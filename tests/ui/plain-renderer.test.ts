@@ -254,7 +254,8 @@ describe("plain-renderer Phase D.5 emitters", () => {
     const unsub = registerPlainTextRenderer(store);
     store.update({
       shell: baseShell({
-        shellView: "threat-stride",
+        shellView: "threats",
+        threatTab: "stride",
         threatModel: {
           version: "1.0",
           dfd: {
@@ -309,7 +310,7 @@ describe("plain-renderer Phase D.5 emitters", () => {
     const unsub = registerPlainTextRenderer(store);
     store.update({
       shell: baseShell({
-        shellView: "diff-since",
+        shellView: "findings",
         diffSince: { ref: "main", repoRoot: "/tmp", changedFiles: ["a.ts", "b.ts"] },
       }),
     });
@@ -529,10 +530,10 @@ describe("plain-renderer view parity (Workstream 5)", () => {
     expect(joined).toContain("verdict: TP");
   });
 
-  it("threat-dfd view with no threatModel routes through threat-model-missing empty copy", () => {
+  it("threat dfd tab with no threatModel routes through threat-model-missing empty copy", () => {
     const store = createUIStore();
     const { lines, unsub } = attach(store);
-    store.update({ shell: baseShell({ shellView: "threat-dfd" }) });
+    store.update({ shell: baseShell({ shellView: "threats", threatTab: "dfd" }) });
     unsub();
     const expected = describeEmptyState("threat-model-missing", { threatView: "dfd" });
     expect(lines).toContain("# THREATS  DFD");
@@ -540,12 +541,13 @@ describe("plain-renderer view parity (Workstream 5)", () => {
     expect(lines).toContain(expected.action);
   });
 
-  it("threat-stride view prints per-category counts", () => {
+  it("threat stride tab prints per-category counts", () => {
     const store = createUIStore();
     const { lines, unsub } = attach(store);
     store.update({
       shell: baseShell({
-        shellView: "threat-stride",
+        shellView: "threats",
+        threatTab: "stride",
         threatModel: {
           version: "1.0",
           dfd: { elements: [], trustBoundaries: [] },
@@ -572,12 +574,13 @@ describe("plain-renderer view parity (Workstream 5)", () => {
     expect(joined).toContain("- information-disclosure: 3");
   });
 
-  it("threat-stories prints narrative attacker stories (not STRIDE threats)", () => {
+  it("threat stories tab prints narrative attacker stories (not STRIDE threats)", () => {
     const store = createUIStore();
     const { lines, unsub } = attach(store);
     store.update({
       shell: baseShell({
-        shellView: "threat-stories",
+        shellView: "threats",
+        threatTab: "stories",
         threatModel: {
           version: "1.0",
           dfd: { elements: [], trustBoundaries: [] },
@@ -656,12 +659,13 @@ describe("plain-renderer view parity (Workstream 5)", () => {
     expect(joined).not.toContain("threat one [high/medium]");
   });
 
-  it("threat-scope prints calibration, out-of-scope, and operator-edit counts", () => {
+  it("threat scope tab prints calibration, out-of-scope, and operator-edit counts", () => {
     const store = createUIStore();
     const { lines, unsub } = attach(store);
     store.update({
       shell: baseShell({
-        shellView: "threat-scope",
+        shellView: "threats",
+        threatTab: "scope",
         threatModel: {
           version: "1.0",
           dfd: { elements: [], trustBoundaries: [] },
@@ -716,12 +720,13 @@ describe("plain-renderer view parity (Workstream 5)", () => {
     expect(joined).toContain("- dismissed threats: 2");
   });
 
-  it("threat-summary prints its heading", () => {
+  it("threat summary tab prints its heading", () => {
     const store = createUIStore();
     const { lines, unsub } = attach(store);
     store.update({
       shell: baseShell({
-        shellView: "threat-summary",
+        shellView: "threats",
+        threatTab: "summary",
         threatModel: {
           version: "1.0",
           dfd: { elements: [], trustBoundaries: [] },
@@ -750,7 +755,8 @@ describe("plain-renderer view parity (Workstream 5)", () => {
     const { lines, unsub } = attach(store);
     store.update({
       shell: baseShell({
-        shellView: "threat-summary",
+        shellView: "threats",
+        threatTab: "summary",
         threatModel: {
           version: "1.0",
           dfd: { elements: [], trustBoundaries: [] },
@@ -796,16 +802,6 @@ describe("plain-renderer view parity (Workstream 5)", () => {
     expect(joined).toContain("## agent actions");
     expect(joined).toContain("- threat-hunt: Generated actor backlog");
     expect(joined).toContain("- threat-hunt: Enumerating top actors");
-  });
-
-  it("diff-since view with no diffSince routes through diff-since-idle empty copy", () => {
-    const store = createUIStore();
-    const { lines, unsub } = attach(store);
-    store.update({ shell: baseShell({ shellView: "diff-since" }) });
-    unsub();
-    const expected = describeEmptyState("diff-since-idle");
-    expect(lines).toContain("# DIFF SINCE  ?");
-    expect(lines).toContain(expected.title);
   });
 });
 

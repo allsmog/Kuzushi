@@ -24,7 +24,20 @@ import {
   saveOperatorScanContext,
 } from "../operator-context.js";
 import type { RepoContext } from "../types.js";
-import type { ContextBuildGrepDomainSlice, ContextBuildState, UIStore } from "../ui/state.js";
+import type {
+  ContextBuildGrepDomainSlice,
+  ContextBuildPhaseId,
+  ContextBuildState,
+  UIStore,
+} from "../ui/state.js";
+import {
+  appendCuratedStoryEvent,
+  appendStoryTail,
+  createShellStoryEvent,
+  formatStoryEventPlain,
+  type ShellStoryEventDraft,
+  shouldPersistStoryEvent,
+} from "../ui/task-story.js";
 
 const FLUSH_INTERVAL_MS = 100;
 const TAIL_BUFFER_LIMIT = 200;
@@ -143,6 +156,7 @@ function createPatcher(store: UIStore | undefined): Patcher {
       mutate((prev) => applyEvent(prev, ev, repoRoot));
       const tailEntry = describeEvent(ev);
       if (tailEntry) appendTail(tailEntry);
+      appendContextStory(store, ev);
     },
     markDone(scanContextPath, repoContext, totalMatches) {
       mutate((prev) => {
@@ -155,14 +169,51 @@ function createPatcher(store: UIStore | undefined): Patcher {
         };
       });
       appendTail({ tsMs: Date.now(), message: `assemble  wrote ${scanContextPath}` });
+      appendContextStoryDraft(store, {
+        kind: "artifact",
+        status: "ok",
+        importance: "primary",
+        message: "Context snapshot written",
+        artifactPath: scanContextPath,
+        count: totalMatches,
+        source: "context:build",
+        durable: true,
+      });
+      appendContextStoryDraft(store, {
+        kind: "result",
+        status: "ok",
+        importance: "primary",
+        message: "context:build done",
+        detail: `${totalMatches} grep matches`,
+        source: "context:build",
+        durable: true,
+      });
     },
     markAborted() {
       mutate((prev) => (prev ? { status: "aborted" } : null));
       appendTail({ tsMs: Date.now(), kind: "warn", message: "aborted by operator" });
+      appendContextStoryDraft(store, {
+        kind: "result",
+        status: "aborted",
+        importance: "primary",
+        message: "context:build aborted",
+        detail: "no snapshot written",
+        source: "context:build",
+        durable: true,
+      });
     },
     markFailed(message) {
       mutate((prev) => (prev ? { status: "failed", errorMessage: message } : null));
       appendTail({ tsMs: Date.now(), kind: "warn", message: `failed: ${message}` });
+      appendContextStoryDraft(store, {
+        kind: "result",
+        status: "fail",
+        importance: "primary",
+        message: "context:build failed",
+        detail: message,
+        source: "context:build",
+        durable: true,
+      });
     },
     flushSync() {
       if (flushTimer) {
@@ -172,6 +223,165 @@ function createPatcher(store: UIStore | undefined): Patcher {
       flush();
     },
   };
+}
+
+function appendContextStory(store: UIStore | undefined, ev: ContextBuildEvent): void {
+  const draft = contextEventToStory(ev);
+  if (draft) appendContextStoryDraft(store, draft);
+}
+
+function appendContextStoryDraft(store: UIStore | undefined, draft: ShellStoryEventDraft): void {
+  if (!store) return;
+  const shell = store.getState().shell;
+  if (!shell) return;
+  const runId = shell.contextBuild?.runId;
+  const event = createShellStoryEvent({
+    ...draft,
+    ...(runId ? { runId } : {}),
+    ...(shell.taskStory?.activeTurnId ? { turnId: shell.taskStory.activeTurnId } : {}),
+  });
+  const nextStory = {
+    activeTurnId: event.turnId ?? shell.taskStory?.activeTurnId,
+    activeRunIds:
+      event.runId && !shell.taskStory?.activeRunIds.includes(event.runId)
+        ? [...(shell.taskStory?.activeRunIds ?? []), event.runId]
+        : (shell.taskStory?.activeRunIds ?? []),
+    startedAt: shell.taskStory?.startedAt ?? event.timestamp,
+    endedAt:
+      event.kind === "result" || event.status === "fail" || event.status === "aborted"
+        ? event.timestamp
+        : shell.taskStory?.endedAt,
+    abortStatus:
+      event.status === "aborted" ? ("aborted" as const) : (shell.taskStory?.abortStatus ?? "idle"),
+    abortReason:
+      event.status === "aborted"
+        ? (event.detail ?? shell.taskStory?.abortReason)
+        : shell.taskStory?.abortReason,
+    backgroundJobs: shell.taskStory?.backgroundJobs,
+    events: appendCuratedStoryEvent(shell.taskStory?.events ?? [], event),
+  };
+  let nextShell = {
+    ...shell,
+    taskStory: nextStory,
+    currentTool: shell.currentTool
+      ? {
+          ...shell.currentTool,
+          storyTail: appendStoryTail(shell.currentTool.storyTail, event),
+          ...(event.kind === "phase" ? { phase: event.message, subLabel: event.message } : {}),
+          ...(event.runId ? { runId: event.runId } : {}),
+          lastEventAt: event.timestamp,
+        }
+      : shell.currentTool,
+  };
+  if (shouldPersistStoryEvent(event)) {
+    nextShell = {
+      ...nextShell,
+      history: [
+        ...nextShell.history,
+        {
+          type: "story",
+          text: formatStoryEventPlain(event),
+          timestamp: event.timestamp,
+          storyEvent: event,
+          ...(event.status === "aborted" ? { abortStatus: "aborted" as const } : {}),
+        },
+      ],
+    };
+  }
+  store.update({ shell: nextShell });
+}
+
+function contextEventToStory(ev: ContextBuildEvent): ShellStoryEventDraft | null {
+  switch (ev.type) {
+    case "phase-start":
+      return {
+        kind: "phase",
+        status: "running",
+        importance: "primary",
+        message: contextPhaseLabel(ev.phase),
+        source: "context:build",
+        durable: true,
+      };
+    case "manifest-result":
+      return {
+        kind: "activity",
+        status: ev.found ? "ok" : "skipped",
+        importance: "secondary",
+        message: `${ev.which} ${ev.found ? "found" : "not present"}`,
+        source: "context:build",
+      };
+    case "walk-result":
+      return {
+        kind: "activity",
+        status: "ok",
+        importance: "secondary",
+        message: "Repository walked",
+        detail: `${ev.entries} entries · ${ev.sourceFiles} source files`,
+        count: ev.sourceFiles,
+        source: "context:build",
+        durable: true,
+      };
+    case "path-signals-result":
+      return {
+        kind: "activity",
+        status: "ok",
+        importance: "secondary",
+        message: "Path signals collected",
+        detail: ev.signals.length > 0 ? ev.signals.join(" · ") : "none",
+        count: ev.signals.length,
+        source: "context:build",
+      };
+    case "grep-start":
+      return {
+        kind: "activity",
+        status: "running",
+        importance: "secondary",
+        message: "Grep sweep started",
+        detail: `${ev.workers} workers · ${ev.filesTotal} files · ${ev.domains.length} domains`,
+        source: "context:build",
+      };
+    case "grep-domain-state":
+      if (ev.status !== "capped") return null;
+      return {
+        kind: "warning",
+        status: "ok",
+        importance: "primary",
+        message: `${ev.domain} grep cap reached`,
+        detail: `${ev.matches} matches`,
+        source: "context:build",
+        durable: true,
+      };
+    case "assemble-result":
+      return {
+        kind: "activity",
+        status: "ok",
+        importance: "secondary",
+        message: "Context assembled",
+        detail: `${ev.sourceFileCount} source files · ${ev.patternMatchCount} matches`,
+        count: ev.patternMatchCount,
+        source: "context:build",
+        durable: true,
+      };
+    default:
+      return null;
+  }
+}
+
+function contextPhaseLabel(phase: ContextBuildPhaseId): string {
+  switch (phase) {
+    case "manifests":
+      return "manifest probes";
+    case "walk":
+      return "walk repo";
+    case "path-signals":
+      return "path signals";
+    case "grep":
+      return "grep sweep";
+    case "assemble":
+      return "assemble context";
+    default:
+      return String(phase);
+  }
 }
 
 function applyEvent(

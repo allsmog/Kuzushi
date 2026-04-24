@@ -22,12 +22,13 @@ import { formatClock, truncateEnd } from "../format.js";
 import { BLACK_CIRCLE, LOWER_HOOK, OUTCOME_GLYPH } from "../glyphs.js";
 import { applyBackspace, isCtrlChord } from "../hooks/text-edit-actions.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { shallowEqual, useUISelector } from "../hooks.js";
+import { shallowEqual, useElapsed, useUISelector } from "../hooks.js";
 import { useLayoutContext } from "../layout-context.js";
 import { ExpandableSection } from "../primitives/ExpandableSection.js";
 import { Gutter } from "../primitives/Gutter.js";
 import { Markdown } from "../primitives/Markdown.js";
 import { Ratchet } from "../primitives/Ratchet.js";
+import { renderShellInputSegments } from "../shell-input-line.js";
 import {
   CTRL_C_ARM_WINDOW_MS as CTRL_C_ARM_WINDOW_MS_IMPORTED,
   resolveKeybind,
@@ -46,12 +47,12 @@ import {
   type ShellTaskStoryState,
   storyKindLabel,
   storyStatusLabel,
+  storyTabEvents,
 } from "../task-story.js";
 import { SPACING, tokens } from "../tokens.js";
 import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { BannerSplash } from "./BannerSplash.js";
 import { ContextBuildView } from "./ContextBuildView.js";
-import { DiffSinceView } from "./DiffSinceView.js";
 import { ErrorMessage } from "./ErrorMessage.js";
 import { FindingCard } from "./FindingCard.js";
 import { FindingsView } from "./FindingsView.js";
@@ -83,7 +84,7 @@ const IDLE_KEYBINDS = [
 ];
 
 const PROCESSING_KEYBINDS = [
-  { keys: "Ctrl+C", label: "Abort" },
+  { keys: "Ctrl+C", label: "Abort / Exit" },
   { keys: "Ctrl+O", label: "Details", secondary: true },
 ];
 const PLAN_KEYBINDS = [
@@ -381,6 +382,14 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
 
   if (!shell) return <Text>Loading...</Text>;
 
+  const inputLine = renderShellInputSegments({
+    prompt: buildShellPrompt(shell.focusedModule),
+    input,
+    cursor,
+    columns,
+    cursorGlyph: theme.glyphs.textCursor,
+  });
+
   return (
     <Box flexDirection="column" flexGrow={1} justifyContent="space-between">
       <Box flexDirection="column">
@@ -467,11 +476,11 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         {!shell.processing && (
           <Box flexDirection="column" marginTop={SPACING.sm} minHeight={2}>
             <Box>
-              <Text>
-                {tokens.accent(buildShellPrompt(shell.focusedModule))}
-                {input.slice(0, cursor)}
-                {tokens.tertiary(cursor < input.length ? input[cursor] : theme.glyphs.textCursor)}
-                {cursor < input.length ? input.slice(cursor + 1) : ""}
+              <Text wrap="truncate-end">
+                {tokens.accent(inputLine.prompt)}
+                {inputLine.beforeCursor}
+                {tokens.tertiary(inputLine.cursorText)}
+                {inputLine.afterCursor}
               </Text>
             </Box>
             {slashSuggestions.length > 0 ? (
@@ -605,25 +614,51 @@ function ShellTaskStatusLine({
 }): React.ReactElement | null {
   const story = shell.taskStory;
   const current = shell.currentTool;
+  const elapsedMs = useElapsed(
+    story?.startedAt ?? current?.startedAt,
+    shell.processing ? 1000 : 5000,
+  );
   if (!story && !current) return null;
   const eventCount = story?.events.length ?? 0;
   const latest = story?.events[story.events.length - 1];
   const abortStatus = current?.abortStatus ?? story?.abortStatus;
+  const backgroundJobs = story?.backgroundJobs ?? [];
+  const runningBackground = backgroundJobs.filter((job) => job.status === "running");
   const stateLabel =
     abortStatus === "aborting"
       ? "aborting"
       : abortStatus === "aborted"
         ? "aborted"
-        : shell.processing
-          ? "active"
-          : "latest";
+        : runningBackground.length > 0 && !shell.processing
+          ? "background"
+          : shell.processing
+            ? "active"
+            : "latest";
   const tail = latest ? ` · ${latest.message}` : "";
-  const controls = shell.processing ? "Ctrl+C interrupt · Ctrl+O details" : "Ctrl+O details";
+  const controls = shell.processing
+    ? "Ctrl+C interrupt · Ctrl+O details"
+    : runningBackground.length > 0
+      ? "Ctrl+O details · jobs"
+      : "Ctrl+O details";
+  const elapsed =
+    elapsedMs > 0
+      ? ` · ${Math.floor(elapsedMs / 60000)
+          .toString()
+          .padStart(2, "0")}:${Math.floor((elapsedMs % 60000) / 1000)
+          .toString()
+          .padStart(2, "0")}`
+      : "";
   return (
     <Box marginTop={SPACING.xs} paddingLeft={SPACING.md}>
       <Text>
         {tokens.muted("task ")}
         {abortStatus === "aborting" ? tokens.warn(stateLabel) : tokens.value(stateLabel)}
+        {elapsed ? tokens.muted(elapsed) : null}
+        {runningBackground.length > 0
+          ? tokens.muted(
+              ` · ${runningBackground.length} background ${runningBackground.length === 1 ? "job" : "jobs"}`,
+            )
+          : null}
         {eventCount > 0
           ? tokens.muted(` · ${eventCount} beat${eventCount === 1 ? "" : "s"}`)
           : null}
@@ -638,7 +673,7 @@ function describeShellLocation(shell: ShellState): string {
   if (shell.shellView === "module") return `${shell.focusedModule ?? "module"} home`;
   if (shell.shellView === "finding") return `finding ${shell.openFindingId ?? "detail"}`;
   if (shell.shellView === "task-story") return "task story";
-  if (shell.shellView.startsWith("threat-")) return shell.shellView.replace("threat-", "threat/");
+  if (shell.shellView === "threats") return `threat/${shell.threatTab ?? "summary"}`;
   return shell.shellView;
 }
 
@@ -745,20 +780,22 @@ function ShellViewPanel({
       if (!match) return null;
       return <FindingCard key={`finding:${target}`} mode="linear" finding={match} />;
     }
-    // Phase C — threat model views. C.4–C.5 still route through the
-    // placeholder until their real components land.
-    case "threat-dfd":
-      return <ThreatDfdView key={view} shell={shell} />;
-    case "threat-stride":
-      return <ThreatStrideMatrix key={view} shell={shell} />;
-    case "threat-stories":
-      return <AttackerStoriesView key={view} shell={shell} />;
-    case "threat-scope":
-      return <ScopeAndCriticalityView key={view} shell={shell} />;
-    case "threat-summary":
-      return <ThreatSummaryExport key={view} shell={shell} />;
-    case "diff-since":
-      return <DiffSinceView key={view} summary={summary} shell={shell} />;
+    case "threats": {
+      const threatKey = `${view}:${shell.threatTab ?? "summary"}`;
+      switch (shell.threatTab ?? "summary") {
+        case "dfd":
+          return <ThreatDfdView key={threatKey} shell={shell} />;
+        case "stride":
+          return <ThreatStrideMatrix key={threatKey} shell={shell} />;
+        case "stories":
+          return <AttackerStoriesView key={threatKey} shell={shell} />;
+        case "scope":
+          return <ScopeAndCriticalityView key={threatKey} shell={shell} />;
+        case "summary":
+          return <ThreatSummaryExport key={threatKey} shell={shell} />;
+      }
+      return <ThreatSummaryExport key={threatKey} shell={shell} />;
+    }
     case "context-build":
       return <ContextBuildView key={view} shell={shell} />;
     case "task-story":
@@ -865,11 +902,13 @@ function TaskStoryView({
   processing: boolean;
 }): React.ReactElement {
   const events = story?.events ?? [];
-  const artifacts = events.filter((event) => event.kind === "artifact" || event.artifactPath);
-  const errors = events.filter((event) => event.status === "fail" || event.status === "aborted");
-  const debug = events.filter((event) => event.importance === "debug");
-  const visibleLive = events.filter((event) => event.importance !== "debug").slice(-16);
+  const artifacts = storyTabEvents(events, "artifacts");
+  const errors = storyTabEvents(events, "errors");
+  const debug = storyTabEvents(events, "debug");
+  const visibleLive = storyTabEvents(events, "live").slice(-16);
   const status = story?.abortStatus === "aborting" ? "aborting" : processing ? "live" : "latest";
+  const backgroundJobs = story?.backgroundJobs ?? [];
+  const runningBackground = backgroundJobs.filter((job) => job.status === "running");
 
   return (
     <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.md}>
@@ -879,11 +918,42 @@ function TaskStoryView({
         {story?.activeRunIds.length
           ? tokens.muted(` · ${story.activeRunIds.length} run id(s)`)
           : null}
+        {runningBackground.length > 0
+          ? tokens.muted(` · ${runningBackground.length} background`)
+          : null}
       </Text>
+      <Text>
+        {tokens.tertiary("Live")}
+        {tokens.muted(" | ")}
+        {tokens.tertiary("Artifacts")}
+        {tokens.muted(" | ")}
+        {tokens.tertiary("Errors")}
+        {tokens.muted(" | ")}
+        {tokens.tertiary("Debug")}
+      </Text>
+      {backgroundJobs.length > 0 ? <BackgroundJobSection jobs={backgroundJobs} /> : null}
       <StorySection title="Live" events={visibleLive} empty="No live story beats yet." />
       <StorySection title="Artifacts" events={artifacts} empty="No artifacts recorded." />
       <StorySection title="Errors" events={errors} empty="No errors recorded." />
       <StorySection title="Debug" events={debug.slice(-10)} empty="No debug events." />
+    </Box>
+  );
+}
+
+function BackgroundJobSection({
+  jobs,
+}: {
+  jobs: NonNullable<ShellTaskStoryState["backgroundJobs"]>;
+}): React.ReactElement {
+  return (
+    <Box flexDirection="column" marginTop={SPACING.xs}>
+      <Text>{tokens.muted("Background")}</Text>
+      {jobs.slice(0, 6).map((job) => (
+        <Text key={job.id}>
+          {tokens.tertiary(LOWER_HOOK)} {tokens.value(`job ${job.id}`)}
+          {tokens.muted(` · ${job.status} · ${job.label}`)}
+        </Text>
+      ))}
     </Box>
   );
 }
@@ -920,7 +990,7 @@ function StoryEventLine({
   const prefix = `${storyKindLabel(event.kind)}:${status}`;
   const color = (value: string): string => {
     if (event.status === "fail") return tokens.danger(value);
-    if (event.status === "aborted") return tokens.warn(value);
+    if (event.status === "aborted" || event.status === "aborting") return tokens.warn(value);
     if (event.status === "ok") return tokens.success(value);
     if (event.importance === "debug") return tokens.tertiary(value);
     return tokens.value(value);

@@ -304,6 +304,7 @@ export class Datastore {
   /** Snapshot of all current values (post-resolution). */
   snapshot(): Record<string, unknown> {
     const out: Record<string, unknown> = {};
+    const knownSpecKeys = new Set(this.allSpecs().map((spec) => spec.name.toUpperCase()));
     for (const spec of this.allSpecs()) {
       const v = this.get(spec.name);
       if (v !== undefined) out[spec.name] = v;
@@ -311,6 +312,7 @@ export class Datastore {
     // Include unknown-but-set keys from any layer
     for (const scope of ["module", "workspace", "global"] as const) {
       for (const [k, v] of this.layers[scope]) {
+        if (knownSpecKeys.has(k)) continue;
         if (!(k in out)) out[k] = v;
       }
     }

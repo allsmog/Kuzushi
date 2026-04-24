@@ -81,7 +81,7 @@ export function ErrorMessage({ text, kind }: ErrorMessageProps): React.ReactElem
           <Text>{tokens.danger(`Rate limited · ${text}`)}</Text>
           <Text>
             {tokens.muted(
-              "Provider throttled this request. Wait a moment and retry, or switch models with /model.",
+              "Provider throttled this request. Wait a moment and retry, or switch models with /provider.",
             )}
           </Text>
         </Box>

@@ -104,6 +104,80 @@ describe("CopilotCore.executeTool", () => {
     expect(result.costUsd).toBe(0.01);
   });
 
+  it("canonicalizes input keys against the tool schema before validation and execution", async () => {
+    const core = new CopilotCore({
+      runtime: fakeRuntime,
+      bus: fakeBus,
+      config: fakeConfig(),
+      dataDir: tmp,
+      loadCoreSast: false,
+    });
+    const executeSpy = vi.fn((input: unknown) =>
+      Promise.resolve({ ok: true, output: JSON.stringify(input) }),
+    );
+    core.registry.register(
+      module("demo", [
+        {
+          ...tool("demo:scan", () => ({ ok: true, output: "x" })),
+          inputSchema: {
+            type: "object",
+            properties: { target: { type: "string" } },
+            required: ["target"],
+          },
+          execute: executeSpy,
+        },
+      ]),
+    );
+
+    const result = await core.executeTool("demo:scan", { TARGET: "./repo" });
+
+    expect(result.ok).toBe(true);
+    expect(result.output).toBe('{"target":"./repo"}');
+    expect(executeSpy).toHaveBeenCalledWith(
+      { target: "./repo" },
+      expect.objectContaining({ target: "./repo" }),
+    );
+  });
+
+  it("uses canonicalized target input for governance checks", async () => {
+    const enforcer = new GovernanceEnforcer({
+      ...defaultScopePolicy(),
+      deniedTargets: ["production-db"],
+    });
+    const auditTrail = new AuditTrail(tmp);
+    const recordSpy = vi.spyOn(auditTrail, "record");
+    const core = new CopilotCore({
+      runtime: fakeRuntime,
+      bus: fakeBus,
+      config: fakeConfig(),
+      dataDir: tmp,
+      loadCoreSast: false,
+      enforcer,
+      auditTrail,
+    });
+    const executeSpy = vi.fn(() => Promise.resolve({ ok: true, output: "unreachable" }));
+    core.registry.register(
+      module("demo", [
+        {
+          ...tool("demo:scan", () => ({ ok: true, output: "x" })),
+          inputSchema: {
+            type: "object",
+            properties: { target: { type: "string" } },
+            required: ["target"],
+          },
+          execute: executeSpy,
+        },
+      ]),
+    );
+
+    const result = await core.executeTool("demo:scan", { TARGET: "production-db" });
+
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("Blocked by governance");
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(recordSpy).toHaveBeenCalled();
+  });
+
   it("rejects invalid input before dispatching to the module tool", async () => {
     const core = new CopilotCore({
       runtime: fakeRuntime,

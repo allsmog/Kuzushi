@@ -12,7 +12,11 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { isRecord } from "../utils.js";
-import { formatToolInputValidationError, validateToolInput } from "./input-validation.js";
+import {
+  formatToolInputValidationError,
+  normalizeToolInputKeys,
+  validateToolInput,
+} from "./input-validation.js";
 import { createProblemDetails, ProblemCode, problemToolResult } from "./problem-details.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "./types.js";
 
@@ -173,7 +177,8 @@ export function bridgeTool(
     inputSchema: schema,
     headless,
     async execute(input: unknown, _ctx: ExecutionContext): Promise<ToolResult> {
-      const validation = validateToolInput(input, schema);
+      const normalizedInput = normalizeToolInputKeys(input, schema);
+      const validation = validateToolInput(normalizedInput, schema);
       if (!validation.ok) {
         const detail = formatToolInputValidationError(
           `${moduleId}:${mcpTool.name}`,
@@ -195,7 +200,7 @@ export function bridgeTool(
       }
       try {
         const result = await callWithTimeout(
-          () => client.callTool(mcpTool.name, coerceArguments(input)),
+          () => client.callTool(mcpTool.name, coerceArguments(normalizedInput)),
           opts.timeoutMs,
           `MCP tool "${mcpTool.name}" timed out after ${opts.timeoutMs}ms`,
         );

@@ -10,6 +10,50 @@ import type {
 
 const PERSISTENT_THREAT_MODEL_PATH = ".kuzushi/threat-model.json";
 
+export function createEmptyThreatModelDocument(now: Date = new Date()): ThreatModelDocument {
+  return {
+    version: "1",
+    dfd: {
+      elements: [],
+      trustBoundaries: [],
+    },
+    threats: [],
+    summary: {
+      total: 0,
+      bySeverity: {},
+      byCategory: {
+        spoofing: 0,
+        tampering: 0,
+        repudiation: 0,
+        "information-disclosure": 0,
+        "denial-of-service": 0,
+        "elevation-of-privilege": 0,
+      },
+    },
+    narrative: {
+      overview: "",
+      inputCategories: {
+        attackerControlled: [],
+        operatorControlled: [],
+        developerControlled: [],
+        externalServices: [],
+        sandboxBoundary: [],
+        assumptions: [],
+      },
+      attackerStories: [],
+      criticalityBuckets: {
+        critical: [],
+        high: [],
+        medium: [],
+        low: [],
+      },
+      outOfScope: [],
+    },
+    userEdited: true,
+    lastEditedAt: now.toISOString(),
+  };
+}
+
 /**
  * Load the persistent threat model from .kuzushi/threat-model.json.
  * Falls back to per-run threat model if persistent doesn't exist.

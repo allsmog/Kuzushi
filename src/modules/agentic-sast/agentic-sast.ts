@@ -19,12 +19,9 @@
  * at registration time (via the bridge's strategy cache), matching the
  * legacy `wrapTask(…)` behaviour from the old registry bootstrapping.
  *
- * Known limitation: the `AGENTIC_SAST_PROMPT` option exists in the input
- * schema (so the shell / `/prompt edit` UX still surfaces it) but the
- * current `AgenticPlugin.scan` body does not read a per-scan prompt
- * override. Wiring this through would require touching
- * `src/scanners/run-agentic.ts`; it was never wired in the legacy module
- * either, so preserving that behaviour is an explicit non-change.
+ * Prompt overrides are intentionally not exposed here until the scanner
+ * consumes them directly; hiding unwired knobs keeps the operator surface
+ * truthful.
  */
 
 import { authLogicDetectTask } from "../../agents/tasks/auth-logic-detect.js";
@@ -62,12 +59,6 @@ export function createAgenticSastModule(): CopilotModule {
       properties: {
         target: targetProperty,
         severity: severityProperty,
-        AGENTIC_SAST_PROMPT: {
-          type: "string",
-          description:
-            "Override the agentic-sast detector prompt. Accepts inline text or a path to .md/.txt.",
-          "x-advanced": true,
-        },
       },
       required: ["target"],
     },

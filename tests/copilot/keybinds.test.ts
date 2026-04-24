@@ -6,7 +6,7 @@
  *
  *   1. Ctrl+C arms, then commits within the window (two-stage exit).
  *   2. Any other key resets the arm logic at the reducer boundary.
- *   3. In-flight work gets an immediate abort, not an arm.
+ *   3. In-flight work gets an immediate abort; an armed follow-up exits.
  *   4. Plan-pending overlay steals y / n / Esc.
  *   5. Threat-view digits cycle through `/threats <sub>`.
  *   6. Findings cursor keybinds clamp to `looseFindingCount`.
@@ -146,6 +146,20 @@ describe("resolveKeybind — Ctrl+C two-stage", () => {
     expect(action).toEqual({ type: "abort-inflight" });
   });
 
+  it("second Ctrl+C after an in-flight abort exits even while work unwinds", () => {
+    const shell = baseShell({ processing: true });
+    const armedAt = 5_000;
+    const state = baseState(shell, { ctrlCArmedAt: armedAt });
+    const action = resolveKeybind({
+      stroke: stroke({ char: "c", key: { ctrl: true } }),
+      input: "",
+      state,
+      looseFindingCount: 0,
+      now: armedAt + 250,
+    });
+    expect(action).toEqual({ type: "exit" });
+  });
+
   it("Ctrl+D follows the same two-stage contract as Ctrl+C", () => {
     const shell = baseShell();
     const state = baseState(shell);
@@ -238,7 +252,7 @@ describe("resolveKeybind — task story details", () => {
 
 describe("resolveKeybind — threat digits", () => {
   it("maps 1..5 to the correct /threats subcommand on a threat view", () => {
-    const shell = baseShell({ shellView: "threat-dfd" });
+    const shell = baseShell({ shellView: "threats", threatTab: "dfd" });
     const state = baseState(shell);
     const calls = ["1", "2", "3", "4", "5"].map((c) => dispatch(c, shell, state));
     expect(calls).toEqual([
@@ -256,12 +270,8 @@ describe("resolveKeybind — threat digits", () => {
     expect(dispatch("1", shell, state).type).toBe("none");
   });
 
-  it("isThreatShellView covers all five sub-views and rejects catalog", () => {
-    expect(isThreatShellView("threat-dfd")).toBe(true);
-    expect(isThreatShellView("threat-stride")).toBe(true);
-    expect(isThreatShellView("threat-stories")).toBe(true);
-    expect(isThreatShellView("threat-scope")).toBe(true);
-    expect(isThreatShellView("threat-summary")).toBe(true);
+  it("isThreatShellView covers the threat view and rejects catalog", () => {
+    expect(isThreatShellView("threats")).toBe(true);
     expect(isThreatShellView("catalog")).toBe(false);
     expect(isThreatShellView("findings")).toBe(false);
     expect(isThreatShellView(undefined)).toBe(false);
@@ -451,8 +461,8 @@ describe("resolveKeybind — q, Esc, and /back", () => {
     expect(isBackableShellView("module")).toBe(true);
     expect(isBackableShellView("findings")).toBe(true);
     expect(isBackableShellView("finding")).toBe(true);
-    expect(isBackableShellView("threat-dfd")).toBe(true);
-    expect(isBackableShellView("diff-since")).toBe(true);
+    expect(isBackableShellView("threats")).toBe(true);
+    expect(isBackableShellView("task-story")).toBe(true);
   });
 });
 

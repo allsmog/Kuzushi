@@ -256,7 +256,7 @@ describe("Ink component snapshots", () => {
     expect(out).not.toContain("never run for this workspace");
   });
 
-  it("ModuleHome — hides internal DAG nodes and shows the hint line", () => {
+  it("ModuleHome — hides advanced pipeline steps and shows the hint line", () => {
     const shell = stubShell({
       focusedModule: "context",
       shellView: "module",
@@ -298,7 +298,7 @@ describe("Ink component snapshots", () => {
     expect(out).not.toContain("context-gatherer");
     expect(out).not.toContain("app-model-build");
     // Hint line announces the hidden count.
-    expect(out).toContain("2 internal DAG nodes");
+    expect(out).toContain("2 advanced pipeline steps");
     expect(out).toContain("/tools --all");
     // Status strip shows visible-tool count (1), not total (3).
     expect(out).toContain("1 tools");
@@ -335,7 +335,8 @@ describe("Ink component snapshots", () => {
 
   it("ThreatDfdView — trust zones + boundaries + flows", () => {
     const shell = stubShell({
-      shellView: "threat-dfd",
+      shellView: "threats",
+      threatTab: "dfd",
       threatModel: {
         version: "1.0",
         dfd: {

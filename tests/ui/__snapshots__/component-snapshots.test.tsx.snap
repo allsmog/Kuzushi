@@ -34,14 +34,14 @@ exports[`Ink component snapshots > FindingCard linear — state strip + evidence
     PoC           curl -s $BASE/admin/fetch?url=http://169.254.169.254/
 
   ──────────────────────────────────────────────────────────────────────────────
-  a assign   c comment   s suppress   r resolve   p patch   v re-verify   q back"
+  q back   /back returns to findings   /trace <runId> shows run evidence"
 `;
 
 exports[`Ink component snapshots > ModuleCatalog — grouped by category with last-run chips 1`] = `
 "  workspace:acme-api · target:./acme-api · 3 modules
 
 
-  Primary next step: /use <module-id> to enter one module workflow.
+  Primary next step: use <module-id> to enter one module workflow.
 
   OFFENSE
 
@@ -67,12 +67,7 @@ exports[`Ink component snapshots > ModuleCatalog — grouped by category with la
 
   ──────────────────────────────────────────────────────────────────────────────
   ─
-  shinsa         ISO 27001 + NIST 800-53                    never run
-
-
-  ───────────────────────────────────────────────────────────
-  coming · blackbox · pwn · pentest · honeypot · yokai · revgraph — see
-  VISION.md"
+  shinsa         ISO 27001 + NIST 800-53                    never run"
 `;
 
 exports[`Ink component snapshots > ModuleHome — tools table + last-run summary 1`] = `

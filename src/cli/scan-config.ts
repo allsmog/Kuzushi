@@ -76,6 +76,10 @@ export interface ScanCommandOptions {
   modulePriority?: string;
   maxModules?: number;
   dryRun?: boolean;
+  confirmConfig?: boolean;
+  reviewContext?: boolean;
+  reviewThreatModel?: boolean;
+  reviewFindings?: boolean;
 }
 
 export function applyScanCommandConfigOverrides(

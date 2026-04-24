@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatToolInputValidationError,
   MAX_TOOL_INPUT_BYTES,
+  normalizeToolInputKeys,
   validateToolInput,
 } from "../../src/modules/input-validation.js";
 
@@ -102,5 +103,50 @@ describe("validateToolInput", () => {
     expect(
       formatToolInputValidationError("demo:run", [{ path: "target", message: "is required" }]),
     ).toBe('Invalid input for tool "demo:run":\n  - target: is required');
+  });
+});
+
+describe("normalizeToolInputKeys", () => {
+  it("canonicalizes object keys case-insensitively against schema properties", () => {
+    expect(normalizeToolInputKeys({ TARGET: "./repo", VERIFY: true }, schema)).toEqual({
+      target: "./repo",
+      verify: true,
+    });
+  });
+
+  it("prefers exact schema keys when an alias duplicate is present", () => {
+    expect(normalizeToolInputKeys({ target: "./repo", TARGET: "./other" }, schema)).toEqual({
+      target: "./repo",
+    });
+  });
+
+  it("canonicalizes nested object keys and leaves unknown keys for validation", () => {
+    const normalized = normalizeToolInputKeys(
+      { TARGET: "./repo", limits: { COUNT: 3 }, EXTRA: true },
+      schema,
+    );
+
+    expect(normalized).toEqual({
+      target: "./repo",
+      limits: { count: 3 },
+      EXTRA: true,
+    });
+    const result = validateToolInput(normalized, schema);
+    expect(result.ok).toBe(false);
+    expect(result.issues).toContainEqual({ path: "EXTRA", message: "unknown property" });
+  });
+
+  it("does not guess when schema property casing is ambiguous", () => {
+    const ambiguousSchema = {
+      type: "object",
+      properties: {
+        target: { type: "string" },
+        TARGET: { type: "string" },
+      },
+    };
+
+    expect(normalizeToolInputKeys({ Target: "./repo" }, ambiguousSchema)).toEqual({
+      Target: "./repo",
+    });
   });
 });

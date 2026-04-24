@@ -28,12 +28,14 @@ import { SessionManager } from "../sessions/manager.js";
 import type { KuzushiConfig } from "../types.js";
 import { formatUnknownModule, formatUnknownTool, formatUnknownVerb } from "../ui/error-format.js";
 import { formatDuration } from "../ui/format.js";
+import { CTRL_C_ARM_WINDOW_MS } from "../ui/shell-keybinds.js";
 import type {
   ContextSnapshot,
   ShellHistoryEntry,
   ShellModuleCard,
   ShellState,
   ShellView,
+  ThreatTab,
   ToolActivityLine,
   TuneSnapshot,
   UIStore,
@@ -42,11 +44,16 @@ import { initContextBuildState } from "../ui/state.js";
 import {
   appendCuratedStoryEvent,
   appendStoryTail,
+  createAbortStoryEvent,
+  createBackgroundJobStoryEvent,
   createShellStoryEvent,
   formatStoryEventPlain,
+  isTerminalStoryStatus,
   type ShellStoryEvent,
   type ShellStoryEventDraft,
+  type ShellTaskBackgroundJob,
   shouldPersistStoryEvent,
+  upsertBackgroundJob,
 } from "../ui/task-story.js";
 import { CopilotCore } from "./core.js";
 import { resolveTool } from "./dispatch/resolve-tool.js";
@@ -103,6 +110,8 @@ const CREDENTIALS_CANCELLED_MESSAGE =
   "Copilot disabled. Run /auth to enable it later, set ANTHROPIC_API_KEY, or save a key to ./.kuzushi/credentials.json.";
 const CANCELLED_TOOL_MESSAGE = "Cancelled active operation.";
 const CANCELLED_AGENT_MESSAGE = "Cancelled active request.";
+const ABORT_EXIT_ARM_DELAY_MS = 75;
+const SIGNAL_DUPLICATE_GRACE_MS = 150;
 
 /** Tools that require a ContextSnapshot before they can execute from the shell. */
 const CONTEXT_REQUIRED_TOOLS = new Set([
@@ -282,23 +291,23 @@ function capShellHistory(history: string[]): string[] {
  */
 export function resolveThreatView(
   sub: string | undefined,
-): { shellView: ShellView; label: string } | undefined {
+): { shellView: ShellView; threatTab: ThreatTab; label: string } | undefined {
   switch (sub) {
     case "dfd":
     case "1":
-      return { shellView: "threat-dfd", label: "data flow diagram" };
+      return { shellView: "threats", threatTab: "dfd", label: "data flow diagram" };
     case "stride":
     case "2":
-      return { shellView: "threat-stride", label: "STRIDE matrix" };
+      return { shellView: "threats", threatTab: "stride", label: "STRIDE matrix" };
     case "stories":
     case "3":
-      return { shellView: "threat-stories", label: "attacker stories" };
+      return { shellView: "threats", threatTab: "stories", label: "attacker stories" };
     case "scope":
     case "4":
-      return { shellView: "threat-scope", label: "scope & criticality" };
+      return { shellView: "threats", threatTab: "scope", label: "scope & criticality" };
     case "summary":
     case "5":
-      return { shellView: "threat-summary", label: "threat summary" };
+      return { shellView: "threats", threatTab: "summary", label: "threat summary" };
     default:
       return undefined;
   }
@@ -1075,23 +1084,34 @@ function applyStoryEventToShell(
   event: ShellStoryEvent,
   options: StoryAppendOptions = {},
 ): ShellState {
+  const currentTurnId = shell.taskStory?.activeTurnId;
+  if (event.turnId && currentTurnId && event.turnId !== currentTurnId && event.source !== "jobs") {
+    return shell;
+  }
   const activeRunIds =
     event.runId && !shell.taskStory?.activeRunIds.includes(event.runId)
       ? [...(shell.taskStory?.activeRunIds ?? []), event.runId]
       : (shell.taskStory?.activeRunIds ?? []);
+  const terminalStory =
+    event.status === "fail" || event.status === "aborted" || event.kind === "result"
+      ? isTerminalStoryStatus(event.status)
+      : false;
   const nextStory = {
     activeTurnId: event.turnId ?? shell.taskStory?.activeTurnId,
     activeRunIds,
     startedAt: shell.taskStory?.startedAt ?? event.timestamp,
-    endedAt:
-      event.status === "ok" || event.status === "fail" || event.status === "aborted"
-        ? event.timestamp
-        : shell.taskStory?.endedAt,
+    endedAt: terminalStory ? event.timestamp : shell.taskStory?.endedAt,
     abortStatus:
+      event.status === "aborting"
+        ? ("aborting" as const)
+        : event.status === "aborted"
+          ? ("aborted" as const)
+          : (shell.taskStory?.abortStatus ?? ("idle" as const)),
+    abortReason:
       event.status === "aborted"
-        ? ("aborted" as const)
-        : (shell.taskStory?.abortStatus ?? ("idle" as const)),
-    abortReason: shell.taskStory?.abortReason,
+        ? (event.detail ?? shell.taskStory?.abortReason)
+        : shell.taskStory?.abortReason,
+    backgroundJobs: shell.taskStory?.backgroundJobs,
     events: appendCuratedStoryEvent(shell.taskStory?.events ?? [], event),
   };
   let nextShell: ShellState = {
@@ -1106,6 +1126,7 @@ function applyStoryEventToShell(
         ...shell.currentTool,
         storyTail: appendStoryTail(shell.currentTool.storyTail, event),
         abortStatus: nextStory.abortStatus,
+        ...(event.runId ? { runId: event.runId } : {}),
         ...(event.kind === "phase" ? { phase: event.message, subLabel: event.message } : {}),
         lastEventAt: event.timestamp,
       },
@@ -1139,6 +1160,23 @@ function appendStoryEvent(
   const event = createShellStoryEvent(draft);
   updateShell(store, (shell) => applyStoryEventToShell(shell, event, options));
   return event;
+}
+
+function updateBackgroundJobStory(store: UIStore, job: ShellTaskBackgroundJob): void {
+  updateShell(store, (shell) => ({
+    ...shell,
+    taskStory: {
+      activeTurnId: shell.taskStory?.activeTurnId,
+      activeRunIds: shell.taskStory?.activeRunIds ?? [],
+      startedAt: shell.taskStory?.startedAt ?? job.startedAt,
+      endedAt: shell.taskStory?.endedAt,
+      abortStatus: shell.taskStory?.abortStatus ?? "idle",
+      abortReason: shell.taskStory?.abortReason,
+      backgroundJobs: upsertBackgroundJob(shell.taskStory?.backgroundJobs, job),
+      events: shell.taskStory?.events ?? [],
+    },
+  }));
+  appendStoryEvent(store, createBackgroundJobStoryEvent(job));
 }
 
 /**
@@ -1264,6 +1302,57 @@ function formatHuntSummaryLine(actorCount: number, findingsCount: number, costUs
   return `${actorsLabel} · ${findingsLabel} · ${costLabel}`;
 }
 
+function formatHuntActorLabel(fingerprint: string): string {
+  const parts = fingerprint.split(":");
+  if (parts.length < 3) return fingerprint;
+  const actorSlug = parts[parts.length - 2]!.replace(/_/g, " ");
+  const runIndex = parts[parts.length - 1]!;
+  return runIndex === "0" ? actorSlug : `${actorSlug} (run ${runIndex})`;
+}
+
+function formatAgentActivityStory(payload: import("../bus/events.js").TaskAgentActivityPayload): {
+  message: string;
+  detail?: string;
+  kind: ShellStoryEventDraft["kind"];
+} {
+  const actor = formatHuntActorLabel(payload.fingerprint);
+  const summary = payload.summary?.trim();
+  const tool = payload.toolName?.trim();
+  if (payload.done) {
+    return {
+      kind: "result",
+      message: `${actor} finished`,
+      ...(summary ? { detail: summary } : {}),
+    };
+  }
+  if (payload.kind === "tool-start") {
+    return {
+      kind: "tool",
+      message: tool ? `${actor} using ${tool}` : `${actor} using tool`,
+      ...(summary ? { detail: summary } : {}),
+    };
+  }
+  if (payload.kind === "tool-complete") {
+    return {
+      kind: "tool",
+      message: tool ? `${actor} completed ${tool}` : `${actor} completed tool`,
+      ...(summary ? { detail: summary } : {}),
+    };
+  }
+  if (payload.kind === "reasoning") {
+    return {
+      kind: "activity",
+      message: `${actor} reasoning`,
+      ...(summary ? { detail: summary } : {}),
+    };
+  }
+  return {
+    kind: "activity",
+    message: `${actor} working`,
+    ...((summary ?? tool) ? { detail: summary ?? tool } : {}),
+  };
+}
+
 function beginShellTurn(
   store: UIStore,
   input: string,
@@ -1300,6 +1389,7 @@ function beginShellTurn(
           activeRunIds: [],
           startedAt: Date.now(),
           abortStatus: "idle",
+          backgroundJobs: shell.taskStory?.backgroundJobs,
           events: [],
         },
   }));
@@ -1321,6 +1411,15 @@ function setAbortHandler(store: UIStore, onAbort?: () => void): void {
 
 function markAbortRequested(store: UIStore, reason: string): void {
   const now = Date.now();
+  const shell = store.getState().shell;
+  appendStoryEvent(
+    store,
+    createAbortStoryEvent(reason, "aborting", {
+      ...(shell?.taskStory?.activeTurnId ? { turnId: shell.taskStory.activeTurnId } : {}),
+      ...(shell?.currentTool?.runId ? { runId: shell.currentTool.runId } : {}),
+      ...(shell?.currentTool?.name ? { source: shell.currentTool.name } : {}),
+    }),
+  );
   updateShell(store, (shell) => ({
     ...shell,
     taskStory: {
@@ -1330,6 +1429,7 @@ function markAbortRequested(store: UIStore, reason: string): void {
       events: shell.taskStory?.events ?? [],
       abortStatus: "aborting",
       abortReason: reason,
+      backgroundJobs: shell.taskStory?.backgroundJobs,
     },
     currentTool: shell.currentTool
       ? {
@@ -1342,14 +1442,15 @@ function markAbortRequested(store: UIStore, reason: string): void {
 }
 
 function markAbortSettled(store: UIStore, reason: string): void {
-  appendStoryEvent(store, {
-    kind: "result",
-    status: "aborted",
-    importance: "primary",
-    message: "Interrupted by operator",
-    detail: reason,
-    durable: true,
-  });
+  const shell = store.getState().shell;
+  appendStoryEvent(
+    store,
+    createAbortStoryEvent(reason, "aborted", {
+      ...(shell?.taskStory?.activeTurnId ? { turnId: shell.taskStory.activeTurnId } : {}),
+      ...(shell?.currentTool?.runId ? { runId: shell.currentTool.runId } : {}),
+      ...(shell?.currentTool?.name ? { source: shell.currentTool.name } : {}),
+    }),
+  );
   updateShell(store, (shell) => ({
     ...shell,
     taskStory: shell.taskStory
@@ -1483,6 +1584,9 @@ function updateToolActivity(store: UIStore, toolName: string, elapsedSeconds: nu
         historyEntryId: sameTool ? prev.historyEntryId : undefined,
         displayName: sameTool ? prev.displayName : undefined,
         lastEventAt: Date.now(),
+        runId: sameTool ? prev.runId : undefined,
+        backgroundJobId: sameTool ? prev.backgroundJobId : undefined,
+        backgrounded: sameTool ? prev.backgrounded : undefined,
       },
     };
   });
@@ -1882,14 +1986,13 @@ async function startInkShell(
   let turnSeq = 0;
   const nextTurnId = (): string => `turn-${Date.now()}-${++turnSeq}`;
   /**
-   * Epoch ms the most recent tool/agent abort fired. The SIGINT fallback
-   * consults this to distinguish a "real" idle-prompt Ctrl+C (operator
-   * intent: exit) from a "duplicate" SIGINT forwarded milliseconds after an
-   * abort completed (pnpm/tsx / terminal-driver double-delivery). Without
-   * this, the second SIGINT takes the idle branch and exits the shell with
-   * code 130 even though the operator only pressed Ctrl+C once.
+   * Epoch ms the most recent tool/agent abort fired. The SIGINT fallback uses
+   * a short grace period to distinguish a duplicate signal from the same
+   * physical keypress from an intentional second Ctrl+C that should exit.
    */
   let lastAbortFiredAt = 0;
+  let abortExitArmedAt = 0;
+  let abortExitArmTimer: ReturnType<typeof setTimeout> | undefined;
 
   // runId-based blacklist for the task:phase-progress / task:activity bus
   // subscribers. When the operator Ctrl+Cs a tool that doesn't honor
@@ -1905,6 +2008,7 @@ async function startInkShell(
   // a long shell session.
   const seenRunIdsThisTurn = new Set<string>();
   const abortedRunIds = new Set<string>();
+  const runIdTurnIds = new Map<string, string>();
   const ABORTED_RUNIDS_CAP = 512;
   const blacklistCurrentTurnRunIds = (): void => {
     for (const id of seenRunIdsThisTurn) {
@@ -1920,6 +2024,31 @@ async function startInkShell(
         if (++dropped >= overflow) break;
       }
     }
+  };
+  const acceptProgressRunId = (runId: string): boolean => {
+    if (abortedRunIds.has(runId)) return false;
+    if (activeAbortRequested || store.getState().shell?.processing !== true) return false;
+    const turnId = activeTurnId;
+    if (turnId) {
+      const existing = runIdTurnIds.get(runId);
+      if (existing && existing !== turnId) return false;
+      runIdTurnIds.set(runId, turnId);
+    }
+    seenRunIdsThisTurn.add(runId);
+    return true;
+  };
+
+  const armExitAfterAbort = (): void => {
+    const armedAt = Date.now();
+    lastAbortFiredAt = armedAt;
+    abortExitArmedAt = armedAt;
+    if (abortExitArmTimer) clearTimeout(abortExitArmTimer);
+    abortExitArmTimer = setTimeout(() => {
+      if (abortExitArmedAt === armedAt) {
+        store.update({ ctrlCArmedAt: armedAt });
+      }
+      abortExitArmTimer = undefined;
+    }, ABORT_EXIT_ARM_DELAY_MS);
   };
 
   const currentCwd = (): string => (opts.target ? path.resolve(opts.target) : process.cwd());
@@ -2132,6 +2261,20 @@ async function startInkShell(
   // `run --bg` backgrounding) and the CoreDispatcher (for the `jobs` family).
   const jobManager = new JobManager();
 
+  const mirrorBackgroundJob = (job: ReturnType<JobManager["list"]>[number]): void => {
+    updateBackgroundJobStory(store, {
+      id: job.id,
+      label: job.label,
+      status: job.state,
+      startedAt: job.startedAt,
+      ...(job.endedAt ? { endedAt: job.endedAt } : {}),
+    });
+  };
+  jobManager.on("started", mirrorBackgroundJob);
+  jobManager.on("completed", mirrorBackgroundJob);
+  jobManager.on("failed", mirrorBackgroundJob);
+  jobManager.on("cancelled", mirrorBackgroundJob);
+
   // Scheduler — layered on JobManager. Forward-declared here; the
   // `runCommand` callback closes over `driver` so we instantiate lazily
   // just before driver construction below. Actual setup lives at a
@@ -2291,9 +2434,7 @@ async function startInkShell(
       // `ctx.signal`, so they keep emitting after abort. Without this their
       // output would appear under the operator's next prompt.
       const runId = event.meta.runId;
-      if (abortedRunIds.has(runId)) return;
-      if (activeAbortRequested || store.getState().shell?.processing !== true) return;
-      seenRunIdsThisTurn.add(runId);
+      if (!acceptProgressRunId(runId)) return;
       appendProgressEvent(store, {
         text: event.payload.phase,
         phase: event.payload.phase,
@@ -2312,9 +2453,7 @@ async function startInkShell(
   );
   bus.subscribe<import("../bus/events.js").TaskActivityEvent>("task:activity", (event) => {
     const runId = event.meta.runId;
-    if (abortedRunIds.has(runId)) return;
-    if (activeAbortRequested || store.getState().shell?.processing !== true) return;
-    seenRunIdsThisTurn.add(runId);
+    if (!acceptProgressRunId(runId)) return;
     const description = event.payload.description;
     const isSubagentTool = looksLikeSubagentToolLine(description);
     // All sub-agent tool-echo lines (bare tool-call-start "Read", assistant
@@ -2350,9 +2489,7 @@ async function startInkShell(
   // execution, then it's gone once the tool resolves.
   bus.subscribe<import("../bus/events.js").TaskOutputEvent>("task:output", (event) => {
     const runId = event.meta.runId;
-    if (abortedRunIds.has(runId)) return;
-    if (activeAbortRequested || store.getState().shell?.processing !== true) return;
-    seenRunIdsThisTurn.add(runId);
+    if (!acceptProgressRunId(runId)) return;
     const entryId = store.getState().shell?.currentTool?.historyEntryId;
     if (entryId) pushLiveActivity(store, entryId, event.payload.line);
     appendStoryEvent(
@@ -2369,6 +2506,35 @@ async function startInkShell(
       { persistHistory: false, liveOnly: true },
     );
   });
+
+  // Threat-hunt actor rail — direct shell runs publish one event stream per
+  // actor. Keep most actor/tool chatter live-only, but persist terminal actor
+  // summaries so the transcript tells a compact progressive story.
+  bus.subscribe<import("../bus/events.js").TaskAgentActivityEvent>(
+    "threat-hunt:agent-activity",
+    (event) => {
+      const runId = event.meta.runId || event.payload.context.runId;
+      if (!runId || !acceptProgressRunId(runId)) return;
+      const story = formatAgentActivityStory(event.payload);
+      appendProgressEvent(store, {
+        text: story.detail ? `${story.message} · ${story.detail}` : story.message,
+        activity: story.detail ? `${story.message} · ${story.detail}` : story.message,
+        liveActivity: story.detail ? `${story.message} · ${story.detail}` : story.message,
+        skipHistory: !event.payload.done,
+        story: {
+          kind: story.kind,
+          status: event.payload.done ? "ok" : "running",
+          importance: event.payload.done ? "primary" : "secondary",
+          message: story.message,
+          ...(story.detail ? { detail: story.detail } : {}),
+          source: "threat-hunt:agent-activity",
+          runId,
+          ...(activeTurnId ? { turnId: activeTurnId } : {}),
+          durable: event.payload.done,
+        },
+      });
+    },
+  );
 
   // Auto-patch bridge — when `setg AutoPatch true`, any verification:result
   // with exploitable=true queues patch:finding as a background job. Closes
@@ -2700,10 +2866,10 @@ async function startInkShell(
       // happen before the next keystroke or the terminal echoes chars
       // below Ink's frame and Ctrl+C keeps missing `useInput`.
       ensureRawMode();
-      // Stamp the abort time so a duplicate SIGINT arriving milliseconds
-      // later (e.g. from pnpm/tsx signal forwarding) doesn't fall through
-      // the idle branch of `shellSigintHandler` and exit the shell.
-      lastAbortFiredAt = Date.now();
+      // Arm the follow-up Ctrl+C window after the current input event has
+      // unwound, so duplicate delivery from the same physical keypress does
+      // not immediately commit an exit.
+      armExitAfterAbort();
     });
   };
 
@@ -2740,10 +2906,9 @@ async function startInkShell(
       // Restore raw mode — the session's subprocess almost certainly
       // disabled it. Without this the next keystroke echoes below Ink.
       ensureRawMode();
-      // Stamp the abort time (see tool-abort path above) so the next
-      // spurious SIGINT — commonly a duplicate forwarded by pnpm/tsx —
-      // doesn't exit the shell by falling through the idle branch.
-      lastAbortFiredAt = Date.now();
+      // Arm the follow-up Ctrl+C window after the current input event has
+      // unwound; see the tool-abort path above.
+      armExitAfterAbort();
       // Tear down the session in the background. Any straggler messages the
       // for-await loop drains are swallowed via the `activeAbortRequested`
       // guard inside the loop; `ensureSession()` lazily opens a fresh
@@ -3327,7 +3492,40 @@ async function startInkShell(
   const priorSigtermListeners = process.listeners("SIGTERM").slice();
   process.removeAllListeners("SIGINT");
   process.removeAllListeners("SIGTERM");
+  const isAbortExitArmed = (now: number): boolean => {
+    const stateArmedAt = store.getState().ctrlCArmedAt ?? 0;
+    return (
+      abortExitArmedAt > 0 &&
+      stateArmedAt === abortExitArmedAt &&
+      now - abortExitArmedAt <= CTRL_C_ARM_WINDOW_MS
+    );
+  };
+  const isLikelyDuplicateAbortSignal = (now: number): boolean => {
+    return lastAbortFiredAt > 0 && now - lastAbortFiredAt < SIGNAL_DUPLICATE_GRACE_MS;
+  };
+  const forwardSigintToPriorListeners = (source: string): void => {
+    handleExit();
+    abortDebug(`${source}: exiting shell via prior SIGINT listeners`);
+    for (const listener of priorSigintListeners) {
+      try {
+        (listener as NodeJS.SignalsListener)("SIGINT");
+      } catch {
+        /* best-effort */
+      }
+    }
+  };
+  const maybeExitAfterAbortSignal = (source: string): boolean => {
+    const now = Date.now();
+    if (!isAbortExitArmed(now)) return false;
+    if (isLikelyDuplicateAbortSignal(now)) {
+      abortDebug(`${source}: duplicate immediately after abort, swallowing`);
+      return true;
+    }
+    forwardSigintToPriorListeners(source);
+    return true;
+  };
   const shellSigintHandler = (): void => {
+    if (maybeExitAfterAbortSignal("SIGINT")) return;
     if (activeActionKind) {
       // Belt-and-suspenders. The onAbort chain (abortActiveAction →
       // handler → controller.abort() → per-scope kill listener) is
@@ -3346,24 +3544,17 @@ async function startInkShell(
     // Idle — fall through to the original cli.ts shutdown behavior so
     // Ctrl+C at an empty prompt still exits cleanly.
     //
-    // Guard: a SIGINT within 2s of a tool/agent abort is almost certainly
+    // Guard: a SIGINT immediately after a tool/agent abort is almost certainly
     // a duplicate — pnpm/tsx and some terminal drivers forward the same
     // Ctrl+C twice (once as 0x03 byte, once as SIGINT) across the
-    // raw-mode flip. Without this, the shell exits with code 130 right
-    // after a successful abort even though the operator only pressed
-    // Ctrl+C once.
-    if (lastAbortFiredAt > 0 && Date.now() - lastAbortFiredAt < 2000) {
-      abortDebug("SIGINT at idle — within 2s of abort, swallowing duplicate");
+    // raw-mode flip. Keep this window short so a real second Ctrl+C can
+    // still force an exit while an aborting task is unwinding.
+    if (isLikelyDuplicateAbortSignal(Date.now())) {
+      abortDebug("SIGINT at idle — immediately after abort, swallowing duplicate");
       return;
     }
     abortDebug("SIGINT at idle — forwarding to prior listeners");
-    for (const listener of priorSigintListeners) {
-      try {
-        (listener as NodeJS.SignalsListener)("SIGINT");
-      } catch {
-        /* best-effort */
-      }
-    }
+    forwardSigintToPriorListeners("SIGINT at idle");
   };
   const shellSigtermHandler = (): void => {
     for (const listener of priorSigtermListeners) {
@@ -3385,10 +3576,11 @@ async function startInkShell(
   // directly catches Ctrl+C even if Ink has lost the pipe, providing
   // a third independent abort path alongside SIGINT and useInput.
   const rawStdinAbortListener = (chunk: Buffer): void => {
-    if (!activeActionKind) return;
     // 0x03 is the byte terminal raw mode sends for Ctrl+C. 0x04 is Ctrl+D;
     // both count as an abort trigger.
     if (!(chunk.includes(0x03) || chunk.includes(0x04))) return;
+    if (maybeExitAfterAbortSignal("raw-stdin")) return;
+    if (!activeActionKind) return;
     abortDebug(`raw-stdin: 0x03/0x04 detected, activeActionKind=${activeActionKind}`);
     const killed = killAllClaudeSubprocesses();
     abortDebug(`raw-stdin: killed=${killed} subprocesses`);
@@ -3426,8 +3618,9 @@ async function startInkShell(
         /* setRawMode may be unavailable on some platforms */
       }
       const devTtyListener = (chunk: Buffer): void => {
-        if (!activeActionKind) return;
         if (!(chunk.includes(0x03) || chunk.includes(0x04))) return;
+        if (maybeExitAfterAbortSignal("dev-tty")) return;
+        if (!activeActionKind) return;
         abortDebug(
           `dev-tty: 0x03/0x04 detected on /dev/tty fd, activeActionKind=${activeActionKind}`,
         );
@@ -3501,6 +3694,18 @@ async function startInkShell(
     try {
       saveShellCommandHistory(dataDir, store.getState().shell?.commandHistory ?? []);
     } finally {
+      if (abortExitArmTimer) {
+        clearTimeout(abortExitArmTimer);
+        abortExitArmTimer = undefined;
+      }
+      try {
+        process.stdin.off("data", rawStdinAbortListener);
+      } catch {
+        /* best-effort */
+      }
+      process.off("SIGINT", shellSigintHandler);
+      process.off("SIGTERM", shellSigtermHandler);
+      devTtyAbortTeardown?.();
       await closeSession();
       await jobManager.shutdown();
       scheduler?.stop();
@@ -4004,6 +4209,7 @@ function handleSlashCommand(
           shellView: "findings",
           openFindingId: null,
           diffSince: undefined,
+          findingScope: { kind: "all" },
         }),
         output: "Showing all current findings.",
       };
@@ -4169,13 +4375,15 @@ function handleBackCommand(
   if (
     currentView === "findings" ||
     currentView === "tune" ||
-    currentView === "diff-since" ||
     currentView === "task-story" ||
-    currentView?.startsWith("threat-")
+    currentView === "threats"
   ) {
     return {
-      shellStateUpdater: (shell) => ({ ...shell, shellView: "module" }),
-      output: "Back to module home.",
+      shellStateUpdater: (shell) => ({
+        ...shell,
+        shellView: ctx.focusedModule ? "module" : "catalog",
+      }),
+      output: ctx.focusedModule ? "Back to module home." : "Back to catalog.",
     };
   }
   if (ctx.focusedModule) {
@@ -4459,6 +4667,7 @@ function handleSinceCommand(
       shellStateUpdater: (shell) => ({
         ...shell,
         diffSince: undefined,
+        findingScope: { kind: "all" },
         shellView: "findings",
       }),
     };
@@ -4477,6 +4686,13 @@ function handleSinceCommand(
         updateShell(ctx.uiStore, (shell) => ({
           ...shell,
           diffSince: {
+            ref: scope.ref,
+            repoRoot: scope.repoRoot,
+            changedFiles: scope.changedFiles,
+            ...(scope.error ? { error: scope.error } : {}),
+          },
+          findingScope: {
+            kind: "changed-files",
             ref: scope.ref,
             repoRoot: scope.repoRoot,
             changedFiles: scope.changedFiles,
@@ -4502,7 +4718,7 @@ function handleThreatsCommand(
   const sub = args[0]?.toLowerCase() ?? "summary";
 
   // /threats dfd|stride|stories|scope|summary (and 1..5) — Phase C views.
-  // Each routes to a shellView; the component reads shell.threatModel which
+  // Each routes to a tab within the single threats view; the component reads shell.threatModel which
   // this handler populates below.
   const viewRoute = resolveThreatView(sub);
   if (viewRoute) {
@@ -4510,7 +4726,11 @@ function handleThreatsCommand(
     const repoRoot = path.resolve(opts.target);
     return {
       output: `Loading threat model for ${viewRoute.label}…`,
-      shellStateUpdater: (shell) => ({ ...shell, shellView: viewRoute.shellView }),
+      shellStateUpdater: (shell) => ({
+        ...shell,
+        shellView: viewRoute.shellView,
+        threatTab: viewRoute.threatTab,
+      }),
       asyncExecute: async () => {
         const { loadShellThreatModel } = await import("./threat-model-loader.js");
         const loaded = loadShellThreatModel(repoRoot);
@@ -4539,10 +4759,31 @@ function handleThreatsCommand(
     return {
       output: "Opening threat model editor...",
       asyncExecute: async () => {
-        const { loadPersistentThreatModel } = await import("../threat-model-renderer.js");
+        const {
+          createEmptyThreatModelDocument,
+          loadPersistentThreatModel,
+          savePersistentThreatModel,
+        } = await import("../threat-model-renderer.js");
         const { runThreatModelEditor } = await import("../ui/setup.js");
-        const tm = loadPersistentThreatModel(repoRoot);
-        if (!tm) return "No threat model found. Run a scan with threat modeling enabled first.";
+        let tm = loadPersistentThreatModel(repoRoot);
+        let createdDraft = false;
+        if (!tm) {
+          tm = createEmptyThreatModelDocument();
+          savePersistentThreatModel(repoRoot, tm, true);
+          createdDraft = true;
+        }
+        if (ctx.uiStore) {
+          updateShell(ctx.uiStore, (shell) => ({
+            ...shell,
+            shellView: "threats",
+            threatTab: shell.threatTab ?? "summary",
+            threatModel: tm,
+            threatModelSource: {
+              path: path.join(repoRoot, ".kuzushi", "threat-model.json"),
+              mtimeMs: Date.now(),
+            },
+          }));
+        }
         const outcome = await runThreatModelEditor(
           ctx.uiStore,
           tm,
@@ -4553,7 +4794,9 @@ function handleThreatsCommand(
         if (outcome.action === "proceed") {
           return "Threat model saved to .kuzushi/threat-model.json";
         }
-        return "Threat model editing skipped.";
+        return createdDraft
+          ? "Draft threat model created at .kuzushi/threat-model.json."
+          : "Threat model editing skipped.";
       },
     };
   }
@@ -5964,7 +6207,7 @@ function formatTools(
     const visible = includeHidden ? module.tools : module.tools.filter((t) => t.hidden !== true);
     const hiddenCount = module.tools.length - visible.length;
     if (visible.length === 0 && hiddenCount > 0) {
-      return `  All ${hiddenCount} tools on ${focusedModule} are DAG-internal. Run \`/tools --all\` to list them.`;
+      return `  All ${hiddenCount} tools on ${focusedModule} are advanced pipeline steps. Run \`/tools --all\` to list them.`;
     }
 
     const sections: string[][] = [
@@ -5991,7 +6234,7 @@ function formatTools(
   if (visibleTools.length === 0) {
     return tools.length === 0
       ? "  No tools available."
-      : "  No user-facing tools. Run `/tools --all` to list DAG-internal nodes.";
+      : "  No default tools. Run `/tools --all` to list advanced pipeline steps.";
   }
   const hiddenCount = tools.length - visibleTools.length;
 

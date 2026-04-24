@@ -47,7 +47,7 @@ import type {
   UIState,
   UIStore,
 } from "./state.js";
-import { formatStoryEventPlain } from "./task-story.js";
+import { formatStoryEventPlain, shouldPersistStoryEvent } from "./task-story.js";
 
 export interface PlainRendererOptions {
   /**
@@ -484,15 +484,8 @@ function printShellView(emit: Emit, shell: ShellState, state: UIState): void {
     case "finding":
       printFindingView(emit, shell, state);
       return;
-    case "threat-dfd":
-    case "threat-stride":
-    case "threat-stories":
-    case "threat-scope":
-    case "threat-summary":
+    case "threats":
       printThreatView(emit, shell, state.agentActivity);
-      return;
-    case "diff-since":
-      printDiffSinceView(emit, shell);
       return;
     case "context-build":
       printContextBuildView(emit, shell);
@@ -505,14 +498,29 @@ function printShellView(emit: Emit, shell: ShellState, state: UIState): void {
 
 function printTaskStoryView(emit: Emit, shell: ShellState): void {
   const story = shell.taskStory;
-  emit(chalk.dim(`  [shell] task story · ${story?.events.length ?? 0} events`));
+  const jobs = story?.backgroundJobs ?? [];
+  const activeJobs = jobs.filter((job) => job.status === "running");
+  emit(
+    chalk.dim(
+      `  [shell] task story · ${story?.events.length ?? 0} events${
+        activeJobs.length > 0 ? ` · ${activeJobs.length} background` : ""
+      }`,
+    ),
+  );
   emit("# TASK STORY");
   if (!story || story.events.length === 0) {
     emit("  (no task story yet)");
     return;
   }
+  if (jobs.length > 0) {
+    emit("## Background");
+    for (const job of jobs.slice(0, 6)) {
+      emit(`  job ${job.id}: ${job.status} · ${job.label}`);
+    }
+  }
+  emit("## Live");
   for (const event of story.events) {
-    if (event.importance === "debug") continue;
+    if (!shouldPersistStoryEvent(event)) continue;
     emit(`  ${formatStoryEventPlain(event)}`);
   }
 }
@@ -709,7 +717,7 @@ function printFindingView(emit: Emit, shell: ShellState, state: UIState): void {
   if (match.attackPath?.chain?.length) {
     emit(`taint: ${match.attackPath.chain.join(" -> ")}`);
   }
-  emit("hint: a assign · c comment · s suppress · r resolve · q back");
+  emit("hint: q back · /back returns to findings · /trace <runId> shows run evidence");
 }
 
 function printThreatView(
@@ -717,7 +725,7 @@ function printThreatView(
   shell: ShellState,
   agentActivity: Map<string, AgentActivityLine[]>,
 ): void {
-  const suffix = shell.shellView.replace(/^threat-/, "");
+  const suffix = shell.threatTab ?? "summary";
   const tm = shell.threatModel;
   const threats = tm?.threats.length ?? 0;
   const elements = tm?.dfd.elements.length ?? 0;
@@ -727,8 +735,8 @@ function printThreatView(
     printEmpty(emit, "threat-model-missing", { threatView: suffix });
     return;
   }
-  switch (shell.shellView) {
-    case "threat-dfd": {
+  switch (suffix) {
+    case "dfd": {
       emit(`elements: ${elements}`);
       emit(`trust boundaries: ${tm.dfd.trustBoundaries?.length ?? 0}`);
       const zones = new Map<string, number>();
@@ -742,14 +750,14 @@ function printThreatView(
       }
       break;
     }
-    case "threat-stride": {
+    case "stride": {
       emit(`total threats: ${threats}`);
       const by = tm.summary?.byCategory ?? {};
       emit("## by category");
       for (const cat of Object.keys(by)) emit(`- ${cat}: ${by[cat as keyof typeof by]}`);
       break;
     }
-    case "threat-stories": {
+    case "stories": {
       const stories = tm.narrative?.attackerStories ?? [];
       emit(`total stories: ${stories.length}`);
       for (const story of stories.slice(0, 10)) {
@@ -759,7 +767,7 @@ function printThreatView(
       if (stories.length > 10) emit(`...and ${stories.length - 10} more`);
       break;
     }
-    case "threat-scope": {
+    case "scope": {
       const buckets = tm.narrative?.criticalityBuckets;
       if (buckets) {
         emit("## criticality calibration");
@@ -789,7 +797,7 @@ function printThreatView(
       emit(`- dismissed threats: ${dismissedCount}`);
       break;
     }
-    case "threat-summary": {
+    case "summary": {
       emit(`total: ${tm.summary?.total ?? threats}`);
       if (tm.summary?.byCategory) {
         emit("## by category");

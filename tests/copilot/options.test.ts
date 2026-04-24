@@ -71,6 +71,12 @@ describe("Datastore", () => {
     expect(ds.set("UNKNOWN", "whatever")).toBeNull();
     expect(ds.get("UNKNOWN")).toBe("whatever");
   });
+
+  it("snapshots known options using schema casing after case-insensitive set", () => {
+    const ds = new Datastore([Opt.string("target", { description: "", required: true })]);
+    expect(ds.set("TARGET", "./repo")).toBeNull();
+    expect(ds.snapshot()).toEqual({ target: "./repo" });
+  });
 });
 
 describe("optionsToJsonSchema", () => {

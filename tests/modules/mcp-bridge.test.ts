@@ -229,6 +229,33 @@ describe("bridgeTool", () => {
     expect(result.output).toContain("extra: unknown property");
   });
 
+  it("canonicalizes input keys before validating and calling the MCP client", async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const client = mockClient(async (name, args) => {
+      calls.push({ name, args });
+      return { content: [{ type: "text", text: "ok" }] };
+    });
+    const tool = bridgeTool(
+      {
+        name: "scan",
+        inputSchema: {
+          type: "object",
+          properties: { target: { type: "string" } },
+          required: ["target"],
+          additionalProperties: false,
+        },
+      },
+      "m",
+      client,
+      baseOpts,
+    );
+
+    const result = await tool.execute({ TARGET: "example.com" }, {} as never);
+
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual([{ name: "scan", args: { target: "example.com" } }]);
+  });
+
   it("stringifies non-text content chunks as JSON fallback", async () => {
     const client = mockClient(async () => ({
       content: [

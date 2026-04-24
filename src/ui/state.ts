@@ -313,8 +313,8 @@ export interface UIState {
   noticeRailExpanded?: boolean;
   /**
    * Timestamp (epoch ms) of the first press of the two-stage Ctrl+C.
-   * When set and within CTRL_C_ARM_WINDOW_MS, a second press actually
-   * aborts; otherwise the armed state decays silently. B.4.
+   * When set and within CTRL_C_ARM_WINDOW_MS, a second press exits;
+   * otherwise the armed state decays silently. B.4.
    */
   ctrlCArmedAt?: number;
   /**
@@ -543,24 +543,40 @@ export type ShellView =
   | "findings"
   | "finding"
   | "tune"
-  // Phase C — randori threat-model sub-views. One ThreatModelDocument
-  // snapshot loads into shell.threatModel and is shared across all five
-  // views; press 1..5 at any threat view to cycle.
-  | "threat-dfd"
-  | "threat-stride"
-  | "threat-stories"
-  | "threat-scope"
-  | "threat-summary"
-  // Phase D.3 — diff-aware view showing findings + threat elements scoped
-  // to the set of files that differ between HEAD and a user-supplied git
-  // ref (e.g. main). Interactive surface over the existing scan `--since`.
-  | "diff-since"
+  // Threat model uses one view with shell.threatTab selecting the sub-surface.
+  | "threats"
   // Live Build — ContextBuildView renders the 5 phases of
   // `gatherContextForRoot` (manifests → walk → path signals → grep sweep →
   // assemble) plus a pillar preview that fills in as signals land. Entered
   // via `/context build`; reads from `shell.contextBuild`.
   | "context-build"
   | "task-story";
+
+export type ThreatTab = "dfd" | "stride" | "stories" | "scope" | "summary";
+
+export type FindingScope =
+  | { kind: "all" }
+  | {
+      kind: "changed-files";
+      ref: string;
+      repoRoot: string;
+      changedFiles: string[];
+      error?: string;
+    };
+
+export interface ActiveRunContext {
+  runId: string;
+  summaryPath?: string;
+  aliasCount?: number;
+}
+
+export interface RunReadiness {
+  blockers: Array<{
+    kind: "auth" | "target" | "context" | "threat-model" | "budget-model";
+    message: string;
+    action?: string;
+  }>;
+}
 
 /**
  * Phases of the deterministic `gatherContextForRoot` pipeline, mirrored in
@@ -777,12 +793,13 @@ export interface ShellState {
   /** True while the planner LLM call is in flight. */
   plannerBusy?: boolean;
   /**
-   * Loaded randori threat model — shared across Phase C views
-   * (threat-dfd / threat-stride / threat-stories / threat-scope /
-   * threat-summary). Populated lazily on entry; null when no scan has
-   * produced a threat model yet.
+   * Loaded randori threat model — shared across all `threats` tabs.
+   * Populated lazily on entry; null when no scan has produced a threat
+   * model yet.
    */
   threatModel?: ThreatModelDocument | null;
+  /** Selected tab when shellView === "threats". */
+  threatTab?: ThreatTab;
   /**
    * Path the threat model snapshot came from (`.kuzushi/threat-model.json`
    * or a per-run fallback), used in the "loaded from … (modified Xh ago)"
@@ -800,6 +817,12 @@ export interface ShellState {
     changedFiles: string[];
     error?: string;
   } | null;
+  /** Canonical findings scope. `diffSince` remains as compatibility storage for existing renderers. */
+  findingScope?: FindingScope;
+  /** Hydrated run context after replay/load, used by aliases and detail pages. */
+  activeRun?: ActiveRunContext | null;
+  /** Blocking setup issues for the next scan run. */
+  runReadiness?: RunReadiness | null;
   /** Conversation history (rendered in the scroll region). */
   history: ShellHistoryEntry[];
   /** Submitted commands, capped and persisted for prompt recall. */
@@ -868,6 +891,12 @@ export interface ShellState {
     displayName?: string;
     /** Current shell turn this tool belongs to; used for story correlation. */
     turnId?: string;
+    /** Current bus run id this tool belongs to; used for stale-event suppression. */
+    runId?: string;
+    /** Background job id if this tool has been detached through the jobs manager. */
+    backgroundJobId?: string;
+    /** Whether the tool is visible as a background task instead of active prompt work. */
+    backgrounded?: boolean;
   };
   /** Progressive story for the active or most recent shell turn. */
   taskStory?: ShellTaskStoryState;
