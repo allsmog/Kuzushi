@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
+import { allMigrations, runMigrations } from "../../src/migrations/index.js";
 import { initDb, SchemaStateError } from "../../src/store.js";
 
 const tempDirs: string[] = [];
@@ -51,6 +52,7 @@ describe("schema reset and incremental migrations", () => {
         { version: 101 },
         { version: 102 },
         { version: 103 },
+        { version: 104 },
       ]);
       expect(readdirSync(path.dirname(dbPath)).filter((n) => n.includes(".bak-"))).toHaveLength(0);
     } finally {
@@ -79,6 +81,7 @@ describe("schema reset and incremental migrations", () => {
         { version: 101 },
         { version: 102 },
         { version: 103 },
+        { version: 104 },
       ]);
       const legacyRow = db.prepare("SELECT COUNT(*) as n FROM findings").get() as { n: number };
       expect(legacyRow.n).toBe(0);
@@ -115,6 +118,7 @@ describe("schema reset and incremental migrations", () => {
         { version: 101 },
         { version: 102 },
         { version: 103 },
+        { version: 104 },
       ]);
       const hostsExists = second
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='hosts'")
@@ -140,6 +144,7 @@ describe("schema reset and incremental migrations", () => {
         { version: 101 },
         { version: 102 },
         { version: 103 },
+        { version: 104 },
       ]);
     } finally {
       second.close();
@@ -185,6 +190,33 @@ describe("schema reset and incremental migrations", () => {
       expect(row.foreign_keys).toBe(1);
     } finally {
       db.close();
+    }
+  });
+
+  it("keeps post-baseline incremental migrations replay-safe if metadata is missing", () => {
+    const replaySafeMigrations = allMigrations.filter((migration) => migration.version >= 102);
+    expect(replaySafeMigrations.length).toBeGreaterThan(0);
+
+    for (const migration of replaySafeMigrations) {
+      const dbPath = tmpDb();
+      const db = new Database(dbPath);
+      try {
+        db.pragma("foreign_keys = ON");
+        runMigrations(
+          db,
+          allMigrations.filter((candidate) => candidate.version <= migration.version),
+        );
+
+        db.prepare("DELETE FROM schema_version WHERE version = ?").run(migration.version);
+
+        expect(() => runMigrations(db, allMigrations)).not.toThrow();
+        const row = db
+          .prepare("SELECT COUNT(*) AS n FROM schema_version WHERE version = ?")
+          .get(migration.version) as { n: number };
+        expect(row.n).toBe(1);
+      } finally {
+        db.close();
+      }
     }
   });
 });

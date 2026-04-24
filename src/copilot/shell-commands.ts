@@ -20,17 +20,32 @@ export type ShellCommandGroup =
   | "threats"
   | "session";
 
+export type CommandSurfaceKind = "core" | "advanced" | "dev" | "deprecated";
+
+export interface CommandMetadata {
+  readonly surface: CommandSurfaceKind;
+  readonly canonical?: string;
+  readonly deprecatedSince?: string;
+}
+
+export interface ShellActionHint {
+  readonly command: string;
+  readonly label: string;
+  readonly surface: CommandSurfaceKind;
+}
+
 export interface ShellCommandEntry {
   readonly syntax: string;
   readonly description: string;
   readonly group?: ShellCommandGroup;
   readonly longDescription?: string;
+  readonly metadata?: CommandMetadata;
 }
 
 export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   {
     syntax: "/help",
-    description: "Show this help; `/help <verb>` expands one entry",
+    description: "Show core workflow help; `/help advanced` shows all commands",
     group: "nav",
   },
   { syntax: "/modules", description: "List loaded modules (alias: /m)", group: "nav" },
@@ -58,18 +73,23 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
     group: "nav",
   },
   {
+    syntax: "/story",
+    description: "Open active task story details",
+    group: "nav",
+  },
+  {
     syntax: "/since <git-ref>",
-    description: "Diff-aware view — scope findings to files changed since <ref>",
+    description: "Scope the findings list to files changed since <ref>",
     group: "nav",
     longDescription:
-      "Computes the changed-file set between HEAD and <ref> via git and pivots the shell to diff-since view.",
+      "Computes the changed-file set between HEAD and <ref> via git and keeps the user on the findings surface.",
   },
   {
     syntax: "/plan <english>",
     description: "Propose option changes from a plain-English request",
     group: "planner",
     longDescription:
-      "Haiku translates the natural-language request into a PlanCard with an option diff the operator can apply with /yes or discard with /no.",
+      "Translates the request into a proposed option diff the operator can apply with /yes or discard with /no.",
   },
   {
     syntax: "/yes | /no",
@@ -115,6 +135,11 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   { syntax: "/set <key> <value>", description: "Set a tool option", group: "config" },
   { syntax: "/config", description: "Open the interactive config editor", group: "config" },
   {
+    syntax: "/config advanced",
+    description: "Open advanced/research configuration",
+    group: "config",
+  },
+  {
     syntax: "/config raw|get|set|path",
     description: "Inspect/update ~/.kuzushi/config.json",
     group: "config",
@@ -143,11 +168,10 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   { syntax: "/context", description: "Generate or show application context map", group: "scope" },
   {
     syntax: "/context build",
-    description:
-      "Live-build the operator scan context (5 phases, writes .kuzushi/scan-context.json)",
+    description: "Build scan context (5 phases, writes .kuzushi/scan-context.json)",
     group: "scope",
   },
-  { syntax: "/context edit", description: "Review/edit operator scan context", group: "scope" },
+  { syntax: "/context edit", description: "Review/edit scan context", group: "scope" },
   {
     syntax: "/context regenerate",
     description: "Re-generate context for current target",
@@ -186,7 +210,7 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   },
   {
     syntax: "/threats edit",
-    description: "Review/edit threat model interactively",
+    description: "Review/edit threat model interactively; creates a draft when none exists",
     group: "threats",
   },
   {
@@ -198,6 +222,52 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   { syntax: "/history", description: "Show command history", group: "session" },
   { syntax: "/exit", description: "Exit the shell", group: "session" },
 ];
+
+const ADVANCED_COMMANDS = new Set([
+  "/plan",
+  "/yes",
+  "/prompt",
+  "/show prompts",
+  "/show runs",
+  "/show aliases",
+  "/replay",
+  "/trace",
+  "/options",
+  "/set",
+  "/config advanced",
+  "/config raw|get|set|path",
+  "/backend",
+  "/ask",
+  "/context build",
+  "/context edit",
+  "/context regenerate",
+  "/threats edit",
+]);
+
+const DEV_COMMANDS = new Set(["/load"]);
+
+export function commandSurface(entry: ShellCommandEntry): CommandSurfaceKind {
+  if (entry.metadata?.surface) return entry.metadata.surface;
+  if (DEV_COMMANDS.has(entry.syntax.split(/\s+/)[0] ?? entry.syntax)) return "dev";
+  if (ADVANCED_COMMANDS.has(entry.syntax)) return "advanced";
+  const head = entry.syntax.split(/\s+/)[0] ?? entry.syntax;
+  if (ADVANCED_COMMANDS.has(head)) return "advanced";
+  return "core";
+}
+
+export function isCommandVisibleInDefaultHelp(entry: ShellCommandEntry): boolean {
+  return commandSurface(entry) === "core";
+}
+
+export function getCommandMetadata(input: string): CommandMetadata {
+  const normalized = input.trim().startsWith("/") ? input.trim() : `/${input.trim()}`;
+  const entries = [...SHELL_COMMAND_CATALOG].sort((a, b) => b.syntax.length - a.syntax.length);
+  const entry = entries.find((candidate) => {
+    const head = candidate.syntax.split(/\s+/)[0] ?? candidate.syntax;
+    return normalized.toLowerCase().startsWith(head.toLowerCase());
+  });
+  return { surface: entry ? commandSurface(entry) : "advanced" };
+}
 
 export const SHELL_COMMAND_GROUP_TITLES: Record<ShellCommandGroup, string> = {
   nav: "Module + view navigation",

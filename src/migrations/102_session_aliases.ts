@@ -9,6 +9,9 @@
  * layer treats as "no alias". No uniqueness constraint — aliases are
  * scoped by convention, not enforced — so an operator can reuse an
  * alias across workspaces without a UX cliff.
+ *
+ * Rollback: Kuzushi migrations are forward-only. Restore a pre-upgrade DB
+ * backup if this needs to be reverted after release.
  */
 
 import type { Migration } from "./types.js";
@@ -17,6 +20,9 @@ export const migration102: Migration = {
   version: 102,
   name: "session_aliases",
   up(db) {
-    db.exec(`ALTER TABLE sessions ADD COLUMN alias TEXT;`);
+    const columns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === "alias")) {
+      db.exec("ALTER TABLE sessions ADD COLUMN alias TEXT;");
+    }
   },
 };

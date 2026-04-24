@@ -6,7 +6,14 @@
  * so command execution stays predictable.
  */
 
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { killAllClaudeSubprocesses } from "../agent-runtime/claude.js";
@@ -32,6 +39,15 @@ import type {
   UIStore,
 } from "../ui/state.js";
 import { initContextBuildState } from "../ui/state.js";
+import {
+  appendCuratedStoryEvent,
+  appendStoryTail,
+  createShellStoryEvent,
+  formatStoryEventPlain,
+  type ShellStoryEvent,
+  type ShellStoryEventDraft,
+  shouldPersistStoryEvent,
+} from "../ui/task-story.js";
 import { CopilotCore } from "./core.js";
 import { resolveTool } from "./dispatch/resolve-tool.js";
 import { CoreDispatcher, DispatcherDriver, WorkspaceDispatcher } from "./dispatcher/index.js";
@@ -57,8 +73,12 @@ import { loadAndRunResource, saveResourceScript } from "./resource.js";
 import { parseToolArgs } from "./run.js";
 import {
   buildShellPrompt,
+  type CommandSurfaceKind,
   collectKnownVerbs,
+  commandSurface,
   formatHelpForVerb,
+  getCommandMetadata,
+  isCommandVisibleInDefaultHelp,
   SHELL_COMMAND_CATALOG,
   SHELL_COMMAND_GROUP_TITLES,
   type ShellCommandEntry,
@@ -999,6 +1019,39 @@ function formatHistory(commandHistory: string[]): string {
   ]);
 }
 
+function recordLocalUsageEvent(
+  dataDir: string | undefined,
+  event: {
+    type: "command";
+    timestamp: string;
+    command: string;
+    surface: CommandSurfaceKind;
+    view?: string;
+    outcome: "started" | "succeeded" | "failed" | "cancelled";
+  },
+): void {
+  if (!dataDir || process.env["KUZUSHI_DISABLE_LOCAL_ANALYTICS"] === "1") return;
+  try {
+    mkdirSync(dataDir, { recursive: true });
+    appendFileSync(path.join(dataDir, "usage.jsonl"), `${JSON.stringify(event)}\n`, "utf8");
+  } catch {
+    // Usage telemetry is local and best-effort; it must never block a command.
+  }
+}
+
+function recordCommandUsage(ctx: ShellContext, shellState: ShellState, command: string): void {
+  const metadata = getCommandMetadata(command);
+  const normalized = command.replace(/^\//, "").trim().split(/\s+/)[0]?.toLowerCase() ?? command;
+  recordLocalUsageEvent(ctx.dataDir, {
+    type: "command",
+    timestamp: new Date().toISOString(),
+    command: normalized,
+    surface: metadata.surface,
+    view: shellState.shellView,
+    outcome: "started",
+  });
+}
+
 function updateShell(store: UIStore, updater: (shell: ShellState) => ShellState): void {
   const shell = store.getState().shell;
   if (!shell) return;
@@ -1010,6 +1063,82 @@ function appendToHistory(store: UIStore, entry: ShellHistoryEntry): void {
     ...shell,
     history: [...shell.history, entry],
   }));
+}
+
+interface StoryAppendOptions {
+  persistHistory?: boolean;
+  liveOnly?: boolean;
+}
+
+function applyStoryEventToShell(
+  shell: ShellState,
+  event: ShellStoryEvent,
+  options: StoryAppendOptions = {},
+): ShellState {
+  const activeRunIds =
+    event.runId && !shell.taskStory?.activeRunIds.includes(event.runId)
+      ? [...(shell.taskStory?.activeRunIds ?? []), event.runId]
+      : (shell.taskStory?.activeRunIds ?? []);
+  const nextStory = {
+    activeTurnId: event.turnId ?? shell.taskStory?.activeTurnId,
+    activeRunIds,
+    startedAt: shell.taskStory?.startedAt ?? event.timestamp,
+    endedAt:
+      event.status === "ok" || event.status === "fail" || event.status === "aborted"
+        ? event.timestamp
+        : shell.taskStory?.endedAt,
+    abortStatus:
+      event.status === "aborted"
+        ? ("aborted" as const)
+        : (shell.taskStory?.abortStatus ?? ("idle" as const)),
+    abortReason: shell.taskStory?.abortReason,
+    events: appendCuratedStoryEvent(shell.taskStory?.events ?? [], event),
+  };
+  let nextShell: ShellState = {
+    ...shell,
+    taskStory: nextStory,
+  };
+
+  if (shell.currentTool) {
+    nextShell = {
+      ...nextShell,
+      currentTool: {
+        ...shell.currentTool,
+        storyTail: appendStoryTail(shell.currentTool.storyTail, event),
+        abortStatus: nextStory.abortStatus,
+        ...(event.kind === "phase" ? { phase: event.message, subLabel: event.message } : {}),
+        lastEventAt: event.timestamp,
+      },
+    };
+  }
+
+  const shouldPersist = options.persistHistory ?? shouldPersistStoryEvent(event);
+  if (!options.liveOnly && shouldPersist) {
+    nextShell = {
+      ...nextShell,
+      history: [
+        ...nextShell.history,
+        {
+          type: "story",
+          text: formatStoryEventPlain(event),
+          timestamp: event.timestamp,
+          storyEvent: event,
+          ...(event.status === "aborted" ? { abortStatus: "aborted" as const } : {}),
+        },
+      ],
+    };
+  }
+  return nextShell;
+}
+
+function appendStoryEvent(
+  store: UIStore,
+  draft: ShellStoryEventDraft,
+  options: StoryAppendOptions = {},
+): ShellStoryEvent {
+  const event = createShellStoryEvent(draft);
+  updateShell(store, (shell) => applyStoryEventToShell(shell, event, options));
+  return event;
 }
 
 /**
@@ -1048,6 +1177,7 @@ function finalizeRunningToolCalls(
       return {
         ...entry,
         status,
+        ...(status === "abort" ? { abortStatus: "aborted" as const } : {}),
         ...(resultOutput ? { resultOutput } : {}),
         liveActivities: undefined,
       };
@@ -1134,7 +1264,13 @@ function formatHuntSummaryLine(actorCount: number, findingsCount: number, costUs
   return `${actorsLabel} · ${findingsLabel} · ${costLabel}`;
 }
 
-function beginShellTurn(store: UIStore, input: string, focusedModule: string | null): void {
+function beginShellTurn(
+  store: UIStore,
+  input: string,
+  focusedModule: string | null,
+  turnId: string,
+  options: { preserveTaskStory?: boolean } = {},
+): void {
   // Stale notices from the previous turn (e.g. "Review complete" from a just-
   // finished scan) shouldn't linger into the next command's output window —
   // they visually attach themselves to unrelated views (module home, catalog)
@@ -1157,6 +1293,15 @@ function beginShellTurn(store: UIStore, input: string, focusedModule: string | n
     pendingAssistantText: undefined,
     currentTool: undefined,
     llmHeartbeat: undefined,
+    taskStory: options.preserveTaskStory
+      ? shell.taskStory
+      : {
+          activeTurnId: turnId,
+          activeRunIds: [],
+          startedAt: Date.now(),
+          abortStatus: "idle",
+          events: [],
+        },
   }));
 }
 
@@ -1171,6 +1316,57 @@ function setAbortHandler(store: UIStore, onAbort?: () => void): void {
   updateShell(store, (shell) => ({
     ...shell,
     onAbort,
+  }));
+}
+
+function markAbortRequested(store: UIStore, reason: string): void {
+  const now = Date.now();
+  updateShell(store, (shell) => ({
+    ...shell,
+    taskStory: {
+      activeTurnId: shell.taskStory?.activeTurnId,
+      activeRunIds: shell.taskStory?.activeRunIds ?? [],
+      startedAt: shell.taskStory?.startedAt ?? now,
+      events: shell.taskStory?.events ?? [],
+      abortStatus: "aborting",
+      abortReason: reason,
+    },
+    currentTool: shell.currentTool
+      ? {
+          ...shell.currentTool,
+          abortStatus: "aborting",
+          lastEventAt: now,
+        }
+      : shell.currentTool,
+  }));
+}
+
+function markAbortSettled(store: UIStore, reason: string): void {
+  appendStoryEvent(store, {
+    kind: "result",
+    status: "aborted",
+    importance: "primary",
+    message: "Interrupted by operator",
+    detail: reason,
+    durable: true,
+  });
+  updateShell(store, (shell) => ({
+    ...shell,
+    taskStory: shell.taskStory
+      ? {
+          ...shell.taskStory,
+          abortStatus: "aborted",
+          abortReason: reason,
+          endedAt: Date.now(),
+        }
+      : shell.taskStory,
+    currentTool: shell.currentTool
+      ? {
+          ...shell.currentTool,
+          abortStatus: "aborted",
+          lastEventAt: Date.now(),
+        }
+      : shell.currentTool,
   }));
 }
 
@@ -1281,6 +1477,11 @@ function updateToolActivity(store: UIStore, toolName: string, elapsedSeconds: nu
         total: sameTool ? prev.total : undefined,
         subLabel: sameTool ? prev.subLabel : undefined,
         activities: sameTool ? prev.activities : undefined,
+        storyTail: sameTool ? prev.storyTail : undefined,
+        abortStatus: sameTool ? prev.abortStatus : undefined,
+        turnId: sameTool ? prev.turnId : undefined,
+        historyEntryId: sameTool ? prev.historyEntryId : undefined,
+        displayName: sameTool ? prev.displayName : undefined,
         lastEventAt: Date.now(),
       },
     };
@@ -1391,6 +1592,7 @@ function appendProgressEvent(
     phase?: string;
     activity?: string;
     liveActivity?: string;
+    story?: ShellStoryEventDraft;
     /**
      * When true, skip appending a `tool-progress` history entry but still
      * update `currentTool.activities` + the running tool's `liveActivities`
@@ -1417,12 +1619,20 @@ function appendProgressEvent(
     liveActivity && liveActivity.length > LIVE_ACTIVITY_TEXT_CAP
       ? `${liveActivity.slice(0, LIVE_ACTIVITY_TEXT_CAP - 1)}…`
       : liveActivity;
+  const storyEvent = event.story ? createShellStoryEvent(event.story, now) : undefined;
 
   updateShell(store, (shell) => {
     let nextShell: ShellState = shell;
 
-    if (shell.currentTool && (phase || trimmedActivity)) {
-      const current = shell.currentTool;
+    if (storyEvent) {
+      nextShell = applyStoryEventToShell(nextShell, storyEvent, {
+        persistHistory: false,
+        liveOnly: event.skipHistory,
+      });
+    }
+
+    if (nextShell.currentTool && (phase || trimmedActivity)) {
+      const current = nextShell.currentTool;
       let nextCurrent = current;
       if (phase) {
         // Detect a phase transition. When the phase label changes, rewrite
@@ -1475,8 +1685,8 @@ function appendProgressEvent(
       nextShell = { ...nextShell, currentTool: nextCurrent };
     }
 
-    if (trimmedLiveActivity && shell.currentTool?.historyEntryId) {
-      const id = shell.currentTool.historyEntryId;
+    if (trimmedLiveActivity && nextShell.currentTool?.historyEntryId) {
+      const id = nextShell.currentTool.historyEntryId;
       const idx = nextShell.history.findIndex((entry) => entry.id === id);
       if (idx >= 0) {
         const entry = nextShell.history[idx]!;
@@ -1496,6 +1706,21 @@ function appendProgressEvent(
     }
 
     if (event.skipHistory) return nextShell;
+
+    if (storyEvent && shouldPersistStoryEvent(storyEvent)) {
+      return {
+        ...nextShell,
+        history: [
+          ...nextShell.history,
+          {
+            type: "story",
+            text: formatStoryEventPlain(storyEvent),
+            timestamp: now,
+            storyEvent,
+          },
+        ],
+      };
+    }
 
     return {
       ...nextShell,
@@ -1653,6 +1878,9 @@ async function startInkShell(
   let credentialsMissing = false;
   let activeActionKind: "tool" | "agent" | null = null;
   let activeAbortRequested = false;
+  let activeTurnId: string | undefined;
+  let turnSeq = 0;
+  const nextTurnId = (): string => `turn-${Date.now()}-${++turnSeq}`;
   /**
    * Epoch ms the most recent tool/agent abort fired. The SIGINT fallback
    * consults this to distinguish a "real" idle-prompt Ctrl+C (operator
@@ -1772,6 +2000,17 @@ async function startInkShell(
       ? `⏺ ${displayName ?? tool.name}(${inputDisplay})`
       : `⏺ ${displayName ?? tool.name}`;
     const historyEntryId = `tc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const turnId = activeTurnId;
+    const startStory = createShellStoryEvent({
+      kind: "tool",
+      status: "running",
+      importance: "primary",
+      message: `${displayName ?? tool.name} started`,
+      source: tool.name,
+      ...(inputDisplay ? { detail: inputDisplay } : {}),
+      ...(turnId ? { turnId } : {}),
+      durable: true,
+    });
     appendToHistory(store, {
       type: "tool-call",
       id: historyEntryId,
@@ -1781,7 +2020,11 @@ async function startInkShell(
       status: "running",
       text: headerText,
       timestamp: Date.now(),
+      storyEvent: startStory,
     });
+    updateShell(store, (shell) =>
+      applyStoryEventToShell(shell, startStory, { persistHistory: false }),
+    );
     // Seed `currentTool` so ToolRunningStatus has something to render the
     // moment the dispatcher kicks off a direct `run` — otherwise the
     // `task:activity` events that fire during the tool would hit an empty
@@ -1795,6 +2038,8 @@ async function startInkShell(
         lastEventAt: startedAt,
         historyEntryId,
         ...(displayName ? { displayName } : {}),
+        ...(turnId ? { turnId } : {}),
+        storyTail: [startStory],
       },
     }));
     let ok = false;
@@ -1824,10 +2069,22 @@ async function startInkShell(
       const verb = aborted ? "aborted" : ok ? "done" : "failed";
       const resultOutput =
         customResult && customResult.length > 0 ? customResult : `${verb} in ${elapsed}s`;
+      appendStoryEvent(store, {
+        kind: "result",
+        status: aborted ? "aborted" : ok ? "ok" : "fail",
+        importance: "primary",
+        message: `${displayName ?? tool.name} ${verb}`,
+        detail: resultOutput,
+        source: tool.name,
+        ...(turnId ? { turnId } : {}),
+        ...(status === "ok" && finalResult?.costUsd ? { costUsd: finalResult.costUsd } : {}),
+        durable: true,
+      });
       patchHistoryEntry(store, historyEntryId, {
         status,
         elapsedSeconds: elapsed,
         resultOutput,
+        ...(status === "abort" ? { abortStatus: "aborted" as const } : {}),
         // Clear the live tail — the tool is done, scrollback already has
         // the per-activity entries for the audit trail.
         liveActivities: undefined,
@@ -2041,6 +2298,15 @@ async function startInkShell(
         text: event.payload.phase,
         phase: event.payload.phase,
         liveActivity: event.payload.phase,
+        story: {
+          kind: "phase",
+          status: "running",
+          importance: "primary",
+          message: event.payload.phase,
+          source: "task:phase-progress",
+          runId,
+          ...(activeTurnId ? { turnId: activeTurnId } : {}),
+        },
       });
     },
   );
@@ -2065,6 +2331,15 @@ async function startInkShell(
       activity: description,
       liveActivity: description,
       skipHistory,
+      story: {
+        kind: isSubagentTool ? "tool" : "activity",
+        status: "running",
+        importance: isSubagentTool ? "debug" : "secondary",
+        message: description,
+        source: "task:activity",
+        runId,
+        ...(activeTurnId ? { turnId: activeTurnId } : {}),
+      },
       ...(event.payload.phase ? { phase: event.payload.phase } : {}),
       ...(isSubagentTool ? { kind: "invocation" as const } : {}),
     });
@@ -2074,8 +2349,25 @@ async function startInkShell(
   // `ShellProgressMessage` analogue: operators see live Bash output during
   // execution, then it's gone once the tool resolves.
   bus.subscribe<import("../bus/events.js").TaskOutputEvent>("task:output", (event) => {
+    const runId = event.meta.runId;
+    if (abortedRunIds.has(runId)) return;
+    if (activeAbortRequested || store.getState().shell?.processing !== true) return;
+    seenRunIdsThisTurn.add(runId);
     const entryId = store.getState().shell?.currentTool?.historyEntryId;
     if (entryId) pushLiveActivity(store, entryId, event.payload.line);
+    appendStoryEvent(
+      store,
+      {
+        kind: "activity",
+        status: "running",
+        importance: "debug",
+        message: event.payload.line,
+        source: "task:output",
+        runId,
+        ...(activeTurnId ? { turnId: activeTurnId } : {}),
+      },
+      { persistHistory: false, liveOnly: true },
+    );
   });
 
   // Auto-patch bridge — when `setg AutoPatch true`, any verification:result
@@ -2391,6 +2683,7 @@ async function startInkShell(
       }
       activeAbortRequested = true;
       abortDebug("tool onAbort: firing controller.abort()");
+      markAbortRequested(store, "tool execution");
       controller.abort(new Error("Shell tool execution aborted"));
       // Immediately return the operator to the prompt instead of waiting
       // for the tool to notice the signal. A tool that ignores the signal
@@ -2399,11 +2692,8 @@ async function startInkShell(
       // behavior — the alternative (waiting for the tool to unwind) felt
       // like the shell was hung even though the abort had fired.
       blacklistCurrentTurnRunIds();
-      appendToHistory(store, {
-        type: "output",
-        text: "[aborted]",
-        timestamp: Date.now(),
-      });
+      finalizeRunningToolCalls(store, "abort", CANCELLED_TOOL_MESSAGE);
+      markAbortSettled(store, "tool execution");
       clearTransientShellState(store);
       setProcessing(store, false);
       // Restore raw mode in case a Claude SDK subprocess disabled it. Must
@@ -2427,6 +2717,7 @@ async function startInkShell(
         return;
       }
       activeAbortRequested = true;
+      markAbortRequested(store, "agent request");
       // Mirror the tool-abort path: immediately return the operator to the
       // prompt instead of waiting for the LLM stream to unwind. Some backends
       // (notably the Claude Agent SDK subprocess) won't fully tear down the
@@ -2442,11 +2733,8 @@ async function startInkShell(
         });
         setPendingAssistantText(store, undefined);
       }
-      appendToHistory(store, {
-        type: "output",
-        text: CANCELLED_AGENT_MESSAGE,
-        timestamp: Date.now(),
-      });
+      finalizeRunningToolCalls(store, "abort", CANCELLED_AGENT_MESSAGE);
+      markAbortSettled(store, "agent request");
       clearTransientShellState(store);
       setProcessing(store, false);
       // Restore raw mode — the session's subprocess almost certainly
@@ -2483,7 +2771,25 @@ async function startInkShell(
     // abort. Clearing here keeps `blacklistCurrentTurnRunIds()` tied to
     // the turn that actually got aborted.
     seenRunIdsThisTurn.clear();
-    beginShellTurn(store, input, shellCtx.focusedModule);
+    const preserveTaskStory = isTaskStoryNavigationInput(input);
+    activeTurnId = preserveTaskStory
+      ? (store.getState().shell?.taskStory?.activeTurnId ?? activeTurnId ?? nextTurnId())
+      : nextTurnId();
+    beginShellTurn(store, input, shellCtx.focusedModule, activeTurnId, { preserveTaskStory });
+    if (!preserveTaskStory) {
+      appendStoryEvent(
+        store,
+        {
+          kind: "phase",
+          status: "running",
+          importance: "primary",
+          message: `Started ${input}`,
+          source: "shell",
+          ...(activeTurnId ? { turnId: activeTurnId } : {}),
+        },
+        { persistHistory: false },
+      );
+    }
 
     // First pass: msfconsole-style dispatcher. If a registered command matches,
     // we render its output and skip the legacy router + LLM agent.
@@ -2591,6 +2897,38 @@ async function startInkShell(
     if (localResult.asyncExecute) {
       const controller = new AbortController();
       setToolAbort(controller);
+      const asyncStartedAt = Date.now();
+      const asyncTool = localResult.executedToolName
+        ? core.registry.resolveTool(localResult.executedToolName)?.tool
+        : undefined;
+      const asyncToolLabel =
+        asyncTool?.displayName ?? localResult.executedToolName ?? "shell action";
+      if (localResult.executedToolName) {
+        const startStory = appendStoryEvent(
+          store,
+          {
+            kind: "tool",
+            status: "running",
+            importance: "primary",
+            message: `${asyncToolLabel} started`,
+            source: localResult.executedToolName,
+            ...(activeTurnId ? { turnId: activeTurnId } : {}),
+            durable: true,
+          },
+          { persistHistory: false },
+        );
+        updateShell(store, (shell) => ({
+          ...shell,
+          currentTool: {
+            name: localResult.executedToolName!,
+            startedAt: asyncStartedAt,
+            lastEventAt: asyncStartedAt,
+            ...(asyncTool?.displayName ? { displayName: asyncTool.displayName } : {}),
+            ...(activeTurnId ? { turnId: activeTurnId } : {}),
+            storyTail: [startStory],
+          },
+        }));
+      }
       try {
         const execResult = normalizeAsyncExecutionResult(
           await localResult.asyncExecute(controller.signal),
@@ -2613,6 +2951,22 @@ async function startInkShell(
               execResult.costUsd,
             ),
           }));
+        }
+        if (localResult.executedToolName) {
+          const elapsed = Math.max(0, Math.floor((Date.now() - asyncStartedAt) / 1000));
+          appendStoryEvent(store, {
+            kind: "result",
+            status: execResult.ok === false ? "fail" : "ok",
+            importance: "primary",
+            message: `${asyncToolLabel} ${execResult.ok === false ? "failed" : "done"}`,
+            detail: execResult.output
+              ? (execResult.output.split("\n", 1)[0] ?? execResult.output)
+              : `${elapsed}s`,
+            source: localResult.executedToolName,
+            ...(activeTurnId ? { turnId: activeTurnId } : {}),
+            ...(execResult.costUsd ? { costUsd: execResult.costUsd } : {}),
+            durable: true,
+          });
         }
         if (execResult.output) {
           appendToHistory(store, {
@@ -2638,6 +2992,18 @@ async function startInkShell(
           // Abort handler already rendered `[aborted]` — no need to also
           // append CANCELLED_TOOL_MESSAGE.
           return;
+        }
+        if (localResult.executedToolName) {
+          appendStoryEvent(store, {
+            kind: "result",
+            status: "fail",
+            importance: "primary",
+            message: `${asyncToolLabel} failed`,
+            detail: error instanceof Error ? error.message : String(error),
+            source: localResult.executedToolName,
+            ...(activeTurnId ? { turnId: activeTurnId } : {}),
+            durable: true,
+          });
         }
         appendToHistory(store, {
           type: "error",
@@ -2684,6 +3050,19 @@ async function startInkShell(
     }
 
     setAgentAbort();
+    appendStoryEvent(
+      store,
+      {
+        kind: "phase",
+        status: "running",
+        importance: "primary",
+        message: "Agent request started",
+        source: "agent",
+        ...(activeTurnId ? { turnId: activeTurnId } : {}),
+        durable: true,
+      },
+      { persistHistory: false },
+    );
 
     let pendingErrorText: string | undefined;
     let fallbackResultText = "";
@@ -2829,6 +3208,16 @@ async function startInkShell(
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
+      appendStoryEvent(store, {
+        kind: "result",
+        status: "fail",
+        importance: "primary",
+        message: "Agent request failed",
+        detail: message,
+        source: "agent",
+        ...(activeTurnId ? { turnId: activeTurnId } : {}),
+        durable: true,
+      });
       const pendingAssistantText = store.getState().shell?.pendingAssistantText;
       if (pendingAssistantText) {
         appendToHistory(store, {
@@ -2853,6 +3242,18 @@ async function startInkShell(
     }
 
     const wasAborted = finishActiveAction();
+    if (!wasAborted) {
+      appendStoryEvent(store, {
+        kind: "result",
+        status: pendingErrorText ? "fail" : "ok",
+        importance: "primary",
+        message: pendingErrorText ? "Agent request failed" : "Agent request complete",
+        ...(pendingErrorText ? { detail: pendingErrorText } : {}),
+        source: "agent",
+        ...(activeTurnId ? { turnId: activeTurnId } : {}),
+        durable: true,
+      });
+    }
     // Clean end-of-turn — mark any still-"running" tool-call entries as
     // resolved. Most should already be `ok` from `tool-summary`, but if
     // the SDK didn't emit one for every batch (or we missed the
@@ -3452,6 +3853,11 @@ let firstBareSentenceHintShown = false;
  * Silent NL fallback was removed to prevent the agent from hallucinating
  * answers from cached `.kuzushi/` artifacts. `/ask` is the explicit door.
  */
+function isTaskStoryNavigationInput(input: string): boolean {
+  const normalized = input.trim().toLowerCase();
+  return normalized === "story" || normalized === "/story";
+}
+
 function routeInput(
   input: string,
   core: CopilotCore,
@@ -3463,10 +3869,12 @@ function routeInput(
   const lower = trimmed.toLowerCase();
 
   if (trimmed.startsWith("?")) {
+    recordCommandUsage(ctx, shellState, "/ask");
     return handleAskCommand([trimmed.slice(1).trim()], opts, shellState);
   }
 
   if (trimmed.startsWith("/")) {
+    recordCommandUsage(ctx, shellState, trimmed);
     return handleSlashCommand(trimmed, core, opts, ctx, shellState);
   }
 
@@ -3475,7 +3883,12 @@ function routeInput(
   }
 
   if (lower === "help") {
+    recordCommandUsage(ctx, shellState, "/help");
     return { output: formatHelp(core, opts) };
+  }
+  if (lower === "help advanced") {
+    recordCommandUsage(ctx, shellState, "/help");
+    return { output: formatHelp(core, opts, { includeAdvanced: true }) };
   }
   if (lower === "modules" || lower === "m") {
     return { output: formatModuleList(core, shellState.moduleCatalog) };
@@ -3502,6 +3915,10 @@ function routeInput(
       output: `Tuning ${ctx.focusedModule}. Use prompt edit <verb> for prompt overrides.`,
     };
   }
+  if (lower === "story") {
+    recordCommandUsage(ctx, shellState, "/story");
+    return handleStoryCommand(shellState);
+  }
   if (lower.startsWith("open ")) {
     return handleOpenCommand(trimmed.split(/\s+/).slice(1));
   }
@@ -3518,6 +3935,14 @@ function routeInput(
 
   const toolResult = resolveDirectToolDispatch(trimmed, core, opts, ctx, shellState);
   if (toolResult !== undefined) {
+    recordLocalUsageEvent(ctx.dataDir, {
+      type: "command",
+      timestamp: new Date().toISOString(),
+      command: "tool-dispatch",
+      surface: "advanced",
+      view: shellState.shellView,
+      outcome: "started",
+    });
     return toolResult;
   }
 
@@ -3546,6 +3971,9 @@ function handleSlashCommand(
       // short expanded description; bare `/help` falls through to the grouped
       // top-level help. Both surfaces render from SHELL_COMMAND_CATALOG so
       // drift is impossible.
+      if (args[0]?.toLowerCase() === "advanced") {
+        return { output: formatHelp(core, opts, { includeAdvanced: true }) };
+      }
       if (args[0]) return { output: formatHelpForVerb(args[0]) };
       return { output: formatHelp(core, opts) };
 
@@ -3571,8 +3999,13 @@ function handleSlashCommand(
     case "findings":
     case "f":
       return {
-        shellStateUpdater: (shell) => ({ ...shell, shellView: "findings", openFindingId: null }),
-        output: "Showing current findings.",
+        shellStateUpdater: (shell) => ({
+          ...shell,
+          shellView: "findings",
+          openFindingId: null,
+          diffSince: undefined,
+        }),
+        output: "Showing all current findings.",
       };
 
     case "tune":
@@ -3970,7 +4403,7 @@ function handleContextCommand(
   // /context regenerate — force re-run
   if (sub === "regenerate" || sub === "regen") {
     if (!opts.target) return { output: "No target set. Use /target <path> first." };
-    return resolveToolExecution("sast:context", args.slice(1), core, opts, ctx, shellState);
+    return resolveToolExecution("context:build", args.slice(1), core, opts, ctx, shellState);
   }
 
   // /context <module-path> — drill into monorepo module
@@ -3989,7 +4422,7 @@ function handleContextCommand(
 
   // No valid snapshot — trigger generation
   if (!opts.target) return { output: "No target set. Use /target <path> first." };
-  return resolveToolExecution("sast:context", [], core, opts, ctx, shellState);
+  return resolveToolExecution("context:build", [], core, opts, ctx, shellState);
 }
 
 function handleSinceCommand(
@@ -3997,9 +4430,9 @@ function handleSinceCommand(
   opts: ShellOptions,
   ctx: ShellContext,
 ): LocalCommandResult {
-  // `/since <ref>` — diff-aware view. Computes the changed-file set between
-  // HEAD and `<ref>` via git, stores it on shell.diffSince, and pivots to the
-  // diff-since shellView. Works on any git ref including tags and SHAs.
+  // `/since <ref>` — findings scope. Computes the changed-file set between
+  // HEAD and `<ref>` via git, stores it on shell.diffSince, and keeps the
+  // operator on the findings surface.
   const ref = args[0];
   if (!ref) {
     return { output: "Usage: /since <git-ref>  e.g.  /since main" };
@@ -4020,7 +4453,7 @@ function handleSinceCommand(
   const repoRoot = path.resolve(opts.target);
   return {
     output: `Diffing HEAD against ${ref}…`,
-    shellStateUpdater: (shell) => ({ ...shell, shellView: "diff-since" }),
+    shellStateUpdater: (shell) => ({ ...shell, shellView: "findings", openFindingId: null }),
     asyncExecute: async () => {
       const { computeDiffScope } = await import("./diff-scope.js");
       const scope = computeDiffScope(repoRoot, ref);
@@ -4038,7 +4471,7 @@ function handleSinceCommand(
       if (!scope.ok) {
         return `git diff failed: ${scope.error ?? "unknown error"}`;
       }
-      return `Found ${scope.changedFiles.length} changed file${
+      return `Findings are now scoped to ${scope.changedFiles.length} changed file${
         scope.changedFiles.length === 1 ? "" : "s"
       } since ${ref}.`;
     },
@@ -5273,6 +5706,10 @@ function handleConfigCommand(args: string[], ctx: ShellContext): LocalCommandRes
     return openConfigEditor(ctx, focusKey);
   }
 
+  if (sub === "advanced") {
+    return openConfigEditor(ctx, args[1] ?? "multiStrategyMode");
+  }
+
   if (sub === "raw" || sub === "json") {
     return {
       asyncExecute: async () => {
@@ -5363,7 +5800,11 @@ function openConfigEditor(ctx: ShellContext, focusKey?: string): LocalCommandRes
   };
 }
 
-function formatHelp(core: CopilotCore, opts: ShellOptions): string {
+function formatHelp(
+  core: CopilotCore,
+  opts: ShellOptions,
+  options: { includeAdvanced?: boolean } = {},
+): string {
   const modules = core.listModules();
   const toolCount = core.registry.allTools().length;
 
@@ -5382,6 +5823,7 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
   ];
   const byGroup = new Map<ShellCommandGroup, ShellCommandEntry[]>();
   for (const entry of SHELL_COMMAND_CATALOG) {
+    if (!options.includeAdvanced && !isCommandVisibleInDefaultHelp(entry)) continue;
     const g = entry.group ?? "session";
     const bucket = byGroup.get(g);
     if (bucket) bucket.push(entry);
@@ -5394,7 +5836,13 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
       `  ${SHELL_COMMAND_GROUP_TITLES[g]}`,
       ...formatCommandRows(
         (byGroup.get(g) ?? []).map(
-          (entry) => [entry.syntax, entry.description] as [string, string],
+          (entry) =>
+            [
+              entry.syntax,
+              options.includeAdvanced && commandSurface(entry) !== "core"
+                ? `[${commandSurface(entry)}] ${entry.description}`
+                : entry.description,
+            ] as [string, string],
         ),
       ),
     ]);
@@ -5402,6 +5850,9 @@ function formatHelp(core: CopilotCore, opts: ShellOptions): string {
   return formatSections([
     [
       "  Kuzushi — security-native AI operating environment",
+      options.includeAdvanced
+        ? "  Showing core, advanced, and developer commands."
+        : "  Showing core workflow commands. Use /help advanced for the full surface.",
       ...formatLabelValueRows([
         ["Modules:", modules.map((module) => module.id).join(", ") || "none"],
         ["Tools:", `${toolCount} available`],
@@ -5513,7 +5964,7 @@ function formatTools(
     ];
     if (hiddenCount > 0) {
       sections.push([
-        `  + ${hiddenCount} internal DAG node${hiddenCount === 1 ? "" : "s"} hidden (run \`/tools --all\` to list)`,
+        `  + ${hiddenCount} advanced pipeline step${hiddenCount === 1 ? "" : "s"} hidden (run \`/tools --all\` to list)`,
       ]);
     }
     return formatSections(sections);
@@ -5538,7 +5989,7 @@ function formatTools(
   ];
   if (hiddenCount > 0) {
     sections.push([
-      `  + ${hiddenCount} internal DAG node${hiddenCount === 1 ? "" : "s"} hidden (run \`/tools --all\` to list)`,
+      `  + ${hiddenCount} advanced pipeline step${hiddenCount === 1 ? "" : "s"} hidden (run \`/tools --all\` to list)`,
     ]);
   }
   return formatSections(sections);

@@ -77,6 +77,40 @@ CREATE TABLE code_graph_paths (
         created_at      TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
+-- Table: cred_logins
+CREATE TABLE cred_logins (
+        id           TEXT PRIMARY KEY,
+        cred_id      TEXT NOT NULL
+                     REFERENCES creds(id) ON DELETE CASCADE,
+        service_id   TEXT NOT NULL
+                     REFERENCES services(id) ON DELETE CASCADE,
+        status       TEXT NOT NULL DEFAULT 'untried'
+                     CHECK (status IN ('untried','successful','failed','locked_out','disabled')),
+        access_level TEXT,
+        last_tried_at TEXT,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (cred_id, service_id)
+      );
+
+-- Table: creds
+CREATE TABLE creds (
+        id              TEXT PRIMARY KEY,
+        workspace_id    TEXT NOT NULL
+                        REFERENCES workspaces(id) ON DELETE CASCADE,
+        public_username TEXT,
+        private_type    TEXT
+                        CHECK (private_type IS NULL OR private_type IN
+                               ('password','hash','ssh_key','token','api_key','cookie','other')),
+        private_data    TEXT,
+        realm_kind      TEXT,
+        realm_value     TEXT,
+        origin_type     TEXT,
+        origin_detail   TEXT,
+        metadata_json   TEXT NOT NULL DEFAULT '{}',
+        created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
 -- Table: crypto_behavioral_runs
 CREATE TABLE crypto_behavioral_runs (
         run_id                TEXT PRIMARY KEY,
@@ -223,6 +257,58 @@ CREATE TABLE findings (
         updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
+-- Table: hosts
+CREATE TABLE hosts (
+        id             TEXT PRIMARY KEY,
+        workspace_id   TEXT NOT NULL
+                       REFERENCES workspaces(id) ON DELETE CASCADE,
+        address        TEXT NOT NULL,
+        hostname       TEXT,
+        os_name        TEXT,
+        os_flavor      TEXT,
+        os_version     TEXT,
+        arch           TEXT,
+        purpose        TEXT,
+        state          TEXT NOT NULL DEFAULT 'alive'
+                       CHECK (state IN ('alive', 'down', 'unknown')),
+        comm           TEXT,
+        metadata_json  TEXT NOT NULL DEFAULT '{}',
+        created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (workspace_id, address)
+      );
+
+-- Table: loot
+CREATE TABLE loot (
+        id            TEXT PRIMARY KEY,
+        workspace_id  TEXT NOT NULL
+                      REFERENCES workspaces(id) ON DELETE CASCADE,
+        host_id       TEXT
+                      REFERENCES hosts(id) ON DELETE SET NULL,
+        ltype         TEXT NOT NULL,              -- mimic msf: "credential.ssh_key"
+        content_type  TEXT,                        -- mime-ish; optional
+        name          TEXT NOT NULL,
+        path          TEXT,                        -- on-disk path, optional
+        data          BLOB,                        -- inline storage (small loot)
+        info          TEXT,                        -- short description
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+-- Table: notes
+CREATE TABLE notes (
+        id            TEXT PRIMARY KEY,
+        workspace_id  TEXT NOT NULL
+                      REFERENCES workspaces(id) ON DELETE CASCADE,
+        host_id       TEXT
+                      REFERENCES hosts(id) ON DELETE SET NULL,
+        service_id    TEXT
+                      REFERENCES services(id) ON DELETE SET NULL,
+        ntype         TEXT NOT NULL,
+        data_json     TEXT NOT NULL DEFAULT '{}',
+        created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
 -- Table: patch_results
 CREATE TABLE patch_results (
         patch_run_id  TEXT PRIMARY KEY,
@@ -266,12 +352,62 @@ CREATE TABLE pipeline_runs (
         updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
+-- Table: schedules
+CREATE TABLE schedules (
+        label          TEXT PRIMARY KEY,
+        interval_spec  TEXT NOT NULL,
+        command        TEXT NOT NULL,
+        last_fired_at  INTEGER,
+        next_fire_at   INTEGER NOT NULL,
+        created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
 -- Table: schema_version
 CREATE TABLE schema_version (
       version    INTEGER PRIMARY KEY,
       name       TEXT NOT NULL,
       applied_at TEXT NOT NULL
     );
+
+-- Table: services
+CREATE TABLE services (
+        id            TEXT PRIMARY KEY,
+        host_id       TEXT NOT NULL
+                      REFERENCES hosts(id) ON DELETE CASCADE,
+        port          INTEGER NOT NULL CHECK (port >= 0 AND port <= 65535),
+        proto         TEXT NOT NULL DEFAULT 'tcp'
+                      CHECK (proto IN ('tcp', 'udp', 'icmp', 'sctp')),
+        name          TEXT,
+        banner        TEXT,
+        state         TEXT NOT NULL DEFAULT 'open'
+                      CHECK (state IN ('open', 'closed', 'filtered', 'unknown')),
+        info_json     TEXT NOT NULL DEFAULT '{}',
+        created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (host_id, port, proto)
+      );
+
+-- Table: sessions
+CREATE TABLE sessions (
+        id             TEXT PRIMARY KEY,
+        workspace_id   TEXT NOT NULL
+                       REFERENCES workspaces(id) ON DELETE CASCADE,
+        host_id        TEXT
+                       REFERENCES hosts(id) ON DELETE SET NULL,
+        service_id     TEXT
+                       REFERENCES services(id) ON DELETE SET NULL,
+        kind           TEXT NOT NULL,    -- 'shell' | 'ssh' | 'browser' | 'honeypot' | ...
+        state          TEXT NOT NULL DEFAULT 'open'
+                       CHECK (state IN ('open','closed','error')),
+        tunnel_peer    TEXT,
+        tunnel_local   TEXT,
+        description    TEXT,
+        via_module     TEXT,
+        via_tool       TEXT,
+        opened_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        closed_at      TEXT,
+        metadata_json  TEXT NOT NULL DEFAULT '{}'
+      , alias TEXT);
 
 -- Table: trajectories
 CREATE TABLE trajectories (
@@ -288,6 +424,30 @@ CREATE TABLE trajectories (
                     REFERENCES findings(fingerprint) ON DELETE SET NULL,
         created_at  TEXT NOT NULL,
         updated_at  TEXT NOT NULL
+      );
+
+-- Table: vulns
+CREATE TABLE vulns (
+        id             TEXT PRIMARY KEY,
+        workspace_id   TEXT NOT NULL
+                       REFERENCES workspaces(id) ON DELETE CASCADE,
+        host_id        TEXT
+                       REFERENCES hosts(id) ON DELETE SET NULL,
+        service_id     TEXT
+                       REFERENCES services(id) ON DELETE SET NULL,
+        finding_fp     TEXT,   -- fingerprint from findings table, if any
+        name           TEXT NOT NULL,
+        description    TEXT,
+        severity       TEXT
+                       CHECK (severity IS NULL OR severity IN ('info','low','medium','high','critical')),
+        references_json TEXT NOT NULL DEFAULT '[]',   -- [{type: 'CVE', value: '...'}]
+        check_code     TEXT
+                       CHECK (check_code IS NULL
+                              OR check_code IN ('unknown','safe','detected','appears','vulnerable','unsupported')),
+        check_reason   TEXT,
+        metadata_json  TEXT NOT NULL DEFAULT '{}',
+        created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
 -- Table: workspace_snapshots
@@ -317,6 +477,9 @@ CREATE INDEX idx_cgn_kind ON code_graph_nodes(repo, node_kind);
 CREATE INDEX idx_cgn_repo ON code_graph_nodes(repo);
 CREATE INDEX idx_cgp_entry  ON code_graph_paths(repo, entry_node_id);
 CREATE INDEX idx_cgp_target ON code_graph_paths(repo, target_node_id);
+CREATE INDEX idx_logins_service ON cred_logins(service_id);
+CREATE INDEX idx_creds_user      ON creds(workspace_id, public_username);
+CREATE INDEX idx_creds_workspace ON creds(workspace_id);
 CREATE INDEX idx_crypto_behavioral_fingerprint
         ON crypto_behavioral_runs(fingerprint, created_at DESC);
 CREATE INDEX idx_dynamic_analysis_runs_fingerprint
@@ -329,16 +492,382 @@ CREATE INDEX idx_findings_repo_ref   ON findings(repo, ref);
 CREATE INDEX idx_findings_rule_id    ON findings(rule_id);
 CREATE INDEX idx_findings_task_id    ON findings(task_id);
 CREATE INDEX idx_findings_verdict    ON findings(verdict);
+CREATE INDEX idx_hosts_workspace ON hosts(workspace_id);
+CREATE INDEX idx_loot_type      ON loot(workspace_id, ltype);
+CREATE INDEX idx_loot_workspace ON loot(workspace_id);
+CREATE INDEX idx_notes_workspace ON notes(workspace_id);
 CREATE INDEX idx_patch_results_fingerprint
         ON patch_results(fingerprint, created_at DESC);
 CREATE INDEX idx_patch_results_repo_status
         ON patch_results(repo, status);
 CREATE INDEX idx_pipeline_runs_repo_status ON pipeline_runs(repo, status);
 CREATE INDEX idx_pipeline_runs_started_at  ON pipeline_runs(started_at DESC);
+CREATE INDEX idx_services_host ON services(host_id);
+CREATE INDEX idx_sessions_state     ON sessions(workspace_id, state);
+CREATE INDEX idx_sessions_workspace ON sessions(workspace_id);
 CREATE INDEX idx_trajectories_rule_id     ON trajectories(rule_id);
 CREATE INDEX idx_trajectories_was_correct ON trajectories(was_correct);
+CREATE INDEX idx_vulns_finding   ON vulns(finding_fp);
+CREATE INDEX idx_vulns_host      ON vulns(host_id);
+CREATE INDEX idx_vulns_service   ON vulns(service_id);
+CREATE INDEX idx_vulns_workspace ON vulns(workspace_id);
 CREATE INDEX idx_workspace_snapshots_workspace
         ON workspace_snapshots(workspace_id);
 
+-- trigger: trg_cred_logins_workspace_insert
+CREATE TRIGGER trg_cred_logins_workspace_insert
+      BEFORE INSERT ON cred_logins
+      WHEN NOT EXISTS (
+        SELECT 1
+        FROM creds
+        JOIN services ON services.id = NEW.service_id
+        JOIN hosts ON hosts.id = services.host_id
+        WHERE creds.id = NEW.cred_id
+          AND hosts.workspace_id = creds.workspace_id
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'credential login must link a credential and service in the same workspace');
+      END;
+
+-- trigger: trg_cred_logins_workspace_update
+CREATE TRIGGER trg_cred_logins_workspace_update
+      BEFORE UPDATE OF cred_id, service_id ON cred_logins
+      WHEN NOT EXISTS (
+        SELECT 1
+        FROM creds
+        JOIN services ON services.id = NEW.service_id
+        JOIN hosts ON hosts.id = services.host_id
+        WHERE creds.id = NEW.cred_id
+          AND hosts.workspace_id = creds.workspace_id
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'credential login must link a credential and service in the same workspace');
+      END;
+
+-- trigger: trg_creds_identity_unique_insert
+CREATE TRIGGER trg_creds_identity_unique_insert
+      BEFORE INSERT ON creds
+      WHEN EXISTS (
+        SELECT 1
+        FROM creds AS existing
+        WHERE 
+  existing.workspace_id = NEW.workspace_id
+  AND IFNULL(existing.public_username, '') = IFNULL(NEW.public_username, '')
+  AND IFNULL(existing.private_type, '') = IFNULL(NEW.private_type, '')
+  AND IFNULL(existing.private_data, '') = IFNULL(NEW.private_data, '')
+  AND IFNULL(existing.realm_kind, '') = IFNULL(NEW.realm_kind, '')
+  AND IFNULL(existing.realm_value, '') = IFNULL(NEW.realm_value, '')
+
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'duplicate credential identity');
+      END;
+
+-- trigger: trg_creds_identity_unique_update
+CREATE TRIGGER trg_creds_identity_unique_update
+      BEFORE UPDATE OF workspace_id, public_username, private_type, private_data, realm_kind, realm_value ON creds
+      WHEN EXISTS (
+        SELECT 1
+        FROM creds AS existing
+        WHERE existing.id <> NEW.id
+          AND 
+  existing.workspace_id = NEW.workspace_id
+  AND IFNULL(existing.public_username, '') = IFNULL(NEW.public_username, '')
+  AND IFNULL(existing.private_type, '') = IFNULL(NEW.private_type, '')
+  AND IFNULL(existing.private_data, '') = IFNULL(NEW.private_data, '')
+  AND IFNULL(existing.realm_kind, '') = IFNULL(NEW.realm_kind, '')
+  AND IFNULL(existing.realm_value, '') = IFNULL(NEW.realm_value, '')
+
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'duplicate credential identity');
+      END;
+
+-- trigger: trg_loot_workspace_host_insert
+CREATE TRIGGER trg_loot_workspace_host_insert
+      BEFORE INSERT ON loot
+      WHEN NEW.host_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM hosts
+          WHERE hosts.id = NEW.host_id
+            AND hosts.workspace_id = NEW.workspace_id
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'loot host must belong to the loot workspace');
+      END;
+
+-- trigger: trg_loot_workspace_host_update
+CREATE TRIGGER trg_loot_workspace_host_update
+      BEFORE UPDATE OF workspace_id, host_id ON loot
+      WHEN NEW.host_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM hosts
+          WHERE hosts.id = NEW.host_id
+            AND hosts.workspace_id = NEW.workspace_id
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'loot host must belong to the loot workspace');
+      END;
+
+-- trigger: trg_notes_workspace_links_insert
+CREATE TRIGGER trg_notes_workspace_links_insert
+      BEFORE INSERT ON notes
+      WHEN
+        (
+          NEW.host_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM hosts
+            WHERE hosts.id = NEW.host_id
+              AND hosts.workspace_id = NEW.workspace_id
+          )
+        )
+        OR (
+          NEW.service_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM services
+            JOIN hosts ON hosts.id = services.host_id
+            WHERE services.id = NEW.service_id
+              AND hosts.workspace_id = NEW.workspace_id
+          )
+        )
+        OR (
+          NEW.host_id IS NOT NULL
+          AND NEW.service_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM services
+            WHERE services.id = NEW.service_id
+              AND services.host_id = NEW.host_id
+          )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'note host/service must belong to the note workspace');
+      END;
+
+-- trigger: trg_notes_workspace_links_update
+CREATE TRIGGER trg_notes_workspace_links_update
+      BEFORE UPDATE OF workspace_id, host_id, service_id ON notes
+      WHEN
+        (
+          NEW.host_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM hosts
+            WHERE hosts.id = NEW.host_id
+              AND hosts.workspace_id = NEW.workspace_id
+          )
+        )
+        OR (
+          NEW.service_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM services
+            JOIN hosts ON hosts.id = services.host_id
+            WHERE services.id = NEW.service_id
+              AND hosts.workspace_id = NEW.workspace_id
+          )
+        )
+        OR (
+          NEW.host_id IS NOT NULL
+          AND NEW.service_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM services
+            WHERE services.id = NEW.service_id
+              AND services.host_id = NEW.host_id
+          )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'note host/service must belong to the note workspace');
+      END;
+
+-- trigger: trg_schedules_validate_insert
+CREATE TRIGGER trg_schedules_validate_insert
+      BEFORE INSERT ON schedules
+      WHEN NOT (
+        
+  lower(substr(trim(NEW.interval_spec), length(trim(NEW.interval_spec)), 1)) IN ('s','m','h','d')
+  AND length(trim(substr(trim(NEW.interval_spec), 1, length(trim(NEW.interval_spec)) - 1))) > 0
+  AND trim(substr(trim(NEW.interval_spec), 1, length(trim(NEW.interval_spec)) - 1)) NOT GLOB '*[^0-9]*'
+  AND CAST(trim(substr(trim(NEW.interval_spec), 1, length(trim(NEW.interval_spec)) - 1)) AS INTEGER) > 0
+
+        AND 
+  typeof(NEW.next_fire_at) = 'integer'
+  AND NEW.next_fire_at >= 0
+  AND (
+    NEW.last_fired_at IS NULL
+    OR (typeof(NEW.last_fired_at) = 'integer' AND NEW.last_fired_at >= 0)
+  )
+
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'invalid persisted schedule');
+      END;
+
+-- trigger: trg_schedules_validate_update
+CREATE TRIGGER trg_schedules_validate_update
+      BEFORE UPDATE OF interval_spec, last_fired_at, next_fire_at ON schedules
+      WHEN NOT (
+        
+  lower(substr(trim(NEW.interval_spec), length(trim(NEW.interval_spec)), 1)) IN ('s','m','h','d')
+  AND length(trim(substr(trim(NEW.interval_spec), 1, length(trim(NEW.interval_spec)) - 1))) > 0
+  AND trim(substr(trim(NEW.interval_spec), 1, length(trim(NEW.interval_spec)) - 1)) NOT GLOB '*[^0-9]*'
+  AND CAST(trim(substr(trim(NEW.interval_spec), 1, length(trim(NEW.interval_spec)) - 1)) AS INTEGER) > 0
+
+        AND 
+  typeof(NEW.next_fire_at) = 'integer'
+  AND NEW.next_fire_at >= 0
+  AND (
+    NEW.last_fired_at IS NULL
+    OR (typeof(NEW.last_fired_at) = 'integer' AND NEW.last_fired_at >= 0)
+  )
+
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'invalid persisted schedule');
+      END;
+
+-- trigger: trg_sessions_workspace_links_insert
+CREATE TRIGGER trg_sessions_workspace_links_insert
+      BEFORE INSERT ON sessions
+      WHEN
+        (
+          NEW.host_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM hosts
+            WHERE hosts.id = NEW.host_id
+              AND hosts.workspace_id = NEW.workspace_id
+          )
+        )
+        OR (
+          NEW.service_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM services
+            JOIN hosts ON hosts.id = services.host_id
+            WHERE services.id = NEW.service_id
+              AND hosts.workspace_id = NEW.workspace_id
+          )
+        )
+        OR (
+          NEW.host_id IS NOT NULL
+          AND NEW.service_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM services
+            WHERE services.id = NEW.service_id
+              AND services.host_id = NEW.host_id
+          )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'session host/service must belong to the session workspace');
+      END;
+
+-- trigger: trg_sessions_workspace_links_update
+CREATE TRIGGER trg_sessions_workspace_links_update
+      BEFORE UPDATE OF workspace_id, host_id, service_id ON sessions
+      WHEN
+        (
+          NEW.host_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM hosts
+            WHERE hosts.id = NEW.host_id
+              AND hosts.workspace_id = NEW.workspace_id
+          )
+        )
+        OR (
+          NEW.service_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM services
+            JOIN hosts ON hosts.id = services.host_id
+            WHERE services.id = NEW.service_id
+              AND hosts.workspace_id = NEW.workspace_id
+          )
+        )
+        OR (
+          NEW.host_id IS NOT NULL
+          AND NEW.service_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM services
+            WHERE services.id = NEW.service_id
+              AND services.host_id = NEW.host_id
+          )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'session host/service must belong to the session workspace');
+      END;
+
+-- trigger: trg_vulns_workspace_links_insert
+CREATE TRIGGER trg_vulns_workspace_links_insert
+      BEFORE INSERT ON vulns
+      WHEN
+        (
+          NEW.host_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM hosts
+            WHERE hosts.id = NEW.host_id
+              AND hosts.workspace_id = NEW.workspace_id
+          )
+        )
+        OR (
+          NEW.service_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM services
+            JOIN hosts ON hosts.id = services.host_id
+            WHERE services.id = NEW.service_id
+              AND hosts.workspace_id = NEW.workspace_id
+          )
+        )
+        OR (
+          NEW.host_id IS NOT NULL
+          AND NEW.service_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM services
+            WHERE services.id = NEW.service_id
+              AND services.host_id = NEW.host_id
+          )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'vuln host/service must belong to the vuln workspace');
+      END;
+
+-- trigger: trg_vulns_workspace_links_update
+CREATE TRIGGER trg_vulns_workspace_links_update
+      BEFORE UPDATE OF workspace_id, host_id, service_id ON vulns
+      WHEN
+        (
+          NEW.host_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM hosts
+            WHERE hosts.id = NEW.host_id
+              AND hosts.workspace_id = NEW.workspace_id
+          )
+        )
+        OR (
+          NEW.service_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM services
+            JOIN hosts ON hosts.id = services.host_id
+            WHERE services.id = NEW.service_id
+              AND hosts.workspace_id = NEW.workspace_id
+          )
+        )
+        OR (
+          NEW.host_id IS NOT NULL
+          AND NEW.service_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM services
+            WHERE services.id = NEW.service_id
+              AND services.host_id = NEW.host_id
+          )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'vuln host/service must belong to the vuln workspace');
+      END;
+
 -- Applied migrations (at generation time):
 --   100  schema_reset
+--   101  workspace_entities
+--   102  session_aliases
+--   103  schedules
+--   104  workspace_integrity_guards

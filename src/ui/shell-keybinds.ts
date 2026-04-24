@@ -65,6 +65,8 @@ export type KeybindAction =
   | { type: "dispatch"; command: string }
   /** Set `shell.findingCursor` to the given (already-clamped) index. */
   | { type: "set-finding-cursor"; cursor: number }
+  /** Open the active/latest task story details view. */
+  | { type: "open-story" }
   /** Clear the in-progress input buffer. */
   | { type: "clear-input" };
 
@@ -147,6 +149,10 @@ export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
       return { type: "exit" };
     }
     return { type: "arm-exit", at: now };
+  }
+
+  if (isCtrlChord(char, key, "o")) {
+    return { type: "open-story" };
   }
 
   // If we got here with an armed timestamp, any other keystroke should

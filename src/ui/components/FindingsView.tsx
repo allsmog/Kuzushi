@@ -305,12 +305,7 @@ function UnifiedFindings({
         </Box>
       )}
 
-      {findings.length === 0 && (
-        <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.md}>
-          <Text>{tokens.muted("No actionable findings yet.")}</Text>
-          <Text>{tokens.hint("Try use sast, run scan, then return with findings.")}</Text>
-        </Box>
-      )}
+      {findings.length === 0 && <EmptyState kind="findings-never-scanned" />}
 
       <Box marginTop={SPACING.sm}>
         <Text>{tokens.muted("─".repeat(78))}</Text>

@@ -97,7 +97,7 @@ export class ModuleDispatcher implements CommandDispatcher {
     const lines = visible.map((t) => `  ${t.name.padEnd(28)}  ${t.description}`);
     if (hiddenCount > 0) {
       lines.push(
-        `  + ${hiddenCount} internal DAG node${hiddenCount === 1 ? "" : "s"} hidden (run \`tools --all\` to list)`,
+        `  + ${hiddenCount} advanced pipeline step${hiddenCount === 1 ? "" : "s"} hidden (run \`tools --all\` to list)`,
       );
     }
     return { output: lines.join("\n") };

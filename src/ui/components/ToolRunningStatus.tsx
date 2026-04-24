@@ -35,7 +35,14 @@ export const ToolRunningStatus = React.memo(ToolRunningStatusImpl, (prev, next) 
   // flicker the bottom block — history owns that surface now.
   const a = prev.tool;
   const b = next.tool;
-  return a.name === b.name && a.startedAt === b.startedAt && a.lastEventAt === b.lastEventAt;
+  return (
+    a.name === b.name &&
+    a.startedAt === b.startedAt &&
+    a.lastEventAt === b.lastEventAt &&
+    a.phase === b.phase &&
+    a.abortStatus === b.abortStatus &&
+    a.storyTail === b.storyTail
+  );
 });
 
 /**
@@ -61,14 +68,35 @@ function ToolRunningStatusImpl({ tool }: ToolRunningStatusProps): React.ReactEle
   // Stale (>3s silent) → use the warn status so the PulseDot renders in
   // yellow instead of cyan. Otherwise stays `running` (cyan pulse).
   const label = tool.displayName ?? tool.name;
+  const aborting = tool.abortStatus === "aborting";
+  const dotStatus = aborting ? "warn" : isStale ? "warn" : "running";
+  const phase = tool.phase ?? tool.subLabel;
+  const tail = (tool.storyTail ?? []).slice(0, 3);
 
   return (
-    <Box marginTop={SPACING.sm}>
-      <Gutter>
-        <PulseDot status={isStale ? "warn" : "running"} />
-      </Gutter>
-      <Text>{isStale ? tokens.warn(label) : tokens.secondary(label)}</Text>
-      <ElapsedReadout tool={tool} isStale={isStale} />
+    <Box marginTop={SPACING.sm} flexDirection="column">
+      <Box>
+        <Gutter>
+          <PulseDot status={dotStatus} />
+        </Gutter>
+        <Text>{aborting || isStale ? tokens.warn(label) : tokens.secondary(label)}</Text>
+        {phase ? <Text>{tokens.muted(` · ${phase}`)}</Text> : null}
+        {aborting ? <Text>{tokens.warn(" · interrupting")}</Text> : null}
+        <ElapsedReadout tool={tool} isStale={isStale} />
+      </Box>
+      {tail.length > 0 ? (
+        <Box flexDirection="column">
+          {tail.map((event) => (
+            <Box key={event.id}>
+              <Gutter />
+              <Gutter>
+                <Text>{tokens.tertiary("⎿")}</Text>
+              </Gutter>
+              <Text>{tokens.muted(event.message)}</Text>
+            </Box>
+          ))}
+        </Box>
+      ) : null}
     </Box>
   );
 }

@@ -27,6 +27,7 @@ import type {
 } from "../types.js";
 import type { ConfigConfirmData, CredentialChoice, WizardResult } from "./preflight-types.js";
 import type { ResumeDiffData } from "./resume-types.js";
+import type { ShellStoryEvent, ShellTaskStoryState } from "./task-story.js";
 
 export type Phase = "idle" | "scanning" | "triaging" | "verifying" | "poc" | "summary" | "done";
 export type UIMode = "preflight" | "running" | "summary" | "review" | "done" | "shell";
@@ -409,7 +410,7 @@ function preflightBreadcrumb(kind: (typeof PREFLIGHT_STEP_ORDER)[number]): UISta
 }
 
 export interface ShellHistoryEntry {
-  type: "input" | "output" | "error" | "tool-progress" | "tool-call" | "hunt-post-mortem";
+  type: "input" | "output" | "error" | "tool-progress" | "tool-call" | "hunt-post-mortem" | "story";
   text: string;
   timestamp: number;
   prompt?: string;
@@ -452,6 +453,10 @@ export interface ShellHistoryEntry {
    * resolves. Falls back to `"✓ done" / "✗ failed" / "· aborted"`.
    */
   resultOutput?: string;
+  /** Structured task-story beat for story rows and story-backed progress/tool rows. */
+  storyEvent?: ShellStoryEvent;
+  /** Immediate abort receipt while cleanup is still unwinding. */
+  abortStatus?: ShellTaskStoryState["abortStatus"];
   /**
    * For `tool-call` while `running`: rolling tail of activity lines
    * (latest at index 0, max 5). Shown beneath the `⏺` header as dim
@@ -554,7 +559,8 @@ export type ShellView =
   // `gatherContextForRoot` (manifests → walk → path signals → grep sweep →
   // assemble) plus a pillar preview that fills in as signals land. Entered
   // via `/context build`; reads from `shell.contextBuild`.
-  | "context-build";
+  | "context-build"
+  | "task-story";
 
 /**
  * Phases of the deterministic `gatherContextForRoot` pipeline, mirrored in
@@ -842,6 +848,10 @@ export interface ShellState {
     total?: number;
     /** Rolling buffer of recent sub-steps (max 5, newest at index 0). */
     activities?: ToolActivityLine[];
+    /** Rich recent story events for the active task card. */
+    storyTail?: ShellStoryEvent[];
+    /** Abort lifecycle for the active tool row. */
+    abortStatus?: ShellTaskStoryState["abortStatus"];
     /** Epoch ms of the most recent event — feeds stale-spinner detection. */
     lastEventAt?: number;
     /**
@@ -856,7 +866,11 @@ export interface ShellState {
      * "sast:scan" without another lookup.
      */
     displayName?: string;
+    /** Current shell turn this tool belongs to; used for story correlation. */
+    turnId?: string;
   };
+  /** Progressive story for the active or most recent shell turn. */
+  taskStory?: ShellTaskStoryState;
   /**
    * Rolling LLM-call heartbeat for the active turn — populated from
    * `llm:call-start/complete/error` bus events so the shell spinner can show

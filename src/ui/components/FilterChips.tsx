@@ -39,7 +39,9 @@ export function FilterChips({ chips }: FilterChipsProps): React.ReactElement {
       </Text>
       <Text>
         {tokens.muted(
-          `${activeCount} active · /filter <key>:<value> to refine · /filter reset to clear`,
+          activeCount > 0
+            ? `${activeCount} active · /findings resets the list`
+            : "0 active · /since <ref> scopes changed files",
         )}
       </Text>
     </Box>

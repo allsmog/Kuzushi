@@ -41,6 +41,12 @@ import type {
   SummaryData,
   UIStore,
 } from "../state.js";
+import {
+  type ShellStoryEvent,
+  type ShellTaskStoryState,
+  storyKindLabel,
+  storyStatusLabel,
+} from "../task-story.js";
 import { SPACING, tokens } from "../tokens.js";
 import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { BannerSplash } from "./BannerSplash.js";
@@ -76,7 +82,10 @@ const IDLE_KEYBINDS = [
   { keys: "Ctrl+C", label: "Exit", secondary: true },
 ];
 
-const PROCESSING_KEYBINDS = [{ keys: "Ctrl+C", label: "Abort" }];
+const PROCESSING_KEYBINDS = [
+  { keys: "Ctrl+C", label: "Abort" },
+  { keys: "Ctrl+O", label: "Details", secondary: true },
+];
 const PLAN_KEYBINDS = [
   { keys: "Y", label: "Apply plan" },
   { keys: "N/Esc", label: "Discard plan" },
@@ -194,6 +203,9 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
           return;
         case "set-finding-cursor":
           store.update({ shell: { ...liveShell, findingCursor: action.cursor } });
+          return;
+        case "open-story":
+          store.update({ shell: { ...liveShell, shellView: "task-story" } });
           return;
         case "clear-input":
           setInput("");
@@ -393,6 +405,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
 
         <MemoShellViewPanel summary={shellState.summary} shell={shell} />
         <ShellWayfinding shell={shell} narrow={columns < 110} />
+        <ShellTaskStatusLine shell={shell} narrow={columns < 110} />
 
         <Ratchet>
           <Box flexDirection="column" minHeight={1}>
@@ -583,9 +596,48 @@ function ShellWayfinding({
   );
 }
 
+function ShellTaskStatusLine({
+  shell,
+  narrow,
+}: {
+  shell: ShellState;
+  narrow: boolean;
+}): React.ReactElement | null {
+  const story = shell.taskStory;
+  const current = shell.currentTool;
+  if (!story && !current) return null;
+  const eventCount = story?.events.length ?? 0;
+  const latest = story?.events[story.events.length - 1];
+  const abortStatus = current?.abortStatus ?? story?.abortStatus;
+  const stateLabel =
+    abortStatus === "aborting"
+      ? "aborting"
+      : abortStatus === "aborted"
+        ? "aborted"
+        : shell.processing
+          ? "active"
+          : "latest";
+  const tail = latest ? ` · ${latest.message}` : "";
+  const controls = shell.processing ? "Ctrl+C interrupt · Ctrl+O details" : "Ctrl+O details";
+  return (
+    <Box marginTop={SPACING.xs} paddingLeft={SPACING.md}>
+      <Text>
+        {tokens.muted("task ")}
+        {abortStatus === "aborting" ? tokens.warn(stateLabel) : tokens.value(stateLabel)}
+        {eventCount > 0
+          ? tokens.muted(` · ${eventCount} beat${eventCount === 1 ? "" : "s"}`)
+          : null}
+        {!narrow ? tokens.muted(` · ${controls}`) : null}
+        {!narrow && tail ? tokens.tertiary(tail) : null}
+      </Text>
+    </Box>
+  );
+}
+
 function describeShellLocation(shell: ShellState): string {
   if (shell.shellView === "module") return `${shell.focusedModule ?? "module"} home`;
   if (shell.shellView === "finding") return `finding ${shell.openFindingId ?? "detail"}`;
+  if (shell.shellView === "task-story") return "task story";
   if (shell.shellView.startsWith("threat-")) return shell.shellView.replace("threat-", "threat/");
   return shell.shellView;
 }
@@ -709,6 +761,8 @@ function ShellViewPanel({
       return <DiffSinceView key={view} summary={summary} shell={shell} />;
     case "context-build":
       return <ContextBuildView key={view} shell={shell} />;
+    case "task-story":
+      return <TaskStoryView key={view} story={shell.taskStory} processing={shell.processing} />;
     default:
       return null;
   }
@@ -730,6 +784,7 @@ const MemoShellViewPanel = memo(
     prev.shell.findingPageSize === next.shell.findingPageSize &&
     prev.shell.moduleCatalog === next.shell.moduleCatalog &&
     prev.shell.contextBuild === next.shell.contextBuild &&
+    prev.shell.taskStory === next.shell.taskStory &&
     prev.summary === next.summary,
 );
 
@@ -768,7 +823,18 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
       return <ToolCallEntry entry={entry} />;
     case "hunt-post-mortem":
       return <HuntPostMortemEntry entry={entry} />;
+    case "story":
+      return entry.storyEvent ? (
+        <StoryEventLine event={entry.storyEvent} />
+      ) : (
+        <Box paddingLeft={SPACING.md}>
+          <Text>{tokens.muted(entry.text)}</Text>
+        </Box>
+      );
     case "tool-progress": {
+      if (entry.storyEvent) {
+        return <StoryEventLine event={entry.storyEvent} />;
+      }
       const kind = entry.progressKind ?? "info";
       const wrap = (s: string): string => {
         if (kind === "ok") return tokens.success(s);
@@ -791,6 +857,96 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
   }
 }
 
+function TaskStoryView({
+  story,
+  processing,
+}: {
+  story: ShellTaskStoryState | undefined;
+  processing: boolean;
+}): React.ReactElement {
+  const events = story?.events ?? [];
+  const artifacts = events.filter((event) => event.kind === "artifact" || event.artifactPath);
+  const errors = events.filter((event) => event.status === "fail" || event.status === "aborted");
+  const debug = events.filter((event) => event.importance === "debug");
+  const visibleLive = events.filter((event) => event.importance !== "debug").slice(-16);
+  const status = story?.abortStatus === "aborting" ? "aborting" : processing ? "live" : "latest";
+
+  return (
+    <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.md}>
+      <Text>
+        {tokens.strong("Task story")}
+        {tokens.muted(` · ${status}`)}
+        {story?.activeRunIds.length
+          ? tokens.muted(` · ${story.activeRunIds.length} run id(s)`)
+          : null}
+      </Text>
+      <StorySection title="Live" events={visibleLive} empty="No live story beats yet." />
+      <StorySection title="Artifacts" events={artifacts} empty="No artifacts recorded." />
+      <StorySection title="Errors" events={errors} empty="No errors recorded." />
+      <StorySection title="Debug" events={debug.slice(-10)} empty="No debug events." />
+    </Box>
+  );
+}
+
+function StorySection({
+  title,
+  events,
+  empty,
+}: {
+  title: string;
+  events: ShellStoryEvent[];
+  empty: string;
+}): React.ReactElement {
+  return (
+    <Box flexDirection="column" marginTop={SPACING.xs}>
+      <Text>{tokens.muted(title)}</Text>
+      {events.length === 0 ? (
+        <Text>{tokens.tertiary(empty)}</Text>
+      ) : (
+        events.map((event) => <StoryEventLine key={event.id} event={event} compact />)
+      )}
+    </Box>
+  );
+}
+
+function StoryEventLine({
+  event,
+  compact = false,
+}: {
+  event: ShellStoryEvent;
+  compact?: boolean;
+}): React.ReactElement {
+  const status = storyStatusLabel(event.status);
+  const prefix = `${storyKindLabel(event.kind)}:${status}`;
+  const color = (value: string): string => {
+    if (event.status === "fail") return tokens.danger(value);
+    if (event.status === "aborted") return tokens.warn(value);
+    if (event.status === "ok") return tokens.success(value);
+    if (event.importance === "debug") return tokens.tertiary(value);
+    return tokens.value(value);
+  };
+  const details = [
+    event.detail,
+    event.artifactPath,
+    event.count != null ? `${event.count}` : undefined,
+    event.costUsd != null && event.costUsd > 0 ? `$${event.costUsd.toFixed(2)}` : undefined,
+  ].filter(Boolean);
+
+  return (
+    <Box paddingLeft={compact ? SPACING.sm : SPACING.xs}>
+      <Gutter>
+        <Text>{tokens.tertiary(LOWER_HOOK)}</Text>
+      </Gutter>
+      <Text>
+        {color(prefix)}
+        {tokens.muted(" · ")}
+        {event.message}
+        {details.length > 0 ? tokens.muted(` · ${details.join(" · ")}`) : null}
+      </Text>
+    </Box>
+  );
+}
+
 /**
  * Header + optional result line for a tool-call entry. Ratchet wraps the
  * whole block so that when `resultOutput` arrives (and replaces shorter
@@ -799,6 +955,8 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
  */
 function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElement {
   const status = entry.status;
+  const aborting = entry.abortStatus === "aborting";
+  const dotStatus = aborting && status === "running" ? "warn" : status;
   const label = entry.displayName ?? entry.tool ?? entry.text.replace(/^[⏺●]\s*/, "");
   const elapsedSuffix =
     status && status !== "running" && entry.elapsedSeconds && entry.elapsedSeconds > 0
@@ -828,11 +986,12 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
     <Ratchet>
       <Box marginTop={SPACING.sm}>
         <Gutter>
-          {status ? <PulseDot status={status} /> : <Text>{tokens.accent(BLACK_CIRCLE)}</Text>}
+          {dotStatus ? <PulseDot status={dotStatus} /> : <Text>{tokens.accent(BLACK_CIRCLE)}</Text>}
         </Gutter>
         <Text>
           {tokens.label(label)}
           {entry.inputHint ? tokens.muted(`(${entry.inputHint})`) : ""}
+          {aborting ? tokens.warn(" · interrupting") : ""}
           {elapsedSuffix}
           {ts}
         </Text>

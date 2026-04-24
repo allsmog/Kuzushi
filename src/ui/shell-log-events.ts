@@ -1,4 +1,5 @@
 import type { ShellHistoryEntry } from "./state.js";
+import { formatStoryEventPlain } from "./task-story.js";
 
 export type ShellLogEventKind =
   | "command/input"
@@ -7,6 +8,7 @@ export type ShellLogEventKind =
   | "tool/use"
   | "tool/result"
   | "progress"
+  | "story"
   | "error"
   | "summary";
 
@@ -52,7 +54,20 @@ export function projectShellHistoryEntry(entry: ShellHistoryEntry): ShellLogEven
         text: entry.text,
         timestamp: entry.timestamp,
       };
+    case "story":
+      return {
+        kind: "story",
+        text: entry.storyEvent ? formatStoryEventPlain(entry.storyEvent) : entry.text,
+        timestamp: entry.timestamp,
+      };
     case "tool-progress":
+      if (entry.storyEvent) {
+        return {
+          kind: "story",
+          text: formatStoryEventPlain(entry.storyEvent),
+          timestamp: entry.timestamp,
+        };
+      }
       return {
         kind: "progress",
         text: entry.text,
@@ -102,6 +117,8 @@ export function formatShellLogEventPlain(
       return formatOutputBlock("error", event.text, options);
     case "progress":
       return [`[progress] ${clipLine(event.text, options.maxLineLength)}`];
+    case "story":
+      return [clipLine(event.text, options.maxLineLength)];
     case "summary":
       return [`[summary] ${clipLine(event.text, options.maxLineLength)}`];
     case "tool/use":
@@ -115,6 +132,17 @@ export function shellHistoryPlainKey(entry: ShellHistoryEntry, index: number): s
 }
 
 export function shellHistoryPlainSignature(entry: ShellHistoryEntry): string {
+  if (entry.type === "story" || entry.storyEvent) {
+    const event = entry.storyEvent;
+    return [
+      entry.type,
+      event?.id ?? "",
+      event?.kind ?? "",
+      event?.status ?? "",
+      event?.message ?? entry.text,
+      event?.timestamp ?? entry.timestamp,
+    ].join(":");
+  }
   if (entry.type === "tool-call") {
     return [
       entry.type,

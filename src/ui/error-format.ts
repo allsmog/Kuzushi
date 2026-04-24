@@ -112,9 +112,9 @@ export function suggestNextStep(err: unknown, category: ErrorCategory): string |
   }
   switch (category) {
     case "rate_limit":
-      return "Wait ~60s and retry, or lower concurrency via /concurrency <n>.";
+      return "Wait ~60s and retry, or lower triageConcurrency in /config advanced before rerunning.";
     case "budget":
-      return "Press c to continue past the cap, or a to abort. Raise --budget to avoid future halts.";
+      return "Run stopped at the budget cap. Raise --budget or choose a cheaper model before rerunning.";
     case "transient":
       return "Network blip — retry the command.";
     case "validation":
@@ -200,20 +200,14 @@ function formatSuggestions(matches: ReadonlyArray<string>): string {
   return ` Did you mean one of: ${matches.map((m) => `"${m}"`).join(", ")}?`;
 }
 
-export function formatUnknownTool(
-  name: string,
-  availableTools: ReadonlyArray<string>,
-): string {
+export function formatUnknownTool(name: string, availableTools: ReadonlyArray<string>): string {
   const suggestions = nearestMatches(name, availableTools, 3);
   const head = `Unknown tool: "${name}".`;
   const tail = `${formatSuggestions(suggestions)} Type /tools to list available.`;
   return `${head}${tail}`;
 }
 
-export function formatUnknownModule(
-  id: string,
-  loadedModules: ReadonlyArray<string>,
-): string {
+export function formatUnknownModule(id: string, loadedModules: ReadonlyArray<string>): string {
   const suggestions = nearestMatches(id, loadedModules, 3);
   const head = `Unknown module: "${id}".`;
   const tail = `${formatSuggestions(suggestions)} Type /modules to list loaded, or /use <id> to focus.`;
@@ -238,6 +232,7 @@ export type EmptyStateKind =
   | "findings-never-scanned"
   | "findings-zero-after-scan"
   | "findings-filter-empty"
+  | "finding-not-found"
   | "findings-compact-idle"
   | "threat-model-missing"
   | "diff-since-idle"
@@ -314,7 +309,13 @@ export function describeEmptyState(
           ctx.filterCount && ctx.filterCount > 0
             ? `${ctx.filterCount} filter${ctx.filterCount === 1 ? "" : "s"} active.`
             : "Filters are excluding every result.",
-        action: "Press c to clear · /findings to reset",
+        action: "/findings resets filters · /open F-NNNN inspects one finding",
+      };
+    case "finding-not-found":
+      return {
+        title: "Finding not found",
+        reason: "That short ID or fingerprint is not in the active findings list.",
+        action: "/findings returns to the list · /show aliases lists valid IDs",
       };
     case "findings-compact-idle": {
       if (ctx.scanInProgress && ctx.progress) {

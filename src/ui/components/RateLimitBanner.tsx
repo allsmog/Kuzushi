@@ -3,8 +3,8 @@
  * concurrency registry has the pipeline throttled.
  *
  * Phase B.4 introduced the surface; Workstream 3 tightened the copy so
- * operators see both a concrete recovery verb (`/concurrency <n>`) and
- * an "until" timestamp when the upstream provider gave us a retry-after.
+ * operators see that Kuzushi already backed off and when the upstream
+ * provider expects recovery.
  *
  * Reads `state.throttle` directly (already populated by
  * `src/scheduler/rate-limit-registry.ts` on 429 responses). Auto-hides
@@ -35,10 +35,6 @@ export function RateLimitBanner({
   if (!throttle) return null;
 
   const untilStr = formatUntil(throttle.until, now());
-  // Suggest halving concurrency, min 1 — safe heuristic when the provider
-  // is clearly rate-limiting us.
-  const suggested = Math.max(1, Math.floor(throttle.concurrency / 2));
-
   return (
     <Box flexDirection="column" marginBottom={SPACING.sm} paddingLeft={SPACING.md}>
       <Text>
@@ -52,7 +48,7 @@ export function RateLimitBanner({
       {throttle.reason ? <Text>{tokens.muted(`    ${throttle.reason}`)}</Text> : null}
       <Text>
         {tokens.hint(
-          `    use /concurrency ${suggested} to back off further, or wait for auto-recovery`,
+          "    Kuzushi reduced concurrency automatically. Wait for recovery, or lower triageConcurrency in /config advanced before rerunning.",
         )}
       </Text>
     </Box>
