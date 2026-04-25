@@ -255,7 +255,7 @@ CREATE TABLE findings (
         finding_metadata_json   TEXT,
         created_at              TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
-      );
+      , actor_fingerprint TEXT);
 
 -- Table: hosts
 CREATE TABLE hosts (
@@ -487,6 +487,10 @@ CREATE INDEX idx_dynamic_analysis_runs_fingerprint
 CREATE INDEX idx_dynamic_analysis_runs_repo_status
         ON dynamic_analysis_runs(repo, status);
 CREATE INDEX idx_finding_assertions_run ON finding_assertions(run_id);
+CREATE INDEX idx_findings_actor_fingerprint
+        ON findings(actor_fingerprint)
+        WHERE actor_fingerprint IS NOT NULL
+    ;
 CREATE INDEX idx_findings_file_path  ON findings(file_path);
 CREATE INDEX idx_findings_repo_ref   ON findings(repo, ref);
 CREATE INDEX idx_findings_rule_id    ON findings(rule_id);
@@ -871,3 +875,4 @@ CREATE TRIGGER trg_vulns_workspace_links_update
 --   102  session_aliases
 --   103  schedules
 --   104  workspace_integrity_guards
+--   105  finding_actor_fingerprint

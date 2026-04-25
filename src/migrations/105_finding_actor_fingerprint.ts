@@ -12,6 +12,7 @@
  * DB backup if this needs to be reverted after release.
  */
 
+import type Database from "better-sqlite3";
 import type { Migration } from "./types.js";
 
 /**
@@ -22,13 +23,9 @@ import type { Migration } from "./types.js";
  * each migration to be safely re-applicable when its `schema_version`
  * row is missing. We probe `pragma_table_info` first.
  */
-function hasColumn(
-  db: { prepare: (sql: string) => { all: (...args: unknown[]) => unknown[] } },
-  table: string,
-  column: string,
-): boolean {
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
   const rows = db
-    .prepare(`SELECT name FROM pragma_table_info(?) WHERE name = ?`)
+    .prepare("SELECT name FROM pragma_table_info(?) WHERE name = ?")
     .all(table, column) as Array<{ name: string }>;
   return rows.length > 0;
 }

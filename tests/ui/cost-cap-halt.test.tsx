@@ -26,25 +26,19 @@ function renderToText(node: ReactElement, columns = 120): string {
 
 describe("CostCapHalt", () => {
   it("renders the BUDGET EXCEEDED header", () => {
-    const out = renderToText(
-      createElement(CostCapHalt, { runningCostUsd: 5.5, budgetUsd: 5.0 }),
-    );
+    const out = renderToText(createElement(CostCapHalt, { runningCostUsd: 5.5, budgetUsd: 5.0 }));
     expect(out).toContain("BUDGET EXCEEDED");
   });
 
   it("shows spent vs cap and the over-budget delta", () => {
-    const out = renderToText(
-      createElement(CostCapHalt, { runningCostUsd: 7.5, budgetUsd: 5.0 }),
-    );
+    const out = renderToText(createElement(CostCapHalt, { runningCostUsd: 7.5, budgetUsd: 5.0 }));
     expect(out).toContain("$7.50");
     expect(out).toContain("$5.00");
     expect(out).toContain("+$2.50");
   });
 
   it("renders a percent-of-cap hint when budget is set", () => {
-    const out = renderToText(
-      createElement(CostCapHalt, { runningCostUsd: 6.0, budgetUsd: 5.0 }),
-    );
+    const out = renderToText(createElement(CostCapHalt, { runningCostUsd: 6.0, budgetUsd: 5.0 }));
     // 6 / 5 = 120%
     expect(out).toContain("120%");
   });
@@ -56,9 +50,7 @@ describe("CostCapHalt", () => {
   });
 
   it("renders both the c and a keybinds with their semantics", () => {
-    const out = renderToText(
-      createElement(CostCapHalt, { runningCostUsd: 5.5, budgetUsd: 5.0 }),
-    );
+    const out = renderToText(createElement(CostCapHalt, { runningCostUsd: 5.5, budgetUsd: 5.0 }));
     expect(out).toMatch(/press\s+c/);
     expect(out).toContain("continue");
     expect(out).toContain("bypass cap");
@@ -67,16 +59,12 @@ describe("CostCapHalt", () => {
   });
 
   it("hints that the cap resets next run", () => {
-    const out = renderToText(
-      createElement(CostCapHalt, { runningCostUsd: 5.5, budgetUsd: 5.0 }),
-    );
+    const out = renderToText(createElement(CostCapHalt, { runningCostUsd: 5.5, budgetUsd: 5.0 }));
     expect(out).toMatch(/next run|--budget/);
   });
 
   it("clamps negative over-delta to zero (runningCost < cap somehow)", () => {
-    const out = renderToText(
-      createElement(CostCapHalt, { runningCostUsd: 3.0, budgetUsd: 5.0 }),
-    );
+    const out = renderToText(createElement(CostCapHalt, { runningCostUsd: 3.0, budgetUsd: 5.0 }));
     expect(out).toContain("+$0.00");
   });
 });

@@ -115,10 +115,7 @@ describe("tokens.muted/subtle honor NO_COLOR + KUZUSHI_HIGH_CONTRAST", () => {
 
 describe("FindingsView narrow-terminal tolerance", () => {
   it("renders an empty-state at 40 columns without crashing", () => {
-    const out = renderToString(
-      createElement(FindingsView, { mode: "compact", results: [] }),
-      40,
-    );
+    const out = renderToString(createElement(FindingsView, { mode: "compact", results: [] }), 40);
     // Should contain the "No findings" message somewhere, regardless
     // of wrapping decisions.
     expect(out).toContain("No findings triaged");
@@ -129,14 +126,8 @@ describe("FindingsView narrow-terminal tolerance", () => {
   });
 
   it("renders empty-state at 60 and 79 cols identically (structure-wise)", () => {
-    const at60 = renderToString(
-      createElement(FindingsView, { mode: "compact", results: [] }),
-      60,
-    );
-    const at79 = renderToString(
-      createElement(FindingsView, { mode: "compact", results: [] }),
-      79,
-    );
+    const at60 = renderToString(createElement(FindingsView, { mode: "compact", results: [] }), 60);
+    const at79 = renderToString(createElement(FindingsView, { mode: "compact", results: [] }), 79);
     expect(at60).toContain("No findings triaged");
     expect(at79).toContain("No findings triaged");
   });
