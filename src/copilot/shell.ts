@@ -12,6 +12,7 @@ import {
   mkdirSync,
   readFileSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -59,6 +60,16 @@ import {
   upsertBackgroundJob,
 } from "../ui/task-story.js";
 import { CopilotCore } from "./core.js";
+
+// Module ids that opt into the v3 ModuleRunView. Kept in sync with the
+// renderer registry in `src/ui/components/module-home/registry.ts` —
+// duplicated here so the dispatcher can decide on view transitions
+// without dragging React/Ink into the tool-execution path.
+const MODULE_HOME_IDS: ReadonlySet<string> = new Set(["context", "threat-hunt"]);
+function hasModuleHomeRenderer(moduleId: string): boolean {
+  return MODULE_HOME_IDS.has(moduleId);
+}
+
 import { resolveTool } from "./dispatch/resolve-tool.js";
 import { CoreDispatcher, DispatcherDriver, WorkspaceDispatcher } from "./dispatcher/index.js";
 import { ModuleDispatcher } from "./dispatcher/module-dispatcher.js";
@@ -2196,18 +2207,41 @@ async function startInkShell(
     // `task:activity` events that fire during the tool would hit an empty
     // slot and be dropped.
     const startedAt = Date.now();
-    updateShell(store, (shell) => ({
-      ...shell,
-      currentTool: {
-        name: tool.name,
-        startedAt,
-        lastEventAt: startedAt,
-        historyEntryId,
-        ...(displayName ? { displayName } : {}),
-        ...(turnId ? { turnId } : {}),
-        storyTail: [startStory],
-      },
-    }));
+    const toolModuleId = tool.name.includes(":") ? tool.name.split(":", 1)[0] : null;
+    const hasModuleHome = toolModuleId ? hasModuleHomeRenderer(toolModuleId) : false;
+    updateShell(store, (shell) => {
+      const next: ShellState = {
+        ...shell,
+        currentTool: {
+          name: tool.name,
+          startedAt,
+          lastEventAt: startedAt,
+          historyEntryId,
+          ...(displayName ? { displayName } : {}),
+          ...(turnId ? { turnId } : {}),
+          storyTail: [startStory],
+        },
+      };
+      // For modules that opted into the v3 home, also seed a moduleRun
+      // slice and flip the view to `module-run`. ModuleRunView reads
+      // `steps`, `evidenceTail`, `costUsd`, `artifacts` from this slice;
+      // the report-worker fills `evidenceTail` via `pushModuleRunActivity`.
+      if (hasModuleHome && toolModuleId && shell.focusedModule === toolModuleId) {
+        next.moduleRun = {
+          moduleId: toolModuleId,
+          toolName: tool.name,
+          ...(displayName ? { displayName } : {}),
+          ...(inputDisplay ? { inputSummary: inputDisplay } : {}),
+          startedAtMs: startedAt,
+          status: "running",
+          steps: [],
+          evidenceTail: [],
+          costUsd: 0,
+        };
+        next.shellView = "module-run";
+      }
+      return next;
+    });
     let ok = false;
     let aborted = false;
     let finalResult: Awaited<ReturnType<CopilotCore["executeTool"]>> | undefined;
@@ -2256,17 +2290,39 @@ async function startInkShell(
         liveActivities: undefined,
         liveActivitiesDropped: undefined,
       });
-      updateShell(store, (shell) => ({
-        ...shell,
-        currentTool: undefined,
-        lastUsedTool: tool.name,
-        moduleCatalog: applyModuleRunTelemetry(
-          shell.moduleCatalog,
-          tool.name,
-          status,
-          status === "ok" ? finalResult?.costUsd : undefined,
-        ),
-      }));
+      updateShell(store, (shell) => {
+        const next: ShellState = {
+          ...shell,
+          currentTool: undefined,
+          lastUsedTool: tool.name,
+          moduleCatalog: applyModuleRunTelemetry(
+            shell.moduleCatalog,
+            tool.name,
+            status,
+            status === "ok" ? finalResult?.costUsd : undefined,
+          ),
+        };
+        // Stamp the active module run with the terminal status + cost,
+        // and bounce the view back to the module home so operators land
+        // somewhere sensible. They can re-open the run with `/back` from
+        // anywhere if they want to re-inspect the steps tail.
+        if (
+          shell.moduleRun &&
+          shell.moduleRun.toolName === tool.name &&
+          shell.moduleRun.status === "running"
+        ) {
+          next.moduleRun = {
+            ...shell.moduleRun,
+            status: aborted ? "aborted" : ok ? "done" : "error",
+            ...(finalResult?.costUsd != null ? { costUsd: finalResult.costUsd } : {}),
+          };
+          if (shell.shellView === "module-run" || shell.shellView === "actor-detail") {
+            next.shellView = "module";
+            next.focusedActor = null;
+          }
+        }
+        return next;
+      });
       // Hunt post-mortem — after threat-hunt (and future hunt-class tools
       // whose runs publish per-actor `agent-activity` events) resolves,
       // drain the archived per-actor snapshots into a collapsed scrollback
@@ -3638,7 +3694,6 @@ async function startInkShell(
   //
   // Best-effort: the open can fail (no controlling terminal, CI mode,
   // etc.) and that's fine — the other three abort paths remain.
-  // biome-ignore lint/correctness/noUnusedVariables: teardown is registered for completeness; the OS reclaims /dev/tty fd on shell exit, so an explicit invocation isn't required today
   let devTtyAbortTeardown: (() => void) | undefined;
   if (process.stdin.isTTY) {
     try {
@@ -4155,9 +4210,54 @@ function routeInput(
     recordCommandUsage(ctx, shellState, "/story");
     return handleStoryCommand(shellState);
   }
+  if (lower === "prompts") {
+    recordCommandUsage(ctx, shellState, "/prompts");
+    return handlePromptsListCommand(core, opts, ctx, shellState);
+  }
+  // Bare verbs scoped to the prompts-editor view route through the existing
+  // /prompt edit / /prompt show / /prompt diff / /prompt reset / /set
+  // handlers. Operators don't need to type the slash prefix once they're
+  // inside `kuzushi/<module>/prompts>`.
+  if (shellState.shellView === "prompts-editor" && ctx.focusedModule) {
+    if (lower.startsWith("edit ")) {
+      const verb = trimmed.split(/\s+/).slice(1).join(" ").trim();
+      recordCommandUsage(ctx, shellState, "/prompt edit");
+      return handlePromptEditCommand(verb || undefined, core, opts, ctx, shellState);
+    }
+    if (lower.startsWith("show ")) {
+      const verb = trimmed.split(/\s+/).slice(1).join(" ").trim();
+      recordCommandUsage(ctx, shellState, "/prompt show");
+      return handlePromptShowCommand(verb || undefined, core, opts, ctx, shellState);
+    }
+    if (lower.startsWith("diff ")) {
+      const verb = trimmed.split(/\s+/).slice(1).join(" ").trim();
+      recordCommandUsage(ctx, shellState, "/prompt diff");
+      return handlePromptDiffCommand(verb || undefined, ctx);
+    }
+    if (lower.startsWith("reset ")) {
+      const verb = trimmed.split(/\s+/).slice(1).join(" ").trim();
+      recordCommandUsage(ctx, shellState, "/prompt reset");
+      return handlePromptResetCommand(verb || undefined, ctx);
+    }
+    if (lower.startsWith("set ")) {
+      const setArgs = trimmed.split(/\s+/).slice(1);
+      recordCommandUsage(ctx, shellState, "/set");
+      return handleSetCommand(setArgs, core, ctx.focusedModule, shellState);
+    }
+  }
   if (ctx.focusedModule === "context" && lower === "dfd") {
     recordCommandUsage(ctx, shellState, "/context dfd");
     return handleContextCommand(["dfd"], core, opts, ctx, shellState);
+  }
+  if (ctx.focusedModule === "context" && lower.startsWith("regen ")) {
+    recordCommandUsage(ctx, shellState, "/context regen");
+    return handleContextCommand(
+      ["regen", ...trimmed.split(/\s+/).slice(1)],
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
   }
   if (lower.startsWith("open ")) {
     return handleOpenCommand(trimmed.split(/\s+/).slice(1));
@@ -4285,15 +4385,35 @@ function handleSlashCommand(
       if (sub === "show") {
         return handlePromptShowCommand(verb, core, opts, ctx, shellState);
       }
+      if (sub === "reset") {
+        return handlePromptResetCommand(verb, ctx);
+      }
+      if (sub === "diff") {
+        return handlePromptDiffCommand(verb, ctx);
+      }
+      if (sub === "list" || sub === undefined) {
+        if (sub === "list" || ctx.focusedModule) {
+          return handlePromptsListCommand(core, opts, ctx, shellState);
+        }
+      }
       return {
         output: [
           "Usage:",
           "  /prompt edit <verb>    open the operator override in $EDITOR",
           "  /prompt show <verb>    print the current effective prompt + source",
+          "  /prompt diff <verb>    show the override file's path for git diff",
+          "  /prompt reset <verb>   delete the override and revert to default",
+          "  /prompt list           open the prompts editor for the focused module",
           "  /show prompts          cross-module audit of all *_PROMPT keys",
         ].join("\n"),
       };
     }
+
+    case "prompts":
+      return handlePromptsListCommand(core, opts, ctx, shellState);
+
+    case "actor":
+      return handleActorCommand(args, ctx, shellState);
 
     case "show":
       return handleShowCommand(args, core, opts, ctx, shellState);
@@ -4412,7 +4532,9 @@ function handleBackCommand(
     currentView === "tune" ||
     currentView === "task-story" ||
     currentView === "threats" ||
-    currentView === "context-build"
+    currentView === "context-build" ||
+    currentView === "module-run" ||
+    currentView === "prompts-editor"
   ) {
     return {
       shellStateUpdater: (shell) => ({
@@ -4420,6 +4542,16 @@ function handleBackCommand(
         shellView: ctx.focusedModule ? "module" : "catalog",
       }),
       output: ctx.focusedModule ? "Back to module home." : "Back to catalog.",
+    };
+  }
+  if (currentView === "actor-detail") {
+    return {
+      shellStateUpdater: (shell) => ({
+        ...shell,
+        shellView: "module-run",
+        focusedActor: null,
+      }),
+      output: "Back to module run.",
     };
   }
   if (ctx.focusedModule) {
@@ -5439,6 +5571,8 @@ function handlePromptEditCommand(
         }
         // Store the absolute path on the shell's in-memory option map so the
         // same path the tool reads at run-time matches what we just wrote.
+        // Also record `promptsEditor.lastSaved{,At}` so the prompts editor
+        // view can render its after-vim "Saved prompt override" card.
         if (ctx.uiStore) {
           updateShell(ctx.uiStore, (shell) => ({
             ...shell,
@@ -5450,6 +5584,15 @@ function handlePromptEditCommand(
               },
             },
             lastUsedTool: toolName,
+            promptsEditor: {
+              ...(shell.promptsEditor ?? {}),
+              lastSavedAt: Date.now(),
+              lastSaved: {
+                name: verb,
+                path: outcome.filePath,
+                size: outcome.byteLen,
+              },
+            },
           }));
         }
         return [
@@ -5460,6 +5603,176 @@ function handlePromptEditCommand(
         return `Prompt editor error: ${err instanceof Error ? err.message : String(err)}`;
       }
     },
+  };
+}
+
+/**
+ * `/actor <n|fingerprint>` — drill into a per-actor transcript from
+ * inside ModuleRunView. Numeric arguments resolve against the
+ * sorted threat-hunt fingerprints in `state.agentActivity` (1-based);
+ * non-numeric arguments are treated as a literal fingerprint.
+ */
+function handleActorCommand(
+  args: string[],
+  ctx: ShellContext,
+  shellState: ShellState,
+): LocalCommandResult {
+  const arg = args[0]?.trim();
+  if (!arg) return { output: "Usage: /actor <n|fingerprint>" };
+  const live = ctx.uiStore?.getState();
+  const activity = live?.agentActivity;
+  if (!activity) return { output: "No live actor activity yet." };
+  const fingerprints: string[] = [];
+  for (const fp of activity.keys()) {
+    if (fp.startsWith("threat-hunt:")) fingerprints.push(fp);
+  }
+  fingerprints.sort();
+  let target: string | undefined;
+  const asInt = Number.parseInt(arg, 10);
+  if (Number.isFinite(asInt) && asInt >= 1) {
+    target = fingerprints[asInt - 1];
+  } else {
+    target = fingerprints.find((fp) => fp === arg || fp.endsWith(arg));
+  }
+  if (!target) {
+    if (fingerprints.length === 0) return { output: "No threat-hunt actors are active." };
+    return {
+      output: `No actor matched "${arg}". Active: ${fingerprints
+        .map((fp, i) => `${i + 1}. ${fp}`)
+        .join(" · ")}`,
+    };
+  }
+  // Type-narrow: the fingerprints array is filtered down to a single
+  // match above, so `target` is guaranteed defined here.
+  const focused = target;
+  void shellState;
+  return {
+    shellStateUpdater: (shell) => ({
+      ...shell,
+      shellView: "actor-detail",
+      focusedActor: focused,
+    }),
+    output: `Drilling into ${focused}.`,
+  };
+}
+
+/**
+ * Bare verb `prompts` from inside `kuzushi/<module>>` — opens the per-module
+ * prompts editor view. Pre-computes the audit table and stashes it on
+ * `shell.promptsEditor.audit` so the renderer doesn't need a `CopilotCore`.
+ */
+function handlePromptsListCommand(
+  core: CopilotCore,
+  opts: ShellOptions,
+  ctx: ShellContext,
+  shellState: ShellState,
+): LocalCommandResult {
+  if (!ctx.focusedModule) {
+    return { output: "No focused module. Use /use <module> first." };
+  }
+  const cwd = opts.target ? path.resolve(opts.target) : process.cwd();
+  const allRows = readPromptAudit(core, shellState.moduleOptions, cwd);
+  const moduleId = ctx.focusedModule;
+  const compact = allRows
+    .filter((r) => r.moduleId === moduleId)
+    .map((r) => ({
+      moduleId: r.moduleId,
+      toolName: r.toolName,
+      verb: r.verb,
+      promptKey: String(r.promptKey),
+      effective: {
+        source: r.effective.source,
+        ...(r.effective.filePath ? { filePath: r.effective.filePath } : {}),
+        ...(r.effective.byteLen != null ? { byteLen: r.effective.byteLen } : {}),
+        ...(r.effective.rawValue != null ? { rawValue: r.effective.rawValue } : {}),
+      },
+    }));
+  return {
+    shellStateUpdater: (shell) => ({
+      ...shell,
+      shellView: "prompts-editor",
+      promptsEditor: { ...(shell.promptsEditor ?? {}), audit: compact },
+    }),
+    output: `Prompts for ${moduleId} — ${compact.length} key${compact.length === 1 ? "" : "s"}.`,
+  };
+}
+
+/**
+ * `/prompt reset <verb>` — delete the override file (if any) and drop the
+ * stored option entry. Idempotent: running on an already-default key
+ * reports a no-op without erroring.
+ */
+function handlePromptResetCommand(
+  verbArg: string | undefined,
+  ctx: ShellContext,
+): LocalCommandResult {
+  if (!ctx.focusedModule) {
+    return { output: "No focused module. Use /use <module> first." };
+  }
+  if (!ctx.dataDir) {
+    return { output: "No data directory resolved for this shell." };
+  }
+  const verb = verbArg?.trim();
+  if (!verb) {
+    return { output: "Usage: prompt reset <verb>" };
+  }
+  const promptKey = verbToPromptKey(verb);
+  if (!promptKey) {
+    return { output: `No prompt override for verb "${verb}".` };
+  }
+  const toolName = `${ctx.focusedModule}:${verb}`;
+  const filePath = path.join(ctx.dataDir, "prompts", ctx.focusedModule, `${verb}.md`);
+  let removed = false;
+  try {
+    if (existsSync(filePath)) {
+      unlinkSync(filePath);
+      removed = true;
+    }
+  } catch (err) {
+    return {
+      output: `Failed to delete ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  return {
+    shellStateUpdater: (shell) => {
+      const next = { ...(shell.moduleOptions[toolName] ?? {}) };
+      delete next[promptKey];
+      const moduleOptions = { ...shell.moduleOptions };
+      if (Object.keys(next).length === 0) delete moduleOptions[toolName];
+      else moduleOptions[toolName] = next;
+      return { ...shell, moduleOptions };
+    },
+    output: removed
+      ? `Removed override at ${filePath}; ${toolName}.${promptKey} reset to default.`
+      : `${toolName}.${promptKey} already at default (no override file).`,
+  };
+}
+
+/**
+ * `/prompt diff <verb>` — unified diff between the local override and the
+ * compiled-in default. Best-effort: if either side is missing we surface
+ * a clear advisory instead of running `git diff`.
+ */
+function handlePromptDiffCommand(
+  verbArg: string | undefined,
+  ctx: ShellContext,
+): LocalCommandResult {
+  if (!ctx.focusedModule) {
+    return { output: "No focused module. Use /use <module> first." };
+  }
+  if (!ctx.dataDir) {
+    return { output: "No data directory resolved for this shell." };
+  }
+  const verb = verbArg?.trim();
+  if (!verb) return { output: "Usage: prompt diff <verb>" };
+  const promptKey = verbToPromptKey(verb);
+  if (!promptKey) return { output: `No prompt override for verb "${verb}".` };
+  const filePath = path.join(ctx.dataDir, "prompts", ctx.focusedModule, `${verb}.md`);
+  if (!existsSync(filePath)) {
+    return { output: `No override file at ${filePath} — nothing to diff.` };
+  }
+  return {
+    output: `Override on disk: ${filePath}.\nThe compiled-in default lives in src/modules/${ctx.focusedModule}/. Use \`git diff\` against the upstream tree for a structured diff.`,
   };
 }
 

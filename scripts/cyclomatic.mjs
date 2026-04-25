@@ -20,9 +20,9 @@ const minCc = Number(valueOf("--min") ?? 1);
 const asJson = args.includes("--json");
 const logicOnly = args.includes("--logic-only");
 const dispatchOnly = args.includes("--dispatch-only");
-const dispatchThreshold = Number(valueOf("--dispatch-threshold") ?? 0.6);
+const dispatchThreshold = Number(flagValue("--dispatch-threshold") ?? 0.6);
 
-function valueOf(flag) {
+function flagValue(flag) {
   const i = args.indexOf(flag);
   return i === -1 ? undefined : args[i + 1];
 }
@@ -64,7 +64,8 @@ function isFunctionLike(node) {
 
 function nameFor(node, sf) {
   if (ts.isConstructorDeclaration(node)) {
-    const cls = node.parent && ts.isClassDeclaration(node.parent) ? node.parent.name?.text : undefined;
+    const cls =
+      node.parent && ts.isClassDeclaration(node.parent) ? node.parent.name?.text : undefined;
     return cls ? `${cls}.constructor` : "constructor";
   }
   if (node.name) {
@@ -108,10 +109,7 @@ function computeCc(fnNode) {
 function dispatchLhs(condition, sf) {
   if (!ts.isBinaryExpression(condition)) return null;
   const op = condition.operatorToken.kind;
-  if (
-    op !== ts.SyntaxKind.EqualsEqualsEqualsToken &&
-    op !== ts.SyntaxKind.EqualsEqualsToken
-  ) {
+  if (op !== ts.SyntaxKind.EqualsEqualsEqualsToken && op !== ts.SyntaxKind.EqualsEqualsToken) {
     return null;
   }
   const isLiteral = (n) =>
@@ -245,15 +243,12 @@ let filtered = results.filter((r) => r.cc >= minCc);
 if (logicOnly) filtered = filtered.filter((r) => r.category === "logic");
 if (dispatchOnly) filtered = filtered.filter((r) => r.category === "dispatch");
 const total = filtered.length;
-const histogram = filtered.reduce(
-  (acc, r) => {
-    const bucket =
-      r.cc >= 41 ? "41+" : r.cc >= 21 ? "21-40" : r.cc >= 11 ? "11-20" : r.cc >= 6 ? "6-10" : "1-5";
-    acc[bucket] = (acc[bucket] ?? 0) + 1;
-    return acc;
-  },
-  {},
-);
+const histogram = filtered.reduce((acc, r) => {
+  const bucket =
+    r.cc >= 41 ? "41+" : r.cc >= 21 ? "21-40" : r.cc >= 11 ? "11-20" : r.cc >= 6 ? "6-10" : "1-5";
+  acc[bucket] = (acc[bucket] ?? 0) + 1;
+  return acc;
+}, {});
 
 // Category counts across the filtered set, for the header line.
 const dispatchCount = filtered.filter((r) => r.category === "dispatch").length;
@@ -280,8 +275,12 @@ if (asJson) {
     `\nTop ${Math.min(topN, filtered.length)} most complex${filterLabel}  ` +
       `(dispatch=${dispatchCount}, logic=${logicCount})`,
   );
-  console.log(`  cc   kind         arms    function                                        location`);
-  console.log(`  ---  -----------  -------  ----------------------------------------------  --------`);
+  console.log(
+    `  cc   kind         arms    function                                        location`,
+  );
+  console.log(
+    `  ---  -----------  -------  ----------------------------------------------  --------`,
+  );
   for (const r of filtered.slice(0, topN)) {
     const name = r.name.length > 46 ? r.name.slice(0, 43) + "..." : r.name.padEnd(46);
     const kind =

@@ -25,6 +25,7 @@ import { ModuleCatalog } from "../../src/ui/components/ModuleCatalog.js";
 import { ModuleHome } from "../../src/ui/components/ModuleHome.js";
 import { PlanCard } from "../../src/ui/components/PlanCard.js";
 import { ThreatDfdView } from "../../src/ui/components/ThreatDfdView.js";
+import { BLACK_CIRCLE } from "../../src/ui/glyphs.js";
 import { KeybindFooter } from "../../src/ui/primitives/KeybindFooter.js";
 import { type ActionableFinding, createUIStore, type ShellState } from "../../src/ui/state.js";
 import { createShellStoryEvent } from "../../src/ui/task-story.js";
@@ -260,32 +261,36 @@ describe("Ink component snapshots", () => {
   });
 
   it("ModuleHome — hides advanced pipeline steps and shows the hint line", () => {
+    // Uses `sast` here because `context` and `threat-hunt` route through
+    // the v3 module-home registry (Status / Actions / Last run), which
+    // intentionally drops the tools table. Modules without a custom home
+    // still render the legacy table + hidden-count hint.
     const shell = stubShell({
-      focusedModule: "context",
+      focusedModule: "sast",
       shellView: "module",
       moduleCatalog: [
         {
-          id: "context",
-          displayName: "Context",
-          category: "intel",
-          description: "Builds the application context snapshot.",
+          id: "sast",
+          displayName: "SAST",
+          category: "offense",
+          description: "Static analysis with corroborating signals.",
           toolCount: 3,
           toolSummaries: [
             {
-              name: "context:build",
-              verb: "build",
-              description: "Generate the application context snapshot",
+              name: "sast:scan",
+              verb: "scan",
+              description: "Run the canonical SAST scan",
               headless: true,
             },
             {
-              name: "context:context-gatherer",
+              name: "sast:context-gatherer",
               verb: "context-gatherer",
               description: "Internal DAG node: Context Gatherer",
               headless: true,
               hidden: true,
             },
             {
-              name: "context:app-model-build",
+              name: "sast:app-model-build",
               verb: "app-model-build",
               description: "Internal DAG node: Application Model",
               headless: true,
@@ -297,7 +302,7 @@ describe("Ink component snapshots", () => {
     });
     const out = renderToString(createElement(ModuleHome, { shell }));
     // Only the public verb should appear — hidden ones must stay out of the table.
-    expect(out).toContain("build");
+    expect(out).toContain("scan");
     expect(out).not.toContain("context-gatherer");
     expect(out).not.toContain("app-model-build");
     // Hint line announces the hidden count.
@@ -389,7 +394,8 @@ describe("Ink component snapshots", () => {
     const out = renderToString(createElement(CopilotShell, { store }), 84);
 
     expect(out.match(/Build Context/g) ?? []).toHaveLength(1);
-    expect(out).toContain("⏺ Build Context(.)");
+    // BLACK_CIRCLE is platform-dependent (`⏺` on macOS, `●` elsewhere).
+    expect(out).toContain(`${BLACK_CIRCLE} Build Context(.)`);
     expect(out).toContain('⎿  Glob "src/**/*" (200 files)');
     expect(out).toContain("context · running · Ctrl+C interrupt · Ctrl+O details");
     expect(out).not.toContain("context home");

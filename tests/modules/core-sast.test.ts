@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCoreSastModule } from "../../src/modules/core-sast.js";
-import { wrapDagToolExecute } from "../../src/modules/dag-bridge.js";
+import { wrapDagToolExecute } from "../../src/modules/dag-execute.js";
 import { createSemgrepModule } from "../../src/modules/semgrep/semgrep.js";
 import { createTaintIrisModule } from "../../src/modules/taint-iris/taint-iris.js";
 import type { CopilotModule, DagTool, ExecutionContext } from "../../src/modules/types.js";

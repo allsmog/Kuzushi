@@ -13,10 +13,7 @@ import { render } from "ink";
 import { createElement, type ReactElement } from "react";
 import { describe, expect, it } from "vitest";
 import { EmptyState } from "../../src/ui/components/EmptyState.js";
-import {
-  describeEmptyState,
-  type EmptyStateKind,
-} from "../../src/ui/error-format.js";
+import { describeEmptyState, type EmptyStateKind } from "../../src/ui/error-format.js";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI for stable assertions
 const ANSI_RE = /\[[0-9;]*[a-zA-Z]/g;
@@ -60,9 +57,7 @@ describe("describeEmptyState", () => {
   });
 
   it("module-no-tools mentions the module id when given", () => {
-    expect(describeEmptyState("module-no-tools", { moduleId: "sast" }).reason).toContain(
-      "sast",
-    );
+    expect(describeEmptyState("module-no-tools", { moduleId: "sast" }).reason).toContain("sast");
   });
 
   it("findings-never-scanned suggests /scan", () => {
@@ -95,13 +90,13 @@ describe("describeEmptyState", () => {
     expect(describeEmptyState("threat-model-missing", { threatView: "dfd" }).title).toContain(
       "data flow",
     );
-    expect(
-      describeEmptyState("threat-model-missing", { threatView: "stride" }).title,
-    ).toContain("STRIDE");
+    expect(describeEmptyState("threat-model-missing", { threatView: "stride" }).title).toContain(
+      "STRIDE",
+    );
     // Unknown view falls back to generic title.
-    expect(
-      describeEmptyState("threat-model-missing", { threatView: "bogus" }).title,
-    ).toContain("threat model");
+    expect(describeEmptyState("threat-model-missing", { threatView: "bogus" }).title).toContain(
+      "threat model",
+    );
   });
 
   it("threat-model-missing action points to /scan or /threats edit", () => {
@@ -116,10 +111,7 @@ describe("describeEmptyState", () => {
 
 describe("<EmptyState>", () => {
   it("renders all three lines: title, reason, action", () => {
-    const out = renderToText(
-      createElement(EmptyState, { kind: "findings-never-scanned" }),
-      120,
-    );
+    const out = renderToText(createElement(EmptyState, { kind: "findings-never-scanned" }), 120);
     const copy = describeEmptyState("findings-never-scanned");
     expect(out).toContain(copy.title);
     expect(out).toContain("/scan");
@@ -137,10 +129,7 @@ describe("<EmptyState>", () => {
   });
 
   it("renders action hint even when reason would overflow a narrow terminal", () => {
-    const out = renderToText(
-      createElement(EmptyState, { kind: "findings-zero-after-scan" }),
-      40,
-    );
+    const out = renderToText(createElement(EmptyState, { kind: "findings-zero-after-scan" }), 40);
     // Action survives; the reason may truncate but must still be present.
     expect(out).toMatch(/\/since|\/tune/);
   });
@@ -168,10 +157,7 @@ describe("<EmptyState>", () => {
   });
 
   it("emits at least three newline-separated lines", () => {
-    const out = renderToText(
-      createElement(EmptyState, { kind: "diff-since-idle" }),
-      120,
-    );
+    const out = renderToText(createElement(EmptyState, { kind: "diff-since-idle" }), 120);
     const lines = out.split(/\r?\n/).filter((l) => l.trim().length > 0);
     expect(lines.length).toBeGreaterThanOrEqual(3);
   });
