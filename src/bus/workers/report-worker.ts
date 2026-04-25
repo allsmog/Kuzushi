@@ -545,14 +545,18 @@ export function registerReportWorker(
               ? undefined
               : (event.payload.summary ?? undefined);
 
-      store.addAgentActivity(fingerprint, {
+      const line = {
         kind: kind as "tool-start" | "tool-progress" | "tool-complete" | "summary",
         toolName: event.payload.toolName,
         detail,
         elapsedSeconds: event.payload.elapsedSeconds,
         index,
         total,
-      });
+      };
+      store.addAgentActivity(fingerprint, line);
+      // Mirror into moduleRun.evidenceTail so ModuleRunView's "Evidence"
+      // tail fills regardless of which fingerprint owns the event.
+      store.pushModuleRunActivity(line);
       return;
     }
 
@@ -608,6 +612,16 @@ export function registerReportWorker(
         toolName,
         detail,
         elapsedSeconds,
+      });
+      // Mirror into moduleRun.evidenceTail. ScanAgentActivity carries no
+      // (index,total) — synth zeros so the type matches AgentActivityLine.
+      store.pushModuleRunActivity({
+        kind: kind as "tool-start" | "tool-progress" | "tool-complete" | "summary" | "reasoning",
+        toolName,
+        detail,
+        elapsedSeconds,
+        index: 0,
+        total: 0,
       });
       return;
     }

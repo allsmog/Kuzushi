@@ -12,9 +12,9 @@ import { render } from "ink";
 import { createElement, type ReactElement } from "react";
 import { describe, expect, it } from "vitest";
 import {
-  ErrorMessage,
   classifyError,
   type ErrorKind,
+  ErrorMessage,
 } from "../../src/ui/components/ErrorMessage.js";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: strips ANSI for stable assertions
@@ -61,7 +61,7 @@ describe("<ErrorMessage>", () => {
     expect(out).toContain("Rate limited");
     expect(out).toContain("429 rate limited");
     expect(out).toContain("Wait a moment");
-    expect(out).toContain("/model");
+    expect(out).toContain("/provider");
   });
 
   it("auth renders headline + /auth hint", () => {
@@ -76,19 +76,14 @@ describe("<ErrorMessage>", () => {
     expect(out).toContain("API_TIMEOUT_MS");
   });
 
-  it("context-limit renders headline + /compact hint", () => {
-    const out = renderToText(
-      createElement(ErrorMessage, { text: "context window exceeded" }),
-    );
+  it("context-limit renders headline + /clear hint", () => {
+    const out = renderToText(createElement(ErrorMessage, { text: "context window exceeded" }));
     expect(out).toContain("Context limit reached");
-    expect(out).toContain("/compact");
     expect(out).toContain("/clear");
   });
 
   it("aborted renders the text without the danger 'Error' headline", () => {
-    const out = renderToText(
-      createElement(ErrorMessage, { text: "Aborted by SIGINT" }),
-    );
+    const out = renderToText(createElement(ErrorMessage, { text: "Aborted by SIGINT" }));
     expect(out).toContain("Aborted by SIGINT");
     // Aborted is operator-initiated — it shouldn't prefix with any
     // failure headline like "Auth failure" or "Rate limited".
@@ -97,9 +92,7 @@ describe("<ErrorMessage>", () => {
   });
 
   it("generic renders the raw text", () => {
-    const out = renderToText(
-      createElement(ErrorMessage, { text: "Something unusual happened" }),
-    );
+    const out = renderToText(createElement(ErrorMessage, { text: "Something unusual happened" }));
     expect(out).toContain("Something unusual happened");
   });
 

@@ -198,7 +198,7 @@ describe("CoreDispatcher", () => {
     const def = await driver.handle("tools");
     expect(def.output).toContain("sast:scan");
     expect(def.output).not.toContain("sast:triage-internal");
-    expect(def.output).toContain("1 internal DAG node");
+    expect(def.output).toContain("1 advanced pipeline step");
 
     const all = await driver.handle("tools --all");
     expect(all.output).toContain("sast:scan");

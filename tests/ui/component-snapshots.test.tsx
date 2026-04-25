@@ -25,6 +25,7 @@ import { ModuleCatalog } from "../../src/ui/components/ModuleCatalog.js";
 import { ModuleHome } from "../../src/ui/components/ModuleHome.js";
 import { PlanCard } from "../../src/ui/components/PlanCard.js";
 import { ThreatDfdView } from "../../src/ui/components/ThreatDfdView.js";
+import { BLACK_CIRCLE } from "../../src/ui/glyphs.js";
 import { KeybindFooter } from "../../src/ui/primitives/KeybindFooter.js";
 import { type ActionableFinding, createUIStore, type ShellState } from "../../src/ui/state.js";
 import { createShellStoryEvent } from "../../src/ui/task-story.js";
@@ -393,7 +394,8 @@ describe("Ink component snapshots", () => {
     const out = renderToString(createElement(CopilotShell, { store }), 84);
 
     expect(out.match(/Build Context/g) ?? []).toHaveLength(1);
-    expect(out).toContain("⏺ Build Context(.)");
+    // BLACK_CIRCLE is platform-dependent (`⏺` on macOS, `●` elsewhere).
+    expect(out).toContain(`${BLACK_CIRCLE} Build Context(.)`);
     expect(out).toContain('⎿  Glob "src/**/*" (200 files)');
     expect(out).toContain("context · running · Ctrl+C interrupt · Ctrl+O details");
     expect(out).not.toContain("context home");

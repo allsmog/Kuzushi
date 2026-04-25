@@ -106,7 +106,10 @@ exports[`Ink component snapshots > PlanCard — option diff table with unsupport
 `;
 
 exports[`Ink component snapshots > ThreatDfdView — trust zones + boundaries + flows 1`] = `
-"  3 nodes · 1 flows · 1 boundaries · 0 threats
+"  kuzushi/threats/dfd               3 nodes · 1 flows · 1 boundaries · 0 threats
+  ──────────────────────────────────────────────────────────────────────────────
+  ──
+
   loaded from /tmp/threat-model.json
 
 
@@ -139,6 +142,7 @@ exports[`Ink component snapshots > ThreatDfdView — trust zones + boundaries + 
     S:0  T:0  R:0  I:0  D:0  E:0   no threats emitted; watch hot paths and
   privileged choke points
 
-  Keys  1 DFD · 2 STRIDE · 3 stories · 4 scope · 5 summary · r regen · a ask AI
-  · q back"
+  1 dfd · 2 stride · 3 stories · 4 scope · 5 summary · r regen · a ask AI · q
+  back
+  patch proposal:  a apply · s skip · d diff · r re-rank"
 `;
