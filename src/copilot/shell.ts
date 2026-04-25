@@ -3638,7 +3638,6 @@ async function startInkShell(
   //
   // Best-effort: the open can fail (no controlling terminal, CI mode,
   // etc.) and that's fine — the other three abort paths remain.
-  // biome-ignore lint/correctness/noUnusedVariables: teardown is registered for completeness; the OS reclaims /dev/tty fd on shell exit, so an explicit invocation isn't required today
   let devTtyAbortTeardown: (() => void) | undefined;
   if (process.stdin.isTTY) {
     try {
@@ -4155,9 +4154,38 @@ function routeInput(
     recordCommandUsage(ctx, shellState, "/story");
     return handleStoryCommand(shellState);
   }
+  if (lower === "prompts") {
+    recordCommandUsage(ctx, shellState, "/prompts");
+    return handlePromptsListCommand(core, opts, ctx, shellState);
+  }
+  // Bare verbs scoped to the prompts-editor view route through the existing
+  // /prompt edit / /prompt show handlers. Operators don't need to type the
+  // slash prefix once they're inside `kuzushi/<module>/prompts>`.
+  if (shellState.shellView === "prompts-editor" && ctx.focusedModule) {
+    if (lower.startsWith("edit ")) {
+      const verb = trimmed.split(/\s+/).slice(1).join(" ").trim();
+      recordCommandUsage(ctx, shellState, "/prompt edit");
+      return handlePromptEditCommand(verb || undefined, core, opts, ctx, shellState);
+    }
+    if (lower.startsWith("show ")) {
+      const verb = trimmed.split(/\s+/).slice(1).join(" ").trim();
+      recordCommandUsage(ctx, shellState, "/prompt show");
+      return handlePromptShowCommand(verb || undefined, core, opts, ctx, shellState);
+    }
+  }
   if (ctx.focusedModule === "context" && lower === "dfd") {
     recordCommandUsage(ctx, shellState, "/context dfd");
     return handleContextCommand(["dfd"], core, opts, ctx, shellState);
+  }
+  if (ctx.focusedModule === "context" && lower.startsWith("regen ")) {
+    recordCommandUsage(ctx, shellState, "/context regen");
+    return handleContextCommand(
+      ["regen", ...trimmed.split(/\s+/).slice(1)],
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
   }
   if (lower.startsWith("open ")) {
     return handleOpenCommand(trimmed.split(/\s+/).slice(1));
@@ -4285,15 +4313,24 @@ function handleSlashCommand(
       if (sub === "show") {
         return handlePromptShowCommand(verb, core, opts, ctx, shellState);
       }
+      if (sub === "list" || sub === undefined) {
+        if (sub === "list" || ctx.focusedModule) {
+          return handlePromptsListCommand(core, opts, ctx, shellState);
+        }
+      }
       return {
         output: [
           "Usage:",
           "  /prompt edit <verb>    open the operator override in $EDITOR",
           "  /prompt show <verb>    print the current effective prompt + source",
+          "  /prompt list           open the prompts editor for the focused module",
           "  /show prompts          cross-module audit of all *_PROMPT keys",
         ].join("\n"),
       };
     }
+
+    case "prompts":
+      return handlePromptsListCommand(core, opts, ctx, shellState);
 
     case "show":
       return handleShowCommand(args, core, opts, ctx, shellState);
@@ -4412,7 +4449,9 @@ function handleBackCommand(
     currentView === "tune" ||
     currentView === "task-story" ||
     currentView === "threats" ||
-    currentView === "context-build"
+    currentView === "context-build" ||
+    currentView === "module-run" ||
+    currentView === "prompts-editor"
   ) {
     return {
       shellStateUpdater: (shell) => ({
@@ -4420,6 +4459,16 @@ function handleBackCommand(
         shellView: ctx.focusedModule ? "module" : "catalog",
       }),
       output: ctx.focusedModule ? "Back to module home." : "Back to catalog.",
+    };
+  }
+  if (currentView === "actor-detail") {
+    return {
+      shellStateUpdater: (shell) => ({
+        ...shell,
+        shellView: "module-run",
+        focusedActor: null,
+      }),
+      output: "Back to module run.",
     };
   }
   if (ctx.focusedModule) {
@@ -5439,6 +5488,8 @@ function handlePromptEditCommand(
         }
         // Store the absolute path on the shell's in-memory option map so the
         // same path the tool reads at run-time matches what we just wrote.
+        // Also record `promptsEditor.lastSaved{,At}` so the prompts editor
+        // view can render its after-vim "Saved prompt override" card.
         if (ctx.uiStore) {
           updateShell(ctx.uiStore, (shell) => ({
             ...shell,
@@ -5450,6 +5501,15 @@ function handlePromptEditCommand(
               },
             },
             lastUsedTool: toolName,
+            promptsEditor: {
+              ...(shell.promptsEditor ?? {}),
+              lastSavedAt: Date.now(),
+              lastSaved: {
+                name: verb,
+                path: outcome.filePath,
+                size: outcome.byteLen,
+              },
+            },
           }));
         }
         return [
@@ -5460,6 +5520,47 @@ function handlePromptEditCommand(
         return `Prompt editor error: ${err instanceof Error ? err.message : String(err)}`;
       }
     },
+  };
+}
+
+/**
+ * Bare verb `prompts` from inside `kuzushi/<module>>` — opens the per-module
+ * prompts editor view. Pre-computes the audit table and stashes it on
+ * `shell.promptsEditor.audit` so the renderer doesn't need a `CopilotCore`.
+ */
+function handlePromptsListCommand(
+  core: CopilotCore,
+  opts: ShellOptions,
+  ctx: ShellContext,
+  shellState: ShellState,
+): LocalCommandResult {
+  if (!ctx.focusedModule) {
+    return { output: "No focused module. Use /use <module> first." };
+  }
+  const cwd = opts.target ? path.resolve(opts.target) : process.cwd();
+  const allRows = readPromptAudit(core, shellState.moduleOptions, cwd);
+  const moduleId = ctx.focusedModule;
+  const compact = allRows
+    .filter((r) => r.moduleId === moduleId)
+    .map((r) => ({
+      moduleId: r.moduleId,
+      toolName: r.toolName,
+      verb: r.verb,
+      promptKey: String(r.promptKey),
+      effective: {
+        source: r.effective.source,
+        ...(r.effective.filePath ? { filePath: r.effective.filePath } : {}),
+        ...(r.effective.byteLen != null ? { byteLen: r.effective.byteLen } : {}),
+        ...(r.effective.rawValue != null ? { rawValue: r.effective.rawValue } : {}),
+      },
+    }));
+  return {
+    shellStateUpdater: (shell) => ({
+      ...shell,
+      shellView: "prompts-editor",
+      promptsEditor: { ...(shell.promptsEditor ?? {}), audit: compact },
+    }),
+    output: `Prompts for ${moduleId} — ${compact.length} key${compact.length === 1 ? "" : "s"}.`,
   };
 }
 

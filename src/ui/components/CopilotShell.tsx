@@ -50,6 +50,7 @@ import {
   storyTabEvents,
 } from "../task-story.js";
 import { SPACING, tokens } from "../tokens.js";
+import { ActorTranscriptView } from "./ActorTranscriptView.js";
 import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { BannerSplash } from "./BannerSplash.js";
 import { ContextBuildView } from "./ContextBuildView.js";
@@ -58,7 +59,9 @@ import { FindingCard } from "./FindingCard.js";
 import { FindingsView } from "./FindingsView.js";
 import { ModuleCatalog } from "./ModuleCatalog.js";
 import { ModuleHome } from "./ModuleHome.js";
+import { ModuleRunView } from "./ModuleRunView.js";
 import { PlanCard } from "./PlanCard.js";
+import { PromptsEditorView } from "./PromptsEditorView.js";
 import { PulseDot } from "./PulseDot.js";
 import { ScopeAndCriticalityView } from "./ScopeAndCriticalityView.js";
 import { Spinner } from "./Spinner.js";
@@ -120,6 +123,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
     (s) => ({
       shell: s.shell,
       summary: s.summary,
+      agentActivity: s.agentActivity,
       ctrlCArmedAt: s.ctrlCArmedAt,
     }),
     shallowEqual,
@@ -425,7 +429,11 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         ) : null}
 
         {!shell.processing || shell.shellView === "task-story" ? (
-          <MemoShellViewPanel summary={shellState.summary} shell={shell} />
+          <MemoShellViewPanel
+            summary={shellState.summary}
+            shell={shell}
+            agentActivity={shellState.agentActivity}
+          />
         ) : null}
         {!shell.processing || shell.shellView === "task-story" ? (
           <ShellWayfinding shell={shell} narrow={columns < 110} />
@@ -691,6 +699,10 @@ function describeShellLocation(shell: ShellState): string {
   if (shell.shellView === "finding") return `finding ${shell.openFindingId ?? "detail"}`;
   if (shell.shellView === "task-story") return "task story";
   if (shell.shellView === "threats") return `threat/${shell.threatTab ?? "summary"}`;
+  if (shell.shellView === "module-run") return `${shell.focusedModule ?? "module"} run`;
+  if (shell.shellView === "actor-detail")
+    return `${shell.focusedModule ?? "module"} actor ${shell.focusedActor ?? ""}`.trim();
+  if (shell.shellView === "prompts-editor") return `${shell.focusedModule ?? "module"} prompts`;
   return shell.shellView;
 }
 
@@ -713,9 +725,11 @@ function historyEntryKey(entry: ShellHistoryEntry): string {
 function ShellViewPanel({
   summary,
   shell,
+  agentActivity,
 }: {
   summary: SummaryData | null;
   shell: ShellState;
+  agentActivity?: ReadonlyMap<string, ReadonlyArray<AgentActivityLine>>;
 }): React.ReactElement | null {
   // Stable React keys per view stop React from re-mounting sibling sub-trees
   // when the shellView changes. The `shellView` value is the key — same view
@@ -789,6 +803,17 @@ function ShellViewPanel({
       return <ContextBuildView key={view} shell={shell} />;
     case "task-story":
       return <TaskStoryView key={view} story={shell.taskStory} processing={shell.processing} />;
+    case "module-run":
+      // Per-run findings are sourced from a future `state.moduleRun.findings`
+      // slice the report-worker will populate; for now the panel renders the
+      // steps + actor/evidence blocks without the findings tail.
+      return <ModuleRunView key={view} shell={shell} findings={[]} agentActivity={agentActivity} />;
+    case "actor-detail":
+      return (
+        <ActorTranscriptView key={view} shell={shell} findings={[]} agentActivity={agentActivity} />
+      );
+    case "prompts-editor":
+      return <PromptsEditorView key={view} shell={shell} />;
     default:
       return null;
   }
@@ -815,6 +840,10 @@ const MemoShellViewPanel = memo(
     prev.shell.moduleCatalog === next.shell.moduleCatalog &&
     prev.shell.contextBuild === next.shell.contextBuild &&
     prev.shell.taskStory === next.shell.taskStory &&
+    prev.shell.moduleRun === next.shell.moduleRun &&
+    prev.shell.focusedActor === next.shell.focusedActor &&
+    prev.shell.promptsEditor === next.shell.promptsEditor &&
+    prev.agentActivity === next.agentActivity &&
     prev.summary === next.summary,
 );
 
