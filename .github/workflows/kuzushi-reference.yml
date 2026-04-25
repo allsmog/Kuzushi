@@ -9,15 +9,13 @@
 #   3. Upload JUnit XML so findings land in the "Checks" / test panel
 #
 # The workflow is NOT wired into Kuzushi's own CI — it is pure documentation.
-# Filename is `-reference.yml` so Kuzushi's meta-CI never tries to run it.
+# We deliberately omit `pull_request` and `push` triggers so it only runs
+# under `workflow_dispatch` (manual). Copies in downstream repos should
+# add `pull_request` / `push` triggers back as appropriate.
 
 name: Kuzushi Security Scan (reference)
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
