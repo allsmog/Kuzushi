@@ -4155,6 +4155,10 @@ function routeInput(
     recordCommandUsage(ctx, shellState, "/story");
     return handleStoryCommand(shellState);
   }
+  if (ctx.focusedModule === "context" && lower === "dfd") {
+    recordCommandUsage(ctx, shellState, "/context dfd");
+    return handleContextCommand(["dfd"], core, opts, ctx, shellState);
+  }
   if (lower.startsWith("open ")) {
     return handleOpenCommand(trimmed.split(/\s+/).slice(1));
   }
@@ -4606,13 +4610,17 @@ function handleContextCommand(
 ): LocalCommandResult {
   const sub = args[0]?.toLowerCase();
 
+  if (sub === "dfd") {
+    return handleThreatsCommand(["dfd"], opts, ctx, shellState);
+  }
+
   // /context build — Live Build screen. Runs the deterministic
   // `gatherContextForRoot` pipeline with a phase observer that streams
   // into `shell.contextBuild`, writes `.kuzushi/scan-context.json` on
   // completion, and returns to the prompt with a one-line summary.
   if (sub === "build") {
-    if (!opts.target) return { output: "No target set. Use /target <path> first." };
-    const repoRoot = path.resolve(opts.target);
+    const repoRoot = resolveActiveTarget(opts, shellState);
+    if (!repoRoot) return { output: "No target set. Use /target <path> first." };
     return {
       output: "Building operator scan context…",
       shellStateUpdater: (shell) => ({
@@ -4630,8 +4638,8 @@ function handleContextCommand(
 
   // /context edit — open the operator context intake editor
   if (sub === "edit") {
-    if (!opts.target) return { output: "No target set. Use /target <path> first." };
-    const repoRoot = path.resolve(opts.target);
+    const repoRoot = resolveActiveTarget(opts, shellState);
+    if (!repoRoot) return { output: "No target set. Use /target <path> first." };
     return {
       output: "Opening operator context editor...",
       asyncExecute: async () => {
@@ -4658,7 +4666,8 @@ function handleContextCommand(
 
   // /context regenerate — force re-run
   if (sub === "regenerate" || sub === "regen") {
-    if (!opts.target) return { output: "No target set. Use /target <path> first." };
+    const target = resolveActiveTarget(opts, shellState);
+    if (!target) return { output: "No target set. Use /target <path> first." };
     const slice = parseContextRegenSlice(args[1]?.toLowerCase());
     if (!slice) {
       return {
@@ -4677,7 +4686,6 @@ function handleContextCommand(
         ].join("\n"),
       };
     }
-    const target = path.resolve(opts.target);
     const result = resolveToolExecution(
       "context:build",
       [target, `scope=${slice}`, "preserveUserEdits=true"],
@@ -4698,16 +4706,17 @@ function handleContextCommand(
   }
 
   // /context — show current snapshot if valid for current target
+  const activeTarget = resolveActiveTarget(opts, shellState);
   if (
     shellState.contextSnapshot &&
-    opts.target &&
-    shellState.contextSnapshot.target === path.resolve(opts.target)
+    activeTarget &&
+    shellState.contextSnapshot.target === activeTarget
   ) {
     return { output: formatContextSummary(shellState.contextSnapshot) };
   }
 
   // No valid snapshot — trigger generation
-  if (!opts.target) return { output: "No target set. Use /target <path> first." };
+  if (!activeTarget) return { output: "No target set. Use /target <path> first." };
   return resolveToolExecution("context:build", [], core, opts, ctx, shellState);
 }
 
@@ -4833,8 +4842,8 @@ function handleThreatsCommand(
   if (sub === "ask") {
     const instruction = args.slice(1).join(" ").trim();
     if (!instruction) return { output: "Usage: /threats ask <instruction>" };
-    if (!opts.target) return { output: "No target set. Use /target <path> first." };
-    const repoRoot = path.resolve(opts.target);
+    const repoRoot = resolveActiveTarget(opts, shellState);
+    if (!repoRoot) return { output: "No target set. Use /target <path> first." };
     return {
       output: "Asking AI for a reviewable threat-model patch…",
       asyncExecute: async (signal) => {
@@ -4868,10 +4877,10 @@ function handleThreatsCommand(
   }
 
   if (sub === "apply" || sub === "accept" || sub === "yes") {
-    if (!opts.target) return { output: "No target set. Use /target <path> first." };
+    const repoRoot = resolveActiveTarget(opts, shellState);
+    if (!repoRoot) return { output: "No target set. Use /target <path> first." };
     const proposal = shellState.pendingThreatPatch;
     if (!proposal) return { output: "No pending threat-model patch to apply." };
-    const repoRoot = path.resolve(opts.target);
     return {
       output: "Applying accepted threat-model patch…",
       asyncExecute: async () => {
@@ -4909,8 +4918,8 @@ function handleThreatsCommand(
   // this handler populates below.
   const viewRoute = resolveThreatView(sub);
   if (viewRoute) {
-    if (!opts.target) return { output: "No target set. Use /target <path> first." };
-    const repoRoot = path.resolve(opts.target);
+    const repoRoot = resolveActiveTarget(opts, shellState);
+    if (!repoRoot) return { output: "No target set. Use /target <path> first." };
     return {
       output: `Loading threat model for ${viewRoute.label}…`,
       shellStateUpdater: (shell) => ({
@@ -4944,8 +4953,8 @@ function handleThreatsCommand(
 
   // /threats edit — open the threat model editor
   if (sub === "edit") {
-    if (!opts.target) return { output: "No target set. Use /target <path> first." };
-    const repoRoot = path.resolve(opts.target);
+    const repoRoot = resolveActiveTarget(opts, shellState);
+    if (!repoRoot) return { output: "No target set. Use /target <path> first." };
     return {
       output: "Opening threat model editor...",
       asyncExecute: async () => {
@@ -4994,6 +5003,15 @@ function handleThreatsCommand(
   return {
     output: "Usage: /threats [dfd|stride|stories|scope|summary|edit]  (1..5 also switches views)",
   };
+}
+
+function resolveActiveTarget(opts: ShellOptions, shellState: ShellState): string | null {
+  if (opts.target) return path.resolve(opts.target);
+  const snapshotTarget = shellState.contextSnapshot?.target;
+  if (!snapshotTarget) return null;
+  const resolved = path.resolve(snapshotTarget);
+  opts.target = resolved;
+  return resolved;
 }
 
 function handleTargetCommand(
