@@ -12,8 +12,7 @@ import React from "react";
 import { shallowEqual, useUISelector } from "../hooks.js";
 import { Ratchet } from "../primitives/Ratchet.js";
 import { TabBar } from "../primitives/TabBar.js";
-import type { PipelineStage, ResultLine as ResultLineData, UIStore } from "../state.js";
-import { tokens } from "../tokens.js";
+import type { ResultLine as ResultLineData, UIStore } from "../state.js";
 import { HeartbeatStrip } from "./AgentActivity.js";
 import type { CommandResult, ReplCommand } from "./CommandInput.js";
 import { CommandInput } from "./CommandInput.js";
@@ -154,8 +153,6 @@ function PipelineTab({
   const throttle = useUISelector(store, (s) => s.throttle, shallowEqual);
   const etaMs = useUISelector(store, (s) => s.etaMs);
   const agentActivity = useUISelector(store, (s) => s.agentActivity);
-  const phase = useUISelector(store, (s) => s.phase);
-  const phaseHeader = React.useMemo(() => phaseLabel(phase, stages), [phase, stages]);
 
   if (stages.length === 0) return null;
   return (
@@ -167,7 +164,6 @@ function PipelineTab({
       results={liveResults}
       agentActivity={agentActivity}
       etaMs={etaMs}
-      phase={phaseHeader}
     />
   );
 }
@@ -261,32 +257,6 @@ function CommandInputSlot({
   return <CommandInput active={active} onCommand={onCommand} />;
 }
 
-// --- Phase label helper (kept local to this module) ------------------------
-
-function phaseLabel(
-  phase: string,
-  stages: PipelineStage[],
-): { title: string; detail?: string } | undefined {
-  if (phase === "idle" || phase === "done" || phase === "summary") return undefined;
-  const active = stages.find((s) => s.status === "active");
-  const detail = active?.detail ?? active?.label;
-  switch (phase) {
-    case "scanning":
-      return { title: "mapping the codebase and hunting for candidates", detail };
-    case "triaging":
-      return { title: "triaging findings with the agent", detail };
-    case "verifying":
-      return { title: "verifying exploitability", detail };
-    case "poc":
-      return { title: "generating PoC harnesses", detail };
-    default:
-      return { title: phase, detail };
-  }
-}
-
 function staticResultKey(result: ResultLineData): string {
   return `${result.kind}:${result.fingerprint}:${result.index}:${result.total}`;
 }
-
-// Unused helper to silence unused-import linter for tokens in case.
-void tokens;

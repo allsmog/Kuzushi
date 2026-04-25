@@ -134,6 +134,15 @@ function AppInner({ store }: AppProps): React.ReactElement {
         }
         return;
       }
+      // Ctrl+C in running mode aborts the in-flight scan and returns the
+      // operator to the shell prompt. Without this branch Ink's default
+      // exit-on-ctrlC unmounts the tree but the abort path on the shell
+      // never fires, so the scan keeps running in the background and the
+      // shell prompt looks frozen.
+      if (key.ctrl && input === "c") {
+        keyState.shellAbort?.();
+        return;
+      }
       if (input === "1") store.update({ scanView: "pipeline" });
       else if (input === "2") store.update({ scanView: "findings" });
       else if (input === "3") store.update({ scanView: "cost" });

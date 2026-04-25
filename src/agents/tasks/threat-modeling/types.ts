@@ -149,4 +149,16 @@ export interface ThreatModelConfig {
   findingThreshold: string;
   /** Which Randori PASTA stages to run (default: s1-s4). */
   randoriStages: string[];
+  /**
+   * Reasoning effort passed to the runtime. `"max"` engages full extended
+   * thinking on Opus, which Randori needs to enumerate threats without
+   * confabulating against defended code.
+   */
+  effort?: import("../../../agent-runtime/types.js").AgentEffort;
+  /**
+   * Per-task wall-clock cap in milliseconds. When the timer fires we abort
+   * the in-flight runtime.query so the pipeline progresses instead of
+   * hanging on a silent SDK stall. `0` disables the cap.
+   */
+  wallClockBudgetMs: number;
 }

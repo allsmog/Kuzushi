@@ -11,7 +11,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { summarizeInput } from "../../../agent-runtime/tool-summary.js";
-import type { AgentMessage, AgentRuntime } from "../../../agent-runtime/types.js";
+import type { AgentEffort, AgentMessage, AgentRuntime } from "../../../agent-runtime/types.js";
 import { createLogger } from "../../../logger.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding } from "../../../scanners/types.js";
@@ -427,6 +427,18 @@ export interface RandoriRunnerParams {
    * header while S1-S4 runs.
    */
   onOutput?: (line: string) => void;
+  /**
+   * Reasoning effort forwarded to the runtime — enables extended thinking
+   * on Opus when set to `"max"`. Optional so callers (and older tests)
+   * can stay on the runtime's default.
+   */
+  effort?: AgentEffort;
+  /**
+   * Wall-clock cap in ms. When the timer fires the linked AbortController
+   * is aborted from outside the streaming loop so the pipeline doesn't
+   * stall indefinitely waiting on a silent SDK stream. `0` disables.
+   */
+  wallClockBudgetMs?: number;
 }
 
 export interface RandoriRunnerResult {
@@ -454,12 +466,31 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
   // an owned AbortController. Without this the Claude Code subprocess
   // keeps streaming (and billing) after Ctrl+C.
   const abortController = new AbortController();
+  let budgetExceeded = false;
   if (params.signal) {
     if (params.signal.aborted) abortController.abort();
     else {
       params.signal.addEventListener("abort", () => abortController.abort(), { once: true });
     }
   }
+
+  // Wall-clock safety net: when the SDK's streaming generator stalls (no
+  // tokens, no result envelope, no error) the abort wired above never
+  // fires because there's no caller signal yet. The timer fires the same
+  // controller from the outside so the next loop iteration breaks and
+  // control returns to the orchestrator.
+  const budgetMs = params.wallClockBudgetMs ?? 0;
+  const budgetTimer =
+    budgetMs > 0
+      ? setTimeout(() => {
+          budgetExceeded = true;
+          params.onActivity?.(
+            `randori budget exceeded after ${Math.round(budgetMs / 1000)}s — aborting`,
+          );
+          log.warn(`${tag} wall-clock budget exceeded; aborting in-flight query`);
+          abortController.abort();
+        }, budgetMs)
+      : null;
 
   const baseOpts = {
     cwd: params.repoRoot,
@@ -475,6 +506,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
     // no `content` field. Bumping this gives the model room for a
     // single Write call carrying the full artifact.
     maxOutputTokens: 64_000,
+    ...(params.effort ? { effort: params.effort } : {}),
   };
 
   let costUsd = 0;
@@ -566,100 +598,117 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
       }
     } catch (error) {
       if (params.signal?.aborted) throw error;
+      // A budget-driven abort raises through the SDK's stream as a
+      // generic abort error. We've already logged the budget event +
+      // pulsed onActivity above, so logging again at warn level just
+      // adds noise to the operator's transcript.
+      if (budgetExceeded || abortController.signal.aborted) {
+        log.info(`${phaseTag} aborted: ${toErrorMessage(error)}`);
+        return;
+      }
       log.warn(`${phaseTag} error: ${toErrorMessage(error)}`);
     }
   };
 
-  const hasS4 = params.stages.includes("s4");
-  const scopeStages = hasS4 ? params.stages.filter((s) => s !== "s4") : params.stages;
+  try {
+    const hasS4 = params.stages.includes("s4");
+    const scopeStages = hasS4 ? params.stages.filter((s) => s !== "s4") : params.stages;
 
-  // ── Phase 1: S1-S3 (scope, tech decomposition, DFD) ──
-  if (scopeStages.length > 0) {
-    log.info(`${tag} Phase 1: running stages ${scopeStages.join(",")}`);
-    params.onPhase?.(`phase 1 (${scopeStages.join("/").toUpperCase()} scope)`);
-    params.onActivity?.(`scoping ${scopeStages.join(", ")}`);
-    await runPhase(buildScopePrompt(params.maxElements, params.artifactDir), `${tag} Phase 1`);
-  }
-
-  // ── Phase 2: S4 (STRIDE threat scenarios with evidence) ──
-  if (hasS4) {
-    params.signal?.throwIfAborted();
-    const scopeArtifacts = readRandoriArtifacts(params.repoRoot, params.artifactDir);
-    if (Object.keys(scopeArtifacts).length > 0) {
-      log.info(`${tag} Phase 2: running stage s4 (STRIDE threats)`);
-      params.onPhase?.("phase 2 (S4 threats)");
-      params.onActivity?.("enumerating STRIDE threats");
-      await runPhase(
-        buildStridePrompt(params.maxThreats, params.artifactDir, params.previousModel),
-        `${tag} Phase 2 (S4)`,
-      );
-    } else {
-      log.warn(`${tag} Skipping S4 — no scope artifacts from S1-S3`);
+    // ── Phase 1: S1-S3 (scope, tech decomposition, DFD) ──
+    if (scopeStages.length > 0) {
+      log.info(`${tag} Phase 1: running stages ${scopeStages.join(",")}`);
+      params.onPhase?.(`phase 1 (${scopeStages.join("/").toUpperCase()} scope)`);
+      params.onActivity?.(`scoping ${scopeStages.join(", ")}`);
+      await runPhase(buildScopePrompt(params.maxElements, params.artifactDir), `${tag} Phase 1`);
     }
-  }
 
-  // ── Phase 3: narrative synthesis ──
-  if (hasS4) {
-    params.signal?.throwIfAborted();
-    const postS4 = readRandoriArtifacts(params.repoRoot, params.artifactDir);
-    const haveStageOutputs = postS4.s2Scope || postS4.s3Decomposition || postS4.s4Threats;
-    if (haveStageOutputs) {
-      log.info(`${tag} Phase 3: synthesising narrative layer`);
-      params.onPhase?.("phase 3 (narrative)");
-      params.onActivity?.("drafting attacker narrative");
-      await runPhase(buildNarrativePrompt(params.artifactDir), `${tag} Phase 3 (narrative)`);
-
-      // Retry once if the artifact is missing or incomplete.
+    // ── Phase 2: S4 (STRIDE threat scenarios with evidence) ──
+    if (hasS4) {
       params.signal?.throwIfAborted();
-      const narrativeAfter = readRandoriArtifacts(params.repoRoot, params.artifactDir).narrative;
-      const narrativeIssues = assessNarrativeArtifact(narrativeAfter);
-      if (narrativeIssues.length > 0) {
-        log.warn(
-          `${tag} Phase 3 narrative incomplete (${narrativeIssues.length} issue(s)); retrying once`,
-        );
-        params.onPhase?.("phase 3 (narrative retry)");
-        params.onActivity?.(`retrying narrative (${narrativeIssues.length} issue(s))`);
+      const scopeArtifacts = readRandoriArtifacts(params.repoRoot, params.artifactDir);
+      if (Object.keys(scopeArtifacts).length > 0) {
+        log.info(`${tag} Phase 2: running stage s4 (STRIDE threats)`);
+        params.onPhase?.("phase 2 (S4 threats)");
+        params.onActivity?.("enumerating STRIDE threats");
         await runPhase(
-          buildNarrativeRetryPrompt(params.artifactDir, narrativeIssues),
-          `${tag} Phase 3 retry`,
+          buildStridePrompt(params.maxThreats, params.artifactDir, params.previousModel),
+          `${tag} Phase 2 (S4)`,
         );
+      } else {
+        log.warn(`${tag} Skipping S4 — no scope artifacts from S1-S3`);
       }
-    } else {
-      log.warn(`${tag} Skipping narrative synthesis — no stage artifacts`);
     }
+
+    // ── Phase 3: narrative synthesis ──
+    if (hasS4) {
+      params.signal?.throwIfAborted();
+      const postS4 = readRandoriArtifacts(params.repoRoot, params.artifactDir);
+      const haveStageOutputs = postS4.s2Scope || postS4.s3Decomposition || postS4.s4Threats;
+      if (haveStageOutputs) {
+        log.info(`${tag} Phase 3: synthesising narrative layer`);
+        params.onPhase?.("phase 3 (narrative)");
+        params.onActivity?.("drafting attacker narrative");
+        await runPhase(buildNarrativePrompt(params.artifactDir), `${tag} Phase 3 (narrative)`);
+
+        // Retry once if the artifact is missing or incomplete.
+        params.signal?.throwIfAborted();
+        const narrativeAfter = readRandoriArtifacts(params.repoRoot, params.artifactDir).narrative;
+        const narrativeIssues = assessNarrativeArtifact(narrativeAfter);
+        if (narrativeIssues.length > 0) {
+          log.warn(
+            `${tag} Phase 3 narrative incomplete (${narrativeIssues.length} issue(s)); retrying once`,
+          );
+          params.onPhase?.("phase 3 (narrative retry)");
+          params.onActivity?.(`retrying narrative (${narrativeIssues.length} issue(s))`);
+          await runPhase(
+            buildNarrativeRetryPrompt(params.artifactDir, narrativeIssues),
+            `${tag} Phase 3 retry`,
+          );
+        }
+      } else {
+        log.warn(`${tag} Skipping narrative synthesis — no stage artifacts`);
+      }
+    }
+
+    // ── Collect ──
+    const artifacts = readRandoriArtifacts(params.repoRoot, params.artifactDir);
+    const merged = mergeRandoriStageOutputs(artifacts);
+
+    if (!merged) {
+      log.warn(`${tag} Randori produced no usable artifacts — returning empty threat model`);
+      const empty: ThreatModelDocument = {
+        version: "1.0",
+        dfd: { elements: [], trustBoundaries: [] },
+        threats: [],
+        summary: {
+          total: 0,
+          bySeverity: {},
+          byCategory: {} as ThreatModelDocument["summary"]["byCategory"],
+        },
+      };
+      return { document: empty, findings: [], artifacts, costUsd, empty: true };
+    }
+
+    const document = convertRandoriToThreatModel(merged);
+    if (!document) {
+      throw new Error(`${tag} Failed to convert Randori output to ThreatModelDocument`);
+    }
+
+    log.info(
+      `${tag} Converted ${document.threats.length} threats, ${document.dfd.elements.length} DFD elements`,
+    );
+
+    const findings = params.emitFindings
+      ? threatsToFindings(
+          document.threats,
+          params.repoRoot,
+          params.repoName,
+          params.findingThreshold,
+        )
+      : [];
+
+    return { document, findings, artifacts, costUsd, empty: false };
+  } finally {
+    if (budgetTimer) clearTimeout(budgetTimer);
   }
-
-  // ── Collect ──
-  const artifacts = readRandoriArtifacts(params.repoRoot, params.artifactDir);
-  const merged = mergeRandoriStageOutputs(artifacts);
-
-  if (!merged) {
-    log.warn(`${tag} Randori produced no usable artifacts — returning empty threat model`);
-    const empty: ThreatModelDocument = {
-      version: "1.0",
-      dfd: { elements: [], trustBoundaries: [] },
-      threats: [],
-      summary: {
-        total: 0,
-        bySeverity: {},
-        byCategory: {} as ThreatModelDocument["summary"]["byCategory"],
-      },
-    };
-    return { document: empty, findings: [], artifacts, costUsd, empty: true };
-  }
-
-  const document = convertRandoriToThreatModel(merged);
-  if (!document) {
-    throw new Error(`${tag} Failed to convert Randori output to ThreatModelDocument`);
-  }
-
-  log.info(
-    `${tag} Converted ${document.threats.length} threats, ${document.dfd.elements.length} DFD elements`,
-  );
-
-  const findings = params.emitFindings
-    ? threatsToFindings(document.threats, params.repoRoot, params.repoName, params.findingThreshold)
-    : [];
-
-  return { document, findings, artifacts, costUsd, empty: false };
 }
