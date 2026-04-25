@@ -65,9 +65,7 @@ export function SpinnerClockProvider({
 
   const value = React.useMemo(() => ({ frame, register }), [frame, register]);
 
-  return (
-    <SpinnerClockContext.Provider value={value}>{children}</SpinnerClockContext.Provider>
-  );
+  return <SpinnerClockContext.Provider value={value}>{children}</SpinnerClockContext.Provider>;
 }
 
 /**
