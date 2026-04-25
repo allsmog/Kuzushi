@@ -1079,6 +1079,13 @@ const MAX_AGENT_ACTIVITY_ENTRIES = 1000;
 /** Default TTL for stale-activity eviction (seconds). */
 const DEFAULT_AGENT_ACTIVITY_TTL_SEC = 600; // 10 minutes
 
+/**
+ * Cap on `shell.moduleRun.evidenceTail` length. The view renders the
+ * last ~8 rows, but we keep a few more in memory so the operator can
+ * see what arrived just before the visible window.
+ */
+const MAX_MODULE_RUN_EVIDENCE = 32;
+
 export class UIStore {
   private state: UIState;
   private listeners = new Set<Listener>();
@@ -1160,6 +1167,69 @@ export class UIStore {
    */
   setBreadcrumb(breadcrumb: UIState["breadcrumb"]): void {
     this.state = { ...this.state, breadcrumb };
+    this.notify();
+  }
+
+  /**
+   * Seed `shell.moduleRun` for the focused module — called on tool-start
+   * by the dispatcher when the module exposes a v3 home renderer. Drops
+   * any prior run for this module (operators only watch one at a time).
+   */
+  beginModuleRun(slice: ModuleRunSlice): void {
+    if (!this.state.shell) return;
+    this.state = {
+      ...this.state,
+      shell: { ...this.state.shell, moduleRun: slice },
+    };
+    this.notify();
+  }
+
+  /**
+   * Patch fields onto `shell.moduleRun` (status, costUsd, artifacts, etc.).
+   * No-op if no run is currently active.
+   */
+  patchModuleRun(patch: Partial<ModuleRunSlice>): void {
+    const shell = this.state.shell;
+    if (!shell?.moduleRun) return;
+    this.state = {
+      ...this.state,
+      shell: { ...shell, moduleRun: { ...shell.moduleRun, ...patch } },
+    };
+    this.notify();
+  }
+
+  /** Replace the steps array on the active module run (idempotent reorder). */
+  setModuleRunSteps(steps: ReadonlyArray<ModuleRunStep>): void {
+    const shell = this.state.shell;
+    if (!shell?.moduleRun) return;
+    this.state = {
+      ...this.state,
+      shell: { ...shell, moduleRun: { ...shell.moduleRun, steps } },
+    };
+    this.notify();
+  }
+
+  /**
+   * Push one row onto `shell.moduleRun.evidenceTail` — bounded ring buffer
+   * of the last `MAX_MODULE_RUN_EVIDENCE` rows. Caller decides whether the
+   * event belongs to the active run (we don't gate by toolName here).
+   */
+  pushModuleRunActivity(line: AgentActivityLine): void {
+    const shell = this.state.shell;
+    if (!shell?.moduleRun) return;
+    const next = [...shell.moduleRun.evidenceTail, line].slice(-MAX_MODULE_RUN_EVIDENCE);
+    this.state = {
+      ...this.state,
+      shell: { ...shell, moduleRun: { ...shell.moduleRun, evidenceTail: next } },
+    };
+    this.notify();
+  }
+
+  /** Drop the active module run snapshot. Used on `/clear`. */
+  clearModuleRun(): void {
+    const shell = this.state.shell;
+    if (!shell?.moduleRun) return;
+    this.state = { ...this.state, shell: { ...shell, moduleRun: null } };
     this.notify();
   }
 
