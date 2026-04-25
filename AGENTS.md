@@ -114,9 +114,14 @@ operator surface. It uses React + Ink for rendering and a single
 | `threat-stories`     | `/threats stories` or `3` | Attacker narrative cards + input-categories rail    |
 | `threat-scope`       | `/threats scope` or `4`   | Criticality buckets + out-of-scope + operator edits |
 | `threat-summary`     | `/threats summary` or `5` | Counts bar charts + drives + artifact paths         |
+| `module-run`         | tool start (auto)         | Live transcript: ⏺ header, ✓/→/○ steps, evidence, actors, findings |
+| `actor-detail`       | `1..4` from `module-run`  | Per-actor full transcript: ● Tool / ⎿ result / ✻ Thinking / ★ Finding |
+| `prompts-editor`     | `prompts` (focused module)| Per-module prompts table + edit/show/diff/reset/set verbs |
 
 Press `1..5` at any threat view to cycle without retyping the verb.
-`/back` steps up one level (`finding → findings → module → catalog`).
+Press `1..4` in `module-run` to drill into the matching actor's transcript.
+`/back` steps up one level (`finding → findings → module → catalog`,
+`actor-detail → module-run → module`).
 
 ### Operator verbs — full list
 
@@ -134,6 +139,7 @@ Press `1..5` at any threat view to cycle without retyping the verb.
 | `/threats [sub]`        | Threat-model views (see table above); bare = summary|
 | `/threats edit`         | Open the full `ThreatModelEditor` (expert)          |
 | `/since <ref>`          | Diff-aware view: findings scoped to git-changed files |
+| `/actor <n\|fp>`        | Drill into the per-actor transcript from `module-run` |
 
 #### Natural-language planner (Phase A.1)
 
@@ -147,9 +153,15 @@ Press `1..5` at any threat view to cycle without retyping the verb.
 
 | Command                 | What it does                                        |
 | ----------------------- | --------------------------------------------------- |
+| `/prompts`              | Open the per-module prompts editor (`prompts-editor` view) |
 | `/prompt edit <verb>`   | Open `$EDITOR` on per-module prompt override        |
 | `/prompt show <verb>`   | Show effective prompt + source (file/inline/default)|
+| `/prompt diff <verb>`   | Show the override file path for `git diff` vs builtin |
+| `/prompt reset <verb>`  | Delete the override file and revert to default      |
 | `/show prompts`         | Cross-module audit table of every `*_PROMPT` key    |
+
+Bare verbs inside `kuzushi/<module>/prompts>`: `edit <name>` /
+`show <name>` / `diff <name>` / `reset <name>` / `set <name> "..."`.
 
 #### Replay / trace (Phase A.3)
 
