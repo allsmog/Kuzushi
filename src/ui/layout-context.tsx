@@ -118,7 +118,28 @@ export function deriveNavigation(
     state.mode === "running" ? "Scan Run" : state.mode === "summary" ? "Summary" : "Preflight";
   const breadcrumbs = [state.repoName || "workspace", title];
   const status = [state.phase];
-  return { title, breadcrumbs, status };
+  // Long-form English description of the active phase, surfaced as the
+  // chrome subtitle so it renders exactly once at the top of the live area
+  // (instead of inside the scrolling pipeline tree, where Ink would commit
+  // it to scrollback once the tree exceeds terminal height — producing two
+  // visible "now …" blocks).
+  const subtitle = state.mode === "running" ? runningPhaseSubtitle(state.phase) : undefined;
+  return subtitle ? { title, breadcrumbs, status, subtitle } : { title, breadcrumbs, status };
+}
+
+function runningPhaseSubtitle(phase: string): string | undefined {
+  switch (phase) {
+    case "scanning":
+      return "mapping the codebase and hunting for candidates";
+    case "triaging":
+      return "triaging findings with the agent";
+    case "verifying":
+      return "verifying exploitability";
+    case "poc":
+      return "generating PoC harnesses";
+    default:
+      return undefined;
+  }
 }
 
 /** Map the current threat tab onto a human label that fits the title slot. */

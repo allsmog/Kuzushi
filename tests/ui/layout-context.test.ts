@@ -94,4 +94,40 @@ describe("deriveNavigation", () => {
     expect(nav.breadcrumbs).toEqual(["repo", "Scan Run"]);
     expect(nav.status).toEqual(["triaging"]);
   });
+
+  it("surfaces a long-form running-mode subtitle for known phases", () => {
+    const scanning = deriveNavigation({
+      mode: "running",
+      phase: "scanning",
+      repoName: "repo",
+      shell: undefined,
+    });
+    expect(scanning.subtitle).toBe("mapping the codebase and hunting for candidates");
+
+    const triaging = deriveNavigation({
+      mode: "running",
+      phase: "triaging",
+      repoName: "repo",
+      shell: undefined,
+    });
+    expect(triaging.subtitle).toBe("triaging findings with the agent");
+  });
+
+  it("omits subtitle for idle/done running phases and non-running modes", () => {
+    const idle = deriveNavigation({
+      mode: "running",
+      phase: "idle",
+      repoName: "repo",
+      shell: undefined,
+    });
+    expect(idle.subtitle).toBeUndefined();
+
+    const summary = deriveNavigation({
+      mode: "summary",
+      phase: "scanning",
+      repoName: "repo",
+      shell: undefined,
+    });
+    expect(summary.subtitle).toBeUndefined();
+  });
 });

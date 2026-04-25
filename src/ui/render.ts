@@ -86,7 +86,12 @@ export async function createUIRenderer(options: CreateUIRendererOptions = {}): P
     const { render } = await import("ink");
     const { App } = await import("./App.js");
     const { createElement } = await import("react");
-    const instance = render(createElement(App, { store }));
+    // Disable Ink's default exit-on-Ctrl+C. Our shell owns the abort path
+    // (App.tsx running-mode handler + shell.ts SIGINT + /dev/tty reader),
+    // and Ink's default would unmount the tree before our handler can call
+    // `shellAbort`, leaving the scan running in the background while the
+    // operator's prompt looks frozen.
+    const instance = render(createElement(App, { store }), { exitOnCtrlC: false });
     return {
       store,
       cleanup: () => {

@@ -49,13 +49,6 @@ interface PipelineIndicatorProps {
   agentActivity?: Map<string, AgentActivityLine[]>;
   /** Estimated time remaining in ms for the active phase. */
   etaMs?: number;
-  /**
-   * Optional English phase label shown above the stage tree (Ink UI v2
-   * screen 03). Example: "hunting the top threats". When undefined the
-   * header is skipped — preserves backward compatibility for callers that
-   * haven't wired the new header yet.
-   */
-  phase?: { title: string; detail?: string };
 }
 
 const MAX_VISIBLE_RESULTS = 5;
@@ -91,7 +84,6 @@ export const PipelineIndicator = React.memo(function PipelineIndicator({
   results,
   agentActivity,
   etaMs,
-  phase,
 }: PipelineIndicatorProps): React.ReactElement | null {
   const hasActiveStage = stages.some((stage) => stage.status === "active");
   const nowMs = useUiNow(hasActiveStage ? 5000 : null);
@@ -100,7 +92,6 @@ export const PipelineIndicator = React.memo(function PipelineIndicator({
 
   return (
     <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.md}>
-      {phase ? <PhaseHeader phase={phase} /> : null}
       {stages.map((stage, stageIdx) => {
         const isLast = stageIdx === stages.length - 1;
         const hasContent =
@@ -560,28 +551,4 @@ function formatToolLine(line: AgentActivityLine): string {
         ? `${tokens.dangerStrong(icons.error)} ${tokens.strong(line.detail.slice(0, 120))}`
         : "";
   }
-}
-
-// --- Phase header (Ink UI v2 screen 03) ---
-
-/**
- * A single "now" band above the stage tree that names the current phase in
- * plain English. Kept tiny on purpose — the tree below carries the detail.
- */
-function PhaseHeader({ phase }: { phase: { title: string; detail?: string } }): React.ReactElement {
-  return (
-    <Box flexDirection="column" marginBottom={SPACING.sm}>
-      <Text>
-        {tokens.label("now")}
-        {"   "}
-        {tokens.warn(phase.title)}
-      </Text>
-      {phase.detail ? (
-        <Text>
-          {"        "}
-          {tokens.muted(phase.detail)}
-        </Text>
-      ) : null}
-    </Box>
-  );
 }

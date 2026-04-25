@@ -71,6 +71,8 @@ export const threatModelRandoriTask: AgentTask<
       logTag: "[threat-model-randori]",
       onPhase: publishPhase,
       onActivity: publishActivity,
+      wallClockBudgetMs: cfg.wallClockBudgetMs,
+      ...(cfg.effort ? { effort: cfg.effort } : {}),
       ...(context.signal ? { signal: context.signal } : {}),
     });
 
