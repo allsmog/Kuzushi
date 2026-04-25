@@ -847,6 +847,54 @@ describe("context system", () => {
     expect(result?.output).toContain("SSRF via webhook");
   });
 
+  it("/context adopts the loaded context snapshot target", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    opts.target = undefined;
+    const shellState = {
+      ...createShellState(module.tools.map((t) => t.name)),
+      contextSnapshot: mockSnapshot,
+    };
+    const ctx = { focusedModule: null };
+
+    const result = __shellInternals.handleLocalCommand("/context", core, opts, ctx, shellState);
+    expect(result?.output).toContain("Context:");
+    expect(opts.target).toBe("/resolved/repo");
+  });
+
+  it("/context dfd routes to the context-backed DFD without an explicit target", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    opts.target = undefined;
+    const shellState = {
+      ...createShellState(module.tools.map((t) => t.name)),
+      contextSnapshot: mockSnapshot,
+    };
+    const ctx = { focusedModule: null };
+
+    const result = __shellInternals.handleLocalCommand("/context dfd", core, opts, ctx, shellState);
+    expect(result?.output).toContain("data flow diagram");
+    expect(result?.shellStateUpdater?.(shellState).threatTab).toBe("dfd");
+    expect(opts.target).toBe("/resolved/repo");
+  });
+
+  it("dfd in the focused context module opens the context-backed DFD", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    opts.target = undefined;
+    const shellState = {
+      ...createShellState(module.tools.map((t) => t.name)),
+      focusedModule: "context",
+      contextSnapshot: mockSnapshot,
+    };
+    const ctx = { focusedModule: "context" };
+
+    const result = __shellInternals.handleLocalCommand("dfd", core, opts, ctx, shellState);
+    expect(result?.output).toContain("data flow diagram");
+    expect(result?.shellStateUpdater?.(shellState).threatTab).toBe("dfd");
+    expect(opts.target).toBe("/resolved/repo");
+  });
+
   it("/context without snapshot dispatches sast:context tool", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
@@ -907,6 +955,36 @@ describe("context system", () => {
     );
   });
 
+  it("/context regen <slice> uses the loaded context snapshot target", async () => {
+    const { core, module, executeTool } = await createMockCore();
+    const opts = createShellOptions();
+    opts.target = undefined;
+    const shellState = {
+      ...createShellState(module.tools.map((t) => t.name)),
+      contextSnapshot: mockSnapshot,
+    };
+    const ctx = { focusedModule: null };
+
+    const result = __shellInternals.handleLocalCommand(
+      "/context regen dfd",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(result?.executedToolName).toBe("context:build");
+    await result?.asyncExecute?.();
+    expect(executeTool).toHaveBeenCalledWith(
+      "context:build",
+      expect.objectContaining({
+        target: "/resolved/repo",
+        scope: "dfd",
+        preserveUserEdits: true,
+      }),
+      expect.anything(),
+    );
+  });
+
   it("/since reset clears diff scope without requiring a target", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
@@ -956,6 +1034,21 @@ describe("context system", () => {
     const result = __shellInternals.handleLocalCommand("/threats dfd", core, opts, ctx, shellState);
     expect(result?.shellStateUpdater?.(shellState).threatTab).toBe("dfd");
     await expect(result?.asyncExecute?.()).resolves.toContain("Showing data flow diagram");
+  });
+
+  it("/threats dfd can use the loaded context snapshot target", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    opts.target = undefined;
+    const shellState = {
+      ...createShellState(module.tools.map((t) => t.name)),
+      contextSnapshot: mockSnapshot,
+    };
+    const ctx = { focusedModule: null };
+
+    const result = __shellInternals.handleLocalCommand("/threats dfd", core, opts, ctx, shellState);
+    expect(result?.shellStateUpdater?.(shellState).threatTab).toBe("dfd");
+    expect(opts.target).toBe("/resolved/repo");
   });
 
   it("/context build enters the Live Build view and seeds contextBuild state", async () => {

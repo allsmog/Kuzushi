@@ -173,6 +173,11 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   },
   { syntax: "/context edit", description: "Review/edit scan context", group: "scope" },
   {
+    syntax: "/context dfd",
+    description: "Open the context-backed data flow diagram",
+    group: "scope",
+  },
+  {
     syntax: "/context regen <slice>",
     description: "Regenerate a generated context slice (dfd, stride, stories, scenarios, etc.)",
     group: "scope",
