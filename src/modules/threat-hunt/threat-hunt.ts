@@ -26,12 +26,7 @@ import {
   resolveDefaultReadOnlyTools,
 } from "../../agent-runtime/execution.js";
 import type { AgentEffort } from "../../agent-runtime/types.js";
-import { resolveThreatModelOutput } from "../../agents/tasks/threat-model-guidance.js";
-import type {
-  DfdElement,
-  StrideThreat,
-  ThreatModelDocument,
-} from "../../agents/tasks/threat-modeling/types.js";
+import type { DfdElement, StrideThreat } from "../../agents/tasks/threat-modeling/types.js";
 import { createEvent } from "../../bus/helpers.js";
 import type { RunContext } from "../../bus/run-context.js";
 import { createLogger } from "../../logger.js";
@@ -52,6 +47,7 @@ import { resolvePromptValue } from "../sast/prompts.js";
 import { targetProperty } from "../sast/schema-fragments.js";
 import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
 import { requireDag } from "../types.js";
+import { type ActorWithThreats, extractActorsWithThreats } from "./selectors.js";
 
 const log = createLogger({ stage: "threat-hunt" });
 
@@ -73,11 +69,6 @@ interface ThreatHuntConfig {
   maxConcurrentHunts: number;
   maxTurnsPerHunt: number;
   promptOverride?: string;
-}
-
-interface ActorWithThreats {
-  actor: DfdElement;
-  threats: StrideThreat[];
 }
 
 /**
@@ -171,46 +162,6 @@ async function resolveConfig(input: unknown, ctx: ExecutionContext): Promise<Thr
     thinkingDisabled: readThinkingDisabled(ctx, p) ?? false,
     ...(promptOverride ? { promptOverride } : {}),
   };
-}
-
-/**
- * Extract external-entity actors from the Randori threat model output,
- * paired with their HIGH/CRITICAL threats. Actors with no high-severity
- * threats are excluded — their hunt would be speculative. Sorted by
- * threat severity (most critical first).
- */
-function extractActorsWithThreats(upstreamOutputs: ReadonlyMap<string, unknown>): {
-  prioritized: ActorWithThreats[];
-  allActors: DfdElement[];
-} {
-  const raw = resolveThreatModelOutput(upstreamOutputs as Map<string, unknown>);
-  if (!isRecord(raw) || !isRecord(raw["document"])) return { prioritized: [], allActors: [] };
-  const doc = raw["document"] as unknown as ThreatModelDocument;
-  if (!doc.dfd?.elements || !Array.isArray(doc.dfd.elements))
-    return { prioritized: [], allActors: [] };
-
-  const allActors = doc.dfd.elements.filter((el) => el.type === "external-entity");
-  const threats: StrideThreat[] = Array.isArray(doc.threats) ? doc.threats : [];
-
-  const highThreats = new Map<string, StrideThreat[]>();
-  for (const threat of threats) {
-    if (threat.impact !== "critical" && threat.impact !== "high") continue;
-    const bucket = highThreats.get(threat.elementId) ?? [];
-    bucket.push(threat);
-    highThreats.set(threat.elementId, bucket);
-  }
-
-  const prioritized = allActors
-    .filter((el) => (highThreats.get(el.id)?.length ?? 0) > 0)
-    .map((el) => ({ actor: el, threats: highThreats.get(el.id)! }))
-    .sort((a, b) => {
-      const critA = a.threats.filter((t) => t.impact === "critical").length;
-      const critB = b.threats.filter((t) => t.impact === "critical").length;
-      if (critB !== critA) return critB - critA;
-      return b.threats.length - a.threats.length;
-    });
-
-  return { prioritized, allActors };
 }
 
 function buildPrompt(actor: DfdElement, threats: StrideThreat[]): string {
@@ -459,7 +410,14 @@ async function runActorHunt(
     structuredOutput != null || resultText
       ? parseFindingOutput(structuredOutput ?? resultText)
       : { findings: [] };
-  return { findings: parsed.findings, costUsd };
+  // Stamp the per-actor fingerprint on each finding so `selectFindings` can
+  // carry it through to the final `Finding[]` (ActorTranscriptView reads it
+  // to synthesize ★ Finding rows for one actor without re-parsing strings).
+  const findingsWithActor = parsed.findings.map((f) => ({
+    ...f,
+    actorFingerprint: fingerprint,
+  }));
+  return { findings: findingsWithActor, costUsd };
 }
 
 /**

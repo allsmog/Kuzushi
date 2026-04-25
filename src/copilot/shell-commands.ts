@@ -97,6 +97,11 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
     group: "planner",
   },
   {
+    syntax: "/prompts",
+    description: "Open the prompts editor for the focused module",
+    group: "prompt",
+  },
+  {
     syntax: "/prompt edit <verb>",
     description: "Open the operator system-prompt override in $EDITOR",
     group: "prompt",

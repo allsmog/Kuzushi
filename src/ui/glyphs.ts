@@ -28,6 +28,19 @@ export const OUTCOME_GLYPH = {
   abort: "·", // ·
 } as const;
 
+/** `✻` — assistant thinking marker for the actor-detail transcript. */
+export const THINKING_GLYPH = "✻";
+
+/** `★` — finding marker for the actor-detail transcript. */
+export const FINDING_GLYPH = "★";
+
+/** Step-row glyphs for the live ModuleRunView (✓ done, → running, ○ pending). */
+export const STEP_GLYPH = {
+  done: "✓",
+  running: "→",
+  pending: "○",
+} as const;
+
 export type BorderVariant = "rounded" | "square";
 
 export const BORDER_GLYPHS: Record<
