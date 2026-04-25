@@ -8,6 +8,7 @@
 import type { ThreatModelDocument } from "../agents/tasks/threat-modeling/types.js";
 import type { ShellPlan } from "../copilot/nl-planner.js";
 import type { ModuleCategory, ModuleRank } from "../modules/types.js";
+import type { ThreatModelPatchProposal } from "../threat-model-patch.js";
 
 // Re-export so the UI layer can `import type { ShellPlan } from "../state.js"`
 // without cross-cutting into `src/copilot/`.
@@ -459,14 +460,16 @@ export interface ShellHistoryEntry {
   abortStatus?: ShellTaskStoryState["abortStatus"];
   /**
    * For `tool-call` while `running`: rolling tail of activity lines
-   * (latest at index 0, max 5). Shown beneath the `⏺` header as dim
-   * `⎿  <activity>` lines until the tool resolves.
+   * (latest at index 0). Shown beneath the `⏺` header as dim `⎿ <activity>`
+   * lines until the tool resolves.
    *
    * Each row carries a stable `id` so Ink/React can keep line identity
    * across prepends; this avoids remount churn/flicker while progress
    * pulses stream in.
    */
   liveActivities?: Array<{ id: string; text: string }>;
+  /** Older live activity lines dropped from the bounded in-memory tail. */
+  liveActivitiesDropped?: number;
   /**
    * For `tool-progress`: status hint — success/failure/stale colorization.
    *
@@ -523,6 +526,10 @@ export interface ContextSnapshot {
   threatModel?: unknown;
   /** ThreatScenario[] from threat-scenario-build. */
   scenarios?: unknown[];
+  /** Generated slices included in the most recent context operation. */
+  generatedSlices?: ContextGenerationSlice[];
+  /** Slices that should be considered stale after a partial regeneration. */
+  staleSlices?: ContextGenerationSlice[];
 
   // --- Monorepo context (discovery=modules) ---
   /** Per-module contexts, keyed by relative path (e.g. "api/", "auth-service/"). */
@@ -553,6 +560,17 @@ export type ShellView =
   | "task-story";
 
 export type ThreatTab = "dfd" | "stride" | "stories" | "scope" | "summary";
+
+export type ContextGenerationSlice =
+  | "all"
+  | "repo"
+  | "enrichment"
+  | "app-model"
+  | "dfd"
+  | "stride"
+  | "stories"
+  | "scope"
+  | "scenarios";
 
 export type FindingScope =
   | { kind: "all" }
@@ -800,6 +818,14 @@ export interface ShellState {
   threatModel?: ThreatModelDocument | null;
   /** Selected tab when shellView === "threats". */
   threatTab?: ThreatTab;
+  /** Selected DFD node/flow id for the attack-surface workspace. */
+  threatDfdSelection?: string;
+  /** True when the `/context regen` palette is open in threat/context views. */
+  contextRegenPaletteOpen?: boolean;
+  /** Pending AI-produced threat-model patch awaiting explicit accept/reject. */
+  pendingThreatPatch?: ThreatModelPatchProposal | null;
+  /** True when accepted in-memory edits have not yet been written. */
+  threatModelDirty?: boolean;
   /**
    * Path the threat model snapshot came from (`.kuzushi/threat-model.json`
    * or a per-run fallback), used in the "loaded from … (modified Xh ago)"

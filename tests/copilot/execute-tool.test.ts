@@ -8,7 +8,12 @@ import { CopilotCore } from "../../src/copilot/core.js";
 import { AuditTrail } from "../../src/governance/audit.js";
 import { GovernanceEnforcer } from "../../src/governance/enforcer.js";
 import { defaultScopePolicy } from "../../src/governance/types.js";
-import type { CopilotModule, ModuleTool, ToolResult } from "../../src/modules/types.js";
+import type {
+  CopilotModule,
+  ExecutionContext,
+  ModuleTool,
+  ToolResult,
+} from "../../src/modules/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
 
 function tool(name: string, impl: () => Promise<ToolResult> | ToolResult): ModuleTool {
@@ -102,6 +107,50 @@ describe("CopilotCore.executeTool", () => {
     expect(result.ok).toBe(true);
     expect(result.output).toBe("2+2=4");
     expect(result.costUsd).toBe(0.01);
+  });
+
+  it("passes the configured runtime through to context module tools", async () => {
+    const runtime = {
+      id: "pi-ai",
+      async *query() {},
+      createSession() {
+        return {
+          async *query() {},
+          close() {},
+        };
+      },
+    } as AgentRuntime;
+    const executeSpy = vi.fn(async (_input: unknown, ctx: ExecutionContext) => ({
+      ok: true,
+      output: ctx.runtime.id,
+    }));
+    const core = new CopilotCore({
+      runtime,
+      bus: fakeBus,
+      config: { ...fakeConfig(), agentRuntimeBackend: "pi-ai" },
+      dataDir: tmp,
+      loadCoreSast: false,
+    });
+    core.registry.register(
+      module("context", [
+        {
+          name: "context:build",
+          description: "fake context build",
+          inputSchema: { type: "object" },
+          headless: true,
+          execute: executeSpy,
+        },
+      ]),
+    );
+
+    const result = await core.executeTool("context:build", {});
+
+    expect(result.ok).toBe(true);
+    expect(result.output).toBe("pi-ai");
+    expect(executeSpy).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ runtime: expect.objectContaining({ id: "pi-ai" }) }),
+    );
   });
 
   it("canonicalizes input keys against the tool schema before validation and execution", async () => {

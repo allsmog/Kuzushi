@@ -94,7 +94,13 @@ function AppInner({ store }: AppProps): React.ReactElement {
       summary: s.summary,
       qualityGate: s.qualityGate,
       review: s.review,
-      shell: s.shell,
+      hasShell: Boolean(s.shell),
+      shellFocusedModule: s.shell?.focusedModule ?? null,
+      shellView: s.shell?.shellView ?? null,
+      shellThreatTab: s.shell?.threatTab ?? null,
+      shellProcessing: s.shell?.processing ?? false,
+      shellWorkspace: s.shell?.workspace ?? null,
+      shellTarget: s.shell?.target ?? null,
     }),
     shallowEqual,
   );
@@ -144,17 +150,37 @@ function AppInner({ store }: AppProps): React.ReactElement {
         mode: routing.mode,
         phase: routing.phase,
         repoName: routing.repoName,
-        shell: routing.shell,
+        shell: routing.hasShell
+          ? {
+              focusedModule: routing.shellFocusedModule,
+              shellView: routing.shellView ?? "catalog",
+              threatTab: routing.shellThreatTab ?? undefined,
+              processing: routing.shellProcessing,
+              workspace: routing.shellWorkspace,
+              target: routing.shellTarget,
+            }
+          : null,
       }),
     }),
-    [routing.mode, routing.phase, routing.repoName, routing.shell],
+    [
+      routing.mode,
+      routing.phase,
+      routing.repoName,
+      routing.hasShell,
+      routing.shellFocusedModule,
+      routing.shellView,
+      routing.shellThreatTab,
+      routing.shellProcessing,
+      routing.shellWorkspace,
+      routing.shellTarget,
+    ],
   );
 
   return (
     <LayoutProvider value={layoutContext}>
       <AppLayout footer={<KeybindFooter />}>
         {routing.mode !== "shell" && <Banner />}
-        {routing.mode === "shell" && routing.shell && <CopilotShell store={store} />}
+        {routing.mode === "shell" && routing.hasShell && <CopilotShell store={store} />}
         {/*
          * One-shot banners — config / resume / skip-info — share a single
          * <Static> region. Multiple Static regions in one Ink tree are

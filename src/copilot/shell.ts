@@ -17,6 +17,7 @@ import {
 import { homedir } from "node:os";
 import path from "node:path";
 import { killAllClaudeSubprocesses } from "../agent-runtime/claude.js";
+import { configureAgentRuntime } from "../agent-runtime/index.js";
 import { clampHint, summarizeInput } from "../agent-runtime/tool-summary.js";
 import type { AgentQueryOptions, AgentRuntime, AgentSession } from "../agent-runtime/types.js";
 import { createBus } from "../bus/index.js";
@@ -25,11 +26,13 @@ import { JobManager } from "../jobs/manager.js";
 import { formatContextSummary } from "../modules/core-sast.js";
 import type { ModuleInfo, ModuleTool } from "../modules/types.js";
 import { SessionManager } from "../sessions/manager.js";
+import { applyThreatModelPatch, proposeThreatModelPatch } from "../threat-model-patch.js";
 import type { KuzushiConfig } from "../types.js";
 import { formatUnknownModule, formatUnknownTool, formatUnknownVerb } from "../ui/error-format.js";
 import { formatDuration } from "../ui/format.js";
 import { CTRL_C_ARM_WINDOW_MS } from "../ui/shell-keybinds.js";
 import type {
+  ContextGenerationSlice,
   ContextSnapshot,
   ShellHistoryEntry,
   ShellModuleCard,
@@ -105,9 +108,9 @@ const SHELL_ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Bash", "LS"];
 const SHELL_HISTORY_FILENAME = "shell-history.json";
 const MAX_SHELL_HISTORY = 1000;
 const DEFAULT_NO_SESSION_MESSAGE =
-  "Copilot disabled — no Anthropic credentials. Run /auth to set them, export ANTHROPIC_API_KEY, or drop a key in ./.kuzushi/credentials.json.";
+  "Copilot disabled — no interactive agent session is available. Run /backend pi-ai or /backend claude, then /auth to set credentials.";
 const CREDENTIALS_CANCELLED_MESSAGE =
-  "Copilot disabled. Run /auth to enable it later, set ANTHROPIC_API_KEY, or save a key to ./.kuzushi/credentials.json.";
+  "Copilot disabled. Run /auth to enable it later, export a provider API key, or save credentials to ./.kuzushi/credentials.json.";
 const CANCELLED_TOOL_MESSAGE = "Cancelled active operation.";
 const CANCELLED_AGENT_MESSAGE = "Cancelled active request.";
 const ABORT_EXIT_ARM_DELAY_MS = 75;
@@ -311,6 +314,24 @@ export function resolveThreatView(
     default:
       return undefined;
   }
+}
+
+const CONTEXT_REGEN_SLICES: ReadonlyArray<ContextGenerationSlice> = [
+  "all",
+  "repo",
+  "enrichment",
+  "app-model",
+  "dfd",
+  "stride",
+  "stories",
+  "scope",
+  "scenarios",
+];
+
+function parseContextRegenSlice(value: string | undefined): ContextGenerationSlice | undefined {
+  return CONTEXT_REGEN_SLICES.includes(value as ContextGenerationSlice)
+    ? (value as ContextGenerationSlice)
+    : undefined;
 }
 
 /**
@@ -644,18 +665,29 @@ type CredentialApplyResult = {
 };
 
 /**
- * Rebuild `opts.runtime` so it picks up the latest config + env. The Anthropic
- * SDK client is constructed once in ClaudeAgentRuntime's constructor with the
- * apiKey/baseURL captured at that moment — without this rebuild, credentials
- * supplied later via /auth never reach the SDK.
+ * Rebuild `opts.runtime` so it picks up the latest config + env. Runtime
+ * instances capture credentials at construction, so credentials supplied later
+ * via /auth need a fresh backend instance. Keep the configured backend intact:
+ * pi-ai stays pi-ai, claude stays claude.
  */
 async function rebuildShellRuntime(opts: ShellOptions): Promise<void> {
-  const { ClaudeAgentRuntime } = await import("../agent-runtime/claude.js");
-  const { LoggingAgentRuntime } = await import("../agent-runtime/logging-runtime.js");
+  opts.runtime = configureAgentRuntime(opts.config);
+}
+
+async function hasActiveShellCredentials(opts: ShellOptions): Promise<boolean> {
   const { resolveActiveCredentials } = await import("../config.js");
   const active = resolveActiveCredentials(opts.config);
-  const creds = Object.keys(active).length > 0 ? active : undefined;
-  opts.runtime = new LoggingAgentRuntime(new ClaudeAgentRuntime(creds));
+  const backend = opts.config.agentRuntimeBackend ?? "pi-ai";
+
+  if (backend === "claude") {
+    const { hasAnthropicCredentials } = await import("../ui/setup.js");
+    return hasAnthropicCredentials(active.apiKey);
+  }
+
+  if (active.apiKey || active.baseUrl) return true;
+
+  const { hasAnyProviderCredentials } = await import("../ui/setup.js");
+  return hasAnyProviderCredentials();
 }
 
 /** Merge `patch` into the active backend's slot in agentRuntimeConfig. */
@@ -1218,6 +1250,7 @@ function finalizeRunningToolCalls(
         ...(status === "abort" ? { abortStatus: "aborted" as const } : {}),
         ...(resultOutput ? { resultOutput } : {}),
         liveActivities: undefined,
+        liveActivitiesDropped: undefined,
       };
     });
     return mutated ? { ...shell, history: next } : shell;
@@ -1226,14 +1259,10 @@ function finalizeRunningToolCalls(
 
 /**
  * Push a short activity line onto a running tool-call's `liveActivities`
- * tail (newest at index 0, max 5). Silently no-ops when the id isn't a
- * running tool-call.
- *
- * Cap bumped from 3 → 5 in Phase 15 so subprocess stdout preview (via
- * `ctx.reportOutput`) has room to show several streaming lines without
- * starving `task:activity` labels.
+ * tail (newest at index 0). Silently no-ops when the id isn't a running
+ * tool-call.
  */
-const LIVE_ACTIVITY_CAP = 5;
+const LIVE_ACTIVITY_CAP = 64;
 const LIVE_ACTIVITY_TEXT_CAP = 80;
 let liveActivitySeq = 0;
 function pushLiveActivity(store: UIStore, id: string, text: string): void {
@@ -1248,12 +1277,15 @@ function pushLiveActivity(store: UIStore, id: string, text: string): void {
     // Dedupe consecutive identical text — no point pushing "scanning X"
     // three times in a row.
     if (prev[0]?.text === trimmed) return shell;
-    const nextActivities = [
-      { id: `la-${Date.now()}-${liveActivitySeq++}`, text: trimmed },
-      ...prev,
-    ].slice(0, LIVE_ACTIVITY_CAP);
+    const rawActivities = [{ id: `la-${Date.now()}-${liveActivitySeq++}`, text: trimmed }, ...prev];
+    const dropped = Math.max(0, rawActivities.length - LIVE_ACTIVITY_CAP);
+    const nextActivities = rawActivities.slice(0, LIVE_ACTIVITY_CAP);
     const next = shell.history.slice();
-    next[idx] = { ...entry, liveActivities: nextActivities };
+    next[idx] = {
+      ...entry,
+      liveActivities: nextActivities,
+      liveActivitiesDropped: (entry.liveActivitiesDropped ?? 0) + dropped,
+    };
     return { ...shell, history: next };
   });
 }
@@ -1480,9 +1512,9 @@ function markAbortSettled(store: UIStore, reason: string): void {
  * below the Ink frame, which is exactly what the user reported.
  *
  * Calling this after every turn edge (abort handler, finally block around
- * driver.handle / agent query) closes the window. Stock Ink doesn't do
- * this; Claude Code's custom Ink does (see
- * yasasbanukaofficial/claude-code/src/ink/components/App.tsx rawModeEnabledCount).
+ * driver.handle / agent query) closes the window. Do not trust
+ * `stdin.isRaw`: subprocesses can change terminal mode through another
+ * `/dev/tty` fd without updating Node's cached flag.
  */
 /**
  * Opt-in tracer for the abort path. Enable with `KUZUSHI_ABORT_DEBUG=1`.
@@ -1504,7 +1536,6 @@ function ensureRawMode(): void {
     setRawMode?: (mode: boolean) => void;
   };
   if (!stdin.isTTY || !stdin.setRawMode) return;
-  if (stdin.isRaw) return;
   try {
     stdin.setRawMode(true);
   } catch {
@@ -1797,12 +1828,18 @@ function appendProgressEvent(
         if (entry.type === "tool-call" && entry.status === "running") {
           const prev = entry.liveActivities ?? [];
           if (prev[0]?.text !== trimmedLiveActivity) {
-            const nextActivities = [
+            const rawActivities = [
               { id: `la-${now}-${liveActivitySeq++}`, text: trimmedLiveActivity },
               ...prev,
-            ].slice(0, LIVE_ACTIVITY_CAP);
+            ];
+            const dropped = Math.max(0, rawActivities.length - LIVE_ACTIVITY_CAP);
+            const nextActivities = rawActivities.slice(0, LIVE_ACTIVITY_CAP);
             const nextHistory = nextShell.history.slice();
-            nextHistory[idx] = { ...entry, liveActivities: nextActivities };
+            nextHistory[idx] = {
+              ...entry,
+              liveActivities: nextActivities,
+              liveActivitiesDropped: (entry.liveActivitiesDropped ?? 0) + dropped,
+            };
             nextShell = { ...nextShell, history: nextHistory };
           }
         }
@@ -2217,6 +2254,7 @@ async function startInkShell(
         // Clear the live tail — the tool is done, scrollback already has
         // the per-activity entries for the audit trail.
         liveActivities: undefined,
+        liveActivitiesDropped: undefined,
       });
       updateShell(store, (shell) => ({
         ...shell,
@@ -2456,15 +2494,13 @@ async function startInkShell(
     if (!acceptProgressRunId(runId)) return;
     const description = event.payload.description;
     const isSubagentTool = looksLikeSubagentToolLine(description);
-    // All sub-agent tool-echo lines (bare tool-call-start "Read", assistant
-    // `tool_use` hint "Read · path", AND the eventual tool-summary
-    // "Read path (42 lines)") are kept out of permanent scrollback — the
-    // summary now attaches to the parent `⏺` entry as its `resultOutput`
-    // (see the `case "tool-summary"` handler below), and the running
-    // `liveActivities` tail still ticks on every sub-step via the
-    // appendProgressEvent calls this subscriber makes regardless of
-    // `skipHistory`. Result: one row per tool call instead of three.
-    const skipHistory = isSubagentTool;
+    // `task:activity` is live-tail material, not durable transcript. Keep
+    // sub-agent tool echoes and free-form module pulses such as "scanning
+    // repo structure" under the running `⏺` row / task details only. Durable
+    // story beats come from phase-progress, artifacts, warnings, aborts, and
+    // final results, which prevents the context build from printing both old
+    // `⎿ activity` rows and curated story rows for the same work.
+    const skipHistory = true;
     appendProgressEvent(store, {
       text: description,
       activity: description,
@@ -2752,11 +2788,8 @@ async function startInkShell(
   };
 
   const lazyPromptForCredentials = async (): Promise<boolean> => {
-    const isClaudeBackend = (opts.config.agentRuntimeBackend ?? "pi-ai") === "claude";
-    if (!isClaudeBackend) return false;
-    const { hasAnthropicCredentials, runCredentialPrompt } = await import("../ui/setup.js");
-    const { resolveActiveCredentials } = await import("../config.js");
-    if (hasAnthropicCredentials(resolveActiveCredentials(opts.config).apiKey)) {
+    const { runCredentialPrompt } = await import("../ui/setup.js");
+    if (await hasActiveShellCredentials(opts)) {
       // Creds appeared from env between calls — clear the disabled flag.
       assistantDisabledReason = undefined;
       credentialsMissing = false;
@@ -3329,6 +3362,7 @@ async function startInkShell(
                 patchHistoryEntry(store, entry.id, {
                   status: "ok",
                   liveActivities: undefined,
+                  liveActivitiesDropped: undefined,
                   ...(firstSummaryLine ? { resultOutput: firstSummaryLine } : {}),
                 });
               }
@@ -3658,15 +3692,13 @@ async function startInkShell(
     }
   }
 
-  // The interactive shell always uses the Claude Agent SDK for sessions —
-  // other backends (e.g. pi-ai) are designed for batch scans and don't expose
-  // `createSession`. We always need Anthropic credentials here regardless of
-  // the configured agentRuntimeBackend, so the prompt is no longer gated on it.
+  // The interactive shell uses the configured runtime. Built-in backends
+  // expose createSession(); Claude is only swapped in as a compatibility
+  // fallback for custom runtimes that cannot create shell sessions.
   await ensureClaudeShellRuntime(opts, store);
   {
-    const { hasAnthropicCredentials, runCredentialPrompt } = await import("../ui/setup.js");
-    const { resolveActiveCredentials } = await import("../config.js");
-    if (!hasAnthropicCredentials(resolveActiveCredentials(opts.config).apiKey)) {
+    const { runCredentialPrompt } = await import("../ui/setup.js");
+    if (!(await hasActiveShellCredentials(opts))) {
       const credentialOutcome = await runCredentialPrompt(store, "shell");
       const result = await applyCredentialOutcome(credentialOutcome, opts);
       if (!result.enabled) {
@@ -3680,7 +3712,7 @@ async function startInkShell(
           timestamp: Date.now(),
         });
       }
-      // Anthropic creds were just provided — re-check the runtime can create
+      // Credentials were just provided — re-check the runtime can create
       // sessions (no-op if the current backend already supports sessions).
       await ensureClaudeShellRuntime(opts, store);
     }
@@ -3817,7 +3849,7 @@ async function startReadlineShell(
   }
 
   // Startup credential prompt for the readline shell. Only runs when stderr is
-  // a TTY (so users in CI/piped contexts aren't blocked) and when the Claude
+  // a TTY (so users in CI/piped contexts aren't blocked) and the active
   // backend has no credentials available yet. Done BEFORE creating the main
   // `rl` so the prompt's own readline interface owns stdin uncontested.
   // Safety-net: swap in Claude only if the configured runtime doesn't expose
@@ -3826,9 +3858,8 @@ async function startReadlineShell(
   // prompt can guide the user to enable whichever backend is active.
   await ensureClaudeShellRuntime(opts);
   if (process.stderr.isTTY) {
-    const { hasAnthropicCredentials, runReadlineCredentialPrompt } = await import("../ui/setup.js");
-    const { resolveActiveCredentials } = await import("../config.js");
-    if (!hasAnthropicCredentials(resolveActiveCredentials(opts.config).apiKey)) {
+    const { runReadlineCredentialPrompt } = await import("../ui/setup.js");
+    if (!(await hasActiveShellCredentials(opts))) {
       const credentialOutcome = await runReadlineCredentialPrompt();
       const result = await applyCredentialOutcome(credentialOutcome, opts);
       if (!result.enabled) {
@@ -4300,7 +4331,7 @@ function handleSlashCommand(
       return handleSinceCommand(args, opts, ctx);
 
     case "threats":
-      return handleThreatsCommand(args, opts, ctx);
+      return handleThreatsCommand(args, opts, ctx, shellState);
 
     case "target":
       return handleTargetCommand(args, opts, shellState);
@@ -4628,7 +4659,37 @@ function handleContextCommand(
   // /context regenerate — force re-run
   if (sub === "regenerate" || sub === "regen") {
     if (!opts.target) return { output: "No target set. Use /target <path> first." };
-    return resolveToolExecution("context:build", args.slice(1), core, opts, ctx, shellState);
+    const slice = parseContextRegenSlice(args[1]?.toLowerCase());
+    if (!slice) {
+      return {
+        shellStateUpdater: (shell) => ({ ...shell, contextRegenPaletteOpen: true }),
+        output: [
+          "Regenerate a generated context slice:",
+          "  /context regen all",
+          "  /context regen repo",
+          "  /context regen enrichment",
+          "  /context regen app-model",
+          "  /context regen dfd",
+          "  /context regen stride",
+          "  /context regen stories",
+          "  /context regen scope",
+          "  /context regen scenarios",
+        ].join("\n"),
+      };
+    }
+    const target = path.resolve(opts.target);
+    const result = resolveToolExecution(
+      "context:build",
+      [target, `scope=${slice}`, "preserveUserEdits=true"],
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    return {
+      ...result,
+      shellStateUpdater: (shell) => ({ ...shell, contextRegenPaletteOpen: false }),
+    };
   }
 
   // /context <module-path> — drill into monorepo module
@@ -4711,12 +4772,137 @@ function handleSinceCommand(
   };
 }
 
+async function loadThreatWorkspace(repoRoot: string, shellState: ShellState) {
+  const { loadShellThreatModel } = await import("./threat-model-loader.js");
+  const persistent = loadShellThreatModel(repoRoot);
+  if (persistent) {
+    return {
+      threatModel: persistent.document,
+      contextSnapshot:
+        shellState.contextSnapshot?.target === repoRoot ? shellState.contextSnapshot : null,
+      sourcePath: persistent.sourcePath,
+      mtimeMs: persistent.mtimeMs,
+      sourceLabel: "persistent threat model",
+    };
+  }
+
+  const { contextSnapshotPath, loadContextSnapshot } = await import(
+    "../modules/sast/context-persist.js"
+  );
+  const snapshot =
+    shellState.contextSnapshot?.target === repoRoot
+      ? shellState.contextSnapshot
+      : loadContextSnapshot(repoRoot);
+  if (!snapshot) return null;
+  const sourcePath = contextSnapshotPath(repoRoot);
+  const mtimeMs = safeMtimeMs(sourcePath);
+  return {
+    threatModel: asThreatModelDocument(snapshot.threatModel),
+    contextSnapshot: snapshot,
+    sourcePath,
+    mtimeMs,
+    sourceLabel: "context snapshot",
+  };
+}
+
+function asThreatModelDocument(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as { dfd?: { elements?: unknown }; threats?: unknown };
+  if (!record.dfd || !Array.isArray(record.dfd.elements) || !Array.isArray(record.threats)) {
+    return null;
+  }
+  return value as import("../agents/tasks/threat-modeling/types.js").ThreatModelDocument;
+}
+
+function safeMtimeMs(absPath: string): number {
+  try {
+    return statSync(absPath).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
 function handleThreatsCommand(
   args: string[],
   opts: ShellOptions,
   ctx: ShellContext,
+  shellState: ShellState,
 ): LocalCommandResult {
   const sub = args[0]?.toLowerCase() ?? "summary";
+
+  if (sub === "ask") {
+    const instruction = args.slice(1).join(" ").trim();
+    if (!instruction) return { output: "Usage: /threats ask <instruction>" };
+    if (!opts.target) return { output: "No target set. Use /target <path> first." };
+    const repoRoot = path.resolve(opts.target);
+    return {
+      output: "Asking AI for a reviewable threat-model patch…",
+      asyncExecute: async (signal) => {
+        const loaded = await loadThreatWorkspace(repoRoot, shellState);
+        if (!loaded?.threatModel) {
+          return "No threat model document available to patch. Run /context regen dfd or /threats edit first.";
+        }
+        const proposal = await proposeThreatModelPatch({
+          runtime: opts.runtime,
+          cwd: repoRoot,
+          threatModel: loaded.threatModel,
+          instruction,
+          signal,
+        });
+        if (ctx.uiStore) {
+          updateShell(ctx.uiStore, (shell) => ({
+            ...shell,
+            shellView: "threats",
+            threatTab: "dfd",
+            threatModel: loaded.threatModel,
+            contextSnapshot: loaded.contextSnapshot ?? shell.contextSnapshot,
+            threatModelSource: { path: loaded.sourcePath, mtimeMs: loaded.mtimeMs },
+            pendingThreatPatch: proposal,
+          }));
+        }
+        return `AI proposed ${proposal.operations.length} threat-model change${
+          proposal.operations.length === 1 ? "" : "s"
+        }. Press y to accept, n to reject, or inspect the diff in /threats dfd.`;
+      },
+    };
+  }
+
+  if (sub === "apply" || sub === "accept" || sub === "yes") {
+    if (!opts.target) return { output: "No target set. Use /target <path> first." };
+    const proposal = shellState.pendingThreatPatch;
+    if (!proposal) return { output: "No pending threat-model patch to apply." };
+    const repoRoot = path.resolve(opts.target);
+    return {
+      output: "Applying accepted threat-model patch…",
+      asyncExecute: async () => {
+        const loaded = await loadThreatWorkspace(repoRoot, shellState);
+        if (!loaded?.threatModel) return "No threat model document available to patch.";
+        const applied = applyThreatModelPatch(loaded.threatModel, proposal);
+        if (!applied.ok)
+          return `Patch rejected:\n${applied.errors.map((e) => `  - ${e}`).join("\n")}`;
+        const { savePersistentThreatModel } = await import("../threat-model-renderer.js");
+        savePersistentThreatModel(repoRoot, applied.document, true);
+        const sourcePath = path.join(repoRoot, ".kuzushi", "threat-model.json");
+        if (ctx.uiStore) {
+          updateShell(ctx.uiStore, (shell) => ({
+            ...shell,
+            threatModel: applied.document,
+            threatModelSource: { path: sourcePath, mtimeMs: Date.now() },
+            pendingThreatPatch: null,
+            threatModelDirty: false,
+          }));
+        }
+        return "Threat-model patch accepted and saved to .kuzushi/threat-model.json.";
+      },
+    };
+  }
+
+  if (sub === "reject" || sub === "no") {
+    return {
+      output: "Pending threat-model patch rejected.",
+      shellStateUpdater: (shell) => ({ ...shell, pendingThreatPatch: null }),
+    };
+  }
 
   // /threats dfd|stride|stories|scope|summary (and 1..5) — Phase C views.
   // Each routes to a tab within the single threats view; the component reads shell.threatModel which
@@ -4733,15 +4919,18 @@ function handleThreatsCommand(
         threatTab: viewRoute.threatTab,
       }),
       asyncExecute: async () => {
-        const { loadShellThreatModel } = await import("./threat-model-loader.js");
-        const loaded = loadShellThreatModel(repoRoot);
+        const loaded = await loadThreatWorkspace(repoRoot, shellState);
         if (!loaded) {
-          return "No threat model found. Run a scan with threat modeling enabled first.";
+          return "No context or threat model found. Run /context or /context regen dfd first.";
+        }
+        if (viewRoute.threatTab !== "dfd" && !loaded.threatModel) {
+          return "No threat model found for this tab. Run /context regen dfd or /threats edit first.";
         }
         if (ctx.uiStore) {
           updateShell(ctx.uiStore, (shell) => ({
             ...shell,
-            threatModel: loaded.document,
+            threatModel: loaded.threatModel,
+            contextSnapshot: loaded.contextSnapshot ?? shell.contextSnapshot,
             threatModelSource: {
               path: loaded.sourcePath,
               mtimeMs: loaded.mtimeMs,
@@ -5950,9 +6139,10 @@ function handleAuthCommand(opts: ShellOptions, ctx: ShellContext): LocalCommandR
     output: [
       "Run /auth from a TTY shell for the interactive credential prompt.",
       "From the readline shell, set credentials via the environment and restart:",
+      "  export OPENAI_API_KEY=sk-...",
       "  export ANTHROPIC_API_KEY=sk-ant-...",
       "  export ANTHROPIC_OAUTH_TOKEN=...",
-      "Or edit ~/.kuzushi/config.json (agentRuntimeConfig.apiKey).",
+      "Or edit ~/.kuzushi/config.json / ./.kuzushi/credentials.json for the active backend slot.",
     ].join("\n"),
   };
 }
@@ -6307,8 +6497,12 @@ export const __shellInternals = {
   formatContextTrailer,
   formatWelcome,
   appendStoryEvent,
+  appendProgressEvent,
   applyStoryEventToShell,
+  applyCredentialOutcome,
   beginShellTurn,
+  ensureClaudeShellRuntime,
+  hasActiveShellCredentials,
   handleLocalCommand: routeInput,
   handleSlashCommand,
   handleStoryCommand,
@@ -6316,6 +6510,7 @@ export const __shellInternals = {
   reconcileShellView,
   loadArtifactManifest,
   loadShellCommandHistory,
+  rebuildShellRuntime,
   resolveDirectToolDispatch,
   saveShellCommandHistory,
 };

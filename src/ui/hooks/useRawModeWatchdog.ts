@@ -19,7 +19,11 @@
  *   commit fires between a subprocess exit and the next keypress
  *   (e.g. no progress events stream in).
  *
- * Cost is one `stdin.isRaw` read per tick — negligible.
+ * Do not trust `stdin.isRaw` here. Node updates that flag when this
+ * ReadStream calls `setRawMode`, but another process or another `/dev/tty`
+ * file descriptor can change the terminal back to cooked mode without
+ * updating the flag. Reasserting raw mode is what keeps Ctrl+C delivered
+ * as `0x03` instead of echoed as `^C`.
  */
 
 import { useEffect, useLayoutEffect } from "react";
@@ -30,7 +34,6 @@ function ensureRawMode(): void {
     setRawMode?: (mode: boolean) => void;
   };
   if (!stdin.isTTY || !stdin.setRawMode) return;
-  if (stdin.isRaw) return;
   try {
     stdin.setRawMode(true);
   } catch {

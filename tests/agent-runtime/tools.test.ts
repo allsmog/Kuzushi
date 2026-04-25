@@ -79,6 +79,48 @@ describe("agent-runtime tools", () => {
     expect(output).not.toContain("scripts/util.ts");
   });
 
+  it("Glob keeps literal directory patterns compact", async () => {
+    const cwd = makeTempWorkspace();
+    const output = await executeTool(
+      "Glob",
+      {
+        pattern: ".",
+      },
+      cwd,
+    );
+
+    expect(output).toBe(".");
+  });
+
+  it("Glob does not emit Node experimental glob warnings", async () => {
+    const cwd = makeTempWorkspace();
+    const warnings: Error[] = [];
+    const onWarning = (warning: Error) => {
+      warnings.push(warning);
+    };
+    process.on("warning", onWarning);
+    try {
+      await executeTool(
+        "Glob",
+        {
+          pattern: "**/*.ts",
+        },
+        cwd,
+      );
+      await Promise.resolve();
+    } finally {
+      process.off("warning", onWarning);
+    }
+
+    expect(
+      warnings.filter(
+        (warning) =>
+          warning.name === "ExperimentalWarning" &&
+          /\b(?:glob|matchesGlob)\b/i.test(warning.message),
+      ),
+    ).toEqual([]);
+  });
+
   it("Grep returns file:line:content matches", async () => {
     const cwd = makeTempWorkspace();
     const output = await executeTool(

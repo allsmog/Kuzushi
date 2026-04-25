@@ -183,8 +183,17 @@ export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
     }
   }
 
+  if (shell.pendingThreatPatch && input.length === 0) {
+    if (char === "y" || char === "Y") return { type: "dispatch", command: "/threats apply" };
+    if (char === "n" || char === "N" || key.escape) {
+      return { type: "dispatch", command: "/threats reject" };
+    }
+  }
+
   // --- 3. Threat-view 1..5 cycle --------------------------------------------
   if (isThreatShellView(shell.shellView) && input.length === 0) {
+    if (char === "r" || char === "R") return { type: "dispatch", command: "/context regen" };
+    if (char === "a" || char === "A") return { type: "dispatch", command: "/threats ask" };
     const sub = THREAT_DIGIT_TO_SUB[char];
     if (sub) return { type: "dispatch", command: `/threats ${sub}` };
   }

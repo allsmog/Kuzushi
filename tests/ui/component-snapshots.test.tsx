@@ -19,12 +19,15 @@ import { createElement, type ReactElement } from "react";
 import { describe, expect, it } from "vitest";
 import { createManualUiClock, UiClockProvider } from "../../src/ui/clock.js";
 import { BannerSplash } from "../../src/ui/components/BannerSplash.js";
+import { CopilotShell } from "../../src/ui/components/CopilotShell.js";
 import { FindingCard } from "../../src/ui/components/FindingCard.js";
 import { ModuleCatalog } from "../../src/ui/components/ModuleCatalog.js";
 import { ModuleHome } from "../../src/ui/components/ModuleHome.js";
 import { PlanCard } from "../../src/ui/components/PlanCard.js";
 import { ThreatDfdView } from "../../src/ui/components/ThreatDfdView.js";
-import type { ActionableFinding, ShellState } from "../../src/ui/state.js";
+import { KeybindFooter } from "../../src/ui/primitives/KeybindFooter.js";
+import { type ActionableFinding, createUIStore, type ShellState } from "../../src/ui/state.js";
+import { createShellStoryEvent } from "../../src/ui/task-story.js";
 
 // ---------------------------------------------------------------------------
 // Render harness
@@ -80,8 +83,8 @@ class FrameCaptureStream extends Writable {
   }
 }
 
-function renderToString(node: ReactElement, columns = 80): string {
-  const stream = new FrameCaptureStream(columns);
+function renderToString(node: ReactElement, columns = 80, rows = 24): string {
+  const stream = new FrameCaptureStream(columns, rows);
   const clock = createManualUiClock(0);
   const instance = render(createElement(UiClockProvider, { clock }, node), {
     stdout: stream as unknown as Writable & NodeJS.WriteStream,
@@ -302,6 +305,160 @@ describe("Ink component snapshots", () => {
     expect(out).toContain("/tools --all");
     // Status strip shows visible-tool count (1), not total (3).
     expect(out).toContain("1 tools");
+  });
+
+  it("CopilotShell — processing context run uses one live row and compact footer", () => {
+    const store = createUIStore();
+    const phase = createShellStoryEvent(
+      {
+        kind: "phase",
+        status: "running",
+        importance: "primary",
+        message: "phase 1 (S1/S2/S3 scope)",
+        runId: "run-1",
+        turnId: "turn-1",
+      },
+      0,
+    );
+    store.update({
+      mode: "shell",
+      shell: {
+        ...stubShell({
+          focusedModule: "context",
+          shellView: "module",
+          processing: true,
+          moduleCatalog: [
+            {
+              id: "context",
+              displayName: "Context",
+              category: "intel",
+              description: "Builds the application context snapshot.",
+              toolCount: 1,
+              toolSummaries: [
+                {
+                  name: "context:build",
+                  verb: "build",
+                  description: "Generate the application context snapshot",
+                  headless: true,
+                },
+              ],
+            },
+          ],
+          history: [
+            {
+              type: "input",
+              text: "run .",
+              prompt: "kuzushi/context> ",
+              timestamp: 0,
+            },
+            {
+              type: "tool-call",
+              id: "tc-context",
+              tool: "context:build",
+              displayName: "Build Context",
+              inputHint: ".",
+              text: "⏺ Build Context(.)",
+              status: "running",
+              timestamp: 0,
+              liveActivities: [
+                { id: "la-1", text: 'Glob "src/**/*" (200 files)' },
+                { id: "la-2", text: "Read package.json (134 lines)" },
+              ],
+            },
+          ],
+          currentTool: {
+            name: "context:build",
+            displayName: "Build Context",
+            startedAt: 0,
+            lastEventAt: 0,
+            historyEntryId: "tc-context",
+            phase: phase.message,
+            storyTail: [phase],
+          },
+          taskStory: {
+            activeTurnId: "turn-1",
+            activeRunIds: ["run-1"],
+            startedAt: 0,
+            abortStatus: "idle",
+            events: [phase],
+          },
+        }),
+      },
+    });
+
+    const out = renderToString(createElement(CopilotShell, { store }), 84);
+
+    expect(out.match(/Build Context/g) ?? []).toHaveLength(1);
+    expect(out).toContain("⏺ Build Context(.)");
+    expect(out).toContain('⎿  Glob "src/**/*" (200 files)');
+    expect(out).toContain("context · running · Ctrl+C interrupt · Ctrl+O details");
+    expect(out).not.toContain("context home");
+    expect(out).not.toContain("intel · 1 tools");
+    expect(out).not.toContain("you are in");
+    expect(out).not.toContain("task active");
+  });
+
+  it("CopilotShell — live tail is viewport-aware with overflow hint", () => {
+    const store = createUIStore();
+    store.update({
+      mode: "shell",
+      shell: {
+        ...stubShell({
+          focusedModule: "context",
+          shellView: "module",
+          processing: true,
+          history: [
+            {
+              type: "tool-call",
+              id: "tc-context",
+              tool: "context:build",
+              displayName: "Build Context",
+              inputHint: ".",
+              text: "⏺ Build Context(.)",
+              status: "running",
+              timestamp: 0,
+              liveActivitiesDropped: 4,
+              liveActivities: Array.from({ length: 18 }, (_, index) => ({
+                id: `la-${index}`,
+                text: `step ${17 - index}`,
+              })),
+            },
+          ],
+          currentTool: {
+            name: "context:build",
+            displayName: "Build Context",
+            startedAt: 0,
+            lastEventAt: 0,
+            historyEntryId: "tc-context",
+          },
+        }),
+      },
+    });
+
+    const out = renderToString(createElement(CopilotShell, { store }), 84, 18);
+
+    expect(out).toContain("+14 earlier updates · Ctrl+O details");
+    expect(out).toContain("step 10");
+    expect(out).toContain("step 17");
+    expect(out).not.toContain("step 9");
+  });
+
+  it("KeybindFooter — divider fits narrow terminals", () => {
+    const out = renderToString(
+      createElement(KeybindFooter, {
+        bindings: [
+          { keys: "Ctrl+C", label: "Interrupt" },
+          { keys: "Ctrl+O", label: "Details", secondary: true },
+        ],
+      }),
+      44,
+    );
+    const lines = out.split(/\r?\n/).filter((line) => line.trim().length > 0);
+
+    expect(lines[0]?.length).toBeLessThanOrEqual(44);
+    expect(lines.filter((line) => /^─+$/.test(line))).toHaveLength(1);
+    expect(out).toContain("[Ctrl+C] Interrupt");
+    expect(out).toContain("[Ctrl+O] Details");
   });
 
   it("FindingCard linear — state strip + evidence + timeline", () => {

@@ -106,28 +106,39 @@ exports[`Ink component snapshots > PlanCard — option diff table with unsupport
 `;
 
 exports[`Ink component snapshots > ThreatDfdView — trust zones + boundaries + flows 1`] = `
-"  4 elements · 0 threats
+"  3 nodes · 1 flows · 1 boundaries · 0 threats
   loaded from /tmp/threat-model.json
 
 
-  ╭─ internet ──────────────────────────────────────────────────────────╮
-  │ E1      ( ext )  attacker — unauth caller
-  ╰────────────────────────────────────────────────────────────────────────╯
+  ! hot path   B boundary   > selected   ✓ validated
 
-  ╭─ app-vpc ───────────────────────────────────────────────────────────╮
-  │ P1      [ proc ]  admin router — Express /admin/*
-  ╰────────────────────────────────────────────────────────────────────────╯
+  ┌─ INTERNET / UNTRUSTED ────────────────────────────────────────────────────┐
+  │ > E1   (ext) attacker               identity · public ingress           │
+  └───────────────────────────────────────────────────────────────────────────┘
+     │ B1 perimeter · 1 crossing
+  ┌─ APP-VPC ─────────────────────────────────────────────────────────────────┐
+  │   P1   [proc] admin router          privileged                          │
+  └───────────────────────────────────────────────────────────────────────────┘
+     │
+  ┌─ DATA / HIGH VALUE ───────────────────────────────────────────────────────┐
+  │ ! D1   <<data>> IMDS                high-value data                     │
+  └───────────────────────────────────────────────────────────────────────────┘
 
-  ╭─ aws-meta ──────────────────────────────────────────────────────────╮
-  │ D1      << data >>  IMDS — AWS instance metadata
-  ╰────────────────────────────────────────────────────────────────────────╯
+  hot paths
+    · F1   P1 -> D1           http · cloud-cred · crosses B1
 
+  Selected  E1 attacker
+    zone   internet / untrusted
+    inputs (none)
+    outputs (none)
+    risks  identity · public ingress
+    next   threat-hunt: run actor-driven adversarial review · taint-iris: trace
+  public inputs across trust boundaries
 
-  trust boundaries
+  STRIDE overlay
+    S:0  T:0  R:0  I:0  D:0  E:0   no threats emitted; watch hot paths and
+  privileged choke points
 
-     ╌╌╌ B1  perimeter   app-vpc ↔ internet   1 crossing
-
-  data flows
-
-     F1      P1 → D1 [http] {cloud-cred}  crosses B1"
+  Keys  1 DFD · 2 STRIDE · 3 stories · 4 scope · 5 summary · r regen · a ask AI
+  · q back"
 `;

@@ -16,6 +16,7 @@ import {
   saveShellCommandHistory,
 } from "../../src/copilot/shell.js";
 import { createCoreSastModule } from "../../src/modules/core-sast.js";
+import { saveContextSnapshot } from "../../src/modules/sast/context-persist.js";
 import type { KuzushiConfig } from "../../src/types.js";
 import type { ShellState } from "../../src/ui/state.js";
 
@@ -108,6 +109,30 @@ function createShellOptions(): ShellOptions {
   };
 }
 
+function createShellOptionsWithConfig(config: KuzushiConfig): ShellOptions {
+  return {
+    config,
+    runtime: {
+      id: "test",
+      async *query() {},
+    } as AgentRuntime,
+    target: ".",
+  };
+}
+
+function createSessionRuntime(id: string): AgentRuntime {
+  return {
+    id,
+    async *query() {},
+    createSession() {
+      return {
+        async *query() {},
+        close() {},
+      };
+    },
+  } as AgentRuntime;
+}
+
 function createShellState(toolNames: string[]): ShellState {
   return {
     modules: ["sast"],
@@ -133,6 +158,70 @@ describe("shell prompt", () => {
   it("renders top-level and focused prompts consistently", async () => {
     expect(buildShellPrompt(null)).toBe("kuzushi> ");
     expect(buildShellPrompt("sast")).toBe("kuzushi/sast> ");
+  });
+});
+
+describe("shell runtime auth", () => {
+  it("keeps /auth inherited credentials on pi-ai", async () => {
+    const opts = createShellOptionsWithConfig({
+      ...baseConfig,
+      agentRuntimeBackend: "pi-ai",
+      agentRuntimeConfig: { piAi: { apiKey: "sk-test" } },
+    });
+
+    await __shellInternals.applyCredentialOutcome(
+      { action: "proceed", choice: { kind: "inherited", providerId: "openai" } },
+      opts,
+    );
+
+    expect(opts.config.agentRuntimeBackend).toBe("pi-ai");
+    expect(opts.runtime.id).toBe("pi-ai");
+  });
+
+  it("stores pasted pi-ai provider credentials without switching to claude", async () => {
+    const oldOpenAiKey = process.env["OPENAI_API_KEY"];
+    delete process.env["OPENAI_API_KEY"];
+    const opts = createShellOptionsWithConfig({
+      ...baseConfig,
+      agentRuntimeBackend: "pi-ai",
+      agentRuntimeConfig: {},
+    });
+
+    try {
+      await __shellInternals.applyCredentialOutcome(
+        {
+          action: "proceed",
+          choice: { kind: "api-key", providerId: "openai", value: "sk-openai", persist: false },
+        },
+        opts,
+      );
+
+      expect(opts.config.agentRuntimeBackend).toBe("pi-ai");
+      expect(opts.config.agentRuntimeConfig?.piAi?.apiKey).toBe("sk-openai");
+      expect(process.env["OPENAI_API_KEY"]).toBe("sk-openai");
+      expect(opts.runtime.id).toBe("pi-ai");
+    } finally {
+      if (oldOpenAiKey === undefined) {
+        delete process.env["OPENAI_API_KEY"];
+      } else {
+        process.env["OPENAI_API_KEY"] = oldOpenAiKey;
+      }
+    }
+  });
+
+  it("does not fall back to claude when the pi-ai runtime can create sessions", async () => {
+    const runtime = createSessionRuntime("pi-ai");
+    const opts = createShellOptionsWithConfig({
+      ...baseConfig,
+      agentRuntimeBackend: "pi-ai",
+    });
+    opts.runtime = runtime;
+
+    await __shellInternals.ensureClaudeShellRuntime(opts);
+
+    expect(opts.runtime).toBe(runtime);
+    expect(opts.runtime.id).toBe("pi-ai");
+    expect(opts.config.agentRuntimeBackend).toBe("pi-ai");
   });
 });
 
@@ -770,7 +859,7 @@ describe("context system", () => {
     expect(result?.asyncExecute).toBeTypeOf("function");
   });
 
-  it("/context regenerate always dispatches tool", async () => {
+  it("/context regenerate without a slice opens the regeneration palette", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
     opts.target = "/resolved/repo";
@@ -787,8 +876,35 @@ describe("context system", () => {
       ctx,
       shellState,
     );
+    expect(result?.output).toContain("/context regen dfd");
+    expect(result?.shellStateUpdater).toBeTypeOf("function");
+    expect(result?.shellStateUpdater?.(shellState).contextRegenPaletteOpen).toBe(true);
+  });
+
+  it("/context regen <slice> dispatches context:build with scope", async () => {
+    const { core, module, executeTool } = await createMockCore();
+    const opts = createShellOptions();
+    opts.target = "/resolved/repo";
+    const shellState = {
+      ...createShellState(module.tools.map((t) => t.name)),
+      contextSnapshot: mockSnapshot,
+    };
+    const ctx = { focusedModule: null };
+
+    const result = __shellInternals.handleLocalCommand(
+      "/context regen dfd",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
     expect(result?.executedToolName).toBe("context:build");
-    expect(result?.asyncExecute).toBeTypeOf("function");
+    await result?.asyncExecute?.();
+    expect(executeTool).toHaveBeenCalledWith(
+      "context:build",
+      expect.objectContaining({ scope: "dfd", preserveUserEdits: true }),
+      expect.anything(),
+    );
   });
 
   it("/since reset clears diff scope without requiring a target", async () => {
@@ -825,6 +941,21 @@ describe("context system", () => {
     expect(nextShell?.shellView).toBe("threats");
     expect(nextShell?.threatTab).toBe("summary");
     expect(result?.asyncExecute).toBeTypeOf("function");
+  });
+
+  it("/threats dfd falls back to saved context snapshot", async () => {
+    const { core, module } = await createMockCore();
+    const repoRoot = mkdtempSync(path.join(os.tmpdir(), "kuzushi-threats-"));
+    tempDirs.push(repoRoot);
+    const opts = createShellOptions();
+    opts.target = repoRoot;
+    saveContextSnapshot(repoRoot, { ...mockSnapshot, target: repoRoot });
+    const shellState = createShellState(module.tools.map((t) => t.name));
+    const ctx = { focusedModule: null };
+
+    const result = __shellInternals.handleLocalCommand("/threats dfd", core, opts, ctx, shellState);
+    expect(result?.shellStateUpdater?.(shellState).threatTab).toBe("dfd");
+    await expect(result?.asyncExecute?.()).resolves.toContain("Showing data flow diagram");
   });
 
   it("/context build enters the Live Build view and seeds contextBuild state", async () => {

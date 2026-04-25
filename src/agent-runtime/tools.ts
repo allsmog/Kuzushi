@@ -1,16 +1,10 @@
 import { execFile, spawn } from "node:child_process";
-import {
-  type Dirent,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { promisify } from "node:util";
 import { type Tool, Type } from "@mariozechner/pi-ai";
+import { globSync as tinyGlobSync } from "tinyglobby";
 import { isRecord, toErrorMessage } from "../utils.js";
 
 const execFileAsync = promisify(execFile);
@@ -329,69 +323,19 @@ interface GlobSyncOptions {
   onlyFiles?: boolean;
 }
 
-// Use a local recursive matcher instead of node:fs globSync. The built-in API
-// still emits an experimental warning on first use in the Node versions we
-// support, which pollutes the Ink frame. `path.matchesGlob` is stable, so we
-// walk the tree ourselves and keep the existing sync call sites intact.
+// Use tinyglobby instead of node:fs globSync/path.matchesGlob. Both built-in
+// APIs can emit ExperimentalWarning in the Node versions we support, which
+// pollutes the Ink frame during shell runs.
 function globSync(pattern: string, options: GlobSyncOptions): string[] {
   const normalizedPattern = normalizeGlobPath(pattern);
   const ignore = (options.ignore ?? []).map((entry) => normalizeGlobPath(entry));
-  const matches: string[] = [];
-  const stack = [""];
-
-  while (stack.length > 0) {
-    const relativeDir = stack.pop() ?? "";
-    const absoluteDir = relativeDir ? path.resolve(options.cwd, relativeDir) : options.cwd;
-
-    let entries: Dirent<string>[];
-    try {
-      entries = readdirSync(absoluteDir, { withFileTypes: true, encoding: "utf8" });
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      const relativePath = relativeDir ? path.join(relativeDir, entry.name) : entry.name;
-      const candidate = normalizeGlobPath(relativePath);
-
-      if (entry.isDirectory()) {
-        const directoryCandidate = `${candidate}/`;
-        if (matchesAnyGlob(ignore, candidate) || matchesAnyGlob(ignore, directoryCandidate)) {
-          continue;
-        }
-        if (
-          options.onlyFiles === false &&
-          matchesGlobCandidate(normalizedPattern, candidate, true)
-        ) {
-          matches.push(candidate);
-        }
-        stack.push(relativePath);
-        continue;
-      }
-
-      if (!entry.isFile() || matchesAnyGlob(ignore, candidate)) {
-        continue;
-      }
-      if (matchesGlobCandidate(normalizedPattern, candidate, false)) {
-        matches.push(candidate);
-      }
-    }
-  }
-
-  return matches;
-}
-
-function matchesAnyGlob(patterns: string[], candidate: string): boolean {
-  return patterns.some((pattern) =>
-    matchesGlobCandidate(pattern, candidate, candidate.endsWith("/")),
-  );
-}
-
-function matchesGlobCandidate(pattern: string, candidate: string, isDirectory: boolean): boolean {
-  if (path.matchesGlob(candidate, pattern)) {
-    return true;
-  }
-  return isDirectory && !candidate.endsWith("/") && path.matchesGlob(`${candidate}/`, pattern);
+  return tinyGlobSync(normalizedPattern, {
+    cwd: options.cwd,
+    expandDirectories: false,
+    followSymbolicLinks: false,
+    ignore,
+    onlyFiles: options.onlyFiles ?? true,
+  });
 }
 
 function normalizeGlobPath(value: string): string {
@@ -422,7 +366,7 @@ function executeGlob(args: Record<string, unknown>, cwd: string): string {
   });
 
   const sorted = rawMatches
-    .map((match) => normalizeForDisplay(path.relative(cwd, path.resolve(searchRoot, match))))
+    .map((match) => normalizeForDisplay(path.relative(cwd, path.resolve(searchRoot, match)) || "."))
     .sort((a, b) => a.localeCompare(b))
     .slice(0, limit);
 
