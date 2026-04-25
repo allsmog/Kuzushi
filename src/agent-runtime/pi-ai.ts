@@ -9,6 +9,7 @@ import {
   type Tool,
   validateToolCall,
 } from "@mariozechner/pi-ai";
+import { publishAgentActivity, publishTaskActivity } from "../bus/activity.js";
 import type {
   LlmCallCompleteEvent,
   LlmCallErrorEvent,
@@ -465,7 +466,23 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
             break;
           }
           const mapped = mapPiAiEventToAgentMessage(next.value);
-          if (mapped) yield mapped;
+          if (mapped) {
+            // Mirror the Claude runtime: when a tool call kicks off, surface
+            // it as a `task:activity` line under the spinner and increment
+            // the agents-active counter for the caller's fingerprint.
+            if (mapped.type === "tool-call-start" && bus) {
+              const toolName = mapped.toolName || "tool";
+              publishTaskActivity(bus, options.taskId ?? "agent-runtime", `Calling ${toolName}…`, {
+                runId: runId ?? undefined,
+              });
+              if (options.phase && options.fingerprint) {
+                publishAgentActivity(bus, options.phase, options.fingerprint, "tool-start", {
+                  toolName,
+                });
+              }
+            }
+            yield mapped;
+          }
         }
       }
 
@@ -1036,6 +1053,15 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
       0,
       totalCostUsd,
     );
+  } finally {
+    // Always clear the agents-active row when the loop unwinds — covers the
+    // happy path (return inside the loop), error path, and consumer-side
+    // generator close. Skip cleanly when no fingerprint/phase was set.
+    if (bus && options.phase && options.fingerprint) {
+      publishAgentActivity(bus, options.phase, options.fingerprint, "tool-complete", {
+        done: true,
+      });
+    }
   }
 }
 

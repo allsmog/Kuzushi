@@ -4,7 +4,7 @@ import { inflightCache } from "../cache.js";
 import { getLogger } from "../logger.js";
 import type { RepoContext } from "../types.js";
 import { isRecord, toErrorMessage } from "../utils.js";
-import type { AgentHistoryEntry, AgentSession } from "./types.js";
+import type { AgentActivityPhase, AgentHistoryEntry, AgentSession } from "./types.js";
 
 const log = getLogger("batch-fallback");
 
@@ -57,6 +57,20 @@ export interface AgentRuntimeOptions {
   thinkingDisabled?: boolean;
   /** Reuse an existing session instead of spawning a new subprocess per call. */
   session?: AgentSession;
+  /**
+   * Caller-supplied task identifier. Threaded into the runtime so emitted
+   * `task:activity` lines under the spinner are tagged with the right
+   * task. Defaults to `"agent-runtime"` inside the runtime when omitted.
+   */
+  taskId?: string;
+  /**
+   * Per-target identifier (finding fingerprint, hunt target id) used as the
+   * key for the "N agents active" counter. Combined with `phase` it makes
+   * the runtime emit `${phase}:agent-activity` envelopes.
+   */
+  fingerprint?: string;
+  /** Phase / pipeline stage that owns this query. Picks the bus topic prefix. */
+  phase?: AgentActivityPhase;
 }
 
 export interface AgentQueryExecutionResult {
@@ -180,6 +194,9 @@ async function executeStructuredAgentQuery(
             systemPromptPrefix: args.systemPromptPrefix,
             effort: args.runtimeOptions?.effort,
             thinkingDisabled: args.runtimeOptions?.thinkingDisabled,
+            taskId: args.runtimeOptions?.taskId,
+            fingerprint: args.runtimeOptions?.fingerprint,
+            phase: args.runtimeOptions?.phase,
             outputFormat: {
               type: "json_schema",
               schema: args.schema,

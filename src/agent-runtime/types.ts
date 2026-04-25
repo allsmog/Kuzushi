@@ -14,6 +14,14 @@ export interface AgentHistoryEntry {
 
 export type AgentEffort = "low" | "medium" | "high" | "max";
 
+/**
+ * Topic prefixes for `${phase}:agent-activity` bus events. Pinning to a string
+ * literal union keeps the call sites honest — every value here has a matching
+ * subscriber in `src/bus/workers/report-worker.ts:591` so the UI counter
+ * actually moves when the runtime emits.
+ */
+export type AgentActivityPhase = "triage" | "verification" | "poc-harness" | "scan" | "threat-hunt";
+
 export interface AgentQueryOptions {
   cwd: string;
   model: string;
@@ -25,6 +33,24 @@ export interface AgentQueryOptions {
   maxBudgetUsd?: number;
   abortController?: AbortController;
   history?: AgentHistoryEntry[];
+  /**
+   * Identifier for the calling task — drives the rolling subtitle under the
+   * tool spinner via `task:activity` events. When unset the runtime tags
+   * activity with `"agent-runtime"` so the line still renders.
+   */
+  taskId?: string;
+  /**
+   * Per-target identifier (finding fingerprint, hunt target id) used as the
+   * key for the "N agents active" counter. When set together with `phase`,
+   * the runtime publishes `${phase}:agent-activity` events which
+   * `report-worker.ts` routes into `store.addAgentActivity`.
+   */
+  fingerprint?: string;
+  /**
+   * Phase / pipeline stage that owns this query. Combined with `fingerprint`
+   * to pick the bus topic for the agents-active counter.
+   */
+  phase?: AgentActivityPhase;
   outputFormat?: {
     type: "json_schema";
     schema: Record<string, unknown>;

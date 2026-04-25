@@ -215,7 +215,12 @@ export async function verifyFindingWithAgent(
       runtimeOptions.runtime,
       runtimeOptions.enableInstrumentation,
     ),
-    runtimeOptions,
+    runtimeOptions: {
+      ...runtimeOptions,
+      phase: "verification",
+      fingerprint: finding.fingerprint,
+      taskId: runtimeOptions.taskId ?? "verification",
+    },
     systemPromptPrefix: verificationSystemPromptPrefix(
       repoContext,
       runtimeOptions.enrichedContext,
@@ -649,6 +654,7 @@ async function verifySingleBatch(
   verifyTemplate?: string,
 ): Promise<BatchVerificationOutput> {
   const prompt = buildBatchVerificationPrompt(items, repoName, verifyTemplate);
+  const batchFingerprint = items.length > 0 ? items[0].finding.fingerprint : undefined;
   const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
     prompt,
     cwd: repoRoot,
@@ -657,7 +663,12 @@ async function verifySingleBatch(
       runtimeOptions.runtime,
       runtimeOptions.enableInstrumentation,
     ),
-    runtimeOptions,
+    runtimeOptions: {
+      ...runtimeOptions,
+      phase: "verification",
+      fingerprint: batchFingerprint,
+      taskId: runtimeOptions.taskId ?? "verification",
+    },
     systemPromptPrefix: verificationSystemPromptPrefix(
       repoContext,
       runtimeOptions.enrichedContext,

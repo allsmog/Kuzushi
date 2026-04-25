@@ -342,7 +342,16 @@ export async function triageFindingWithAgent(
     cwd: repoRoot,
     model,
     allowedTools,
-    runtimeOptions,
+    // Tag the runtime call with phase + fingerprint so the bus emits
+    // `triage:agent-activity` events the UI counter listens to. Without
+    // this the "agents active" line stays at 0 even when this finding's
+    // triage agent is mid-flight.
+    runtimeOptions: {
+      ...runtimeOptions,
+      phase: "triage",
+      fingerprint: finding.fingerprint,
+      taskId: runtimeOptions.taskId ?? "triage",
+    },
     systemPromptPrefix:
       precomputedSystemPromptPrefix ??
       triageSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
@@ -750,12 +759,22 @@ async function triageSingleBatch(
   batchTemplate?: string,
 ): Promise<BatchTriageOutput> {
   const prompt = buildBatchTriagePrompt(findings, repoName, batchTemplate);
+  // Batch triage covers multiple findings in one call. The counter keys on
+  // a single fingerprint, so use the first finding's as a representative
+  // and let the rolling activity line under the spinner ("Calling Read…")
+  // tell operators what's actually happening.
+  const batchFingerprint = findings.length > 0 ? findings[0].fingerprint : undefined;
   const { resultText, structuredOutput, executionError, costUsd } = await runStructuredAgentQuery({
     prompt,
     cwd: repoRoot,
     model,
     allowedTools: BATCH_TRIAGE_TOOLS,
-    runtimeOptions,
+    runtimeOptions: {
+      ...runtimeOptions,
+      phase: "triage",
+      fingerprint: batchFingerprint,
+      taskId: runtimeOptions.taskId ?? "triage",
+    },
     systemPromptPrefix: triageSystemPromptPrefix(repoContext, runtimeOptions.enrichedContext),
     schema: BATCH_TRIAGE_SCHEMA,
     strict: true,

@@ -693,6 +693,7 @@ export const KuzushiConfigSchema = z.object({
   scanMode: ScanModeSchema,
   agentRuntimeBackend: AgentRuntimeBackendSchema.optional(),
   agentRuntimeConfig: AgentRuntimeConfigSchema.optional(),
+  auth: z.literal("inherited").optional(),
   tasks: z.array(z.string()),
   severity: z.array(z.string()),
   excludePatterns: z.array(z.string()),

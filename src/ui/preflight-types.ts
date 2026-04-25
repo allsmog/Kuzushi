@@ -21,7 +21,8 @@ export type ProviderId =
   | "openrouter"
   | "bedrock"
   | "ollama"
-  | "inherited";
+  | "inherited"
+  | "inherited-claude";
 
 export type CredentialChoice =
   | { kind: "api-key"; providerId: ProviderId; value: string; baseUrl?: string; persist: boolean }

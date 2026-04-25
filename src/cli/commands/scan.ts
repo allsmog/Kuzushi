@@ -168,7 +168,9 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   // Interactive credential prompt when no credentials are detected for the
   // default provider. pi-ai resolves creds from env vars, so setting the
   // right env var per provider is sufficient for the scan run.
-  if (!opts.resume && process.stdout.isTTY) {
+  // Skip entirely when `auth: "inherited"` is configured — the operator
+  // explicitly opted to trust ambient creds, and we shouldn't second-guess.
+  if (!opts.resume && process.stdout.isTTY && config.auth !== "inherited") {
     const { hasAnyProviderCredentials, runCredentialPrompt } = await import("../../ui/setup.js");
     if (!hasAnyProviderCredentials()) {
       const { providerEnvVar, providerBaseUrlEnvVar, backendConfigSlot } = await import(

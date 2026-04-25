@@ -363,6 +363,17 @@ export const TOP_LEVEL_CONFIG_SETTERS: Record<string, ConfigSetter> = {
     }
     config.agentRuntimeConfig = normalizeAgentRuntimeConfig(parsed);
   },
+  auth: (config, raw) => {
+    const v = String(raw).trim().toLowerCase();
+    if (v === "" || v === "none" || v === "null") {
+      delete (config as Partial<KuzushiConfig>).auth;
+      return;
+    }
+    if (v !== "inherited") {
+      throw new Error('auth must be "inherited" or unset');
+    }
+    config.auth = "inherited";
+  },
   busBackend: setEnum("busBackend", BUS_BACKENDS),
 
   // Triage
