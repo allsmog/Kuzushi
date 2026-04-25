@@ -985,3 +985,169 @@ describe("plain-renderer output hygiene (Workstream 5)", () => {
     expect(joined).toContain("True positives:");
   });
 });
+
+describe("plain-renderer v3 views", () => {
+  it("module-run idle prints the no-active-run advisory", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+    store.update({
+      shell: baseShell({
+        shellView: "module-run",
+        focusedModule: "threat-hunt",
+      }),
+    });
+    unsub();
+    const joined = lines.join("\n");
+    expect(joined).toContain("[run] threat-hunt · idle");
+    expect(joined).toContain("# RUN");
+    expect(joined).toContain("(no active run)");
+  });
+
+  it("module-run with steps prints the elapsed banner and step glyphs", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+    store.update({
+      shell: baseShell({
+        shellView: "module-run",
+        focusedModule: "threat-hunt",
+        moduleRun: {
+          moduleId: "threat-hunt",
+          toolName: "threat-hunt:run",
+          startedAtMs: Date.now() - 5_000,
+          status: "running",
+          steps: [
+            { id: "boot", title: "load threat model", status: "done" },
+            { id: "spawn", title: "spawn actor agents", status: "running" },
+            { id: "merge", title: "merge findings", status: "pending" },
+          ],
+          evidenceTail: [],
+        },
+      }),
+    });
+    unsub();
+    const joined = lines.join("\n");
+    expect(joined).toContain("[run] threat-hunt:threat-hunt:run");
+    expect(joined).toContain("# RUN threat-hunt");
+    expect(joined).toContain("status: running");
+    expect(joined).toContain("✓ load threat model");
+    expect(joined).toContain("→ spawn actor agents");
+    expect(joined).toContain("○ merge findings");
+  });
+
+  it("actor-detail with no focusedActor prints the (none) placeholder", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+    store.update({
+      shell: baseShell({
+        shellView: "actor-detail",
+        focusedModule: "threat-hunt",
+        focusedActor: null,
+      }),
+    });
+    unsub();
+    const joined = lines.join("\n");
+    expect(joined).toContain("[actor] (none)");
+    expect(joined).toContain("# ACTOR TRANSCRIPT");
+    expect(joined).toContain("(no actor focused)");
+  });
+
+  it("actor-detail emits one row per agent activity entry with the right glyph", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+    store.addAgentActivity("threat-hunt:Authenticated_User:0", {
+      kind: "tool-start",
+      toolName: "Read",
+      detail: "src/api.ts",
+      index: 0,
+      total: 1,
+    });
+    store.addAgentActivity("threat-hunt:Authenticated_User:0", {
+      kind: "tool-complete",
+      toolName: "Read",
+      detail: "138 lines",
+      index: 0,
+      total: 1,
+    });
+    store.addAgentActivity("threat-hunt:Authenticated_User:0", {
+      kind: "reasoning",
+      detail: "checking sanitizers",
+      index: 0,
+      total: 1,
+    });
+    store.addAgentActivity("threat-hunt:Authenticated_User:0", {
+      kind: "finding-preview",
+      detail: "SSRF on /admin/fetch",
+      index: 0,
+      total: 1,
+    });
+    store.update({
+      shell: baseShell({
+        shellView: "actor-detail",
+        focusedModule: "threat-hunt",
+        focusedActor: "threat-hunt:Authenticated_User:0",
+      }),
+    });
+    unsub();
+    const joined = lines.join("\n");
+    expect(joined).toContain("[actor] threat-hunt:Authenticated_User:0 · 4 events");
+    expect(joined).toContain("● Read");
+    expect(joined).toContain("⎿ Read");
+    expect(joined).toContain("✻ checking sanitizers");
+    expect(joined).toContain("★ SSRF on /admin/fetch");
+  });
+
+  it("prompts-editor empty list emits the (no prompt keys) advisory", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+    store.update({
+      shell: baseShell({
+        shellView: "prompts-editor",
+        focusedModule: "threat-hunt",
+      }),
+    });
+    unsub();
+    const joined = lines.join("\n");
+    expect(joined).toContain("[prompts] threat-hunt · 0 overrides");
+    expect(joined).toContain("# PROMPTS");
+    expect(joined).toContain("(no prompt keys)");
+  });
+
+  it("prompts-editor populated audit lists each verb + source", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+    store.update({
+      shell: baseShell({
+        shellView: "prompts-editor",
+        focusedModule: "threat-hunt",
+        promptsEditor: {
+          audit: [
+            {
+              moduleId: "threat-hunt",
+              toolName: "threat-hunt:run",
+              verb: "run",
+              promptKey: "THREAT_HUNT_PROMPT",
+              effective: { source: "default" },
+            },
+            {
+              moduleId: "threat-hunt",
+              toolName: "threat-hunt:run",
+              verb: "actor",
+              promptKey: "THREAT_HUNT_PROMPT",
+              effective: {
+                source: "file",
+                filePath: "/repo/.kuzushi/prompts/threat-hunt/actor.md",
+              },
+            },
+          ],
+        },
+      }),
+    });
+    unsub();
+    const joined = lines.join("\n");
+    expect(joined).toContain("[prompts] threat-hunt · 1 override");
+    expect(joined).toContain("# PROMPTS");
+    expect(joined).toContain("run  source=default");
+    expect(joined).toContain("actor  source=file");
+    expect(joined).toContain(".kuzushi/prompts/threat-hunt/actor.md");
+  });
+});

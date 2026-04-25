@@ -66,6 +66,13 @@ export interface Finding {
   blame?: import("../git/blame.js").BlameInfo;
   /** Short commit SHA where the vulnerability was introduced. */
   introducedIn?: string;
+  /**
+   * Optional per-actor fingerprint set by threat-hunt — matches the key
+   * used in `state.agentActivity` (e.g. `"threat-hunt:Foo:0"`). Lets the
+   * ActorTranscriptView synthesize ★ Finding rows for one actor without
+   * parsing fingerprint strings or re-grouping `findings` by file path.
+   */
+  actorFingerprint?: string;
 }
 
 export type AllowedTriageTool =

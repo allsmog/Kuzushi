@@ -6,6 +6,7 @@ import { migration101 } from "./101_workspace_entities.js";
 import { migration102 } from "./102_session_aliases.js";
 import { migration103 } from "./103_schedules.js";
 import { migration104 } from "./104_workspace_integrity_guards.js";
+import { migration105 } from "./105_finding_actor_fingerprint.js";
 import type { Migration } from "./types.js";
 
 /**
@@ -23,4 +24,5 @@ export const allMigrations: Migration[] = [
   migration102,
   migration103,
   migration104,
+  migration105,
 ];

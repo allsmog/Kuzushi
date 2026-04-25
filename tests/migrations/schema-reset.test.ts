@@ -53,6 +53,7 @@ describe("schema reset and incremental migrations", () => {
         { version: 102 },
         { version: 103 },
         { version: 104 },
+        { version: 105 },
       ]);
       expect(readdirSync(path.dirname(dbPath)).filter((n) => n.includes(".bak-"))).toHaveLength(0);
     } finally {
@@ -82,6 +83,7 @@ describe("schema reset and incremental migrations", () => {
         { version: 102 },
         { version: 103 },
         { version: 104 },
+        { version: 105 },
       ]);
       const legacyRow = db.prepare("SELECT COUNT(*) as n FROM findings").get() as { n: number };
       expect(legacyRow.n).toBe(0);
@@ -119,6 +121,7 @@ describe("schema reset and incremental migrations", () => {
         { version: 102 },
         { version: 103 },
         { version: 104 },
+        { version: 105 },
       ]);
       const hostsExists = second
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='hosts'")
@@ -145,6 +148,7 @@ describe("schema reset and incremental migrations", () => {
         { version: 102 },
         { version: 103 },
         { version: 104 },
+        { version: 105 },
       ]);
     } finally {
       second.close();

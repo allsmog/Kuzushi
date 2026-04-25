@@ -493,6 +493,96 @@ function printShellView(emit: Emit, shell: ShellState, state: UIState): void {
     case "task-story":
       printTaskStoryView(emit, shell);
       return;
+    case "module-run":
+      printModuleRunView(emit, shell);
+      return;
+    case "actor-detail":
+      printActorDetailView(emit, shell, state);
+      return;
+    case "prompts-editor":
+      printPromptsEditorView(emit, shell);
+      return;
+  }
+}
+
+function printModuleRunView(emit: Emit, shell: ShellState): void {
+  const run = shell.moduleRun;
+  if (!run) {
+    emit(`  [run] ${shell.focusedModule ?? "module"} · idle`);
+    emit("# RUN");
+    emit("  (no active run)");
+    return;
+  }
+  const elapsed = formatDuration(Math.max(0, Date.now() - run.startedAtMs));
+  const stepsDone = run.steps.filter((s) => s.status === "done").length;
+  const stepsTotal = run.steps.length;
+  emit(
+    `  [run] ${run.moduleId}:${run.toolName ?? "run"} · ${elapsed} · ${stepsDone}/${stepsTotal}`,
+  );
+  emit(`# RUN ${run.moduleId}`);
+  emit(`  status: ${run.status}`);
+  for (const step of run.steps) {
+    const glyph =
+      step.status === "done"
+        ? "✓"
+        : step.status === "running"
+          ? "→"
+          : step.status === "error"
+            ? "✗"
+            : "○";
+    emit(`  ${glyph} ${step.title}`);
+  }
+}
+
+function printActorDetailView(emit: Emit, shell: ShellState, state: UIState): void {
+  const fp = shell.focusedActor ?? "";
+  const lines = fp ? (state.agentActivity?.get(fp) ?? []) : [];
+  emit(`  [actor] ${fp || "(none)"} · ${lines.length} events`);
+  emit("# ACTOR TRANSCRIPT");
+  if (!fp) {
+    emit("  (no actor focused)");
+    return;
+  }
+  for (const line of lines) {
+    const glyph =
+      line.kind === "tool-start" || line.kind === "tool-progress"
+        ? "●"
+        : line.kind === "tool-complete"
+          ? "⎿"
+          : line.kind === "reasoning"
+            ? "✻"
+            : line.kind === "finding-preview"
+              ? "★"
+              : "•";
+    // For tool-* events the toolName leads, with the detail wrapped in
+    // `(...)` so grep parity with the Ink view stays useful. Free-form
+    // events (reasoning, finding-preview) just show the detail.
+    if ((line.kind === "tool-start" || line.kind === "tool-progress") && line.toolName) {
+      const head = line.detail ? `${line.toolName}(${line.detail})` : line.toolName;
+      emit(`  ${glyph} ${head}`);
+      continue;
+    }
+    if (line.kind === "tool-complete" && line.toolName) {
+      emit(`  ${glyph} ${line.toolName}${line.detail ? ` — ${line.detail}` : ""}`);
+      continue;
+    }
+    const detail = line.detail ?? line.toolName ?? line.kind;
+    emit(`  ${glyph} ${detail}`);
+  }
+}
+
+function printPromptsEditorView(emit: Emit, shell: ShellState): void {
+  const moduleId = shell.focusedModule ?? "module";
+  const audit = shell.promptsEditor?.audit ?? [];
+  const localEdits = audit.filter((r) => r.effective.source === "file").length;
+  emit(`  [prompts] ${moduleId} · ${localEdits} override${localEdits === 1 ? "" : "s"}`);
+  emit("# PROMPTS");
+  if (audit.length === 0) {
+    emit("  (no prompt keys)");
+    return;
+  }
+  for (const row of audit) {
+    emit(`  ${row.verb}  source=${row.effective.source}  ${row.effective.filePath ?? ""}`);
   }
 }
 

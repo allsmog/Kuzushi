@@ -198,6 +198,15 @@ export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
     if (sub) return { type: "dispatch", command: `/threats ${sub}` };
   }
 
+  // --- 3b. ModuleRunView 1..4 actor drill-in --------------------------------
+  // Pressing a digit while the view is `module-run` dispatches `/actor <n>`,
+  // which the slash router resolves to a per-actor fingerprint and flips
+  // the view to `actor-detail`. Range 1..4 mirrors the four actor cards
+  // ModuleRunView reserves space for; higher digits fall through.
+  if (shell.shellView === "module-run" && input.length === 0 && /^[1-4]$/.test(char)) {
+    return { type: "dispatch", command: `/actor ${char}` };
+  }
+
   // --- 4. Findings cursor ---------------------------------------------------
   if (shell.shellView === "findings" && input.length === 0 && looseFindingCount > 0) {
     const cur = shell.findingCursor ?? 0;

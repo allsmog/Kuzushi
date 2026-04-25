@@ -16,6 +16,7 @@ import type { ShellModuleToolSummary, ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { ContextStrip } from "./ContextStrip.js";
 import { EmptyState } from "./EmptyState.js";
+import { getModuleHomeRenderer } from "./module-home/registry.js";
 import { ScreenContent } from "./ScreenContent.js";
 
 interface ModuleHomeProps {
@@ -23,6 +24,13 @@ interface ModuleHomeProps {
 }
 
 export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
+  // Modules can opt into the v3 "Status / Actions / Last run" home by
+  // registering a renderer in `module-home/registry.ts`. The lookup is
+  // resolved up-front so the legacy keybind registration below stays at
+  // the top of the function (rules-of-hooks: same hooks, every render).
+  const customRenderer = getModuleHomeRenderer(shell.focusedModule ?? null);
+  const useCustom = customRenderer != null && shell.processing !== true;
+
   useRegisterKeybindings([
     { keys: "Enter", label: "type tool verb" },
     { keys: "t", label: "tune", secondary: true },
@@ -30,6 +38,7 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
     { keys: "b", label: "back", secondary: true },
     { keys: "?", label: "help", secondary: true },
   ]);
+  if (useCustom) return customRenderer!.render({ shell });
   const moduleId = shell.focusedModule;
   if (!moduleId) {
     return (

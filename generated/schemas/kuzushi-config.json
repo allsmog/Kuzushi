@@ -13,11 +13,29 @@
     "agentRuntimeConfig": {
       "additionalProperties": false,
       "properties": {
-        "apiKey": {
-          "type": "string"
+        "claude": {
+          "additionalProperties": false,
+          "properties": {
+            "apiKey": {
+              "type": "string"
+            },
+            "baseUrl": {
+              "type": "string"
+            }
+          },
+          "type": "object"
         },
-        "baseUrl": {
-          "type": "string"
+        "piAi": {
+          "additionalProperties": false,
+          "properties": {
+            "apiKey": {
+              "type": "string"
+            },
+            "baseUrl": {
+              "type": "string"
+            }
+          },
+          "type": "object"
         }
       },
       "type": "object"
@@ -147,9 +165,6 @@
     "enableExternalHooks": {
       "type": "boolean"
     },
-    "enableExternalTasks": {
-      "type": "boolean"
-    },
     "ensembleModels": {
       "items": {
         "type": "string"
@@ -157,12 +172,6 @@
       "type": "array"
     },
     "excludePatterns": {
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
-    "externalTasks": {
       "items": {
         "type": "string"
       },

@@ -22,7 +22,7 @@ import { truncateEnd } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
-import { ContextStrip } from "./ContextStrip.js";
+import { RuleHeader } from "./RuleHeader.js";
 import { ScreenContent } from "./ScreenContent.js";
 
 interface ThreatDfdViewProps {
@@ -61,17 +61,20 @@ export function ThreatDfdView({ shell }: ThreatDfdViewProps): React.ReactElement
     selectedId: shell.threatDfdSelection,
   });
 
+  const status = [
+    `${model.nodes.length} nodes`,
+    `${model.flows.length} flows`,
+    `${model.boundaries.length} boundaries`,
+    `${model.stats.threats} threats`,
+  ].join(" · ");
   return (
     <ScreenContent>
-      <ContextStrip
-        status={[
-          `${model.nodes.length} nodes`,
-          `${model.flows.length} flows`,
-          `${model.boundaries.length} boundaries`,
-          `${model.stats.threats} threats`,
-        ]}
-        subtitle={model.sourceLabel}
-      />
+      <RuleHeader breadcrumb="kuzushi/threats/dfd" status={status} />
+      {model.sourceLabel ? (
+        <Box marginBottom={SPACING.sm}>
+          <Text>{tokens.muted(model.sourceLabel)}</Text>
+        </Box>
+      ) : null}
       <Legend />
       {model.nodes.length === 0 ? <EmptyWorkspace /> : <AttackSurfaceMap model={model} />}
       <SelectedPanel model={model} />
@@ -358,12 +361,13 @@ function PatchProposalCard({ shell }: { shell: ShellState }): React.ReactElement
 
 function ControlHint(): React.ReactElement {
   return (
-    <Box marginTop={SPACING.sm}>
+    <Box marginTop={SPACING.sm} flexDirection="column">
       <Text>
         {tokens.muted(
-          "Keys  1 DFD · 2 STRIDE · 3 stories · 4 scope · 5 summary · r regen · a ask AI · q back",
+          "1 dfd · 2 stride · 3 stories · 4 scope · 5 summary · r regen · a ask AI · q back",
         )}
       </Text>
+      <Text>{tokens.muted("patch proposal:  a apply · s skip · d diff · r re-rank")}</Text>
     </Box>
   );
 }

@@ -96,6 +96,7 @@ export function buildSummaryData(
         attackNarrative: f.attackNarrative,
         blame: f.blame,
         introducedIn: f.introducedIn,
+        actorFingerprint: f.actorFingerprint,
       }),
     );
 

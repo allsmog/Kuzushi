@@ -284,6 +284,12 @@ export interface ActionableFinding {
   attackNarrative?: string;
   blame?: { sha: string; author: string; date: string; summary: string };
   introducedIn?: string;
+  /**
+   * Per-actor fingerprint stamped by `threat-hunt` so the v3
+   * `ActorTranscriptView` can synthesize ★ Finding rows for completed and
+   * replayed runs. Optional — non-actor findings leave it undefined.
+   */
+  actorFingerprint?: string;
 }
 
 export interface UIState {
@@ -557,7 +563,16 @@ export type ShellView =
   // assemble) plus a pillar preview that fills in as signals land. Entered
   // via `/context build`; reads from `shell.contextBuild`.
   | "context-build"
-  | "task-story";
+  | "task-story"
+  // ModuleRunView — Claude-Code-style live transcript for the focused
+  // module's active tool run. Reads from `shell.moduleRun`.
+  | "module-run"
+  // ActorTranscriptView — full per-actor transcript drilled into from a
+  // ModuleRunView. Reads from `shell.agentActivity[shell.focusedActor]`.
+  | "actor-detail"
+  // PromptsEditorView — list + verbs (edit, show, diff, reset, set) for
+  // the focused module's prompt overrides.
+  | "prompts-editor";
 
 export type ThreatTab = "dfd" | "stride" | "stories" | "scope" | "summary";
 
@@ -728,6 +743,100 @@ export interface ShellModuleCard {
   toolSummaries?: ReadonlyArray<ShellModuleToolSummary>;
 }
 
+/**
+ * One step in the ModuleRunView "Steps" block. The renderer maps `status`
+ * → `STEP_GLYPH` (`✓` done, `→` running, `○` pending). `count` and
+ * `elapsedSeconds` are advisory and right-aligned when present.
+ */
+export interface ModuleRunStep {
+  id: string;
+  title: string;
+  status: "pending" | "running" | "done" | "error";
+  /** Optional right-aligned counter — e.g. "3/5 actors" or "12 paths". */
+  count?: string;
+  /** Optional right-aligned elapsed seconds when the row is done/running. */
+  elapsedSeconds?: number;
+  /** Optional error message rendered under a failed row. */
+  error?: string;
+}
+
+/** One artifact row rendered under the ModuleRunView "Artifacts" section. */
+export interface ModuleRunArtifact {
+  label: string;
+  path: string;
+  /** Optional bytes/size annotation rendered to the right. */
+  size?: string;
+}
+
+/**
+ * Snapshot of the active or most recent module run, owned by the shell so
+ * the new ModuleRunView can render without needing to hit the bus or the
+ * datastore. Populated by the report-worker when it sees agent activity
+ * and tool lifecycle for the focused module.
+ */
+export interface ModuleRunSlice {
+  /** Module that owns this run (matches `shell.focusedModule`). */
+  moduleId: string;
+  /** Run-id from the bus (mirrors `shell.activeRun?.runId` when known). */
+  runId?: string;
+  /** Tool currently running, e.g. `"threat-hunt:run"`. */
+  toolName?: string;
+  /** Operator-friendly display name from `ModuleTool.displayName`. */
+  displayName?: string;
+  /** Pre-formatted input summary from the tool's `formatInput`, if any. */
+  inputSummary?: string;
+  /** Epoch ms the run started — drives the live elapsed counter. */
+  startedAtMs: number;
+  /** Lifecycle status for the run as a whole. */
+  status: "running" | "done" | "error" | "aborted";
+  /** Step rows in display order (top-to-bottom). */
+  steps: ReadonlyArray<ModuleRunStep>;
+  /**
+   * Recent activity tail flattened across all fingerprints — ring buffer
+   * trimmed by the report-worker. Rendered as the "Evidence" table.
+   */
+  evidenceTail: ReadonlyArray<AgentActivityLine>;
+  /** Aggregate cost for this run, in USD. */
+  costUsd?: number;
+  /** Artifacts produced — paths the operator may want to crack open. */
+  artifacts?: ReadonlyArray<ModuleRunArtifact>;
+}
+
+/**
+ * After-vim confirmation state for the PromptsEditorView. The
+ * "Saved prompt override" card renders while `lastSavedAt` is fresh
+ * (within ~5s); the editor view also reads pre-computed audit rows
+ * from `audit` (populated when the operator opens the view).
+ */
+export interface PromptsEditorSlice {
+  /**
+   * Cached audit rows for the focused module. Re-populated by the shell
+   * router on entry to `shellView === "prompts-editor"` so the renderer
+   * doesn't need a `CopilotCore` handle.
+   */
+  audit?: ReadonlyArray<{
+    moduleId: string;
+    toolName: string;
+    verb: string;
+    promptKey: string;
+    effective: {
+      source: "default" | "inline" | "file" | "unset";
+      filePath?: string;
+      byteLen?: number;
+      rawValue?: string;
+    };
+  }>;
+  lastSavedAt?: number;
+  lastSaved?: {
+    /** Verb that was edited (e.g. "triage"). */
+    name: string;
+    /** Absolute path of the override file. */
+    path: string;
+    /** File size in bytes. */
+    size: number;
+  };
+}
+
 export interface ShellModuleToolSummary {
   /** Fully qualified name, e.g. "sast:scan". */
   name: string;
@@ -782,6 +891,20 @@ export interface ShellState {
   shellView: ShellView;
   /** When shellView === "finding", which finding ID is open (e.g. "F-0216"). */
   openFindingId: string | null;
+  /**
+   * When `shellView === "actor-detail"`, the per-actor fingerprint to
+   * render the transcript for (e.g. `"threat-hunt:Unauthenticated_User:0"`).
+   * Optional / null when the drill-in is not active.
+   */
+  focusedActor?: string | null;
+  /**
+   * Live snapshot of the focused module's currently running (or most recent)
+   * tool, populated by the report-worker. Drives the ModuleRunView header,
+   * step rows, and Evidence/Findings/Cost/Artifacts blocks.
+   */
+  moduleRun?: ModuleRunSlice | null;
+  /** Transient state for the PromptsEditorView's after-vim confirmation card. */
+  promptsEditor?: PromptsEditorSlice | null;
   /**
    * Cursor index into the (severity-sorted) loose-findings list rendered by
    * FindingsView. Driven by j/k/ArrowDown/ArrowUp/g/G/PgUp/PgDown at the
@@ -962,6 +1085,13 @@ const MAX_AGENT_ACTIVITY_ENTRIES = 1000;
 /** Default TTL for stale-activity eviction (seconds). */
 const DEFAULT_AGENT_ACTIVITY_TTL_SEC = 600; // 10 minutes
 
+/**
+ * Cap on `shell.moduleRun.evidenceTail` length. The view renders the
+ * last ~8 rows, but we keep a few more in memory so the operator can
+ * see what arrived just before the visible window.
+ */
+const MAX_MODULE_RUN_EVIDENCE = 32;
+
 export class UIStore {
   private state: UIState;
   private listeners = new Set<Listener>();
@@ -1043,6 +1173,69 @@ export class UIStore {
    */
   setBreadcrumb(breadcrumb: UIState["breadcrumb"]): void {
     this.state = { ...this.state, breadcrumb };
+    this.notify();
+  }
+
+  /**
+   * Seed `shell.moduleRun` for the focused module — called on tool-start
+   * by the dispatcher when the module exposes a v3 home renderer. Drops
+   * any prior run for this module (operators only watch one at a time).
+   */
+  beginModuleRun(slice: ModuleRunSlice): void {
+    if (!this.state.shell) return;
+    this.state = {
+      ...this.state,
+      shell: { ...this.state.shell, moduleRun: slice },
+    };
+    this.notify();
+  }
+
+  /**
+   * Patch fields onto `shell.moduleRun` (status, costUsd, artifacts, etc.).
+   * No-op if no run is currently active.
+   */
+  patchModuleRun(patch: Partial<ModuleRunSlice>): void {
+    const shell = this.state.shell;
+    if (!shell?.moduleRun) return;
+    this.state = {
+      ...this.state,
+      shell: { ...shell, moduleRun: { ...shell.moduleRun, ...patch } },
+    };
+    this.notify();
+  }
+
+  /** Replace the steps array on the active module run (idempotent reorder). */
+  setModuleRunSteps(steps: ReadonlyArray<ModuleRunStep>): void {
+    const shell = this.state.shell;
+    if (!shell?.moduleRun) return;
+    this.state = {
+      ...this.state,
+      shell: { ...shell, moduleRun: { ...shell.moduleRun, steps } },
+    };
+    this.notify();
+  }
+
+  /**
+   * Push one row onto `shell.moduleRun.evidenceTail` — bounded ring buffer
+   * of the last `MAX_MODULE_RUN_EVIDENCE` rows. Caller decides whether the
+   * event belongs to the active run (we don't gate by toolName here).
+   */
+  pushModuleRunActivity(line: AgentActivityLine): void {
+    const shell = this.state.shell;
+    if (!shell?.moduleRun) return;
+    const next = [...shell.moduleRun.evidenceTail, line].slice(-MAX_MODULE_RUN_EVIDENCE);
+    this.state = {
+      ...this.state,
+      shell: { ...shell, moduleRun: { ...shell.moduleRun, evidenceTail: next } },
+    };
+    this.notify();
+  }
+
+  /** Drop the active module run snapshot. Used on `/clear`. */
+  clearModuleRun(): void {
+    const shell = this.state.shell;
+    if (!shell?.moduleRun) return;
+    this.state = { ...this.state, shell: { ...shell, moduleRun: null } };
     this.notify();
   }
 

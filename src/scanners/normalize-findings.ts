@@ -59,6 +59,11 @@ export interface NormalizedFinding {
   impact: string;
   cwe: string[];
   evidence: string;
+  /**
+   * Optional sidecar set by threat-hunt before merge — survives
+   * `selectFindings` so the UI can group findings by hunting actor.
+   */
+  actorFingerprint?: string;
 }
 
 export interface FindingOutput {
@@ -155,6 +160,7 @@ export function selectFindings(
       impact: finding.impact,
       cwe: finding.cwe,
       score,
+      ...(finding.actorFingerprint ? { actorFingerprint: finding.actorFingerprint } : {}),
     };
 
     const existing = deduped.get(fingerprint);
