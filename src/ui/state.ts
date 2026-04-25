@@ -284,6 +284,12 @@ export interface ActionableFinding {
   attackNarrative?: string;
   blame?: { sha: string; author: string; date: string; summary: string };
   introducedIn?: string;
+  /**
+   * Per-actor fingerprint stamped by `threat-hunt` so the v3
+   * `ActorTranscriptView` can synthesize ★ Finding rows for completed and
+   * replayed runs. Optional — non-actor findings leave it undefined.
+   */
+  actorFingerprint?: string;
 }
 
 export interface UIState {

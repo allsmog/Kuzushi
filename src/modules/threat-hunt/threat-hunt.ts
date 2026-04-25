@@ -510,13 +510,43 @@ export const threatHuntTool = defineDagTool<
   },
   async run(input, ctx) {
     ctx.signal?.throwIfAborted();
+
+    // Steps surfaced in `ModuleRunView`. Mutated in place; emitted on every
+    // transition. Idempotent — the renderer is no-op when no run is active.
+    const steps: Array<{
+      id: string;
+      title: string;
+      status: "pending" | "running" | "done" | "error";
+      count?: string;
+    }> = [
+      { id: "boot", title: "load threat model", status: "running" },
+      { id: "enumerate", title: "enumerate actors", status: "pending" },
+      { id: "spawn", title: "spawn actor agents", status: "pending" },
+      { id: "merge", title: "merge findings", status: "pending" },
+    ];
+    const emit = (): void => ctx.uiStore?.setModuleRunSteps?.(steps.slice());
+    const setStep = (
+      id: string,
+      patch: Partial<{ status: "pending" | "running" | "done" | "error"; count: string }>,
+    ): void => {
+      const ix = steps.findIndex((s) => s.id === id);
+      if (ix < 0) return;
+      steps[ix] = { ...steps[ix]!, ...patch };
+      emit();
+    };
+    emit();
+
     const config = await resolveConfig(input, ctx);
     ctx.reportActivity?.("reading threat model");
     const dag = requireDag(ctx);
     const { prioritized, allActors } = extractActorsWithThreats(dag.upstreamOutputs);
+    setStep("boot", { status: "done" });
 
     if (allActors.length === 0) {
       log.info("[threat-hunt] No external entities in threat model DFD — skipping");
+      setStep("enumerate", { status: "done", count: "0 actors" });
+      setStep("spawn", { status: "done", count: "skipped" });
+      setStep("merge", { status: "done", count: "0 findings" });
       return attachTaskOutputMeta([], { costUsd: 0 }) as Finding[];
     }
 
@@ -526,12 +556,17 @@ export const threatHuntTool = defineDagTool<
 
     const capped = actorsToHunt.slice(0, config.maxActors);
     const totalRuns = capped.length * config.runsPerActor;
+    setStep("enumerate", {
+      status: "done",
+      count: `${capped.length} actor${capped.length === 1 ? "" : "s"}`,
+    });
     log.info(
       `[threat-hunt] Spawning ${totalRuns} hunts (${capped.length} actors x ${config.runsPerActor} runs, from ${allActors.length} external entities)`,
     );
     ctx.reportActivity?.(
       `queuing ${capped.length} actor${capped.length === 1 ? "" : "s"} × ${config.runsPerActor} run${config.runsPerActor === 1 ? "" : "s"}`,
     );
+    setStep("spawn", { status: "running", count: `0/${totalRuns}` });
 
     // Build all hunt tasks, then execute with bounded concurrency.
     const huntTasks: Array<() => Promise<FindingOutput>> = [];
@@ -551,6 +586,7 @@ export const threatHuntTool = defineDagTool<
     const maxConcurrent = Math.min(totalRuns, config.maxConcurrentHunts);
     const totalBatches = Math.ceil(huntTasks.length / maxConcurrent);
     const results: FindingOutput[] = [];
+    let completed = 0;
     for (let i = 0; i < huntTasks.length; i += maxConcurrent) {
       if (ctx.signal?.aborted) break;
       const batch = huntTasks.slice(i, i + maxConcurrent);
@@ -561,9 +597,13 @@ export const threatHuntTool = defineDagTool<
       );
       const batchResults = await Promise.all(batch.map((fn) => fn()));
       results.push(...batchResults);
+      completed += batchResults.length;
+      setStep("spawn", { count: `${completed}/${totalRuns}` });
     }
+    setStep("spawn", { status: "done", count: `${completed}/${totalRuns}` });
 
     // Merge all findings, dedup via selectFindings
+    setStep("merge", { status: "running" });
     const merged: FindingOutput = {
       findings: results.flatMap((r) => r.findings),
       costUsd: results.reduce((sum, r) => sum + (r.costUsd ?? 0), 0),
@@ -577,6 +617,11 @@ export const threatHuntTool = defineDagTool<
       "threat-hunt",
       config.maxFindings,
     );
+    setStep("merge", {
+      status: "done",
+      count: `${findings.length} finding${findings.length === 1 ? "" : "s"}`,
+    });
+    ctx.uiStore?.patchModuleRun?.({ costUsd: merged.costUsd ?? 0 });
 
     return attachTaskOutputMeta(findings, { costUsd: merged.costUsd ?? 0 }) as Finding[];
   },

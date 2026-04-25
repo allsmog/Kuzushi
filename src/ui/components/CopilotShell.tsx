@@ -804,13 +804,24 @@ function ShellViewPanel({
     case "task-story":
       return <TaskStoryView key={view} story={shell.taskStory} processing={shell.processing} />;
     case "module-run":
-      // Per-run findings are sourced from a future `state.moduleRun.findings`
-      // slice the report-worker will populate; for now the panel renders the
-      // steps + actor/evidence blocks without the findings tail.
-      return <ModuleRunView key={view} shell={shell} findings={[]} agentActivity={agentActivity} />;
+      // `summary.actionableFindings` carries `actorFingerprint` once the
+      // run completes; ModuleRunView/ActorTranscriptView filter by it.
+      return (
+        <ModuleRunView
+          key={view}
+          shell={shell}
+          findings={summary?.actionableFindings ?? []}
+          agentActivity={agentActivity}
+        />
+      );
     case "actor-detail":
       return (
-        <ActorTranscriptView key={view} shell={shell} findings={[]} agentActivity={agentActivity} />
+        <ActorTranscriptView
+          key={view}
+          shell={shell}
+          findings={summary?.actionableFindings ?? []}
+          agentActivity={agentActivity}
+        />
       );
     case "prompts-editor":
       return <PromptsEditorView key={view} shell={shell} />;

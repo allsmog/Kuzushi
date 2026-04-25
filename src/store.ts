@@ -117,6 +117,14 @@ export interface StoredFindingRecord {
   attackNarrative: string | undefined;
   blame?: { sha: string; author: string; date: string; summary: string };
   introducedIn?: string;
+  /**
+   * Optional per-actor fingerprint stamped by `threat-hunt` (matches
+   * `state.agentActivity` keys, e.g. `"threat-hunt:Foo:0"`). Threaded
+   * through to `ActionableFinding.actorFingerprint` so the v3
+   * `ActorTranscriptView` can render ★ Finding rows for completed and
+   * replayed runs.
+   */
+  actorFingerprint?: string;
 }
 
 const PROOF_STATE_PRECEDENCE: Record<ProofState, number> = {
@@ -128,7 +136,7 @@ const PROOF_STATE_PRECEDENCE: Record<ProofState, number> = {
 };
 
 /** Current canonical schema version. */
-const CURRENT_SCHEMA_VERSION = 104;
+const CURRENT_SCHEMA_VERSION = 105;
 
 /**
  * Lowest schema version that the migration runner can upgrade in-place.
@@ -336,8 +344,8 @@ const UPSERT_FINDING_SQL = `
       severity, message, adjusted_score, corroboration_json, suppression_json, verdict, confidence,
       rationale, verification_steps, fix_patch, triage_cost_usd, triage_details_json,
       taint_path_json, proof_state, engine_provenance_json,
-      finding_metadata_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      finding_metadata_json, actor_fingerprint
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fingerprint) DO UPDATE SET
       task_id=excluded.task_id,
       repo=excluded.repo,
@@ -361,6 +369,7 @@ const UPSERT_FINDING_SQL = `
       proof_state=excluded.proof_state,
       engine_provenance_json=excluded.engine_provenance_json,
       finding_metadata_json=COALESCE(excluded.finding_metadata_json, findings.finding_metadata_json),
+      actor_fingerprint=COALESCE(excluded.actor_fingerprint, findings.actor_fingerprint),
       updated_at=datetime('now')
   `;
 
@@ -422,6 +431,7 @@ function upsertFindingParams(
     finding.proofState ?? null,
     finding.engineProvenance ? safeJsonStringify(finding.engineProvenance) : null,
     null, // finding_metadata_json — populated by updateFindingMetadata; COALESCE preserves existing
+    finding.actorFingerprint ?? null,
   ];
 }
 
@@ -1004,7 +1014,8 @@ export function getActionableFindings(
            poc_run_stdout as pocRunStdout,
            poc_run_stderr as pocRunStderr,
            poc_run_verdict as pocRunVerdict,
-           poc_run_duration_ms as pocRunDurationMs
+           poc_run_duration_ms as pocRunDurationMs,
+           actor_fingerprint as actorFingerprint
     FROM findings ${where}
     ORDER BY
       CASE verdict WHEN 'tp' THEN 0 WHEN 'needs_review' THEN 1 ELSE 2 END,
@@ -1053,6 +1064,7 @@ export function getActionableFindings(
     pocRunStderr: string | null;
     pocRunVerdict: PocExecutionVerdict | null;
     pocRunDurationMs: number | null;
+    actorFingerprint: string | null;
   }>;
 
   return rows.map((row) => {
@@ -1131,6 +1143,7 @@ export function getActionableFindings(
       introducedIn:
         parseFindingMetadata(row.findingMetadataJson)?.introducedIn ??
         parseFindingMetadata(row.findingMetadataJson)?.blame?.sha,
+      actorFingerprint: row.actorFingerprint ?? undefined,
     };
   });
 }

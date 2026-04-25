@@ -11,7 +11,6 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
-import type { Finding } from "../../scanners/types.js";
 import { formatCost, truncateEnd } from "../format.js";
 import { BLACK_CIRCLE, FINDING_GLYPH, LOWER_HOOK, THINKING_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
@@ -25,9 +24,27 @@ import {
 import { RuleHeader } from "./RuleHeader.js";
 import { ScreenContent } from "./ScreenContent.js";
 
+/**
+ * Narrow shape that both `Finding` (scanner output) and
+ * `ActionableFinding` (post-summary) satisfy. The view only needs the
+ * fields below; accepting either shape lets `CopilotShell` pass through
+ * `summary.actionableFindings` for completed runs without a translation.
+ */
+export interface ActorViewFinding {
+  fingerprint: string;
+  severity: string;
+  filePath: string;
+  startLine: number;
+  /** Live findings expose `message`; ActionableFinding uses `rationale`/`title`. */
+  message?: string;
+  rationale?: string;
+  title?: string;
+  actorFingerprint?: string;
+}
+
 interface ActorTranscriptViewProps {
   shell: ShellState;
-  findings?: ReadonlyArray<Finding>;
+  findings?: ReadonlyArray<ActorViewFinding>;
   /**
    * Live agent activity map (per-actor fingerprints → last-N lines).
    * Threaded from the UIStore — the same map is read by ModuleRunView.
@@ -91,13 +108,17 @@ function Header({ label, subtitle }: { label: string; subtitle: string }): React
   );
 }
 
+function findingHeadline(f: ActorViewFinding): string {
+  return f.title ?? f.message ?? f.rationale ?? "(no title)";
+}
+
 function Transcript({
   lines,
   findings,
   maxRows,
 }: {
   lines: ReadonlyArray<AgentActivityLine>;
-  findings: ReadonlyArray<Finding>;
+  findings: ReadonlyArray<ActorViewFinding>;
   maxRows: number;
 }): React.ReactElement {
   const tail = lines.slice(-maxRows);
@@ -127,7 +148,7 @@ function Transcript({
         <EntryRow
           key={`f:${f.fingerprint}`}
           glyph={FINDING_GLYPH}
-          head={`Finding — ${truncateEnd(f.message, 80)}`}
+          head={`Finding — ${truncateEnd(findingHeadline(f), 80)}`}
           body={`${f.severity} · ${f.filePath}:${f.startLine}`}
         />
       ))}
@@ -190,7 +211,7 @@ function OtherActors({
 }: {
   current: string | null;
   fingerprints: ReadonlyArray<string>;
-  findings: ReadonlyArray<Finding>;
+  findings: ReadonlyArray<ActorViewFinding>;
 }): React.ReactElement | null {
   const others = fingerprints.filter((fp) => fp !== current);
   if (others.length === 0) return null;
