@@ -409,6 +409,13 @@ export interface KuzushiConfig {
   agentRuntimeBackend?: AgentRuntimeBackend;
   /** Optional runtime-level credentials and endpoint overrides. */
   agentRuntimeConfig?: AgentRuntimeConfig;
+  /**
+   * Auth mode. `"inherited"` means "trust whatever credentials the parent
+   * process / Claude Code session already has" — the credential prompt is
+   * skipped on subsequent launches. Set by picking "Inherited Claude" in
+   * the credential prompt or via `--inherit-claude` on the CLI.
+   */
+  auth?: "inherited";
   /** Enabled task IDs, in execution order. */
   tasks: TaskId[];
   /** Default severity filter. */

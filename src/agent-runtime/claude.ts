@@ -12,6 +12,7 @@ import {
   type SpawnOptions,
 } from "@anthropic-ai/claude-agent-sdk";
 import Anthropic from "@anthropic-ai/sdk";
+import { publishAgentActivity, publishTaskActivity } from "../bus/activity.js";
 import type { LlmCallCompleteEvent, LlmCallErrorEvent, LlmCallStartEvent } from "../bus/events.js";
 import type { MessageBus } from "../bus/types.js";
 import { getLogger } from "../logger.js";
@@ -20,6 +21,7 @@ import { normalizeCostUsd, toErrorMessage } from "../utils.js";
 import type { AgentQueryExecutionResult } from "./execution.js";
 import { buildSdkHooks } from "./sdk-hooks.js";
 import type {
+  AgentActivityPhase,
   AgentBatchRequest,
   AgentMessage,
   AgentQueryOptions,
@@ -198,6 +200,69 @@ for (const stream of [process.stdout, process.stderr]) {
 }
 
 /**
+ * Subset of fields we read off each SDK content block to detect tool-use
+ * activity. The SDK ships `BetaContentBlock` as a discriminated union, but
+ * `mapMessage` already spreads to `Record<string, unknown>` so we work
+ * against that loose shape here.
+ */
+interface ToolUseBlockShape {
+  type?: unknown;
+  name?: unknown;
+  input?: unknown;
+}
+
+/**
+ * Emit `task:activity` (always — drives the spinner subtitle) and
+ * `${phase}:agent-activity` (only when both `phase` and `fingerprint` are
+ * set — drives the "N agents active" counter) for any tool-use blocks
+ * inside an SDK assistant message.
+ *
+ * Best-effort: every publish is wrapped in the helpers' own try/catch so a
+ * broken subscriber never takes down the SDK loop.
+ */
+function emitActivityForAssistant(
+  bus: MessageBus | null,
+  contentBlocks: unknown,
+  ctx: {
+    runId?: string | null;
+    taskId?: string;
+    fingerprint?: string;
+    phase?: AgentActivityPhase;
+  },
+): void {
+  if (!bus || !Array.isArray(contentBlocks)) return;
+  const taskId = ctx.taskId ?? "agent-runtime";
+  const runId = ctx.runId ?? undefined;
+  for (const raw of contentBlocks as ToolUseBlockShape[]) {
+    if (!raw || raw.type !== "tool_use") continue;
+    const toolName = typeof raw.name === "string" && raw.name.length > 0 ? raw.name : "tool";
+    publishTaskActivity(bus, taskId, `Calling ${toolName}…`, { runId });
+    if (ctx.phase && ctx.fingerprint) {
+      publishAgentActivity(bus, ctx.phase, ctx.fingerprint, "tool-start", {
+        toolName,
+        toolInput: isPlainObject(raw.input) ? raw.input : undefined,
+      });
+    }
+  }
+}
+
+/**
+ * Emit a terminal `${phase}:agent-activity` envelope so the report-worker
+ * clears the fingerprint from the agents-active map (`done: true`).
+ */
+function emitActivityDone(
+  bus: MessageBus | null,
+  ctx: { fingerprint?: string; phase?: AgentActivityPhase },
+): void {
+  if (!bus || !ctx.phase || !ctx.fingerprint) return;
+  publishAgentActivity(bus, ctx.phase, ctx.fingerprint, "tool-complete", { done: true });
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
  * Agent runtime backed by the Claude Agent SDK (@anthropic-ai/claude-agent-sdk).
  *
  * Benefits over pi-ai:
@@ -272,6 +337,12 @@ function releaseSlot(): void {
 export function __getSemaphoreState(): { active: number; leaked: number; waiting: number } {
   return { active: activeQueries, leaked: leakedSlots, waiting: waitQueue.length };
 }
+
+/** Exported for tests only — direct access to the SDK-message activity helpers. */
+export const __activityInternals = {
+  emitActivityForAssistant,
+  emitActivityDone,
+};
 
 export class ClaudeAgentRuntime implements AgentRuntime {
   readonly id = "claude";
@@ -793,7 +864,23 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         options,
       });
 
+      const activityCtx = {
+        runId: this.runId,
+        taskId: request.options.taskId,
+        fingerprint: request.options.fingerprint,
+        phase: request.options.phase,
+      };
+
       for await (const message of queryResult) {
+        // Surface tool-use activity to the bus BEFORE filtering through
+        // mapMessage — assistant messages with tool-use blocks drive the
+        // spinner subtitle and the "agents active" counter regardless of
+        // whether the caller consumes the mapped form.
+        if (message.type === "assistant") {
+          const sdkAssistant = message as SDKAssistantMessage;
+          emitActivityForAssistant(this.bus, sdkAssistant.message?.content, activityCtx);
+        }
+
         const mapped = mapMessage(message);
         if (!mapped) continue;
 
@@ -804,6 +891,10 @@ export class ClaudeAgentRuntime implements AgentRuntime {
           numTurns = sdkResult.num_turns ?? 0;
 
           const durationMs = Date.now() - startedAtMs;
+
+          // Clear the per-fingerprint agents-active row before yielding the
+          // result so the UI counter drops as soon as the work is done.
+          emitActivityDone(this.bus, activityCtx);
 
           if (sdkResult.subtype === "success" && "result" in mapped) {
             yield {
@@ -855,6 +946,13 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     } catch (error) {
       const durationMs = Date.now() - startedAtMs;
       log.error(`Claude SDK query failed (${durationMs}ms): ${toErrorMessage(error)}`);
+
+      // Make sure the agents-active counter doesn't get stuck when the
+      // SDK throws (subprocess crash, invalid auth, etc.).
+      emitActivityDone(this.bus, {
+        fingerprint: request.options.fingerprint,
+        phase: request.options.phase,
+      });
 
       // Emit llm:call-error
       if (this.bus) {
@@ -1090,6 +1188,13 @@ class ClaudeSession implements AgentSession {
       };
       this.messageQueue.enqueue(userMessage);
 
+      const activityCtx = {
+        runId: this._runId,
+        taskId: this.baseOptions.taskId,
+        fingerprint: this.baseOptions.fingerprint,
+        phase: this.baseOptions.phase,
+      };
+
       // Read messages from the subprocess until we get a result for this turn
       const iter = this.queryIterator!;
       while (true) {
@@ -1101,6 +1206,7 @@ class ClaudeSession implements AgentSession {
           done = next.done;
         } catch (error) {
           // Subprocess crashed — self-close to release the semaphore slot, then yield error.
+          emitActivityDone(this._bus, activityCtx);
           await this.close();
           yield {
             type: "result",
@@ -1113,6 +1219,7 @@ class ClaudeSession implements AgentSession {
 
         if (done) {
           // Subprocess exited unexpectedly — self-close to release the semaphore slot.
+          emitActivityDone(this._bus, activityCtx);
           await this.close();
           yield {
             type: "result",
@@ -1123,6 +1230,11 @@ class ClaudeSession implements AgentSession {
           return;
         }
 
+        if (value.type === "assistant") {
+          const sdkAssistant = value as SDKAssistantMessage;
+          emitActivityForAssistant(this._bus, sdkAssistant.message?.content, activityCtx);
+        }
+
         const mapped = mapMessage(value);
         if (!mapped) continue;
 
@@ -1130,6 +1242,8 @@ class ClaudeSession implements AgentSession {
           const sdkResult = value as SDKResultMessage;
           const totalCostUsd = normalizeCostUsd(sdkResult.total_cost_usd);
           const numTurns = sdkResult.num_turns ?? 0;
+
+          emitActivityDone(this._bus, activityCtx);
 
           if (sdkResult.subtype === "success" && "result" in mapped) {
             yield {

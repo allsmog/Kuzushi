@@ -116,6 +116,11 @@ export async function generatePocHarness(
       allowedTools: resolveDefaultPocHarnessTools(runtime),
       permissionMode: "dontAsk",
       systemPromptPrefix: pocHarnessSystemPromptPrefix(repoContext),
+      // Surface tool calls under the spinner subtitle and tick the
+      // agents-active counter while the harness session is alive.
+      taskId: "poc-harness",
+      fingerprint: finding.fingerprint,
+      phase: "poc-harness",
       outputFormat: {
         type: "json_schema",
         schema: POC_HARNESS_RESULT_SCHEMA,
@@ -168,7 +173,12 @@ export async function generatePocHarness(
       cwd: repoRoot,
       model,
       allowedTools: resolveDefaultPocHarnessTools(runtimeOptions.runtime),
-      runtimeOptions,
+      runtimeOptions: {
+        ...runtimeOptions,
+        phase: "poc-harness",
+        fingerprint: finding.fingerprint,
+        taskId: runtimeOptions.taskId ?? "poc-harness",
+      },
       systemPromptPrefix: pocHarnessSystemPromptPrefix(repoContext),
       schema: POC_HARNESS_RESULT_SCHEMA,
     });

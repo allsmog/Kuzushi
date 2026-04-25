@@ -686,6 +686,13 @@ async function rebuildShellRuntime(opts: ShellOptions): Promise<void> {
 }
 
 async function hasActiveShellCredentials(opts: ShellOptions): Promise<boolean> {
+  // Inherited mode: the operator opted to trust whatever the parent process
+  // / Claude Code session already has. Skip the prompt unconditionally —
+  // the SDK subprocess will resolve creds at query time and surface a real
+  // error if none are reachable, which is more useful than a generic
+  // "no creds" preflight.
+  if (opts.config.auth === "inherited") return true;
+
   const { resolveActiveCredentials } = await import("../config.js");
   const active = resolveActiveCredentials(opts.config);
   const backend = opts.config.agentRuntimeBackend ?? "pi-ai";
@@ -726,6 +733,38 @@ async function applyCredentialOutcome(
 
   const choice = outcome.choice;
   if (choice.kind === "inherited") {
+    // "Inherited Claude" — flip to the claude backend and persist `auth:
+    // "inherited"` to the global config so future launches skip the prompt
+    // even when no API key is in env. Generic "Use environment" (no
+    // providerId or providerId === "inherited") only rebuilds the runtime;
+    // it relies on whatever env vars already exist and re-prompts later
+    // if they're missing.
+    if (choice.providerId === "inherited-claude") {
+      opts.config.agentRuntimeBackend = "claude";
+      opts.config.auth = "inherited";
+      let persistedTo: string | undefined;
+      try {
+        const { applyConfigPatch, configPath } = await import("../config.js");
+        applyConfigPatch([
+          { path: "agentRuntimeBackend", value: "claude" },
+          { path: "auth", value: "inherited" },
+        ]);
+        persistedTo = configPath();
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        await rebuildShellRuntime(opts);
+        return {
+          enabled: true,
+          message: `Inherited Claude enabled (in-memory). Failed to persist: ${detail}`,
+        };
+      }
+      await rebuildShellRuntime(opts);
+      return {
+        enabled: true,
+        message: `Inherited Claude enabled. Saved to ${persistedTo}.`,
+        persistedTo,
+      };
+    }
     await rebuildShellRuntime(opts);
     return { enabled: true };
   }
@@ -2951,6 +2990,16 @@ async function startInkShell(
       markAbortSettled(store, "tool execution");
       clearTransientShellState(store);
       setProcessing(store, false);
+      // When the aborted tool was a pipeline-mode tool (sast:scan, etc.) the
+      // report-worker had flipped `mode` to "running" to mount the scan UI.
+      // The worker only flips back on a clean `run-completed` envelope, so an
+      // abort would leave the operator stranded on a frozen RunningView.
+      // Restoring mode to "shell" here returns them to the module prompt
+      // immediately. Idle agent turns ignore this flip — they already run
+      // under `mode === "shell"`.
+      if (store.getState().mode === "running") {
+        store.update({ mode: "shell", phase: "idle" });
+      }
       // Restore raw mode in case a Claude SDK subprocess disabled it. Must
       // happen before the next keystroke or the terminal echoes chars
       // below Ink's frame and Ctrl+C keeps missing `useInput`.

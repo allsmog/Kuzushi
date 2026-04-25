@@ -178,6 +178,30 @@ describe("shell runtime auth", () => {
     expect(opts.runtime.id).toBe("pi-ai");
   });
 
+  it("inherited-claude flips backend to claude and sets auth flag", async () => {
+    const tmpHome = mkdtempSync(path.join(os.tmpdir(), "kuzushi-inherit-"));
+    tempDirs.push(tmpHome);
+    const oldHome = process.env["HOME"];
+    process.env["HOME"] = tmpHome;
+    try {
+      const opts = createShellOptionsWithConfig({
+        ...baseConfig,
+        agentRuntimeBackend: "pi-ai",
+      });
+
+      await __shellInternals.applyCredentialOutcome(
+        { action: "proceed", choice: { kind: "inherited", providerId: "inherited-claude" } },
+        opts,
+      );
+
+      expect(opts.config.agentRuntimeBackend).toBe("claude");
+      expect(opts.config.auth).toBe("inherited");
+    } finally {
+      if (oldHome === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = oldHome;
+    }
+  });
+
   it("stores pasted pi-ai provider credentials without switching to claude", async () => {
     const oldOpenAiKey = process.env["OPENAI_API_KEY"];
     delete process.env["OPENAI_API_KEY"];

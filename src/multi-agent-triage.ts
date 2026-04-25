@@ -222,7 +222,12 @@ async function runSpecialist(
         cwd: repoRoot,
         model,
         allowedTools: resolveDefaultReadOnlyTools(runtimeOptions?.runtime),
-        runtimeOptions,
+        runtimeOptions: {
+          ...(runtimeOptions ?? {}),
+          phase: "triage",
+          fingerprint: finding.fingerprint,
+          taskId: runtimeOptions?.taskId ?? `triage-${role}`,
+        },
         systemPromptPrefix: triageSystemPromptPrefix(
           repoContext,
           (runtimeOptions as TriageRuntimeOptions | undefined)?.enrichedContext,
@@ -601,7 +606,12 @@ export async function triageFindingMultiAgent(
     cwd: repoRoot,
     model: managerModel,
     allowedTools: resolveDefaultReadOnlyTools(runtimeOptions?.runtime),
-    runtimeOptions,
+    runtimeOptions: {
+      ...(runtimeOptions ?? {}),
+      phase: "triage",
+      fingerprint: finding.fingerprint,
+      taskId: runtimeOptions?.taskId ?? "triage-manager",
+    },
     systemPromptPrefix: triageSystemPromptPrefix(repoContext, runtimeOptions?.enrichedContext),
     schema: TRIAGE_RESULT_SCHEMA,
   });

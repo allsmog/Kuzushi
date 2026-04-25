@@ -327,11 +327,14 @@ export async function runReadlineCredentialPrompt(): Promise<CredentialOutcome> 
     // the most common path and the user can always use the full Ink TTY
     // flow for other providers.
     const choice = await ask(
-      "Authenticate — [1] Anthropic API key  [i] use env vars  [Enter] Skip: ",
+      "Authenticate — [c] Inherit Claude (parent session)  [1] Anthropic API key  [i] use env vars  [Enter] Skip: ",
     );
     if (choice === null) return { action: "cancel" };
     const trimmedChoice = choice.trim().toLowerCase();
     if (trimmedChoice === "" || trimmedChoice === "q") return { action: "cancel" };
+    if (trimmedChoice === "c" || trimmedChoice === "inherited-claude") {
+      return { action: "proceed", choice: { kind: "inherited", providerId: "inherited-claude" } };
+    }
     if (trimmedChoice === "i" || trimmedChoice === "inherited") {
       return { action: "proceed", choice: { kind: "inherited", providerId: "anthropic" } };
     }

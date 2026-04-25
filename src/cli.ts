@@ -104,11 +104,17 @@ program
   .option("--scope <path>", "Load rules of engagement from YAML file")
   .option("--model <model>", "Default model for AI operations")
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY")
+  .option(
+    "--inherit-claude",
+    "Skip credential prompt; trust ambient Claude / Claude Code session creds and persist auth: inherited",
+    false,
+  )
   .addHelpText(
     "after",
     `
 Examples:
   $ kuzushi                                           # start the shell with default modules
+  $ kuzushi --inherit-claude                          # use parent Claude Code session, skip prompt
   $ kuzushi shell --target ./acme-api                 # pre-set the scan target
   $ kuzushi shell --load randori,vuln-scout,tob      # pre-load extra built-in modules
   $ kuzushi shell --workspace acme-pentest            # resume a named workspace
@@ -124,12 +130,28 @@ Examples:
         scope?: string;
         model?: string;
         apiKey?: string;
+        inheritClaude?: boolean;
       }) => {
         const { startShell } = await import("./copilot/shell.js");
         const { loadLocalCredentials, resolveActiveCredentials } = await import("./config.js");
         const config = loadConfig();
         if (opts.model) {
           config.model = opts.model;
+        }
+        if (opts.inheritClaude) {
+          config.auth = "inherited";
+          config.agentRuntimeBackend = "claude";
+          // Best-effort persist so the choice survives across launches —
+          // matches what picking "Inherited Claude" in the prompt does.
+          try {
+            const { applyConfigPatch } = await import("./config.js");
+            applyConfigPatch([
+              { path: "agentRuntimeBackend", value: "claude" },
+              { path: "auth", value: "inherited" },
+            ]);
+          } catch {
+            // Non-fatal: in-memory flag still applies for this run.
+          }
         }
 
         // Project-local credentials (`<cwd>/.kuzushi/credentials.json`)
