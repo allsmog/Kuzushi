@@ -120,7 +120,29 @@ export function createContextModule(): CopilotModule {
       const discovery = (p.discovery as string) ?? "auto";
       const scope = parseContextScope(p.scope);
 
+      // Steps drive the ✓/→/○ rows in `ModuleRunView`. Major phases of
+      // the context build map to one row each. The renderer is no-op when
+      // no run is active (run/headless mode), so this is safe to call
+      // unconditionally.
+      const stepIds = stepIdsForScope(scope, { enrichment, threatModel, scenarios });
+      const steps: Array<{
+        id: string;
+        title: string;
+        status: "pending" | "running" | "done" | "error";
+      }> = stepIds.map((id) => ({
+        id,
+        title: STEP_TITLES[id] ?? id,
+        status: "pending",
+      }));
+      const advance = (id: string, status: "running" | "done" | "error"): void => {
+        const ix = steps.findIndex((s) => s.id === id);
+        if (ix < 0) return;
+        steps[ix] = { ...steps[ix]!, status };
+        ctx.uiStore?.setModuleRunSteps?.(steps.slice());
+      };
+
       try {
+        advance("snapshot", "running");
         const scoped = optionsForScope(scope, { enrichment, threatModel, scenarios });
         const snapshot = await generateContextSnapshot(target, ctx, {
           ...scoped,
@@ -128,18 +150,25 @@ export function createContextModule(): CopilotModule {
         });
         snapshot.generatedSlices = scope === "all" ? [...CONTEXT_GENERATION_SLICES] : [scope];
         snapshot.staleSlices = staleSlicesFor(scope);
+        advance("snapshot", "done");
 
+        advance("publish", "running");
         const uiStoreInternal = ctx.uiStore as import("../../ui/state.js").UIStore | undefined;
         if (uiStoreInternal) {
           const shell = uiStoreInternal.getState().shell;
           if (shell) uiStoreInternal.update({ shell: { ...shell, contextSnapshot: snapshot } });
         }
+        advance("publish", "done");
 
+        advance("save", "running");
         saveContextSnapshot(target, snapshot);
+        advance("save", "done");
 
         return { ok: true, output: formatContextSummary(snapshot), data: snapshot };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        const running = steps.find((s) => s.status === "running");
+        if (running) advance(running.id, "error");
         return { ok: false, output: `Context generation error: ${msg}` };
       }
     },
@@ -206,6 +235,25 @@ function optionsForScope(
     default:
       return defaults;
   }
+}
+
+/**
+ * Step ids surfaced in `ModuleRunView`. Decides which rows render based
+ * on the operator's scope choice — a partial regen (`scope=dfd`) doesn't
+ * pretend to also run enrichment/scenarios.
+ */
+const STEP_TITLES: Record<string, string> = {
+  snapshot: "build context snapshot",
+  publish: "publish to shell state",
+  save: "persist .kuzushi/context-snapshot.json",
+};
+
+function stepIdsForScope(
+  scope: ContextGenerationSlice,
+  _opts: { enrichment: boolean; threatModel: boolean; scenarios: boolean },
+): string[] {
+  void scope;
+  return ["snapshot", "publish", "save"];
 }
 
 function staleSlicesFor(scope: ContextGenerationSlice): ContextGenerationSlice[] {

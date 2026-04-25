@@ -544,18 +544,30 @@ function printActorDetailView(emit: Emit, shell: ShellState, state: UIState): vo
     return;
   }
   for (const line of lines) {
-    const head =
+    const glyph =
       line.kind === "tool-start" || line.kind === "tool-progress"
-        ? "● "
+        ? "●"
         : line.kind === "tool-complete"
-          ? "⎿ "
+          ? "⎿"
           : line.kind === "reasoning"
-            ? "✻ "
+            ? "✻"
             : line.kind === "finding-preview"
-              ? "★ "
-              : "• ";
+              ? "★"
+              : "•";
+    // For tool-* events the toolName leads, with the detail wrapped in
+    // `(...)` so grep parity with the Ink view stays useful. Free-form
+    // events (reasoning, finding-preview) just show the detail.
+    if ((line.kind === "tool-start" || line.kind === "tool-progress") && line.toolName) {
+      const head = line.detail ? `${line.toolName}(${line.detail})` : line.toolName;
+      emit(`  ${glyph} ${head}`);
+      continue;
+    }
+    if (line.kind === "tool-complete" && line.toolName) {
+      emit(`  ${glyph} ${line.toolName}${line.detail ? ` — ${line.detail}` : ""}`);
+      continue;
+    }
     const detail = line.detail ?? line.toolName ?? line.kind;
-    emit(`  ${head}${detail}`);
+    emit(`  ${glyph} ${detail}`);
   }
 }
 

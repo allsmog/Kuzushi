@@ -75,6 +75,7 @@ export async function runInteractiveReview(
     verificationSteps: f.verificationSteps,
     blame: f.blame,
     introducedIn: f.introducedIn,
+    actorFingerprint: f.actorFingerprint,
   }));
 
   const result: ReviewResult = { reviewed: 0, tp: 0, fp: 0, byDesign: 0, skipped: 0 };

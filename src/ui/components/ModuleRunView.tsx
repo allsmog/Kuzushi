@@ -31,7 +31,6 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
-import type { Finding } from "../../scanners/types.js";
 import { formatCost, formatDuration, truncateEnd } from "../format.js";
 import { BLACK_CIRCLE, STEP_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
@@ -39,13 +38,14 @@ import { Table } from "../primitives/Table.js";
 import type { AgentActivityLine, ModuleRunArtifact, ModuleRunStep, ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { actorLabelFromFingerprint, actorShortId, toCompactRow } from "../transcript-format.js";
+import type { ActorViewFinding } from "./ActorTranscriptView.js";
 import { RuleHeader } from "./RuleHeader.js";
 import { ScreenContent } from "./ScreenContent.js";
 
 interface ModuleRunViewProps {
   shell: ShellState;
   /** Project-level findings, used to render the "Findings" tail. */
-  findings?: ReadonlyArray<Finding>;
+  findings?: ReadonlyArray<ActorViewFinding>;
   /**
    * Live agent activity map (per-actor fingerprints → last-N activity
    * lines). Threaded from the UIStore — `ShellState` doesn't own it
@@ -302,21 +302,19 @@ function FindingsBlock({
   findings,
 }: {
   run: NonNullable<ShellState["moduleRun"]>;
-  findings: ReadonlyArray<Finding>;
+  findings: ReadonlyArray<ActorViewFinding>;
 }): React.ReactElement {
   if (!findings || findings.length === 0) return <Box />;
-  // Filter to this run's findings when we can tell — fall back to "all".
+  // Prefer findings stamped to actors of *this* module run; fall back to all.
   const scoped =
-    run.runId != null
-      ? findings.filter(
-          (f) => (f.taskId ?? "") === run.moduleId || (f.taskId ?? "") === run.toolName,
-        )
+    run.moduleId === "threat-hunt"
+      ? findings.filter((f) => f.actorFingerprint?.startsWith("threat-hunt:"))
       : findings;
   const slice = scoped.slice(0, MAX_FINDING_ROWS).map((f) => ({
     severity: f.severity,
     id: f.fingerprint.slice(0, 8),
     path: `${f.filePath}:${f.startLine}`,
-    title: f.message,
+    title: f.title ?? f.message ?? f.rationale ?? "(no title)",
   }));
   if (slice.length === 0) return <Box />;
   return (

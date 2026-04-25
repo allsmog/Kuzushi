@@ -62,6 +62,11 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
     group: "nav",
   },
   {
+    syntax: "/actor <n>",
+    description: "Drill into a per-actor transcript from inside ModuleRunView (1–4 keys)",
+    group: "nav",
+  },
+  {
     syntax: "/findings",
     description: "Show the current findings list (alias: /f)",
     group: "nav",
@@ -109,6 +114,16 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   {
     syntax: "/prompt show <verb>",
     description: "Show the effective prompt + source for a tool",
+    group: "prompt",
+  },
+  {
+    syntax: "/prompt diff <verb>",
+    description: "Show the override file path so you can git-diff vs builtin",
+    group: "prompt",
+  },
+  {
+    syntax: "/prompt reset <verb>",
+    description: "Delete the override file and revert to the compiled default",
     group: "prompt",
   },
   {
@@ -242,6 +257,7 @@ const ADVANCED_COMMANDS = new Set([
   "/plan",
   "/yes",
   "/prompt",
+  "/prompts",
   "/show prompts",
   "/show runs",
   "/show aliases",

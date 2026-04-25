@@ -40,6 +40,20 @@ export type UiStatePatch = Record<string, unknown>;
  * If your tool needs something beyond these, propose an addition here rather
  * than casting to the concrete class — adding methods is non-breaking.
  */
+/**
+ * Narrow shape for one row in the ModuleRunView "steps" block. Mirrors the
+ * host `ModuleRunStep` (in `src/ui/state.ts`) but re-declared here so the
+ * SDK surface stays free of internal UI imports.
+ */
+export interface ModuleRunStepLike {
+  id: string;
+  title: string;
+  status: "pending" | "running" | "done" | "error";
+  count?: string;
+  elapsedSeconds?: number;
+  error?: string;
+}
+
 export interface HostUiHandle {
   /** Read the current UI state. Modules treat the returned value as opaque. */
   getState(): unknown;
@@ -48,6 +62,23 @@ export interface HostUiHandle {
    * `partial` is a shallow patch — matching the host `UIStore.update()` signature.
    */
   update(partial: UiStatePatch): void;
+  /**
+   * Replace the steps array on the active module run. No-op when no run
+   * is currently active (the dispatcher seeds `shell.moduleRun` only for
+   * modules with a v3 home renderer).
+   *
+   * Modules call this to drive the `✓ done / → running / ○ pending` rows
+   * in `ModuleRunView`. Idempotent — emit the full list each time.
+   */
+  setModuleRunSteps?(steps: ReadonlyArray<ModuleRunStepLike>): void;
+  /**
+   * Patch fields on the active module run (e.g. cost, artifacts). Same
+   * no-op semantics as `setModuleRunSteps` when no run is active.
+   */
+  patchModuleRun?(patch: {
+    costUsd?: number;
+    artifacts?: ReadonlyArray<{ label: string; path: string; size?: string }>;
+  }): void;
 }
 
 // ---------------------------------------------------------------------------
