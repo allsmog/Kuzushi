@@ -76,8 +76,14 @@ function createTrackedSpawn(
     // kernel delivers terminal Ctrl+C SIGINT to the subprocess group
     // only. Our parent node process never sees Ctrl+C and the
     // onAbort chain never runs, which is exactly the "spinner keeps
-    // spinning after Ctrl+C" symptom. Isolating the pgrp guarantees
-    // terminal signals land on us.
+    // spinning after Ctrl+C" symptom. Isolating the pgrp keeps terminal
+    // signals aimed at us.
+    //
+    // Keep every child stdio stream off the real TTY. A process can flip
+    // terminal mode through any inherited terminal fd, not just stdin; an
+    // inherited stderr was enough for long context builds to put the parent
+    // TUI back into cooked mode, where Ctrl+C is echoed as "^C" and Ink never
+    // sees the byte. Pipe stderr and drain it instead.
     //
     // We intentionally do NOT call `proc.unref()` — we want the parent
     // to stay informed of 'exit' so the tracked set stays honest.
@@ -85,9 +91,18 @@ function createTrackedSpawn(
       cwd: options.cwd,
       env: options.env,
       signal: options.signal,
-      stdio: ["pipe", "pipe", "inherit"],
+      stdio: ["pipe", "pipe", "pipe"],
       detached: true,
     }) as unknown as SpawnedProcess;
+    const stderr = (proc as { stderr?: NodeJS.ReadableStream }).stderr;
+    stderr?.on("data", (chunk: Buffer | string) => {
+      if (!process.env.KUZUSHI_ABORT_DEBUG) return;
+      try {
+        process.stderr.write(String(chunk));
+      } catch {
+        /* best-effort debug forwarding */
+      }
+    });
     tracked.add(proc);
     globalTrackedProcesses.add(proc);
     // child_process emits 'exit' once the process is gone — drop it from

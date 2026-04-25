@@ -25,11 +25,24 @@ import { contextGathererTask } from "../../agents/tasks/context-gatherer.js";
 import { invariantCheckTask } from "../../agents/tasks/invariant-analysis/check.js";
 import { invariantExtractTask } from "../../agents/tasks/invariant-analysis/extract.js";
 import { threatScenarioBuildTask } from "../../agents/tasks/threat-scenario-build.js";
+import type { ContextGenerationSlice } from "../../ui/state.js";
 import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
 import { defineModule, defineTool } from "../define.js";
 import { saveContextSnapshot } from "../sast/context-persist.js";
 import { formatContextSummary, generateContextSnapshot } from "../sast/shared.js";
 import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
+
+const CONTEXT_GENERATION_SLICES = [
+  "all",
+  "repo",
+  "enrichment",
+  "app-model",
+  "dfd",
+  "stride",
+  "stories",
+  "scope",
+  "scenarios",
+] as const satisfies readonly ContextGenerationSlice[];
 
 export function createContextModule(): CopilotModule {
   const contextBuildTool = defineTool<"context">({
@@ -73,6 +86,19 @@ export function createContextModule(): CopilotModule {
           default: true,
           description: "Build threat scenarios from STRIDE threats.",
         },
+        scope: {
+          type: "string",
+          enum: [...CONTEXT_GENERATION_SLICES],
+          default: "all",
+          description:
+            "Regenerate one generated context slice. all = full rebuild; dfd/stride/stories/scope target threat-model slices.",
+        },
+        preserveUserEdits: {
+          type: "boolean",
+          default: true,
+          description:
+            "Preserve operator-edited threat-model artifacts unless the user explicitly accepts a patch.",
+        },
         CONTEXT_PROMPT: {
           type: "string",
           description:
@@ -92,14 +118,16 @@ export function createContextModule(): CopilotModule {
       const threatModel = p.threatModel !== false;
       const scenarios = p.scenarios !== false && threatModel;
       const discovery = (p.discovery as string) ?? "auto";
+      const scope = parseContextScope(p.scope);
 
       try {
+        const scoped = optionsForScope(scope, { enrichment, threatModel, scenarios });
         const snapshot = await generateContextSnapshot(target, ctx, {
-          enrichment,
-          threatModel,
-          scenarios,
+          ...scoped,
           discovery: discovery as "auto" | "flat" | "modules",
         });
+        snapshot.generatedSlices = scope === "all" ? [...CONTEXT_GENERATION_SLICES] : [scope];
+        snapshot.staleSlices = staleSlicesFor(scope);
 
         const uiStoreInternal = ctx.uiStore as import("../../ui/state.js").UIStore | undefined;
         if (uiStoreInternal) {
@@ -150,4 +178,52 @@ export function createContextModule(): CopilotModule {
     },
     tools: [contextBuildTool, ...hiddenInfraDagTools],
   });
+}
+
+function parseContextScope(value: unknown): ContextGenerationSlice {
+  return CONTEXT_GENERATION_SLICES.includes(value as ContextGenerationSlice)
+    ? (value as ContextGenerationSlice)
+    : "all";
+}
+
+function optionsForScope(
+  scope: ContextGenerationSlice,
+  defaults: { enrichment: boolean; threatModel: boolean; scenarios: boolean },
+): { enrichment: boolean; threatModel: boolean; scenarios: boolean } {
+  switch (scope) {
+    case "repo":
+      return { enrichment: false, threatModel: false, scenarios: false };
+    case "enrichment":
+    case "app-model":
+      return { enrichment: true, threatModel: false, scenarios: false };
+    case "dfd":
+    case "stride":
+    case "stories":
+    case "scope":
+      return { enrichment: true, threatModel: true, scenarios: false };
+    case "scenarios":
+      return { enrichment: true, threatModel: true, scenarios: true };
+    default:
+      return defaults;
+  }
+}
+
+function staleSlicesFor(scope: ContextGenerationSlice): ContextGenerationSlice[] {
+  switch (scope) {
+    case "repo":
+      return ["enrichment", "app-model", "dfd", "stride", "stories", "scope", "scenarios"];
+    case "enrichment":
+      return ["app-model", "dfd", "stride", "stories", "scope", "scenarios"];
+    case "app-model":
+      return ["dfd", "stride", "stories", "scope", "scenarios"];
+    case "dfd":
+      return ["stride", "stories", "scope", "scenarios"];
+    case "stride":
+      return ["stories", "scope", "scenarios"];
+    case "stories":
+    case "scope":
+      return ["scenarios"];
+    default:
+      return [];
+  }
 }

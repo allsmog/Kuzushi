@@ -173,8 +173,8 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   },
   { syntax: "/context edit", description: "Review/edit scan context", group: "scope" },
   {
-    syntax: "/context regenerate",
-    description: "Re-generate context for current target",
+    syntax: "/context regen <slice>",
+    description: "Regenerate a generated context slice (dfd, stride, stories, scenarios, etc.)",
     group: "scope",
   },
   {
@@ -214,6 +214,11 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
     group: "threats",
   },
   {
+    syntax: "/threats ask <instruction>",
+    description: "Ask AI to propose a reviewable threat-model patch",
+    group: "threats",
+  },
+  {
     syntax: "/load <specifier>",
     description: "Load an external module at runtime",
     group: "session",
@@ -240,8 +245,9 @@ const ADVANCED_COMMANDS = new Set([
   "/ask",
   "/context build",
   "/context edit",
-  "/context regenerate",
+  "/context regen",
   "/threats edit",
+  "/threats ask",
 ]);
 
 const DEV_COMMANDS = new Set(["/load"]);

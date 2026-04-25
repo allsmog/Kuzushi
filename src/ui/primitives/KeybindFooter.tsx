@@ -10,7 +10,7 @@ import { Box, Text } from "ink";
 import type { FC } from "react";
 import { type Keybinding, useKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
-import { SPACING, tokens, WIDTHS } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import { Divider } from "./Divider.js";
 
 export interface KeybindFooterProps {
@@ -28,7 +28,7 @@ export const KeybindFooter: FC<KeybindFooterProps> = ({ bindings: override, maxS
 
   return (
     <Box flexDirection="column">
-      <Divider width={WIDTHS.footerWidth} />
+      <Divider />
       <Box flexDirection="row" paddingLeft={SPACING.md}>
         <Text>
           {shown

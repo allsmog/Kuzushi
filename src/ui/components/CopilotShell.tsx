@@ -65,7 +65,6 @@ import { Spinner } from "./Spinner.js";
 import { ThreatDfdView } from "./ThreatDfdView.js";
 import { ThreatStrideMatrix } from "./ThreatStrideMatrix.js";
 import { ThreatSummaryExport } from "./ThreatSummaryExport.js";
-import { ToolRunningStatus } from "./ToolRunningStatus.js";
 import { TuneView } from "./TuneView.js";
 
 interface CopilotShellProps {
@@ -84,7 +83,7 @@ const IDLE_KEYBINDS = [
 ];
 
 const PROCESSING_KEYBINDS = [
-  { keys: "Ctrl+C", label: "Abort / Exit" },
+  { keys: "Ctrl+C", label: "Interrupt" },
   { keys: "Ctrl+O", label: "Details", secondary: true },
 ];
 const PLAN_KEYBINDS = [
@@ -375,7 +374,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         target: shell?.target,
       },
     ];
-    if (shell && !showCatalog) {
+    if (shell && !showCatalog && !shell.processing) {
       items.push({
         key: "shell-banner",
         kind: "banner",
@@ -413,7 +412,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
           {(item) => <ShellStaticItemView key={item.key} item={item as ShellStaticItem} />}
         </Static>
 
-        {showCatalog ? <MemoShellBanner shell={shell} /> : null}
+        {showCatalog && !shell.processing ? <MemoShellBanner shell={shell} /> : null}
 
         <MemoShellLiveHistory history={liveHistory} />
       </Box>
@@ -425,9 +424,13 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
           </Box>
         ) : null}
 
-        <MemoShellViewPanel summary={shellState.summary} shell={shell} />
-        <ShellWayfinding shell={shell} narrow={columns < 110} />
-        <ShellTaskStatusLine shell={shell} narrow={columns < 110} />
+        {!shell.processing || shell.shellView === "task-story" ? (
+          <MemoShellViewPanel summary={shellState.summary} shell={shell} />
+        ) : null}
+        {!shell.processing || shell.shellView === "task-story" ? (
+          <ShellWayfinding shell={shell} narrow={columns < 110} />
+        ) : null}
+        <ShellTaskStatusLine shell={shell} columns={columns} />
 
         <Ratchet>
           <Box flexDirection="column" minHeight={1}>
@@ -451,30 +454,6 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
                   timestamp: pendingAssistantStartedAtRef.current || Date.now(),
                 }}
               />
-            )}
-
-            {shell.processing && shell.currentTool && (
-              <Box flexDirection="column">
-                <ToolRunningStatus tool={shell.currentTool} />
-                {shell.llmHeartbeat && <LlmHeartbeatLine heartbeat={shell.llmHeartbeat} />}
-              </Box>
-            )}
-
-            {shell.processing && !shell.currentTool && (
-              <Box
-                flexDirection="column"
-                marginTop={theme.spacing.sm}
-                paddingLeft={theme.spacing.md}
-              >
-                <Box>
-                  <Spinner />
-                  <Text>
-                    {"  "}
-                    {tokens.muted("running...")}
-                  </Text>
-                </Box>
-                {shell.llmHeartbeat && <LlmHeartbeatLine heartbeat={shell.llmHeartbeat} />}
-              </Box>
             )}
 
             {shellState.ctrlCArmedAt &&
@@ -512,6 +491,18 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
 }
 
 const SHELL_LIVE_HISTORY_COUNT = 8;
+const LIVE_ACTIVITY_MIN_ROWS = 8;
+const LIVE_ACTIVITY_MAX_ROWS = 24;
+const LIVE_ACTIVITY_RESERVED_ROWS = 12;
+
+function liveActivityDisplayLimit(rows: number | undefined): number {
+  const terminalRows = rows ?? 30;
+  const available = terminalRows - LIVE_ACTIVITY_RESERVED_ROWS;
+  return Math.min(
+    LIVE_ACTIVITY_MAX_ROWS,
+    Math.max(LIVE_ACTIVITY_MIN_ROWS, Number.isFinite(available) ? available : 12),
+  );
+}
 
 type ShellStaticItem =
   | { key: string; kind: "splash"; workspace?: string | null; target?: string | null }
@@ -620,10 +611,10 @@ function ShellWayfinding({
 
 function ShellTaskStatusLine({
   shell,
-  narrow,
+  columns,
 }: {
   shell: ShellState;
-  narrow: boolean;
+  columns: number;
 }): React.ReactElement | null {
   const story = shell.taskStory;
   const current = shell.currentTool;
@@ -632,54 +623,67 @@ function ShellTaskStatusLine({
     shell.processing ? 1000 : 5000,
   );
   if (!story && !current) return null;
-  const eventCount = story?.events.length ?? 0;
-  const latest = story?.events[story.events.length - 1];
   const abortStatus = current?.abortStatus ?? story?.abortStatus;
   const backgroundJobs = story?.backgroundJobs ?? [];
   const runningBackground = backgroundJobs.filter((job) => job.status === "running");
   const stateLabel =
     abortStatus === "aborting"
-      ? "aborting"
+      ? "interrupting"
       : abortStatus === "aborted"
         ? "aborted"
         : runningBackground.length > 0 && !shell.processing
           ? "background"
           : shell.processing
-            ? "active"
-            : "latest";
-  const tail = latest ? ` · ${latest.message}` : "";
-  const controls = shell.processing
-    ? "Ctrl+C interrupt · Ctrl+O details"
-    : runningBackground.length > 0
-      ? "Ctrl+O details · jobs"
-      : "Ctrl+O details";
+            ? "running"
+            : "done";
+  const controls = columns >= 78 ? "Ctrl+C interrupt · Ctrl+O details" : "";
   const elapsed =
     elapsedMs > 0
-      ? ` · ${Math.floor(elapsedMs / 60000)
+      ? `${Math.floor(elapsedMs / 60000)
           .toString()
           .padStart(2, "0")}:${Math.floor((elapsedMs % 60000) / 1000)
           .toString()
           .padStart(2, "0")}`
       : "";
+  const label = truncateEnd(
+    shell.focusedModule ?? current?.displayName ?? current?.name ?? "task",
+    columns < 72 ? 18 : 28,
+  );
+  const backgroundLabel =
+    runningBackground.length > 0
+      ? `${runningBackground.length} background ${runningBackground.length === 1 ? "job" : "jobs"}`
+      : "";
+  const heartbeat = formatShellHeartbeat(shell.llmHeartbeat, columns < 72);
+  const line = truncateEnd(
+    [label, stateLabel, elapsed, backgroundLabel, heartbeat, controls].filter(Boolean).join(" · "),
+    Math.max(24, columns - SPACING.md * 2),
+  );
+  const renderLine =
+    abortStatus === "aborting" || abortStatus === "aborted"
+      ? tokens.warn(line)
+      : tokens.muted(line);
   return (
     <Box marginTop={SPACING.xs} paddingLeft={SPACING.md}>
-      <Text>
-        {tokens.muted("task ")}
-        {abortStatus === "aborting" ? tokens.warn(stateLabel) : tokens.value(stateLabel)}
-        {elapsed ? tokens.muted(elapsed) : null}
-        {runningBackground.length > 0
-          ? tokens.muted(
-              ` · ${runningBackground.length} background ${runningBackground.length === 1 ? "job" : "jobs"}`,
-            )
-          : null}
-        {eventCount > 0
-          ? tokens.muted(` · ${eventCount} beat${eventCount === 1 ? "" : "s"}`)
-          : null}
-        {!narrow ? tokens.muted(` · ${controls}`) : null}
-        {!narrow && tail ? tokens.tertiary(tail) : null}
-      </Text>
+      <Text>{renderLine}</Text>
     </Box>
   );
+}
+
+function formatShellHeartbeat(
+  heartbeat: ShellState["llmHeartbeat"] | undefined,
+  narrow: boolean,
+): string {
+  if (!heartbeat || (heartbeat.activeCalls === 0 && heartbeat.completedCalls === 0)) return "";
+  const calls =
+    heartbeat.activeCalls > 0
+      ? `${heartbeat.activeCalls} LLM`
+      : `${heartbeat.completedCalls} LLM done`;
+  if (narrow) return calls;
+  const parts = [];
+  if (heartbeat.latestModel) parts.push(heartbeat.latestModel);
+  parts.push(calls);
+  if (heartbeat.totalCostUsd > 0) parts.push(`$${heartbeat.totalCostUsd.toFixed(2)}`);
+  return parts.join(" · ");
 }
 
 function describeShellLocation(shell: ShellState): string {
@@ -695,34 +699,6 @@ function historyEntryKey(entry: ShellHistoryEntry): string {
   // immutable fields that stay stable across shell re-renders.
   if (entry.id) return `id:${entry.id}`;
   return `${entry.type}:${entry.timestamp}:${entry.toolUseId ?? ""}:${entry.text}`;
-}
-
-/**
- * One-line LLM heartbeat shown under the tool spinner. Reads the rolling
- * `shell.llmHeartbeat` state (populated via `llm:call-start/complete/error`
- * bus subscriptions in shell.ts) so operators can tell a slow LLM call from
- * a hang without dropping into `--verbose`.
- */
-function LlmHeartbeatLine({
-  heartbeat,
-}: {
-  heartbeat: NonNullable<ShellState["llmHeartbeat"]>;
-}): React.ReactElement | null {
-  const { activeCalls, completedCalls, latestModel, totalCostUsd } = heartbeat;
-  if (activeCalls === 0 && completedCalls === 0) return null;
-  const parts: string[] = [];
-  if (latestModel) parts.push(latestModel);
-  const calls =
-    activeCalls > 0
-      ? `${activeCalls} call${activeCalls === 1 ? "" : "s"} in flight`
-      : `${completedCalls} call${completedCalls === 1 ? "" : "s"}`;
-  parts.push(calls);
-  if (totalCostUsd > 0) parts.push(`$${totalCostUsd.toFixed(2)}`);
-  return (
-    <Box paddingLeft={SPACING.lg}>
-      <Text>{tokens.muted(`· ${parts.join(" · ")}`)}</Text>
-    </Box>
-  );
 }
 
 /**
@@ -830,6 +806,10 @@ const MemoShellViewPanel = memo(
     prev.shell.focusedModule === next.shell.focusedModule &&
     prev.shell.openFindingId === next.shell.openFindingId &&
     prev.shell.threatModel === next.shell.threatModel &&
+    prev.shell.contextSnapshot === next.shell.contextSnapshot &&
+    prev.shell.threatDfdSelection === next.shell.threatDfdSelection &&
+    prev.shell.contextRegenPaletteOpen === next.shell.contextRegenPaletteOpen &&
+    prev.shell.pendingThreatPatch === next.shell.pendingThreatPatch &&
     prev.shell.findingCursor === next.shell.findingCursor &&
     prev.shell.findingPageSize === next.shell.findingPageSize &&
     prev.shell.moduleCatalog === next.shell.moduleCatalog &&
@@ -1037,6 +1017,7 @@ function StoryEventLine({
  * the transition.
  */
 function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElement {
+  const { stdout } = useStdout();
   const status = entry.status;
   const aborting = entry.abortStatus === "aborting";
   const dotStatus = aborting && status === "running" ? "warn" : status;
@@ -1064,6 +1045,12 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
         : status === "abort"
           ? OUTCOME_GLYPH.abort
           : "";
+  const liveLimit = liveActivityDisplayLimit(stdout?.rows);
+  const liveActivities = entry.liveActivities ?? [];
+  const visibleLiveActivities = liveActivities.slice(0, liveLimit).slice().reverse();
+  const hiddenLiveActivityCount =
+    (entry.liveActivitiesDropped ?? 0) +
+    Math.max(0, liveActivities.length - visibleLiveActivities.length);
 
   return (
     <Ratchet>
@@ -1079,17 +1066,23 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
           {ts}
         </Text>
       </Box>
-      {status === "running" && entry.liveActivities && entry.liveActivities.length > 0 ? (
+      {status === "running" && liveActivities.length > 0 ? (
         <Box flexDirection="column">
-          {/*
-           * Show the last 12 sub-activities while the ⏺ row is active so
-           * operators can watch the build progress instead of getting the
-           * single "… N earlier updates" collapse notice. The finalized
-           * per-phase `tool-progress` rows in scrollback preserve the full
-           * sequence once each phase completes, so there's no information
-           * loss from a deeper tail here.
-           */}
-          {entry.liveActivities.slice(-12).map((activity) => (
+          {hiddenLiveActivityCount > 0 ? (
+            <Box>
+              <Gutter />
+              <Gutter>
+                <Text>{tokens.tertiary(LOWER_HOOK)}</Text>
+              </Gutter>
+              <Text>
+                {" "}
+                {tokens.tertiary(
+                  `+${hiddenLiveActivityCount} earlier update${hiddenLiveActivityCount === 1 ? "" : "s"} · Ctrl+O details`,
+                )}
+              </Text>
+            </Box>
+          ) : null}
+          {visibleLiveActivities.map((activity) => (
             <Box key={activity.id}>
               <Gutter />
               <Gutter>

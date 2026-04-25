@@ -15,6 +15,7 @@ const {
   pushLiveActivity,
   finalizeRunningToolCalls,
   appendStoryEvent,
+  appendProgressEvent,
   applyStoryEventToShell,
   beginShellTurn,
 } = __shellInternals;
@@ -110,6 +111,70 @@ describe("task story shell integration helpers", () => {
 
     expect(next.taskStory?.events.at(-1)?.message).toBe("Read · package.json");
     expect(next.history).toEqual(shell.history);
+  });
+
+  it("keeps context activity live-only while persisting phase story beats", () => {
+    const store = seedShellState();
+    store.update({
+      shell: {
+        ...store.getState().shell!,
+        history: [
+          {
+            type: "tool-call",
+            id: "tc-1",
+            tool: "context:build",
+            text: "⏺ Build Context(.)",
+            status: "running",
+            timestamp: 1,
+          },
+        ],
+        currentTool: {
+          ...store.getState().shell!.currentTool!,
+          historyEntryId: "tc-1",
+        },
+      },
+    });
+
+    appendProgressEvent(store, {
+      text: "scanning repo structure",
+      activity: "scanning repo structure",
+      liveActivity: "scanning repo structure",
+      skipHistory: true,
+      story: {
+        kind: "activity",
+        status: "running",
+        importance: "secondary",
+        message: "scanning repo structure",
+        source: "task:activity",
+        runId: "run-1",
+        turnId: "turn-1",
+      },
+    });
+    appendProgressEvent(store, {
+      text: "phase 1 (S1/S2/S3 scope)",
+      phase: "phase 1 (S1/S2/S3 scope)",
+      liveActivity: "phase 1 (S1/S2/S3 scope)",
+      story: {
+        kind: "phase",
+        status: "running",
+        importance: "primary",
+        message: "phase 1 (S1/S2/S3 scope)",
+        source: "task:phase-progress",
+        runId: "run-1",
+        turnId: "turn-1",
+      },
+    });
+
+    const history = store.getState().shell!.history;
+    expect(history.filter((entry) => entry.type === "tool-progress")).toHaveLength(0);
+    expect(history.filter((entry) => entry.type === "story")).toHaveLength(1);
+    expect(history.some((entry) => entry.text.includes("scanning repo structure"))).toBe(false);
+    expect(history.some((entry) => entry.text.includes("phase 1 (S1/S2/S3 scope)"))).toBe(true);
+    const toolEntry = history[0];
+    expect(toolEntry?.type).toBe("tool-call");
+    if (toolEntry?.type !== "tool-call") throw new Error("expected tool-call entry");
+    expect(toolEntry.liveActivities?.[0]?.text).toBe("phase 1 (S1/S2/S3 scope)");
+    expect(toolEntry.liveActivities?.[1]?.text).toBe("scanning repo structure");
   });
 
   it("suppresses story events from superseded turns", () => {
@@ -588,7 +653,7 @@ describe("patchHistoryEntry", () => {
   });
 });
 
-describe("pushLiveActivity cap bumped to 5 (Phase 15)", () => {
+describe("pushLiveActivity cap", () => {
   function seedWithRunningToolCall(): UIStore {
     const store = seedShellState();
     store.update({
@@ -610,14 +675,14 @@ describe("pushLiveActivity cap bumped to 5 (Phase 15)", () => {
     return store;
   }
 
-  it("keeps up to 5 liveActivity entries (was 3)", () => {
+  it("keeps a bounded liveActivity buffer and counts dropped entries", () => {
     const store = seedWithRunningToolCall();
-    for (let i = 0; i < 10; i++) pushLiveActivity(store, "tc-cap", `line ${i}`);
+    for (let i = 0; i < 70; i++) pushLiveActivity(store, "tc-cap", `line ${i}`);
     const entry = store.getState().shell!.history[0]!;
-    // cap is 5; older ones drop off the tail
-    expect(entry.liveActivities!.length).toBe(5);
-    expect(entry.liveActivities![0]!.text).toBe("line 9");
-    expect(entry.liveActivities![4]!.text).toBe("line 5");
+    expect(entry.liveActivities!.length).toBe(64);
+    expect(entry.liveActivitiesDropped).toBe(6);
+    expect(entry.liveActivities![0]!.text).toBe("line 69");
+    expect(entry.liveActivities![63]!.text).toBe("line 6");
   });
 });
 
@@ -651,13 +716,14 @@ describe("pushLiveActivity", () => {
     expect(entry.liveActivities?.map((a) => a.text)).toEqual(["step 2", "step 1"]);
   });
 
-  it("caps the tail at 5 entries", () => {
+  it("caps the tail at 64 entries", () => {
     const store = seedWithRunningToolCall();
-    for (let i = 0; i < 10; i++) pushLiveActivity(store, "tc-1", `step ${i}`);
+    for (let i = 0; i < 80; i++) pushLiveActivity(store, "tc-1", `step ${i}`);
     const entry = store.getState().shell!.history[0]!;
-    // Phase 15: cap bumped 3 → 5 so subprocess stdout preview has headroom.
-    expect(entry.liveActivities!.length).toBeLessThanOrEqual(5);
-    expect(entry.liveActivities![0]!.text).toBe("step 9");
+    expect(entry.liveActivities!.length).toBeLessThanOrEqual(64);
+    expect(entry.liveActivities![0]!.text).toBe("step 79");
+    expect(entry.liveActivities![63]!.text).toBe("step 16");
+    expect(entry.liveActivitiesDropped).toBe(16);
   });
 
   it("dedupes consecutive identical text", () => {
