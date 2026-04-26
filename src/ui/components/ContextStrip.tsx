@@ -26,7 +26,7 @@ export function ContextStrip({ status, subtitle }: ContextStripProps): React.Rea
   return (
     <Box flexDirection="column" marginBottom={theme.spacing.sm}>
       {items.length > 0 && (
-        <Text>
+        <Text wrap="truncate-end">
           {items
             .map((item, i) => `${i === 0 ? "" : tokens.subtle(sep)}${tokens.value(String(item))}`)
             .join("")}

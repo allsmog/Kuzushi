@@ -38,7 +38,7 @@ exports[`Ink component snapshots > FindingCard linear — state strip + evidence
 `;
 
 exports[`Ink component snapshots > ModuleCatalog — grouped by category with last-run chips 1`] = `
-"  workspace:acme-api · target:./acme-api · 3 modules
+"  workspace:acme-api · target:acme-api · 3 modules
 
 
   Primary next step: use <module-id> to enter one module workflow.

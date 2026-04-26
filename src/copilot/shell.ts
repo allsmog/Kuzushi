@@ -82,10 +82,10 @@ import {
   editPrompt,
   formatEffectivePromptLine,
   formatPromptAuditTable,
+  type PromptOptionKey,
   promptKeyToVerb,
   readEffectivePrompt,
   readPromptAudit,
-  verbToPromptKey,
 } from "./prompt-edit.js";
 import { listRecipes, resolveRecipePath } from "./recipes.js";
 import { openRepl as openDevRepl } from "./repl.js";
@@ -3106,45 +3106,57 @@ async function startInkShell(
       );
     }
 
-    // First pass: msfconsole-style dispatcher. If a registered command matches,
-    // we render its output and skip the legacy router + LLM agent.
-    const controller = new AbortController();
-    setToolAbort(controller);
+    // First pass: msfconsole-style dispatcher. A few Ink shell sub-views have
+    // view-local bare verbs (`show build` in the prompts editor, focused
+    // `show options`) that must route through the shell state before the core
+    // dispatcher claims generic `show`/`set`.
+    const shellBeforeDispatch = store.getState().shell;
+    const useShellRouterFirst = shouldRouteShellInputBeforeDispatcher(
+      input,
+      shellBeforeDispatch,
+      shellCtx,
+    );
     let dispatched: Awaited<ReturnType<typeof driver.handle>>;
-    try {
-      dispatched = await driver.handle(input, controller.signal);
-    } catch (err) {
-      // Tasks that honor `ctx.signal` bubble AbortError up through the
-      // dispatcher. The abort handler already rendered `[aborted]` and
-      // returned the operator to the prompt — swallow the error here so
-      // there's no unhandled-rejection noise.
+    if (useShellRouterFirst) {
+      dispatched = { matched: false };
+    } else {
+      const controller = new AbortController();
+      setToolAbort(controller);
+      try {
+        dispatched = await driver.handle(input, controller.signal);
+      } catch (err) {
+        // Tasks that honor `ctx.signal` bubble AbortError up through the
+        // dispatcher. The abort handler already rendered `[aborted]` and
+        // returned the operator to the prompt — swallow the error here so
+        // there's no unhandled-rejection noise.
+        if (controller.signal.aborted) {
+          finishActiveAction();
+          return;
+        }
+        appendToHistory(store, {
+          type: "error",
+          text: err instanceof Error ? err.message : String(err),
+          timestamp: Date.now(),
+        });
+        finishActiveAction();
+        clearTransientShellState(store);
+        setProcessing(store, false);
+        return;
+      } finally {
+        // Any tool invocation might have spawned a Claude SDK subprocess that
+        // disabled raw mode; re-assert so the next keystroke lands in Ink.
+        ensureRawMode();
+      }
+      // If Ctrl+C fired during dispatch, the abort handler already returned the
+      // operator to the prompt and marked `processing: false`. Swallow the
+      // late output/exit from the now-cancelled tool so it doesn't append
+      // after the operator has moved on. Gate on the per-turn controller so a
+      // racing next-turn's `setToolAbort` (which resets `activeAbortRequested`)
+      // can't let this turn's output through.
       if (controller.signal.aborted) {
         finishActiveAction();
         return;
       }
-      appendToHistory(store, {
-        type: "error",
-        text: err instanceof Error ? err.message : String(err),
-        timestamp: Date.now(),
-      });
-      finishActiveAction();
-      clearTransientShellState(store);
-      setProcessing(store, false);
-      return;
-    } finally {
-      // Any tool invocation might have spawned a Claude SDK subprocess that
-      // disabled raw mode; re-assert so the next keystroke lands in Ink.
-      ensureRawMode();
-    }
-    // If Ctrl+C fired during dispatch, the abort handler already returned the
-    // operator to the prompt and marked `processing: false`. Swallow the
-    // late output/exit from the now-cancelled tool so it doesn't append
-    // after the operator has moved on. Gate on the per-turn controller so a
-    // racing next-turn's `setToolAbort` (which resets `activeAbortRequested`)
-    // can't let this turn's output through.
-    if (controller.signal.aborted) {
-      finishActiveAction();
-      return;
     }
     if (dispatched.matched) {
       if (dispatched.push || dispatched.pop) syncFocusFromDispatcher();
@@ -3168,7 +3180,7 @@ async function startInkShell(
     }
     // Not matched — clear the controller registered above; subsequent routers
     // register their own AbortController as needed.
-    finishActiveAction();
+    if (!useShellRouterFirst) finishActiveAction();
 
     const shellState = store.getState().shell;
     if (!shellState) {
@@ -4196,6 +4208,26 @@ function isTaskStoryNavigationInput(input: string): boolean {
   return normalized === "story" || normalized === "/story";
 }
 
+function shouldRouteShellInputBeforeDispatcher(
+  input: string,
+  shellState: ShellState | null | undefined,
+  ctx: ShellContext,
+): boolean {
+  const trimmed = input.trim();
+  if (!trimmed || trimmed.startsWith("/")) return false;
+  const lower = trimmed.toLowerCase();
+  if (shellState?.shellView === "prompts-editor" && ctx.focusedModule) {
+    return /^(edit|show|diff|reset|set)\s+/.test(lower);
+  }
+  if (!ctx.focusedModule) return false;
+  return (
+    lower === "options" ||
+    lower === "show options" ||
+    lower.startsWith("show options ") ||
+    lower.startsWith("set ")
+  );
+}
+
 function routeInput(
   input: string,
   core: CopilotCore,
@@ -4279,18 +4311,30 @@ function routeInput(
     if (lower.startsWith("diff ")) {
       const verb = trimmed.split(/\s+/).slice(1).join(" ").trim();
       recordCommandUsage(ctx, shellState, "/prompt diff");
-      return handlePromptDiffCommand(verb || undefined, ctx);
+      return handlePromptDiffCommand(verb || undefined, core, opts, ctx, shellState);
     }
     if (lower.startsWith("reset ")) {
       const verb = trimmed.split(/\s+/).slice(1).join(" ").trim();
       recordCommandUsage(ctx, shellState, "/prompt reset");
-      return handlePromptResetCommand(verb || undefined, ctx);
+      return handlePromptResetCommand(verb || undefined, core, opts, ctx, shellState);
     }
     if (lower.startsWith("set ")) {
-      const setArgs = trimmed.split(/\s+/).slice(1);
-      recordCommandUsage(ctx, shellState, "/set");
-      return handleSetCommand(setArgs, core, ctx.focusedModule, shellState);
+      recordCommandUsage(ctx, shellState, "/prompt set");
+      return handlePromptInlineSetCommand(trimmed, core, opts, ctx, shellState);
     }
+  }
+  if (lower === "options") {
+    recordCommandUsage(ctx, shellState, "/options");
+    return handleOptionsCommand([], core, opts, ctx, shellState);
+  }
+  if (lower === "show options" || lower.startsWith("show options ")) {
+    recordCommandUsage(ctx, shellState, "/options");
+    return handleOptionsCommand(trimmed.split(/\s+/).slice(2), core, opts, ctx, shellState);
+  }
+  if (lower.startsWith("set ")) {
+    const setArgs = trimmed.split(/\s+/).slice(1);
+    recordCommandUsage(ctx, shellState, "/set");
+    return handleSetCommand(setArgs, core, ctx.focusedModule, shellState);
   }
   if (ctx.focusedModule === "context" && lower === "dfd") {
     recordCommandUsage(ctx, shellState, "/context dfd");
@@ -4433,10 +4477,10 @@ function handleSlashCommand(
         return handlePromptShowCommand(verb, core, opts, ctx, shellState);
       }
       if (sub === "reset") {
-        return handlePromptResetCommand(verb, ctx);
+        return handlePromptResetCommand(verb, core, opts, ctx, shellState);
       }
       if (sub === "diff") {
-        return handlePromptDiffCommand(verb, ctx);
+        return handlePromptDiffCommand(verb, core, opts, ctx, shellState);
       }
       if (sub === "list" || sub === undefined) {
         if (sub === "list" || ctx.focusedModule) {
@@ -5539,6 +5583,10 @@ function resolveOptionsTool(
   }
 
   if (!lastUsedTool) {
+    if (focusedModule) {
+      const fallbackToolName = pickDefaultToolName(core, focusedModule);
+      if (fallbackToolName) return { ok: true, toolName: fallbackToolName };
+    }
     return { ok: false, output: "Usage: /options <tool>" };
   }
 
@@ -5604,6 +5652,98 @@ function formatOptions(
   ]);
 }
 
+type PromptEditorAuditRows = NonNullable<NonNullable<ShellState["promptsEditor"]>["audit"]>;
+
+interface PromptTarget {
+  moduleId: string;
+  toolName: string;
+  /** Display/action name shown in the prompts editor. */
+  name: string;
+  promptKey: PromptOptionKey;
+}
+
+function buildPromptEditorAuditRows(
+  core: CopilotCore,
+  opts: ShellOptions,
+  moduleOptions: Record<string, Record<string, unknown>>,
+  moduleId: string,
+): PromptEditorAuditRows {
+  const cwd = opts.target ? path.resolve(opts.target) : process.cwd();
+  return readPromptAudit(core, moduleOptions, cwd)
+    .filter((r) => r.moduleId === moduleId)
+    .map((r) => ({
+      moduleId: r.moduleId,
+      toolName: r.toolName,
+      verb: r.verb,
+      promptKey: String(r.promptKey),
+      effective: {
+        source: r.effective.source,
+        ...(r.effective.filePath ? { filePath: r.effective.filePath } : {}),
+        ...(r.effective.byteLen != null ? { byteLen: r.effective.byteLen } : {}),
+        ...(r.effective.rawValue != null ? { rawValue: r.effective.rawValue } : {}),
+      },
+    }));
+}
+
+function resolvePromptTarget(
+  nameArg: string | undefined,
+  core: CopilotCore,
+  opts: ShellOptions,
+  ctx: ShellContext,
+  shellState: ShellState,
+): { ok: true; target: PromptTarget } | { ok: false; output: string } {
+  if (!ctx.focusedModule) {
+    return { ok: false, output: "No focused module. Use /use <module> first." };
+  }
+  const name = nameArg?.trim();
+  if (!name) {
+    return { ok: false, output: "Usage: /prompt <edit|show|diff|reset> <name>" };
+  }
+
+  const cwd = opts.target ? path.resolve(opts.target) : process.cwd();
+  const rows = readPromptAudit(core, shellState.moduleOptions, cwd).filter(
+    (r) => r.moduleId === ctx.focusedModule,
+  );
+  const normalized = name.toLowerCase();
+  const row =
+    rows.find((r) => r.verb.toLowerCase() === normalized) ??
+    rows.find((r) => promptKeyToVerb(r.promptKey).toLowerCase() === normalized) ??
+    rows.find((r) => r.toolName.toLowerCase() === `${ctx.focusedModule}:${normalized}`);
+
+  if (!row) {
+    const available = rows.map((r) => r.verb).sort();
+    return {
+      ok: false,
+      output:
+        available.length > 0
+          ? `No prompt override named "${name}" for ${ctx.focusedModule}. Available: ${available.join(", ")}.`
+          : `No tools in ${ctx.focusedModule} declare prompt overrides.`,
+    };
+  }
+
+  return {
+    ok: true,
+    target: {
+      moduleId: row.moduleId,
+      toolName: row.toolName,
+      name: row.verb,
+      promptKey: row.promptKey,
+    },
+  };
+}
+
+function stripWrappingQuotes(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length >= 2) {
+    const first = trimmed[0];
+    const last = trimmed[trimmed.length - 1];
+    if ((first === `"` && last === `"`) || (first === "'" && last === "'")) {
+      return trimmed.slice(1, -1);
+    }
+  }
+  return trimmed;
+}
+
 /**
  * `/prompt edit <verb>` — opens $EDITOR on `.kuzushi/prompts/<module>/<verb>.md`,
  * saves on exit, and seeds `shell.moduleOptions[<tool>][<KEY>_PROMPT]` with
@@ -5625,28 +5765,26 @@ function handlePromptEditCommand(
   }
   const verb = verbArg?.trim();
   if (!verb) {
-    return { output: "Usage: /prompt edit <verb>  (e.g. /prompt edit triage)" };
+    return { output: "Usage: /prompt edit <name>  (e.g. /prompt edit triage)" };
   }
-  const promptKey = verbToPromptKey(verb);
-  if (!promptKey) {
-    return { output: `No prompt override for verb "${verb}".` };
-  }
-  const toolName = `${ctx.focusedModule}:${verb}`;
-  const resolved = core.registry.resolveTool(toolName);
+  const targetResult = resolvePromptTarget(verb, core, opts, ctx, shellState);
+  if (!targetResult.ok) return { output: targetResult.output };
+  const target = targetResult.target;
+  const resolved = core.registry.resolveTool(target.toolName);
   if (!resolved) {
-    return { output: `Tool ${toolName} not found. Use /tools to list.` };
+    return { output: `Tool ${target.toolName} not found. Use /tools to list.` };
   }
   const dataDir = ctx.dataDir;
-  const focusedModule = ctx.focusedModule;
   const description = resolved.tool.description;
   return {
-    output: `Opening ${promptKey} override in $EDITOR…`,
+    output: `Opening ${target.promptKey} override in $EDITOR…`,
     asyncExecute: async () => {
       try {
         const outcome = await editPrompt({
           dataDir,
-          moduleId: focusedModule,
-          verb,
+          moduleId: target.moduleId,
+          verb: target.name,
+          promptKey: target.promptKey,
           toolDescription: description,
         });
         if (!outcome.saved) {
@@ -5657,21 +5795,24 @@ function handlePromptEditCommand(
         // Also record `promptsEditor.lastSaved{,At}` so the prompts editor
         // view can render its after-vim "Saved prompt override" card.
         if (ctx.uiStore) {
+          const liveShell = ctx.uiStore.getState().shell;
+          const nextModuleOptions = {
+            ...(liveShell?.moduleOptions ?? {}),
+            [target.toolName]: {
+              ...(liveShell?.moduleOptions[target.toolName] ?? {}),
+              [outcome.promptKey]: outcome.filePath,
+            },
+          };
           updateShell(ctx.uiStore, (shell) => ({
             ...shell,
-            moduleOptions: {
-              ...shell.moduleOptions,
-              [toolName]: {
-                ...(shell.moduleOptions[toolName] ?? {}),
-                [outcome.promptKey]: outcome.filePath,
-              },
-            },
-            lastUsedTool: toolName,
+            moduleOptions: nextModuleOptions,
+            lastUsedTool: target.toolName,
             promptsEditor: {
               ...(shell.promptsEditor ?? {}),
+              audit: buildPromptEditorAuditRows(core, opts, nextModuleOptions, target.moduleId),
               lastSavedAt: Date.now(),
               lastSaved: {
-                name: verb,
+                name: target.name,
                 path: outcome.filePath,
                 size: outcome.byteLen,
               },
@@ -5680,7 +5821,7 @@ function handlePromptEditCommand(
         }
         return [
           `Saved ${outcome.byteLen} bytes to ${outcome.filePath}`,
-          `Set ${toolName}.${outcome.promptKey} = ${outcome.filePath}`,
+          `Set ${target.toolName}.${outcome.promptKey} = ${outcome.filePath}`,
         ].join("\n");
       } catch (err) {
         return `Prompt editor error: ${err instanceof Error ? err.message : String(err)}`;
@@ -5753,23 +5894,8 @@ function handlePromptsListCommand(
   if (!ctx.focusedModule) {
     return { output: "No focused module. Use /use <module> first." };
   }
-  const cwd = opts.target ? path.resolve(opts.target) : process.cwd();
-  const allRows = readPromptAudit(core, shellState.moduleOptions, cwd);
   const moduleId = ctx.focusedModule;
-  const compact = allRows
-    .filter((r) => r.moduleId === moduleId)
-    .map((r) => ({
-      moduleId: r.moduleId,
-      toolName: r.toolName,
-      verb: r.verb,
-      promptKey: String(r.promptKey),
-      effective: {
-        source: r.effective.source,
-        ...(r.effective.filePath ? { filePath: r.effective.filePath } : {}),
-        ...(r.effective.byteLen != null ? { byteLen: r.effective.byteLen } : {}),
-        ...(r.effective.rawValue != null ? { rawValue: r.effective.rawValue } : {}),
-      },
-    }));
+  const compact = buildPromptEditorAuditRows(core, opts, shellState.moduleOptions, moduleId);
   return {
     shellStateUpdater: (shell) => ({
       ...shell,
@@ -5787,7 +5913,10 @@ function handlePromptsListCommand(
  */
 function handlePromptResetCommand(
   verbArg: string | undefined,
+  core: CopilotCore,
+  opts: ShellOptions,
   ctx: ShellContext,
+  shellState: ShellState,
 ): LocalCommandResult {
   if (!ctx.focusedModule) {
     return { output: "No focused module. Use /use <module> first." };
@@ -5797,14 +5926,16 @@ function handlePromptResetCommand(
   }
   const verb = verbArg?.trim();
   if (!verb) {
-    return { output: "Usage: prompt reset <verb>" };
+    return { output: "Usage: prompt reset <name>" };
   }
-  const promptKey = verbToPromptKey(verb);
-  if (!promptKey) {
-    return { output: `No prompt override for verb "${verb}".` };
-  }
-  const toolName = `${ctx.focusedModule}:${verb}`;
-  const filePath = path.join(ctx.dataDir, "prompts", ctx.focusedModule, `${verb}.md`);
+  const targetResult = resolvePromptTarget(verb, core, opts, ctx, shellState);
+  if (!targetResult.ok) return { output: targetResult.output };
+  const target = targetResult.target;
+  const filePath = path.join(ctx.dataDir, "prompts", target.moduleId, `${target.name}.md`);
+  const hadStoredOverride = Object.hasOwn(
+    shellState.moduleOptions[target.toolName] ?? {},
+    target.promptKey,
+  );
   let removed = false;
   try {
     if (existsSync(filePath)) {
@@ -5818,16 +5949,30 @@ function handlePromptResetCommand(
   }
   return {
     shellStateUpdater: (shell) => {
-      const next = { ...(shell.moduleOptions[toolName] ?? {}) };
-      delete next[promptKey];
+      const next = { ...(shell.moduleOptions[target.toolName] ?? {}) };
+      delete next[target.promptKey];
       const moduleOptions = { ...shell.moduleOptions };
-      if (Object.keys(next).length === 0) delete moduleOptions[toolName];
-      else moduleOptions[toolName] = next;
-      return { ...shell, moduleOptions };
+      if (Object.keys(next).length === 0) delete moduleOptions[target.toolName];
+      else moduleOptions[target.toolName] = next;
+      const promptsEditor = {
+        ...(shell.promptsEditor ?? {}),
+        audit: buildPromptEditorAuditRows(core, opts, moduleOptions, target.moduleId),
+      };
+      if (promptsEditor.lastSaved?.name === target.name) {
+        delete promptsEditor.lastSaved;
+        delete promptsEditor.lastSavedAt;
+      }
+      return {
+        ...shell,
+        moduleOptions,
+        promptsEditor,
+      };
     },
     output: removed
-      ? `Removed override at ${filePath}; ${toolName}.${promptKey} reset to default.`
-      : `${toolName}.${promptKey} already at default (no override file).`,
+      ? `Removed override at ${filePath}; ${target.toolName}.${target.promptKey} reset to default.`
+      : hadStoredOverride
+        ? `Reset ${target.toolName}.${target.promptKey} to default (no override file at ${filePath}).`
+        : `${target.toolName}.${target.promptKey} already at default (no override file).`,
   };
 }
 
@@ -5838,7 +5983,10 @@ function handlePromptResetCommand(
  */
 function handlePromptDiffCommand(
   verbArg: string | undefined,
+  core: CopilotCore,
+  opts: ShellOptions,
   ctx: ShellContext,
+  shellState: ShellState,
 ): LocalCommandResult {
   if (!ctx.focusedModule) {
     return { output: "No focused module. Use /use <module> first." };
@@ -5847,15 +5995,16 @@ function handlePromptDiffCommand(
     return { output: "No data directory resolved for this shell." };
   }
   const verb = verbArg?.trim();
-  if (!verb) return { output: "Usage: prompt diff <verb>" };
-  const promptKey = verbToPromptKey(verb);
-  if (!promptKey) return { output: `No prompt override for verb "${verb}".` };
-  const filePath = path.join(ctx.dataDir, "prompts", ctx.focusedModule, `${verb}.md`);
+  if (!verb) return { output: "Usage: prompt diff <name>" };
+  const targetResult = resolvePromptTarget(verb, core, opts, ctx, shellState);
+  if (!targetResult.ok) return { output: targetResult.output };
+  const target = targetResult.target;
+  const filePath = path.join(ctx.dataDir, "prompts", target.moduleId, `${target.name}.md`);
   if (!existsSync(filePath)) {
     return { output: `No override file at ${filePath} — nothing to diff.` };
   }
   return {
-    output: `Override on disk: ${filePath}.\nThe compiled-in default lives in src/modules/${ctx.focusedModule}/. Use \`git diff\` against the upstream tree for a structured diff.`,
+    output: `Override on disk: ${filePath}.\nThe compiled-in default lives in src/modules/${target.moduleId}/. Use \`git diff\` against the upstream tree for a structured diff.`,
   };
 }
 
@@ -5875,22 +6024,68 @@ function handlePromptShowCommand(
   }
   const verb = verbArg?.trim();
   if (!verb) {
-    return { output: "Usage: /prompt show <verb>" };
+    return { output: "Usage: /prompt show <name>" };
   }
-  const promptKey = verbToPromptKey(verb);
-  if (!promptKey) {
-    return { output: `No prompt override for verb "${verb}".` };
-  }
-  const toolName = `${ctx.focusedModule}:${verb}`;
-  if (!core.registry.resolveTool(toolName)) {
-    return { output: `Tool ${toolName} not found.` };
-  }
+  const targetResult = resolvePromptTarget(verb, core, opts, ctx, shellState);
+  if (!targetResult.ok) return { output: targetResult.output };
+  const target = targetResult.target;
   const cwd = opts.target ? path.resolve(opts.target) : process.cwd();
-  const stored = shellState.moduleOptions[toolName];
-  const effective = readEffectivePrompt(toolName, promptKey, stored, cwd);
-  const verbSuffix = promptKeyToVerb(promptKey);
-  const header = `Prompt for ${toolName} (${verbSuffix})`;
+  const stored = shellState.moduleOptions[target.toolName];
+  const effective = readEffectivePrompt(target.toolName, target.promptKey, stored, cwd);
+  const verbSuffix = promptKeyToVerb(target.promptKey);
+  const header = `Prompt for ${target.toolName} (${verbSuffix})`;
   return { output: `${header}\n  ${formatEffectivePromptLine(effective)}` };
+}
+
+function handlePromptInlineSetCommand(
+  input: string,
+  core: CopilotCore,
+  opts: ShellOptions,
+  ctx: ShellContext,
+  shellState: ShellState,
+): LocalCommandResult {
+  const rest = input
+    .trim()
+    .replace(/^set\s+/i, "")
+    .trim();
+  const match = /^(\S+)\s+([\s\S]+)$/.exec(rest);
+  if (!match) {
+    return { output: "Usage: set <name> <inline text or path>" };
+  }
+  const name = match[1]!;
+  const value = stripWrappingQuotes(match[2]!);
+  if (!value) {
+    return { output: "Usage: set <name> <inline text or path>" };
+  }
+  const targetResult = resolvePromptTarget(name, core, opts, ctx, shellState);
+  if (!targetResult.ok) return { output: targetResult.output };
+  const target = targetResult.target;
+  return {
+    shellStateUpdater: (shell) => {
+      const moduleOptions = {
+        ...shell.moduleOptions,
+        [target.toolName]: {
+          ...(shell.moduleOptions[target.toolName] ?? {}),
+          [target.promptKey]: value,
+        },
+      };
+      const promptsEditor = {
+        ...(shell.promptsEditor ?? {}),
+        audit: buildPromptEditorAuditRows(core, opts, moduleOptions, target.moduleId),
+      };
+      if (promptsEditor.lastSaved?.name === target.name) {
+        delete promptsEditor.lastSaved;
+        delete promptsEditor.lastSavedAt;
+      }
+      return {
+        ...shell,
+        moduleOptions,
+        lastUsedTool: target.toolName,
+        promptsEditor,
+      };
+    },
+    output: `Set ${target.toolName}.${target.promptKey} inline override (${Buffer.byteLength(value, "utf-8")} bytes).`,
+  };
 }
 
 /**
@@ -6922,6 +7117,7 @@ export const __shellInternals = {
   handleSlashCommand,
   handleStoryCommand,
   isTaskStoryNavigationInput,
+  shouldRouteShellInputBeforeDispatcher,
   reconcileShellView,
   loadArtifactManifest,
   loadShellCommandHistory,

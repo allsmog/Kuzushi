@@ -97,6 +97,8 @@ export interface EditPromptInput {
   moduleId: string;
   /** Verb (e.g. "triage") — translated into a prompt key. */
   verb: string;
+  /** Prompt key declared by the selected tool. Defaults to verb-derived lookup. */
+  promptKey?: PromptOptionKey;
   /** Tool description — used as a seed comment on first edit. */
   toolDescription?: string;
 }
@@ -121,7 +123,7 @@ export interface EditPromptOutput {
  * existing configuration untouched in that case.
  */
 export async function editPrompt(input: EditPromptInput): Promise<EditPromptOutput> {
-  const promptKey = verbToPromptKey(input.verb);
+  const promptKey = input.promptKey ?? verbToPromptKey(input.verb);
   if (!promptKey) {
     throw new Error(
       `No prompt override for verb "${input.verb}". Known verbs: ${PROMPT_OPTION_KEYS.map((k) => promptKeyToVerb(k)).join(", ")}`,

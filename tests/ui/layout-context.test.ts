@@ -9,6 +9,7 @@ describe("deriveNavigation", () => {
       shellView: "findings",
       processing: false,
       workspace: "demo",
+      target: "/Users/example/projects/acme-api",
     } as ShellState;
 
     const nav = deriveNavigation({
@@ -21,6 +22,7 @@ describe("deriveNavigation", () => {
     expect(nav.title).toBe("findings");
     expect(nav.breadcrumbs).toEqual(["shell", "sast", "findings"]);
     expect(nav.status).toContain("idle");
+    expect(nav.status).toContain("target:acme-api");
   });
 
   it("derives titles for threat tabs from the current threatTab", () => {

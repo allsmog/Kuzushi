@@ -160,6 +160,8 @@ function formatAvailableTools(core: CopilotCore): string {
  *   verify=true            → { verify: true }
  *   preset=deep            → { preset: "deep" }
  */
+const ARRAY_ARG_KEYS = new Set(["tasks", "severity"]);
+
 export function parseToolArgs(args: string[]): Record<string, unknown> {
   const result: Record<string, unknown> = {};
 
@@ -181,8 +183,11 @@ export function parseToolArgs(args: string[]): Record<string, unknown> {
       result[key] = true;
     } else if (rawValue === "false") {
       result[key] = false;
-    } else if (rawValue.includes(",")) {
-      result[key] = rawValue.split(",").map((v) => v.trim());
+    } else if (rawValue.includes(",") || ARRAY_ARG_KEYS.has(key)) {
+      result[key] = rawValue
+        .split(",")
+        .map((v) => v.trim())
+        .filter((v) => v.length > 0);
     } else if (/^\d+$/.test(rawValue)) {
       result[key] = parseInt(rawValue, 10);
     } else if (/^\d+\.\d+$/.test(rawValue)) {

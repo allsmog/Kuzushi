@@ -54,7 +54,7 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
       <ContextStrip
         status={[
           `workspace:${shell.workspace ?? "none"}`,
-          `target:${shell.target ?? "none"}`,
+          `target:${compactTarget(shell.target)}`,
           `${(shell.moduleCatalog ?? []).length} modules`,
         ]}
       />
@@ -93,6 +93,14 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
       )}
     </ScreenContent>
   );
+}
+
+function compactTarget(target: string | null | undefined): string {
+  if (!target) return "none";
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) return target;
+  const trimmed = target.replace(/\/+$/, "");
+  const parts = trimmed.split("/").filter(Boolean);
+  return parts[parts.length - 1] ?? target;
 }
 
 function ModuleRows({ rows }: { rows: ShellModuleCard[] }): React.ReactElement {

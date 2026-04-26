@@ -32,6 +32,21 @@ import type {
 
 const log = getLogger("claude-runtime");
 
+function isAbortRequested(options: AgentQueryOptions): boolean {
+  return options.abortController?.signal.aborted === true;
+}
+
+function abortResult(durationMs: number, numTurns: number, totalCostUsd: number): AgentMessage {
+  return {
+    type: "result",
+    subtype: "error_aborted",
+    errors: ["Aborted by operator"],
+    durationMs,
+    numTurns,
+    totalCostUsd,
+  };
+}
+
 /**
  * Extension of Anthropic.Message for responses that include parsed structured output.
  * The SDK's ParsedMessage type adds `parsed_output` when structured output (JSON schema)
@@ -667,6 +682,10 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       const durationMs = Date.now() - startedAtMs;
       const retryable =
         error instanceof Anthropic.RateLimitError || error instanceof Anthropic.InternalServerError;
+      if (isAbortRequested(request.options)) {
+        yield abortResult(durationMs, 0, 0);
+        return;
+      }
 
       log.error(
         `Direct API query failed (${durationMs}ms, retryable=${retryable}): ${toErrorMessage(error)}`,
@@ -945,7 +964,10 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       }
     } catch (error) {
       const durationMs = Date.now() - startedAtMs;
-      log.error(`Claude SDK query failed (${durationMs}ms): ${toErrorMessage(error)}`);
+      const wasAborted = isAbortRequested(request.options);
+      if (!wasAborted) {
+        log.error(`Claude SDK query failed (${durationMs}ms): ${toErrorMessage(error)}`);
+      }
 
       // Make sure the agents-active counter doesn't get stuck when the
       // SDK throws (subprocess crash, invalid auth, etc.).
@@ -953,6 +975,11 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         fingerprint: request.options.fingerprint,
         phase: request.options.phase,
       });
+
+      if (wasAborted) {
+        yield abortResult(durationMs, numTurns, totalCostUsd);
+        return;
+      }
 
       // Emit llm:call-error
       if (this.bus) {
@@ -1208,6 +1235,10 @@ class ClaudeSession implements AgentSession {
           // Subprocess crashed — self-close to release the semaphore slot, then yield error.
           emitActivityDone(this._bus, activityCtx);
           await this.close();
+          if (isAbortRequested(this.baseOptions)) {
+            yield abortResult(0, 0, 0);
+            return;
+          }
           yield {
             type: "result",
             subtype: "error_runtime",
@@ -1221,6 +1252,10 @@ class ClaudeSession implements AgentSession {
           // Subprocess exited unexpectedly — self-close to release the semaphore slot.
           emitActivityDone(this._bus, activityCtx);
           await this.close();
+          if (isAbortRequested(this.baseOptions)) {
+            yield abortResult(0, 0, 0);
+            return;
+          }
           yield {
             type: "result",
             subtype: "error_runtime",

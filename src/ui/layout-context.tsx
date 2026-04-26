@@ -191,6 +191,15 @@ function shellStatus(shell: ShellNavigationState | null | undefined): string[] {
   const status: string[] = [];
   status.push(shell.processing ? "busy" : "idle");
   if (shell.workspace) status.push(`workspace:${shell.workspace}`);
-  if (shell.target) status.push(`target:${shell.target}`);
+  if (shell.target) status.push(`target:${compactTargetLabel(shell.target)}`);
   return status;
+}
+
+function compactTargetLabel(target: string): string {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) return target;
+  const trimmed = target.replace(/\/+$/, "");
+  const parts = trimmed.split("/").filter(Boolean);
+  if (parts.length === 0) return target;
+  const last = parts[parts.length - 1]!;
+  return last.length > 0 ? last : target;
 }
