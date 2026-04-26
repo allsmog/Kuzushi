@@ -145,12 +145,12 @@ export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
 
   // --- 1. Ctrl+C / Ctrl+D ---------------------------------------------------
   if (isCtrlChord(char, key, "c") || isCtrlChord(char, key, "d")) {
+    if (shell.processing) {
+      return { type: "abort-inflight" };
+    }
     const armedAt = state.ctrlCArmedAt ?? 0;
     if (armedAt > 0 && now - armedAt <= CTRL_C_ARM_WINDOW_MS) {
       return { type: "exit" };
-    }
-    if (shell.processing) {
-      return { type: "abort-inflight" };
     }
     return { type: "arm-exit", at: now };
   }

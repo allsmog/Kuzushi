@@ -260,8 +260,18 @@ function _SubTaskBranches({
 }): React.ReactElement {
   const pipe = hasMoreBelow ? tokens.muted(icons.treePipe) : " ";
 
+  // Hide trivial support tasks once they've finished — `task-selector`
+  // and friends complete in under a few milliseconds and just pollute
+  // the tree (`task-selector  complete  1ms`). Active support rows still
+  // show, so the operator sees them while they're doing work.
+  const visible = subTasks.filter((task) => {
+    if (task.role !== "support") return true;
+    if (task.status !== "done") return true;
+    return (task.elapsedMs ?? 0) >= 200;
+  });
+
   // Sort: primary detector tasks first, then support tasks.
-  const sorted = [...subTasks].sort((a, b) => {
+  const sorted = [...visible].sort((a, b) => {
     const aWeight = a.role === "support" ? 1 : 0;
     const bWeight = b.role === "support" ? 1 : 0;
     return aWeight - bWeight;
@@ -388,9 +398,7 @@ function SubTaskRowImpl({
             const toolConnector = toolIsLast ? icons.treeLast : icons.treeMiddle;
             const branchPipe = isLast ? " " : tokens.muted(icons.treePipe);
             return (
-              <Text
-                key={`${line.kind}:${line.toolName ?? ""}:${line.detail ?? ""}:${line.index}:${line.total}`}
-              >
+              <Text key={`activity-${li}:${line.kind}:${line.toolName ?? ""}:${line.detail ?? ""}`}>
                 {pipe} {"  "}
                 {branchPipe} {tokens.muted(toolConnector)} {formatToolLine(line)}
               </Text>

@@ -8,8 +8,9 @@
  * presentational.
  */
 
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import type React from "react";
+import { truncateEnd } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { Table } from "../primitives/Table.js";
 import type { ShellModuleToolSummary, ShellState } from "../state.js";
@@ -30,6 +31,10 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
   // the top of the function (rules-of-hooks: same hooks, every render).
   const customRenderer = getModuleHomeRenderer(shell.focusedModule ?? null);
   const useCustom = customRenderer != null && shell.processing !== true;
+  const { stdout } = useStdout();
+  const columns = stdout?.columns ?? 120;
+  const tableMaxWidth = Math.max(44, Math.min(96, columns - SPACING.md * 3));
+  const narrow = columns < 96;
 
   useRegisterKeybindings([
     { keys: "Enter", label: "type tool verb" },
@@ -52,6 +57,14 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
   const allTools: ReadonlyArray<ShellModuleToolSummary> = card?.toolSummaries ?? [];
   const visibleTools = allTools.filter((t) => !t.hidden);
   const hiddenCount = allTools.length - visibleTools.length;
+  const tableRows = visibleTools.map((tool) => ({
+    ...tool,
+    name:
+      narrow && tool.name.startsWith(`${moduleId}:`)
+        ? tool.name.slice(moduleId.length + 1)
+        : tool.name,
+    description: narrow ? truncateEnd(tool.description, 44) : tool.description,
+  }));
   // While a tool is actively running, the tools table + last-run card are
   // clutter — the operator has already picked a verb. Collapse to just the
   // header strip so the progress bar dominates the viewport.
@@ -70,7 +83,9 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
         <>
           <Section
             label="tools"
-            hint="(invoke from this shell as verb, or headless via kuzushi run)"
+            hint={
+              narrow ? undefined : "(invoke from this shell as verb, or headless via kuzushi run)"
+            }
           >
             {visibleTools.length === 0 ? (
               <Box paddingLeft={3}>
@@ -81,12 +96,23 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
                 <Table
                   showHeader
                   gap={1}
+                  maxWidth={tableMaxWidth}
                   columns={[
                     { key: "verb", header: "VERB", flex: 2, truncate: "end" },
-                    { key: "name", header: "TOOL NAME", flex: 3, truncate: "middle" },
-                    { key: "description", header: "DESCRIPTION", flex: 5, truncate: "end" },
+                    {
+                      key: "name",
+                      header: narrow ? "NAME" : "TOOL NAME",
+                      flex: 3,
+                      truncate: "middle",
+                    },
+                    {
+                      key: "description",
+                      header: narrow ? "DESC" : "DESCRIPTION",
+                      flex: 5,
+                      truncate: "end",
+                    },
                   ]}
-                  rows={visibleTools}
+                  rows={tableRows}
                 />
                 {hiddenCount > 0 ? (
                   <Box paddingLeft={3} marginTop={SPACING.sm}>

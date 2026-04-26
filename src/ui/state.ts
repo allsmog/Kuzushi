@@ -360,6 +360,8 @@ export interface UIState {
   notices: UINotice[];
   warnings: string[];
   bannerShown: boolean;
+  /** True once the interactive shell welcome splash has been rendered. */
+  shellSplashShown: boolean;
   compactBannerShown?: boolean;
   startBannerShown: boolean;
   /** Resume diff data — shown when resuming a previous run. */
@@ -1122,6 +1124,7 @@ export class UIStore {
       notices: [],
       warnings: [],
       bannerShown: false,
+      shellSplashShown: false,
       compactBannerShown: false,
       startBannerShown: false,
       stages: [],

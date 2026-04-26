@@ -125,6 +125,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       summary: s.summary,
       agentActivity: s.agentActivity,
       ctrlCArmedAt: s.ctrlCArmedAt,
+      shellSplashShown: s.shellSplashShown,
     }),
     shallowEqual,
   );
@@ -139,6 +140,26 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   const pendingAssistantStartedAtRef = useRef<number>(Date.now());
 
   const processing = shell?.processing === true;
+  const showSplash = shellState.shellSplashShown !== true;
+
+  React.useEffect(() => {
+    if (showSplash) {
+      store.update({ shellSplashShown: true });
+    }
+  }, [store, showSplash]);
+
+  React.useEffect(() => {
+    if (!shellState.ctrlCArmedAt) return;
+    const remaining = CTRL_C_ARM_WINDOW_MS - (Date.now() - shellState.ctrlCArmedAt);
+    if (remaining <= 0) {
+      store.update({ ctrlCArmedAt: undefined });
+      return;
+    }
+    const timer = setTimeout(() => {
+      store.update({ ctrlCArmedAt: undefined });
+    }, remaining + 25);
+    return () => clearTimeout(timer);
+  }, [store, shellState.ctrlCArmedAt]);
 
   useRegisterKeybindings(
     processing
@@ -370,14 +391,15 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
     [shell?.history],
   );
   const staticItems = React.useMemo<Array<ShellStaticItem>>(() => {
-    const items: Array<ShellStaticItem> = [
-      {
+    const items: Array<ShellStaticItem> = [];
+    if (showSplash) {
+      items.push({
         key: "kz-splash",
         kind: "splash",
         workspace: shell?.workspace,
         target: shell?.target,
-      },
-    ];
+      });
+    }
     if (shell && !showCatalog && !shell.processing) {
       items.push({
         key: "shell-banner",
@@ -393,7 +415,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       });
     }
     return items;
-  }, [shell, showCatalog, staticHistory]);
+  }, [shell, showCatalog, showSplash, staticHistory]);
   const slashSuggestions = input.trim().startsWith("/") ? listShellSuggestions(input) : [];
 
   if (!shell) return <Text>Loading...</Text>;
@@ -634,6 +656,8 @@ function ShellTaskStatusLine({
   const abortStatus = current?.abortStatus ?? story?.abortStatus;
   const backgroundJobs = story?.backgroundJobs ?? [];
   const runningBackground = backgroundJobs.filter((job) => job.status === "running");
+  const idleTerminalStory = !shell.processing && !current && runningBackground.length === 0;
+  if (idleTerminalStory && shell.shellView !== "task-story") return null;
   const stateLabel =
     abortStatus === "aborting"
       ? "interrupting"
@@ -644,12 +668,16 @@ function ShellTaskStatusLine({
           : shell.processing
             ? "running"
             : "done";
-  const controls = columns >= 78 ? "Ctrl+C interrupt · Ctrl+O details" : "";
+  const controls = shell.processing && columns >= 78 ? "Ctrl+C interrupt · Ctrl+O details" : "";
+  const displayElapsedMs =
+    !shell.processing && story?.endedAt && story.startedAt
+      ? Math.max(0, story.endedAt - story.startedAt)
+      : elapsedMs;
   const elapsed =
-    elapsedMs > 0
-      ? `${Math.floor(elapsedMs / 60000)
+    displayElapsedMs > 0
+      ? `${Math.floor(displayElapsedMs / 60000)
           .toString()
-          .padStart(2, "0")}:${Math.floor((elapsedMs % 60000) / 1000)
+          .padStart(2, "0")}:${Math.floor((displayElapsedMs % 60000) / 1000)
           .toString()
           .padStart(2, "0")}`
       : "";

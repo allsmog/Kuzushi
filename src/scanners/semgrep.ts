@@ -1,9 +1,16 @@
 import path from "node:path";
+import type { AgentRuntime } from "../agent-runtime/types.js";
 import { loadCustomRulesDir } from "../strategies/rule-persistence.js";
 import type { ScanOpts } from "../types.js";
 import { resolveSemgrepBinary } from "./resolve-semgrep.js";
 import { runSemgrep, selectFindings } from "./run-semgrep.js";
-import type { Finding, ScannerPlugin, TaskConfig, TriageAgentConfig } from "./types.js";
+import type {
+  Finding,
+  ScanContext,
+  ScannerPlugin,
+  TaskConfig,
+  TriageAgentConfig,
+} from "./types.js";
 
 export class SemgrepPlugin implements ScannerPlugin {
   readonly id = "semgrep";
@@ -31,7 +38,13 @@ export class SemgrepPlugin implements ScannerPlugin {
     this.scannerBin = await resolveSemgrepBinary();
   }
 
-  async scan(repoRoot: string, opts: ScanOpts, _config: TaskConfig): Promise<Finding[]> {
+  async scan(
+    repoRoot: string,
+    opts: ScanOpts,
+    _config: TaskConfig,
+    _runtime?: AgentRuntime,
+    scanContext?: ScanContext,
+  ): Promise<Finding[]> {
     const repoName = path.basename(repoRoot);
 
     // Auto-load custom rules generated from previous verified findings
@@ -44,7 +57,9 @@ export class SemgrepPlugin implements ScannerPlugin {
       configs = this.configFlag;
     }
 
-    const output = await runSemgrep(repoRoot, opts, this.scannerBin, configs);
+    const output = await runSemgrep(repoRoot, opts, this.scannerBin, configs, {
+      signal: scanContext?.signal,
+    });
     // Do not apply maxFindings here — the registry's dedupeFindings applies
     // the single final cap across all tasks to avoid double-capping.
     return selectFindings(output, repoName, "HEAD");

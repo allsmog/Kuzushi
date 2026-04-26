@@ -747,6 +747,22 @@ describe("local shell commands", () => {
         timestamp: Date.now(),
         discovery: "flat" as const,
         options: { enrichment: true, threatModel: true, scenarios: true },
+        appModel: {
+          version: "1",
+          routes: [],
+          outboundClients: [],
+          dataStores: [],
+          backgroundJobs: [],
+          serviceBoundaries: [],
+          relevantFiles: [],
+          notes: [],
+        },
+        threatModel: {
+          version: "1.0",
+          dfd: { elements: [], trustBoundaries: [] },
+          threats: [],
+          summary: { total: 0, bySeverity: {}, byCategory: {} },
+        },
       },
     };
 
@@ -782,6 +798,50 @@ describe("local shell commands", () => {
       shellState,
     );
     expect(slashScan?.executedToolName).toBe("sast:scan");
+
+    const contextDefaultRun = __shellInternals.handleLocalCommand(
+      "run . discovery=flat",
+      core,
+      opts,
+      { focusedModule: "context" },
+      { ...shellState, focusedModule: "context" },
+    );
+    expect(contextDefaultRun?.executedToolName).toBe("context:build");
+    expect(contextDefaultRun?.asyncExecute).toBeTypeOf("function");
+
+    await contextDefaultRun?.asyncExecute?.();
+
+    expect(executeTool).toHaveBeenCalledWith(
+      "context:build",
+      expect.objectContaining({
+        target: ".",
+        discovery: "flat",
+      }),
+      expect.objectContaining({
+        workspaceId: undefined,
+      }),
+    );
+
+    executeTool.mockClear();
+
+    const incompleteContext = __shellInternals.handleLocalCommand(
+      "threat-hunt /repo",
+      core,
+      opts,
+      ctx,
+      {
+        ...shellState,
+        contextSnapshot: {
+          target: ".",
+          timestamp: Date.now(),
+          discovery: "flat" as const,
+          options: { enrichment: false, threatModel: false, scenarios: false },
+          appModel: shellState.contextSnapshot.appModel,
+        },
+      },
+    );
+    expect(incompleteContext?.output).toContain("Context incomplete for threat-hunt:run");
+    expect(incompleteContext?.asyncExecute).toBeUndefined();
 
     const threatHunt = __shellInternals.handleLocalCommand(
       "threat-hunt /repo maxActors=7",

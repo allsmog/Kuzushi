@@ -64,6 +64,7 @@ export async function runSemgrep(
   opts: ScanOpts,
   scannerBin: string = "semgrep",
   configFlag: string | string[] = "auto",
+  options: { signal?: AbortSignal } = {},
 ): Promise<SemgrepOutput> {
   const binName = scannerBin.split("/").pop() ?? "scanner";
   const configs = Array.isArray(configFlag) ? configFlag : [configFlag];
@@ -93,6 +94,11 @@ export async function runSemgrep(
   }
 
   return new Promise((resolve, reject) => {
+    const signal = options.signal;
+    if (signal?.aborted) {
+      reject(createAbortError(binName));
+      return;
+    }
     const proc = spawn(scannerBin, args, {
       cwd: repoRoot,
       stdio: ["ignore", "pipe", "pipe"],
@@ -100,9 +106,28 @@ export async function runSemgrep(
 
     const stdoutChunks: Buffer[] = [];
     let settled = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const cleanupAbort = () => {
+      signal?.removeEventListener("abort", abort);
+      if (killTimer) {
+        clearTimeout(killTimer);
+        killTimer = undefined;
+      }
+    };
+    const abort = () => {
+      if (settled) return;
+      proc.kill("SIGTERM");
+      killTimer = setTimeout(() => {
+        if (!settled) proc.kill("SIGKILL");
+      }, 1000);
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
 
     proc.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
     proc.stderr.on("data", (chunk: Buffer) => {
+      if (signal?.aborted) return;
       const text = chunk.toString().trimEnd();
       if (text.length > 0) {
         emitDiagnostic(binName, text);
@@ -114,6 +139,12 @@ export async function runSemgrep(
         return;
       }
       settled = true;
+      cleanupAbort();
+
+      if (signal?.aborted) {
+        reject(createAbortError(binName));
+        return;
+      }
 
       // Semgrep/Opengrep exit code 1 means "findings were found", not a runtime failure.
       if (code !== null && code > 1) {
@@ -138,9 +169,20 @@ export async function runSemgrep(
         return;
       }
       settled = true;
+      cleanupAbort();
+      if (signal?.aborted) {
+        reject(createAbortError(binName));
+        return;
+      }
       reject(new Error(`Failed to spawn ${binName}: ${err.message}`));
     });
   });
+}
+
+function createAbortError(binName: string): Error {
+  const err = new Error(`${binName} scan aborted`);
+  err.name = "AbortError";
+  return err;
 }
 
 /** Rank, deduplicate, and select top findings. */

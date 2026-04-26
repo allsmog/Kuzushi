@@ -5,6 +5,7 @@ import { safeJsonStringify } from "../../utils/safe-json.js";
 import type {
   PipelineCompleteEvent,
   PipelineStartEvent,
+  ScanAgentActivityEvent,
   TaskAgentActivityEvent,
   TriageErrorEvent,
   TriageResultEvent,
@@ -21,6 +22,50 @@ interface RunAuditState {
   runDir: string;
   triageLogPath: string;
   verifyLogPath: string;
+  scanLogPath: string;
+}
+
+const scanRunState = new Map<string, { runDir: string; scanLogPath: string }>();
+
+/**
+ * Always-on scan-events writer: subscribes to `pipeline:start` so every
+ * run gets a `scan.jsonl` file an operator can `tail -f` to watch
+ * detector tool-use, regardless of whether the gated triage/verify
+ * audit log is enabled. Cheap (one append per tool event) and
+ * orthogonal to the rest of audit-worker, which is gated on
+ * `config.auditLog`.
+ */
+export function registerScanEventLog(bus: MessageBus): void {
+  bus.subscribe<PipelineStartEvent>("pipeline:start", (event) => {
+    const runDir = path.join(event.payload.context.repoRoot, ".kuzushi", "runs", event.meta.runId);
+    ensureDir(runDir);
+    scanRunState.set(event.meta.runId, {
+      runDir,
+      scanLogPath: path.join(runDir, "scan.jsonl"),
+    });
+  });
+
+  bus.subscribe<ScanAgentActivityEvent>("scan:agent-activity", (event) => {
+    const state = scanRunState.get(event.meta.runId);
+    if (!state) return;
+    appendFileSync(
+      state.scanLogPath,
+      `${safeJsonStringify({
+        timestamp: event.meta.timestamp,
+        eventType: event.type,
+        taskId: event.payload.taskId,
+        kind: event.payload.kind,
+        toolName: event.payload.toolName,
+        toolInput: event.payload.toolInput,
+        summary: event.payload.summary,
+        elapsedSeconds: event.payload.elapsedSeconds,
+      })}\n`,
+    );
+  });
+
+  bus.subscribe<PipelineCompleteEvent>("pipeline:complete", (event) => {
+    scanRunState.delete(event.meta.runId);
+  });
 }
 
 /**
@@ -41,6 +86,7 @@ export function registerAuditWorker(bus: MessageBus, deps: AuditWorkerDeps): voi
       runDir,
       triageLogPath: path.join(runDir, "triage.jsonl"),
       verifyLogPath: path.join(runDir, "verify.jsonl"),
+      scanLogPath: path.join(runDir, "scan.jsonl"),
     };
 
     runState.set(event.meta.runId, state);

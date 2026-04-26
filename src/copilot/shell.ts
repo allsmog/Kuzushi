@@ -31,7 +31,6 @@ import { applyThreatModelPatch, proposeThreatModelPatch } from "../threat-model-
 import type { KuzushiConfig } from "../types.js";
 import { formatUnknownModule, formatUnknownTool, formatUnknownVerb } from "../ui/error-format.js";
 import { formatDuration } from "../ui/format.js";
-import { CTRL_C_ARM_WINDOW_MS } from "../ui/shell-keybinds.js";
 import type {
   ContextGenerationSlice,
   ContextSnapshot,
@@ -42,6 +41,7 @@ import type {
   ThreatTab,
   ToolActivityLine,
   TuneSnapshot,
+  UIState,
   UIStore,
 } from "../ui/state.js";
 import { initContextBuildState } from "../ui/state.js";
@@ -70,7 +70,7 @@ function hasModuleHomeRenderer(moduleId: string): boolean {
   return MODULE_HOME_IDS.has(moduleId);
 }
 
-import { resolveTool } from "./dispatch/resolve-tool.js";
+import { looksLikePath, resolveTool } from "./dispatch/resolve-tool.js";
 import { CoreDispatcher, DispatcherDriver, WorkspaceDispatcher } from "./dispatcher/index.js";
 import { ModuleDispatcher } from "./dispatcher/module-dispatcher.js";
 import { openInEditor } from "./editor.js";
@@ -124,7 +124,6 @@ const CREDENTIALS_CANCELLED_MESSAGE =
   "Copilot disabled. Run /auth to enable it later, export a provider API key, or save credentials to ./.kuzushi/credentials.json.";
 const CANCELLED_TOOL_MESSAGE = "Cancelled active operation.";
 const CANCELLED_AGENT_MESSAGE = "Cancelled active request.";
-const ABORT_EXIT_ARM_DELAY_MS = 75;
 const SIGNAL_DUPLICATE_GRACE_MS = 150;
 
 /** Tools that require a ContextSnapshot before they can execute from the shell. */
@@ -1938,6 +1937,48 @@ function clearTransientShellState(store: UIStore): void {
   }));
 }
 
+function settleAbortedShellTurn(store: UIStore, reason: string, resultOutput: string): void {
+  finalizeRunningToolCalls(store, "abort", resultOutput);
+  markAbortSettled(store, reason);
+  store.clearNotices();
+  updateShell(store, (shell) => {
+    const nextShell: ShellState = {
+      ...shell,
+      processing: false,
+      currentTool: undefined,
+      pendingAssistantText: undefined,
+      onAbort: undefined,
+      llmHeartbeat: undefined,
+    };
+    if (nextShell.moduleRun?.status === "running") {
+      nextShell.moduleRun = { ...nextShell.moduleRun, status: "aborted" };
+    }
+    if (nextShell.contextBuild?.status === "running") {
+      nextShell.contextBuild = {
+        ...nextShell.contextBuild,
+        status: "aborted",
+        errorMessage: nextShell.contextBuild.errorMessage ?? resultOutput,
+      };
+    }
+    if (nextShell.shellView === "module-run" || nextShell.shellView === "actor-detail") {
+      nextShell.shellView = nextShell.focusedModule ? "module" : "catalog";
+      nextShell.focusedActor = null;
+    }
+    return nextShell;
+  });
+
+  const rootPatch: Partial<UIState> = {
+    ctrlCArmedAt: undefined,
+    costCapHalted: false,
+  };
+  const state = store.getState();
+  if (state.mode === "running") {
+    rootPatch.mode = "shell";
+    rootPatch.phase = "idle";
+  }
+  store.update(rootPatch);
+}
+
 async function closeShellSession(session: AgentSession | undefined): Promise<void> {
   try {
     await session?.close();
@@ -2078,8 +2119,6 @@ async function startInkShell(
    * physical keypress from an intentional second Ctrl+C that should exit.
    */
   let lastAbortFiredAt = 0;
-  let abortExitArmedAt = 0;
-  let abortExitArmTimer: ReturnType<typeof setTimeout> | undefined;
 
   // runId-based blacklist for the task:phase-progress / task:activity bus
   // subscribers. When the operator Ctrl+Cs a tool that doesn't honor
@@ -2125,17 +2164,9 @@ async function startInkShell(
     return true;
   };
 
-  const armExitAfterAbort = (): void => {
-    const armedAt = Date.now();
-    lastAbortFiredAt = armedAt;
-    abortExitArmedAt = armedAt;
-    if (abortExitArmTimer) clearTimeout(abortExitArmTimer);
-    abortExitArmTimer = setTimeout(() => {
-      if (abortExitArmedAt === armedAt) {
-        store.update({ ctrlCArmedAt: armedAt });
-      }
-      abortExitArmTimer = undefined;
-    }, ABORT_EXIT_ARM_DELAY_MS);
+  const noteAbortFired = (): void => {
+    lastAbortFiredAt = Date.now();
+    store.update({ ctrlCArmedAt: undefined });
   };
 
   const currentCwd = (): string => (opts.target ? path.resolve(opts.target) : process.cwd());
@@ -2976,6 +3007,7 @@ async function startInkShell(
         return;
       }
       activeAbortRequested = true;
+      noteAbortFired();
       abortDebug("tool onAbort: firing controller.abort()");
       markAbortRequested(store, "tool execution");
       controller.abort(new Error("Shell tool execution aborted"));
@@ -2986,28 +3018,12 @@ async function startInkShell(
       // behavior — the alternative (waiting for the tool to unwind) felt
       // like the shell was hung even though the abort had fired.
       blacklistCurrentTurnRunIds();
-      finalizeRunningToolCalls(store, "abort", CANCELLED_TOOL_MESSAGE);
-      markAbortSettled(store, "tool execution");
-      clearTransientShellState(store);
-      setProcessing(store, false);
-      // When the aborted tool was a pipeline-mode tool (sast:scan, etc.) the
-      // report-worker had flipped `mode` to "running" to mount the scan UI.
-      // The worker only flips back on a clean `run-completed` envelope, so an
-      // abort would leave the operator stranded on a frozen RunningView.
-      // Restoring mode to "shell" here returns them to the module prompt
-      // immediately. Idle agent turns ignore this flip — they already run
-      // under `mode === "shell"`.
-      if (store.getState().mode === "running") {
-        store.update({ mode: "shell", phase: "idle" });
-      }
+      settleAbortedShellTurn(store, "tool execution", CANCELLED_TOOL_MESSAGE);
+      activeActionKind = null;
       // Restore raw mode in case a Claude SDK subprocess disabled it. Must
       // happen before the next keystroke or the terminal echoes chars
       // below Ink's frame and Ctrl+C keeps missing `useInput`.
       ensureRawMode();
-      // Arm the follow-up Ctrl+C window after the current input event has
-      // unwound, so duplicate delivery from the same physical keypress does
-      // not immediately commit an exit.
-      armExitAfterAbort();
     });
   };
 
@@ -3021,6 +3037,7 @@ async function startInkShell(
         return;
       }
       activeAbortRequested = true;
+      noteAbortFired();
       markAbortRequested(store, "agent request");
       // Mirror the tool-abort path: immediately return the operator to the
       // prompt instead of waiting for the LLM stream to unwind. Some backends
@@ -3037,16 +3054,11 @@ async function startInkShell(
         });
         setPendingAssistantText(store, undefined);
       }
-      finalizeRunningToolCalls(store, "abort", CANCELLED_AGENT_MESSAGE);
-      markAbortSettled(store, "agent request");
-      clearTransientShellState(store);
-      setProcessing(store, false);
+      settleAbortedShellTurn(store, "agent request", CANCELLED_AGENT_MESSAGE);
+      activeActionKind = null;
       // Restore raw mode — the session's subprocess almost certainly
       // disabled it. Without this the next keystroke echoes below Ink.
       ensureRawMode();
-      // Arm the follow-up Ctrl+C window after the current input event has
-      // unwound; see the tool-abort path above.
-      armExitAfterAbort();
       // Tear down the session in the background. Any straggler messages the
       // for-await loop drains are swallowed via the `activeAbortRequested`
       // guard inside the loop; `ensureSession()` lazily opens a fresh
@@ -3631,14 +3643,6 @@ async function startInkShell(
   const priorSigtermListeners = process.listeners("SIGTERM").slice();
   process.removeAllListeners("SIGINT");
   process.removeAllListeners("SIGTERM");
-  const isAbortExitArmed = (now: number): boolean => {
-    const stateArmedAt = store.getState().ctrlCArmedAt ?? 0;
-    return (
-      abortExitArmedAt > 0 &&
-      stateArmedAt === abortExitArmedAt &&
-      now - abortExitArmedAt <= CTRL_C_ARM_WINDOW_MS
-    );
-  };
   const isLikelyDuplicateAbortSignal = (now: number): boolean => {
     return lastAbortFiredAt > 0 && now - lastAbortFiredAt < SIGNAL_DUPLICATE_GRACE_MS;
   };
@@ -3653,18 +3657,16 @@ async function startInkShell(
       }
     }
   };
-  const maybeExitAfterAbortSignal = (source: string): boolean => {
+  const maybeSwallowDuplicateAbortSignal = (source: string): boolean => {
     const now = Date.now();
-    if (!isAbortExitArmed(now)) return false;
     if (isLikelyDuplicateAbortSignal(now)) {
       abortDebug(`${source}: duplicate immediately after abort, swallowing`);
       return true;
     }
-    forwardSigintToPriorListeners(source);
-    return true;
+    return false;
   };
   const shellSigintHandler = (): void => {
-    if (maybeExitAfterAbortSignal("SIGINT")) return;
+    if (maybeSwallowDuplicateAbortSignal("SIGINT")) return;
     if (activeActionKind) {
       // Belt-and-suspenders. The onAbort chain (abortActiveAction →
       // handler → controller.abort() → per-scope kill listener) is
@@ -3718,7 +3720,7 @@ async function startInkShell(
     // 0x03 is the byte terminal raw mode sends for Ctrl+C. 0x04 is Ctrl+D;
     // both count as an abort trigger.
     if (!(chunk.includes(0x03) || chunk.includes(0x04))) return;
-    if (maybeExitAfterAbortSignal("raw-stdin")) return;
+    if (maybeSwallowDuplicateAbortSignal("raw-stdin")) return;
     if (!activeActionKind) return;
     abortDebug(`raw-stdin: 0x03/0x04 detected, activeActionKind=${activeActionKind}`);
     const killed = killAllClaudeSubprocesses();
@@ -3757,7 +3759,7 @@ async function startInkShell(
       }
       const devTtyListener = (chunk: Buffer): void => {
         if (!(chunk.includes(0x03) || chunk.includes(0x04))) return;
-        if (maybeExitAfterAbortSignal("dev-tty")) return;
+        if (maybeSwallowDuplicateAbortSignal("dev-tty")) return;
         if (!activeActionKind) return;
         abortDebug(
           `dev-tty: 0x03/0x04 detected on /dev/tty fd, activeActionKind=${activeActionKind}`,
@@ -3830,10 +3832,6 @@ async function startInkShell(
     try {
       saveShellCommandHistory(dataDir, store.getState().shell?.commandHistory ?? []);
     } finally {
-      if (abortExitArmTimer) {
-        clearTimeout(abortExitArmTimer);
-        abortExitArmTimer = undefined;
-      }
       try {
         process.stdin.off("data", rawStdinAbortListener);
       } catch {
@@ -5406,6 +5404,17 @@ function resolveDirectToolDispatch(
   // so that a focused module whose tool is named `run` wins; still available
   // at top level and for explicit cross-module dispatch like `run sast:scan .`.
   if (cmd.toLowerCase() === "run" && args.length > 0) {
+    if (ctx.focusedModule) {
+      const explicitToolName = resolveToolName(args[0]!, core, ctx.focusedModule);
+      const firstArgTargetsDefaultTool =
+        looksLikePath(args[0]!) || args[0]!.includes("=") || args[0]!.startsWith("-");
+      if (!explicitToolName && firstArgTargetsDefaultTool) {
+        const defaultToolName = pickDefaultToolName(core, ctx.focusedModule);
+        if (defaultToolName) {
+          return resolveToolExecution(defaultToolName, args, core, opts, ctx, shellState);
+        }
+      }
+    }
     return resolveToolExecution(args[0]!, args.slice(1), core, opts, ctx, shellState);
   }
 
@@ -5438,8 +5447,9 @@ function resolveToolExecution(
   const finalToolName = resolvedToolName;
 
   // Context gating — block tools that require context when none exists
-  if (CONTEXT_REQUIRED_TOOLS.has(finalToolName) && !shellState.contextSnapshot) {
-    return { output: `Context required for ${finalToolName}. Run context (or /context) first.` };
+  const contextRequirementError = getContextRequirementError(finalToolName, shellState);
+  if (contextRequirementError) {
+    return { output: contextRequirementError };
   }
 
   return {
@@ -5488,6 +5498,30 @@ function resolveToolExecution(
       };
     },
   };
+}
+
+function getContextRequirementError(toolName: string, shellState: ShellState): string | undefined {
+  if (!CONTEXT_REQUIRED_TOOLS.has(toolName)) return undefined;
+  const snapshot = shellState.contextSnapshot;
+  if (!snapshot) {
+    return `Context required for ${toolName}. Run context (or /context) first.`;
+  }
+
+  const missing: string[] = [];
+  const needsThreatModel = toolName === "threat-hunt:run" || toolName === "sast:threat-hunt";
+  const needsAppModel =
+    needsThreatModel || toolName === "taint-iris:hunt" || toolName === "sast:taint-iris";
+
+  if (needsThreatModel && !snapshot.threatModel) {
+    missing.push("threat model");
+  }
+  if (needsAppModel && !snapshot.appModel) {
+    missing.push("app model");
+  }
+
+  if (missing.length === 0) return undefined;
+  const hint = needsThreatModel ? "Run context with threat modeling first." : "Run context first.";
+  return `Context incomplete for ${toolName}: missing ${missing.join(" and ")}. ${hint}`;
 }
 
 function resolveOptionsTool(
@@ -6881,6 +6915,7 @@ export const __shellInternals = {
   applyStoryEventToShell,
   applyCredentialOutcome,
   beginShellTurn,
+  settleAbortedShellTurn,
   ensureClaudeShellRuntime,
   hasActiveShellCredentials,
   handleLocalCommand: routeInput,

@@ -209,6 +209,36 @@ export type ScanAgentActivityEvent = EventEnvelope<
   }
 >;
 
+/**
+ * Lifecycle events for scan-stage tasks that the orchestrator runs directly
+ * during `handleScanComplete` (post-DAG ranking helpers like
+ * `reachability-check` and `call-graph-assist`). These don't go through the
+ * scan-worker `task:start` dispatch path — emitting `task:start` would cause
+ * the worker to re-run them — but they still need a UI subtask row so the
+ * pipeline view and "tasks running" counter stay truthful while they execute.
+ *
+ * Only the report-worker subscribes; scan-worker ignores them by design.
+ */
+export type ScanPostTaskStartEvent = EventEnvelope<
+  "scan:post-task-start",
+  {
+    context: RunContext;
+    taskId: string;
+    detail?: string;
+  }
+>;
+
+export type ScanPostTaskCompleteEvent = EventEnvelope<
+  "scan:post-task-complete",
+  {
+    context: RunContext;
+    taskId: string;
+    durationMs: number;
+    costUsd?: number;
+    error?: string;
+  }
+>;
+
 export type TriageStartEvent = EventEnvelope<
   "triage:start",
   {
@@ -1075,6 +1105,8 @@ export type KuzushiEvent =
   | ScanFindingEvent
   | ScanCompleteEvent
   | ScanAgentActivityEvent
+  | ScanPostTaskStartEvent
+  | ScanPostTaskCompleteEvent
   | TriageStartEvent
   | TriageFindingQueuedEvent
   | TriageBatchQueuedEvent

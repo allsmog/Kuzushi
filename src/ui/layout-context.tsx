@@ -103,6 +103,8 @@ export function useLayoutContext(): LayoutContextValue {
 export function deriveNavigation(
   state: Pick<UIState, "mode" | "phase" | "repoName"> & {
     shell?: ShellNavigationState | null;
+    /** Optional currently-running scan sub-task; used to specialise the subtitle. */
+    activeScanTask?: { label: string } | null;
   },
 ): NavigationMeta {
   if (state.mode === "shell") {
@@ -123,20 +125,29 @@ export function deriveNavigation(
   // (instead of inside the scrolling pipeline tree, where Ink would commit
   // it to scrollback once the tree exceeds terminal height — producing two
   // visible "now …" blocks).
-  const subtitle = state.mode === "running" ? runningPhaseSubtitle(state.phase) : undefined;
+  const subtitle =
+    state.mode === "running"
+      ? runningPhaseSubtitle(state.phase, state.activeScanTask?.label)
+      : undefined;
   return subtitle ? { title, breadcrumbs, status, subtitle } : { title, breadcrumbs, status };
 }
 
-function runningPhaseSubtitle(phase: string): string | undefined {
+function runningPhaseSubtitle(phase: string, activeTaskLabel?: string): string | undefined {
   switch (phase) {
     case "scanning":
-      return "mapping the codebase and hunting for candidates";
+      return activeTaskLabel
+        ? `running ${activeTaskLabel}`
+        : "mapping the codebase and hunting for candidates";
     case "triaging":
-      return "triaging findings with the agent";
+      return activeTaskLabel
+        ? `triaging with ${activeTaskLabel}`
+        : "triaging findings with the agent";
     case "verifying":
-      return "verifying exploitability";
+      return activeTaskLabel ? `verifying with ${activeTaskLabel}` : "verifying exploitability";
     case "poc":
-      return "generating PoC harnesses";
+      return activeTaskLabel
+        ? `building harness for ${activeTaskLabel}`
+        : "generating PoC harnesses";
     default:
       return undefined;
   }

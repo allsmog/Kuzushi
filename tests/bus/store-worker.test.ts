@@ -234,6 +234,63 @@ describe("store-worker", () => {
     db.close();
   });
 
+  it("persists triage assertions even when the finding upsert is still queued", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    registerStoreWorker(bus, { db });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    // Seed a pipeline_runs row so the run_id FK is satisfied.
+    db.prepare(`
+      INSERT INTO pipeline_runs (run_id, repo, started_at, status, config_json, scan_opts_json)
+      VALUES (?, ?, datetime('now'), 'triaging', '{}', '{}')
+    `).run(runId, "repo");
+
+    const finding = makeFinding("fp-assert");
+    const result = makeResult("fp-assert");
+
+    await bus.publish(
+      createEvent("triage:result", runId, {
+        context,
+        finding,
+        result,
+        index: 1,
+        total: 1,
+      }),
+    );
+
+    // Assertions fire immediately after triage:result for the same finding,
+    // before the upsert queue's 50-entry batch threshold is reached. The
+    // handler must flush the queue so the FK on finding_assertions.fingerprint
+    // resolves.
+    await bus.publish(
+      createEvent("triage:assertions", runId, {
+        context,
+        fingerprint: finding.fingerprint,
+        assertions: [{ name: "verdict_present", passed: true, score: 1, weight: 1, reason: "ok" }],
+        qualityScore: 1,
+      }),
+    );
+
+    const row = db
+      .prepare(
+        "SELECT assertion_name as name FROM finding_assertions WHERE run_id = ? AND fingerprint = ?",
+      )
+      .get(runId, "fp-assert") as { name: string } | undefined;
+    expect(row?.name).toBe("verdict_present");
+
+    await bus.close();
+    db.close();
+  });
+
   it("rejects invalid run status values before persistence", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");

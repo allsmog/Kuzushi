@@ -31,6 +31,8 @@ import type {
   ReportRequestedEvent,
   ScanAgentActivityEvent,
   ScanCompleteEvent,
+  ScanPostTaskCompleteEvent,
+  ScanPostTaskStartEvent,
   TaskAgentActivityEvent,
   TaskCompleteEvent,
   TaskErrorEvent,
@@ -144,10 +146,6 @@ export function registerReportWorker(
   });
 
   bus.subscribe<TaskStartEvent>("task:start", (event) => {
-    if (event.payload.outputKind !== "findings" && event.payload.outputKind !== "threat-model") {
-      return;
-    }
-
     const state = getOrCreateRunState(runState, event.meta.runId);
     const tasks = new Set(state.tasks ?? []);
     tasks.add(event.payload.taskId);
@@ -155,10 +153,16 @@ export function registerReportWorker(
 
     if (store) {
       store.update({ tasks: state.tasks, phase: "scanning", mode: "running" });
-      // Add scanner as a sub-task branch under the Scan stage
-      const role = SUPPORT_TASK_IDS.has(event.payload.taskId)
-        ? ("support" as const)
-        : ("primary" as const);
+      // Every DAG task gets a sub-task row so the operator can see what's
+      // running. Tasks with non-finding output kinds (custom upstream
+      // setup, verdict aggregation, report shaping) are flagged as
+      // `support` so the renderer mutes them and the active-task picker
+      // prefers primary detectors when summarising the stage.
+      const role =
+        SUPPORT_TASK_IDS.has(event.payload.taskId) ||
+        (event.payload.outputKind !== "findings" && event.payload.outputKind !== "threat-model")
+          ? ("support" as const)
+          : ("primary" as const);
       store.upsertSubTask("scan", {
         id: event.payload.taskId,
         label: event.payload.taskId,
@@ -167,6 +171,7 @@ export function registerReportWorker(
         detail: scanTaskStartDetail(event.payload.taskId),
         role,
       });
+      updateScanStageDetail(store);
     }
   });
 
@@ -178,10 +183,13 @@ export function registerReportWorker(
         ?.subTasks.find((task) => task.id === event.payload.taskId);
       const findingCount = existing?.findingCount ?? 0;
       const lastFinding = existing?.lastFinding;
-      const detail =
-        findingCount > 0
-          ? `${findingCount} finding${findingCount === 1 ? "" : "s"}${lastFinding ? ` · ${truncate(lastFinding, 60)}` : ""}`
-          : "complete";
+      // Detail used to redundantly include the finding count, which the
+      // renderer already shows in its own column; keep just the rule
+      // id / preview text so the row reads as
+      //   ◉ semgrep   32 findings   prototype-pollution.scope-pollution   29.9s
+      // instead of the previous double-printed
+      //   ◉ semgrep   32 findings   32 findings · javascript.lang.security.audit.proto…
+      const detail = lastFinding ? truncateLastFinding(lastFinding) : "complete";
       store.clearScanActivity(event.payload.taskId);
       store.upsertSubTask("scan", {
         id: event.payload.taskId,
@@ -208,6 +216,55 @@ export function registerReportWorker(
       kind: "finding-preview",
       detail: `Found: ${detail}`,
     });
+    updateScanStageDetail(store);
+  });
+
+  // Post-DAG ranking helpers (`reachability-check`, `call-graph-assist`)
+  // run inside `handleScanComplete` rather than the scan-worker dispatch
+  // path, so they need their own start/complete events to register a
+  // sub-task row. Without these, the operator sees "0 tasks running"
+  // for several minutes while the helpers churn through the codebase.
+  bus.subscribe<ScanPostTaskStartEvent>("scan:post-task-start", (event) => {
+    if (!store) return;
+    const role = SUPPORT_TASK_IDS.has(event.payload.taskId) ? "support" : "primary";
+    store.upsertSubTask("scan", {
+      id: event.payload.taskId,
+      label: event.payload.taskId,
+      status: "active",
+      startedAt: Date.now(),
+      detail: event.payload.detail ?? scanTaskStartDetail(event.payload.taskId),
+      role,
+    });
+    updateScanStageDetail(store);
+  });
+
+  bus.subscribe<ScanPostTaskCompleteEvent>("scan:post-task-complete", (event) => {
+    if (!store) return;
+    const existing = store
+      .getState()
+      .stages.find((stage) => stage.id === "scan")
+      ?.subTasks.find((task) => task.id === event.payload.taskId);
+    const findingCount = existing?.findingCount ?? 0;
+    store.clearScanActivity(event.payload.taskId);
+    if (event.payload.error) {
+      store.upsertSubTask("scan", {
+        id: event.payload.taskId,
+        label: event.payload.taskId,
+        status: "error",
+        elapsedMs: event.payload.durationMs,
+        detail: event.payload.error.slice(0, 60),
+        lastError: event.payload.error.slice(0, 120),
+      });
+    } else {
+      store.upsertSubTask("scan", {
+        id: event.payload.taskId,
+        label: event.payload.taskId,
+        status: "done",
+        elapsedMs: event.payload.durationMs,
+        findingCount,
+        detail: "complete",
+      });
+    }
     updateScanStageDetail(store);
   });
 
@@ -639,6 +696,9 @@ export function registerReportWorker(
 
   bus.subscribe<PipelineErrorEvent>("pipeline:error", (event) => {
     if (store) {
+      if (event.payload.fatal && store.getState().shell) {
+        return;
+      }
       store.addNotice({
         level: event.payload.fatal ? "error" : "warning",
         message: event.payload.fatal ? "Pipeline failed" : "Pipeline warning",
@@ -987,7 +1047,9 @@ function summarizeToolInput(
 
   const filePath = asString(toolInput["file_path"]) ?? asString(toolInput["path"]);
   const pattern = asString(toolInput["pattern"]);
-  const glob = asString(toolInput["glob"]);
+  const glob = asString(toolInput["glob"]) ?? pattern; // Glob accepts either key
+  const command = asString(toolInput["command"]);
+  const url = asString(toolInput["url"]);
 
   if (name === "Read" && filePath) {
     return `Inspecting ${filePath}`;
@@ -1000,6 +1062,23 @@ function summarizeToolInput(
 
   if (name === "Glob" && glob) {
     return `Scanning ${glob}`;
+  }
+
+  if (name === "Bash" && command) {
+    const truncated = command.length > 60 ? `${command.slice(0, 57)}...` : command;
+    return `Running \`${truncated}\``;
+  }
+
+  if (name === "Write" && filePath) {
+    return `Writing ${filePath}`;
+  }
+
+  if (name === "Edit" && filePath) {
+    return `Editing ${filePath}`;
+  }
+
+  if ((name === "WebFetch" || name === "WebSearch") && url) {
+    return `${name} ${url}`;
   }
 
   if (filePath) {
@@ -1034,12 +1113,28 @@ function updateScanStageDetail(store: UIStore): void {
     return;
   }
 
-  const taskCount = scanStage.subTasks.length;
-  const doneCount = scanStage.subTasks.filter((task) => task.status === "done").length;
-  const findingCount = scanStage.subTasks.reduce((sum, task) => sum + (task.findingCount ?? 0), 0);
-  const parts: string[] = [];
+  const subTasks = scanStage.subTasks;
+  const taskCount = subTasks.length;
+  const doneCount = subTasks.filter((task) => task.status === "done").length;
+  const findingCount = subTasks.reduce((sum, task) => sum + (task.findingCount ?? 0), 0);
+  // Prefer the most recently started primary task as the visible "now
+  // running …" anchor — primary detectors are what the operator cares
+  // about, and the most recent start is the freshest context. Fall
+  // back to any active row if no primary is in flight.
+  const active = subTasks
+    .filter((task) => task.status === "active")
+    .sort((a, b) => {
+      const aPrimary = a.role !== "support" ? 0 : 1;
+      const bPrimary = b.role !== "support" ? 0 : 1;
+      if (aPrimary !== bPrimary) return aPrimary - bPrimary;
+      return (b.startedAt ?? 0) - (a.startedAt ?? 0);
+    })[0];
 
-  if (taskCount > 0 && doneCount < taskCount) {
+  const parts: string[] = [];
+  if (active) {
+    parts.push(`running ${active.label}`);
+    if (taskCount > 0) parts.push(`${doneCount}/${taskCount} done`);
+  } else if (taskCount > 0 && doneCount < taskCount) {
     parts.push(`${doneCount} of ${taskCount} tasks done`);
   } else if (taskCount > 0) {
     parts.push(`${taskCount} task${taskCount === 1 ? "" : "s"} complete`);
@@ -1077,6 +1172,25 @@ function scanTaskStartDetail(taskId: string): string {
 
 function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 3)}...`;
+}
+
+/**
+ * Compress a `lastFinding` blob (typically a Semgrep rule id like
+ * `javascript.lang.security.audit.prototype-pollution.protot…` or a
+ * short message) into something that reads at a glance. For dotted
+ * identifiers we keep the trailing two segments — the leading category
+ * path is filler — and otherwise we just length-limit. The width here
+ * matches the SubTaskRow's detail column reservation.
+ */
+function truncateLastFinding(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return "complete";
+  if (trimmed.includes(".") && !trimmed.includes(" ")) {
+    const segments = trimmed.split(".");
+    const tail = segments.slice(-2).join(".");
+    return truncate(tail, 60);
+  }
+  return truncate(trimmed, 60);
 }
 
 function asString(value: unknown): string | null {
