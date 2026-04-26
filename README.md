@@ -360,6 +360,7 @@ kuzushi scan <repo> --ci                   # plain-text stream mode (no Ink)
 ## Scan Presets
 
 ```sh
+kuzushi scan <repo> --preset safe        # first-run friendly: context + secrets/crypto, $5 cost cap
 kuzushi scan <repo> --preset fast        # semgrep only, no context/enrichment
 kuzushi scan <repo> --preset standard    # semgrep + IRIS taint + secrets/crypto
 kuzushi scan <repo> --preset deep        # + verification + threat modeling + systems hunt
