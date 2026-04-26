@@ -24,6 +24,13 @@ describe("parseToolArgs", () => {
     });
   });
 
+  it("parses known array options with a single value", () => {
+    expect(parseToolArgs(["tasks=semgrep", "severity=low"])).toEqual({
+      tasks: ["semgrep"],
+      severity: ["low"],
+    });
+  });
+
   it("parses integer values", () => {
     expect(parseToolArgs(["max=50"])).toEqual({ max: 50 });
   });

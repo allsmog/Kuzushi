@@ -37,6 +37,7 @@
     "setup:benchmarks": "bash scripts/setup-benchmarks.sh",
     "prepare": "husky",
     "dev": "tsx src/cli.ts",
+    "mock-tui": "tsx scripts/mock-tui.ts",
     "clean:dist": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc",
     "build:clean": "pnpm clean:dist && tsc",

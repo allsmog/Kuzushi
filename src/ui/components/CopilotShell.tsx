@@ -18,7 +18,7 @@ import {
   firstShellSuggestion,
   listShellSuggestions,
 } from "../../copilot/shell-commands.js";
-import { formatClock, truncateEnd } from "../format.js";
+import { formatClock, truncateEnd, truncateMiddle } from "../format.js";
 import { BLACK_CIRCLE, LOWER_HOOK, OUTCOME_GLYPH } from "../glyphs.js";
 import { applyBackspace, isCtrlChord } from "../hooks/text-edit-actions.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
@@ -438,7 +438,9 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
           {(item) => <ShellStaticItemView key={item.key} item={item as ShellStaticItem} />}
         </Static>
 
-        {showCatalog && !shell.processing ? <MemoShellBanner shell={shell} /> : null}
+        {showCatalog && !shell.processing ? (
+          <MemoShellBanner shell={shell} columns={columns} />
+        ) : null}
 
         <MemoShellLiveHistory history={liveHistory} />
       </Box>
@@ -564,24 +566,37 @@ function ShellStaticItemView({ item }: { item: ShellStaticItem }): React.ReactEl
     case "splash":
       return <BannerSplash workspace={item.workspace} target={item.target} />;
     case "banner":
-      return <MemoShellBanner shell={item.shell} />;
+      return <MemoShellBanner shell={item.shell} columns={80} />;
     case "history":
       return <HistoryEntry entry={item.entry} />;
   }
 }
 
 const MemoShellBanner = memo(
-  function ShellBanner({ shell }: { shell: ShellState }): React.ReactElement {
+  function ShellBanner({
+    shell,
+    columns,
+  }: {
+    shell: ShellState;
+    columns: number;
+  }): React.ReactElement {
     const location = describeShellLocation(shell);
+    const available = Math.max(24, columns - SPACING.md * 2 - 2);
     const parts: string[] = [location];
     if (shell.workspace) parts.push(shell.workspace);
-    if (shell.target && shell.target !== shell.workspace) parts.push(shell.target);
+    if (shell.target && shell.target !== shell.workspace) {
+      parts.push(truncateMiddle(shell.target, Math.min(44, available)));
+    }
+    const line = truncateEnd(
+      parts.slice(1).join(" · "),
+      Math.max(0, available - location.length - 3),
+    );
     return (
       <Box paddingLeft={SPACING.md} paddingTop={SPACING.xs}>
         <Text>
           {tokens.muted("▸ ")}
           {tokens.strong(parts[0])}
-          {parts.length > 1 ? tokens.muted(` · ${parts.slice(1).join(" · ")}`) : null}
+          {line ? tokens.muted(` · ${line}`) : null}
         </Text>
       </Box>
     );
@@ -590,7 +605,8 @@ const MemoShellBanner = memo(
     prev.shell.shellView === next.shell.shellView &&
     prev.shell.focusedModule === next.shell.focusedModule &&
     prev.shell.workspace === next.shell.workspace &&
-    prev.shell.target === next.shell.target,
+    prev.shell.target === next.shell.target &&
+    prev.columns === next.columns,
 );
 
 const MemoShellLiveHistory = memo(

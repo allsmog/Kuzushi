@@ -27,6 +27,7 @@ import { PlanCard } from "../../src/ui/components/PlanCard.js";
 import { ThreatDfdView } from "../../src/ui/components/ThreatDfdView.js";
 import { BLACK_CIRCLE } from "../../src/ui/glyphs.js";
 import { KeybindFooter } from "../../src/ui/primitives/KeybindFooter.js";
+import { TabBar } from "../../src/ui/primitives/TabBar.js";
 import { type ActionableFinding, createUIStore, type ShellState } from "../../src/ui/state.js";
 import { createAbortStoryEvent, createShellStoryEvent } from "../../src/ui/task-story.js";
 
@@ -158,6 +159,25 @@ describe("Ink component snapshots", () => {
       }),
     );
     expect(out).toMatchSnapshot();
+  });
+
+  it("TabBar — shortcuts read before labels", () => {
+    const out = renderToString(
+      createElement(TabBar, {
+        activeId: "pipeline",
+        tabs: [
+          { id: "pipeline", label: "Pipeline", shortcut: "1" },
+          { id: "findings", label: "Findings", shortcut: "2" },
+          { id: "cost", label: "Cost", shortcut: "3" },
+        ],
+      }),
+      80,
+      6,
+    );
+    expect(out).toContain("● 1 Pipeline");
+    expect(out).toContain("2 Findings");
+    expect(out).toContain("3 Cost");
+    expect(out).not.toContain("Pipeline 1");
   });
 
   it("ModuleCatalog — grouped by category with last-run chips", () => {

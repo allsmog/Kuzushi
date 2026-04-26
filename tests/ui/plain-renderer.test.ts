@@ -1,13 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { describeEmptyState } from "../../src/ui/error-format.js";
+import { baseFinding, baseShell, baseSummary } from "../../src/ui/mock-fixtures.js";
 import { registerPlainTextRenderer } from "../../src/ui/plain-renderer.js";
-import {
-  type ActionableFinding,
-  createUIStore,
-  type ShellPlan,
-  type ShellState,
-  type SummaryData,
-} from "../../src/ui/state.js";
+import { createUIStore, type ShellPlan } from "../../src/ui/state.js";
 
 /**
  * Test harness: capture plain-renderer output via an injected `write`
@@ -46,86 +41,6 @@ function captureConsole(): {
     restore: () => {
       console.log = original;
     },
-  };
-}
-
-function baseShell(overrides: Partial<ShellState> = {}): ShellState {
-  return {
-    modules: [],
-    moduleCatalog: [],
-    tools: [],
-    focusedModule: null,
-    shellView: "catalog",
-    openFindingId: null,
-    target: null,
-    workspace: null,
-    history: [],
-    commandHistory: [],
-    moduleOptions: {},
-    processing: false,
-    ...overrides,
-  };
-}
-
-function baseFinding(overrides: Partial<ActionableFinding> = {}): ActionableFinding {
-  return {
-    verdict: "tp",
-    confidence: 0.9,
-    severity: "high",
-    taskId: "sast",
-    filePath: "src/x.ts",
-    startLine: 10,
-    ruleId: "test-rule",
-    rationale: "sample rationale",
-    fingerprint: "abcd1234ef567890",
-    corroboratingSignals: [],
-    suppressionReasons: [],
-    ...overrides,
-  };
-}
-
-function baseSummary(findings: ActionableFinding[] = []): SummaryData {
-  return {
-    repoName: "test-repo",
-    verdictCounts: { tp: findings.length, fp: 0, needs_review: 0, by_design: 0 },
-    totalTriaged: findings.length,
-    triageCostUsd: 0,
-    verificationCostUsd: 0,
-    pocHarnessCostUsd: 0,
-    variantAnalysisCostUsd: 0,
-    exploitable: 0,
-    notExploitable: 0,
-    pocGenerated: 0,
-    pocSkipped: 0,
-    triageErrors: 0,
-    verifyErrors: 0,
-    pocHarnessErrors: 0,
-    skippedLowConfidence: 0,
-    skippedByFpFilter: 0,
-    softSuppressedFindings: 0,
-    skippedByLlmRescore: 0,
-    corroboratedClusters: 0,
-    verifyGateAutoAccepted: 0,
-    verifyGateSkipped: 0,
-    variantFindings: 0,
-    dynamicConfirmed: 0,
-    dynamicInteresting: 0,
-    dynamicRejected: 0,
-    dynamicErrors: 0,
-    dynamicCostUsd: 0,
-    incrementalCachedFiles: 0,
-    incrementalRescannedFiles: 0,
-    incrementalDepExpandedFiles: 0,
-    patchGenerated: 0,
-    patchVerified: 0,
-    patchFailed: 0,
-    patchErrors: 0,
-    patchCostUsd: 0,
-    budgetExceeded: false,
-    failedTasks: [],
-    tiPriorDegraded: false,
-    exploitChains: [],
-    actionableFindings: findings,
   };
 }
 

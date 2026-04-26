@@ -12,8 +12,9 @@
  * log transcripts stay compact.
  */
 
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import type React from "react";
+import { truncateEnd, truncateMiddle } from "../format.js";
 import { SPACING, tokens } from "../tokens.js";
 
 const WORDMARK = [
@@ -27,7 +28,7 @@ const WORDMARK = [
 
 const TIPS: ReadonlyArray<string> = [
   'type /plan "run harder, focus on auth" to have Haiku propose option changes',
-  "/prompt edit triage opens the operator system-prompt override in $EDITOR",
+  "/prompt edit triage opens the triage prompt override in $EDITOR",
   "/show runs lists every past scan; /replay <id> re-renders the summary",
   "/threats dfd — ASCII box-and-arrow of the randori data flow diagram (1..5 to cycle)",
   "F-0001 / C-01 short-IDs resolve deterministically — /show aliases to list them",
@@ -47,10 +48,15 @@ interface BannerSplashProps {
 }
 
 export function BannerSplash({ workspace, target, tip }: BannerSplashProps): React.ReactElement {
+  const { stdout } = useStdout();
+  const columns = stdout?.columns ?? 100;
+  const textWidth = Math.max(24, columns - SPACING.md * 2 - 4);
   const resolvedTip = tip ?? pickTip(`${workspace ?? ""}\u0000${target ?? ""}`);
   const contextParts: string[] = [];
   if (workspace) contextParts.push(`workspace ${workspace}`);
-  if (target) contextParts.push(`target ${target}`);
+  if (target) contextParts.push(`target ${truncateMiddle(target, Math.min(48, textWidth - 7))}`);
+  const contextLine = truncateEnd(contextParts.join("  \u00B7  "), textWidth);
+  const tipLine = truncateEnd(resolvedTip, textWidth - "tip: ".length);
 
   return (
     <Box
@@ -73,14 +79,14 @@ export function BannerSplash({ workspace, target, tip }: BannerSplashProps): Rea
         <Box>
           <Text>
             {tokens.muted("  ")}
-            {tokens.muted(contextParts.join("  \u00B7  "))}
+            {tokens.muted(contextLine)}
           </Text>
         </Box>
       ) : null}
       <Box marginTop={SPACING.sm}>
         <Text>
           {tokens.hint("  tip: ")}
-          {tokens.hint(resolvedTip)}
+          {tokens.hint(tipLine)}
         </Text>
       </Box>
     </Box>

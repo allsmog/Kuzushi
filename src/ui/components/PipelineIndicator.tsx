@@ -19,7 +19,7 @@
  *   ○ Report
  */
 
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import React from "react";
 import { useUiNow } from "../clock.js";
 import {
@@ -87,6 +87,9 @@ export const PipelineIndicator = React.memo(function PipelineIndicator({
 }: PipelineIndicatorProps): React.ReactElement | null {
   const hasActiveStage = stages.some((stage) => stage.status === "active");
   const nowMs = useUiNow(hasActiveStage ? 5000 : null);
+  const { stdout } = useStdout();
+  const columns = stdout?.columns ?? 120;
+  const compact = columns < 96;
 
   if (stages.length === 0) return null;
 
@@ -107,6 +110,8 @@ export const PipelineIndicator = React.memo(function PipelineIndicator({
               throttle={stage.status === "active" ? throttle : undefined}
               etaMs={stage.status === "active" ? etaMs : undefined}
               nowMs={stage.status === "active" ? nowMs : undefined}
+              columns={columns}
+              compact={compact}
             />
 
             {/* Sub-task branches for scanner tasks (scan stage) */}
@@ -143,6 +148,8 @@ function _StageHeaderLine({
   throttle,
   etaMs,
   nowMs,
+  columns,
+  compact,
 }: {
   stage: PipelineStage;
   progress?: { current: number; total: number };
@@ -150,11 +157,25 @@ function _StageHeaderLine({
   throttle?: { concurrency: number; reason: string } | null;
   etaMs?: number;
   nowMs?: number;
+  columns: number;
+  compact: boolean;
 }): React.ReactElement {
   const labelWidth = 14;
   const paddedLabel = padCell(stage.label, labelWidth);
 
   if (stage.status === "done") {
+    if (compact) {
+      const elapsedRaw = stage.elapsedMs != null ? formatDuration(stage.elapsedMs) : "";
+      const detail = truncateEnd(stage.detail ?? "complete", Math.max(12, columns - 34));
+      const { icon } = statusBadge("stage", "done");
+      return (
+        <Text>
+          {tokens.muted(`${icon} ${stage.label}`)}
+          {tokens.muted(`  ${detail}`)}
+          {elapsedRaw ? tokens.muted(`  ${elapsedRaw}`) : ""}
+        </Text>
+      );
+    }
     // padCell runs on raw strings before coloring — ANSI-aware width means
     // the column reserves a real cell count.
     const detailRaw = stage.detail ?? "";
@@ -171,6 +192,26 @@ function _StageHeaderLine({
 
   if (stage.status === "active") {
     const detailRaw = stage.detail ?? "";
+    if (compact) {
+      const elapsedRaw =
+        stage.startedAt != null && nowMs != null ? formatDuration(nowMs - stage.startedAt) : "";
+      const progressRaw =
+        progress && progress.total > 0 ? formatStageProgressCompact(progress) : "";
+      const throttleRaw = throttle ? `${icons.warning} ${throttle.concurrency}x` : "";
+      const right = [progressRaw, elapsedRaw, throttleRaw].filter(Boolean).join("  ");
+      const detailWidth = Math.max(14, columns - stage.label.length - right.length - 12);
+      return (
+        <Box>
+          <Spinner color="accent" />
+          <Text>
+            {" "}
+            {tokens.dangerStrong(stage.label)}
+            {detailRaw ? `  ${tokens.strong(truncateEnd(detailRaw, detailWidth))}` : ""}
+            {right ? tokens.muted(`  ${right}`) : ""}
+          </Text>
+        </Box>
+      );
+    }
     const detail = detailRaw
       ? `  ${tokens.strong(padCell(detailRaw, STAGE_DETAIL_WIDTH))}`
       : `  ${" ".repeat(STAGE_DETAIL_WIDTH)}`;
@@ -217,6 +258,11 @@ function _StageHeaderLine({
 
   const { icon } = statusBadge("stage", "pending");
   return <Text>{tokens.muted(`${icon} ${paddedLabel}`)}</Text>;
+}
+
+function formatStageProgressCompact(progress: { current: number; total: number }): string {
+  const current = Math.min(progress.current, progress.total);
+  return `${current}/${progress.total}`;
 }
 
 function formatStageProgress(progress?: { current: number; total: number }): string {
@@ -398,6 +444,8 @@ function SubTaskRowImpl({
             const toolConnector = toolIsLast ? icons.treeLast : icons.treeMiddle;
             const branchPipe = isLast ? " " : tokens.muted(icons.treePipe);
             return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: index disambiguates
+              // identical (kind, toolName, detail) lines that legitimately repeat.
               <Text key={`activity-${li}:${line.kind}:${line.toolName ?? ""}:${line.detail ?? ""}`}>
                 {pipe} {"  "}
                 {branchPipe} {tokens.muted(toolConnector)} {formatToolLine(line)}

@@ -467,6 +467,111 @@ describe("local shell commands", () => {
     expect(optionsAgain?.output).toContain("* 7");
   });
 
+  it("routes focused bare show options through shell state", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    let shellState = {
+      ...createShellState(module.tools.map((tool) => tool.name)),
+      focusedModule: "sast" as const,
+      shellView: "module" as const,
+    };
+    const ctx = { focusedModule: "sast" };
+
+    expect(
+      __shellInternals.shouldRouteShellInputBeforeDispatcher("show options", shellState, ctx),
+    ).toBe(true);
+
+    const optionsResult = __shellInternals.handleLocalCommand(
+      "show options",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(optionsResult?.output).toContain("sast:scan options");
+
+    shellState = optionsResult?.shellStateUpdater
+      ? optionsResult.shellStateUpdater(shellState)
+      : shellState;
+    expect(shellState.lastUsedTool).toBe("sast:scan");
+
+    const setResult = __shellInternals.handleLocalCommand(
+      "set preset fast",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(setResult?.output).toBe("Set sast:scan.preset = fast");
+  });
+
+  it("prompts editor actions use rendered prompt names", async () => {
+    const { core } = await createMockCore();
+    const opts = createShellOptions();
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "kuzushi-prompts-"));
+    tempDirs.push(tmp);
+    const toolNames = core.registry.allTools().map(({ tool }) => tool.name);
+    let shellState = {
+      ...createShellState(toolNames),
+      focusedModule: "context" as const,
+      shellView: "prompts-editor" as const,
+    };
+    const ctx = { focusedModule: "context", dataDir: tmp };
+
+    expect(
+      __shellInternals.shouldRouteShellInputBeforeDispatcher("show build", shellState, ctx),
+    ).toBe(true);
+
+    const showDefault = __shellInternals.handleLocalCommand(
+      "show build",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(showDefault?.output).toContain("Prompt for context:build (context)");
+    expect(showDefault?.output).toContain("CONTEXT_PROMPT  source=default");
+
+    const setInline = __shellInternals.handleLocalCommand(
+      'set build "Inline smoke override"',
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(setInline?.output).toBe("Set context:build.CONTEXT_PROMPT inline override (21 bytes).");
+
+    shellState = setInline?.shellStateUpdater
+      ? setInline.shellStateUpdater(shellState)
+      : shellState;
+    expect(shellState.moduleOptions["context:build"]).toEqual({
+      CONTEXT_PROMPT: "Inline smoke override",
+    });
+    shellState = {
+      ...shellState,
+      promptsEditor: {
+        ...(shellState.promptsEditor ?? {}),
+        lastSavedAt: Date.now(),
+        lastSaved: { name: "build", path: path.join(tmp, "build.md"), size: 21 },
+      },
+    };
+
+    const showInline = __shellInternals.handleLocalCommand(
+      "show build",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(showInline?.output).toContain("CONTEXT_PROMPT  source=inline");
+
+    const reset = __shellInternals.handleLocalCommand("reset build", core, opts, ctx, shellState);
+    expect(reset?.output).toContain("Reset context:build.CONTEXT_PROMPT to default");
+    shellState = reset?.shellStateUpdater ? reset.shellStateUpdater(shellState) : shellState;
+    expect(shellState.moduleOptions["context:build"]).toBeUndefined();
+    expect(shellState.promptsEditor?.lastSaved).toBeUndefined();
+  });
+
   it("errors on unknown slash commands and missing /set context", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
