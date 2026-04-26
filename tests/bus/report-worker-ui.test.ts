@@ -216,6 +216,65 @@ describe("report-worker with UI store", () => {
     db.close();
   });
 
+  it("does not surface fatal pipeline errors through the transient notice rail in shell mode", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+    const store = createUIStore();
+    store.update({
+      mode: "running",
+      shell: {
+        modules: ["sast"],
+        tools: ["sast:scan"],
+        focusedModule: "sast",
+        shellView: "module",
+        openFindingId: null,
+        target: "/tmp/repo",
+        workspace: "acme",
+        history: [],
+        commandHistory: ["scan ."],
+        moduleOptions: {},
+        processing: true,
+      },
+    });
+
+    const config: KuzushiConfig = {
+      model: "anthropic:claude-sonnet-4-6",
+      busBackend: "in-process",
+      triageBatchSize: 15,
+      triageConcurrency: 2,
+      scanMode: "parallel",
+      tasks: ["semgrep"],
+      severity: ["ERROR"],
+      excludePatterns: [],
+      taskConfig: { semgrep: {} },
+    };
+
+    registerReportWorker(bus, { db, config }, store);
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    await bus.publish(
+      createEvent("pipeline:error", runId, {
+        context,
+        error: "FOREIGN KEY constraint failed",
+        fatal: true,
+      }),
+    );
+
+    expect(store.getState().notices.some((notice) => notice.message === "Pipeline failed")).toBe(
+      false,
+    );
+
+    await bus.close();
+    db.close();
+  });
+
   it("labels threat-hunt start with 'analyzing threats from attack surface' instead of 'initializing'", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");

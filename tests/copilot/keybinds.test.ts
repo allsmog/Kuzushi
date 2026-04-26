@@ -6,7 +6,7 @@
  *
  *   1. Ctrl+C arms, then commits within the window (two-stage exit).
  *   2. Any other key resets the arm logic at the reducer boundary.
- *   3. In-flight work gets an immediate abort; an armed follow-up exits.
+ *   3. In-flight work gets an immediate abort, even with a stale idle-exit arm.
  *   4. Plan-pending overlay steals y / n / Esc.
  *   5. Context-build L/q expands the tail or aborts/backs out.
  *   6. Threat-view digits cycle through `/threats <sub>`.
@@ -66,6 +66,7 @@ function baseState(shell: ShellState, overrides: Partial<UIState> = {}): UIState
     notices: [],
     warnings: [],
     bannerShown: false,
+    shellSplashShown: false,
     startBannerShown: false,
     stages: [],
     preflight: null,
@@ -155,7 +156,7 @@ describe("resolveKeybind — Ctrl+C two-stage", () => {
     expect(action).toEqual({ type: "abort-inflight" });
   });
 
-  it("second Ctrl+C after an in-flight abort exits even while work unwinds", () => {
+  it("stale idle-exit arm does not exit while work is in flight", () => {
     const shell = baseShell({ processing: true });
     const armedAt = 5_000;
     const state = baseState(shell, { ctrlCArmedAt: armedAt });
@@ -166,7 +167,7 @@ describe("resolveKeybind — Ctrl+C two-stage", () => {
       looseFindingCount: 0,
       now: armedAt + 250,
     });
-    expect(action).toEqual({ type: "exit" });
+    expect(action).toEqual({ type: "abort-inflight" });
   });
 
   it("Ctrl+D follows the same two-stage contract as Ctrl+C", () => {

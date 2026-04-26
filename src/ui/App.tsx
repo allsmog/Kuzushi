@@ -33,7 +33,7 @@ import { deriveNavigation, LayoutProvider, STANDARD_LAYOUT_THEME } from "./layou
 import { KeybindFooter } from "./primitives/KeybindFooter.js";
 import { SpinnerClockProvider } from "./primitives/SpinnerClock.js";
 import { createReplContext, handleReplCommand } from "./repl.js";
-import type { UIStore } from "./state.js";
+import type { PipelineStage, UIStore } from "./state.js";
 import { tokens } from "./tokens.js";
 
 interface AppProps {
@@ -101,6 +101,10 @@ function AppInner({ store }: AppProps): React.ReactElement {
       shellProcessing: s.shell?.processing ?? false,
       shellWorkspace: s.shell?.workspace ?? null,
       shellTarget: s.shell?.target ?? null,
+      // Most-recently-started active scan sub-task (primary preferred). Drives
+      // the chrome subtitle ("running secrets-crypto-detect") so the operator
+      // can see what's busy without parsing the tree.
+      activeScanTaskLabel: pickActiveScanTaskLabel(s.stages),
     }),
     shallowEqual,
   );
@@ -169,6 +173,7 @@ function AppInner({ store }: AppProps): React.ReactElement {
               target: routing.shellTarget,
             }
           : null,
+        activeScanTask: routing.activeScanTaskLabel ? { label: routing.activeScanTaskLabel } : null,
       }),
     }),
     [
@@ -182,13 +187,20 @@ function AppInner({ store }: AppProps): React.ReactElement {
       routing.shellProcessing,
       routing.shellWorkspace,
       routing.shellTarget,
+      routing.activeScanTaskLabel,
     ],
   );
+  const showGlobalBanner =
+    routing.mode !== "shell" &&
+    (routing.mode !== "preflight" ||
+      routing.preflight != null ||
+      routing.configBanner != null ||
+      routing.resumeDiff != null);
 
   return (
     <LayoutProvider value={layoutContext}>
       <AppLayout footer={<KeybindFooter />}>
-        {routing.mode !== "shell" && <Banner />}
+        {showGlobalBanner && <Banner />}
         {routing.mode === "shell" && routing.hasShell && <CopilotShell store={store} />}
         {/*
          * One-shot banners — config / resume / skip-info — share a single
@@ -214,7 +226,9 @@ function AppInner({ store }: AppProps): React.ReactElement {
           }
         />
 
-        <NoticeRail notices={routing.notices} expanded={routing.noticeRailExpanded} />
+        {routing.mode !== "shell" && (
+          <NoticeRail notices={routing.notices} expanded={routing.noticeRailExpanded} />
+        )}
 
         {routing.mode === "preflight" && routing.preflight?.kind === "wizard" && (
           <SetupWizard
@@ -287,6 +301,35 @@ function AppInner({ store }: AppProps): React.ReactElement {
       </AppLayout>
     </LayoutProvider>
   );
+}
+
+/**
+ * Pick the most relevant currently-running scan sub-task whose label can be
+ * surfaced as the chrome subtitle. Primary detectors win over `support`
+ * setup tasks; among ties, the most-recently-started wins so the operator
+ * sees the freshest in-flight work.
+ */
+function pickActiveScanTaskLabel(stages: PipelineStage[] | undefined): string | null {
+  if (!stages) return null;
+  const scan = stages.find((stage) => stage.id === "scan");
+  if (!scan) return null;
+  let best: { label: string; primary: boolean; startedAt: number } | null = null;
+  for (const task of scan.subTasks) {
+    if (task.status !== "active") continue;
+    const candidate = {
+      label: task.label,
+      primary: task.role !== "support",
+      startedAt: task.startedAt ?? 0,
+    };
+    if (
+      !best ||
+      (candidate.primary && !best.primary) ||
+      (candidate.primary === best.primary && candidate.startedAt > best.startedAt)
+    ) {
+      best = candidate;
+    }
+  }
+  return best?.label ?? null;
 }
 
 // ---------------------------------------------------------------------------

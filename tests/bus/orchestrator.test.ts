@@ -3846,4 +3846,134 @@ describe("PipelineOrchestrator", () => {
     await bus.close();
     db.close();
   });
+
+  it("classifies bus:handler-error from triage:assertions as non-fatal", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    // A semgrep task that never completes — keeps run state populated
+    // so handleBusHandlerError can find it instead of early-returning.
+    const taskRegistry = new TaskRegistry();
+    taskRegistry.register({
+      id: "semgrep",
+      displayName: "Semgrep",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return new Promise<Finding[]>(() => {
+          /* never resolves — keeps state alive for the test */
+        });
+      },
+    });
+
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarted = bus.waitFor<TaskStartEvent>(
+      "task:start",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: makeConfig(),
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    await taskStarted;
+
+    const pipelineErrorPromise = bus.waitFor<PipelineErrorEvent>(
+      "pipeline:error",
+      (event) => event.meta.runId === runId && event.payload.error.includes("triage:assertions"),
+      1_000,
+    );
+
+    await bus.publish(
+      createEvent("bus:handler-error", runId, {
+        sourceEventType: "triage:assertions",
+        sourceEventId: "evt-1",
+        error: "FOREIGN KEY constraint failed",
+      }),
+    );
+
+    const pipelineError = await pipelineErrorPromise;
+    expect(pipelineError.payload.fatal).toBe(false);
+
+    await bus.close();
+    db.close();
+  });
+
+  it("classifies bus:handler-error from triage:result as fatal", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const taskRegistry = new TaskRegistry();
+    taskRegistry.register({
+      id: "semgrep",
+      displayName: "Semgrep",
+      outputKind: "findings",
+      dependsOn: [],
+      async run() {
+        return new Promise<Finding[]>(() => {
+          /* never resolves */
+        });
+      },
+    });
+
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarted = bus.waitFor<TaskStartEvent>(
+      "task:start",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: makeConfig(),
+        scanOpts: makeScanOpts(),
+      }),
+    );
+
+    await taskStarted;
+
+    const pipelineErrorPromise = bus.waitFor<PipelineErrorEvent>(
+      "pipeline:error",
+      (event) => event.meta.runId === runId && event.payload.error.includes("triage:result"),
+      1_000,
+    );
+
+    await bus.publish(
+      createEvent("bus:handler-error", runId, {
+        sourceEventType: "triage:result",
+        sourceEventId: "evt-2",
+        error: "boom",
+      }),
+    );
+
+    const pipelineError = await pipelineErrorPromise;
+    expect(pipelineError.payload.fatal).toBe(true);
+
+    await bus.close();
+    db.close();
+  });
 });

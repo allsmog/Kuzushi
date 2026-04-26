@@ -76,7 +76,15 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): Sto
   bus.subscribe<TriageAssertionsEvent>("triage:assertions", (event) => {
     const { fingerprint, assertions } = event.payload;
     const runId = event.meta.runId;
-    saveAssertionResults(deps.db, runId, fingerprint, assertions);
+    // Ensure the finding row is flushed before inserting assertions —
+    // finding_assertions.fingerprint has a FK to findings(fingerprint), and the
+    // upsert queue batches 50 entries before auto-flushing.
+    upsertQueue.flush();
+    try {
+      saveAssertionResults(deps.db, runId, fingerprint, assertions);
+    } catch {
+      /* best-effort — assertion persistence must not kill the pipeline */
+    }
   });
 
   bus.subscribe<VerificationResultEvent>("verification:result", async (event) => {

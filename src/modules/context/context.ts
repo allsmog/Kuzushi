@@ -148,7 +148,7 @@ export function createContextModule(): CopilotModule {
           ...scoped,
           discovery: discovery as "auto" | "flat" | "modules",
         });
-        snapshot.generatedSlices = scope === "all" ? [...CONTEXT_GENERATION_SLICES] : [scope];
+        snapshot.generatedSlices = generatedSlicesFor(scope, scoped);
         snapshot.staleSlices = staleSlicesFor(scope);
         advance("snapshot", "done");
 
@@ -274,4 +274,20 @@ function staleSlicesFor(scope: ContextGenerationSlice): ContextGenerationSlice[]
     default:
       return [];
   }
+}
+
+function generatedSlicesFor(
+  scope: ContextGenerationSlice,
+  opts: { enrichment: boolean; threatModel: boolean; scenarios: boolean },
+): ContextGenerationSlice[] {
+  if (scope !== "all") return [scope];
+
+  const slices: ContextGenerationSlice[] = ["repo", "app-model"];
+  if (opts.enrichment) slices.push("enrichment");
+  if (opts.threatModel) slices.push("dfd", "stride", "stories", "scope");
+  if (opts.scenarios) slices.push("scenarios");
+  if (opts.enrichment && opts.threatModel && opts.scenarios) {
+    return ["all", ...slices];
+  }
+  return slices;
 }

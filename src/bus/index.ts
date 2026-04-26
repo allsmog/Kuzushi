@@ -7,7 +7,7 @@ import type { KuzushiConfig } from "../types.js";
 import { createBus } from "./adapters/index.js";
 import { registerOrchestrator } from "./orchestrator.js";
 import type { MessageBus } from "./types.js";
-import { registerAuditWorker } from "./workers/audit-worker.js";
+import { registerAuditWorker, registerScanEventLog } from "./workers/audit-worker.js";
 import { registerBlameWorker } from "./workers/blame-worker.js";
 import { registerDynamicAnalysisWorker } from "./workers/dynamic-analysis-worker.js";
 import { registerGitHubWorker } from "./workers/github-worker.js";
@@ -132,6 +132,11 @@ export async function registerAllWorkers(
 
   // GitHub integration (fix PRs + findings comments)
   registerGitHubWorker(bus, { config: deps.config });
+
+  // Always-on scan-events log (`.kuzushi/runs/<runId>/scan.jsonl`) so the
+  // operator can `tail -f` to watch detector tool-use without flipping the
+  // gated `auditLog` config knob. Cheap (one append per tool event).
+  registerScanEventLog(bus);
 
   if (deps.config.auditLog) {
     registerAuditWorker(bus, {

@@ -83,7 +83,7 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
         ...(context.gitRoot ? { gitRoot: context.gitRoot } : {}),
         repoName: context.repoName,
         config: deps.config,
-        runtime: wrapRuntimeWithActivityForwarding(deps.runtime, bus, taskId, runId),
+        runtime: wrapRuntimeWithActivityForwarding(deps.runtime, bus, taskId, runId, "scan"),
         bus,
         upstreamOutputs,
         securityProfiles,

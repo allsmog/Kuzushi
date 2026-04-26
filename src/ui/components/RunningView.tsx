@@ -202,10 +202,14 @@ function HeartbeatSlot({ store }: { store: UIStore }): React.ReactElement {
   // HeartbeatStrip reads many fields internally; pass the narrow state slice.
   // Subscribing to the whole UIState object here is fine because HeartbeatStrip
   // is a terminal consumer — it re-renders anyway on activity updates.
+  // `phase` is included so the strip can switch its agents-active count
+  // from triage/verify fingerprints to active scan sub-tasks while
+  // `phase === "scanning"`.
   const state = useUISelector(
     store,
     (s) => ({
       mode: s.mode,
+      phase: s.phase,
       agentActivity: s.agentActivity,
       pipelineStartedAt: s.pipelineStartedAt,
       runningCostUsd: s.runningCostUsd,

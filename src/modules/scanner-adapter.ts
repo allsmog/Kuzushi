@@ -73,6 +73,7 @@ export function buildScannerDagTool<Id extends string>(
         bus: ctx.bus,
         taskId: plugin.id,
         runId: dag.runId,
+        signal: ctx.signal,
         runContext: {
           runId: dag.runId,
           repoRoot: dag.workRoot ?? dag.repoRoot,

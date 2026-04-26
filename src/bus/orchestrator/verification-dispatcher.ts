@@ -9,6 +9,7 @@ import { updateRunCost } from "../../store.js";
 import { normalizeCostUsd } from "../../utils.js";
 import type { VerificationErrorEvent, VerificationResultEvent } from "../events.js";
 import { createEvent } from "../helpers.js";
+import { getRunSignal } from "../run-signals.js";
 import type { MessageBus } from "../types.js";
 import { buildThreatModelSummary } from "./triage-dispatcher.js";
 import type { OrchestratorDeps, RunState } from "./types.js";
@@ -108,8 +109,11 @@ export async function dispatchVerification(
       state.config.verifyRefinementMaxIterations && state.config.verifyRefinementMaxIterations > 1
         ? 1
         : Math.max(1, Math.floor(state.config.verifyBatchSize ?? 5));
+    const runSignal = getRunSignal(runId);
 
     while (state.verifyInFlight < concurrency && state.verifyCursor < state.verifyQueue.length) {
+      // Fail-fast: stop dispatching once the run is aborted.
+      if (runSignal?.aborted) break;
       await emitBudgetCheck(state, runId);
       if (isBudgetExceeded(state)) {
         // Reduce verifyTotal to match what was actually dispatched so

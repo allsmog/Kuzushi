@@ -166,6 +166,7 @@ export function registerTaintAnalysisRefinementWorker(
             bus,
             "taint-analysis-run",
             event.meta.runId,
+            "scan",
           ),
           bus,
           upstreamOutputs: new Map([["taint-analysis-label", refinedLabelOutput]]),

@@ -18,6 +18,7 @@ const {
   appendProgressEvent,
   applyStoryEventToShell,
   beginShellTurn,
+  settleAbortedShellTurn,
 } = __shellInternals;
 
 function seedShellState(): UIStore {
@@ -227,6 +228,57 @@ describe("task story shell integration helpers", () => {
       abortStatus: "aborted",
       resultOutput: "Cancelled active operation.",
     });
+  });
+
+  it("settles aborted turns without leaving live shell residue", () => {
+    const store = seedShellState();
+    store.update({
+      mode: "running",
+      phase: "scanning",
+      ctrlCArmedAt: 5_000,
+      notices: [
+        {
+          id: "notice-1",
+          createdAt: 1,
+          level: "warning",
+          message: "Pipeline cancelled",
+          source: "pipeline",
+        },
+      ],
+      shell: {
+        ...store.getState().shell!,
+        focusedModule: "context",
+        shellView: "module-run",
+        onAbort: () => undefined,
+        pendingAssistantText: "partial",
+        llmHeartbeat: { activeCalls: 1, completedCalls: 0, totalCostUsd: 0 },
+        moduleRun: {
+          moduleId: "context",
+          toolName: "context:build",
+          startedAtMs: 1,
+          status: "running",
+          steps: [],
+          evidenceTail: [],
+        },
+      },
+    });
+
+    settleAbortedShellTurn(store, "tool execution", "Cancelled active operation.");
+
+    const state = store.getState();
+    const shell = state.shell!;
+    expect(state.mode).toBe("shell");
+    expect(state.phase).toBe("idle");
+    expect(state.ctrlCArmedAt).toBeUndefined();
+    expect(state.notices).toEqual([]);
+    expect(shell.processing).toBe(false);
+    expect(shell.currentTool).toBeUndefined();
+    expect(shell.onAbort).toBeUndefined();
+    expect(shell.pendingAssistantText).toBeUndefined();
+    expect(shell.llmHeartbeat).toBeUndefined();
+    expect(shell.moduleRun?.status).toBe("aborted");
+    expect(shell.shellView).toBe("module");
+    expect(shell.taskStory?.abortStatus).toBe("aborted");
   });
 });
 

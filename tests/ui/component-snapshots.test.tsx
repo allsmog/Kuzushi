@@ -28,7 +28,7 @@ import { ThreatDfdView } from "../../src/ui/components/ThreatDfdView.js";
 import { BLACK_CIRCLE } from "../../src/ui/glyphs.js";
 import { KeybindFooter } from "../../src/ui/primitives/KeybindFooter.js";
 import { type ActionableFinding, createUIStore, type ShellState } from "../../src/ui/state.js";
-import { createShellStoryEvent } from "../../src/ui/task-story.js";
+import { createAbortStoryEvent, createShellStoryEvent } from "../../src/ui/task-story.js";
 
 // ---------------------------------------------------------------------------
 // Render harness
@@ -402,6 +402,93 @@ describe("Ink component snapshots", () => {
     expect(out).not.toContain("intel · 1 tools");
     expect(out).not.toContain("you are in");
     expect(out).not.toContain("task active");
+  });
+
+  it("CopilotShell — does not replay the welcome splash after shell remount", () => {
+    const store = createUIStore();
+    store.update({
+      mode: "shell",
+      shellSplashShown: true,
+      shell: {
+        ...stubShell({
+          focusedModule: "sast",
+          shellView: "module",
+          processing: false,
+          history: [],
+        }),
+      },
+    });
+
+    const out = renderToString(createElement(CopilotShell, { store }), 84);
+
+    expect(out).toContain("sast home");
+    expect(out).not.toContain("agentic SAST orchestration");
+  });
+
+  it("CopilotShell — hides aborted task status after returning idle", () => {
+    const store = createUIStore();
+    const aborted = createShellStoryEvent(
+      createAbortStoryEvent("tool execution", "aborted", { turnId: "turn-1" }),
+      65_000,
+    );
+    store.update({
+      mode: "shell",
+      shellSplashShown: true,
+      shell: {
+        ...stubShell({
+          focusedModule: "sast",
+          shellView: "module",
+          processing: false,
+          taskStory: {
+            activeTurnId: "turn-1",
+            activeRunIds: [],
+            startedAt: 1_000,
+            endedAt: 65_000,
+            abortStatus: "aborted",
+            abortReason: "tool execution",
+            events: [aborted],
+          },
+        }),
+      },
+    });
+
+    const out = renderToString(createElement(CopilotShell, { store }), 84);
+
+    expect(out).not.toContain("sast · aborted");
+    expect(out).not.toContain("Ctrl+C interrupt");
+  });
+
+  it("CopilotShell — task story shows frozen aborted elapsed without live controls", () => {
+    const store = createUIStore();
+    const aborted = createShellStoryEvent(
+      createAbortStoryEvent("tool execution", "aborted", { turnId: "turn-1" }),
+      66_000,
+    );
+    store.update({
+      mode: "shell",
+      shellSplashShown: true,
+      shell: {
+        ...stubShell({
+          focusedModule: "sast",
+          shellView: "task-story",
+          processing: false,
+          taskStory: {
+            activeTurnId: "turn-1",
+            activeRunIds: [],
+            startedAt: 1_000,
+            endedAt: 66_000,
+            abortStatus: "aborted",
+            abortReason: "tool execution",
+            events: [aborted],
+          },
+        }),
+      },
+    });
+
+    const out = renderToString(createElement(CopilotShell, { store }), 84);
+
+    expect(out).toContain("sast · aborted · 01:05");
+    expect(out).not.toContain("Ctrl+C interrupt");
   });
 
   it("CopilotShell — live tail is viewport-aware with overflow hint", () => {

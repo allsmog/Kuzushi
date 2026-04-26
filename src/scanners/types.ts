@@ -99,6 +99,7 @@ export interface ScanContext {
   taskId?: string;
   runId?: string;
   runContext?: import("../bus/run-context.js").RunContext;
+  signal?: AbortSignal;
 }
 
 export interface ScannerPlugin {

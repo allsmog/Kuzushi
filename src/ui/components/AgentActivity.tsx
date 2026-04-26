@@ -91,7 +91,21 @@ export function HeartbeatStrip({
   const elapsedMs = state.pipelineStartedAt ? Date.now() - state.pipelineStartedAt : 0;
   const elapsedStr = elapsedMs > 0 ? formatDuration(elapsedMs) : "0s";
   const costStr = state.runningCostUsd > 0 ? formatCost(state.runningCostUsd) : "$0.00";
-  const agentStr = `${activeFingerprints} agent${activeFingerprints === 1 ? "" : "s"} active`;
+  // During the scan phase, `agentActivity` (keyed by triage / verify
+  // fingerprints) is empty by design — the live work lives in scan
+  // sub-tasks. Count those instead so the strip doesn't read
+  // "0 agents active" while a dozen detectors are running.
+  const activeScanTasks =
+    state.phase === "scanning"
+      ? (state.stages
+          .find((stage) => stage.id === "scan")
+          ?.subTasks.filter((task) => task.status === "active").length ?? 0)
+      : 0;
+  const isScanCount = state.phase === "scanning" && activeFingerprints === 0;
+  const visibleCount = isScanCount ? activeScanTasks : activeFingerprints;
+  const agentStr = isScanCount
+    ? `${visibleCount} task${visibleCount === 1 ? "" : "s"} running`
+    : `${visibleCount} agent${visibleCount === 1 ? "" : "s"} active`;
 
   return (
     <ScreenContent>

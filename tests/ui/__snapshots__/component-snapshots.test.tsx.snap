@@ -75,16 +75,12 @@ exports[`Ink component snapshots > ModuleHome — tools table + last-run summary
   40+ task pipeline
 
 
-  tools   (invoke from this shell as verb, or headless via kuzushi run)
+  tools
 
-  VERB            TOOL NAME               DESCRIPTION
-
-  ──────────────────────────────────────────────────────────────────────────────
-  ─
-  scan            sast:scan               run the full pipeline
-
-  triage          sast:triage             re-triage one finding
-
+  VERB           NAME                  DESC
+  ─────────────────────────────────────────────────────────────────────────
+  scan           scan                  run the full pipeline
+  triage         triage                re-triage one finding
 
   last run
 

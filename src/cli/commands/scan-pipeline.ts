@@ -13,7 +13,8 @@ import {
   registerAllWorkers,
 } from "../../bus/index.js";
 import { resolveInitialTaskPlan } from "../../bus/orchestrator/task-policy.js";
-import { registerRunSignal, unregisterRunSignal } from "../../bus/run-signals.js";
+import { wireRunAbort } from "../../bus/run-abort.js";
+import { unregisterRunSignal } from "../../bus/run-signals.js";
 import { inflightCache } from "../../cache.js";
 import { expandTaskSelections } from "../../capabilities.js";
 import {
@@ -36,7 +37,7 @@ import {
   markStaleRunsAborted,
 } from "../../store.js";
 import type { KuzushiConfig, ScanOpts } from "../../types.js";
-import type { UIStore } from "../../ui/state.js";
+import type { UIMode, UIStore } from "../../ui/state.js";
 import { CliCommandError, CliConfigError, CliUsageError } from "../errors.js";
 import {
   resolveActivePiAiModels,
@@ -74,7 +75,7 @@ export interface PipelineParams {
   monorepoContext?: import("../../monorepo/types.js").MonorepoSharedContext;
   uiStore?: UIStore;
   signal?: AbortSignal;
-  returnModeOnComplete?: import("../../ui/state.js").UIMode;
+  returnModeOnComplete?: UIMode;
 }
 
 export interface PipelineResult {
@@ -322,13 +323,13 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
       })
     : undefined;
 
-  // Publish the signal under this runId so bus workers (scan-worker, etc.)
-  // can populate `TaskContext.signal`. Without this hop, long-running
-  // tasks like threat-hunt ignore Ctrl+C because their runtime.query
-  // receives no AbortController and pi-ai has nothing to cancel.
-  if (params.signal) {
-    registerRunSignal(runId, params.signal);
-  }
+  // Publish a per-run AbortSignal under this runId so bus workers
+  // (scan-worker, etc.) can populate `TaskContext.signal`. `wireRunAbort`
+  // chains the caller's signal (Ctrl+C) and any fatal `pipeline:error`
+  // event for this run into a single controller — the latter is the
+  // fail-fast path that prevents the dispatchers from churning through
+  // queued findings after the run state has already been torn down.
+  wireRunAbort(bus, runId, params.signal);
 
   if (reportMode === "full" && !params.uiStore) {
     printScanPlan(config, scanOpts, taskRegistry);
@@ -353,12 +354,14 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     ]);
     if (outcome.kind === "aborted") {
       if (params.uiStore) {
-        params.uiStore.addNotice({
-          level: "warning",
-          message: "Pipeline cancelled",
-          detail: "Stopped by shell request.",
-          source: "pipeline",
-        });
+        if (shouldShowPipelineNotice(params.uiStore, params.returnModeOnComplete)) {
+          params.uiStore.addNotice({
+            level: "warning",
+            message: "Pipeline cancelled",
+            detail: "Stopped by shell request.",
+            source: "pipeline",
+          });
+        }
         if (params.returnModeOnComplete) {
           params.uiStore.setMode(params.returnModeOnComplete);
         }
@@ -371,12 +374,14 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     }
     if (outcome.kind === "error") {
       if (params.uiStore) {
-        params.uiStore.addNotice({
-          level: "error",
-          message: "Pipeline failed",
-          detail: outcome.event.payload.error,
-          source: "pipeline",
-        });
+        if (params.returnModeOnComplete !== "shell") {
+          params.uiStore.addNotice({
+            level: "error",
+            message: "Pipeline failed",
+            detail: outcome.event.payload.error,
+            source: "pipeline",
+          });
+        }
         if (params.returnModeOnComplete) {
           params.uiStore.setMode(params.returnModeOnComplete);
         }
@@ -478,6 +483,14 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     }
   }
 }
+
+function shouldShowPipelineNotice(uiStore: UIStore, returnModeOnComplete?: UIMode): boolean {
+  return returnModeOnComplete !== "shell" && !uiStore.getState().shell;
+}
+
+export const __scanPipelineInternals = {
+  shouldShowPipelineNotice,
+};
 
 export function getScanPlanSummary(
   config: KuzushiConfig,

@@ -5,7 +5,7 @@ import { chainAnalysisTask } from "../agents/tasks/chain-analysis.js";
 import { reachabilityCheckTask } from "../agents/tasks/reachability-check.js";
 import { resolveStageModel } from "../agents/tasks/runtime-overrides.js";
 import { SELECTABLE_TASK_IDS } from "../agents/tasks/task-selector.js";
-import type { TaskContext as AgentTaskContext } from "../agents/types.js";
+import type { AgentTask, TaskContext as AgentTaskContext } from "../agents/types.js";
 import { normalizeTaskCapabilityIds, resolveCapabilityConfigKey } from "../capabilities.js";
 import { PipelineHookChain } from "../hooks/chain.js";
 import { loadHooksFromFile } from "../hooks/loader.js";
@@ -1391,92 +1391,24 @@ export class PipelineOrchestrator {
 
     // Reachability-assisted ranking: penalize unreachable findings before final sort
     if (state.config.callGraphAssistEnabled === true && filteredFindings.length > 0) {
-      try {
-        const reachabilityContext: AgentTaskContext = {
-          runId,
-          projectRoot: state.context.repoRoot,
-          workRoot: state.context.scanPath ?? state.context.repoRoot,
-          repoRoot: state.context.scanPath ?? state.context.repoRoot,
-          scanPath: state.context.scanPath,
-          repoName: state.context.repoName,
-          config: state.config,
-          runtime: wrapRuntimeWithActivityForwarding(
-            this.deps.runtime,
-            this.bus,
-            "reachability-check",
-            runId,
-          ),
-          bus: this.bus,
-          upstreamOutputs: new Map(state.taskOutputs),
-        };
-        if (reachabilityCheckTask.init) {
-          await reachabilityCheckTask.init({});
-        }
-        const reachOutput = await reachabilityCheckTask.run(filteredFindings, reachabilityContext);
-        if (Array.isArray(reachOutput) && reachOutput.length > 0) {
-          filteredFindings = reachOutput as Finding[];
-        }
-        const reachCostUsd = normalizeCostUsd(getTaskOutputMeta(reachOutput)?.costUsd);
-        if (reachCostUsd > 0) {
-          state.totalCostUsd += reachCostUsd;
-          try {
-            await this.bus.publish(
-              createEvent("run:cost", state.checkpointRunId, {
-                context: state.context,
-                costUsd: reachCostUsd,
-              }),
-            );
-          } catch {
-            // Best-effort cost persistence.
-          }
-        }
-      } catch (error) {
-        log.warn(`[reachability-check] Failed open: ${toErrorMessage(error)}`);
-      }
+      filteredFindings = await this.runPostScanTask({
+        state,
+        runId,
+        taskId: "reachability-check",
+        detail: "ranking by reachability",
+        task: reachabilityCheckTask,
+        input: filteredFindings,
+      });
 
       // Call-graph-assist: enrich high-score findings with call-chain evidence
-      try {
-        const cgContext: AgentTaskContext = {
-          runId,
-          projectRoot: state.context.repoRoot,
-          workRoot: state.context.scanPath ?? state.context.repoRoot,
-          repoRoot: state.context.scanPath ?? state.context.repoRoot,
-          scanPath: state.context.scanPath,
-          repoName: state.context.repoName,
-          config: state.config,
-          runtime: wrapRuntimeWithActivityForwarding(
-            this.deps.runtime,
-            this.bus,
-            "call-graph-assist",
-            runId,
-          ),
-          bus: this.bus,
-          upstreamOutputs: new Map(state.taskOutputs),
-        };
-        if (callGraphAssistTask.init) {
-          await callGraphAssistTask.init({});
-        }
-        const cgOutput = await callGraphAssistTask.run(filteredFindings, cgContext);
-        if (Array.isArray(cgOutput) && cgOutput.length > 0) {
-          filteredFindings = cgOutput as Finding[];
-        }
-        const cgCostUsd = normalizeCostUsd(getTaskOutputMeta(cgOutput)?.costUsd);
-        if (cgCostUsd > 0) {
-          state.totalCostUsd += cgCostUsd;
-          try {
-            await this.bus.publish(
-              createEvent("run:cost", state.checkpointRunId, {
-                context: state.context,
-                costUsd: cgCostUsd,
-              }),
-            );
-          } catch {
-            // Best-effort cost persistence.
-          }
-        }
-      } catch (error) {
-        log.warn(`[call-graph-assist] Failed open: ${toErrorMessage(error)}`);
-      }
+      filteredFindings = await this.runPostScanTask({
+        state,
+        runId,
+        taskId: "call-graph-assist",
+        detail: "tracing call chains",
+        task: callGraphAssistTask,
+        input: filteredFindings,
+      });
     }
 
     if (state.config.prioritizeFindings === false) {
@@ -1634,6 +1566,98 @@ export class PipelineOrchestrator {
     }
 
     await this.dispatchTriageBatch(state, runId, triageCandidates);
+  }
+
+  /**
+   * Run a post-DAG ranking helper (`reachability-check`, `call-graph-assist`)
+   * with full UI lifecycle events so the operator sees a sub-task row in the
+   * scan stage and the "tasks running" counter stays accurate. These tasks
+   * intentionally bypass the scan-worker `task:start` dispatch path because
+   * they need `state.scanFindings` after cluster + dedup + filter + LLM
+   * rescore — too late to participate in the regular DAG.
+   *
+   * Failure is best-effort: a thrown error is reported via
+   * `scan:post-task-complete{error}` and the original input findings are
+   * returned, matching the previous catch-and-continue behaviour.
+   */
+  private async runPostScanTask(args: {
+    state: RunState;
+    runId: string;
+    taskId: string;
+    detail?: string;
+    task: AgentTask;
+    input: Finding[];
+  }): Promise<Finding[]> {
+    const { state, runId, taskId, detail, task, input } = args;
+    const startedAt = Date.now();
+    let costUsd = 0;
+    let errorMessage: string | undefined;
+    let result: Finding[] = input;
+
+    await this.bus.publish(
+      createEvent("scan:post-task-start", runId, {
+        context: state.context,
+        taskId,
+        ...(detail ? { detail } : {}),
+      }),
+    );
+
+    try {
+      const taskContext: AgentTaskContext = {
+        runId,
+        projectRoot: state.context.repoRoot,
+        workRoot: state.context.scanPath ?? state.context.repoRoot,
+        repoRoot: state.context.scanPath ?? state.context.repoRoot,
+        scanPath: state.context.scanPath,
+        repoName: state.context.repoName,
+        config: state.config,
+        runtime: wrapRuntimeWithActivityForwarding(
+          this.deps.runtime,
+          this.bus,
+          taskId,
+          runId,
+          "scan",
+        ),
+        bus: this.bus,
+        upstreamOutputs: new Map(state.taskOutputs),
+      };
+      if (task.init) {
+        await task.init({});
+      }
+      const output = await task.run(input, taskContext);
+      if (Array.isArray(output) && output.length > 0) {
+        result = output as Finding[];
+      }
+      costUsd = normalizeCostUsd(getTaskOutputMeta(output)?.costUsd);
+      if (costUsd > 0) {
+        state.totalCostUsd += costUsd;
+        try {
+          await this.bus.publish(
+            createEvent("run:cost", state.checkpointRunId, {
+              context: state.context,
+              costUsd,
+            }),
+          );
+        } catch {
+          // Best-effort cost persistence.
+        }
+      }
+    } catch (error) {
+      errorMessage = toErrorMessage(error);
+      log.warn(`[${taskId}] Failed open: ${errorMessage}`);
+    }
+
+    await this.bus.publish(
+      createEvent("scan:post-task-complete", runId, {
+        context: state.context,
+        taskId,
+        durationMs: Date.now() - startedAt,
+        ...(costUsd > 0 ? { costUsd } : {}),
+        ...(errorMessage ? { error: errorMessage } : {}),
+      }),
+    );
+
+    return result;
   }
 
   private async handleTriageResult(event: TriageResultEvent): Promise<void> {
@@ -1973,6 +1997,9 @@ export class PipelineOrchestrator {
       "poc-harness:agent-activity",
       "dynamic:agent-activity",
       "threat-hunt:agent-activity",
+      // Triage assertions are informational quality scoring; a DB error
+      // in their persistence path must never tear down the run.
+      "triage:assertions",
       "budget:check",
       "budget:warning",
       "llm:call-start",
@@ -2197,6 +2224,7 @@ export class PipelineOrchestrator {
               this.bus,
               "chain-analysis",
               runId,
+              "scan",
             ),
             bus: this.bus,
             upstreamOutputs: state.taskOutputs,

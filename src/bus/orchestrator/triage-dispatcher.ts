@@ -10,6 +10,7 @@ import { updateRunCost } from "../../store.js";
 import type { TriageResult } from "../../types.js";
 import { isRecord, normalizeCostUsd } from "../../utils.js";
 import { createEvent } from "../helpers.js";
+import { getRunSignal } from "../run-signals.js";
 import type { MessageBus } from "../types.js";
 import type { OrchestratorDeps, RunState } from "./types.js";
 
@@ -278,8 +279,13 @@ export async function dispatchTriage(
   state.dispatching = true;
   try {
     const concurrency = normalizeConcurrency(state.config.triageConcurrency);
+    const runSignal = getRunSignal(runId);
 
     while (state.inFlight < concurrency && state.queueCursor < state.triageQueue.length) {
+      // Fail-fast: the run's abort signal flips on fatal pipeline:error or
+      // operator Ctrl+C. Stop dispatching so we don't burn LLM cost on
+      // findings whose results will be discarded.
+      if (runSignal?.aborted) break;
       await emitBudgetCheck(state, runId);
       if (isBudgetExceeded(state)) {
         await emitBudgetExceeded(state, runId);
