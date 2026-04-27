@@ -608,6 +608,8 @@ export const ScanOptsSchema = z.object({
   maxFindings: z.number().optional(),
   excludePatterns: z.array(z.string()),
   tasks: z.array(z.string()).optional(),
+  taskMode: z.enum(["auto", "manual"]).optional(),
+  disabledTasks: z.array(z.string()).optional(),
   fresh: z.boolean(),
   diffBase: z.string().optional(),
   agenticReviewContext: z.string().optional(),

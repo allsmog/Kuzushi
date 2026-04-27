@@ -65,6 +65,8 @@ export type KeybindAction =
   | { type: "dispatch"; command: string }
   /** Set `shell.findingCursor` to the given (already-clamped) index. */
   | { type: "set-finding-cursor"; cursor: number }
+  /** Set `shell.sastTaskCursor` to the given (already-clamped) index. */
+  | { type: "set-sast-task-cursor"; cursor: number }
   /** Open or close the active/latest task story details view. */
   | { type: "toggle-story"; nextView: ShellState["shellView"] }
   /** Toggle the `/context build` tail log between compact and expanded. */
@@ -81,6 +83,8 @@ export interface KeybindInputs {
   state: UIState;
   /** Loose-finding count — used to clamp cursor movement. */
   looseFindingCount: number;
+  /** SAST task row count — used to clamp the SAST task selector cursor. */
+  sastTaskCount?: number;
   /** Current time — injectable for deterministic tests. */
   now: number;
 }
@@ -173,6 +177,11 @@ export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
     }
   }
 
+  if (shell.shellView === "module-run" && shell.processing && input.length === 0) {
+    if (char === "p" || char === "P") return { type: "dispatch", command: "/pause" };
+    if (char === "r" || char === "R") return { type: "dispatch", command: "/resume" };
+  }
+
   if (shell.processing) return { type: "none" };
 
   // --- 2. Plan-pending overlay ----------------------------------------------
@@ -193,7 +202,6 @@ export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
   // --- 3. Threat-view 1..5 cycle --------------------------------------------
   if (isThreatShellView(shell.shellView) && input.length === 0) {
     if (char === "r" || char === "R") return { type: "dispatch", command: "/context regen" };
-    if (char === "a" || char === "A") return { type: "dispatch", command: "/threats ask" };
     const sub = THREAT_DIGIT_TO_SUB[char];
     if (sub) return { type: "dispatch", command: `/threats ${sub}` };
   }
@@ -205,6 +213,23 @@ export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
   // ModuleRunView reserves space for; higher digits fall through.
   if (shell.shellView === "module-run" && input.length === 0 && /^[1-4]$/.test(char)) {
     return { type: "dispatch", command: `/actor ${char}` };
+  }
+
+  if (shell.shellView === "sast-tasks" && input.length === 0) {
+    const count = inputs.sastTaskCount ?? 0;
+    const cur = shell.sastTaskCursor ?? 0;
+    const clamp = (next: number): number => Math.max(0, Math.min(Math.max(0, count - 1), next));
+    if (count > 0 && (char === "j" || key.downArrow)) {
+      return { type: "set-sast-task-cursor", cursor: clamp(cur + 1) };
+    }
+    if (count > 0 && (char === "k" || key.upArrow)) {
+      return { type: "set-sast-task-cursor", cursor: clamp(cur - 1) };
+    }
+    if (char === " ") return { type: "dispatch", command: "/task toggle" };
+    if (char === "a" || char === "A") return { type: "dispatch", command: "/task mode toggle" };
+    if (char === "o" || char === "O") return { type: "dispatch", command: "/options" };
+    if (char === "r" || char === "R") return { type: "dispatch", command: "/task reset" };
+    if (char === "b" || char === "B") return { type: "dispatch", command: "/back" };
   }
 
   // --- 4. Findings cursor ---------------------------------------------------

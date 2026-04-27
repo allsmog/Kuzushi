@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentRuntime } from "../../src/agent-runtime/types.js";
 import type { MessageBus } from "../../src/bus/types.js";
 import { CopilotCore } from "../../src/copilot/core.js";
+import { Datastore } from "../../src/copilot/options.js";
 import { AuditTrail } from "../../src/governance/audit.js";
 import { GovernanceEnforcer } from "../../src/governance/enforcer.js";
 import { defaultScopePolicy } from "../../src/governance/types.js";
@@ -107,6 +108,36 @@ describe("CopilotCore.executeTool", () => {
     expect(result.ok).toBe(true);
     expect(result.output).toBe("2+2=4");
     expect(result.costUsd).toBe(0.01);
+  });
+
+  it("prefers universal model overrides over legacy module model globals", async () => {
+    const globals = new Datastore();
+    globals.set("MODEL", "anthropic:claude-opus-4-6", "global");
+    globals.set("DEMO_MODEL", "anthropic:claude-haiku-4-6", "global");
+    const seen: Array<string | undefined> = [];
+    const core = new CopilotCore({
+      runtime: fakeRuntime,
+      bus: fakeBus,
+      config: fakeConfig(),
+      dataDir: tmp,
+      loadCoreSast: false,
+      globals,
+    });
+    core.registry.register(
+      module("demo", [
+        {
+          ...tool("demo:run", () => ({ ok: true, output: "ok" })),
+          async execute(_input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
+            seen.push(ctx.toolModel);
+            return { ok: true, output: "ok" };
+          },
+        },
+      ]),
+    );
+
+    await core.executeTool("demo:run", {});
+
+    expect(seen).toEqual(["anthropic:claude-opus-4-6"]);
   });
 
   it("passes the configured runtime through to context module tools", async () => {

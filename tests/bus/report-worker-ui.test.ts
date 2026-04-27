@@ -216,6 +216,177 @@ describe("report-worker with UI store", () => {
     db.close();
   });
 
+  it("keeps shell-owned module runs in shell mode and fills module-run steps", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+    const store = createUIStore();
+    store.update({
+      mode: "shell",
+      shell: {
+        modules: ["taint-iris"],
+        tools: ["taint-iris:hunt"],
+        focusedModule: "taint-iris",
+        shellView: "module-run",
+        openFindingId: null,
+        target: "/tmp/repo",
+        workspace: "acme",
+        history: [],
+        commandHistory: ["use taint-iris", "run"],
+        moduleOptions: {},
+        processing: true,
+        moduleRun: {
+          moduleId: "taint-iris",
+          source: "shell",
+          toolName: "taint-iris:hunt",
+          displayName: "Taint IRIS",
+          startedAtMs: Date.now(),
+          status: "running",
+          steps: [],
+          evidenceTail: [],
+          findingCount: 0,
+          costUsd: 0,
+          model: "anthropic:claude-opus-4-6",
+        },
+      },
+    });
+
+    const config: KuzushiConfig = {
+      model: "anthropic:claude-sonnet-4-6",
+      busBackend: "in-process",
+      triageBatchSize: 15,
+      triageConcurrency: 2,
+      scanMode: "parallel",
+      tasks: ["taint-cwe-select", "taint-iris"],
+      severity: ["ERROR"],
+      excludePatterns: [],
+      taskConfig: { "taint-cwe-select": {}, "taint-iris": {} },
+    };
+
+    registerReportWorker(bus, { db, config }, store);
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+      postProcessMode: "scan-only" as const,
+    };
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts: {
+          severity: ["ERROR"],
+          excludePatterns: [],
+          tasks: ["taint-cwe-select", "taint-iris"],
+          fresh: false,
+        },
+      }),
+    );
+    await bus.publish(
+      createEvent("task:start", runId, {
+        context,
+        taskId: "taint-cwe-select",
+        outputKind: "custom",
+        input: null,
+        upstreamOutputs: new Map(),
+      }),
+    );
+    await bus.publish(
+      createEvent("task:complete", runId, {
+        context,
+        taskId: "taint-cwe-select",
+        outputKind: "custom",
+        output: {},
+        durationMs: 500,
+      }),
+    );
+    await bus.publish(
+      createEvent("task:start", runId, {
+        context,
+        taskId: "taint-iris",
+        outputKind: "findings",
+        input: null,
+        upstreamOutputs: new Map(),
+      }),
+    );
+    await bus.publish(
+      createEvent("task:progress", runId, {
+        context,
+        taskId: "taint-iris",
+        outputKind: "findings",
+        progress: {
+          ruleId: "taint.sql",
+          filePath: "src/app.ts",
+          startLine: 42,
+        },
+      }),
+    );
+    await bus.publish(
+      createEvent("task:progress", runId, {
+        context,
+        taskId: "taint-iris",
+        outputKind: "findings",
+        progress: {
+          ruleId: "taint.sql.duplicate",
+          filePath: "src/app.ts",
+          startLine: 42,
+        },
+      }),
+    );
+    await bus.publish(
+      createEvent("scan:complete", runId, {
+        context,
+        totalFindings: 2,
+      }),
+    );
+    await bus.publish(
+      createEvent("report:requested", runId, {
+        context,
+        reportMode: "full",
+        stats: {
+          tasks: ["taint-cwe-select", "taint-iris"],
+          totalFindings: 1,
+          queuedForTriage: 0,
+          skippedAlreadyTriaged: 0,
+          triaged: 0,
+          triageErrors: 0,
+          totalCostUsd: 0.12,
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+        },
+      }),
+    );
+
+    const state = store.getState();
+    expect(state.mode).toBe("shell");
+    expect(state.shell?.shellView).toBe("module-run");
+    expect(state.shell?.commandHistory).toEqual(["use taint-iris", "run"]);
+    expect(state.shell?.moduleRun?.runId).toBe(runId);
+    expect(state.shell?.moduleRun?.activeTaskLabel).toBeUndefined();
+    expect(state.shell?.moduleRun?.status).toBe("done");
+    expect(state.shell?.moduleRun?.postProcessMode).toBe("scan-only");
+    expect(state.shell?.moduleRun?.completedAtMs).toEqual(expect.any(Number));
+    expect(state.shell?.moduleRun?.findingCount).toBe(1);
+    expect(state.shell?.moduleRun?.costUsd).toBe(0.12);
+    expect(state.shell?.moduleRun?.steps.find((step) => step.id === "taint-iris")?.count).toBe(
+      "1 finding",
+    );
+    expect(state.shell?.moduleRun?.steps.find((step) => step.id === "report")?.count).toBe(
+      "1 finding",
+    );
+    expect(state.shell?.moduleRun?.steps.map((step) => [step.id, step.status])).toEqual([
+      ["taint-cwe-select", "done"],
+      ["taint-iris", "done"],
+      ["report", "done"],
+    ]);
+
+    await bus.close();
+    db.close();
+  });
+
   it("does not surface fatal pipeline errors through the transient notice rail in shell mode", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");

@@ -23,7 +23,13 @@ export function wrapDagToolExecute(
     ctx: ExecutionContext,
   ): Promise<ToolResult> => {
     const { runSingleTaskPipeline } = await import("./sast/pipeline-runner.js");
-    return runSingleTaskPipeline(taskIds, input, ctx, { summaryLabel });
+    const taskConfig = ctx.toolModel
+      ? Object.fromEntries(taskIds.map((taskId) => [taskId, { model: ctx.toolModel }]))
+      : undefined;
+    return runSingleTaskPipeline(taskIds, input, ctx, {
+      summaryLabel,
+      ...(taskConfig ? { taskConfig } : {}),
+    });
   };
 }
 

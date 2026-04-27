@@ -17,7 +17,7 @@ import { getRateLimitRegistry } from "../../scheduler/index.js";
 import type { KuzushiConfig } from "../../types.js";
 import { buildScanNotification, sendCompletionNotification } from "../../ui/notify.js";
 import { emitOutputNotice } from "../../ui/output.js";
-import type { UIStore } from "../../ui/state.js";
+import type { ModuleRunStep, UIStore } from "../../ui/state.js";
 import { buildSummaryData } from "../../ui/summary-data.js";
 import type {
   BudgetExceededEvent,
@@ -98,6 +98,7 @@ export function registerReportWorker(
         : [...event.payload.config.tasks];
 
     if (store) {
+      const shellRun = getShellOwnedModuleRun(store, event.meta.runId);
       // Build pipeline stages from config
       const stageList: Array<{ id: string; label: string }> = [{ id: "scan", label: "Scan" }];
       if (!scanOnly) {
@@ -113,8 +114,17 @@ export function registerReportWorker(
 
       store.initStages(stageList);
       store.activateStage("scan", state.tasks?.join(", "));
+      if (shellRun) {
+        const taskSteps = (state.tasks ?? []).map((taskId) => moduleRunStep(taskId, "pending"));
+        store.patchModuleRun({
+          runId: event.meta.runId,
+          activeTaskLabel: "preparing task",
+          steps: [...taskSteps, moduleRunStep("report", "pending", "report")],
+          model: shellRun.model ?? event.payload.config.model,
+          postProcessMode: event.payload.context.postProcessMode,
+        });
+      }
       store.update({
-        mode: "running",
         tasks: state.tasks,
         pipelineStartedAt: Date.now(),
         configBanner: {
@@ -125,6 +135,7 @@ export function registerReportWorker(
           backend: event.payload.config.agentRuntimeBackend,
           scanMode: event.payload.config.scanMode,
         },
+        ...(!shellRun ? { mode: "running" as const } : {}),
       });
       store.clearNotices();
 
@@ -152,7 +163,12 @@ export function registerReportWorker(
     state.tasks = [...tasks];
 
     if (store) {
-      store.update({ tasks: state.tasks, phase: "scanning", mode: "running" });
+      const shellRun = getShellOwnedModuleRun(store, event.meta.runId);
+      store.update({
+        tasks: state.tasks,
+        phase: "scanning",
+        ...(!shellRun ? { mode: "running" as const } : {}),
+      });
       // Every DAG task gets a sub-task row so the operator can see what's
       // running. Tasks with non-finding output kinds (custom upstream
       // setup, verdict aggregation, report shaping) are flagged as
@@ -171,6 +187,18 @@ export function registerReportWorker(
         detail: scanTaskStartDetail(event.payload.taskId),
         role,
       });
+      patchModuleRunTask(
+        store,
+        event.payload.taskId,
+        {
+          status: "running",
+          count: undefined,
+        },
+        event.meta.runId,
+      );
+      if (shellRun) {
+        store.patchModuleRun({ activeTaskLabel: event.payload.taskId });
+      }
       updateScanStageDetail(store);
     }
   });
@@ -200,6 +228,22 @@ export function registerReportWorker(
         lastFinding,
         detail,
       });
+      patchModuleRunTask(
+        store,
+        event.payload.taskId,
+        {
+          status: "done",
+          elapsedSeconds: Math.max(0, Math.round(event.payload.durationMs / 1000)),
+          count:
+            findingCount > 0
+              ? `${findingCount} finding${findingCount === 1 ? "" : "s"}`
+              : undefined,
+        },
+        event.meta.runId,
+      );
+      if (event.payload.costUsd != null) {
+        incrementModuleRunCost(store, event.payload.costUsd, event.meta.runId);
+      }
       updateScanStageDetail(store);
     }
   });
@@ -211,6 +255,7 @@ export function registerReportWorker(
 
     const detail = describeTaskProgress(event.payload.progress);
     store.recordSubTaskFinding("scan", event.payload.taskId, detail);
+    incrementModuleRunFinding(store, event.payload.taskId, detail, event.meta.runId);
     // Inject the provisional finding as a story beat in the activity lines.
     store.addScanActivity(event.payload.taskId, {
       kind: "finding-preview",
@@ -284,6 +329,18 @@ export function registerReportWorker(
         lastError: event.payload.error?.slice(0, 120),
         retryCount: prevRetries,
       });
+      patchModuleRunTask(
+        store,
+        event.payload.taskId,
+        {
+          status: "error",
+          error: truncate(event.payload.error, 120),
+        },
+        event.meta.runId,
+      );
+      if (getShellOwnedModuleRun(store, event.meta.runId)) {
+        store.patchModuleRun({ activeTaskLabel: event.payload.taskId });
+      }
       store.addNotice({
         level: "error",
         message: `Task failed: ${event.payload.taskId}`,
@@ -300,6 +357,9 @@ export function registerReportWorker(
 
     if (store) {
       store.update({ totalFindings: state.totalFindings });
+      if (getShellOwnedModuleRun(store, event.meta.runId)) {
+        store.patchModuleRun({ findingCount: state.totalFindings });
+      }
       // Signal that scan tasks are done but post-processing (dedup, filter, rank) is happening.
       const count = event.payload.totalFindings;
       store.updateStageDetail(
@@ -348,7 +408,7 @@ export function registerReportWorker(
         skippedAlreadyTriaged: skipped,
         model: event.payload.model,
         progress: { current: 0, total: event.payload.findingCount },
-        mode: "running",
+        ...(!getShellOwnedModuleRun(store, event.meta.runId) ? { mode: "running" as const } : {}),
       });
       maybeUpdateStartBanner(store, state, event.payload.context.repoName);
     } else {
@@ -425,7 +485,7 @@ export function registerReportWorker(
         model: event.payload.model,
         progress: { current: 0, total: event.payload.findingCount },
         results: [], // clear triage results from live view
-        mode: "running",
+        ...(!getShellOwnedModuleRun(store, event.meta.runId) ? { mode: "running" as const } : {}),
       });
     } else {
       if (event.payload.findingCount > 0) {
@@ -497,7 +557,7 @@ export function registerReportWorker(
         model: event.payload.model,
         progress: { current: 0, total: event.payload.findingCount },
         results: [],
-        mode: "running",
+        ...(!getShellOwnedModuleRun(store, event.meta.runId) ? { mode: "running" as const } : {}),
       });
     } else {
       if (event.payload.findingCount > 0) {
@@ -610,10 +670,10 @@ export function registerReportWorker(
         index,
         total,
       };
-      store.addAgentActivity(fingerprint, line);
+      const changed = store.addAgentActivity(fingerprint, line);
       // Mirror into moduleRun.evidenceTail so ModuleRunView's "Evidence"
       // tail fills regardless of which fingerprint owns the event.
-      store.pushModuleRunActivity(line);
+      if (changed) store.pushModuleRunActivity(line);
       return;
     }
 
@@ -768,6 +828,7 @@ export function registerReportWorker(
     const scanOnly = event.payload.context.postProcessMode === "scan-only";
 
     if (store) {
+      const shellRun = getShellOwnedModuleRun(store, event.meta.runId);
       if (reportMode === "full") {
         maybeUpdateStartBanner(store, state, event.payload.context.repoName);
 
@@ -804,15 +865,59 @@ export function registerReportWorker(
         });
 
         const qualityGateResult = event.payload.stats?.qualityGateResult ?? null;
+        const summaryFindingCount = summaryData.actionableFindings.length;
+        const finalFindingCount =
+          event.payload.stats?.totalFindings ??
+          (summaryFindingCount > 0 || state.totalFindings == null
+            ? summaryFindingCount
+            : state.totalFindings);
 
         store.activateStage("report");
         store.completeStage("report");
+        completeOpenModuleRunTasks(store, event.meta.runId);
+        patchModuleRunTask(
+          store,
+          "report",
+          {
+            status: "done",
+            count: `${finalFindingCount} finding${finalFindingCount === 1 ? "" : "s"}`,
+          },
+          event.meta.runId,
+        );
+        if (shellRun?.moduleId === "taint-iris") {
+          patchModuleRunTask(
+            store,
+            "taint-iris",
+            {
+              count: `${finalFindingCount} finding${finalFindingCount === 1 ? "" : "s"}`,
+            },
+            event.meta.runId,
+          );
+        }
         store.update({
-          mode: "summary",
           phase: "summary",
           summary: summaryData,
           qualityGate: qualityGateResult,
+          ...(!shellRun ? { mode: "summary" as const } : {}),
         });
+        if (shellRun) {
+          const costUsd =
+            event.payload.stats?.totalCostUsd ??
+            summaryData.triageCostUsd +
+              summaryData.verificationCostUsd +
+              summaryData.pocHarnessCostUsd +
+              summaryData.variantAnalysisCostUsd +
+              summaryData.dynamicCostUsd +
+              summaryData.patchCostUsd;
+          store.patchModuleRun({
+            activeTaskLabel: undefined,
+            status: "done",
+            completedAtMs: Date.now(),
+            postProcessMode: event.payload.context.postProcessMode,
+            findingCount: finalFindingCount,
+            costUsd,
+          });
+        }
 
         // Send completion notification
         const { title, message } = buildScanNotification({
@@ -861,6 +966,79 @@ export function registerReportWorker(
 
     runState.delete(event.meta.runId);
   });
+}
+
+function getShellOwnedModuleRun(store: UIStore, runId?: string) {
+  const run = store.getState().shell?.moduleRun;
+  if (!run || run.source !== "shell") return undefined;
+  if (runId && run.runId && run.runId !== runId) return undefined;
+  if (runId && !run.runId && run.status !== "running") return undefined;
+  return run;
+}
+
+function moduleRunStep(
+  taskId: string,
+  status: ModuleRunStep["status"],
+  title = taskId,
+): ModuleRunStep {
+  return { id: taskId, title, status };
+}
+
+function patchModuleRunTask(
+  store: UIStore,
+  taskId: string,
+  patch: Partial<ModuleRunStep>,
+  runId?: string,
+): void {
+  const run = getShellOwnedModuleRun(store, runId);
+  if (!run) return;
+
+  const existing = run.steps.find((step) => step.id === taskId);
+  const steps = existing
+    ? run.steps.map((step) => (step.id === taskId ? { ...step, ...patch, id: taskId } : step))
+    : [...run.steps, { ...moduleRunStep(taskId, "pending"), ...patch, id: taskId }];
+  store.setModuleRunSteps(steps);
+}
+
+function incrementModuleRunFinding(
+  store: UIStore,
+  taskId: string,
+  detail: string,
+  runId?: string,
+): void {
+  const run = getShellOwnedModuleRun(store, runId);
+  if (!run) return;
+  const nextCount = (run.findingCount ?? 0) + 1;
+  store.patchModuleRun({ findingCount: nextCount, activeTaskLabel: taskId });
+  patchModuleRunTask(
+    store,
+    taskId,
+    {
+      count: `${nextCount} finding${nextCount === 1 ? "" : "s"}`,
+    },
+    runId,
+  );
+  store.pushModuleRunActivity({
+    kind: "finding-preview",
+    detail: `Found: ${detail}`,
+    index: 0,
+    total: 0,
+  });
+}
+
+function incrementModuleRunCost(store: UIStore, costUsd: number, runId?: string): void {
+  const run = getShellOwnedModuleRun(store, runId);
+  if (!run || costUsd <= 0) return;
+  store.patchModuleRun({ costUsd: (run.costUsd ?? 0) + costUsd });
+}
+
+function completeOpenModuleRunTasks(store: UIStore, runId?: string): void {
+  const run = getShellOwnedModuleRun(store, runId);
+  if (!run) return;
+  const steps = run.steps.map((step) =>
+    step.id !== "report" && step.status === "running" ? { ...step, status: "done" as const } : step,
+  );
+  store.setModuleRunSteps(steps);
 }
 
 function writeFileReports(

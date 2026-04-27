@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentMessage, AgentRuntime } from "../../../../src/agent-runtime/types.js";
 import {
+  createRandoriToolGuard,
   describeRuntimeMessage,
   runRandoriPasta,
 } from "../../../../src/agents/tasks/threat-modeling/randori-runner.js";
@@ -148,6 +149,44 @@ describe("describeRuntimeMessage", () => {
     expect(describeRuntimeMessage(asMsg({ type: "thinking-delta", delta: "thinking..." }))).toEqual(
       [],
     );
+  });
+});
+
+describe("createRandoriToolGuard", () => {
+  const options = { signal: new AbortController().signal, toolUseId: "tu-1" };
+
+  it("denies absolute Read paths outside a targeted .github directory", async () => {
+    const guard = createRandoriToolGuard("/tmp/repo/.github");
+    const decision = await guard("Read", { file_path: "/tmp/repo/actions/x.yml" }, options);
+
+    expect(decision).toMatchObject({
+      behavior: "deny",
+      message: expect.stringContaining('escapes the Randori analysis root "/tmp/repo/.github"'),
+    });
+  });
+
+  it("allows absolute Read paths inside a targeted .github directory", async () => {
+    const guard = createRandoriToolGuard("/tmp/repo/.github");
+    const decision = await guard("Read", { file_path: "/tmp/repo/.github/actions/x.yml" }, options);
+
+    expect(decision).toEqual({ behavior: "allow" });
+  });
+
+  it("allows relative Read paths that resolve inside the active target", async () => {
+    const guard = createRandoriToolGuard("/tmp/repo/.github");
+    const decision = await guard("Read", { file_path: "actions/x.yml" }, options);
+
+    expect(decision).toEqual({ behavior: "allow" });
+  });
+
+  it("denies relative Read paths that escape the active target", async () => {
+    const guard = createRandoriToolGuard("/tmp/repo/.github");
+    const decision = await guard("Read", { file_path: "../actions/x.yml" }, options);
+
+    expect(decision).toMatchObject({
+      behavior: "deny",
+      message: expect.stringContaining('file_path "../actions/x.yml" escapes'),
+    });
   });
 });
 

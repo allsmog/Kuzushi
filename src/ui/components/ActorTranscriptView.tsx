@@ -33,8 +33,12 @@ import { ScreenContent } from "./ScreenContent.js";
 export interface ActorViewFinding {
   fingerprint: string;
   severity: string;
+  displaySeverity?: "critical" | "high" | "medium" | "low";
+  taskId?: string;
   filePath: string;
   startLine: number;
+  ruleId?: string;
+  verdict?: string;
   /** Live findings expose `message`; ActionableFinding uses `rationale`/`title`. */
   message?: string;
   rationale?: string;

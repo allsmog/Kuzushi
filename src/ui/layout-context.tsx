@@ -171,6 +171,7 @@ function shellTitle(shell: ShellNavigationState | null | undefined): string {
   if (view === "findings") return "findings";
   if (view === "finding") return "finding detail";
   if (view === "tune") return "tune";
+  if (view === "options") return "options";
   if (shell.focusedModule) return `module · ${shell.focusedModule}`;
   return "module catalog";
 }

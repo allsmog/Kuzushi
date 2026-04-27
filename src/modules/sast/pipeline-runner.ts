@@ -26,6 +26,32 @@ export function mergeTaskConfig(
   };
 }
 
+function normalizeResumeInput(value: unknown): string | boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "boolean") return value ? true : undefined;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed === "true" || trimmed === "latest") return true;
+  if (trimmed === "false") return undefined;
+  return trimmed;
+}
+
+function normalizeStringArrayInput(value: unknown): string[] | undefined {
+  if (value == null) return undefined;
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string" && item.trim() !== "");
+  }
+  if (typeof value === "string") {
+    const parsed = value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return parsed.length > 0 ? parsed : undefined;
+  }
+  return undefined;
+}
+
 export async function executeSastPipeline(
   input: unknown,
   ctx: ExecutionContext,
@@ -55,12 +81,16 @@ export async function executeSastPipeline(
   const mergedConfig = mergeTaskConfig(ctx.config, options?.taskConfig);
   const scanPath = path.default.resolve(target);
   const { root: repoRoot, name: repoName } = resolveRepo(target);
-  const taskIds = options?.tasks ?? (params.tasks as string[] | undefined);
+  const requestedTasks = normalizeStringArrayInput(params.tasks);
+  const taskMode: "auto" | "manual" = params.taskMode === "manual" ? "manual" : "auto";
+  const taskModeExplicit = typeof params.taskMode === "string";
+  const manualTasks = taskMode === "manual" || (!taskModeExplicit && requestedTasks?.length);
+  const taskIds = options?.tasks ?? (manualTasks ? (requestedTasks ?? []) : undefined);
+  const disabledTasks = normalizeStringArrayInput(params.disabledTasks);
 
-  const config =
-    taskIds && taskIds.length > 0
-      ? { ...mergedConfig, tasks: [] as string[], enableDynamicTaskSelection: false }
-      : mergedConfig;
+  const config = taskIds
+    ? { ...mergedConfig, tasks: [] as string[], enableDynamicTaskSelection: false }
+    : mergedConfig;
   const severityOpt = Array.isArray(params.severity)
     ? (params.severity as string[]).join(",")
     : undefined;
@@ -71,6 +101,8 @@ export async function executeSastPipeline(
     excludePatterns: config.excludePatterns ?? [],
     fresh: false,
     tasks: taskIds,
+    taskMode,
+    disabledTasks,
   };
 
   const opts = {
@@ -94,6 +126,7 @@ export async function executeSastPipeline(
     pocHarness: false,
     context: true,
     tasks: taskIds?.join(","),
+    resume: normalizeResumeInput(params.resume),
   };
 
   const uiStoreInternal = ctx.uiStore as import("../../ui/state.js").UIStore | undefined;
@@ -119,6 +152,11 @@ export async function executeSastPipeline(
       returnModeOnComplete: uiStoreInternal?.getState().shell ? "shell" : undefined,
       postProcessMode: options?.postProcessMode ?? "full",
       seedTaskOutputs: ctx.seedTaskOutputs,
+      origin: {
+        moduleId: ctx.tool?.moduleId,
+        toolName: ctx.tool?.name,
+        resumeLabel: options?.summaryLabel ?? ctx.tool?.displayName ?? "Scan",
+      },
     });
 
     const label = options?.summaryLabel ?? "Scan";

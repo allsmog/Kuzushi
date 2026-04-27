@@ -12,6 +12,7 @@ import "./module-run-active.js";
 import "./module-run-done.js";
 import "./module-sast.js";
 import "./prompts-editor.js";
+import "./sast-tasks.js";
 import "./task-story.js";
 import "./threats-dfd.js";
 import "./threats-scope.js";

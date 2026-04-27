@@ -73,6 +73,8 @@ describe("plain-renderer Phase D.5 emitters", () => {
     unsub();
     cap.restore();
     expect(cap.lines.some((l) => l.includes("[shell] module home (sast)"))).toBe(true);
+    expect(cap.lines.some((l) => l.includes("## task selection"))).toBe(true);
+    expect(cap.lines.some((l) => l.includes("commands: tasks"))).toBe(true);
   });
 
   it("emits typed shell history and terminal tool-call updates", () => {
@@ -364,6 +366,76 @@ describe("plain-renderer view parity (Workstream 5)", () => {
     expect(joined).toContain("verify: on");
     expect(joined).toContain("autoPatch: off");
     expect(joined).toContain("triageConcurrency: 3");
+  });
+
+  it("options view prints option rows as the primary surface", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+    store.update({
+      shell: baseShell({
+        shellView: "options",
+        focusedModule: "context",
+        optionsView: {
+          toolName: "context:build",
+          rows: [
+            {
+              optionName: "target",
+              valueLabel: "/repo",
+              defaultLabel: "—",
+              description: "Path to the repository to analyze.",
+              isSet: false,
+            },
+            {
+              optionName: "model",
+              valueLabel: "* anthropic:claude-sonnet-4-6",
+              defaultLabel: "anthropic:claude-sonnet-4-6",
+              description: "Model override for this session.",
+              isSet: true,
+            },
+          ],
+        },
+      }),
+    });
+    unsub();
+    const joined = lines.join("\n");
+    expect(joined).toContain("# OPTIONS  context");
+    expect(joined).toContain("context:build · 2 options · 1 set");
+    expect(joined).toContain("target: /repo");
+    expect(joined).toContain("model: * anthropic:claude-sonnet-4-6");
+    expect(joined).toContain("commands: set <option> <value>");
+  });
+
+  it("SAST task view prints task selection rows", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+    store.update({
+      shell: baseShell({
+        shellView: "sast-tasks",
+        focusedModule: "sast",
+        sastTaskCursor: 1,
+        tuneSnapshot: {
+          preset: "standard",
+          tasks: ["semgrep"],
+          verify: false,
+          autoPatch: false,
+          triageConcurrency: 3,
+          model: "sonnet-4-6",
+        },
+        moduleOptions: {
+          "sast:scan": {
+            disabledTasks: ["codeql"],
+          },
+        },
+      }),
+    });
+    unsub();
+    const joined = lines.join("\n");
+    expect(joined).toContain("# SAST TASKS");
+    expect(joined).toContain("profile standard · auto + denylist");
+    expect(joined).toContain("1 blocked");
+    expect(joined).toContain("[x] enabled");
+    expect(joined).toContain("active: codeql · Space allows codeql.");
+    expect(joined).toContain("[ ] codeql");
   });
 
   it("findings view with no summary emits findings-never-scanned empty copy", () => {
@@ -947,6 +1019,64 @@ describe("plain-renderer v3 views", () => {
     expect(joined).toContain("✓ load threat model");
     expect(joined).toContain("→ spawn actor agents");
     expect(joined).toContain("○ merge findings");
+  });
+
+  it("module-run completed prints frozen status, cost, and concise findings", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+    const findings = [
+      baseFinding({
+        fingerprint: "b-high",
+        severity: "ERROR",
+        filePath: "src/poc-executor/process.ts",
+        startLine: 43,
+        ruleId: "taint.command-injection",
+        rationale: "Captured in scan-only mode — pending triage",
+      }),
+      baseFinding({
+        fingerprint: "a-med",
+        severity: "WARNING",
+        filePath: "src/repo-walk.ts",
+        startLine: 46,
+        ruleId: "taint.path-traversal",
+        rationale: "Captured in scan-only mode — pending triage",
+      }),
+    ];
+    store.update({
+      summary: baseSummary(findings),
+      shell: baseShell({
+        shellView: "module-run",
+        focusedModule: "taint-iris",
+        moduleRun: {
+          moduleId: "taint-iris",
+          source: "shell",
+          toolName: "taint-iris:hunt",
+          displayName: "Taint IRIS",
+          startedAtMs: 0,
+          completedAtMs: 1_146_000,
+          status: "done",
+          postProcessMode: "scan-only",
+          findingCount: 2,
+          costUsd: 3.16,
+          steps: [
+            { id: "taint-cwe-select", title: "taint-cwe-select", status: "done" },
+            { id: "taint-iris", title: "taint-iris", status: "done", count: "2 findings" },
+            { id: "report", title: "report", status: "done", count: "2 findings" },
+          ],
+          evidenceTail: [],
+        },
+      }),
+    });
+    unsub();
+    const joined = lines.join("\n");
+    expect(joined).toContain("[run] taint-iris:taint-iris:hunt · 19m 6s · done");
+    expect(joined).toContain("Taint IRIS complete · 2 findings · $3.16 · 19m 6s");
+    expect(joined).toContain("scan-only: saved as needs_review; triage pending");
+    expect(joined).toContain("F-0001");
+    expect(joined).toContain("taint.command-injection");
+    expect(joined).toContain("F-0002");
+    expect(joined).toContain("taint.path-traversal");
+    expect(joined).not.toContain("Captured in scan-only mode");
   });
 
   it("actor-detail with no focusedActor prints the (none) placeholder", () => {

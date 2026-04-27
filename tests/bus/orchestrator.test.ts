@@ -33,6 +33,7 @@ import {
   getRun,
   initDb,
   updatePocHarnessResult,
+  updateRunContext,
   updateRunFindings,
   updateRunStatus,
   updateVerificationResult,
@@ -1364,6 +1365,7 @@ describe("PipelineOrchestrator", () => {
       ...makeScanOpts(),
       maxFindings: 5,
     });
+    updateRunContext(db, resumeRunId, { languages: ["TypeScript"] });
 
     const runId = generateRunId();
     const context = {
@@ -2976,6 +2978,108 @@ describe("PipelineOrchestrator", () => {
     expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain(
       "fp-empty-fallback",
     );
+
+    await bus.close();
+    db.close();
+  });
+
+  it("does not re-add disabled tasks from task-selector recommendations or fallback", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    const taskRegistry = new TaskRegistry();
+    const contextTask: AgentTask<ScanOpts, unknown> = {
+      id: "context-gatherer",
+      displayName: "Context Gatherer",
+      outputKind: "custom",
+      dependsOn: [],
+      async run() {
+        return {
+          languages: ["Go"],
+          frameworks: [],
+          authPatterns: [],
+          sanitizationLibs: [],
+          ormOrDb: [],
+          entryPoints: [],
+        };
+      },
+    };
+    const selectorTask: AgentTask<ScanOpts, unknown> = {
+      id: "task-selector",
+      displayName: "Task Selector",
+      outputKind: "custom",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return { recommendedTasks: ["secrets"], reasoning: {} };
+      },
+    };
+    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "secrets-crypto-detect",
+      displayName: "Secrets & Crypto",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-disabled-secrets", 80)];
+      },
+    };
+    const protoTask: AgentTask<ScanOpts, Finding[]> = {
+      id: "prototype-pollution-detect",
+      displayName: "Prototype Pollution",
+      outputKind: "findings",
+      dependsOn: ["context-gatherer"],
+      async run() {
+        return [makeFinding("fp-fallback-proto", 60)];
+      },
+    };
+
+    taskRegistry.register(contextTask);
+    taskRegistry.register(selectorTask);
+    taskRegistry.register(secretsCryptoTask);
+    taskRegistry.register(protoTask);
+
+    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerStoreWorker(bus, { db });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    const taskStarts: string[] = [];
+    bus.subscribe<TaskStartEvent>("task:start", (event) => {
+      if (event.meta.runId === runId) {
+        taskStarts.push(event.payload.taskId);
+      }
+    });
+
+    const triageBatchQueuedPromise = bus.waitFor<TriageBatchQueuedEvent>(
+      "triage:batch-queued",
+      (event) => event.meta.runId === runId,
+    );
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config: {
+          ...makeConfig(),
+          enableDynamicTaskSelection: true,
+          tasks: [],
+        },
+        scanOpts: { ...makeScanOpts(), tasks: [], disabledTasks: ["secrets"] },
+      }),
+    );
+
+    const triageBatchQueued = await triageBatchQueuedPromise;
+
+    expect(taskStarts).not.toContain("secrets-crypto-detect");
+    expect(taskStarts).toContain("prototype-pollution-detect");
+    expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toEqual([
+      "fp-fallback-proto",
+    ]);
 
     await bus.close();
     db.close();

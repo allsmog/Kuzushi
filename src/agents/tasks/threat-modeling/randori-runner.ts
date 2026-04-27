@@ -11,7 +11,12 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { summarizeInput } from "../../../agent-runtime/tool-summary.js";
-import type { AgentEffort, AgentMessage, AgentRuntime } from "../../../agent-runtime/types.js";
+import type {
+  AgentEffort,
+  AgentMessage,
+  AgentQueryOptions,
+  AgentRuntime,
+} from "../../../agent-runtime/types.js";
 import { createLogger } from "../../../logger.js";
 import { scoreFindingMetadata } from "../../../scanners/scoring.js";
 import type { Finding } from "../../../scanners/types.js";
@@ -40,9 +45,27 @@ const IMPACT_TO_SEVERITY: Record<string, string> = {
 // Prompt builders
 // ---------------------------------------------------------------------------
 
-export function buildScopePrompt(maxElements: number, outputDir: string): string {
+function buildAnalysisRootPromptLines(analysisRoot?: string): string[] {
+  const root = analysisRoot?.trim();
+  const rootLabel = root || "the current working directory";
+  return [
+    "Filesystem scope:",
+    `- Treat ${rootLabel} as the only analysis root.`,
+    "- Do not inspect parent directories or the enclosing git repository unless they are inside that root.",
+    "- If the analysis root is a subdirectory such as .github, preserve that path segment in absolute file paths.",
+    "- Glob results are relative to the analysis root; pass those relative paths to Read unchanged, or prefix them with the full analysis root.",
+  ];
+}
+
+export function buildScopePrompt(
+  maxElements: number,
+  outputDir: string,
+  analysisRoot?: string,
+): string {
   return [
     "You are running a PASTA threat model analysis on the current repository.",
+    "",
+    ...buildAnalysisRootPromptLines(analysisRoot),
     "",
     "Run stages: s1, s2, s3",
     "",
@@ -58,9 +81,11 @@ export function buildScopePrompt(maxElements: number, outputDir: string): string
   ].join("\n");
 }
 
-export function buildNarrativePrompt(outputDir: string): string {
+export function buildNarrativePrompt(outputDir: string, analysisRoot?: string): string {
   return [
     "You are synthesising the narrative layer of a PASTA threat model.",
+    "",
+    ...buildAnalysisRootPromptLines(analysisRoot),
     "",
     `Read the prior stage outputs from ${outputDir}/pasta-s1.json, pasta-s2.json, pasta-s3.json,`,
     `and pasta-s4.json. Inspect the actual source files they reference to ground every claim.`,
@@ -105,10 +130,16 @@ export function buildNarrativePrompt(outputDir: string): string {
   ].join("\n");
 }
 
-export function buildNarrativeRetryPrompt(outputDir: string, reasons: string[]): string {
+export function buildNarrativeRetryPrompt(
+  outputDir: string,
+  reasons: string[],
+  analysisRoot?: string,
+): string {
   return [
     `Your previous attempt to write ${outputDir}/pasta-narrative.json does not meet the schema requirements:`,
     ...reasons.map((r) => `- ${r}`),
+    "",
+    ...buildAnalysisRootPromptLines(analysisRoot),
     "",
     "Re-read the S1-S4 artifacts and the source files they reference, then rewrite",
     `${outputDir}/pasta-narrative.json with the full schema populated. Hard requirements:`,
@@ -126,6 +157,7 @@ export function buildStridePrompt(
   maxThreats: number,
   outputDir: string,
   previousModel?: ThreatModelDocument | null,
+  analysisRoot?: string,
 ): string {
   const preamble: string[] = [];
   if (previousModel) {
@@ -144,6 +176,8 @@ export function buildStridePrompt(
   return [
     ...preamble,
     "You are running Stage S4 of a PASTA threat model analysis.",
+    "",
+    ...buildAnalysisRootPromptLines(analysisRoot),
     "",
     `Read the prior stage outputs from ${outputDir}/pasta-s1.json, pasta-s2.json, pasta-s3.json, and dfd.mmd.`,
     "These describe the application's business context, technical scope, and data flow diagram.",
@@ -170,6 +204,80 @@ export function buildStridePrompt(
     "- Path traversal via symlinks or relative paths in repo content escaping the project root",
     "- Subprocess invocation with repo-derived metadata (names, paths) as unsanitized arguments",
   ].join("\n");
+}
+
+const TOOL_PATH_KEYS: Record<string, string[]> = {
+  Read: ["file_path", "path", "filePath"],
+  Write: ["file_path", "path", "filePath"],
+  Edit: ["file_path", "path", "filePath"],
+  MultiEdit: ["file_path", "path", "filePath"],
+  NotebookEdit: ["notebook_path", "path", "file_path", "filePath"],
+  Glob: ["path"],
+  Grep: ["path"],
+  GetFunctionBody: ["file_path", "path", "filePath"],
+  GetCallers: ["path"],
+  GetCallees: ["file_path", "path", "filePath"],
+  GoToDefinition: ["file_path", "path", "filePath", "file"],
+  FindReferences: ["file_path", "path", "filePath", "file"],
+  TypeAtPosition: ["file_path", "path", "filePath", "file"],
+};
+
+interface PathCandidate {
+  key: string;
+  value: string;
+}
+
+function collectPathCandidates(toolName: string, input: Record<string, unknown>): PathCandidate[] {
+  const candidates: PathCandidate[] = [];
+  for (const key of TOOL_PATH_KEYS[toolName] ?? []) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) {
+      candidates.push({ key, value: value.trim() });
+    }
+  }
+
+  // Glob/Grep pattern fields are path-like enough to escape via "../" or an
+  // absolute prefix, while Grep's regex pattern is content, not a filesystem path.
+  if (toolName === "Glob") {
+    const pattern = input["pattern"];
+    if (typeof pattern === "string" && pattern.trim()) {
+      candidates.push({ key: "pattern", value: pattern.trim() });
+    }
+  }
+  if (toolName === "Grep") {
+    const glob = input["glob"];
+    if (typeof glob === "string" && glob.trim()) {
+      candidates.push({ key: "glob", value: glob.trim() });
+    }
+  }
+
+  return candidates;
+}
+
+function isInsideRoot(root: string, candidate: string): boolean {
+  const resolved = path.isAbsolute(candidate)
+    ? path.normalize(candidate)
+    : path.resolve(root, candidate);
+  const relative = path.relative(root, resolved);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+export function createRandoriToolGuard(
+  repoRoot: string,
+): NonNullable<AgentQueryOptions["canUseTool"]> {
+  const root = path.resolve(repoRoot);
+  return (toolName, input) => {
+    for (const candidate of collectPathCandidates(toolName, input)) {
+      if (isInsideRoot(root, candidate.value)) continue;
+      return {
+        behavior: "deny",
+        message:
+          `Tool "${toolName}" ${candidate.key} "${candidate.value}" escapes the Randori analysis root ` +
+          `"${root}". Use a path under the active target directory.`,
+      };
+    }
+    return { behavior: "allow" };
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -496,6 +604,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
     cwd: params.repoRoot,
     model: params.model,
     allowedTools: params.allowedTools,
+    canUseTool: createRandoriToolGuard(params.repoRoot),
     permissionMode: "dontAsk" as const,
     plugins: [{ type: "local" as const, path: params.pluginPath }],
     abortController,
@@ -619,7 +728,10 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
       log.info(`${tag} Phase 1: running stages ${scopeStages.join(",")}`);
       params.onPhase?.(`phase 1 (${scopeStages.join("/").toUpperCase()} scope)`);
       params.onActivity?.(`scoping ${scopeStages.join(", ")}`);
-      await runPhase(buildScopePrompt(params.maxElements, params.artifactDir), `${tag} Phase 1`);
+      await runPhase(
+        buildScopePrompt(params.maxElements, params.artifactDir, params.repoRoot),
+        `${tag} Phase 1`,
+      );
     }
 
     // ── Phase 2: S4 (STRIDE threat scenarios with evidence) ──
@@ -631,7 +743,12 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
         params.onPhase?.("phase 2 (S4 threats)");
         params.onActivity?.("enumerating STRIDE threats");
         await runPhase(
-          buildStridePrompt(params.maxThreats, params.artifactDir, params.previousModel),
+          buildStridePrompt(
+            params.maxThreats,
+            params.artifactDir,
+            params.previousModel,
+            params.repoRoot,
+          ),
           `${tag} Phase 2 (S4)`,
         );
       } else {
@@ -648,7 +765,10 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
         log.info(`${tag} Phase 3: synthesising narrative layer`);
         params.onPhase?.("phase 3 (narrative)");
         params.onActivity?.("drafting attacker narrative");
-        await runPhase(buildNarrativePrompt(params.artifactDir), `${tag} Phase 3 (narrative)`);
+        await runPhase(
+          buildNarrativePrompt(params.artifactDir, params.repoRoot),
+          `${tag} Phase 3 (narrative)`,
+        );
 
         // Retry once if the artifact is missing or incomplete.
         params.signal?.throwIfAborted();
@@ -661,7 +781,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
           params.onPhase?.("phase 3 (narrative retry)");
           params.onActivity?.(`retrying narrative (${narrativeIssues.length} issue(s))`);
           await runPhase(
-            buildNarrativeRetryPrompt(params.artifactDir, narrativeIssues),
+            buildNarrativeRetryPrompt(params.artifactDir, narrativeIssues, params.repoRoot),
             `${tag} Phase 3 retry`,
           );
         }

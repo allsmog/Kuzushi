@@ -99,6 +99,87 @@ describe("resolveInitialTaskPlan", () => {
     expect(new Set(plan.enabledTaskIds)).toEqual(new Set(["semgrep", "codeql", "threat-hunt"]));
   });
 
+  it("filters disabled tasks from configured task lists", () => {
+    const registry = makeRegistry([
+      stubTask("semgrep"),
+      stubTask("codeql"),
+      stubTask("threat-hunt"),
+    ]);
+    const plan = resolveInitialTaskPlan(
+      registry,
+      [],
+      {
+        tasks: ["semgrep", "codeql", "threat-hunt"],
+        enableContextGathering: false,
+        enableContextEnrichment: false,
+        enableDynamicTaskSelection: false,
+      },
+      { disabledTasks: ["codeql"] },
+    );
+    expect(plan.enabledTaskIds).toContain("semgrep");
+    expect(plan.enabledTaskIds).toContain("threat-hunt");
+    expect(plan.enabledTaskIds).not.toContain("codeql");
+  });
+
+  it("filters disabled tasks from all-task expansion", () => {
+    const registry = makeRegistry([
+      stubTask("semgrep"),
+      stubTask("codeql"),
+      stubTask("threat-hunt"),
+    ]);
+    const plan = resolveInitialTaskPlan(
+      registry,
+      [],
+      {
+        tasks: ["*"],
+        enableContextGathering: false,
+        enableContextEnrichment: false,
+        enableDynamicTaskSelection: false,
+      },
+      { disabledTasks: ["codeql"] },
+    );
+    expect(plan.useAllTasks).toBe(true);
+    expect(new Set(plan.enabledTaskIds)).toEqual(new Set(["semgrep", "threat-hunt"]));
+  });
+
+  it("expands disabled public capabilities before filtering", () => {
+    const registry = makeRegistry([
+      stubTask("semgrep"),
+      stubTask("taint-cwe-select"),
+      stubTask("taint-iris", ["taint-cwe-select"]),
+    ]);
+    const plan = resolveInitialTaskPlan(
+      registry,
+      [],
+      {
+        tasks: ["semgrep", "taint-cwe-select", "taint-iris"],
+        enableContextGathering: false,
+        enableContextEnrichment: false,
+        enableDynamicTaskSelection: false,
+      },
+      { disabledTasks: ["taint-analysis"] },
+    );
+    expect(plan.disabledTaskIds).toEqual(["taint-cwe-select", "taint-iris"]);
+    expect(plan.enabledTaskIds).toEqual(["semgrep"]);
+  });
+
+  it("errors on unknown disabled task identifiers", () => {
+    const registry = makeRegistry([stubTask("semgrep")]);
+    expect(() =>
+      resolveInitialTaskPlan(
+        registry,
+        [],
+        {
+          tasks: ["semgrep"],
+          enableContextGathering: false,
+          enableContextEnrichment: false,
+          enableDynamicTaskSelection: false,
+        },
+        { disabledTasks: ["not-a-task"] },
+      ),
+    ).toThrow("Unknown disabled task");
+  });
+
   it("does NOT inject task-selector when enableDynamicTaskSelection is false", () => {
     // Regression: /use threat-hunt; run . had the shell's
     // executeSastPipeline clamp config.tasks=[] but leave dynamic

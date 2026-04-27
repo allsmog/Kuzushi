@@ -42,7 +42,6 @@ import {
 } from "../modules/problem-details.js";
 import { createCorePromptArmorModule } from "../modules/prompt-armor/prompt-armor.js";
 import { createCoreRandoriModule } from "../modules/randori/randori.js";
-import { createReconModule } from "../modules/recon/core-recon.js";
 import { ModuleRegistry, parseModuleSpecifier } from "../modules/registry.js";
 import { createSemgrepModule } from "../modules/semgrep/semgrep.js";
 import { createCoreShinsaModule } from "../modules/shinsa/shinsa.js";
@@ -181,7 +180,6 @@ export class CopilotCore {
         createPatchModule(),
         createFindingsModule(),
         createContextModule(),
-        createReconModule(),
         // Hidden orchestrator-level module — infrastructure DAG nodes
         // (task-selector, approval gates, taint-iris sub-tasks). Loaded so
         // the module registry owns every scan-DAG participant; the user
@@ -316,13 +314,19 @@ export class CopilotCore {
         : {};
     const target = ctxOverrides?.target ?? (inputRecord.target as string | undefined);
 
-    // Live operator knobs read from the global Datastore (set via `setg`).
-    // BUDGET_USD caps the enforcer's budget check; <MOD>_MODEL picks a
-    // model for this specific invocation.
+    const datastore = ctxOverrides?.datastore;
+
+    // Live operator knobs read from the active Datastore and global Datastore.
+    // BUDGET_USD caps the enforcer's budget check. `model` / `MODEL` is the
+    // universal session override; <MOD>_MODEL remains as a legacy per-module
+    // override for compatibility.
     const budgetOverride = parseBudgetOverride(this.opts.globals?.get("BUDGET_USD"));
     const moduleId = resolved.module.id;
     const modelKey = `${moduleId.toUpperCase().replace(/-/g, "_")}_MODEL`;
-    const toolModel = this.opts.globals?.get<string>(modelKey);
+    const toolModel =
+      readModelOverride(datastore?.get("model")) ??
+      readModelOverride(this.opts.globals?.get("MODEL")) ??
+      readModelOverride(this.opts.globals?.get(modelKey));
 
     if (this.opts.enforcer) {
       const check =
@@ -380,7 +384,6 @@ export class CopilotCore {
     };
 
     const runConfig = ctxOverrides?.config ?? this.opts.config;
-    const datastore = ctxOverrides?.datastore;
     const ctx: ExecutionContext = {
       cwd: ctxOverrides?.cwd ?? this.opts.dataDir,
       runtime: toolRuntime,
@@ -388,6 +391,11 @@ export class CopilotCore {
       config: runConfig,
       workspaceId: ctxOverrides?.workspaceId,
       target,
+      tool: {
+        moduleId,
+        name: qualifiedName,
+        ...(tool.displayName ? { displayName: tool.displayName } : {}),
+      },
       signal: ctxOverrides?.signal,
       uiStore: ctxOverrides?.uiStore,
       seedTaskOutputs: ctxOverrides?.seedTaskOutputs,
@@ -733,6 +741,12 @@ function parseBudgetOverride(raw: unknown): number | undefined {
   const n = typeof raw === "number" ? raw : Number.parseFloat(String(raw));
   if (!Number.isFinite(n) || n < 0) return undefined;
   return n;
+}
+
+function readModelOverride(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const value = raw.trim();
+  return value.length > 0 ? value : undefined;
 }
 
 // ---------------------------------------------------------------------------

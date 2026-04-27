@@ -56,6 +56,20 @@ describe("SAST sub-modules", () => {
     expect(hunt).toContain("threatModel");
   });
 
+  it("taint-iris hunt declares checkpoint resume and live pause-resume", () => {
+    const tool = createTaintIrisModule().tools.find((t) => t.name === "taint-iris:hunt");
+    expect(tool?.runLifecycle).toEqual({
+      persistence: "pipeline-checkpoint",
+      resume: "checkpoint",
+      liveControl: "pause-resume",
+      pipelineTasks: ["taint-iris"],
+    });
+    expect(tool?.inputSchema.properties?.resume).toEqual({
+      type: ["boolean", "string"],
+      description: "Resume the latest checkpoint or a specific run id.",
+    });
+  });
+
   it("triage / verify / patch declare findings requirement", () => {
     for (const factory of [createTriageModule, createVerifyModule, createPatchModule]) {
       const mod = factory();

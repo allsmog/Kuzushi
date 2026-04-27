@@ -226,6 +226,16 @@ export interface ExecutionContext {
   workspaceId?: string;
   /** Current target (repo path, host, etc.). */
   target?: string;
+  /**
+   * Metadata for the tool currently being executed. Populated by the host for
+   * shell/run mode, and useful for persistence layers that need to record
+   * which module-owned capability produced a run.
+   */
+  tool?: {
+    moduleId: string;
+    name: string;
+    displayName?: string;
+  };
   /** The project/scan root directory. */
   cwd: string;
   /** Agent runtime for LLM queries. */
@@ -404,6 +414,19 @@ export interface ModuleTool {
   readonly references?: ReadonlyArray<ModuleReference>;
   /** Optional behavioral notes specific to this tool. */
   readonly notes?: ModuleNotes;
+  /**
+   * Declares what kind of run history this tool can truthfully support.
+   *
+   * Omitted means ephemeral/non-resumable. Checkpoint resume is reserved for
+   * tools whose state is persisted enough to continue unfinished work. Completed
+   * runs should be replayed/rerun, not "resumed".
+   */
+  readonly runLifecycle?: {
+    persistence: "pipeline-checkpoint" | "workspace-result" | "ephemeral";
+    resume: "checkpoint" | "restart-only" | "none";
+    liveControl?: "pause-resume";
+    pipelineTasks?: "any" | string[];
+  };
   // --- Optional display hooks (shell rendering) ---
   /**
    * Human-friendly label used in the shell's `⏺ <name>(...)` header instead

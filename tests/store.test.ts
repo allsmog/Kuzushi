@@ -17,7 +17,9 @@ import {
   getTotalPocHarnessCost,
   getTriagedFingerprints,
   getVerdictCounts,
+  hasRunCheckpoint,
   initDb,
+  markStaleRunsAborted,
   updateFindingMetadata,
   updateFindingProofState,
   updatePocHarnessResult,
@@ -572,6 +574,7 @@ describe("pipeline_runs", () => {
     expect(getLatestResumableRun(db, "repo")).toBeUndefined();
 
     createRun(db, "run-new", "repo", makeConfig(), makeScanOpts());
+    updateRunFindings(db, "run-new", [makeFinding("fp-resume")]);
     updateRunStatus(db, "run-new", "triaging");
 
     const latest = getLatestResumableRun(db, "repo");
@@ -588,11 +591,44 @@ describe("pipeline_runs", () => {
     const db = initDb(dbPath);
 
     createRun(db, "run-poc", "repo", makeConfig(), makeScanOpts());
+    updateRunFindings(db, "run-poc", [makeFinding("fp-poc")]);
     updateRunStatus(db, "run-poc", "poc-harnessing");
 
     const latest = getLatestResumableRun(db, "repo");
     expect(latest?.runId).toBe("run-poc");
     expect(latest?.status).toBe("poc-harnessing");
+    db.close();
+  });
+
+  it("only treats interrupted runs with checkpoints as resumable", () => {
+    const db = initDb(dbPath);
+
+    createRun(db, "run-abort", "repo", makeConfig(), makeScanOpts());
+    updateRunStatus(db, "run-abort", "aborted");
+
+    createRun(db, "run-interrupted-empty", "repo", makeConfig(), makeScanOpts());
+    updateRunStatus(db, "run-interrupted-empty", "interrupted");
+
+    createRun(db, "run-interrupted", "repo", makeConfig(), makeScanOpts());
+    updateRunFindings(db, "run-interrupted", [makeFinding("fp-interrupted")]);
+    updateRunStatus(db, "run-interrupted", "interrupted");
+
+    expect(hasRunCheckpoint(db, "run-interrupted")).toBe(true);
+    const latest = getLatestResumableRun(db, "repo");
+    expect(latest?.runId).toBe("run-interrupted");
+    db.close();
+  });
+
+  it("marks stale active runs interrupted when checkpointed and aborted otherwise", () => {
+    const db = initDb(dbPath);
+
+    createRun(db, "run-empty", "repo", makeConfig(), makeScanOpts());
+    createRun(db, "run-checkpoint", "repo", makeConfig(), makeScanOpts());
+    updateRunFindings(db, "run-checkpoint", [makeFinding("fp-stale")]);
+
+    expect(markStaleRunsAborted(db, "repo")).toBe(2);
+    expect(getRun(db, "run-empty")?.status).toBe("aborted");
+    expect(getRun(db, "run-checkpoint")?.status).toBe("interrupted");
     db.close();
   });
 

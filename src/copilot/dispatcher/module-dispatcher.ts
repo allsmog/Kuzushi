@@ -12,6 +12,11 @@
  * get `set FOO bar` ergonomics even on legacy modules.
  */
 
+import {
+  describeModelOverrideFormat,
+  validateModelOverride,
+} from "../../agent-runtime/model-validation.js";
+import type { AgentRuntimeBackend } from "../../contracts.js";
 import type { CopilotModule, JSONSchema, ModuleTool, ToolResult } from "../../modules/types.js";
 import { looksLikePath } from "../dispatch/resolve-tool.js";
 import { Datastore, type OptionSpec } from "../options.js";
@@ -29,6 +34,8 @@ export interface ModuleDispatcherOptions {
   module: CopilotModule;
   /** Shared global datastore (set by `setg`). */
   globals: Datastore;
+  /** Active agent runtime backend, used to validate model overrides. */
+  agentRuntimeBackend?: AgentRuntimeBackend;
   /** Optional executor — when present, `run` invokes the tool. Otherwise prints the call. */
   runTool?: ModuleToolRunner;
 }
@@ -52,7 +59,9 @@ export class ModuleDispatcher implements CommandDispatcher {
       options: "Alias for `show options`",
       tools: "List tools exposed by this module",
     };
-    this.datastore = createModuleDatastore(opts.module, opts.globals);
+    this.datastore = createModuleDatastore(opts.module, opts.globals, {
+      agentRuntimeBackend: opts.agentRuntimeBackend,
+    });
   }
 
   async execute(cmd: string, args: string[], ctx: CommandContext): Promise<CommandResult | void> {
@@ -168,7 +177,7 @@ export class ModuleDispatcher implements CommandDispatcher {
     }
     const depError = this.checkRequires(ctx);
     if (depError) return { output: depError };
-    const snapshot = this.datastore.snapshot();
+    const snapshot = snapshotToolInput(this.datastore, tool);
     const lines = [
       `[*] DRY RUN — would invoke ${tool.name}`,
       `      module: ${this.module.id}`,
@@ -202,7 +211,7 @@ export class ModuleDispatcher implements CommandDispatcher {
     if (!jobMgr) {
       return { output: "[-] Background jobs are not enabled. Run foreground instead." };
     }
-    const input = this.datastore.snapshot();
+    const input = snapshotToolInput(this.datastore, tool);
     const id = jobMgr.start({ label: tool.name, kind: "tool" }, async (jobCtx) => {
       jobCtx.log(`[*] Running ${tool.name} in background`);
       const result = await this.runTool!(tool, input, jobCtx.signal, this.datastore);
@@ -222,14 +231,19 @@ export class ModuleDispatcher implements CommandDispatcher {
     if (depError) return { output: depError };
     if (!this.runTool) {
       return {
-        output: `[*] Would invoke ${tool.name} with: ${JSON.stringify(this.datastore.snapshot())}`,
+        output: `[*] Would invoke ${tool.name} with: ${JSON.stringify(snapshotToolInput(this.datastore, tool))}`,
       };
     }
     // Progress + completion are now printed by `runToolFromDispatcher` in
     // `shell.ts` as cc-repo-style `⏺ tool(hint)` + `⎿  done/failed in Xs`
     // history entries. Intentionally no `print.status` / `print.good` here
     // to avoid duplicating the header/footer in scrollback.
-    const result = await this.runTool(tool, this.datastore.snapshot(), ctx.signal, this.datastore);
+    const result = await this.runTool(
+      tool,
+      snapshotToolInput(this.datastore, tool),
+      ctx.signal,
+      this.datastore,
+    );
     return { output: result.output };
   }
 
@@ -264,9 +278,7 @@ export class ModuleDispatcher implements CommandDispatcher {
         const count = ctx.driver.getHostCount?.() ?? 0;
         const need = req.minCount ?? 1;
         if (count < need) {
-          missing.push(
-            `  - ${need}+ hosts in workspace — run recon first (e.g. 'use recon' then 'run')`,
-          );
+          missing.push(`  - ${need}+ hosts in workspace — add hosts to the active workspace first`);
         }
       } else if (req.kind === "session") {
         const count = ctx.driver.getLiveSessionCount?.(req.sessionKind) ?? 0;
@@ -310,7 +322,11 @@ function pickDefaultTool(mod: CopilotModule): ModuleTool | undefined {
  * If a tool's input properties have `description` + `default`, those become
  * OptionSpecs so `show options` works without per-module wiring.
  */
-export function createModuleDatastore(mod: CopilotModule, globals: Datastore): Datastore {
+export function createModuleDatastore(
+  mod: CopilotModule,
+  globals: Datastore,
+  opts: { agentRuntimeBackend?: AgentRuntimeBackend } = {},
+): Datastore {
   const specs: OptionSpec[] = [];
   const seen = new Set<string>();
   for (const tool of mod.tools) {
@@ -323,11 +339,42 @@ export function createModuleDatastore(mod: CopilotModule, globals: Datastore): D
       specs.push(propertyToSpec(name, schema, required.has(name)));
     }
   }
+  installModelOptionSpec(specs, opts.agentRuntimeBackend);
   // Inherit any globally-set values into the resolved view (no copy — they
   // live in `globals`; the new store and `globals` are queried separately
   // via Datastore.get(), but for the per-module view we want a single store).
   // To keep the layered semantics, we use a *delegating* datastore.
   return new DelegatingDatastore(specs, globals);
+}
+
+export function modelOptionSpec(name: string, backend?: AgentRuntimeBackend): OptionSpec<string> {
+  return {
+    name,
+    type: "string",
+    required: false,
+    description: describeModelOverrideFormat(backend),
+    validate: (value) => validateModelOverride(backend, value),
+  };
+}
+
+function installModelOptionSpec(specs: OptionSpec[], backend?: AgentRuntimeBackend): void {
+  const existingIndex = specs.findIndex((spec) => spec.name.toUpperCase() === "MODEL");
+  if (existingIndex === -1) {
+    specs.push(modelOptionSpec("model", backend));
+    return;
+  }
+
+  const existing = specs[existingIndex]!;
+  specs[existingIndex] = {
+    ...existing,
+    description: existing.description || describeModelOverrideFormat(backend),
+    validate: (value: unknown) => {
+      const previous = existing.validate?.(value as never);
+      if (previous) return previous;
+      if (typeof value !== "string") return "model must be a string";
+      return validateModelOverride(backend, value);
+    },
+  };
 }
 
 function readProperties(schema: JSONSchema): Record<string, JSONSchema> {
@@ -405,6 +452,23 @@ function propertyToSpec(name: string, schema: JSONSchema, required: boolean): Op
   }
 }
 
+function snapshotToolInput(store: Datastore, tool: ModuleTool): Record<string, unknown> {
+  const snapshot = store.snapshot();
+  if (!schemaAcceptsProperty(tool.inputSchema, "model")) {
+    delete snapshot["model"];
+    delete snapshot["MODEL"];
+  }
+  return snapshot;
+}
+
+function schemaAcceptsProperty(schema: JSONSchema, property: string): boolean {
+  const props = readProperties(schema);
+  if (Object.hasOwn(props, property)) return true;
+  if (Object.hasOwn(props, property.toUpperCase())) return true;
+  const additional = (schema as { additionalProperties?: unknown }).additionalProperties;
+  return additional !== undefined && additional !== false;
+}
+
 /**
  * A Datastore that falls back to a parent (`globals`) when no module-local
  * value or default is present.
@@ -421,5 +485,14 @@ class DelegatingDatastore extends Datastore {
     const local = super.get<T>(name);
     if (local !== undefined) return local;
     return this.parent.get<T>(name);
+  }
+
+  override has(name: string): boolean {
+    return super.has(name) || this.parent.has(name);
+  }
+
+  override whence(name: string): ReturnType<Datastore["whence"]> {
+    const local = super.whence(name);
+    return local === "unset" ? this.parent.whence(name) : local;
   }
 }

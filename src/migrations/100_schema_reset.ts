@@ -101,11 +101,14 @@ export const migration100: Migration = {
       CREATE TABLE pipeline_runs (
         run_id          TEXT PRIMARY KEY,
         repo            TEXT NOT NULL,
+        module_id       TEXT,
+        tool_name       TEXT,
+        resume_label    TEXT,
         started_at      TEXT NOT NULL,
         status          TEXT NOT NULL
                         CHECK (status IN ('scanning','triaging','verifying',
                                           'poc-harnessing','dynamic-analyzing',
-                                          'complete','error','aborted')),
+                                          'interrupted','complete','error','aborted')),
         config_json     TEXT NOT NULL,
         scan_opts_json  TEXT NOT NULL,
         findings_json   TEXT,

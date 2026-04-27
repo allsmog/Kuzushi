@@ -9,6 +9,7 @@ import type { ApplicationModel } from "./types.js";
 import type { ContextSnapshot } from "./ui/state.js";
 
 export type AttackSurfaceSourceKind = "persistent" | "context" | "empty";
+export type AttackSurfaceDfdBasis = "threat-model" | "app-model-inferred" | "empty";
 
 export interface AttackSurfaceNode {
   id: string;
@@ -49,7 +50,9 @@ export interface AttackSurfaceZone {
 
 export interface AttackSurfaceDfdModel {
   sourceKind: AttackSurfaceSourceKind;
+  basis: AttackSurfaceDfdBasis;
   sourceLabel: string;
+  qualityNotice?: string;
   target?: string;
   generatedAt?: number;
   zones: AttackSurfaceZone[];
@@ -113,6 +116,15 @@ export function deriveAttackSurfaceDfdModel(input: {
   const built = fromThreatModel
     ? buildFromThreatModel(dfdElements, dfdBoundaries, appModel)
     : buildFromApplicationModel(appModel, repoContext);
+  const basis: AttackSurfaceDfdBasis = fromThreatModel
+    ? "threat-model"
+    : built.nodes.length > 0 || built.flows.length > 0 || built.boundaries.length > 0
+      ? "app-model-inferred"
+      : "empty";
+  const qualityNotice =
+    basis === "app-model-inferred"
+      ? "No generated DFD elements were found; showing a low-confidence map inferred from application context."
+      : undefined;
 
   const threats = threatModel?.threats ?? [];
   const strideCounts = { ...STRIDE_ZERO };
@@ -130,7 +142,9 @@ export function deriveAttackSurfaceDfdModel(input: {
 
   return {
     sourceKind,
+    basis,
     sourceLabel,
+    ...(qualityNotice ? { qualityNotice } : {}),
     target: input.contextSnapshot?.target,
     generatedAt: input.contextSnapshot?.timestamp,
     zones: groupZones(built.nodes),
@@ -238,7 +252,7 @@ function buildFromThreatModel(
 
 function buildFromApplicationModel(
   appModel: ApplicationModel | null,
-  repoContext: { authPatterns?: string[]; frameworks?: string[] } | null,
+  repoContext: { authPatterns?: string[]; frameworks?: string[]; entryPoints?: string[] } | null,
 ): {
   nodes: AttackSurfaceNode[];
   flows: AttackSurfaceFlow[];
@@ -249,39 +263,62 @@ function buildFromApplicationModel(
   const publicRoutes = routes.filter((route) => route.authMechanisms.length === 0);
   const authRoutes = routes.filter((route) => route.authMechanisms.length > 0);
   const dataStores = appModel?.dataStores ?? [];
+  const serviceBoundaries = appModel?.serviceBoundaries ?? [];
+  const entrypointBoundaries = serviceBoundaries.filter(
+    (boundary) => boundary.kind === "entrypoint",
+  );
+  const repoEntryPoints = repoContext?.entryPoints ?? [];
+  const hasIngressEvidence =
+    routes.length > 0 || entrypointBoundaries.length > 0 || repoEntryPoints.length > 0;
+  const hasPublicIngressEvidence =
+    publicRoutes.length > 0 || entrypointBoundaries.length > 0 || repoEntryPoints.length > 0;
   const authLabel = first(repoContext?.authPatterns) ?? "auth boundary";
 
-  const nodes: AttackSurfaceNode[] = [
-    node(
-      "E1",
-      "external-entity",
-      "unauth user",
-      "internet / untrusted",
-      "External caller reaching public ingress.",
-      "hot",
-      ["public ingress"],
-    ),
-    node(
-      "E2",
-      "external-entity",
-      "admin browser",
-      "internet / untrusted",
-      "Authenticated privileged browser session.",
-      "watch",
-      ["privileged"],
-    ),
-    node(
-      "P1",
-      "process",
-      "web router",
-      "edge / entrypoints",
-      `${routes.length} routes · ${publicRoutes.length} public · ${authRoutes.length} auth-gated`,
-      publicRoutes.length > 0 ? "hot" : "watch",
-      [`routes ${routes.length}`, `public ${publicRoutes.length}`, `auth ${authRoutes.length}`],
-    ),
-  ];
+  const nodes: AttackSurfaceNode[] = [];
 
-  if (authRoutes.length > 0 || authLabel) {
+  if (hasPublicIngressEvidence) {
+    nodes.push(
+      node(
+        "E1",
+        "external-entity",
+        "unauth user",
+        "internet / untrusted",
+        "External caller reaching public ingress.",
+        "hot",
+        ["public ingress"],
+      ),
+    );
+  }
+
+  if (authRoutes.length > 0 && hasIngressEvidence) {
+    nodes.push(
+      node(
+        "E2",
+        "external-entity",
+        "admin browser",
+        "internet / untrusted",
+        "Authenticated privileged browser session.",
+        "watch",
+        ["privileged"],
+      ),
+    );
+  }
+
+  if (hasIngressEvidence) {
+    nodes.push(
+      node(
+        "P1",
+        "process",
+        "web router",
+        "edge / entrypoints",
+        `${routes.length} routes · ${publicRoutes.length} public · ${authRoutes.length} auth-gated`,
+        hasPublicIngressEvidence ? "hot" : "watch",
+        [`routes ${routes.length}`, `public ${publicRoutes.length}`, `auth ${authRoutes.length}`],
+      ),
+    );
+  }
+
+  if ((authRoutes.length > 0 || authLabel) && hasIngressEvidence) {
     nodes.push(
       node(
         "P2",
@@ -295,7 +332,7 @@ function buildFromApplicationModel(
     );
   }
 
-  const boundaryNodes = (appModel?.serviceBoundaries ?? []).slice(0, 5);
+  const boundaryNodes = serviceBoundaries.slice(0, 5);
   boundaryNodes.forEach((boundary, index) => {
     nodes.push(
       node(
@@ -325,15 +362,32 @@ function buildFromApplicationModel(
   });
 
   const flows: AttackSurfaceFlow[] = [];
-  flows.push(flow("F1", "E1", "P1", "HTTPS", "user-input", "public route traffic", ["B1"], true));
-  if (nodes.some((n) => n.id === "P2")) {
+  if (nodes.some((n) => n.id === "E1") && nodes.some((n) => n.id === "P1")) {
     flows.push(
-      flow("F2", "E2", "P2", "HTTPS", "identity", "privileged auth traffic", ["B1"], true),
+      flow(
+        "F1",
+        "E1",
+        "P1",
+        "HTTPS",
+        "user-input",
+        "public route traffic",
+        ["B1"],
+        hasPublicIngressEvidence,
+      ),
     );
-    flows.push(flow("F3", "P1", "P2", "internal", "session", "route auth checks", [], false));
+  }
+  if (nodes.some((n) => n.id === "P2")) {
+    if (nodes.some((n) => n.id === "E2")) {
+      flows.push(
+        flow("F2", "E2", "P2", "HTTPS", "identity", "privileged auth traffic", ["B1"], true),
+      );
+    }
+    if (nodes.some((n) => n.id === "P1")) {
+      flows.push(flow("F3", "P1", "P2", "internal", "session", "route auth checks", [], false));
+    }
   }
   const firstApp = nodes.find((n) => n.zone === "application / trusted");
-  if (firstApp) {
+  if (firstApp && nodes.some((n) => n.id === "P1")) {
     flows.push(
       flow(
         "F4",
@@ -385,7 +439,7 @@ function buildFromApplicationModel(
       to: "data / high value",
       crossingFlows: flows.filter((f) => f.crosses.includes("B3")).map((f) => f.id),
     },
-  ].filter((boundary) => boundary.crossingFlows.length > 0 || boundary.id === "B1");
+  ].filter((boundary) => boundary.crossingFlows.length > 0);
 
   return { nodes, flows, boundaries };
 }
@@ -501,7 +555,7 @@ function parseApplicationModel(value: unknown): ApplicationModel | null {
 
 function parseRepoContext(
   value: unknown,
-): { authPatterns?: string[]; frameworks?: string[] } | null {
+): { authPatterns?: string[]; frameworks?: string[]; entryPoints?: string[] } | null {
   const parsed = RepoContextSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }

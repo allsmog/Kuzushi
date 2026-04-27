@@ -29,6 +29,12 @@ export function createTaintIrisModule(): CopilotModule {
     displayName: "Taint IRIS",
     description: "Run IRIS taint analysis (taint-cwe-select then taint-iris), scan-only mode.",
     headless: true,
+    runLifecycle: {
+      persistence: "pipeline-checkpoint",
+      resume: "checkpoint",
+      liveControl: "pause-resume",
+      pipelineTasks: ["taint-iris"],
+    },
     formatInput(input) {
       const p = input as Record<string, unknown> | undefined;
       return typeof p?.["target"] === "string" ? (p["target"] as string) : null;
@@ -47,6 +53,10 @@ export function createTaintIrisModule(): CopilotModule {
           description:
             "Override the taint-iris system prompt. Accepts inline text or a path to .md/.txt.",
           "x-advanced": true,
+        },
+        resume: {
+          type: ["boolean", "string"],
+          description: "Resume the latest checkpoint or a specific run id.",
         },
       },
       required: ["target"],

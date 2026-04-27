@@ -12,6 +12,8 @@ export interface ScanOpts {
   maxFindings?: number;
   excludePatterns: string[];
   tasks?: string[];
+  taskMode?: "auto" | "manual";
+  disabledTasks?: string[];
   fresh: boolean;
   /** Git ref to diff against for differential review (e.g. "main", "HEAD~5"). */
   diffBase?: string;

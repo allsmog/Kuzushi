@@ -6,9 +6,15 @@ import { buildSdkHooks } from "../../src/agent-runtime/sdk-hooks.js";
  * shape is Record<HookEvent, HookCallbackMatcher[]>, where each matcher has
  * a `hooks: HookCallback[]`. We wire exactly one matcher with one callback.
  */
-function getPreToolUseCallback(cfg: Record<string, unknown>): (input: unknown) => Promise<unknown> {
+function getPreToolUseCallback(
+  cfg: Record<string, unknown>,
+): (input: unknown, toolUseId?: string, opts?: { signal?: AbortSignal }) => Promise<unknown> {
   const matchers =
-    (cfg.PreToolUse as Array<{ hooks: Array<(input: unknown) => Promise<unknown>> }>) ?? [];
+    (cfg.PreToolUse as Array<{
+      hooks: Array<
+        (input: unknown, toolUseId?: string, opts?: { signal?: AbortSignal }) => Promise<unknown>
+      >;
+    }>) ?? [];
   const cb = matchers[0]?.hooks?.[0];
   if (!cb) throw new Error("no PreToolUse callback");
   return cb;
@@ -88,5 +94,76 @@ describe("buildSdkHooks — PreToolUse normalizer", () => {
       tool_input: { file_path: "/abs", content: "x" },
     });
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("passes normalized tool input to canUseTool", async () => {
+    const canUseTool = vi.fn(() => ({ behavior: "allow" as const }));
+    const signal = new AbortController().signal;
+    const cb = getPreToolUseCallback(buildSdkHooks({ canUseTool }));
+
+    await cb(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "Read",
+        tool_use_id: "from-event",
+        tool_input: { path: "/repo/.github/workflows/ci.yml" },
+      },
+      "from-callback",
+      { signal },
+    );
+
+    expect(canUseTool).toHaveBeenCalledTimes(1);
+    expect(canUseTool).toHaveBeenCalledWith(
+      "Read",
+      { file_path: "/repo/.github/workflows/ci.yml" },
+      expect.objectContaining({ signal, toolUseId: "from-event" }),
+    );
+  });
+
+  it("returns PreToolUse deny output when canUseTool denies a call", async () => {
+    const cb = getPreToolUseCallback(
+      buildSdkHooks({
+        canUseTool: () => ({ behavior: "deny", message: "outside active target" }),
+      }),
+    );
+
+    const result = (await cb({
+      hook_event_name: "PreToolUse",
+      tool_name: "Read",
+      tool_input: { file_path: "/repo/actions/build.yml" },
+    })) as {
+      hookSpecificOutput?: {
+        hookEventName?: string;
+        permissionDecision?: string;
+        permissionDecisionReason?: string;
+      };
+    };
+
+    expect(result.hookSpecificOutput).toEqual({
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: "outside active target",
+    });
+  });
+
+  it("keeps updatedInput when canUseTool allows a normalized call", async () => {
+    const cb = getPreToolUseCallback(
+      buildSdkHooks({
+        canUseTool: () => ({ behavior: "allow" }),
+      }),
+    );
+
+    const result = (await cb({
+      hook_event_name: "PreToolUse",
+      tool_name: "Write",
+      tool_input: { filePath: "/repo/.github/out.json", content: "{}" },
+    })) as {
+      hookSpecificOutput?: { hookEventName?: string; updatedInput?: Record<string, unknown> };
+    };
+
+    expect(result.hookSpecificOutput).toEqual({
+      hookEventName: "PreToolUse",
+      updatedInput: { file_path: "/repo/.github/out.json", content: "{}" },
+    });
   });
 });

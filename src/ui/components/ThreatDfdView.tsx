@@ -37,7 +37,6 @@ export function ThreatDfdView({ shell }: ThreatDfdViewProps): React.ReactElement
     { keys: "4", label: "scope", secondary: true },
     { keys: "5", label: "summary", secondary: true },
     { keys: "r", label: "regen", secondary: true },
-    { keys: "a", label: "ask AI", secondary: true },
     { keys: "q", label: "back", secondary: true },
   ]);
 
@@ -72,10 +71,11 @@ export function ThreatDfdView({ shell }: ThreatDfdViewProps): React.ReactElement
       <RuleHeader breadcrumb="kuzushi/threats/dfd" status={status} />
       {model.sourceLabel ? (
         <Box marginBottom={SPACING.sm}>
-          <Text>{tokens.muted(model.sourceLabel)}</Text>
+          <Text>{tokens.muted(formatSourceLine(model))}</Text>
         </Box>
       ) : null}
-      <Legend />
+      {model.qualityNotice ? <QualityNotice notice={model.qualityNotice} /> : null}
+      <Legend validated={model.basis === "threat-model"} />
       {model.nodes.length === 0 ? <EmptyWorkspace /> : <AttackSurfaceMap model={model} />}
       <SelectedPanel model={model} />
       <StrideOverlay model={model} />
@@ -83,12 +83,31 @@ export function ThreatDfdView({ shell }: ThreatDfdViewProps): React.ReactElement
         <RegenerationPalette stale={shell.contextSnapshot?.staleSlices} />
       ) : null}
       {shell.pendingThreatPatch ? <PatchProposalCard shell={shell} /> : null}
-      <ControlHint />
+      <ControlHint hasPatch={Boolean(shell.pendingThreatPatch)} />
     </ScreenContent>
   );
 }
 
-function Legend(): React.ReactElement {
+function formatSourceLine(model: AttackSurfaceDfdModel): string {
+  if (model.basis === "app-model-inferred") {
+    const loadedPrefix = "loaded from ";
+    const source = model.sourceLabel.startsWith(loadedPrefix)
+      ? model.sourceLabel.slice(loadedPrefix.length)
+      : model.sourceLabel;
+    return `inferred from ${source}`;
+  }
+  return model.sourceLabel;
+}
+
+function QualityNotice({ notice }: { notice: string }): React.ReactElement {
+  return (
+    <Box marginBottom={SPACING.sm}>
+      <Text>{tokens.warn(notice)}</Text>
+    </Box>
+  );
+}
+
+function Legend({ validated }: { validated: boolean }): React.ReactElement {
   return (
     <Box marginTop={SPACING.sm}>
       <Text>
@@ -97,8 +116,8 @@ function Legend(): React.ReactElement {
         {tokens.warn("B boundary")}
         {tokens.muted("   ")}
         {tokens.accent("> selected")}
-        {tokens.muted("   ")}
-        {tokens.success("✓ validated")}
+        {validated ? tokens.muted("   ") : ""}
+        {validated ? tokens.success("✓ validated") : ""}
       </Text>
     </Box>
   );
@@ -359,15 +378,16 @@ function PatchProposalCard({ shell }: { shell: ShellState }): React.ReactElement
   );
 }
 
-function ControlHint(): React.ReactElement {
+function ControlHint({ hasPatch }: { hasPatch: boolean }): React.ReactElement {
   return (
     <Box marginTop={SPACING.sm} flexDirection="column">
       <Text>
-        {tokens.muted(
-          "1 dfd · 2 stride · 3 stories · 4 scope · 5 summary · r regen · a ask AI · q back",
-        )}
+        {tokens.muted("1 dfd · 2 stride · 3 stories · 4 scope · 5 summary · r regen · q back")}
       </Text>
-      <Text>{tokens.muted("patch proposal:  a apply · s skip · d diff · r re-rank")}</Text>
+      <Text>{tokens.muted("AI edits: /threats ask <instruction>")}</Text>
+      {hasPatch ? (
+        <Text>{tokens.muted("patch proposal: y accept · n reject · /threats ask <revision>")}</Text>
+      ) : null}
     </Box>
   );
 }

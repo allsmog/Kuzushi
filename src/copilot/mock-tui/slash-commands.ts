@@ -16,12 +16,26 @@
  *   /threats [sub]
  *   1..5 in threats      — DFD/STRIDE/stories/scope/summary cycler
  *   /tune, /t            — focused-module tune view
+ *   /tasks               — SAST task selector
+ *   /task ...            — basic SAST task selector state changes
  *   /prompts             — focused-module prompts editor
  *   /actor <fingerprint> — drill into per-actor transcript
  *   /back                — pop to prior view
  *   /quit, /q, /exit, :q — clean exit
  */
+
 import type { ShellHistoryEntry, ShellView, ThreatTab, UIStore } from "../../ui/state.js";
+import {
+  readDisabledSastTasks,
+  readSastTaskMode,
+  resetSastTaskOptions,
+  resolveSastTaskAtCursor,
+  resolveSastTaskCapability,
+  SAST_SCAN_TOOL_NAME,
+  setSastTaskMode,
+  toggleDisabledSastTask,
+  updateDisabledSastTask,
+} from "../sast-task-selection.js";
 
 const THREAT_TABS = new Set<ThreatTab>(["dfd", "stride", "stories", "scope", "summary"]);
 const THREAT_TAB_BY_INDEX: ThreatTab[] = ["dfd", "stride", "stories", "scope", "summary"];
@@ -89,6 +103,19 @@ export function buildSlashCommandRouter(
         return;
       }
       navigate(store, state, { shellView: "prompts-editor" });
+      return;
+    }
+
+    if (trimmed === "/tasks") {
+      navigate(store, state, {
+        shellView: "sast-tasks",
+        focusedModule: "sast",
+      });
+      return;
+    }
+
+    if (trimmed.startsWith("/task")) {
+      handleTaskCommand(store, trimmed);
       return;
     }
 
@@ -185,6 +212,72 @@ function matchThreatCycle(input: string, store: UIStore): ThreatTab | null {
     return THREAT_TAB_BY_INDEX[idx - 1] ?? null;
   }
   return null;
+}
+
+function handleTaskCommand(store: UIStore, input: string): void {
+  const shell = store.getState().shell;
+  if (!shell) return;
+  const [, sub = "", rawId = ""] = input.trim().split(/\s+/);
+  const currentOptions = shell.moduleOptions[SAST_SCAN_TOOL_NAME] ?? {};
+  let nextOptions: Record<string, unknown> | null = null;
+  let message = "";
+
+  if (sub === "block" || sub === "deny") {
+    if (!rawId) {
+      appendHistory(store, "Usage: /task block <id>");
+      return;
+    }
+    nextOptions = updateDisabledSastTask(currentOptions, rawId, true);
+    message = `blocked ${rawId}`;
+  } else if (sub === "allow" || sub === "unblock") {
+    if (!rawId) {
+      appendHistory(store, "Usage: /task allow <id>");
+      return;
+    }
+    nextOptions = updateDisabledSastTask(currentOptions, rawId, false);
+    message = `allowed ${rawId}`;
+  } else if (sub === "toggle") {
+    const capability = rawId
+      ? resolveSastTaskCapability(rawId)
+      : resolveSastTaskAtCursor(shell.sastTaskCursor);
+    if (!capability) {
+      appendHistory(store, `unknown SAST task capability: ${rawId}`);
+      return;
+    }
+    if (capability.toggleable === false) {
+      appendHistory(store, `${capability.label} is required infrastructure`);
+      return;
+    }
+    const before = new Set(readDisabledSastTasks(currentOptions));
+    nextOptions = toggleDisabledSastTask(currentOptions, capability.id);
+    message = `${before.has(capability.id) ? "allowed" : "blocked"} ${capability.id}`;
+  } else if (sub === "mode") {
+    const requested = rawId === "auto" || rawId === "manual" ? rawId : undefined;
+    const current = readSastTaskMode(currentOptions);
+    const mode = requested ?? (current === "auto" ? "manual" : "auto");
+    nextOptions = setSastTaskMode(currentOptions, mode, shell.tuneSnapshot?.tasks ?? []);
+    message = `mode ${mode}`;
+  } else if (sub === "reset") {
+    nextOptions = resetSastTaskOptions(currentOptions);
+    message = "reset task selection";
+  } else {
+    appendHistory(store, "Usage: /task block|allow|toggle|mode|reset");
+    return;
+  }
+
+  const moduleOptions = { ...shell.moduleOptions };
+  if (Object.keys(nextOptions).length === 0) delete moduleOptions[SAST_SCAN_TOOL_NAME];
+  else moduleOptions[SAST_SCAN_TOOL_NAME] = nextOptions;
+  store.update({
+    shell: {
+      ...shell,
+      focusedModule: "sast",
+      shellView: "sast-tasks",
+      lastUsedTool: SAST_SCAN_TOOL_NAME,
+      moduleOptions,
+    },
+  });
+  appendHistory(store, message);
 }
 
 function appendHistory(store: UIStore, text: string): void {

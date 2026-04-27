@@ -1,4 +1,5 @@
 import { normalizeTaskIds, type TaskRegistry } from "../../agents/registry.js";
+import { normalizeTaskCapabilityIds } from "../../capabilities.js";
 import type { KuzushiConfig } from "../../types.js";
 
 const THREAT_AWARE_DETECTOR_TASK_IDS = new Set([
@@ -23,9 +24,14 @@ export interface InitialTaskPlan {
   baseTaskIds: string[];
   candidateIds: string[];
   enabledTaskIds: string[];
+  disabledTaskIds: string[];
   dynamicSelectionActive: boolean;
   useAllTasks: boolean;
   contextGatheringForced: boolean;
+}
+
+export interface TaskPolicyOptions {
+  disabledTasks?: readonly string[];
 }
 
 export function resolveInitialTaskPlan(
@@ -35,10 +41,15 @@ export function resolveInitialTaskPlan(
     KuzushiConfig,
     "tasks" | "enableContextGathering" | "enableContextEnrichment" | "enableDynamicTaskSelection"
   >,
+  options: TaskPolicyOptions = {},
 ): InitialTaskPlan {
-  const configuredTasks = config.tasks ?? [];
-  const allRegisteredTasks = registry.ids();
-  const useAllTasks = configuredTasks.length === 1 && configuredTasks[0] === "*";
+  const disabledTaskIds = normalizeDisabledTaskIds(registry, options.disabledTasks ?? []);
+  const disabledSet = new Set(disabledTaskIds);
+  const configuredTasksRaw = config.tasks ?? [];
+  const configuredTasks = filterDisabledTaskIds(configuredTasksRaw, disabledSet);
+  const explicitTasks = filterDisabledTaskIds(tasks, disabledSet);
+  const allRegisteredTasks = registry.ids().filter((id) => !disabledSet.has(id));
+  const useAllTasks = configuredTasksRaw.length === 1 && configuredTasksRaw[0] === "*";
   const dynamicSelectionActive =
     config.enableDynamicTaskSelection === true && registry.has("task-selector");
   const enableContextExplicit =
@@ -48,14 +59,16 @@ export function resolveInitialTaskPlan(
   const baseTaskIds = useAllTasks ? allRegisteredTasks : configuredTasks;
 
   const candidateIds = injectThreatModelPolicyCandidates(registry, [
-    ...tasks,
+    ...explicitTasks,
     ...(enableContextExplicit ? ["context-gatherer"] : []),
     ...(enableContextEnrichment ? ["context-enricher"] : []),
     ...baseTaskIds,
     ...(dynamicSelectionActive ? ["task-selector"] : []),
-  ]);
+  ]).filter((id) => !disabledSet.has(id));
 
-  let enabledTaskIds = collectTransitiveDeps(registry, candidateIds);
+  let enabledTaskIds = collectTransitiveDeps(registry, candidateIds).filter(
+    (id) => !disabledSet.has(id),
+  );
   let contextGatheringForced = false;
 
   if (config.enableContextGathering === false) {
@@ -77,10 +90,35 @@ export function resolveInitialTaskPlan(
     baseTaskIds: normalizeTaskIds(baseTaskIds),
     candidateIds,
     enabledTaskIds,
+    disabledTaskIds,
     dynamicSelectionActive,
     useAllTasks,
     contextGatheringForced,
   };
+}
+
+export function normalizeDisabledTaskIds(
+  registry: TaskRegistry,
+  disabledTasks: readonly string[],
+): string[] {
+  const raw = disabledTasks
+    .map((id) => (id.trim() === "agentic" ? "agentic-sast" : id.trim()))
+    .filter((id) => id.length > 0);
+  if (raw.length === 0) return [];
+
+  const normalized = normalizeTaskIds(normalizeTaskCapabilityIds(raw));
+  const unknown = normalized.filter((id) => !registry.has(id));
+  if (unknown.length > 0) {
+    throw new Error(
+      `Unknown disabled task${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}`,
+    );
+  }
+  return normalized;
+}
+
+export function filterDisabledTaskIds(ids: string[], disabledSet: ReadonlySet<string>): string[] {
+  if (disabledSet.size === 0) return normalizeTaskIds(ids);
+  return normalizeTaskIds(ids).filter((id) => !disabledSet.has(id));
 }
 
 export function injectThreatModelPolicyCandidates(

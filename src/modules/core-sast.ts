@@ -73,6 +73,19 @@ const scanTool = defineTool<"sast">({
         items: { type: "string" },
         description: "Specific task IDs to enable (e.g. ['semgrep', 'ssrf-detect']).",
       },
+      taskMode: {
+        type: "string",
+        enum: ["auto", "manual"],
+        default: "auto",
+        description:
+          "Task selection mode. Auto keeps presets/dynamic selection; manual uses the tasks allowlist.",
+      },
+      disabledTasks: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Capability or task IDs that must not run, even when presets or dynamic selection recommend them.",
+      },
       severity: {
         type: "array",
         items: { type: "string", enum: ["critical", "high", "medium", "low"] },
@@ -86,10 +99,20 @@ const scanTool = defineTool<"sast">({
         type: "boolean",
         description: "Generate patches for confirmed vulnerabilities.",
       },
+      resume: {
+        type: ["boolean", "string"],
+        description: "Resume the latest checkpoint or a specific run id.",
+      },
     },
     required: ["target"],
   },
   headless: true,
+  runLifecycle: {
+    persistence: "pipeline-checkpoint",
+    resume: "checkpoint",
+    liveControl: "pause-resume",
+    pipelineTasks: "any",
+  },
   async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     // Capability probe — the pipeline needs the workspace to persist findings.
     // In `kuzushi run` mode without a workspace, warn via the structured

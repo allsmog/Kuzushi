@@ -27,3 +27,6 @@ vendor/
 perf/results.json
 *.txt
 .kuzushi/credentials.json
+
+# Local Claude Design / scratch prompts — do not commit
+kuzushi-*-prompt.md

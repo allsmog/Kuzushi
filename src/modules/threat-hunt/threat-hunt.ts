@@ -490,8 +490,18 @@ export const threatHuntTool = defineDagTool<
           "Override the threat-hunt actor system prompt. Accepts inline text or a path to .md/.txt.",
         "x-advanced": true,
       },
+      resume: {
+        type: ["boolean", "string"],
+        description: "Resume the latest checkpoint or a specific run id.",
+      },
     },
     required: ["target"],
+  },
+  runLifecycle: {
+    persistence: "pipeline-checkpoint",
+    resume: "checkpoint",
+    liveControl: "pause-resume",
+    pipelineTasks: ["threat-hunt"],
   },
   formatInput(input) {
     const p = input as Record<string, unknown> | undefined;

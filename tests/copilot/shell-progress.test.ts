@@ -61,6 +61,15 @@ describe("task story shell integration helpers", () => {
     expect(shell.history.at(-1)).toMatchObject({ type: "input", text: "context build" });
   });
 
+  it("can record instant navigation turns without flipping into processing", () => {
+    const store = seedShellState();
+    beginShellTurn(store, "use context", null, "turn-1", { processing: false });
+
+    const shell = store.getState().shell!;
+    expect(shell.processing).toBe(false);
+    expect(shell.history.at(-1)).toMatchObject({ type: "input", text: "use context" });
+  });
+
   it("preserves existing task story when navigating to details", () => {
     const store = seedShellState();
     appendStoryEvent(store, {

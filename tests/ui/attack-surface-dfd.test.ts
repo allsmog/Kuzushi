@@ -122,6 +122,8 @@ describe("deriveAttackSurfaceDfdModel", () => {
       sourceKind: "context",
     });
 
+    expect(model.basis).toBe("app-model-inferred");
+    expect(model.qualityNotice).toContain("low-confidence");
     expect(model.stats.routes).toBe(2);
     expect(model.stats.publicRoutes).toBe(1);
     expect(model.stats.dataStores).toBe(1);
@@ -137,15 +139,59 @@ describe("deriveAttackSurfaceDfdModel", () => {
       sourceKind: "persistent",
     });
 
+    expect(model.basis).toBe("threat-model");
+    expect(model.qualityNotice).toBeUndefined();
     expect(model.nodes.map((node) => node.id)).toEqual(["E1", "P1"]);
     expect(model.flows).toHaveLength(1);
     expect(model.boundaries[0]?.id).toBe("B1");
+  });
+
+  it("does not synthesize public ingress without route or entrypoint evidence", () => {
+    const weakAppModel: ApplicationModel = {
+      ...appModel(),
+      routes: [],
+      serviceBoundaries: [
+        {
+          id: "ds-boundary",
+          name: "datastore access",
+          kind: "datastore",
+          description: "datastore access point",
+          evidenceAnchors: [],
+        },
+      ],
+    };
+    const model = deriveAttackSurfaceDfdModel({
+      contextSnapshot: snapshot({
+        appModel: weakAppModel,
+        repoContext: {
+          languages: ["TypeScript"],
+          frameworks: ["React"],
+          authPatterns: ["middleware-guards"],
+          ormOrDb: [],
+          entryPoints: [],
+          sanitizationLibs: [],
+        },
+        threatModel: {
+          ...threatModel(),
+          dfd: { elements: [], trustBoundaries: [] },
+        },
+      }),
+      sourceKind: "context",
+    });
+
+    expect(model.basis).toBe("app-model-inferred");
+    expect(model.nodes.map((node) => node.id)).not.toContain("E1");
+    expect(model.nodes.map((node) => node.id)).not.toContain("P1");
+    expect(model.flows.some((flow) => flow.source === "P1" || flow.target === "P1")).toBe(false);
+    expect(model.flows.some((flow) => flow.crosses.includes("B1"))).toBe(false);
+    expect(model.boundaries.map((boundary) => boundary.id)).not.toContain("B1");
   });
 
   it("returns an empty model without context", () => {
     const model = deriveAttackSurfaceDfdModel({});
 
     expect(model.nodes).toHaveLength(0);
+    expect(model.basis).toBe("empty");
     expect(model.sourceKind).toBe("empty");
   });
 });
