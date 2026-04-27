@@ -296,6 +296,14 @@ describe("resolveKeybind — threat digits", () => {
     ]);
   });
 
+  it("keeps r as the threat-view regen shortcut and does not bind a to an empty ask", () => {
+    const shell = baseShell({ shellView: "threats", threatTab: "dfd" });
+    const state = baseState(shell);
+
+    expect(dispatch("r", shell, state)).toEqual({ type: "dispatch", command: "/context regen" });
+    expect(dispatch("a", shell, state).type).toBe("none");
+  });
+
   it("does not trigger on non-threat views", () => {
     const shell = baseShell({ shellView: "catalog" });
     const state = baseState(shell);
@@ -422,6 +430,66 @@ describe("resolveKeybind — findings cursor", () => {
   });
 });
 
+describe("resolveKeybind — SAST task selector", () => {
+  function taskState(cursor = 0) {
+    const shell = baseShell({
+      shellView: "sast-tasks",
+      focusedModule: "sast",
+      sastTaskCursor: cursor,
+    });
+    const state = baseState(shell);
+    return { shell, state };
+  }
+
+  it("j/k move the SAST task cursor and clamp to available rows", () => {
+    const { state } = taskState(1);
+    expect(
+      resolveKeybind({
+        stroke: stroke({ char: "j" }),
+        input: "",
+        state,
+        looseFindingCount: 0,
+        sastTaskCount: 3,
+        now: 0,
+      }),
+    ).toEqual({ type: "set-sast-task-cursor", cursor: 2 });
+    expect(
+      resolveKeybind({
+        stroke: stroke({ char: "k" }),
+        input: "",
+        state,
+        looseFindingCount: 0,
+        sastTaskCount: 3,
+        now: 0,
+      }),
+    ).toEqual({ type: "set-sast-task-cursor", cursor: 0 });
+  });
+
+  it("Space, a, o, and r dispatch the matching task commands", () => {
+    const { shell, state } = taskState();
+    expect(dispatch(" ", shell, state)).toEqual({ type: "dispatch", command: "/task toggle" });
+    expect(dispatch("a", shell, state)).toEqual({
+      type: "dispatch",
+      command: "/task mode toggle",
+    });
+    expect(dispatch("o", shell, state)).toEqual({ type: "dispatch", command: "/options" });
+    expect(dispatch("r", shell, state)).toEqual({ type: "dispatch", command: "/task reset" });
+  });
+
+  it("does not dispatch task selector keys while typing", () => {
+    const { state } = taskState();
+    const action = resolveKeybind({
+      stroke: stroke({ char: "o" }),
+      input: "query",
+      state,
+      looseFindingCount: 0,
+      sastTaskCount: 3,
+      now: 0,
+    });
+    expect(action.type).toBe("none");
+  });
+});
+
 describe("resolveKeybind — q, Esc, and /back", () => {
   it("L toggles the context-build tail while work is in flight", () => {
     const shell = baseShell({
@@ -531,6 +599,7 @@ describe("resolveKeybind — q, Esc, and /back", () => {
     expect(isBackableShellView("findings")).toBe(true);
     expect(isBackableShellView("finding")).toBe(true);
     expect(isBackableShellView("threats")).toBe(true);
+    expect(isBackableShellView("sast-tasks")).toBe(true);
     expect(isBackableShellView("task-story")).toBe(true);
   });
 });

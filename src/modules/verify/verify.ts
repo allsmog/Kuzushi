@@ -49,6 +49,10 @@ export function createVerifyModule(): CopilotModule {
       required: ["fingerprint"],
     },
     headless: true,
+    runLifecycle: {
+      persistence: "workspace-result",
+      resume: "restart-only",
+    },
     async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
       const p = parseVerifyFindingInput(input);
       if (!ctx.workspace) {

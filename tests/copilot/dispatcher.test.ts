@@ -367,7 +367,7 @@ describe("ModuleDispatcher requires preflight", () => {
     await driver.handle("set RHOST x");
     const result = await driver.handle("run");
     expect(result.output).toContain("hosts in workspace");
-    expect(result.output).toContain("'use recon' then 'run'");
+    expect(result.output).toContain("add hosts to the active workspace first");
   });
 
   it("blocks run when a session requirement is unmet", async () => {
@@ -605,6 +605,72 @@ describe("CoreDispatcher runTool wiring", () => {
     expect(calls[0].input.TARGET).toBe(".");
     expect(result.matched).toBe(true);
     expect(result.output).toBe("ran sast:run");
+  });
+
+  it("exposes universal model options without sending synthetic model to tool input", async () => {
+    const registry = new ModuleRegistry();
+    const tool: ModuleTool = {
+      name: "sast:run",
+      description: "runnable tool",
+      inputSchema: {
+        type: "object",
+        properties: { TARGET: { type: "string", description: "target", default: "." } },
+      },
+      headless: true,
+      async execute(): Promise<ToolResult> {
+        return { ok: true, output: "direct" };
+      },
+    };
+    const mod: CopilotModule = {
+      id: "sast",
+      displayName: "SAST",
+      category: "defense",
+      version: "1.0.0",
+      description: "SAST",
+      rank: "good",
+      tools: [tool],
+    };
+    registry.register(mod);
+    (registry as unknown as { initialized: Set<string> }).initialized.add("sast");
+
+    const calls: Array<{ input: Record<string, unknown>; model?: unknown }> = [];
+    const runTool = async (
+      _t: ModuleTool,
+      input: Record<string, unknown>,
+      _signal?: AbortSignal,
+      datastore?: Datastore,
+    ): Promise<ToolResult> => {
+      calls.push({ input, model: datastore?.get("model") });
+      return { ok: true, output: "ran" };
+    };
+
+    const core = new CoreDispatcher({
+      registry,
+      globals: new Datastore(),
+      agentRuntimeBackend: "claude",
+      history: () => [],
+      runTool,
+    });
+    const driver = new DispatcherDriver({ base: core, cwd: "/tmp", print: createArraySink() });
+
+    const globals = await driver.handle("show globals");
+    expect(globals.output).toContain("MODEL");
+    const invalid = await driver.handle("setg model openai:gpt-4o");
+    expect(invalid.output).toContain("Invalid value");
+    await driver.handle("setg model anthropic:claude-sonnet-4-6");
+    await driver.handle("use sast");
+    const options = await driver.handle("show options");
+    expect(options.output).toContain("model");
+    expect(options.output).toContain("anthropic:claude-sonnet-4-6");
+
+    await driver.handle("set model claude-opus-4-6");
+    const result = await driver.handle("run");
+
+    expect(result.output).toBe("ran");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].model).toBe("claude-opus-4-6");
+    expect(calls[0].input).toMatchObject({ TARGET: "." });
+    expect(calls[0].input).not.toHaveProperty("model");
   });
 });
 

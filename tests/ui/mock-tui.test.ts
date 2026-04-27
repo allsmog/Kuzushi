@@ -40,7 +40,9 @@ describe("mock-tui scenarios", () => {
 
   it("registers at least the v1 scenarios", () => {
     const ids = listScenarios().map((s) => s.id);
-    expect(ids).toEqual(expect.arrayContaining(["catalog", "findings-many", "module-sast"]));
+    expect(ids).toEqual(
+      expect.arrayContaining(["catalog", "findings-many", "module-sast", "sast-tasks"]),
+    );
   });
 
   it("catalog scenario emits the catalog heading + module rows", () => {
@@ -82,6 +84,20 @@ describe("mock-tui scenarios", () => {
     const joined = lines.join("\n");
     expect(joined).toContain("# MODULE  sast");
     expect(joined).toContain("## tools");
+  });
+
+  it("sast-tasks scenario emits the task selector view", () => {
+    const store = createUIStore();
+    const { lines, unsub } = attach(store);
+    const scenario = listScenarios().find((s) => s.id === "sast-tasks");
+    expect(scenario).toBeDefined();
+    if (!scenario) return;
+    applySeedToStore(store, scenario.seed());
+    unsub();
+    const joined = lines.join("\n");
+    expect(joined).toContain("# SAST TASKS");
+    expect(joined).toContain("profile standard · auto + denylist");
+    expect(joined).toContain("active: codeql · Space allows codeql.");
   });
 
   it("every registered scenario seeds without crashing the plain renderer", () => {
@@ -129,6 +145,25 @@ describe("mock-tui slash-command router", () => {
     const shell = store.getState().shell;
     expect(shell?.shellView).toBe("module");
     expect(shell?.focusedModule).toBe("sast");
+  });
+
+  it("/tasks opens the SAST task selector", () => {
+    const { store, onInput } = bootCatalog();
+    onInput("/tasks");
+    const shell = store.getState().shell;
+    expect(shell?.shellView).toBe("sast-tasks");
+    expect(shell?.focusedModule).toBe("sast");
+  });
+
+  it("/task commands update mock SAST task state", () => {
+    const { store, onInput } = bootCatalog();
+    onInput("/tasks");
+    onInput("/task block codeql");
+    expect(store.getState().shell?.moduleOptions["sast:scan"]?.disabledTasks).toEqual(["codeql"]);
+    onInput("/task toggle codeql");
+    expect(store.getState().shell?.moduleOptions["sast:scan"]?.disabledTasks).toBeUndefined();
+    onInput("/task mode manual");
+    expect(store.getState().shell?.moduleOptions["sast:scan"]?.taskMode).toBe("manual");
   });
 
   it("/threats stride sets the stride tab", () => {

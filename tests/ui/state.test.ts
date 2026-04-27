@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { UIStore } from "../../src/ui/state.js";
+import { type ShellState, UIStore } from "../../src/ui/state.js";
+
+function shell(overrides: Partial<ShellState> = {}): ShellState {
+  return {
+    modules: [],
+    moduleCatalog: [],
+    tools: [],
+    focusedModule: "context",
+    shellView: "module-run",
+    openFindingId: null,
+    target: null,
+    workspace: null,
+    history: [],
+    commandHistory: [],
+    moduleOptions: {},
+    processing: true,
+    ...overrides,
+  };
+}
 
 describe("UIStore agentActivity memory retention", () => {
   it("caps the agentActivity map at MAX_AGENT_ACTIVITY_ENTRIES under sustained growth", () => {
@@ -69,6 +87,55 @@ describe("UIStore agentActivity memory retention", () => {
 
     store.resetAgentActivity();
     expect(store.getState().agentActivity.size).toBe(0);
+  });
+
+  it("does not notify for repeated display-identical agent activity", () => {
+    const store = new UIStore();
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+    const line = {
+      kind: "tool-progress" as const,
+      toolName: "Read",
+      index: 0,
+      total: 1,
+    };
+
+    expect(store.addAgentActivity("fp", line)).toBe(true);
+    expect(store.addAgentActivity("fp", { ...line, elapsedSeconds: 12 })).toBe(false);
+    unsubscribe();
+
+    expect(notifications).toBe(1);
+    expect(store.getState().agentActivity.get("fp")).toHaveLength(1);
+  });
+
+  it("dedupes repeated module-run evidence rows", () => {
+    const store = new UIStore();
+    store.update({
+      shell: shell({
+        moduleRun: {
+          moduleId: "context",
+          source: "shell",
+          toolName: "context:build",
+          startedAtMs: 0,
+          status: "running",
+          steps: [],
+          evidenceTail: [],
+        },
+      }),
+    });
+    const line = {
+      kind: "tool-progress" as const,
+      toolName: "Read",
+      index: 0,
+      total: 1,
+    };
+
+    expect(store.pushModuleRunActivity(line)).toBe(true);
+    expect(store.pushModuleRunActivity({ ...line, elapsedSeconds: 12 })).toBe(false);
+
+    expect(store.getState().shell?.moduleRun?.evidenceTail).toHaveLength(1);
   });
 });
 

@@ -9,19 +9,22 @@
  * `back` pops it.
  */
 
+import type { AgentRuntimeBackend } from "../../contracts.js";
 import type { ModuleRegistry } from "../../modules/registry.js";
 import type { CopilotModule } from "../../modules/types.js";
 import { wrapToWidth } from "../../ui/format.js";
 import { type Datastore, formatOptionsTable } from "../options.js";
 import { formatSearchResult, searchCatalog } from "../search.js";
 import { randomTip } from "../tips.js";
-import { ModuleDispatcher, type ModuleToolRunner } from "./module-dispatcher.js";
+import { ModuleDispatcher, type ModuleToolRunner, modelOptionSpec } from "./module-dispatcher.js";
 import type { CommandContext, CommandDispatcher, CommandResult } from "./types.js";
 
 export interface CoreDispatcherOptions {
   registry: ModuleRegistry;
   /** Global datastore — stores `setg`-set keys. */
   globals: Datastore;
+  /** Active agent runtime backend, used to validate universal model overrides. */
+  agentRuntimeBackend?: AgentRuntimeBackend;
   /** Source of command history (for `history`). */
   history: () => string[];
   /** Sink to mutate history (for `history -c`). */
@@ -142,7 +145,11 @@ export class CoreDispatcher implements CommandDispatcher {
   readonly name = "core";
   readonly commands = COMMANDS;
 
-  constructor(private readonly opts: CoreDispatcherOptions) {}
+  constructor(private readonly opts: CoreDispatcherOptions) {
+    if (!opts.globals.spec("MODEL")) {
+      opts.globals.registerOption(modelOptionSpec("MODEL", opts.agentRuntimeBackend));
+    }
+  }
 
   async execute(cmd: string, args: string[], ctx: CommandContext): Promise<CommandResult | void> {
     switch (cmd) {
@@ -394,6 +401,7 @@ export class CoreDispatcher implements CommandDispatcher {
     const dispatcher = new ModuleDispatcher({
       module: mod,
       globals: this.opts.globals,
+      agentRuntimeBackend: this.opts.agentRuntimeBackend,
       ...(this.opts.runTool ? { runTool: this.opts.runTool } : {}),
     });
     return { push: dispatcher, output: `Selected module: ${mod.id}` };
@@ -661,7 +669,7 @@ export class CoreDispatcher implements CommandDispatcher {
         const count = ctx.driver.getHostCount?.() ?? 0;
         const need = req.minCount ?? 1;
         lines.push(`  ${count >= need ? "✓" : "✗"} hosts   (have ${count}, need ${need}+)`);
-        if (count < need) lines.push(`      Fix: 'use recon' then 'run'`);
+        if (count < need) lines.push("      Fix: add hosts to the active workspace first");
       } else if (req.kind === "session") {
         const count = ctx.driver.getLiveSessionCount?.(req.sessionKind) ?? 0;
         const label = req.sessionKind ? `'${req.sessionKind}'` : "any";

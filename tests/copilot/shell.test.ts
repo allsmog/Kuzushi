@@ -17,6 +17,7 @@ import {
 } from "../../src/copilot/shell.js";
 import { createCoreSastModule } from "../../src/modules/core-sast.js";
 import { saveContextSnapshot } from "../../src/modules/sast/context-persist.js";
+import { createRun, initDb, updateRunFindings, updateRunStatus } from "../../src/store.js";
 import type { KuzushiConfig } from "../../src/types.js";
 import type { ShellState } from "../../src/ui/state.js";
 
@@ -38,12 +39,14 @@ async function createMockCore() {
   const { createSemgrepModule } = await import("../../src/modules/semgrep/semgrep.js");
   const { createThreatHuntModule } = await import("../../src/modules/threat-hunt/threat-hunt.js");
   const { createContextModule } = await import("../../src/modules/context/context.js");
+  const { createTaintIrisModule } = await import("../../src/modules/taint-iris/taint-iris.js");
 
   const sast = createCoreSastModule();
   const semgrep = createSemgrepModule();
   const threatHunt = createThreatHuntModule();
   const context = createContextModule();
-  const mods = [sast, semgrep, threatHunt, context];
+  const taintIris = createTaintIrisModule();
+  const mods = [sast, semgrep, threatHunt, context, taintIris];
   const module = sast; // back-compat name; older assertions still reference `module`
 
   const executeTool = vi.fn(async (_toolName: string, input: unknown) => ({
@@ -270,13 +273,13 @@ describe("artifact visibility", () => {
     expect(__shellInternals.loadArtifactManifest(dir)).toEqual([]);
   });
 
-  it("banner lists scan-context + threat-model when present, with a /ask pointer", async () => {
+  it("banner lists scan-context + threat-model as reusable context", async () => {
     const dir = makeTempRepo(true, ["scan-context.json", "threat-model.json"]);
     const banner = __shellInternals.formatArtifactBanner(dir);
-    expect(banner).toContain("Prior artifacts in .kuzushi/:");
+    expect(banner).toContain("Available .kuzushi context:");
     expect(banner).toContain("scan-context.json");
     expect(banner).toContain("threat-model.json");
-    expect(banner).toContain("/ask uses these as context.");
+    expect(banner).toContain("Reused by /ask and context-aware modules.");
   });
 
   it("trailer is a compact filename list — keeps tool-summary readable", async () => {
@@ -288,6 +291,20 @@ describe("artifact visibility", () => {
     expect(trailer).toContain("findings.sqlite3");
     // No expanded "modified YYYY-MM-DD" tags in the trailer — keep it one line.
     expect(trailer).not.toContain("modified");
+  });
+});
+
+describe("startup scope defaults", () => {
+  it("derives an implicit workspace name from a local target path", () => {
+    expect(__shellInternals.inferWorkspaceNameFromTarget("/tmp/acme api")).toBe("acme-api");
+    expect(__shellInternals.inferWorkspaceNameFromTarget(".")).toBe(path.basename(process.cwd()));
+  });
+
+  it("sets cwd as the implicit target for bare shell launches", () => {
+    const opts = createShellOptions();
+    delete opts.target;
+    __shellInternals.applyImplicitShellTarget(opts);
+    expect(opts.target).toBe(process.cwd());
   });
 });
 
@@ -307,6 +324,7 @@ describe("local shell commands", () => {
     );
     expect(workspaceResult).toEqual({ output: "Workspace set to: acme-pentest" });
     expect(opts.workspace).toBe("acme-pentest");
+    expect(opts.workspaceName).toBe("acme-pentest");
 
     const useResult = __shellInternals.handleLocalCommand("use sast", core, opts, ctx, shellState);
     expect(useResult?.setFocus).toBe("sast");
@@ -362,6 +380,102 @@ describe("local shell commands", () => {
     const bareHelp = __shellInternals.handleLocalCommand("help", core, opts, ctx, shellState);
     expect(bareHelp?.output).toContain("Kuzushi");
     expect(bareHelp?.output).toContain("use sast");
+  });
+
+  it("routes focused-module resume with an explicit run id", async () => {
+    const { core, module, executeTool } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = createShellState(module.tools.map((tool) => tool.name));
+    const ctx = { focusedModule: "sast" };
+
+    const result = __shellInternals.handleLocalCommand("resume run-123", core, opts, ctx, {
+      ...shellState,
+      focusedModule: "sast",
+    });
+
+    expect(result?.executedToolName).toBe("sast:scan");
+    const output = await result?.asyncExecute?.();
+    expect(output).toMatchObject({ ok: true });
+    expect(executeTool).toHaveBeenCalledWith(
+      "sast:scan",
+      expect.objectContaining({ resume: "run-123" }),
+      expect.any(Object),
+    );
+  });
+
+  it("keeps checkpoint /resume distinct from live resume while the turn is pre-marked busy", async () => {
+    const { core, module, executeTool } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = createShellState(module.tools.map((tool) => tool.name));
+    const ctx = { focusedModule: "sast" };
+
+    const result = __shellInternals.handleLocalCommand("/resume run-456", core, opts, ctx, {
+      ...shellState,
+      focusedModule: "sast",
+      processing: true,
+    });
+
+    expect(result?.executedToolName).toBe("sast:scan");
+    await result?.asyncExecute?.();
+    expect(executeTool).toHaveBeenCalledWith(
+      "sast:scan",
+      expect.objectContaining({ resume: "run-456" }),
+      expect.any(Object),
+    );
+  });
+
+  it("reports no resume database for focused-module resume", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const dataDir = mkdtempSync(path.join(os.tmpdir(), "kuzushi-resume-empty-"));
+    tempDirs.push(dataDir);
+    opts.target = path.join(dataDir, "repo");
+    const shellState = createShellState(module.tools.map((tool) => tool.name));
+    const ctx = { focusedModule: "sast", dataDir };
+
+    const result = __shellInternals.handleLocalCommand("/resume", core, opts, ctx, {
+      ...shellState,
+      focusedModule: "sast",
+    });
+    const output = await result?.asyncExecute?.();
+    expect(output).toContain("No runs database found");
+  });
+
+  it("renders an ambiguous resume chooser when multiple candidates match", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const root = mkdtempSync(path.join(os.tmpdir(), "kuzushi-resume-many-"));
+    tempDirs.push(root);
+    opts.target = root;
+    const dataDir = path.join(root, ".kuzushi");
+    const { mkdirSync } = require("node:fs") as typeof import("node:fs");
+    mkdirSync(dataDir, { recursive: true });
+    const db = initDb(path.join(dataDir, "findings.sqlite3"));
+    const repo = path.resolve(root);
+    const scanOpts = {
+      severity: ["ERROR"],
+      excludePatterns: [],
+      fresh: false,
+      tasks: ["semgrep"],
+    };
+    createRun(db, "run-a", repo, baseConfig, scanOpts);
+    updateRunFindings(db, "run-a", []);
+    updateRunStatus(db, "run-a", "triaging");
+    createRun(db, "run-b", repo, baseConfig, scanOpts);
+    updateRunFindings(db, "run-b", []);
+    updateRunStatus(db, "run-b", "interrupted");
+    db.close();
+
+    const shellState = createShellState(module.tools.map((tool) => tool.name));
+    const ctx = { focusedModule: "sast", dataDir };
+    const result = __shellInternals.handleLocalCommand("/resume", core, opts, ctx, {
+      ...shellState,
+      focusedModule: "sast",
+    });
+    const output = await result?.asyncExecute?.();
+    expect(output).toContain("Multiple resumable runs match");
+    expect(output).toContain("run-a");
+    expect(output).toContain("run-b");
   });
 
   it("routes /ask through askQuestion with current screen context", async () => {
@@ -434,14 +548,23 @@ describe("local shell commands", () => {
       ctx,
       shellState,
     );
-    expect(optionsResult?.output).toContain("sast:threat-hunt options");
-    expect(optionsResult?.output).toContain("maxActors");
-    expect(optionsResult?.output).toContain("5");
+    expect(optionsResult?.output).toBe("Showing options for sast:threat-hunt.");
 
     shellState = optionsResult?.shellStateUpdater
       ? optionsResult.shellStateUpdater(shellState)
       : shellState;
+    expect(shellState.shellView).toBe("options");
     expect(shellState.lastUsedTool).toBe("sast:threat-hunt");
+    expect(shellState.optionsView?.toolName).toBe("sast:threat-hunt");
+    expect(shellState.optionsView?.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          optionName: "maxActors",
+          defaultLabel: "5",
+          isSet: false,
+        }),
+      ]),
+    );
 
     const setResult = __shellInternals.handleLocalCommand(
       "/set maxActors 7",
@@ -456,6 +579,15 @@ describe("local shell commands", () => {
       ? setResult.shellStateUpdater(shellState)
       : shellState;
     expect(shellState.moduleOptions["sast:threat-hunt"]).toEqual({ maxActors: 7 });
+    expect(shellState.optionsView?.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          optionName: "maxActors",
+          valueLabel: "* 7",
+          isSet: true,
+        }),
+      ]),
+    );
 
     const optionsAgain = __shellInternals.handleLocalCommand(
       "/options",
@@ -464,7 +596,18 @@ describe("local shell commands", () => {
       ctx,
       shellState,
     );
-    expect(optionsAgain?.output).toContain("* 7");
+    expect(optionsAgain?.output).toBe("Showing options for sast:threat-hunt.");
+    shellState = optionsAgain?.shellStateUpdater
+      ? optionsAgain.shellStateUpdater(shellState)
+      : shellState;
+    expect(shellState.optionsView?.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          optionName: "maxActors",
+          valueLabel: "* 7",
+        }),
+      ]),
+    );
   });
 
   it("routes focused bare show options through shell state", async () => {
@@ -488,12 +631,14 @@ describe("local shell commands", () => {
       ctx,
       shellState,
     );
-    expect(optionsResult?.output).toContain("sast:scan options");
+    expect(optionsResult?.output).toBe("Showing options for sast:scan.");
 
     shellState = optionsResult?.shellStateUpdater
       ? optionsResult.shellStateUpdater(shellState)
       : shellState;
+    expect(shellState.shellView).toBe("options");
     expect(shellState.lastUsedTool).toBe("sast:scan");
+    expect(shellState.optionsView?.toolName).toBe("sast:scan");
 
     const setResult = __shellInternals.handleLocalCommand(
       "set preset fast",
@@ -503,6 +648,258 @@ describe("local shell commands", () => {
       shellState,
     );
     expect(setResult?.output).toBe("Set sast:scan.preset = fast");
+
+    shellState = setResult?.shellStateUpdater
+      ? setResult.shellStateUpdater(shellState)
+      : shellState;
+    expect(shellState.optionsView?.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ optionName: "preset", valueLabel: "* fast" }),
+      ]),
+    );
+
+    const back = __shellInternals.handleLocalCommand("/back", core, opts, ctx, shellState);
+    expect(back?.output).toBe("Back to module home.");
+    shellState = back?.shellStateUpdater ? back.shellStateUpdater(shellState) : shellState;
+    expect(shellState.shellView).toBe("module");
+  });
+
+  it("routes slash show options to the options view", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    let shellState = {
+      ...createShellState(module.tools.map((tool) => tool.name)),
+      focusedModule: "sast" as const,
+      shellView: "module" as const,
+    };
+    const ctx = { focusedModule: "sast" };
+
+    const result = __shellInternals.handleLocalCommand(
+      "/show options",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+
+    expect(result?.output).toBe("Showing options for sast:scan.");
+    shellState = result?.shellStateUpdater ? result.shellStateUpdater(shellState) : shellState;
+    expect(shellState.shellView).toBe("options");
+    expect(shellState.optionsView?.toolName).toBe("sast:scan");
+  });
+
+  it("opens the SAST task selector and stores blocked task options", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    let shellState = {
+      ...createShellState(module.tools.map((tool) => tool.name)),
+      focusedModule: "sast" as const,
+      shellView: "module" as const,
+    };
+    const ctx = { focusedModule: "sast" };
+
+    const open = __shellInternals.handleLocalCommand("/tasks", core, opts, ctx, shellState);
+    expect(open?.output).toContain("Showing SAST task selection");
+    shellState = open?.shellStateUpdater ? open.shellStateUpdater(shellState) : shellState;
+    expect(shellState.shellView).toBe("sast-tasks");
+    expect(shellState.lastUsedTool).toBe("sast:scan");
+
+    const block = __shellInternals.handleLocalCommand(
+      "/task block codeql",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(block?.output).toContain("Blocked");
+    expect(block?.output).toContain("blocked");
+    shellState = block?.shellStateUpdater ? block.shellStateUpdater(shellState) : shellState;
+    expect(shellState.moduleOptions["sast:scan"]?.disabledTasks).toEqual(["codeql"]);
+
+    const allow = __shellInternals.handleLocalCommand(
+      "/task allow codeql",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(allow?.output).toContain("Allowed");
+    shellState = allow?.shellStateUpdater ? allow.shellStateUpdater(shellState) : shellState;
+    expect(shellState.moduleOptions["sast:scan"]?.disabledTasks).toBeUndefined();
+
+    const toggle = __shellInternals.handleLocalCommand(
+      "/task toggle codeql",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(toggle?.output).toContain("Blocked SAST task capability: codeql");
+    shellState = toggle?.shellStateUpdater ? toggle.shellStateUpdater(shellState) : shellState;
+    expect(shellState.moduleOptions["sast:scan"]?.disabledTasks).toEqual(["codeql"]);
+
+    const required = __shellInternals.handleLocalCommand(
+      "/task toggle context-gathering",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(required?.output).toContain("required infrastructure");
+    expect(required?.shellStateUpdater).toBeUndefined();
+  });
+
+  it("routes bare SAST task selector verbs while inside /tasks", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    let shellState = {
+      ...createShellState(module.tools.map((tool) => tool.name)),
+      focusedModule: "sast" as const,
+      shellView: "sast-tasks" as const,
+    };
+    const ctx = { focusedModule: "sast" };
+
+    const block = __shellInternals.handleLocalCommand("block ssrf", core, opts, ctx, shellState);
+    expect(block?.output).toContain("Blocked SAST task capability: ssrf");
+    shellState = block?.shellStateUpdater ? block.shellStateUpdater(shellState) : shellState;
+    expect(shellState.moduleOptions["sast:scan"]?.disabledTasks).toEqual(["ssrf"]);
+
+    const mode = __shellInternals.handleLocalCommand("mode", core, opts, ctx, shellState);
+    expect(mode?.output).toContain("manual allowlist");
+    shellState = mode?.shellStateUpdater ? mode.shellStateUpdater(shellState) : shellState;
+    expect(shellState.moduleOptions["sast:scan"]?.taskMode).toBe("manual");
+
+    const reset = __shellInternals.handleLocalCommand("reset", core, opts, ctx, shellState);
+    expect(reset?.output).toContain("SAST task selection reset");
+    shellState = reset?.shellStateUpdater ? reset.shellStateUpdater(shellState) : shellState;
+    expect(shellState.moduleOptions["sast:scan"]).toBeUndefined();
+  });
+
+  it("sets SAST task mode and exposes it in show options", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    let shellState = {
+      ...createShellState(module.tools.map((tool) => tool.name)),
+      focusedModule: "sast" as const,
+      shellView: "sast-tasks" as const,
+      tuneSnapshot: {
+        tasks: ["semgrep"],
+        verify: false,
+        autoPatch: false,
+        triageConcurrency: 2,
+        model: "anthropic:claude-sonnet-4-6",
+      },
+    };
+    const ctx = { focusedModule: "sast" };
+
+    const mode = __shellInternals.handleLocalCommand(
+      "/task mode manual",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(mode?.output).toContain("manual allowlist");
+    shellState = mode?.shellStateUpdater ? mode.shellStateUpdater(shellState) : shellState;
+    expect(shellState.moduleOptions["sast:scan"]?.taskMode).toBe("manual");
+    expect(shellState.moduleOptions["sast:scan"]?.tasks).toEqual(["semgrep"]);
+
+    const options = __shellInternals.handleLocalCommand("/options", core, opts, ctx, shellState);
+    expect(options?.output).toBe("Showing options for sast:scan.");
+    shellState = options?.shellStateUpdater ? options.shellStateUpdater(shellState) : shellState;
+    expect(shellState.shellView).toBe("options");
+    expect(shellState.optionsView?.taskSummary?.stateLine).toContain("manual allowlist");
+    expect(shellState.optionsView?.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          optionName: "taskMode",
+          valueLabel: "* manual",
+          description: expect.stringContaining("Use /tasks to edit"),
+        }),
+        expect.objectContaining({
+          optionName: "disabledTasks",
+          valueLabel: "none",
+          description: expect.stringContaining("Use /tasks to edit"),
+        }),
+      ]),
+    );
+    expect(shellState.optionsView?.tip).toContain("tip: use /tasks");
+
+    const reset = __shellInternals.handleLocalCommand("/task reset", core, opts, ctx, shellState);
+    shellState = reset?.shellStateUpdater ? reset.shellStateUpdater(shellState) : shellState;
+    expect(shellState.moduleOptions["sast:scan"]).toBeUndefined();
+  });
+
+  it("shows and stores synthetic model options for focused modules", async () => {
+    const { core } = await createMockCore();
+    const opts = createShellOptionsWithConfig({
+      ...baseConfig,
+      agentRuntimeBackend: "claude",
+    });
+    let shellState = {
+      ...createShellState(core.registry.allTools().map(({ tool }) => tool.name)),
+      focusedModule: "taint-iris" as const,
+      shellView: "module" as const,
+    };
+    const ctx = { focusedModule: "taint-iris" };
+
+    const optionsResult = __shellInternals.handleLocalCommand(
+      "show options",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(optionsResult?.output).toBe("Showing options for taint-iris:hunt.");
+
+    shellState = optionsResult?.shellStateUpdater
+      ? optionsResult.shellStateUpdater(shellState)
+      : shellState;
+    expect(shellState.optionsView?.toolName).toBe("taint-iris:hunt");
+    expect(shellState.optionsView?.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          optionName: "model",
+          description: expect.stringContaining("Claude accepts bare Claude model ids"),
+        }),
+      ]),
+    );
+
+    const setResult = __shellInternals.handleLocalCommand(
+      "set model claude-opus-4-6",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(setResult?.output).toBe("Set taint-iris:hunt.model = claude-opus-4-6");
+
+    shellState = setResult?.shellStateUpdater
+      ? setResult.shellStateUpdater(shellState)
+      : shellState;
+    expect(shellState.moduleOptions["taint-iris:hunt"]).toEqual({
+      model: "claude-opus-4-6",
+    });
+
+    const optionsAgain = __shellInternals.handleLocalCommand(
+      "show options",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(optionsAgain?.output).toBe("Showing options for taint-iris:hunt.");
+    shellState = optionsAgain?.shellStateUpdater
+      ? optionsAgain.shellStateUpdater(shellState)
+      : shellState;
+    expect(shellState.optionsView?.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          optionName: "model",
+          valueLabel: "* claude-opus-4-6",
+        }),
+      ]),
+    );
   });
 
   it("prompts editor actions use rendered prompt names", async () => {
@@ -530,7 +927,7 @@ describe("local shell commands", () => {
       shellState,
     );
     expect(showDefault?.output).toContain("Prompt for context:build (context)");
-    expect(showDefault?.output).toContain("CONTEXT_PROMPT  source=default");
+    expect(showDefault?.output).toContain("source=default");
 
     const setInline = __shellInternals.handleLocalCommand(
       'set build "Inline smoke override"',
@@ -563,10 +960,11 @@ describe("local shell commands", () => {
       ctx,
       shellState,
     );
-    expect(showInline?.output).toContain("CONTEXT_PROMPT  source=inline");
+    expect(showInline?.output).toContain("source=inline");
 
     const reset = __shellInternals.handleLocalCommand("reset build", core, opts, ctx, shellState);
-    expect(reset?.output).toContain("Reset context:build.CONTEXT_PROMPT to default");
+    expect(reset?.output).toContain("context:build.CONTEXT_PROMPT");
+    expect(reset?.output).toContain("to default");
     shellState = reset?.shellStateUpdater ? reset.shellStateUpdater(shellState) : shellState;
     expect(shellState.moduleOptions["context:build"]).toBeUndefined();
     expect(shellState.promptsEditor?.lastSaved).toBeUndefined();
@@ -668,6 +1066,37 @@ describe("local shell commands", () => {
     // And don't demote an already-correct module view.
     expect(__shellInternals.reconcileShellView("findings", "sast")).toBe("findings");
     expect(__shellInternals.reconcileShellView("module", "sast")).toBe("module");
+  });
+
+  it("bare dispatcher use exits a stale threat view into module home", () => {
+    expect(__shellInternals.reconcileShellViewAfterFocusChange("threats", "context")).toBe(
+      "module",
+    );
+    expect(__shellInternals.reconcileShellViewAfterFocusChange("catalog", "context")).toBe(
+      "module",
+    );
+    expect(__shellInternals.reconcileShellViewAfterFocusChange("threats", null)).toBe("threats");
+  });
+
+  it("plain informational output exits stale threat views", () => {
+    expect(
+      __shellInternals.reconcileShellViewAfterPlainOutput("threats", "context", "show modules"),
+    ).toBe("module");
+    expect(
+      __shellInternals.reconcileShellViewAfterPlainOutput("threats", "context", "show moudles"),
+    ).toBe("module");
+    expect(
+      __shellInternals.reconcileShellViewAfterPlainOutput("threats", null, "show modules"),
+    ).toBe("catalog");
+    expect(
+      __shellInternals.reconcileShellViewAfterPlainOutput("threats", "context", "/threats stride"),
+    ).toBe("threats");
+    expect(
+      __shellInternals.reconcileShellViewAfterPlainOutput("threats", "context", "/context regen"),
+    ).toBe("threats");
+    expect(
+      __shellInternals.reconcileShellViewAfterPlainOutput("threats", "context", "/context dfd"),
+    ).toBe("threats");
   });
 
   it("/back returns to module home from threat and findings views", async () => {
@@ -1210,6 +1639,29 @@ describe("context system", () => {
     expect(result?.asyncExecute).toBeTypeOf("function");
   });
 
+  it("/show prompts exits a stale threat view back to the focused module", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = {
+      ...createShellState(module.tools.map((t) => t.name)),
+      focusedModule: "context" as const,
+      shellView: "threats" as const,
+      threatTab: "summary" as const,
+    };
+    const ctx = { focusedModule: "context" };
+
+    const result = __shellInternals.handleLocalCommand(
+      "/show prompts",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+
+    expect(result?.output).toContain("CONTEXT_PROMPT");
+    expect(result?.shellStateUpdater?.(shellState).shellView).toBe("module");
+  });
+
   it("/threats dfd falls back to saved context snapshot", async () => {
     const { core, module } = await createMockCore();
     const repoRoot = mkdtempSync(path.join(os.tmpdir(), "kuzushi-threats-"));
@@ -1586,7 +2038,7 @@ describe("slash suggestions", () => {
 
   it("narrows by prefix", () => {
     expect(listShellSuggestions("/us")).toEqual(["/use <module>"]);
-    expect(listShellSuggestions("/ta")).toEqual(["/target <path>"]);
+    expect(listShellSuggestions("/tar")).toEqual(["/target <path>"]);
   });
 
   it("returns multiple matches when the prefix is ambiguous", () => {
@@ -1619,7 +2071,7 @@ describe("slash suggestions", () => {
   });
 
   it("firstShellSuggestion returns the top match or null", () => {
-    expect(firstShellSuggestion("/ta")).toBe("/target <path>");
+    expect(firstShellSuggestion("/tar")).toBe("/target <path>");
     expect(firstShellSuggestion("/")).toBe("/help");
     expect(firstShellSuggestion("/zzz-nope")).toBeNull();
     expect(firstShellSuggestion("not a slash")).toBeNull();

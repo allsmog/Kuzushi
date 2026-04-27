@@ -145,6 +145,25 @@ describe("createCoreSastModule tool execution", () => {
         }),
       }),
     );
+
+    await taintIrisTool.execute(
+      { target: "/tmp/repo" },
+      { ...ctx, toolModel: "anthropic:claude-opus-4-6" },
+    );
+    expect(runPipelineMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          taskConfig: expect.objectContaining({
+            "taint-cwe-select": expect.objectContaining({
+              model: "anthropic:claude-opus-4-6",
+            }),
+            "taint-iris": expect.objectContaining({
+              model: "anthropic:claude-opus-4-6",
+            }),
+          }),
+        }),
+      }),
+    );
   });
 });
 

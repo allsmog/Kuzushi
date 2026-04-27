@@ -47,6 +47,24 @@ describe("parseToolArgs", () => {
     });
   });
 
+  it("parses resume flags without treating them as targets", () => {
+    expect(parseToolArgs(["--resume"])).toEqual({ resume: true });
+    expect(parseToolArgs(["--resume=run-123"])).toEqual({ resume: "run-123" });
+    expect(parseToolArgs(["resume=true"])).toEqual({ resume: true });
+    expect(parseToolArgs(["resume=run-123"])).toEqual({ resume: "run-123" });
+  });
+
+  it("keeps positional targets alongside resume flags", () => {
+    expect(parseToolArgs(["./repo", "--resume"])).toEqual({
+      target: "./repo",
+      resume: true,
+    });
+    expect(parseToolArgs(["--resume=run-123", "./repo"])).toEqual({
+      resume: "run-123",
+      target: "./repo",
+    });
+  });
+
   it("handles empty args", () => {
     expect(parseToolArgs([])).toEqual({});
   });

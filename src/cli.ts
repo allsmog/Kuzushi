@@ -1123,6 +1123,7 @@ program
   .option("--quiet", "Suppress output (exit code only)", false)
   .option("--input <json>", "Tool input as JSON string")
   .option("--target <path>", "Target override (repo path, host, URL)")
+  .option("--resume [runId]", "Resume latest checkpoint or the specified run id")
   .option("--workspace <id>", "Workspace to write results to")
   .option("--load <modules>", "Additional modules to load (comma-separated)")
   .option("--model <model>", "Model override for AI operations")
@@ -1149,6 +1150,7 @@ Examples:
           quiet?: boolean;
           input?: string;
           target?: string;
+          resume?: string | boolean;
           workspace?: string;
           load?: string;
           model?: string;
@@ -1181,6 +1183,9 @@ Examples:
         // Target from positional arg or --target
         if (opts.target && !input.target) {
           input.target = opts.target;
+        }
+        if (opts.resume !== undefined && input.resume === undefined) {
+          input.resume = opts.resume === true ? true : opts.resume;
         }
 
         // Resolve config

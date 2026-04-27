@@ -287,17 +287,18 @@ function shortPath(abs: string): string {
 }
 
 export function formatEffectivePromptLine(e: EffectivePrompt): string {
+  const promptKey = `\`${e.promptKey}\``;
   switch (e.source) {
     case "default":
-      return `${e.promptKey}  source=default  (no override set)`;
+      return `${promptKey}  source=default  (no override set)`;
     case "unset":
-      return `${e.promptKey}  source=unset  path=${e.filePath ? shortPath(e.filePath) : "?"}  (file missing)`;
+      return `${promptKey}  source=unset  path=${e.filePath ? shortPath(e.filePath) : "?"}  (file missing)`;
     case "inline": {
       const preview = (e.resolved ?? "").slice(0, 80).replace(/\n/g, " ");
-      return `${e.promptKey}  source=inline  ${e.byteLen ?? 0} bytes\n  "${preview}${(e.resolved ?? "").length > 80 ? "\u2026" : ""}"`;
+      return `${promptKey}  source=inline  ${e.byteLen ?? 0} bytes\n  "${preview}${(e.resolved ?? "").length > 80 ? "\u2026" : ""}"`;
     }
     case "file":
-      return `${e.promptKey}  source=file  ${e.byteLen ?? 0} bytes  path=${shortPath(e.filePath ?? "")}`;
+      return `${promptKey}  source=file  ${e.byteLen ?? 0} bytes  path=${shortPath(e.filePath ?? "")}`;
   }
 }
 

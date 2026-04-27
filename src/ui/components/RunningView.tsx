@@ -7,12 +7,13 @@
  * routing shell.
  */
 
-import { Box, Static } from "ink";
+import { Box, Static, Text } from "ink";
 import React from "react";
+import { formatCost, formatDuration } from "../format.js";
 import { shallowEqual, useUISelector } from "../hooks.js";
 import { Ratchet } from "../primitives/Ratchet.js";
-import { TabBar } from "../primitives/TabBar.js";
 import type { ResultLine as ResultLineData, UIStore } from "../state.js";
+import { SPACING, tokens } from "../tokens.js";
 import { HeartbeatStrip } from "./AgentActivity.js";
 import type { CommandResult, ReplCommand } from "./CommandInput.js";
 import { CommandInput } from "./CommandInput.js";
@@ -32,12 +33,6 @@ interface RunningViewProps {
 
 /** How many recent results stay in the live PipelineIndicator area vs Static. */
 const LIVE_RESULT_COUNT = 3;
-
-const TABS = [
-  { id: "pipeline", label: "Pipeline", shortcut: "1" },
-  { id: "findings", label: "Findings", shortcut: "2" },
-  { id: "cost", label: "Cost", shortcut: "3" },
-] as const;
 
 export const RunningView = React.memo(function RunningView({
   store,
@@ -71,7 +66,7 @@ export const RunningView = React.memo(function RunningView({
           {(item) => <ResultLine key={item._key} data={item as ResultLineData} />}
         </Static>
 
-        <TabBar tabs={[...TABS]} activeId={scanView} />
+        <RunSummaryHeader store={store} scanView={scanView} />
 
         {scanView === "pipeline" && <PipelineTab store={store} liveResults={liveResults} />}
         {scanView === "findings" && <FindingsTab store={store} />}
@@ -84,6 +79,59 @@ export const RunningView = React.memo(function RunningView({
     </Box>
   );
 });
+
+function RunSummaryHeader({
+  store,
+  scanView,
+}: {
+  store: UIStore;
+  scanView: "pipeline" | "findings" | "cost";
+}): React.ReactElement {
+  const state = useUISelector(
+    store,
+    (s) => ({
+      repoName: s.repoName,
+      phase: s.phase,
+      tasks: s.tasks,
+      stages: s.stages,
+      totalFindings: s.totalFindings,
+      runningCostUsd: s.runningCostUsd,
+      pipelineStartedAt: s.pipelineStartedAt,
+    }),
+    shallowEqual,
+  );
+  const activeStage = state.stages.find((stage) => stage.status === "active");
+  const activeTask = activeStage?.subTasks.find((task) => task.status === "active");
+  const label = state.repoName || "scan";
+  const work = activeTask?.label ?? activeStage?.detail ?? activeStage?.label ?? state.phase;
+  const elapsed = state.pipelineStartedAt
+    ? formatDuration(Date.now() - state.pipelineStartedAt)
+    : "0s";
+  const taskCount = state.tasks.length;
+  const findings = `${state.totalFindings} finding${state.totalFindings === 1 ? "" : "s"}`;
+  const viewLabel =
+    scanView === "pipeline" ? "pipeline" : scanView === "findings" ? "findings" : "cost";
+
+  return (
+    <Box marginBottom={SPACING.sm}>
+      <Text>
+        {tokens.accent("●")} {tokens.label(label)}
+        {tokens.muted(" · ")}
+        {tokens.value(work)}
+        {tokens.muted(" · ")}
+        {tokens.muted(`${taskCount} task${taskCount === 1 ? "" : "s"}`)}
+        {tokens.muted(" · ")}
+        {tokens.muted(elapsed)}
+        {tokens.muted(" · ")}
+        {tokens.value(findings)}
+        {tokens.muted(" · ")}
+        {tokens.value(formatCost(state.runningCostUsd))}
+        {tokens.muted(" · view ")}
+        {tokens.value(viewLabel)}
+      </Text>
+    </Box>
+  );
+}
 
 function RunningBottomDock({
   store,

@@ -35,6 +35,7 @@ import { formatCost, formatDuration, truncateEnd } from "../format.js";
 import { BLACK_CIRCLE, STEP_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { Table } from "../primitives/Table.js";
+import { normalizeSeverity, type Severity, severityChalk, severityStyle } from "../severity.js";
 import type { AgentActivityLine, ModuleRunArtifact, ModuleRunStep, ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { actorLabelFromFingerprint, actorShortId, toCompactRow } from "../transcript-format.js";
@@ -57,7 +58,8 @@ interface ModuleRunViewProps {
 }
 
 const MAX_EVIDENCE_ROWS = 8;
-const MAX_FINDING_ROWS = 5;
+const MAX_LIVE_FINDING_ROWS = 5;
+const MAX_COMPLETED_FINDING_ROWS = 8;
 
 export function ModuleRunView({
   shell,
@@ -65,17 +67,26 @@ export function ModuleRunView({
   agentActivity,
   nowMs,
 }: ModuleRunViewProps): React.ReactElement {
+  const run = shell.moduleRun;
+  const liveControls = run?.status === "running" && run.liveControl === "pause-resume";
   useRegisterKeybindings([
     { keys: "1–4", label: "drill into actor" },
+    ...(liveControls
+      ? [
+          { keys: "p", label: "pause queued work", secondary: true },
+          { keys: "r", label: "resume queued work", secondary: true },
+        ]
+      : []),
     { keys: "b", label: "back", secondary: true },
     { keys: "Ctrl+C", label: "interrupt", secondary: true },
   ]);
 
-  const run = shell.moduleRun;
   const moduleId = run?.moduleId ?? shell.focusedModule ?? "module";
   const breadcrumb = `kuzushi/${moduleId}/run`;
 
-  const elapsed = run ? formatDuration(Math.max(0, (nowMs ?? Date.now()) - run.startedAtMs)) : "0s";
+  const now = nowMs ?? Date.now();
+  const elapsedMs = run ? Math.max(0, (run.completedAtMs ?? now) - run.startedAtMs) : 0;
+  const elapsed = formatDuration(elapsedMs);
   const status = run
     ? run.status === "running"
       ? `${elapsed} · running`
@@ -91,7 +102,9 @@ export function ModuleRunView({
       <RuleHeader breadcrumb={breadcrumb} status={status} />
       {run ? (
         <>
+          {liveControls ? <LiveControlsHint /> : null}
           <ToolHeader run={run} />
+          <TerminalRunBanner run={run} findings={findings} elapsed={elapsed} />
           <StepsBlock steps={run.steps} />
           {run.moduleId === "threat-hunt" ? (
             <ActorsBlock agentActivity={agentActivity} run={run} />
@@ -110,15 +123,78 @@ export function ModuleRunView({
   );
 }
 
+function LiveControlsHint(): React.ReactElement {
+  return (
+    <Box marginTop={SPACING.xs} marginBottom={SPACING.xs}>
+      <Text>{tokens.muted("p pause · r resume · Ctrl+C abort")}</Text>
+    </Box>
+  );
+}
+
 function ToolHeader({ run }: { run: NonNullable<ShellState["moduleRun"]> }): React.ReactElement {
   const label = run.displayName ?? run.toolName ?? `${run.moduleId}:run`;
   const args = run.inputSummary ? `(${truncateEnd(run.inputSummary, 56)})` : "";
+  const glyph =
+    run.status === "running"
+      ? tokens.accent(BLACK_CIRCLE)
+      : run.status === "done"
+        ? tokens.success(STEP_GLYPH.done)
+        : run.status === "aborted"
+          ? tokens.muted("·")
+          : tokens.danger("✗");
   return (
-    <Box marginBottom={SPACING.sm}>
+    <Box flexDirection="column" marginBottom={SPACING.sm}>
       <Text>
-        {tokens.accent(BLACK_CIRCLE)} {tokens.label(label)}
+        {glyph} {tokens.label(label)}
         {args ? tokens.muted(args) : null}
       </Text>
+      {run.status === "running" && (run.activeTaskLabel || run.findingCount != null) ? (
+        <Text>
+          {tokens.muted("  ")}
+          {run.activeTaskLabel ? tokens.muted(`task ${run.activeTaskLabel}`) : null}
+          {run.activeTaskLabel && run.findingCount != null ? tokens.muted(" · ") : null}
+          {run.findingCount != null
+            ? tokens.value(`${run.findingCount} finding${run.findingCount === 1 ? "" : "s"}`)
+            : null}
+        </Text>
+      ) : null}
+    </Box>
+  );
+}
+
+function TerminalRunBanner({
+  run,
+  findings,
+  elapsed,
+}: {
+  run: NonNullable<ShellState["moduleRun"]>;
+  findings: ReadonlyArray<ActorViewFinding>;
+  elapsed: string;
+}): React.ReactElement {
+  if (run.status === "running") return <Box />;
+  const label = run.displayName ?? run.toolName ?? `${run.moduleId}:run`;
+  const findingCount = run.findingCount ?? scopedFindings(run, findings).length;
+  const findingText = `${findingCount} finding${findingCount === 1 ? "" : "s"}`;
+  const cost = run.costUsd != null ? formatCost(run.costUsd) : "—";
+  const outcome =
+    run.status === "done" ? "complete" : run.status === "aborted" ? "aborted" : "failed";
+  const color =
+    run.status === "done" ? tokens.success : run.status === "aborted" ? tokens.warn : tokens.danger;
+  const scanOnlyNote =
+    run.postProcessMode === "scan-only" && run.status === "done" && findingCount > 0
+      ? "scan-only: saved as needs_review; triage pending"
+      : null;
+
+  return (
+    <Box flexDirection="column" marginBottom={SPACING.sm}>
+      <Text>
+        {color(`${label} ${outcome}`)} {tokens.muted("·")} {tokens.value(findingText)}
+        {tokens.muted(" · ")}
+        {tokens.value(cost)}
+        {tokens.muted(" · ")}
+        {tokens.value(elapsed)}
+      </Text>
+      {scanOnlyNote ? <Text>{tokens.muted(`  ${scanOnlyNote}`)}</Text> : null}
     </Box>
   );
 }
@@ -305,21 +381,20 @@ function FindingsBlock({
   findings: ReadonlyArray<ActorViewFinding>;
 }): React.ReactElement {
   if (!findings || findings.length === 0) return <Box />;
-  // Prefer findings stamped to actors of *this* module run; fall back to all.
-  const scoped =
-    run.moduleId === "threat-hunt"
-      ? findings.filter((f) => f.actorFingerprint?.startsWith("threat-hunt:"))
-      : findings;
-  const slice = scoped.slice(0, MAX_FINDING_ROWS).map((f) => ({
-    severity: f.severity,
-    id: f.fingerprint.slice(0, 8),
-    path: `${f.filePath}:${f.startLine}`,
-    title: f.title ?? f.message ?? f.rationale ?? "(no title)",
+  const scoped = scopedFindings(run, findings);
+  const maxRows = run.status === "running" ? MAX_LIVE_FINDING_ROWS : MAX_COMPLETED_FINDING_ROWS;
+  const ordered = aliasedFindingRows(scoped);
+  const slice = ordered.slice(0, maxRows).map(({ alias, finding }) => ({
+    severity: severityTokenForFinding(finding),
+    id: alias,
+    path: `${finding.filePath}:${finding.startLine}`,
+    title: findingHeadline(finding),
   }));
   if (slice.length === 0) return <Box />;
+  const hidden = Math.max(0, ordered.length - slice.length);
   return (
     <Section title="findings">
-      <Box paddingLeft={SPACING.md}>
+      <Box flexDirection="column" paddingLeft={SPACING.md}>
         <Table
           showHeader={false}
           divider={false}
@@ -332,19 +407,72 @@ function FindingsBlock({
           ]}
           rows={slice}
         />
+        {hidden > 0 ? <Text>{tokens.muted(`+${hidden} more`)}</Text> : null}
       </Box>
     </Section>
   );
 }
 
+function scopedFindings(
+  run: NonNullable<ShellState["moduleRun"]>,
+  findings: ReadonlyArray<ActorViewFinding>,
+): ActorViewFinding[] {
+  if (run.moduleId !== "threat-hunt") return [...findings];
+  return findings.filter((f) => f.actorFingerprint?.startsWith("threat-hunt:"));
+}
+
+function aliasedFindingRows(
+  findings: ReadonlyArray<ActorViewFinding>,
+): Array<{ alias: string; finding: ActorViewFinding }> {
+  return [...findings].sort(compareFindingsForDisplay).map((finding, index) => ({
+    alias: `F-${String(index + 1).padStart(4, "0")}`,
+    finding,
+  }));
+}
+
+const SEVERITY_RANK: Record<Severity, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+  info: 4,
+};
+
+function compareFindingsForDisplay(a: ActorViewFinding, b: ActorViewFinding): number {
+  const severityDelta = SEVERITY_RANK[displaySeverity(a)] - SEVERITY_RANK[displaySeverity(b)];
+  if (severityDelta !== 0) return severityDelta;
+  return a.fingerprint.localeCompare(b.fingerprint);
+}
+
+function displaySeverity(finding: ActorViewFinding): Severity {
+  return normalizeSeverity(finding.displaySeverity ?? finding.severity);
+}
+
+function severityTokenForFinding(finding: ActorViewFinding): string {
+  const severity = displaySeverity(finding);
+  const style = severityStyle(severity);
+  return severityChalk(severity)(`${style.glyph} ${style.label}`);
+}
+
+const SCAN_ONLY_PLACEHOLDER_RE = /captured in scan-only mode/i;
+
+function findingHeadline(finding: ActorViewFinding): string {
+  const raw = finding.title ?? finding.message ?? finding.rationale;
+  if (raw && !SCAN_ONLY_PLACEHOLDER_RE.test(raw)) return raw;
+  return finding.ruleId ?? finding.taskId ?? "scan-only finding";
+}
+
 function MetaRow({ run }: { run: NonNullable<ShellState["moduleRun"]> }): React.ReactElement {
   const cost = run.costUsd != null ? formatCost(run.costUsd) : "—";
+  const model = run.model ? truncateEnd(run.model, 44) : "default";
   return (
-    <Section title="cost · prompts">
+    <Section title="run facts">
       <Box paddingLeft={SPACING.md}>
         <Text>
           {tokens.muted("cost     ")}
           {tokens.value(cost)}
+          {tokens.muted("    model ")}
+          {tokens.value(model)}
           {tokens.muted("    prompts ")}
           {tokens.value("kuzushi/<module>/prompts")}
         </Text>

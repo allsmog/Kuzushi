@@ -27,14 +27,17 @@ import type { ReportMode } from "../../contracts.js";
 import { registerShutdownHook } from "../../lifecycle.js";
 import { printQualityGateResult } from "../../report.js";
 import { configureRateLimitRegistry } from "../../scheduler/index.js";
+import type { PipelineRunOrigin } from "../../store.js";
 import {
   createRun,
   defaultDbPath,
   deleteFindingsForRepo,
   getLatestResumableRun,
   getRun,
+  hasRunCheckpoint,
   initDb,
   markStaleRunsAborted,
+  updateRunStatus,
 } from "../../store.js";
 import type { KuzushiConfig, ScanOpts } from "../../types.js";
 import type { UIMode, UIStore } from "../../ui/state.js";
@@ -76,6 +79,7 @@ export interface PipelineParams {
   uiStore?: UIStore;
   signal?: AbortSignal;
   returnModeOnComplete?: UIMode;
+  origin?: PipelineRunOrigin;
 }
 
 export interface PipelineResult {
@@ -288,7 +292,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
 
   if (!resumeRunId) {
     markStaleRunsAborted(db, runRepoId);
-    createRun(db, runId, runRepoId, config, scanOpts);
+    createRun(db, runId, runRepoId, config, scanOpts, params.origin);
   }
 
   const context = {
@@ -353,6 +357,8 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
       ...(pipelineAbort ? [pipelineAbort] : []),
     ]);
     if (outcome.kind === "aborted") {
+      const status = hasRunCheckpoint(db, runId) ? "interrupted" : "aborted";
+      updateRunStatus(db, runId, status);
       if (params.uiStore) {
         if (shouldShowPipelineNotice(params.uiStore, params.returnModeOnComplete)) {
           params.uiStore.addNotice({
@@ -498,7 +504,11 @@ export function getScanPlanSummary(
   taskRegistry?: Awaited<ReturnType<typeof createDefaultTaskRegistry>>,
 ): ScanPlanSummary {
   const taskIds = scanOpts.tasks ?? config.tasks ?? ["semgrep"];
-  const taskPlan = taskRegistry ? resolveInitialTaskPlan(taskRegistry, taskIds, config) : undefined;
+  const taskPlan = taskRegistry
+    ? resolveInitialTaskPlan(taskRegistry, taskIds, config, {
+        disabledTasks: scanOpts.disabledTasks,
+      })
+    : undefined;
   const resolvedTaskIds = taskPlan
     ? taskPlan.enabledTaskIds.filter((id) => !taskIds.includes(id))
     : [];
@@ -571,7 +581,21 @@ function resolveResumeRunId(
   }
 
   if (run.status === "complete") {
-    throw new CliUsageError(`run "${resumeRunId}" is already complete and cannot be resumed.`);
+    throw new CliUsageError(
+      `run "${resumeRunId}" is already complete. Use replay or rerun instead of resume.`,
+    );
+  }
+
+  if (run.status === "error" || run.status === "aborted") {
+    throw new CliUsageError(
+      `run "${resumeRunId}" ended as ${run.status} and has no resumable checkpoint.`,
+    );
+  }
+
+  if (!hasRunCheckpoint(db, resumeRunId)) {
+    throw new CliUsageError(
+      `run "${resumeRunId}" has no checkpoint. Re-run without --resume to start fresh.`,
+    );
   }
 
   return resumeRunId;

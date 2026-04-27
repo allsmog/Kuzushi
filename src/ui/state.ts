@@ -557,7 +557,10 @@ export type ShellView =
   | "module"
   | "findings"
   | "finding"
+  | "since"
   | "tune"
+  | "options"
+  | "sast-tasks"
   // Threat model uses one view with shell.threatTab selecting the sub-surface.
   | "threats"
   // Live Build — ContextBuildView renders the 5 phases of
@@ -741,6 +744,13 @@ export interface ShellModuleCard {
   lastRunAt?: number;
   /** Human-readable one-liner summary of the last run (e.g. "ran 2h · 4 tp"). */
   lastRunSummary?: string;
+  /** Best current run action surfaced by ModuleCatalog/ModuleHome. */
+  runState?: {
+    kind: "resume" | "complete";
+    runId: string;
+    summary: string;
+    actions: ReadonlyArray<string>;
+  };
   /** Tools this module exposes — pre-enumerated at shell init for ModuleHome. */
   toolSummaries?: ReadonlyArray<ShellModuleToolSummary>;
 }
@@ -779,6 +789,8 @@ export interface ModuleRunArtifact {
 export interface ModuleRunSlice {
   /** Module that owns this run (matches `shell.focusedModule`). */
   moduleId: string;
+  /** Presentation owner. Shell-owned runs keep the app in `mode="shell"`. */
+  source?: "shell";
   /** Run-id from the bus (mirrors `shell.activeRun?.runId` when known). */
   runId?: string;
   /** Tool currently running, e.g. `"threat-hunt:run"`. */
@@ -787,10 +799,22 @@ export interface ModuleRunSlice {
   displayName?: string;
   /** Pre-formatted input summary from the tool's `formatInput`, if any. */
   inputSummary?: string;
+  /** Live queue-level control support declared by the running tool. */
+  liveControl?: "pause-resume";
   /** Epoch ms the run started — drives the live elapsed counter. */
   startedAtMs: number;
+  /** Epoch ms when the run reached a terminal state; freezes elapsed rendering. */
+  completedAtMs?: number;
   /** Lifecycle status for the run as a whole. */
   status: "running" | "done" | "error" | "aborted";
+  /** Pipeline post-processing mode, when this run is pipeline-backed. */
+  postProcessMode?: "full" | "scan-only";
+  /** Currently active scan/DAG task label, if the run is pipeline-backed. */
+  activeTaskLabel?: string;
+  /** Aggregate findings observed for this run. */
+  findingCount?: number;
+  /** Explicit session model override used for this run, when set. */
+  model?: string;
   /** Step rows in display order (top-to-bottom). */
   steps: ReadonlyArray<ModuleRunStep>;
   /**
@@ -839,6 +863,22 @@ export interface PromptsEditorSlice {
   };
 }
 
+export interface OptionsViewSlice {
+  toolName: string;
+  rows: ReadonlyArray<{
+    optionName: string;
+    valueLabel: string;
+    defaultLabel: string;
+    description: string;
+    isSet: boolean;
+  }>;
+  taskSummary?: {
+    stateLine: string;
+    commands: string;
+  };
+  tip?: string;
+}
+
 export interface ShellModuleToolSummary {
   /** Fully qualified name, e.g. "sast:scan". */
   name: string;
@@ -848,6 +888,10 @@ export interface ShellModuleToolSummary {
   description: string;
   /** Tool runs in non-interactive / run mode. */
   headless: boolean;
+  /** Resume behavior declared by the module SDK. */
+  resumeMode?: "checkpoint" | "restart-only" | "none";
+  /** Live queue-level control support for an active run. */
+  liveControl?: "pause-resume";
   /**
    * True for DAG-internal nodes that should be filtered out of the default
    * ModuleHome tools table. Surfaces only via `/tools --all` or `/info <tool>`.
@@ -907,6 +951,8 @@ export interface ShellState {
   moduleRun?: ModuleRunSlice | null;
   /** Transient state for the PromptsEditorView's after-vim confirmation card. */
   promptsEditor?: PromptsEditorSlice | null;
+  /** Cached rows for the focused tool options view. */
+  optionsView?: OptionsViewSlice | null;
   /**
    * Cursor index into the (severity-sorted) loose-findings list rendered by
    * FindingsView. Driven by j/k/ArrowDown/ArrowUp/g/G/PgUp/PgDown at the
@@ -921,9 +967,11 @@ export interface ShellState {
    * terminal-size effect can thread the value through.
    */
   findingPageSize?: number;
+  /** Cursor into the SAST task selector rows. */
+  sastTaskCursor?: number;
   /** Active target. */
   target: string | null;
-  /** Workspace ID. */
+  /** Workspace display label. The execution workspace id stays in ShellOptions. */
   workspace: string | null;
   /** Narrow projection of the user's config used by the v2 Tune screen. */
   tuneSnapshot?: TuneSnapshot;
@@ -1094,6 +1142,16 @@ const DEFAULT_AGENT_ACTIVITY_TTL_SEC = 600; // 10 minutes
  */
 const MAX_MODULE_RUN_EVIDENCE = 32;
 
+function sameActivityDisplayLine(a: AgentActivityLine, b: AgentActivityLine): boolean {
+  return (
+    a.kind === b.kind &&
+    a.toolName === b.toolName &&
+    a.detail === b.detail &&
+    a.index === b.index &&
+    a.total === b.total
+  );
+}
+
 export class UIStore {
   private state: UIState;
   private listeners = new Set<Listener>();
@@ -1223,15 +1281,20 @@ export class UIStore {
    * of the last `MAX_MODULE_RUN_EVIDENCE` rows. Caller decides whether the
    * event belongs to the active run (we don't gate by toolName here).
    */
-  pushModuleRunActivity(line: AgentActivityLine): void {
+  pushModuleRunActivity(line: AgentActivityLine): boolean {
     const shell = this.state.shell;
-    if (!shell?.moduleRun) return;
+    if (!shell?.moduleRun) return false;
+    const previous = shell.moduleRun.evidenceTail[shell.moduleRun.evidenceTail.length - 1];
+    if (previous && sameActivityDisplayLine(previous, line)) {
+      return false;
+    }
     const next = [...shell.moduleRun.evidenceTail, line].slice(-MAX_MODULE_RUN_EVIDENCE);
     this.state = {
       ...this.state,
       shell: { ...shell, moduleRun: { ...shell.moduleRun, evidenceTail: next } },
     };
     this.notify();
+    return true;
   }
 
   /** Drop the active module run snapshot. Used on `/clear`. */
@@ -1305,17 +1368,12 @@ export class UIStore {
     this.notify();
   }
 
-  addAgentActivity(fingerprint: string, line: AgentActivityLine): void {
+  addAgentActivity(fingerprint: string, line: AgentActivityLine): boolean {
     const newMap = new Map(this.state.agentActivity);
     const lines = newMap.get(fingerprint) ?? [];
     const previous = lines[lines.length - 1];
-    if (
-      previous &&
-      previous.kind === line.kind &&
-      previous.toolName === line.toolName &&
-      previous.detail === line.detail
-    ) {
-      return;
+    if (previous && sameActivityDisplayLine(previous, line)) {
+      return false;
     }
     // Keep only the latest 4 activity lines per finding to avoid clutter.
     const updated = [...lines, line].slice(-4);
@@ -1332,6 +1390,7 @@ export class UIStore {
 
     this.state = { ...this.state, agentActivity: newMap };
     this.notify();
+    return true;
   }
 
   clearAgentActivity(fingerprint: string): void {

@@ -94,6 +94,7 @@ export const PIPELINE_RUN_STATUSES = [
   "verifying",
   "poc-harnessing",
   "dynamic-analyzing",
+  "interrupted",
   "complete",
   "error",
   "aborted",

@@ -21,6 +21,14 @@
  * Tests inject `{ write: (line) => ... }` to capture output.
  */
 import chalk from "chalk";
+import {
+  buildSastTaskRows,
+  buildSastTaskSelectionSummary,
+  formatSastTaskLegend,
+  formatSastTaskStateLine,
+  readDisabledSastTasks,
+  SAST_SCAN_TOOL_NAME,
+} from "../copilot/sast-task-selection.js";
 import { describeEmptyState, type EmptyStateContext, type EmptyStateKind } from "./error-format.js";
 import {
   colorVerdict,
@@ -250,7 +258,11 @@ export function registerPlainTextRenderer(
         for (const line of formatShellHistoryEntryPlain(entry)) emit(line);
       });
 
-      const viewKey = `${shell.shellView}:${shell.focusedModule ?? ""}:${shell.openFindingId ?? ""}`;
+      const optionsKey =
+        shell.shellView === "options" && shell.optionsView
+          ? `:${shell.optionsView.toolName}:${shell.optionsView.rows.map((row) => `${row.optionName}=${row.valueLabel}`).join("|")}`
+          : "";
+      const viewKey = `${shell.shellView}:${shell.focusedModule ?? ""}:${shell.openFindingId ?? ""}${optionsKey}`;
       if (viewKey !== lastShellView) {
         lastShellView = viewKey;
         printShellView(emit, shell, state);
@@ -478,6 +490,12 @@ function printShellView(emit: Emit, shell: ShellState, state: UIState): void {
     case "tune":
       printTuneView(emit, shell);
       return;
+    case "options":
+      printOptionsView(emit, shell);
+      return;
+    case "sast-tasks":
+      printSastTasksView(emit, shell);
+      return;
     case "findings":
       printFindingsView(emit, shell, state);
       return;
@@ -494,7 +512,7 @@ function printShellView(emit: Emit, shell: ShellState, state: UIState): void {
       printTaskStoryView(emit, shell);
       return;
     case "module-run":
-      printModuleRunView(emit, shell);
+      printModuleRunView(emit, shell, state);
       return;
     case "actor-detail":
       printActorDetailView(emit, shell, state);
@@ -505,7 +523,7 @@ function printShellView(emit: Emit, shell: ShellState, state: UIState): void {
   }
 }
 
-function printModuleRunView(emit: Emit, shell: ShellState): void {
+function printModuleRunView(emit: Emit, shell: ShellState, state: UIState): void {
   const run = shell.moduleRun;
   if (!run) {
     emit(`  [run] ${shell.focusedModule ?? "module"} · idle`);
@@ -513,14 +531,26 @@ function printModuleRunView(emit: Emit, shell: ShellState): void {
     emit("  (no active run)");
     return;
   }
-  const elapsed = formatDuration(Math.max(0, Date.now() - run.startedAtMs));
+  const elapsed = formatDuration(Math.max(0, (run.completedAtMs ?? Date.now()) - run.startedAtMs));
   const stepsDone = run.steps.filter((s) => s.status === "done").length;
   const stepsTotal = run.steps.length;
+  const cost = run.costUsd != null ? ` · ${formatCost(run.costUsd)}` : "";
   emit(
-    `  [run] ${run.moduleId}:${run.toolName ?? "run"} · ${elapsed} · ${stepsDone}/${stepsTotal}`,
+    `  [run] ${run.moduleId}:${run.toolName ?? "run"} · ${elapsed} · ${run.status} · ${stepsDone}/${stepsTotal}${cost}`,
   );
   emit(`# RUN ${run.moduleId}`);
   emit(`  status: ${run.status}`);
+  if (run.status !== "running") {
+    const label = run.displayName ?? run.toolName ?? `${run.moduleId}:run`;
+    const findings = moduleRunScopedFindings(run, state.summary?.actionableFindings ?? []);
+    const findingCount = run.findingCount ?? findings.length;
+    emit(
+      `  ${label} ${run.status === "done" ? "complete" : run.status} · ${findingCount} finding${findingCount === 1 ? "" : "s"} · ${run.costUsd != null ? formatCost(run.costUsd) : "cost n/a"} · ${elapsed}`,
+    );
+    if (run.postProcessMode === "scan-only" && run.status === "done" && findingCount > 0) {
+      emit("  scan-only: saved as needs_review; triage pending");
+    }
+  }
   for (const step of run.steps) {
     const glyph =
       step.status === "done"
@@ -532,6 +562,64 @@ function printModuleRunView(emit: Emit, shell: ShellState): void {
             : "○";
     emit(`  ${glyph} ${step.title}`);
   }
+  const findings = moduleRunAliasedFindings(
+    moduleRunScopedFindings(run, state.summary?.actionableFindings ?? []),
+  );
+  if (findings.length > 0) {
+    emit("## findings");
+    const limit = run.status === "running" ? 5 : 8;
+    for (const { alias, finding } of findings.slice(0, limit)) {
+      const sev = normalizeSeverity(finding.displaySeverity ?? finding.severity);
+      const title = moduleRunFindingTitle(finding);
+      emit(
+        `  ${severityToken(sev, { NO_COLOR: "1" })}  ${alias}  ${finding.filePath}:${finding.startLine}  ${clipLine(title, 80)}`,
+      );
+    }
+    const hidden = Math.max(0, findings.length - limit);
+    if (hidden > 0) emit(`  +${hidden} more`);
+  }
+}
+
+function moduleRunScopedFindings(
+  run: NonNullable<ShellState["moduleRun"]>,
+  findings: ReadonlyArray<ActionableFinding>,
+): ActionableFinding[] {
+  if (run.moduleId !== "threat-hunt") return [...findings];
+  return findings.filter((finding) => finding.actorFingerprint?.startsWith("threat-hunt:"));
+}
+
+function moduleRunAliasedFindings(
+  findings: ReadonlyArray<ActionableFinding>,
+): Array<{ alias: string; finding: ActionableFinding }> {
+  return [...findings]
+    .sort((a, b) => {
+      const severityDelta =
+        moduleRunSeverityRank(a.displaySeverity ?? a.severity) -
+        moduleRunSeverityRank(b.displaySeverity ?? b.severity);
+      if (severityDelta !== 0) return severityDelta;
+      return a.fingerprint.localeCompare(b.fingerprint);
+    })
+    .map((finding, index) => ({
+      alias: `F-${String(index + 1).padStart(4, "0")}`,
+      finding,
+    }));
+}
+
+function moduleRunSeverityRank(severity: string | undefined): number {
+  const normalized = normalizeSeverity(severity);
+  if (normalized === "critical") return 0;
+  if (normalized === "high") return 1;
+  if (normalized === "medium") return 2;
+  if (normalized === "low") return 3;
+  return 4;
+}
+
+const MODULE_RUN_SCAN_ONLY_PLACEHOLDER_RE = /captured in scan-only mode/i;
+
+function moduleRunFindingTitle(finding: ActionableFinding): string {
+  const raw = finding.title ?? finding.rationale;
+  if (raw && !MODULE_RUN_SCAN_ONLY_PLACEHOLDER_RE.test(raw)) return raw;
+  return finding.ruleId || finding.taskId || "scan-only finding";
 }
 
 function printActorDetailView(emit: Emit, shell: ShellState, state: UIState): void {
@@ -584,6 +672,40 @@ function printPromptsEditorView(emit: Emit, shell: ShellState): void {
   for (const row of audit) {
     emit(`  ${row.verb}  source=${row.effective.source}  ${row.effective.filePath ?? ""}`);
   }
+}
+
+function printOptionsView(emit: Emit, shell: ShellState): void {
+  const moduleId = shell.focusedModule ?? "module";
+  const view = shell.optionsView;
+  const rows = view?.rows ?? [];
+  const setCount = rows.filter((row) => row.isSet).length;
+  emit(
+    chalk.dim(
+      `  [options] ${view?.toolName ?? moduleId} · ${rows.length} options · ${setCount} set`,
+    ),
+  );
+  emit(`# OPTIONS  ${moduleId}`);
+  if (!view) {
+    emit("  (no options loaded - run show options)");
+    return;
+  }
+  if (view.taskSummary) {
+    emit("## task selection");
+    emit(`  ${view.taskSummary.stateLine}`);
+    emit(`  ${view.taskSummary.commands}`);
+  }
+  if (rows.length === 0) {
+    emit(`  ${view.toolName} has no configurable options.`);
+  } else {
+    emit("## options");
+    for (const row of rows) {
+      emit(
+        `  ${row.optionName}: ${row.valueLabel} (default ${row.defaultLabel}) - ${clipLine(row.description, 96)}`,
+      );
+    }
+  }
+  emit("commands: set <option> <value> · show options · show advanced · /back");
+  if (view.tip) emit(view.tip);
 }
 
 function printTaskStoryView(emit: Emit, shell: ShellState): void {
@@ -693,6 +815,9 @@ function printModuleView(emit: Emit, shell: ShellState): void {
   const card = (shell.moduleCatalog ?? []).find((c) => c.id === shell.focusedModule);
   emit(`# MODULE  ${shell.focusedModule}`);
   if (card?.description) emit(`description: ${card.description}`);
+  if (shell.focusedModule === "sast") {
+    printPlainSastTaskSelectionSummary(emit, shell);
+  }
   const tools = card?.toolSummaries ?? [];
   if (tools.length === 0) {
     printEmpty(emit, "module-no-tools", { moduleId: shell.focusedModule });
@@ -704,6 +829,16 @@ function printModuleView(emit: Emit, shell: ShellState): void {
     emit(`- ${t.verb}${headless}: ${t.description}`);
   }
   emit("hint: run <verb> to invoke · /tune to adjust · /back to return");
+}
+
+function printPlainSastTaskSelectionSummary(emit: Emit, shell: ShellState): void {
+  const options = shell.moduleOptions[SAST_SCAN_TOOL_NAME] ?? {};
+  const summary = buildSastTaskSelectionSummary({ options, tune: shell.tuneSnapshot });
+  const disabled = readDisabledSastTasks(options);
+  emit("## task selection");
+  emit(formatSastTaskStateLine(summary));
+  emit(`blocked: ${disabled.length > 0 ? disabled.join(", ") : "none"}`);
+  emit("commands: tasks · show options · scan .");
 }
 
 function printTuneView(emit: Emit, shell: ShellState): void {
@@ -729,6 +864,29 @@ function printTuneView(emit: Emit, shell: ShellState): void {
     if (snap.houseRulesPath) emit(chalk.dim(`(loaded from ${snap.houseRulesPath})`));
   }
   emit("hint: /config to open the expert editor · /back to return");
+}
+
+function printSastTasksView(emit: Emit, shell: ShellState): void {
+  const options = shell.moduleOptions[SAST_SCAN_TOOL_NAME] ?? {};
+  const rows = buildSastTaskRows({ options, tune: shell.tuneSnapshot });
+  const summary = buildSastTaskSelectionSummary({
+    options,
+    tune: shell.tuneSnapshot,
+    cursor: shell.sastTaskCursor,
+    rows,
+  });
+  emit(chalk.dim("  [shell] sast tasks"));
+  emit("# SAST TASKS");
+  emit(formatSastTaskStateLine(summary));
+  emit(formatSastTaskLegend());
+  emit(`active: ${summary.activeRow?.label ?? "(none)"} · ${summary.activeAction}`);
+  emit("## tasks");
+  for (const row of rows) {
+    emit(
+      `- ${row.state} ${row.label.padEnd(20)} source=${row.source.padEnd(10)} cost=${row.cost}  ${row.notes}`,
+    );
+  }
+  emit("hint: /task toggle [id] · /task mode toggle · show options · /back");
 }
 
 function printFindingsView(emit: Emit, shell: ShellState, state: UIState): void {
@@ -923,7 +1081,7 @@ function collectRecentAgentActions(
   return out;
 }
 
-function printDiffSinceView(emit: Emit, shell: ShellState): void {
+function _printDiffSinceView(emit: Emit, shell: ShellState): void {
   const ref = shell.diffSince?.ref ?? "?";
   const n = shell.diffSince?.changedFiles.length ?? 0;
   emit(chalk.dim(`  [since ${ref}] ${n} changed file(s)`));

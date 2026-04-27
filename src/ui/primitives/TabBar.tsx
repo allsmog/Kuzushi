@@ -1,7 +1,8 @@
 /**
  * Horizontal tab bar for view switching.
  *
- * Renders:  ● 1 Pipeline  │  2 Findings  │  3 Cost
+ * Renders the active marker before the shortcut and label, with separators
+ * between inactive tabs.
  *
  * Active tab uses a single high-emphasis treatment. Inactive tabs stay quiet.
  */

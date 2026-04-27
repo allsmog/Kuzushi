@@ -35,6 +35,7 @@ import {
   getStoredVerificationResults,
   getTriagedFingerprints,
   getVerifiedFingerprints,
+  hasRunCheckpoint,
 } from "../store.js";
 import { getTaskOutputMeta } from "../task-output-meta.js";
 import type {
@@ -178,10 +179,13 @@ export class PipelineOrchestrator {
 
       // Persist interrupted state
       try {
+        const status = hasRunCheckpoint(this.deps.db, state.checkpointRunId)
+          ? "interrupted"
+          : "aborted";
         await this.bus.publish(
           createEvent("run:status", state.checkpointRunId, {
             context: state.context,
-            status: "error",
+            status,
           }),
         );
       } catch {
@@ -555,11 +559,22 @@ export class PipelineOrchestrator {
       return;
     }
 
-    if (run.status === "error") {
+    if (run.status === "error" || run.status === "aborted") {
       await this.bus.publish(
         createEvent("pipeline:error", runId, {
           context: state.context,
-          error: `Run "${resumeRunId}" ended in error and cannot be resumed. Re-run without --resume to start fresh.`,
+          error: `Run "${resumeRunId}" ended as ${run.status} and cannot be resumed. Re-run without --resume to start fresh.`,
+          fatal: true,
+        }),
+      );
+      return;
+    }
+
+    if (!hasRunCheckpoint(this.deps.db, resumeRunId)) {
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: `Run "${resumeRunId}" has no checkpoint. Re-run without --resume to start fresh.`,
           fatal: true,
         }),
       );
@@ -579,6 +594,15 @@ export class PipelineOrchestrator {
       return;
     }
 
+    const storedConfig = safeJsonParse<unknown>(run.configJson, null);
+    if (isRecord(storedConfig)) {
+      state.config = {
+        ...state.config,
+        ...(storedConfig as Partial<KuzushiConfig>),
+      };
+    }
+    state.verifyEnabled = state.config.verify === true;
+    state.pocHarnessEnabled = state.config.pocHarness === true;
     state.verifyVerdicts = new Set(
       parseVerifyVerdictsFromConfigJson(run.configJson, [...state.verifyVerdicts]),
     );
@@ -813,8 +837,23 @@ export class PipelineOrchestrator {
   }
 
   private async runTaskDag(state: RunState, runId: string): Promise<void> {
-    const taskPlan = resolveInitialTaskPlan(this.deps.taskRegistry, state.tasks, state.config);
+    let taskPlan: ReturnType<typeof resolveInitialTaskPlan>;
+    try {
+      taskPlan = resolveInitialTaskPlan(this.deps.taskRegistry, state.tasks, state.config, {
+        disabledTasks: state.scanOpts.disabledTasks,
+      });
+    } catch (error) {
+      await this.bus.publish(
+        createEvent("pipeline:error", runId, {
+          context: state.context,
+          error: toErrorMessage(error),
+          fatal: true,
+        }),
+      );
+      return;
+    }
     const dynamicSelectionActive = taskPlan.dynamicSelectionActive;
+    const disabledTaskIds = new Set(taskPlan.disabledTaskIds);
     let enabledTaskIds = [...taskPlan.enabledTaskIds];
 
     if (taskPlan.contextGatheringForced) {
@@ -1058,7 +1097,10 @@ export class PipelineOrchestrator {
           // Resolve capability IDs (e.g. "taint-analysis") to task IDs (e.g. "taint-cwe-select", "taint-iris")
           const resolved = normalizeTaskCapabilityIds(dynamicTasks);
           const newTaskIds = resolved.filter(
-            (id) => !enabledTaskIds.includes(id) && this.deps.taskRegistry!.has(id),
+            (id) =>
+              !enabledTaskIds.includes(id) &&
+              this.deps.taskRegistry!.has(id) &&
+              !disabledTaskIds.has(id),
           );
 
           if (newTaskIds.length > 0) {
@@ -1068,7 +1110,7 @@ export class PipelineOrchestrator {
               ...collectTransitiveDeps(this.deps.taskRegistry, newTaskIds).filter(
                 (id) => !enabledTaskIds.includes(id),
               ),
-            ]);
+            ]).filter((id) => !disabledTaskIds.has(id));
 
             // Re-resolve remaining stages — only commit enabledTaskIds on success
             try {
@@ -1099,7 +1141,10 @@ export class PipelineOrchestrator {
           const selectorFailed = state.failedTasks.includes("task-selector");
           const reason = selectorFailed ? "failed" : "recommended no selectable tasks";
           const fallbackIds = [...SELECTABLE_TASK_IDS].filter(
-            (id) => !enabledTaskIds.includes(id) && this.deps.taskRegistry!.has(id),
+            (id) =>
+              !enabledTaskIds.includes(id) &&
+              this.deps.taskRegistry!.has(id) &&
+              !disabledTaskIds.has(id),
           );
           if (fallbackIds.length > 0) {
             log.warn(
@@ -1110,7 +1155,7 @@ export class PipelineOrchestrator {
               ...collectTransitiveDeps(this.deps.taskRegistry, fallbackIds).filter(
                 (id) => !enabledTaskIds.includes(id),
               ),
-            ]);
+            ]).filter((id) => !disabledTaskIds.has(id));
             try {
               const fullStages = resolveOrderWithPolicyEdges(this.deps.taskRegistry, candidateIds);
               enabledTaskIds = candidateIds;
@@ -3874,6 +3919,25 @@ function parseScanOptsJson(raw: string): ScanOpts {
     tasks = parsedScanners;
   }
 
+  const disabledValue = parsed["disabledTasks"];
+  let disabledTasks: string[] | undefined;
+  if (disabledValue != null) {
+    const parsedDisabled = asStringArray(disabledValue);
+    if (!parsedDisabled) {
+      throw new Error("scan opts payload has invalid disabledTasks");
+    }
+    disabledTasks = parsedDisabled;
+  }
+
+  const taskModeValue = parsed["taskMode"];
+  let taskMode: ScanOpts["taskMode"];
+  if (taskModeValue !== undefined) {
+    if (taskModeValue !== "auto" && taskModeValue !== "manual") {
+      throw new Error("scan opts payload has invalid taskMode");
+    }
+    taskMode = taskModeValue;
+  }
+
   const maxFindingsValue = parsed["maxFindings"];
   let maxFindings: number | undefined;
   if (maxFindingsValue !== undefined) {
@@ -3889,6 +3953,8 @@ function parseScanOptsJson(raw: string): ScanOpts {
     maxFindings,
     excludePatterns,
     tasks,
+    taskMode,
+    disabledTasks,
     fresh,
   };
 }

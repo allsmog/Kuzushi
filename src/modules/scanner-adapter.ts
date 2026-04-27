@@ -32,6 +32,25 @@ export interface ScannerDagToolSpec<Id extends string> {
   headless?: boolean;
 }
 
+const resumeProperty = {
+  type: ["boolean", "string"],
+  description: "Resume the latest checkpoint or a specific run id.",
+};
+
+function withResumeProperty(schema: DagTool["inputSchema"]): DagTool["inputSchema"] {
+  const properties =
+    schema.properties && typeof schema.properties === "object" && !Array.isArray(schema.properties)
+      ? (schema.properties as Record<string, unknown>)
+      : {};
+  return {
+    ...schema,
+    properties: {
+      ...properties,
+      resume: resumeProperty,
+    },
+  };
+}
+
 /**
  * Build a DagTool backed by a `ScannerPlugin`. The closure over
  * `state` lets `init` and `run` share the per-module-load plugin instance.
@@ -47,6 +66,12 @@ export function buildScannerDagTool<Id extends string>(
     displayName: spec.displayName,
     description: spec.description,
     headless: spec.headless ?? true,
+    runLifecycle: {
+      persistence: "pipeline-checkpoint",
+      resume: "checkpoint",
+      liveControl: "pause-resume",
+      pipelineTasks: [plugin.id],
+    },
     ...(spec.rank ? { rank: spec.rank } : {}),
     formatInput(input) {
       const p = input as Record<string, unknown> | undefined;
@@ -56,7 +81,7 @@ export function buildScannerDagTool<Id extends string>(
       const first = result.output.split("\n", 1)[0]?.trim();
       return first && first.length > 0 ? first : null;
     },
-    inputSchema: spec.inputSchema,
+    inputSchema: withResumeProperty(spec.inputSchema),
     dag: {
       outputKind: "findings",
       dependsOn: [],

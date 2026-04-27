@@ -816,6 +816,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       onNormalize: (toolName, renames) => {
         log.debug(`${toolName} input normalized: ${renames.join(", ")}`);
       },
+      canUseTool: request.options.canUseTool,
     });
 
     // Abort controller
@@ -1177,6 +1178,7 @@ class ClaudeSession implements AgentSession {
       onNormalize: (toolName, renames) => {
         log.debug(`session ${toolName} input normalized: ${renames.join(", ")}`);
       },
+      canUseTool: this.baseOptions.canUseTool,
     });
 
     // Intercept subprocess spawn so close() can SIGTERM/SIGKILL directly.

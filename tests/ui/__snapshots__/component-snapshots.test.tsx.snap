@@ -82,9 +82,39 @@ exports[`Ink component snapshots > ModuleHome — tools table + last-run summary
   scan           scan                  run the full pipeline
   triage         triage                re-triage one finding
 
+  task selection   tasks opens scanners/detectors
+
+     profile standard · auto + denylist · 1/19 enabled · 0 blocked · 1 required
+     · 18 auto
+     blocked: none
+     commands: tasks · show options · scan .
+
   last run
 
      ran 2h · 4 tp"
+`;
+
+exports[`Ink component snapshots > OptionsView — focused tool options without module home 1`] = `
+"  kuzushi/context/options                                          context:build · 3 options · 1 set
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+  ──
+
+
+  Options                  * = set in this shell
+    OPTION        VALUE                      DEFAULT             DESCRIPTION
+
+    target        /repo                      —                   Path to the repository to analyze.
+
+    threatModel   true                       true                Run PASTA S1-S4 threat modeling.
+
+    model         * anthropic:…e-sonnet-4-6  anthropic…nnet-4-6  Model override for this session.
+
+
+  actions
+    set <option> <value>  set a module option
+    show options          refresh this table
+    show advanced         print advanced option details
+    /back                 return to module home"
 `;
 
 exports[`Ink component snapshots > PlanCard — option diff table with unsupported row 1`] = `
@@ -99,6 +129,57 @@ exports[`Ink component snapshots > PlanCard — option diff table with unsupport
   ╰────────────────────────────────────────────────────────────────────────────╯
 
     press y to apply   n to discard   Esc to cancel"
+`;
+
+exports[`Ink component snapshots > ThreatDfdView — inferred app-model fallback 1`] = `
+"  kuzushi/threats/dfd               5 nodes · 4 flows · 3 boundaries · 0 threats
+  ──────────────────────────────────────────────────────────────────────────────
+  ──
+
+  inferred from /tmp/context-snapshot.json
+
+  No generated DFD elements were found; showing a low-confidence map inferred
+  from application context.
+
+
+  ! hot path   B boundary   > selected
+
+  ┌─ INTERNET / UNTRUSTED ────────────────────────────────────────────────────┐
+  │ > E1   (ext) unauth user            public ingress                      │
+  └───────────────────────────────────────────────────────────────────────────┘
+     │ B1 perimeter · 1 crossing
+  ┌─ EDGE / ENTRYPOINTS ──────────────────────────────────────────────────────┐
+  │ ! P1   [proc] web router            routes 1 · public 1 · auth 0        │
+  │   P2   [proc] auth-module           identity · sessions                 │
+  └───────────────────────────────────────────────────────────────────────────┘
+     │ B2 service edge · 1 crossing
+  ┌─ APPLICATION / TRUSTED ───────────────────────────────────────────────────┐
+  │   P3   [proc] public router         entrypoint                          │
+  └───────────────────────────────────────────────────────────────────────────┘
+     │ B3 data boundary · 1 crossing
+  ┌─ DATA / HIGH VALUE ───────────────────────────────────────────────────────┐
+  │ ! D1   <<data>> users db            high-value data · postgres          │
+  └───────────────────────────────────────────────────────────────────────────┘
+
+  hot paths
+    ! F1   E1 -> P1           HTTPS · user-input · crosses B1
+    ! F4   P1 -> P3           internal · request · crosses B2
+    ! F5   P3 -> D1           db · sensitive · crosses B3
+
+  Selected  E1 unauth user
+    zone   internet / untrusted
+    inputs (none)
+    outputs P1
+    risks  public ingress
+    next   threat-hunt: run actor-driven adversarial review · taint-iris: trace
+  public inputs across trust boundaries
+
+  STRIDE overlay
+    S:0  T:0  R:0  I:0  D:0  E:0   no threats emitted; watch hot paths and
+  privileged choke points
+
+  1 dfd · 2 stride · 3 stories · 4 scope · 5 summary · r regen · q back
+  AI edits: /threats ask <instruction>"
 `;
 
 exports[`Ink component snapshots > ThreatDfdView — trust zones + boundaries + flows 1`] = `
@@ -138,7 +219,6 @@ exports[`Ink component snapshots > ThreatDfdView — trust zones + boundaries + 
     S:0  T:0  R:0  I:0  D:0  E:0   no threats emitted; watch hot paths and
   privileged choke points
 
-  1 dfd · 2 stride · 3 stories · 4 scope · 5 summary · r regen · a ask AI · q
-  back
-  patch proposal:  a apply · s skip · d diff · r re-rank"
+  1 dfd · 2 stride · 3 stories · 4 scope · 5 summary · r regen · q back
+  AI edits: /threats ask <instruction>"
 `;

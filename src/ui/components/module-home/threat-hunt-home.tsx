@@ -69,13 +69,20 @@ function scopeRows(shell: ShellState): Row[] {
   ];
 }
 
-function actionRows(): Row[] {
-  return [
+function actionRows(shell: ShellState): Row[] {
+  const card = shell.moduleCatalog?.find((c) => c.id === MODULE_ID);
+  const rows: Row[] = [
     { key: "run .", value: "spawn one agent per ready actor" },
     { key: "run --changed", value: "scope to git-changed files only" },
     { key: "prompts", value: "edit the actor system prompt" },
     { key: "/threats dfd", value: "review the attack surface" },
   ];
+  if (card?.runState?.kind === "resume") {
+    rows.unshift({ key: "resume", value: card.runState.summary });
+  } else if (card?.runState?.kind === "complete") {
+    rows.unshift({ key: `replay ${card.runState.runId}`, value: card.runState.summary });
+  }
+  return rows;
 }
 
 export function ThreatHuntHome({ shell }: ModuleHomeProps): React.ReactElement {
@@ -91,7 +98,7 @@ export function ThreatHuntHome({ shell }: ModuleHomeProps): React.ReactElement {
       <RuleHeader breadcrumb={`kuzushi/${MODULE_ID}`} />
       <KeyValueSection title="readiness" rows={readinessRows(shell)} />
       <KeyValueSection title="scope" rows={scopeRows(shell)} />
-      <KeyValueSection title="actions" rows={actionRows()} />
+      <KeyValueSection title="actions" rows={actionRows(shell)} />
     </ScreenContent>
   );
 }

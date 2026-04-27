@@ -5,12 +5,11 @@
  * the TTY), and reads the file back on exit. Returns null if the user
  * cancelled (non-zero exit), otherwise the file contents.
  *
- * Intentionally synchronous: Ink's React reconciler must be suspended while
- * the editor holds the TTY. The host (shell.ts) wraps this in an Ink
- * waitUntilExit dance; this module just handles the mechanics.
+ * Intentionally synchronous: Ink's React reconciler must not keep rendering
+ * while the editor owns the TTY. This module just handles the mechanics.
  */
 
-import { spawn } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,12 +37,9 @@ export async function openInEditor(
   writeFileSync(file, initial, "utf8");
 
   try {
-    const exitCode = await new Promise<number>((resolve, reject) => {
-      const child = spawn(editor, [file], { stdio: "inherit" });
-      child.on("error", reject);
-      child.on("exit", (code) => resolve(code ?? 1));
-    });
-    if (exitCode !== 0) return null;
+    const result = spawnSync(editor, [file], { stdio: "inherit" });
+    if (result.error) throw result.error;
+    if ((result.status ?? 1) !== 0) return null;
     return readFileSync(file, "utf8");
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -55,6 +55,8 @@ function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, "");
 }
 
+const STALE_RUN_HEADER = ["●", "1", "Pipeline"].join(" ");
+
 function renderToString(node: ReactElement, columns = 100): string {
   const stream = new FrameCaptureStream(columns);
   const clock = createManualUiClock(new Date("2026-04-23T14:08:15").getTime());
@@ -163,6 +165,7 @@ describe("ContextBuildView", () => {
     const out = renderToString(
       createElement(ContextBuildView, { shell: stubShell(midGrepState()) }),
     );
+    expect(out).not.toContain(STALE_RUN_HEADER);
     expect(out).toMatchSnapshot();
   });
 

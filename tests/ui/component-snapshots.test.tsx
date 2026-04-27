@@ -17,13 +17,16 @@ import { Writable } from "node:stream";
 import { render } from "ink";
 import { createElement, type ReactElement } from "react";
 import { describe, expect, it } from "vitest";
+import { App } from "../../src/ui/App.js";
 import { createManualUiClock, UiClockProvider } from "../../src/ui/clock.js";
 import { BannerSplash } from "../../src/ui/components/BannerSplash.js";
 import { CopilotShell } from "../../src/ui/components/CopilotShell.js";
 import { FindingCard } from "../../src/ui/components/FindingCard.js";
 import { ModuleCatalog } from "../../src/ui/components/ModuleCatalog.js";
 import { ModuleHome } from "../../src/ui/components/ModuleHome.js";
+import { OptionsView } from "../../src/ui/components/OptionsView.js";
 import { PlanCard } from "../../src/ui/components/PlanCard.js";
+import { RunningView } from "../../src/ui/components/RunningView.js";
 import { ThreatDfdView } from "../../src/ui/components/ThreatDfdView.js";
 import { BLACK_CIRCLE } from "../../src/ui/glyphs.js";
 import { KeybindFooter } from "../../src/ui/primitives/KeybindFooter.js";
@@ -105,6 +108,8 @@ function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, "");
 }
 
+const STALE_RUN_HEADER = ["●", "1", "Pipeline"].join(" ");
+
 function stubShell(overrides: Partial<ShellState> = {}): ShellState {
   return {
     modules: [],
@@ -164,20 +169,63 @@ describe("Ink component snapshots", () => {
   it("TabBar — shortcuts read before labels", () => {
     const out = renderToString(
       createElement(TabBar, {
-        activeId: "pipeline",
+        activeId: "overview",
         tabs: [
-          { id: "pipeline", label: "Pipeline", shortcut: "1" },
-          { id: "findings", label: "Findings", shortcut: "2" },
-          { id: "cost", label: "Cost", shortcut: "3" },
+          { id: "overview", label: "Overview", shortcut: "1" },
+          { id: "details", label: "Details", shortcut: "2" },
+          { id: "spend", label: "Spend", shortcut: "3" },
         ],
       }),
       80,
       6,
     );
-    expect(out).toContain("● 1 Pipeline");
-    expect(out).toContain("2 Findings");
-    expect(out).toContain("3 Cost");
-    expect(out).not.toContain("Pipeline 1");
+    expect(out).toContain("● 1 Overview");
+    expect(out).toContain("2 Details");
+    expect(out).toContain("3 Spend");
+    expect(out).not.toContain("Overview 1");
+    expect(out).not.toContain(STALE_RUN_HEADER);
+  });
+
+  it("RunningView — scan mode uses compact run summary instead of legacy tabs", () => {
+    const store = createUIStore();
+    store.update({
+      mode: "running",
+      repoName: "acme-api",
+      phase: "scanning",
+      scanView: "pipeline",
+      tasks: ["context-gatherer", "semgrep"],
+      totalFindings: 2,
+      runningCostUsd: 0.13,
+      pipelineStartedAt: Date.now() - 12_000,
+      progress: { current: 1, total: 2 },
+      stages: [
+        {
+          id: "scan",
+          label: "Scan",
+          status: "active",
+          detail: "running semgrep",
+          subTasks: [
+            { id: "context-gatherer", label: "context-gatherer", status: "done" },
+            { id: "semgrep", label: "semgrep", status: "active" },
+          ],
+        },
+        { id: "report", label: "Report", status: "pending", subTasks: [] },
+      ],
+    });
+    const out = renderToString(
+      createElement(RunningView, {
+        store,
+        onCommand: () => ({ message: "ok", type: "info" }),
+      }),
+      120,
+      30,
+    );
+    expect(out).toContain("acme-api");
+    expect(out).toContain("semgrep");
+    expect(out).toContain("2 findings");
+    expect(out).toContain("$0.13");
+    expect(out).toContain("view pipeline");
+    expect(out).not.toContain(STALE_RUN_HEADER);
   });
 
   it("ModuleCatalog — grouped by category with last-run chips", () => {
@@ -245,6 +293,60 @@ describe("Ink component snapshots", () => {
     });
     const out = renderToString(createElement(ModuleHome, { shell }));
     expect(out).toMatchSnapshot();
+  });
+
+  it("ModuleHome — switches from generic to custom home without hook-order errors", () => {
+    const genericShell = stubShell({
+      focusedModule: "sast",
+      shellView: "module",
+      moduleCatalog: [
+        {
+          id: "sast",
+          displayName: "SAST",
+          category: "offense",
+          description: "Static analysis with corroborating signals.",
+          toolCount: 1,
+          toolSummaries: [
+            {
+              name: "sast:scan",
+              verb: "scan",
+              description: "Run the canonical SAST scan",
+              headless: true,
+            },
+          ],
+        },
+      ],
+    });
+    const customShell = stubShell({
+      focusedModule: "threat-hunt",
+      shellView: "module",
+      target: "/repo",
+      moduleCatalog: [
+        {
+          id: "threat-hunt",
+          displayName: "Threat Hunt",
+          category: "offense",
+          description: "Spawn actor-scoped threat hunting agents.",
+          toolCount: 1,
+        },
+      ],
+    });
+    const stream = new FrameCaptureStream(100, 24);
+    const clock = createManualUiClock(0);
+    const wrap = (node: ReactElement) => createElement(UiClockProvider, { clock }, node);
+    const instance = render(wrap(createElement(ModuleHome, { shell: genericShell })), {
+      stdout: stream as unknown as Writable & NodeJS.WriteStream,
+      debug: true,
+    });
+
+    expect(() => {
+      instance.rerender(wrap(createElement(ModuleHome, { shell: customShell })));
+    }).not.toThrow();
+
+    instance.unmount();
+    const out = stripAnsi(stream.lastFrame());
+    expect(out).toContain("kuzushi/threat-hunt");
+    expect(out).toContain("readiness");
   });
 
   it("ModuleHome — collapses tools and last-run while processing", () => {
@@ -424,6 +526,63 @@ describe("Ink component snapshots", () => {
     expect(out).not.toContain("task active");
   });
 
+  it("CopilotShell — module-run hides the duplicate running history row", () => {
+    const store = createUIStore();
+    store.update({
+      mode: "shell",
+      shell: {
+        ...stubShell({
+          focusedModule: "context",
+          shellView: "module-run",
+          processing: true,
+          history: [
+            {
+              type: "input",
+              text: "run .",
+              prompt: "kuzushi/context> ",
+              timestamp: 0,
+            },
+            {
+              type: "tool-call",
+              id: "tc-context",
+              tool: "context:build",
+              displayName: "Build Context",
+              inputHint: ".",
+              text: "⏺ Build Context(.)",
+              status: "running",
+              timestamp: 0,
+              liveActivities: [{ id: "la-1", text: "Read package.json (134 lines)" }],
+            },
+          ],
+          currentTool: {
+            name: "context:build",
+            displayName: "Build Context",
+            startedAt: 0,
+            lastEventAt: 0,
+            historyEntryId: "tc-context",
+          },
+          moduleRun: {
+            moduleId: "context",
+            source: "shell",
+            toolName: "context:build",
+            displayName: "Build Context",
+            inputSummary: ".",
+            startedAtMs: 0,
+            status: "running",
+            steps: [],
+            evidenceTail: [],
+          },
+        }),
+      },
+    });
+
+    const out = renderToString(createElement(CopilotShell, { store }), 84);
+
+    expect(out).toContain("kuzushi/context/run");
+    expect(out.match(/Build Context/g) ?? []).toHaveLength(1);
+    expect(out).not.toContain("Read package.json");
+  });
+
   it("CopilotShell — does not replay the welcome splash after shell remount", () => {
     const store = createUIStore();
     store.update({
@@ -442,7 +601,46 @@ describe("Ink component snapshots", () => {
     const out = renderToString(createElement(CopilotShell, { store }), 84);
 
     expect(out).toContain("sast home");
+    expect(out).toContain("task selection");
+    expect(out).toContain("tasks opens scanners/detectors");
     expect(out).not.toContain("agentic SAST orchestration");
+  });
+
+  it("CopilotShell — SAST task selector owns footer hints", () => {
+    const store = createUIStore();
+    store.update({
+      mode: "shell",
+      shellSplashShown: true,
+      shell: {
+        ...stubShell({
+          focusedModule: "sast",
+          shellView: "sast-tasks",
+          processing: false,
+          sastTaskCursor: 1,
+          history: [],
+          tuneSnapshot: {
+            preset: "standard",
+            tasks: ["semgrep"],
+            verify: false,
+            autoPatch: false,
+            triageConcurrency: 2,
+            model: "anthropic:claude-sonnet-4-6",
+          },
+          moduleOptions: {
+            "sast:scan": {
+              disabledTasks: ["codeql"],
+            },
+          },
+        }),
+      },
+    });
+
+    const out = renderToString(createElement(App, { store }), 100, 40);
+
+    expect(out).toContain("kuzushi/sast/tasks");
+    expect(out).toContain("Space allows codeql.");
+    expect(out).toContain("[Space] Toggle block");
+    expect(out).not.toContain("[Enter] Send");
   });
 
   it("CopilotShell — hides aborted task status after returning idle", () => {
@@ -603,6 +801,43 @@ describe("Ink component snapshots", () => {
     expect(out).toMatchSnapshot();
   });
 
+  it("OptionsView — focused tool options without module home", () => {
+    const shell = stubShell({
+      focusedModule: "context",
+      shellView: "options",
+      optionsView: {
+        toolName: "context:build",
+        rows: [
+          {
+            optionName: "target",
+            valueLabel: "/repo",
+            defaultLabel: "—",
+            description: "Path to the repository to analyze.",
+            isSet: false,
+          },
+          {
+            optionName: "threatModel",
+            valueLabel: "true",
+            defaultLabel: "true",
+            description: "Run PASTA S1-S4 threat modeling.",
+            isSet: false,
+          },
+          {
+            optionName: "model",
+            valueLabel: "* anthropic:claude-sonnet-4-6",
+            defaultLabel: "anthropic:claude-sonnet-4-6",
+            description: "Model override for this session.",
+            isSet: true,
+          },
+        ],
+      },
+    });
+    const out = renderToString(createElement(OptionsView, { shell }), 100, 24);
+    expect(out).toContain("kuzushi/context/options");
+    expect(out).not.toContain("context home");
+    expect(out).toMatchSnapshot();
+  });
+
   it("ThreatDfdView — trust zones + boundaries + flows", () => {
     const shell = stubShell({
       shellView: "threats",
@@ -669,6 +904,72 @@ describe("Ink component snapshots", () => {
         },
       },
       threatModelSource: { path: "/tmp/threat-model.json", mtimeMs: 0 },
+    });
+    const out = renderToString(createElement(ThreatDfdView, { shell }));
+    expect(out).toMatchSnapshot();
+  });
+
+  it("ThreatDfdView — inferred app-model fallback", () => {
+    const shell = stubShell({
+      shellView: "threats",
+      threatTab: "dfd",
+      contextSnapshot: {
+        target: "/repo",
+        timestamp: 1,
+        discovery: "flat",
+        options: { enrichment: true, threatModel: true, scenarios: true },
+        repoContext: {
+          languages: ["TypeScript"],
+          frameworks: ["Express"],
+          authPatterns: ["auth-module"],
+          ormOrDb: ["postgres"],
+          entryPoints: [],
+          sanitizationLibs: [],
+        },
+        appModel: {
+          version: "1",
+          routes: [
+            {
+              id: "r1",
+              method: "GET",
+              path: "/public",
+              filePath: "routes.ts",
+              startLine: 1,
+              middleware: [],
+              authMechanisms: [],
+            },
+          ],
+          outboundClients: [],
+          dataStores: [
+            {
+              id: "ds1",
+              kind: "postgres",
+              name: "users db",
+              filePath: "db.ts",
+              startLine: 1,
+            },
+          ],
+          backgroundJobs: [],
+          serviceBoundaries: [
+            {
+              id: "entrypoint",
+              name: "public router",
+              kind: "entrypoint",
+              description: "route entrypoint",
+              evidenceAnchors: [],
+            },
+          ],
+          relevantFiles: [],
+          notes: [],
+        },
+        threatModel: {
+          version: "1.0",
+          dfd: { elements: [], trustBoundaries: [] },
+          threats: [],
+          summary: { total: 0, bySeverity: {}, byCategory: {} },
+        },
+      },
+      threatModelSource: { path: "/tmp/context-snapshot.json", mtimeMs: 0 },
     });
     const out = renderToString(createElement(ThreatDfdView, { shell }));
     expect(out).toMatchSnapshot();

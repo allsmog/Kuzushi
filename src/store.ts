@@ -44,9 +44,18 @@ import { isRecord } from "./utils.js";
 
 export type { PipelineRunStatus } from "./contracts.js";
 
-interface PipelineRunRecord {
+export interface PipelineRunOrigin {
+  moduleId?: string | null;
+  toolName?: string | null;
+  resumeLabel?: string | null;
+}
+
+export interface PipelineRunRecord {
   runId: string;
   repo: string;
+  moduleId: string | null;
+  toolName: string | null;
+  resumeLabel: string | null;
   startedAt: string;
   status: PipelineRunStatus;
   configJson: string;
@@ -59,6 +68,33 @@ interface PipelineRunRecord {
   metricsJson: string | null;
   assertionsJson: string | null;
   promptHash: string | null;
+}
+
+const PIPELINE_RUN_SELECT_COLUMNS = `
+      run_id as runId,
+      repo,
+      module_id as moduleId,
+      tool_name as toolName,
+      resume_label as resumeLabel,
+      started_at as startedAt,
+      status,
+      config_json as configJson,
+      scan_opts_json as scanOptsJson,
+      findings_json as findingsJson,
+      context_json as contextJson,
+      total_cost_usd as totalCostUsd,
+      completed_at as completedAt,
+      updated_at as updatedAt,
+      metrics_json as metricsJson,
+      assertions_json as assertionsJson,
+      prompt_hash as promptHash
+`;
+
+const RESUMABLE_RUN_STATUSES = [...ACTIVE_PIPELINE_RUN_STATUSES, "interrupted"] as const;
+const CHECKPOINT_PRESENT_SQL = "(findings_json IS NOT NULL OR context_json IS NOT NULL)";
+
+function sqlStringList(values: readonly string[]): string {
+  return values.map((value) => `'${value.replace(/'/g, "''")}'`).join(", ");
 }
 
 export interface StoredFindingRecord {
@@ -136,7 +172,7 @@ const PROOF_STATE_PRECEDENCE: Record<ProofState, number> = {
 };
 
 /** Current canonical schema version. */
-const CURRENT_SCHEMA_VERSION = 105;
+const CURRENT_SCHEMA_VERSION = 106;
 
 /**
  * Lowest schema version that the migration runner can upgrade in-place.
@@ -1298,16 +1334,21 @@ export function createRun(
   repo: string,
   config: KuzushiConfig,
   scanOpts: ScanOpts,
+  origin: PipelineRunOrigin = {},
 ): void {
   const stmt = db.prepare(`
     INSERT INTO pipeline_runs (
-      run_id, repo, started_at, status, config_json, scan_opts_json
-    ) VALUES (?, ?, ?, 'scanning', ?, ?)
+      run_id, repo, module_id, tool_name, resume_label,
+      started_at, status, config_json, scan_opts_json
+    ) VALUES (?, ?, ?, ?, ?, ?, 'scanning', ?, ?)
   `);
 
   stmt.run(
     runId,
     repo,
+    origin.moduleId ?? null,
+    origin.toolName ?? null,
+    origin.resumeLabel ?? null,
     new Date().toISOString(),
     safeJsonStringify(config),
     safeJsonStringify(scanOpts),
@@ -1340,7 +1381,13 @@ export function updateRunStatus(
     params["completedAt"] = extra.completedAt;
   }
 
-  if (extra.completedAt === undefined && status === "complete") {
+  if (
+    extra.completedAt === undefined &&
+    (status === "complete" ||
+      status === "error" ||
+      status === "aborted" ||
+      status === "interrupted")
+  ) {
     fields.push("completed_at = @completedAt");
     params["completedAt"] = new Date().toISOString();
   }
@@ -1948,25 +1995,15 @@ export function getLatestResumableRun(
   db: Database.Database,
   repo: string,
 ): PipelineRunRecord | undefined {
+  const statuses = sqlStringList(RESUMABLE_RUN_STATUSES);
   const row = db
     .prepare(`
     SELECT
-      run_id as runId,
-      repo,
-      started_at as startedAt,
-      status,
-      config_json as configJson,
-      scan_opts_json as scanOptsJson,
-      findings_json as findingsJson,
-      context_json as contextJson,
-      total_cost_usd as totalCostUsd,
-      completed_at as completedAt,
-      updated_at as updatedAt,
-      metrics_json as metricsJson,
-      assertions_json as assertionsJson,
-      prompt_hash as promptHash
+${PIPELINE_RUN_SELECT_COLUMNS}
     FROM pipeline_runs
-    WHERE repo = ? AND status IN ('scanning', 'triaging', 'verifying', 'poc-harnessing', 'dynamic-analyzing')
+    WHERE repo = ?
+      AND status IN (${statuses})
+      AND ${CHECKPOINT_PRESENT_SQL}
     ORDER BY started_at DESC, rowid DESC
     LIMIT 1
   `)
@@ -1984,26 +2021,15 @@ export function getResumableModuleRuns(
   db: Database.Database,
   monorepoPrefix: string,
 ): PipelineRunRecord[] {
+  const statuses = sqlStringList([...RESUMABLE_RUN_STATUSES, "complete"]);
   const rows = db
     .prepare(`
     SELECT
-      run_id as runId,
-      repo,
-      started_at as startedAt,
-      status,
-      config_json as configJson,
-      scan_opts_json as scanOptsJson,
-      findings_json as findingsJson,
-      context_json as contextJson,
-      total_cost_usd as totalCostUsd,
-      completed_at as completedAt,
-      updated_at as updatedAt,
-      metrics_json as metricsJson,
-      assertions_json as assertionsJson,
-      prompt_hash as promptHash
+${PIPELINE_RUN_SELECT_COLUMNS}
     FROM pipeline_runs
     WHERE repo LIKE ? || '/%'
-      AND status IN ('scanning', 'triaging', 'verifying', 'poc-harnessing', 'dynamic-analyzing', 'complete')
+      AND status IN (${statuses})
+      AND (status = 'complete' OR ${CHECKPOINT_PRESENT_SQL})
     ORDER BY started_at DESC, rowid DESC
   `)
     .all(monorepoPrefix) as PipelineRunRecord[];
@@ -2039,20 +2065,7 @@ export function listRuns(
   const rows = db
     .prepare(`
     SELECT
-      run_id as runId,
-      repo,
-      started_at as startedAt,
-      status,
-      config_json as configJson,
-      scan_opts_json as scanOptsJson,
-      findings_json as findingsJson,
-      context_json as contextJson,
-      total_cost_usd as totalCostUsd,
-      completed_at as completedAt,
-      updated_at as updatedAt,
-      metrics_json as metricsJson,
-      assertions_json as assertionsJson,
-      prompt_hash as promptHash
+${PIPELINE_RUN_SELECT_COLUMNS}
     FROM pipeline_runs
     ${where}
     ORDER BY COALESCE(completed_at, started_at) DESC, started_at DESC, rowid DESC
@@ -2068,20 +2081,7 @@ export function getRun(db: Database.Database, runId: string): PipelineRunRecord 
   const row = db
     .prepare(`
     SELECT
-      run_id as runId,
-      repo,
-      started_at as startedAt,
-      status,
-      config_json as configJson,
-      scan_opts_json as scanOptsJson,
-      findings_json as findingsJson,
-      context_json as contextJson,
-      total_cost_usd as totalCostUsd,
-      completed_at as completedAt,
-      updated_at as updatedAt,
-      metrics_json as metricsJson,
-      assertions_json as assertionsJson,
-      prompt_hash as promptHash
+${PIPELINE_RUN_SELECT_COLUMNS}
     FROM pipeline_runs
     WHERE run_id = ?
     LIMIT 1
@@ -2149,16 +2149,37 @@ export function saveAssertionResults(
   insertAll();
 }
 
+/** True when a run has persisted state that can resume unfinished work. */
+export function hasRunCheckpoint(db: Database.Database, runId: string): boolean {
+  const row = db
+    .prepare(
+      `
+    SELECT 1
+    FROM pipeline_runs
+    WHERE run_id = ?
+      AND ${CHECKPOINT_PRESENT_SQL}
+    LIMIT 1
+  `,
+    )
+    .get(runId) as { "1": number } | undefined;
+  return row != null;
+}
+
 /**
- * Mark pipeline runs stuck in non-terminal states as "aborted".
- * Cleans up orphaned runs from killed processes or crashes.
+ * Mark active pipeline runs as interrupted when a checkpoint exists, otherwise
+ * aborted. Cleans up orphaned runs from killed processes or crashes.
  */
 export function markStaleRunsAborted(db: Database.Database, repo: string): number {
   const activeStatuses = ACTIVE_PIPELINE_RUN_STATUSES.map((status) => `'${status}'`).join(", ");
   const result = db
     .prepare(`
     UPDATE pipeline_runs
-    SET status = 'aborted', completed_at = datetime('now'), updated_at = datetime('now')
+    SET status = CASE
+          WHEN ${CHECKPOINT_PRESENT_SQL} THEN 'interrupted'
+          ELSE 'aborted'
+        END,
+        completed_at = datetime('now'),
+        updated_at = datetime('now')
     WHERE repo = ? AND status IN (${activeStatuses})
   `)
     .run(repo);

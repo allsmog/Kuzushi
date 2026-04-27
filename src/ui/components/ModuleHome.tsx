@@ -10,6 +10,12 @@
 
 import { Box, Text, useStdout } from "ink";
 import type React from "react";
+import {
+  buildSastTaskSelectionSummary,
+  formatSastTaskStateLine,
+  readDisabledSastTasks,
+  SAST_SCAN_TOOL_NAME,
+} from "../../copilot/sast-task-selection.js";
 import { truncateEnd } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { Table } from "../primitives/Table.js";
@@ -29,22 +35,24 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
   // registering a renderer in `module-home/registry.ts`. The lookup is
   // resolved up-front so the legacy keybind registration below stays at
   // the top of the function (rules-of-hooks: same hooks, every render).
-  const customRenderer = getModuleHomeRenderer(shell.focusedModule ?? null);
-  const useCustom = customRenderer != null && shell.processing !== true;
+  const CustomHome = getModuleHomeRenderer(shell.focusedModule ?? null)?.render;
+  const useCustom = CustomHome != null && shell.processing !== true;
   const { stdout } = useStdout();
   const columns = stdout?.columns ?? 120;
   const tableMaxWidth = Math.max(44, Math.min(96, columns - SPACING.md * 3));
   const narrow = columns < 96;
+  const moduleId = shell.focusedModule;
+  const isSastModule = moduleId === "sast";
 
   useRegisterKeybindings([
     { keys: "Enter", label: "type tool verb" },
+    ...(isSastModule ? [{ keys: "tasks", label: "select tasks", secondary: true }] : []),
     { keys: "t", label: "tune", secondary: true },
     { keys: "f", label: "findings", secondary: true },
     { keys: "b", label: "back", secondary: true },
     { keys: "?", label: "help", secondary: true },
   ]);
-  if (useCustom) return customRenderer!.render({ shell });
-  const moduleId = shell.focusedModule;
+  if (useCustom && CustomHome) return <CustomHome shell={shell} />;
   if (!moduleId) {
     return (
       <Box paddingLeft={2}>
@@ -127,17 +135,43 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
             )}
           </Section>
 
+          {isSastModule ? <SastTaskSelectionSummary shell={shell} /> : null}
+
           <Section label="last run">
-            <Text>
-              {"   "}
-              {card?.lastRunSummary
-                ? tokens.value(card.lastRunSummary)
-                : tokens.muted("never run for this workspace")}
-            </Text>
+            <Box flexDirection="column" paddingLeft={3}>
+              <Text>
+                {card?.lastRunSummary
+                  ? tokens.value(card.lastRunSummary)
+                  : tokens.muted("never run for this workspace")}
+              </Text>
+              {card?.runState ? (
+                <Text>{tokens.muted(`actions: ${card.runState.actions.join(" · ")}`)}</Text>
+              ) : null}
+            </Box>
           </Section>
         </>
       )}
     </ScreenContent>
+  );
+}
+
+function SastTaskSelectionSummary({ shell }: { shell: ShellState }): React.ReactElement {
+  const options = shell.moduleOptions[SAST_SCAN_TOOL_NAME] ?? {};
+  const summary = buildSastTaskSelectionSummary({ options, tune: shell.tuneSnapshot });
+  const disabled = readDisabledSastTasks(options);
+  const blockedLabel = disabled.length > 0 ? disabled.join(", ") : "none";
+
+  return (
+    <Section label="task selection" hint="tasks opens scanners/detectors">
+      <Box flexDirection="column" paddingLeft={3}>
+        <Text>{tokens.value(formatSastTaskStateLine(summary))}</Text>
+        <Text>
+          {tokens.muted("blocked: ")}
+          {blockedLabel === "none" ? tokens.muted(blockedLabel) : tokens.value(blockedLabel)}
+        </Text>
+        <Text>{tokens.muted("commands: tasks · show options · scan .")}</Text>
+      </Box>
+    </Section>
   );
 }
 

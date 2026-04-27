@@ -166,6 +166,17 @@ export function parseToolArgs(args: string[]): Record<string, unknown> {
   const result: Record<string, unknown> = {};
 
   for (const arg of args) {
+    if (arg === "--resume") {
+      result.resume = true;
+      continue;
+    }
+
+    if (arg.startsWith("--resume=")) {
+      const rawResume = arg.slice("--resume=".length).trim();
+      result.resume = rawResume.length > 0 ? rawResume : true;
+      continue;
+    }
+
     const eqIdx = arg.indexOf("=");
     if (eqIdx === -1) {
       // Bare positional arg — treat as "target"
