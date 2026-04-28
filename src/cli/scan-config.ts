@@ -41,6 +41,12 @@ export interface ScanCommandOptions {
   autoRuleGen: boolean;
   taintDiffBase?: string;
   taintDiffMode?: string;
+  /**
+   * Restrict ALL detectors to files changed since this git ref.
+   * Distinct from `taintDiffBase` which only scopes the taint stage.
+   * Field-test issue #51.
+   */
+  diffBase?: string;
   stream: boolean;
   streamPort?: number;
   githubPr: boolean;

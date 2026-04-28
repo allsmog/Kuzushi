@@ -329,6 +329,10 @@ program
     false,
   )
   .option("--taint-diff-base <ref>", "Only taint-analyze files changed since the provided git ref")
+  .option(
+    "--diff-base <ref>",
+    "Restrict ALL detectors to files changed since the provided git ref (e.g. main, HEAD~5). Sets scanPaths from `git diff --name-only <ref>..HEAD`. Field-test issue #51.",
+  )
   .option("--taint-diff-mode <mode>", "Diff-aware taint mode: delta|baseline")
   .option("--stream", "Enable SSE streaming server for live pipeline events", false)
   .option("--stream-port <n>", "Port for SSE streaming server (0 = auto)", parseInt)

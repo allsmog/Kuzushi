@@ -113,6 +113,40 @@ export function prepareScanExecution(
   const expandedTasks = expandTaskSelections(requestedTasks, config);
   config.tasks = expandedTasks;
 
+  // --diff-base: scope all detectors to files changed since <ref>.
+  // Resolves to absolute paths so the scanners' `scanPaths` array is
+  // unambiguous regardless of cwd. Field-test issue #51.
+  let scanPaths: string[] | undefined;
+  if (opts.diffBase) {
+    try {
+      const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+      const path = require("node:path") as typeof import("node:path");
+      const out = execFileSync("git", ["diff", "--name-only", `${opts.diffBase}..HEAD`], {
+        cwd: repoRoot,
+        encoding: "utf8",
+      });
+      const changed = out
+        .split("\n")
+        .map((line: string) => line.trim())
+        .filter(Boolean);
+      if (changed.length === 0) {
+        const { getLogger } = require("../../logger.js") as typeof import("../../logger.js");
+        getLogger("scan").warn(
+          `--diff-base ${opts.diffBase}: no files changed since ref. Falling back to full-tree scan.`,
+        );
+      } else {
+        scanPaths = changed.map((f: string) => path.join(repoRoot, f));
+      }
+    } catch (err) {
+      const { getLogger } = require("../../logger.js") as typeof import("../../logger.js");
+      getLogger("scan").warn(
+        `--diff-base ${opts.diffBase}: git diff failed (${
+          err instanceof Error ? err.message : String(err)
+        }). Falling back to full-tree scan.`,
+      );
+    }
+  }
+
   const scanOpts: ScanOpts = {
     severity,
     maxFindings: opts.max,
@@ -120,6 +154,8 @@ export function prepareScanExecution(
     excludePatterns: config.excludePatterns,
     tasks: taskOverride ?? expandedTasks,
     fresh: opts.fresh,
+    diffBase: opts.diffBase,
+    scanPaths,
   };
 
   return { config, scanOpts };
