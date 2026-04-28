@@ -418,6 +418,23 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
           `\n${stats.deadLetterCount} finding(s) failed all triage retries. Re-run with \`--resume\` after fixing the blocker, or use \`--review-findings\` to inspect completed findings.`,
         );
       }
+      // Field-test issue #15a: when ≥1 scanner/detector task failed,
+      // exit non-zero so CI / shell scripts notice. Previously kuzushi
+      // reported `summary: $0.00 · 48s` exit 0 even when 100% of LLM
+      // detectors failed. Skip when KUZUSHI_TOLERATE_TASK_FAILURES=1
+      // for operators who want partial-success behavior preserved.
+      const failedTasks = stats.failedTasks ?? [];
+      if (
+        failedTasks.length > 0 &&
+        process.env["KUZUSHI_TOLERATE_TASK_FAILURES"] !== "1" &&
+        process.exitCode !== 1
+      ) {
+        console.error(
+          `\n${failedTasks.length} task(s) failed during scanning: ${failedTasks.join(", ")}. ` +
+            `Set KUZUSHI_TOLERATE_TASK_FAILURES=1 to keep exit 0 on partial-failure runs.`,
+        );
+        process.exitCode = 1;
+      }
     }
 
     if (process.stdout.isTTY && reportMode === "full" && params.opts.reviewFindings === true) {
