@@ -386,6 +386,11 @@ program
   )
   .option("--max-modules <n>", "Max modules to scan in Phase 2 (top N by priority)", parseInt)
   .option("--dry-run", "Print scan scope (modules, tasks, tasks) without running", false)
+  .option(
+    "--show-plan",
+    "Print the resolved scan plan and then run (operator-friendly preview without a separate --dry-run pass)",
+    false,
+  )
   .option("--confirm-config", "Review effective config before starting an interactive scan", false)
   .option(
     "--review-context",

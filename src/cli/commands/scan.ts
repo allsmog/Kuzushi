@@ -245,18 +245,24 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     }
   }
 
-  if (opts.dryRun) {
-    resetTerminalOutput();
-    cleanupUI();
+  if (opts.dryRun || opts.showPlan) {
     const { taskIds, taskSummary, dynamicSelectionActive } = getScanPlanSummary(config, scanOpts);
-    console.log("\nDry run — no scan will be executed.");
+    const banner = opts.dryRun
+      ? "\nDry run — no scan will be executed."
+      : "\nScan plan (will execute after this preview):";
+    if (opts.dryRun) {
+      resetTerminalOutput();
+      cleanupUI();
+    }
+    console.log(banner);
     console.log(`  Target:    ${scanPath}`);
     console.log(`  Tasks:     ${taskIds.join(", ") || "none"}`);
     console.log(`  Expanded:  ${taskSummary}`);
     console.log(`  Dynamic:   ${dynamicSelectionActive ? "on" : "off"}`);
     console.log(`  Model:     ${config.model}`);
     console.log(`  Severity:  ${scanOpts.severity?.join(", ") || "all"}\n`);
-    return;
+    if (opts.dryRun) return;
+    // --show-plan falls through to runPipeline below.
   }
 
   try {

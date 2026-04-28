@@ -90,6 +90,13 @@ export interface ScanCommandOptions {
   modulePriority?: string;
   maxModules?: number;
   dryRun?: boolean;
+  /**
+   * Print the resolved scan plan (same shape as `--dry-run`) and then
+   * proceed with the scan. Useful for "what's about to run?" sanity
+   * checks in CI logs without forcing a separate dry-run pass.
+   * Field-test issue #58.
+   */
+  showPlan?: boolean;
   confirmConfig?: boolean;
   reviewContext?: boolean;
   reviewThreatModel?: boolean;
