@@ -37,6 +37,12 @@ runtime could authenticate via the Claude Code subprocess. Operators
 get a fail-fast that's actually a false positive. Fixed alongside #1.
 
 ### 🟠 #3 — `--tasks <id>` is not a whitelist
+**(DOC FIXED — `1646fea`)** — flag help text now states explicitly:
+"enables but does not strictly hard-restrict; dependent agentic
+detectors can still fire even when not listed." Behavior unchanged
+(orchestrator surgery deferred); operators have a clear expectation.
+
+
 
 Passing `--tasks semgrep --no-context` still ran
 `template-injection-detect`, `sharp-edges-detect`, `ssrf-detect`,
@@ -47,6 +53,11 @@ Either `--tasks` should hard-restrict to the listed ids, or the help
 text should call out that downstream/auto-included tasks still fire.
 
 ### 🟠 #4 — Semgrep crashes hard when registry is unreachable
+**(FIXED — `60a2134`)** — exit-7 from semgrep now appends a multi-line
+hint with the exact `git clone semgrep-rules` + project-config
+override that unblocks sandboxed environments.
+
+
 
 Default `taskConfig.semgrep.configFlag` is
 `["auto", "p/security-audit", "p/owasp-top-ten", "p/cwe-top-25"]` — all
@@ -71,6 +82,10 @@ non-zero" and recommend the fix.
 
 ### 🟡 #6 — `kuzushi scan . --list-modules` says "0 modules" on
 single-root repos
+**(FIXED — `1646fea`)** — single-root case now prints the explicit
+"no monorepo modules detected — looks like a single-root project"
+hint with the right command to run instead.
+
 
 Sentry has both `pyproject.toml` and `package.json` at the root. Kuzushi
 correctly treats it as single-root, but `--list-modules` then prints
@@ -136,6 +151,10 @@ produce a single finding. Repros included:
   partial state into `/tmp`.
 
 ### 🟠 #12 — `kuzushi scan` doesn't reap its semgrep subprocesses
+**(FIXED — `9723486`)** — semgrep is now spawned `detached: true` and
+the whole process group is signaled on parent exit/abort.
+
+
 
 After killing the parent `node` (or after a SIGPIPE), `pysemgrep` /
 `semgrep-core` keep running detached. Need a clean shutdown path that
@@ -152,6 +171,11 @@ way, the scan command shouldn't die quiet on SIGPIPE; should drain or
 at least exit non-zero.
 
 ### 🟠 #14 — No "scan is alive" pulse in `--ci` mode
+**(FIXED — `baac119`)** — heartbeat fires at 60s of silence in
+scanning/triaging/verifying phases. Disable with
+`heartbeatSeconds: 0`.
+
+
 
 Once `phase: idle → scanning` prints, `--ci` goes silent for the
 entire scan duration (which on Sentry is many minutes). Operators have
@@ -166,6 +190,11 @@ N findings)`) would fix this. Right now `--ci` looks identical between
 
 ### 🔴 #16 — Findings stranded in `pipeline_runs.findings_json` because
 triage failed
+**(FIXED — `ee4c1c0`)** — `KUZUSHI_PERSIST_RAW_FINDINGS=1` opts into
+pre-persisting raw scanner findings to the `findings` table with a
+`needs_review` placeholder. Real triage results overwrite via
+ON CONFLICT DO UPDATE.
+
 
 Run `1b6326b3` produced **27,375 semgrep findings** (118 ERROR-tier,
 including 2 real SSRF and 1 raw-SQL injection in Sentry source). They
@@ -186,6 +215,10 @@ shouldn't lose the raw scanner output.
 
 ### 🟠 #18 — Stderr from spawned Claude SDK subprocesses is invisible
 unless `KUZUSHI_ABORT_DEBUG=1`
+**(FIXED — `272dff8`)** — `createTrackedSpawn` buffers an 8 KB stderr
+tail and replays it on any non-zero exit / non-null signal.
+
+
 
 `createTrackedSpawn` in `src/agent-runtime/claude.ts:115` listens for
 `stderr` data on every Claude subprocess but only forwards it to the
@@ -210,6 +243,12 @@ then exit cleanly with a summary) or it should not exit on EOF until
 in-flight work finishes.
 
 ### 🔴 #20 — OAuth-in-env path is ~12× more expensive than not setting it
+**(FIXED — `68ac262`)** — `isClaudeCodeHostManagedAuth()` detects
+host-managed sessions (via `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` /
+`CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR`) and skips env priming so
+the spawned `claude` CLI inherits the host's shared cache.
+
+
 
 When `ANTHROPIC_API_KEY=$(cat /home/claude/.claude/remote/.oauth_token)`
 is set, the Claude CLI subprocess reports `apiKeySource:
@@ -224,6 +263,11 @@ detect host-managed auth (e.g. `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`
 env var) and skip the env priming when present.
 
 ### 🟠 #21 — `kuzushi shell --load` is additive only; no `--exclude`
+**(FIXED — `1646fea`)** — new `kuzushi shell --exclude codeql,...`
+flag drops listed built-in modules from the default load via
+`CopilotCoreOptions.excludeBuiltinModules`.
+
+
 
 `--load <modules>` adds modules to the default set, but there's no way
 to *remove* a default module (e.g. when `codeql` is broken or
@@ -233,6 +277,11 @@ load in a given environment.
 
 ### 🟠 #22 — Catalog shows "completed · no findings · $0.0" even when
 the run produced 27K findings
+**(FIXED — `ee4c1c0`)** — same fix as #16; catalog reads from the
+`findings` table which is now pre-populated when
+`KUZUSHI_PERSIST_RAW_FINDINGS=1`.
+
+
 
 After the 13-minute semgrep scan that wrote 27,375 findings into
 `pipeline_runs.findings_json`, the catalog renders the sast / semgrep
@@ -241,7 +290,44 @@ modules as "completed · no findings · $0.00". Same root cause as #16
 side effect — every module looks like it found nothing — is its own
 UX bug worth flagging separately.
 
+### 🟠 #24 — `threat-model-randori` (and any task that needs to Write
+artifacts) silently degrades under root's `plan` permission mode
+**(FIXED — `947391f`)** — `planModeAllowedDirectories()` whitelists
+the scan target, `~/.kuzushi/{,plans,runs}`, `~/.claude/plans`,
+`/home/claude/.claude/plans`, and `<cwd>/.kuzushi` via the SDK's
+`additionalDirectories` option. randori, threat-hunt, and similar
+artifact-producing tasks now read/write where the rest of the
+pipeline expects.
+
+
+
+The post-`c3b9bd2` plan-mode fallback unblocks the LLM call itself
+but blocks the Read/Write paths randori uses for its artifacts:
+
+```
+[threat-model-randori] Phase 1 Write failed (1/3):
+  Tool "Write" file_path "/root/.claude/plans/deep-riding-willow.md" escapes the Read sandbox
+[threat-model-randori] Phase 2 (S4) Read failed (1/3):
+  Tool "Read" file_path "/root/.kuzushi/runs/<runId>/..." [restricted]
+```
+
+Randori retries 3x then moves on — degrades gracefully but produces a
+much weaker threat model than on a non-root host. Two follow-ups:
+  (a) the SDK's `additionalDirectories` option could be set to include
+      the run dir + `~/.kuzushi/plans/` so plan-mode reads/writes there
+      are allowed;
+  (b) tasks that fundamentally need to write artifacts (randori,
+      threat-hunt, systems-hunt context dumps) should declare that
+      requirement and either escalate or warn the operator instead of
+      silently retrying-then-skipping.
+
 ### 🟠 #23 — `--max N` semantics ambiguous
+**(DOC FIXED — `1646fea`)** — help text now reads:
+"Cap for the triage stage: at most <n> findings reach the triage
+agent. Scanner-stage emits all raw findings; pre-triage dedup may
+also drop more."
+
+
 
 The flag is documented as "Max findings to triage" but in practice on
 this scan it appeared to also cap how many lenses each detector
@@ -251,6 +337,12 @@ match — and probably want separate flags for "max raw findings" vs
 "max triaged" vs "max lens iterations".
 
 ### 🟠 #17 — `--audit-log` doesn't actually write `scan.jsonl`
+**(CASCADE OF #15)** — `registerScanEventLog` listens for
+`scan:agent-activity` events. Pre-#15 those events never fired
+because every detector died before tool-use. With #15 fixed, scan.jsonl
+populates naturally.
+
+
 
 With `--audit-log` set, the run dir got `run.json` and (later)
 `threat-model.json` — but no `scan.jsonl`, no `triage.jsonl`, no
@@ -258,6 +350,17 @@ With `--audit-log` set, the run dir got `run.json` and (later)
 operator surfaces for "what happened during this run". They're empty
 even though the orchestrator emitted plenty of warnings/errors that
 should have been captured.
+
+### 🔴 #15a — Scan reports `summary $0.00` exit 0 even when 100% of
+detectors failed
+**(FIXED — `60a2134`)** — exit code is now 1 when
+`stats.failedTasks.length > 0`. Override with
+`KUZUSHI_TOLERATE_TASK_FAILURES=1` for partial-success runs.
+
+### 🟠 #15b — `prototype-pollution-detect` "Invalid JSON output" wrap
+**(FIXED — `60a2134`)** — `parseJson()` now distinguishes empty,
+truncated, and malformed outputs and points operators at the upstream
+"subprocess exit" log line as the actual cause.
 
 ### 🔴 #15 — Every agentic detector subprocess exits with code 1
 **(FIXED — `c3b9bd2`)**
