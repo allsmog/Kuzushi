@@ -77,6 +77,7 @@ import {
   isPocHarnessDone as isPocHarnessQueueDone,
   publishPocQueueDepth,
 } from "./orchestrator/poc-dispatcher.js";
+import { InMemoryScanFindingsStore } from "./orchestrator/scan-findings-store.js";
 import {
   collectTransitiveDeps,
   injectThreatModelPolicyCandidates,
@@ -329,7 +330,7 @@ export class PipelineOrchestrator {
       scanOpts,
       tasks,
       startedAt: event.meta.timestamp,
-      scanFindings: [],
+      scanFindings: new InMemoryScanFindingsStore(),
       totalFindings: 0,
       skippedAlreadyTriaged: 0,
       skippedLowConfidence: 0,
@@ -624,7 +625,7 @@ export class PipelineOrchestrator {
     if (!run.findingsJson) {
       if (run.status === "scanning") {
         state.resuming = false;
-        state.scanFindings = [];
+        state.scanFindings.clear();
         state.collectScanFindingEvents = false;
         await this.runTaskDag(state, runId);
         return;
@@ -642,8 +643,8 @@ export class PipelineOrchestrator {
 
     try {
       const parsed = safeJsonParse<unknown>(run.findingsJson);
-      state.scanFindings = clusterFindings(coerceFindings(parsed)).findings;
-      state.totalFindings = state.scanFindings.length;
+      state.scanFindings.replace(clusterFindings(coerceFindings(parsed)).findings);
+      state.totalFindings = state.scanFindings.count();
       state.totalCostUsd = normalizeCostUsd(run.totalCostUsd);
     } catch (error) {
       await this.bus.publish(
@@ -670,7 +671,7 @@ export class PipelineOrchestrator {
     await this.handleScanComplete(
       createEvent("scan:complete", runId, {
         context: state.context,
-        totalFindings: state.scanFindings.length,
+        totalFindings: state.scanFindings.count(),
       }),
     );
   }
@@ -681,10 +682,7 @@ export class PipelineOrchestrator {
 
     try {
       verifiedFingerprints = getVerifiedFingerprints(this.deps.db);
-      triageByFingerprint = getStoredTriageResults(
-        this.deps.db,
-        state.scanFindings.map((finding) => finding.fingerprint),
-      );
+      triageByFingerprint = getStoredTriageResults(this.deps.db, state.scanFindings.fingerprints());
     } catch (error) {
       await this.bus.publish(
         createEvent("pipeline:error", runId, {
@@ -696,7 +694,7 @@ export class PipelineOrchestrator {
       return;
     }
 
-    state.totalFindings = state.scanFindings.length;
+    state.totalFindings = state.scanFindings.count();
     state.skippedLowConfidence = 0;
     state.verifyCandidates = [];
     state.verifyQueue = [];
@@ -721,7 +719,7 @@ export class PipelineOrchestrator {
     state.pocHarnessStarted = false;
 
     const pendingCandidates: VerificationCandidate[] = [];
-    for (const finding of state.scanFindings) {
+    for (const finding of state.scanFindings.iterate()) {
       const triageResult = triageByFingerprint.get(finding.fingerprint);
       if (!triageResult) {
         continue;
@@ -759,14 +757,9 @@ export class PipelineOrchestrator {
     let pocHarnessedFingerprints = new Set<string>();
 
     try {
-      triageByFingerprint = getStoredTriageResults(
-        this.deps.db,
-        state.scanFindings.map((finding) => finding.fingerprint),
-      );
-      verificationByFingerprint = getStoredVerificationResults(
-        this.deps.db,
-        state.scanFindings.map((finding) => finding.fingerprint),
-      );
+      const fingerprints = state.scanFindings.fingerprints();
+      triageByFingerprint = getStoredTriageResults(this.deps.db, fingerprints);
+      verificationByFingerprint = getStoredVerificationResults(this.deps.db, fingerprints);
       pocHarnessedFingerprints = getPocHarnessedFingerprints(this.deps.db);
     } catch (error) {
       await this.bus.publish(
@@ -779,7 +772,7 @@ export class PipelineOrchestrator {
       return;
     }
 
-    state.totalFindings = state.scanFindings.length;
+    state.totalFindings = state.scanFindings.count();
     state.skippedLowConfidence = 0;
     state.verifyCandidates = [];
     state.verifyQueue = [];
@@ -806,7 +799,7 @@ export class PipelineOrchestrator {
     state.reportRequested = true;
 
     const pendingCandidates: PocHarnessCandidate[] = [];
-    for (const finding of state.scanFindings) {
+    for (const finding of state.scanFindings.iterate()) {
       const triageResult = triageByFingerprint.get(finding.fingerprint);
       if (!triageResult) {
         continue;
@@ -1076,10 +1069,10 @@ export class PipelineOrchestrator {
           }
 
           if (outputKind === "findings") {
-            state.scanFindings.push(...coerceFindings(output));
+            state.scanFindings.addAll(coerceFindings(output));
           } else if (outputKind === "threat-model") {
             if (isRecord(output) && Array.isArray(output["findings"])) {
-              state.scanFindings.push(...coerceFindings(output["findings"]));
+              state.scanFindings.addAll(coerceFindings(output["findings"]));
             }
           }
         }
@@ -1215,7 +1208,7 @@ export class PipelineOrchestrator {
     await this.bus.publish(
       createEvent("scan:complete", runId, {
         context: state.context,
-        totalFindings: state.scanFindings.length,
+        totalFindings: state.scanFindings.count(),
       }),
     );
   }
@@ -1259,7 +1252,7 @@ export class PipelineOrchestrator {
       createEvent("report:requested", runId, {
         context: state.context,
         stats: buildReportStats(this.deps.db, state),
-        fingerprints: state.scanFindings.map((finding) => finding.fingerprint),
+        fingerprints: state.scanFindings.fingerprints(),
         exploitChains: undefined,
         reportMode: state.context.reportMode,
       }),
@@ -1332,7 +1325,7 @@ export class PipelineOrchestrator {
     // output simply doesn't accumulate. Distinct from `maxFindings`
     // which gates triage downstream.
     const cap = state.scanOpts.maxRawFindings;
-    if (typeof cap === "number" && cap > 0 && state.scanFindings.length >= cap) {
+    if (typeof cap === "number" && cap > 0 && state.scanFindings.count() >= cap) {
       if (!state.maxRawFindingsWarned) {
         state.maxRawFindingsWarned = true;
         log.warn(
@@ -1343,7 +1336,7 @@ export class PipelineOrchestrator {
       return;
     }
 
-    state.scanFindings.push(event.payload.finding);
+    state.scanFindings.add(event.payload.finding);
   }
 
   private async handleScanComplete(event: ScanCompleteEvent): Promise<void> {
@@ -1356,13 +1349,13 @@ export class PipelineOrchestrator {
 
     state.stageTimestamps.scanEnd = event.meta.timestamp;
 
-    const clustered = clusterFindings(state.scanFindings);
+    const clustered = clusterFindings(state.scanFindings.toArray());
 
     // Location-based dedup: merge findings at the same file:line into one,
     // keeping the highest-scored and attaching others as corroborating signals.
     // Prevents 11x triage/verification for the same code location.
-    state.scanFindings = deduplicateByLocation(clustered.findings);
-    state.totalFindings = state.scanFindings.length;
+    state.scanFindings.replace(deduplicateByLocation(clustered.findings));
+    state.totalFindings = state.scanFindings.count();
     state.corroboratedClusters = clustered.corroboratedClusters;
 
     try {
@@ -1377,7 +1370,7 @@ export class PipelineOrchestrator {
       await this.bus.publish(
         createEvent("run:findings-checkpoint", state.checkpointRunId, {
           context: state.context,
-          findings: state.scanFindings,
+          findings: state.scanFindings.toArray(),
         }),
       );
     } catch (error) {
@@ -1408,7 +1401,7 @@ export class PipelineOrchestrator {
     }
 
     // Apply hard/soft filtering after clustering so corroborating evidence is preserved.
-    let filteredFindings = [...state.scanFindings];
+    let filteredFindings = state.scanFindings.toArray();
     state.skippedByFpFilter = 0;
     state.softSuppressedFindings = 0;
     if (state.config.fpFilterEnabled !== false) {
@@ -1417,7 +1410,7 @@ export class PipelineOrchestrator {
         ...(state.precedents?.hardExclusions ?? []),
       ];
       const fpFilter = new HardExclusionFilter(customExclusions);
-      const filterResult = fpFilter.filterFindings(state.scanFindings);
+      const filterResult = fpFilter.filterFindings(state.scanFindings.toArray());
       filteredFindings = filterResult.kept;
       state.skippedByFpFilter = filterResult.hardExcluded.length;
       state.softSuppressedFindings = filterResult.softSuppressed.length;
@@ -1492,7 +1485,7 @@ export class PipelineOrchestrator {
       }
     }
 
-    state.scanFindings = filteredFindings;
+    state.scanFindings.replace(filteredFindings);
     state.totalFindings = filteredFindings.length;
 
     const pendingFindings = filteredFindings.filter(
@@ -1834,7 +1827,7 @@ export class PipelineOrchestrator {
     // Evaluate quality gates if configured
     let qualityGateResult: QualityGateResult | undefined;
     if (state.config.qualityGates) {
-      const fingerprints = state.scanFindings.map((f) => f.fingerprint);
+      const fingerprints = state.scanFindings.fingerprints();
       const findings = getActionableFindings(this.deps.db, state.context.repoName, {
         includeFalsePositives: true,
         fingerprints,
@@ -1941,7 +1934,7 @@ export class PipelineOrchestrator {
     if (state.hookChain) {
       try {
         await state.hookChain.afterAll(this.buildHookContext(state), {
-          findings: state.scanFindings,
+          findings: state.scanFindings.toArray(),
           stats: pipelineStats as unknown as Record<string, unknown>,
         });
       } catch (error) {
@@ -1989,13 +1982,14 @@ export class PipelineOrchestrator {
     state.refinementInFlight = false;
     state.refinementIteration = Math.max(state.refinementIteration, event.payload.iteration);
 
-    const nonTaintAnalysis = state.scanFindings.filter(
-      (finding) => finding.taskId !== "taint-analysis-run",
-    );
-    state.scanFindings = [...nonTaintAnalysis, ...event.payload.updatedFindings].sort(
+    const nonTaintAnalysis = state.scanFindings
+      .toArray()
+      .filter((finding) => finding.taskId !== "taint-analysis-run");
+    const merged = [...nonTaintAnalysis, ...event.payload.updatedFindings].sort(
       (a, b) => b.score - a.score,
     );
-    state.totalFindings = state.scanFindings.length;
+    state.scanFindings.replace(merged);
+    state.totalFindings = state.scanFindings.count();
     state.triaged += event.payload.deltaTriaged;
     state.triageErrors += event.payload.deltaErrors;
     state.triageTotal += event.payload.deltaFindings.length;
@@ -2005,7 +1999,7 @@ export class PipelineOrchestrator {
       await this.bus.publish(
         createEvent("run:findings-checkpoint", state.checkpointRunId, {
           context: state.context,
-          findings: state.scanFindings,
+          findings: state.scanFindings.toArray(),
         }),
       );
       await this.bus.publish(
@@ -2337,7 +2331,7 @@ export class PipelineOrchestrator {
       createEvent("report:requested", runId, {
         context: state.context,
         stats: buildReportStats(this.deps.db, state),
-        fingerprints: state.scanFindings.map((f) => f.fingerprint),
+        fingerprints: state.scanFindings.fingerprints(),
         exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
         reportMode: state.context.reportMode,
       }),
@@ -2349,10 +2343,10 @@ export class PipelineOrchestrator {
   private collectConfirmedTPs(
     state: RunState,
   ): Array<{ finding: Finding; triageResult: TriageResult }> {
-    const fingerprints = state.scanFindings.map((f) => f.fingerprint);
+    const fingerprints = state.scanFindings.fingerprints();
     const triageResults = getStoredTriageResults(this.deps.db, fingerprints);
     const confirmed: Array<{ finding: Finding; triageResult: TriageResult }> = [];
-    for (const finding of state.scanFindings) {
+    for (const finding of state.scanFindings.iterate()) {
       const tr = triageResults.get(finding.fingerprint);
       if (tr && tr.verdict === "tp") {
         confirmed.push({ finding, triageResult: tr });
@@ -2364,14 +2358,14 @@ export class PipelineOrchestrator {
   private collectVariantAnalysisSeeds(
     state: RunState,
   ): Array<{ finding: Finding; triageResult: TriageResult }> {
-    const fingerprints = state.scanFindings.map((finding) => finding.fingerprint);
+    const fingerprints = state.scanFindings.fingerprints();
     const triageResults = getStoredTriageResults(this.deps.db, fingerprints);
     const verificationResults = state.verifyEnabled
       ? getStoredVerificationResults(this.deps.db, fingerprints)
       : new Map<string, VerificationResult>();
 
     const seeds: Array<{ finding: Finding; triageResult: TriageResult }> = [];
-    for (const finding of state.scanFindings) {
+    for (const finding of state.scanFindings.iterate()) {
       const triageResult = triageResults.get(finding.fingerprint);
       if (!triageResult || triageResult.verdict !== "tp") {
         continue;
@@ -2517,10 +2511,11 @@ export class PipelineOrchestrator {
       // location (filePath:startLine) since different tasks use incompatible
       // fingerprint schemes and a sweep finding at the same location as an
       // existing finding is a duplicate.
-      const existingFps = new Set(state.scanFindings.map((f) => f.fingerprint));
-      const existingLocations = new Set(
-        state.scanFindings.map((f) => `${f.filePath}:${f.startLine}`),
-      );
+      const existingFps = new Set(state.scanFindings.fingerprints());
+      const existingLocations = new Set<string>();
+      for (const f of state.scanFindings.iterate()) {
+        existingLocations.add(`${f.filePath}:${f.startLine}`);
+      }
       const newFindings = sweepFindings.filter(
         (f) =>
           !existingFps.has(f.fingerprint) && !existingLocations.has(`${f.filePath}:${f.startLine}`),
@@ -2528,7 +2523,7 @@ export class PipelineOrchestrator {
 
       if (newFindings.length > 0) {
         state.ruleSweepFindings = newFindings.length;
-        state.scanFindings.push(...newFindings);
+        state.scanFindings.addAll(newFindings);
         log.info(`[rule-sweep] Found ${newFindings.length} new findings from custom rules`);
 
         // Persist sweep findings to DB so they appear in reports and survive resume.
@@ -2666,9 +2661,12 @@ export class PipelineOrchestrator {
     if (!hasLabelContext) {
       return false;
     }
-    return state.scanFindings.some(
-      (finding) => finding.taskId === "taint-analysis-run" || finding.taskId === "taint-iris",
-    );
+    for (const finding of state.scanFindings.iterate()) {
+      if (finding.taskId === "taint-analysis-run" || finding.taskId === "taint-iris") {
+        return true;
+      }
+    }
+    return false;
   }
 
   private async startTaintAnalysisRefinement(state: RunState, runId: string): Promise<void> {
@@ -2686,7 +2684,7 @@ export class PipelineOrchestrator {
         model: refinementModel,
         iteration: nextIteration,
         totalIterations: state.refinementIterations,
-        findings: [...state.scanFindings],
+        findings: state.scanFindings.toArray(),
         labelOutput:
           state.taskOutputs.get("taint-analysis-label") ??
           state.taskOutputs.get("taint-cwe-select"),
@@ -3124,7 +3122,7 @@ export class PipelineOrchestrator {
       createEvent("report:requested", runId, {
         context: state.context,
         stats: buildReportStats(this.deps.db, state),
-        fingerprints: state.scanFindings.map((f) => f.fingerprint),
+        fingerprints: state.scanFindings.fingerprints(),
         exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
         reportMode: state.context.reportMode,
       }),
@@ -3292,7 +3290,7 @@ export class PipelineOrchestrator {
       createEvent("report:requested", runId, {
         context: state.context,
         stats: buildReportStats(this.deps.db, state),
-        fingerprints: state.scanFindings.map((f) => f.fingerprint),
+        fingerprints: state.scanFindings.fingerprints(),
         exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
         reportMode: state.context.reportMode,
       }),
@@ -3319,18 +3317,13 @@ export class PipelineOrchestrator {
   private selectDynamicAnalysisCandidates(state: RunState): DynamicAnalysisCandidate[] {
     const maxCandidates = state.config.dynamicMaxCandidates ?? 20;
     const minScore = state.config.dynamicMinScore ?? 7;
-    const triageResults = getStoredTriageResults(
-      this.deps.db,
-      state.scanFindings.map((f) => f.fingerprint),
-    );
-    const verificationResults = getStoredVerificationResults(
-      this.deps.db,
-      state.scanFindings.map((f) => f.fingerprint),
-    );
+    const fingerprints = state.scanFindings.fingerprints();
+    const triageResults = getStoredTriageResults(this.deps.db, fingerprints);
+    const verificationResults = getStoredVerificationResults(this.deps.db, fingerprints);
 
     const candidates: DynamicAnalysisCandidate[] = [];
 
-    for (const finding of state.scanFindings) {
+    for (const finding of state.scanFindings.iterate()) {
       const triageResult = triageResults.get(finding.fingerprint);
       if (!triageResult || triageResult.verdict === "fp") continue;
 
@@ -3572,7 +3565,7 @@ export class PipelineOrchestrator {
       createEvent("report:requested", runId, {
         context: state.context,
         stats: buildReportStats(this.deps.db, state),
-        fingerprints: state.scanFindings.map((f) => f.fingerprint),
+        fingerprints: state.scanFindings.fingerprints(),
         exploitChains: state.exploitChains.length > 0 ? state.exploitChains : undefined,
         reportMode: state.context.reportMode,
       }),
@@ -3822,9 +3815,9 @@ function buildRunMetrics(db: Database.Database, state: RunState) {
     variantAnalysis: state.variantAnalysisCostUsd,
   };
 
-  let findings: Finding[] = state.scanFindings;
+  let findings: Finding[] = state.scanFindings.toArray();
   try {
-    const fingerprints = state.scanFindings.map((finding) => finding.fingerprint);
+    const fingerprints = state.scanFindings.fingerprints();
     findings = getActionableFindings(db, state.context.repoName, {
       includeFalsePositives: true,
       fingerprints: fingerprints.length > 0 ? fingerprints : undefined,
