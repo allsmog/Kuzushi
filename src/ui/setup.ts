@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { ThreatModelDocument } from "../agents/tasks/threat-modeling/types.js";
 import type { ConfigPatchEntry } from "../config.js";
-import { applyConfigPatch, configPath, loadConfig } from "../config.js";
+import { applyConfigPatch, configPath, loadConfig, resolveAmbientOauthToken } from "../config.js";
 import { saveOperatorScanContext } from "../operator-context.js";
 import { savePersistentThreatModel } from "../threat-model-renderer.js";
 import type { OperatorScanContext } from "../types.js";
@@ -187,6 +187,8 @@ export function hasAnthropicCredentials(configApiKey?: string): boolean {
   if (configApiKey) return true;
   if (process.env["ANTHROPIC_API_KEY"]) return true;
   if (process.env["ANTHROPIC_OAUTH_TOKEN"]) return true;
+  // File-based ambient OAuth (Claude Code remote sandbox, local install).
+  if (resolveAmbientOauthToken({})) return true;
   return false;
 }
 
@@ -210,7 +212,9 @@ export function hasAnyProviderCredentials(): boolean {
     "OPENROUTER_API_KEY",
     "OLLAMA_BASE_URL",
   ];
-  return envKeys.some((k) => Boolean(process.env[k]));
+  if (envKeys.some((k) => Boolean(process.env[k]))) return true;
+  if (resolveAmbientOauthToken({})) return true;
+  return false;
 }
 
 export type CredentialOutcome =

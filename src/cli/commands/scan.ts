@@ -140,6 +140,21 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     loadConfig(repoRoot, { trustProjectConfig: opts.trustRepoConfig === true }),
     opts,
   );
+
+  // Inherited auth: walk the OAuth token search path and prime
+  // ANTHROPIC_API_KEY so pi-ai's anthropic provider (and the Claude
+  // Code subprocess) see a credential without requiring the operator
+  // to copy-paste anything. Skips when an env var is already set.
+  if (modeConfig.auth === "inherited" && !process.env.ANTHROPIC_API_KEY) {
+    const { resolveAmbientOauthToken } = await import("../../config.js");
+    const { getLogger } = await import("../../logger.js");
+    const ambient = resolveAmbientOauthToken(modeConfig);
+    if (ambient) {
+      process.env.ANTHROPIC_API_KEY = ambient.token;
+      getLogger("kuzushi").info(`Using inherited OAuth token (source: ${ambient.source})`);
+    }
+  }
+
   const monorepoDecision = await resolveMonorepoExecution({
     repoRoot,
     scanPath,
