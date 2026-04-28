@@ -24,6 +24,16 @@ export interface CiStreamOptions {
   write?: (line: string) => void;
   /** Include per-finding lines. Default true — flip off for very noisy scans. */
   emitFindings?: boolean;
+  /**
+   * Heartbeat interval in seconds. While the pipeline is in `scanning` /
+   * `triaging` / `verifying` state and no other line has been written for
+   * this long, emit a `heartbeat: …` line so operators can tell the
+   * scan is alive vs hung. Set to 0 to disable. Default 60s — enough to
+   * stay quiet on fast scans, frequent enough to reassure on slow ones
+   * (a Sentry-sized agentic scan can sit silent for many minutes).
+   * Field-test issue #14.
+   */
+  heartbeatSeconds?: number;
 }
 
 /**
@@ -36,31 +46,37 @@ export interface CiStreamOptions {
 export function attachCiStream(store: UIStore, opts: CiStreamOptions = {}): () => void {
   const write = opts.write ?? ((line: string) => process.stdout.write(`${line}\n`));
   const emitFindings = opts.emitFindings ?? true;
+  const heartbeatSeconds = opts.heartbeatSeconds ?? 60;
 
   let lastPhase: UIState["phase"] | null = null;
   const lastStageStatus = new Map<string, string>();
   const seenResults = new Set<string>();
   let startAnnounced = false;
   let endAnnounced = false;
+  let lastWriteAt = Date.now();
+  const writeWithHeartbeatReset = (text: string): void => {
+    write(text);
+    lastWriteAt = Date.now();
+  };
 
   const unsubscribe = store.subscribe(() => {
     const state = store.getState();
     if (state.mode !== "running" && !startAnnounced) return;
 
     if (!startAnnounced && state.repoName) {
-      write(line("scan", `${state.repoName} started`));
+      writeWithHeartbeatReset(line("scan", `${state.repoName} started`));
       startAnnounced = true;
     }
 
     if (state.phase !== lastPhase) {
-      write(line("phase", `${lastPhase ?? "(init)"} → ${state.phase}`));
+      writeWithHeartbeatReset(line("phase", `${lastPhase ?? "(init)"} → ${state.phase}`));
       lastPhase = state.phase;
     }
 
     for (const stage of state.stages) {
       const prev = lastStageStatus.get(stage.id);
       if (prev !== stage.status) {
-        write(line("stage", formatStage(stage)));
+        writeWithHeartbeatReset(line("stage", formatStage(stage)));
         lastStageStatus.set(stage.id, stage.status);
       }
     }
@@ -70,19 +86,47 @@ export function attachCiStream(store: UIStore, opts: CiStreamOptions = {}): () =
         if (r.kind !== "triage" || !r.verdict) continue;
         if (seenResults.has(r.fingerprint)) continue;
         seenResults.add(r.fingerprint);
-        write(line("finding", formatResult(r)));
+        writeWithHeartbeatReset(line("finding", formatResult(r)));
       }
     }
 
     if ((state.mode === "summary" || state.phase === "done") && !endAnnounced) {
       if (state.summary) {
-        write(line("summary", formatSummary(state)));
+        writeWithHeartbeatReset(line("summary", formatSummary(state)));
       }
       endAnnounced = true;
     }
   });
 
-  return unsubscribe;
+  // Heartbeat — emit a reassuring "still alive" line when the pipeline
+  // has been silent for too long. Without this, a long agentic scan
+  // looks identical to a hung process for many minutes (issue #14).
+  let heartbeatTimer: NodeJS.Timeout | undefined;
+  if (heartbeatSeconds > 0) {
+    heartbeatTimer = setInterval(() => {
+      const state = store.getState();
+      if (endAnnounced) return;
+      if (
+        state.mode !== "running" ||
+        (state.phase !== "scanning" && state.phase !== "triaging" && state.phase !== "verifying")
+      ) {
+        return;
+      }
+      const idleMs = Date.now() - lastWriteAt;
+      if (idleMs < heartbeatSeconds * 1000) return;
+      const activeStages = state.stages.filter((s) => s.status === "active").map((s) => s.id);
+      const detail = activeStages.length ? ` (${activeStages.join(", ")})` : "";
+      const idleSec = Math.round(idleMs / 1000);
+      writeWithHeartbeatReset(
+        line("heartbeat", `${state.phase} alive · idle ${idleSec}s${detail}`),
+      );
+    }, Math.min(heartbeatSeconds, 30) * 1000).unref();
+  }
+
+  return () => {
+    unsubscribe();
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+  };
 }
 
 function line(kind: string, body: string): string {
