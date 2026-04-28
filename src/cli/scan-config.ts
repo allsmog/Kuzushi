@@ -62,6 +62,20 @@ export interface ScanCommandOptions {
   agentRuntime?: string;
   apiKey?: string;
   baseUrl?: string;
+  /**
+   * Mirror of `kuzushi shell --inherit-claude` for the scan command:
+   * sets `config.auth = "inherited"` for this run so the OAuth ambient
+   * resolver primes ANTHROPIC_API_KEY without persisting state.
+   * Field-test issue #49.
+   */
+  inheritClaude?: boolean;
+  /**
+   * Built-in module ids to skip during the default load (comma-separated).
+   * Same semantics as `kuzushi shell --exclude`, exposed symmetrically
+   * on scan so containers missing optional binaries (codeql) don't
+   * have to set ambient config. Field-test issue #40.
+   */
+  exclude?: string;
   trustRepoConfig?: boolean;
   qualityGate: boolean;
   failOnTp: boolean;
@@ -105,6 +119,13 @@ export function applyScanCommandConfigOverrides(
     } else {
       Object.assign(config, preset);
     }
+  }
+
+  // `--inherit-claude` mirrors the shell flag for one-off scans —
+  // doesn't persist to disk, but flags the run as inherited so the
+  // OAuth ambient resolver in scan.ts can prime credentials. (#49)
+  if (opts.inheritClaude) {
+    config.auth = "inherited";
   }
 
   if (opts.model) config.model = opts.model;
