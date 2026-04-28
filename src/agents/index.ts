@@ -21,6 +21,7 @@ import { TaskRegistry } from "./registry.js";
 export async function createDefaultTaskRegistry(
   _config?: KuzushiConfig,
   _repoRoot?: string,
+  options: { excludeBuiltinModules?: string[] } = {},
 ): Promise<TaskRegistry> {
   const tasks = new TaskRegistry();
 
@@ -54,7 +55,13 @@ export async function createDefaultTaskRegistry(
     createCoreVulnScoutModule(),
   ];
 
-  for (const mod of dagModules) {
+  // Symmetric with `kuzushi shell --exclude` — drop modules the
+  // operator explicitly opted out of (e.g. `codeql` when its CLI
+  // binary isn't installed). Field-test issue #40.
+  const excluded = new Set(options.excludeBuiltinModules ?? []);
+  const filtered = excluded.size > 0 ? dagModules.filter((m) => !excluded.has(m.id)) : dagModules;
+
+  for (const mod of filtered) {
     registerDagToolsInTaskRegistry(tasks, mod);
   }
 

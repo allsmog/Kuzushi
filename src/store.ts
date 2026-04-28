@@ -172,7 +172,7 @@ const PROOF_STATE_PRECEDENCE: Record<ProofState, number> = {
 };
 
 /** Current canonical schema version. */
-const CURRENT_SCHEMA_VERSION = 106;
+const CURRENT_SCHEMA_VERSION = 107;
 
 /**
  * Lowest schema version that the migration runner can upgrade in-place.
@@ -483,6 +483,73 @@ export function upsertFinding(
   stmt.run(...upsertFindingParams(finding, triage, repo, ref));
 }
 
+/**
+ * Sentinel rationale that distinguishes a pre-persistence placeholder
+ * row from a real triage result. `getTriagedFingerprints` excludes
+ * rows with this rationale so the orchestrator's "skip already-triaged"
+ * logic doesn't accidentally treat raw-finding placeholders as
+ * triaged.
+ */
+export const RAW_FINDING_PLACEHOLDER_RATIONALE = "raw scanner finding (not triaged)";
+
+/**
+ * Build a placeholder `TriageResult` for raw scanner findings that haven't
+ * been triaged yet. Used by `upsertRawFinding` to pre-persist scan-stage
+ * output so it survives a triage failure (field-test issue #16/#22).
+ *
+ * The placeholder uses verdict `needs_review` and confidence `0` so the
+ * `findings` table accurately reflects "scanner saw it, no judgement
+ * yet" — and the SQL `UPSERT ... ON CONFLICT` lets a real triage result
+ * overwrite it later without dropping rows.
+ */
+export function rawFindingTriagePlaceholder(finding: Finding): TriageResult {
+  return {
+    fingerprint: finding.fingerprint,
+    verdict: "needs_review",
+    confidence: 0,
+    rationale: RAW_FINDING_PLACEHOLDER_RATIONALE,
+    verificationSteps: [],
+    fixPatch: null,
+  };
+}
+
+/**
+ * SQL that inserts a raw-finding placeholder ONLY when no row with
+ * that fingerprint exists yet. Critical for the pre-persist path:
+ * a regular UPSERT would overwrite real triage results from prior
+ * runs (or from same-run faster paths) with the placeholder.
+ */
+const INSERT_RAW_FINDING_SQL = `
+    INSERT INTO findings (
+      fingerprint, task_id, repo, ref, rule_id, file_path, start_line,
+      severity, message, adjusted_score, corroboration_json, suppression_json, verdict, confidence,
+      rationale, verification_steps, fix_patch, triage_cost_usd, triage_details_json,
+      taint_path_json, proof_state, engine_provenance_json,
+      finding_metadata_json, actor_fingerprint
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(fingerprint) DO NOTHING
+  `;
+
+/**
+ * Persist a single raw scanner finding so it lands in the `findings`
+ * table at scan-stage end, before triage runs. If triage later fails
+ * (LLM auth error, rate limit, etc.) the finding still surfaces in
+ * `kuzushi shell /findings` and `--sarif`/`--json` exports.
+ *
+ * Uses `ON CONFLICT DO NOTHING` so existing rows (real triage results
+ * from prior runs, or same-run rows from a faster path) are never
+ * clobbered with the placeholder verdict.
+ */
+export function upsertRawFinding(
+  db: Database.Database,
+  finding: Finding,
+  repo: string,
+  ref: string,
+): void {
+  const stmt = db.prepare(INSERT_RAW_FINDING_SQL);
+  stmt.run(...upsertFindingParams(finding, rawFindingTriagePlaceholder(finding), repo, ref));
+}
+
 /** Default flush threshold for {@link FindingUpsertQueue}.
  *  Raised from 1 → 50: the store worker already flushes at every natural
  *  phase boundary (triage:complete, verification:result, poc-harness:result,
@@ -539,9 +606,17 @@ export class FindingUpsertQueue {
  *  Excludes findings with the batch-drop fallback signature (confidence=0,
  *  fallback rationale) so they get re-queued on subsequent runs. */
 export function getTriagedFingerprints(db: Database.Database): Set<string> {
+  // Excludes:
+  //  1. batch-drop fallback rows (confidence=0, fallback rationale) so
+  //     they get re-queued on subsequent runs.
+  //  2. raw-finding placeholders (`KUZUSHI_PERSIST_RAW_FINDINGS=1` /
+  //     default-on path) — verdict='needs_review', confidence=0,
+  //     `RAW_FINDING_PLACEHOLDER_RATIONALE`. Without this filter the
+  //     placeholders look "already triaged" and the next run skips
+  //     them entirely.
   const rows = db
-    .prepare("SELECT fingerprint FROM findings WHERE NOT (confidence = 0 AND rationale = ?)")
-    .all(BATCH_TRIAGE_FALLBACK_RATIONALE) as Array<{
+    .prepare("SELECT fingerprint FROM findings WHERE NOT (confidence = 0 AND rationale IN (?, ?))")
+    .all(BATCH_TRIAGE_FALLBACK_RATIONALE, RAW_FINDING_PLACEHOLDER_RATIONALE) as Array<{
     fingerprint: string;
   }>;
   return new Set(rows.map((r) => r.fingerprint));

@@ -10,6 +10,12 @@
 export interface ScanOpts {
   severity: string[];
   maxFindings?: number;
+  /**
+   * Soft cap on raw scanner findings collected during scan stage.
+   * Once exceeded, new findings are dropped and a warning is logged.
+   * Distinct from `maxFindings` (triage cap). Field-test issue #34.
+   */
+  maxRawFindings?: number;
   excludePatterns: string[];
   tasks?: string[];
   taskMode?: "auto" | "manual";

@@ -12,7 +12,7 @@ import { accessSync, constants, existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { parsePiAiModelSpec } from "../agent-runtime/model-spec.js";
 import type { ConfigValidationIssue } from "../config/validation.js";
-import { providerEnvVar, resolveActiveCredentials } from "../config.js";
+import { providerEnvVar, resolveActiveCredentials, resolveAmbientOauthToken } from "../config.js";
 import type { KuzushiConfig } from "../types.js";
 
 /** Return the first directory on PATH containing an executable named `bin`, or null. */
@@ -196,6 +196,22 @@ function checkAgentRuntimeCredentials(config: KuzushiConfig): {
       },
       issue: null,
     };
+  }
+
+  // Inherited-auth mode: a discoverable OAuth token (env var, configured
+  // file, or `~/.claude/...`) is treated as a valid credential.
+  if (config.auth === "inherited" && providerId === "anthropic") {
+    const ambient = resolveAmbientOauthToken(config);
+    if (ambient) {
+      return {
+        check: {
+          name: "credentials",
+          status: "ok",
+          detail: `inherited OAuth (${ambient.source})`,
+        },
+        issue: null,
+      };
+    }
   }
 
   return {

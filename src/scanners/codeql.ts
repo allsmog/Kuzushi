@@ -21,6 +21,7 @@ export class CodeQLPlugin implements ScannerPlugin {
   private threads: number | undefined;
   private ram: number | undefined;
   private multiLanguage = false;
+  private unavailableReason: string | undefined;
 
   async init(config: TaskConfig): Promise<void> {
     const configuredBinary = asOptionalString(config["binary"]);
@@ -33,13 +34,26 @@ export class CodeQLPlugin implements ScannerPlugin {
 
     if (configuredBinary) {
       this.codeqlBin = configuredBinary;
+      this.unavailableReason = undefined;
       return;
     }
 
-    this.codeqlBin = await resolveCodeQLBinary();
+    // Defer the "CodeQL not installed" error to scan-time so the module
+    // can be loaded for catalog discovery (and `kuzushi shell` startup)
+    // without crashing every command — only `codeql:scan` should fail.
+    try {
+      this.codeqlBin = await resolveCodeQLBinary();
+      this.unavailableReason = undefined;
+    } catch (err) {
+      this.codeqlBin = "";
+      this.unavailableReason = err instanceof Error ? err.message : String(err);
+    }
   }
 
   async scan(repoRoot: string, opts: ScanOpts, _config: TaskConfig): Promise<Finding[]> {
+    if (this.unavailableReason) {
+      throw new Error(this.unavailableReason);
+    }
     const repoName = path.basename(repoRoot);
 
     if (this.multiLanguage && !this.language) {

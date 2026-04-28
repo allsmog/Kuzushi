@@ -64,6 +64,8 @@ export interface RunState {
   resuming: boolean;
   config: KuzushiConfig;
   scanOpts: ScanOpts;
+  /** Latched once we hit `maxRawFindings` so we only warn once per run. */
+  maxRawFindingsWarned?: boolean;
   tasks: string[];
   startedAt: string;
   scanFindings: Finding[];

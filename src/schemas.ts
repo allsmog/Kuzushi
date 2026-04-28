@@ -606,6 +606,12 @@ export type ExploitChainZ = z.infer<typeof ExploitChainSchema>;
 export const ScanOptsSchema = z.object({
   severity: z.array(z.string()),
   maxFindings: z.number().optional(),
+  /**
+   * Soft cap on raw scanner findings collected during scan stage.
+   * Once exceeded, new findings are dropped and a warning is logged.
+   * Distinct from `maxFindings` (triage cap). Field-test issue #34.
+   */
+  maxRawFindings: z.number().optional(),
   excludePatterns: z.array(z.string()),
   tasks: z.array(z.string()).optional(),
   taskMode: z.enum(["auto", "manual"]).optional(),
@@ -696,6 +702,7 @@ export const KuzushiConfigSchema = z.object({
   agentRuntimeBackend: AgentRuntimeBackendSchema.optional(),
   agentRuntimeConfig: AgentRuntimeConfigSchema.optional(),
   auth: z.literal("inherited").optional(),
+  oauthTokenFile: z.string().optional(),
   tasks: z.array(z.string()),
   severity: z.array(z.string()),
   excludePatterns: z.array(z.string()),

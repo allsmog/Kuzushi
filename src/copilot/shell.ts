@@ -274,6 +274,13 @@ export interface ShellOptions {
   /** Human-readable active workspace name for shell UI and prompts. */
   workspaceName?: string;
   modules?: string[];
+  /**
+   * Built-in module ids to skip during the default load (forwarded to
+   * `CopilotCoreOptions.excludeBuiltinModules`). Lets `kuzushi shell
+   * --exclude codeql` bypass loading the codeql module when its CLI
+   * isn't installed. Field-test issue #21.
+   */
+  excludeBuiltinModules?: string[];
   target?: string;
 }
 
@@ -2543,6 +2550,7 @@ export async function startShell(opts: ShellOptions): Promise<void> {
     config: opts.config,
     dataDir,
     modules: opts.modules,
+    excludeBuiltinModules: opts.excludeBuiltinModules,
   });
 
   await core.init();

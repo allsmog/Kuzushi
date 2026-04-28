@@ -140,6 +140,27 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     loadConfig(repoRoot, { trustProjectConfig: opts.trustRepoConfig === true }),
     opts,
   );
+
+  // Inherited auth: walk the OAuth token search path and prime
+  // ANTHROPIC_API_KEY so pi-ai's anthropic provider (and the Claude
+  // Code subprocess) see a credential without requiring the operator
+  // to copy-paste anything. Skips when an env var is already set.
+  // Also skips when Claude Code's host-managed auth is active — see
+  // field-test issue #20 (~12× cost regression from cache misses).
+  if (modeConfig.auth === "inherited" && !process.env.ANTHROPIC_API_KEY) {
+    const { resolveAmbientOauthToken, isClaudeCodeHostManagedAuth } = await import(
+      "../../config.js"
+    );
+    if (!isClaudeCodeHostManagedAuth()) {
+      const { getLogger } = await import("../../logger.js");
+      const ambient = resolveAmbientOauthToken(modeConfig);
+      if (ambient) {
+        process.env.ANTHROPIC_API_KEY = ambient.token;
+        getLogger("kuzushi").info(`Using inherited OAuth token (source: ${ambient.source})`);
+      }
+    }
+  }
+
   const monorepoDecision = await resolveMonorepoExecution({
     repoRoot,
     scanPath,
@@ -224,18 +245,24 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     }
   }
 
-  if (opts.dryRun) {
-    resetTerminalOutput();
-    cleanupUI();
+  if (opts.dryRun || opts.showPlan) {
     const { taskIds, taskSummary, dynamicSelectionActive } = getScanPlanSummary(config, scanOpts);
-    console.log("\nDry run — no scan will be executed.");
+    const banner = opts.dryRun
+      ? "\nDry run — no scan will be executed."
+      : "\nScan plan (will execute after this preview):";
+    if (opts.dryRun) {
+      resetTerminalOutput();
+      cleanupUI();
+    }
+    console.log(banner);
     console.log(`  Target:    ${scanPath}`);
     console.log(`  Tasks:     ${taskIds.join(", ") || "none"}`);
     console.log(`  Expanded:  ${taskSummary}`);
     console.log(`  Dynamic:   ${dynamicSelectionActive ? "on" : "off"}`);
     console.log(`  Model:     ${config.model}`);
     console.log(`  Severity:  ${scanOpts.severity?.join(", ") || "all"}\n`);
-    return;
+    if (opts.dryRun) return;
+    // --show-plan falls through to runPipeline below.
   }
 
   try {

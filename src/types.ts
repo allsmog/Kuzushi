@@ -416,6 +416,13 @@ export interface KuzushiConfig {
    * the credential prompt or via `--inherit-claude` on the CLI.
    */
   auth?: "inherited";
+  /**
+   * Path to a file containing an Anthropic OAuth bearer token (raw token
+   * starting with `sk-ant-oat...`, or a Claude Code `.credentials.json`
+   * with `claudeAiOauth.accessToken`). Used by inherited-auth mode when
+   * no `ANTHROPIC_API_KEY` / `ANTHROPIC_OAUTH_TOKEN` env var is set.
+   */
+  oauthTokenFile?: string;
   /** Enabled task IDs, in execution order. */
   tasks: TaskId[];
   /** Default severity filter. */

@@ -113,12 +113,49 @@ export function prepareScanExecution(
   const expandedTasks = expandTaskSelections(requestedTasks, config);
   config.tasks = expandedTasks;
 
+  // --diff-base: scope all detectors to files changed since <ref>.
+  // Resolves to absolute paths so the scanners' `scanPaths` array is
+  // unambiguous regardless of cwd. Field-test issue #51.
+  let scanPaths: string[] | undefined;
+  if (opts.diffBase) {
+    try {
+      const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+      const path = require("node:path") as typeof import("node:path");
+      const out = execFileSync("git", ["diff", "--name-only", `${opts.diffBase}..HEAD`], {
+        cwd: repoRoot,
+        encoding: "utf8",
+      });
+      const changed = out
+        .split("\n")
+        .map((line: string) => line.trim())
+        .filter(Boolean);
+      if (changed.length === 0) {
+        const { getLogger } = require("../../logger.js") as typeof import("../../logger.js");
+        getLogger("scan").warn(
+          `--diff-base ${opts.diffBase}: no files changed since ref. Falling back to full-tree scan.`,
+        );
+      } else {
+        scanPaths = changed.map((f: string) => path.join(repoRoot, f));
+      }
+    } catch (err) {
+      const { getLogger } = require("../../logger.js") as typeof import("../../logger.js");
+      getLogger("scan").warn(
+        `--diff-base ${opts.diffBase}: git diff failed (${
+          err instanceof Error ? err.message : String(err)
+        }). Falling back to full-tree scan.`,
+      );
+    }
+  }
+
   const scanOpts: ScanOpts = {
     severity,
     maxFindings: opts.max,
+    maxRawFindings: opts.maxRawFindings,
     excludePatterns: config.excludePatterns,
     tasks: taskOverride ?? expandedTasks,
     fresh: opts.fresh,
+    diffBase: opts.diffBase,
+    scanPaths,
   };
 
   return { config, scanOpts };
@@ -205,7 +242,13 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
 
   try {
     bus = createBus(config);
-    taskRegistry = await createDefaultTaskRegistry(config, repoRoot);
+    // Honor `kuzushi scan --exclude codeql,...` symmetrically with the
+    // shell command (#40). Comma-split, trim, drop empty entries.
+    const excludeBuiltinModules = opts.exclude
+      ?.split(",")
+      .map((m: string) => m.trim())
+      .filter(Boolean);
+    taskRegistry = await createDefaultTaskRegistry(config, repoRoot, { excludeBuiltinModules });
     await registerAllWorkers(bus, { taskRegistry, db, config, runtime, uiStore: params.uiStore });
   } catch (error) {
     db.close();
@@ -293,6 +336,43 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
   if (!resumeRunId) {
     markStaleRunsAborted(db, runRepoId);
     createRun(db, runId, runRepoId, config, scanOpts, params.origin);
+  }
+
+  // Partial-summary flush: when SIGTERM/SIGINT/timeout tears the process
+  // down mid-run, write a `summary.partial.json` to the run dir with
+  // whatever counters are in SQLite at the moment. Without this a killed
+  // scan leaves no on-disk artifact summarising progress, even though
+  // the findings table is populated. (Field-test issue #25.)
+  // Priority 0 — runs BEFORE bus-drain (1) and db-close (2) so we can
+  // still query SQLite. Skipped on resumed runs to avoid clobbering a
+  // good summary.json from the original run.
+  if (!resumeRunId) {
+    const runDir = path.join(repoRoot, ".kuzushi", "runs", runId);
+    shutdownHookDisposers.push(
+      registerShutdownHook(
+        "partial-summary-flush",
+        async () => {
+          try {
+            const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
+            // Skip if a real summary.json already landed (clean exit).
+            if (existsSync(path.join(runDir, "summary.json"))) return;
+            mkdirSync(runDir, { recursive: true });
+            const partialPath = path.join(runDir, "summary.partial.json");
+            const summary = {
+              runId,
+              repoName,
+              abortedAt: new Date().toISOString(),
+              note: "Process exited before pipeline:complete fired. Findings table in .kuzushi/findings.sqlite3 has whatever raw scanner output got pre-persisted.",
+            };
+            writeFileSync(partialPath, `${JSON.stringify(summary, null, 2)}\n`);
+            console.error(`[shutdown] Wrote partial summary to ${partialPath}`);
+          } catch {
+            /* best-effort — partial-summary write failure must not block shutdown */
+          }
+        },
+        0,
+      ),
+    );
   }
 
   const context = {
@@ -417,6 +497,23 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
         console.error(
           `\n${stats.deadLetterCount} finding(s) failed all triage retries. Re-run with \`--resume\` after fixing the blocker, or use \`--review-findings\` to inspect completed findings.`,
         );
+      }
+      // Field-test issue #15a: when ≥1 scanner/detector task failed,
+      // exit non-zero so CI / shell scripts notice. Previously kuzushi
+      // reported `summary: $0.00 · 48s` exit 0 even when 100% of LLM
+      // detectors failed. Skip when KUZUSHI_TOLERATE_TASK_FAILURES=1
+      // for operators who want partial-success behavior preserved.
+      const failedTasks = stats.failedTasks ?? [];
+      if (
+        failedTasks.length > 0 &&
+        process.env["KUZUSHI_TOLERATE_TASK_FAILURES"] !== "1" &&
+        process.exitCode !== 1
+      ) {
+        console.error(
+          `\n${failedTasks.length} task(s) failed during scanning: ${failedTasks.join(", ")}. ` +
+            `Set KUZUSHI_TOLERATE_TASK_FAILURES=1 to keep exit 0 on partial-failure runs.`,
+        );
+        process.exitCode = 1;
       }
     }
 

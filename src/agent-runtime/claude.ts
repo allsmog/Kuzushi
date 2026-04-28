@@ -1,4 +1,5 @@
 import { spawn as childSpawn } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import {
   type Options as ClaudeOptions,
   query as claudeQuery,
@@ -112,22 +113,50 @@ function createTrackedSpawn(
       detached: true,
     }) as unknown as SpawnedProcess;
     const stderr = (proc as { stderr?: NodeJS.ReadableStream }).stderr;
+    // Buffer the tail of stderr so we can replay it when the subprocess
+    // exits non-zero — operators were debugging "exit code 1" with no
+    // visible cause until they discovered KUZUSHI_ABORT_DEBUG=1. The
+    // *last* 8 KB of stderr is almost always the actionable error
+    // ("--dangerously-skip-permissions cannot be used with root", auth
+    // failures, JSON-schema rejections, etc.).
+    const STDERR_TAIL_BYTES = 8 * 1024;
+    let stderrTail = "";
     stderr?.on("data", (chunk: Buffer | string) => {
-      if (!process.env.KUZUSHI_ABORT_DEBUG) return;
-      try {
-        process.stderr.write(String(chunk));
-      } catch {
-        /* best-effort debug forwarding */
+      const text = String(chunk);
+      // Always live-tail when the operator opted in.
+      if (process.env.KUZUSHI_ABORT_DEBUG) {
+        try {
+          process.stderr.write(text);
+        } catch {
+          /* best-effort debug forwarding */
+        }
       }
+      stderrTail = (stderrTail + text).slice(-STDERR_TAIL_BYTES);
     });
     tracked.add(proc);
     globalTrackedProcesses.add(proc);
     // child_process emits 'exit' once the process is gone — drop it from
     // both tracked sets so `killTrackedProcesses` doesn't try to kill a
-    // ghost.
-    proc.once("exit", () => {
+    // ghost. On non-zero exit, replay the buffered stderr tail so the
+    // operator sees the cause without re-running with KUZUSHI_ABORT_DEBUG=1.
+    proc.once("exit", (code: number | null, signal: string | null) => {
       tracked.delete(proc);
       globalTrackedProcesses.delete(proc);
+      if (
+        !process.env.KUZUSHI_ABORT_DEBUG &&
+        stderrTail.trim() &&
+        ((typeof code === "number" && code !== 0) || signal !== null)
+      ) {
+        const exitDesc =
+          typeof code === "number" ? `exit ${code}` : signal ? `signal ${signal}` : "unknown";
+        try {
+          process.stderr.write(
+            `[claude-runtime] subprocess ${exitDesc} stderr tail (last ${STDERR_TAIL_BYTES} bytes):\n${stderrTail.trimEnd()}\n`,
+          );
+        } catch {
+          /* best-effort */
+        }
+      }
     });
     return proc;
   };
@@ -202,6 +231,74 @@ function killTrackedProcesses(tracked: Set<SpawnedProcess>, graceMs = 500): void
       }
     }
   }, graceMs).unref();
+}
+
+/**
+ * The Claude Code CLI rejects `--dangerously-skip-permissions` when the
+ * spawning process runs as root/sudo, exiting with code 1 and the message
+ *   "--dangerously-skip-permissions cannot be used with root/sudo
+ *    privileges for security reasons"
+ *
+ * That blocks every agentic detector in containers / CI runners that
+ * default to UID 0 (Docker base images, Claude Code remote sandboxes,
+ * GitHub Actions). This helper returns true only when it's safe to set
+ * the flag — when the current effective UID isn't 0. The
+ * `KUZUSHI_DANGEROUSLY_SKIP_PERMISSIONS` env var lets operators force
+ * the historical behavior on either side: `1` to always set, `0` to
+ * never set.
+ */
+/**
+ * Directories that plan-mode subprocesses are allowed to read/write.
+ * Without this, randori, threat-hunt and other artifact-producing tasks
+ * silently retry-then-skip when sandboxed under plan mode (issue #24).
+ *
+ * The whitelist intentionally stays narrow: target dir (so the agent
+ * can re-read sources without permission churn), the kuzushi run/plans
+ * dirs (so artifacts land where the rest of the pipeline expects), and
+ * Claude Code's plan-staging dir (where randori writes its threat
+ * model spec).
+ */
+function planModeAllowedDirectories(cwd?: string): string[] {
+  const dirs = new Set<string>();
+  if (cwd) dirs.add(cwd);
+  const home = process.env["HOME"];
+  if (home) {
+    dirs.add(`${home}/.kuzushi`);
+    dirs.add(`${home}/.kuzushi/plans`);
+    dirs.add(`${home}/.kuzushi/runs`);
+    dirs.add(`${home}/.claude/plans`);
+  }
+  // Claude Code's well-known remote-sandbox path (mirrors the OAuth
+  // resolver fallback list).
+  dirs.add("/home/claude/.claude/plans");
+  if (cwd) dirs.add(`${cwd}/.kuzushi`);
+
+  // The SDK silently drops `additionalDirectories` entries that don't
+  // exist on disk — `/root/.claude/plans` was getting whitelisted but
+  // ignored, leaving randori writes still rejected (#29). Materialize
+  // each path so the SDK accepts it, mode 0o700 to keep them
+  // operator-private.
+  for (const dir of dirs) {
+    try {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+    } catch {
+      /* best-effort — a failed mkdir just means the SDK will drop
+         the entry, which is what would have happened anyway */
+    }
+  }
+
+  return [...dirs];
+}
+
+function shouldAllowSkipPermissions(): boolean {
+  const override = process.env["KUZUSHI_DANGEROUSLY_SKIP_PERMISSIONS"];
+  if (override === "1" || override?.toLowerCase() === "true") return true;
+  if (override === "0" || override?.toLowerCase() === "false") return false;
+  try {
+    return typeof process.geteuid === "function" ? process.geteuid() !== 0 : true;
+  } catch {
+    return true;
+  }
 }
 
 // Prevent EPIPE from crashing the process when Claude SDK subprocesses die.
@@ -363,11 +460,19 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   readonly id = "claude";
   private readonly config: AgentRuntimeCredentials | undefined;
   private readonly client: Anthropic;
+  /**
+   * True when this runtime has no API key configured — the Batch
+   * API path will throw synchronously on every attempt. Surfaced so
+   * callers (`agent-runtime/execution.ts`) can skip Batch outright
+   * and avoid logging a fallback warning per batch (#28).
+   */
+  readonly oauthMode: boolean;
   bus: MessageBus | null = null;
   runId: string | null = null;
 
   constructor(config?: AgentRuntimeCredentials) {
     this.config = config;
+    this.oauthMode = !config?.apiKey;
     this.client = new Anthropic({
       apiKey: config?.apiKey,
       baseURL: config?.baseUrl,
@@ -738,8 +843,14 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     const options: ClaudeOptions = {
       cwd: request.options.cwd,
       permissionMode: mapPermissionMode(request.options.permissionMode),
-      allowDangerouslySkipPermissions: true,
+      allowDangerouslySkipPermissions: shouldAllowSkipPermissions(),
       persistSession: false,
+      // Under root's `plan`-mode fallback, the SDK enforces a strict
+      // sandbox that blocks Read/Write outside the cwd. Tasks like
+      // threat-model-randori legitimately need to read prior run dirs
+      // and write plan artifacts. Whitelist the kuzushi/Claude-Code
+      // workspace dirs so plan mode degrades gracefully (issue #24).
+      additionalDirectories: planModeAllowedDirectories(request.options.cwd),
     };
 
     // Model
@@ -1098,8 +1209,9 @@ class ClaudeSession implements AgentSession {
     const options: ClaudeOptions = {
       cwd: this.baseOptions.cwd,
       permissionMode: mapPermissionMode(this.baseOptions.permissionMode),
-      allowDangerouslySkipPermissions: true,
+      allowDangerouslySkipPermissions: shouldAllowSkipPermissions(),
       persistSession: false,
+      additionalDirectories: planModeAllowedDirectories(this.baseOptions.cwd),
     };
 
     if (this.baseOptions.model) {
@@ -1328,6 +1440,15 @@ class ClaudeSession implements AgentSession {
 function mapPermissionMode(
   mode: string | undefined,
 ): "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" {
+  // When running as root (containers, CI runners, Claude Code remote
+  // sandboxes), the Claude CLI rejects `bypassPermissions` /
+  // `--dangerously-skip-permissions` for security. Only `plan` mode is
+  // root-safe and still functional. Detectors lose Bash/Edit/Write
+  // tool execution but keep Read/Grep/Glob — enough for SAST work.
+  // `KUZUSHI_DANGEROUSLY_SKIP_PERMISSIONS=1` forces the historical
+  // behavior on hosts that explicitly opt in.
+  const safeMode: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" =
+    shouldAllowSkipPermissions() ? "bypassPermissions" : "plan";
   switch (mode) {
     case "default":
     case "acceptEdits":
@@ -1335,12 +1456,9 @@ function mapPermissionMode(
       return mode;
     case "bypassPermissions":
     case "dontAsk":
-      // For non-interactive automated use, "dontAsk" in Kuzushi maps to
-      // "bypassPermissions" in the Claude SDK. The SDK's "dontAsk" denies
-      // anything not pre-approved, which breaks automated tool execution.
-      return "bypassPermissions";
+      return safeMode;
     default:
-      return "bypassPermissions";
+      return safeMode;
   }
 }
 
