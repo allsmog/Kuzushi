@@ -425,6 +425,13 @@
     "sarifOutput": {
       "type": "string"
     },
+    "scanFindingsBackend": {
+      "enum": [
+        "memory",
+        "sqlite"
+      ],
+      "type": "string"
+    },
     "scanMode": {
       "enum": [
         "sequential",
