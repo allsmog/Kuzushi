@@ -51,6 +51,7 @@ export function attachCiStream(store: UIStore, opts: CiStreamOptions = {}): () =
   let lastPhase: UIState["phase"] | null = null;
   const lastStageStatus = new Map<string, string>();
   const seenResults = new Set<string>();
+  let lastThrottleKey: string | null = null;
   let startAnnounced = false;
   let endAnnounced = false;
   let lastWriteAt = Date.now();
@@ -88,6 +89,23 @@ export function attachCiStream(store: UIStore, opts: CiStreamOptions = {}): () =
         seenResults.add(r.fingerprint);
         writeWithHeartbeatReset(line("finding", formatResult(r)));
       }
+    }
+
+    // Surface the rate-limit / throttle banner that CLAUDE.md
+    // promised but never reached --ci mode (#38). Emit one line on
+    // each transition (off→on, on→off, or concurrency change) so
+    // operators can correlate slow scans with API rate limits.
+    const throttle = state.throttle;
+    const throttleKey = throttle ? `${throttle.concurrency}|${throttle.reason}` : "null";
+    if (throttleKey !== lastThrottleKey) {
+      if (throttle) {
+        writeWithHeartbeatReset(
+          line("throttle", `concurrency=${throttle.concurrency} (${throttle.reason})`),
+        );
+      } else if (lastThrottleKey !== null && lastThrottleKey !== "null") {
+        writeWithHeartbeatReset(line("throttle", "released"));
+      }
+      lastThrottleKey = throttleKey;
     }
 
     if ((state.mode === "summary" || state.phase === "done") && !endAnnounced) {
