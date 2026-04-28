@@ -34,9 +34,9 @@ import {
   defaultAttachmentAdapter,
   type KindSpec,
 } from "../modules/_shared/attachments/index.js";
+import { CARLINI_THREAT_HUNT_KIND_SPEC } from "../modules/carlini-threat-hunt/attachments.js";
 import { CONTEXT_KIND_SPEC } from "../modules/context/attachments.js";
 import { formatContextSummary } from "../modules/core-sast.js";
-import { THREAT_HUNT_KIND_SPEC } from "../modules/threat-hunt/attachments.js";
 import { THREAT_MODEL_KIND_SPEC } from "../modules/threat-model/attachments.js";
 import type { ModuleInfo, ModuleTool } from "../modules/types.js";
 import { loadDraftScope, scopeToHomeSlice } from "../modules/vendor-assessment/storage.js";
@@ -163,12 +163,10 @@ const SIGNAL_DUPLICATE_GRACE_MS = 150;
 
 /** Tools that require a ContextSnapshot before they can execute from the shell. */
 const CONTEXT_REQUIRED_TOOLS = new Set([
-  // Legacy sast:* names (resolved via registry alias).
-  "sast:threat-hunt",
   "sast:taint-iris",
-  // New sub-module names.
-  "threat-hunt:run",
+  "carlini-threat-hunt:run",
   "taint-iris:hunt",
+  "taint-iris-next:hunt",
 ]);
 
 /**
@@ -228,7 +226,7 @@ function looksLikeSubagentStartLine(text: string): boolean {
 /** Build a seed map from a ContextSnapshot to inject into pipelines.
  *
  * Seed VALUE SHAPE must match what each task actually returns, because
- * downstream consumers (`extractActorsWithThreats` in threat-hunt,
+ * downstream consumers (`extractActorsWithThreats` in carlini-threat-hunt,
  * `asStrideTaskOutput` in scanner tasks, …) deref specific fields on
  * the upstream output. Mismatches manifest as "0 findings, 0 actors"
  * with no error — the task just short-circuits on
@@ -241,7 +239,7 @@ function looksLikeSubagentStartLine(text: string): boolean {
  *   threat-model-randori:  { document: ThreatModelDocument, findings: Finding[] }
  *   threat-scenario-build: { scenarios: ThreatScenario[] }
  *
- * `findings: []` for threat-model-randori is safe — threat-hunt only
+ * `findings: []` for threat-model-randori is safe — carlini-threat-hunt only
  * reads `.document`, and no other task reads the findings array from
  * the threat-model output (those findings flow separately via
  * `taskOutputs["threat-model-randori"].findings` into the report
@@ -465,8 +463,11 @@ export function pickDefaultToolName(core: CopilotCore, moduleId: string): string
   const preferred = [
     `${moduleId}:run`,
     `${moduleId}:scan`,
-    `${moduleId}:exploit`,
     `${moduleId}:audit`,
+    `${moduleId}:hunt`,
+    `${moduleId}:exploit`,
+    `${moduleId}:build`,
+    `${moduleId}:list`,
   ];
   for (const name of preferred) {
     const t = mod.tools.find((x) => x.name === name);
@@ -1727,11 +1728,11 @@ function pushLiveActivity(store: UIStore, id: string, text: string): void {
 
 /**
  * Tool names whose completion drains `state.lastHuntSnapshot` into a
- * `hunt-post-mortem` scrollback block. Currently just threat-hunt:run;
+ * `hunt-post-mortem` scrollback block. Currently just carlini-threat-hunt:run;
  * add other hunt-class tools here when they adopt the per-actor
  * `reportAgentActivity` + `done:true` pattern.
  */
-const HUNT_CLASS_TOOLS = new Set(["threat-hunt:run"]);
+const HUNT_CLASS_TOOLS = new Set(["carlini-threat-hunt:run"]);
 
 function isHuntClassTool(toolName: string): boolean {
   return HUNT_CLASS_TOOLS.has(toolName);
@@ -1822,7 +1823,7 @@ function formatAgentActivityStory(payload: import("../bus/events.js").TaskAgentA
 
 function moduleRunOwnsThreatHuntActivity(shell: ShellState | null | undefined): boolean {
   return (
-    shell?.moduleRun?.toolName === "threat-hunt:run" &&
+    shell?.moduleRun?.toolName === "carlini-threat-hunt:run" &&
     shell.moduleRun.status === "running" &&
     (shell.shellView === "module-run" || shell.shellView === "actor-detail")
   );
@@ -2525,7 +2526,7 @@ export async function startShell(opts: ShellOptions): Promise<void> {
   // No-workspace fallback: if the target repo has a prior on-disk
   // `<target>/.kuzushi/context-snapshot.json` from an earlier
   // `context:build` run, auto-load it so dependent modules
-  // (threat-hunt, agentic-sast, taint-iris) find their appModel
+  // (carlini-threat-hunt, agentic-sast, taint-iris) find their appModel
   // prerequisites without the operator having to re-run context:build
   // on every session.
   //
@@ -2622,7 +2623,7 @@ async function startInkShell(
   // Strategy: every event we accept adds its runId to `seenRunIdsThisTurn`.
   // On abort, we migrate that set into `abortedRunIds` so any future event
   // with one of those runIds is dropped unconditionally. New turns get new
-  // task runIds (fresh UUIDs from `buildTaskContext`), so legitimate
+  // task runIds (fresh UUIDs from the DAG execution context), so legitimate
   // progress still flows. Cap the blacklist FIFO to bound memory over
   // a long shell session.
   const seenRunIdsThisTurn = new Set<string>();
@@ -2916,7 +2917,7 @@ async function startInkShell(
       } catch {
         /* best-effort */
       }
-      // Hunt post-mortem — after threat-hunt (and future hunt-class tools
+      // Hunt post-mortem — after carlini-threat-hunt (and future hunt-class tools
       // whose runs publish per-actor `agent-activity` events) resolves,
       // drain the archived per-actor snapshots into a collapsed scrollback
       // block so operators can expand it to see which actor made the last
@@ -3192,11 +3193,11 @@ async function startInkShell(
     );
   });
 
-  // Threat-hunt actor rail — direct shell runs publish one event stream per
+  // Carlini threat-hunt actor rail — direct shell runs publish one event stream per
   // actor. Keep most actor/tool chatter live-only, but persist terminal actor
   // summaries so the transcript tells a compact progressive story.
   bus.subscribe<import("../bus/events.js").TaskAgentActivityEvent>(
-    "threat-hunt:agent-activity",
+    "carlini-threat-hunt:agent-activity",
     (event) => {
       const runId = event.meta.runId || event.payload.context.runId;
       if (!runId || !acceptProgressRunId(runId)) return;
@@ -3215,7 +3216,7 @@ async function startInkShell(
           importance: event.payload.done ? "primary" : "secondary",
           message: story.message,
           ...(story.detail ? { detail: story.detail } : {}),
-          source: "threat-hunt:agent-activity",
+          source: "carlini-threat-hunt:agent-activity",
           runId,
           ...(activeTurnId ? { turnId: activeTurnId } : {}),
           durable: event.payload.done,
@@ -5210,7 +5211,7 @@ function handleSlashCommand(
       return handleConfigCommand(args, ctx);
 
     case "auth":
-      return handleAuthCommand(opts, ctx);
+      return handleAuthCommand(args, opts, ctx);
 
     case "ask":
       return handleAskCommand(args, opts, shellState);
@@ -5379,7 +5380,7 @@ const KB_REGISTRY: ReadonlyMap<
 > = new Map<string, { spec: KindSpec<string>; adapter?: AttachmentStorageAdapter<string> }>([
   ["threat-model", { spec: THREAT_MODEL_KIND_SPEC as KindSpec<string> }],
   ["context", { spec: CONTEXT_KIND_SPEC as KindSpec<string> }],
-  ["threat-hunt", { spec: THREAT_HUNT_KIND_SPEC as KindSpec<string> }],
+  ["carlini-threat-hunt", { spec: CARLINI_THREAT_HUNT_KIND_SPEC as KindSpec<string> }],
 ]);
 
 /**
@@ -5398,7 +5399,7 @@ function handleKbCommand(
   if (!ctx.focusedModule) {
     return {
       output:
-        "Usage: /use <module> first, then /kb. Try one of: threat-model, context, threat-hunt.",
+        "Usage: /use <module> first, then /kb. Try one of: threat-model, context, carlini-threat-hunt.",
     };
   }
   const moduleId = ctx.focusedModule;
@@ -6392,8 +6393,8 @@ function resolveDirectToolDispatch(
 
   // Focused-module shorthand takes precedence over the `run <tool>` escape.
   // Without this, inside a module whose primary tool is literally named `run`
-  // (e.g. `threat-hunt:run`), typing `run .` is parsed as "dispatch tool `.`"
-  // instead of "dispatch threat-hunt:run with positional `.`".
+  // (e.g. `carlini-threat-hunt:run`), typing `run .` is parsed as "dispatch tool `.`"
+  // instead of "dispatch carlini-threat-hunt:run with positional `.`".
   if (ctx.focusedModule) {
     const qualifiedName = `${ctx.focusedModule}:${cmd}`;
     if (core.registry.resolveTool(qualifiedName)) {
@@ -6477,6 +6478,12 @@ function targetRepoCandidates(opts: ShellOptions, shellState: ShellState): Set<s
     ids.add(path.basename(path.resolve(rawTarget)));
   }
   return ids;
+}
+
+function normalizeShellTargetInput(value: unknown, activeTarget: string | undefined): unknown {
+  if (typeof value !== "string" || !activeTarget) return value;
+  const trimmed = value.trim();
+  return trimmed === "." || trimmed === "./" ? activeTarget : value;
 }
 
 async function executeResumeTool(
@@ -6621,6 +6628,9 @@ function resolveToolExecution(
   const storedArgs = shellState.moduleOptions[finalToolName] ?? {};
   const parsedArgs = parseToolArgs(toolArgs);
   const mergedArgs: Record<string, unknown> = { ...storedArgs, ...parsedArgs };
+  if ("target" in mergedArgs) {
+    mergedArgs.target = normalizeShellTargetInput(mergedArgs.target, opts.target);
+  }
   if (!("target" in mergedArgs) && opts.target) {
     mergedArgs.target = opts.target;
   }
@@ -6719,7 +6729,8 @@ function getContextRequirementError(
   }
 
   const missing: string[] = [];
-  const needsThreatModel = toolName === "threat-hunt:run" || toolName === "sast:threat-hunt";
+  const needsThreatModel =
+    toolName === "carlini-threat-hunt:run" || toolName === "taint-iris-next:hunt";
   const needsAppModel =
     needsThreatModel || toolName === "taint-iris:hunt" || toolName === "sast:taint-iris";
 
@@ -7120,7 +7131,7 @@ function handlePromptEditCommand(
 /**
  * `/actor <n|fingerprint>` — drill into a per-actor transcript from
  * inside ModuleRunView. Numeric arguments resolve against the
- * sorted threat-hunt fingerprints in `state.agentActivity` (1-based);
+ * sorted carlini-threat-hunt fingerprints in `state.agentActivity` (1-based);
  * non-numeric arguments are treated as a literal fingerprint.
  */
 function handleActorCommand(
@@ -7135,7 +7146,7 @@ function handleActorCommand(
   if (!activity) return { output: "No live actor activity yet." };
   const fingerprints: string[] = [];
   for (const fp of activity.keys()) {
-    if (fp.startsWith("threat-hunt:")) fingerprints.push(fp);
+    if (fp.startsWith("carlini-threat-hunt:")) fingerprints.push(fp);
   }
   fingerprints.sort();
   let target: string | undefined;
@@ -7146,7 +7157,7 @@ function handleActorCommand(
     target = fingerprints.find((fp) => fp === arg || fp.endsWith(arg));
   }
   if (!target) {
-    if (fingerprints.length === 0) return { output: "No threat-hunt actors are active." };
+    if (fingerprints.length === 0) return { output: "No carlini-threat-hunt actors are active." };
     return {
       output: `No actor matched "${arg}". Active: ${fingerprints
         .map((fp, i) => `${i + 1}. ${fp}`)
@@ -7695,17 +7706,63 @@ function formatBackendSlots(
   const out: string[] = [];
   for (const slot of ["claude", "piAi"] as const) {
     const s = cfg?.[slot];
-    if (!s || (!s.apiKey && !s.baseUrl)) {
+    if (s && (s.apiKey || s.baseUrl)) {
       out.push(
-        `  ${slot.padEnd(6)} (unset — run /backend ${slot === "piAi" ? "pi-ai" : "claude"} then /auth)`,
+        `  ${slot.padEnd(6)} apiKey=${maskApiKey(s.apiKey)}  baseUrl=${s.baseUrl ?? "(default)"}`,
+      );
+      continue;
+    }
+    // No file-based creds — probe env vars before reporting "unset". The
+    // claude runtime honors process.env.ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL
+    // at subprocess launch, so reporting "unset" when env vars are set is a
+    // lie that costs operators $0/0-finding wasted runs.
+    const envCreds = probeEnvCredsForSlot(slot);
+    if (envCreds) {
+      out.push(
+        `  ${slot.padEnd(6)} env-only (apiKey=${maskApiKey(envCreds.apiKey)}  baseUrl=${envCreds.baseUrl ?? "(default)"})`,
       );
       continue;
     }
     out.push(
-      `  ${slot.padEnd(6)} apiKey=${maskApiKey(s.apiKey)}  baseUrl=${s.baseUrl ?? "(default)"}`,
+      `  ${slot.padEnd(6)} (unset — run /backend ${slot === "piAi" ? "pi-ai" : "claude"} then /auth)`,
     );
   }
   return out;
+}
+
+/**
+ * Probe environment variables for backend credentials. Returns null when
+ * no env-var credentials are present for the slot. Used by `/backend show`
+ * so that operators who set ANTHROPIC_API_KEY in their parent shell don't
+ * see a misleading "unset" status.
+ */
+function probeEnvCredsForSlot(
+  slot: "claude" | "piAi",
+): { apiKey?: string; baseUrl?: string } | null {
+  if (slot === "claude") {
+    const apiKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+    const baseUrl = process.env.ANTHROPIC_BASE_URL;
+    if (apiKey || baseUrl) return { apiKey, baseUrl };
+    return null;
+  }
+  // pi-ai is multi-provider. Honor the most common provider env vars so
+  // operators see a green light when ANY provider has env-only creds.
+  const piAiVars: Array<[string, string?]> = [
+    ["ANTHROPIC_API_KEY"],
+    ["OPENAI_API_KEY", "OPENAI_BASE_URL"],
+    ["GOOGLE_API_KEY"],
+    ["GROQ_API_KEY"],
+    ["MISTRAL_API_KEY"],
+    ["DEEPSEEK_API_KEY"],
+  ];
+  for (const [keyVar, baseVar] of piAiVars) {
+    const apiKey = process.env[keyVar];
+    if (apiKey) {
+      const baseUrl = baseVar ? process.env[baseVar] : undefined;
+      return { apiKey, baseUrl };
+    }
+  }
+  return null;
 }
 
 /**
@@ -7960,7 +8017,7 @@ function loadArtifactManifest(repoRoot: string): string[] {
   const files: Array<{ rel: string; label: string }> = [
     { rel: "scan-context.json", label: "operator-authored scan context" },
     { rel: "threat-model.json", label: "persistent threat model" },
-    // context-snapshot.json is what enables /use threat-hunt (etc.) to pass
+    // context-snapshot.json is what enables /use carlini-threat-hunt (etc.) to pass
     // the appModel prereq check without re-running context:build.
     // Surface it by name so operators understand what's carrying them.
     { rel: "context-snapshot.json", label: "context snapshot (repo + app model)" },
@@ -8026,7 +8083,89 @@ function handleAskCommand(
   return { askQuestion: `${contextPrefix}\n\n---\n${question}` };
 }
 
-function handleAuthCommand(opts: ShellOptions, ctx: ShellContext): LocalCommandResult {
+/**
+ * One-shot migration from project config.json (`agentRuntimeConfig` block,
+ * which is silently stripped by UNSAFE_PROJECT_CONFIG_KEYS) to the supported
+ * `.kuzushi/credentials.json` location. Reads project config.json (walking up
+ * from cwd to the nearest ancestor with `.kuzushi/`), extracts the cred
+ * blocks, writes via persistLocalCredentials, and reports.
+ */
+function handleAuthImportFromConfig(opts: ShellOptions): LocalCommandResult {
+  return {
+    asyncExecute: async () => {
+      const { findProjectConfigRoot, projectConfigPath } = await import("../config/paths.js");
+      const { persistLocalCredentials } = await import("../config.js");
+      const root = findProjectConfigRoot(opts.target ?? process.cwd());
+      if (!root) {
+        return "No project config.json found in any ancestor — nothing to import.";
+      }
+      const cfgPath = projectConfigPath(root);
+      let raw: Record<string, unknown>;
+      try {
+        const fs = await import("node:fs");
+        const text = fs.readFileSync(cfgPath, "utf-8");
+        raw = JSON.parse(text) as Record<string, unknown>;
+      } catch (error) {
+        return `Could not read ${cfgPath}: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      const arc = raw.agentRuntimeConfig;
+      if (!arc || typeof arc !== "object") {
+        return `${cfgPath} has no agentRuntimeConfig block — nothing to import.`;
+      }
+      // Accept both nested form ({claude: {apiKey}, piAi: {...}}) and the
+      // legacy flat form ({apiKey, baseUrl}) which the loader retargets to
+      // the claude slot.
+      const arcRec = arc as Record<string, unknown>;
+      const credsToWrite: Record<string, { apiKey?: string; baseUrl?: string }> = {};
+      for (const slot of ["claude", "piAi", "codex"] as const) {
+        const slotVal = arcRec[slot];
+        if (slotVal && typeof slotVal === "object") {
+          const sv = slotVal as Record<string, unknown>;
+          const apiKey = typeof sv.apiKey === "string" ? sv.apiKey : undefined;
+          const baseUrl = typeof sv.baseUrl === "string" ? sv.baseUrl : undefined;
+          if (apiKey || baseUrl) credsToWrite[slot] = { apiKey, baseUrl };
+        }
+      }
+      // Legacy flat form → claude slot.
+      if (
+        Object.keys(credsToWrite).length === 0 &&
+        (typeof arcRec.apiKey === "string" || typeof arcRec.baseUrl === "string")
+      ) {
+        const apiKey = typeof arcRec.apiKey === "string" ? arcRec.apiKey : undefined;
+        const baseUrl = typeof arcRec.baseUrl === "string" ? arcRec.baseUrl : undefined;
+        credsToWrite.claude = { apiKey, baseUrl };
+      }
+      if (Object.keys(credsToWrite).length === 0) {
+        return `${cfgPath} has agentRuntimeConfig but no apiKey/baseUrl to import.`;
+      }
+      const writtenTo = persistLocalCredentials(credsToWrite, root);
+      const slots = Object.keys(credsToWrite).join(", ");
+      return [
+        `Imported ${slots} credentials from ${cfgPath}`,
+        `→ ${writtenTo}`,
+        ".gitignore updated to exclude credentials.json.",
+        "",
+        "You can now safely delete the agentRuntimeConfig block from project config.json.",
+        "Restart the shell to pick up the new credentials.",
+      ].join("\n");
+    },
+  };
+}
+
+function handleAuthCommand(
+  args: string[],
+  opts: ShellOptions,
+  ctx: ShellContext,
+): LocalCommandResult {
+  // /auth import-from-config — migrate creds from project config.json (the
+  // unsupported but natural location) to credentials.json (the supported one).
+  // Saves operators from the silent-strip footgun documented in
+  // sanitizeProjectConfigLayer + the C1 banner.
+  const sub = (args[0] ?? "").toLowerCase();
+  if (sub === "import-from-config") {
+    return handleAuthImportFromConfig(opts);
+  }
+
   // Ink shell: open the modal credential prompt and apply the outcome.
   if (ctx.uiStore) {
     return {
