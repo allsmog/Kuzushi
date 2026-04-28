@@ -1,0 +1,109 @@
+rules:
+  # CWE-78: OS Command Injection — user-controlled input flowing into
+  # child_process.exec. Matches both `exec(req.query.X + ...)` shapes and
+  # `exec("prefix " + req.query.X)` shapes used in the smoke test app.
+  - id: express-exec-command-injection
+    languages: [javascript]
+    severity: ERROR
+    metadata:
+      cwe:
+        - "CWE-78: Improper Neutralization of Special Elements used in an OS Command"
+      likelihood: HIGH
+      impact: HIGH
+      confidence: HIGH
+      subcategory: [vuln]
+    message: >-
+      Possible OS command injection — user-controlled input is concatenated
+      into a child_process.exec call.
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: |
+                  exec($X + $Y, ...)
+              - pattern: |
+                  exec($X, ...)
+          - metavariable-pattern:
+              metavariable: $X
+              patterns:
+                - pattern-either:
+                    - pattern: $REQ.query.$P
+                    - pattern: $REQ.body.$P
+                    - pattern: $REQ.params.$P
+      - patterns:
+          - pattern: exec($X + $Y, ...)
+          - metavariable-pattern:
+              metavariable: $Y
+              patterns:
+                - pattern-either:
+                    - pattern: $REQ.query.$P
+                    - pattern: $REQ.body.$P
+                    - pattern: $REQ.params.$P
+
+  # CWE-79: Reflected XSS — request data flowing into res.send / res.write
+  # without escaping. Catches the `res.send("...html..." + req.query.X)` shape.
+  - id: express-reflected-xss
+    languages: [javascript]
+    severity: ERROR
+    metadata:
+      cwe:
+        - "CWE-79: Improper Neutralization of Input During Web Page Generation"
+      likelihood: HIGH
+      impact: MEDIUM
+      confidence: HIGH
+      subcategory: [vuln]
+    message: >-
+      Possible reflected XSS — user input is concatenated into an HTML
+      response without escaping.
+    pattern-either:
+      - patterns:
+          - pattern: $RES.send($X)
+          - metavariable-pattern:
+              metavariable: $X
+              patterns:
+                - pattern-either:
+                    - pattern: $A + $REQ.query.$P
+                    - pattern: $A + $REQ.query.$P + $B
+                    - pattern: $REQ.query.$P + $B
+                    - pattern: $A + $REQ.body.$P
+                    - pattern: $REQ.body.$P + $B
+
+  # CWE-22: Path traversal — user-controlled filename joined with path.join
+  # and passed to fs.readFileSync / fs.writeFileSync / res.sendFile.
+  - id: express-path-traversal
+    languages: [javascript]
+    severity: ERROR
+    metadata:
+      cwe:
+        - "CWE-22: Improper Limitation of a Pathname to a Restricted Directory"
+      likelihood: HIGH
+      impact: HIGH
+      confidence: MEDIUM
+      subcategory: [vuln]
+    message: >-
+      Possible path traversal — user-controlled filename joined into a
+      filesystem path without validation.
+    pattern-either:
+      - pattern: |
+          $P = path.join(..., $REQ.query.$X, ...)
+      - pattern: |
+          $P = path.join(..., $REQ.body.$X, ...)
+      - pattern: |
+          fs.writeFileSync(path.join(..., $REQ.body.$X, ...), ...)
+
+  # CWE-95: eval() with user input. Targets the dead-code helper in the
+  # smoke test app (semgrep finds it; reachability-check downgrades it).
+  - id: javascript-eval-with-user-input
+    languages: [javascript]
+    severity: ERROR
+    metadata:
+      cwe:
+        - "CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code"
+      likelihood: HIGH
+      impact: HIGH
+      confidence: HIGH
+      subcategory: [vuln]
+    message: >-
+      eval() with a function argument — code injection if the argument is
+      attacker-controlled.
+    pattern: |
+      function $F($X, ...) { ...; eval($X); ... }

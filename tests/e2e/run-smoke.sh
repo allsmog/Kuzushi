@@ -12,6 +12,18 @@ MOCK_SERVER_SCRIPT="${REPO_DIR}/tests/fixtures/mock-anthropic-server.mjs"
 MOCK_MODE_NOTE="${TEST_LOG_DIR}/mock-mode.txt"
 MOCK_URL_FILE="${TEST_LOG_DIR}/mock-base-url.txt"
 MOCK_SERVER_LOG="${TEST_LOG_DIR}/mock-server.log"
+# Vendored semgrep rules — committed at tests/e2e/fixtures/semgrep-rules/. We
+# point the scanner at this directory instead of `--config auto` so the smoke
+# run does not depend on the semgrep registry being reachable from CI (a
+# historical flake — see #54).
+SEMGREP_RULES_DIR="${REPO_DIR}/tests/e2e/fixtures/semgrep-rules"
+
+# The CLI surfaces a hard error if Anthropic credentials are completely
+# absent, even when a non-Anthropic agent runtime is selected (here: pi-ai
+# pointing at the mock server). Set a dummy key so credential preflight
+# passes — the mock server ignores it. This matches the apiKey already
+# set in agentRuntimeConfig.apiKey below.
+export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-fake-key}"
 
 # Command used to invoke the Kuzushi CLI. Default `pnpm dev` (tsx) is handy
 # locally; CI sets KUZUSHI_CMD="node dist/cli.js" to exercise the built
@@ -100,7 +112,12 @@ cat > "${TEST_APP_DIR}/.kuzushi/config.json" <<JSON
   "enableContextEnrichment": false,
   "enableDynamicTaskSelection": false,
   "llmRescoreEnabled": false,
-  "fpFilterEnabled": false
+  "fpFilterEnabled": false,
+  "taskConfig": {
+    "semgrep": {
+      "configFlag": ["${SEMGREP_RULES_DIR}"]
+    }
+  }
 }
 JSON
 
