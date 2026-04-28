@@ -301,6 +301,43 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     createRun(db, runId, runRepoId, config, scanOpts, params.origin);
   }
 
+  // Partial-summary flush: when SIGTERM/SIGINT/timeout tears the process
+  // down mid-run, write a `summary.partial.json` to the run dir with
+  // whatever counters are in SQLite at the moment. Without this a killed
+  // scan leaves no on-disk artifact summarising progress, even though
+  // the findings table is populated. (Field-test issue #25.)
+  // Priority 0 — runs BEFORE bus-drain (1) and db-close (2) so we can
+  // still query SQLite. Skipped on resumed runs to avoid clobbering a
+  // good summary.json from the original run.
+  if (!resumeRunId) {
+    const runDir = path.join(repoRoot, ".kuzushi", "runs", runId);
+    shutdownHookDisposers.push(
+      registerShutdownHook(
+        "partial-summary-flush",
+        async () => {
+          try {
+            const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
+            // Skip if a real summary.json already landed (clean exit).
+            if (existsSync(path.join(runDir, "summary.json"))) return;
+            mkdirSync(runDir, { recursive: true });
+            const partialPath = path.join(runDir, "summary.partial.json");
+            const summary = {
+              runId,
+              repoName,
+              abortedAt: new Date().toISOString(),
+              note: "Process exited before pipeline:complete fired. Findings table in .kuzushi/findings.sqlite3 has whatever raw scanner output got pre-persisted.",
+            };
+            writeFileSync(partialPath, `${JSON.stringify(summary, null, 2)}\n`);
+            console.error(`[shutdown] Wrote partial summary to ${partialPath}`);
+          } catch {
+            /* best-effort — partial-summary write failure must not block shutdown */
+          }
+        },
+        0,
+      ),
+    );
+  }
+
   const context = {
     runId,
     repoRoot,
