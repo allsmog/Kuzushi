@@ -78,10 +78,17 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): Sto
     const { fingerprint, assertions } = event.payload;
     const runId = event.meta.runId;
     // Ensure the finding row is flushed before inserting assertions —
-    // finding_assertions.fingerprint has a FK to findings(fingerprint), and the
-    // upsert queue batches 50 entries before auto-flushing.
-    upsertQueue.flush();
+    // finding_assertions.fingerprint has a FK to findings(fingerprint), and
+    // the upsert queue batches 50 entries before auto-flushing. Both the
+    // flush and the assertion insert are best-effort: triage assertions
+    // are informational quality scoring (the orchestrator already marks
+    // this source as non-fatal), so a transient DB error here must never
+    // surface as a `bus:handler-error` and tear down the run. Field-test
+    // issue #54 saw a `pipeline_runs(run_id)` FK fault in the e2e smoke
+    // harness escape this handler when only the assertion-insert was
+    // wrapped — widening the try/catch closes that loophole.
     try {
+      upsertQueue.flush();
       saveAssertionResults(deps.db, runId, fingerprint, assertions);
     } catch {
       /* best-effort — assertion persistence must not kill the pipeline */
