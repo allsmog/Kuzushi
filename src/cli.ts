@@ -101,6 +101,10 @@ program
   .description("Interactive security copilot shell")
   .option("--workspace <id>", "Resume a workspace")
   .option("--load <modules>", "Additional modules to load (comma-separated)")
+  .option(
+    "--exclude <modules>",
+    "Default modules to skip (comma-separated). Use to opt out of e.g. `codeql` when its CLI isn't installed.",
+  )
   .option("--target <path>", "Set initial target (repo path, host, URL)")
   .option("--scope <path>", "Load rules of engagement from YAML file")
   .option("--model <model>", "Default model for AI operations")
@@ -127,6 +131,7 @@ Examples:
       async (opts: {
         workspace?: string;
         load?: string;
+        exclude?: string;
         target?: string;
         scope?: string;
         model?: string;
@@ -220,6 +225,10 @@ Examples:
             ?.split(",")
             .map((m) => m.trim())
             .filter(Boolean),
+          excludeBuiltinModules: opts.exclude
+            ?.split(",")
+            .map((m) => m.trim())
+            .filter(Boolean),
           target: opts.target,
         });
       },
@@ -233,9 +242,16 @@ program
   .description("Scan a repository with configured tasks and triage findings with an agent")
   .argument("<repo>", "Path to the repository to scan")
   .option("--preset <name>", "Scan preset: fast, standard, deep")
-  .option("--tasks <names>", "Tasks to run (comma-separated task ids)")
+  .option(
+    "--tasks <names>",
+    "Comma-separated task ids to enable. Note: the orchestrator may still pull in dependent agentic detectors (template-injection-detect, sharp-edges-detect, etc.) even when not listed — `--tasks` enables but does not strictly hard-restrict. Use `kuzushi task list` to see the full DAG.",
+  )
   .option("--severity <levels>", "Severity filter (comma-separated)")
-  .option("--max <n>", "Max findings to triage", parseInt)
+  .option(
+    "--max <n>",
+    "Cap for the triage stage: at most <n> findings reach the triage agent. Scanner-stage emits all raw findings; pre-triage dedup may also drop more.",
+    parseInt,
+  )
   .option("--model <model>", "Default model to use across tasks and AI stages")
   .option(
     "--ensemble-models <models>",
@@ -523,14 +539,16 @@ configCmd
   .command("get")
   .description("Get a config value")
   .argument("[key]", "Config key (omit to show all)")
+  .option("-r, --repo <path>", "Include project-level config overlay from this repo")
+  .option("--trust-repo-config", "Trust unsafe repo-local config keys", false)
   .action(
-    wrapCliAction((key?: string) => {
+    wrapCliAction((key: string | undefined, opts: { repo?: string; trustRepoConfig?: boolean }) => {
+      const config = loadConfig(opts.repo, { trustProjectConfig: opts.trustRepoConfig === true });
       if (!key) {
-        const config = loadConfig();
         console.log(JSON.stringify(config, null, 2));
         return;
       }
-      const value = getConfigValue(key);
+      const value = getConfigValue(key, opts.repo);
       if (value === undefined) {
         throw new CliUsageError(`Unknown config key: ${key}`);
       }
