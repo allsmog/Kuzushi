@@ -116,6 +116,7 @@ export function prepareScanExecution(
   const scanOpts: ScanOpts = {
     severity,
     maxFindings: opts.max,
+    maxRawFindings: opts.maxRawFindings,
     excludePatterns: config.excludePatterns,
     tasks: taskOverride ?? expandedTasks,
     fresh: opts.fresh,

@@ -267,6 +267,11 @@ program
     "Cap for the triage stage: at most <n> findings reach the triage agent. Scanner-stage emits all raw findings; pre-triage dedup may also drop more.",
     parseInt,
   )
+  .option(
+    "--max-raw-findings <n>",
+    "Soft cap on raw scanner findings collected in memory. Once exceeded, new scan:finding events are dropped and a warning is logged. Use to bound long agentic runs.",
+    parseInt,
+  )
   .option("--model <model>", "Default model to use across tasks and AI stages")
   .option(
     "--ensemble-models <models>",
