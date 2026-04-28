@@ -17,6 +17,7 @@ import path from "node:path";
 import { Command } from "commander";
 import { configureAgentRuntime } from "./agent-runtime/index.js";
 import { createDefaultTaskRegistry } from "./agents/index.js";
+import { runInspectCommand } from "./cli/commands/inspect.js";
 import { runScanCommand } from "./cli/commands/scan.js";
 import { CliUsageError, wrapCliAction } from "./cli/errors.js";
 import { resolveRepo } from "./cli/shared.js";
@@ -438,6 +439,32 @@ Exit codes:
 `,
   )
   .action(wrapCliAction(runScanCommand));
+
+// `kuzushi inspect` — pretty-print findings from SQLite without
+// re-running the pipeline. Lets operators see results from a killed
+// or in-flight scan, filter by severity/task, and emit JSON for
+// downstream tooling. Field-test issue #43.
+program
+  .command("inspect")
+  .description("Print findings for a previous scan run")
+  .option("-r, --repo <path>", "Repository path", ".")
+  .option("--run-id <id>", "Run id (default: latest run in this repo's DB)")
+  .option("--severity <level>", "Filter by severity (ERROR|WARNING|INFO)")
+  .option("--task <task-id>", "Filter by detector task id (semgrep, ssrf-detect, etc.)")
+  .option("--limit <n>", "Cap printed rows (default 50)", parseInt)
+  .option("--json", "Emit JSON instead of human-readable table")
+  .option("--db <path>", "SQLite DB path (default: <repo>/.kuzushi/findings.sqlite3)")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ kuzushi inspect -r ./repo                                    # latest run, top 50
+  $ kuzushi inspect --severity ERROR --limit 10                  # ERROR-only, top 10
+  $ kuzushi inspect --task ssrf-detect --json                    # ssrf findings as JSON
+  $ kuzushi inspect --run-id 30857617-510d-46db-ad67-...         # specific run
+`,
+  )
+  .action(wrapCliAction(runInspectCommand));
 
 // ── compare-runs ──────────────────────────────────────────────────────────
 
