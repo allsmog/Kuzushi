@@ -24,6 +24,16 @@ export interface CiStreamOptions {
   write?: (line: string) => void;
   /** Include per-finding lines. Default true — flip off for very noisy scans. */
   emitFindings?: boolean;
+  /**
+   * Heartbeat interval in seconds. While the pipeline is in `scanning` /
+   * `triaging` / `verifying` state and no other line has been written for
+   * this long, emit a `heartbeat: …` line so operators can tell the
+   * scan is alive vs hung. Set to 0 to disable. Default 60s — enough to
+   * stay quiet on fast scans, frequent enough to reassure on slow ones
+   * (a Sentry-sized agentic scan can sit silent for many minutes).
+   * Field-test issue #14.
+   */
+  heartbeatSeconds?: number;
 }
 
 /**
@@ -36,31 +46,38 @@ export interface CiStreamOptions {
 export function attachCiStream(store: UIStore, opts: CiStreamOptions = {}): () => void {
   const write = opts.write ?? ((line: string) => process.stdout.write(`${line}\n`));
   const emitFindings = opts.emitFindings ?? true;
+  const heartbeatSeconds = opts.heartbeatSeconds ?? 60;
 
   let lastPhase: UIState["phase"] | null = null;
   const lastStageStatus = new Map<string, string>();
   const seenResults = new Set<string>();
+  let lastThrottleKey: string | null = null;
   let startAnnounced = false;
   let endAnnounced = false;
+  let lastWriteAt = Date.now();
+  const writeWithHeartbeatReset = (text: string): void => {
+    write(text);
+    lastWriteAt = Date.now();
+  };
 
   const unsubscribe = store.subscribe(() => {
     const state = store.getState();
     if (state.mode !== "running" && !startAnnounced) return;
 
     if (!startAnnounced && state.repoName) {
-      write(line("scan", `${state.repoName} started`));
+      writeWithHeartbeatReset(line("scan", `${state.repoName} started`));
       startAnnounced = true;
     }
 
     if (state.phase !== lastPhase) {
-      write(line("phase", `${lastPhase ?? "(init)"} → ${state.phase}`));
+      writeWithHeartbeatReset(line("phase", `${lastPhase ?? "(init)"} → ${state.phase}`));
       lastPhase = state.phase;
     }
 
     for (const stage of state.stages) {
       const prev = lastStageStatus.get(stage.id);
       if (prev !== stage.status) {
-        write(line("stage", formatStage(stage)));
+        writeWithHeartbeatReset(line("stage", formatStage(stage)));
         lastStageStatus.set(stage.id, stage.status);
       }
     }
@@ -70,19 +87,142 @@ export function attachCiStream(store: UIStore, opts: CiStreamOptions = {}): () =
         if (r.kind !== "triage" || !r.verdict) continue;
         if (seenResults.has(r.fingerprint)) continue;
         seenResults.add(r.fingerprint);
-        write(line("finding", formatResult(r)));
+        writeWithHeartbeatReset(line("finding", formatResult(r)));
       }
+    }
+
+    // Surface the rate-limit / throttle banner that CLAUDE.md
+    // promised but never reached --ci mode (#38). Emit one line on
+    // each transition (off→on, on→off, or concurrency change) so
+    // operators can correlate slow scans with API rate limits.
+    const throttle = state.throttle;
+    const throttleKey = throttle ? `${throttle.concurrency}|${throttle.reason}` : "null";
+    if (throttleKey !== lastThrottleKey) {
+      if (throttle) {
+        writeWithHeartbeatReset(
+          line("throttle", `concurrency=${throttle.concurrency} (${throttle.reason})`),
+        );
+      } else if (lastThrottleKey !== null && lastThrottleKey !== "null") {
+        writeWithHeartbeatReset(line("throttle", "released"));
+      }
+      lastThrottleKey = throttleKey;
     }
 
     if ((state.mode === "summary" || state.phase === "done") && !endAnnounced) {
       if (state.summary) {
-        write(line("summary", formatSummary(state)));
+        writeWithHeartbeatReset(line("summary", formatSummary(state)));
       }
       endAnnounced = true;
     }
   });
 
-  return unsubscribe;
+  // Heartbeat — emit a reassuring "still alive" line when the pipeline
+  // has been silent for too long. Without this, a long agentic scan
+  // looks identical to a hung process for many minutes (issue #14).
+  // Now also includes raw-finding count and running cost (#39, #45) so
+  // operators can decide kill-vs-wait without grep'ing the SQLite DB.
+  let heartbeatTimer: NodeJS.Timeout | undefined;
+  if (heartbeatSeconds > 0) {
+    heartbeatTimer = setInterval(() => {
+      const state = store.getState();
+      if (endAnnounced) return;
+      if (
+        state.mode !== "running" ||
+        (state.phase !== "scanning" && state.phase !== "triaging" && state.phase !== "verifying")
+      ) {
+        return;
+      }
+      const idleMs = Date.now() - lastWriteAt;
+      if (idleMs < heartbeatSeconds * 1000) return;
+      writeWithHeartbeatReset(line("heartbeat", formatHeartbeat(state, idleMs)));
+    }, Math.min(heartbeatSeconds, 30) * 1000).unref();
+  }
+
+  // Shutdown drain — emit a single "shutting down" line on
+  // SIGTERM / SIGINT / beforeExit so operators can tell graceful
+  // teardown from a hard crash. Without this the heartbeat just
+  // stops mid-cadence and there's no signal that anything happened.
+  // Field-test issue #41.
+  let drainEmitted = false;
+  const emitDrain = (reason: string): void => {
+    if (drainEmitted || endAnnounced) return;
+    drainEmitted = true;
+    const state = store.getState();
+    const findingsPart =
+      state.totalFindings > 0 ? ` · ${state.totalFindings.toLocaleString()} raw findings` : "";
+    const costPart = state.runningCostUsd > 0 ? ` · $${state.runningCostUsd.toFixed(2)}` : "";
+    try {
+      write(line("shutdown", `${reason} · phase=${state.phase}${findingsPart}${costPart}`));
+    } catch {
+      /* best-effort — the same EPIPE handler in claude.ts catches stdout-closed */
+    }
+  };
+  const onSigterm = (): void => emitDrain("SIGTERM received");
+  const onSigint = (): void => emitDrain("SIGINT received");
+  const onBeforeExit = (): void => emitDrain("process exiting");
+  process.on("SIGTERM", onSigterm);
+  process.on("SIGINT", onSigint);
+  process.on("beforeExit", onBeforeExit);
+
+  return () => {
+    unsubscribe();
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    process.off("SIGTERM", onSigterm);
+    process.off("SIGINT", onSigint);
+    process.off("beforeExit", onBeforeExit);
+  };
+}
+
+/**
+ * Build a heartbeat line that surfaces all the numbers an operator
+ * needs to decide whether to keep waiting: phase, raw-finding count,
+ * cost so far, idle time, and active stage ids. Cost is only included
+ * when non-zero (avoids a noisy `$0.00` on scanner-only stages).
+ *
+ * In triage / verify phases, replaces the raw count with a
+ * `triage: M/N · ETA Xm` progress block so operators can decide
+ * kill-vs-wait against a concrete remaining-time estimate.
+ * Field-test issues #26 and #46.
+ */
+function formatHeartbeat(state: UIState, idleMs: number): string {
+  const idleSec = Math.round(idleMs / 1000);
+  const costPart = state.runningCostUsd > 0 ? ` · $${state.runningCostUsd.toFixed(2)}` : "";
+  const activeStages = state.stages.filter((s) => s.status === "active").map((s) => s.id);
+  const stageDetail = activeStages.length ? ` (${activeStages.join(", ")})` : "";
+
+  // Triage progress: count completed `triage`-kind results; pair
+  // with `selectedForTriage` for a clean M/N. ETA is a moving
+  // estimate based on processed/(elapsed since triage start).
+  if (state.phase === "triaging" && state.selectedForTriage > 0) {
+    const processed = state.results.filter((r) => r.kind === "triage" && r.verdict).length;
+    const total = state.selectedForTriage;
+    const triageStage = state.stages.find((s) => s.id === "triage");
+    const triageStart = triageStage?.startedAt;
+    let etaPart = "";
+    if (triageStart && processed > 0) {
+      const elapsedMs = Date.now() - triageStart;
+      const rate = processed / elapsedMs; // findings per ms
+      const remaining = total - processed;
+      const etaMs = remaining > 0 && rate > 0 ? remaining / rate : 0;
+      if (etaMs > 0) etaPart = ` · ETA ${formatDuration(etaMs)}`;
+    }
+    return `${state.phase} alive · ${processed}/${total} triaged${etaPart}${costPart} · idle ${idleSec}s${stageDetail}`;
+  }
+
+  const findingsPart =
+    state.totalFindings > 0 ? ` · ${state.totalFindings.toLocaleString()} raw` : "";
+  return `${state.phase} alive${findingsPart}${costPart} · idle ${idleSec}s${stageDetail}`;
+}
+
+/** Compact human duration: "47m", "2h 13m", "5h", "38h". */
+function formatDuration(ms: number): string {
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hours = Math.floor(min / 60);
+  const remMin = min % 60;
+  return remMin > 0 && hours < 10 ? `${hours}h ${remMin}m` : `${hours}h`;
 }
 
 function line(kind: string, body: string): string {

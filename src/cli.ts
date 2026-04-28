@@ -17,6 +17,7 @@ import path from "node:path";
 import { Command } from "commander";
 import { configureAgentRuntime } from "./agent-runtime/index.js";
 import { createDefaultTaskRegistry } from "./agents/index.js";
+import { runInspectCommand } from "./cli/commands/inspect.js";
 import { runScanCommand } from "./cli/commands/scan.js";
 import { CliUsageError, wrapCliAction } from "./cli/errors.js";
 import { resolveRepo } from "./cli/shared.js";
@@ -25,13 +26,14 @@ import { formatConfigValidationIssue, validateKuzushiConfig } from "./config/val
 import {
   configPath,
   getConfigValue,
+  isClaudeCodeHostManagedAuth,
   loadConfig,
   setConfigValue,
   unsetConfigValue,
 } from "./config.js";
 import { cleanup as cleanupHttpAgents } from "./http-agent.js";
 import { initiateShutdown, registerShutdownHook } from "./lifecycle.js";
-import { setGlobalLogLevel } from "./logger.js";
+import { getLogger, setGlobalLogLevel } from "./logger.js";
 import { defaultDbPath, getRun, initDb, listRuns } from "./store.js";
 
 function maybeWarnPlaintextApiKeyStorage(key: string, value: string): void {
@@ -100,6 +102,10 @@ program
   .description("Interactive security copilot shell")
   .option("--workspace <id>", "Resume a workspace")
   .option("--load <modules>", "Additional modules to load (comma-separated)")
+  .option(
+    "--exclude <modules>",
+    "Default modules to skip (comma-separated). Use to opt out of e.g. `codeql` when its CLI isn't installed.",
+  )
   .option("--target <path>", "Set initial target (repo path, host, URL)")
   .option("--scope <path>", "Load rules of engagement from YAML file")
   .option("--model <model>", "Default model for AI operations")
@@ -126,6 +132,7 @@ Examples:
       async (opts: {
         workspace?: string;
         load?: string;
+        exclude?: string;
         target?: string;
         scope?: string;
         model?: string;
@@ -137,6 +144,20 @@ Examples:
         const config = loadConfig();
         if (opts.model) {
           config.model = opts.model;
+        }
+        // Validate --target up front. Previously a typo'd path
+        // bubbled through to runtime tool calls — catching it here
+        // gives a clearer error before the Ink shell starts.
+        // (Field-test issue #55.) Skip validation for non-path
+        // targets (URLs / hosts) by checking for a scheme prefix.
+        if (opts.target) {
+          const isUrlLike = /^[a-z][a-z0-9+.-]*:/i.test(opts.target);
+          if (!isUrlLike && !existsSync(opts.target)) {
+            throw new CliUsageError(
+              `--target path not found: ${opts.target}\n` +
+                "  Pass an existing repo path, a URL (https://…), or a host:port.",
+            );
+          }
         }
         if (opts.inheritClaude) {
           config.auth = "inherited";
@@ -189,12 +210,37 @@ Examples:
         if (opts.apiKey) {
           process.env.ANTHROPIC_API_KEY = opts.apiKey;
         }
+
+        // Inherited mode: walk the OAuth token search path and prime
+        // ANTHROPIC_API_KEY from the first hit. pi-ai's anthropic provider
+        // detects the `sk-ant-oat` prefix and switches to Bearer auth +
+        // Claude Code beta headers automatically.
+        // Skip when running inside a Claude Code host-managed session —
+        // the spawned `claude` CLI uses the host's auth + cache, and
+        // setting ANTHROPIC_API_KEY there forces cache-creation on every
+        // spawn (~12× cost regression — field-test issue #20).
+        if (
+          config.auth === "inherited" &&
+          !process.env.ANTHROPIC_API_KEY &&
+          !isClaudeCodeHostManagedAuth()
+        ) {
+          const { resolveAmbientOauthToken } = await import("./config.js");
+          const ambient = resolveAmbientOauthToken(config);
+          if (ambient) {
+            process.env.ANTHROPIC_API_KEY = ambient.token;
+            getLogger("kuzushi").info(`Using inherited OAuth token (source: ${ambient.source})`);
+          }
+        }
         const runtime = configureAgentRuntime(config);
         await startShell({
           config,
           runtime,
           workspace: opts.workspace,
           modules: opts.load
+            ?.split(",")
+            .map((m) => m.trim())
+            .filter(Boolean),
+          excludeBuiltinModules: opts.exclude
             ?.split(",")
             .map((m) => m.trim())
             .filter(Boolean),
@@ -211,9 +257,21 @@ program
   .description("Scan a repository with configured tasks and triage findings with an agent")
   .argument("<repo>", "Path to the repository to scan")
   .option("--preset <name>", "Scan preset: fast, standard, deep")
-  .option("--tasks <names>", "Tasks to run (comma-separated task ids)")
+  .option(
+    "--tasks <names>",
+    "Comma-separated task ids to enable. Note: the orchestrator may still pull in dependent agentic detectors (template-injection-detect, sharp-edges-detect, etc.) even when not listed — `--tasks` enables but does not strictly hard-restrict. Use `kuzushi task list` to see the full DAG.",
+  )
   .option("--severity <levels>", "Severity filter (comma-separated)")
-  .option("--max <n>", "Max findings to triage", parseInt)
+  .option(
+    "--max <n>",
+    "Cap for the triage stage: at most <n> findings reach the triage agent. Scanner-stage emits all raw findings; pre-triage dedup may also drop more.",
+    parseInt,
+  )
+  .option(
+    "--max-raw-findings <n>",
+    "Soft cap on raw scanner findings collected in memory. Once exceeded, new scan:finding events are dropped and a warning is logged. Use to bound long agentic runs.",
+    parseInt,
+  )
   .option("--model <model>", "Default model to use across tasks and AI stages")
   .option(
     "--ensemble-models <models>",
@@ -271,6 +329,10 @@ program
     false,
   )
   .option("--taint-diff-base <ref>", "Only taint-analyze files changed since the provided git ref")
+  .option(
+    "--diff-base <ref>",
+    "Restrict ALL detectors to files changed since the provided git ref (e.g. main, HEAD~5). Sets scanPaths from `git diff --name-only <ref>..HEAD`. Field-test issue #51.",
+  )
   .option("--taint-diff-mode <mode>", "Diff-aware taint mode: delta|baseline")
   .option("--stream", "Enable SSE streaming server for live pipeline events", false)
   .option("--stream-port <n>", "Port for SSE streaming server (0 = auto)", parseInt)
@@ -312,6 +374,15 @@ program
   .option("--agent-runtime <backend>", "Agent runtime backend")
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
   .option("--base-url <url>", "Override ANTHROPIC_BASE_URL for this run")
+  .option(
+    "--inherit-claude",
+    "Use parent Claude Code session credentials for this run; sets `auth: inherited` in-memory.",
+    false,
+  )
+  .option(
+    "--exclude <modules>",
+    "Default modules to skip (comma-separated). Use to opt out of e.g. `codeql` when its CLI isn't installed.",
+  )
   .option("--list-modules", "Discover and print modules without scanning", false)
   .option("--modules <spec>", 'Manual module list: "name:path,name:path,..."')
   .option("--module-filter <pattern>", "Only scan modules whose names match the pattern")
@@ -325,6 +396,11 @@ program
   )
   .option("--max-modules <n>", "Max modules to scan in Phase 2 (top N by priority)", parseInt)
   .option("--dry-run", "Print scan scope (modules, tasks, tasks) without running", false)
+  .option(
+    "--show-plan",
+    "Print the resolved scan plan and then run (operator-friendly preview without a separate --dry-run pass)",
+    false,
+  )
   .option("--confirm-config", "Review effective config before starting an interactive scan", false)
   .option(
     "--review-context",
@@ -372,6 +448,96 @@ Exit codes:
 `,
   )
   .action(wrapCliAction(runScanCommand));
+
+// `kuzushi triage <run-id>` — drive the triage stage against an
+// existing run's checkpointed findings without re-scanning. Thin
+// alias for `kuzushi scan --resume <run-id> --no-context` so it's
+// discoverable from `kuzushi --help` instead of buried in the scan
+// flag list. Field-test issues #50 / #36 (partial #48).
+program
+  .command("triage")
+  .description("Re-run triage against a previous run's checkpointed findings (no re-scan)")
+  .argument("<run-id>", "Pipeline run id to resume")
+  .option("-r, --repo <path>", "Repository path", ".")
+  .option("--max <n>", "Cap findings sent to triage", parseInt)
+  .option("--ci", "CI stream output (one-line-per-event)", false)
+  .option("--audit-log", "Persist per-run audit logs", false)
+  .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
+  .option("--inherit-claude", "Use parent Claude Code session credentials", false)
+  .addHelpText(
+    "after",
+    `
+Pure resume — assumes the original run reached scan-stage end and
+the findings table is populated (see KUZUSHI_PERSIST_RAW_FINDINGS).
+Useful when the original run died mid-triage and you want to retry
+without paying for the scan again.
+
+Examples:
+  $ kuzushi triage 30857617-510d-46db-ad67-ca4fdfd842e6
+  $ kuzushi triage <run-id> --max 50 --ci
+`,
+  )
+  .action(
+    wrapCliAction(async (runId: string, opts: Record<string, unknown>) => {
+      const repo = (opts.repo as string | undefined) ?? ".";
+      // Forward to scan command with --resume + --no-context.
+      // ScanCommandOptions has many required fields; spread an opts object
+      // populated only with what triage cares about and let
+      // applyScanCommandConfigOverrides fill the rest.
+      await runScanCommand(repo, {
+        resume: runId,
+        context: false, // --no-context
+        ci: opts.ci === true,
+        auditLog: opts.auditLog === true,
+        max: opts.max as number | undefined,
+        apiKey: opts.apiKey as string | undefined,
+        inheritClaude: opts.inheritClaude === true,
+        verify: false,
+        cryptoBehavioralTest: false,
+        codeGraph: false,
+        multiStrategy: false,
+        multiStrategyFull: false,
+        multiStrategyAutoRules: false,
+        autoRuleGen: false,
+        stream: false,
+        githubPr: false,
+        githubComment: false,
+        autoPatch: false,
+        pocHarness: false,
+        moduleDiscovery: true,
+        fresh: false,
+        cache: true,
+        qualityGate: false,
+        failOnTp: false,
+      });
+    }),
+  );
+
+// `kuzushi inspect` — pretty-print findings from SQLite without
+// re-running the pipeline. Lets operators see results from a killed
+// or in-flight scan, filter by severity/task, and emit JSON for
+// downstream tooling. Field-test issue #43.
+program
+  .command("inspect")
+  .description("Print findings for a previous scan run")
+  .option("-r, --repo <path>", "Repository path", ".")
+  .option("--run-id <id>", "Run id (default: latest run in this repo's DB)")
+  .option("--severity <level>", "Filter by severity (ERROR|WARNING|INFO)")
+  .option("--task <task-id>", "Filter by detector task id (semgrep, ssrf-detect, etc.)")
+  .option("--limit <n>", "Cap printed rows (default 50)", parseInt)
+  .option("--json", "Emit JSON instead of human-readable table")
+  .option("--db <path>", "SQLite DB path (default: <repo>/.kuzushi/findings.sqlite3)")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  $ kuzushi inspect -r ./repo                                    # latest run, top 50
+  $ kuzushi inspect --severity ERROR --limit 10                  # ERROR-only, top 10
+  $ kuzushi inspect --task ssrf-detect --json                    # ssrf findings as JSON
+  $ kuzushi inspect --run-id 30857617-510d-46db-ad67-...         # specific run
+`,
+  )
+  .action(wrapCliAction(runInspectCommand));
 
 // ── compare-runs ──────────────────────────────────────────────────────────
 
@@ -501,14 +667,16 @@ configCmd
   .command("get")
   .description("Get a config value")
   .argument("[key]", "Config key (omit to show all)")
+  .option("-r, --repo <path>", "Include project-level config overlay from this repo")
+  .option("--trust-repo-config", "Trust unsafe repo-local config keys", false)
   .action(
-    wrapCliAction((key?: string) => {
+    wrapCliAction((key: string | undefined, opts: { repo?: string; trustRepoConfig?: boolean }) => {
+      const config = loadConfig(opts.repo, { trustProjectConfig: opts.trustRepoConfig === true });
       if (!key) {
-        const config = loadConfig();
         console.log(JSON.stringify(config, null, 2));
         return;
       }
-      const value = getConfigValue(key);
+      const value = getConfigValue(key, opts.repo);
       if (value === undefined) {
         throw new CliUsageError(`Unknown config key: ${key}`);
       }

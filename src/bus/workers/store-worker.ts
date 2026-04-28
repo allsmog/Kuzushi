@@ -12,6 +12,7 @@ import {
   updateRunStatus,
   updateVerification,
   upsertFinding,
+  upsertRawFinding,
 } from "../../store.js";
 import { updateTrajectoryCorrectness } from "../../trajectory-memory.js";
 import type { KuzushiConfig } from "../../types.js";
@@ -199,6 +200,32 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): Sto
       updateRunFindings(deps.db, event.meta.runId, event.payload.findings);
     } catch {
       /* best-effort */
+    }
+    // Pre-persist raw scanner findings into the `findings` table with a
+    // `needs_review` placeholder so they survive triage-stage failures
+    // (LLM auth error, rate limit, model rejection). Without this,
+    // findings are stranded in `pipeline_runs.findings_json` and the
+    // operator-facing /findings list / SARIF / JSON exporters report "0
+    // findings" even when 27K+ raw findings exist on disk. Real triage
+    // results overwrite the placeholder via the SQL `ON CONFLICT` path.
+    //
+    // Field-test issues #16 / #22 / #42: defaults to ON because losing
+    // 1.5 hours of scanner output to a triage flake is the worse
+    // failure mode. Set `KUZUSHI_PERSIST_RAW_FINDINGS=0` to restore
+    // the historical "rows only after triage" semantics.
+    if (process.env["KUZUSHI_PERSIST_RAW_FINDINGS"] !== "0") {
+      try {
+        const ref = deps.ref ?? "HEAD";
+        const repo = event.payload.context?.repoName ?? "";
+        // upsertRawFinding uses ON CONFLICT DO NOTHING so we can never
+        // clobber a real triage result with the placeholder. Critical
+        // when a fingerprint was already triaged on a prior run.
+        for (const finding of event.payload.findings) {
+          upsertRawFinding(deps.db, finding, repo, ref);
+        }
+      } catch {
+        /* best-effort: pre-persistence failures must not kill the pipeline */
+      }
     }
   });
 

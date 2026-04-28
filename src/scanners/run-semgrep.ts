@@ -99,17 +99,41 @@ export async function runSemgrep(
       reject(createAbortError(binName));
       return;
     }
+    // Spawn detached so semgrep + semgrep-core get their own process
+    // group. On parent exit/abort we then kill the whole group, which
+    // reaps the long-running semgrep-core RPC backend that otherwise
+    // outlives kuzushi (field-test issue #12 — orphan semgrep-core
+    // observed running 16+ minutes after parent SIGTERM).
     const proc = spawn(scannerBin, args, {
       cwd: repoRoot,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
 
     const stdoutChunks: Buffer[] = [];
     let settled = false;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
 
+    /** Kill the whole pgrp (semgrep + semgrep-core children). */
+    const killGroup = (sig: NodeJS.Signals = "SIGTERM"): void => {
+      try {
+        if (typeof proc.pid === "number") process.kill(-proc.pid, sig);
+      } catch {
+        try {
+          proc.kill(sig);
+        } catch {
+          /* already gone */
+        }
+      }
+    };
+    const onParentExit = (): void => {
+      if (!settled) killGroup("SIGTERM");
+    };
+    process.once("exit", onParentExit);
+
     const cleanupAbort = () => {
       signal?.removeEventListener("abort", abort);
+      process.removeListener("exit", onParentExit);
       if (killTimer) {
         clearTimeout(killTimer);
         killTimer = undefined;
@@ -117,9 +141,9 @@ export async function runSemgrep(
     };
     const abort = () => {
       if (settled) return;
-      proc.kill("SIGTERM");
+      killGroup("SIGTERM");
       killTimer = setTimeout(() => {
-        if (!settled) proc.kill("SIGKILL");
+        if (!settled) killGroup("SIGKILL");
       }, 1000);
     };
     signal?.addEventListener("abort", abort, { once: true });
@@ -148,7 +172,16 @@ export async function runSemgrep(
 
       // Semgrep/Opengrep exit code 1 means "findings were found", not a runtime failure.
       if (code !== null && code > 1) {
-        reject(new Error(`${binName} failed (exit ${code})`));
+        // Exit 7 from semgrep is the registry/config-load failure path
+        // (HTTP 403 / network unreachable / invalid config bundle).
+        // Surface a concrete remediation hint — operators in sandboxed
+        // environments otherwise have to read the source to learn that
+        // the registry blocks tripped them up. Field-test issue #4.
+        const hint =
+          code === 7
+            ? `\n  Hint: exit 7 typically means semgrep couldn't fetch its rule registry (HTTP 403 / unreachable). Override with a local ruleset:\n    git clone --depth=1 https://github.com/semgrep/semgrep-rules ~/.kuzushi-cache/semgrep-rules\n  Then in <repo>/.kuzushi/config.json set\n    {"taskConfig":{"semgrep":{"configFlag":["~/.kuzushi-cache/semgrep-rules/python", "..."]}}}\n  and re-run with --trust-repo-config.`
+            : "";
+        reject(new Error(`${binName} failed (exit ${code})${hint}`));
         return;
       }
 

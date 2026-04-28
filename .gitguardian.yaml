@@ -1,0 +1,13 @@
+# GitGuardian / ggshield config — see
+# https://docs.gitguardian.com/ggshield-docs/reference/config-files
+#
+# `tests/oauth-resolver.test.ts` exercises the OAuth ambient resolver
+# (added in feat(auth)) and uses obviously-fake fixtures with the
+# Anthropic OAuth prefix. The detector regex matches the real prefix
+# so it flags every fixture in that file. Test fixtures themselves
+# are constructed at runtime to avoid embedding the literal in source
+# (see the `OAT` / `API_NEG` consts in that file); this config is a
+# belt-and-suspenders ignore for any future direct-string usage.
+secret:
+  ignored-paths:
+    - tests/oauth-resolver.test.ts

@@ -334,11 +334,14 @@ CREATE TABLE patch_results (
 CREATE TABLE pipeline_runs (
         run_id          TEXT PRIMARY KEY,
         repo            TEXT NOT NULL,
+        module_id       TEXT,
+        tool_name       TEXT,
+        resume_label    TEXT,
         started_at      TEXT NOT NULL,
         status          TEXT NOT NULL
                         CHECK (status IN ('scanning','triaging','verifying',
                                           'poc-harnessing','dynamic-analyzing',
-                                          'complete','error','aborted')),
+                                          'interrupted','complete','error','aborted')),
         config_json     TEXT NOT NULL,
         scan_opts_json  TEXT NOT NULL,
         findings_json   TEXT,
@@ -350,7 +353,7 @@ CREATE TABLE pipeline_runs (
         prompt_hash     TEXT,
         head_ref        TEXT,
         updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
-      );
+      , branch TEXT, pr_number INTEGER);
 
 -- Table: schedules
 CREATE TABLE schedules (
@@ -504,6 +507,8 @@ CREATE INDEX idx_patch_results_fingerprint
         ON patch_results(fingerprint, created_at DESC);
 CREATE INDEX idx_patch_results_repo_status
         ON patch_results(repo, status);
+CREATE INDEX idx_pipeline_runs_branch ON pipeline_runs(branch);
+CREATE INDEX idx_pipeline_runs_pr_number ON pipeline_runs(pr_number);
 CREATE INDEX idx_pipeline_runs_repo_status ON pipeline_runs(repo, status);
 CREATE INDEX idx_pipeline_runs_started_at  ON pipeline_runs(started_at DESC);
 CREATE INDEX idx_services_host ON services(host_id);
@@ -876,3 +881,5 @@ CREATE TRIGGER trg_vulns_workspace_links_update
 --   103  schedules
 --   104  workspace_integrity_guards
 --   105  finding_actor_fingerprint
+--   106  pipeline_resume_metadata
+--   107  pipeline_runs_branch_pr

@@ -6,6 +6,7 @@ import {
   realpathSync,
   writeFileSync,
 } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { normalizeTaskConfigAliases } from "./capabilities.js";
 import { AGENT_RUNTIME_BACKENDS, BUS_BACKENDS, DEFAULTS } from "./config/defaults.js";
@@ -1401,6 +1402,151 @@ export function providerEnvVar(providerId: string): string | undefined {
     openrouter: "OPENROUTER_API_KEY",
   };
   return map[providerId];
+}
+
+export interface AmbientOauthResolution {
+  /** The OAuth bearer token (raw `sk-ant-oat...` string). */
+  token: string;
+  /**
+   * Human-readable description of where the token came from
+   * (e.g. `env:ANTHROPIC_OAUTH_TOKEN`, `file:/home/.../.oauth_token`).
+   * Surfaced in `kuzushi doctor` and the inherited-auth log line.
+   */
+  source: string;
+}
+
+/**
+ * Walk a deterministic search path looking for an Anthropic OAuth bearer
+ * token to use as the runtime credential. Resolution order:
+ *
+ *   1. `ANTHROPIC_API_KEY` env var if it has the OAuth shape (`sk-ant-oat`).
+ *   2. `ANTHROPIC_OAUTH_TOKEN` env var.
+ *   3. `ANTHROPIC_OAUTH_TOKEN_FILE` env var → file contents.
+ *   4. `config.oauthTokenFile` → file contents.
+ *   5. `~/.claude/remote/.oauth_token` (Claude Code remote sandbox).
+ *   6. `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`.
+ *
+ * Used by inherited-auth mode so operators in a Claude Code child
+ * session don't have to copy-paste a key. Returns `undefined` when no
+ * token is discoverable; callers may then fall through to the existing
+ * credential prompt or fail in `kuzushi doctor`.
+ */
+export function resolveAmbientOauthToken(
+  config: Pick<KuzushiConfig, "oauthTokenFile">,
+): AmbientOauthResolution | undefined {
+  const envApi = process.env["ANTHROPIC_API_KEY"]?.trim();
+  if (envApi && envApi.startsWith("sk-ant-oat")) {
+    return { token: envApi, source: "env:ANTHROPIC_API_KEY" };
+  }
+
+  const envOauth = process.env["ANTHROPIC_OAUTH_TOKEN"]?.trim();
+  if (envOauth) {
+    return { token: envOauth, source: "env:ANTHROPIC_OAUTH_TOKEN" };
+  }
+
+  const envFile = process.env["ANTHROPIC_OAUTH_TOKEN_FILE"]?.trim();
+  if (envFile) {
+    const tok = readOauthFile(envFile);
+    if (tok) return { token: tok, source: `env:ANTHROPIC_OAUTH_TOKEN_FILE (${envFile})` };
+  }
+
+  if (config.oauthTokenFile) {
+    const tok = readOauthFile(config.oauthTokenFile);
+    if (tok) return { token: tok, source: `config:oauthTokenFile (${config.oauthTokenFile})` };
+  }
+
+  // Probe the current user's home plus any well-known fallbacks (e.g.
+  // `/home/claude`, which Claude Code's remote sandbox mounts the
+  // credential into independent of the running user). The fallback list
+  // is overrideable via `KUZUSHI_OAUTH_WELL_KNOWN_HOMES` (colon-separated)
+  // — set it to an empty string to disable, e.g. in tests.
+  const homedirs = new Set<string>([os.homedir(), ...wellKnownOauthHomes()]);
+  for (const home of homedirs) {
+    const remotePath = path.join(home, ".claude", "remote", ".oauth_token");
+    const remoteToken = tryReadFile(remotePath)?.trim();
+    if (remoteToken && remoteToken.startsWith("sk-ant-oat")) {
+      return { token: remoteToken, source: `file:${remotePath}` };
+    }
+  }
+  for (const home of homedirs) {
+    const credsPath = path.join(home, ".claude", ".credentials.json");
+    const credsRaw = tryReadFile(credsPath);
+    if (credsRaw) {
+      const parsed = parseCredentialsJson(credsRaw);
+      if (parsed) return { token: parsed, source: `file:${credsPath}` };
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Read a file that contains either a raw OAuth token or a Claude Code
+ * `.credentials.json` document. Trims surrounding whitespace.
+ */
+function readOauthFile(filePath: string): string | undefined {
+  const raw = tryReadFile(filePath);
+  if (!raw) return undefined;
+  if (raw.trim().startsWith("{")) {
+    const parsed = parseCredentialsJson(raw);
+    if (parsed) return parsed;
+  }
+  return raw.trim() || undefined;
+}
+
+function parseCredentialsJson(raw: string): string | undefined {
+  try {
+    const j = JSON.parse(raw) as Record<string, unknown>;
+    const oauth = j["claudeAiOauth"];
+    if (oauth && typeof oauth === "object") {
+      const tok = (oauth as Record<string, unknown>)["accessToken"];
+      if (typeof tok === "string" && tok.trim()) return tok.trim();
+    }
+    const flat = j["accessToken"];
+    if (typeof flat === "string" && flat.trim()) return flat.trim();
+  } catch {
+    // fall through
+  }
+  return undefined;
+}
+
+function tryReadFile(filePath: string): string | undefined {
+  try {
+    return readFileSync(filePath, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * True when the host process is a Claude Code subagent that manages its
+ * own auth via the parent's session (file-descriptor or proxy). Setting
+ * `ANTHROPIC_API_KEY` in this state is actively harmful: the spawned
+ * `claude` CLI treats the env var as a fresh session with its own cache
+ * — costing ~12× per spawn vs. inheriting the host-managed cache (see
+ * field-test issue #20). Detection signals are env vars set
+ * unconditionally by the Claude Code remote runner.
+ */
+export function isClaudeCodeHostManagedAuth(): boolean {
+  if (process.env["CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"]) return true;
+  if (process.env["CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"]) return true;
+  return false;
+}
+
+/**
+ * Default fallback home directories to probe for ambient OAuth tokens.
+ * `KUZUSHI_OAUTH_WELL_KNOWN_HOMES` overrides this (colon-separated, set
+ * to "" to disable entirely — useful in tests).
+ */
+function wellKnownOauthHomes(): string[] {
+  const override = process.env["KUZUSHI_OAUTH_WELL_KNOWN_HOMES"];
+  if (override !== undefined) {
+    return override
+      .split(":")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  return ["/home/claude"];
 }
 
 /**

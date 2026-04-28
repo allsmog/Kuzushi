@@ -10,6 +10,14 @@ export interface ScanCommandOptions {
   tasks?: string;
   severity?: string;
   max?: number;
+  /**
+   * Soft cap on raw scanner findings collected in memory. Once exceeded,
+   * the orchestrator stops accumulating new `scan:finding` events and
+   * logs a warning. Running detectors complete but their post-cap
+   * output is dropped. Distinct from `--max <N>` which gates the
+   * triage stage. Field-test issue #34.
+   */
+  maxRawFindings?: number;
   model?: string;
   ensembleModels?: string;
   taskModels?: string[];
@@ -33,6 +41,12 @@ export interface ScanCommandOptions {
   autoRuleGen: boolean;
   taintDiffBase?: string;
   taintDiffMode?: string;
+  /**
+   * Restrict ALL detectors to files changed since this git ref.
+   * Distinct from `taintDiffBase` which only scopes the taint stage.
+   * Field-test issue #51.
+   */
+  diffBase?: string;
   stream: boolean;
   streamPort?: number;
   githubPr: boolean;
@@ -62,6 +76,20 @@ export interface ScanCommandOptions {
   agentRuntime?: string;
   apiKey?: string;
   baseUrl?: string;
+  /**
+   * Mirror of `kuzushi shell --inherit-claude` for the scan command:
+   * sets `config.auth = "inherited"` for this run so the OAuth ambient
+   * resolver primes ANTHROPIC_API_KEY without persisting state.
+   * Field-test issue #49.
+   */
+  inheritClaude?: boolean;
+  /**
+   * Built-in module ids to skip during the default load (comma-separated).
+   * Same semantics as `kuzushi shell --exclude`, exposed symmetrically
+   * on scan so containers missing optional binaries (codeql) don't
+   * have to set ambient config. Field-test issue #40.
+   */
+  exclude?: string;
   trustRepoConfig?: boolean;
   qualityGate: boolean;
   failOnTp: boolean;
@@ -76,6 +104,13 @@ export interface ScanCommandOptions {
   modulePriority?: string;
   maxModules?: number;
   dryRun?: boolean;
+  /**
+   * Print the resolved scan plan (same shape as `--dry-run`) and then
+   * proceed with the scan. Useful for "what's about to run?" sanity
+   * checks in CI logs without forcing a separate dry-run pass.
+   * Field-test issue #58.
+   */
+  showPlan?: boolean;
   confirmConfig?: boolean;
   reviewContext?: boolean;
   reviewThreatModel?: boolean;
@@ -105,6 +140,13 @@ export function applyScanCommandConfigOverrides(
     } else {
       Object.assign(config, preset);
     }
+  }
+
+  // `--inherit-claude` mirrors the shell flag for one-off scans —
+  // doesn't persist to disk, but flags the run as inherited so the
+  // OAuth ambient resolver in scan.ts can prime credentials. (#49)
+  if (opts.inheritClaude) {
+    config.auth = "inherited";
   }
 
   if (opts.model) config.model = opts.model;

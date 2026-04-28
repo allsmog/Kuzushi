@@ -49,7 +49,23 @@ export function parseJson(text: string, tag: string): unknown {
   try {
     return JSON.parse(text);
   } catch (error) {
-    throw new Error(`${tag} Invalid JSON output: ${toErrorMessage(error)}`);
+    // "Unexpected end of JSON input" almost always means the LLM
+    // subprocess died mid-stream (auth failure, rate limit, model
+    // rejection) rather than a model-malformed JSON answer. Make the
+    // error message say so — operators were misreading this as a
+    // model behavior bug. See field-test issue #15b.
+    const msg = toErrorMessage(error);
+    if (!text || !text.trim()) {
+      throw new Error(
+        `${tag} subprocess returned empty output (likely died — check for upstream "subprocess exit" logs)`,
+      );
+    }
+    if (msg.includes("Unexpected end of JSON input") && text.length < 200) {
+      throw new Error(
+        `${tag} subprocess returned truncated output (${text.length} bytes; likely died mid-stream): ${msg}`,
+      );
+    }
+    throw new Error(`${tag} Invalid JSON output: ${msg}`);
   }
 }
 
