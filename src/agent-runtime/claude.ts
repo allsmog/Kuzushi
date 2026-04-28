@@ -204,6 +204,31 @@ function killTrackedProcesses(tracked: Set<SpawnedProcess>, graceMs = 500): void
   }, graceMs).unref();
 }
 
+/**
+ * The Claude Code CLI rejects `--dangerously-skip-permissions` when the
+ * spawning process runs as root/sudo, exiting with code 1 and the message
+ *   "--dangerously-skip-permissions cannot be used with root/sudo
+ *    privileges for security reasons"
+ *
+ * That blocks every agentic detector in containers / CI runners that
+ * default to UID 0 (Docker base images, Claude Code remote sandboxes,
+ * GitHub Actions). This helper returns true only when it's safe to set
+ * the flag — when the current effective UID isn't 0. The
+ * `KUZUSHI_DANGEROUSLY_SKIP_PERMISSIONS` env var lets operators force
+ * the historical behavior on either side: `1` to always set, `0` to
+ * never set.
+ */
+function shouldAllowSkipPermissions(): boolean {
+  const override = process.env["KUZUSHI_DANGEROUSLY_SKIP_PERMISSIONS"];
+  if (override === "1" || override?.toLowerCase() === "true") return true;
+  if (override === "0" || override?.toLowerCase() === "false") return false;
+  try {
+    return typeof process.geteuid === "function" ? process.geteuid() !== 0 : true;
+  } catch {
+    return true;
+  }
+}
+
 // Prevent EPIPE from crashing the process when Claude SDK subprocesses die.
 // Multiple concurrent query() calls each spawn a Claude Code subprocess;
 // if one exits early the parent may write to a closed pipe.
@@ -738,7 +763,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     const options: ClaudeOptions = {
       cwd: request.options.cwd,
       permissionMode: mapPermissionMode(request.options.permissionMode),
-      allowDangerouslySkipPermissions: true,
+      allowDangerouslySkipPermissions: shouldAllowSkipPermissions(),
       persistSession: false,
     };
 
@@ -1098,7 +1123,7 @@ class ClaudeSession implements AgentSession {
     const options: ClaudeOptions = {
       cwd: this.baseOptions.cwd,
       permissionMode: mapPermissionMode(this.baseOptions.permissionMode),
-      allowDangerouslySkipPermissions: true,
+      allowDangerouslySkipPermissions: shouldAllowSkipPermissions(),
       persistSession: false,
     };
 
@@ -1328,6 +1353,15 @@ class ClaudeSession implements AgentSession {
 function mapPermissionMode(
   mode: string | undefined,
 ): "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" {
+  // When running as root (containers, CI runners, Claude Code remote
+  // sandboxes), the Claude CLI rejects `bypassPermissions` /
+  // `--dangerously-skip-permissions` for security. Only `plan` mode is
+  // root-safe and still functional. Detectors lose Bash/Edit/Write
+  // tool execution but keep Read/Grep/Glob — enough for SAST work.
+  // `KUZUSHI_DANGEROUSLY_SKIP_PERMISSIONS=1` forces the historical
+  // behavior on hosts that explicitly opt in.
+  const safeMode: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" =
+    shouldAllowSkipPermissions() ? "bypassPermissions" : "plan";
   switch (mode) {
     case "default":
     case "acceptEdits":
@@ -1335,12 +1369,9 @@ function mapPermissionMode(
       return mode;
     case "bypassPermissions":
     case "dontAsk":
-      // For non-interactive automated use, "dontAsk" in Kuzushi maps to
-      // "bypassPermissions" in the Claude SDK. The SDK's "dontAsk" denies
-      // anything not pre-approved, which breaks automated tool execution.
-      return "bypassPermissions";
+      return safeMode;
     default:
-      return "bypassPermissions";
+      return safeMode;
   }
 }
 
