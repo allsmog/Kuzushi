@@ -3,6 +3,7 @@ import { extractRuleFamily, updateCalibrationWeights } from "../../confidence-ca
 import { isOneOf, PIPELINE_RUN_STATUSES } from "../../contracts.js";
 import {
   FindingUpsertQueue,
+  rawFindingTriagePlaceholder,
   saveAssertionResults,
   updatePocHarness,
   updateRunContext,
@@ -199,6 +200,27 @@ export function registerStoreWorker(bus: MessageBus, deps: StoreWorkerDeps): Sto
       updateRunFindings(deps.db, event.meta.runId, event.payload.findings);
     } catch {
       /* best-effort */
+    }
+    // Optional safety net for field-test issues #16 / #22: pre-persist
+    // raw scanner findings into the `findings` table with a
+    // `needs_review` placeholder. Without this, a triage-stage failure
+    // strands findings in `pipeline_runs.findings_json` and the
+    // operator-facing /findings list / SARIF / JSON exports report "0
+    // findings". Off by default to preserve existing test semantics
+    // (rows only enter `findings` after triage); flip
+    // `KUZUSHI_PERSIST_RAW_FINDINGS=1` to opt in. Real triage results
+    // overwrite the placeholder via the SQL `ON CONFLICT` path.
+    if (process.env["KUZUSHI_PERSIST_RAW_FINDINGS"] === "1") {
+      try {
+        const ref = deps.ref ?? "HEAD";
+        const repo = event.payload.context?.repoName ?? "";
+        for (const finding of event.payload.findings) {
+          upsertQueue.enqueue(finding, rawFindingTriagePlaceholder(finding), repo, ref);
+        }
+        upsertQueue.flush();
+      } catch {
+        /* best-effort: pre-persistence failures must not kill the pipeline */
+      }
     }
   });
 

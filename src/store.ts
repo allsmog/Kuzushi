@@ -483,6 +483,42 @@ export function upsertFinding(
   stmt.run(...upsertFindingParams(finding, triage, repo, ref));
 }
 
+/**
+ * Build a placeholder `TriageResult` for raw scanner findings that haven't
+ * been triaged yet. Used by `upsertRawFinding` to pre-persist scan-stage
+ * output so it survives a triage failure (field-test issue #16/#22).
+ *
+ * The placeholder uses verdict `needs_review` and confidence `0` so the
+ * `findings` table accurately reflects "scanner saw it, no judgement
+ * yet" — and the SQL `UPSERT ... ON CONFLICT` lets a real triage result
+ * overwrite it later without dropping rows.
+ */
+export function rawFindingTriagePlaceholder(finding: Finding): TriageResult {
+  return {
+    fingerprint: finding.fingerprint,
+    verdict: "needs_review",
+    confidence: 0,
+    rationale: "raw scanner finding (not triaged)",
+    verificationSteps: [],
+    fixPatch: null,
+  };
+}
+
+/**
+ * Persist a single raw scanner finding so it lands in the `findings`
+ * table at scan-stage end, before triage runs. If triage later fails
+ * (LLM auth error, rate limit, etc.) the finding still surfaces in
+ * `kuzushi shell /findings` and `--sarif`/`--json` exports.
+ */
+export function upsertRawFinding(
+  db: Database.Database,
+  finding: Finding,
+  repo: string,
+  ref: string,
+): void {
+  upsertFinding(db, finding, rawFindingTriagePlaceholder(finding), repo, ref);
+}
+
 /** Default flush threshold for {@link FindingUpsertQueue}.
  *  Raised from 1 → 50: the store worker already flushes at every natural
  *  phase boundary (triage:complete, verification:result, poc-harness:result,
