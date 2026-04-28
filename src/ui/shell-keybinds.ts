@@ -28,6 +28,40 @@ export const CTRL_C_ARM_WINDOW_MS = 2000;
 /** Default pageSize mirror — must match FindingsView's DEFAULT_PAGE_SIZE. */
 export const FINDINGS_DEFAULT_PAGE_SIZE = 50;
 
+/**
+ * How long after the last text-input event we treat an Enter as paste-trailing
+ * rather than a deliberate submit. Tight enough that real keystrokes followed
+ * by Enter (`tmux send-keys "/cmd" Enter`) submit immediately.
+ */
+export const PASTE_GUARD_WINDOW_MS = 5;
+
+/**
+ * Decide whether an Enter that arrives after some text input should submit
+ * immediately or buffer (in case it's the trailing newline of a multi-line
+ * paste). Pure helper so `tests/copilot/keybinds.test.ts` can lock the
+ * behavior without spinning up Ink.
+ *
+ * Rules:
+ * - If there's no buffered input, never submit (caller falls through to arm).
+ * - If the last text-input event was a single character (typing or `tmux
+ *   send-keys`, which delivers one byte at a time over PTY), submit. Even if
+ *   the gap is microseconds.
+ * - If the last text-input event was multi-character (genuine paste blob)
+ *   AND it landed within `PASTE_GUARD_WINDOW_MS`, treat the Enter as paste
+ *   trailing newline and buffer.
+ * - Otherwise submit.
+ */
+export function shouldSubmitOnReturn(opts: {
+  bufferedInputLength: number;
+  msSinceLastTextInput: number;
+  lastTextInputCharLength: number;
+}): boolean {
+  if (opts.bufferedInputLength === 0) return false;
+  const looksLikePaste =
+    opts.lastTextInputCharLength > 1 && opts.msSinceLastTextInput < PASTE_GUARD_WINDOW_MS;
+  return !looksLikePaste;
+}
+
 /** Description of a single Ink `useInput` keystroke. */
 export interface Keystroke {
   /** Printable character (if any). */
