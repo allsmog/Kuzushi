@@ -16,7 +16,7 @@ import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { Table } from "../primitives/Table.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
-import { RuleHeader } from "./RuleHeader.js";
+import { ContextStrip } from "./ContextStrip.js";
 import { ScreenContent } from "./ScreenContent.js";
 
 type CompactAuditRow = NonNullable<ShellState["promptsEditor"]>["audit"] extends
@@ -74,15 +74,13 @@ export function PromptsEditorView({
     { keys: "?", label: "help", secondary: true },
   ]);
 
-  const moduleId = shell.focusedModule ?? "module";
-  const breadcrumb = `kuzushi/${moduleId}/prompts`;
   const rows: ReadonlyArray<AnyRow> = rowsProp ?? shell.promptsEditor?.audit ?? [];
   const localEdits = rows.filter((r) => r.effective.source === "file").length;
   const status = `${rows.length} prompt${rows.length === 1 ? "" : "s"} · ${localEdits} local edit${localEdits === 1 ? "" : "s"}`;
 
   return (
     <ScreenContent>
-      <RuleHeader breadcrumb={breadcrumb} status={status} />
+      <ContextStrip status={[status]} />
       <SavedConfirmation editor={shell.promptsEditor} nowMs={nowMs ?? Date.now()} />
       <Box marginTop={SPACING.sm}>
         <Text>

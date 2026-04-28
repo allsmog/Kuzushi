@@ -243,7 +243,10 @@ describe("why command", () => {
     });
     await driver.handle("use threat-hunt");
     const result = await driver.handle("why");
-    expect(result.output).toContain("snapshot.appModel");
+    // The unmet-snapshot renderer prints `<moduleId>.<field>` so the operator
+    // sees which module produces the missing artefact (e.g. "context.appModel")
+    // rather than the bare "snapshot.appModel" the older format used.
+    expect(result.output).toContain("context.appModel");
     expect(result.output).toContain("'use context' then 'run'");
   });
 

@@ -8,6 +8,7 @@
 import type { ThreatModelDocument } from "../agents/tasks/threat-modeling/types.js";
 import type { ShellPlan } from "../copilot/nl-planner.js";
 import type { ModuleCategory, ModuleRank } from "../modules/types.js";
+import type { VendorAssessmentHomeSlice } from "../modules/vendor-assessment/types.js";
 import type { ThreatModelPatchProposal } from "../threat-model-patch.js";
 
 // Re-export so the UI layer can `import type { ShellPlan } from "../state.js"`
@@ -518,8 +519,8 @@ export interface ContextSnapshot {
   timestamp: number;
   /** Discovery mode used during generation. */
   discovery: "auto" | "flat" | "modules";
-  /** Which optional steps were enabled when generated. */
-  options: { enrichment: boolean; threatModel: boolean; scenarios: boolean };
+  /** Which optional context steps were enabled when generated. */
+  options: { enrichment: boolean; threatModel?: boolean; scenarios?: boolean };
 
   // --- Single-project context (discovery=flat, or auto with single project) ---
   /** RepoContext from context-gatherer (languages, frameworks, auth, entry points). */
@@ -530,9 +531,9 @@ export interface ContextSnapshot {
   enrichedContext?: unknown;
   /** ApplicationModel from app-model-build (routes, outbound clients, data stores, jobs). */
   appModel?: unknown;
-  /** ThreatModelDocument from threat-model-randori (DFD, STRIDE threats, summary). */
+  /** Legacy snapshots may contain an embedded threat model; new runs persist via threat-model. */
   threatModel?: unknown;
-  /** ThreatScenario[] from threat-scenario-build. */
+  /** Legacy snapshots may contain embedded scenarios; new runs persist via threat-model. */
   scenarios?: unknown[];
   /** Generated slices included in the most recent context operation. */
   generatedSlices?: ContextGenerationSlice[];
@@ -577,20 +578,16 @@ export type ShellView =
   | "actor-detail"
   // PromptsEditorView — list + verbs (edit, show, diff, reset, set) for
   // the focused module's prompt overrides.
-  | "prompts-editor";
+  | "prompts-editor"
+  // KbView — the focused module's knowledge base (operator-attached files).
+  // Reads from `shell.kbState[shell.kb.moduleId]` (see `src/modules/_shared/
+  // attachments/tools.ts:AttachmentsHomeSlice`). Entered via `/kb` or the
+  // bare `attachments` verb inside a focused module.
+  | "kb";
 
 export type ThreatTab = "dfd" | "stride" | "stories" | "scope" | "summary";
 
-export type ContextGenerationSlice =
-  | "all"
-  | "repo"
-  | "enrichment"
-  | "app-model"
-  | "dfd"
-  | "stride"
-  | "stories"
-  | "scope"
-  | "scenarios";
+export type ContextGenerationSlice = "all" | "repo" | "enrichment" | "app-model";
 
 export type FindingScope =
   | { kind: "all" }
@@ -953,6 +950,25 @@ export interface ShellState {
   promptsEditor?: PromptsEditorSlice | null;
   /** Cached rows for the focused tool options view. */
   optionsView?: OptionsViewSlice | null;
+  /** Vendor assessment draft-scope summary for the custom module home. */
+  vendorAssessment?: VendorAssessmentHomeSlice | null;
+  /**
+   * Knowledge-base attachments for KB-enabled modules (`threat-model`,
+   * `context`, `threat-hunt`, `vendor-assessment`). Keyed by module id; each
+   * entry is the slice produced by the shared attachment factory's
+   * `buildHomeSlice`. Read by both the per-module `AttachmentsBlock` on
+   * the module home view and the dedicated `/kb` view.
+   */
+  kbState?: Record<string, import("../modules/_shared/attachments/index.js").AttachmentsHomeSlice>;
+  /**
+   * Cursor + collapse state for the `/kb` view. Persists across `/back`
+   * within a single shell session so the operator returns to the same row.
+   */
+  kb?: {
+    moduleId: string;
+    cursor: number;
+    collapsed: boolean;
+  } | null;
   /**
    * Cursor index into the (severity-sorted) loose-findings list rendered by
    * FindingsView. Driven by j/k/ArrowDown/ArrowUp/g/G/PgUp/PgDown at the

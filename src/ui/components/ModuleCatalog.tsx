@@ -49,15 +49,16 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
     bucket.push(card);
     byCategory[card.category] = bucket;
   }
+  const workspace = shell.workspace ?? "none";
+  const targetLabel = compactTarget(shell.target);
+  const moduleCount = (shell.moduleCatalog ?? []).length;
+  const status =
+    workspace === targetLabel
+      ? [`scope:${workspace}`, `${moduleCount} modules`]
+      : [`workspace:${workspace}`, `target:${targetLabel}`, `${moduleCount} modules`];
   return (
     <ScreenContent>
-      <ContextStrip
-        status={[
-          `workspace:${shell.workspace ?? "none"}`,
-          `target:${compactTarget(shell.target)}`,
-          `${(shell.moduleCatalog ?? []).length} modules`,
-        ]}
-      />
+      <ContextStrip status={status} />
       <Box marginTop={SPACING.sm}>
         <Text>
           {tokens.strong("Primary next step: ")}
@@ -113,7 +114,7 @@ function ModuleRows({ rows }: { rows: ShellModuleCard[] }): React.ReactElement {
         {
           key: "description",
           header: "DESCRIPTION",
-          flex: 4,
+          flex: 6,
           truncate: "end",
           render: (c) => c.description,
         },

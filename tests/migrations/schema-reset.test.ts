@@ -41,20 +41,22 @@ afterEach(() => {
   }
 });
 
+/**
+ * Source of truth for the version list a current `initDb()` should leave
+ * behind — derived from `allMigrations` so adding a new migration file is a
+ * single-line change and these tests stay accurate without manual edits.
+ */
+function expectedVersions(): Array<{ version: number }> {
+  return allMigrations.map((m) => ({ version: m.version }));
+}
+
 describe("schema reset and incremental migrations", () => {
   it("applies all migrations to a fresh DB without producing a backup", () => {
     const dbPath = tmpDb();
     const db = initDb(dbPath);
     try {
       const rows = db.prepare("SELECT version FROM schema_version ORDER BY version").all();
-      expect(rows).toEqual([
-        { version: 100 },
-        { version: 101 },
-        { version: 102 },
-        { version: 103 },
-        { version: 104 },
-        { version: 105 },
-      ]);
+      expect(rows).toEqual(expectedVersions());
       expect(readdirSync(path.dirname(dbPath)).filter((n) => n.includes(".bak-"))).toHaveLength(0);
     } finally {
       db.close();
@@ -77,14 +79,7 @@ describe("schema reset and incremental migrations", () => {
 
       // New DB has v100+v101 and no legacy data.
       const versions = db.prepare("SELECT version FROM schema_version ORDER BY version").all();
-      expect(versions).toEqual([
-        { version: 100 },
-        { version: 101 },
-        { version: 102 },
-        { version: 103 },
-        { version: 104 },
-        { version: 105 },
-      ]);
+      expect(versions).toEqual(expectedVersions());
       const legacyRow = db.prepare("SELECT COUNT(*) as n FROM findings").get() as { n: number };
       expect(legacyRow.n).toBe(0);
     } finally {
@@ -115,14 +110,7 @@ describe("schema reset and incremental migrations", () => {
     try {
       expect(resets).toHaveLength(0); // No backup — pure in-place upgrade.
       const versions = second.prepare("SELECT version FROM schema_version ORDER BY version").all();
-      expect(versions).toEqual([
-        { version: 100 },
-        { version: 101 },
-        { version: 102 },
-        { version: 103 },
-        { version: 104 },
-        { version: 105 },
-      ]);
+      expect(versions).toEqual(expectedVersions());
       const hostsExists = second
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='hosts'")
         .get();
@@ -142,14 +130,7 @@ describe("schema reset and incremental migrations", () => {
     try {
       expect(resets).toHaveLength(0);
       const versions = second.prepare("SELECT version FROM schema_version ORDER BY version").all();
-      expect(versions).toEqual([
-        { version: 100 },
-        { version: 101 },
-        { version: 102 },
-        { version: 103 },
-        { version: 104 },
-        { version: 105 },
-      ]);
+      expect(versions).toEqual(expectedVersions());
     } finally {
       second.close();
     }

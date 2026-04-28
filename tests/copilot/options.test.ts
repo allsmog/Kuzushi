@@ -151,13 +151,13 @@ describe("formatOptionsTable", () => {
 
   it("does not break mid-word when width is wide enough", () => {
     const ds = new Datastore([
-      Opt.string("threatModel", {
-        description: "Run PASTA S1-S4 threat modeling.",
+      Opt.string("enrichment", {
+        description: "Run LLM context enrichment.",
         default: "true",
       }),
     ]);
     const out = formatOptionsTable(ds, { availableWidth: 120 });
-    expect(out).toContain("Run PASTA S1-S4 threat modeling.");
+    expect(out).toContain("Run LLM context enrichment.");
     expect(out.split("\n").filter((l) => l.trim().length > 0)).toHaveLength(3); // header + sep + one body line
   });
 });

@@ -35,16 +35,12 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
     { keys: "/config", label: "full editor", secondary: true },
     { keys: "b", label: "back", secondary: true },
   ]);
-  const moduleId = shell.focusedModule ?? "(no module)";
   const snap = shell.tuneSnapshot;
 
   return (
     <ScreenContent>
       <Box>
         <Text>
-          {tokens.muted("\u25C2 back   ")}
-          {tokens.strong(moduleId)}
-          {tokens.muted("   \u2502   ")}
           {tokens.muted("home   ")}
           {tokens.accent("tune")}
           {tokens.muted("    prompt    runs")}
@@ -102,7 +98,7 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
       </TuneControl>
 
       <Box marginTop={SPACING.sm}>
-        <Text>{tokens.muted("\u2500".repeat(78))}</Text>
+        <Text>{tokens.muted("─".repeat(78))}</Text>
       </Box>
       <Box marginTop={SPACING.sm}>
         <Text>{tokens.strong("Primary action: run with the focused module settings.")}</Text>
@@ -156,7 +152,7 @@ function Options({
     const pretty = multi ? opt : opt;
     return on ? tokens.strong(pretty) : tokens.muted(pretty);
   });
-  const sep = tokens.muted("  \u2500\u2500  ");
+  const sep = tokens.muted("  ──  ");
   return (
     <Text>
       {"    "}

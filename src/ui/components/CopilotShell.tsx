@@ -11,7 +11,7 @@
  */
 
 import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
-import React, { memo, useRef, useState } from "react";
+import React, { memo, useEffect, useRef, useState } from "react";
 import { computeFindingAliases, resolveAlias } from "../../copilot/finding-alias.js";
 import { SAST_TASK_CAPABILITIES } from "../../copilot/sast-task-selection.js";
 import {
@@ -58,6 +58,7 @@ import { ContextBuildView } from "./ContextBuildView.js";
 import { ErrorMessage } from "./ErrorMessage.js";
 import { FindingCard } from "./FindingCard.js";
 import { FindingsView } from "./FindingsView.js";
+import { KbView } from "./KbView.js";
 import { ModuleCatalog } from "./ModuleCatalog.js";
 import { ModuleHome } from "./ModuleHome.js";
 import { ModuleRunView } from "./ModuleRunView.js";
@@ -235,24 +236,20 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
           {(item) => <ShellStaticItemView key={item.key} item={item as ShellStaticItem} />}
         </Static>
 
-        {showCatalog && !shell.processing ? (
+        {showCatalog && shell.shellView !== "catalog" && !shell.processing ? (
           <MemoShellBanner shell={shell} columns={columns} />
         ) : null}
 
         <MemoShellLiveHistory
           history={liveHistory}
           suppressRunningToolName={suppressRunningToolName}
+          compactRunningToolCalls={shell.shellView === "task-story"}
         />
       </Box>
 
       <Box flexDirection="column">
-        {!shell.processing && shell.history.length > 0 ? (
-          <Box marginTop={SPACING.sm} paddingLeft={SPACING.md}>
-            <Text>{tokens.tertiary("interactive")}</Text>
-          </Box>
-        ) : null}
-
         {!shell.processing ||
+        shell.shellView === "context-build" ||
         shell.shellView === "task-story" ||
         shell.shellView === "module-run" ||
         shell.shellView === "actor-detail" ? (
@@ -262,10 +259,12 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
             agentActivity={shellState.agentActivity}
           />
         ) : null}
-        {!shell.processing ||
-        shell.shellView === "task-story" ||
-        shell.shellView === "module-run" ||
-        shell.shellView === "actor-detail" ? (
+        {(!shell.processing ||
+          shell.shellView === "context-build" ||
+          shell.shellView === "task-story" ||
+          shell.shellView === "module-run" ||
+          shell.shellView === "actor-detail") &&
+        shell.shellView !== "catalog" ? (
           <ShellWayfinding shell={shell} narrow={columns < 110} />
         ) : null}
         <ShellTaskStatusLine shell={shell} columns={columns} />
@@ -325,6 +324,85 @@ const ShellInputArea = memo(
     const [cursor, setCursor] = useState(0);
     const [historyIndex, setHistoryIndex] = useState<number | null>(null);
     const draftInputRef = useRef("");
+    const inputRef = useRef("");
+    const cursorRef = useRef(0);
+    const pendingReturnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const pendingReturnArmedRef = useRef(false);
+    const pendingReturnExpiresAtRef = useRef(0);
+    const lastTextInputAtRef = useRef(0);
+    const onInputRef = useRef(shell.onInput);
+    onInputRef.current = shell.onInput;
+
+    const clearPendingReturnTimer = (): void => {
+      if (pendingReturnTimerRef.current) {
+        clearTimeout(pendingReturnTimerRef.current);
+        pendingReturnTimerRef.current = null;
+      }
+    };
+
+    const disarmPendingReturn = (): void => {
+      clearPendingReturnTimer();
+      pendingReturnArmedRef.current = false;
+      pendingReturnExpiresAtRef.current = 0;
+    };
+
+    const updateCursor = (next: number): void => {
+      const clamped = Math.max(0, Math.min(next, inputRef.current.length));
+      cursorRef.current = clamped;
+      setCursor(clamped);
+    };
+
+    const replaceInput = (next: string, nextCursor = next.length): void => {
+      inputRef.current = next;
+      setInput(next);
+      const clamped = Math.max(0, Math.min(nextCursor, next.length));
+      cursorRef.current = clamped;
+      setCursor(clamped);
+    };
+
+    const clearInput = (): void => {
+      disarmPendingReturn();
+      replaceInput("", 0);
+      setHistoryIndex(null);
+      draftInputRef.current = "";
+    };
+
+    const submitBufferedInput = (): void => {
+      const value = inputRef.current;
+      if (value.length === 0) return;
+      disarmPendingReturn();
+      onInputRef.current?.(value);
+      clearInput();
+    };
+
+    const scheduleBufferedSubmit = (): void => {
+      clearPendingReturnTimer();
+      pendingReturnTimerRef.current = setTimeout(() => {
+        pendingReturnTimerRef.current = null;
+        if (!pendingReturnArmedRef.current) return;
+        if (Date.now() > pendingReturnExpiresAtRef.current) {
+          disarmPendingReturn();
+          return;
+        }
+        if (inputRef.current.length > 0) submitBufferedInput();
+      }, 35);
+    };
+
+    const armBufferedSubmit = (): void => {
+      pendingReturnArmedRef.current = true;
+      pendingReturnExpiresAtRef.current = Date.now() + 500;
+      scheduleBufferedSubmit();
+    };
+
+    useEffect(
+      () => () => {
+        if (pendingReturnTimerRef.current) {
+          clearTimeout(pendingReturnTimerRef.current);
+          pendingReturnTimerRef.current = null;
+        }
+      },
+      [],
+    );
 
     useRegisterKeybindings(
       shell.processing
@@ -341,6 +419,7 @@ const ShellInputArea = memo(
         const liveState = store.getState();
         const liveShell = liveState.shell;
         if (!liveShell) return;
+        const bufferedInput = inputRef.current;
 
         // High-order keybind dispatch — a single pure reducer decides
         // whether this keystroke maps to an abort, an exit, a slash-command
@@ -351,7 +430,7 @@ const ShellInputArea = memo(
         // for the shell's keymap — see tests/copilot/keybinds.test.ts.
         const action = resolveKeybind({
           stroke: { char, key },
-          input,
+          input: bufferedInput,
           state: liveState,
           looseFindingCount: countLooseFindings(
             liveState.summary?.actionableFindings ?? [],
@@ -410,10 +489,7 @@ const ShellInputArea = memo(
             }
             return;
           case "clear-input":
-            setInput("");
-            setCursor(0);
-            setHistoryIndex(null);
-            draftInputRef.current = "";
+            clearInput();
             return;
           case "none":
             break;
@@ -423,32 +499,37 @@ const ShellInputArea = memo(
           return;
         }
 
-        if (key.return && input.length > 0) {
-          liveShell.onInput?.(input);
-          setInput("");
-          setCursor(0);
-          setHistoryIndex(null);
-          draftInputRef.current = "";
+        const currentInput = inputRef.current;
+        const currentCursor = cursorRef.current;
+
+        const isReturn = key.return || char === "\r" || char === "\n";
+        if (isReturn) {
+          const recentlyTyped = Date.now() - lastTextInputAtRef.current < 25;
+          if (currentInput.length > 0 && !recentlyTyped) {
+            submitBufferedInput();
+          } else {
+            armBufferedSubmit();
+          }
           return;
         }
 
         if (key.leftArrow) {
-          setCursor((c) => Math.max(0, c - 1));
+          updateCursor(currentCursor - 1);
           return;
         }
 
         if (key.rightArrow) {
-          setCursor((c) => Math.min(input.length, c + 1));
+          updateCursor(currentCursor + 1);
           return;
         }
 
         if (isCtrlChord(char, "a", key.ctrl)) {
-          setCursor(0);
+          updateCursor(0);
           return;
         }
 
         if (isCtrlChord(char, "e", key.ctrl)) {
-          setCursor(input.length);
+          updateCursor(currentInput.length);
           return;
         }
 
@@ -456,10 +537,9 @@ const ShellInputArea = memo(
         // not `key.backspace` — see text-edit-actions.ts. Merge both into a
         // single delete-left so backspace works at end-of-line.
         if (key.backspace || key.delete) {
-          const edit = applyBackspace(input, cursor);
+          const edit = applyBackspace(currentInput, currentCursor);
           if (!edit) return;
-          setInput(edit.value);
-          setCursor(edit.cursor);
+          replaceInput(edit.value, edit.cursor);
           setHistoryIndex(null);
           return;
         }
@@ -467,19 +547,17 @@ const ShellInputArea = memo(
         if (key.upArrow) {
           if (liveShell.commandHistory.length === 0) return;
           if (historyIndex === null) {
-            draftInputRef.current = input;
+            draftInputRef.current = currentInput;
             const nextIndex = liveShell.commandHistory.length - 1;
             setHistoryIndex(nextIndex);
             const next = liveShell.commandHistory[nextIndex] ?? "";
-            setInput(next);
-            setCursor(next.length);
+            replaceInput(next);
             return;
           }
           const nextIndex = Math.max(0, historyIndex - 1);
           setHistoryIndex(nextIndex);
           const next = liveShell.commandHistory[nextIndex] ?? "";
-          setInput(next);
-          setCursor(next.length);
+          replaceInput(next);
           return;
         }
 
@@ -488,14 +566,12 @@ const ShellInputArea = memo(
           const nextIndex = historyIndex + 1;
           if (nextIndex >= liveShell.commandHistory.length) {
             setHistoryIndex(null);
-            setInput(draftInputRef.current);
-            setCursor(draftInputRef.current.length);
+            replaceInput(draftInputRef.current);
             return;
           }
           setHistoryIndex(nextIndex);
           const next = liveShell.commandHistory[nextIndex] ?? "";
-          setInput(next);
-          setCursor(next.length);
+          replaceInput(next);
           return;
         }
 
@@ -504,33 +580,36 @@ const ShellInputArea = memo(
         // for backable views. The catalog-empty-buffer Esc falls through to
         // `none` and is intentionally a no-op (mirrors q-on-catalog).
 
-        if (key.tab && input.trim().startsWith("/")) {
-          const suggestion = firstShellSuggestion(input);
+        if (key.tab && currentInput.trim().startsWith("/")) {
+          const suggestion = firstShellSuggestion(currentInput);
           if (suggestion) {
-            setInput(suggestion);
-            setCursor(suggestion.length);
+            replaceInput(suggestion);
             setHistoryIndex(null);
           }
           return;
         }
 
-        if (char === "?" && input.length === 0) {
+        if (char === "?" && currentInput.length === 0) {
           liveShell.onInput?.("/help");
           return;
         }
 
         if (isCtrlChord(char, "u", key.ctrl)) {
-          setInput("");
-          setCursor(0);
-          setHistoryIndex(null);
-          draftInputRef.current = "";
+          clearInput();
           return;
         }
 
         if (char && !key.ctrl && !key.meta && !key.tab) {
           if (historyIndex === null) draftInputRef.current = "";
-          setInput((v) => v.slice(0, cursor) + char + v.slice(cursor));
-          setCursor((c) => c + char.length);
+          lastTextInputAtRef.current = Date.now();
+          replaceInput(
+            currentInput.slice(0, currentCursor) + char + currentInput.slice(currentCursor),
+            currentCursor + char.length,
+          );
+          if (pendingReturnArmedRef.current) {
+            if (Date.now() <= pendingReturnExpiresAtRef.current) scheduleBufferedSubmit();
+            else disarmPendingReturn();
+          }
           setHistoryIndex(null);
         }
       },
@@ -665,9 +744,11 @@ const MemoShellLiveHistory = memo(
   function ShellLiveHistory({
     history,
     suppressRunningToolName,
+    compactRunningToolCalls = false,
   }: {
     history: ReadonlyArray<ShellHistoryEntry>;
     suppressRunningToolName?: string;
+    compactRunningToolCalls?: boolean;
   }): React.ReactElement {
     const visibleHistory = suppressRunningToolName
       ? history.filter(
@@ -682,13 +763,21 @@ const MemoShellLiveHistory = memo(
     return (
       <Box flexDirection="column">
         {visibleHistory.map((entry) => (
-          <HistoryEntry key={historyEntryKey(entry)} entry={entry} />
+          <HistoryEntry
+            key={historyEntryKey(entry)}
+            entry={entry}
+            compactToolCall={
+              compactRunningToolCalls && entry.type === "tool-call" && entry.status === "running"
+            }
+          />
         ))}
       </Box>
     );
   },
   (prev, next) =>
-    prev.history === next.history && prev.suppressRunningToolName === next.suppressRunningToolName,
+    prev.history === next.history &&
+    prev.suppressRunningToolName === next.suppressRunningToolName &&
+    prev.compactRunningToolCalls === next.compactRunningToolCalls,
 );
 
 function ShellWayfinding({
@@ -938,6 +1027,8 @@ function ShellViewPanel({
       );
     case "prompts-editor":
       return <PromptsEditorView key={view} shell={shell} />;
+    case "kb":
+      return <KbView key={view} shell={shell} />;
     default:
       return null;
   }
@@ -983,7 +1074,13 @@ const MemoShellViewPanel = memo(
  * While running, the entry also renders a tail of recent `liveActivities`
  * so operators can see what the tool is doing at a glance.
  */
-function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElement {
+function HistoryEntry({
+  entry,
+  compactToolCall = false,
+}: {
+  entry: ShellHistoryEntry;
+  compactToolCall?: boolean;
+}): React.ReactElement {
   switch (entry.type) {
     case "input":
       return (
@@ -1007,7 +1104,7 @@ function HistoryEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactEleme
         </Box>
       );
     case "tool-call":
-      return <ToolCallEntry entry={entry} />;
+      return <ToolCallEntry entry={entry} compact={compactToolCall} />;
     case "hunt-post-mortem":
       return <HuntPostMortemEntry entry={entry} />;
     case "story":
@@ -1060,6 +1157,17 @@ function TaskStoryView({
   const backgroundJobs = story?.backgroundJobs ?? [];
   const runningBackground = backgroundJobs.filter((job) => job.status === "running");
 
+  // Build a compact, comma-joined section summary so the header conveys
+  // counts without forcing the four pseudo-tabs that previously rendered
+  // every section regardless of content.
+  const summaryParts: string[] = [];
+  if (visibleLive.length > 0) summaryParts.push(`${visibleLive.length} live`);
+  if (artifacts.length > 0)
+    summaryParts.push(`${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"}`);
+  if (errors.length > 0)
+    summaryParts.push(`${errors.length} error${errors.length === 1 ? "" : "s"}`);
+  if (debug.length > 0) summaryParts.push(`${debug.length} debug`);
+
   return (
     <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.md}>
       <Text>
@@ -1071,21 +1179,26 @@ function TaskStoryView({
         {runningBackground.length > 0
           ? tokens.muted(` · ${runningBackground.length} background`)
           : null}
-      </Text>
-      <Text>
-        {tokens.tertiary("Live")}
-        {tokens.muted(" | ")}
-        {tokens.tertiary("Artifacts")}
-        {tokens.muted(" | ")}
-        {tokens.tertiary("Errors")}
-        {tokens.muted(" | ")}
-        {tokens.tertiary("Debug")}
+        {summaryParts.length > 0 ? tokens.muted(` · ${summaryParts.join(" · ")}`) : null}
       </Text>
       {backgroundJobs.length > 0 ? <BackgroundJobSection jobs={backgroundJobs} /> : null}
-      <StorySection title="Live" events={visibleLive} empty="No live story beats yet." />
-      <StorySection title="Artifacts" events={artifacts} empty="No artifacts recorded." />
-      <StorySection title="Errors" events={errors} empty="No errors recorded." />
-      <StorySection title="Debug" events={debug.slice(-10)} empty="No debug events." />
+      {visibleLive.length > 0 ? <StorySection title="Live" events={visibleLive} empty="" /> : null}
+      {errors.length > 0 ? <StorySection title="Errors" events={errors} empty="" /> : null}
+      {artifacts.length > 0 ? <StorySection title="Artifacts" events={artifacts} empty="" /> : null}
+      {debug.length > 0 ? (
+        <Box marginTop={SPACING.xs}>
+          <Text>
+            {tokens.muted(
+              `Debug · ${debug.length} entr${debug.length === 1 ? "y" : "ies"} (raw tool calls — see scrollback above)`,
+            )}
+          </Text>
+        </Box>
+      ) : null}
+      {summaryParts.length === 0 && backgroundJobs.length === 0 ? (
+        <Box marginTop={SPACING.xs}>
+          <Text>{tokens.tertiary("No story beats yet.")}</Text>
+        </Box>
+      ) : null}
     </Box>
   );
 }
@@ -1173,7 +1286,13 @@ function StoryEventLine({
  * `liveActivities`) the total height never shrinks — no flicker during
  * the transition.
  */
-function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElement {
+function ToolCallEntry({
+  entry,
+  compact = false,
+}: {
+  entry: ShellHistoryEntry;
+  compact?: boolean;
+}): React.ReactElement {
   const { stdout } = useStdout();
   const status = entry.status;
   const aborting = entry.abortStatus === "aborting";
@@ -1209,6 +1328,13 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
     (entry.liveActivitiesDropped ?? 0) +
     Math.max(0, liveActivities.length - visibleLiveActivities.length);
 
+  // In task-story view, the panel below is the canonical activity surface;
+  // collapse the per-tool tail to one pointer line so the same updates
+  // don't render twice. Off task-story, the tail is the only progress
+  // indicator and we render it in full.
+  const showActivityTail = !compact && status === "running" && liveActivities.length > 0;
+  const showCompactPointer = compact && status === "running" && liveActivities.length > 0;
+
   return (
     <Ratchet>
       <Box marginTop={SPACING.sm}>
@@ -1223,7 +1349,23 @@ function ToolCallEntry({ entry }: { entry: ShellHistoryEntry }): React.ReactElem
           {ts}
         </Text>
       </Box>
-      {status === "running" && liveActivities.length > 0 ? (
+      {showCompactPointer ? (
+        <Box>
+          <Gutter />
+          <Gutter>
+            <Text>{tokens.tertiary(LOWER_HOOK)}</Text>
+          </Gutter>
+          <Text>
+            {" "}
+            {tokens.tertiary(
+              `${liveActivities.length + (entry.liveActivitiesDropped ?? 0)} update${
+                liveActivities.length + (entry.liveActivitiesDropped ?? 0) === 1 ? "" : "s"
+              } · see Task story below`,
+            )}
+          </Text>
+        </Box>
+      ) : null}
+      {showActivityTail ? (
         <Box flexDirection="column">
           {hiddenLiveActivityCount > 0 ? (
             <Box>

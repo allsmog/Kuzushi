@@ -151,7 +151,11 @@ export class CoreDispatcher implements CommandDispatcher {
     }
   }
 
-  async execute(cmd: string, args: string[], ctx: CommandContext): Promise<CommandResult | void> {
+  async execute(
+    cmd: string,
+    args: string[],
+    ctx: CommandContext,
+  ): Promise<CommandResult | undefined> {
     switch (cmd) {
       case "help":
       case "?":
@@ -648,15 +652,23 @@ export class CoreDispatcher implements CommandDispatcher {
     }
     const shell = ctx.driver.getShellState?.();
     const snapshot = (shell?.contextSnapshot ?? undefined) as Record<string, unknown> | undefined;
+    const threatModel = shell?.threatModel;
     const lines: string[] = [`Why ${mod.id}'s preflight cares:`];
     for (const req of reqs) {
       if (req.kind === "snapshot") {
-        const present = !!snapshot && snapshot[req.field] != null;
+        const present =
+          req.moduleId === "threat-model" && req.field === "threatModel"
+            ? threatModel != null
+            : !!snapshot && snapshot[req.field] != null;
         lines.push(
-          `  ${present ? "✓" : "✗"} snapshot.${req.field}   (produced by: ${req.moduleId})`,
+          `  ${present ? "✓" : "✗"} ${req.moduleId}.${req.field}   (produced by: ${req.moduleId})`,
         );
         if (!present) {
-          lines.push(`      Fix: 'use ${req.moduleId}' then 'run'`);
+          lines.push(
+            req.moduleId === "threat-model"
+              ? "      Fix: run '/threats regen dfd'"
+              : `      Fix: 'use ${req.moduleId}' then 'run'`,
+          );
         }
       } else if (req.kind === "findings") {
         const count = ctx.driver.getFindingCount?.() ?? 0;
@@ -850,7 +862,7 @@ export class CoreDispatcher implements CommandDispatcher {
     const header = `  ${pad("Id", widths.id)}  ${pad("State", widths.state)}  ${pad("Elapsed", widths.elapsed)}  Label`;
     const sep = `  ${"-".repeat(widths.id)}  ${"-".repeat(widths.state)}  ${"-".repeat(widths.elapsed)}  -----`;
     const rows = jobs.map((j) => {
-      const elapsed = (((j.endedAt ?? Date.now()) - j.startedAt) / 1000).toFixed(1) + "s";
+      const elapsed = `${(((j.endedAt ?? Date.now()) - j.startedAt) / 1000).toFixed(1)}s`;
       return `  ${pad(j.id, widths.id)}  ${pad(j.state, widths.state)}  ${pad(elapsed, widths.elapsed)}  ${j.label}`;
     });
     return { output: [header, sep, ...rows].join("\n") };

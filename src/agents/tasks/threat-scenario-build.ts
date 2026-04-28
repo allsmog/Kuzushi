@@ -1,4 +1,5 @@
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
+import { loadPersistentThreatModel } from "../../threat-model-renderer.js";
 import type {
   ApplicationModel,
   ModelEvidenceAnchor,
@@ -88,12 +89,14 @@ export const threatScenarioBuildTask: AgentTask<unknown, ThreatScenarioBuildOutp
   id: "threat-scenario-build",
   displayName: "Threat Scenario Builder",
   outputKind: "custom",
-  dependsOn: ["app-model-build"],
+  dependsOn: ["app-model-build", "threat-model-randori"],
 
   async run(_input, context): Promise<ThreatScenarioBuildOutput> {
     context.signal?.throwIfAborted();
     const appModel = asApplicationModel(context.upstreamOutputs.get("app-model-build"));
-    const strideOutput = asStrideDocument(resolveThreatModelOutput(context.upstreamOutputs));
+    const strideOutput =
+      asStrideDocument(resolveThreatModelOutput(context.upstreamOutputs)) ??
+      loadPersistentThreatModel(context.repoRoot);
     if (!appModel || !strideOutput) {
       return attachTaskOutputMeta({ scenarios: [] }, { costUsd: 0 });
     }

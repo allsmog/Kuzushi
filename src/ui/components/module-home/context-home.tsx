@@ -14,6 +14,7 @@ import type { ContextSnapshot } from "../../state.js";
 import { SPACING, tokens } from "../../tokens.js";
 import { RuleHeader } from "../RuleHeader.js";
 import { ScreenContent } from "../ScreenContent.js";
+import { AttachmentsBlock } from "./AttachmentsBlock.js";
 import type { ModuleHomeProps } from "./types.js";
 
 const MODULE_ID = "context";
@@ -83,9 +84,9 @@ function ActionsBlock({ shell }: ModuleHomeProps): React.ReactElement {
   // type the verb at the prompt; this block just lists what's available.
   const rows: Row[] = [
     { key: "run .", value: "build full context for the current target" },
-    { key: "regen <slice>", value: "regenerate one of: dfd · stride · stories · scenarios" },
+    { key: "regen <slice>", value: "regenerate one of: repo · enrichment · app-model" },
     { key: "prompts", value: "edit per-tool system prompts" },
-    { key: "/threats dfd", value: "open the attack-surface workspace" },
+    { key: "/use threat-model", value: "open dedicated threat-model workflows" },
   ];
   if (shell.contextSnapshot?.staleSlices?.length) {
     rows.unshift({
@@ -114,15 +115,18 @@ function LastRunBlock({ shell }: ModuleHomeProps): React.ReactElement {
 export function ContextHome({ shell }: ModuleHomeProps): React.ReactElement {
   useRegisterKeybindings([
     { keys: "Enter", label: "type tool verb" },
+    { keys: "a", label: "attachments", secondary: true },
     { keys: "t", label: "tune", secondary: true },
     { keys: "f", label: "findings", secondary: true },
     { keys: "b", label: "back", secondary: true },
     { keys: "?", label: "help", secondary: true },
   ]);
+  const slice = shell.kbState?.[MODULE_ID] ?? null;
   return (
     <ScreenContent>
       <RuleHeader breadcrumb={`kuzushi/${MODULE_ID}`} />
       <StatusBlock shell={shell} />
+      <AttachmentsBlock slice={slice} moduleId={MODULE_ID} />
       <ActionsBlock shell={shell} />
       <LastRunBlock shell={shell} />
     </ScreenContent>

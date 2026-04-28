@@ -34,10 +34,10 @@ export async function createDefaultTaskRegistry(
   const { createCodeqlModule } = await import("../modules/codeql/codeql.js");
   const { createContextModule } = await import("../modules/context/context.js");
   const { createPipelineModule } = await import("../modules/pipeline/pipeline.js");
-  const { createCoreRandoriModule } = await import("../modules/randori/randori.js");
   const { createSemgrepModule } = await import("../modules/semgrep/semgrep.js");
   const { createSystemsHuntModule } = await import("../modules/systems-hunt/systems-hunt.js");
   const { createThreatHuntModule } = await import("../modules/threat-hunt/threat-hunt.js");
+  const { createThreatModelModule } = await import("../modules/threat-model/threat-model.js");
   const { createCoreTobModule } = await import("../modules/tob/tob.js");
   const { createCoreVulnScoutModule } = await import("../modules/vuln-scout/vuln-scout.js");
 
@@ -48,8 +48,8 @@ export async function createDefaultTaskRegistry(
     createCodeqlModule(),
     createAgenticSastModule(),
     createThreatHuntModule(),
+    createThreatModelModule(),
     createSystemsHuntModule(),
-    createCoreRandoriModule(),
     createCoreTobModule(),
     createCoreVulnScoutModule(),
   ];

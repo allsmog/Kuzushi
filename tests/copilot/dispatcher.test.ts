@@ -301,7 +301,7 @@ describe("ModuleDispatcher requires preflight", () => {
     const registry = new ModuleRegistry();
     const mod = mkModuleWithRequires("threat-hunt", [
       { kind: "snapshot", moduleId: "context", field: "appModel" },
-      { kind: "snapshot", moduleId: "randori", field: "threatModel" },
+      { kind: "snapshot", moduleId: "threat-model", field: "threatModel" },
     ]);
     registry.register(mod);
     (registry as unknown as { initialized: Set<string> }).initialized.add("threat-hunt");
@@ -322,6 +322,7 @@ describe("ModuleDispatcher requires preflight", () => {
     expect(result.output).toContain("appModel");
     expect(result.output).toContain("'use context' then 'run'");
     expect(result.output).toContain("threatModel");
+    expect(result.output).toContain("/threats regen dfd");
   });
 
   it("allows run when every snapshot requirement is satisfied", async () => {

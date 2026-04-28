@@ -10,11 +10,15 @@ import { publishTaskActivity, publishTaskPhase } from "../../../bus/activity.js"
 import { createLogger } from "../../../logger.js";
 import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
-import { loadPersistentThreatModel } from "../../../threat-model-renderer.js";
+import {
+  loadPersistentThreatModel,
+  savePersistentThreatModel,
+} from "../../../threat-model-renderer.js";
 import type { ScanOpts } from "../../../types.js";
 import type { AgentTask } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
 import { resolveThreatModelConfig } from "./config.js";
+import { applyThreatModelMethodology } from "./methodology.js";
 import { runRandoriPasta } from "./randori-runner.js";
 import { resolveRandoriPluginPath } from "./resolve-randori.js";
 import type { ThreatModelDocument } from "./types.js";
@@ -43,7 +47,9 @@ export const threatModelRandoriTask: AgentTask<
     const artifactDir = path.join(".kuzushi", "runs", context.runId, "randori-output");
 
     log.info(
-      `Starting Randori PASTA analysis (stages=${cfg.randoriStages.join(",")}, model=${cfg.model})`,
+      `Starting Randori threat model analysis (methodology=${cfg.methodology}, stages=${cfg.randoriStages.join(
+        ",",
+      )}, model=${cfg.model})`,
     );
 
     const taskId = "threat-model-randori";
@@ -76,8 +82,11 @@ export const threatModelRandoriTask: AgentTask<
       ...(context.signal ? { signal: context.signal } : {}),
     });
 
+    const document = applyThreatModelMethodology(result.document, cfg.methodology);
+    savePersistentThreatModel(context.repoRoot, document, false);
+
     return attachTaskOutputMeta(
-      { document: result.document, findings: result.findings },
+      { document, findings: result.findings },
       { costUsd: result.costUsd },
     );
   },

@@ -4,7 +4,7 @@
  * Everything in this file is infrastructure that 2+ sub-modules need:
  *   - `generateContextSnapshot` + friends: context-gathering DAG for `sast:context`
  *   - `formatContextSummary` + friends: rendering for the context summary view
- *   - Runtime shape helpers (`asRepoContext`, `asAppModel`, `asThreatModel`)
+ *   - Runtime shape helpers (`asRepoContext`, `asAppModel`)
  *
  * This module exists to enable the SAST family to be split into per-capability
  * sub-modules (`semgrep`, `codeql`, `taint-iris`, `triage`, `verify`, `patch`,
@@ -20,22 +20,16 @@ import type { ExecutionContext } from "../types.js";
 
 export interface ContextGenOptions {
   enrichment: boolean;
-  threatModel: boolean;
-  scenarios: boolean;
   discovery: "auto" | "flat" | "modules";
 }
 
 /**
- * Human-friendly names for the internal task ids. The raw task id is
- * debug-grade ("threat-model-randori"); the operator-visible spinner should
- * describe the intent ("building threat model"). Unknown ids pass through.
+ * Human-friendly names for the internal task ids. Unknown ids pass through.
  */
 const STAGE_LABELS: Record<string, string> = {
   "context-gatherer": "scanning repo structure",
   "context-enricher": "enriching context",
-  "threat-model-randori": "building threat model",
   "app-model-build": "building app model",
-  "threat-scenario-build": "building threat scenarios",
 };
 
 function humanizeStage(taskName: string): string {
@@ -102,8 +96,6 @@ export async function generateContextSnapshot(
       discovery: opts.discovery,
       options: {
         enrichment: opts.enrichment,
-        threatModel: opts.threatModel,
-        scenarios: opts.scenarios,
       },
     };
   } finally {
@@ -177,8 +169,6 @@ async function generateMonorepoSnapshot(
       discovery: opts.discovery,
       options: {
         enrichment: opts.enrichment,
-        threatModel: opts.threatModel,
-        scenarios: opts.scenarios,
       },
       modules,
     };
@@ -235,7 +225,6 @@ async function generateSingleProjectContext(
 
   ctx.signal?.throwIfAborted();
   let enricherOutput: unknown;
-  let threatModelOutput: unknown;
   const parallelTasks: Promise<void>[] = [];
 
   if (opts.enrichment) {
@@ -246,24 +235,6 @@ async function generateSingleProjectContext(
           const { contextEnricherTask } = await import("../../agents/tasks/context-enricher.js");
           enricherOutput = await contextEnricherTask.run(undefined, buildTaskContext());
           upstreamOutputs.set("context-enricher", enricherOutput);
-        } catch (err) {
-          rethrowIfAborted(err);
-          /* optional */
-        }
-      })(),
-    );
-  }
-
-  if (opts.threatModel) {
-    parallelTasks.push(
-      (async () => {
-        updateProgress("threat-model-randori");
-        try {
-          const { threatModelRandoriTask } = await import(
-            "../../agents/tasks/threat-modeling/randori.js"
-          );
-          threatModelOutput = await threatModelRandoriTask.run(scanOpts, buildTaskContext());
-          upstreamOutputs.set("threat-model-randori", threatModelOutput);
         } catch (err) {
           rethrowIfAborted(err);
           /* optional */
@@ -286,25 +257,7 @@ async function generateSingleProjectContext(
     /* optional */
   }
 
-  let scenarioOutput: unknown;
-  if (opts.scenarios && threatModelOutput && appModel) {
-    ctx.signal?.throwIfAborted();
-    updateProgress("threat-scenario-build");
-    try {
-      const { threatScenarioBuildTask } = await import(
-        "../../agents/tasks/threat-scenario-build.js"
-      );
-      scenarioOutput = await threatScenarioBuildTask.run(undefined, buildTaskContext());
-      upstreamOutputs.set("threat-scenario-build", scenarioOutput);
-    } catch (err) {
-      rethrowIfAborted(err);
-      /* optional */
-    }
-  }
-
   const gatherer = gathererOutput as unknown as Record<string, unknown> | undefined;
-  const tmOutput = threatModelOutput as unknown as Record<string, unknown> | undefined;
-  const scOutput = scenarioOutput as unknown as Record<string, unknown> | undefined;
 
   return {
     target: scanPath,
@@ -313,8 +266,6 @@ async function generateSingleProjectContext(
     fileIndex: gatherer?.fileIndex,
     enrichedContext: enricherOutput,
     appModel,
-    threatModel: tmOutput?.document ?? tmOutput,
-    scenarios: Array.isArray(scOutput?.scenarios) ? (scOutput.scenarios as unknown[]) : undefined,
   };
 }
 
@@ -341,7 +292,7 @@ export function formatContextSummary(
 function formatSingleContext(
   ctx: Pick<
     import("../../ui/state.js").ContextSnapshot,
-    "repoContext" | "appModel" | "threatModel" | "scenarios" | "target" | "timestamp"
+    "repoContext" | "appModel" | "target" | "timestamp"
   >,
   label: string,
 ): string {
@@ -382,26 +333,6 @@ function formatSingleContext(
     sections.push(routeLines);
   }
 
-  const tm = asThreatModel(ctx.threatModel);
-  if (tm) {
-    const tmLines = [`  Threat Model (STRIDE): ${tm.total} threats`];
-    const bySev = tm.bySeverity;
-    const sevParts: string[] = [];
-    if (bySev.critical) sevParts.push(`${bySev.critical} critical`);
-    if (bySev.high) sevParts.push(`${bySev.high} high`);
-    if (bySev.medium) sevParts.push(`${bySev.medium} medium`);
-    if (bySev.low) sevParts.push(`${bySev.low} low`);
-    if (sevParts.length) tmLines.push(`    ${sevParts.join(" · ")}`);
-
-    const topThreats = tm.threats
-      .filter((t) => t.impact === "critical" || t.impact === "high")
-      .slice(0, 3);
-    for (const t of topThreats) {
-      tmLines.push(`    ✗ ${t.title} (${t.impact})`);
-    }
-    sections.push(tmLines);
-  }
-
   const statLines: string[] = [];
   if (am) {
     if (am.outboundClients.length) {
@@ -432,33 +363,11 @@ function formatMonorepoContext(snapshot: import("../../ui/state.js").ContextSnap
     const mod = modules[name]!;
     const rc = asRepoContext(mod.repoContext);
     const am = asAppModel(mod.appModel);
-    const tm = asThreatModel(mod.threatModel);
     const tech = rc ? [...rc.frameworks, ...rc.ormOrDb].slice(0, 3).join(", ") : "";
     const routes = am?.routes.length ?? 0;
-    const threats = tm?.total ?? 0;
 
     const techStr = tech ? tech.padEnd(24) : "".padEnd(24);
-    lines.push(`  ${name.padEnd(18)} ${techStr} ${routes} routes, ${threats} threats`);
-  }
-
-  let totalThreats = 0;
-  const sevAccum: Record<string, number> = {};
-  for (const mod of Object.values(modules)) {
-    const tm = asThreatModel(mod.threatModel);
-    if (tm) {
-      totalThreats += tm.total;
-      for (const [sev, count] of Object.entries(tm.bySeverity)) {
-        sevAccum[sev] = (sevAccum[sev] ?? 0) + count;
-      }
-    }
-  }
-  if (totalThreats > 0) {
-    const parts: string[] = [];
-    if (sevAccum.critical) parts.push(`${sevAccum.critical} critical`);
-    if (sevAccum.high) parts.push(`${sevAccum.high} high`);
-    if (sevAccum.medium) parts.push(`${sevAccum.medium} medium`);
-    lines.push("");
-    lines.push(`  ${totalThreats} STRIDE threats total (${parts.join(", ")})`);
+    lines.push(`  ${name.padEnd(18)} ${techStr} ${routes} routes`);
   }
 
   return lines.join("\n");
@@ -512,27 +421,6 @@ export function asAppModel(raw: unknown): AppModelShape | null {
     serviceBoundaries: Array.isArray(obj.serviceBoundaries) ? obj.serviceBoundaries : [],
     dataStores: Array.isArray(obj.dataStores) ? obj.dataStores : [],
     backgroundJobs: Array.isArray(obj.backgroundJobs) ? obj.backgroundJobs : [],
-  };
-}
-
-interface ThreatModelShape {
-  total: number;
-  bySeverity: Record<string, number>;
-  threats: Array<{ title: string; impact: string }>;
-}
-
-export function asThreatModel(raw: unknown): ThreatModelShape | null {
-  if (!raw || typeof raw !== "object") return null;
-  const obj = raw as Record<string, unknown>;
-  const summary = obj.summary as Record<string, unknown> | undefined;
-  const threats = Array.isArray(obj.threats) ? obj.threats : [];
-  return {
-    total: typeof summary?.total === "number" ? summary.total : threats.length,
-    bySeverity: (summary?.bySeverity as Record<string, number>) ?? {},
-    threats: threats.map((t: Record<string, unknown>) => ({
-      title: typeof t.title === "string" ? t.title : "Unknown",
-      impact: typeof t.impact === "string" ? t.impact : "medium",
-    })),
   };
 }
 

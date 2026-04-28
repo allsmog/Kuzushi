@@ -126,10 +126,8 @@ function Legend({ validated }: { validated: boolean }): React.ReactElement {
 function EmptyWorkspace(): React.ReactElement {
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
-      <Text>{tokens.warn("No context-backed DFD is available yet.")}</Text>
-      <Text>
-        {tokens.muted("Run /context, /context regen dfd, or /threats edit to create one.")}
-      </Text>
+      <Text>{tokens.warn("No threat-model DFD is available yet.")}</Text>
+      <Text>{tokens.muted("Run /context, then /threats regen dfd, or use /threats edit.")}</Text>
     </Box>
   );
 }
@@ -330,13 +328,13 @@ function RegenerationPalette({ stale }: { stale?: readonly string[] }): React.Re
   const staleLabel = stale && stale.length > 0 ? `stale: ${stale.join(", ")}` : "no stale slices";
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
-      <Text>{tokens.label("Regenerate generated slice")}</Text>
+      <Text>{tokens.label("Regenerate threat-model slice")}</Text>
       <Text>{tokens.muted(`  ${staleLabel}`)}</Text>
       <Text>{tokens.value("  /context regen repo        repo/file signals")}</Text>
       <Text>{tokens.value("  /context regen app-model   routes, stores, boundaries")}</Text>
-      <Text>{tokens.value("  /context regen dfd         data-flow diagram")}</Text>
-      <Text>{tokens.value("  /context regen stride      STRIDE overlay")}</Text>
-      <Text>{tokens.value("  /context regen scenarios   downstream probes")}</Text>
+      <Text>{tokens.value("  /threats regen dfd         data-flow diagram")}</Text>
+      <Text>{tokens.value("  /threats regen stride      STRIDE overlay")}</Text>
+      <Text>{tokens.value("  /threats regen scenarios   downstream probes")}</Text>
     </Box>
   );
 }

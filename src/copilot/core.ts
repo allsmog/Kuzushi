@@ -48,10 +48,12 @@ import { createCoreShinsaModule } from "../modules/shinsa/shinsa.js";
 import { createSystemsHuntModule } from "../modules/systems-hunt/systems-hunt.js";
 import { createTaintIrisModule } from "../modules/taint-iris/taint-iris.js";
 import { createThreatHuntModule } from "../modules/threat-hunt/threat-hunt.js";
+import { createThreatModelModule } from "../modules/threat-model/threat-model.js";
 import { createCoreTobModule } from "../modules/tob/tob.js";
 import { createTriageModule } from "../modules/triage/triage.js";
 import type { ExecutionContext, ModuleContext, ModuleInfo, ToolResult } from "../modules/types.js";
 import { createVariantHunterModule } from "../modules/variant-hunter.js";
+import { createVendorAssessmentModule } from "../modules/vendor-assessment/vendor-assessment.js";
 import { createVerifyModule } from "../modules/verify/verify.js";
 import { createCoreVulnScoutModule } from "../modules/vuln-scout/vuln-scout.js";
 import type { KuzushiConfig } from "../types.js";
@@ -180,6 +182,8 @@ export class CopilotCore {
         createPatchModule(),
         createFindingsModule(),
         createContextModule(),
+        createThreatModelModule(),
+        createVendorAssessmentModule(),
         // Hidden orchestrator-level module — infrastructure DAG nodes
         // (task-selector, approval gates, taint-iris sub-tasks). Loaded so
         // the module registry owns every scan-DAG participant; the user
@@ -591,6 +595,12 @@ export class CopilotCore {
       case "randori":
         await this.loadWithScope(createCoreRandoriModule());
         break;
+      case "threat-model":
+        await this.loadWithScope(createThreatModelModule());
+        break;
+      case "vendor-assessment":
+        await this.loadWithScope(createVendorAssessmentModule());
+        break;
       case "vuln-scout":
         await this.loadWithScope(createCoreVulnScoutModule());
         break;
@@ -810,7 +820,7 @@ export function detectClaudeCodePlugin(packageDir: string): string | null {
  */
 export function builtinHintFor(packageName: string): string {
   const map: Record<string, string> = {
-    "@kuzushi/randori-plugin": "randori",
+    "@kuzushi/randori-plugin": "threat-model",
     "@kuzushi/vuln-scout": "vuln-scout",
     "@kuzushi/tob-skills": "tob",
     "shinsa-plugin": "shinsa",

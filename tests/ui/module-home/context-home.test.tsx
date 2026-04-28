@@ -36,7 +36,6 @@ class FrameCaptureStream extends Writable {
     return "";
   }
 }
-// biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI for stable text matching
 const ANSI_RE = new RegExp(`${String.fromCharCode(0x1b)}\\[[^A-Za-z]*[A-Za-z]`, "g");
 function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, "");
@@ -81,7 +80,7 @@ describe("ContextHome", () => {
     expect(out).toContain("(none yet) — run /context build");
     expect(out).toContain("actions");
     expect(out).toContain("regen <slice>");
-    expect(out).toContain("/threats dfd");
+    expect(out).toContain("/use threat-model");
     expect(out).toContain("never run for this workspace");
   });
 
@@ -90,18 +89,18 @@ describe("ContextHome", () => {
       target: "demo-app",
       timestamp: Date.now() - 10 * 60_000,
       discovery: "auto",
-      options: { enrichment: true, threatModel: true, scenarios: false },
-      generatedSlices: ["dfd", "stride"],
-      staleSlices: ["scenarios"],
+      options: { enrichment: true },
+      generatedSlices: ["repo", "app-model"],
+      staleSlices: ["enrichment"],
     };
     const out = renderText(
       createElement(ContextHome, { shell: shell({ contextSnapshot: snapshot }) }),
     );
     expect(out).toContain("generated");
-    expect(out).toContain("dfd");
-    expect(out).toContain("stride");
+    expect(out).toContain("repo");
+    expect(out).toContain("app-model");
     expect(out).toContain("stale");
-    expect(out).toContain("scenarios");
+    expect(out).toContain("enrichment");
     expect(out).toContain("regen stale");
     expect(out).toContain("1 stale slice(s)");
   });

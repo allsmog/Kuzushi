@@ -32,7 +32,11 @@ export class InteractiveSessionDispatcher implements CommandDispatcher {
     this.name = `session(${labelBase})`;
   }
 
-  async execute(cmd: string, _args: string[], _ctx: CommandContext): Promise<CommandResult | void> {
+  async execute(
+    cmd: string,
+    _args: string[],
+    _ctx: CommandContext,
+  ): Promise<CommandResult | undefined> {
     if (cmd === "exit" || cmd === "background" || cmd === "back") {
       return { pop: true, output: `[*] Left session ${this.sessionId.slice(0, 8)}.` };
     }

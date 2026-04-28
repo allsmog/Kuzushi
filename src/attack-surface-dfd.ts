@@ -544,7 +544,7 @@ function nextActions(stats: AttackSurfaceDfdModel["stats"], threatCount: number)
     "taint-iris: trace public inputs across trust boundaries",
   ];
   if (stats.dataStores > 0) actions.push("/threats scope: inspect high-value stores");
-  if (threatCount === 0) actions.push("/context regen stride: rebuild STRIDE overlay only");
+  if (threatCount === 0) actions.push("/threats regen stride: rebuild STRIDE overlay only");
   return actions;
 }
 

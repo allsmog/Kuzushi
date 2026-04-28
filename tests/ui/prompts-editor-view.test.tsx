@@ -36,7 +36,6 @@ class FrameCaptureStream extends Writable {
     return "";
   }
 }
-// biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI for stable text matching
 const ANSI_RE = new RegExp(`${String.fromCharCode(0x1b)}\\[[^A-Za-z]*[A-Za-z]`, "g");
 function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, "");
@@ -101,16 +100,14 @@ const SAMPLE_ROWS: PromptAuditRow[] = [
 ];
 
 describe("PromptsEditorView", () => {
-  it("renders an empty list with the breadcrumb when no prompts are exposed", () => {
+  it("renders an empty list with the status strip when no prompts are exposed", () => {
     const out = renderText(createElement(PromptsEditorView, { shell: shell(), rows: [] }));
-    expect(out).toContain("kuzushi/threat-hunt/prompts");
     expect(out).toContain("0 prompts");
     expect(out).toContain("No prompt overrides for this module.");
   });
 
   it("renders the table with default + local-edit rows", () => {
     const out = renderText(createElement(PromptsEditorView, { shell: shell(), rows: SAMPLE_ROWS }));
-    expect(out).toContain("kuzushi/threat-hunt/prompts");
     expect(out).toContain("2 prompts · 1 local edit");
     expect(out).toContain("run");
     expect(out).toContain("default");

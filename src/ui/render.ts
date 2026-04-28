@@ -82,10 +82,14 @@ export async function createUIRenderer(options: CreateUIRendererOptions = {}): P
     const { wrapStdoutForSyncOutput } = await import("./sync-output.js");
     const restoreStdout = wrapStdoutForSyncOutput();
 
-    // Dynamic import to avoid loading React/Ink when not needed (CI, pipes)
+    // Dynamic import to avoid loading React/Ink when not needed (CI, pipes).
+    // The dev shell can execute TSX through a classic JSX transform, so make
+    // React available globally before importing component modules.
+    const react = await import("react");
+    (globalThis as typeof globalThis & { React?: typeof react.default }).React ??= react.default;
+    const { createElement } = react;
     const { render } = await import("ink");
     const { App } = await import("./App.js");
-    const { createElement } = await import("react");
     // Disable Ink's default exit-on-Ctrl+C. Our shell owns the abort path
     // (App.tsx running-mode handler + shell.ts SIGINT + /dev/tty reader),
     // and Ink's default would unmount the tree before our handler can call
