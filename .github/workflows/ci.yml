@@ -168,15 +168,25 @@ jobs:
   # Uses KUZUSHI_CMD env to point the smoke script at the built CLI instead
   # of `pnpm dev` (tsx), so we catch TS-only bugs before release.
   #
-  # Currently non-blocking (`continue-on-error: true`): the smoke harness
-  # depends on a mock Anthropic server + the pi-ai backend, and on
-  # internet access for the semgrep rule registry. The historical
-  # `triage:assertions` FK fault (pipeline_runs row not present when the
-  # assertion worker fires) is now defended in store-worker via a
-  # widened try/catch — see `swallows triage:assertions FK failures …`
-  # in tests/bus/store-worker.test.ts. Once the remaining harness
-  # flakes (semgrep registry reachability, mock-server readiness)
-  # stabilize, drop `continue-on-error: true`.
+  # Still non-blocking (`continue-on-error: true`) so the historical flakes
+  # have a chance to settle before we make the gate hard. Two of the three
+  # documented sources of flake have now been removed:
+  #
+  #   1. `triage:assertions` FK fault — defended in store-worker via the
+  #      widened try/catch landed in 55a7c5e; covered by the
+  #      `swallows triage:assertions FK failures …` regression in
+  #      tests/bus/store-worker.test.ts.
+  #   2. Semgrep registry reachability — `tests/e2e/run-smoke.sh` now
+  #      points the scanner at the vendored ruleset under
+  #      `tests/e2e/fixtures/semgrep-rules/` instead of `--config auto`,
+  #      so the run does not depend on the public registry being up.
+  #   3. ANTHROPIC_API_KEY precondition — the smoke script now exports
+  #      `ANTHROPIC_API_KEY=fake-key` before invoking the CLI so credential
+  #      preflight passes deterministically (the mock server ignores it).
+  #
+  # Once this hardening has produced several consecutive green smoke runs
+  # on main, drop `continue-on-error: true`. Don't drop it on faith — see
+  # the closing remark on field-test issue #54.
   e2e:
     name: e2e
     needs: build
