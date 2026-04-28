@@ -696,6 +696,7 @@ export const KuzushiConfigSchema = z.object({
   retryBackoffMs: z.number().optional(),
   retryBackoffMultiplier: z.number().optional(),
   busBackend: BusBackendSchema,
+  scanFindingsBackend: z.enum(["memory", "sqlite"]).optional(),
   triageBatchSize: z.number(),
   triageConcurrency: z.number(),
   scanMode: ScanModeSchema,

@@ -399,6 +399,15 @@ export interface KuzushiConfig {
   retryBackoffMultiplier?: number;
   /** Message bus backend for pipeline events. */
   busBackend: BusBackend;
+  /**
+   * Backend used to buffer raw findings during a pipeline run. `"memory"`
+   * (default) keeps the buffer as a `Finding[]` in the orchestrator state.
+   * `"sqlite"` persists findings to the `scan_findings` table and pages
+   * iteration via `stmt.iterate()` — useful for very large monorepo scans
+   * (10k+ raw findings) where the in-memory buffer dominates the heap.
+   * Opt-in until validated on real workloads.
+   */
+  scanFindingsBackend?: "memory" | "sqlite";
   /** Maximum findings per batch triage LLM call. */
   triageBatchSize: number;
   /** Number of in-flight triage tasks. */
