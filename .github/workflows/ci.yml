@@ -169,10 +169,14 @@ jobs:
   # of `pnpm dev` (tsx), so we catch TS-only bugs before release.
   #
   # Currently non-blocking (`continue-on-error: true`): the smoke harness
-  # depends on a mock Anthropic server + the pi-ai backend, and there is a
-  # pre-existing foreign-key bug in `triage:assertions` (pipeline_runs row
-  # not present when the assertion worker fires) that the harness cannot
-  # clear. Tracked as tech debt — remove `continue-on-error` once fixed.
+  # depends on a mock Anthropic server + the pi-ai backend, and on
+  # internet access for the semgrep rule registry. The historical
+  # `triage:assertions` FK fault (pipeline_runs row not present when the
+  # assertion worker fires) is now defended in store-worker via a
+  # widened try/catch — see `swallows triage:assertions FK failures …`
+  # in tests/bus/store-worker.test.ts. Once the remaining harness
+  # flakes (semgrep registry reachability, mock-server readiness)
+  # stabilize, drop `continue-on-error: true`.
   e2e:
     name: e2e
     needs: build

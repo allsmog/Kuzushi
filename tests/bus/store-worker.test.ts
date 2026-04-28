@@ -291,6 +291,59 @@ describe("store-worker", () => {
     db.close();
   });
 
+  it("swallows triage:assertions FK failures so the pipeline survives (#54)", async () => {
+    // Regression for the e2e smoke harness FK fault: when the
+    // pipeline_runs row is absent (or the upsert flush hits any other
+    // FK / DB error), the handler must NOT surface a bus:handler-error.
+    // Triage assertions are informational quality scoring; a DB error
+    // here must never tear down the run.
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+
+    registerStoreWorker(bus, { db });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+    };
+
+    // Intentionally do NOT seed pipeline_runs — saveAssertionResults will
+    // hit `FOREIGN KEY constraint failed` on the run_id FK.
+    db.prepare(`
+      INSERT INTO findings (
+        fingerprint, task_id, repo, ref, rule_id, file_path, start_line,
+        severity, message, verdict, confidence, rationale, verification_steps
+      ) VALUES (?, 'semgrep', 'repo', 'HEAD', 'r', 'f.ts', 1, 'ERROR', 'm',
+                'tp', 1, 'r', '[]')
+    `).run("fp-orphan");
+
+    const handlerError = bus
+      .waitFor<BusHandlerErrorEvent>(
+        "bus:handler-error",
+        (event) => event.meta.runId === runId,
+        300,
+      )
+      .catch((err: Error) => ({ timedOut: true, message: err.message }));
+
+    await bus.publish(
+      createEvent("triage:assertions", runId, {
+        context,
+        fingerprint: "fp-orphan",
+        assertions: [{ name: "verdict_present", passed: true, score: 1, weight: 1, reason: "ok" }],
+        qualityScore: 1,
+      }),
+    );
+
+    const result = await handlerError;
+    expect((result as { timedOut?: boolean }).timedOut).toBe(true);
+
+    await bus.close();
+    db.close();
+  });
+
   it("rejects invalid run status values before persistence", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
