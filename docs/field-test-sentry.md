@@ -454,3 +454,213 @@ silent-data-loss class bug. Suspect the agentic detector graph crashes
 during init in this restricted environment but the orchestrator treats
 the failure as "all tasks done, 0 findings."
 
+---
+
+## Issues observed during the post-fix run (5-task agentic scan, 1h 34m)
+
+These are NEW issues that surfaced after the OAuth + permission-mode +
+plan-mode patches landed and the scan actually started doing real work.
+Most are about long-run reliability and operator visibility — none of
+them existed in earlier runs because earlier runs died too fast to
+exercise these code paths.
+
+### 🔴 #25 — Scan exits silently with no exit code, summary, or error
+
+The fix-enabled 5-task run lived 1h 34m, emitted 94 heartbeats, then
+**vanished** — no `pipeline:error`, no `summary:` line, no `exit:`
+line, no SARIF/JSON written. SQLite `pipeline_runs.status` still
+shows `triaging` because completion was never recorded. Likely
+unhandled rejection in the triage path or OOM-killed by the kernel,
+but kuzushi can't tell us which. Should install a
+`process.on('SIGTERM')` + `process.on('beforeExit')` that writes a
+final `pipeline:abort` event with whatever partial state is in
+memory before the process tears down.
+
+### 🔴 #26 — Triage stage makes zero observable progress
+
+After SQLite flipped to `status: 'triaging'`, all 27,440 findings sat
+on `verdict='needs_review'` for 30+ minutes — no flips to `tp`/`fp`,
+no `triage:result` events landing in the store, no per-finding
+`finding:` lines in the `--ci` stream. The orchestrator clearly
+*thinks* it's triaging (the status update fired) but no findings
+ever got promoted out of placeholder. Either the LLM call is
+silently 429'd, deadlocked on a semaphore, or the
+`upsertQueue.flush()` on `triage:complete` never fires. Operators
+need a `triage: progress N/M flushed` heartbeat or a
+`triage: stalled — last event Xs ago` warning.
+
+### 🟠 #27 — `--ci` heartbeat caption is stale across phase transitions
+
+Heartbeat kept printing `heartbeat: scanning alive · idle 60s (scan)`
+for 30+ minutes after `pipeline_runs.status` had already moved to
+`triaging`. The CI stream reads `state.phase` from the UIStore and
+the UIStore phase never advances when the orchestrator transitions
+internally — the visible `phase: idle → scanning` event is the only
+time `phase` is updated. Need orchestrator → UIStore phase syncs at
+each stage boundary so the heartbeat caption matches reality.
+
+### 🟠 #28 — Every triage attempt logs "Batch API failed, falling back
+to sequential" warning under OAuth
+
+```
+[batch-fallback] [warn] Batch API failed, falling back to sequential:
+  Batch API requires an API key — not available in OAuth mode
+```
+
+`agent-runtime/claude.ts:391-395` already throws this synchronously,
+so the orchestrator could detect OAuth-mode at session-init and skip
+the Batch path silently. As-is the warning fires *per triage batch*,
+adding noise to every long-running OAuth scan.
+
+### 🔴 #29 — `additionalDirectories` fix (`947391f`) is incomplete
+
+After the fix, randori still complained:
+```
+[threat-model-randori] Phase 2 (S4) Write failed (1/3):
+  Tool "Write" file_path "/root/.claude/plans/starry-stargazing-map.md"
+  escapes the Read sandbox
+```
+
+`/root/.claude/plans` should have been whitelisted via the
+`os.homedir() = /root` + `.claude/plans` join. Likely cause: the SDK
+requires whitelisted dirs to *exist on disk*; an entry pointing at a
+non-existent path is dropped. Fix: `mkdirSync(p, {recursive: true,
+mode: 0o700})` for each whitelisted plans/runs dir before passing to
+the SDK.
+
+### 🟠 #30 — Randori passes a directory path to the `Read` tool
+
+```
+[threat-model-randori] Phase 1 Read failed (1/3):
+  EISDIR: illegal operation on a directory, read '/root/bounty-targets/sentry'
+```
+
+Randori is calling `Read(target_root)` first thing in Phase 1 instead
+of `Glob`/`LS`. The retry-3-then-skip masks the bug. Fix in the
+randori prompt template: emit `Glob('**/*.py')` / `LS .` first, then
+Read individual files.
+
+### 🟠 #31 — Randori chokes on Sentry-sized files
+
+```
+[threat-model-randori] Phase 2 (S4) Read failed (1/3):
+  File content (36668 tokens) exceeds maximum allowed tokens (25000).
+  Use offset and limit parameters
+```
+
+The 25k-token Read cap is reasonable, but randori doesn't fall back
+to chunked reads. Either the prompt should teach
+`Read(file, offset=0, limit=20000)` then continue, or the runtime
+should retry the failed Read with `limit: 20000` automatically.
+
+### 🟠 #32 — Triage in OAuth mode is single-threaded
+
+When Batch API is rejected (#28), kuzushi falls back to sequential
+queries — *truly* sequential, one claude subprocess at a time. With
+27,440 raw findings, even at 5s/triage that's 38 hours. Sequential is
+required for cost-deterministic batches but the OAuth fallback should
+parallelize K claude subprocesses (configurable, default 4) since
+each one is its own session anyway.
+
+### 🟠 #33 — Memory grows unbounded during long scans
+
+Scan node RSS over the run: 130 MB at start → 190 MB at 18 min →
+347 MB at 30 min → 405 MB at 1h. No findings were being added to the
+in-memory queue (they're SQLite-backed); presumably the
+`state.scanFindings` array holds all 27K and grows the agent context
+per turn. Risk on smaller hosts; should swap
+`state.scanFindings: Finding[]` for an iterator over the SQLite
+findings table.
+
+### 🟠 #34 — `--max <N>` is honored only at the triage gate, not the
+scanner stage
+
+Even with `--max 5`, scanners produced 27,440 raw findings. The flag
+caps how many findings reach the triage agent, but every detector
+runs to completion. Doc fix in `1646fea` covers the wording, but
+operators frequently want a "stop scanning after N total findings"
+flag. Add `--max-raw-findings <N>` that aborts running detectors
+once the threshold is hit.
+
+### 🔴 #35 — No incremental report writing
+
+`--sarif` / `--json` / `--jsonl` only land on `pipeline:complete`. If
+the scan dies before that — silent exit (#25), Ctrl+C, OOM — none of
+the export flags produce any artefact, even though findings are
+already in SQLite. The export workers should subscribe to
+`stage:complete` and write incremental partial reports
+(`out.partial.sarif` etc.) so a killed scan still leaves something
+on disk. (Mitigation: I shipped a manual SQLite → JSON exporter for
+this run, but that's a workaround — `findings-bounty.json` and
+`FINDINGS_AGENTIC.md` were generated from raw SQL, not the report
+worker.)
+
+### 🟠 #36 — No "resume triage only" mode
+
+If triage dies (#26), there's no command to drive triage against just
+the `needs_review` rows already in SQLite. `--resume` resumes from
+checkpoints that may not have been written. Add
+`kuzushi triage --run-id <id>` that runs the triage stage against
+existing findings. Equivalent need for `kuzushi report --run-id <id>`
+to regenerate exports without re-scanning.
+
+### 🟠 #37 — Stage transitions go quiet after the first one
+
+`stage:` lines in `--ci`: only `stage: scan → active`,
+`stage: triage → pending`, `stage: report → pending`. Never
+`stage: scan → done` or `stage: triage → active`. Either the
+orchestrator stops emitting `stage:active`/`stage:done` events after
+init, or the UIStore stage map only updates once. With long scans
+this leaves operators blind to which stage is even running.
+
+### 🟠 #38 — Rate-limit detection / backoff banner not visible
+
+CLAUDE.md mentions a "rate-limit banner" wired to `state.throttle`
+(Phase B.4). Across the 1h 34m run we hit 0 visible throttle banners
+and 0 cost prints, despite almost certainly brushing API rate
+limits (the 5-hour OAuth quota or per-minute concurrent-request
+caps). Either the throttle detection isn't plumbed through the OAuth
+path, or the banner only renders in Ink mode (not `--ci`).
+
+### 🟠 #39 — No progressive cost in `--ci` mode
+
+The heartbeat doesn't include `$X.XX so far`; the `summary:` line is
+the first cost an operator ever sees. For 1h+ runs that's painful —
+no way to abort early when you see costs spike. Plumb
+`state.runningCostUsd` into the heartbeat formatter.
+
+### 🟠 #40 — `kuzushi scan` lacks `--exclude` (`1646fea` only added
+shell)
+
+The `--exclude codeql` flag I shipped only applies to `kuzushi
+shell`. `kuzushi scan` should accept the same flag for symmetry —
+operators in environments missing a binary need it on both surfaces.
+Currently scan-mode lights up the codeql failure even with the
+tolerant init from `2e8a3b8`.
+
+### 🟡 #41 — Heartbeat fires from a `setInterval` that doesn't survive
+process death gracefully
+
+The heartbeat timer is `.unref()`'d, so it won't block exit. But the
+heartbeat *cadence* during the silent exit (#25) showed the timer
+kept firing right up to the moment the process vanished — meaning
+there was no shutdown drain that could have surfaced the impending
+crash. Even a 1-line "preparing exit / X findings buffered" before
+process tear-down would help operators tell graceful-quit apart from
+crash.
+
+### 🟢 What worked surprisingly well
+
+For balance — these previously-broken behaviors held up after the
+patches:
+  - **OAuth auto-discovery** (`bdc15e6`) — `kuzushi doctor` now
+    reports `inherited OAuth (file:/home/claude/.claude/remote/.oauth_token)`.
+    Zero auth issues across the run.
+  - **Root-safe permission mode** (`c3b9bd2`) — 0 SDK errors during
+    1h 34m of agentic work, vs 498 errors per scan pre-patch.
+  - **Raw-finding pre-persist** (`ee4c1c0`) — survived the silent
+    exit. Without this, all 27,440 findings would have been lost.
+  - **`--ci` heartbeat** (`baac119`) — 94 heartbeats fired
+    correctly; gave us proof of life across 1.5 hours.
+  - **codeql tolerant init** (`2e8a3b8`) — the missing codeql binary
+    no longer takes down the shell startup.
