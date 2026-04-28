@@ -54,6 +54,13 @@ function buildAnalysisRootPromptLines(analysisRoot?: string): string[] {
     "- Do not inspect parent directories or the enclosing git repository unless they are inside that root.",
     "- If the analysis root is a subdirectory such as .github, preserve that path segment in absolute file paths.",
     "- Glob results are relative to the analysis root; pass those relative paths to Read unchanged, or prefix them with the full analysis root.",
+    "",
+    "Tool-use rules (avoid common failure modes — field-test issues #30, #31):",
+    "- ALWAYS call Glob or LS before Read on a path you haven't verified is a file.",
+    "  Read on a directory raises EISDIR; Read on a missing path is wasted retries.",
+    "- If Read fails with `File content (N tokens) exceeds maximum`, retry the SAME",
+    "  call with `offset: 0, limit: 20000` and continue paging until done.",
+    "- Avoid Write to paths outside the analysis root or the kuzushi run dir.",
   ];
 }
 
