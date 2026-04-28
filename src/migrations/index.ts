@@ -9,6 +9,7 @@ import { migration104 } from "./104_workspace_integrity_guards.js";
 import { migration105 } from "./105_finding_actor_fingerprint.js";
 import { migration106 } from "./106_pipeline_resume_metadata.js";
 import { migration107 } from "./107_pipeline_runs_branch_pr.js";
+import { migration108 } from "./108_scan_findings.js";
 import type { Migration } from "./types.js";
 
 /**
@@ -29,4 +30,5 @@ export const allMigrations: Migration[] = [
   migration105,
   migration106,
   migration107,
+  migration108,
 ];

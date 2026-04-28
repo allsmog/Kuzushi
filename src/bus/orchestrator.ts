@@ -77,7 +77,7 @@ import {
   isPocHarnessDone as isPocHarnessQueueDone,
   publishPocQueueDepth,
 } from "./orchestrator/poc-dispatcher.js";
-import { InMemoryScanFindingsStore } from "./orchestrator/scan-findings-store.js";
+import { createScanFindingsStore } from "./orchestrator/scan-findings-store.js";
 import {
   collectTransitiveDeps,
   injectThreatModelPolicyCandidates,
@@ -330,7 +330,11 @@ export class PipelineOrchestrator {
       scanOpts,
       tasks,
       startedAt: event.meta.timestamp,
-      scanFindings: new InMemoryScanFindingsStore(),
+      scanFindings: createScanFindingsStore({
+        backend: config.scanFindingsBackend,
+        db: this.deps.db,
+        runId: resumeRunId ?? runId,
+      }),
       totalFindings: 0,
       skippedAlreadyTriaged: 0,
       skippedLowConfidence: 0,
