@@ -148,7 +148,16 @@ export async function runSemgrep(
 
       // Semgrep/Opengrep exit code 1 means "findings were found", not a runtime failure.
       if (code !== null && code > 1) {
-        reject(new Error(`${binName} failed (exit ${code})`));
+        // Exit 7 from semgrep is the registry/config-load failure path
+        // (HTTP 403 / network unreachable / invalid config bundle).
+        // Surface a concrete remediation hint — operators in sandboxed
+        // environments otherwise have to read the source to learn that
+        // the registry blocks tripped them up. Field-test issue #4.
+        const hint =
+          code === 7
+            ? `\n  Hint: exit 7 typically means semgrep couldn't fetch its rule registry (HTTP 403 / unreachable). Override with a local ruleset:\n    git clone --depth=1 https://github.com/semgrep/semgrep-rules ~/.kuzushi-cache/semgrep-rules\n  Then in <repo>/.kuzushi/config.json set\n    {"taskConfig":{"semgrep":{"configFlag":["~/.kuzushi-cache/semgrep-rules/python", "..."]}}}\n  and re-run with --trust-repo-config.`
+            : "";
+        reject(new Error(`${binName} failed (exit ${code})${hint}`));
         return;
       }
 
