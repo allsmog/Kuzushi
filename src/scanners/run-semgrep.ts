@@ -99,17 +99,41 @@ export async function runSemgrep(
       reject(createAbortError(binName));
       return;
     }
+    // Spawn detached so semgrep + semgrep-core get their own process
+    // group. On parent exit/abort we then kill the whole group, which
+    // reaps the long-running semgrep-core RPC backend that otherwise
+    // outlives kuzushi (field-test issue #12 — orphan semgrep-core
+    // observed running 16+ minutes after parent SIGTERM).
     const proc = spawn(scannerBin, args, {
       cwd: repoRoot,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
 
     const stdoutChunks: Buffer[] = [];
     let settled = false;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
 
+    /** Kill the whole pgrp (semgrep + semgrep-core children). */
+    const killGroup = (sig: NodeJS.Signals = "SIGTERM"): void => {
+      try {
+        if (typeof proc.pid === "number") process.kill(-proc.pid, sig);
+      } catch {
+        try {
+          proc.kill(sig);
+        } catch {
+          /* already gone */
+        }
+      }
+    };
+    const onParentExit = (): void => {
+      if (!settled) killGroup("SIGTERM");
+    };
+    process.once("exit", onParentExit);
+
     const cleanupAbort = () => {
       signal?.removeEventListener("abort", abort);
+      process.removeListener("exit", onParentExit);
       if (killTimer) {
         clearTimeout(killTimer);
         killTimer = undefined;
@@ -117,9 +141,9 @@ export async function runSemgrep(
     };
     const abort = () => {
       if (settled) return;
-      proc.kill("SIGTERM");
+      killGroup("SIGTERM");
       killTimer = setTimeout(() => {
-        if (!settled) proc.kill("SIGKILL");
+        if (!settled) killGroup("SIGKILL");
       }, 1000);
     };
     signal?.addEventListener("abort", abort, { once: true });
