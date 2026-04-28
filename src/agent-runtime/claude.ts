@@ -246,6 +246,34 @@ function killTrackedProcesses(tracked: Set<SpawnedProcess>, graceMs = 500): void
  * the historical behavior on either side: `1` to always set, `0` to
  * never set.
  */
+/**
+ * Directories that plan-mode subprocesses are allowed to read/write.
+ * Without this, randori, threat-hunt and other artifact-producing tasks
+ * silently retry-then-skip when sandboxed under plan mode (issue #24).
+ *
+ * The whitelist intentionally stays narrow: target dir (so the agent
+ * can re-read sources without permission churn), the kuzushi run/plans
+ * dirs (so artifacts land where the rest of the pipeline expects), and
+ * Claude Code's plan-staging dir (where randori writes its threat
+ * model spec).
+ */
+function planModeAllowedDirectories(cwd?: string): string[] {
+  const dirs = new Set<string>();
+  if (cwd) dirs.add(cwd);
+  const home = process.env["HOME"];
+  if (home) {
+    dirs.add(`${home}/.kuzushi`);
+    dirs.add(`${home}/.kuzushi/plans`);
+    dirs.add(`${home}/.kuzushi/runs`);
+    dirs.add(`${home}/.claude/plans`);
+  }
+  // Claude Code's well-known remote-sandbox path (mirrors the OAuth
+  // resolver fallback list).
+  dirs.add("/home/claude/.claude/plans");
+  if (cwd) dirs.add(`${cwd}/.kuzushi`);
+  return [...dirs];
+}
+
 function shouldAllowSkipPermissions(): boolean {
   const override = process.env["KUZUSHI_DANGEROUSLY_SKIP_PERMISSIONS"];
   if (override === "1" || override?.toLowerCase() === "true") return true;
@@ -793,6 +821,12 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       permissionMode: mapPermissionMode(request.options.permissionMode),
       allowDangerouslySkipPermissions: shouldAllowSkipPermissions(),
       persistSession: false,
+      // Under root's `plan`-mode fallback, the SDK enforces a strict
+      // sandbox that blocks Read/Write outside the cwd. Tasks like
+      // threat-model-randori legitimately need to read prior run dirs
+      // and write plan artifacts. Whitelist the kuzushi/Claude-Code
+      // workspace dirs so plan mode degrades gracefully (issue #24).
+      additionalDirectories: planModeAllowedDirectories(request.options.cwd),
     };
 
     // Model
@@ -1153,6 +1187,7 @@ class ClaudeSession implements AgentSession {
       permissionMode: mapPermissionMode(this.baseOptions.permissionMode),
       allowDangerouslySkipPermissions: shouldAllowSkipPermissions(),
       persistSession: false,
+      additionalDirectories: planModeAllowedDirectories(this.baseOptions.cwd),
     };
 
     if (this.baseOptions.model) {
