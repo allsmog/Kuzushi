@@ -334,11 +334,14 @@ CREATE TABLE patch_results (
 CREATE TABLE pipeline_runs (
         run_id          TEXT PRIMARY KEY,
         repo            TEXT NOT NULL,
+        module_id       TEXT,
+        tool_name       TEXT,
+        resume_label    TEXT,
         started_at      TEXT NOT NULL,
         status          TEXT NOT NULL
                         CHECK (status IN ('scanning','triaging','verifying',
                                           'poc-harnessing','dynamic-analyzing',
-                                          'complete','error','aborted')),
+                                          'interrupted','complete','error','aborted')),
         config_json     TEXT NOT NULL,
         scan_opts_json  TEXT NOT NULL,
         findings_json   TEXT,
@@ -876,3 +879,4 @@ CREATE TRIGGER trg_vulns_workspace_links_update
 --   103  schedules
 --   104  workspace_integrity_guards
 --   105  finding_actor_fingerprint
+--   106  pipeline_resume_metadata
