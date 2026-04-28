@@ -184,6 +184,72 @@ ready to read. Workaround: query the JSON blob directly (see
 `findings` table at *scan stage end*, not after triage. Triage failure
 shouldn't lose the raw scanner output.
 
+### 🟠 #18 — Stderr from spawned Claude SDK subprocesses is invisible
+unless `KUZUSHI_ABORT_DEBUG=1`
+
+`createTrackedSpawn` in `src/agent-runtime/claude.ts:115` listens for
+`stderr` data on every Claude subprocess but only forwards it to the
+parent process when `KUZUSHI_ABORT_DEBUG=1` is set. That meant the
+real cause of #15 — claude printing
+`--dangerously-skip-permissions cannot be used with root/sudo
+privileges for security reasons` — was hidden for an entire
+debugging session. The orchestrator only saw "exit code 1" and shouted
+that 498 times. Should at least surface the stderr on the *first*
+failure of a given task, or buffer the last 1-2 KB and include it in
+the orchestrator's `Task "X" failed: ...` message.
+
+### 🟠 #19 — Stdin-piped commands kill the shell on EOF
+
+Driving the shell with `printf "/use sast\nscan\n" | kuzushi shell ...`
+causes the shell to exit ~immediately after the first command — when
+stdin closes, Ink interprets it as a quit signal even though more
+work was queued. Wrapping the input as `(printf ...; sleep 50) | …`
+keeps it alive but isn't a real fix. Either the shell should treat
+non-TTY stdin as a one-shot batch (read all input, run all commands,
+then exit cleanly with a summary) or it should not exit on EOF until
+in-flight work finishes.
+
+### 🔴 #20 — OAuth-in-env path is ~12× more expensive than not setting it
+
+When `ANTHROPIC_API_KEY=$(cat /home/claude/.claude/remote/.oauth_token)`
+is set, the Claude CLI subprocess reports `apiKeySource:
+"ANTHROPIC_API_KEY"` and treats every spawn as a fresh session: my
+"say only ok" smoke test charged **$0.063** (16,675 cache *creation*
+tokens). With the env var unset (claude CLI uses host-managed auth),
+the same prompt charged **$0.005** (16,675 cache *read* tokens). 12×
+cost differential just from `unset ANTHROPIC_API_KEY`. The OAuth
+ambient resolver shipped in `bdc15e6` defaults to setting the env var,
+so kuzushi-on-Claude-Code pays for cache misses on every spawn. Should
+detect host-managed auth (e.g. `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`
+env var) and skip the env priming when present.
+
+### 🟠 #21 — `kuzushi shell --load` is additive only; no `--exclude`
+
+`--load <modules>` adds modules to the default set, but there's no way
+to *remove* a default module (e.g. when `codeql` is broken or
+unavailable). #8's tolerant-init fix mitigates this, but the
+underlying gap still exists for any module that legitimately can't
+load in a given environment.
+
+### 🟠 #22 — Catalog shows "completed · no findings · $0.0" even when
+the run produced 27K findings
+
+After the 13-minute semgrep scan that wrote 27,375 findings into
+`pipeline_runs.findings_json`, the catalog renders the sast / semgrep
+modules as "completed · no findings · $0.00". Same root cause as #16
+(triage failure leaves findings stranded), but the operator-facing
+side effect — every module looks like it found nothing — is its own
+UX bug worth flagging separately.
+
+### 🟠 #23 — `--max N` semantics ambiguous
+
+The flag is documented as "Max findings to triage" but in practice on
+this scan it appeared to also cap how many lenses each detector
+runs (the runs that hit `--max 5` produced ≤ 5 raw lens results, not
+just 5 triaged findings). The CLI help and the actual behavior should
+match — and probably want separate flags for "max raw findings" vs
+"max triaged" vs "max lens iterations".
+
 ### 🟠 #17 — `--audit-log` doesn't actually write `scan.jsonl`
 
 With `--audit-log` set, the run dir got `run.json` and (later)
