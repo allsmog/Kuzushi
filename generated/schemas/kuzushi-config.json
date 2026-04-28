@@ -46,6 +46,10 @@
     "auditLog": {
       "type": "boolean"
     },
+    "auth": {
+      "const": "inherited",
+      "type": "string"
+    },
     "autoPatchAfter": {
       "enum": [
         "verify",
@@ -328,6 +332,9 @@
         }
       },
       "type": "object"
+    },
+    "oauthTokenFile": {
+      "type": "string"
     },
     "patchBuildCommand": {
       "type": "string"
