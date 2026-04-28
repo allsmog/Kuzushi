@@ -112,22 +112,50 @@ function createTrackedSpawn(
       detached: true,
     }) as unknown as SpawnedProcess;
     const stderr = (proc as { stderr?: NodeJS.ReadableStream }).stderr;
+    // Buffer the tail of stderr so we can replay it when the subprocess
+    // exits non-zero — operators were debugging "exit code 1" with no
+    // visible cause until they discovered KUZUSHI_ABORT_DEBUG=1. The
+    // *last* 8 KB of stderr is almost always the actionable error
+    // ("--dangerously-skip-permissions cannot be used with root", auth
+    // failures, JSON-schema rejections, etc.).
+    const STDERR_TAIL_BYTES = 8 * 1024;
+    let stderrTail = "";
     stderr?.on("data", (chunk: Buffer | string) => {
-      if (!process.env.KUZUSHI_ABORT_DEBUG) return;
-      try {
-        process.stderr.write(String(chunk));
-      } catch {
-        /* best-effort debug forwarding */
+      const text = String(chunk);
+      // Always live-tail when the operator opted in.
+      if (process.env.KUZUSHI_ABORT_DEBUG) {
+        try {
+          process.stderr.write(text);
+        } catch {
+          /* best-effort debug forwarding */
+        }
       }
+      stderrTail = (stderrTail + text).slice(-STDERR_TAIL_BYTES);
     });
     tracked.add(proc);
     globalTrackedProcesses.add(proc);
     // child_process emits 'exit' once the process is gone — drop it from
     // both tracked sets so `killTrackedProcesses` doesn't try to kill a
-    // ghost.
-    proc.once("exit", () => {
+    // ghost. On non-zero exit, replay the buffered stderr tail so the
+    // operator sees the cause without re-running with KUZUSHI_ABORT_DEBUG=1.
+    proc.once("exit", (code: number | null, signal: string | null) => {
       tracked.delete(proc);
       globalTrackedProcesses.delete(proc);
+      if (
+        !process.env.KUZUSHI_ABORT_DEBUG &&
+        stderrTail.trim() &&
+        ((typeof code === "number" && code !== 0) || signal !== null)
+      ) {
+        const exitDesc =
+          typeof code === "number" ? `exit ${code}` : signal ? `signal ${signal}` : "unknown";
+        try {
+          process.stderr.write(
+            `[claude-runtime] subprocess ${exitDesc} stderr tail (last ${STDERR_TAIL_BYTES} bytes):\n${stderrTail.trimEnd()}\n`,
+          );
+        } catch {
+          /* best-effort */
+        }
+      }
     });
     return proc;
   };
