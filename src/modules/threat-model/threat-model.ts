@@ -25,13 +25,14 @@ import {
   createAttachmentTools,
   renderUntrustedAttachments,
 } from "../_shared/attachments/index.js";
-import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
+import { defineHiddenDagNodeTool } from "../hidden-dag-node.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 import {
   loadThreatModelAttachments,
   THREAT_MODEL_KIND_SPEC,
   threatModelAttachmentAdapter,
 } from "./attachments.js";
+import { ensureThreatModelKbIndex } from "./kb-index.js";
 
 const DEFAULT_STAGES = ["s1", "s2", "s3", "s4"] as const;
 const VALID_STAGES = new Set(["s1", "s2", "s3", "s4"]);
@@ -272,6 +273,31 @@ const buildTool: ModuleTool = {
       const document = applyThreatModelMethodology(result.document, methodology);
       const preserveUserEdits = readBoolean(params["preserveUserEdits"], true);
       const persisted = savePersistentThreatModel(root, document, !preserveUserEdits);
+      const indexedDocument = loadPersistentThreatModel(root) ?? document;
+      const kb = ensureThreatModelKbIndex({ repoRoot: root, document: indexedDocument });
+      // Detect a silently-failed run: stages "completed" but the LLM was
+      // never reached (no cost, no output). Almost always credentials —
+      // unauthenticated runtime returns empty stage output without erroring.
+      // Reporting "complete" with $0 / 0-elements is misleading; flip to
+      // ok:false so the operator sees a real failure.
+      const looksUnauthenticated =
+        result.costUsd === 0 &&
+        stages.length > 0 &&
+        document.threats.length === 0 &&
+        document.dfd.nodes.length === 0 &&
+        document.dfd.flows.length === 0;
+      if (looksUnauthenticated) {
+        return {
+          ok: false,
+          output:
+            `threat-model:build returned 0 elements with $0 LLM cost — the runtime appears unauthenticated.\n` +
+            `  Target:   ${name} (${root})\n` +
+            `  Stages:   ${stages.join(", ")} (each returned empty)\n` +
+            `  Diagnose: /backend show — verify a credential slot has apiKey set or that ANTHROPIC_API_KEY is in env.\n` +
+            `  Note:     project config.json keys 'agentRuntimeConfig'/'agentRuntimeBackend' are stripped for safety; use .kuzushi/credentials.json instead.`,
+          costUsd: 0,
+        };
+      }
       const lines = [
         `threat-model:build complete for ${name} (${root})`,
         `  Method:   ${methodologyLabel(methodology)}`,
@@ -281,7 +307,8 @@ const buildTool: ModuleTool = {
         `  Artifact: ${artifactDir}`,
         `  Saved:    ${persisted ? ".kuzushi/threat-model.json" : "skipped (operator-edited model preserved)"}`,
         `  Threats:  ${document.threats.length}`,
-        `  DFD:      ${document.dfd.elements.length} elements`,
+        `  DFD:      ${document.dfd.nodes.length} nodes · ${document.dfd.flows.length} flows · ${document.dfd.trustBoundaries.length} boundaries`,
+        `  KB:       ${kb.rebuilt ? "rebuilt" : "current"} .kuzushi/threat-model-kb.sqlite3 (${kb.stats.chunks} chunks)`,
         `  Findings: ${result.findings.length}${emitFindings ? "" : " (emitFindings=false)"}`,
         `  Cost:     $${result.costUsd.toFixed(4)}`,
       ];
@@ -402,7 +429,7 @@ const readTool: ModuleTool = {
       output: [
         `Loaded ${methodologyLabel(methodology)} threat model for ${name} from ${outputDir}`,
         `  Threats: ${document.threats.length}`,
-        `  DFD:     ${document.dfd.elements.length} elements`,
+        `  DFD:     ${document.dfd.nodes.length} nodes · ${document.dfd.flows.length} flows`,
       ].join("\n"),
       data: { target: root, repoName: name, outputDir, methodology, document, artifacts },
     };
@@ -451,8 +478,8 @@ export function createThreatModelModule(): CopilotModule {
       void documents;
     },
   });
-  const hide = (task: Parameters<typeof exposeAgentTaskAsHiddenDagTool<"threat-model">>[0]) =>
-    exposeAgentTaskAsHiddenDagTool<"threat-model">(task, { moduleId: "threat-model" });
+  const hide = (task: Parameters<typeof defineHiddenDagNodeTool<"threat-model">>[0]) =>
+    defineHiddenDagNodeTool<"threat-model">(task, { moduleId: "threat-model" });
   const hiddenDagTools = [hide(threatModelRandoriTask), hide(threatScenarioBuildTask)];
   return {
     id: "threat-model",

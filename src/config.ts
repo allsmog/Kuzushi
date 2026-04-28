@@ -10,7 +10,13 @@ import os from "node:os";
 import path from "node:path";
 import { normalizeTaskConfigAliases } from "./capabilities.js";
 import { AGENT_RUNTIME_BACKENDS, BUS_BACKENDS, DEFAULTS } from "./config/defaults.js";
-import { CONFIG_DIR, CONFIG_PATH, configPath, projectConfigPath } from "./config/paths.js";
+import {
+  CONFIG_DIR,
+  CONFIG_PATH,
+  configPath,
+  findProjectConfigRoot,
+  projectConfigPath,
+} from "./config/paths.js";
 import {
   type ConfigFormat,
   detectConfigFormat,
@@ -53,7 +59,7 @@ export function localCredentialsPath(cwd: string = process.cwd()): string {
 /**
  * Read the project-local credentials file at `<cwd>/.kuzushi/credentials.json`.
  *
- * Accepts both the modern per-backend shape (`{ claude: {apiKey, baseUrl}, piAi: {...} }`)
+ * Accepts both the modern per-backend shape (`{ claude: {...}, piAi: {...}, codex: {...} }`)
  * and the legacy flat shape (`{ apiKey, baseUrl }`). Legacy input is migrated
  * into the `claude` slot so pre-split creds continue to work without operator action.
  */
@@ -93,9 +99,11 @@ export function persistLocalCredentials(
   const merged: AgentRuntimeConfig = {
     claude: { ...(existing.claude ?? {}), ...(creds.claude ?? {}) },
     piAi: { ...(existing.piAi ?? {}), ...(creds.piAi ?? {}) },
+    codex: { ...(existing.codex ?? {}), ...(creds.codex ?? {}) },
   };
   if (!merged.claude || Object.keys(merged.claude).length === 0) delete merged.claude;
   if (!merged.piAi || Object.keys(merged.piAi).length === 0) delete merged.piAi;
+  if (!merged.codex || Object.keys(merged.codex).length === 0) delete merged.codex;
   writeFileSync(filePath, `${JSON.stringify(merged, null, 2)}\n`, {
     encoding: "utf-8",
     mode: 0o600,
@@ -766,6 +774,7 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
         merged.agentRuntimeConfig = {
           claude: { ...(existing.claude ?? {}), ...(normalizedLayer.claude ?? {}) },
           piAi: { ...(existing.piAi ?? {}), ...(normalizedLayer.piAi ?? {}) },
+          codex: { ...(existing.codex ?? {}), ...(normalizedLayer.codex ?? {}) },
         };
         if (
           !merged.agentRuntimeConfig.claude ||
@@ -778,6 +787,12 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
           Object.keys(merged.agentRuntimeConfig.piAi).length === 0
         ) {
           delete merged.agentRuntimeConfig.piAi;
+        }
+        if (
+          !merged.agentRuntimeConfig.codex ||
+          Object.keys(merged.agentRuntimeConfig.codex).length === 0
+        ) {
+          delete merged.agentRuntimeConfig.codex;
         }
         continue;
       }
@@ -844,9 +859,15 @@ function loadConfigLayers(repoRoot?: string): {
   globalRaw: WritableConfigLayer;
   projectRaw: WritableConfigLayer;
 } {
+  // For reads, walk up from `repoRoot` (or cwd) to find the nearest
+  // ancestor's `.kuzushi/config.json`. Operators reasonably expect
+  // `kuzushi shell` from `<repo>/sub/dir/` to honor `<repo>/.kuzushi/config.json`
+  // — without this, only cwd-rooted configs are loaded and the operator's
+  // per-repo config is silently ignored.
+  const readRoot = findProjectConfigRoot(repoRoot ?? process.cwd()) ?? repoRoot;
   return {
     globalRaw: readConfigFile(configPath(), [CONFIG_DIR]),
-    projectRaw: repoRoot ? readConfigFile(projectConfigPath(repoRoot), [repoRoot]) : {},
+    projectRaw: readRoot ? readConfigFile(projectConfigPath(readRoot), [readRoot]) : {},
   };
 }
 
@@ -945,13 +966,42 @@ function sanitizeProjectConfigLayer(
   const stripped: string[] = [];
   const sanitized = stripUnsafeProjectConfigValue(cloneLayerValue(layer), [], stripped);
   if (stripped.length > 0) {
+    const projectPath = projectConfigPath(repoRoot);
     log.warn(
-      `Ignoring unsafe repo-local config keys from ${projectConfigPath(repoRoot)}: ${stripped.join(", ")}. ` +
+      `Ignoring unsafe repo-local config keys from ${projectPath}: ${stripped.join(", ")}. ` +
         "Pass --trust-repo-config to opt in.",
     );
+    // The log.warn above is invisible once Ink takes over the terminal.
+    // For credential-bearing strips, surface a one-line stderr banner so the
+    // operator knows their per-repo creds are being silently dropped.
+    // Idempotent + opt-out via KUZUSHI_QUIET_CRED_BANNER=1.
+    surfaceCredStripBanner(stripped, projectPath);
   }
 
   return isRecord(sanitized) ? (sanitized as WritableConfigLayer) : {};
+}
+
+let credStripBannerEmitted = false;
+const CRED_BEARING_KEYS = new Set(["agentRuntimeConfig", "agentRuntimeBackend", "credentials"]);
+function surfaceCredStripBanner(strippedKeys: string[], projectPath: string): void {
+  if (credStripBannerEmitted) return;
+  if (process.env.KUZUSHI_QUIET_CRED_BANNER) return;
+  const credKeys = strippedKeys.filter((k) => {
+    const head = k.split(".")[0] ?? "";
+    return CRED_BEARING_KEYS.has(head);
+  });
+  if (credKeys.length === 0) return;
+  credStripBannerEmitted = true;
+  process.stderr.write(
+    `[kuzushi] Detected creds in ${projectPath} (project config). These keys aren't honored from project config.json: ${credKeys.join(", ")}. ` +
+      "Move them to .kuzushi/credentials.json or set ANTHROPIC_API_KEY in env. " +
+      "Silence with KUZUSHI_QUIET_CRED_BANNER=1.\n",
+  );
+}
+
+/** Test-only reset for the idempotent cred-strip banner. */
+export function _resetCredStripBannerForTests(): void {
+  credStripBannerEmitted = false;
 }
 
 function stripUnsafeProjectConfigValue(
@@ -1342,7 +1392,7 @@ function normalizeAgentRuntimeCredentials(value: unknown): AgentRuntimeCredentia
  * Normalize `agentRuntimeConfig` input from any layer (config file, setConfigValue
  * JSON, local credentials file). Accepts:
  *
- *   - Modern per-backend shape:  { claude: {apiKey, baseUrl}, piAi: {...} }
+ *   - Modern per-backend shape:  { claude: {...}, piAi: {...}, codex: {...} }
  *   - Legacy flat shape:         { apiKey, baseUrl }  → migrates to { claude: {...} }
  *   - Mixed (flat + per-backend): flat keys route to `claude` unless it's already set.
  *
@@ -1353,6 +1403,7 @@ function normalizeAgentRuntimeConfig(value: unknown): AgentRuntimeConfig | undef
 
   const claudeFromSlot = normalizeAgentRuntimeCredentials(value["claude"]);
   const piAiFromSlot = normalizeAgentRuntimeCredentials(value["piAi"]);
+  const codexFromSlot = normalizeAgentRuntimeCredentials(value["codex"]);
   const legacyFlat = normalizeAgentRuntimeCredentials(value);
 
   // Merge legacy flat into claude only when the claude slot hasn't been set
@@ -1360,11 +1411,12 @@ function normalizeAgentRuntimeConfig(value: unknown): AgentRuntimeConfig | undef
   // config. Order: modern slot wins, legacy fills the gap.
   const claude: AgentRuntimeCredentials | undefined = claudeFromSlot ?? legacyFlat;
 
-  if (!claude && !piAiFromSlot) return undefined;
+  if (!claude && !piAiFromSlot && !codexFromSlot) return undefined;
 
   const out: AgentRuntimeConfig = {};
   if (claude) out.claude = claude;
   if (piAiFromSlot) out.piAi = piAiFromSlot;
+  if (codexFromSlot) out.codex = codexFromSlot;
   return out;
 }
 
@@ -1377,12 +1429,15 @@ export function resolveActiveCredentials(
   config: Pick<KuzushiConfig, "agentRuntimeBackend" | "agentRuntimeConfig">,
 ): AgentRuntimeCredentials {
   const backend = config.agentRuntimeBackend ?? "pi-ai";
-  const slot = backend === "pi-ai" ? "piAi" : "claude";
+  const slot = backendConfigSlot(backend);
   return config.agentRuntimeConfig?.[slot] ?? {};
 }
 
 /** Slot name for `agentRuntimeConfig` that matches a backend id. */
-export function backendConfigSlot(backend: AgentRuntimeBackend | undefined): "claude" | "piAi" {
+export function backendConfigSlot(
+  backend: AgentRuntimeBackend | undefined,
+): "claude" | "piAi" | "codex" {
+  if (backend === "codex") return "codex";
   return (backend ?? "pi-ai") === "pi-ai" ? "piAi" : "claude";
 }
 
