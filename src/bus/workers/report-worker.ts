@@ -29,6 +29,7 @@ import type {
   PocHarnessStartEvent,
   PromptReportEvent,
   ReportRequestedEvent,
+  RunStatusEvent,
   ScanAgentActivityEvent,
   ScanCompleteEvent,
   ScanPostTaskCompleteEvent,
@@ -372,6 +373,23 @@ export function registerReportWorker(
     }
   });
 
+  // Sync UIStore.phase eagerly from `run:status` so the heartbeat
+  // caption reflects the orchestrator's *current* stage instead of
+  // lagging behind until `triage:start` / `verification:start` fire
+  // (issue #27 — heartbeat printed "scanning alive" for 30+ minutes
+  // after the run had already moved to `triaging` per SQLite).
+  bus.subscribe<RunStatusEvent>("run:status", (event) => {
+    if (!store) return;
+    const status = event.payload.status;
+    let phase: "scanning" | "triaging" | "verifying" | "poc" | "summary" | undefined;
+    if (status === "scanning") phase = "scanning";
+    else if (status === "triaging") phase = "triaging";
+    else if (status === "verifying") phase = "verifying";
+    else if (status === "poc-harnessing") phase = "poc";
+    else if (status === "complete" || status === "aborted" || status === "error") phase = "summary";
+    if (phase) store.update({ phase });
+  });
+
   bus.subscribe<TriageStartEvent>("triage:start", (event) => {
     const state = getOrCreateRunState(runState, event.meta.runId);
     state.selectedForTriage = event.payload.findingCount;
@@ -385,6 +403,10 @@ export function registerReportWorker(
         filtered > 0
           ? `${selected} of ${total} findings selected · ${filtered} filtered`
           : `${selected} findings via ${event.payload.model}`;
+      // Mark scan stage as complete when triage starts so the CI
+      // stream gets a `stage: scan → done` line (issue #37 — stage
+      // transitions used to go quiet after the first activate event).
+      store.completeStage("scan");
       store.activateStage("triage", triageDetail);
       triageStartedAt = Date.now();
 
@@ -476,6 +498,8 @@ export function registerReportWorker(
 
   bus.subscribe<VerificationStartEvent>("verification:start", (event) => {
     if (store) {
+      // Mark triage as complete when verification starts (issue #37).
+      store.completeStage("triage");
       store.activateStage(
         "verify",
         `${event.payload.findingCount} findings via ${event.payload.model}`,
@@ -548,6 +572,8 @@ export function registerReportWorker(
 
   bus.subscribe<PocHarnessStartEvent>("poc-harness:start", (event) => {
     if (store) {
+      // Mark verify as complete when PoC harness starts (issue #37).
+      store.completeStage("verify");
       store.activateStage(
         "poc",
         `${event.payload.findingCount} harnesses via ${event.payload.model}`,
