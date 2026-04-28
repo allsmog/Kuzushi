@@ -1,4 +1,5 @@
 import { spawn as childSpawn } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import {
   type Options as ClaudeOptions,
   query as claudeQuery,
@@ -271,6 +272,21 @@ function planModeAllowedDirectories(cwd?: string): string[] {
   // resolver fallback list).
   dirs.add("/home/claude/.claude/plans");
   if (cwd) dirs.add(`${cwd}/.kuzushi`);
+
+  // The SDK silently drops `additionalDirectories` entries that don't
+  // exist on disk — `/root/.claude/plans` was getting whitelisted but
+  // ignored, leaving randori writes still rejected (#29). Materialize
+  // each path so the SDK accepts it, mode 0o700 to keep them
+  // operator-private.
+  for (const dir of dirs) {
+    try {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+    } catch {
+      /* best-effort — a failed mkdir just means the SDK will drop
+         the entry, which is what would have happened anyway */
+    }
+  }
+
   return [...dirs];
 }
 
