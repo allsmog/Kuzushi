@@ -1,11 +1,11 @@
-# GitGuardian config — see https://docs.gitguardian.com/ggshield-docs/reference/config-files
+# GitGuardian / ggshield config — see
+# https://docs.gitguardian.com/ggshield-docs/reference/config-files
 #
-# tests/oauth-resolver.test.ts uses obviously-fake `redacted-fake-oat-prefix-*`
-# fixtures (suffixes like `-from-env-api-key`, `-from-config-path`,
-# `-remote-sandbox`) to exercise the OAuth ambient resolver added in
-# bdc15e6. The regex prefix `redacted-fake-oat-prefix` is shared with real
-# Anthropic OAuth tokens, so the scanner flags every occurrence.
-# Scope the ignore to that single test file rather than disabling the
-# whole detector globally.
-paths-ignore:
-  - tests/oauth-resolver.test.ts
+# `tests/oauth-resolver.test.ts` exercises the OAuth ambient resolver
+# (bdc15e6) and uses obviously-fake `redacted-fake-oat-prefix-from-env-api-key`
+# style fixtures. The detector regex matches the real Anthropic
+# `redacted-fake-oat-prefix` prefix so it flags every fixture in that file.
+# Scope the ignore as narrowly as possible.
+secret:
+  ignored-paths:
+    - tests/oauth-resolver.test.ts
