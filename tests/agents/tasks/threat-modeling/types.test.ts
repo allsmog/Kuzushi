@@ -21,8 +21,9 @@ function makeConfig(): KuzushiConfig {
 
 describe("DEFAULT_THREAT_MODEL_CONFIG", () => {
   it("has expected defaults", () => {
+    expect(DEFAULT_THREAT_MODEL_CONFIG.methodology).toBe("pasta");
     expect(DEFAULT_THREAT_MODEL_CONFIG.maxElements).toBe(50);
-    expect(DEFAULT_THREAT_MODEL_CONFIG.maxThreats).toBe(100);
+    expect(DEFAULT_THREAT_MODEL_CONFIG.maxThreats).toBe(20);
     expect(DEFAULT_THREAT_MODEL_CONFIG.emitFindings).toBe(true);
     expect(DEFAULT_THREAT_MODEL_CONFIG.findingThreshold).toBe("medium");
     expect(DEFAULT_THREAT_MODEL_CONFIG.randoriStages).toEqual(["s1", "s2", "s3", "s4"]);
@@ -33,8 +34,9 @@ describe("resolveThreatModelConfig", () => {
   it("returns defaults when no config", () => {
     const resolved = resolveThreatModelConfig(makeConfig());
     expect(resolved.model).toBe("anthropic:claude-sonnet-4-6");
+    expect(resolved.methodology).toBe("pasta");
     expect(resolved.maxElements).toBe(50);
-    expect(resolved.maxThreats).toBe(100);
+    expect(resolved.maxThreats).toBe(20);
     expect(resolved.emitFindings).toBe(true);
   });
 
@@ -42,6 +44,7 @@ describe("resolveThreatModelConfig", () => {
     const config = makeConfig();
     config.taskConfig["threat-model"] = {
       model: "openai:gpt-4",
+      methodology: "dread",
       maxElements: 25,
       maxThreats: 50,
       emitFindings: false,
@@ -51,6 +54,7 @@ describe("resolveThreatModelConfig", () => {
 
     const resolved = resolveThreatModelConfig(config);
     expect(resolved.model).toBe("openai:gpt-4");
+    expect(resolved.methodology).toBe("dread");
     expect(resolved.maxElements).toBe(25);
     expect(resolved.maxThreats).toBe(50);
     expect(resolved.emitFindings).toBe(false);
@@ -73,5 +77,13 @@ describe("resolveThreatModelConfig", () => {
 
     const resolved = resolveThreatModelConfig(config);
     expect(resolved.model).toBe("openai:gpt-4");
+  });
+
+  it("accepts modelType as a methodology alias", () => {
+    const config = makeConfig();
+    config.taskConfig["threat-model"] = { modelType: "stride" };
+
+    const resolved = resolveThreatModelConfig(config);
+    expect(resolved.methodology).toBe("stride");
   });
 });

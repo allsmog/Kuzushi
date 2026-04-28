@@ -3,15 +3,14 @@
  *
  * Pure `ModuleTool` (`context:build`) — the shell entry point drives
  * `generateContextSnapshot` (which internally runs its own mini-DAG of
- * context-gatherer → context-enricher → app-model-build → threat-model →
- * threat-scenario-build). Hidden DagTools on this module expose the
- * individual infrastructure DAG nodes (context-gatherer,
- * context-enricher, app-model-build, threat-scenario-build,
+ * context-gatherer → context-enricher → app-model-build). Hidden DagTools on
+ * this module expose the individual infrastructure DAG nodes
+ * (context-gatherer, context-enricher, app-model-build,
  * code-config-detect, call-graph-assist, code-graph-build/enrich,
  * invariant-extract/check) so the module registry owns their lifecycle
  * instead of `createDefaultTaskRegistry`.
  *
- * Produces the ContextSnapshot consumed downstream by randori /
+ * Produces the ContextSnapshot consumed downstream by threat-model /
  * agentic-sast / taint-iris / threat-hunt.
  */
 
@@ -24,24 +23,20 @@ import { contextEnricherTask } from "../../agents/tasks/context-enricher.js";
 import { contextGathererTask } from "../../agents/tasks/context-gatherer.js";
 import { invariantCheckTask } from "../../agents/tasks/invariant-analysis/check.js";
 import { invariantExtractTask } from "../../agents/tasks/invariant-analysis/extract.js";
-import { threatScenarioBuildTask } from "../../agents/tasks/threat-scenario-build.js";
 import type { ContextGenerationSlice } from "../../ui/state.js";
+import { createAttachmentTools } from "../_shared/attachments/index.js";
 import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
 import { defineModule, defineTool } from "../define.js";
 import { saveContextSnapshot } from "../sast/context-persist.js";
 import { formatContextSummary, generateContextSnapshot } from "../sast/shared.js";
 import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
+import { CONTEXT_KIND_SPEC, contextAttachmentAdapter } from "./attachments.js";
 
 const CONTEXT_GENERATION_SLICES = [
   "all",
   "repo",
   "enrichment",
   "app-model",
-  "dfd",
-  "stride",
-  "stories",
-  "scope",
-  "scenarios",
 ] as const satisfies readonly ContextGenerationSlice[];
 
 export function createContextModule(): CopilotModule {
@@ -59,8 +54,8 @@ export function createContextModule(): CopilotModule {
     },
     description:
       "Generate the application context map for a target repository. Runs context " +
-      "gathering, LLM enrichment, app model extraction, PASTA threat modeling, " +
-      "and threat scenario building. Results are cached.",
+      "gathering, optional LLM enrichment, and app/surface model extraction. " +
+      "Results are cached.",
     inputSchema: {
       type: "object",
       properties: {
@@ -76,28 +71,11 @@ export function createContextModule(): CopilotModule {
           default: true,
           description: "Run LLM context enrichment (1 API call).",
         },
-        threatModel: {
-          type: "boolean",
-          default: true,
-          description: "Run PASTA S1-S4 threat modeling.",
-        },
-        scenarios: {
-          type: "boolean",
-          default: true,
-          description: "Build threat scenarios from STRIDE threats.",
-        },
         scope: {
           type: "string",
           enum: [...CONTEXT_GENERATION_SLICES],
           default: "all",
-          description:
-            "Regenerate one generated context slice. all = full rebuild; dfd/stride/stories/scope target threat-model slices.",
-        },
-        preserveUserEdits: {
-          type: "boolean",
-          default: true,
-          description:
-            "Preserve operator-edited threat-model artifacts unless the user explicitly accepts a patch.",
+          description: "Regenerate one context slice. all = full rebuild.",
         },
         CONTEXT_PROMPT: {
           type: "string",
@@ -115,8 +93,6 @@ export function createContextModule(): CopilotModule {
       if (!target) return { ok: false, output: "context:build requires a target (repo path)." };
 
       const enrichment = p.enrichment !== false;
-      const threatModel = p.threatModel !== false;
-      const scenarios = p.scenarios !== false && threatModel;
       const discovery = (p.discovery as string) ?? "auto";
       const scope = parseContextScope(p.scope);
 
@@ -124,7 +100,7 @@ export function createContextModule(): CopilotModule {
       // the context build map to one row each. The renderer is no-op when
       // no run is active (run/headless mode), so this is safe to call
       // unconditionally.
-      const stepIds = stepIdsForScope(scope, { enrichment, threatModel, scenarios });
+      const stepIds = stepIdsForScope(scope, { enrichment });
       const steps: Array<{
         id: string;
         title: string;
@@ -143,7 +119,7 @@ export function createContextModule(): CopilotModule {
 
       try {
         advance("snapshot", "running");
-        const scoped = optionsForScope(scope, { enrichment, threatModel, scenarios });
+        const scoped = optionsForScope(scope, { enrichment });
         const snapshot = await generateContextSnapshot(target, ctx, {
           ...scoped,
           discovery: discovery as "auto" | "flat" | "modules",
@@ -181,7 +157,6 @@ export function createContextModule(): CopilotModule {
     hide(contextGathererTask),
     hide(contextEnricherTask),
     hide(appModelBuildTask),
-    hide(threatScenarioBuildTask),
     hide(codeConfigDetectTask),
     hide(callGraphAssistTask),
     hide(codeGraphBuildTask),
@@ -190,22 +165,31 @@ export function createContextModule(): CopilotModule {
     hide(invariantCheckTask),
   ];
 
+  // Knowledge-base verbs (`attach` / `attachments` / `detach` / `reparse`)
+  // are registered through the shared factory. The context enricher reads
+  // the persisted KB and passes the rendered block into its system prompt
+  // (see `agents/tasks/context-enricher.ts`).
+  const attachmentTools = createAttachmentTools("context", CONTEXT_KIND_SPEC, {
+    adapter: contextAttachmentAdapter(),
+  });
+
   return defineModule({
     id: "context",
     displayName: "Context Map",
     category: "intel",
     version: "0.17.2",
     description:
-      "Builds the application context snapshot: repo model, routes, app model, " +
-      "threat model seed. Required by agentic / taint-iris / threat-hunt.",
+      "Builds the target context snapshot: repo model, enrichment, and app/surface model. " +
+      "Required by agentic / taint-iris / threat-hunt. " +
+      "Attach reference material (architecture docs, API specs, runbooks) with `attach`.",
     rank: "excellent",
-    references: [{ type: "URL", value: "https://owasp.org/Threat-Modeling" }],
+    references: [{ type: "URL", value: "https://c4model.com/" }],
     notes: {
       stability: ["stable"],
       reliability: ["reliable"],
       sideEffects: ["costs LLM tokens"],
     },
-    tools: [contextBuildTool, ...hiddenInfraDagTools],
+    tools: [contextBuildTool, ...attachmentTools, ...hiddenInfraDagTools],
   });
 }
 
@@ -217,21 +201,14 @@ function parseContextScope(value: unknown): ContextGenerationSlice {
 
 function optionsForScope(
   scope: ContextGenerationSlice,
-  defaults: { enrichment: boolean; threatModel: boolean; scenarios: boolean },
-): { enrichment: boolean; threatModel: boolean; scenarios: boolean } {
+  defaults: { enrichment: boolean },
+): { enrichment: boolean } {
   switch (scope) {
     case "repo":
-      return { enrichment: false, threatModel: false, scenarios: false };
+      return { enrichment: false };
     case "enrichment":
     case "app-model":
-      return { enrichment: true, threatModel: false, scenarios: false };
-    case "dfd":
-    case "stride":
-    case "stories":
-    case "scope":
-      return { enrichment: true, threatModel: true, scenarios: false };
-    case "scenarios":
-      return { enrichment: true, threatModel: true, scenarios: true };
+      return { enrichment: true };
     default:
       return defaults;
   }
@@ -239,8 +216,7 @@ function optionsForScope(
 
 /**
  * Step ids surfaced in `ModuleRunView`. Decides which rows render based
- * on the operator's scope choice — a partial regen (`scope=dfd`) doesn't
- * pretend to also run enrichment/scenarios.
+ * on the operator's context-scope choice.
  */
 const STEP_TITLES: Record<string, string> = {
   snapshot: "build context snapshot",
@@ -248,10 +224,7 @@ const STEP_TITLES: Record<string, string> = {
   save: "persist .kuzushi/context-snapshot.json",
 };
 
-function stepIdsForScope(
-  scope: ContextGenerationSlice,
-  _opts: { enrichment: boolean; threatModel: boolean; scenarios: boolean },
-): string[] {
+function stepIdsForScope(scope: ContextGenerationSlice, _opts: { enrichment: boolean }): string[] {
   void scope;
   return ["snapshot", "publish", "save"];
 }
@@ -259,18 +232,11 @@ function stepIdsForScope(
 function staleSlicesFor(scope: ContextGenerationSlice): ContextGenerationSlice[] {
   switch (scope) {
     case "repo":
-      return ["enrichment", "app-model", "dfd", "stride", "stories", "scope", "scenarios"];
+      return ["enrichment", "app-model"];
     case "enrichment":
-      return ["app-model", "dfd", "stride", "stories", "scope", "scenarios"];
+      return ["app-model"];
     case "app-model":
-      return ["dfd", "stride", "stories", "scope", "scenarios"];
-    case "dfd":
-      return ["stride", "stories", "scope", "scenarios"];
-    case "stride":
-      return ["stories", "scope", "scenarios"];
-    case "stories":
-    case "scope":
-      return ["scenarios"];
+      return [];
     default:
       return [];
   }
@@ -278,15 +244,13 @@ function staleSlicesFor(scope: ContextGenerationSlice): ContextGenerationSlice[]
 
 function generatedSlicesFor(
   scope: ContextGenerationSlice,
-  opts: { enrichment: boolean; threatModel: boolean; scenarios: boolean },
+  opts: { enrichment: boolean },
 ): ContextGenerationSlice[] {
   if (scope !== "all") return [scope];
 
   const slices: ContextGenerationSlice[] = ["repo", "app-model"];
   if (opts.enrichment) slices.push("enrichment");
-  if (opts.threatModel) slices.push("dfd", "stride", "stories", "scope");
-  if (opts.scenarios) slices.push("scenarios");
-  if (opts.enrichment && opts.threatModel && opts.scenarios) {
+  if (opts.enrichment) {
     return ["all", ...slices];
   }
   return slices;

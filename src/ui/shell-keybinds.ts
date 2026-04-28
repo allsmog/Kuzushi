@@ -201,7 +201,7 @@ export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
 
   // --- 3. Threat-view 1..5 cycle --------------------------------------------
   if (isThreatShellView(shell.shellView) && input.length === 0) {
-    if (char === "r" || char === "R") return { type: "dispatch", command: "/context regen" };
+    if (char === "r" || char === "R") return { type: "dispatch", command: "/threats regen" };
     const sub = THREAT_DIGIT_TO_SUB[char];
     if (sub) return { type: "dispatch", command: `/threats ${sub}` };
   }

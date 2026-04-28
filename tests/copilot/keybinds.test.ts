@@ -300,7 +300,7 @@ describe("resolveKeybind — threat digits", () => {
     const shell = baseShell({ shellView: "threats", threatTab: "dfd" });
     const state = baseState(shell);
 
-    expect(dispatch("r", shell, state)).toEqual({ type: "dispatch", command: "/context regen" });
+    expect(dispatch("r", shell, state)).toEqual({ type: "dispatch", command: "/threats regen" });
     expect(dispatch("a", shell, state).type).toBe("none");
   });
 

@@ -36,6 +36,7 @@ export { createNDayDiffHunterModule } from "./n-day-diff-hunter.js";
 // Registry + specifier parsing — re-export so third parties can do static
 // analysis of their own module specifiers without importing deep paths.
 export { ModuleRegistry, parseModuleSpecifier } from "./registry.js";
+export { createThreatModelModule } from "./threat-model/threat-model.js";
 // Core types — these are the shape third parties implement.
 export type {
   CopilotModule,
@@ -55,3 +56,12 @@ export type {
   ToolResult,
 } from "./types.js";
 export { createVariantHunterModule } from "./variant-hunter.js";
+export type {
+  VendorAssessmentDocument,
+  VendorAssessmentDocumentKind,
+  VendorAssessmentHomeSlice,
+  VendorAssessmentProfile,
+  VendorAssessmentReportJson,
+  VendorAssessmentScope,
+} from "./vendor-assessment/types.js";
+export { createVendorAssessmentModule } from "./vendor-assessment/vendor-assessment.js";

@@ -6,14 +6,13 @@
  * Without this, `context:build` output lives in memory only; the next
  * shell session starts with `shell.contextSnapshot` empty, and
  * downstream modules (`threat-hunt`, `agentic-sast`, `taint-iris`) fail
- * the appModel/threatModel prerequisite check even though the operator
- * ran context minutes earlier.
+ * the appModel prerequisite check even though the operator ran context
+ * minutes earlier. Threat models now live in `.kuzushi/threat-model.json`.
  *
  * File shape: `<target>/.kuzushi/context-snapshot.json`. Chosen over
  * `.kuzushi/runs/<runId>/` because (a) it's predictable — a reader
- * doesn't need to pick between stale runs, (b) the run-dirs hold stage
- * artifacts (pasta-s*.json), not the aggregated snapshot shape that
- * threat-hunt/taint-iris actually consume.
+ * doesn't need to pick between stale runs, (b) it is target-understanding
+ * state, not methodology-specific threat-model output.
  *
  * Stale handling: operators expect freshness. If the on-disk snapshot
  * is older than STALENESS_WARN_MS, `loadContextSnapshot` still returns

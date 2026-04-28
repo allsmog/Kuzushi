@@ -64,7 +64,11 @@ export class ModuleDispatcher implements CommandDispatcher {
     });
   }
 
-  async execute(cmd: string, args: string[], ctx: CommandContext): Promise<CommandResult | void> {
+  async execute(
+    cmd: string,
+    args: string[],
+    ctx: CommandContext,
+  ): Promise<CommandResult | undefined> {
     switch (cmd) {
       case "run":
       case "exploit":
@@ -256,15 +260,21 @@ export class ModuleDispatcher implements CommandDispatcher {
     if (!reqs || reqs.length === 0) return null;
     const shell = ctx.driver.getShellState?.();
     const snapshot = (shell?.contextSnapshot ?? undefined) as Record<string, unknown> | undefined;
+    const threatModel = shell?.threatModel;
 
     const missing: string[] = [];
     for (const req of reqs) {
       if (req.kind === "snapshot") {
-        const ok = !!snapshot && snapshot[req.field] != null;
+        const ok =
+          req.moduleId === "threat-model" && req.field === "threatModel"
+            ? threatModel != null
+            : !!snapshot && snapshot[req.field] != null;
         if (!ok) {
-          missing.push(
-            `  - ${req.field} from '${req.moduleId}' — fix: 'use ${req.moduleId}' then 'run'`,
-          );
+          const fix =
+            req.moduleId === "threat-model"
+              ? "run '/threats regen dfd'"
+              : `'use ${req.moduleId}' then 'run'`;
+          missing.push(`  - ${req.field} from '${req.moduleId}' — fix: ${fix}`);
         }
       } else if (req.kind === "findings") {
         const count = ctx.driver.getFindingCount?.() ?? 0;

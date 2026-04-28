@@ -54,6 +54,11 @@ describe("SAST sub-modules", () => {
     const hunt = reqs(createThreatHuntModule()).map((r) => r.kind === "snapshot" && r.field);
     expect(hunt).toContain("appModel");
     expect(hunt).toContain("threatModel");
+    const huntModules = reqs(createThreatHuntModule()).map(
+      (r) => r.kind === "snapshot" && r.moduleId,
+    );
+    expect(huntModules).toContain("context");
+    expect(huntModules).toContain("threat-model");
   });
 
   it("taint-iris hunt declares checkpoint resume and live pause-resume", () => {

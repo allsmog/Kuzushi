@@ -92,10 +92,8 @@ describe("core-randori module", () => {
     const mod = createCoreRandoriModule();
     expect(mod.id).toBe("randori");
     expect(mod.category).toBe("intel");
-    // Hidden DAG bridges (e.g. the `randori:threat-model-randori` wrapper
-    // that keeps `dependsOn: ["threat-model-randori"]` resolving in the
-    // orchestrator) are filtered — this test asserts the user-visible tool
-    // surface.
+    // Randori is now a direct provider wrapper; DAG ownership lives in
+    // threat-model. This test asserts the user-visible tool surface.
     expect(
       mod.tools
         .filter((t) => !t.hidden)

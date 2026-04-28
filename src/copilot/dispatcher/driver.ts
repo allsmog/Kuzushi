@@ -18,7 +18,7 @@ export interface DriverOptions {
   /** Promptbase, e.g. "kuzushi". */
   promptBase?: string;
   /** Optional ShellState accessor — powers module requires preflight. */
-  getShellState?: () => { contextSnapshot?: unknown } | undefined;
+  getShellState?: () => { contextSnapshot?: unknown; threatModel?: unknown } | undefined;
   /** Optional finding-count accessor — powers triage/verify/patch requires. */
   getFindingCount?: () => number | undefined;
   /** Optional host-count accessor — powers blackbox/lateral requires. */
@@ -208,7 +208,7 @@ export class DispatcherDriver implements Driver {
     // This is how the InteractiveSessionDispatcher forwards free-form input
     // to session.interact() — its `commands` only lists control verbs.
     const top = this._stack[this._stack.length - 1] as CommandDispatcher & {
-      fallback?: (line: string, ctx: CommandContext) => Promise<CommandResult | void>;
+      fallback?: (line: string, ctx: CommandContext) => Promise<CommandResult | undefined>;
     };
     if (typeof top.fallback === "function") {
       const ctx: CommandContext = signal

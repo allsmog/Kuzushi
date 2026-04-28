@@ -1,4 +1,6 @@
 import { getLogger } from "../../logger.js";
+import { renderUntrustedAttachments } from "../../modules/_shared/attachments/index.js";
+import { loadContextAttachments } from "../../modules/context/attachments.js";
 import { languageGeneralHintsModule } from "../../prompts/language-tuning.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
@@ -93,7 +95,7 @@ function resolveConfig(ctx: TaskContext): ContextEnricherConfig {
   return { model };
 }
 
-function buildPrompt(repoContext: RepoContext | undefined): string {
+function buildPrompt(repoContext: RepoContext | undefined, attachmentsBlock?: string): string {
   const contextLines = repoContext
     ? [
         "## Heuristic repo context (from context-gatherer)",
@@ -106,12 +108,22 @@ function buildPrompt(repoContext: RepoContext | undefined): string {
         "",
       ]
     : [];
+  // Operator-staged reference material (architecture docs, API specs,
+  // runbooks, prior incidents). When present, it sits right after the
+  // heuristic repo context so the LLM grounds its trust-boundary and
+  // data-classification analysis in the actual artifacts rather than
+  // guessing from code alone. Wrapped by the shared renderer so the model
+  // treats it as untrusted reference data, not nested instructions.
+  const attachmentsLines = attachmentsBlock?.trim()
+    ? ["## Operator-attached reference material", attachmentsBlock, ""]
+    : [];
 
   return [
     "You are a senior security architect performing deep context analysis of a codebase.",
     "Your goal is to discover security-relevant architectural details that heuristic analysis misses.",
     "",
     ...contextLines,
+    ...attachmentsLines,
     languageGeneralHintsModule(repoContext),
     "## Analysis tasks",
     "",
@@ -211,7 +223,20 @@ export const contextEnricherTask: AgentTask<unknown, EnrichedRepoContext["enrich
     const { model } = resolveConfig(context);
     const workRoot = context.workRoot ?? context.repoRoot;
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
-    const prompt = buildPrompt(repoContext);
+    // KB attachments live at `<repoRoot>/.kuzushi/context/attachments.json`
+    // — same place the operator's `context:attach` tool persisted them.
+    // Loading from `repoRoot` (not `workRoot`) so attachments staged at the
+    // project root are visible even when the scan is scoped to a
+    // subdirectory.
+    const attachments = loadContextAttachments(context.repoRoot);
+    const attachmentsBlock =
+      attachments.length > 0
+        ? renderUntrustedAttachments(attachments, {
+            moduleId: "context",
+            emptyPlaceholder: "",
+          }).block
+        : undefined;
+    const prompt = buildPrompt(repoContext, attachmentsBlock);
     const runtime = context.runtime;
 
     let structuredOutput: unknown;

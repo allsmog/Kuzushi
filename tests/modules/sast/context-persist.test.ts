@@ -36,9 +36,8 @@ function makeSnapshot(overrides: Partial<ContextSnapshot> = {}): ContextSnapshot
     target: "/repo",
     timestamp: Date.now(),
     discovery: "flat",
-    options: { enrichment: true, threatModel: true, scenarios: false },
+    options: { enrichment: true },
     appModel: { routes: [] },
-    threatModel: { threats: [] },
     ...overrides,
   };
 }
@@ -120,7 +119,6 @@ describe("context-persist", () => {
     const snap = makeSnapshot({
       target: path.resolve(target),
       appModel: { routes: [{ path: "/api/x" }] },
-      threatModel: { threats: [{ id: "T1" }] },
     });
     saveContextSnapshot(target, snap);
 

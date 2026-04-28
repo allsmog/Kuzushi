@@ -103,7 +103,7 @@ export interface ModuleNotes {
  *
  *  - snapshot: a field on the active ShellState.contextSnapshot must be
  *    present. Used when sub-module A consumes sub-module B's in-memory
- *    output (e.g. threat-hunt needs context.appModel + randori.threatModel).
+ *    output (e.g. threat-hunt needs context.appModel + threat-model.threatModel).
  *  - findings: the workspace DB must contain at least `minCount` findings.
  *    Used by triage/verify/patch which operate on previously stored findings
  *    regardless of which scanner produced them.
@@ -113,7 +113,7 @@ export type CopilotModuleRequirement =
       kind: "snapshot";
       /** Upstream module id (for the error hint: `use <moduleId>; run`). */
       moduleId: string;
-      /** ShellState.contextSnapshot field that must be truthy. */
+      /** ShellState context/threat-model field that must be truthy. */
       field: "repoContext" | "fileIndex" | "appModel" | "threatModel" | "scenarios" | "modules";
     }
   | {

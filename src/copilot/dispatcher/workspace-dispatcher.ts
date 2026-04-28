@@ -41,8 +41,6 @@ const COMMANDS: Record<string, string> = {
 
 const IMPORT_FORMATS: ImportFormat[] = ["sarif", "nmap-xml", "kz-bundle"];
 const EXPORT_FORMATS: ExportFormat[] = ["sarif", "kz-bundle", "markdown"];
-type GithubFormat = "github";
-const GITHUB_FORMAT: GithubFormat = "github";
 
 export class WorkspaceDispatcher implements CommandDispatcher {
   readonly name = "workspace";
@@ -50,12 +48,15 @@ export class WorkspaceDispatcher implements CommandDispatcher {
 
   constructor(private readonly opts: WorkspaceDispatcherOptions) {}
 
-  async execute(cmd: string, args: string[], ctx: CommandContext): Promise<CommandResult | void> {
+  async execute(
+    cmd: string,
+    args: string[],
+    ctx: CommandContext,
+  ): Promise<CommandResult | undefined> {
     const wid = this.opts.activeWorkspaceId();
     if (!wid) {
       return { output: "[-] No active workspace. Use `workspace use <name>` first." };
     }
-    const ws = this.opts.workspaces;
     switch (cmd) {
       case "hosts":
         return this.cmd_hosts(args, wid);
@@ -571,7 +572,7 @@ function parseFlags(args: string[]): Record<string, string> {
         }
       }
     } else {
-      out._ = ((out._ ?? "") + " " + tok).trim();
+      out._ = `${out._ ?? ""} ${tok}`.trim();
       i++;
     }
   }

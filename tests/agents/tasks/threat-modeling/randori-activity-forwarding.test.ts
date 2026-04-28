@@ -9,6 +9,7 @@ import {
 vi.mock("../../../../src/agents/tasks/threat-modeling/randori-artifacts.js", () => ({
   readRandoriArtifacts: vi.fn(() => ({})),
   mergeRandoriStageOutputs: vi.fn(() => null),
+  ensureFallbackS4Artifact: vi.fn(() => ({ written: false, path: "", threats: [] })),
 }));
 
 vi.mock("../../../../src/agents/tasks/threat-modeling/randori-adapter.js", () => ({

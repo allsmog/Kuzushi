@@ -77,7 +77,9 @@ describe("runResourceScript", () => {
     const { driver, sink } = newDriver();
     const res = await runResourceScript(
       {
-        setg: { MODEL: "claude-opus-4-7" },
+        // The validator now requires `provider:modelId` form (CLI rolled out
+        // multi-provider in 0.18); plain ids are rejected.
+        setg: { MODEL: "anthropic:claude-opus-4-7" },
         commands: ["modules", "use sast", "back"],
       },
       { driver },
@@ -85,7 +87,7 @@ describe("runResourceScript", () => {
     expect(res.executed).toBe(3);
     expect(res.errors).toEqual([]);
     const emitted = sink.lines.map((l) => l.text).join("\n");
-    expect(emitted).toContain("MODEL => claude-opus-4-7");
+    expect(emitted).toContain("MODEL => anthropic:claude-opus-4-7");
     expect(emitted).toContain("Selected module: sast");
   });
 

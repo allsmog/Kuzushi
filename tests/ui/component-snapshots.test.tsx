@@ -31,7 +31,12 @@ import { ThreatDfdView } from "../../src/ui/components/ThreatDfdView.js";
 import { BLACK_CIRCLE } from "../../src/ui/glyphs.js";
 import { KeybindFooter } from "../../src/ui/primitives/KeybindFooter.js";
 import { TabBar } from "../../src/ui/primitives/TabBar.js";
-import { type ActionableFinding, createUIStore, type ShellState } from "../../src/ui/state.js";
+import {
+  type ActionableFinding,
+  createUIStore,
+  initContextBuildState,
+  type ShellState,
+} from "../../src/ui/state.js";
 import { createAbortStoryEvent, createShellStoryEvent } from "../../src/ui/task-story.js";
 
 // ---------------------------------------------------------------------------
@@ -526,6 +531,32 @@ describe("Ink component snapshots", () => {
     expect(out).not.toContain("task active");
   });
 
+  it("CopilotShell — keeps context-build mounted while processing", () => {
+    const store = createUIStore();
+    store.update({
+      mode: "shell",
+      shellSplashShown: true,
+      shell: {
+        ...stubShell({
+          focusedModule: "context",
+          shellView: "context-build",
+          processing: true,
+          contextBuild: {
+            ...initContextBuildState("/tmp/acme-api", 0),
+            runId: "TEST",
+          },
+        }),
+      },
+    });
+
+    const out = renderToString(createElement(CopilotShell, { store }), 100);
+
+    expect(out).toContain("Phases");
+    expect(out).toContain("manifest probes");
+    expect(out).toContain("context-build");
+    expect(out).toContain("q abort");
+  });
+
   it("CopilotShell — module-run hides the duplicate running history row", () => {
     const store = createUIStore();
     store.update({
@@ -816,10 +847,17 @@ describe("Ink component snapshots", () => {
             isSet: false,
           },
           {
-            optionName: "threatModel",
+            optionName: "scope",
+            valueLabel: "app-model",
+            defaultLabel: "all",
+            description: "Regenerate one context slice. all = full rebuild.",
+            isSet: true,
+          },
+          {
+            optionName: "enrichment",
             valueLabel: "true",
             defaultLabel: "true",
-            description: "Run PASTA S1-S4 threat modeling.",
+            description: "Run LLM context enrichment (1 API call).",
             isSet: false,
           },
           {
@@ -833,7 +871,7 @@ describe("Ink component snapshots", () => {
       },
     });
     const out = renderToString(createElement(OptionsView, { shell }), 100, 24);
-    expect(out).toContain("kuzushi/context/options");
+    expect(out).toContain("context:build · 4 options · 2 set");
     expect(out).not.toContain("context home");
     expect(out).toMatchSnapshot();
   });
@@ -917,7 +955,7 @@ describe("Ink component snapshots", () => {
         target: "/repo",
         timestamp: 1,
         discovery: "flat",
-        options: { enrichment: true, threatModel: true, scenarios: true },
+        options: { enrichment: true },
         repoContext: {
           languages: ["TypeScript"],
           frameworks: ["Express"],
@@ -962,14 +1000,7 @@ describe("Ink component snapshots", () => {
           relevantFiles: [],
           notes: [],
         },
-        threatModel: {
-          version: "1.0",
-          dfd: { elements: [], trustBoundaries: [] },
-          threats: [],
-          summary: { total: 0, bySeverity: {}, byCategory: {} },
-        },
       },
-      threatModelSource: { path: "/tmp/context-snapshot.json", mtimeMs: 0 },
     });
     const out = renderToString(createElement(ThreatDfdView, { shell }));
     expect(out).toMatchSnapshot();

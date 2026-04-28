@@ -11,7 +11,7 @@ import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { Table } from "../primitives/Table.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
-import { RuleHeader } from "./RuleHeader.js";
+import { ContextStrip } from "./ContextStrip.js";
 import { ScreenContent } from "./ScreenContent.js";
 
 interface OptionsViewProps {
@@ -26,8 +26,6 @@ export function OptionsView({ shell }: OptionsViewProps): React.ReactElement {
   ]);
 
   const view = shell.optionsView;
-  const moduleId = shell.focusedModule ?? "module";
-  const breadcrumb = `kuzushi/${moduleId}/options`;
   const rowCount = view?.rows.length ?? 0;
   const setCount = view?.rows.filter((row) => row.isSet).length ?? 0;
   const status = view
@@ -36,7 +34,7 @@ export function OptionsView({ shell }: OptionsViewProps): React.ReactElement {
 
   return (
     <ScreenContent>
-      <RuleHeader breadcrumb={breadcrumb} status={status} />
+      <ContextStrip status={[status]} />
       {!view ? <EmptyOptions /> : <OptionsContent view={view} />}
     </ScreenContent>
   );
@@ -68,8 +66,8 @@ function OptionsContent({ view }: { view: NonNullable<ShellState["optionsView"]>
           gap={2}
           columns={[
             { key: "optionName", header: "OPTION", flex: 2, truncate: "end" },
-            { key: "valueLabel", header: "VALUE", flex: 4, truncate: "middle" },
-            { key: "defaultLabel", header: "DEFAULT", flex: 3, truncate: "middle" },
+            { key: "valueLabel", header: "VALUE", flex: 3, truncate: "middle" },
+            { key: "defaultLabel", header: "DEFAULT", flex: 2, truncate: "middle" },
             { key: "description", header: "DESCRIPTION", flex: 6, truncate: "end" },
           ]}
           rows={view.rows}

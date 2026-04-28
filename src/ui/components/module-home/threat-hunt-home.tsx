@@ -14,6 +14,7 @@ import { useRegisterKeybindings } from "../../hooks/useKeybindings.js";
 import type { ShellState } from "../../state.js";
 import { RuleHeader } from "../RuleHeader.js";
 import { ScreenContent } from "../ScreenContent.js";
+import { AttachmentsBlock } from "./AttachmentsBlock.js";
 import { KeyValueSection } from "./context-home.js";
 import type { ModuleHomeProps } from "./types.js";
 
@@ -88,16 +89,19 @@ function actionRows(shell: ShellState): Row[] {
 export function ThreatHuntHome({ shell }: ModuleHomeProps): React.ReactElement {
   useRegisterKeybindings([
     { keys: "Enter", label: "type tool verb" },
+    { keys: "a", label: "attachments", secondary: true },
     { keys: "t", label: "tune", secondary: true },
     { keys: "f", label: "findings", secondary: true },
     { keys: "b", label: "back", secondary: true },
     { keys: "?", label: "help", secondary: true },
   ]);
+  const slice = shell.kbState?.[MODULE_ID] ?? null;
   return (
     <ScreenContent>
       <RuleHeader breadcrumb={`kuzushi/${MODULE_ID}`} />
       <KeyValueSection title="readiness" rows={readinessRows(shell)} />
       <KeyValueSection title="scope" rows={scopeRows(shell)} />
+      <AttachmentsBlock slice={slice} moduleId={MODULE_ID} />
       <KeyValueSection title="actions" rows={actionRows(shell)} />
     </ScreenContent>
   );

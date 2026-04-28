@@ -24,6 +24,7 @@ import { toErrorMessage } from "../../../utils.js";
 import { forwardSubAgentMessage } from "../forward-subagent-output.js";
 import { convertRandoriToThreatModel } from "./randori-adapter.js";
 import {
+  ensureFallbackS4Artifact,
   mergeRandoriStageOutputs,
   type RandoriArtifacts,
   readRandoriArtifacts,
@@ -181,6 +182,10 @@ export function buildStridePrompt(
     "",
     `Read the prior stage outputs from ${outputDir}/pasta-s1.json, pasta-s2.json, pasta-s3.json, and dfd.mmd.`,
     "These describe the application's business context, technical scope, and data flow diagram.",
+    "Use a risk-first PASTA style: connect threat actors and objectives to business impact,",
+    "assets, trust boundaries, known weaknesses, and realistic attack patterns. Do not",
+    "re-enumerate S1-S3; build a bounded threat library from them and spot-check only the",
+    "source files needed for evidence anchors.",
     "",
     `Write ${outputDir}/pasta-s4.json with STRIDE threat scenarios grounded in code evidence.`,
     "",
@@ -191,6 +196,7 @@ export function buildStridePrompt(
     "- Map to MITRE ATT&CK technique IDs where applicable",
     "- Include OWASP category mapping (e.g., A01, A03)",
     `- Identify up to ${maxThreats} distinct threat scenarios across all STRIDE categories`,
+    "- Prefer the top risks by attack viability and business impact over exhaustive coverage",
     "",
     "Use the DFD elements and trust boundaries from S3 to identify attack surfaces.",
     "Read the actual source files referenced in the DFD to ground threats in real code.",
@@ -547,6 +553,15 @@ export interface RandoriRunnerParams {
    * stall indefinitely waiting on a silent SDK stream. `0` disables.
    */
   wallClockBudgetMs?: number;
+  /**
+   * Optional reference-material block prepended to every phase prompt.
+   * Sourced from `threat-model:attach` operator KB and rendered via the
+   * shared `renderUntrustedAttachments` helper, so it carries the
+   * `<untrusted_attachment moduleId="threat-model">` delimiter that tells
+   * the model "this is data, not instructions". Empty string / undefined
+   * means no addendum and the prompt is sent verbatim.
+   */
+  systemPromptAddendum?: string;
 }
 
 export interface RandoriRunnerResult {
@@ -633,6 +648,14 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
   // staleness watchdog to show a misleading `waiting…` chip.
   const runPhase = async (prompt: string, phaseTag: string): Promise<void> => {
     params.signal?.throwIfAborted();
+    // Prepend operator-staged reference material (architecture diagrams,
+    // RFCs, runbooks…) ahead of the phase's PASTA prompt. The block is
+    // already wrapped in `<untrusted_attachment>` delimiters with a per-
+    // run nonce, so the sub-Claude treats it as data rather than nested
+    // instructions. Skipped cleanly when no attachments are staged.
+    const finalPrompt = params.systemPromptAddendum?.trim()
+      ? `${params.systemPromptAddendum}\n\n---\n\n${prompt}`
+      : prompt;
     // tool_use_id → tool_name; needed so when a tool_result comes back
     // (keyed only by tool_use_id) we can identify WHICH tool failed.
     const toolNames = new Map<string, string>();
@@ -643,7 +666,10 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
     // cap trips when any single tool's count reaches MAX.
     const failuresByTool = new Map<string, number>();
     try {
-      for await (const message of params.runtime.query({ prompt, options: baseOpts })) {
+      for await (const message of params.runtime.query({
+        prompt: finalPrompt,
+        options: baseOpts,
+      })) {
         // Respect aborts eagerly — the abortController in baseOpts is
         // linked to params.signal, so the SDK will eventually stop, but
         // bailing here returns control to the shell immediately.
@@ -738,26 +764,50 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
     if (hasS4) {
       params.signal?.throwIfAborted();
       const scopeArtifacts = readRandoriArtifacts(params.repoRoot, params.artifactDir);
-      if (Object.keys(scopeArtifacts).length > 0) {
-        log.info(`${tag} Phase 2: running stage s4 (STRIDE threats)`);
-        params.onPhase?.("phase 2 (S4 threats)");
-        params.onActivity?.("enumerating STRIDE threats");
-        await runPhase(
-          buildStridePrompt(
-            params.maxThreats,
-            params.artifactDir,
-            params.previousModel,
+      if (hasUsableStageArtifacts(scopeArtifacts)) {
+        if (budgetExceeded || abortController.signal.aborted) {
+          log.warn(`${tag} Skipping LLM S4 because the prior phase exhausted the runtime budget`);
+          params.onPhase?.("phase 2 (S4 fallback)");
+          params.onActivity?.("deriving bounded S4 threats from S3 artifacts");
+          ensureFallbackS4Artifact(
             params.repoRoot,
-          ),
-          `${tag} Phase 2 (S4)`,
-        );
+            params.artifactDir,
+            scopeArtifacts,
+            params.maxThreats,
+          );
+        } else {
+          log.info(`${tag} Phase 2: running stage s4 (STRIDE threats)`);
+          params.onPhase?.("phase 2 (S4 threats)");
+          params.onActivity?.("enumerating STRIDE threats");
+          await runPhase(
+            buildStridePrompt(
+              params.maxThreats,
+              params.artifactDir,
+              params.previousModel,
+              params.repoRoot,
+            ),
+            `${tag} Phase 2 (S4)`,
+          );
+          const postS4Artifacts = readRandoriArtifacts(params.repoRoot, params.artifactDir);
+          if (!hasThreatScenarios(postS4Artifacts.s4Threats)) {
+            params.onPhase?.("phase 2 (S4 fallback)");
+            params.onActivity?.("deriving bounded S4 threats from S3 artifacts");
+            const fallback = ensureFallbackS4Artifact(
+              params.repoRoot,
+              params.artifactDir,
+              postS4Artifacts,
+              params.maxThreats,
+            );
+            if (fallback.written) log.warn(`${tag} Wrote fallback S4 threats to ${fallback.path}`);
+          }
+        }
       } else {
         log.warn(`${tag} Skipping S4 — no scope artifacts from S1-S3`);
       }
     }
 
     // ── Phase 3: narrative synthesis ──
-    if (hasS4) {
+    if (hasS4 && !budgetExceeded && !abortController.signal.aborted) {
       params.signal?.throwIfAborted();
       const postS4 = readRandoriArtifacts(params.repoRoot, params.artifactDir);
       const haveStageOutputs = postS4.s2Scope || postS4.s3Decomposition || postS4.s4Threats;
@@ -792,7 +842,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
 
     // ── Collect ──
     const artifacts = readRandoriArtifacts(params.repoRoot, params.artifactDir);
-    const merged = mergeRandoriStageOutputs(artifacts);
+    const merged = mergeRandoriStageOutputs(artifacts, { fallbackMaxThreats: params.maxThreats });
 
     if (!merged) {
       log.warn(`${tag} Randori produced no usable artifacts — returning empty threat model`);
@@ -831,4 +881,20 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
   } finally {
     if (budgetTimer) clearTimeout(budgetTimer);
   }
+}
+
+function hasUsableStageArtifacts(artifacts: RandoriArtifacts): boolean {
+  return Boolean(
+    artifacts.s1Objectives ||
+      artifacts.s2Scope ||
+      artifacts.s3Decomposition ||
+      artifacts.s4Threats ||
+      artifacts.narrative,
+  );
+}
+
+function hasThreatScenarios(s4: Record<string, unknown> | null): boolean {
+  if (!s4) return false;
+  const raw = s4["threat_scenarios"] ?? s4["threats"];
+  return Array.isArray(raw) && raw.length > 0;
 }

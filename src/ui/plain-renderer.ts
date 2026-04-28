@@ -520,6 +520,34 @@ function printShellView(emit: Emit, shell: ShellState, state: UIState): void {
     case "prompts-editor":
       printPromptsEditorView(emit, shell);
       return;
+    case "kb":
+      printKbView(emit, shell);
+      return;
+  }
+}
+
+function printKbView(emit: Emit, shell: ShellState): void {
+  const moduleId = shell.kb?.moduleId ?? shell.focusedModule ?? "kb";
+  const slice = shell.kbState?.[moduleId];
+  emit(`# KB ${moduleId}`);
+  if (!slice || slice.documents.length === 0) {
+    emit("  (no attachments yet) — use `attach <path-or-url>` to add reference material");
+    return;
+  }
+  emit(
+    `  ${slice.documents.length} attached · ${slice.totals.parsed} parsed · ${slice.totals.needsReview} review · ${slice.totals.error} error`,
+  );
+  emit(`  scope: ${slice.scopePath}`);
+  for (const doc of slice.documents) {
+    const glyph =
+      doc.status === "parsed"
+        ? "[x]"
+        : doc.status === "error"
+          ? "[!]"
+          : doc.status === "metadata-only"
+            ? "[~]"
+            : "[ ]";
+    emit(`  ${doc.id}  ${glyph}  ${doc.title}  · ${doc.kindLabel} · ${doc.detail}`);
   }
 }
 
@@ -817,6 +845,8 @@ function printModuleView(emit: Emit, shell: ShellState): void {
   if (card?.description) emit(`description: ${card.description}`);
   if (shell.focusedModule === "sast") {
     printPlainSastTaskSelectionSummary(emit, shell);
+  } else if (shell.focusedModule === "vendor-assessment") {
+    printPlainVendorAssessmentSummary(emit, shell);
   }
   const tools = card?.toolSummaries ?? [];
   if (tools.length === 0) {
@@ -829,6 +859,23 @@ function printModuleView(emit: Emit, shell: ShellState): void {
     emit(`- ${t.verb}${headless}: ${t.description}`);
   }
   emit("hint: run <verb> to invoke · /tune to adjust · /back to return");
+}
+
+function printPlainVendorAssessmentSummary(emit: Emit, shell: ShellState): void {
+  const slice = shell.vendorAssessment;
+  emit("## status");
+  emit(`vendor: ${slice?.vendorName ?? "(not set)"}`);
+  emit(`profile: ${slice?.profile ?? "enterprise-ai"}`);
+  emit(`confidence: ${slice?.confidence ?? "empty"}`);
+  emit(`docs: ${slice?.documents.length ?? 0} attached`);
+  emit(`missing: ${(slice?.missingArtifacts ?? []).join(", ") || "(none)"}`);
+  emit("## documents");
+  const docs = slice?.documents ?? [];
+  if (docs.length === 0) emit("(none attached)");
+  for (const doc of docs) {
+    emit(`- ${doc.title}  ${doc.kind}  ${doc.status}  ${doc.detail}`);
+  }
+  emit("commands: attach <path-or-url> · scope · clear scope · assess vendor=<name> · prompts");
 }
 
 function printPlainSastTaskSelectionSummary(emit: Emit, shell: ShellState): void {

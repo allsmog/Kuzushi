@@ -8,11 +8,15 @@
  */
 import { ContextHome } from "./context-home.js";
 import { ThreatHuntHome } from "./threat-hunt-home.js";
+import { ThreatModelHome } from "./threat-model-home.js";
 import type { ModuleHomeRenderer } from "./types.js";
+import { VendorAssessmentHome } from "./vendor-assessment-home.js";
 
 export const MODULE_HOME_RENDERERS: ReadonlyArray<ModuleHomeRenderer> = [
   { id: "context", render: ContextHome },
   { id: "threat-hunt", render: ThreatHuntHome },
+  { id: "threat-model", render: ThreatModelHome },
+  { id: "vendor-assessment", render: VendorAssessmentHome },
 ];
 
 export function getModuleHomeRenderer(moduleId: string | null): ModuleHomeRenderer | undefined {

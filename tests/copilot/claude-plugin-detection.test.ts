@@ -50,7 +50,7 @@ describe("detectClaudeCodePlugin", () => {
 
 describe("builtinHintFor", () => {
   it("redirects known plugin packages to their builtin wrappers", () => {
-    expect(builtinHintFor("@kuzushi/randori-plugin")).toContain("builtin:randori");
+    expect(builtinHintFor("@kuzushi/randori-plugin")).toContain("builtin:threat-model");
     expect(builtinHintFor("@kuzushi/vuln-scout")).toContain("builtin:vuln-scout");
     expect(builtinHintFor("@kuzushi/tob-skills")).toContain("builtin:tob");
     expect(builtinHintFor("shinsa-plugin")).toContain("builtin:shinsa");

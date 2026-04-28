@@ -1,6 +1,7 @@
 import type { AgentEffort } from "../../../agent-runtime/types.js";
 import type { KuzushiConfig } from "../../../types.js";
 import { isRecord } from "../../../utils.js";
+import { normalizeThreatModelMethodology } from "./methodology.js";
 import type { ThreatModelConfig } from "./types.js";
 
 export type { ThreatModelConfig } from "./types.js";
@@ -10,9 +11,10 @@ export type { ThreatModelConfig } from "./types.js";
 // Sonnet without extended reasoning. Operators can downgrade via
 // `taskConfig["threat-model"].model` / `.effort`.
 export const DEFAULT_THREAT_MODEL_CONFIG: ThreatModelConfig = {
+  methodology: "pasta",
   model: "anthropic:claude-opus-4-6",
   maxElements: 50,
-  maxThreats: 100,
+  maxThreats: 20,
   emitFindings: true,
   findingThreshold: "medium",
   randoriStages: ["s1", "s2", "s3", "s4"],
@@ -25,6 +27,10 @@ export function resolveThreatModelConfig(config: KuzushiConfig): ThreatModelConf
   if (!isRecord(raw)) return { ...DEFAULT_THREAT_MODEL_CONFIG, model: config.model };
 
   return {
+    methodology: normalizeThreatModelMethodology(
+      raw["methodology"] ?? raw["modelType"] ?? raw["type"],
+      DEFAULT_THREAT_MODEL_CONFIG.methodology,
+    ),
     model: normalizeString(raw["model"] ?? raw["strideModel"], config.model),
     maxElements: normalizePositiveInt(raw["maxElements"], DEFAULT_THREAT_MODEL_CONFIG.maxElements),
     maxThreats: normalizePositiveInt(raw["maxThreats"], DEFAULT_THREAT_MODEL_CONFIG.maxThreats),

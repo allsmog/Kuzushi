@@ -3,14 +3,12 @@
  *
  * Thin wrapper that exposes the @kuzushi/randori-plugin Claude Code plugin
  * as module:action tools callable from shell and run modes. Shares the
- * `runRandoriPasta` runner with the `threat-model-randori` pipeline task
- * (src/agents/tasks/threat-modeling/randori.ts) so behaviour stays
+ * `runRandoriPasta` runner with the threat-model module so behaviour stays
  * consistent across all three execution modes.
  */
 
 import path from "node:path";
 import { resolveDefaultReadOnlyTools } from "../../agent-runtime/execution.js";
-import { threatModelRandoriTask } from "../../agents/tasks/threat-modeling/randori.js";
 import { convertRandoriToThreatModel } from "../../agents/tasks/threat-modeling/randori-adapter.js";
 import {
   mergeRandoriStageOutputs,
@@ -20,7 +18,6 @@ import { runRandoriPasta } from "../../agents/tasks/threat-modeling/randori-runn
 import { resolveRandoriPluginPath } from "../../agents/tasks/threat-modeling/resolve-randori.js";
 import { resolveRepo } from "../../cli/shared.js";
 import { loadPersistentThreatModel } from "../../threat-model-renderer.js";
-import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
 const DEFAULT_STAGES = ["s1", "s2", "s3", "s4"] as const;
@@ -310,14 +307,6 @@ const threatModelTool: ModuleTool = {
 // ---------------------------------------------------------------------------
 
 export function createCoreRandoriModule(): CopilotModule {
-  // Hidden DagTool wrapper for the scan pipeline's threat-model-randori task.
-  // Registered under its own id ("threat-model-randori") via the bridge so
-  // `dependsOn: ["threat-model-randori"]` keeps resolving (threat-hunt,
-  // task-selector, and the category-sensitive detectors all rely on it).
-  const hiddenThreatModel = exposeAgentTaskAsHiddenDagTool<"randori">(threatModelRandoriTask, {
-    moduleId: "randori",
-  });
-
   return {
     id: "randori",
     displayName: "Randori PASTA",
@@ -326,7 +315,7 @@ export function createCoreRandoriModule(): CopilotModule {
     description:
       "PASTA threat modeling wrapper around the @kuzushi/randori-plugin Claude Code plugin — " +
       "runs S1-S4 plus narrative synthesis and returns a ThreatModelDocument.",
-    tools: [pastaTool, threatModelTool, hiddenThreatModel],
+    tools: [pastaTool, threatModelTool],
     async init() {
       // No eager plugin resolution — tools report a graceful error if missing.
     },

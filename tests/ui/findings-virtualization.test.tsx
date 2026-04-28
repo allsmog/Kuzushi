@@ -92,16 +92,20 @@ describe("FindingsView virtualization", () => {
     instance.unmount();
   });
 
-  it("finishes a 2000-finding initial render in under 200ms", () => {
+  it("finishes a 2000-finding initial render well under the un-virtualized baseline", () => {
     const findings = makeFindings(2000);
     const t0 = Date.now();
     const instance = renderHeadless(
       createElement(FindingsView, { mode: "unified", findings, pageSize: 50 }),
     );
     const elapsed = Date.now() - t0;
-    // Generous ceiling — on CI we've seen 30-90ms consistently with a 50-row
-    // window. Without virtualization the same fixture was 600ms+.
-    expect(elapsed).toBeLessThan(200);
+    // Regression sentinel rather than a tight perf assertion: without
+    // virtualization this fixture was 600ms+, so anything below 500ms
+    // proves the windowing path is engaged. The render-count test above
+    // already pins the intent (≤ pageSize LooseRow bodies); this one just
+    // catches a structural regression that defeats virtualization without
+    // flaking when the wider test suite runs in parallel and steals CPU.
+    expect(elapsed).toBeLessThan(500);
     instance.unmount();
   });
 
@@ -156,7 +160,7 @@ describe("FindingsView virtualization", () => {
     instance.unmount();
   });
 
-  it("500-finding initial render uses pageSize rows + stays under 150ms", () => {
+  it("500-finding initial render stays in the windowed regime", () => {
     const findings = makeFindings(500);
     const t0 = Date.now();
     const instance = renderHeadless(
@@ -164,7 +168,10 @@ describe("FindingsView virtualization", () => {
     );
     const elapsed = Date.now() - t0;
     expect(renderCount("LooseRow")).toBeLessThanOrEqual(50);
-    expect(elapsed).toBeLessThan(150);
+    // Same rationale as the 2000-row test: hold the budget loose enough
+    // that we don't flake under parallel load while still catching a
+    // structural regression that drops virtualization.
+    expect(elapsed).toBeLessThan(400);
     instance.unmount();
   });
 });

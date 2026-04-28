@@ -18,6 +18,7 @@ export type ShellCommandGroup =
   | "config"
   | "scope"
   | "threats"
+  | "kb"
   | "session";
 
 export type CommandSurfaceKind = "core" | "advanced" | "dev" | "deprecated";
@@ -221,13 +222,8 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   },
   { syntax: "/context edit", description: "Review/edit scan context", group: "scope" },
   {
-    syntax: "/context dfd",
-    description: "Open the context-backed data flow diagram",
-    group: "scope",
-  },
-  {
     syntax: "/context regen <slice>",
-    description: "Regenerate a generated context slice (dfd, stride, stories, scenarios, etc.)",
+    description: "Regenerate a context slice (all, repo, enrichment, app-model)",
     group: "scope",
   },
   {
@@ -257,6 +253,11 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
     group: "threats",
   },
   {
+    syntax: "/threats regen <slice>",
+    description: "Regenerate threat-model artifacts (all, dfd, stride, stories, scope, scenarios)",
+    group: "threats",
+  },
+  {
     syntax: "/threats summary | 5",
     description: "Counts bar charts + drives + artifact paths",
     group: "threats",
@@ -270,6 +271,35 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
     syntax: "/threats ask <instruction>",
     description: "Ask AI to propose a reviewable threat-model patch",
     group: "threats",
+  },
+  {
+    syntax: "/kb",
+    description: "Open the focused module's knowledge base (attachments)",
+    group: "kb",
+    longDescription:
+      "Opens the cursor+preview view for the focused module's attachments. Bare `attachments` is an alias.",
+  },
+  {
+    syntax: "attach <path-or-url>",
+    description: "Attach a file or URL to the focused module's KB",
+    group: "kb",
+    longDescription:
+      "Routes to `<focusedModule>:attach`. Text/Markdown/JSON/CSV/YAML/XML/HTML are parsed natively; PDFs use a lightweight extractor; images and unsupported types are retained as metadata-only references.",
+  },
+  {
+    syntax: "attachments",
+    description: "List attachments for the focused module (alias for /kb)",
+    group: "kb",
+  },
+  {
+    syntax: "detach <id>",
+    description: "Remove an attachment by id, unique prefix, or unique title",
+    group: "kb",
+  },
+  {
+    syntax: "reparse <id>",
+    description: "Re-run the parser after the source file changed on disk",
+    group: "kb",
   },
   {
     syntax: "/load <specifier>",
@@ -308,6 +338,7 @@ const ADVANCED_COMMANDS = new Set([
   "/context regen",
   "/threats edit",
   "/threats ask",
+  "/threats regen",
 ]);
 
 const DEV_COMMANDS = new Set(["/load"]);
@@ -344,6 +375,7 @@ export const SHELL_COMMAND_GROUP_TITLES: Record<ShellCommandGroup, string> = {
   config: "Config & tool options",
   scope: "Target · context · workspace",
   threats: "Threat modelling",
+  kb: "Knowledge base",
   session: "Session",
 };
 

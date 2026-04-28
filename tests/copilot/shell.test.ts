@@ -40,13 +40,17 @@ async function createMockCore() {
   const { createThreatHuntModule } = await import("../../src/modules/threat-hunt/threat-hunt.js");
   const { createContextModule } = await import("../../src/modules/context/context.js");
   const { createTaintIrisModule } = await import("../../src/modules/taint-iris/taint-iris.js");
+  const { createThreatModelModule } = await import(
+    "../../src/modules/threat-model/threat-model.js"
+  );
 
   const sast = createCoreSastModule();
   const semgrep = createSemgrepModule();
   const threatHunt = createThreatHuntModule();
   const context = createContextModule();
   const taintIris = createTaintIrisModule();
-  const mods = [sast, semgrep, threatHunt, context, taintIris];
+  const threatModel = createThreatModelModule();
+  const mods = [sast, semgrep, threatHunt, context, taintIris, threatModel];
   const module = sast; // back-compat name; older assertions still reference `module`
 
   const executeTool = vi.fn(async (_toolName: string, input: unknown) => ({
@@ -1298,6 +1302,12 @@ describe("local shell commands", () => {
           summary: { total: 0, bySeverity: {}, byCategory: {} },
         },
       },
+      threatModel: {
+        version: "1.0",
+        dfd: { elements: [], trustBoundaries: [] },
+        threats: [],
+        summary: { total: 0, bySeverity: {}, byCategory: {} },
+      },
     };
 
     const qualified = __shellInternals.handleLocalCommand(
@@ -1372,6 +1382,7 @@ describe("local shell commands", () => {
           options: { enrichment: false, threatModel: false, scenarios: false },
           appModel: shellState.contextSnapshot.appModel,
         },
+        threatModel: null,
       },
     );
     expect(incompleteContext?.output).toContain("Context incomplete for threat-hunt:run");
@@ -1454,6 +1465,7 @@ describe("context system", () => {
     const shellState = {
       ...createShellState(module.tools.map((t) => t.name)),
       contextSnapshot: mockSnapshot,
+      threatModel: mockSnapshot.threatModel,
     };
     const ctx = { focusedModule: null };
 
@@ -1462,7 +1474,7 @@ describe("context system", () => {
     expect(result?.output).toContain("TypeScript");
     expect(result?.output).toContain("Express");
     expect(result?.output).toContain("Routes (2)");
-    expect(result?.output).toContain("SSRF via webhook");
+    expect(result?.output).not.toContain("SSRF via webhook");
   });
 
   it("/context adopts the loaded context snapshot target", async () => {
@@ -1472,6 +1484,7 @@ describe("context system", () => {
     const shellState = {
       ...createShellState(module.tools.map((t) => t.name)),
       contextSnapshot: mockSnapshot,
+      threatModel: mockSnapshot.threatModel,
     };
     const ctx = { focusedModule: null };
 
@@ -1480,7 +1493,7 @@ describe("context system", () => {
     expect(opts.target).toBe("/resolved/repo");
   });
 
-  it("/context dfd routes to the context-backed DFD without an explicit target", async () => {
+  it("/context dfd returns a migration hint", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
     opts.target = undefined;
@@ -1491,12 +1504,12 @@ describe("context system", () => {
     const ctx = { focusedModule: null };
 
     const result = __shellInternals.handleLocalCommand("/context dfd", core, opts, ctx, shellState);
-    expect(result?.output).toContain("data flow diagram");
-    expect(result?.shellStateUpdater?.(shellState).threatTab).toBe("dfd");
-    expect(opts.target).toBe("/resolved/repo");
+    expect(result?.output).toContain("/threats dfd");
+    expect(result?.output).toContain("/threats regen dfd");
+    expect(result?.shellStateUpdater).toBeUndefined();
   });
 
-  it("dfd in the focused context module opens the context-backed DFD", async () => {
+  it("dfd in the focused context module returns a migration hint", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
     opts.target = undefined;
@@ -1508,9 +1521,9 @@ describe("context system", () => {
     const ctx = { focusedModule: "context" };
 
     const result = __shellInternals.handleLocalCommand("dfd", core, opts, ctx, shellState);
-    expect(result?.output).toContain("data flow diagram");
-    expect(result?.shellStateUpdater?.(shellState).threatTab).toBe("dfd");
-    expect(opts.target).toBe("/resolved/repo");
+    expect(result?.output).toContain("/threats dfd");
+    expect(result?.output).toContain("/threats regen dfd");
+    expect(result?.shellStateUpdater).toBeUndefined();
   });
 
   it("/context without snapshot dispatches sast:context tool", async () => {
@@ -1542,13 +1555,40 @@ describe("context system", () => {
       ctx,
       shellState,
     );
-    expect(result?.output).toContain("/context regen dfd");
+    expect(result?.output).toContain("/context regen app-model");
+    expect(result?.output).toContain("/threats regen <all|dfd|stride|stories|scope|scenarios>");
     expect(result?.shellStateUpdater).toBeTypeOf("function");
     expect(result?.shellStateUpdater?.(shellState).contextRegenPaletteOpen).toBe(true);
   });
 
-  it("/context regen <slice> dispatches context:build with scope", async () => {
+  it("/context regen <slice> dispatches context:build with context scope", async () => {
     const { core, module, executeTool } = await createMockCore();
+    const opts = createShellOptions();
+    opts.target = "/resolved/repo";
+    const shellState = {
+      ...createShellState(module.tools.map((t) => t.name)),
+      contextSnapshot: mockSnapshot,
+    };
+    const ctx = { focusedModule: null };
+
+    const result = __shellInternals.handleLocalCommand(
+      "/context regen app-model",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(result?.executedToolName).toBe("context:build");
+    await result?.asyncExecute?.();
+    expect(executeTool).toHaveBeenCalledWith(
+      "context:build",
+      expect.objectContaining({ scope: "app-model" }),
+      expect.anything(),
+    );
+  });
+
+  it("/context regen threat-model slice returns migration hint", async () => {
+    const { core, module } = await createMockCore();
     const opts = createShellOptions();
     opts.target = "/resolved/repo";
     const shellState = {
@@ -1564,13 +1604,9 @@ describe("context system", () => {
       ctx,
       shellState,
     );
-    expect(result?.executedToolName).toBe("context:build");
-    await result?.asyncExecute?.();
-    expect(executeTool).toHaveBeenCalledWith(
-      "context:build",
-      expect.objectContaining({ scope: "dfd", preserveUserEdits: true }),
-      expect.anything(),
-    );
+    expect(result?.output).toContain("moved out of context");
+    expect(result?.output).toContain("/threats regen dfd");
+    expect(result?.executedToolName).toBeUndefined();
   });
 
   it("/context regen <slice> uses the loaded context snapshot target", async () => {
@@ -1584,7 +1620,7 @@ describe("context system", () => {
     const ctx = { focusedModule: null };
 
     const result = __shellInternals.handleLocalCommand(
-      "/context regen dfd",
+      "/context regen app-model",
       core,
       opts,
       ctx,
@@ -1596,7 +1632,36 @@ describe("context system", () => {
       "context:build",
       expect.objectContaining({
         target: "/resolved/repo",
-        scope: "dfd",
+        scope: "app-model",
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("/threats regen <slice> dispatches threat-model:build", async () => {
+    const { core, module, executeTool } = await createMockCore();
+    const opts = createShellOptions();
+    opts.target = "/resolved/repo";
+    const shellState = {
+      ...createShellState(module.tools.map((t) => t.name)),
+      contextSnapshot: mockSnapshot,
+    };
+    const ctx = { focusedModule: null };
+
+    const result = __shellInternals.handleLocalCommand(
+      "/threats regen dfd",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(result?.executedToolName).toBe("threat-model:build");
+    await result?.asyncExecute?.();
+    expect(executeTool).toHaveBeenCalledWith(
+      "threat-model:build",
+      expect.objectContaining({
+        target: "/resolved/repo",
+        slice: "dfd",
         preserveUserEdits: true,
       }),
       expect.anything(),
@@ -1739,6 +1804,7 @@ describe("context system", () => {
     const shellState = {
       ...createShellState(module.tools.map((t) => t.name)),
       contextSnapshot: mockSnapshot,
+      threatModel: mockSnapshot.threatModel,
     };
 
     const result = __shellInternals.handleLocalCommand(

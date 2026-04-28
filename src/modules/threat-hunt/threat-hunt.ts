@@ -1,6 +1,6 @@
 /**
- * Threat-driven hunt — CTF-framed actor agents driven by STRIDE threats
- * from the Randori PASTA threat model.
+ * Threat-driven hunt — CTF-framed actor agents driven by a generated
+ * threat-model document.
  *
  * Each external-entity actor in the DFD spawns one or more agents; each
  * agent receives a scoped system prompt, free tool access (read/grep/glob),
@@ -15,8 +15,7 @@
  * `runSingleTaskPipeline` bridge, no duplicated prompt-override path.
  *
  * Inspired by Nicholas Carlini's file-sweep approach demonstrated at
- * [un]prompted 2026, driven by the Randori threat model instead of blind
- * file iteration.
+ * [un]prompted 2026, driven by a threat model instead of blind file iteration.
  */
 
 import {
@@ -42,11 +41,17 @@ import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
+import { createAttachmentTools, renderUntrustedAttachments } from "../_shared/attachments/index.js";
 import { defineDagTool, defineModule } from "../define.js";
 import { resolvePromptValue } from "../sast/prompts.js";
 import { targetProperty } from "../sast/schema-fragments.js";
 import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
 import { requireDag } from "../types.js";
+import {
+  loadThreatHuntAttachments,
+  THREAT_HUNT_KIND_SPEC,
+  threatHuntAttachmentAdapter,
+} from "./attachments.js";
 import { type ActorWithThreats, extractActorsWithThreats } from "./selectors.js";
 
 const log = createLogger({ stage: "threat-hunt" });
@@ -69,6 +74,13 @@ interface ThreatHuntConfig {
   maxConcurrentHunts: number;
   maxTurnsPerHunt: number;
   promptOverride?: string;
+  /**
+   * Operator-staged reference material (incident postmortems, runtime logs,
+   * prior findings, intel briefs). Pre-rendered into a nonce-wrapped
+   * `<untrusted_attachment>` block by `resolveConfig` so each actor's
+   * `buildScopedPrompt` call only has to concatenate, not re-render.
+   */
+  attachmentsBlock?: string;
 }
 
 /**
@@ -151,6 +163,17 @@ async function resolveConfig(input: unknown, ctx: ExecutionContext): Promise<Thr
   const p = isRecord(input) ? input : {};
   const promptRaw = readOption<string>(ctx, p, "THREAT_HUNT_PROMPT", "promptOverride");
   const promptOverride = await resolvePromptValue(promptRaw, ctx.cwd);
+  // Pre-render the attachments block once per run; every per-actor prompt
+  // shares it so we don't pay the rendering cost (and re-roll the nonce)
+  // for each actor.
+  const attachments = loadThreatHuntAttachments(ctx.cwd);
+  const attachmentsBlock =
+    attachments.length > 0
+      ? renderUntrustedAttachments(attachments, {
+          moduleId: "threat-hunt",
+          emptyPlaceholder: "",
+        }).block
+      : undefined;
   return {
     model: readModel(ctx, p),
     maxFindings: readPositiveInt(ctx, p, "maxFindings", 50),
@@ -161,6 +184,7 @@ async function resolveConfig(input: unknown, ctx: ExecutionContext): Promise<Thr
     effort: readEffort(ctx, p) ?? DEFAULT_THREAT_HUNT_EFFORT,
     thinkingDisabled: readThinkingDisabled(ctx, p) ?? false,
     ...(promptOverride ? { promptOverride } : {}),
+    ...(attachmentsBlock ? { attachmentsBlock } : {}),
   };
 }
 
@@ -211,13 +235,24 @@ function buildScopedPrompt(
   threats: StrideThreat[],
   scanScope: string,
   promptOverride?: string,
+  attachmentsBlock?: string,
 ): string {
   const base = promptOverride ?? buildPrompt(actor, threats);
-  return [
+  // Order: scope-restriction → operator KB → actor mission. Putting the
+  // attachments block between scope and mission means the agent reads "what
+  // you can touch", "what you should know", "what to do" in that sequence.
+  // Note: attachments fire even under THREAT_HUNT_PROMPT overrides so the
+  // operator's evidence is never silently dropped — flip the conditional
+  // here if a future override should suppress the KB.
+  const sections: string[] = [
     `IMPORTANT: Only examine files under ${scanScope}. Do not read, grep, or navigate outside this directory.`,
     "",
-    base,
-  ].join("\n");
+  ];
+  if (attachmentsBlock?.trim()) {
+    sections.push(attachmentsBlock, "");
+  }
+  sections.push(base);
+  return sections.join("\n");
 }
 
 /**
@@ -282,7 +317,13 @@ async function runActorHunt(
   ctx.signal?.throwIfAborted();
   const dag = requireDag(ctx);
   const scanScope = dag.scanPath ?? dag.repoRoot;
-  const prompt = buildScopedPrompt(actor, threats, scanScope, config.promptOverride);
+  const prompt = buildScopedPrompt(
+    actor,
+    threats,
+    scanScope,
+    config.promptOverride,
+    config.attachmentsBlock,
+  );
   const tag = `[threat-hunt/${actor.name}#${runIndex}]`;
 
   // Link the tool's abort signal to a per-hunt AbortController so Ctrl+C
@@ -638,13 +679,22 @@ export const threatHuntTool = defineDagTool<
 });
 
 export function createThreatHuntModule(): CopilotModule {
+  // Knowledge-base verbs (`attach` / `attachments` / `detach` / `reparse`)
+  // are registered through the shared factory. Operators stage incident
+  // postmortems, runtime/SIEM logs, prior findings, intel briefs, etc.;
+  // `resolveConfig` reads them at run time and threads the rendered block
+  // into every per-actor prompt via `buildScopedPrompt`.
+  const attachmentTools = createAttachmentTools("threat-hunt", THREAT_HUNT_KIND_SPEC, {
+    adapter: threatHuntAttachmentAdapter(),
+  });
   return defineModule({
     id: "threat-hunt",
     displayName: "Threat Hunt",
     category: "offense",
     version: "0.17.2",
     description:
-      "CTF-framed actor agents that hunt STRIDE threats from the Randori PASTA threat model.",
+      "CTF-framed actor agents that hunt threats from the active threat-model document. " +
+      "Attach reference material (incidents, runtime logs, prior findings) with `attach`.",
     rank: "good",
     references: [{ type: "URL", value: "https://unprompted.ai/" }],
     notes: {
@@ -654,9 +704,9 @@ export function createThreatHuntModule(): CopilotModule {
     },
     requires: [
       { kind: "snapshot", moduleId: "context", field: "appModel" },
-      { kind: "snapshot", moduleId: "context", field: "threatModel" },
+      { kind: "snapshot", moduleId: "threat-model", field: "threatModel" },
     ],
-    tools: [threatHuntTool],
+    tools: [threatHuntTool, ...attachmentTools],
   });
 }
 
@@ -664,6 +714,7 @@ export function createThreatHuntModule(): CopilotModule {
 export const __threatHuntInternals = {
   extractActors: (m: ReadonlyMap<string, unknown>) => extractActorsWithThreats(m).allActors,
   buildPrompt,
+  buildScopedPrompt,
   buildActorFingerprint,
   resolveConfig,
   runActorHunt,

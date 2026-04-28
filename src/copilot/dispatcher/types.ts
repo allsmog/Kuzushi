@@ -50,8 +50,8 @@ export interface CommandDispatcher {
   readonly name: string;
   /** Map of command name → one-line help text. */
   readonly commands: Readonly<Record<string, string>>;
-  /** Execute a command. Returns a CommandResult or void. */
-  execute(cmd: string, args: string[], ctx: CommandContext): Promise<CommandResult | void>;
+  /** Execute a command. Returns a CommandResult or undefined. */
+  execute(cmd: string, args: string[], ctx: CommandContext): Promise<CommandResult | undefined>;
   /** Optional per-command help. */
   help?(cmd: string): string | undefined;
   /** Optional per-command tab completion. Receives the partial token + prior words. */
@@ -80,7 +80,7 @@ export interface Driver {
    * check `requires` preflight constraints (e.g. threat-hunt needs a fresh
    * ContextSnapshot with appModel). Omit in non-shell contexts.
    */
-  getShellState?(): { contextSnapshot?: unknown } | undefined;
+  getShellState?(): { contextSnapshot?: unknown; threatModel?: unknown } | undefined;
   /**
    * Optional finding-count lookup. Used by modules that declare a
    * `kind: "findings"` requirement (triage / verify / patch).

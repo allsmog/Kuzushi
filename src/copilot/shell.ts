@@ -28,11 +28,22 @@ import type { AgentQueryOptions, AgentRuntime, AgentSession } from "../agent-run
 import { createBus } from "../bus/index.js";
 import type { MessageBus } from "../bus/types.js";
 import { JobManager } from "../jobs/manager.js";
+import {
+  type AttachmentStorageAdapter,
+  buildHomeSlice,
+  defaultAttachmentAdapter,
+  type KindSpec,
+} from "../modules/_shared/attachments/index.js";
+import { CONTEXT_KIND_SPEC } from "../modules/context/attachments.js";
 import { formatContextSummary } from "../modules/core-sast.js";
+import { THREAT_HUNT_KIND_SPEC } from "../modules/threat-hunt/attachments.js";
+import { THREAT_MODEL_KIND_SPEC } from "../modules/threat-model/attachments.js";
 import type { ModuleInfo, ModuleTool } from "../modules/types.js";
+import { loadDraftScope, scopeToHomeSlice } from "../modules/vendor-assessment/storage.js";
 import { SessionManager } from "../sessions/manager.js";
 import type { PipelineRunRecord } from "../store.js";
 import { applyThreatModelPatch, proposeThreatModelPatch } from "../threat-model-patch.js";
+import { loadPersistentThreatModel } from "../threat-model-renderer.js";
 import type { KuzushiConfig } from "../types.js";
 import { formatUnknownModule, formatUnknownTool, formatUnknownVerb } from "../ui/error-format.js";
 import { formatDuration } from "../ui/format.js";
@@ -236,7 +247,10 @@ function looksLikeSubagentStartLine(text: string): boolean {
  * `taskOutputs["threat-model-randori"].findings` into the report
  * phase, which isn't reconstructed from the snapshot).
  */
-function buildSeedMapFromSnapshot(snapshot: ContextSnapshot): Map<string, unknown> {
+function buildSeedMapFromSnapshot(
+  snapshot: ContextSnapshot,
+  extras: { threatModel?: unknown; scenarios?: unknown[] } = {},
+): Map<string, unknown> {
   const seed = new Map<string, unknown>();
   if (snapshot.repoContext || snapshot.fileIndex) {
     seed.set("context-gatherer", {
@@ -246,9 +260,9 @@ function buildSeedMapFromSnapshot(snapshot: ContextSnapshot): Map<string, unknow
   }
   if (snapshot.enrichedContext) seed.set("context-enricher", snapshot.enrichedContext);
   if (snapshot.appModel) seed.set("app-model-build", snapshot.appModel);
-  if (snapshot.threatModel)
-    seed.set("threat-model-randori", { document: snapshot.threatModel, findings: [] });
-  if (snapshot.scenarios) seed.set("threat-scenario-build", { scenarios: snapshot.scenarios });
+  if (extras.threatModel)
+    seed.set("threat-model-randori", { document: extras.threatModel, findings: [] });
+  if (extras.scenarios) seed.set("threat-scenario-build", { scenarios: extras.scenarios });
   return seed;
 }
 
@@ -410,16 +424,26 @@ const CONTEXT_REGEN_SLICES: ReadonlyArray<ContextGenerationSlice> = [
   "repo",
   "enrichment",
   "app-model",
+];
+const THREAT_MODEL_REGEN_SLICES = [
+  "all",
   "dfd",
   "stride",
   "stories",
   "scope",
   "scenarios",
-];
+] as const;
+type ThreatModelRegenSlice = (typeof THREAT_MODEL_REGEN_SLICES)[number];
 
 function parseContextRegenSlice(value: string | undefined): ContextGenerationSlice | undefined {
   return CONTEXT_REGEN_SLICES.includes(value as ContextGenerationSlice)
     ? (value as ContextGenerationSlice)
+    : undefined;
+}
+
+function parseThreatModelRegenSlice(value: string | undefined): ThreatModelRegenSlice | undefined {
+  return THREAT_MODEL_REGEN_SLICES.includes(value as ThreatModelRegenSlice)
+    ? (value as ThreatModelRegenSlice)
     : undefined;
 }
 
@@ -635,7 +659,7 @@ function moduleIdFromToolName(toolName: string): string | null {
   return moduleId && moduleId.length > 0 ? moduleId : null;
 }
 
-function seedCheckpointModuleRun(
+function seedFocusedModuleRun(
   store: UIStore | undefined,
   shellState: ShellState,
   tool: ModuleTool,
@@ -643,14 +667,15 @@ function seedCheckpointModuleRun(
   inputSummary?: string,
   model?: string,
 ): void {
-  if (!store || tool.runLifecycle?.persistence !== "pipeline-checkpoint") return;
+  if (!store) return;
   const moduleId = moduleIdFromToolName(tool.name);
   if (!moduleId || shellState.focusedModule !== moduleId) return;
 
   updateShell(store, (shell) => {
-    if (shell.moduleRun?.status === "running" && shell.moduleRun.toolName === tool.name) {
-      return shell;
-    }
+    const existing =
+      shell.moduleRun?.status === "running" && shell.moduleRun.toolName === tool.name
+        ? shell.moduleRun
+        : undefined;
     return {
       ...shell,
       shellView: "module-run",
@@ -660,18 +685,32 @@ function seedCheckpointModuleRun(
         source: "shell",
         toolName: tool.name,
         ...(tool.displayName ? { displayName: tool.displayName } : {}),
-        ...(inputSummary ? { inputSummary } : {}),
+        ...((inputSummary ?? existing?.inputSummary)
+          ? { inputSummary: inputSummary ?? existing?.inputSummary }
+          : {}),
         ...(tool.runLifecycle?.liveControl ? { liveControl: tool.runLifecycle.liveControl } : {}),
-        ...(model ? { model } : {}),
-        startedAtMs,
+        ...((model ?? existing?.model) ? { model: model ?? existing?.model } : {}),
+        startedAtMs: existing?.startedAtMs ?? startedAtMs,
         status: "running",
-        steps: [],
-        evidenceTail: [],
-        findingCount: 0,
-        costUsd: 0,
+        steps: existing?.steps ?? [],
+        evidenceTail: existing?.evidenceTail ?? [],
+        findingCount: existing?.findingCount ?? 0,
+        costUsd: existing?.costUsd ?? 0,
       },
     };
   });
+}
+
+function seedCheckpointModuleRun(
+  store: UIStore | undefined,
+  shellState: ShellState,
+  tool: ModuleTool,
+  startedAtMs: number,
+  inputSummary?: string,
+  model?: string,
+): void {
+  if (!store || tool.runLifecycle?.persistence !== "pipeline-checkpoint") return;
+  seedFocusedModuleRun(store, shellState, tool, startedAtMs, inputSummary, model);
 }
 
 function patchCheckpointModuleRunTerminal(
@@ -2479,9 +2518,9 @@ export async function startShell(opts: ShellOptions): Promise<void> {
   // No-workspace fallback: if the target repo has a prior on-disk
   // `<target>/.kuzushi/context-snapshot.json` from an earlier
   // `context:build` run, auto-load it so dependent modules
-  // (threat-hunt, agentic-sast, taint-iris) find their appModel /
-  // threatModel prerequisites without the operator having to re-run
-  // context:build on every session.
+  // (threat-hunt, agentic-sast, taint-iris) find their appModel
+  // prerequisites without the operator having to re-run context:build
+  // on every session.
   //
   // `opts.target` may be undefined when the operator runs `kuzushi`
   // from within a repo with no flags; every other tool-dispatch path
@@ -2668,9 +2707,19 @@ async function startInkShell(
     signal?: AbortSignal,
     datastore?: Datastore,
   ) => {
-    setProcessing(store, true);
-    const snapshot = store.getState().shell?.contextSnapshot ?? null;
-    const seedTaskOutputs = snapshot ? buildSeedMapFromSnapshot(snapshot) : undefined;
+    const shell = store.getState().shell;
+    const snapshot = shell?.contextSnapshot ?? null;
+    const seedTarget = opts.target ?? currentCwd();
+    const threatModel =
+      shell?.threatModel ??
+      (!/^[a-z][a-z0-9+.-]*:\/\//i.test(seedTarget)
+        ? loadPersistentThreatModel(path.resolve(seedTarget))
+        : null);
+    const seedTaskOutputs = snapshot
+      ? buildSeedMapFromSnapshot(snapshot, {
+          ...(threatModel ? { threatModel } : {}),
+        })
+      : undefined;
     const execOpts: Parameters<CopilotCore["executeTool"]>[2] = {
       cwd: currentCwd(),
       uiStore: store,
@@ -2711,20 +2760,6 @@ async function startInkShell(
       ...(turnId ? { turnId } : {}),
       durable: true,
     });
-    appendToHistory(store, {
-      type: "tool-call",
-      id: historyEntryId,
-      tool: tool.name,
-      ...(displayName ? { displayName } : {}),
-      ...(inputDisplay ? { inputHint: inputDisplay } : {}),
-      status: "running",
-      text: headerText,
-      timestamp: Date.now(),
-      storyEvent: startStory,
-    });
-    updateShell(store, (shell) =>
-      applyStoryEventToShell(shell, startStory, { persistHistory: false }),
-    );
     // Seed `currentTool` so ToolRunningStatus has something to render the
     // moment the dispatcher kicks off a direct `run` — otherwise the
     // `task:activity` events that fire during the tool would hit an empty
@@ -2732,9 +2767,33 @@ async function startInkShell(
     const startedAt = Date.now();
     const toolModuleId = tool.name.includes(":") ? tool.name.split(":", 1)[0] : null;
     const runModel = localModelOverride ?? datastore?.get<string>("model");
+    // Batch the initial run state so Ink never renders a blank processing
+    // frame between `run` and the module-run screen.
     updateShell(store, (shell) => {
-      const next: ShellState = {
-        ...shell,
+      let next: ShellState = applyStoryEventToShell(
+        {
+          ...shell,
+          processing: true,
+          history: [
+            ...shell.history,
+            {
+              type: "tool-call",
+              id: historyEntryId,
+              tool: tool.name,
+              ...(displayName ? { displayName } : {}),
+              ...(inputDisplay ? { inputHint: inputDisplay } : {}),
+              status: "running",
+              text: headerText,
+              timestamp: Date.now(),
+              storyEvent: startStory,
+            },
+          ],
+        },
+        startStory,
+        { persistHistory: false },
+      );
+      next = {
+        ...next,
         currentTool: {
           name: tool.name,
           startedAt,
@@ -3255,7 +3314,9 @@ async function startInkShell(
     // Expose the live ShellState to module preflight checks (CopilotModule.requires).
     getShellState: () => {
       const shell = store.getState().shell;
-      return shell ? { contextSnapshot: shell.contextSnapshot } : undefined;
+      return shell
+        ? { contextSnapshot: shell.contextSnapshot, threatModel: shell.threatModel }
+        : undefined;
     },
     // Workspace-DB finding count for triage/verify/patch requires. Optional —
     // when no workspace is active the count defaults to 0 and the preflight
@@ -3746,6 +3807,12 @@ async function startInkShell(
             storyTail: [startStory],
           },
         }));
+        if (asyncTool) {
+          const liveShell = store.getState().shell;
+          if (liveShell) {
+            seedFocusedModuleRun(store, liveShell, asyncTool, asyncStartedAt);
+          }
+        }
       }
       try {
         const execResult = normalizeAsyncExecutionResult(
@@ -4134,6 +4201,26 @@ async function startInkShell(
     ensureRawMode();
   }
 
+  // Pre-compute the .kuzushi/ artifact banner so it lands in the FIRST
+  // shell-state render. Appending it after `store.update` would grow the
+  // <Static> stream mid-stream and Ink's previous dynamic frame escapes
+  // the clearing region — the catalog appears to render twice in scrollback.
+  const initialHistory: ShellHistoryEntry[] = [];
+  {
+    const banner = formatArtifactBanner(opts.target ? path.resolve(opts.target) : process.cwd());
+    if (banner) {
+      initialHistory.push({ type: "output", text: banner, timestamp: Date.now() });
+    }
+  }
+  const initialThreatTarget = opts.target ? path.resolve(opts.target) : process.cwd();
+  const initialThreatModel = loadPersistentThreatModel(initialThreatTarget);
+  const initialThreatModelSource = initialThreatModel
+    ? {
+        path: path.join(initialThreatTarget, ".kuzushi", "threat-model.json"),
+        mtimeMs: safeMtimeMs(path.join(initialThreatTarget, ".kuzushi", "threat-model.json")),
+      }
+    : undefined;
+
   store.update({
     mode: "shell",
     shell: {
@@ -4146,10 +4233,12 @@ async function startInkShell(
       target: opts.target ?? null,
       workspace: workspaceDisplayName(opts, workspaceManager),
       tuneSnapshot: buildTuneSnapshot(opts.config, dataDir, null),
-      history: [],
+      history: initialHistory,
       commandHistory,
       moduleOptions: {},
       contextSnapshot: loadedSnapshot ?? undefined,
+      threatModel: initialThreatModel,
+      ...(initialThreatModelSource ? { threatModelSource: initialThreatModelSource } : {}),
       processing: false,
       onInput: handleInput,
       onExit: handleExit,
@@ -4318,15 +4407,6 @@ async function startInkShell(
     }
   }
 
-  // Surface available .kuzushi/ context so operators see what may be reused
-  // before they run anything. Silent on fresh dirs.
-  {
-    const banner = formatArtifactBanner(opts.target ? path.resolve(opts.target) : process.cwd());
-    if (banner) {
-      appendToHistory(store, { type: "output", text: banner, timestamp: Date.now() });
-    }
-  }
-
   // The interactive shell uses the configured runtime. Built-in backends
   // expose createSession(); Claude is only swapped in as a compatibility
   // fallback for custom runtimes that cannot create shell sessions.
@@ -4400,6 +4480,14 @@ async function startReadlineShell(
   const tools = core.registry.allTools();
   const catalogRuns = await readRunHistoryForCatalog(dataDir, opts.target);
   const rlCtx: ShellContext = { focusedModule: null, workspaceManager, dataDir };
+  const initialThreatTarget = opts.target ? path.resolve(opts.target) : process.cwd();
+  const initialThreatModel = loadPersistentThreatModel(initialThreatTarget);
+  const initialThreatModelSource = initialThreatModel
+    ? {
+        path: path.join(initialThreatTarget, ".kuzushi", "threat-model.json"),
+        mtimeMs: safeMtimeMs(path.join(initialThreatTarget, ".kuzushi", "threat-model.json")),
+      }
+    : undefined;
   let rlState: ShellState = {
     modules: modules.map((module) => module.id),
     moduleCatalog: buildModuleCatalog(modules, core, catalogRuns),
@@ -4414,6 +4502,8 @@ async function startReadlineShell(
     commandHistory,
     moduleOptions: {},
     contextSnapshot: loadedSnapshot ?? undefined,
+    threatModel: initialThreatModel,
+    ...(initialThreatModelSource ? { threatModelSource: initialThreatModelSource } : {}),
     processing: false,
   };
 
@@ -4741,6 +4831,9 @@ function shouldRouteShellInputBeforeDispatcher(
   if (shellState?.shellView === "options" && lower === "show advanced") {
     return true;
   }
+  if (ctx.focusedModule === "vendor-assessment" && lower === "clear scope") {
+    return true;
+  }
   return (
     lower === "options" ||
     lower === "show options" ||
@@ -4805,6 +4898,14 @@ function routeInput(
       shellStateUpdater: (shell) => ({ ...shell, shellView: "tune" }),
       output: `Tuning ${ctx.focusedModule}. Use prompt edit <verb> for prompt overrides.`,
     };
+  }
+  // `attachments` typed bare in a focused KB-enabled module flips to the
+  // `/kb` view AND populates `shell.kbState[focusedModule]` from disk so
+  // operators don't have to remember the slash form. The actual `<id>:
+  // attachments` tool is also reachable via `run attachments` for headless /
+  // CI workflows that want the text output.
+  if (lower === "kb" || lower === "attachments") {
+    return handleKbCommand(core, opts, ctx, shellState);
   }
   if (lower === "tasks") {
     recordCommandUsage(ctx, shellState, "/tasks");
@@ -4889,6 +4990,16 @@ function routeInput(
     recordCommandUsage(ctx, shellState, "/context regen");
     return handleContextCommand(
       ["regen", ...trimmed.split(/\s+/).slice(1)],
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+  }
+  if (ctx.focusedModule === "vendor-assessment" && lower === "clear scope") {
+    return resolveToolExecution(
+      "vendor-assessment:scope",
+      ["clear=true"],
       core,
       opts,
       ctx,
@@ -5004,6 +5115,9 @@ function handleSlashCommand(
         output: `Tuning ${ctx.focusedModule}. Use prompt edit <verb> for prompt overrides.`,
       };
 
+    case "kb":
+      return handleKbCommand(core, opts, ctx, shellState);
+
     case "story":
       return handleStoryCommand(shellState);
 
@@ -5106,7 +5220,7 @@ function handleSlashCommand(
       return handleSinceCommand(args, opts, ctx);
 
     case "threats":
-      return handleThreatsCommand(args, opts, ctx, shellState);
+      return handleThreatsCommand(args, core, opts, ctx, shellState);
 
     case "target":
       return handleTargetCommand(args, opts, shellState);
@@ -5153,6 +5267,10 @@ function handleUseCommand(
   const tuneSnapshot = ctx.dataDir
     ? buildTuneSnapshot(opts.config, ctx.dataDir, moduleId)
     : undefined;
+  const vendorAssessment =
+    moduleId === "vendor-assessment"
+      ? scopeToHomeSlice(shellTargetCwd(opts), loadDraftScope(shellTargetCwd(opts)))
+      : undefined;
   return {
     setFocus: moduleId,
     shellStateUpdater: (shell) => ({
@@ -5160,9 +5278,17 @@ function handleUseCommand(
       shellView: "module",
       openFindingId: null,
       tuneSnapshot: tuneSnapshot ?? shell.tuneSnapshot,
+      vendorAssessment: vendorAssessment ?? shell.vendorAssessment,
     }),
     output: `Focused on ${mod.displayName}. ${mod.tools.length} tools available.`,
   };
+}
+
+function shellTargetCwd(opts: ShellOptions): string {
+  if (opts.target && !/^[a-z][a-z0-9+.-]*:\/\//i.test(opts.target)) {
+    return path.resolve(opts.target);
+  }
+  return process.cwd();
 }
 
 function handleBackCommand(
@@ -5221,6 +5347,80 @@ function handleBackCommand(
     };
   }
   return { output: "Already at top level." };
+}
+
+/**
+ * Registry of KB-enabled modules that the `/kb` view knows how to load
+ * directly from disk on view-entry. Each entry exposes the module's
+ * KindSpec (for label rendering) plus an optional custom storage adapter
+ * (vendor-assessment uses one to keep its `scope.draft.json` shape; the
+ * three new modules use the default `.kuzushi/<id>/attachments.json`
+ * adapter).
+ *
+ * The map is keyed by moduleId. `kbState[moduleId]` is patched as a side
+ * effect of the shared attach/detach/reparse tools too — the view simply
+ * reads it; this registry exists so the view can populate the slice the
+ * very first time the operator types `/kb` after a fresh shell.
+ */
+const KB_REGISTRY: ReadonlyMap<
+  string,
+  {
+    spec: KindSpec<string>;
+    adapter?: AttachmentStorageAdapter<string>;
+  }
+> = new Map<string, { spec: KindSpec<string>; adapter?: AttachmentStorageAdapter<string> }>([
+  ["threat-model", { spec: THREAT_MODEL_KIND_SPEC as KindSpec<string> }],
+  ["context", { spec: CONTEXT_KIND_SPEC as KindSpec<string> }],
+  ["threat-hunt", { spec: THREAT_HUNT_KIND_SPEC as KindSpec<string> }],
+]);
+
+/**
+ * Open the focused module's KB view (`/kb` or bare `attachments`). Loads
+ * any pre-existing attachments from disk so the view shows them on first
+ * entry, even before any attach/detach has fired this session.
+ */
+function handleKbCommand(
+  core: CopilotCore,
+  opts: ShellOptions,
+  ctx: ShellContext,
+  shellState: ShellState,
+): LocalCommandResult {
+  void core;
+  void opts;
+  if (!ctx.focusedModule) {
+    return {
+      output:
+        "Usage: /use <module> first, then /kb. Try one of: threat-model, context, threat-hunt.",
+    };
+  }
+  const moduleId = ctx.focusedModule;
+  const entry = KB_REGISTRY.get(moduleId);
+  if (!entry) {
+    return {
+      output: `${moduleId} does not expose a knowledge base. Available: ${[...KB_REGISTRY.keys()].join(", ")}.`,
+    };
+  }
+  const cwd = opts.target ? path.resolve(opts.target) : process.cwd();
+  const adapter = entry.adapter ?? defaultAttachmentAdapter<string>(moduleId);
+  const docs = adapter.read(cwd);
+  const scopePath = adapter.pathFor(cwd);
+  const slice = buildHomeSlice(moduleId, scopePath, docs, entry.spec);
+  const previousCursor =
+    shellState.kb && shellState.kb.moduleId === moduleId
+      ? Math.min(shellState.kb.cursor, Math.max(0, slice.documents.length - 1))
+      : 0;
+  return {
+    shellStateUpdater: (shell) => ({
+      ...shell,
+      shellView: "kb",
+      kb: { moduleId, cursor: previousCursor, collapsed: shell.kb?.collapsed ?? false },
+      kbState: { ...(shell.kbState ?? {}), [moduleId]: slice },
+    }),
+    output:
+      slice.documents.length === 0
+        ? `${moduleId}: no attachments yet. Use \`attach <path-or-url>\` to add reference material.`
+        : `${moduleId}: ${slice.documents.length} attachment(s).`,
+  };
 }
 
 function handleStoryCommand(shellState: ShellState): LocalCommandResult {
@@ -5545,7 +5745,10 @@ function handleContextCommand(
   const sub = args[0]?.toLowerCase();
 
   if (sub === "dfd") {
-    return handleThreatsCommand(["dfd"], opts, ctx, shellState);
+    return {
+      output:
+        "DFD is now owned by threat-model. Use /threats dfd to view it or /threats regen dfd to rebuild it.",
+    };
   }
 
   // /context build — Live Build screen. Runs the deterministic
@@ -5604,6 +5807,12 @@ function handleContextCommand(
     if (!target) return { output: "No target set. Use /target <path> first." };
     const slice = parseContextRegenSlice(args[1]?.toLowerCase());
     if (!slice) {
+      const movedSlice = parseThreatModelRegenSlice(args[1]?.toLowerCase());
+      if (movedSlice) {
+        return {
+          output: `Threat-model slice "${movedSlice}" moved out of context. Run /threats regen ${movedSlice}.`,
+        };
+      }
       return {
         shellStateUpdater: (shell) => ({ ...shell, contextRegenPaletteOpen: true }),
         output: [
@@ -5612,17 +5821,14 @@ function handleContextCommand(
           "  /context regen repo",
           "  /context regen enrichment",
           "  /context regen app-model",
-          "  /context regen dfd",
-          "  /context regen stride",
-          "  /context regen stories",
-          "  /context regen scope",
-          "  /context regen scenarios",
+          "",
+          "Threat-model slices moved to /threats regen <all|dfd|stride|stories|scope|scenarios>.",
         ].join("\n"),
       };
     }
     const result = resolveToolExecution(
       "context:build",
-      [target, `scope=${slice}`, "preserveUserEdits=true"],
+      [target, `scope=${slice}`],
       core,
       opts,
       ctx,
@@ -5719,10 +5925,14 @@ async function loadThreatWorkspace(repoRoot: string, shellState: ShellState) {
   const { loadShellThreatModel } = await import("./threat-model-loader.js");
   const persistent = loadShellThreatModel(repoRoot);
   if (persistent) {
+    const { loadContextSnapshot } = await import("../modules/sast/context-persist.js");
+    const contextSnapshot =
+      shellState.contextSnapshot?.target === repoRoot
+        ? shellState.contextSnapshot
+        : loadContextSnapshot(repoRoot);
     return {
       threatModel: persistent.document,
-      contextSnapshot:
-        shellState.contextSnapshot?.target === repoRoot ? shellState.contextSnapshot : null,
+      contextSnapshot,
       sourcePath: persistent.sourcePath,
       mtimeMs: persistent.mtimeMs,
       sourceLabel: "persistent threat model",
@@ -5740,21 +5950,12 @@ async function loadThreatWorkspace(repoRoot: string, shellState: ShellState) {
   const sourcePath = contextSnapshotPath(repoRoot);
   const mtimeMs = safeMtimeMs(sourcePath);
   return {
-    threatModel: asThreatModelDocument(snapshot.threatModel),
+    threatModel: null,
     contextSnapshot: snapshot,
     sourcePath,
     mtimeMs,
     sourceLabel: "context snapshot",
   };
-}
-
-function asThreatModelDocument(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const record = value as { dfd?: { elements?: unknown }; threats?: unknown };
-  if (!record.dfd || !Array.isArray(record.dfd.elements) || !Array.isArray(record.threats)) {
-    return null;
-  }
-  return value as import("../agents/tasks/threat-modeling/types.js").ThreatModelDocument;
 }
 
 function safeMtimeMs(absPath: string): number {
@@ -5767,11 +5968,39 @@ function safeMtimeMs(absPath: string): number {
 
 function handleThreatsCommand(
   args: string[],
+  core: CopilotCore,
   opts: ShellOptions,
   ctx: ShellContext,
   shellState: ShellState,
 ): LocalCommandResult {
   const sub = args[0]?.toLowerCase() ?? "summary";
+
+  if (sub === "regenerate" || sub === "regen") {
+    const target = resolveActiveTarget(opts, shellState);
+    if (!target) return { output: "No target set. Use /target <path> first." };
+    const slice = parseThreatModelRegenSlice(args[1]?.toLowerCase());
+    if (!slice) {
+      return {
+        output: [
+          "Regenerate a threat-model slice:",
+          "  /threats regen all",
+          "  /threats regen dfd",
+          "  /threats regen stride",
+          "  /threats regen stories",
+          "  /threats regen scope",
+          "  /threats regen scenarios",
+        ].join("\n"),
+      };
+    }
+    return resolveToolExecution(
+      "threat-model:build",
+      [target, `slice=${slice}`, "preserveUserEdits=true"],
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+  }
 
   if (sub === "ask") {
     const instruction = args.slice(1).join(" ").trim();
@@ -5783,7 +6012,7 @@ function handleThreatsCommand(
       asyncExecute: async (signal) => {
         const loaded = await loadThreatWorkspace(repoRoot, shellState);
         if (!loaded?.threatModel) {
-          return "No threat model document available to patch. Run /context regen dfd or /threats edit first.";
+          return "No threat model document available to patch. Run /threats regen dfd or /threats edit first.";
         }
         const proposal = await proposeThreatModelPatch({
           runtime: opts.runtime,
@@ -5864,10 +6093,10 @@ function handleThreatsCommand(
       asyncExecute: async () => {
         const loaded = await loadThreatWorkspace(repoRoot, shellState);
         if (!loaded) {
-          return "No context or threat model found. Run /context or /context regen dfd first.";
+          return "No context or threat model found. Run /context, then /threats regen dfd.";
         }
         if (viewRoute.threatTab !== "dfd" && !loaded.threatModel) {
-          return "No threat model found for this tab. Run /context regen dfd or /threats edit first.";
+          return "No threat model found for this tab. Run /threats regen dfd or /threats edit first.";
         }
         if (ctx.uiStore) {
           updateShell(ctx.uiStore, (shell) => ({
@@ -5935,7 +6164,8 @@ function handleThreatsCommand(
   }
 
   return {
-    output: "Usage: /threats [dfd|stride|stories|scope|summary|edit]  (1..5 also switches views)",
+    output:
+      "Usage: /threats [dfd|stride|stories|scope|summary|edit|regen <slice>]  (1..5 also switches views)",
   };
 }
 
@@ -6265,8 +6495,15 @@ async function executeResumeTool(
     };
   }
   const toolInput = stripSyntheticModelOptionFromInput(tool, input);
+  const threatModel =
+    shellState.threatModel ??
+    (!/^[a-z][a-z0-9+.-]*:\/\//i.test(target)
+      ? loadPersistentThreatModel(path.resolve(target))
+      : null);
   const seedTaskOutputs = shellState.contextSnapshot
-    ? buildSeedMapFromSnapshot(shellState.contextSnapshot)
+    ? buildSeedMapFromSnapshot(shellState.contextSnapshot, {
+        ...(threatModel ? { threatModel } : {}),
+      })
     : undefined;
   seedCheckpointModuleRun(
     ctx.uiStore,
@@ -6373,8 +6610,20 @@ function resolveToolExecution(
     return { output: formatUnknownToolMessage(finalToolName, core) };
   }
 
-  // Context gating — block tools that require context when none exists
-  const contextRequirementError = getContextRequirementError(finalToolName, shellState);
+  const storedArgs = shellState.moduleOptions[finalToolName] ?? {};
+  const parsedArgs = parseToolArgs(toolArgs);
+  const mergedArgs: Record<string, unknown> = { ...storedArgs, ...parsedArgs };
+  if (!("target" in mergedArgs) && opts.target) {
+    mergedArgs.target = opts.target;
+  }
+
+  // Context gating — block tools that require context/threat-model state when missing.
+  const contextRequirementError = getContextRequirementError(
+    finalToolName,
+    shellState,
+    mergedArgs,
+    opts,
+  );
   if (contextRequirementError) {
     return { output: contextRequirementError };
   }
@@ -6382,15 +6631,19 @@ function resolveToolExecution(
   return {
     executedToolName: finalToolName,
     asyncExecute: async (signal?: AbortSignal) => {
-      const storedArgs = shellState.moduleOptions[finalToolName] ?? {};
-      const parsedArgs = parseToolArgs(toolArgs);
-      const mergedArgs: Record<string, unknown> = { ...storedArgs, ...parsedArgs };
-      if (!("target" in mergedArgs) && opts.target) {
-        mergedArgs.target = opts.target;
-      }
-
+      const target =
+        typeof mergedArgs.target === "string" && mergedArgs.target.trim()
+          ? mergedArgs.target
+          : opts.target;
+      const threatModel =
+        shellState.threatModel ??
+        (target && !/^[a-z][a-z0-9+.-]*:\/\//i.test(target)
+          ? loadPersistentThreatModel(path.resolve(target))
+          : null);
       const seedTaskOutputs = shellState.contextSnapshot
-        ? buildSeedMapFromSnapshot(shellState.contextSnapshot)
+        ? buildSeedMapFromSnapshot(shellState.contextSnapshot, {
+            ...(threatModel ? { threatModel } : {}),
+          })
         : undefined;
       const modelDatastore = createShellModelDatastore(opts.config, mergedArgs);
       if (modelDatastore.error) {
@@ -6401,7 +6654,7 @@ function resolveToolExecution(
       }
       const toolInput = stripSyntheticModelOptionFromInput(resolvedTool.tool, mergedArgs);
       const inputSummary = resolvedTool.tool.formatInput?.(toolInput) ?? undefined;
-      seedCheckpointModuleRun(
+      seedFocusedModuleRun(
         ctx.uiStore,
         shellState,
         resolvedTool.tool,
@@ -6445,7 +6698,12 @@ function resolveToolExecution(
   };
 }
 
-function getContextRequirementError(toolName: string, shellState: ShellState): string | undefined {
+function getContextRequirementError(
+  toolName: string,
+  shellState: ShellState,
+  input: Record<string, unknown>,
+  opts: ShellOptions,
+): string | undefined {
   if (!CONTEXT_REQUIRED_TOOLS.has(toolName)) return undefined;
   const snapshot = shellState.contextSnapshot;
   if (!snapshot) {
@@ -6457,7 +6715,17 @@ function getContextRequirementError(toolName: string, shellState: ShellState): s
   const needsAppModel =
     needsThreatModel || toolName === "taint-iris:hunt" || toolName === "sast:taint-iris";
 
-  if (needsThreatModel && !snapshot.threatModel) {
+  const target =
+    typeof input.target === "string" && input.target.trim()
+      ? input.target
+      : (opts.target ?? snapshot.target);
+  const persistentThreatModel =
+    target && !/^[a-z][a-z0-9+.-]*:\/\//i.test(target)
+      ? loadPersistentThreatModel(path.resolve(target))
+      : null;
+  const hasThreatModel = !!(shellState.threatModel ?? persistentThreatModel);
+
+  if (needsThreatModel && !hasThreatModel) {
     missing.push("threat model");
   }
   if (needsAppModel && !snapshot.appModel) {
@@ -6465,7 +6733,7 @@ function getContextRequirementError(toolName: string, shellState: ShellState): s
   }
 
   if (missing.length === 0) return undefined;
-  const hint = needsThreatModel ? "Run context with threat modeling first." : "Run context first.";
+  const hint = needsThreatModel ? "Run /context, then /threats regen dfd." : "Run context first.";
   return `Context incomplete for ${toolName}: missing ${missing.join(" and ")}. ${hint}`;
 }
 
@@ -7644,7 +7912,6 @@ function buildAskContextPrefix(shellState: ShellState, opts: ShellOptions): stri
     const snapshotLines: string[] = [];
     if (snapshot.repoContext) snapshotLines.push("repoContext");
     if (snapshot.appModel) snapshotLines.push("appModel");
-    if (snapshot.threatModel) snapshotLines.push("threatModel");
     if (snapshot.enrichedContext) snapshotLines.push("enrichedContext");
     if (snapshotLines.length > 0) {
       lines.push(`- context snapshot loaded: ${snapshotLines.join(", ")}`);
@@ -7686,9 +7953,9 @@ function loadArtifactManifest(repoRoot: string): string[] {
     { rel: "scan-context.json", label: "operator-authored scan context" },
     { rel: "threat-model.json", label: "persistent threat model" },
     // context-snapshot.json is what enables /use threat-hunt (etc.) to pass
-    // the appModel/threatModel prereq check without re-running context:build.
+    // the appModel prereq check without re-running context:build.
     // Surface it by name so operators understand what's carrying them.
-    { rel: "context-snapshot.json", label: "context snapshot (appModel + threatModel)" },
+    { rel: "context-snapshot.json", label: "context snapshot (repo + app model)" },
     { rel: "findings.sqlite3", label: "prior findings DB" },
   ];
   for (const { rel, label } of files) {
@@ -7908,6 +8175,7 @@ function formatHelp(
     "config",
     "scope",
     "threats",
+    "kb",
     "session",
   ];
   const byGroup = new Map<ShellCommandGroup, ShellCommandEntry[]>();

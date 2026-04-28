@@ -31,6 +31,8 @@ export type StrideCategory =
   | "denial-of-service"
   | "elevation-of-privilege";
 
+export type ThreatModelMethodology = "pasta" | "stride" | "dread";
+
 /**
  * Evidence anchor tying a threat-model element or finding to a source location.
  *
@@ -59,6 +61,24 @@ export interface StrideThreat {
   relatedCwe: string[];
   affectedFiles: Array<{ filePath: string; startLine: number }>;
   evidenceAnchors?: EvidenceAnchor[];
+}
+
+export interface DreadThreatScore {
+  threatId: string;
+  damage: number;
+  reproducibility: number;
+  exploitability: number;
+  affectedUsers: number;
+  discoverability: number;
+  score: number;
+  rating: "critical" | "high" | "medium" | "low";
+  rationale: string[];
+}
+
+export interface DreadRiskScores {
+  methodology: "dread";
+  scale: "0-10";
+  threats: DreadThreatScore[];
 }
 
 /**
@@ -115,6 +135,8 @@ export interface ThreatModelNarrative {
 
 export interface ThreatModelDocument {
   version: string;
+  /** Methodology selected by the operator for this normalized document. */
+  methodology?: ThreatModelMethodology;
   dfd: {
     elements: DfdElement[];
     trustBoundaries: TrustBoundary[];
@@ -127,6 +149,8 @@ export interface ThreatModelDocument {
   };
   /** Narrative layer (Overview / Trust boundaries / Attacker stories / …). */
   narrative?: ThreatModelNarrative;
+  /** Optional risk-prioritization overlay for methodologies such as DREAD. */
+  riskScores?: DreadRiskScores;
   /** Operator annotations keyed by threat ID. */
   userAnnotations?: Record<string, string>;
   /** Operator-confirmed mitigations that the scanner should trust. */
@@ -142,6 +166,7 @@ export interface ThreatModelDocument {
 // ── Config ──
 
 export interface ThreatModelConfig {
+  methodology: ThreatModelMethodology;
   model: string;
   maxElements: number;
   maxThreats: number;

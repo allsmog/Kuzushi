@@ -38,36 +38,36 @@ exports[`Ink component snapshots > FindingCard linear — state strip + evidence
 `;
 
 exports[`Ink component snapshots > ModuleCatalog — grouped by category with last-run chips 1`] = `
-"  workspace:acme-api · target:acme-api · 3 modules
+"  scope:acme-api · 3 modules
 
 
   Primary next step: use <module-id> to enter one module workflow.
 
   OFFENSE
 
-  MODULE         DESCRIPTION                                LAST RUN
+  MODULE         DESCRIPTION                                      LAST RUN
 
   ──────────────────────────────────────────────────────────────────────────────
-  ─
-  sast           40+ task pipeline                          ran 2h · 4 tp
+  ──
+  sast           40+ task pipeline                                ran 2h · 4 tp
 
 
   INTEL
 
-  MODULE         DESCRIPTION                                LAST RUN
+  MODULE         DESCRIPTION                                      LAST RUN
 
   ──────────────────────────────────────────────────────────────────────────────
-  ─
-  randori        PASTA threat model                         ran 2h · 12 threats
-
+  ──
+  randori        PASTA threat model                               ran 2h · 12
+  thr…
 
   GOVERNANCE
 
-  MODULE         DESCRIPTION                                LAST RUN
+  MODULE         DESCRIPTION                                      LAST RUN
 
   ──────────────────────────────────────────────────────────────────────────────
-  ─
-  shinsa         ISO 27001 + NIST 800-53                    never run"
+  ──
+  shinsa         ISO 27001 + NIST 800-53                          never run"
 `;
 
 exports[`Ink component snapshots > ModuleHome — tools table + last-run summary 1`] = `
@@ -95,19 +95,19 @@ exports[`Ink component snapshots > ModuleHome — tools table + last-run summary
 `;
 
 exports[`Ink component snapshots > OptionsView — focused tool options without module home 1`] = `
-"  kuzushi/context/options                                          context:build · 3 options · 1 set
-  ──────────────────────────────────────────────────────────────────────────────────────────────────
-  ──
+"  context:build · 4 options · 2 set
 
 
   Options                  * = set in this shell
-    OPTION        VALUE                      DEFAULT             DESCRIPTION
+    OPTION          VALUE                  DEFAULT         DESCRIPTION
 
-    target        /repo                      —                   Path to the repository to analyze.
+    target          /repo                  —               Path to the repository to analyze.
 
-    threatModel   true                       true                Run PASTA S1-S4 threat modeling.
+    scope           app-model              all             Regenerate one context slice. all = full
+    r…
+    enrichment      true                   true            Run LLM context enrichment (1 API call).
 
-    model         * anthropic:…e-sonnet-4-6  anthropic…nnet-4-6  Model override for this session.
+    model           * anthropi…sonnet-4-6  anthrop…et-4-6  Model override for this session.
 
 
   actions
@@ -136,7 +136,7 @@ exports[`Ink component snapshots > ThreatDfdView — inferred app-model fallback
   ──────────────────────────────────────────────────────────────────────────────
   ──
 
-  inferred from /tmp/context-snapshot.json
+  inferred from .kuzushi/context-snapshot.json
 
   No generated DFD elements were found; showing a low-confidence map inferred
   from application context.
