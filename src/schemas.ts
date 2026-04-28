@@ -696,6 +696,7 @@ export const KuzushiConfigSchema = z.object({
   agentRuntimeBackend: AgentRuntimeBackendSchema.optional(),
   agentRuntimeConfig: AgentRuntimeConfigSchema.optional(),
   auth: z.literal("inherited").optional(),
+  oauthTokenFile: z.string().optional(),
   tasks: z.array(z.string()),
   severity: z.array(z.string()),
   excludePatterns: z.array(z.string()),

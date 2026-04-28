@@ -31,7 +31,7 @@ import {
 } from "./config.js";
 import { cleanup as cleanupHttpAgents } from "./http-agent.js";
 import { initiateShutdown, registerShutdownHook } from "./lifecycle.js";
-import { setGlobalLogLevel } from "./logger.js";
+import { getLogger, setGlobalLogLevel } from "./logger.js";
 import { defaultDbPath, getRun, initDb, listRuns } from "./store.js";
 
 function maybeWarnPlaintextApiKeyStorage(key: string, value: string): void {
@@ -188,6 +188,19 @@ Examples:
 
         if (opts.apiKey) {
           process.env.ANTHROPIC_API_KEY = opts.apiKey;
+        }
+
+        // Inherited mode: walk the OAuth token search path and prime
+        // ANTHROPIC_API_KEY from the first hit. pi-ai's anthropic provider
+        // detects the `sk-ant-oat` prefix and switches to Bearer auth +
+        // Claude Code beta headers automatically.
+        if (config.auth === "inherited" && !process.env.ANTHROPIC_API_KEY) {
+          const { resolveAmbientOauthToken } = await import("./config.js");
+          const ambient = resolveAmbientOauthToken(config);
+          if (ambient) {
+            process.env.ANTHROPIC_API_KEY = ambient.token;
+            getLogger("kuzushi").info(`Using inherited OAuth token (source: ${ambient.source})`);
+          }
         }
         const runtime = configureAgentRuntime(config);
         await startShell({
