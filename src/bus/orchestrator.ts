@@ -1440,6 +1440,7 @@ export class PipelineOrchestrator {
         threshold: state.config.llmRescoreThreshold,
         repoRoot: state.context.scanPath ?? state.context.repoRoot,
         runtime: this.deps.runtime,
+        concurrency: state.config.triageConcurrency,
       });
       const applied = applyRescoreResults(rescoreWindow, rescoreResults);
       filteredFindings = [...applied.findings, ...untouched].sort(
@@ -2588,6 +2589,7 @@ export class PipelineOrchestrator {
         threshold: state.config.llmRescoreThreshold,
         repoRoot: state.context.scanPath ?? state.context.repoRoot,
         runtime: this.deps.runtime,
+        concurrency: state.config.triageConcurrency,
       });
       normalized = [
         ...applyRescoreResults(rescoreWindow, rescoreResults).findings,

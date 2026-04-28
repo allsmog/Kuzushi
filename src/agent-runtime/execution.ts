@@ -369,9 +369,45 @@ export async function runStructuredSessionQuery(
 }
 
 /**
+ * Map an async worker over `items` with a bounded concurrency limit. Preserves
+ * input order in the result array. Errors propagate (no implicit swallow).
+ *
+ * Used by the `runStructuredBatchQuery` OAuth fallback so an operator's
+ * `--triage-concurrency` (or per-task default) actually translates into N
+ * parallel agent queries instead of strictly sequential ones. Kept generic so
+ * other batch-fallback paths (taint labeling, llm-rescore) can adopt it.
+ */
+export async function mapConcurrent<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const limit = Math.max(1, Math.floor(Number.isFinite(concurrency) ? concurrency : 1));
+  const results = new Array<R>(items.length);
+  if (items.length === 0) return results;
+
+  let nextIndex = 0;
+  const runners: Array<Promise<void>> = [];
+  const runnerCount = Math.min(limit, items.length);
+  for (let r = 0; r < runnerCount; r++) {
+    runners.push(
+      (async () => {
+        while (true) {
+          const i = nextIndex++;
+          if (i >= items.length) return;
+          results[i] = await worker(items[i], i);
+        }
+      })(),
+    );
+  }
+  await Promise.all(runners);
+  return results;
+}
+
+/**
  * Submit multiple tool-less prompts as a batch for 50% cost reduction.
- * Falls back to sequential `runStructuredAgentQuery()` if the runtime
- * doesn't support batch processing.
+ * Falls back to bounded-concurrency `runStructuredAgentQuery()` calls if the
+ * runtime doesn't support batch processing (e.g. OAuth-mode Claude).
  */
 export async function runStructuredBatchQuery(
   requests: Array<{ id: string; prompt: string; systemPrompt?: string }>,
@@ -382,6 +418,12 @@ export async function runStructuredBatchQuery(
     runtimeOptions?: AgentRuntimeOptions;
     effort?: AgentEffort;
     thinkingDisabled?: boolean;
+    /**
+     * Max parallel agent queries when the runtime falls back from the Batch
+     * API to per-prompt calls (OAuth mode, proxy 404, etc.). Defaults to 1
+     * (preserves prior strictly sequential behavior).
+     */
+    fallbackConcurrency?: number;
   },
 ): Promise<Map<string, AgentQueryExecutionResult>> {
   const runtime = args.runtimeOptions?.runtime;
@@ -414,12 +456,16 @@ export async function runStructuredBatchQuery(
     }
   }
 
-  // Fallback: run sequentially.
+  // Fallback: run with bounded concurrency. The agent-runtime spawn
+  // semaphore (claude.ts MAX_CONCURRENT_QUERIES) still caps subprocess
+  // count, but bounded mapConcurrent here gives operators a way to tune
+  // OAuth-mode throughput via --triage-concurrency without unbounded
+  // promise creation.
   // Do NOT carry over temperature=0 from batch settings — the Batch API
   // handles temperature internally, but sequential queries with thinking
   // enabled require temperature=1 (or omitted to use the default).
-  const results = new Map<string, AgentQueryExecutionResult>();
-  for (const req of requests) {
+  const concurrency = args.fallbackConcurrency ?? 1;
+  const entries = await mapConcurrent(requests, concurrency, async (req) => {
     const result = await runStructuredAgentQuery({
       prompt: req.prompt,
       cwd: args.cwd,
@@ -434,7 +480,11 @@ export async function runStructuredBatchQuery(
       systemPromptPrefix: req.systemPrompt,
       schema: args.schema,
     });
-    results.set(req.id, result);
+    return [req.id, result] as const;
+  });
+  const results = new Map<string, AgentQueryExecutionResult>();
+  for (const [id, result] of entries) {
+    results.set(id, result);
   }
   return results;
 }
