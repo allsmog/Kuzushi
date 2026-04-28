@@ -18,6 +18,7 @@ import type {
   VerificationResult,
 } from "../../types.js";
 import type { RunContext } from "../events.js";
+import type { ScanFindingsStore } from "./scan-findings-store.js";
 
 export interface QueuedFinding {
   finding: Finding;
@@ -68,7 +69,15 @@ export interface RunState {
   maxRawFindingsWarned?: boolean;
   tasks: string[];
   startedAt: string;
-  scanFindings: Finding[];
+  /**
+   * Memory-bounded buffer over scan findings. Defaults to
+   * {@link import("./scan-findings-store.js").InMemoryScanFindingsStore},
+   * with a SQLite-backed implementation available for very large monorepo
+   * scans (gated by `KuzushiConfig.scanFindingsBackend`).
+   *
+   * Migrated from `Finding[]` in #33 — see `scan-findings-store.ts`.
+   */
+  scanFindings: ScanFindingsStore;
   totalFindings: number;
   skippedAlreadyTriaged: number;
   skippedLowConfidence: number;
