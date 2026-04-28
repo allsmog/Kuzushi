@@ -39,6 +39,7 @@ import type {
   TaskErrorEvent,
   TaskProgressEvent,
   TaskStartEvent,
+  TriageCompleteEvent,
   TriageErrorEvent,
   TriageResultEvent,
   TriageStartEvent,
@@ -370,6 +371,41 @@ export function registerReportWorker(
       maybeUpdateStartBanner(store, state, event.payload.context.repoName);
     } else {
       maybePrintStartBanner(state, event.payload.context.repoName);
+    }
+  });
+
+  // Incremental report writes: when triage finishes, dump a partial
+  // JSON snapshot of the findings table to `<jsonOutput>.partial` so
+  // a SIGTERM/OOM/abort during verify or report stages doesn't lose
+  // exports. Direct SQLite query (no SARIF gen) so it's fast and
+  // dependency-free; the canonical SARIF still comes out of
+  // pipeline:complete. Field-test issue #35.
+  bus.subscribe<TriageCompleteEvent>("triage:complete", (event) => {
+    if (!deps.config.jsonOutput) return;
+    try {
+      const partial = `${deps.config.jsonOutput}.partial`;
+      const dir = path.dirname(partial);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const rows = deps.db
+        .prepare(
+          `SELECT fingerprint, task_id, rule_id, file_path, start_line, severity,
+                  message, verdict, confidence, adjusted_score
+           FROM findings
+           ORDER BY adjusted_score DESC NULLS LAST`,
+        )
+        .all();
+      const payload = {
+        runId: event.meta.runId,
+        repo: event.payload.context.repoName,
+        snapshotAt: new Date().toISOString(),
+        triagedCount: event.payload.triaged,
+        triageErrors: event.payload.errors,
+        triageCostUsd: event.payload.totalCostUsd ?? 0,
+        findings: rows,
+      };
+      writeFileSync(partial, `${JSON.stringify(payload, null, 2)}\n`);
+    } catch {
+      /* best-effort — partial-report failures must not kill the pipeline */
     }
   });
 
