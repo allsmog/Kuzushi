@@ -33,6 +33,7 @@ import { renderShellInputSegments } from "../shell-input-line.js";
 import {
   CTRL_C_ARM_WINDOW_MS as CTRL_C_ARM_WINDOW_MS_IMPORTED,
   resolveKeybind,
+  shouldSubmitOnReturn,
 } from "../shell-keybinds.js";
 import type {
   ActionableFinding,
@@ -330,6 +331,11 @@ const ShellInputArea = memo(
     const pendingReturnArmedRef = useRef(false);
     const pendingReturnExpiresAtRef = useRef(0);
     const lastTextInputAtRef = useRef(0);
+    // Length of the most recent text-input event. Single-char events are
+    // keystrokes (or `tmux send-keys`, which delivers char-at-a-time over PTY);
+    // multi-char events are pastes. The Enter-guard only fires for pastes,
+    // so scripted automation (`tmux send-keys "/cmd" Enter`) is not swallowed.
+    const lastTextInputLenRef = useRef(0);
     const onInputRef = useRef(shell.onInput);
     onInputRef.current = shell.onInput;
 
@@ -504,12 +510,18 @@ const ShellInputArea = memo(
 
         const isReturn = key.return || char === "\r" || char === "\n";
         if (isReturn) {
-          const recentlyTyped = Date.now() - lastTextInputAtRef.current < 25;
-          if (currentInput.length > 0 && !recentlyTyped) {
-            submitBufferedInput();
-          } else {
-            armBufferedSubmit();
-          }
+          // Decision lives in shouldSubmitOnReturn() so tests can lock the
+          // behavior without driving Ink. Pastes (multi-char events within
+          // a few ms) buffer; keystrokes and `tmux send-keys` (single-char
+          // events) submit immediately even when followed by Enter within
+          // microseconds.
+          const submit = shouldSubmitOnReturn({
+            bufferedInputLength: currentInput.length,
+            msSinceLastTextInput: Date.now() - lastTextInputAtRef.current,
+            lastTextInputCharLength: lastTextInputLenRef.current,
+          });
+          if (submit) submitBufferedInput();
+          else armBufferedSubmit();
           return;
         }
 
@@ -602,6 +614,7 @@ const ShellInputArea = memo(
         if (char && !key.ctrl && !key.meta && !key.tab) {
           if (historyIndex === null) draftInputRef.current = "";
           lastTextInputAtRef.current = Date.now();
+          lastTextInputLenRef.current = char.length;
           replaceInput(
             currentInput.slice(0, currentCursor) + char + currentInput.slice(currentCursor),
             currentCursor + char.length,
@@ -1461,9 +1474,9 @@ function HuntActorRow({ actor }: { actor: HuntActorSnapshot }): React.ReactEleme
 }
 
 /**
- * Pull the human-readable actor slug out of a threat-hunt fingerprint.
- * `buildActorFingerprint` in `src/modules/threat-hunt/threat-hunt.ts`
- * builds `threat-hunt:<Actor_Name>:<runIndex>`; we show
+ * Pull the human-readable actor slug out of a carlini-threat-hunt fingerprint.
+ * `buildActorFingerprint` in `src/modules/carlini-threat-hunt/carlini-threat-hunt.ts`
+ * builds `carlini-threat-hunt:<Actor_Name>:<runIndex>`; we show
  * `Actor Name` (runIndex 0 suppressed) or `Actor Name (run N)`.
  */
 function extractActorLabel(fingerprint: string): string {

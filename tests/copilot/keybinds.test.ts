@@ -23,8 +23,10 @@ import {
   isThreatShellView,
   type KeybindAction,
   type Keystroke,
+  PASTE_GUARD_WINDOW_MS,
   resolveKeybind,
   resolveTaskStoryToggleView,
+  shouldSubmitOnReturn,
 } from "../../src/ui/shell-keybinds.js";
 import type { ShellState, UIState } from "../../src/ui/state.js";
 
@@ -642,5 +644,70 @@ describe("resolveKeybind — fall-through", () => {
       now: 0,
     });
     expect(action.type).toBe("none");
+  });
+});
+
+describe("shouldSubmitOnReturn (paste guard)", () => {
+  it("never submits an empty buffer", () => {
+    expect(
+      shouldSubmitOnReturn({
+        bufferedInputLength: 0,
+        msSinceLastTextInput: 1000,
+        lastTextInputCharLength: 1,
+      }),
+    ).toBe(false);
+  });
+
+  it("submits immediately after a single-char keystroke", () => {
+    // Real human typing: e.g. typed "/help" then pressed Enter 50 ms later.
+    expect(
+      shouldSubmitOnReturn({
+        bufferedInputLength: 5,
+        msSinceLastTextInput: 50,
+        lastTextInputCharLength: 1,
+      }),
+    ).toBe(true);
+  });
+
+  it("submits immediately after `tmux send-keys` (single-char events, microsecond gap)", () => {
+    // tmux send-keys delivers chars one at a time over PTY; gap can be < 1 ms.
+    // The fix: single-char events bypass the paste guard regardless of timing.
+    expect(
+      shouldSubmitOnReturn({
+        bufferedInputLength: 5,
+        msSinceLastTextInput: 0,
+        lastTextInputCharLength: 1,
+      }),
+    ).toBe(true);
+  });
+
+  it("buffers when last event was a multi-char paste within the guard window", () => {
+    // Multi-line clipboard paste: the trailing \n on a non-last line should
+    // not auto-submit. Last text event delivered "line2\nline3" together.
+    expect(
+      shouldSubmitOnReturn({
+        bufferedInputLength: 50,
+        msSinceLastTextInput: 1,
+        lastTextInputCharLength: 12,
+      }),
+    ).toBe(false);
+  });
+
+  it("submits when last event was multi-char but outside the guard window", () => {
+    // User pasted, then waited > guard window before pressing Enter — that's
+    // a deliberate submit, not a paste-trailing newline.
+    expect(
+      shouldSubmitOnReturn({
+        bufferedInputLength: 50,
+        msSinceLastTextInput: PASTE_GUARD_WINDOW_MS + 5,
+        lastTextInputCharLength: 12,
+      }),
+    ).toBe(true);
+  });
+
+  it("PASTE_GUARD_WINDOW_MS is small enough to never block real keystrokes", () => {
+    // Anchor: humans cannot type faster than ~30 ms/keystroke. The guard
+    // should be far below that so real typing never accidentally triggers it.
+    expect(PASTE_GUARD_WINDOW_MS).toBeLessThanOrEqual(10);
   });
 });

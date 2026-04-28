@@ -37,6 +37,53 @@ function isAbortRequested(options: AgentQueryOptions): boolean {
   return options.abortController?.signal.aborted === true;
 }
 
+// Operator escape hatch for proxies that reject `thinking.type=enabled`
+// (e.g. some internal Anthropic-compatible gateways accept `adaptive`/`disabled`
+// only). When set, every Claude path emits `thinking: { type: "disabled" }`.
+export function thinkingForceDisabled(): boolean {
+  return Boolean(process.env.KUZUSHI_DISABLE_THINKING);
+}
+
+// Detect a likely-incompatible proxy: ANTHROPIC_BASE_URL is set and the host
+// is not anthropic.com. Internal gateways often reject `thinking.type=enabled`
+// (the SDK's default for non-low effort). Returns the host so the caller can
+// surface a helpful one-line warning at shell startup.
+export function detectNonAnthropicProxy(): string | null {
+  const url = process.env.ANTHROPIC_BASE_URL;
+  if (!url) return null;
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return null;
+  }
+  if (host.endsWith("anthropic.com")) return null;
+  return host;
+}
+
+// Idempotent banner: emit once per process lifetime when a non-Anthropic
+// proxy is configured AND thinking isn't already force-disabled. Operators
+// can silence with KUZUSHI_QUIET_PROXY_BANNER=1.
+let proxyBannerEmitted = false;
+export function warnIfNonAnthropicProxy(stream: NodeJS.WriteStream = process.stderr): void {
+  if (proxyBannerEmitted) return;
+  if (process.env.KUZUSHI_QUIET_PROXY_BANNER) return;
+  if (thinkingForceDisabled()) return;
+  const host = detectNonAnthropicProxy();
+  if (!host) return;
+  proxyBannerEmitted = true;
+  stream.write(
+    `[kuzushi] ANTHROPIC_BASE_URL points at ${host}. ` +
+      `If requests fail with "thinking.type" errors, set KUZUSHI_DISABLE_THINKING=1 ` +
+      `(silence this with KUZUSHI_QUIET_PROXY_BANNER=1).\n`,
+  );
+}
+
+// Test-only reset for the idempotent banner state.
+export function _resetProxyBannerForTests(): void {
+  proxyBannerEmitted = false;
+}
+
 function abortResult(durationMs: number, numTurns: number, totalCostUsd: number): AgentMessage {
   return {
     type: "result",
@@ -249,7 +296,7 @@ function killTrackedProcesses(tracked: Set<SpawnedProcess>, graceMs = 500): void
  */
 /**
  * Directories that plan-mode subprocesses are allowed to read/write.
- * Without this, randori, threat-hunt and other artifact-producing tasks
+ * Without this, randori, carlini-threat-hunt and other artifact-producing tasks
  * silently retry-then-skip when sandboxed under plan mode (issue #24).
  *
  * The whitelist intentionally stays narrow: target dir (so the agent
@@ -534,7 +581,10 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       }
 
       const thinkingDisabled =
-        baseOptions.thinkingDisabled || isHaiku || baseOptions.effort === "low";
+        baseOptions.thinkingDisabled ||
+        isHaiku ||
+        baseOptions.effort === "low" ||
+        thinkingForceDisabled();
 
       const params: Anthropic.MessageCreateParamsNonStreaming = {
         model,
@@ -695,7 +745,10 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       // Thinking: disable for classification, use adaptive+omitted for analysis
       // display: "omitted" skips streaming thinking tokens (faster time-to-first-text)
       const shouldDisableThinking =
-        request.options.thinkingDisabled || isHaiku || request.options.effort === "low";
+        request.options.thinkingDisabled ||
+        isHaiku ||
+        request.options.effort === "low" ||
+        thinkingForceDisabled();
 
       // Use streaming + finalMessage() to avoid HTTP timeouts on large outputs
       const stream = this.client.messages.stream({
@@ -959,11 +1012,15 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
     // Effort level
     if (request.options.effort) {
-      options.effort = request.options.effort;
+      options.effort = request.options.effort === "xhigh" ? "high" : request.options.effort;
     }
 
     // Thinking — disable only when explicitly requested or for low-effort classification
-    if (request.options.thinkingDisabled || request.options.effort === "low") {
+    if (
+      request.options.thinkingDisabled ||
+      request.options.effort === "low" ||
+      thinkingForceDisabled()
+    ) {
       options.thinking = { type: "disabled" };
     }
 
@@ -1259,11 +1316,15 @@ class ClaudeSession implements AgentSession {
 
     // Effort level
     if (this.baseOptions.effort) {
-      options.effort = this.baseOptions.effort;
+      options.effort = this.baseOptions.effort === "xhigh" ? "high" : this.baseOptions.effort;
     }
 
     // Thinking — disable only when explicitly requested or for low-effort classification
-    if (this.baseOptions.thinkingDisabled || this.baseOptions.effort === "low") {
+    if (
+      this.baseOptions.thinkingDisabled ||
+      this.baseOptions.effort === "low" ||
+      thinkingForceDisabled()
+    ) {
       options.thinking = { type: "disabled" };
     }
 
