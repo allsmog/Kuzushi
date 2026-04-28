@@ -444,11 +444,19 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   readonly id = "claude";
   private readonly config: AgentRuntimeCredentials | undefined;
   private readonly client: Anthropic;
+  /**
+   * True when this runtime has no API key configured — the Batch
+   * API path will throw synchronously on every attempt. Surfaced so
+   * callers (`agent-runtime/execution.ts`) can skip Batch outright
+   * and avoid logging a fallback warning per batch (#28).
+   */
+  readonly oauthMode: boolean;
   bus: MessageBus | null = null;
   runId: string | null = null;
 
   constructor(config?: AgentRuntimeCredentials) {
     this.config = config;
+    this.oauthMode = !config?.apiKey;
     this.client = new Anthropic({
       apiKey: config?.apiKey,
       baseURL: config?.baseUrl,
