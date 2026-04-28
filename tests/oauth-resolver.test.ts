@@ -12,7 +12,7 @@ vi.mock("node:os", () => ({
   homedir: () => TMP_HOME,
 }));
 
-const { resolveAmbientOauthToken } = await import("../src/config.js");
+const { resolveAmbientOauthToken, isClaudeCodeHostManagedAuth } = await import("../src/config.js");
 
 const ENV_KEYS = [
   "ANTHROPIC_API_KEY",
@@ -152,6 +152,20 @@ describe("resolveAmbientOauthToken", () => {
 
     const got = resolveAmbientOauthToken({ oauthTokenFile: filePath });
     expect(got?.token).toBe("redacted-fake-oat-prefix-config");
+  });
+
+  it("isClaudeCodeHostManagedAuth detects host-managed signals", () => {
+    delete process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
+    expect(isClaudeCodeHostManagedAuth()).toBe(false);
+
+    process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST = "1";
+    expect(isClaudeCodeHostManagedAuth()).toBe(true);
+    delete process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST;
+
+    process.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR = "4";
+    expect(isClaudeCodeHostManagedAuth()).toBe(true);
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
   });
 
   it("probes well-known fallback homedirs from KUZUSHI_OAUTH_WELL_KNOWN_HOMES", () => {

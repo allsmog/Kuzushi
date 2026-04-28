@@ -1519,6 +1519,21 @@ function tryReadFile(filePath: string): string | undefined {
 }
 
 /**
+ * True when the host process is a Claude Code subagent that manages its
+ * own auth via the parent's session (file-descriptor or proxy). Setting
+ * `ANTHROPIC_API_KEY` in this state is actively harmful: the spawned
+ * `claude` CLI treats the env var as a fresh session with its own cache
+ * — costing ~12× per spawn vs. inheriting the host-managed cache (see
+ * field-test issue #20). Detection signals are env vars set
+ * unconditionally by the Claude Code remote runner.
+ */
+export function isClaudeCodeHostManagedAuth(): boolean {
+  if (process.env["CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"]) return true;
+  if (process.env["CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"]) return true;
+  return false;
+}
+
+/**
  * Default fallback home directories to probe for ambient OAuth tokens.
  * `KUZUSHI_OAUTH_WELL_KNOWN_HOMES` overrides this (colon-separated, set
  * to "" to disable entirely — useful in tests).
