@@ -664,3 +664,114 @@ patches:
     correctly; gave us proof of life across 1.5 hours.
   - **codeql tolerant init** (`2e8a3b8`) — the missing codeql binary
     no longer takes down the shell startup.
+
+---
+
+## Round 2 fix log (#25-#58)
+
+After the field-test surfaced #25-#58, the user requested all of
+them be fixed. Below is the closing tag for each. Architectural
+items genuinely needing their own design pass are tagged
+**DEFERRED** with a one-paragraph design sketch.
+
+### Tier 1 — quick wins (5 commits)
+
+| # | Title | Commit |
+| - | ----- | ------ |
+| 27 | Stale heartbeat caption | `0e9f391` |
+| 37 | Stage transitions silence | `0e9f391` |
+| 39 / 45 | Heartbeat finding count + cost | `0e9f391` |
+| 40 | `kuzushi scan --exclude` | `691103b` |
+| 49 | `kuzushi scan --inherit-claude` | `691103b` |
+| 55 | `--target` validation | `691103b` |
+| 56 | `scripts/kuzushi-dev` shim | `691103b` |
+| 42 | `KUZUSHI_PERSIST_RAW_FINDINGS` default-on | `bfc88a9` |
+| 28 | Silent batch-API early-out under OAuth | `faa8f99` |
+| 47 | Triage retry final-failure log line | `faa8f99` |
+| 30 / 31 | Randori prompt: Glob/LS first + chunked Read | `86d0034` |
+
+### Tier 4 — CI hygiene (1 commit)
+
+| # | Title | Commit |
+| - | ----- | ------ |
+| 52 | `.github/workflows/secret-scan.yml` | `d558d5e` |
+| 58 | `kuzushi scan --show-plan` | `d558d5e` |
+
+### Tier 2 — medium fixes
+
+| # | Title | Commit |
+| - | ----- | ------ |
+| 25 | `summary.partial.json` on abort | `bf26f73` |
+| 41 | Shutdown-drain heartbeat line | `bf26f73` |
+| 29 | `additionalDirectories` mkdir-before-pass | `2c077c9` |
+| 38 | Rate-limit / throttle line in `--ci` | `2c077c9` |
+| 53 | Pre-commit `pnpm codegen:check` | `2c077c9` |
+| 43 | `kuzushi inspect` subcommand | `54a3c8f` |
+| 34 | `--max-raw-findings <N>` soft cap | `f793580` |
+| 50 | `kuzushi triage <run-id>` (partial #36/#48) | `181ac70` |
+| 35 | `<jsonOutput>.partial` on triage:complete | `506f076` |
+| 26 / 46 | Triage progress + ETA in heartbeat | `8b2eb50` |
+
+### Tier 3 — architectural (2 shipped, 3 deferred)
+
+| # | Title | Status |
+| - | ----- | ------ |
+| 44 | Schema migration: `branch` + `pr_number` columns | `1144a09` |
+| 51 | `--diff-base <ref>` for general detectors | `01a44fb` |
+| 36 / 48 | `kuzushi report --run-id`, `kuzushi verify --run-id` | partial via `181ac70`; full version DEFERRED |
+| 57 | `scripts/sync-pr-description.sh` | `f793580` |
+
+### DEFERRED — architectural follow-ups
+
+These three are genuinely big enough to warrant their own design
+discussions and PRs. Sketched here so the work is unblocked when
+someone picks them up.
+
+#### #32 — Parallelize triage subprocesses under OAuth
+
+Today the OAuth fallback path (`agent-runtime/execution.ts:386`)
+runs requests strictly sequentially. With 27,440 raw findings and
+~5s/finding LLM latency that's 38 hours.
+
+**Sketch:** add `--triage-concurrency <N>` (default 4) that
+forks N concurrent `claude` subprocess sessions in OAuth mode. Each
+subprocess is its own Claude Code session anyway; correctness
+constraint is that they share neither tool state nor working dir,
+which is already true in the spawn shape we use. Cost guard: each
+subprocess is independently rate-limited by the Anthropic API, so N
+parallel sessions don't bypass the limit, they just keep more of
+the budget hot. Implementation lands mostly in
+`runStructuredAgentBatch()` and the dispatcher's
+`waitForCapacity()`.
+
+#### #33 — SQLite-backed iterator for `state.scanFindings`
+
+The orchestrator holds `state.scanFindings: Finding[]` in memory
+the entire run. Sentry-sized agentic runs grew from 130 MB → 405 MB
+across 1h. Findings are ALSO already in SQLite (the
+`pipeline_runs.findings_json` blob and, post-`bfc88a9`, the
+`findings` table itself).
+
+**Sketch:** introduce a `FindingCursor` interface that wraps a
+prepared SELECT and exposes `next()` / `close()` semantics.
+Replace `state.scanFindings.push(...)` with cursor inserts; replace
+`state.scanFindings[i]` reads with cursor seeks. The
+`run:findings-checkpoint` event becomes a no-op (data is already
+durable). Bigger blast radius — every place that touches
+`state.scanFindings` needs migration — so warrants its own PR with
+careful test coverage of the orchestrator state machine.
+
+#### #54 — e2e harness `triage:assertions` foreign-key bug
+
+Per the comment in `.github/workflows/ci.yml`, the e2e job is
+`continue-on-error: true` because of a known FK violation:
+`pipeline_runs` row not present when the assertion worker fires.
+Tracked as tech debt.
+
+**Sketch:** fix the harness sequence so `pipeline_runs.runId` is
+inserted before any `triage:assertions` event publishes. The
+ordering currently depends on a race between `pipeline:start`'s
+DB-write hook and the worker's first event read; pinning the
+write to a synchronous `INSERT ... RETURNING` and gating the worker
+subscriptions on its completion would close the gap. Once green,
+flip `continue-on-error` off so the job actually blocks merges.
