@@ -1326,6 +1326,23 @@ export class PipelineOrchestrator {
       return;
     }
 
+    // Soft cap on raw findings (#34): once over the threshold, drop
+    // new ones and emit a single warning so operators see the cap
+    // engaged. Running detectors don't get killed — their post-cap
+    // output simply doesn't accumulate. Distinct from `maxFindings`
+    // which gates triage downstream.
+    const cap = state.scanOpts.maxRawFindings;
+    if (typeof cap === "number" && cap > 0 && state.scanFindings.length >= cap) {
+      if (!state.maxRawFindingsWarned) {
+        state.maxRawFindingsWarned = true;
+        log.warn(
+          `--max-raw-findings ${cap} reached — dropping additional scan:finding events. ` +
+            "Detectors continue running but their post-cap output is discarded.",
+        );
+      }
+      return;
+    }
+
     state.scanFindings.push(event.payload.finding);
   }
 

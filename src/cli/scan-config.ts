@@ -10,6 +10,14 @@ export interface ScanCommandOptions {
   tasks?: string;
   severity?: string;
   max?: number;
+  /**
+   * Soft cap on raw scanner findings collected in memory. Once exceeded,
+   * the orchestrator stops accumulating new `scan:finding` events and
+   * logs a warning. Running detectors complete but their post-cap
+   * output is dropped. Distinct from `--max <N>` which gates the
+   * triage stage. Field-test issue #34.
+   */
+  maxRawFindings?: number;
   model?: string;
   ensembleModels?: string;
   taskModels?: string[];

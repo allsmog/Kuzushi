@@ -606,6 +606,12 @@ export type ExploitChainZ = z.infer<typeof ExploitChainSchema>;
 export const ScanOptsSchema = z.object({
   severity: z.array(z.string()),
   maxFindings: z.number().optional(),
+  /**
+   * Soft cap on raw scanner findings collected during scan stage.
+   * Once exceeded, new findings are dropped and a warning is logged.
+   * Distinct from `maxFindings` (triage cap). Field-test issue #34.
+   */
+  maxRawFindings: z.number().optional(),
   excludePatterns: z.array(z.string()),
   tasks: z.array(z.string()).optional(),
   taskMode: z.enum(["auto", "manual"]).optional(),
