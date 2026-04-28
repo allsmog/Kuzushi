@@ -178,15 +178,51 @@ export function attachCiStream(store: UIStore, opts: CiStreamOptions = {}): () =
  * needs to decide whether to keep waiting: phase, raw-finding count,
  * cost so far, idle time, and active stage ids. Cost is only included
  * when non-zero (avoids a noisy `$0.00` on scanner-only stages).
+ *
+ * In triage / verify phases, replaces the raw count with a
+ * `triage: M/N · ETA Xm` progress block so operators can decide
+ * kill-vs-wait against a concrete remaining-time estimate.
+ * Field-test issues #26 and #46.
  */
 function formatHeartbeat(state: UIState, idleMs: number): string {
   const idleSec = Math.round(idleMs / 1000);
-  const findingsPart =
-    state.totalFindings > 0 ? ` · ${state.totalFindings.toLocaleString()} raw` : "";
   const costPart = state.runningCostUsd > 0 ? ` · $${state.runningCostUsd.toFixed(2)}` : "";
   const activeStages = state.stages.filter((s) => s.status === "active").map((s) => s.id);
   const stageDetail = activeStages.length ? ` (${activeStages.join(", ")})` : "";
+
+  // Triage progress: count completed `triage`-kind results; pair
+  // with `selectedForTriage` for a clean M/N. ETA is a moving
+  // estimate based on processed/(elapsed since triage start).
+  if (state.phase === "triaging" && state.selectedForTriage > 0) {
+    const processed = state.results.filter((r) => r.kind === "triage" && r.verdict).length;
+    const total = state.selectedForTriage;
+    const triageStage = state.stages.find((s) => s.id === "triage");
+    const triageStart = triageStage?.startedAt;
+    let etaPart = "";
+    if (triageStart && processed > 0) {
+      const elapsedMs = Date.now() - triageStart;
+      const rate = processed / elapsedMs; // findings per ms
+      const remaining = total - processed;
+      const etaMs = remaining > 0 && rate > 0 ? remaining / rate : 0;
+      if (etaMs > 0) etaPart = ` · ETA ${formatDuration(etaMs)}`;
+    }
+    return `${state.phase} alive · ${processed}/${total} triaged${etaPart}${costPart} · idle ${idleSec}s${stageDetail}`;
+  }
+
+  const findingsPart =
+    state.totalFindings > 0 ? ` · ${state.totalFindings.toLocaleString()} raw` : "";
   return `${state.phase} alive${findingsPart}${costPart} · idle ${idleSec}s${stageDetail}`;
+}
+
+/** Compact human duration: "47m", "2h 13m", "5h", "38h". */
+function formatDuration(ms: number): string {
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hours = Math.floor(min / 60);
+  const remMin = min % 60;
+  return remMin > 0 && hours < 10 ? `${hours}h ${remMin}m` : `${hours}h`;
 }
 
 function line(kind: string, body: string): string {
