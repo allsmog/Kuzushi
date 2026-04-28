@@ -445,6 +445,70 @@ Exit codes:
   )
   .action(wrapCliAction(runScanCommand));
 
+// `kuzushi triage <run-id>` — drive the triage stage against an
+// existing run's checkpointed findings without re-scanning. Thin
+// alias for `kuzushi scan --resume <run-id> --no-context` so it's
+// discoverable from `kuzushi --help` instead of buried in the scan
+// flag list. Field-test issues #50 / #36 (partial #48).
+program
+  .command("triage")
+  .description("Re-run triage against a previous run's checkpointed findings (no re-scan)")
+  .argument("<run-id>", "Pipeline run id to resume")
+  .option("-r, --repo <path>", "Repository path", ".")
+  .option("--max <n>", "Cap findings sent to triage", parseInt)
+  .option("--ci", "CI stream output (one-line-per-event)", false)
+  .option("--audit-log", "Persist per-run audit logs", false)
+  .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
+  .option("--inherit-claude", "Use parent Claude Code session credentials", false)
+  .addHelpText(
+    "after",
+    `
+Pure resume — assumes the original run reached scan-stage end and
+the findings table is populated (see KUZUSHI_PERSIST_RAW_FINDINGS).
+Useful when the original run died mid-triage and you want to retry
+without paying for the scan again.
+
+Examples:
+  $ kuzushi triage 30857617-510d-46db-ad67-ca4fdfd842e6
+  $ kuzushi triage <run-id> --max 50 --ci
+`,
+  )
+  .action(
+    wrapCliAction(async (runId: string, opts: Record<string, unknown>) => {
+      const repo = (opts.repo as string | undefined) ?? ".";
+      // Forward to scan command with --resume + --no-context.
+      // ScanCommandOptions has many required fields; spread an opts object
+      // populated only with what triage cares about and let
+      // applyScanCommandConfigOverrides fill the rest.
+      await runScanCommand(repo, {
+        resume: runId,
+        context: false, // --no-context
+        ci: opts.ci === true,
+        auditLog: opts.auditLog === true,
+        max: opts.max as number | undefined,
+        apiKey: opts.apiKey as string | undefined,
+        inheritClaude: opts.inheritClaude === true,
+        verify: false,
+        cryptoBehavioralTest: false,
+        codeGraph: false,
+        multiStrategy: false,
+        multiStrategyFull: false,
+        multiStrategyAutoRules: false,
+        autoRuleGen: false,
+        stream: false,
+        githubPr: false,
+        githubComment: false,
+        autoPatch: false,
+        pocHarness: false,
+        moduleDiscovery: true,
+        fresh: false,
+        cache: true,
+        qualityGate: false,
+        failOnTp: false,
+      });
+    }),
+  );
+
 // `kuzushi inspect` — pretty-print findings from SQLite without
 // re-running the pipeline. Lets operators see results from a killed
 // or in-flight scan, filter by severity/task, and emit JSON for
