@@ -120,9 +120,38 @@ export function attachCiStream(store: UIStore, opts: CiStreamOptions = {}): () =
     }, Math.min(heartbeatSeconds, 30) * 1000).unref();
   }
 
+  // Shutdown drain — emit a single "shutting down" line on
+  // SIGTERM / SIGINT / beforeExit so operators can tell graceful
+  // teardown from a hard crash. Without this the heartbeat just
+  // stops mid-cadence and there's no signal that anything happened.
+  // Field-test issue #41.
+  let drainEmitted = false;
+  const emitDrain = (reason: string): void => {
+    if (drainEmitted || endAnnounced) return;
+    drainEmitted = true;
+    const state = store.getState();
+    const findingsPart =
+      state.totalFindings > 0 ? ` · ${state.totalFindings.toLocaleString()} raw findings` : "";
+    const costPart = state.runningCostUsd > 0 ? ` · $${state.runningCostUsd.toFixed(2)}` : "";
+    try {
+      write(line("shutdown", `${reason} · phase=${state.phase}${findingsPart}${costPart}`));
+    } catch {
+      /* best-effort — the same EPIPE handler in claude.ts catches stdout-closed */
+    }
+  };
+  const onSigterm = (): void => emitDrain("SIGTERM received");
+  const onSigint = (): void => emitDrain("SIGINT received");
+  const onBeforeExit = (): void => emitDrain("process exiting");
+  process.on("SIGTERM", onSigterm);
+  process.on("SIGINT", onSigint);
+  process.on("beforeExit", onBeforeExit);
+
   return () => {
     unsubscribe();
     if (heartbeatTimer) clearInterval(heartbeatTimer);
+    process.off("SIGTERM", onSigterm);
+    process.off("SIGINT", onSigint);
+    process.off("beforeExit", onBeforeExit);
   };
 }
 
