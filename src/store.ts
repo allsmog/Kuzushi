@@ -172,7 +172,7 @@ const PROOF_STATE_PRECEDENCE: Record<ProofState, number> = {
 };
 
 /** Current canonical schema version. */
-const CURRENT_SCHEMA_VERSION = 106;
+const CURRENT_SCHEMA_VERSION = 107;
 
 /**
  * Lowest schema version that the migration runner can upgrade in-place.
