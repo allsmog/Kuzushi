@@ -164,7 +164,62 @@ Even a once-per-30s heartbeat (`stage: scan → progress (12345 files,
 N findings)`) would fix this. Right now `--ci` looks identical between
 "working hard" and "dead".
 
+### 🔴 #16 — Findings stranded in `pipeline_runs.findings_json` because
+triage failed
+
+Run `1b6326b3` produced **27,375 semgrep findings** (118 ERROR-tier,
+including 2 real SSRF and 1 raw-SQL injection in Sentry source). They
+were correctly serialized into
+`pipeline_runs.findings_json` (~20 MB). But the `findings` table —
+the one that `kuzushi shell /findings`, the SARIF/JSON exporters,
+and the dedup/scoring pipeline read from — was **empty**. Reason: the
+triage stage hit issue #15 (Claude SDK exits 1) and the scan got stuck
+retrying triage forever, so the post-triage "promote findings into the
+findings table" step never ran.
+
+Concrete impact: the operator-facing UX showed "0 findings, $0.00"
+even though the underlying SQLite blob had a 20 MB findings catalogue
+ready to read. Workaround: query the JSON blob directly (see
+`FINDINGS_HIGHLIGHTS.md`). Long-term fix: persist findings into the
+`findings` table at *scan stage end*, not after triage. Triage failure
+shouldn't lose the raw scanner output.
+
+### 🟠 #17 — `--audit-log` doesn't actually write `scan.jsonl`
+
+With `--audit-log` set, the run dir got `run.json` and (later)
+`threat-model.json` — but no `scan.jsonl`, no `triage.jsonl`, no
+`verify.jsonl`. Per the README and CLAUDE.md these are the canonical
+operator surfaces for "what happened during this run". They're empty
+even though the orchestrator emitted plenty of warnings/errors that
+should have been captured.
+
 ### 🔴 #15 — Every agentic detector subprocess exits with code 1
+**(FIXED — `c3b9bd2`)**
+
+**Root cause:** the Claude Code CLI rejects
+`--dangerously-skip-permissions` AND `--permission-mode bypassPermissions`
+when the spawning process runs as root, and kuzushi's
+`agent-runtime/claude.ts` hard-coded `allowDangerouslySkipPermissions:
+true` plus a default permission mode of `bypassPermissions`. In every
+container that runs as UID 0 (Docker base images, Claude Code remote
+sandboxes, GitHub Actions), every LLM call therefore failed with exit
+1 and `--dangerously-skip-permissions cannot be used with root/sudo
+privileges for security reasons` (which kuzushi only printed when
+`KUZUSHI_ABORT_DEBUG=1` — itself a discoverability problem).
+
+**Fix:** detect root via `process.geteuid() === 0`, skip the
+`allowDangerouslySkipPermissions` flag, and downgrade the default
+permission mode to `plan`. Operators on non-root hosts get the
+historical behavior; root operators trade Bash/Edit/Write tool access
+for a working agentic stack. `KUZUSHI_DANGEROUSLY_SKIP_PERMISSIONS=1`
+forces the old behavior when an operator knows they need it.
+
+**Verified end-to-end:** post-patch the
+`agentic-sast,threat-hunt,systems-hunt` scan against Sentry runs with
+zero `Claude SDK query failed` errors — versus 498 errors in the
+single 13-minute pre-patch run.
+
+
 
 `--tasks agentic-sast` (or `threat-hunt`) reliably emits a wall of:
 
