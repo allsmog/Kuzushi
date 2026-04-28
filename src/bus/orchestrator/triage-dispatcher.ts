@@ -5,6 +5,7 @@
  * handling results/errors, and tracking dead-letter findings.
  */
 
+import { getLogger } from "../../logger.js";
 import type { Finding } from "../../scanners/types.js";
 import { updateRunCost } from "../../store.js";
 import type { TriageResult } from "../../types.js";
@@ -13,6 +14,8 @@ import { createEvent } from "../helpers.js";
 import { getRunSignal } from "../run-signals.js";
 import type { MessageBus } from "../types.js";
 import type { OrchestratorDeps, RunState } from "./types.js";
+
+const triageLog = getLogger("triage");
 
 /**
  * Collect the threat IDs present in the threat-model output so downstream
@@ -239,6 +242,13 @@ export function handleTriageError(
       attempts: totalAttempts,
       lastAttempt: new Date().toISOString(),
     });
+    // Surface the final-failure decision (#47) — operators were
+    // watching `(N/3)` retries climb and then losing the trail. The
+    // last error is included so logs make the cause traceable
+    // without grep'ing the audit log.
+    triageLog.warn(
+      `gave up after ${totalAttempts} attempts: ${fp.slice(0, 12)} — ${error}`.slice(0, 240),
+    );
   } else {
     state.triageErrors -= 1;
     state.triageQueue.push({

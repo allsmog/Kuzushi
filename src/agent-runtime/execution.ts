@@ -389,8 +389,14 @@ export async function runStructuredBatchQuery(
     throw new Error("Agent runtime is required for batch queries.");
   }
 
-  // Use batch API if available, fall back to sequential on endpoint errors (e.g. proxy 404)
-  if (runtime.queryBatch) {
+  // Use batch API if available, fall back to sequential on endpoint errors (e.g. proxy 404).
+  // Skip outright when the runtime is in OAuth mode — the throw is
+  // synchronous and logging the same warning per batch is just noise
+  // (field-test issue #28). The runtime exposes an `oauthMode` flag
+  // set in claude.ts when no apiKey is configured.
+  const batchUnavailableUnderOAuth =
+    runtime.queryBatch && (runtime as { oauthMode?: boolean }).oauthMode === true;
+  if (runtime.queryBatch && !batchUnavailableUnderOAuth) {
     try {
       return await runtime.queryBatch(
         requests.map((r) => ({ id: r.id, prompt: r.prompt, systemPrompt: r.systemPrompt })),
