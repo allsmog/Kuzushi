@@ -205,7 +205,13 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
 
   try {
     bus = createBus(config);
-    taskRegistry = await createDefaultTaskRegistry(config, repoRoot);
+    // Honor `kuzushi scan --exclude codeql,...` symmetrically with the
+    // shell command (#40). Comma-split, trim, drop empty entries.
+    const excludeBuiltinModules = opts.exclude
+      ?.split(",")
+      .map((m: string) => m.trim())
+      .filter(Boolean);
+    taskRegistry = await createDefaultTaskRegistry(config, repoRoot, { excludeBuiltinModules });
     await registerAllWorkers(bus, { taskRegistry, db, config, runtime, uiStore: params.uiStore });
   } catch (error) {
     db.close();

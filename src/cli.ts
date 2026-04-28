@@ -144,6 +144,20 @@ Examples:
         if (opts.model) {
           config.model = opts.model;
         }
+        // Validate --target up front. Previously a typo'd path
+        // bubbled through to runtime tool calls — catching it here
+        // gives a clearer error before the Ink shell starts.
+        // (Field-test issue #55.) Skip validation for non-path
+        // targets (URLs / hosts) by checking for a scheme prefix.
+        if (opts.target) {
+          const isUrlLike = /^[a-z][a-z0-9+.-]*:/i.test(opts.target);
+          if (!isUrlLike && !existsSync(opts.target)) {
+            throw new CliUsageError(
+              `--target path not found: ${opts.target}\n` +
+                "  Pass an existing repo path, a URL (https://…), or a host:port.",
+            );
+          }
+        }
         if (opts.inheritClaude) {
           config.auth = "inherited";
           config.agentRuntimeBackend = "claude";
@@ -350,6 +364,15 @@ program
   .option("--agent-runtime <backend>", "Agent runtime backend")
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
   .option("--base-url <url>", "Override ANTHROPIC_BASE_URL for this run")
+  .option(
+    "--inherit-claude",
+    "Use parent Claude Code session credentials for this run; sets `auth: inherited` in-memory.",
+    false,
+  )
+  .option(
+    "--exclude <modules>",
+    "Default modules to skip (comma-separated). Use to opt out of e.g. `codeql` when its CLI isn't installed.",
+  )
   .option("--list-modules", "Discover and print modules without scanning", false)
   .option("--modules <spec>", 'Manual module list: "name:path,name:path,..."')
   .option("--module-filter <pattern>", "Only scan modules whose names match the pattern")
