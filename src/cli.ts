@@ -25,6 +25,7 @@ import { formatConfigValidationIssue, validateKuzushiConfig } from "./config/val
 import {
   configPath,
   getConfigValue,
+  isClaudeCodeHostManagedAuth,
   loadConfig,
   setConfigValue,
   unsetConfigValue,
@@ -194,7 +195,15 @@ Examples:
         // ANTHROPIC_API_KEY from the first hit. pi-ai's anthropic provider
         // detects the `sk-ant-oat` prefix and switches to Bearer auth +
         // Claude Code beta headers automatically.
-        if (config.auth === "inherited" && !process.env.ANTHROPIC_API_KEY) {
+        // Skip when running inside a Claude Code host-managed session —
+        // the spawned `claude` CLI uses the host's auth + cache, and
+        // setting ANTHROPIC_API_KEY there forces cache-creation on every
+        // spawn (~12× cost regression — field-test issue #20).
+        if (
+          config.auth === "inherited" &&
+          !process.env.ANTHROPIC_API_KEY &&
+          !isClaudeCodeHostManagedAuth()
+        ) {
           const { resolveAmbientOauthToken } = await import("./config.js");
           const ambient = resolveAmbientOauthToken(config);
           if (ambient) {
