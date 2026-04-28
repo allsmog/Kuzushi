@@ -99,7 +99,19 @@ export async function runMonorepoScan(repoPath: string, opts: ScanCommandOptions
         config.monorepo?.excludeModules ?? [],
       );
       if (filteredModules.length === 0) {
-        console.log("No modules matched the current filter.");
+        // Clearer message for single-root repos (the most common
+        // accident here: operator passes `--list-modules` against a
+        // non-monorepo and gets "0 modules / no match" with no idea
+        // why). Field-test issue #6.
+        if (modules.length === 0) {
+          console.log(
+            `${monorepoName}: no monorepo modules detected — looks like a single-root project.\n` +
+              "  Use a normal scan: kuzushi scan <path>\n" +
+              "  Or force monorepo discovery on a packaged target: kuzushi scan <path> --modules name:path,...",
+          );
+        } else {
+          console.log("No modules matched the current filter.");
+        }
         return;
       }
       if (normalizePriorityThreshold(opts.modulePriority) !== "all") {

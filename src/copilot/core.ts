@@ -80,6 +80,13 @@ export interface CopilotCoreOptions {
   modules?: string[];
   /** Whether to load the built-in SAST module. Defaults to true. */
   loadCoreSast?: boolean;
+  /**
+   * Built-in module ids to skip during the default load. Useful when a
+   * module's binary dependency is missing (e.g. `codeql`) and the
+   * operator wants to keep the rest of the catalog functional.
+   * Field-test issue #21.
+   */
+  excludeBuiltinModules?: string[];
   /** Optional governance enforcer for scope/budget/tier checks. */
   enforcer?: import("../governance/enforcer.js").GovernanceEnforcer;
   /** Optional audit trail for logging tool executions. */
@@ -186,7 +193,9 @@ export class CopilotCore {
         // never sees `/use pipeline` in the catalog.
         createPipelineModule(),
       ];
+      const excluded = new Set(this.opts.excludeBuiltinModules ?? []);
       for (const mod of sastFamily) {
+        if (excluded.has(mod.id)) continue;
         await this.loadWithScope(mod);
       }
 
