@@ -101,6 +101,8 @@ export function attachCiStream(store: UIStore, opts: CiStreamOptions = {}): () =
   // Heartbeat — emit a reassuring "still alive" line when the pipeline
   // has been silent for too long. Without this, a long agentic scan
   // looks identical to a hung process for many minutes (issue #14).
+  // Now also includes raw-finding count and running cost (#39, #45) so
+  // operators can decide kill-vs-wait without grep'ing the SQLite DB.
   let heartbeatTimer: NodeJS.Timeout | undefined;
   if (heartbeatSeconds > 0) {
     heartbeatTimer = setInterval(() => {
@@ -114,12 +116,7 @@ export function attachCiStream(store: UIStore, opts: CiStreamOptions = {}): () =
       }
       const idleMs = Date.now() - lastWriteAt;
       if (idleMs < heartbeatSeconds * 1000) return;
-      const activeStages = state.stages.filter((s) => s.status === "active").map((s) => s.id);
-      const detail = activeStages.length ? ` (${activeStages.join(", ")})` : "";
-      const idleSec = Math.round(idleMs / 1000);
-      writeWithHeartbeatReset(
-        line("heartbeat", `${state.phase} alive · idle ${idleSec}s${detail}`),
-      );
+      writeWithHeartbeatReset(line("heartbeat", formatHeartbeat(state, idleMs)));
     }, Math.min(heartbeatSeconds, 30) * 1000).unref();
   }
 
@@ -127,6 +124,22 @@ export function attachCiStream(store: UIStore, opts: CiStreamOptions = {}): () =
     unsubscribe();
     if (heartbeatTimer) clearInterval(heartbeatTimer);
   };
+}
+
+/**
+ * Build a heartbeat line that surfaces all the numbers an operator
+ * needs to decide whether to keep waiting: phase, raw-finding count,
+ * cost so far, idle time, and active stage ids. Cost is only included
+ * when non-zero (avoids a noisy `$0.00` on scanner-only stages).
+ */
+function formatHeartbeat(state: UIState, idleMs: number): string {
+  const idleSec = Math.round(idleMs / 1000);
+  const findingsPart =
+    state.totalFindings > 0 ? ` · ${state.totalFindings.toLocaleString()} raw` : "";
+  const costPart = state.runningCostUsd > 0 ? ` · $${state.runningCostUsd.toFixed(2)}` : "";
+  const activeStages = state.stages.filter((s) => s.status === "active").map((s) => s.id);
+  const stageDetail = activeStages.length ? ` (${activeStages.join(", ")})` : "";
+  return `${state.phase} alive${findingsPart}${costPart} · idle ${idleSec}s${stageDetail}`;
 }
 
 function line(kind: string, body: string): string {
