@@ -33,7 +33,7 @@ import { Box, Text } from "ink";
 import type React from "react";
 import { useEffect, useRef } from "react";
 import { formatCost, formatDuration, truncateEnd } from "../format.js";
-import { BLACK_CIRCLE, STEP_GLYPH } from "../glyphs.js";
+import { STEP_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { Table } from "../primitives/Table.js";
 import { normalizeSeverity, type Severity, severityChalk, severityStyle } from "../severity.js";
@@ -41,8 +41,10 @@ import type { AgentActivityLine, ModuleRunArtifact, ModuleRunStep, ShellState } 
 import { SPACING, tokens } from "../tokens.js";
 import { actorLabelFromFingerprint, actorShortId, toCompactRow } from "../transcript-format.js";
 import type { ActorViewFinding } from "./ActorTranscriptView.js";
+import { DelayedBusyIndicator } from "./DelayedBusyIndicator.js";
 import { RuleHeader } from "./RuleHeader.js";
 import { ScreenContent } from "./ScreenContent.js";
+import { Spinner } from "./Spinner.js";
 
 interface ModuleRunViewProps {
   shell: ShellState;
@@ -136,9 +138,18 @@ export function ModuleRunView({
           <ArtifactsBlock artifacts={run.artifacts} />
         </>
       ) : (
-        <Box marginTop={SPACING.sm}>
-          <Text>{tokens.muted("No active run for this module yet.")}</Text>
-        </Box>
+        <>
+          {shell.processing ? (
+            <DelayedBusyIndicator
+              label="Starting module run"
+              detail="Waiting for the first run event."
+            />
+          ) : (
+            <Box marginTop={SPACING.sm}>
+              <Text>{tokens.muted("No active run for this module yet.")}</Text>
+            </Box>
+          )}
+        </>
       )}
     </ScreenContent>
   );
@@ -157,7 +168,7 @@ function ToolHeader({ run }: { run: NonNullable<ShellState["moduleRun"]> }): Rea
   const args = run.inputSummary ? `(${truncateEnd(run.inputSummary, 56)})` : "";
   const glyph =
     run.status === "running"
-      ? tokens.accent(BLACK_CIRCLE)
+      ? null
       : run.status === "done"
         ? tokens.success(STEP_GLYPH.done)
         : run.status === "aborted"
@@ -165,10 +176,14 @@ function ToolHeader({ run }: { run: NonNullable<ShellState["moduleRun"]> }): Rea
           : tokens.danger("✗");
   return (
     <Box flexDirection="column" marginBottom={SPACING.sm}>
-      <Text>
-        {glyph} {tokens.label(label)}
-        {args ? tokens.muted(args) : null}
-      </Text>
+      <Box>
+        {run.status === "running" ? <Spinner color="accent" /> : <Text>{glyph}</Text>}
+        <Text>
+          {" "}
+          {tokens.label(label)}
+          {args ? tokens.muted(args) : null}
+        </Text>
+      </Box>
       {run.status === "running" && (run.activeTaskLabel || run.findingCount != null) ? (
         <Text>
           {tokens.muted("  ")}

@@ -19,6 +19,7 @@ import { boxFooter, boxHeader } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
+import { isCancelInput } from "../interaction-key-policy.js";
 import type { CredentialChoice, ProviderId } from "../preflight-types.js";
 import {
   SelectList,
@@ -246,21 +247,21 @@ export function CredentialPrompt({
 
   useInput(
     (input, key) => {
-      if (input === "q" || key.escape) onCancel();
+      if (input === "q" || isCancelInput(input, key)) onCancel();
     },
     { isActive: step === "provider" },
   );
 
   useInput(
-    (_input, key) => {
-      if (key.escape) setStep("input");
+    (input, key) => {
+      if (isCancelInput(input, key)) setStep("input");
     },
     { isActive: step === "save" },
   );
 
   useInput(
-    (_input, key) => {
-      if (key.escape) {
+    (input, key) => {
+      if (isCancelInput(input, key)) {
         setStep(chosenProvider?.authKind === "base-url" ? "provider" : "input");
         setBaseUrlValue("");
       }

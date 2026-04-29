@@ -132,6 +132,30 @@ describe("ActorTranscriptView", () => {
     expect(out).toContain("ANON");
   });
 
+  it("shows tail position and hidden earlier count when transcript is clipped", () => {
+    const map = new Map<string, AgentActivityLine[]>([
+      [
+        "carlini-threat-hunt:Authenticated_User:0",
+        [
+          activity({ kind: "tool-start", toolName: "Read", detail: "a.ts" }),
+          activity({ kind: "tool-complete", toolName: "Read", detail: "ok" }),
+          activity({ kind: "reasoning", detail: "checking allowlist" }),
+          activity({ kind: "finding-preview", detail: "SSRF on /admin/fetch" }),
+        ],
+      ],
+    ]);
+    const out = renderText(
+      createElement(ActorTranscriptView, {
+        shell: shell(),
+        agentActivity: map,
+        maxRows: 2,
+      }),
+    );
+    expect(out).toContain("(2 of 4)");
+    expect(out).toContain("+2 earlier");
+    expect(out).not.toContain("Read(a.ts)");
+  });
+
   it("synthesizes ★ Finding rows from findings whose actorFingerprint matches", () => {
     const map = new Map<string, AgentActivityLine[]>([
       [

@@ -24,6 +24,7 @@ import { boxFooter, boxHeader } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
+import { isCancelInput } from "../interaction-key-policy.js";
 import type { ActionableFinding } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { FindingCard } from "./FindingCard.js";
@@ -87,7 +88,7 @@ export function InteractiveReview({
     } else if (input === "s") {
       setTally((t) => ({ ...t, skipped: t.skipped + 1 }));
       advance();
-    } else if (input === "q" || key.escape) {
+    } else if (input === "q" || isCancelInput(input, key)) {
       onQuit();
     }
   });

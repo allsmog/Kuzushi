@@ -15,6 +15,7 @@ import { boxFooter, boxHeader } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
+import { isCancelInput } from "../interaction-key-policy.js";
 import type { WizardResult } from "../preflight-types.js";
 import {
   SelectList,
@@ -304,6 +305,6 @@ export function SetupWizard({
 /** Minimal Escape / "q" cancel handler. */
 function useEscapeCancel(onCancel: () => void): void {
   useInput((input, key) => {
-    if (input === "q" || key.escape) onCancel();
+    if (input === "q" || isCancelInput(input, key)) onCancel();
   });
 }

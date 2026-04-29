@@ -101,6 +101,8 @@ export type KeybindAction =
   | { type: "set-finding-cursor"; cursor: number }
   /** Set `shell.sastTaskCursor` to the given (already-clamped) index. */
   | { type: "set-sast-task-cursor"; cursor: number }
+  /** Set `shell.kb.cursor` to the given (already-clamped) index. */
+  | { type: "set-kb-cursor"; cursor: number }
   /** Open or close the active/latest task story details view. */
   | { type: "toggle-story"; nextView: ShellState["shellView"] }
   /** Toggle the `/context build` tail log between compact and expanded. */
@@ -266,6 +268,29 @@ export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
     if (char === "b" || char === "B") return { type: "dispatch", command: "/back" };
   }
 
+  if (shell.shellView === "kb" && input.length === 0) {
+    const moduleId = shell.kb?.moduleId ?? shell.focusedModule ?? "";
+    const docs = moduleId ? (shell.kbState?.[moduleId]?.documents ?? []) : [];
+    const count = docs.length;
+    const cur = shell.kb?.cursor ?? 0;
+    const clamp = (next: number): number => Math.max(0, Math.min(Math.max(0, count - 1), next));
+    if (count > 0 && (char === "j" || key.downArrow)) {
+      return { type: "set-kb-cursor", cursor: clamp(cur + 1) };
+    }
+    if (count > 0 && (char === "k" || key.upArrow)) {
+      return { type: "set-kb-cursor", cursor: clamp(cur - 1) };
+    }
+    if (count > 0 && char === "g") return { type: "set-kb-cursor", cursor: 0 };
+    if (count > 0 && char === "G") return { type: "set-kb-cursor", cursor: count - 1 };
+    const selected = docs[clamp(cur)];
+    if (selected && (char === "d" || char === "D")) {
+      return { type: "dispatch", command: `detach ${selected.id}` };
+    }
+    if (selected && (char === "r" || char === "R")) {
+      return { type: "dispatch", command: `reparse ${selected.id}` };
+    }
+  }
+
   // --- 4. Findings cursor ---------------------------------------------------
   if (shell.shellView === "findings" && input.length === 0 && looseFindingCount > 0) {
     const cur = shell.findingCursor ?? 0;
@@ -290,7 +315,11 @@ export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
   }
 
   // --- 5. `q` → /back on backable views -------------------------------------
-  if (char === "q" && input.length === 0 && isBackableShellView(shell.shellView)) {
+  if (
+    (char === "q" || char === "b") &&
+    input.length === 0 &&
+    isBackableShellView(shell.shellView)
+  ) {
     return { type: "dispatch", command: "/back" };
   }
 

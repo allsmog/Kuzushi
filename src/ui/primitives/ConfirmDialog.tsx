@@ -7,6 +7,7 @@
 import { Box, Text, useInput } from "ink";
 import type { FC } from "react";
 import { useState } from "react";
+import { isCancelInput } from "../interaction-key-policy.js";
 import { SPACING, tokens } from "../tokens.js";
 
 export interface ConfirmDialogProps {
@@ -32,13 +33,15 @@ export const ConfirmDialog: FC<ConfirmDialogProps> = ({
 
   useInput(
     (input, key) => {
-      if (key.leftArrow || key.upArrow) {
+      if (isCancelInput(input, key)) {
+        onCancel();
+      } else if (key.leftArrow || key.upArrow) {
         setChoice("confirm");
       } else if (key.rightArrow || key.downArrow || key.tab) {
         setChoice("cancel");
       } else if (input === "y" || input === "Y") {
         onConfirm();
-      } else if (input === "n" || input === "N" || key.escape) {
+      } else if (input === "n" || input === "N") {
         onCancel();
       } else if (key.return) {
         (choice === "confirm" ? onConfirm : onCancel)();

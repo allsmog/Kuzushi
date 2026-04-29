@@ -56,9 +56,11 @@ import { ActorTranscriptView } from "./ActorTranscriptView.js";
 import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { BannerSplash } from "./BannerSplash.js";
 import { ContextBuildView } from "./ContextBuildView.js";
-import { ErrorMessage } from "./ErrorMessage.js";
+import { DelayedBusyIndicator } from "./DelayedBusyIndicator.js";
+import { ErrorCard } from "./ErrorCard.js";
 import { FindingCard } from "./FindingCard.js";
 import { FindingsView } from "./FindingsView.js";
+import { InteractionErrorBoundary } from "./InteractionErrorBoundary.js";
 import { KbView } from "./KbView.js";
 import { ModuleCatalog } from "./ModuleCatalog.js";
 import { ModuleHome } from "./ModuleHome.js";
@@ -199,6 +201,12 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         ? shell.moduleRun.toolName
         : undefined
       : undefined;
+  const hasSpecificBusySurface =
+    Boolean(shell?.currentTool) ||
+    Boolean(shell?.plannerBusy) ||
+    Boolean(shell?.pendingAssistantText) ||
+    shell?.moduleRun?.status === "running" ||
+    shell?.contextBuild?.status === "running";
   const staticItems = React.useMemo<Array<ShellStaticItem>>(() => {
     const items: Array<ShellStaticItem> = [];
     if (showSplash) {
@@ -254,11 +262,13 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         shell.shellView === "task-story" ||
         shell.shellView === "module-run" ||
         shell.shellView === "actor-detail" ? (
-          <MemoShellViewPanel
-            summary={shellState.summary}
-            shell={shell}
-            agentActivity={shellState.agentActivity}
-          />
+          <InteractionErrorBoundary label={describeShellLocation(shell)}>
+            <MemoShellViewPanel
+              summary={shellState.summary}
+              shell={shell}
+              agentActivity={shellState.agentActivity}
+            />
+          </InteractionErrorBoundary>
         ) : null}
         {(!shell.processing ||
           shell.shellView === "context-build" ||
@@ -283,6 +293,13 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
             )}
 
             {shell.pendingPlan && <PlanCard plan={shell.pendingPlan} />}
+
+            {shell.processing && !hasSpecificBusySurface ? (
+              <DelayedBusyIndicator
+                label="Working"
+                detail="Command accepted. Waiting for the first progress event."
+              />
+            ) : null}
 
             {shell.pendingAssistantText && (
               <HistoryEntry
@@ -477,6 +494,16 @@ const ShellInputArea = memo(
             return;
           case "set-sast-task-cursor":
             store.update({ shell: { ...liveShell, sastTaskCursor: action.cursor } });
+            return;
+          case "set-kb-cursor":
+            if (liveShell.kb) {
+              store.update({
+                shell: {
+                  ...liveShell,
+                  kb: { ...liveShell.kb, cursor: action.cursor },
+                },
+              });
+            }
             return;
           case "toggle-story":
             store.update({ shell: { ...liveShell, shellView: action.nextView } });
@@ -1113,7 +1140,7 @@ function HistoryEntry({
     case "error":
       return (
         <Box marginTop={SPACING.sm}>
-          <ErrorMessage text={entry.text} />
+          <ErrorCard message={entry.text} error={entry.text} />
         </Box>
       );
     case "tool-call":
