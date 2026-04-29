@@ -19,7 +19,6 @@ import type {
 } from "../../agents/tasks/threat-modeling/types.js";
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { severityChalk } from "../severity.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { ContextStrip } from "./ContextStrip.js";
@@ -208,21 +207,18 @@ function MatrixHeaderRow({
   nameWidth: number;
 }): React.ReactElement {
   return (
-    <Box flexDirection="column">
-      <Text>
-        {tokens.muted("id".padEnd(idWidth))}
-        {"  "}
-        {tokens.muted("element".padEnd(nameWidth))}
-        {"  "}
-        {STRIDE_COLUMNS.map((col) => tokens.label(` ${col.letter} `)).join("")}
-      </Text>
-      <Text>
-        {tokens.muted("\u2500".repeat(idWidth))}
-        {"  "}
-        {tokens.muted("\u2500".repeat(nameWidth))}
-        {"  "}
-        {tokens.muted("\u2500".repeat(STRIDE_COLUMNS.length * 3))}
-      </Text>
+    <Box flexDirection="row">
+      <Box width={idWidth} marginRight={2}>
+        <Text>{tokens.muted("id")}</Text>
+      </Box>
+      <Box width={nameWidth} marginRight={2}>
+        <Text>{tokens.muted("element")}</Text>
+      </Box>
+      {STRIDE_COLUMNS.map((col) => (
+        <Box key={col.category} width={3}>
+          <Text>{tokens.label(col.letter)}</Text>
+        </Box>
+      ))}
     </Box>
   );
 }
@@ -247,23 +243,26 @@ function MatrixRow({
     return colorCell(impact);
   });
   return (
-    <Text>
-      {tokens.muted(element.id.padEnd(idWidth))}
-      {"  "}
-      {tokens.value(name.padEnd(nameWidth))}
-      {"  "}
-      {cells.join("")}
-    </Text>
+    <Box flexDirection="row">
+      <Box width={idWidth} marginRight={2}>
+        <Text>{tokens.muted(element.id)}</Text>
+      </Box>
+      <Box width={nameWidth} marginRight={2}>
+        <Text>{tokens.value(name)}</Text>
+      </Box>
+      {cells.map((cell, index) => (
+        <Box key={`${element.id}:${STRIDE_COLUMNS[index]?.category}`} width={3}>
+          <Text>{cell}</Text>
+        </Box>
+      ))}
+    </Box>
   );
 }
 
 function colorCell(impact: CellImpact): string {
   const glyph = cellGlyph(impact);
-  const padded = ` ${glyph} `;
-  if (impact === null) return tokens.muted(padded);
-  // Pure severity pass-through: the cell glyph already carries the tier
-  // visually, so colorblind/NO_COLOR readers still parse the matrix.
-  return severityChalk(impact)(padded);
+  if (impact === null) return tokens.muted(glyph);
+  return heatToken(impact)(glyph);
 }
 
 function Legend(): React.ReactElement {
@@ -271,13 +270,13 @@ function Legend(): React.ReactElement {
     <Box marginTop={SPACING.sm}>
       <Text>
         {tokens.hint("cells: ")}
-        {severityChalk("critical")("\u2588 crit")}
+        {heatToken("critical")("\u2588 crit")}
         {tokens.muted("  ")}
-        {severityChalk("high")("\u2593 high")}
+        {heatToken("high")("\u2593 high")}
         {tokens.muted("  ")}
-        {severityChalk("medium")("\u2592 med")}
+        {heatToken("medium")("\u2592 med")}
         {tokens.muted("  ")}
-        {severityChalk("low")("\u2591 low")}
+        {heatToken("low")("\u2591 low")}
         {tokens.muted("  ")}
         {tokens.muted("\u00B7 none")}
       </Text>
@@ -299,23 +298,38 @@ function PivotTable({
   const likelihoods: Array<"high" | "medium" | "low"> = ["high", "medium", "low"];
   return (
     <Box flexDirection="column">
-      <Text>
-        {tokens.muted("impact \\ likelihood   ")}
-        {likelihoods.map((l) => tokens.muted(l.padEnd(8))).join("")}
-      </Text>
+      <Box flexDirection="row">
+        <Box width={20} marginRight={2}>
+          <Text>{tokens.muted("impact \\ likelihood")}</Text>
+        </Box>
+        {likelihoods.map((l) => (
+          <Box key={l} width={8}>
+            <Text>{tokens.muted(l)}</Text>
+          </Box>
+        ))}
+      </Box>
       {impacts.map((impact) => (
-        <Text key={impact}>
-          {tokens.value(impact.padEnd(22))}
-          {likelihoods
-            .map((l) => {
-              const n = pivot[impact][l];
-              const body = String(n).padEnd(8);
-              if (n === 0) return tokens.muted(body);
-              return severityChalk(impact)(body);
-            })
-            .join("")}
-        </Text>
+        <Box key={impact} flexDirection="row">
+          <Box width={20} marginRight={2}>
+            <Text>{tokens.value(impact)}</Text>
+          </Box>
+          {likelihoods.map((l) => {
+            const n = pivot[impact][l];
+            const body = String(n);
+            return (
+              <Box key={`${impact}:${l}`} width={8}>
+                <Text>{n === 0 ? tokens.muted(body) : heatToken(impact)(body)}</Text>
+              </Box>
+            );
+          })}
+        </Box>
       ))}
     </Box>
   );
+}
+
+function heatToken(impact: ThreatImpact): (text: string) => string {
+  if (impact === "critical" || impact === "high") return tokens.danger;
+  if (impact === "medium") return tokens.warn;
+  return tokens.muted;
 }

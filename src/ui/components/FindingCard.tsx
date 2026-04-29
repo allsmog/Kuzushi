@@ -13,7 +13,7 @@
 
 import { Box, Text } from "ink";
 import React from "react";
-import { badge, colorVerdict, severityLabel } from "../format.js";
+import { colorVerdict, severityLabel } from "../format.js";
 import { fileLink } from "../hyperlink.js";
 import { icons } from "../icons.js";
 import { renderMarkdownInline } from "../markdown.js";
@@ -27,11 +27,11 @@ import {
   muted,
   SPACING,
   strong,
-  successStrong,
   warn,
   warnStrong,
 } from "../tokens.js";
 import { CodePreview } from "./CodePreview.js";
+import { RuleHeader } from "./RuleHeader.js";
 import { ScreenContent } from "./ScreenContent.js";
 
 const DEBUG_ON = process.env.KUZUSHI_DEBUG === "1";
@@ -64,9 +64,9 @@ function _FindingCard({ finding, mode }: FindingCardProps): React.ReactElement {
   const summaryText = (finding.attackNarrative ?? finding.rationale) || "";
   const verificationBadge =
     finding.verifyExploitable === 1
-      ? ` ${badge("EXPLOITABLE", "red")}`
+      ? ` ${danger("[EXPLOITABLE]")}`
       : finding.verifyExploitable === 0
-        ? ` ${badge("NOT EXPLOITABLE", "green")}`
+        ? ` ${muted("[NOT EXPLOITABLE]")}`
         : "";
   const location = accent(
     fileLink(finding.filePath, `${finding.filePath}:${finding.startLine}`, finding.startLine),
@@ -113,7 +113,7 @@ function _FindingCard({ finding, mode }: FindingCardProps): React.ReactElement {
     // Status-signaling: the entire row is colored by execution verdict.
     const verdictColor =
       finding.pocRunVerdict === "PASS"
-        ? successStrong
+        ? strong
         : finding.pocRunVerdict === "FAIL"
           ? dangerStrong
           : finding.pocRunVerdict === "TIMEOUT"
@@ -289,26 +289,23 @@ function LinearFinding({ finding }: { finding: ActionableFinding }): React.React
 
   return (
     <ScreenContent>
-      <Box>
-        <Text>
-          {muted("\u25C2 findings   ")}
-          {strong(shortId)}
-          {muted("   \u2502   ")}
-          {sevLabel}
-          {"   "}
-          {strong(titleLine)}
-        </Text>
+      <RuleHeader
+        breadcrumb={`kuzushi/findings/${shortId}`}
+        status={`${sevLabel} · ${current}`}
+        rule={false}
+      />
+      <Box marginTop={SPACING.sm}>
+        <Text>{strong(titleLine)}</Text>
       </Box>
 
-      <Box marginTop={SPACING.sm}>
-        <Text>
-          {"   "}
-          {STATE_STRIP.map((step, i) => {
+      <Box flexDirection="column" marginTop={SPACING.sm}>
+        <Text>{label("state")}</Text>
+        <Box flexDirection="row" gap={1} paddingLeft={SPACING.md}>
+          {STATE_STRIP.map((step) => {
             const active = step.key === current;
-            const text = active ? strong(step.label) : muted(step.label);
-            return i === 0 ? text : `${muted(" \u2500\u25B6 ")}${text}`;
-          }).reduce((a, b) => a + b, "")}
-        </Text>
+            return <Text key={step.key}>{active ? strong(step.label) : muted(step.label)}</Text>;
+          })}
+        </Box>
       </Box>
 
       <LinearRow label="where" value={loc} />
@@ -329,7 +326,7 @@ function LinearFinding({ finding }: { finding: ActionableFinding }): React.React
       {finding.verifyExploitable === 1 && (
         <LinearRow
           label="verification"
-          value={`${successStrong("exploit harness passed")} · exit 0`}
+          value={`${dangerStrong("exploit harness passed")} · exit 0`}
         />
       )}
       {finding.verifyPocPayload && (
@@ -339,15 +336,6 @@ function LinearFinding({ finding }: { finding: ActionableFinding }): React.React
       {finding.verificationSteps && finding.verificationSteps.length > 0 && (
         <LinearList label="next verification" items={finding.verificationSteps.slice(0, 4)} />
       )}
-
-      <Box marginTop={SPACING.sm}>
-        <Text>{muted("\u2500".repeat(78))}</Text>
-      </Box>
-      <Box>
-        <Text>
-          {muted("q back   /back returns to findings   /trace <runId> shows run evidence")}
-        </Text>
-      </Box>
     </ScreenContent>
   );
 }
@@ -362,13 +350,16 @@ function LinearRow({
   hint?: string;
 }): React.ReactElement {
   return (
-    <Box marginTop={SPACING.sm}>
-      <Text>
-        {"  "}
-        {label(labelText.padEnd(14))}
-        {value}
-        {hint ? `  ${muted(hint)}` : ""}
-      </Text>
+    <Box flexDirection="row" marginTop={SPACING.sm} paddingLeft={SPACING.md}>
+      <Box width={14}>
+        <Text>{label(labelText)}</Text>
+      </Box>
+      <Box flexGrow={1}>
+        <Text>
+          {value}
+          {hint ? `  ${muted(hint)}` : ""}
+        </Text>
+      </Box>
     </Box>
   );
 }
@@ -383,10 +374,7 @@ function LinearParagraph({
   if (!text) return null;
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
-      <Text>
-        {"  "}
-        {label(labelText)}
-      </Text>
+      <Text>{label(labelText)}</Text>
       <Box paddingLeft={SPACING.xl}>
         <Text>{text}</Text>
       </Box>
@@ -403,10 +391,7 @@ function LinearList({
 }): React.ReactElement {
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
-      <Text>
-        {"  "}
-        {label(labelText)}
-      </Text>
+      <Text>{label(labelText)}</Text>
       <Box flexDirection="column" paddingLeft={SPACING.xl}>
         {items.map((item, i) => (
           <Text key={`${i}-${item.slice(0, 12)}`}>{muted(item)}</Text>

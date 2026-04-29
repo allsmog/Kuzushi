@@ -22,10 +22,11 @@ import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { computeVisibleSlice } from "../hooks/useVisibleSlice.js";
 import { icons } from "../icons.js";
 import { useRenderCounter } from "../perf.js";
-import { normalizeSeverity, severityChalk, severityStyle } from "../severity.js";
+import { normalizeSeverity, type Severity, severityStyle } from "../severity.js";
 import type { ActionableFinding, ResultLine } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { ChainGroup } from "./ChainGroup.js";
+import { ContextStrip } from "./ContextStrip.js";
 import { EmptyState } from "./EmptyState.js";
 import { type FilterChip, FilterChips } from "./FilterChips.js";
 import { ScreenContent } from "./ScreenContent.js";
@@ -264,38 +265,30 @@ function UnifiedFindings({
 
   return (
     <ScreenContent>
-      <Box>
-        <Text>
-          {tokens.muted("◂ back   ")}
-          {tokens.strong("findings")}
-          {tokens.muted("   │   ")}
-          <SeverityCounts counts={counts} />
-          {tokens.muted(`   ${findings.length} open`)}
-        </Text>
-      </Box>
+      <ContextStrip status={severityStatus(counts, findings.length)} />
 
       <Box marginTop={SPACING.sm} flexDirection="column">
-        <Text>{tokens.strong("Primary action: /open F-NNNN to inspect one finding deeply.")}</Text>
         <FilterChips chips={filters ?? defaultFilters()} />
       </Box>
 
-      <Box marginTop={SPACING.sm}>
-        <Text>{tokens.muted("─".repeat(78))}</Text>
-      </Box>
-
-      {resolvedChains.map(({ chain, members }) => {
-        if (members.length === 0) return null;
-        return (
-          <ChainGroup
-            key={chain.id}
-            chainId={chain.id}
-            title={chain.name}
-            severity={chain.severity}
-            verified={chain.verified}
-            findings={members}
-          />
-        );
-      })}
+      {resolvedChains.length > 0 ? (
+        <Box flexDirection="column" marginTop={SPACING.sm}>
+          <Text>{tokens.label("chains")}</Text>
+          {resolvedChains.map(({ chain, members }) => {
+            if (members.length === 0) return null;
+            return (
+              <ChainGroup
+                key={chain.id}
+                chainId={chain.id}
+                title={chain.name}
+                severity={chain.severity}
+                verified={chain.verified}
+                findings={members}
+              />
+            );
+          })}
+        </Box>
+      ) : null}
 
       {loose.length > 0 && (
         <Box flexDirection="column" marginTop={SPACING.sm}>
@@ -306,11 +299,11 @@ function UnifiedFindings({
             {slice.cursor > 0 ? tokens.hint(" ▲") : ""}
             {slice.cursor < loose.length - 1 ? tokens.hint(" ▼") : ""}
           </Text>
+          <LooseHeader />
           {hiddenAbove > 0 && (
-            <Text>
-              {"  "}
-              {tokens.muted(`↑ ${hiddenAbove} more above`)}
-            </Text>
+            <Box paddingLeft={SPACING.md}>
+              <Text>{tokens.muted(`↑ ${hiddenAbove} more above`)}</Text>
+            </Box>
           )}
           {visibleLoose.map((f, idx) => (
             <LooseRow
@@ -321,22 +314,14 @@ function UnifiedFindings({
             />
           ))}
           {hiddenBelow > 0 && (
-            <Text>
-              {"  "}
-              {tokens.muted(`↓ ${hiddenBelow} more below`)}
-            </Text>
+            <Box paddingLeft={SPACING.md}>
+              <Text>{tokens.muted(`↓ ${hiddenBelow} more below`)}</Text>
+            </Box>
           )}
         </Box>
       )}
 
       {findings.length === 0 && <EmptyState kind="findings-never-scanned" />}
-
-      <Box marginTop={SPACING.sm}>
-        <Text>{tokens.muted("─".repeat(78))}</Text>
-      </Box>
-      <Box>
-        <Text>{tokens.hint("j/k move   /open F-NNNN inspect   b back")}</Text>
-      </Box>
     </ScreenContent>
   );
 }
@@ -364,23 +349,30 @@ const LooseRow = React.memo(
     const sev = finding.displaySeverity ?? mapSeverity(finding.severity);
     const sevTag = severityInline(sev);
     return (
-      <Box flexDirection="column">
-        <Text>
-          {"  "}
-          {active ? tokens.accent("› ") : "  "}
-          {sevTag}
-          {"  "}
-          {alias ? `${tokens.accent(alias)}  ` : ""}
-          {tokens.strong(clip(title, 56))}
-          {"  "}
-          {tokens.muted(`[${finding.taskId || "sast"}]`)}
-        </Text>
-        <Text>
-          {"           "}
-          {tokens.muted(`${finding.filePath}:${finding.startLine}`)}
-          {"  "}
-          {tokens.muted(`· ${finding.verdict?.toUpperCase() ?? "—"}`)}
-        </Text>
+      <Box flexDirection="column" paddingLeft={SPACING.md}>
+        <Box flexDirection="row">
+          <Box width={2}>
+            <Text>{active ? tokens.accent("›") : ""}</Text>
+          </Box>
+          <Box width={10}>
+            <Text>{sevTag}</Text>
+          </Box>
+          <Box width={9}>
+            <Text>{alias ? tokens.accent(alias) : ""}</Text>
+          </Box>
+          <Box flexGrow={1}>
+            <Text>
+              {tokens.strong(clip(title, 56))}
+              {tokens.muted(` [${finding.taskId || "sast"}]`)}
+            </Text>
+          </Box>
+        </Box>
+        <Box paddingLeft={21}>
+          <Text>
+            {tokens.muted(`${finding.filePath}:${finding.startLine}`)}
+            {tokens.muted(` · ${finding.verdict?.toUpperCase() ?? "—"}`)}
+          </Text>
+        </Box>
       </Box>
     );
   },
@@ -388,25 +380,36 @@ const LooseRow = React.memo(
     prev.finding === next.finding && prev.alias === next.alias && prev.active === next.active,
 );
 
-function SeverityCounts({
-  counts,
-}: {
-  counts: { crit: number; high: number; med: number; low: number };
-}): React.ReactElement {
-  // Render with glyph+label pairs so NO_COLOR / grayscale readers still
-  // see the severity tier. See src/ui/severity.ts.
-  const critGlyph = severityStyle("critical").glyph;
-  const highGlyph = severityStyle("high").glyph;
-  const medGlyph = severityStyle("medium").glyph;
-  const lowGlyph = severityStyle("low").glyph;
+function LooseHeader(): React.ReactElement {
   return (
-    <Text>
-      {counts.crit > 0 ? `${severityChalk("critical")(`${critGlyph} ${counts.crit} crit`)}  ` : ""}
-      {counts.high > 0 ? `${severityChalk("high")(`${highGlyph} ${counts.high} high`)}  ` : ""}
-      {counts.med > 0 ? `${severityChalk("medium")(`${medGlyph} ${counts.med} med`)}  ` : ""}
-      {counts.low > 0 ? `${severityChalk("low")(`${lowGlyph} ${counts.low} low`)}` : ""}
-    </Text>
+    <Box flexDirection="row" paddingLeft={SPACING.md} marginTop={SPACING.xs}>
+      <Box width={2}>
+        <Text>{tokens.muted("")}</Text>
+      </Box>
+      <Box width={10}>
+        <Text>{tokens.muted("severity")}</Text>
+      </Box>
+      <Box width={9}>
+        <Text>{tokens.muted("id")}</Text>
+      </Box>
+      <Box flexGrow={1}>
+        <Text>{tokens.muted("finding")}</Text>
+      </Box>
+    </Box>
   );
+}
+
+function severityStatus(
+  counts: { crit: number; high: number; med: number; low: number },
+  total: number,
+): string[] {
+  const parts: string[] = [];
+  if (counts.crit > 0) parts.push(`${counts.crit} critical`);
+  if (counts.high > 0) parts.push(`${counts.high} high`);
+  if (counts.med > 0) parts.push(`${counts.med} medium`);
+  if (counts.low > 0) parts.push(`${counts.low} low`);
+  parts.push(`${total} open`);
+  return parts;
 }
 
 function defaultFilters(): FilterChip[] {
@@ -449,7 +452,13 @@ function mapSeverity(severity: string): "critical" | "high" | "medium" | "low" {
 function severityInline(sev: "critical" | "high" | "medium" | "low"): string {
   // Glyph + label pairing so color-blind / NO_COLOR / SR users still read the tier.
   const style = severityStyle(sev);
-  return severityChalk(sev)(`${style.glyph} ${style.label}`);
+  return shellSeverity(sev)(`${style.glyph} ${style.label}`);
+}
+
+function shellSeverity(severity: Severity): (text: string) => string {
+  if (severity === "critical" || severity === "high") return tokens.danger;
+  if (severity === "medium") return tokens.warn;
+  return tokens.muted;
 }
 
 function clip(text: string, max: number): string {

@@ -89,7 +89,7 @@ export function ActorTranscriptView({
 
   return (
     <ScreenContent>
-      <RuleHeader breadcrumb={breadcrumb} status={subtitle} />
+      <RuleHeader breadcrumb={breadcrumb} status={subtitle} rule={false} />
       {fingerprint ? (
         <Header label={actorLabelFromFingerprint(fingerprint)} subtitle={subtitle} />
       ) : null}
@@ -234,10 +234,12 @@ function OtherActors({
   });
   return (
     <Box marginTop={SPACING.md}>
-      <Text>
-        {tokens.muted("Other actors    ")}
-        {tokens.value(cells.join(" · "))}
-      </Text>
+      <Box flexDirection="row">
+        <Box width={14}>
+          <Text>{tokens.muted("Other actors")}</Text>
+        </Box>
+        <Text>{tokens.value(cells.join(" · "))}</Text>
+      </Box>
     </Box>
   );
 }

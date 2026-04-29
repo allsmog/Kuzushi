@@ -21,11 +21,11 @@ import { ContextStrip } from "./ContextStrip.js";
 import { ScreenContent } from "./ScreenContent.js";
 
 const CATEGORY_ORDER = ["offense", "intel", "governance", "defense"] as const;
-const CATEGORY_META: Record<(typeof CATEGORY_ORDER)[number], { label: string; blurb: string }> = {
-  offense: { label: "OFFENSE", blurb: "hunt vulnerabilities and prove exploitability" },
-  intel: { label: "INTEL", blurb: "research targets, map attack surface, gather context" },
-  governance: { label: "GOVERNANCE", blurb: "policy, compliance, and audit-ready evidence" },
-  defense: { label: "DEFENSE", blurb: "detect, prioritize, and remediate findings" },
+const CATEGORY_LABEL: Record<(typeof CATEGORY_ORDER)[number], string> = {
+  offense: "offense",
+  intel: "intel",
+  governance: "governance",
+  defense: "defense",
 };
 
 interface ModuleCatalogProps {
@@ -59,25 +59,13 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
   return (
     <ScreenContent>
       <ContextStrip status={status} />
-      <Box marginTop={SPACING.sm}>
-        <Text>
-          {tokens.strong("Primary next step: ")}
-          {tokens.accent("use <module-id>")}
-          {tokens.muted(" to enter one module workflow.")}
-        </Text>
-      </Box>
 
       {CATEGORY_ORDER.map((cat) => {
         const rows = byCategory[cat];
         if (!rows || rows.length === 0) return null;
-        const meta = CATEGORY_META[cat];
         return (
           <Box key={cat} flexDirection="column" marginTop={SPACING.sm}>
-            <Text>
-              {tokens.label(meta.label)}
-              {"  "}
-              {tokens.muted(meta.blurb)}
-            </Text>
+            <Text>{tokens.label(CATEGORY_LABEL[cat])}</Text>
             <Box marginTop={SPACING.sm}>
               <ModuleRows rows={rows} />
             </Box>
@@ -134,6 +122,7 @@ function ModuleRows({ rows }: { rows: ShellModuleCard[] }): React.ReactElement {
           render: (c) => c.lastRunSummary ?? "never run",
         },
       ]}
+      divider={false}
       rows={rows}
     />
   );

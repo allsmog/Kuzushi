@@ -18,8 +18,8 @@ import {
   selectedAttackSurfaceNode,
 } from "../../attack-surface-dfd.js";
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
-import { truncateEnd } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { Table } from "../primitives/Table.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { RuleHeader } from "./RuleHeader.js";
@@ -68,14 +68,13 @@ export function ThreatDfdView({ shell }: ThreatDfdViewProps): React.ReactElement
   ].join(" · ");
   return (
     <ScreenContent>
-      <RuleHeader breadcrumb="kuzushi/threats/dfd" status={status} />
+      <RuleHeader breadcrumb="kuzushi/threats/dfd" status={status} rule={false} />
       {model.sourceLabel ? (
         <Box marginBottom={SPACING.sm}>
           <Text>{tokens.muted(formatSourceLine(model))}</Text>
         </Box>
       ) : null}
       {model.qualityNotice ? <QualityNotice notice={model.qualityNotice} /> : null}
-      <Legend validated={model.basis === "threat-model"} />
       {model.nodes.length === 0 ? <EmptyWorkspace /> : <AttackSurfaceMap model={model} />}
       <SelectedPanel model={model} />
       <StrideOverlay model={model} />
@@ -107,22 +106,6 @@ function QualityNotice({ notice }: { notice: string }): React.ReactElement {
   );
 }
 
-function Legend({ validated }: { validated: boolean }): React.ReactElement {
-  return (
-    <Box marginTop={SPACING.sm}>
-      <Text>
-        {tokens.danger("! hot path")}
-        {tokens.muted("   ")}
-        {tokens.warn("B boundary")}
-        {tokens.muted("   ")}
-        {tokens.accent("> selected")}
-        {validated ? tokens.muted("   ") : ""}
-        {validated ? tokens.success("✓ validated") : ""}
-      </Text>
-    </Box>
-  );
-}
-
 function EmptyWorkspace(): React.ReactElement {
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
@@ -133,127 +116,118 @@ function EmptyWorkspace(): React.ReactElement {
 }
 
 function AttackSurfaceMap({ model }: { model: AttackSurfaceDfdModel }): React.ReactElement {
+  const nodeRows = model.zones.flatMap((zone) =>
+    zone.nodes.map((node) => ({
+      zone: zone.title,
+      id: node.id,
+      type: nodeGlyph(node),
+      node: node.name,
+      risk: node.risk,
+      detail: node.tags.length > 0 ? node.tags.slice(0, 3).join(" · ") : node.description,
+      selected: node.id === model.selectedId,
+    })),
+  );
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
-      {model.zones.map((zone, index) => (
-        <Box key={zone.id} flexDirection="column">
-          <ZoneBlock title={zone.title} nodes={zone.nodes} selectedId={model.selectedId} />
-          {index < model.zones.length - 1 ? <BoundaryBetween model={model} zone={zone.id} /> : null}
-        </Box>
-      ))}
-      {model.flows.length > 0 ? <HotPaths model={model} /> : null}
+      <Section title="zones">
+        <Table
+          showHeader
+          divider={false}
+          gap={2}
+          columns={[
+            { key: "zone", header: "zone", flex: 2, truncate: "end" },
+            { key: "id", header: "id", width: 5 },
+            { key: "type", header: "type", width: 8 },
+            {
+              key: "node",
+              header: "node",
+              flex: 3,
+              truncate: "end",
+              render: (row: (typeof nodeRows)[number]) =>
+                row.selected ? tokens.accent(row.node) : row.node,
+            },
+            {
+              key: "risk",
+              header: "risk",
+              width: 8,
+              render: (row: (typeof nodeRows)[number]) => riskToken(row.risk),
+            },
+            { key: "detail", header: "detail", flex: 4, truncate: "end" },
+          ]}
+          rows={nodeRows}
+        />
+      </Section>
+      {model.boundaries.length > 0 ? <BoundariesBlock model={model} /> : null}
+      {model.flows.length > 0 ? <FlowsBlock model={model} /> : null}
     </Box>
   );
 }
 
-function ZoneBlock({
-  title,
-  nodes,
-  selectedId,
-}: {
-  title: string;
-  nodes: AttackSurfaceNode[];
-  selectedId?: string;
-}): React.ReactElement {
-  const width = 76;
-  const heading = ` ${title} `;
-  const fill = "─".repeat(Math.max(0, width - heading.length - 2));
+function BoundariesBlock({ model }: { model: AttackSurfaceDfdModel }): React.ReactElement {
+  const rows = model.boundaries.map((boundary) => ({
+    id: boundary.id,
+    name: boundary.name,
+    from: boundary.from,
+    to: boundary.to,
+    crossing: String(boundary.crossingFlows.length),
+  }));
   return (
-    <Box flexDirection="column" marginBottom={SPACING.xs}>
-      <Text>
-        {tokens.muted("┌")}
-        {tokens.muted("─")}
-        {tokens.warn(heading)}
-        {tokens.muted(fill)}
-        {tokens.muted("┐")}
-      </Text>
-      {nodes.map((node) => (
-        <NodeRow key={node.id} node={node} selected={node.id === selectedId} />
-      ))}
-      <Text>{tokens.muted(`└${"─".repeat(width - 1)}┘`)}</Text>
-    </Box>
+    <Section title="boundaries">
+      <Table
+        showHeader
+        divider={false}
+        gap={2}
+        columns={[
+          {
+            key: "id",
+            header: "id",
+            width: 8,
+            render: (row: (typeof rows)[number]) => tokens.warn(row.id),
+          },
+          { key: "name", header: "name", flex: 3, truncate: "end" },
+          { key: "from", header: "from", flex: 2, truncate: "end" },
+          { key: "to", header: "to", flex: 2, truncate: "end" },
+          { key: "crossing", header: "flows", width: 6, align: "right" },
+        ]}
+        rows={rows}
+      />
+    </Section>
   );
 }
 
-function NodeRow({
-  node,
-  selected,
-}: {
-  node: AttackSurfaceNode;
-  selected: boolean;
-}): React.ReactElement {
-  const marker = selected ? tokens.accent(">") : node.risk === "hot" ? tokens.danger("!") : " ";
-  const glyph = nodeGlyph(node);
-  const label = `${node.id.padEnd(4)} ${glyph} ${node.name}`;
-  const detail = node.tags.length > 0 ? node.tags.slice(0, 3).join(" · ") : node.description;
-  const color = selected
-    ? tokens.accent
-    : node.risk === "hot"
-      ? tokens.danger
-      : node.risk === "watch"
-        ? tokens.warn
-        : tokens.value;
-  return (
-    <Text>
-      {tokens.muted("│ ")}
-      {marker} {color(label.padEnd(34))}
-      {tokens.muted(truncateEnd(detail, 36).padEnd(36))}
-      {tokens.muted("│")}
-    </Text>
-  );
-}
-
-function BoundaryBetween({
-  model,
-  zone,
-}: {
-  model: AttackSurfaceDfdModel;
-  zone: string;
-}): React.ReactElement | null {
-  const boundary = model.boundaries.find((b) => b.from === zone);
-  if (!boundary) {
-    return (
-      <Text>
-        {"   "}
-        {tokens.muted("│")}
-      </Text>
-    );
-  }
-  return (
-    <Text>
-      {"   "}
-      {tokens.muted("│")} {tokens.warn(boundary.id)}
-      {tokens.muted(` ${boundary.name} · ${boundary.crossingFlows.length} crossing`)}
-    </Text>
-  );
-}
-
-function HotPaths({ model }: { model: AttackSurfaceDfdModel }): React.ReactElement {
+function FlowsBlock({ model }: { model: AttackSurfaceDfdModel }): React.ReactElement {
   const hot = model.flows.filter((flow) => flow.hot).slice(0, 5);
   const shown = hot.length > 0 ? hot : model.flows.slice(0, 5);
+  const rows = shown.map((flow) => ({
+    risk: flow.hot ? "hot" : "watch",
+    from: flow.source,
+    to: flow.target,
+    protocol: flow.protocol ?? "",
+    data: flow.dataClassification ?? "",
+    crosses: flow.crosses.length > 0 ? flow.crosses.join(",") : "",
+  }));
   return (
-    <Box flexDirection="column" marginTop={SPACING.sm}>
-      <Text>{tokens.label("hot paths")}</Text>
-      {shown.map((flow) => (
-        <FlowLine key={flow.id} flow={flow} />
-      ))}
-    </Box>
-  );
-}
-
-function FlowLine({ flow }: { flow: AttackSurfaceFlow }): React.ReactElement {
-  const label = `${flow.id.padEnd(4)} ${flow.source} -> ${flow.target}`;
-  const meta = [
-    flow.protocol,
-    flow.dataClassification,
-    flow.crosses.length > 0 ? `crosses ${flow.crosses.join(",")}` : undefined,
-  ].filter(Boolean);
-  return (
-    <Text>
-      {"  "}
-      {flow.hot ? tokens.danger("!") : tokens.muted("·")} {tokens.value(label.padEnd(24))}
-      {flow.hot ? tokens.danger(meta.join(" · ")) : tokens.muted(meta.join(" · "))}
-    </Text>
+    <Section title="flows">
+      <Table
+        showHeader
+        divider={false}
+        gap={2}
+        columns={[
+          {
+            key: "risk",
+            header: "risk",
+            width: 8,
+            render: (row: (typeof rows)[number]) => riskToken(row.risk),
+          },
+          { key: "from", header: "from", flex: 2, truncate: "end" },
+          { key: "to", header: "to", flex: 2, truncate: "end" },
+          { key: "protocol", header: "protocol", flex: 1, truncate: "end" },
+          { key: "data", header: "data", flex: 2, truncate: "end" },
+          { key: "crosses", header: "boundary", flex: 2, truncate: "end" },
+        ]}
+        rows={rows}
+      />
+    </Section>
   );
 }
 
@@ -264,36 +238,16 @@ function SelectedPanel({ model }: { model: AttackSurfaceDfdModel }): React.React
   const risks = node.tags.length > 0 ? node.tags.join(" · ") : node.description;
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
-      <Text>
-        {tokens.label("Selected")}
-        {"  "}
-        {tokens.accent(`${node.id} ${node.name}`)}
-      </Text>
-      <Text>
-        {"  "}
-        {tokens.muted("zone   ")}
-        {tokens.value(node.zone)}
-      </Text>
-      <Text>
-        {"  "}
-        {tokens.muted("inputs ")}
-        {tokens.value(formatFlowEndpoints(flows.inputs, "source"))}
-      </Text>
-      <Text>
-        {"  "}
-        {tokens.muted("outputs ")}
-        {tokens.value(formatFlowEndpoints(flows.outputs, "target"))}
-      </Text>
-      <Text>
-        {"  "}
-        {tokens.muted("risks  ")}
-        {node.risk === "hot" ? tokens.danger(risks) : tokens.warn(risks)}
-      </Text>
-      <Text>
-        {"  "}
-        {tokens.muted("next   ")}
-        {tokens.value(model.nextActions.slice(0, 2).join(" · "))}
-      </Text>
+      <Text>{tokens.label("selected")}</Text>
+      <FieldRow label="id" value={tokens.accent(`${node.id} ${node.name}`)} />
+      <FieldRow label="zone" value={node.zone} />
+      <FieldRow label="inputs" value={formatFlowEndpoints(flows.inputs, "source")} />
+      <FieldRow label="outputs" value={formatFlowEndpoints(flows.outputs, "target")} />
+      <FieldRow
+        label="risks"
+        value={node.risk === "hot" ? tokens.danger(risks) : tokens.warn(risks)}
+      />
+      <FieldRow label="next" value={model.nextActions.slice(0, 2).join(" · ")} />
     </Box>
   );
 }
@@ -303,23 +257,21 @@ function StrideOverlay({ model }: { model: AttackSurfaceDfdModel }): React.React
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>{tokens.label("STRIDE overlay")}</Text>
-      <Text>
-        {"  "}
-        {tokens.value(`S:${counts.spoofing}`)}
-        {tokens.muted("  ")}
-        {tokens.value(`T:${counts.tampering}`)}
-        {tokens.muted("  ")}
-        {tokens.value(`R:${counts.repudiation}`)}
-        {tokens.muted("  ")}
-        {tokens.value(`I:${counts["information-disclosure"]}`)}
-        {tokens.muted("  ")}
-        {tokens.value(`D:${counts["denial-of-service"]}`)}
-        {tokens.muted("  ")}
-        {tokens.value(`E:${counts["elevation-of-privilege"]}`)}
-        {model.stats.threats === 0
-          ? tokens.warn("   no threats emitted; watch hot paths and privileged choke points")
-          : null}
-      </Text>
+      <Box flexDirection="row" gap={2} paddingLeft={SPACING.md}>
+        <Text>{tokens.value(`S:${counts.spoofing}`)}</Text>
+        <Text>{tokens.value(`T:${counts.tampering}`)}</Text>
+        <Text>{tokens.value(`R:${counts.repudiation}`)}</Text>
+        <Text>{tokens.value(`I:${counts["information-disclosure"]}`)}</Text>
+        <Text>{tokens.value(`D:${counts["denial-of-service"]}`)}</Text>
+        <Text>{tokens.value(`E:${counts["elevation-of-privilege"]}`)}</Text>
+      </Box>
+      {model.stats.threats === 0 ? (
+        <Box paddingLeft={SPACING.md}>
+          <Text>
+            {tokens.warn("no threats emitted; watch hot paths and privileged choke points")}
+          </Text>
+        </Box>
+      ) : null}
     </Box>
   );
 }
@@ -329,12 +281,27 @@ function RegenerationPalette({ stale }: { stale?: readonly string[] }): React.Re
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>{tokens.label("Regenerate threat-model slice")}</Text>
-      <Text>{tokens.muted(`  ${staleLabel}`)}</Text>
-      <Text>{tokens.value("  /context regen repo        repo/file signals")}</Text>
-      <Text>{tokens.value("  /context regen app-model   routes, stores, boundaries")}</Text>
-      <Text>{tokens.value("  /threats regen dfd         data-flow diagram")}</Text>
-      <Text>{tokens.value("  /threats regen stride      STRIDE overlay")}</Text>
-      <Text>{tokens.value("  /threats regen scenarios   downstream probes")}</Text>
+      <Box paddingLeft={SPACING.md}>
+        <Text>{tokens.muted(staleLabel)}</Text>
+      </Box>
+      <Box paddingLeft={SPACING.md}>
+        <Table
+          showHeader={false}
+          divider={false}
+          gap={2}
+          columns={[
+            { key: "command", width: 28 },
+            { key: "detail", flex: 1, truncate: "end" },
+          ]}
+          rows={[
+            { command: "/context regen repo", detail: "repo/file signals" },
+            { command: "/context regen app-model", detail: "routes, stores, boundaries" },
+            { command: "/threats regen dfd", detail: "data-flow diagram" },
+            { command: "/threats regen stride", detail: "STRIDE overlay" },
+            { command: "/threats regen scenarios", detail: "downstream probes" },
+          ]}
+        />
+      </Box>
     </Box>
   );
 }
@@ -345,49 +312,70 @@ function PatchProposalCard({ shell }: { shell: ShellState }): React.ReactElement
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>{tokens.label("AI proposed DFD patch")}</Text>
-      <Text>
-        {"  "}
-        {tokens.muted("instruction ")}
-        {tokens.value(patch.instruction)}
-      </Text>
-      <Text>
-        {"  "}
-        {tokens.muted("summary     ")}
-        {tokens.value(patch.summary)}
-      </Text>
+      <FieldRow label="instruction" value={patch.instruction} />
+      <FieldRow label="summary" value={patch.summary} />
       {patch.diffLines.slice(0, 8).map((line) => (
         <Text key={line}>
-          {"  "}
           {line.startsWith("-")
             ? tokens.danger(line)
             : line.startsWith("+")
-              ? tokens.success(line)
+              ? tokens.accent(line)
               : tokens.warn(line)}
         </Text>
       ))}
       {patch.validationErrors.length > 0 ? (
-        <Text>
-          {"  "}
-          {tokens.warn(`warnings: ${patch.validationErrors.join(" · ")}`)}
-        </Text>
+        <Box paddingLeft={SPACING.md}>
+          <Text>{tokens.warn(`warnings: ${patch.validationErrors.join(" · ")}`)}</Text>
+        </Box>
       ) : null}
-      <Text>{tokens.muted("  y accept and save · n reject · /threats ask <revision>")}</Text>
+      <Box paddingLeft={SPACING.md}>
+        <Text>{tokens.muted("y accept · n reject · /threats ask <revision>")}</Text>
+      </Box>
     </Box>
   );
 }
 
 function ControlHint({ hasPatch }: { hasPatch: boolean }): React.ReactElement {
+  if (!hasPatch) return <Box />;
   return (
-    <Box marginTop={SPACING.sm} flexDirection="column">
-      <Text>
-        {tokens.muted("1 dfd · 2 stride · 3 stories · 4 scope · 5 summary · r regen · q back")}
-      </Text>
-      <Text>{tokens.muted("AI edits: /threats ask <instruction>")}</Text>
-      {hasPatch ? (
-        <Text>{tokens.muted("patch proposal: y accept · n reject · /threats ask <revision>")}</Text>
-      ) : null}
+    <Box marginTop={SPACING.sm}>
+      <Text>{tokens.muted("patch proposal: y accept · n reject · /threats ask <revision>")}</Text>
     </Box>
   );
+}
+
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <Box flexDirection="column" marginTop={SPACING.sm}>
+      <Text>{tokens.label(title)}</Text>
+      <Box marginTop={SPACING.xs} paddingLeft={SPACING.md}>
+        {children}
+      </Box>
+    </Box>
+  );
+}
+
+function FieldRow({ label, value }: { label: string; value: string }): React.ReactElement {
+  return (
+    <Box flexDirection="row" paddingLeft={SPACING.md}>
+      <Box width={9}>
+        <Text>{tokens.muted(label)}</Text>
+      </Box>
+      <Text>{tokens.value(value)}</Text>
+    </Box>
+  );
+}
+
+function riskToken(risk: string): string {
+  if (risk === "hot") return tokens.danger("hot");
+  if (risk === "watch") return tokens.warn("watch");
+  return tokens.muted(risk || "normal");
 }
 
 function nodeGlyph(node: AttackSurfaceNode): string {
