@@ -2,6 +2,21 @@ import type { KuzushiConfig } from "../types.js";
 
 export type ScanPreset = "safe" | "fast" | "standard" | "deep" | "reference";
 
+const DEEP_TASKS = [
+  "context:context-gatherer",
+  "context:context-enricher",
+  "agentic-sast:secrets-crypto-detect",
+  "context:code-config-detect",
+  "pipeline:taint-cwe-select",
+  "taint-iris:hunt",
+  "threat-model:threat-model-randori",
+  "carlini-threat-hunt:run",
+  "systems-hunt:systems-context-gatherer",
+  "systems-hunt:systems-invariant-extract",
+  "systems-hunt:systems-trigger-synth",
+  "systems-hunt:systems-hunt",
+];
+
 export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
   // Recommended for first-time users: tight cost and turn caps, no expensive optional tasks.
   safe: {
@@ -37,20 +52,7 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
     enableDynamicTaskSelection: false,
   },
   deep: {
-    tasks: [
-      "context:context-gatherer",
-      "context:context-enricher",
-      "agentic-sast:secrets-crypto-detect",
-      "context:code-config-detect",
-      "pipeline:taint-cwe-select",
-      "taint-iris:hunt",
-      "threat-model:threat-model-randori",
-      "carlini-threat-hunt:run",
-      "systems-hunt:systems-context-gatherer",
-      "systems-hunt:systems-invariant-extract",
-      "systems-hunt:systems-trigger-synth",
-      "systems-hunt:systems-hunt",
-    ],
+    tasks: [...DEEP_TASKS],
     verify: true,
     variantAnalysis: true,
     taskConfig: {
@@ -58,8 +60,7 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
     },
   },
   reference: {
-    // Inherits the user's configured task list — does not override it.
-    // Orchid is used surgically for systems-hunt only (see taskConfig below).
+    tasks: [...DEEP_TASKS],
     verify: true,
     pocHarness: true,
     codeGraphEnabled: true,

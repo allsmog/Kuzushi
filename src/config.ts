@@ -867,7 +867,7 @@ function saveUpdatedConfigLayer(config: WritableConfigLayer, repoRoot?: string):
 }
 
 function rejectLegacyAgentRuntimePath(key: string): void {
-  if (!/^agentRuntimeConfig\.(apiKey|baseUrl)$/.test(key)) return;
+  if (!/^agentRuntimeConfig\.(apiKey|apiKeyFile|baseUrl)$/.test(key)) return;
   const field = key.split(".").at(-1);
   throw new Error(
     `Legacy config key "${key}" was removed. Use "agentRuntimeConfig.claude.${field}" instead.`,
@@ -875,7 +875,7 @@ function rejectLegacyAgentRuntimePath(key: string): void {
 }
 
 function rejectLegacyAgentRuntimeConfig(value: Record<string, unknown>): void {
-  if (!("apiKey" in value || "baseUrl" in value)) return;
+  if (!("apiKey" in value || "apiKeyFile" in value || "baseUrl" in value)) return;
   throw new Error(
     'Legacy flat agentRuntimeConfig was removed. Use {"claude":{"apiKey":"..."}} or another backend slot.',
   );
@@ -1378,10 +1378,12 @@ function normalizeConfidenceSignalWeights(value: unknown): ConfidenceSignalWeigh
 function normalizeAgentRuntimeCredentials(value: unknown): AgentRuntimeCredentials | undefined {
   if (!isRecord(value)) return undefined;
   const apiKey = normalizeOptionalString(value["apiKey"]);
+  const apiKeyFile = normalizeOptionalString(value["apiKeyFile"]);
   const baseUrl = normalizeOptionalString(value["baseUrl"]);
-  if (!apiKey && !baseUrl) return undefined;
+  if (!apiKey && !apiKeyFile && !baseUrl) return undefined;
   const out: AgentRuntimeCredentials = {};
   if (apiKey) out.apiKey = apiKey;
+  if (apiKeyFile) out.apiKeyFile = apiKeyFile;
   if (baseUrl) out.baseUrl = baseUrl;
   return out;
 }

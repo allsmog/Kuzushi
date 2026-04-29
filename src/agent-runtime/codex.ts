@@ -8,6 +8,7 @@ import {
   type ThreadItem,
   type ThreadOptions,
 } from "@openai/codex-sdk";
+import { resolveAgentRuntimeConfig } from "../credentials.js";
 import { getLogger } from "../logger.js";
 import type { AgentRuntimeCredentials } from "../types.js";
 import { isRecord, toErrorMessage } from "../utils.js";
@@ -422,9 +423,10 @@ export class CodexAgentRuntime implements AgentRuntime {
   private readonly client: Codex;
 
   constructor(config?: AgentRuntimeCredentials) {
+    const resolvedConfig = resolveAgentRuntimeConfig(config);
     this.client = new Codex({
-      ...(config?.apiKey ? { apiKey: config.apiKey } : {}),
-      ...(config?.baseUrl ? { baseUrl: config.baseUrl } : {}),
+      ...(resolvedConfig?.apiKey ? { apiKey: resolvedConfig.apiKey } : {}),
+      ...(resolvedConfig?.baseUrl ? { baseUrl: resolvedConfig.baseUrl } : {}),
     });
   }
 

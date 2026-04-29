@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { allMigrations, runMigrations } from "../migrations/index.js";
+import { ensureScannerCacheSchema } from "../scanner-cache.js";
 
 const CURRENT_SCHEMA_VERSION = 108;
 const POST_RESET_BASELINE_VERSION = 100;
@@ -45,6 +46,15 @@ export function initDb(dbPath: string, opts?: InitDbOpts): Database.Database {
   }
 
   runMigrations(db, allMigrations);
+  try {
+    ensureScannerCacheSchema(db);
+  } catch (error) {
+    console.warn(
+      `[store] failed to ensure scanner_cache schema: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
   db.pragma("wal_checkpoint(TRUNCATE)");
 
   return db;
@@ -88,6 +98,13 @@ function openWithPragmas(dbPath: string): Database.Database {
   db.pragma("busy_timeout = 5000");
   db.pragma("synchronous = NORMAL");
   db.pragma("foreign_keys = ON");
+  for (const target of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    try {
+      fs.chmodSync(target, 0o600);
+    } catch {
+      /* best-effort: WAL/SHM may not exist yet or filesystem may not support POSIX perms */
+    }
+  }
   return db;
 }
 

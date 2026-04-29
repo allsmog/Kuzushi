@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
-import { runPatchPipeline } from "../../patch.js";
+import { registerShutdownHook } from "../../lifecycle.js";
+import { cleanupActiveWorktreesSync, runPatchPipeline } from "../../patch.js";
 import type { KuzushiConfig } from "../../types.js";
 import { toErrorMessage } from "../../utils.js";
 import type { PatchRequestedEvent } from "../events.js";
@@ -15,11 +16,32 @@ export interface PatchWorkerDeps {
 }
 
 /**
+ * Process-wide guard so multiple worker registrations (e.g. across pipeline
+ * stages or tests) only install the worktree-cleanup shutdown hook once.
+ */
+let worktreeCleanupHookRegistered = false;
+
+/**
  * Worker that subscribes to patch:requested events, runs patch synthesis,
  * and emits patch:start/complete/error events.
  */
 export function registerPatchWorker(deps: PatchWorkerDeps): void {
   const { bus, db, runtime, config } = deps;
+
+  // Worktrees outlive the patch worker (they're handed to the patch-verify
+  // worker via the patch:complete event), so we install the cleanup hook
+  // here at runtime registration time. Priority 5 → runs before generic
+  // resource shutdown so the on-disk state is gone before the process exits.
+  if (!worktreeCleanupHookRegistered) {
+    worktreeCleanupHookRegistered = true;
+    registerShutdownHook(
+      "patch-worktree-cleanup",
+      async () => {
+        cleanupActiveWorktreesSync();
+      },
+      5,
+    );
+  }
 
   bus.subscribe<PatchRequestedEvent>("patch:requested", async (event) => {
     const { context, fingerprint } = event.payload;

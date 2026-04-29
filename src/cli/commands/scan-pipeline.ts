@@ -177,7 +177,7 @@ export function createPipelineRuntime(config: KuzushiConfig, scanOpts: ScanOpts)
       );
       if (missingCredentials.some((entry) => entry.provider === "anthropic")) {
         details.push(
-          "Tip: for Anthropic models, you can also set agentRuntimeConfig.apiKey or pass --api-key for this run.",
+          "Tip: for Anthropic models, you can also set agentRuntimeConfig.<backend>.apiKey or pass --api-key for this run.",
         );
       }
       throw new CliConfigError("missing API credentials for selected model provider(s):", {
@@ -222,7 +222,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
   const dbPath = params.dbPath ?? resolveDbPath(repoRoot, scanPath, params.gitRoot);
   const dbDir = path.dirname(dbPath);
   if (!existsSync(dbDir)) {
-    mkdirSync(dbDir, { recursive: true });
+    mkdirSync(dbDir, { recursive: true, mode: 0o700 });
   }
 
   const runRepoId = params.runRepoId ?? path.resolve(repoRoot);

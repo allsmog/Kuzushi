@@ -17,6 +17,7 @@ import type {
   LlmRetryEvent,
 } from "../bus/events.js";
 import type { MessageBus } from "../bus/types.js";
+import { resolveAgentRuntimeConfig } from "../credentials.js";
 import { KuzushiError, wrapError } from "../errors.js";
 import { installGlobalDispatcher } from "../http-agent.js";
 import { getLogger } from "../logger.js";
@@ -290,7 +291,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
   runId?: string;
 
   constructor(runtimeConfig?: AgentRuntimeCredentials) {
-    this.runtimeConfig = runtimeConfig;
+    this.runtimeConfig = resolveAgentRuntimeConfig(runtimeConfig);
   }
 
   async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {

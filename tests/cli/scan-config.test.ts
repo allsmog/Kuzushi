@@ -176,7 +176,7 @@ describe("applyScanCommandConfigOverrides", () => {
     ).toThrowError(new CliUsageError("--taint-diff-mode must be one of: delta, baseline."));
   });
 
-  it("applies reference preset with deep-merged taskConfig", () => {
+  it("applies reference preset as a strict superset of deep with PoC + frontier model", () => {
     const config = structuredClone(DEFAULTS);
     const originalSemgrep = { ...config.taskConfig.semgrep };
     const originalCarliniThreatHunt = { ...config.taskConfig["carlini-threat-hunt"] };
@@ -197,11 +197,27 @@ describe("applyScanCommandConfigOverrides", () => {
     // Top-level preset fields are applied
     expect(config.verify).toBe(true);
     expect(config.pocHarness).toBe(true);
-    // Scanners are NOT overridden — user's configured tasks are preserved
-    expect(config.tasks).toEqual(DEFAULTS.tasks);
+    // Reference is a strict superset of deep — its task list now includes
+    // the full deep task DAG so users get what the README advertises
+    // ("deep + PoC + threat-informed hunting + frontier model") even when
+    // they pass only `--preset reference` against a fresh config.
+    expect(config.tasks).toEqual([
+      "context:context-gatherer",
+      "context:context-enricher",
+      "agentic-sast:secrets-crypto-detect",
+      "context:code-config-detect",
+      "pipeline:taint-cwe-select",
+      "taint-iris:hunt",
+      "threat-model:threat-model-randori",
+      "carlini-threat-hunt:run",
+      "systems-hunt:systems-context-gatherer",
+      "systems-hunt:systems-invariant-extract",
+      "systems-hunt:systems-trigger-synth",
+      "systems-hunt:systems-hunt",
+    ]);
   });
 
-  it("reference preset does not override global model or tasks", () => {
+  it("reference preset honors --model override and still applies the deep task list", () => {
     const config = structuredClone(DEFAULTS);
 
     applyScanCommandConfigOverrides(
@@ -214,8 +230,10 @@ describe("applyScanCommandConfigOverrides", () => {
 
     // CLI --model sets the global model; preset doesn't fight it
     expect(config.model).toBe("anthropic:claude-opus-4-6");
-    // Scanners stay at user defaults
-    expect(config.tasks).toEqual(DEFAULTS.tasks);
+    // Reference now sets the task list (deep-equivalent), so it should
+    // include systems-hunt regardless of the user's prior config.
+    expect(config.tasks).toContain("systems-hunt:systems-hunt");
+    expect(config.tasks).toContain("threat-model:threat-model-randori");
     // Only systems-hunt gets Orchid from taskConfig deep-merge
     expect(config.taskConfig["systems-hunt"].model).toBe("anthropic:claude-orchid-preview");
     expect(config.taskConfig["carlini-threat-hunt"].model).toBe(
