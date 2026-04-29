@@ -16,6 +16,7 @@ export async function createDefaultDagRegistry(
   // lazy-load cost.
   const { registerDagToolsInDagRegistry } = await import("../modules/dag-registry.js");
   const { createAgenticSastModule } = await import("../modules/agentic-sast/agentic-sast.js");
+  const { createChromeRceModule } = await import("../modules/chrome-rce/chrome-rce.js");
   const { createCodeqlModule } = await import("../modules/codeql/codeql.js");
   const { createContextModule } = await import("../modules/context/context.js");
   const { createPipelineModule } = await import("../modules/pipeline/pipeline.js");
@@ -41,6 +42,7 @@ export async function createDefaultDagRegistry(
     createSystemsHuntModule(),
     createCoreTobModule(),
     createCoreVulnScoutModule(),
+    createChromeRceModule(),
   ];
 
   // Symmetric with `kuzushi shell --exclude` — drop modules the
