@@ -446,6 +446,113 @@ describe("report-worker with UI store", () => {
     db.close();
   });
 
+  it("inline runs without module-run state stay in shell mode and publish task activity", async () => {
+    const bus = new InProcessBus();
+    const db = initDb(":memory:");
+    const store = createUIStore();
+    store.update({
+      mode: "shell",
+      shell: {
+        modules: ["carlini-threat-hunt"],
+        tools: ["carlini-threat-hunt:run"],
+        focusedModule: "carlini-threat-hunt",
+        shellView: "module",
+        openFindingId: null,
+        target: "/tmp/repo",
+        workspace: "acme",
+        history: [],
+        commandHistory: [],
+        moduleOptions: {},
+        processing: true,
+      },
+    });
+
+    const config: KuzushiConfig = {
+      model: "anthropic:claude-sonnet-4-6",
+      busBackend: "in-process",
+      triageBatchSize: 15,
+      triageConcurrency: 2,
+      scanMode: "parallel",
+      tasks: ["carlini-threat-hunt"],
+      severity: ["ERROR"],
+      excludePatterns: [],
+      taskConfig: { "carlini-threat-hunt": {} },
+    };
+
+    registerReportWorker(bus, { db, config }, store);
+
+    const activityEvents: Array<{ taskId: string; description: string }> = [];
+    bus.subscribe("task:activity", (event) => {
+      activityEvents.push({
+        taskId: event.payload.taskId,
+        description: event.payload.description,
+      });
+    });
+
+    const runId = generateRunId();
+    const context = {
+      runId,
+      repoRoot: "/tmp/repo",
+      repoName: "repo",
+      dbPath: "/tmp/repo/.kuzushi/findings.sqlite3",
+      postProcessMode: "scan-only" as const,
+      inline: true,
+    };
+
+    await bus.publish(
+      createEvent("pipeline:start", runId, {
+        context,
+        config,
+        scanOpts: {
+          severity: ["ERROR"],
+          excludePatterns: [],
+          tasks: ["carlini-threat-hunt"],
+          fresh: false,
+        },
+      }),
+    );
+
+    expect(store.getState().stages).toEqual([]);
+    expect(store.getState().mode).toBe("shell");
+    expect(store.getState().shell?.shellView).toBe("module");
+
+    await bus.publish(
+      createEvent("task:start", runId, {
+        context,
+        taskId: "carlini-threat-hunt",
+        outputKind: "findings",
+        input: null,
+        upstreamOutputs: new Map(),
+      }),
+    );
+
+    expect(activityEvents).toContainEqual({
+      taskId: "carlini-threat-hunt",
+      description: "analyzing threats from attack surface",
+    });
+
+    await bus.publish(
+      createEvent("scan:complete", runId, {
+        context,
+        totalFindings: 0,
+        durationMs: 1000,
+      }),
+    );
+    await bus.publish(
+      createEvent("report:requested", runId, {
+        context,
+        reportMode: "full",
+      }),
+    );
+
+    expect(store.getState().mode).toBe("shell");
+    expect(store.getState().summary).toBeFalsy();
+    expect(store.getState().stages).toEqual([]);
+
+    await bus.close();
+    db.close();
+  });
+
   it("labels carlini-threat-hunt start with 'analyzing threats from attack surface' instead of 'initializing'", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");

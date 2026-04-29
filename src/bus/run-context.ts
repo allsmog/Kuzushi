@@ -19,4 +19,6 @@ export interface RunContext {
   dbPath: string;
   postProcessMode?: "full" | "scan-only";
   reportMode?: ReportMode;
+  /** True when the pipeline was kicked off from a shell-embedded single-task run. */
+  inline?: boolean;
 }

@@ -86,6 +86,8 @@ export async function executeSastPipeline(
     taskConfig?: Record<string, Record<string, unknown>>;
     configOverrides?: Partial<KuzushiConfig>;
     postProcessMode?: "full" | "scan-only";
+    /** Shell-embedded single-task run — see RunContext.inline. */
+    inline?: boolean;
   },
 ): Promise<ToolResult> {
   const params = input as Record<string, unknown>;
@@ -178,9 +180,14 @@ export async function executeSastPipeline(
       manageCache: false,
       uiStore: uiStoreInternal,
       signal: ctx.signal,
-      returnModeOnComplete: uiStoreInternal?.getState().shell ? "shell" : undefined,
+      returnModeOnComplete: options?.inline
+        ? undefined
+        : uiStoreInternal?.getState().shell
+          ? "shell"
+          : undefined,
       postProcessMode: options?.postProcessMode ?? "full",
       seedTaskOutputs: ctx.seedTaskOutputs,
+      ...(options?.inline ? { inline: true } : {}),
       origin: {
         moduleId: ctx.tool?.moduleId,
         toolName: ctx.tool?.name,
@@ -240,6 +247,8 @@ export async function runSingleTaskPipeline(
     summaryLabel?: string;
     taskConfig?: Record<string, Record<string, unknown>>;
     configOverrides?: Partial<KuzushiConfig>;
+    /** Opt out of shell-inline rendering; defaults to true for single-task tools. */
+    inline?: boolean;
   },
 ): Promise<ToolResult> {
   return executeSastPipeline(input, ctx, {
@@ -248,5 +257,6 @@ export async function runSingleTaskPipeline(
     ...(extraOpts?.taskConfig ? { taskConfig: extraOpts.taskConfig } : {}),
     ...(extraOpts?.configOverrides ? { configOverrides: extraOpts.configOverrides } : {}),
     postProcessMode: "scan-only",
+    inline: extraOpts?.inline ?? true,
   });
 }
