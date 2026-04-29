@@ -17,7 +17,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { killAllClaudeSubprocesses } from "../agent-runtime/claude.js";
+import { killAllClaudeSubprocesses, warnIfNonAnthropicProxy } from "../agent-runtime/claude.js";
 import { configureAgentRuntime } from "../agent-runtime/index.js";
 import {
   describeModelOverrideFormat,
@@ -34,9 +34,9 @@ import {
   defaultAttachmentAdapter,
   type KindSpec,
 } from "../modules/_shared/attachments/index.js";
+import { CARLINI_THREAT_HUNT_KIND_SPEC } from "../modules/carlini-threat-hunt/attachments.js";
 import { CONTEXT_KIND_SPEC } from "../modules/context/attachments.js";
 import { formatContextSummary } from "../modules/core-sast.js";
-import { THREAT_HUNT_KIND_SPEC } from "../modules/threat-hunt/attachments.js";
 import { THREAT_MODEL_KIND_SPEC } from "../modules/threat-model/attachments.js";
 import type { ModuleInfo, ModuleTool } from "../modules/types.js";
 import { loadDraftScope, scopeToHomeSlice } from "../modules/vendor-assessment/storage.js";
@@ -154,7 +154,7 @@ const SHELL_ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Bash", "LS"];
 const SHELL_HISTORY_FILENAME = "shell-history.json";
 const MAX_SHELL_HISTORY = 1000;
 const DEFAULT_NO_SESSION_MESSAGE =
-  "Copilot disabled — no interactive agent session is available. Run /backend pi-ai or /backend claude, then /auth to set credentials.";
+  "Copilot disabled — no interactive agent session is available. Run /backend pi-ai, /backend claude, or /backend codex, then /auth to set credentials.";
 const CREDENTIALS_CANCELLED_MESSAGE =
   "Copilot disabled. Run /auth to enable it later, export a provider API key, or save credentials to ./.kuzushi/credentials.json.";
 const CANCELLED_TOOL_MESSAGE = "Cancelled active operation.";
@@ -164,10 +164,10 @@ const SIGNAL_DUPLICATE_GRACE_MS = 150;
 /** Tools that require a ContextSnapshot before they can execute from the shell. */
 const CONTEXT_REQUIRED_TOOLS = new Set([
   // Legacy sast:* names (resolved via registry alias).
-  "sast:threat-hunt",
+  "sast:carlini-threat-hunt",
   "sast:taint-iris",
   // New sub-module names.
-  "threat-hunt:run",
+  "carlini-threat-hunt:run",
   "taint-iris:hunt",
 ]);
 
@@ -228,7 +228,7 @@ function looksLikeSubagentStartLine(text: string): boolean {
 /** Build a seed map from a ContextSnapshot to inject into pipelines.
  *
  * Seed VALUE SHAPE must match what each task actually returns, because
- * downstream consumers (`extractActorsWithThreats` in threat-hunt,
+ * downstream consumers (`extractActorsWithThreats` in carlini-threat-hunt,
  * `asStrideTaskOutput` in scanner tasks, …) deref specific fields on
  * the upstream output. Mismatches manifest as "0 findings, 0 actors"
  * with no error — the task just short-circuits on
@@ -241,7 +241,7 @@ function looksLikeSubagentStartLine(text: string): boolean {
  *   threat-model-randori:  { document: ThreatModelDocument, findings: Finding[] }
  *   threat-scenario-build: { scenarios: ThreatScenario[] }
  *
- * `findings: []` for threat-model-randori is safe — threat-hunt only
+ * `findings: []` for threat-model-randori is safe — carlini-threat-hunt only
  * reads `.document`, and no other task reads the findings array from
  * the threat-model output (those findings flow separately via
  * `taskOutputs["threat-model-randori"].findings` into the report
@@ -465,8 +465,11 @@ export function pickDefaultToolName(core: CopilotCore, moduleId: string): string
   const preferred = [
     `${moduleId}:run`,
     `${moduleId}:scan`,
-    `${moduleId}:exploit`,
     `${moduleId}:audit`,
+    `${moduleId}:hunt`,
+    `${moduleId}:exploit`,
+    `${moduleId}:build`,
+    `${moduleId}:list`,
   ];
   for (const name of preferred) {
     const t = mod.tools.find((x) => x.name === name);
@@ -962,7 +965,7 @@ type CredentialApplyResult = {
  * Rebuild `opts.runtime` so it picks up the latest config + env. Runtime
  * instances capture credentials at construction, so credentials supplied later
  * via /auth need a fresh backend instance. Keep the configured backend intact:
- * pi-ai stays pi-ai, claude stays claude.
+ * pi-ai stays pi-ai, claude stays claude, codex stays codex.
  */
 async function rebuildShellRuntime(opts: ShellOptions): Promise<void> {
   opts.runtime = configureAgentRuntime(opts.config);
@@ -997,7 +1000,7 @@ function mergeIntoActiveSlot(
   patch: { apiKey?: string; baseUrl?: string },
 ): void {
   const backend = opts.config.agentRuntimeBackend ?? "pi-ai";
-  const slot = backend === "pi-ai" ? "piAi" : "claude";
+  const slot = backend === "codex" ? "codex" : backend === "pi-ai" ? "piAi" : "claude";
   const existing = opts.config.agentRuntimeConfig?.[slot] ?? {};
   const nextSlot = { ...existing, ...patch };
   opts.config.agentRuntimeConfig = {
@@ -1727,11 +1730,11 @@ function pushLiveActivity(store: UIStore, id: string, text: string): void {
 
 /**
  * Tool names whose completion drains `state.lastHuntSnapshot` into a
- * `hunt-post-mortem` scrollback block. Currently just threat-hunt:run;
+ * `hunt-post-mortem` scrollback block. Currently just carlini-threat-hunt:run;
  * add other hunt-class tools here when they adopt the per-actor
  * `reportAgentActivity` + `done:true` pattern.
  */
-const HUNT_CLASS_TOOLS = new Set(["threat-hunt:run"]);
+const HUNT_CLASS_TOOLS = new Set(["carlini-threat-hunt:run"]);
 
 function isHuntClassTool(toolName: string): boolean {
   return HUNT_CLASS_TOOLS.has(toolName);
@@ -1820,9 +1823,9 @@ function formatAgentActivityStory(payload: import("../bus/events.js").TaskAgentA
   };
 }
 
-function moduleRunOwnsThreatHuntActivity(shell: ShellState | null | undefined): boolean {
+function moduleRunOwnsCarliniThreatHuntActivity(shell: ShellState | null | undefined): boolean {
   return (
-    shell?.moduleRun?.toolName === "threat-hunt:run" &&
+    shell?.moduleRun?.toolName === "carlini-threat-hunt:run" &&
     shell.moduleRun.status === "running" &&
     (shell.shellView === "module-run" || shell.shellView === "actor-detail")
   );
@@ -2483,6 +2486,12 @@ async function closeShellSession(session: AgentSession | undefined): Promise<voi
  * Non-TTY: readline fallback with plain text.
  */
 export async function startShell(opts: ShellOptions): Promise<void> {
+  // Surface a one-line banner before Ink takes over the terminal when the
+  // operator is pointed at a non-Anthropic proxy. Goes to stderr so it
+  // survives the Ink stdout takeover. See `warnIfNonAnthropicProxy` for the
+  // detection rules and the `KUZUSHI_DISABLE_THINKING` / `KUZUSHI_QUIET_PROXY_BANNER`
+  // escape hatches.
+  warnIfNonAnthropicProxy();
   applyImplicitShellTarget(opts);
   // Bare `kuzushi` should still feel scoped to the current repository.
   // Resolve the display name before DB startup so the shell has a useful
@@ -2525,7 +2534,7 @@ export async function startShell(opts: ShellOptions): Promise<void> {
   // No-workspace fallback: if the target repo has a prior on-disk
   // `<target>/.kuzushi/context-snapshot.json` from an earlier
   // `context:build` run, auto-load it so dependent modules
-  // (threat-hunt, agentic-sast, taint-iris) find their appModel
+  // (carlini-threat-hunt, agentic-sast, taint-iris) find their appModel
   // prerequisites without the operator having to re-run context:build
   // on every session.
   //
@@ -2622,7 +2631,7 @@ async function startInkShell(
   // Strategy: every event we accept adds its runId to `seenRunIdsThisTurn`.
   // On abort, we migrate that set into `abortedRunIds` so any future event
   // with one of those runIds is dropped unconditionally. New turns get new
-  // task runIds (fresh UUIDs from `buildTaskContext`), so legitimate
+  // task runIds (fresh UUIDs from `buildDagRunContext`), so legitimate
   // progress still flows. Cap the blacklist FIFO to bound memory over
   // a long shell session.
   const seenRunIdsThisTurn = new Set<string>();
@@ -2916,7 +2925,7 @@ async function startInkShell(
       } catch {
         /* best-effort */
       }
-      // Hunt post-mortem — after threat-hunt (and future hunt-class tools
+      // Hunt post-mortem — after carlini-threat-hunt (and future hunt-class tools
       // whose runs publish per-actor `agent-activity` events) resolves,
       // drain the archived per-actor snapshots into a collapsed scrollback
       // block so operators can expand it to see which actor made the last
@@ -3196,11 +3205,11 @@ async function startInkShell(
   // actor. Keep most actor/tool chatter live-only, but persist terminal actor
   // summaries so the transcript tells a compact progressive story.
   bus.subscribe<import("../bus/events.js").TaskAgentActivityEvent>(
-    "threat-hunt:agent-activity",
+    "carlini-threat-hunt:agent-activity",
     (event) => {
       const runId = event.meta.runId || event.payload.context.runId;
       if (!runId || !acceptProgressRunId(runId)) return;
-      if (!event.payload.done && moduleRunOwnsThreatHuntActivity(store.getState().shell)) {
+      if (!event.payload.done && moduleRunOwnsCarliniThreatHuntActivity(store.getState().shell)) {
         return;
       }
       const story = formatAgentActivityStory(event.payload);
@@ -3215,7 +3224,7 @@ async function startInkShell(
           importance: event.payload.done ? "primary" : "secondary",
           message: story.message,
           ...(story.detail ? { detail: story.detail } : {}),
-          source: "threat-hunt:agent-activity",
+          source: "carlini-threat-hunt:agent-activity",
           runId,
           ...(activeTurnId ? { turnId: activeTurnId } : {}),
           durable: event.payload.done,
@@ -5379,7 +5388,7 @@ const KB_REGISTRY: ReadonlyMap<
 > = new Map<string, { spec: KindSpec<string>; adapter?: AttachmentStorageAdapter<string> }>([
   ["threat-model", { spec: THREAT_MODEL_KIND_SPEC as KindSpec<string> }],
   ["context", { spec: CONTEXT_KIND_SPEC as KindSpec<string> }],
-  ["threat-hunt", { spec: THREAT_HUNT_KIND_SPEC as KindSpec<string> }],
+  ["carlini-threat-hunt", { spec: CARLINI_THREAT_HUNT_KIND_SPEC as KindSpec<string> }],
 ]);
 
 /**
@@ -5398,7 +5407,7 @@ function handleKbCommand(
   if (!ctx.focusedModule) {
     return {
       output:
-        "Usage: /use <module> first, then /kb. Try one of: threat-model, context, threat-hunt.",
+        "Usage: /use <module> first, then /kb. Try one of: threat-model, context, carlini-threat-hunt.",
     };
   }
   const moduleId = ctx.focusedModule;
@@ -6392,8 +6401,8 @@ function resolveDirectToolDispatch(
 
   // Focused-module shorthand takes precedence over the `run <tool>` escape.
   // Without this, inside a module whose primary tool is literally named `run`
-  // (e.g. `threat-hunt:run`), typing `run .` is parsed as "dispatch tool `.`"
-  // instead of "dispatch threat-hunt:run with positional `.`".
+  // (e.g. `carlini-threat-hunt:run`), typing `run .` is parsed as "dispatch tool `.`"
+  // instead of "dispatch carlini-threat-hunt:run with positional `.`".
   if (ctx.focusedModule) {
     const qualifiedName = `${ctx.focusedModule}:${cmd}`;
     if (core.registry.resolveTool(qualifiedName)) {
@@ -6719,7 +6728,11 @@ function getContextRequirementError(
   }
 
   const missing: string[] = [];
-  const needsThreatModel = toolName === "threat-hunt:run" || toolName === "sast:threat-hunt";
+  const needsThreatModel =
+    toolName === "carlini-threat-hunt:run" ||
+    toolName === "sast:carlini-threat-hunt" ||
+    toolName === "taint-iris-next:hunt" ||
+    toolName === "sast:taint-iris-next";
   const needsAppModel =
     needsThreatModel || toolName === "taint-iris:hunt" || toolName === "sast:taint-iris";
 
@@ -7120,7 +7133,7 @@ function handlePromptEditCommand(
 /**
  * `/actor <n|fingerprint>` — drill into a per-actor transcript from
  * inside ModuleRunView. Numeric arguments resolve against the
- * sorted threat-hunt fingerprints in `state.agentActivity` (1-based);
+ * sorted carlini-threat-hunt fingerprints in `state.agentActivity` (1-based);
  * non-numeric arguments are treated as a literal fingerprint.
  */
 function handleActorCommand(
@@ -7135,7 +7148,7 @@ function handleActorCommand(
   if (!activity) return { output: "No live actor activity yet." };
   const fingerprints: string[] = [];
   for (const fp of activity.keys()) {
-    if (fp.startsWith("threat-hunt:")) fingerprints.push(fp);
+    if (fp.startsWith("carlini-threat-hunt:")) fingerprints.push(fp);
   }
   fingerprints.sort();
   let target: string | undefined;
@@ -7146,7 +7159,7 @@ function handleActorCommand(
     target = fingerprints.find((fp) => fp === arg || fp.endsWith(arg));
   }
   if (!target) {
-    if (fingerprints.length === 0) return { output: "No threat-hunt actors are active." };
+    if (fingerprints.length === 0) return { output: "No carlini-threat-hunt actors are active." };
     return {
       output: `No actor matched "${arg}". Active: ${fingerprints
         .map((fp, i) => `${i + 1}. ${fp}`)
@@ -7689,16 +7702,16 @@ function formatBackendSlots(
     | {
         claude?: { apiKey?: string; baseUrl?: string };
         piAi?: { apiKey?: string; baseUrl?: string };
+        codex?: { apiKey?: string; baseUrl?: string };
       }
     | undefined,
 ): string[] {
   const out: string[] = [];
-  for (const slot of ["claude", "piAi"] as const) {
+  for (const slot of ["claude", "piAi", "codex"] as const) {
     const s = cfg?.[slot];
     if (!s || (!s.apiKey && !s.baseUrl)) {
-      out.push(
-        `  ${slot.padEnd(6)} (unset — run /backend ${slot === "piAi" ? "pi-ai" : "claude"} then /auth)`,
-      );
+      const backend = slot === "piAi" ? "pi-ai" : slot;
+      out.push(`  ${slot.padEnd(6)} (unset — run /backend ${backend} then /auth)`);
       continue;
     }
     out.push(
@@ -7766,11 +7779,12 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
         lines.push(...formatBackendSlots(opts.config.agentRuntimeConfig));
         lines.push(
           "",
-          "Available: pi-ai (default, 20+ providers), claude (legacy CC subprocess)",
+          "Available: pi-ai (default, 20+ providers), claude (legacy CC subprocess), codex (Codex SDK)",
           "Usage:",
           "  /backend show           Show current + persisted backend + credentials",
           "  /backend pi-ai          Use pi-ai — multi-provider, in-process (recommended)",
           "  /backend claude         Use Claude Code SDK — Anthropic only, subprocess-per-task",
+          "  /backend codex          Use Codex SDK — OpenAI models",
           "",
           "For provider/model selection, use /provider instead.",
           `Persists to ${configPath()}.`,
@@ -7780,11 +7794,11 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
     };
   }
 
-  if (sub !== "claude" && sub !== "pi-ai") {
-    const suggestion = closestBackend(sub, ["claude", "pi-ai"]);
+  if (sub !== "claude" && sub !== "pi-ai" && sub !== "codex") {
+    const suggestion = closestBackend(sub, ["claude", "pi-ai", "codex"]);
     const hint = suggestion ? ` Did you mean "${suggestion}"?` : "";
     return {
-      output: `Unknown backend "${sub}".${hint} Available: claude, pi-ai. Run /backend show for help.`,
+      output: `Unknown backend "${sub}".${hint} Available: claude, pi-ai, codex. Run /backend show for help.`,
     };
   }
 
@@ -7805,12 +7819,14 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
       const note =
         sub === "claude"
           ? "Shell sessions and future `kuzushi scan ...` runs will use claude. Restart the shell to pick up the change."
-          : "Shell sessions and future `kuzushi scan ...` runs will use pi-ai. Restart the shell to pick up the change.";
+          : sub === "codex"
+            ? "Shell sessions and future `kuzushi scan ...` runs will use codex. Restart the shell to pick up the change."
+            : "Shell sessions and future `kuzushi scan ...` runs will use pi-ai. Restart the shell to pick up the change.";
       const lines = [`Backend persisted as "${sub}" in ${configPath()}.`, note];
       // Each backend has its own credential slot now, so switching can't leak
       // creds between backends. Just hint when the new slot is empty so the
       // operator knows to /auth.
-      const slot = sub === "pi-ai" ? "piAi" : "claude";
+      const slot = sub === "codex" ? "codex" : sub === "pi-ai" ? "piAi" : "claude";
       const slotCreds = opts.config.agentRuntimeConfig?.[slot];
       if (!slotCreds || (!slotCreds.apiKey && !slotCreds.baseUrl)) {
         lines.push(
@@ -7960,7 +7976,7 @@ function loadArtifactManifest(repoRoot: string): string[] {
   const files: Array<{ rel: string; label: string }> = [
     { rel: "scan-context.json", label: "operator-authored scan context" },
     { rel: "threat-model.json", label: "persistent threat model" },
-    // context-snapshot.json is what enables /use threat-hunt (etc.) to pass
+    // context-snapshot.json is what enables /use carlini-threat-hunt (etc.) to pass
     // the appModel prereq check without re-running context:build.
     // Surface it by name so operators understand what's carrying them.
     { rel: "context-snapshot.json", label: "context snapshot (repo + app model)" },
