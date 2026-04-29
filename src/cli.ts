@@ -109,6 +109,13 @@ program
   .option("--target <path>", "Set initial target (repo path, host, URL)")
   .option("--scope <path>", "Load rules of engagement from YAML file")
   .option("--model <model>", "Default model for AI operations")
+  .option("--effort <level>", "Default reasoning effort for shell-launched tasks")
+  .option(
+    "--task-config <taskId.key=value>",
+    "Set a shell task config override; repeatable",
+    collectRepeatedOption,
+    [],
+  )
   .option("--agent-runtime <backend>", "Agent runtime backend")
   .option("--api-key <key>", "Override active provider API key")
   .option(
@@ -127,7 +134,7 @@ Examples:
   $ kuzushi shell --workspace acme-pentest            # resume a named workspace
   $ kuzushi shell --model anthropic:claude-opus-4-7   # override the default model
   $ kuzushi shell --agent-runtime codex --model codex:gpt-5.4-mini
-`,
+	`,
   )
   .action(wrapCliAction(async (opts: ShellCommandOptions) => runShellCommand(opts)));
 

@@ -22,6 +22,8 @@ export interface ShellCommandOptions {
   target?: string;
   scope?: string;
   model?: string;
+  effort?: string;
+  taskConfig?: string[];
   agentRuntime?: string;
   apiKey?: string;
   inheritClaude?: boolean;
@@ -49,6 +51,8 @@ export async function runShellCommand(opts: ShellCommandOptions): Promise<void> 
 function applyShellOptionOverrides(config: KuzushiConfig, opts: ShellCommandOptions): void {
   if (opts.model) config.model = opts.model;
   if (opts.agentRuntime) setAgentRuntimeBackend(config, opts.agentRuntime);
+  applyDefaultEffort(config, opts.effort);
+  applyTaskConfigOverrides(config, opts.taskConfig ?? []);
   validateShellTarget(opts.target);
   if (opts.inheritClaude) applyInheritedClaudeAuth(config);
 }
@@ -72,6 +76,65 @@ function validateShellTarget(target: string | undefined): void {
 
 function isUrlLikeTarget(target: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(target);
+}
+
+function applyDefaultEffort(config: KuzushiConfig, effort: string | undefined): void {
+  if (!effort) return;
+  if (!["low", "medium", "high", "xhigh"].includes(effort)) {
+    throw new CliUsageError(
+      `Invalid --effort "${effort}". Valid values: low, medium, high, xhigh.`,
+    );
+  }
+  for (const taskId of Object.keys(config.taskConfig)) {
+    config.taskConfig[taskId] = {
+      ...config.taskConfig[taskId],
+      effort,
+    };
+  }
+}
+
+function applyTaskConfigOverrides(config: KuzushiConfig, assignments: string[]): void {
+  for (const assignment of assignments) {
+    const parsed = parseTaskConfigAssignment(assignment);
+    config.taskConfig[parsed.taskId] = {
+      ...(config.taskConfig[parsed.taskId] ?? {}),
+      [parsed.key]: parsed.value,
+    };
+  }
+}
+
+function parseTaskConfigAssignment(assignment: string): {
+  taskId: string;
+  key: string;
+  value: unknown;
+} {
+  const equalsIndex = assignment.indexOf("=");
+  if (equalsIndex <= 0 || equalsIndex === assignment.length - 1) {
+    throw invalidTaskConfigAssignment(assignment);
+  }
+  const lhs = assignment.slice(0, equalsIndex).trim();
+  const value = parseTaskConfigValue(assignment.slice(equalsIndex + 1).trim());
+  const dotIndex = lhs.lastIndexOf(".");
+  if (dotIndex <= 0 || dotIndex === lhs.length - 1) {
+    throw invalidTaskConfigAssignment(assignment);
+  }
+  const taskId = lhs.slice(0, dotIndex).trim();
+  const key = lhs.slice(dotIndex + 1).trim();
+  if (!taskId || !key) throw invalidTaskConfigAssignment(assignment);
+  return { taskId, key, value };
+}
+
+function parseTaskConfigValue(value: string): unknown {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  if (/^-?\d+(\.\d+)?$/.test(value)) return Number(value);
+  return value;
+}
+
+function invalidTaskConfigAssignment(assignment: string): CliUsageError {
+  return new CliUsageError(
+    `--task-config must be in the form <taskId.key=value>; received "${assignment}".`,
+  );
 }
 
 function applyInheritedClaudeAuth(config: KuzushiConfig): void {

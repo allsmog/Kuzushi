@@ -299,15 +299,26 @@ function UnifiedFindings({
 
       {loose.length > 0 && (
         <Box flexDirection="column" marginTop={SPACING.sm}>
-          <Text>{tokens.label("ungrouped findings")}</Text>
+          <Text>
+            {tokens.label("ungrouped findings")}
+            {"  "}
+            {tokens.hint(`(${slice.cursor + 1} of ${loose.length})`)}
+            {slice.cursor > 0 ? tokens.hint(" ▲") : ""}
+            {slice.cursor < loose.length - 1 ? tokens.hint(" ▼") : ""}
+          </Text>
           {hiddenAbove > 0 && (
             <Text>
               {"  "}
               {tokens.muted(`↑ ${hiddenAbove} more above`)}
             </Text>
           )}
-          {visibleLoose.map((f) => (
-            <LooseRow key={f.fingerprint} finding={f} alias={aliasMap.get(f.fingerprint)} />
+          {visibleLoose.map((f, idx) => (
+            <LooseRow
+              key={f.fingerprint}
+              finding={f}
+              alias={aliasMap.get(f.fingerprint)}
+              active={slice.top + idx === slice.cursor}
+            />
           ))}
           {hiddenBelow > 0 && (
             <Text>
@@ -342,9 +353,11 @@ const LooseRow = React.memo(
   function LooseRow({
     finding,
     alias,
+    active = false,
   }: {
     finding: ActionableFinding;
     alias?: string;
+    active?: boolean;
   }): React.ReactElement {
     useRenderCounter("LooseRow");
     const title = finding.title ?? finding.ruleId;
@@ -354,6 +367,7 @@ const LooseRow = React.memo(
       <Box flexDirection="column">
         <Text>
           {"  "}
+          {active ? tokens.accent("› ") : "  "}
           {sevTag}
           {"  "}
           {alias ? `${tokens.accent(alias)}  ` : ""}
@@ -370,7 +384,8 @@ const LooseRow = React.memo(
       </Box>
     );
   },
-  (prev, next) => prev.finding === next.finding && prev.alias === next.alias,
+  (prev, next) =>
+    prev.finding === next.finding && prev.alias === next.alias && prev.active === next.active,
 );
 
 function SeverityCounts({

@@ -21,6 +21,7 @@ import { useElapsed, useTerminalWidth } from "../hooks.js";
 import type { ContextBuildGrepDomainSlice, ContextBuildState, ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { ContextStrip } from "./ContextStrip.js";
+import { DelayedBusyIndicator } from "./DelayedBusyIndicator.js";
 import { ScreenContent } from "./ScreenContent.js";
 
 const PHASE_ROWS: ReadonlyArray<{
@@ -114,12 +115,26 @@ export function ContextBuildView({ shell }: ContextBuildViewProps): React.ReactE
   return (
     <ScreenContent>
       <HeaderStrip state={cb} />
+      {cb.status === "running" ? (
+        <DelayedBusyIndicator
+          label="Building context"
+          detail={currentContextBuildDetail(cb)}
+          startedAt={cb.startedAtMs}
+          delayMs={0}
+        />
+      ) : null}
       <PhasesBox state={cb} width={frameWidth} />
       <PillarPreview state={cb} colWidth={pillarColWidth} />
       <TailLog state={cb} />
       <ControlBar state={cb} width={frameWidth} />
     </ScreenContent>
   );
+}
+
+function currentContextBuildDetail(state: ContextBuildState): string {
+  const running = PHASE_ROWS.find((phase) => state.phases[phase.id].status === "running");
+  if (!running) return "Waiting for the first phase event.";
+  return `${running.title} · ${running.hint(state)}`.replace(/\s+·\s*$/, "");
 }
 
 function HeaderStrip({ state }: { state: ContextBuildState }): React.ReactElement {

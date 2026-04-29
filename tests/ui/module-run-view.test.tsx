@@ -88,7 +88,9 @@ const STALE_RUN_HEADER = ["●", "1", "Pipeline"].join(" ");
 
 describe("ModuleRunView", () => {
   it("renders the empty state when shell.moduleRun is null", () => {
-    const out = renderText(createElement(ModuleRunView, { shell: shell({ moduleRun: null }) }));
+    const out = renderText(
+      createElement(ModuleRunView, { shell: shell({ moduleRun: null, processing: false }) }),
+    );
     expect(out).toContain("kuzushi/carlini-threat-hunt/run");
     expect(out).toContain("No active run for this module yet.");
   });
@@ -113,7 +115,7 @@ describe("ModuleRunView", () => {
     });
     const out = renderText(createElement(ModuleRunView, { shell: state, nowMs: 12_000 }));
     expect(out).toContain("kuzushi/carlini-threat-hunt/run");
-    expect(out).toMatch(/(?:⏺|●) Carlini Threat Hunt\(\.\)/);
+    expect(out).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Carlini Threat Hunt\(\.\)/);
     expect(out).toContain("steps");
     expect(out).toContain("load threat model");
     expect(out).toContain("spawn 3 actors");

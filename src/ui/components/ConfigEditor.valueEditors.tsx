@@ -11,6 +11,7 @@ import type React from "react";
 import { useState } from "react";
 import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { isCancelInput } from "../interaction-key-policy.js";
 import { TextInput } from "../primitives/TextInput.js";
 import { SPACING, tokens } from "../tokens.js";
 import type { FieldDescriptor, FieldType } from "./ConfigEditor.fields.js";
@@ -37,7 +38,7 @@ export function BoolEditor({
     { keys: "Esc", label: "Cancel" },
   ]);
   useInput((input, key) => {
-    if (key.escape) onCancel();
+    if (isCancelInput(input, key)) onCancel();
     else if (key.return) onSubmit(value);
     else if (input === " ") setValue((v) => !v);
   });
@@ -97,7 +98,7 @@ export function EnumEditor({
         ],
   );
   useInput((input, key) => {
-    if (key.escape) {
+    if (isCancelInput(input, key)) {
       onCancel();
       return;
     }
@@ -283,7 +284,7 @@ export function StringListEditor({
   useInput(
     (input, key) => {
       if (mode !== "nav") return;
-      if (key.escape) {
+      if (isCancelInput(input, key)) {
         onCancel();
       } else if (input === "a") {
         setBuffer("");

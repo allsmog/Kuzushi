@@ -26,6 +26,7 @@ import { createCodeqlModule } from "../modules/codeql/codeql.js";
 import { createContextModule } from "../modules/context/context.js";
 import { createCoreSastModule } from "../modules/core-sast.js";
 import type { DagRegistry } from "../modules/dag-registry.js";
+import { createDepHygieneModule } from "../modules/dep-hygiene/dep-hygiene.js";
 import { createFindingsModule } from "../modules/findings/findings.js";
 import {
   formatToolInputValidationError,
@@ -193,6 +194,7 @@ export class CopilotCore {
         createContextModule(),
         createThreatModelModule(),
         createVendorAssessmentModule(),
+        createDepHygieneModule(),
         // Hidden orchestrator-level module — infrastructure DAG nodes
         // (task-selector, approval gates, taint-iris sub-tasks). Loaded so
         // the module registry owns every scan-DAG participant; the user

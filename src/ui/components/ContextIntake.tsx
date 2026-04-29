@@ -16,6 +16,7 @@ import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
+import { isCancelInput } from "../interaction-key-policy.js";
 import { TextInput } from "../primitives/TextInput.js";
 import { SPACING, tokens } from "../tokens.js";
 
@@ -254,7 +255,7 @@ export function ContextIntake({
       if (editMode) return;
       if (key.tab) {
         advanceSection();
-      } else if (key.escape || input === "q") {
+      } else if (isCancelInput(input, key) || input === "q") {
         onCancel();
       } else if (input === "a" && !key.shift) {
         const item = displayItems[selectedIdx];
@@ -357,6 +358,13 @@ export function ContextIntake({
         )}
       </Text>
       <Text>{""}</Text>
+      <Box paddingLeft={SPACING.md}>
+        <Text>
+          {tokens.hint(`(${selectedIdx + 1} of ${displayItems.length})`)}
+          {selectedIdx > 0 ? tokens.hint(" ▲") : ""}
+          {selectedIdx < displayItems.length - 1 ? tokens.hint(" ▼") : ""}
+        </Text>
+      </Box>
 
       {displayItems.map((item, i) => {
         const showGroup = item.groupLabel && item.groupLabel !== lastGroup;

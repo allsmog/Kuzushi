@@ -100,7 +100,7 @@ describe("FindingsView memoization", () => {
     t.unmount();
   });
 
-  it("moving the cursor within the current window does not re-run visible rows", () => {
+  it("moving the cursor within the current window re-runs only the changed active rows", () => {
     const findings = makeFindings(200);
     const t = renderTree(
       createElement(FindingsView, {
@@ -120,8 +120,9 @@ describe("FindingsView memoization", () => {
       }),
     );
     // Cursor moved 1 step inside the existing [0, 50) window → no new rows
-    // mount, no row bodies re-run (memoized on `finding` identity).
-    expect(renderCount("LooseRow")).toBe(initial);
+    // mount. Only the old active row and the new active row re-run so their
+    // position signifier can update.
+    expect(renderCount("LooseRow") - initial).toBe(2);
     t.unmount();
   });
 

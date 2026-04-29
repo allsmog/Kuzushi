@@ -126,6 +126,7 @@ function Transcript({
   maxRows: number;
 }): React.ReactElement {
   const tail = lines.slice(-maxRows);
+  const hidden = Math.max(0, lines.length - tail.length);
   const entries = tail.map((line, idx) => ({
     entry: toTranscriptEntry(line),
     // Combine kind + tool + position in the *original* lines array so the
@@ -135,6 +136,12 @@ function Transcript({
 
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
+      {lines.length > 0 ? (
+        <Text>
+          {tokens.hint(`(${tail.length} of ${lines.length})`)}
+          {hidden > 0 ? tokens.hint(` · +${hidden} earlier`) : ""}
+        </Text>
+      ) : null}
       {entries.length === 0 ? (
         <Text>{tokens.muted("(no activity yet)")}</Text>
       ) : (

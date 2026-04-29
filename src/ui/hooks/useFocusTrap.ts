@@ -12,6 +12,7 @@
  */
 import { useFocusManager, useInput } from "ink";
 import { useEffect } from "react";
+import { isCancelInput } from "../interaction-key-policy.js";
 
 export interface UseFocusTrapOptions {
   active: boolean;
@@ -27,7 +28,7 @@ export function useFocusTrap(options: UseFocusTrapOptions): void {
   }, [active, enableFocus]);
 
   useInput(
-    (_input, key) => {
+    (input, key) => {
       if (key.tab && key.shift) {
         focusPrevious();
         return;
@@ -36,7 +37,7 @@ export function useFocusTrap(options: UseFocusTrapOptions): void {
         focusNext();
         return;
       }
-      if (key.escape) {
+      if (isCancelInput(input, key)) {
         onEscape?.();
       }
     },

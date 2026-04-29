@@ -136,7 +136,15 @@ export function registerReportWorker(
           concurrency: event.payload.config.triageConcurrency,
           backend: event.payload.config.agentRuntimeBackend,
           scanMode: event.payload.config.scanMode,
+          ...(typeof event.payload.config.costBudgetUsd === "number"
+            ? { budget: event.payload.config.costBudgetUsd }
+            : {}),
         },
+        // O1: surface the budget cap so StatusFooter can render
+        // `$X.XX / $Y.YY` and the CostCapHalt card has a value to compare.
+        ...(typeof event.payload.config.costBudgetUsd === "number"
+          ? { costCapBudgetUsd: event.payload.config.costBudgetUsd }
+          : {}),
         ...(!shellRun ? { mode: "running" as const } : {}),
       });
       store.clearNotices();
@@ -731,6 +739,10 @@ export function registerReportWorker(
         elapsedSeconds: event.payload.elapsedSeconds,
         index,
         total,
+        // O3: stamp the wall-clock time so ActorsBlock can surface
+        // "waiting on actor N of M — last activity Ys ago" when an actor
+        // stalls. Optional on the type so older callers stay valid.
+        tsMs: Date.now(),
       };
       const changed = store.addAgentActivity(fingerprint, line);
       // Mirror into moduleRun.evidenceTail so ModuleRunView's "Evidence"
@@ -853,6 +865,11 @@ export function registerReportWorker(
   bus.subscribe<BudgetExceededEvent>("budget:exceeded", (event) => {
     const detail = `${event.payload.totalCostUsd.toFixed(4)} spent against ${event.payload.budgetUsd.toFixed(4)}`;
     if (store) {
+      // O7: flip the cost-cap halt state so the CostCapHalt card actually
+      // renders. The UI card, key bindings (c/a in App.tsx), and store
+      // field already exist; the missing piece was a subscriber to
+      // `budget:exceeded` that toggled `costCapHalted = true`.
+      store.update({ costCapHalted: true });
       store.addNotice({
         level: "error",
         message: "Budget exceeded",

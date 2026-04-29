@@ -43,7 +43,7 @@ exports[`Ink component snapshots > ModuleCatalog — grouped by category with la
 
   Primary next step: use <module-id> to enter one module workflow.
 
-  OFFENSE
+  OFFENSE  hunt vulnerabilities and prove exploitability
 
   MODULE                 DESCRIPTION                                LAST RUN
 
@@ -52,7 +52,7 @@ exports[`Ink component snapshots > ModuleCatalog — grouped by category with la
   sast                   40+ task pipeline                          ran 2h · 4
   tp
 
-  INTEL
+  INTEL  research targets, map attack surface, gather context
 
   MODULE                 DESCRIPTION                                LAST RUN
 
@@ -61,7 +61,7 @@ exports[`Ink component snapshots > ModuleCatalog — grouped by category with la
   randori                PASTA threat model                         ran 2h · 12
   t…
 
-  GOVERNANCE
+  GOVERNANCE  policy, compliance, and audit-ready evidence
 
   MODULE                 DESCRIPTION                                LAST RUN
 

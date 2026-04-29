@@ -30,10 +30,10 @@ interface KbViewProps {
 
 export function KbView({ shell }: KbViewProps): React.ReactElement {
   useRegisterKeybindings([
-    { keys: "↑/↓", label: "move" },
+    { keys: "j/k", label: "move" },
     { keys: "d", label: "detach", secondary: true },
     { keys: "r", label: "reparse", secondary: true },
-    { keys: "a", label: "attach", secondary: true },
+    { keys: "attach <path>", label: "attach", secondary: true },
     { keys: "b", label: "back", secondary: true },
     { keys: "?", label: "help", secondary: true },
   ]);
@@ -103,6 +103,11 @@ function ListPane({
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
       <Box paddingLeft={SPACING.md} flexDirection="column">
+        <Text>
+          {tokens.hint(`(${cursor + 1} of ${docs.length})`)}
+          {cursor > 0 ? tokens.hint(" ▲") : ""}
+          {cursor < docs.length - 1 ? tokens.hint(" ▼") : ""}
+        </Text>
         <Text>
           {tokens.muted(
             `${pad("#", 3)} ${pad("STATUS", 7)} ${pad("TITLE", 36)} ${pad("KIND", 18)} ${pad("SIZE", 10)} AGE`,

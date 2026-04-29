@@ -42,9 +42,10 @@ export function createSystemsHuntModule(): CopilotModule {
     category: "defense",
     version: "0.17.2",
     description:
-      "LLM-driven hunt for memory-safety and low-level protocol bugs in systems code (C, " +
-      "C++, Rust, Go). Four-stage chain: context gather → invariant extract → trigger synth → " +
-      "hunt. Deep-semantic tasks preserved for backward compatibility.",
+      "LLM-driven hunt for memory-safety and low-level protocol bugs in systems code (C, C++, Rust, Go).",
+    longDescription:
+      "Four-stage chain: context gather → invariant extract → trigger synth → hunt. " +
+      "Deep-semantic tasks preserved for backward compatibility.",
     rank: "good",
     notes: {
       stability: ["stable"],
