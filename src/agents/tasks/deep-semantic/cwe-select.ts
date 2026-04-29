@@ -14,7 +14,7 @@ import { coerceRepoContext } from "../../../repo-context.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { toErrorMessage } from "../../../utils.js";
-import type { AgentTask } from "../../types.js";
+import type { DagNodeImpl } from "../../types.js";
 import { resolveTaskModel, resolveTaskRuntime } from "../runtime-overrides.js";
 import type { CweSelection, CweSelectOutput } from "../taint-iris/cwe-select.js";
 import { DEEP_SEMANTIC_CWE_MENU, isDeepSemanticLanguage } from "./types.js";
@@ -76,7 +76,7 @@ function buildPrompt(repoContext: ReturnType<typeof coerceRepoContext>): string 
   ].join("\n");
 }
 
-export const deepSemanticCweSelectTask: AgentTask<ScanOpts, CweSelectOutput> = {
+export const deepSemanticCweSelectTask: DagNodeImpl<ScanOpts, CweSelectOutput> = {
   id: "deep-semantic-cwe-select",
   displayName: "Deep Semantic CWE Selector",
   outputKind: "custom",

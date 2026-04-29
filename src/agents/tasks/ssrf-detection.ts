@@ -11,7 +11,7 @@ import { formatProfilesForPrompt, getProfilesForTask } from "../../security-prof
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { DagNodeImpl, DagRunContext } from "../types.js";
 import {
   computeDetectionFingerprint,
   dedupAndRankFindings,
@@ -100,7 +100,7 @@ interface SsrfDetectionConfig {
   maxFindings: number;
 }
 
-function resolveConfig(ctx: TaskContext): SsrfDetectionConfig {
+function resolveConfig(ctx: DagRunContext): SsrfDetectionConfig {
   const model = resolveTaskModel(ctx, "ssrf-detect");
   const maxFindings = resolveTaskPositiveInt(ctx, "ssrf-detect", "maxFindings", 50);
   return { model, maxFindings };
@@ -293,7 +293,7 @@ function computeFingerprint(repoName: string, filePath: string, f: SsrfDetection
   ]);
 }
 
-export const ssrfDetectionTask: AgentTask<ScanOpts, Finding[]> = {
+export const ssrfDetectionTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "ssrf-detect",
   displayName: "SSRF Detector",
   outputKind: "findings",
@@ -411,7 +411,7 @@ export const ssrfDetectionTask: AgentTask<ScanOpts, Finding[]> = {
 
 function runSsrfLens(
   prompt: string,
-  context: TaskContext,
+  context: DagRunContext,
   model: string,
   tag: string,
 ): Promise<LensResult> {

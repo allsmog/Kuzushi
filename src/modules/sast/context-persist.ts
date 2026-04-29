@@ -5,7 +5,7 @@
  *
  * Without this, `context:build` output lives in memory only; the next
  * shell session starts with `shell.contextSnapshot` empty, and
- * downstream modules (`threat-hunt`, `agentic-sast`, `taint-iris`) fail
+ * downstream modules (`carlini-threat-hunt`, `agentic-sast`, `taint-iris`) fail
  * the appModel prerequisite check even though the operator ran context
  * minutes earlier. Threat models now live in `.kuzushi/threat-model.json`.
  *

@@ -32,7 +32,7 @@ const PROMPT_OPTION_KEYS = [
   "TRIAGE_PROMPT",
   "VERIFY_PROMPT",
   "PATCH_PROMPT",
-  "THREAT_HUNT_PROMPT",
+  "CARLINI_THREAT_HUNT_PROMPT",
   "CONTEXT_PROMPT",
   "TAINT_IRIS_PROMPT",
   "RANDORI_PROMPT",
@@ -48,8 +48,8 @@ export type PromptOptionKey = (typeof PROMPT_OPTION_KEYS)[number];
  * Translate a verb (the text after the colon in a fully-qualified tool name)
  * to the canonical `*_PROMPT` key declared by that tool's inputSchema.
  *
- * Mapping is case-insensitive; hyphens become underscores so `threat-hunt`
- * → `THREAT_HUNT_PROMPT`.
+ * Mapping is case-insensitive; hyphens become underscores so `carlini-threat-hunt`
+ * → `CARLINI_THREAT_HUNT_PROMPT`.
  */
 export function verbToPromptKey(verb: string): PromptOptionKey | undefined {
   const normalized = verb.trim().toUpperCase().replace(/-/g, "_");

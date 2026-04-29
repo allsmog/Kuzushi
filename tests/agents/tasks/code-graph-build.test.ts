@@ -7,7 +7,7 @@ import {
   __codeGraphBuildInternals,
   codeGraphBuildTask,
 } from "../../../src/agents/tasks/code-graph/build.js";
-import type { TaskContext } from "../../../src/agents/types.js";
+import type { DagRunContext } from "../../../src/agents/types.js";
 
 vi.mock("../../../src/analysis-support/index.js", () => ({
   getCodeIntelligenceProvider: vi.fn(),
@@ -46,7 +46,7 @@ function makeRuntime(): AgentRuntime {
   };
 }
 
-function makeContext(repoRoot: string, runtime: AgentRuntime): TaskContext {
+function makeContext(repoRoot: string, runtime: AgentRuntime): DagRunContext {
   return {
     runId: "run-1",
     repoRoot,

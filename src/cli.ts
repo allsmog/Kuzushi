@@ -16,18 +16,21 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { Command } from "commander";
 import { configureAgentRuntime } from "./agent-runtime/index.js";
-import { createDefaultTaskRegistry } from "./agents/index.js";
+import { createDefaultDagRegistry } from "./agents/index.js";
 import { runInspectCommand } from "./cli/commands/inspect.js";
 import { runScanCommand } from "./cli/commands/scan.js";
 import { CliUsageError, wrapCliAction } from "./cli/errors.js";
 import { resolveRepo } from "./cli/shared.js";
-import { DEFAULTS } from "./config/defaults.js";
+import { AGENT_RUNTIME_BACKENDS, DEFAULTS } from "./config/defaults.js";
 import { formatConfigValidationIssue, validateKuzushiConfig } from "./config/validation.js";
 import {
   configPath,
   getConfigValue,
   isClaudeCodeHostManagedAuth,
   loadConfig,
+  providerBaseUrlEnvVar,
+  providerEnvVar,
+  resolveActiveCredentials,
   setConfigValue,
   unsetConfigValue,
 } from "./config.js";
@@ -43,6 +46,7 @@ function maybeWarnPlaintextApiKeyStorage(key: string, value: string): void {
   const isSlotApiKeyPath =
     key === "agentRuntimeConfig.claude.apiKey" ||
     key === "agentRuntimeConfig.piAi.apiKey" ||
+    key === "agentRuntimeConfig.codex.apiKey" ||
     key === "agentRuntimeConfig.apiKey"; // legacy form — retargeted, still worth warning
   let storesApiKey = isSlotApiKeyPath;
 
@@ -55,7 +59,10 @@ function maybeWarnPlaintextApiKeyStorage(key: string, value: string): void {
         typeof (obj as Record<string, unknown>)["apiKey"] === "string" &&
         (obj as Record<string, string>)["apiKey"].trim().length > 0;
       storesApiKey =
-        hasApiKey(parsed) || hasApiKey(parsed?.["claude"]) || hasApiKey(parsed?.["piAi"]);
+        hasApiKey(parsed) ||
+        hasApiKey(parsed?.["claude"]) ||
+        hasApiKey(parsed?.["piAi"]) ||
+        hasApiKey(parsed?.["codex"]);
     } catch {
       storesApiKey = false;
     }
@@ -109,7 +116,8 @@ program
   .option("--target <path>", "Set initial target (repo path, host, URL)")
   .option("--scope <path>", "Load rules of engagement from YAML file")
   .option("--model <model>", "Default model for AI operations")
-  .option("--api-key <key>", "Override ANTHROPIC_API_KEY")
+  .option("--agent-runtime <backend>", "Agent runtime backend")
+  .option("--api-key <key>", "Override active provider API key")
   .option(
     "--inherit-claude",
     "Skip credential prompt; trust ambient Claude / Claude Code session creds and persist auth: inherited",
@@ -125,6 +133,7 @@ Examples:
   $ kuzushi shell --load randori,vuln-scout,tob      # pre-load extra built-in modules
   $ kuzushi shell --workspace acme-pentest            # resume a named workspace
   $ kuzushi shell --model anthropic:claude-opus-4-7   # override the default model
+  $ kuzushi shell --agent-runtime codex --model codex:gpt-5.4-mini
 `,
   )
   .action(
@@ -136,14 +145,25 @@ Examples:
         target?: string;
         scope?: string;
         model?: string;
+        agentRuntime?: string;
         apiKey?: string;
         inheritClaude?: boolean;
       }) => {
         const { startShell } = await import("./copilot/shell.js");
-        const { loadLocalCredentials, resolveActiveCredentials } = await import("./config.js");
+        const { loadLocalCredentials } = await import("./config.js");
         const config = loadConfig();
         if (opts.model) {
           config.model = opts.model;
+        }
+        if (opts.agentRuntime) {
+          if (!AGENT_RUNTIME_BACKENDS.has(opts.agentRuntime)) {
+            throw new CliUsageError(
+              `Invalid --agent-runtime "${opts.agentRuntime}". Valid values: ${[
+                ...AGENT_RUNTIME_BACKENDS,
+              ].join(", ")}`,
+            );
+          }
+          config.agentRuntimeBackend = opts.agentRuntime as typeof config.agentRuntimeBackend;
         }
         // Validate --target up front. Previously a typo'd path
         // bubbled through to runtime tool calls — catching it here
@@ -178,7 +198,7 @@ Examples:
         // Project-local credentials (`<cwd>/.kuzushi/credentials.json`)
         // override env-only state so per-project keys "just work". Local
         // credentials files now follow the per-backend shape
-        // (`{ claude: {...}, piAi: {...} }`), but legacy flat files are
+        // (`{ claude: {...}, piAi: {...}, codex: {...} }`), but legacy flat files are
         // migrated by `loadLocalCredentials` into the claude slot.
         const localCreds = loadLocalCredentials(opts.target ?? process.cwd());
         if (localCreds) {
@@ -186,6 +206,7 @@ Examples:
           config.agentRuntimeConfig = {
             claude: { ...(existing.claude ?? {}), ...(localCreds.claude ?? {}) },
             piAi: { ...(existing.piAi ?? {}), ...(localCreds.piAi ?? {}) },
+            codex: { ...(existing.codex ?? {}), ...(localCreds.codex ?? {}) },
           };
           if (
             !config.agentRuntimeConfig.claude ||
@@ -199,16 +220,27 @@ Examples:
           ) {
             delete config.agentRuntimeConfig.piAi;
           }
+          if (
+            !config.agentRuntimeConfig.codex ||
+            Object.keys(config.agentRuntimeConfig.codex).length === 0
+          ) {
+            delete config.agentRuntimeConfig.codex;
+          }
         }
 
         // Prime env vars from the active backend's slot so child processes
-        // (Claude Code subprocess, pi-ai fetch) inherit the right credentials.
+        // (Claude Code subprocess, Codex SDK, pi-ai fetch) inherit the right credentials.
         const active = resolveActiveCredentials(config);
-        if (active.apiKey) process.env.ANTHROPIC_API_KEY = active.apiKey;
-        if (active.baseUrl) process.env.ANTHROPIC_BASE_URL = active.baseUrl;
+        const activeProvider = config.agentRuntimeBackend === "codex" ? "openai" : "anthropic";
+        const apiKeyEnv = providerEnvVar(activeProvider);
+        const baseUrlEnv = providerBaseUrlEnvVar(activeProvider);
+        if (active.apiKey && apiKeyEnv) process.env[apiKeyEnv] = active.apiKey;
+        if (active.baseUrl && baseUrlEnv) process.env[baseUrlEnv] = active.baseUrl;
 
         if (opts.apiKey) {
-          process.env.ANTHROPIC_API_KEY = opts.apiKey;
+          const overrideEnv =
+            config.agentRuntimeBackend === "codex" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
+          process.env[overrideEnv] = opts.apiKey;
         }
 
         // Inherited mode: walk the OAuth token search path and prime
@@ -1094,9 +1126,9 @@ taskCmd
   .action(async (opts: { repo: string; filter?: string; trustRepoConfig?: boolean }) => {
     const { root } = resolveRepo(opts.repo);
     const config = loadConfig(root, { trustProjectConfig: opts.trustRepoConfig === true });
-    const taskRegistry = await createDefaultTaskRegistry(config, root);
+    const dagRegistry = await createDefaultDagRegistry(config, root);
 
-    let tasks = taskRegistry.list();
+    let tasks = dagRegistry.list();
     if (opts.filter) {
       tasks = tasks.filter((t) => t.outputKind === opts.filter);
     }
@@ -1110,7 +1142,7 @@ taskCmd
     const allIds = tasks.map((t) => t.id);
     let stages: string[][] = [];
     try {
-      stages = taskRegistry.resolveOrder(allIds);
+      stages = dagRegistry.resolveOrder(allIds);
     } catch {
       // DAG resolution may fail if not all deps are in the list
     }
@@ -1144,13 +1176,13 @@ taskCmd
     wrapCliAction(async (id: string, opts: { repo: string; trustRepoConfig?: boolean }) => {
       const { root } = resolveRepo(opts.repo);
       const config = loadConfig(root, { trustProjectConfig: opts.trustRepoConfig === true });
-      const taskRegistry = await createDefaultTaskRegistry(config, root);
+      const dagRegistry = await createDefaultDagRegistry(config, root);
 
-      if (!taskRegistry.has(id)) {
+      if (!dagRegistry.has(id)) {
         throw new CliUsageError(`Task "${id}" not found.`);
       }
 
-      const task = taskRegistry.get(id);
+      const task = dagRegistry.get(id);
 
       console.log(`Task: ${task.id}`);
       console.log(`  Display Name: ${task.displayName}`);

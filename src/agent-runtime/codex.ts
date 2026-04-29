@@ -60,6 +60,11 @@ function mapApprovalPolicy(mode: AgentPermissionMode | undefined): ApprovalMode 
   return "never";
 }
 
+function shouldUseWorkspaceWrite(options: AgentQueryOptions): boolean {
+  const allowed = new Set((options.allowedTools ?? []).map((tool) => tool.toLowerCase()));
+  return ["write", "edit", "multiedit", "patch"].some((tool) => allowed.has(tool));
+}
+
 function abortResult(durationMs: number, numTurns: number): AgentMessage {
   return {
     type: "result",
@@ -90,7 +95,7 @@ function buildThreadOptions(options: AgentQueryOptions): ThreadOptions {
     model: normalizeCodexModel(options.model),
     workingDirectory: options.cwd,
     approvalPolicy: mapApprovalPolicy(options.permissionMode),
-    sandboxMode: "read-only",
+    sandboxMode: shouldUseWorkspaceWrite(options) ? "workspace-write" : "read-only",
     skipGitRepoCheck: true,
   };
 

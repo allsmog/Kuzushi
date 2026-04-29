@@ -1,6 +1,7 @@
 import type { AgentRuntime } from "./agent-runtime/types.js";
 import type {
-  DfdElement,
+  DfdFlow,
+  DfdNode,
   StrideCategory,
   StrideThreat,
   ThreatModelDocument,
@@ -130,10 +131,12 @@ export function applyThreatModelPatch(
   if (errors.length > 0) return { ok: false, errors };
 
   const next = cloneDocument(doc);
+  normalizeDfdShape(next);
   for (const operation of proposal.operations) {
     applyOperation(next, operation);
   }
   normalizeBoundaryCrossings(next);
+  syncLegacyDfdShape(next);
   next.summary = recomputeSummary(next.threats);
   next.userEdited = true;
   next.lastEditedAt = now.toISOString();
@@ -145,17 +148,23 @@ export function validateThreatModelPatch(
   operations: ReadonlyArray<ThreatModelPatchOperation>,
 ): string[] {
   const errors: string[] = [];
-  const elementIds = new Set(doc.dfd.elements.map((element) => element.id));
-  const boundaryIds = new Set(doc.dfd.trustBoundaries.map((boundary) => boundary.id));
-  const threatIds = new Set(doc.threats.map((threat) => threat.id));
+  const normalized = cloneDocument(doc);
+  normalizeDfdShape(normalized);
+  const elementIds = new Set(normalized.dfd.nodes.map((element) => element.id));
+  const flowIds = new Set(normalized.dfd.flows.map((flow) => flow.id));
+  const boundaryIds = new Set(normalized.dfd.trustBoundaries.map((boundary) => boundary.id));
+  const threatIds = new Set(normalized.threats.map((threat) => threat.id));
 
   for (const operation of operations) {
     if (operation.op === "add") {
       const value = operation.value as Record<string, unknown> | undefined;
       const id = typeof value?.["id"] === "string" ? value["id"] : operation.id;
       if (!id) errors.push(`${operation.target} add is missing id`);
-      if (operation.target === "element" || operation.target === "flow") {
-        if (id && elementIds.has(id)) errors.push(`DFD element already exists: ${id}`);
+      if (operation.target === "element") {
+        if (id && elementIds.has(id)) errors.push(`DFD node already exists: ${id}`);
+      }
+      if (operation.target === "flow") {
+        if (id && flowIds.has(id)) errors.push(`DFD flow already exists: ${id}`);
       }
       if (operation.target === "boundary" && id && boundaryIds.has(id)) {
         errors.push(`Trust boundary already exists: ${id}`);
@@ -166,7 +175,7 @@ export function validateThreatModelPatch(
       continue;
     }
 
-    const resolved = resolveOperationId(doc, operation);
+    const resolved = resolveOperationId(normalized, operation);
     if (!resolved && operation.target !== "metadata") {
       errors.push(
         `${operation.op} ${operation.target} could not resolve ${operation.id ?? operation.matchName ?? "(missing id)"}`,
@@ -174,30 +183,25 @@ export function validateThreatModelPatch(
       continue;
     }
     if (operation.target === "flow") {
-      const flow = doc.dfd.elements.find((element) => element.id === resolved);
-      if (flow && flow.type !== "data-flow") errors.push(`${resolved} is not a data-flow`);
+      const flow = normalized.dfd.flows.find((candidate) => candidate.id === resolved);
+      if (!flow) errors.push(`${resolved} is not a data-flow`);
     }
   }
 
-  const simulated = cloneDocument(doc);
+  const simulated = cloneDocument(normalized);
   for (const operation of operations) {
     if (!errors.length) applyOperation(simulated, operation);
   }
   normalizeBoundaryCrossings(simulated);
-  const ids = new Set(simulated.dfd.elements.map((element) => element.id));
-  for (const flow of simulated.dfd.elements.filter((element) => element.type === "data-flow")) {
-    if (flow.source && !ids.has(flow.source))
-      errors.push(`Flow ${flow.id} has missing source ${flow.source}`);
-    if (flow.target && !ids.has(flow.target))
-      errors.push(`Flow ${flow.id} has missing target ${flow.target}`);
+  const ids = new Set(simulated.dfd.nodes.map((element) => element.id));
+  const simulatedFlowIds = new Set(simulated.dfd.flows.map((flow) => flow.id));
+  for (const flow of simulated.dfd.flows) {
+    if (!ids.has(flow.sourceId)) errors.push(`Flow ${flow.id} has missing source ${flow.sourceId}`);
+    if (!ids.has(flow.targetId)) errors.push(`Flow ${flow.id} has missing target ${flow.targetId}`);
   }
   for (const boundary of simulated.dfd.trustBoundaries) {
-    for (const flowId of boundary.crossingFlows) {
-      if (
-        !simulated.dfd.elements.some(
-          (element) => element.id === flowId && element.type === "data-flow",
-        )
-      ) {
+    for (const flowId of boundary.crossingFlowIds) {
+      if (!simulatedFlowIds.has(flowId)) {
         errors.push(`Boundary ${boundary.id} references missing flow ${flowId}`);
       }
     }
@@ -206,25 +210,34 @@ export function validateThreatModelPatch(
 }
 
 function buildPatchPrompt(doc: ThreatModelDocument, instruction: string): string {
+  const normalized = cloneDocument(doc);
+  normalizeDfdShape(normalized);
   const compact = {
-    elements: doc.dfd.elements.map((element) => ({
+    nodes: normalized.dfd.nodes.map((element) => ({
       id: element.id,
       type: element.type,
       name: element.name,
-      source: element.source,
-      target: element.target,
       trustZone: element.trustZone,
     })),
-    trustBoundaries: doc.dfd.trustBoundaries.map((boundary) => ({
+    flows: normalized.dfd.flows.map((flow) => ({
+      id: flow.id,
+      name: flow.name,
+      sourceId: flow.sourceId,
+      targetId: flow.targetId,
+      protocol: flow.protocol,
+    })),
+    trustBoundaries: normalized.dfd.trustBoundaries.map((boundary) => ({
       id: boundary.id,
       name: boundary.name,
       innerZone: boundary.innerZone,
       outerZone: boundary.outerZone,
-      crossingFlows: boundary.crossingFlows,
+      crossingFlowIds: boundary.crossingFlowIds,
     })),
-    threats: doc.threats.map((threat) => ({
+    threats: normalized.threats.map((threat) => ({
       id: threat.id,
-      elementId: threat.elementId,
+      targetElementIds: threat.targetElementIds,
+      actorIds: threat.actorIds,
+      flowIds: threat.flowIds,
       category: threat.category,
       title: threat.title,
     })),
@@ -234,8 +247,8 @@ function buildPatchPrompt(doc: ThreatModelDocument, instruction: string): string
     "Never apply changes directly. Return only a structured patch.",
     "",
     "Allowed targets:",
-    "- element: non-flow DFD element",
-    "- flow: DFD element where type is data-flow",
+    "- element: DFD node (external-entity, process, or data-store)",
+    "- flow: DFD flow with sourceId and targetId",
     "- boundary: trust boundary",
     "- threat: STRIDE threat",
     "- metadata: small document metadata updates",
@@ -310,17 +323,16 @@ function createHeuristicPatch(
   instruction: string,
   createdAt: number,
 ): ThreatModelPatchProposal {
+  const normalized = cloneDocument(doc);
+  normalizeDfdShape(normalized);
   const removeMatch = instruction.match(/\bremove\s+(?:the\s+)?(.+?)(?:\s+from\b|$)/i);
   const name = removeMatch?.[1]?.trim().replace(/^["']|["']$/g, "");
   const element = name
-    ? (doc.dfd.elements.find(
-        (candidate) =>
-          candidate.type !== "data-flow" && candidate.name.toLowerCase() === name.toLowerCase(),
+    ? (normalized.dfd.nodes.find(
+        (candidate) => candidate.name.toLowerCase() === name.toLowerCase(),
       ) ??
-      doc.dfd.elements.find(
-        (candidate) =>
-          candidate.type !== "data-flow" &&
-          candidate.name.toLowerCase().includes(name.toLowerCase()),
+      normalized.dfd.nodes.find((candidate) =>
+        candidate.name.toLowerCase().includes(name.toLowerCase()),
       ))
     : undefined;
   const operations: ThreatModelPatchOperation[] = element
@@ -349,19 +361,20 @@ function buildThreatModelPatchDiff(
   doc: ThreatModelDocument,
   operations: ReadonlyArray<ThreatModelPatchOperation>,
 ): string[] {
+  const normalized = cloneDocument(doc);
+  normalizeDfdShape(normalized);
   const lines: string[] = [];
   for (const operation of operations) {
-    const id = resolveOperationId(doc, operation) ?? operation.id ?? operation.matchName ?? "(new)";
+    const id =
+      resolveOperationId(normalized, operation) ?? operation.id ?? operation.matchName ?? "(new)";
     if (operation.op === "remove" && operation.target === "element") {
-      const element = doc.dfd.elements.find((candidate) => candidate.id === id);
+      const element = normalized.dfd.nodes.find((candidate) => candidate.id === id);
       if (!element) continue;
       lines.push(`- ${element.id} ${element.name}`);
-      const connected = doc.dfd.elements.filter(
-        (candidate) =>
-          candidate.type === "data-flow" &&
-          (candidate.source === element.id || candidate.target === element.id),
+      const connected = normalized.dfd.flows.filter(
+        (candidate) => candidate.sourceId === element.id || candidate.targetId === element.id,
       );
-      for (const flow of connected) lines.push(`- ${flow.id} ${flow.source} -> ${flow.target}`);
+      for (const flow of connected) lines.push(`- ${flow.id} ${flow.sourceId} -> ${flow.targetId}`);
       continue;
     }
     const sign = operation.op === "add" ? "+" : operation.op === "remove" ? "-" : "~";
@@ -374,14 +387,13 @@ function applyOperation(doc: ThreatModelDocument, operation: ThreatModelPatchOpe
   const id = resolveOperationId(doc, operation) ?? operation.id;
   if (operation.op === "remove") {
     if (operation.target === "element" && id) {
-      doc.dfd.elements = doc.dfd.elements.filter((element) => {
-        if (element.id === id) return false;
-        if (element.type !== "data-flow") return true;
-        return element.source !== id && element.target !== id;
-      });
-      doc.threats = doc.threats.filter((threat) => threat.elementId !== id);
+      doc.dfd.nodes = doc.dfd.nodes.filter((element) => element.id !== id);
+      doc.dfd.flows = doc.dfd.flows.filter((flow) => flow.sourceId !== id && flow.targetId !== id);
+      doc.threats = doc.threats.filter(
+        (threat) => !(threat.targetElementIds ?? []).includes(id) && threat.elementId !== id,
+      );
     } else if (operation.target === "flow" && id) {
-      doc.dfd.elements = doc.dfd.elements.filter((element) => element.id !== id);
+      doc.dfd.flows = doc.dfd.flows.filter((flow) => flow.id !== id);
     } else if (operation.target === "boundary" && id) {
       doc.dfd.trustBoundaries = doc.dfd.trustBoundaries.filter((boundary) => boundary.id !== id);
     } else if (operation.target === "threat" && id) {
@@ -392,9 +404,12 @@ function applyOperation(doc: ThreatModelDocument, operation: ThreatModelPatchOpe
 
   if (operation.op === "update" && id) {
     const fields = operation.fields ?? {};
-    if (operation.target === "element" || operation.target === "flow") {
-      const element = doc.dfd.elements.find((candidate) => candidate.id === id);
+    if (operation.target === "element") {
+      const element = doc.dfd.nodes.find((candidate) => candidate.id === id);
       if (element) Object.assign(element, fields);
+    } else if (operation.target === "flow") {
+      const flow = doc.dfd.flows.find((candidate) => candidate.id === id);
+      if (flow) Object.assign(flow, normalizeFlowPatchFields(fields));
     } else if (operation.target === "boundary") {
       const boundary = doc.dfd.trustBoundaries.find((candidate) => candidate.id === id);
       if (boundary) Object.assign(boundary, fields);
@@ -406,8 +421,10 @@ function applyOperation(doc: ThreatModelDocument, operation: ThreatModelPatchOpe
   }
 
   if (operation.op === "add") {
-    if (operation.target === "element" || operation.target === "flow") {
-      doc.dfd.elements.push(operation.value as DfdElement);
+    if (operation.target === "element") {
+      doc.dfd.nodes.push(operation.value as DfdNode);
+    } else if (operation.target === "flow") {
+      doc.dfd.flows.push(operation.value as DfdFlow);
     } else if (operation.target === "boundary") {
       doc.dfd.trustBoundaries.push(operation.value as TrustBoundary);
     } else if (operation.target === "threat") {
@@ -429,16 +446,86 @@ function resolveOperationId(
   if (operation.target === "threat") {
     return doc.threats.find((threat) => threat.title.toLowerCase() === needle)?.id;
   }
-  return doc.dfd.elements.find((element) => element.name.toLowerCase() === needle)?.id;
+  if (operation.target === "flow") {
+    return doc.dfd.flows.find((flow) => flow.name?.toLowerCase() === needle)?.id;
+  }
+  return doc.dfd.nodes.find((element) => element.name.toLowerCase() === needle)?.id;
 }
 
 function normalizeBoundaryCrossings(doc: ThreatModelDocument): void {
-  const flowIds = new Set(
-    doc.dfd.elements.filter((element) => element.type === "data-flow").map((flow) => flow.id),
-  );
+  const flowIds = new Set(doc.dfd.flows.map((flow) => flow.id));
   for (const boundary of doc.dfd.trustBoundaries) {
-    boundary.crossingFlows = boundary.crossingFlows.filter((flowId) => flowIds.has(flowId));
+    boundary.crossingFlowIds = boundary.crossingFlowIds.filter((flowId) => flowIds.has(flowId));
   }
+}
+
+function normalizeDfdShape(doc: ThreatModelDocument): void {
+  const dfd = doc.dfd as {
+    nodes?: DfdNode[];
+    flows?: DfdFlow[];
+    elements?: Array<Record<string, unknown>>;
+    trustBoundaries?: Array<TrustBoundary & { crossingFlows?: string[] }>;
+  };
+  const legacyElements = Array.isArray(dfd.elements) ? dfd.elements : [];
+  if (!Array.isArray(dfd.nodes)) {
+    dfd.nodes = legacyElements
+      .filter((element) => element["type"] !== "data-flow")
+      .map((element) => element as unknown as DfdNode);
+  }
+  if (!Array.isArray(dfd.flows)) {
+    dfd.flows = legacyElements
+      .filter((element) => element["type"] === "data-flow")
+      .map((element) => ({
+        id: String(element["id"] ?? ""),
+        name: typeof element["name"] === "string" ? element["name"] : undefined,
+        description: String(element["description"] ?? element["name"] ?? ""),
+        sourceId: String(element["sourceId"] ?? element["source_id"] ?? element["source"] ?? ""),
+        targetId: String(element["targetId"] ?? element["target_id"] ?? element["target"] ?? ""),
+        trustBoundaryIds: Array.isArray(element["trustBoundaryIds"])
+          ? (element["trustBoundaryIds"] as string[])
+          : [],
+      }))
+      .filter((flow) => flow.id && flow.sourceId && flow.targetId);
+  }
+  dfd.trustBoundaries = (dfd.trustBoundaries ?? []).map((boundary) => ({
+    ...boundary,
+    crossingFlowIds: boundary.crossingFlowIds ?? boundary.crossingFlows ?? [],
+  }));
+}
+
+function syncLegacyDfdShape(doc: ThreatModelDocument): void {
+  if (!("elements" in doc.dfd)) return;
+  const elements: Array<Record<string, unknown>> = [
+    ...doc.dfd.nodes.map((node) => ({ ...node }) as Record<string, unknown>),
+    ...doc.dfd.flows.map(
+      (flow) =>
+        ({
+          ...flow,
+          type: "data-flow",
+          source: flow.sourceId,
+          target: flow.targetId,
+        }) as Record<string, unknown>,
+    ),
+  ];
+  (doc.dfd as unknown as { elements: Array<Record<string, unknown>> }).elements = elements;
+  for (const boundary of doc.dfd.trustBoundaries as Array<
+    TrustBoundary & { crossingFlows?: string[] }
+  >) {
+    if ("crossingFlows" in boundary) boundary.crossingFlows = boundary.crossingFlowIds;
+  }
+}
+
+function normalizeFlowPatchFields(fields: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...fields };
+  if ("source" in out && !("sourceId" in out)) {
+    out["sourceId"] = out["source"];
+    delete out["source"];
+  }
+  if ("target" in out && !("targetId" in out)) {
+    out["targetId"] = out["target"];
+    delete out["target"];
+  }
+  return out;
 }
 
 function recomputeSummary(threats: StrideThreat[]): ThreatModelDocument["summary"] {

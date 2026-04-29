@@ -1461,9 +1461,9 @@ function HuntActorRow({ actor }: { actor: HuntActorSnapshot }): React.ReactEleme
 }
 
 /**
- * Pull the human-readable actor slug out of a threat-hunt fingerprint.
- * `buildActorFingerprint` in `src/modules/threat-hunt/threat-hunt.ts`
- * builds `threat-hunt:<Actor_Name>:<runIndex>`; we show
+ * Pull the human-readable actor slug out of a carlini-threat-hunt fingerprint.
+ * `buildActorFingerprint` in `src/modules/carlini-threat-hunt/carlini-threat-hunt.ts`
+ * builds `carlini-threat-hunt:<Actor_Name>:<runIndex>`; we show
  * `Actor Name` (runIndex 0 suppressed) or `Actor Name (run N)`.
  */
 function extractActorLabel(fingerprint: string): string {

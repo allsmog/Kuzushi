@@ -174,18 +174,19 @@ describe("plain-renderer Phase D.5 emitters", () => {
         shellView: "threats",
         threatTab: "stride",
         threatModel: {
-          version: "1.0",
+          version: "2.0",
           dfd: {
-            elements: [
+            nodes: [
               { id: "P1", type: "process", name: "p", description: "", trustZone: "z" },
               { id: "E1", type: "external-entity", name: "e", description: "", trustZone: "z" },
             ],
+            flows: [],
             trustBoundaries: [],
           },
           threats: [
             {
               id: "T1",
-              elementId: "P1",
+              targetElementIds: ["P1"],
               category: "spoofing",
               title: "",
               description: "",
@@ -216,9 +217,9 @@ describe("plain-renderer Phase D.5 emitters", () => {
     });
     unsub();
     cap.restore();
-    expect(cap.lines.some((l) => l.includes("[threats] stride · 2 elements · 1 threats"))).toBe(
-      true,
-    );
+    expect(
+      cap.lines.some((l) => l.includes("[threats] stride · 2 nodes · 0 flows · 1 threats")),
+    ).toBe(true);
   });
 
   it("prints [since <ref>] with changed-file count", () => {
@@ -768,14 +769,14 @@ describe("plain-renderer view parity (Workstream 5)", () => {
           [
             {
               kind: "tool-progress",
-              toolName: "threat-hunt",
+              toolName: "carlini-threat-hunt",
               detail: "Enumerating top actors",
               index: 1,
               total: 3,
             },
             {
               kind: "tool-complete",
-              toolName: "threat-hunt",
+              toolName: "carlini-threat-hunt",
               detail: "Generated actor backlog",
               index: 2,
               total: 3,
@@ -787,8 +788,8 @@ describe("plain-renderer view parity (Workstream 5)", () => {
     unsub();
     const joined = lines.join("\n");
     expect(joined).toContain("## agent actions");
-    expect(joined).toContain("- threat-hunt: Generated actor backlog");
-    expect(joined).toContain("- threat-hunt: Enumerating top actors");
+    expect(joined).toContain("- carlini-threat-hunt: Generated actor backlog");
+    expect(joined).toContain("- carlini-threat-hunt: Enumerating top actors");
   });
 });
 
@@ -980,12 +981,12 @@ describe("plain-renderer v3 views", () => {
     store.update({
       shell: baseShell({
         shellView: "module-run",
-        focusedModule: "threat-hunt",
+        focusedModule: "carlini-threat-hunt",
       }),
     });
     unsub();
     const joined = lines.join("\n");
-    expect(joined).toContain("[run] threat-hunt · idle");
+    expect(joined).toContain("[run] carlini-threat-hunt · idle");
     expect(joined).toContain("# RUN");
     expect(joined).toContain("(no active run)");
   });
@@ -996,10 +997,10 @@ describe("plain-renderer v3 views", () => {
     store.update({
       shell: baseShell({
         shellView: "module-run",
-        focusedModule: "threat-hunt",
+        focusedModule: "carlini-threat-hunt",
         moduleRun: {
-          moduleId: "threat-hunt",
-          toolName: "threat-hunt:run",
+          moduleId: "carlini-threat-hunt",
+          toolName: "carlini-threat-hunt:run",
           startedAtMs: Date.now() - 5_000,
           status: "running",
           steps: [
@@ -1013,8 +1014,8 @@ describe("plain-renderer v3 views", () => {
     });
     unsub();
     const joined = lines.join("\n");
-    expect(joined).toContain("[run] threat-hunt:threat-hunt:run");
-    expect(joined).toContain("# RUN threat-hunt");
+    expect(joined).toContain("[run] carlini-threat-hunt:carlini-threat-hunt:run");
+    expect(joined).toContain("# RUN carlini-threat-hunt");
     expect(joined).toContain("status: running");
     expect(joined).toContain("✓ load threat model");
     expect(joined).toContain("→ spawn actor agents");
@@ -1085,7 +1086,7 @@ describe("plain-renderer v3 views", () => {
     store.update({
       shell: baseShell({
         shellView: "actor-detail",
-        focusedModule: "threat-hunt",
+        focusedModule: "carlini-threat-hunt",
         focusedActor: null,
       }),
     });
@@ -1099,27 +1100,27 @@ describe("plain-renderer v3 views", () => {
   it("actor-detail emits one row per agent activity entry with the right glyph", () => {
     const store = createUIStore();
     const { lines, unsub } = attach(store);
-    store.addAgentActivity("threat-hunt:Authenticated_User:0", {
+    store.addAgentActivity("carlini-threat-hunt:Authenticated_User:0", {
       kind: "tool-start",
       toolName: "Read",
       detail: "src/api.ts",
       index: 0,
       total: 1,
     });
-    store.addAgentActivity("threat-hunt:Authenticated_User:0", {
+    store.addAgentActivity("carlini-threat-hunt:Authenticated_User:0", {
       kind: "tool-complete",
       toolName: "Read",
       detail: "138 lines",
       index: 0,
       total: 1,
     });
-    store.addAgentActivity("threat-hunt:Authenticated_User:0", {
+    store.addAgentActivity("carlini-threat-hunt:Authenticated_User:0", {
       kind: "reasoning",
       detail: "checking sanitizers",
       index: 0,
       total: 1,
     });
-    store.addAgentActivity("threat-hunt:Authenticated_User:0", {
+    store.addAgentActivity("carlini-threat-hunt:Authenticated_User:0", {
       kind: "finding-preview",
       detail: "SSRF on /admin/fetch",
       index: 0,
@@ -1128,13 +1129,13 @@ describe("plain-renderer v3 views", () => {
     store.update({
       shell: baseShell({
         shellView: "actor-detail",
-        focusedModule: "threat-hunt",
-        focusedActor: "threat-hunt:Authenticated_User:0",
+        focusedModule: "carlini-threat-hunt",
+        focusedActor: "carlini-threat-hunt:Authenticated_User:0",
       }),
     });
     unsub();
     const joined = lines.join("\n");
-    expect(joined).toContain("[actor] threat-hunt:Authenticated_User:0 · 4 events");
+    expect(joined).toContain("[actor] carlini-threat-hunt:Authenticated_User:0 · 4 events");
     expect(joined).toContain("● Read");
     expect(joined).toContain("⎿ Read");
     expect(joined).toContain("✻ checking sanitizers");
@@ -1147,12 +1148,12 @@ describe("plain-renderer v3 views", () => {
     store.update({
       shell: baseShell({
         shellView: "prompts-editor",
-        focusedModule: "threat-hunt",
+        focusedModule: "carlini-threat-hunt",
       }),
     });
     unsub();
     const joined = lines.join("\n");
-    expect(joined).toContain("[prompts] threat-hunt · 0 overrides");
+    expect(joined).toContain("[prompts] carlini-threat-hunt · 0 overrides");
     expect(joined).toContain("# PROMPTS");
     expect(joined).toContain("(no prompt keys)");
   });
@@ -1163,24 +1164,17 @@ describe("plain-renderer v3 views", () => {
     store.update({
       shell: baseShell({
         shellView: "prompts-editor",
-        focusedModule: "threat-hunt",
+        focusedModule: "carlini-threat-hunt",
         promptsEditor: {
           audit: [
             {
-              moduleId: "threat-hunt",
-              toolName: "threat-hunt:run",
+              moduleId: "carlini-threat-hunt",
+              toolName: "carlini-threat-hunt:run",
               verb: "run",
-              promptKey: "THREAT_HUNT_PROMPT",
-              effective: { source: "default" },
-            },
-            {
-              moduleId: "threat-hunt",
-              toolName: "threat-hunt:run",
-              verb: "actor",
-              promptKey: "THREAT_HUNT_PROMPT",
+              promptKey: "CARLINI_THREAT_HUNT_PROMPT",
               effective: {
                 source: "file",
-                filePath: "/repo/.kuzushi/prompts/threat-hunt/actor.md",
+                filePath: "/repo/.kuzushi/prompts/carlini-threat-hunt/run.md",
               },
             },
           ],
@@ -1189,10 +1183,9 @@ describe("plain-renderer v3 views", () => {
     });
     unsub();
     const joined = lines.join("\n");
-    expect(joined).toContain("[prompts] threat-hunt · 1 override");
+    expect(joined).toContain("[prompts] carlini-threat-hunt · 1 override");
     expect(joined).toContain("# PROMPTS");
-    expect(joined).toContain("run  source=default");
-    expect(joined).toContain("actor  source=file");
-    expect(joined).toContain(".kuzushi/prompts/threat-hunt/actor.md");
+    expect(joined).toContain("run  source=file");
+    expect(joined).toContain(".kuzushi/prompts/carlini-threat-hunt/run.md");
   });
 });

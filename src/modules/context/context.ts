@@ -8,10 +8,10 @@
  * (context-gatherer, context-enricher, app-model-build,
  * code-config-detect, call-graph-assist, code-graph-build/enrich,
  * invariant-extract/check) so the module registry owns their lifecycle
- * instead of `createDefaultTaskRegistry`.
+ * instead of `createDefaultDagRegistry`.
  *
  * Produces the ContextSnapshot consumed downstream by threat-model /
- * agentic-sast / taint-iris / threat-hunt.
+ * agentic-sast / taint-iris / carlini-threat-hunt.
  */
 
 import { appModelBuildTask } from "../../agents/tasks/app-model-build.js";
@@ -25,8 +25,8 @@ import { invariantCheckTask } from "../../agents/tasks/invariant-analysis/check.
 import { invariantExtractTask } from "../../agents/tasks/invariant-analysis/extract.js";
 import type { ContextGenerationSlice } from "../../ui/state.js";
 import { createAttachmentTools } from "../_shared/attachments/index.js";
-import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
 import { defineModule, defineTool } from "../define.js";
+import { defineHiddenDagNodeTool } from "../hidden-dag-node.js";
 import { saveContextSnapshot } from "../sast/context-persist.js";
 import { formatContextSummary, generateContextSnapshot } from "../sast/shared.js";
 import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
@@ -150,8 +150,8 @@ export function createContextModule(): CopilotModule {
     },
   });
 
-  const hide = (task: Parameters<typeof exposeAgentTaskAsHiddenDagTool<"context">>[0]) =>
-    exposeAgentTaskAsHiddenDagTool<"context">(task, { moduleId: "context" });
+  const hide = (task: Parameters<typeof defineHiddenDagNodeTool<"context">>[0]) =>
+    defineHiddenDagNodeTool<"context">(task, { moduleId: "context" });
 
   const hiddenInfraDagTools = [
     hide(contextGathererTask),
@@ -180,7 +180,7 @@ export function createContextModule(): CopilotModule {
     version: "0.17.2",
     description:
       "Builds the target context snapshot: repo model, enrichment, and app/surface model. " +
-      "Required by agentic / taint-iris / threat-hunt. " +
+      "Required by agentic / taint-iris / carlini-threat-hunt. " +
       "Attach reference material (architecture docs, API specs, runbooks) with `attach`.",
     rank: "excellent",
     references: [{ type: "URL", value: "https://c4model.com/" }],

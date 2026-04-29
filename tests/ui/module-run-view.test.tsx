@@ -67,7 +67,7 @@ function shell(overrides: Partial<ShellState> = {}): ShellState {
     modules: [],
     moduleCatalog: [],
     tools: [],
-    focusedModule: "threat-hunt",
+    focusedModule: "carlini-threat-hunt",
     shellView: "module-run",
     openFindingId: null,
     target: null,
@@ -89,16 +89,16 @@ const STALE_RUN_HEADER = ["●", "1", "Pipeline"].join(" ");
 describe("ModuleRunView", () => {
   it("renders the empty state when shell.moduleRun is null", () => {
     const out = renderText(createElement(ModuleRunView, { shell: shell({ moduleRun: null }) }));
-    expect(out).toContain("kuzushi/threat-hunt/run");
+    expect(out).toContain("kuzushi/carlini-threat-hunt/run");
     expect(out).toContain("No active run for this module yet.");
   });
 
-  it("renders header + steps + meta row for a running threat-hunt", () => {
+  it("renders header + steps + meta row for a running carlini-threat-hunt", () => {
     const state = shell({
       moduleRun: {
-        moduleId: "threat-hunt",
-        toolName: "threat-hunt:run",
-        displayName: "Threat Hunt",
+        moduleId: "carlini-threat-hunt",
+        toolName: "carlini-threat-hunt:run",
+        displayName: "Carlini Threat Hunt",
         inputSummary: ".",
         startedAtMs: 0,
         status: "running",
@@ -112,8 +112,8 @@ describe("ModuleRunView", () => {
       },
     });
     const out = renderText(createElement(ModuleRunView, { shell: state, nowMs: 12_000 }));
-    expect(out).toContain("kuzushi/threat-hunt/run");
-    expect(out).toMatch(/(?:⏺|●) Threat Hunt\(\.\)/);
+    expect(out).toContain("kuzushi/carlini-threat-hunt/run");
+    expect(out).toMatch(/(?:⏺|●) Carlini Threat Hunt\(\.\)/);
     expect(out).toContain("steps");
     expect(out).toContain("load threat model");
     expect(out).toContain("spawn 3 actors");
@@ -245,11 +245,11 @@ describe("ModuleRunView", () => {
     expect(out).not.toContain("Captured in scan-only mode");
   });
 
-  it("renders the actors block for threat-hunt with active + queued cards", () => {
+  it("renders the actors block for carlini-threat-hunt with active + queued cards", () => {
     const state = shell({
       moduleRun: {
-        moduleId: "threat-hunt",
-        toolName: "threat-hunt:run",
+        moduleId: "carlini-threat-hunt",
+        toolName: "carlini-threat-hunt:run",
         startedAtMs: 0,
         status: "running",
         steps: [],
@@ -258,14 +258,14 @@ describe("ModuleRunView", () => {
     });
     const map = new Map<string, AgentActivityLine[]>([
       [
-        "threat-hunt:Authenticated_User:0",
+        "carlini-threat-hunt:Authenticated_User:0",
         [
           activity({ kind: "tool-start", toolName: "Read", detail: "src/api.ts" }),
           activity({ kind: "tool-complete", toolName: "Read", detail: "138 lines" }),
         ],
       ],
       [
-        "threat-hunt:Anonymous_Visitor:0",
+        "carlini-threat-hunt:Anonymous_Visitor:0",
         [activity({ kind: "tool-start", toolName: "Grep", detail: "auth" })],
       ],
     ]);

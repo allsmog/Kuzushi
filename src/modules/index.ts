@@ -9,9 +9,9 @@
 
 // Built-in module factories (consumed by src/copilot/core.ts).
 export { createCoreSastModule } from "./core-sast.js";
-export type { DefineModuleSpec, DefineToolSpec } from "./define.js";
+export type { DefineDagToolSpec, DefineModuleSpec, DefineToolSpec } from "./define.js";
 // Authoring helpers — the recommended way to build a module.
-export { defineModule, defineTool } from "./define.js";
+export { defineDagTool, defineModule, defineTool } from "./define.js";
 export type { ModuleLoadErrorCode } from "./errors.js";
 // Structured load-time error type + its discriminator.
 export { ModuleLoadError } from "./errors.js";
@@ -36,11 +36,32 @@ export { createNDayDiffHunterModule } from "./n-day-diff-hunter.js";
 // Registry + specifier parsing — re-export so third parties can do static
 // analysis of their own module specifiers without importing deep paths.
 export { ModuleRegistry, parseModuleSpecifier } from "./registry.js";
+export type {
+  RankedTaintIrisNextCweCatalogEntry,
+  TaintIrisNextAgentCweSelection,
+  TaintIrisNextBackendHints,
+  TaintIrisNextCweCatalogEntry,
+  TaintIrisNextSelectionValidation,
+  TaintIrisNextStructuralQuery,
+} from "./taint-iris-next/cwe-reference.js";
+export {
+  buildStructuralQueriesFromCatalog,
+  filterCatalogForContext,
+  rankCatalogEntries,
+  renderCatalogForPrompt,
+  TAINT_IRIS_NEXT_CWE_CATALOG,
+  TAINT_IRIS_NEXT_CWE_CATALOG_BY_ID,
+  validateAgentCweSelections,
+} from "./taint-iris-next/cwe-reference.js";
+export { createTaintIrisNextModule } from "./taint-iris-next/taint-iris-next.js";
 export { createThreatModelModule } from "./threat-model/threat-model.js";
 // Core types — these are the shape third parties implement.
 export type {
   CopilotModule,
   CopilotModuleRequirement,
+  DagContext,
+  DagTool,
+  DagToolSpec,
   ExecutionContext,
   JSONSchema,
   ModuleCategory,
@@ -55,6 +76,7 @@ export type {
   ModuleTool,
   ToolResult,
 } from "./types.js";
+export { requireDag } from "./types.js";
 export { createVariantHunterModule } from "./variant-hunter.js";
 export type {
   VendorAssessmentDocument,

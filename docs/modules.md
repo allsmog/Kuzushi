@@ -122,12 +122,9 @@ Optional fields: `rank` (`"manual" | "low" | "normal" | "good" | "great" | "exce
 `examples <id>`), `requires`, `knowledge`, `events`, `hidden`,
 `init(config, ctx)`, `dispose()`.
 
-> **DAG participation.** Modules used to carry a separate `tasks` array for
-> pipeline DAG nodes. That field is gone — DAG nodes are now `DagTool`s
-> declared inside `tools`. Use `defineDagTool<"<id>">({...})` for
-> user-visible DAG nodes, or `exposeAgentTaskAsHiddenDagTool(task, {moduleId})`
-> for internal pipeline helpers you want the module registry to own
-> without surfacing to shell/LLM dispatch. See §6.1 below.
+> **DAG participation.** DAG nodes are `DagTool`s declared inside `tools`.
+> Use `defineDagTool<"<id>">({...})`; hidden infrastructure nodes use the
+> same `DagTool` contract with `hidden: true`.
 
 See `src/modules/core-sast.ts` for the canonical reference.
 
@@ -181,9 +178,9 @@ const hunt = defineDagTool<"my-scanner", ScanOpts, Finding[]>({
   inputSchema: { type: "object", properties: { target: { type: "string" } } },
   dag: {
     outputKind: "findings",
-    dependsOn: ["context-gatherer", "app-model-build"],
+    dependsOn: ["context:context-gatherer", "context:app-model-build"],
     // Optional: only run when some upstream condition holds.
-    condition: (upstream, _cfg) => !!upstream.get("app-model-build"),
+    condition: (upstream, _cfg) => !!upstream.get("context:app-model-build"),
   },
   async run(input, ctx: ExecutionContext): Promise<Finding[]> {
     const dag = requireDag(ctx);  // throws outside a pipeline run
@@ -193,29 +190,15 @@ const hunt = defineDagTool<"my-scanner", ScanOpts, Finding[]>({
 });
 ```
 
-Authors don't implement `execute` themselves — the module registry's DAG
-bridge installs one automatically. It re-enters the scan pipeline filtered
+Authors don't implement `execute` themselves — the module registry installs
+one automatically. It re-enters the scan pipeline filtered
 to this one task, so shell dispatch (`/use my-scanner; run`) and headless
 `kuzushi run my-scanner:hunt --target ./repo` both share the exact code path
 scan mode uses.
 
 **Hidden DAG tools.** Internal helpers that shouldn't appear in `/use`
-overviews or LLM tool lists can be declared via
-`exposeAgentTaskAsHiddenDagTool(task, { moduleId })`. Pass
-`multiStrategy: true` to apply the host's multi-strategy wrapper. Example:
-
-```ts
-import { exposeAgentTaskAsHiddenDagTool } from "kuzushi/modules";
-import { ssrfDetectionTask } from "./tasks/ssrf.js";
-
-const hiddenSsrf = exposeAgentTaskAsHiddenDagTool<"my-scanner">(
-  ssrfDetectionTask,
-  { moduleId: "my-scanner", multiStrategy: true },
-);
-
-// Add to your module's tools[] — users never see it, but the orchestrator
-// will resolve `dependsOn: ["ssrf-detect"]` against it.
-```
+overviews or LLM tool lists should still be authored with `defineDagTool`;
+set `hidden: true` and keep dependency names qualified.
 
 ## 7. `ExecutionContext` reference
 

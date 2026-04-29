@@ -1,5 +1,5 @@
 /**
- * ThreatHuntHome — readiness/scope/actions blocks rendered against a
+ * CarliniThreatHuntHome — readiness/scope/actions blocks rendered against a
  * stub threat-model document so `actorsFromDocument` can partition
  * actors into ready/deferred buckets.
  */
@@ -9,7 +9,7 @@ import { createElement, type ReactElement } from "react";
 import { describe, expect, it } from "vitest";
 import type { ThreatModelDocument } from "../../../src/agents/tasks/threat-modeling/types.js";
 import { createManualUiClock, UiClockProvider } from "../../../src/ui/clock.js";
-import { ThreatHuntHome } from "../../../src/ui/components/module-home/threat-hunt-home.js";
+import { CarliniThreatHuntHome } from "../../../src/ui/components/module-home/carlini-threat-hunt-home.js";
 import type { ShellState } from "../../../src/ui/state.js";
 
 class FrameCaptureStream extends Writable {
@@ -36,7 +36,6 @@ class FrameCaptureStream extends Writable {
     return "";
   }
 }
-// biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI for stable text matching
 const ANSI_RE = new RegExp(`${String.fromCharCode(0x1b)}\\[[^A-Za-z]*[A-Za-z]`, "g");
 function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, "");
@@ -60,7 +59,7 @@ function shell(overrides: Partial<ShellState> = {}): ShellState {
     modules: [],
     moduleCatalog: [],
     tools: [],
-    focusedModule: "threat-hunt",
+    focusedModule: "carlini-threat-hunt",
     shellView: "module",
     openFindingId: null,
     target: "/repo",
@@ -76,7 +75,10 @@ function shell(overrides: Partial<ShellState> = {}): ShellState {
 function makeStride(elementId: string, impact: "critical" | "high" | "medium", i: number) {
   return {
     id: `t-${i}`,
-    elementId,
+    actorIds: [elementId],
+    entrypointIds: [],
+    targetElementIds: [elementId],
+    flowIds: [],
     category: "spoofing" as const,
     title: `t${i}`,
     description: "",
@@ -93,9 +95,9 @@ function makeStride(elementId: string, impact: "critical" | "high" | "medium", i
 
 function doc(): ThreatModelDocument {
   return {
-    version: "1",
+    version: "2.0",
     dfd: {
-      elements: [
+      nodes: [
         {
           id: "ext-1",
           type: "external-entity",
@@ -111,6 +113,7 @@ function doc(): ThreatModelDocument {
           trustZone: "external",
         },
       ],
+      flows: [],
       trustBoundaries: [],
     },
     threats: [makeStride("ext-1", "critical", 1), makeStride("ext-2", "medium", 2)],
@@ -118,10 +121,10 @@ function doc(): ThreatModelDocument {
   } as unknown as ThreatModelDocument;
 }
 
-describe("ThreatHuntHome", () => {
+describe("CarliniThreatHuntHome", () => {
   it("shows the no-context advisory when no snapshot has landed", () => {
-    const out = renderText(createElement(ThreatHuntHome, { shell: shell() }));
-    expect(out).toContain("kuzushi/threat-hunt");
+    const out = renderText(createElement(CarliniThreatHuntHome, { shell: shell() }));
+    expect(out).toContain("kuzushi/carlini-threat-hunt");
     expect(out).toContain("readiness");
     expect(out).toContain("(no snapshot");
     expect(out).toContain("(no DFD)");
@@ -133,7 +136,7 @@ describe("ThreatHuntHome", () => {
 
   it("partitions ready vs deferred actors when a threat model is loaded", () => {
     const out = renderText(
-      createElement(ThreatHuntHome, {
+      createElement(CarliniThreatHuntHome, {
         shell: shell({ threatModel: doc() }),
       }),
     );

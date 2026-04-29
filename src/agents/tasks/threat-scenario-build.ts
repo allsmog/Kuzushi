@@ -7,7 +7,7 @@ import type {
   ThreatScenarioDetectorId,
 } from "../../types.js";
 import { isRecord } from "../../utils.js";
-import type { AgentTask } from "../types.js";
+import type { DagNodeImpl } from "../types.js";
 import { resolveThreatModelOutput } from "./threat-model-guidance.js";
 import type { ThreatModelDocument } from "./threat-modeling/types.js";
 
@@ -85,7 +85,7 @@ const DETECTOR_MATCHERS: Array<{
   },
 ];
 
-export const threatScenarioBuildTask: AgentTask<unknown, ThreatScenarioBuildOutput> = {
+export const threatScenarioBuildTask: DagNodeImpl<unknown, ThreatScenarioBuildOutput> = {
   id: "threat-scenario-build",
   displayName: "Threat Scenario Builder",
   outputKind: "custom",

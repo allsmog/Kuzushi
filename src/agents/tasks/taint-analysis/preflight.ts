@@ -16,7 +16,7 @@ import { ensureDatabase, withCodeQLDatabase } from "../../../scanners/run-codeql
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
-import type { AgentTask } from "../../types.js";
+import type { DagNodeImpl } from "../../types.js";
 import {
   CodeqlProfileDetectionError,
   detectWorkingProfile,
@@ -300,7 +300,7 @@ function supplementCandidatesToCsvRows(candidates: ExtractionSupplementCandidate
 /**
  * Taint Analysis Step 0-2 task: deterministic pre-flight + candidate extraction.
  */
-export const taintAnalysisPreflightTask: AgentTask<ScanOpts, TaintAnalysisPreflightOutput> = {
+export const taintAnalysisPreflightTask: DagNodeImpl<ScanOpts, TaintAnalysisPreflightOutput> = {
   id: "taint-analysis-preflight",
   displayName: "Taint Analysis Pre-flight",
   outputKind: "custom",

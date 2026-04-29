@@ -82,7 +82,7 @@ export type AgentRuntimeBackend = AgentRuntimeBackendZ;
 /**
  * Credentials for a single agent runtime backend.
  *
- * Consumed directly by `ClaudeAgentRuntime` and `PiAiAgentRuntime`. The shape
+ * Consumed directly by `ClaudeAgentRuntime`, `PiAiAgentRuntime`, and `CodexAgentRuntime`. The shape
  * matches the env-var pair they resolve to.
  */
 export type AgentRuntimeCredentials = AgentRuntimeCredentialsZ;
@@ -366,6 +366,8 @@ export interface KuzushiConfig {
   enableContextGathering?: boolean;
   /** Persist per-run JSONL audit logs. */
   auditLog?: boolean;
+  /** Play a local startup sound when the interactive shell opens. */
+  startupSound?: boolean;
   /** Optional markdown report output path. */
   reportOutput?: string;
   /** Optional SARIF report output path. */

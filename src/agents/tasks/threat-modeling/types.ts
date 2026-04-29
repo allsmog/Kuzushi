@@ -1,15 +1,37 @@
 // ── Data Flow Diagram ──
 
-export interface DfdElement {
+export interface ThreatModelProvenance {
+  source?: string;
+  generatedAt?: string;
+  model?: string;
+  fallback?: boolean;
+  notes?: string[];
+}
+
+export interface DfdNode {
   id: string;
-  type: "external-entity" | "process" | "data-store" | "data-flow";
+  type: "external-entity" | "process" | "data-store";
   name: string;
   description: string;
   trustZone: string;
-  source?: string;
-  target?: string;
+  evidenceAnchors?: EvidenceAnchor[];
+  provenance?: ThreatModelProvenance;
+}
+
+/** Deprecated compatibility alias for older callers; graph v2 uses DfdNode. */
+export type DfdElement = DfdNode;
+
+export interface DfdFlow {
+  id: string;
+  name?: string;
+  description: string;
+  sourceId: string;
+  targetId: string;
   protocol?: string;
   dataClassification?: string;
+  trustBoundaryIds: string[];
+  evidenceAnchors?: EvidenceAnchor[];
+  provenance?: ThreatModelProvenance;
 }
 
 export interface TrustBoundary {
@@ -17,8 +39,9 @@ export interface TrustBoundary {
   name: string;
   innerZone: string;
   outerZone: string;
-  crossingFlows: string[];
+  crossingFlowIds: string[];
   evidenceAnchors?: EvidenceAnchor[];
+  provenance?: ThreatModelProvenance;
 }
 
 // ── STRIDE ──
@@ -43,12 +66,34 @@ export type ThreatModelMethodology = "pasta" | "stride" | "dread";
 export interface EvidenceAnchor {
   filePath: string;
   startLine: number;
+  endLine?: number;
+  symbol?: string;
   description: string;
+  snippet?: string;
+  source?: string;
+  provenance?: ThreatModelProvenance;
+}
+
+export interface ThreatModelReference {
+  kind?: "source" | "sink" | "guard" | "sanitizer" | string;
+  name?: string;
+  elementId?: string;
+  filePath?: string;
+  startLine?: number;
+  endLine?: number;
+  symbol?: string;
+  description?: string;
+  snippet?: string;
+  source?: string;
+  provenance?: ThreatModelProvenance;
 }
 
 export interface StrideThreat {
   id: string;
-  elementId: string;
+  targetElementIds: string[];
+  actorIds?: string[];
+  entrypointIds?: string[];
+  flowIds?: string[];
   category: StrideCategory;
   title: string;
   description: string;
@@ -56,11 +101,21 @@ export interface StrideThreat {
   preconditions: string[];
   impact: "critical" | "high" | "medium" | "low";
   likelihood: "high" | "medium" | "low";
+  probability?: number;
+  confidence?: "high" | "medium" | "low";
   existingMitigations: string[];
   missingMitigations: string[];
   relatedCwe: string[];
   affectedFiles: Array<{ filePath: string; startLine: number }>;
   evidenceAnchors?: EvidenceAnchor[];
+  sources?: ThreatModelReference[];
+  sinks?: ThreatModelReference[];
+  guards?: ThreatModelReference[];
+  sanitizers?: ThreatModelReference[];
+  requiredCapabilities?: string[];
+  provenance?: ThreatModelProvenance;
+  /** Deprecated compatibility alias for older renderers/tests. */
+  elementId?: string;
 }
 
 export interface DreadThreatScore {
@@ -134,12 +189,15 @@ export interface ThreatModelNarrative {
 }
 
 export interface ThreatModelDocument {
-  version: string;
+  version: "2.0" | string;
   /** Methodology selected by the operator for this normalized document. */
   methodology?: ThreatModelMethodology;
   dfd: {
-    elements: DfdElement[];
+    nodes: DfdNode[];
+    flows: DfdFlow[];
     trustBoundaries: TrustBoundary[];
+    /** Deprecated compatibility alias; canonical graph v2 uses `nodes`. */
+    elements?: DfdElement[];
   };
   threats: StrideThreat[];
   summary: {
@@ -149,6 +207,8 @@ export interface ThreatModelDocument {
   };
   /** Narrative layer (Overview / Trust boundaries / Attacker stories / …). */
   narrative?: ThreatModelNarrative;
+  /** Metadata about generated/fallback model construction. */
+  provenance?: ThreatModelProvenance;
   /** Optional risk-prioritization overlay for methodologies such as DREAD. */
   riskScores?: DreadRiskScores;
   /** Operator annotations keyed by threat ID. */

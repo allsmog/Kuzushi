@@ -48,6 +48,8 @@ export interface EnsureCodeQLDatabaseResult {
 export interface RunCodeQLOptions {
   threads?: number;
   ram?: number;
+  searchPath?: string;
+  additionalPacks?: string;
 }
 
 interface CodeQLSarifDriver {
@@ -281,6 +283,16 @@ async function runCodeQLImpl(
     const ram = asPositiveInt(opts.ram);
     if (ram != null) {
       args.push(`--ram=${ram}`);
+    }
+
+    const searchPath = asOptionalString(opts.searchPath);
+    if (searchPath) {
+      args.push(`--search-path=${searchPath}`);
+    }
+
+    const additionalPacks = asOptionalString(opts.additionalPacks);
+    if (additionalPacks) {
+      args.push(`--additional-packs=${additionalPacks}`);
     }
 
     await execCodeQL(codeqlBin, args);

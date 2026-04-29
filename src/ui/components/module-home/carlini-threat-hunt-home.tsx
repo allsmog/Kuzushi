@@ -1,5 +1,5 @@
 /**
- * Threat-hunt module home — Readiness / Scope / Actions.
+ * Carlini threat-hunt module home — Readiness / Scope / Actions.
  *
  * Reads from the shared threat-model + context snapshots so the page can
  * render before any hunt has run. `actorsFromDocument` partitions actors
@@ -9,7 +9,9 @@
 
 import type React from "react";
 import type { ThreatModelDocument } from "../../../agents/tasks/threat-modeling/types.js";
-import { actorsFromDocument } from "../../../modules/threat-hunt/selectors.js";
+import { actorsFromDocument } from "../../../modules/carlini-threat-hunt/selectors.js";
+import { readThreatModelKbStatus } from "../../../modules/threat-model/kb-index.js";
+import { loadPersistentThreatModel } from "../../../threat-model-renderer.js";
 import { useRegisterKeybindings } from "../../hooks/useKeybindings.js";
 import type { ShellState } from "../../state.js";
 import { RuleHeader } from "../RuleHeader.js";
@@ -18,7 +20,7 @@ import { AttachmentsBlock } from "./AttachmentsBlock.js";
 import { KeyValueSection } from "./context-home.js";
 import type { ModuleHomeProps } from "./types.js";
 
-const MODULE_ID = "threat-hunt";
+const MODULE_ID = "carlini-threat-hunt";
 
 interface Row {
   key: string;
@@ -33,39 +35,76 @@ function formatActors(doc: ThreatModelDocument | null | undefined): string {
   return `${ready} ready · ${deferred} deferred`;
 }
 
+function resolveThreatModel(shell: ShellState): ThreatModelDocument | null {
+  const target = shell.contextSnapshot?.target ?? shell.target;
+  if (target) {
+    const persisted = loadPersistentThreatModel(target);
+    if (persisted) return persisted;
+  }
+  return shell.threatModel ?? null;
+}
+
 function readinessRows(shell: ShellState): Row[] {
   const snapshot = shell.contextSnapshot ?? null;
-  const dfd = shell.threatModel?.dfd;
-  const nodeCount = dfd?.elements?.length ?? 0;
+  const threatModel = resolveThreatModel(shell);
+  const dfd = threatModel?.dfd;
+  const nodeCount = dfd?.nodes?.length ?? 0;
+  const flowCount = dfd?.flows?.length ?? 0;
   const boundaryCount = dfd?.trustBoundaries?.length ?? 0;
-  const flowEdges = dfd?.elements?.filter((el) => el.type === "data-flow").length ?? 0;
+  const actorIds = new Set(
+    (dfd?.nodes ?? []).filter((node) => node.type === "external-entity").map((node) => node.id),
+  );
+  const actorLinkedThreats =
+    threatModel?.threats.filter((threat) =>
+      (threat.actorIds ?? []).some((actorId) => actorIds.has(actorId)),
+    ).length ?? 0;
+  const fallback =
+    threatModel?.provenance?.fallback ||
+    threatModel?.threats.some((threat) => threat.provenance?.fallback)
+      ? "fallback"
+      : "generated";
   const snapshotLabel = snapshot
     ? `target ${snapshot.target}`
     : "(no snapshot — run /context build)";
+  const kbStatus = threatKbStatus(shell);
   return [
     { key: "context", value: snapshotLabel },
     {
       key: "attack surface",
       value:
-        nodeCount === 0 && flowEdges === 0
+        nodeCount === 0 && flowCount === 0
           ? "(no DFD)"
-          : `${nodeCount} nodes · ${flowEdges} flows · ${boundaryCount} boundaries`,
+          : `${nodeCount} nodes · ${flowCount} flows · ${boundaryCount} boundaries`,
     },
-    { key: "actors", value: formatActors(shell.threatModel) },
+    { key: "s4 quality", value: `${actorLinkedThreats} actor-linked threats · ${fallback}` },
+    { key: "threat KB", value: kbStatus },
+    { key: "actors", value: formatActors(threatModel) },
   ];
+}
+
+function threatKbStatus(shell: ShellState): string {
+  const target = shell.contextSnapshot?.target ?? shell.target;
+  if (!target) return "(no target)";
+  const status = readThreatModelKbStatus(target, shell.threatModel);
+  if (!status.exists) return ".kuzushi/threat-model-kb.sqlite3 · missing";
+  const chunks = status.stats ? `${status.stats.chunks} chunks` : "unknown chunks";
+  return status.current
+    ? `.kuzushi/threat-model-kb.sqlite3 · current · ${chunks}`
+    : `.kuzushi/threat-model-kb.sqlite3 · stale (${status.staleReason ?? "unknown"}) · ${chunks}`;
 }
 
 function scopeRows(shell: ShellState): Row[] {
   const tune = shell.tuneSnapshot;
   const tools = shell.moduleOptions?.[`${MODULE_ID}:run`] ?? {};
   const model = (tools["model"] as string | undefined) ?? tune?.model ?? "(default)";
-  const effort = (tools["effort"] as string | undefined) ?? "max";
+  const effort = (tools["effort"] as string | undefined) ?? "xhigh";
   return [
     { key: "target", value: shell.target ?? "(none)" },
     { key: "mode", value: tune?.preset ?? "(default)" },
     { key: "model", value: model },
     { key: "effort", value: effort },
     { key: "evidence", value: ".kuzushi/findings.sqlite3" },
+    { key: "kb", value: ".kuzushi/threat-model-kb.sqlite3" },
     { key: "output", value: "scrollback · /findings · /open <F-NNNN>" },
   ];
 }
@@ -86,7 +125,7 @@ function actionRows(shell: ShellState): Row[] {
   return rows;
 }
 
-export function ThreatHuntHome({ shell }: ModuleHomeProps): React.ReactElement {
+export function CarliniThreatHuntHome({ shell }: ModuleHomeProps): React.ReactElement {
   useRegisterKeybindings([
     { keys: "Enter", label: "type tool verb" },
     { keys: "a", label: "attachments", secondary: true },

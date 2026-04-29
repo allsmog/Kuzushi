@@ -1,7 +1,7 @@
 import { normalizeTaskCapabilityIds } from "../../capabilities.js";
 import { coerceFileIndex, coerceRepoContext } from "../../repo-context.js";
 import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
-import type { AgentTask } from "../types.js";
+import type { DagNodeImpl } from "../types.js";
 
 /**
  * Result of dynamic task selection based on repo context.
@@ -147,7 +147,7 @@ const SELECTION_RULES: SelectionRule[] = [
   },
   {
     condition: (ctx) => ctx.languages.length > 1,
-    tasks: ["threat-model", "threat-hunt"],
+    tasks: ["threat-model", "carlini-threat-hunt"],
     reason: "Multi-language repo — STRIDE + PASTA threat models and threat-actor-driven hunting",
   },
   {
@@ -155,7 +155,7 @@ const SELECTION_RULES: SelectionRule[] = [
       ctx.frameworks.some((f) =>
         /express|fastapi|django|flask|spring|gin|echo|nest|next|rails|laravel/i.test(f),
       ) || ctx.authPatterns.length > 0,
-    tasks: ["auth-logic", "threat-hunt"],
+    tasks: ["auth-logic", "carlini-threat-hunt"],
     reason:
       "Web framework or auth patterns detected — probe authorization logic and run threat-actor-driven hunting",
   },
@@ -173,7 +173,7 @@ const ALWAYS_RECOMMENDED = [
   "security-misconfig",
   "sharp-edges",
   "threat-model",
-  "threat-hunt",
+  "carlini-threat-hunt",
   "taint-analysis",
 ];
 
@@ -183,28 +183,28 @@ const ALWAYS_RECOMMENDED = [
  * initial candidate set — task-selector adds the relevant subset after it runs.
  */
 export const SELECTABLE_TASK_IDS: ReadonlySet<string> = new Set([
-  "secrets-crypto-detect",
-  "code-config-detect",
-  "ssrf-detect",
-  "race-condition-detect",
-  "nosql-injection-detect",
-  "prototype-pollution-detect",
-  "template-injection-detect",
-  "graphql-security-detect",
-  "supply-chain-detect",
-  "command-injection-detect",
-  "xxe-detect",
-  "deserialization-detect",
-  "auth-logic-detect",
-  "threat-model-randori",
-  "threat-hunt",
-  "sharp-edges-detect",
-  "taint-cwe-select",
-  "taint-iris",
-  "systems-context-gatherer",
-  "systems-invariant-extract",
-  "systems-trigger-synth",
-  "systems-hunt",
+  "agentic-sast:secrets-crypto-detect",
+  "context:code-config-detect",
+  "agentic-sast:ssrf-detect",
+  "agentic-sast:race-condition-detect",
+  "agentic-sast:nosql-injection-detect",
+  "agentic-sast:prototype-pollution-detect",
+  "agentic-sast:template-injection-detect",
+  "agentic-sast:graphql-security-detect",
+  "agentic-sast:supply-chain-detect",
+  "agentic-sast:command-injection-detect",
+  "agentic-sast:xxe-detect",
+  "agentic-sast:deserialization-detect",
+  "agentic-sast:auth-logic-detect",
+  "threat-model:threat-model-randori",
+  "carlini-threat-hunt:run",
+  "agentic-sast:sharp-edges-detect",
+  "pipeline:taint-cwe-select",
+  "taint-iris:hunt",
+  "systems-hunt:systems-context-gatherer",
+  "systems-hunt:systems-invariant-extract",
+  "systems-hunt:systems-trigger-synth",
+  "systems-hunt:systems-hunt",
 ]);
 
 /**
@@ -289,16 +289,16 @@ function applyDefaultReasoning(
   for (const taskId of recommendedTasks) {
     if (!reasoning[taskId]) {
       reasoning[taskId] =
-        taskId === "secrets-crypto-detect"
+        taskId === "agentic-sast:secrets-crypto-detect"
           ? "Always recommended: secrets and crypto detection"
-          : taskId === "code-config-detect"
+          : taskId === "context:code-config-detect"
             ? "Always recommended: code and config security checks"
             : "Recommended from repository context";
     }
   }
 }
 
-export const taskSelectorTask: AgentTask<ScanOpts, TaskSelectionResult> = {
+export const taskSelectorTask: DagNodeImpl<ScanOpts, TaskSelectionResult> = {
   id: "task-selector",
   displayName: "Dynamic Task Selector",
   outputKind: "custom",

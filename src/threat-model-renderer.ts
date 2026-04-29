@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type {
-  DfdElement,
+  DfdNode,
   StrideCategory,
   StrideThreat,
   ThreatModelDocument,
@@ -12,9 +12,10 @@ const PERSISTENT_THREAT_MODEL_PATH = ".kuzushi/threat-model.json";
 
 export function createEmptyThreatModelDocument(now: Date = new Date()): ThreatModelDocument {
   return {
-    version: "1",
+    version: "2.0",
     dfd: {
-      elements: [],
+      nodes: [],
+      flows: [],
       trustBoundaries: [],
     },
     threats: [],
@@ -254,23 +255,24 @@ function renderCriticalityBuckets(narrative: ThreatModelNarrative, lines: string
 // ── DFD fallback helpers (used when no narrative is present, or alongside it as detail) ──
 
 function renderOverviewFromDfd(doc: ThreatModelDocument, lines: string[]): void {
-  const processes = doc.dfd.elements.filter((e: DfdElement) => e.type === "process");
-  const externalEntities = doc.dfd.elements.filter((e: DfdElement) => e.type === "external-entity");
-  const dataStores = doc.dfd.elements.filter((e: DfdElement) => e.type === "data-store");
-  const dataFlows = doc.dfd.elements.filter((e: DfdElement) => e.type === "data-flow");
+  const nodes = dfdNodes(doc);
+  const dataFlows = dfdFlows(doc);
+  const processes = nodes.filter((e: DfdNode) => e.type === "process");
+  const externalEntities = nodes.filter((e: DfdNode) => e.type === "external-entity");
+  const dataStores = nodes.filter((e: DfdNode) => e.type === "data-store");
 
   if (processes.length > 0) {
     lines.push(
-      `The application consists of ${processes.length} core process${processes.length > 1 ? "es" : ""}: ${processes.map((p: DfdElement) => p.name).join(", ")}.`,
+      `The application consists of ${processes.length} core process${processes.length > 1 ? "es" : ""}: ${processes.map((p: DfdNode) => p.name).join(", ")}.`,
     );
   }
   if (externalEntities.length > 0) {
     lines.push(
-      `External actors: ${externalEntities.map((e: DfdElement) => `${e.name} (${e.description})`).join("; ")}.`,
+      `External actors: ${externalEntities.map((e: DfdNode) => `${e.name} (${e.description})`).join("; ")}.`,
     );
   }
   if (dataStores.length > 0) {
-    lines.push(`Data stores: ${dataStores.map((d: DfdElement) => d.name).join(", ")}.`);
+    lines.push(`Data stores: ${dataStores.map((d: DfdNode) => d.name).join(", ")}.`);
   }
   if (dataFlows.length > 0) {
     lines.push(`Data flows: ${dataFlows.length} identified.`);
@@ -279,7 +281,8 @@ function renderOverviewFromDfd(doc: ThreatModelDocument, lines: string[]): void 
 }
 
 function renderDfdTrustBoundaries(doc: ThreatModelDocument, lines: string[]): void {
-  if (doc.dfd.trustBoundaries.length === 0) {
+  const trustBoundaries = dfdTrustBoundaries(doc);
+  if (trustBoundaries.length === 0) {
     if (!doc.narrative) {
       lines.push("No explicit trust boundaries identified.");
       lines.push("");
@@ -287,27 +290,68 @@ function renderDfdTrustBoundaries(doc: ThreatModelDocument, lines: string[]): vo
     return;
   }
   lines.push("**DFD trust boundaries**");
-  for (const boundary of doc.dfd.trustBoundaries) {
+  for (const boundary of trustBoundaries) {
     lines.push(`- **${boundary.name}**: ${boundary.innerZone} \u2194 ${boundary.outerZone}`);
-    if (boundary.crossingFlows.length > 0) {
-      lines.push(`  Crossing flows: ${boundary.crossingFlows.join(", ")}`);
+    if (boundary.crossingFlowIds.length > 0) {
+      lines.push(`  Crossing flows: ${boundary.crossingFlowIds.join(", ")}`);
     }
   }
   lines.push("");
 }
 
 function renderTrustZoneFallback(doc: ThreatModelDocument, lines: string[]): void {
-  const externalEntities = doc.dfd.elements.filter((e: DfdElement) => e.type === "external-entity");
-  const zones = new Set(externalEntities.map((e: DfdElement) => e.trustZone).filter(Boolean));
+  const externalEntities = dfdNodes(doc).filter((e: DfdNode) => e.type === "external-entity");
+  const zones = new Set(externalEntities.map((e: DfdNode) => e.trustZone).filter(Boolean));
   if (zones.size === 0) return;
   lines.push("Trust zone assumptions:");
   for (const zone of zones) {
     const actors = externalEntities
-      .filter((e: DfdElement) => e.trustZone === zone)
-      .map((e: DfdElement) => e.name);
+      .filter((e: DfdNode) => e.trustZone === zone)
+      .map((e: DfdNode) => e.name);
     lines.push(`- **${zone}**: ${actors.join(", ")}`);
   }
   lines.push("");
+}
+
+function dfdNodes(doc: ThreatModelDocument): DfdNode[] {
+  if (Array.isArray(doc.dfd.nodes) && doc.dfd.nodes.length > 0) return doc.dfd.nodes;
+  const elements = (Array.isArray(doc.dfd.elements) ? doc.dfd.elements : []) as Array<
+    DfdNode | { id: string; type: "data-flow" }
+  >;
+  return elements.filter(
+    (element) => (element as { type?: string }).type !== "data-flow",
+  ) as DfdNode[];
+}
+
+function dfdFlows(doc: ThreatModelDocument): Array<{ id: string }> {
+  if (Array.isArray(doc.dfd.flows) && doc.dfd.flows.length > 0) return doc.dfd.flows;
+  const elements = (Array.isArray(doc.dfd.elements) ? doc.dfd.elements : []) as Array<
+    DfdNode | { id: string; type: "data-flow" }
+  >;
+  return elements
+    .filter((element) => (element as { type?: string }).type === "data-flow")
+    .map((element) => ({
+      id: element.id,
+    }));
+}
+
+function dfdTrustBoundaries(doc: ThreatModelDocument): Array<{
+  id: string;
+  name: string;
+  innerZone: string;
+  outerZone: string;
+  crossingFlowIds: string[];
+}> {
+  return (doc.dfd.trustBoundaries ?? []).map((boundary) => {
+    const legacy = boundary as typeof boundary & { crossingFlows?: string[] };
+    return {
+      id: boundary.id,
+      name: boundary.name,
+      innerZone: boundary.innerZone,
+      outerZone: boundary.outerZone,
+      crossingFlowIds: boundary.crossingFlowIds ?? legacy.crossingFlows ?? [],
+    };
+  });
 }
 
 function renderStrideThreats(

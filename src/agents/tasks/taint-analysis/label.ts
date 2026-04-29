@@ -13,7 +13,7 @@ import { withRetry } from "../../../retry.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { extractJsonObject, isRecord, toErrorMessage } from "../../../utils.js";
-import type { AgentTask } from "../../types.js";
+import type { DagNodeImpl } from "../../types.js";
 import {
   countCandidateCsvRecords,
   isCsvRecordBlank,
@@ -311,7 +311,7 @@ type LoadPassCheckpointResult =
 /**
  * Taint Analysis Step 3 task: LLM labeling + checkpoint payload generation.
  */
-export const taintAnalysisLabelTask: AgentTask<ScanOpts, TaintAnalysisLabelOutput> = {
+export const taintAnalysisLabelTask: DagNodeImpl<ScanOpts, TaintAnalysisLabelOutput> = {
   id: "taint-analysis-label",
   displayName: "Taint Analysis Label",
   outputKind: "custom",

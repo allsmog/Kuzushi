@@ -13,7 +13,7 @@ import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { toErrorMessage } from "../../../utils.js";
-import type { AgentTask, TaskContext } from "../../types.js";
+import type { DagNodeImpl, DagRunContext } from "../../types.js";
 import { runPluginFindingScanner } from "../plugin-finding-scanner.js";
 import {
   resolveTaskAllowedTools,
@@ -30,7 +30,7 @@ interface VulnScoutConfig {
   maxFindings: number;
 }
 
-function resolveConfig(ctx: TaskContext): VulnScoutConfig {
+function resolveConfig(ctx: DagRunContext): VulnScoutConfig {
   const model = resolveTaskModel(ctx, "vuln-scout");
   const maxFindings = resolveTaskPositiveInt(ctx, "vuln-scout", "maxFindings", 50);
   return { model, maxFindings };
@@ -57,7 +57,7 @@ export function buildVulnScoutPrompt(): string {
 // Backwards-compat alias for internal tests/callers.
 const buildPrompt = buildVulnScoutPrompt;
 
-async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
+async function run(_input: ScanOpts, context: DagRunContext): Promise<Finding[]> {
   const config = resolveConfig(context);
   const tag = "[vuln-scout]";
 
@@ -95,7 +95,7 @@ async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
   return attachTaskOutputMeta(result.findings, { costUsd: result.costUsd });
 }
 
-export const vulnScoutTask: AgentTask<ScanOpts, Finding[]> = {
+export const vulnScoutTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "vuln-scout",
   displayName: "Vuln Scout Pentest",
   outputKind: "findings",

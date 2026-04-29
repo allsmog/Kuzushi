@@ -104,6 +104,74 @@ describe("Randori artifact fallback S4", () => {
     });
   });
 
+  it("converts S3 graph arrays into canonical graph v2 nodes and flows", () => {
+    const merged = mergeRandoriStageOutputs(
+      makeArtifacts({
+        s3Decomposition: {
+          external_entities: [{ id: "E-EXT", name: "External PR author", trust_zone: "external" }],
+          entry_points: [{ id: "EP-PR", name: "pull_request event", trust_zone: "github" }],
+          processes: [{ id: "P-WF", name: "Privileged workflow", trust_zone: "runner" }],
+          data_stores: [{ id: "DS-SECRETS", name: "Vault secrets", trust_zone: "internal" }],
+          data_flows: [
+            {
+              id: "F-1",
+              from: "E-EXT",
+              to: "EP-PR",
+              label: "Open PR",
+              protocol: "https",
+              crosses: ["TB-INTERNET"],
+            },
+            {
+              id: "F-2",
+              from: "P-WF",
+              to: "DS-SECRETS",
+              label: "Read secrets",
+              crosses: ["TB-SECRETS"],
+            },
+          ],
+          trust_boundaries: [
+            { id: "TB-INTERNET", name: "Public internet" },
+            { id: "TB-SECRETS", name: "Secret boundary" },
+          ],
+        },
+        s4Threats: { threats: [] },
+      }),
+      { synthesizeThreats: false },
+    );
+
+    const dfd = merged?.["dfd"] as Record<string, unknown>;
+    expect(dfd["nodes"]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "E-EXT", type: "external-entity" }),
+        expect.objectContaining({ id: "EP-PR", type: "process" }),
+        expect.objectContaining({ id: "P-WF", type: "process" }),
+        expect.objectContaining({ id: "DS-SECRETS", type: "data-store" }),
+      ]),
+    );
+    expect(dfd["flows"]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "F-1",
+          source_id: "E-EXT",
+          target_id: "EP-PR",
+          trust_boundary_ids: ["TB-INTERNET"],
+        }),
+        expect.objectContaining({
+          id: "F-2",
+          source_id: "P-WF",
+          target_id: "DS-SECRETS",
+          trust_boundary_ids: ["TB-SECRETS"],
+        }),
+      ]),
+    );
+    expect(dfd["trust_boundaries"]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "TB-INTERNET", crossing_flow_ids: ["F-1"] }),
+        expect.objectContaining({ id: "TB-SECRETS", crossing_flow_ids: ["F-2"] }),
+      ]),
+    );
+  });
+
   it("writes pasta-s4.json when a run has useful S3 but no S4", () => {
     const repoRoot = mkdtempSync(path.join(tmpdir(), "kuzushi-randori-"));
     tempDirs.push(repoRoot);

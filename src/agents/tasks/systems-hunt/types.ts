@@ -3,7 +3,7 @@ import path from "node:path";
 import { resolveTaskConfig } from "../../../capabilities.js";
 import type { FileIndex, KuzushiConfig } from "../../../types.js";
 import { isPathWithinRoot } from "../../../utils.js";
-import type { TaskContext } from "../../types.js";
+import type { DagRunContext } from "../../types.js";
 
 export const SYSTEMS_PATTERN_DOMAINS = [
   "protocol-parser",
@@ -220,7 +220,7 @@ export function hasSystemsSignals(fileIndex: FileIndex | undefined): boolean {
 }
 
 export function resolveSystemsHuntConfig(
-  context: Pick<TaskContext, "config" | "repoRoot" | "modelOverride">,
+  context: Pick<DagRunContext, "config" | "repoRoot" | "modelOverride">,
 ): SystemsHuntConfig {
   const raw = resolveTaskConfig(context.config as KuzushiConfig, "systems-hunt");
   const configuredModel = asNonEmptyString(raw["model"]);

@@ -29,10 +29,12 @@ import { normalizeToolInput } from "./tool-input-normalizer.js";
 import { summarizeToolCompletion } from "./tool-summary.js";
 import { executeTool, PI_AI_TOOL_DEFINITIONS } from "./tools.js";
 import type {
+  AgentEffort,
   AgentMessage,
   AgentQueryOptions,
   AgentQueryRequest,
   AgentRuntime,
+  AgentRuntimeTool,
   AgentSession,
 } from "./types.js";
 
@@ -147,6 +149,8 @@ async function* streamLlmCall(
     signal?: AbortSignal;
     temperature?: number;
     maxTokens?: number;
+    effort?: AgentEffort;
+    thinkingDisabled?: boolean;
     maxRetries?: number;
     backoffMs?: number;
     observability?: { bus?: MessageBus; model?: string; runId?: string };
@@ -159,6 +163,7 @@ async function* streamLlmCall(
     signal: options.signal,
     temperature: options.temperature,
     maxTokens: options.maxTokens,
+    ...buildReasoningOptions(options.effort, options.thinkingDisabled),
   };
 
   let lastError: unknown;
@@ -301,9 +306,14 @@ export class PiAiAgentRuntime implements AgentRuntime {
       const enabledTools = resolveEnabledTools(
         request.options.allowedTools,
         request.options.disallowedTools,
+        request.options.customTools,
       );
       const context: PiAiContext = {
-        systemPrompt: buildSystemPrompt(outputFormat?.schema, request.options.systemPromptPrefix),
+        systemPrompt: buildSystemPrompt(
+          outputFormat?.schema,
+          request.options.systemPromptPrefix,
+          enabledTools,
+        ),
         messages: [
           ...mapHistoryToMessages(request.options.history),
           {
@@ -454,6 +464,8 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
         signal,
         temperature: options.temperature,
         maxTokens: options.maxOutputTokens,
+        effort: options.effort,
+        thinkingDisabled: options.thinkingDisabled,
         observability,
       });
       let assistant: PiAiAssistantMessage;
@@ -545,6 +557,8 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
             signal,
             temperature: options.temperature,
             maxTokens: options.maxOutputTokens,
+            effort: options.effort,
+            thinkingDisabled: options.thinkingDisabled,
             // Soft-retry loop manages its own attempt count; disable
             // streamLlmCall's internal network-retry so we don't double-retry.
             maxRetries: 0,
@@ -586,7 +600,7 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
 
       // Context compaction: when `assistant.usage.input` crosses 75% of
       // the model's context window, compact old tool-result content in
-      // place. Keeps many-turn agent runs (threat-hunt's 50-turn
+      // place. Keeps many-turn agent runs (carlini-threat-hunt's 50-turn
       // free-exploration hunts especially) from hitting provider
       // `prompt is too long` 400s. See context-compactor.ts for the
       // rationale and knobs.
@@ -1002,7 +1016,16 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
         let isToolError = false;
         let toolResultText = "";
         try {
-          toolResultText = await executeTool(toolCall.name, validatedArgs, options.cwd);
+          const customTool = options.customTools?.find(
+            (candidate) => candidate.name === toolCall.name,
+          );
+          toolResultText = customTool
+            ? await customTool.execute(validatedArgs, {
+                cwd: options.cwd,
+                signal,
+                toolUseId,
+              })
+            : await executeTool(toolCall.name, validatedArgs, options.cwd);
         } catch (error) {
           isToolError = true;
           toolResultText = toErrorMessage(error);
@@ -1095,12 +1118,20 @@ class PiAiSession implements AgentSession {
     this.options = baseOptions;
     this.modelSpec = baseOptions.model;
     this.model = resolveModel(baseOptions.model, runtimeConfig?.baseUrl);
-    this.enabledTools = resolveEnabledTools(baseOptions.allowedTools, baseOptions.disallowedTools);
+    this.enabledTools = resolveEnabledTools(
+      baseOptions.allowedTools,
+      baseOptions.disallowedTools,
+      baseOptions.customTools,
+    );
     this.toolsByName = new Map(this.enabledTools.map((tool) => [tool.name, tool]));
     this.outputFormat = baseOptions.outputFormat;
     this.maxBudgetUsd = normalizeBudget(baseOptions.maxBudgetUsd);
     this.context = {
-      systemPrompt: buildSystemPrompt(this.outputFormat?.schema, baseOptions.systemPromptPrefix),
+      systemPrompt: buildSystemPrompt(
+        this.outputFormat?.schema,
+        baseOptions.systemPromptPrefix,
+        this.enabledTools,
+      ),
       messages: [...mapHistoryToMessages(baseOptions.history)],
       ...(this.enabledTools.length > 0 ? { tools: this.enabledTools } : {}),
     };
@@ -1198,12 +1229,13 @@ function applyRuntimeEnvOverrides(runtimeConfig: AgentRuntimeCredentials | undef
 
 function resolveModel(modelSpec: string, baseUrlOverride?: string) {
   const { provider, modelId } = parsePiAiModelSpec(modelSpec);
+  const effectiveBaseUrl = baseUrlOverride ?? providerBaseUrlFromEnv(provider);
 
   try {
     const model = getModel(provider as KnownProvider, modelId as never);
     if (model) {
-      if (baseUrlOverride) {
-        (model as { baseUrl: string }).baseUrl = baseUrlOverride;
+      if (effectiveBaseUrl) {
+        (model as { baseUrl: string }).baseUrl = effectiveBaseUrl;
       }
       return model;
     }
@@ -1213,7 +1245,7 @@ function resolveModel(modelSpec: string, baseUrlOverride?: string) {
 
   // Model not in pi-ai registry — construct a custom model object.
   // This supports Ollama and other OpenAI-compatible endpoints.
-  if (!baseUrlOverride) {
+  if (!effectiveBaseUrl) {
     throw new Error(
       `Unable to resolve pi-ai model "${modelSpec}": model not found in registry. ` +
         "Provide agentRuntimeConfig.baseUrl (or --base-url) for custom model endpoints.",
@@ -1225,7 +1257,7 @@ function resolveModel(modelSpec: string, baseUrlOverride?: string) {
     name: modelId,
     api: "openai-completions" as const,
     provider,
-    baseUrl: baseUrlOverride,
+    baseUrl: effectiveBaseUrl,
     reasoning: false,
     input: ["text"] as ("text" | "image")[],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -1234,19 +1266,66 @@ function resolveModel(modelSpec: string, baseUrlOverride?: string) {
   };
 }
 
+function providerBaseUrlFromEnv(provider: string): string | undefined {
+  const key =
+    provider === "anthropic"
+      ? "ANTHROPIC_BASE_URL"
+      : provider === "openai"
+        ? "OPENAI_BASE_URL"
+        : undefined;
+  const value = key ? process.env[key]?.trim() : undefined;
+  return value || undefined;
+}
+
+function piAiThinkingLevel(
+  effort: AgentEffort | undefined,
+): "low" | "medium" | "high" | "xhigh" | undefined {
+  if (effort === "max" || effort === "xhigh") return "xhigh";
+  if (effort === "low" || effort === "medium" || effort === "high") return effort;
+  return undefined;
+}
+
+function buildReasoningOptions(
+  effort: AgentEffort | undefined,
+  thinkingDisabled: boolean | undefined,
+): Record<string, unknown> {
+  if (thinkingDisabled || effort === "low") {
+    return {
+      thinkingEnabled: false,
+      reasoningEffort: "minimal",
+    };
+  }
+
+  const level = piAiThinkingLevel(effort);
+  if (!level) return {};
+
+  return {
+    thinkingEnabled: true,
+    thinkingDisplay: "summarized",
+    effort: level,
+    reasoning: level,
+    reasoningEffort: level,
+  };
+}
+
 function resolveEnabledTools(
   allowedTools: string[] | undefined,
   disallowedTools: string[] | undefined,
+  customTools: AgentRuntimeTool[] | undefined,
 ): Tool[] {
   const allowSet = new Set<string>();
+  const customToolNames = new Set((customTools ?? []).map((tool) => tool.name));
   if (Array.isArray(allowedTools)) {
     for (const toolName of allowedTools) {
-      if (KNOWN_TOOL_NAMES.has(toolName)) {
+      if (KNOWN_TOOL_NAMES.has(toolName) || customToolNames.has(toolName)) {
         allowSet.add(toolName);
       }
     }
   } else {
     for (const toolName of KNOWN_TOOL_NAMES) {
+      allowSet.add(toolName);
+    }
+    for (const toolName of customToolNames) {
       allowSet.add(toolName);
     }
   }
@@ -1257,7 +1336,17 @@ function resolveEnabledTools(
     }
   }
 
-  return PI_AI_TOOL_DEFINITIONS.filter((tool) => allowSet.has(tool.name));
+  return [
+    ...PI_AI_TOOL_DEFINITIONS,
+    ...(customTools ?? []).map(
+      (tool) =>
+        ({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        }) as Tool,
+    ),
+  ].filter((tool): tool is Tool => allowSet.has(tool.name));
 }
 
 function buildStructuredOutputRetryMessage(schema: Record<string, unknown>): string {
@@ -1268,8 +1357,14 @@ function buildStructuredOutputRetryMessage(schema: Record<string, unknown>): str
   ].join("\n");
 }
 
-function buildSystemPrompt(schema: Record<string, unknown> | undefined, prefix?: string): string {
+function buildSystemPrompt(
+  schema: Record<string, unknown> | undefined,
+  prefix?: string,
+  enabledTools: Tool[] = PI_AI_TOOL_DEFINITIONS,
+): string {
   const lines: string[] = [];
+  const toolNames =
+    enabledTools.length > 0 ? enabledTools.map((tool) => tool.name).join(", ") : "no tools";
 
   if (prefix) {
     lines.push(prefix, "");
@@ -1277,7 +1372,7 @@ function buildSystemPrompt(schema: Record<string, unknown> | undefined, prefix?:
 
   lines.push(
     "You are a code security agent operating on a local repository.",
-    "Use available tools (Read, Glob, Grep, Bash, Write, GetCallers, GetCallees, GetFunctionBody, GoToDefinition, FindReferences, TypeAtPosition) when code inspection or file manipulation is required.",
+    `Use available tools (${toolNames}) when code inspection, retrieval, or file manipulation is required.`,
     "When you call tools, pass valid JSON arguments.",
   );
 

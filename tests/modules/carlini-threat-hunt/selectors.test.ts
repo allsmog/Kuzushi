@@ -1,5 +1,5 @@
 /**
- * Selectors moved out of `threat-hunt.ts` so the UI can call them without
+ * Selectors moved out of `carlini-threat-hunt.ts` so the UI can call them without
  * dragging in the agent-runtime. The behavior should match what the old
  * inline implementation produced.
  */
@@ -8,12 +8,15 @@ import type { ThreatModelDocument } from "../../../src/agents/tasks/threat-model
 import {
   actorsFromDocument,
   extractActorsWithThreats,
-} from "../../../src/modules/threat-hunt/selectors.js";
+} from "../../../src/modules/carlini-threat-hunt/selectors.js";
 
 function makeStride(elementId: string, impact: "critical" | "high" | "medium" | "low", i: number) {
   return {
     id: `t-${i}`,
-    elementId,
+    actorIds: [elementId],
+    entrypointIds: [],
+    targetElementIds: [elementId],
+    flowIds: [],
     category: "spoofing" as const,
     title: `threat ${i}`,
     description: "",
@@ -30,9 +33,9 @@ function makeStride(elementId: string, impact: "critical" | "high" | "medium" | 
 
 function makeDoc(): ThreatModelDocument {
   return {
-    version: "1",
+    version: "2.0",
     dfd: {
-      elements: [
+      nodes: [
         {
           id: "ext-1",
           type: "external-entity",
@@ -55,6 +58,7 @@ function makeDoc(): ThreatModelDocument {
           trustZone: "internal",
         },
       ],
+      flows: [],
       trustBoundaries: [],
     },
     threats: [
@@ -92,5 +96,85 @@ describe("actorsFromDocument", () => {
   it("tolerates null / missing dfd", () => {
     expect(actorsFromDocument(null)).toEqual({ prioritized: [], allActors: [] });
     expect(actorsFromDocument(undefined)).toEqual({ prioritized: [], allActors: [] });
+  });
+
+  it("uses threat text to repair unresolved generator actor ids before flow fallback", () => {
+    const doc = makeDoc();
+    doc.dfd.nodes = [
+      {
+        id: "A-EXT",
+        type: "external-entity",
+        name: "External / fork contributor",
+        description: "External contributor opening fork pull requests",
+        trustZone: "external",
+      },
+      {
+        id: "A-ARTIFACTORY",
+        type: "external-entity",
+        name: "repository.example.com (Artifactory)",
+        description: "Artifact registry",
+        trustZone: "external",
+      },
+      {
+        id: "C-WF",
+        type: "process",
+        name: "Privileged workflow",
+        description: "pull_request_target workflow",
+        trustZone: "internal",
+      },
+    ];
+    doc.dfd.flows = [
+      {
+        id: "DF-1",
+        name: "artifact download",
+        description: "Workflow downloads build artifact",
+        sourceId: "C-WF",
+        targetId: "A-ARTIFACTORY",
+        protocol: "HTTPS",
+        trustBoundaryIds: [],
+      },
+    ];
+    doc.threats = [
+      {
+        ...makeStride("AC-2", "critical", 1),
+        actorIds: ["AC-2"],
+        targetElementIds: ["C-WF"],
+        flowIds: ["DF-1"],
+        title: "Fork PR can execute privileged pull_request_target workflow",
+        requiredCapabilities: ["Open a pull request from a fork"],
+      },
+    ];
+
+    const result = actorsFromDocument(doc);
+
+    expect(result.prioritized.map((item) => item.actor.id)).toEqual(["A-EXT"]);
+  });
+
+  it("falls back to linked flows when direct and semantic actor links are missing", () => {
+    const doc = makeDoc();
+    doc.dfd.flows = [
+      {
+        id: "flow-1",
+        name: "request",
+        description: "Visitor sends a request to the API",
+        sourceId: "ext-2",
+        targetId: "proc-1",
+        protocol: "HTTPS",
+        trustBoundaryIds: [],
+      },
+    ];
+    doc.threats = [
+      {
+        ...makeStride("missing-actor", "high", 1),
+        actorIds: ["missing-actor"],
+        targetElementIds: ["proc-1"],
+        flowIds: ["flow-1"],
+        title: "Cache poisoning through request header",
+      },
+    ];
+
+    const result = actorsFromDocument(doc);
+
+    expect(result.prioritized.map((item) => item.actor.id)).toEqual(["ext-2"]);
   });
 });

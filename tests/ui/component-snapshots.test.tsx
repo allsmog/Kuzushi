@@ -323,13 +323,13 @@ describe("Ink component snapshots", () => {
       ],
     });
     const customShell = stubShell({
-      focusedModule: "threat-hunt",
+      focusedModule: "carlini-threat-hunt",
       shellView: "module",
       target: "/repo",
       moduleCatalog: [
         {
-          id: "threat-hunt",
-          displayName: "Threat Hunt",
+          id: "carlini-threat-hunt",
+          displayName: "Carlini Threat Hunt",
           category: "offense",
           description: "Spawn actor-scoped threat hunting agents.",
           toolCount: 1,
@@ -350,7 +350,7 @@ describe("Ink component snapshots", () => {
 
     instance.unmount();
     const out = stripAnsi(stream.lastFrame());
-    expect(out).toContain("kuzushi/threat-hunt");
+    expect(out).toContain("kuzushi/carlini-threat-hunt");
     expect(out).toContain("readiness");
   });
 
@@ -388,7 +388,7 @@ describe("Ink component snapshots", () => {
   });
 
   it("ModuleHome — hides advanced pipeline steps and shows the hint line", () => {
-    // Uses `sast` here because `context` and `threat-hunt` route through
+    // Uses `sast` here because `context` and `carlini-threat-hunt` route through
     // the v3 module-home registry (Status / Actions / Last run), which
     // intentionally drops the tools table. Modules without a custom home
     // still render the legacy table + hidden-count hint.

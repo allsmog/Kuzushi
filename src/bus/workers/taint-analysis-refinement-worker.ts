@@ -2,7 +2,6 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
-import type { TaskRegistry } from "../../agents/registry.js";
 import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
 import { taintAnalysisRunTask } from "../../agents/tasks/taint-analysis/analyze.js";
 import { buildTaintModelDocument } from "../../agents/tasks/taint-analysis/label.js";
@@ -17,7 +16,8 @@ import {
   resolveTaintAnalysisConfig,
   TAINT_ANALYSIS_PASS_IDS,
 } from "../../agents/tasks/taint-analysis/types.js";
-import type { TaskContext } from "../../agents/types.js";
+import type { DagRunContext } from "../../agents/types.js";
+import type { DagRegistry } from "../../modules/dag-registry.js";
 import { coerceRepoContext } from "../../repo-context.js";
 import type { Finding } from "../../scanners/types.js";
 import {
@@ -35,7 +35,7 @@ import type { MessageBus } from "../types.js";
 
 export interface TaintAnalysisRefinementWorkerDeps {
   db: Database.Database;
-  taskRegistry: TaskRegistry;
+  dagRegistry: DagRegistry;
   config: KuzushiConfig;
   runtime: AgentRuntime;
 }
@@ -153,7 +153,7 @@ export function registerTaintAnalysisRefinementWorker(
           labels: refinedLabels,
         };
 
-        const taskContext: TaskContext = {
+        const taskContext: DagRunContext = {
           runId: event.meta.runId,
           projectRoot: context.repoRoot,
           workRoot: context.scanPath ?? context.repoRoot,

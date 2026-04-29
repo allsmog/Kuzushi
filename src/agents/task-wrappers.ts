@@ -1,5 +1,5 @@
 import { createLogger } from "../logger.js";
-import type { AgentTask, TaskContext } from "./types.js";
+import type { DagNodeImpl, DagRunContext } from "./types.js";
 
 const log = createLogger({ stage: "task-wrappers" });
 
@@ -7,12 +7,12 @@ const log = createLogger({ stage: "task-wrappers" });
  * Wrap a task with in-memory caching based on a cache key function.
  */
 export function withCache<TInput = unknown, TOutput = unknown>(
-  task: AgentTask<TInput, TOutput>,
+  task: DagNodeImpl<TInput, TOutput>,
   options: {
     cacheKey: (input: TInput) => string;
     ttlMs?: number;
   },
-): AgentTask<TInput, TOutput> {
+): DagNodeImpl<TInput, TOutput> {
   const cache = new Map<string, { value: TOutput; timestamp: number }>();
   const ttl = options.ttlMs ?? 0; // 0 = no expiry
 
@@ -22,7 +22,7 @@ export function withCache<TInput = unknown, TOutput = unknown>(
     displayName: task.displayName,
     outputKind: task.outputKind,
     dependsOn: task.dependsOn,
-    async run(input: TInput, context: TaskContext): Promise<TOutput> {
+    async run(input: TInput, context: DagRunContext): Promise<TOutput> {
       const key = options.cacheKey(input);
       const cached = cache.get(key);
 
@@ -43,12 +43,12 @@ export function withCache<TInput = unknown, TOutput = unknown>(
  * Wrap a task with retry logic on failure.
  */
 export function withRetry<TInput = unknown, TOutput = unknown>(
-  task: AgentTask<TInput, TOutput>,
+  task: DagNodeImpl<TInput, TOutput>,
   options?: {
     maxRetries?: number;
     backoffMs?: number;
   },
-): AgentTask<TInput, TOutput> {
+): DagNodeImpl<TInput, TOutput> {
   const maxRetries = options?.maxRetries ?? 3;
   const backoffMs = options?.backoffMs ?? 1000;
 
@@ -58,7 +58,7 @@ export function withRetry<TInput = unknown, TOutput = unknown>(
     displayName: task.displayName,
     outputKind: task.outputKind,
     dependsOn: task.dependsOn,
-    async run(input: TInput, context: TaskContext): Promise<TOutput> {
+    async run(input: TInput, context: DagRunContext): Promise<TOutput> {
       let lastError: Error | undefined;
 
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -87,16 +87,16 @@ export function withRetry<TInput = unknown, TOutput = unknown>(
  * Wrap a task with a timeout.
  */
 export function withTimeout<TInput = unknown, TOutput = unknown>(
-  task: AgentTask<TInput, TOutput>,
+  task: DagNodeImpl<TInput, TOutput>,
   timeoutMs: number,
-): AgentTask<TInput, TOutput> {
+): DagNodeImpl<TInput, TOutput> {
   return {
     ...task,
     id: task.id,
     displayName: task.displayName,
     outputKind: task.outputKind,
     dependsOn: task.dependsOn,
-    async run(input: TInput, context: TaskContext): Promise<TOutput> {
+    async run(input: TInput, context: DagRunContext): Promise<TOutput> {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -121,15 +121,15 @@ export function withTimeout<TInput = unknown, TOutput = unknown>(
  * Wrap a task with structured logging around execution.
  */
 export function withLogging<TInput = unknown, TOutput = unknown>(
-  task: AgentTask<TInput, TOutput>,
-): AgentTask<TInput, TOutput> {
+  task: DagNodeImpl<TInput, TOutput>,
+): DagNodeImpl<TInput, TOutput> {
   return {
     ...task,
     id: task.id,
     displayName: task.displayName,
     outputKind: task.outputKind,
     dependsOn: task.dependsOn,
-    async run(input: TInput, context: TaskContext): Promise<TOutput> {
+    async run(input: TInput, context: DagRunContext): Promise<TOutput> {
       const startTime = Date.now();
       log.info({ taskId: task.id }, "Task execution started");
 
@@ -159,8 +159,8 @@ export function withLogging<TInput = unknown, TOutput = unknown>(
  * Wrappers are applied in order (first wrapper is outermost).
  */
 export function compose<TInput = unknown, TOutput = unknown>(
-  task: AgentTask<TInput, TOutput>,
-  ...wrappers: Array<(task: AgentTask<TInput, TOutput>) => AgentTask<TInput, TOutput>>
-): AgentTask<TInput, TOutput> {
+  task: DagNodeImpl<TInput, TOutput>,
+  ...wrappers: Array<(task: DagNodeImpl<TInput, TOutput>) => DagNodeImpl<TInput, TOutput>>
+): DagNodeImpl<TInput, TOutput> {
   return wrappers.reduce((wrapped, wrapper) => wrapper(wrapped), task);
 }

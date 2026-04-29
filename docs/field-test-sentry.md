@@ -295,7 +295,7 @@ artifacts) silently degrades under root's `plan` permission mode
 **(FIXED — `947391f`)** — `planModeAllowedDirectories()` whitelists
 the scan target, `~/.kuzushi/{,plans,runs}`, `~/.claude/plans`,
 `/home/claude/.claude/plans`, and `<cwd>/.kuzushi` via the SDK's
-`additionalDirectories` option. randori, threat-hunt, and similar
+`additionalDirectories` option. randori, carlini-threat-hunt, and similar
 artifact-producing tasks now read/write where the rest of the
 pipeline expects.
 
@@ -317,7 +317,7 @@ much weaker threat model than on a non-root host. Two follow-ups:
       the run dir + `~/.kuzushi/plans/` so plan-mode reads/writes there
       are allowed;
   (b) tasks that fundamentally need to write artifacts (randori,
-      threat-hunt, systems-hunt context dumps) should declare that
+      carlini-threat-hunt, systems-hunt context dumps) should declare that
       requirement and either escalate or warn the operator instead of
       silently retrying-then-skipping.
 
@@ -384,13 +384,13 @@ for a working agentic stack. `KUZUSHI_DANGEROUSLY_SKIP_PERMISSIONS=1`
 forces the old behavior when an operator knows they need it.
 
 **Verified end-to-end:** post-patch the
-`agentic-sast,threat-hunt,systems-hunt` scan against Sentry runs with
+`agentic-sast,carlini-threat-hunt,systems-hunt` scan against Sentry runs with
 zero `Claude SDK query failed` errors — versus 498 errors in the
 single 13-minute pre-patch run.
 
 
 
-`--tasks agentic-sast` (or `threat-hunt`) reliably emits a wall of:
+`--tasks agentic-sast` (or `carlini-threat-hunt`) reliably emits a wall of:
 
 ```
 [claude-runtime] [error] Claude SDK query failed (1655ms): Claude Code process exited with code 1

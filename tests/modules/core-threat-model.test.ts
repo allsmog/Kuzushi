@@ -75,12 +75,41 @@ function createCtx(overrides: Partial<ExecutionContext> = {}): ExecutionContext 
 
 function threatModelWithThreat() {
   return {
-    version: "1.0",
-    dfd: { elements: [], trustBoundaries: [] },
+    version: "2.0",
+    dfd: {
+      nodes: [
+        {
+          id: "actor",
+          type: "external-entity",
+          name: "PR author",
+          description: "External contributor",
+          trustZone: "external",
+        },
+        {
+          id: "boundary",
+          type: "process",
+          name: "Privileged workflow",
+          description: "Comment-triggered workflow",
+          trustZone: "ci",
+        },
+      ],
+      flows: [
+        {
+          id: "flow-1",
+          description: "PR author reaches privileged workflow",
+          sourceId: "actor",
+          targetId: "boundary",
+          trustBoundaryIds: [],
+        },
+      ],
+      trustBoundaries: [],
+    },
     threats: [
       {
         id: "T-1",
-        elementId: "boundary",
+        targetElementIds: ["boundary"],
+        actorIds: ["actor"],
+        flowIds: ["flow-1"],
         category: "elevation-of-privilege",
         title: "Privileged workflow trigger",
         description: "A comment-triggered workflow can run privileged automation.",

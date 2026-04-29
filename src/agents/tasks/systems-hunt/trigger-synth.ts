@@ -2,7 +2,7 @@ import { createLogger } from "../../../logger.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
-import type { AgentTask } from "../../types.js";
+import type { DagNodeImpl } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
 import { formatSystemsSurfacePack } from "./helpers.js";
 import type {
@@ -58,7 +58,7 @@ const TRIGGER_SCHEMA = {
   },
 } as const;
 
-export const systemsTriggerSynthTask: AgentTask<ScanOpts, SystemsTriggerOutput> = {
+export const systemsTriggerSynthTask: DagNodeImpl<ScanOpts, SystemsTriggerOutput> = {
   id: "systems-trigger-synth",
   displayName: "Systems Trigger Synthesizer",
   outputKind: "custom",

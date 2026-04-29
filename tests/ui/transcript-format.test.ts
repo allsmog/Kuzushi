@@ -113,13 +113,13 @@ describe("toTranscriptEntry", () => {
 
 describe("actorLabelFromFingerprint", () => {
   it("strips slug + suppresses runIndex 0", () => {
-    expect(actorLabelFromFingerprint("threat-hunt:Unauthenticated_User:0")).toBe(
+    expect(actorLabelFromFingerprint("carlini-threat-hunt:Unauthenticated_User:0")).toBe(
       "Unauthenticated User",
     );
   });
 
   it("annotates non-zero runIndex", () => {
-    expect(actorLabelFromFingerprint("threat-hunt:External_Attacker:2")).toBe(
+    expect(actorLabelFromFingerprint("carlini-threat-hunt:External_Attacker:2")).toBe(
       "External Attacker (run 2)",
     );
   });
@@ -131,16 +131,16 @@ describe("actorLabelFromFingerprint", () => {
 
 describe("actorShortId", () => {
   it("derives stable AUTH-01 / DATA-02 style aliases", () => {
-    const a = actorShortId("threat-hunt:Authenticated_User:0", 0);
+    const a = actorShortId("carlini-threat-hunt:Authenticated_User:0", 0);
     expect(a).toMatch(/^AUTH/);
     expect(a).toBe("AUTH-01");
-    const b = actorShortId("threat-hunt:Data_Importer:1", 1);
+    const b = actorShortId("carlini-threat-hunt:Data_Importer:1", 1);
     expect(b).toBe("DATA-02");
   });
 
   it("falls back to ACTOR-prefix for non-letter slugs", () => {
     // The slug "123" has no letters, so the fallback "ACTOR" prefix is
     // truncated to the canonical 4-char head.
-    expect(actorShortId("threat-hunt:123:0", 4)).toBe("ACTO-05");
+    expect(actorShortId("carlini-threat-hunt:123:0", 4)).toBe("ACTO-05");
   });
 });

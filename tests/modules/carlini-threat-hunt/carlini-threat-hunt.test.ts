@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { AgentMessage, AgentRuntime } from "../../../src/agent-runtime/types.js";
 import type {
-  DfdElement,
+  AgentMessage,
+  AgentQueryRequest,
+  AgentRuntime,
+} from "../../../src/agent-runtime/types.js";
+import type {
+  DfdFlow,
+  DfdNode,
+  StrideThreat,
   ThreatModelDocument,
 } from "../../../src/agents/tasks/threat-modeling/types.js";
 import { publishAgentActivity } from "../../../src/bus/activity.js";
@@ -12,15 +18,15 @@ import type {
   TaskAgentActivityEvent,
 } from "../../../src/bus/events.js";
 import {
-  __threatHuntInternals,
-  threatHuntTool,
-} from "../../../src/modules/threat-hunt/threat-hunt.js";
+  __carliniThreatHuntInternals,
+  carliniThreatHuntTool,
+} from "../../../src/modules/carlini-threat-hunt/carlini-threat-hunt.js";
 import type { ExecutionContext } from "../../../src/modules/types.js";
 
 const { extractActors, buildPrompt, buildActorFingerprint, resolveConfig, runActorHunt } =
-  __threatHuntInternals;
+  __carliniThreatHuntInternals;
 
-function makeDfdElement(overrides: Partial<DfdElement> = {}): DfdElement {
+function makeDfdNode(overrides: Partial<DfdNode> = {}): DfdNode {
   return {
     id: "actor-1",
     type: "external-entity",
@@ -31,11 +37,26 @@ function makeDfdElement(overrides: Partial<DfdElement> = {}): DfdElement {
   };
 }
 
-function makeThreatModelOutput(elements: DfdElement[] = []) {
+function makeDfdFlow(overrides: Partial<DfdFlow> = {}): DfdFlow {
+  return {
+    id: "flow-1",
+    sourceId: "actor-1",
+    targetId: "process-1",
+    description: "HTTP request into the service",
+    protocol: "https",
+    dataClassification: "public",
+    trustBoundaryIds: [],
+    evidence: [],
+    ...overrides,
+  };
+}
+
+function makeThreatModelOutput(elements: DfdNode[] = []) {
   const doc: ThreatModelDocument = {
-    version: "1.0",
+    version: "2.0",
     dfd: {
-      elements,
+      nodes: elements,
+      flows: [],
       trustBoundaries: [],
     },
     threats: [],
@@ -55,6 +76,31 @@ function makeThreatModelOutput(elements: DfdElement[] = []) {
   return { document: doc, findings: [] };
 }
 
+function makeStrideThreat(overrides: Partial<StrideThreat> = {}): StrideThreat {
+  return {
+    id: "threat-1",
+    actorIds: ["actor-1"],
+    entrypointIds: [],
+    targetElementIds: ["actor-1"],
+    flowIds: [],
+    category: "information-disclosure",
+    title: "Password reset token disclosure",
+    description: "Reset tokens are exposed to the actor.",
+    attackVector: "Submit a crafted reset request and replay the token.",
+    preconditions: [],
+    impact: "high",
+    likelihood: "medium",
+    existingMitigations: [],
+    missingMitigations: [],
+    relatedCwe: ["CWE-200"],
+    affectedFiles: [{ filePath: "src/routes/auth.ts", startLine: 88 }],
+    evidenceAnchors: [
+      { filePath: "src/routes/auth.ts", startLine: 91, description: "token returned in response" },
+    ],
+    ...overrides,
+  };
+}
+
 /**
  * Build an ExecutionContext for direct DagTool invocation in tests. Wires
  * `reportActivity` and `reportAgentActivity` through the in-process bus the
@@ -66,10 +112,12 @@ function makeExecutionContext(
   opts: {
     upstreamOutputs?: Map<string, unknown>;
     taskConfig?: Record<string, unknown>;
+    toolTaskConfig?: Record<string, unknown>;
   } = {},
 ): ExecutionContext {
   const upstreamOutputs = opts.upstreamOutputs ?? new Map<string, unknown>();
   const taskConfig = opts.taskConfig ?? {};
+  const toolTaskConfig = opts.toolTaskConfig ?? {};
   const runContext = {
     runId: "test-run",
     repoRoot: "/tmp/repo",
@@ -82,8 +130,12 @@ function makeExecutionContext(
     bus,
     config: {
       model: "anthropic:claude-sonnet-4-6",
-      taskConfig: { "threat-hunt": taskConfig },
+      taskConfig: {
+        "carlini-threat-hunt": taskConfig,
+        "carlini-threat-hunt:run": toolTaskConfig,
+      },
     } as never,
+    tool: { moduleId: "carlini-threat-hunt", name: "carlini-threat-hunt:run" },
     dag: {
       runId: "test-run",
       repoRoot: "/tmp/repo",
@@ -95,7 +147,7 @@ function makeExecutionContext(
         type: "task:activity",
         meta: { id: "a", timestamp: new Date().toISOString(), runId: "test-run" },
         payload: {
-          taskId: "threat-hunt",
+          taskId: "carlini-threat-hunt",
           description,
           ...(meta?.phase !== undefined ? { phase: meta.phase } : {}),
           ...(meta?.step !== undefined ? { step: meta.step } : {}),
@@ -104,7 +156,7 @@ function makeExecutionContext(
       } as never);
     },
     reportAgentActivity: (fingerprint, kind, meta) => {
-      publishAgentActivity(bus, "threat-hunt", fingerprint, kind, {
+      publishAgentActivity(bus, "carlini-threat-hunt", fingerprint, kind, {
         ...meta,
         runContext,
       });
@@ -112,17 +164,17 @@ function makeExecutionContext(
   };
 }
 
-describe("threat-hunt", () => {
+describe("carlini-threat-hunt", () => {
   describe("extractActors", () => {
     it("filters to external-entity elements only", () => {
       const upstream = new Map<string, unknown>();
       upstream.set(
         "threat-model-randori",
         makeThreatModelOutput([
-          makeDfdElement({ id: "a1", type: "external-entity", name: "User" }),
-          makeDfdElement({ id: "p1", type: "process", name: "Auth Service" }),
-          makeDfdElement({ id: "ds1", type: "data-store", name: "User DB" }),
-          makeDfdElement({ id: "a2", type: "external-entity", name: "Admin" }),
+          makeDfdNode({ id: "a1", type: "external-entity", name: "User" }),
+          makeDfdNode({ id: "p1", type: "process", name: "Auth Service" }),
+          makeDfdNode({ id: "ds1", type: "data-store", name: "User DB" }),
+          makeDfdNode({ id: "a2", type: "external-entity", name: "Admin" }),
         ]),
       );
 
@@ -146,7 +198,7 @@ describe("threat-hunt", () => {
       const upstream = new Map<string, unknown>();
       upstream.set(
         "threat-model-randori",
-        makeThreatModelOutput([makeDfdElement({ id: "p1", type: "process", name: "API" })]),
+        makeThreatModelOutput([makeDfdNode({ id: "p1", type: "process", name: "API" })]),
       );
       expect(extractActors(upstream)).toEqual([]);
     });
@@ -154,7 +206,7 @@ describe("threat-hunt", () => {
 
   describe("buildPrompt", () => {
     it("includes actor name, description, and trust zone", () => {
-      const actor = makeDfdElement({
+      const actor = makeDfdNode({
         name: "External API Consumer",
         description: "Third-party service calling our REST API",
         trustZone: "partner-network",
@@ -163,21 +215,63 @@ describe("threat-hunt", () => {
       const prompt = buildPrompt(actor, []);
       expect(prompt).toContain("External API Consumer");
       expect(prompt).toContain("Third-party service calling our REST API");
+      expect(prompt).toContain("Resolved actor id: actor-1");
+      expect(prompt).toContain("Threat actor grounding");
       expect(prompt).toContain("partner-network");
     });
 
-    it("includes CTF framing", () => {
-      const prompt = buildPrompt(makeDfdElement(), []);
-      expect(prompt).toContain("competing in a CTF");
+    it("includes authorized CTF-style framing", () => {
+      const prompt = buildPrompt(makeDfdNode(), []);
+      expect(prompt).toContain("authorized CTF-style security assessment");
+      expect(prompt).toContain("Do not modify files");
     });
 
     it("includes anti-hallucination constraints", () => {
-      const prompt = buildPrompt(makeDfdElement(), []);
+      const prompt = buildPrompt(makeDfdNode(), []);
       expect(prompt).toContain("Anti-hallucination constraints");
     });
 
+    it("keeps threat details out of the default prompt and points to ThreatKbSearch", () => {
+      const prompt = buildPrompt(makeDfdNode(), [makeStrideThreat()]);
+      expect(prompt).toContain("ThreatKbSearch");
+      expect(prompt).toContain('actorId="actor-1"');
+      expect(prompt).not.toContain("[HIGH/information-disclosure] Password reset token disclosure");
+      expect(prompt).not.toContain(
+        "Attack vector: Submit a crafted reset request and replay the token.",
+      );
+      expect(prompt).not.toContain("Affected code: src/routes/auth.ts:88");
+      expect(prompt).not.toContain("Evidence: src/routes/auth.ts:91");
+      expect(prompt).toContain("Do NOT re-confirm what is already documented in the KB");
+      expect(prompt).toContain("find something new or deeper");
+    });
+
+    it("gives Codex-style runtimes a concrete read-only SQLite command", () => {
+      const prompt = buildPrompt(makeDfdNode(), [makeStrideThreat()], [makeDfdFlow()], {
+        kbPath: "/tmp/repo/.kuzushi/threat-model-kb.sqlite3",
+        threatKbSearchAvailable: false,
+      });
+
+      expect(prompt).toContain('sqlite3 -readonly "/tmp/repo/.kuzushi/threat-model-kb.sqlite3"');
+      expect(prompt).toContain(`actor_ids_json like '%"actor-1"%'`);
+      expect(prompt).toContain(`flow_ids_json like '%"flow-1"%'`);
+      expect(prompt).toContain("Your first action must be a read-only shell command");
+      expect(prompt).toContain("Your next actions must inspect repository code");
+    });
+
+    it("can inline full threat details only in debug mode", () => {
+      const prompt = buildPrompt(makeDfdNode(), [makeStrideThreat()], [], {
+        debugInlineThreats: true,
+      });
+      expect(prompt).toContain("[HIGH/information-disclosure] Password reset token disclosure");
+      expect(prompt).toContain(
+        "Attack vector: Submit a crafted reset request and replay the token.",
+      );
+      expect(prompt).toContain("Affected code: src/routes/auth.ts:88");
+      expect(prompt).toContain("Evidence: src/routes/auth.ts:91");
+    });
+
     it("does not include framework awareness", () => {
-      const prompt = buildPrompt(makeDfdElement(), []);
+      const prompt = buildPrompt(makeDfdNode(), []);
       expect(prompt).not.toContain("Framework Awareness");
     });
   });
@@ -209,6 +303,31 @@ describe("threat-hunt", () => {
       expect(config.runsPerActor).toBe(3);
     });
 
+    it("reads model, effort, and thinking from the tool-name taskConfig bucket", async () => {
+      const bus = new InProcessBus();
+      const runtime: AgentRuntime = {
+        id: "stub",
+        query(): AsyncIterable<AgentMessage> {
+          return (async function* () {})();
+        },
+      };
+      const ctx = makeExecutionContext(bus, runtime, {
+        toolTaskConfig: {
+          model: "codex:gpt-5.5",
+          effort: "xtra-high",
+          thinking: false,
+        },
+      });
+      try {
+        const config = await resolveConfig({}, ctx);
+        expect(config.model).toBe("codex:gpt-5.5");
+        expect(config.effort).toBe("xhigh");
+        expect(config.thinkingDisabled).toBe(true);
+      } finally {
+        await bus.close();
+      }
+    });
+
     it("allows runsPerActor exactly at cap (5)", async () => {
       const config = await runResolve({ runsPerActor: 5 });
       expect(config.runsPerActor).toBe(5);
@@ -224,6 +343,40 @@ describe("threat-hunt", () => {
       expect(config.maxConcurrentHunts).toBe(3);
     });
 
+    it("defaults to lean KB-backed prompts", async () => {
+      const config = await runResolve();
+      expect(config.promptContext).toBe("actor-flows");
+      expect(config.debugInlineThreats).toBe(false);
+      expect(config.kbTopK).toBe(8);
+      expect(config.kbMaxChunkChars).toBe(1200);
+    });
+
+    it("defaults to Opus 4.7 at xhigh effort", async () => {
+      const config = await runResolve();
+      expect(config.model).toBe("anthropic:claude-opus-4-7");
+      expect(config.effort).toBe("xhigh");
+    });
+
+    it("honors explicit model and xtra-high effort aliases", async () => {
+      const config = await runResolve(
+        {},
+        {
+          model: "anthropic:claude-sonnet-4-6",
+          effort: "xtra-high",
+        },
+      );
+      expect(config.model).toBe("anthropic:claude-sonnet-4-6");
+      expect(config.effort).toBe("xhigh");
+    });
+
+    it("uses the positive thinking option to control runtime thinking", async () => {
+      const enabled = await runResolve({}, { thinking: true });
+      const disabled = await runResolve({}, { thinking: false });
+
+      expect(enabled.thinkingDisabled).toBe(false);
+      expect(disabled.thinkingDisabled).toBe(true);
+    });
+
     it("reads runsPerActor from tool input over defaults", async () => {
       const config = await runResolve({}, { runsPerActor: 2 });
       expect(config.runsPerActor).toBe(2);
@@ -232,17 +385,17 @@ describe("threat-hunt", () => {
 
   describe("tool definition", () => {
     it("has correct metadata", () => {
-      expect(threatHuntTool.name).toBe("threat-hunt:run");
-      expect(threatHuntTool.dag.outputKind).toBe("findings");
-      expect(threatHuntTool.dag.dependsOn).toEqual(["threat-model-randori"]);
+      expect(carliniThreatHuntTool.name).toBe("carlini-threat-hunt:run");
+      expect(carliniThreatHuntTool.dag.outputKind).toBe("findings");
+      expect(carliniThreatHuntTool.dag.dependsOn).toEqual([]);
     });
 
     it("has triageAgentConfig on the DAG spec", () => {
-      expect(threatHuntTool.dag.triageAgentConfig).toBeDefined();
+      expect(carliniThreatHuntTool.dag.triageAgentConfig).toBeDefined();
 
-      const config = threatHuntTool.dag.triageAgentConfig!(
+      const config = carliniThreatHuntTool.dag.triageAgentConfig!(
         {
-          taskId: "threat-hunt",
+          taskId: "carlini-threat-hunt",
           fingerprint: "abc",
           ruleId: "hunt/sqli",
           filePath: "src/api.ts",
@@ -263,11 +416,14 @@ describe("threat-hunt", () => {
       expect(config.prompt).toContain("threat-driven hunt");
       expect(config.prompt).toContain("src/api.ts:42");
       expect(config.prompt).toContain("SQL injection");
+      expect(config.prompt).toContain("Trace the complete data flow from source to sink");
+      expect(config.prompt).toContain("Check for sanitization or framework protections");
+      expect(config.prompt).toContain("reachable from the stated actor's trust zone");
     });
 
     describe("renderResult", () => {
       it("returns the first non-empty output line as-is (avoids dup with runSingleTaskPipeline summary)", () => {
-        const rendered = threatHuntTool.renderResult?.({
+        const rendered = carliniThreatHuntTool.renderResult?.({
           ok: true,
           output: "Threat hunt complete: teleport — 22 findings ($24.30)\nSecond line is dropped",
           data: { stats: { totalFindings: 22 } },
@@ -276,7 +432,7 @@ describe("threat-hunt", () => {
       });
 
       it("synthesizes from data.stats when output is empty", () => {
-        const rendered = threatHuntTool.renderResult?.({
+        const rendered = carliniThreatHuntTool.renderResult?.({
           ok: true,
           output: "",
           data: { stats: { totalFindings: 4 } },
@@ -285,7 +441,7 @@ describe("threat-hunt", () => {
       });
 
       it("falls back to generic completion when no output and no stats", () => {
-        const rendered = threatHuntTool.renderResult?.({
+        const rendered = carliniThreatHuntTool.renderResult?.({
           ok: true,
           output: "",
         });
@@ -293,7 +449,7 @@ describe("threat-hunt", () => {
       });
 
       it("signals failure when result.ok is false and output is empty", () => {
-        const rendered = threatHuntTool.renderResult?.({
+        const rendered = carliniThreatHuntTool.renderResult?.({
           ok: false,
           output: "",
         });
@@ -327,7 +483,7 @@ describe("threat-hunt", () => {
       upstream.set(
         "threat-model-randori",
         makeThreatModelOutput([
-          makeDfdElement({ id: "a1", name: "Attacker", type: "external-entity" }),
+          makeDfdNode({ id: "a1", name: "Attacker", type: "external-entity" }),
         ]),
       );
 
@@ -336,13 +492,14 @@ describe("threat-hunt", () => {
         taskConfig: { maxActors: 1, runsPerActor: 1 },
       });
 
-      await threatHuntTool.run({}, ctx);
+      await carliniThreatHuntTool.run({}, ctx);
       // Give best-effort publishes a tick to drain.
       await new Promise((resolve) => setImmediate(resolve));
 
       const descriptions = activity.map((a) => a.description);
       expect(descriptions).toEqual([
         "reading threat model",
+        expect.stringMatching(/^(indexed|reusing) threat-model KB \(\d+ chunks\)$/),
         "queuing 1 actor × 1 run",
         "batch 1/1: hunting 1 actor",
         expect.stringMatching(/^hunting as Attacker — thinking \(/),
@@ -373,10 +530,13 @@ describe("threat-hunt", () => {
 
       const ctx = makeExecutionContext(bus, emptyRuntime, { upstreamOutputs: upstream });
 
-      await threatHuntTool.run({}, ctx);
+      await carliniThreatHuntTool.run({}, ctx);
       await new Promise((resolve) => setImmediate(resolve));
 
-      expect(activity).toEqual(["reading threat model"]);
+      expect(activity).toEqual([
+        "reading threat model",
+        expect.stringMatching(/^(indexed|reusing) threat-model KB \(\d+ chunks\)$/),
+      ]);
 
       await bus.close();
     });
@@ -384,17 +544,17 @@ describe("threat-hunt", () => {
 
   describe("buildActorFingerprint", () => {
     it("sanitizes whitespace so multi-word actor names produce parseable fingerprints", () => {
-      const fp = buildActorFingerprint(makeDfdElement({ name: "Unauthenticated User" }), 0);
-      expect(fp).toBe("threat-hunt:Unauthenticated_User:0");
+      const fp = buildActorFingerprint(makeDfdNode({ name: "Unauthenticated User" }), 0);
+      expect(fp).toBe("carlini-threat-hunt:Unauthenticated_User:0");
     });
 
     it("sanitizes embedded colons so the channel:key convention isn't broken", () => {
-      const fp = buildActorFingerprint(makeDfdElement({ name: "system:admin" }), 2);
-      expect(fp).toBe("threat-hunt:system_admin:2");
+      const fp = buildActorFingerprint(makeDfdNode({ name: "system:admin" }), 2);
+      expect(fp).toBe("carlini-threat-hunt:system_admin:2");
     });
 
     it("produces distinct fingerprints per runIndex for the same actor", () => {
-      const actor = makeDfdElement({ name: "StripeAPI" });
+      const actor = makeDfdNode({ name: "StripeAPI" });
       expect(buildActorFingerprint(actor, 0)).not.toBe(buildActorFingerprint(actor, 1));
       expect(buildActorFingerprint(actor, 1)).not.toBe(buildActorFingerprint(actor, 2));
     });
@@ -415,15 +575,15 @@ describe("threat-hunt", () => {
     async function captureEvents(
       bus: InProcessBus,
       ctx: ExecutionContext,
-      actor: DfdElement,
+      actor: DfdNode,
       runIndex: number,
     ): Promise<TaskAgentActivityEvent["payload"][]> {
       const events: TaskAgentActivityEvent["payload"][] = [];
-      bus.subscribe<TaskAgentActivityEvent>("threat-hunt:agent-activity", (event) => {
+      bus.subscribe<TaskAgentActivityEvent>("carlini-threat-hunt:agent-activity", (event) => {
         events.push(event.payload);
       });
       const config = await resolveConfig({}, ctx);
-      await runActorHunt(actor, [], ctx, config, runIndex, 1);
+      await runActorHunt(actor, [], [], ctx, config, runIndex, 1);
       // Drain best-effort publishes.
       await new Promise((resolve) => setImmediate(resolve));
       return events;
@@ -436,13 +596,13 @@ describe("threat-hunt", () => {
         { type: "result", subtype: "success", result: '{"findings":[]}' },
       ]);
       const ctx = makeExecutionContext(bus, runtime);
-      const actor = makeDfdElement({ name: "StripeAPI" });
+      const actor = makeDfdNode({ name: "StripeAPI" });
 
       const events = await captureEvents(bus, ctx, actor, 0);
 
       const toolProgress = events.find((e) => e.kind === "tool-progress");
       expect(toolProgress).toBeDefined();
-      expect(toolProgress!.fingerprint).toBe("threat-hunt:StripeAPI:0");
+      expect(toolProgress!.fingerprint).toBe("carlini-threat-hunt:StripeAPI:0");
       expect(toolProgress!.toolName).toBe("Read");
       expect(toolProgress!.elapsedSeconds).toBe(0.42);
 
@@ -460,12 +620,42 @@ describe("threat-hunt", () => {
         { type: "result", subtype: "success", result: '{"findings":[]}' },
       ]);
       const ctx = makeExecutionContext(bus, runtime);
-      const actor = makeDfdElement({ name: "Attacker" });
+      const actor = makeDfdNode({ name: "Attacker" });
 
       const events = await captureEvents(bus, ctx, actor, 0);
 
       const complete = events.find((e) => e.kind === "tool-complete" && e.summary);
       expect(complete?.summary).toBe("read 412 lines from src/api.ts");
+
+      await bus.close();
+    });
+
+    it("maps Codex tool-call-start and tool-result messages into actor activity", async () => {
+      const bus = new InProcessBus();
+      const runtime = makeStubRuntime([
+        {
+          type: "tool-call-start",
+          toolUseId: "cmd-1",
+          toolName: "Bash",
+        },
+        {
+          type: "tool-result",
+          toolUseId: "cmd-1",
+          isError: false,
+          content: "src/proxy/netstack.go:42: route accepted",
+        },
+        { type: "result", subtype: "success", result: '{"findings":[]}' },
+      ]);
+      const ctx = makeExecutionContext(bus, runtime);
+      const actor = makeDfdNode({ name: "Attacker" });
+
+      const events = await captureEvents(bus, ctx, actor, 0);
+
+      const start = events.find((e) => e.kind === "tool-start");
+      expect(start?.toolName).toBe("Bash");
+
+      const complete = events.find((e) => e.kind === "tool-complete" && e.toolName === "Bash");
+      expect(complete?.summary).toBe("src/proxy/netstack.go:42: route accepted");
 
       await bus.close();
     });
@@ -483,7 +673,7 @@ describe("threat-hunt", () => {
         { type: "result", subtype: "success", result: '{"findings":[]}' },
       ]);
       const ctx = makeExecutionContext(bus, runtime);
-      const actor = makeDfdElement({ name: "Attacker" });
+      const actor = makeDfdNode({ name: "Attacker" });
 
       const events = await captureEvents(bus, ctx, actor, 0);
 
@@ -508,18 +698,18 @@ describe("threat-hunt", () => {
         ...baseCtx,
         reportAgentActivity: undefined,
       };
-      const actor = makeDfdElement({ name: "Attacker" });
+      const actor = makeDfdNode({ name: "Attacker" });
       const events: ScanAgentActivityEvent["payload"][] = [];
       bus.subscribe<ScanAgentActivityEvent>("scan:agent-activity", (event) => {
         events.push(event.payload);
       });
       const config = await resolveConfig({}, ctx);
-      await runActorHunt(actor, [], ctx, config, 0, 1);
+      await runActorHunt(actor, [], [], ctx, config, 0, 1);
       await new Promise((resolve) => setImmediate(resolve));
 
       const progress = events.find((e) => e.kind === "tool-progress");
       expect(progress).toBeDefined();
-      expect(progress?.taskId).toBe("threat-hunt");
+      expect(progress?.taskId).toBe("carlini-threat-hunt");
       expect(progress?.toolName).toBe("Read");
 
       await bus.close();
@@ -531,13 +721,68 @@ describe("threat-hunt", () => {
         { type: "result", subtype: "success", result: '{"findings":[]}' },
       ]);
       const ctx = makeExecutionContext(bus, runtime);
-      const actor = makeDfdElement({ name: "Attacker" });
+      const actor = makeDfdNode({ name: "Attacker" });
 
       const events = await captureEvents(bus, ctx, actor, 0);
 
       const last = events[events.length - 1];
       expect(last?.done).toBe(true);
-      expect(last?.fingerprint).toBe("threat-hunt:Attacker:0");
+      expect(last?.fingerprint).toBe("carlini-threat-hunt:Attacker:0");
+
+      await bus.close();
+    });
+
+    it("runs the actor agent from the scan scope rather than the enclosing repo root", async () => {
+      const bus = new InProcessBus();
+      let request: AgentQueryRequest | undefined;
+      const runtime: AgentRuntime = {
+        id: "stub",
+        query(req): AsyncIterable<AgentMessage> {
+          request = req;
+          return (async function* () {
+            yield { type: "result", subtype: "success", result: '{"findings":[]}' };
+          })();
+        },
+      };
+      const ctx = makeExecutionContext(bus, runtime);
+      ctx.dag = {
+        ...ctx.dag!,
+        repoRoot: "/tmp/mono",
+        workRoot: "/tmp/mono/.github",
+        scanPath: "/tmp/mono/.github",
+      };
+      const actor = makeDfdNode({ name: "Attacker" });
+      const config = await resolveConfig({}, ctx);
+
+      await runActorHunt(actor, [], [], ctx, config, 0, 1);
+
+      expect(request?.options.cwd).toBe("/tmp/mono/.github");
+      expect(request?.prompt).toContain("IMPORTANT: Only examine files under /tmp/mono/.github");
+
+      await bus.close();
+    });
+
+    it("uses prompt-level JSON instructions instead of strict output schema for Codex", async () => {
+      const bus = new InProcessBus();
+      let request: AgentQueryRequest | undefined;
+      const runtime: AgentRuntime = {
+        id: "codex",
+        query(req): AsyncIterable<AgentMessage> {
+          request = req;
+          return (async function* () {
+            yield { type: "result", subtype: "success", result: '{"findings":[]}' };
+          })();
+        },
+      };
+      const ctx = makeExecutionContext(bus, runtime);
+      const actor = makeDfdNode({ name: "Attacker" });
+      const config = await resolveConfig({}, ctx);
+
+      await runActorHunt(actor, [], [], ctx, config, 0, 1);
+
+      expect(request?.options.outputFormat).toBeUndefined();
+      expect(request?.prompt).toContain("Final output contract for Codex runtime");
+      expect(request?.prompt).toContain('Use {"findings":[]}');
 
       await bus.close();
     });
@@ -559,14 +804,14 @@ describe("threat-hunt", () => {
         },
       };
       const ctx = makeExecutionContext(bus, failingRuntime);
-      const actor = makeDfdElement({ name: "Attacker" });
+      const actor = makeDfdNode({ name: "Attacker" });
 
       const events: TaskAgentActivityEvent["payload"][] = [];
-      bus.subscribe<TaskAgentActivityEvent>("threat-hunt:agent-activity", (event) => {
+      bus.subscribe<TaskAgentActivityEvent>("carlini-threat-hunt:agent-activity", (event) => {
         events.push(event.payload);
       });
       const config = await resolveConfig({}, ctx);
-      await expect(runActorHunt(actor, [], ctx, config, 0, 1)).rejects.toThrow(
+      await expect(runActorHunt(actor, [], [], ctx, config, 0, 1)).rejects.toThrow(
         /simulated subprocess crash/,
       );
       await new Promise((resolve) => setImmediate(resolve));

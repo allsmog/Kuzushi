@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { ScanOpts } from "../../../../types.js";
 import { isRecord } from "../../../../utils.js";
-import type { AgentTask } from "../../../types.js";
+import type { DagNodeImpl } from "../../../types.js";
 import { resolveTaintAnalysisConfig } from "../types.js";
 import {
   type CrossServiceDiscoverOutput,
@@ -116,7 +116,7 @@ const FRAMEWORK_PATTERNS: FrameworkPattern[] = [
 
 // ── Task Definition ─────────────────────────────────────────────────────
 
-export const taintAnalysisDiscoverTask: AgentTask<ScanOpts, CrossServiceDiscoverOutput> = {
+export const taintAnalysisDiscoverTask: DagNodeImpl<ScanOpts, CrossServiceDiscoverOutput> = {
   id: "taint-analysis-discover",
   displayName: "Cross-Service Discovery",
   outputKind: "custom",

@@ -446,7 +446,7 @@ describe("report-worker with UI store", () => {
     db.close();
   });
 
-  it("labels threat-hunt start with 'analyzing threats from attack surface' instead of 'initializing'", async () => {
+  it("labels carlini-threat-hunt start with 'analyzing threats from attack surface' instead of 'initializing'", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
     const store = createUIStore();
@@ -457,10 +457,10 @@ describe("report-worker with UI store", () => {
       triageBatchSize: 15,
       triageConcurrency: 2,
       scanMode: "parallel",
-      tasks: ["threat-hunt"],
+      tasks: ["carlini-threat-hunt"],
       severity: ["ERROR"],
       excludePatterns: [],
-      taskConfig: { "threat-hunt": {} },
+      taskConfig: { "carlini-threat-hunt": {} },
     };
 
     registerReportWorker(bus, { db, config }, store);
@@ -480,7 +480,7 @@ describe("report-worker with UI store", () => {
         scanOpts: {
           severity: ["ERROR"],
           excludePatterns: [],
-          tasks: ["threat-hunt"],
+          tasks: ["carlini-threat-hunt"],
           fresh: false,
         },
       }),
@@ -488,7 +488,7 @@ describe("report-worker with UI store", () => {
     await bus.publish(
       createEvent("task:start", runId, {
         context,
-        taskId: "threat-hunt",
+        taskId: "carlini-threat-hunt",
         outputKind: "findings",
         input: null,
         upstreamOutputs: new Map(),
@@ -496,9 +496,11 @@ describe("report-worker with UI store", () => {
     );
 
     const scanStage = store.getState().stages.find((stage) => stage.id === "scan");
-    const threatHuntTask = scanStage?.subTasks.find((task) => task.id === "threat-hunt");
-    expect(threatHuntTask?.detail).toBe("analyzing threats from attack surface");
-    expect(threatHuntTask?.detail).not.toBe("initializing");
+    const carliniThreatHuntTask = scanStage?.subTasks.find(
+      (task) => task.id === "carlini-threat-hunt",
+    );
+    expect(carliniThreatHuntTask?.detail).toBe("analyzing threats from attack surface");
+    expect(carliniThreatHuntTask?.detail).not.toBe("initializing");
 
     await bus.close();
     db.close();

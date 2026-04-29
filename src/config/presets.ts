@@ -5,7 +5,12 @@ export type ScanPreset = "safe" | "fast" | "standard" | "deep" | "reference";
 export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
   // Recommended for first-time users: tight cost and turn caps, no expensive optional tasks.
   safe: {
-    tasks: ["context-gatherer", "context-enricher", "secrets-crypto-detect", "code-config-detect"],
+    tasks: [
+      "context:context-gatherer",
+      "context:context-enricher",
+      "agentic-sast:secrets-crypto-detect",
+      "context:code-config-detect",
+    ],
     enableDynamicTaskSelection: false,
     triageMaxFindings: 20,
     triageSpecialistMaxTurns: 5,
@@ -14,7 +19,7 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
     cryptoBehavioralTestEnabled: false,
   },
   fast: {
-    tasks: ["semgrep"],
+    tasks: ["semgrep:scan"],
     enableDynamicTaskSelection: false,
     enableContextGathering: false,
     enableContextEnrichment: false,
@@ -22,34 +27,34 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
   },
   standard: {
     tasks: [
-      "context-gatherer",
-      "context-enricher",
-      "secrets-crypto-detect",
-      "code-config-detect",
-      "taint-cwe-select",
-      "taint-iris",
+      "context:context-gatherer",
+      "context:context-enricher",
+      "agentic-sast:secrets-crypto-detect",
+      "context:code-config-detect",
+      "pipeline:taint-cwe-select",
+      "taint-iris:hunt",
     ],
     enableDynamicTaskSelection: false,
   },
   deep: {
     tasks: [
-      "context-gatherer",
-      "context-enricher",
-      "secrets-crypto-detect",
-      "code-config-detect",
-      "taint-cwe-select",
-      "taint-iris",
-      "threat-model-randori",
-      "threat-hunt",
-      "systems-context-gatherer",
-      "systems-invariant-extract",
-      "systems-trigger-synth",
-      "systems-hunt",
+      "context:context-gatherer",
+      "context:context-enricher",
+      "agentic-sast:secrets-crypto-detect",
+      "context:code-config-detect",
+      "pipeline:taint-cwe-select",
+      "taint-iris:hunt",
+      "threat-model:threat-model-randori",
+      "carlini-threat-hunt:run",
+      "systems-hunt:systems-context-gatherer",
+      "systems-hunt:systems-invariant-extract",
+      "systems-hunt:systems-trigger-synth",
+      "systems-hunt:systems-hunt",
     ],
     verify: true,
     variantAnalysis: true,
     taskConfig: {
-      "threat-hunt": { maxActors: 8, runsPerActor: 2 },
+      "carlini-threat-hunt": { maxActors: 8, runsPerActor: 2 },
     },
   },
   reference: {
@@ -61,7 +66,7 @@ export const SCAN_PRESETS: Record<ScanPreset, Partial<KuzushiConfig>> = {
     enableDynamicTaskSelection: true,
     variantAnalysis: true,
     taskConfig: {
-      "threat-hunt": {
+      "carlini-threat-hunt": {
         runsPerActor: 3,
         maxActors: 10,
         maxConcurrentHunts: 3,

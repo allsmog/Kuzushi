@@ -6,7 +6,7 @@ import { coerceContextEnrichment, coerceRepoContext } from "../../../repo-contex
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ApplicationModel, ApplicationRoute, ScanOpts } from "../../../types.js";
 import { toErrorMessage } from "../../../utils.js";
-import type { AgentTask } from "../../types.js";
+import type { DagNodeImpl } from "../../types.js";
 import { resolveTaskModel, resolveTaskRuntime } from "../runtime-overrides.js";
 import { buildDiscoveryPrompt, buildTracePrompt, TRACE_OUTPUT_SCHEMA } from "./prompts.js";
 import {
@@ -66,7 +66,7 @@ function coerceApplicationModel(raw: unknown): ApplicationModel | null {
   return raw as ApplicationModel;
 }
 
-export const codeGraphBuildTask: AgentTask<ScanOpts, CodeGraphOutput> = {
+export const codeGraphBuildTask: DagNodeImpl<ScanOpts, CodeGraphOutput> = {
   id: "code-graph-build",
   displayName: "Code Graph Builder",
   outputKind: "custom",

@@ -13,7 +13,7 @@ import { systemsContextGathererTask } from "../../../src/agents/tasks/systems-hu
 import { systemsHuntTask } from "../../../src/agents/tasks/systems-hunt/hunt.js";
 import { systemsInvariantExtractTask } from "../../../src/agents/tasks/systems-hunt/invariant-extract.js";
 import { systemsTriggerSynthTask } from "../../../src/agents/tasks/systems-hunt/trigger-synth.js";
-import type { TaskContext } from "../../../src/agents/types.js";
+import type { DagRunContext } from "../../../src/agents/types.js";
 import { DEFAULTS } from "../../../src/config.js";
 
 const FIXTURE_ROOT = path.resolve("tests/fixtures/systems-hunt");
@@ -60,7 +60,7 @@ describe("systems-hunt replay fixtures", () => {
           enableCounterexamplePass: true,
         };
 
-        const baseContext = makeTaskContext(
+        const baseContext = makeDagRunContext(
           repoRoot,
           path.basename(path.dirname(repoRoot)),
           runtime,
@@ -124,12 +124,12 @@ function stageFixtureRepo(fixtureName: string): string {
   return tempRoot;
 }
 
-function makeTaskContext(
+function makeDagRunContext(
   repoRoot: string,
   repoName: string,
   runtime: AgentRuntime,
   config = structuredClone(DEFAULTS),
-): TaskContext {
+): DagRunContext {
   return {
     runId: "systems-replay",
     repoRoot,

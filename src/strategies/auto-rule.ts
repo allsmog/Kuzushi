@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { resolveTaskModel, resolveTaskRuntime } from "../agents/tasks/runtime-overrides.js";
-import type { TaskContext } from "../agents/types.js";
+import type { DagRunContext } from "../agents/types.js";
 import { createLogger } from "../logger.js";
 import type { Finding } from "../scanners/types.js";
 import { toErrorMessage } from "../utils.js";
@@ -57,7 +57,7 @@ function detectLanguage(filePath: string): string {
 export async function generateRule(
   finding: Finding,
   evidence: StrategyEvidence[] | undefined,
-  context: TaskContext,
+  context: DagRunContext,
 ): Promise<GeneratedRule | null> {
   const runtime = resolveTaskRuntime(context);
   const model = resolveTaskModel(context, "multi-strategy");
@@ -248,7 +248,7 @@ export async function validateRule(
 export async function generateGeneralizedRule(
   originalRule: GeneratedRule,
   finding: Finding,
-  context: TaskContext,
+  context: DagRunContext,
 ): Promise<GeneratedRule | null> {
   if (originalRule.kind !== "semgrep") return null;
 

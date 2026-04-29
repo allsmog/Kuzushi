@@ -151,16 +151,14 @@ export function generateOperatorContextFromOutputs(
     dataClassification?: string;
     description?: string;
   }> = [];
-  if (threatModel?.dfd?.elements) {
-    for (const el of threatModel.dfd.elements) {
-      if (el.type === "data-flow" && el.source && el.target) {
-        dataFlows.push({
-          from: el.source,
-          to: el.target,
-          dataClassification: el.dataClassification ?? undefined,
-          description: el.description,
-        });
-      }
+  if (threatModel?.dfd?.flows) {
+    for (const flow of threatModel.dfd.flows) {
+      dataFlows.push({
+        from: flow.sourceId,
+        to: flow.targetId,
+        dataClassification: flow.dataClassification ?? undefined,
+        description: flow.description,
+      });
     }
   }
 

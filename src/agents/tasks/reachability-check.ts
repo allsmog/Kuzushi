@@ -1,7 +1,7 @@
 import { createLogger } from "../../logger.js";
 import type { Finding } from "../../scanners/types.js";
 import { toErrorMessage } from "../../utils.js";
-import type { AgentTask } from "../types.js";
+import type { DagNodeImpl } from "../types.js";
 import { resolveTaskModel, resolveTaskRuntime } from "./runtime-overrides.js";
 
 const log = createLogger({ stage: "reachability-check" });
@@ -119,7 +119,7 @@ function parseResults(raw: unknown, findings: Finding[]): Map<string, Reachabili
   return results;
 }
 
-export const reachabilityCheckTask: AgentTask<Finding[], Finding[]> = {
+export const reachabilityCheckTask: DagNodeImpl<Finding[], Finding[]> = {
   id: "reachability-check",
   displayName: "Reachability Check",
   outputKind: "findings",

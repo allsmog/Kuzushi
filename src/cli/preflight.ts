@@ -163,6 +163,8 @@ function checkAgentRuntimeCredentials(config: KuzushiConfig): {
     }
   } else if (backend === "claude") {
     providerId = "anthropic";
+  } else if (backend === "codex") {
+    providerId = "openai";
   } else {
     return {
       check: {
