@@ -15,9 +15,7 @@
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useState } from "react";
-import { boxFooter, boxHeader } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import { isCancelInput } from "../interaction-key-policy.js";
 import type { CredentialChoice, ProviderId } from "../preflight-types.js";
@@ -233,7 +231,6 @@ export function CredentialPrompt({
   const [capturedValue, setCapturedValue] = useState("");
   const [baseUrlValue, setBaseUrlValue] = useState("");
   const [capturedBaseUrl, setCapturedBaseUrl] = useState<string | undefined>(undefined);
-  const width = useTerminalCardWidth();
 
   const stepKeybinds =
     step === "provider"
@@ -312,14 +309,15 @@ export function CredentialPrompt({
   if (step === "save") {
     return (
       <Box flexDirection="column">
-        <Text>{""}</Text>
-        <Text>{boxHeader("Persist credentials?", width)}</Text>
-        <Text>{""}</Text>
         <Box paddingLeft={SPACING.md}>
-          <Text>{tokens.muted(`Save ${chosenProvider?.name} credentials to`)}</Text>
+          <Text>{tokens.label("Persist credentials?")}</Text>
         </Box>
         <Box paddingLeft={SPACING.md}>
-          <Text>{tokens.muted("./.kuzushi/credentials.json (auto-added to .gitignore)?")}</Text>
+          <Text>
+            {tokens.muted(`Save ${chosenProvider?.name} credentials to `)}
+            {tokens.value("./.kuzushi/credentials.json")}
+            {tokens.muted(" (auto-added to .gitignore)")}
+          </Text>
         </Box>
         <Text>{""}</Text>
         <SelectList<SaveOption>
@@ -327,7 +325,6 @@ export function CredentialPrompt({
           onSelect={handleSaveSelect}
           renderItem={saveRenderer}
         />
-        <Text>{boxFooter(width)}</Text>
       </Box>
     );
   }
@@ -342,9 +339,9 @@ export function CredentialPrompt({
       : "(blank for default, or paste proxy/gateway URL)";
     return (
       <Box flexDirection="column">
-        <Text>{""}</Text>
-        <Text>{boxHeader(title, width)}</Text>
-        <Text>{""}</Text>
+        <Box paddingLeft={SPACING.md}>
+          <Text>{tokens.label(title)}</Text>
+        </Box>
         <Box paddingLeft={SPACING.md}>
           <Text>
             {tokens.muted(
@@ -384,7 +381,6 @@ export function CredentialPrompt({
             placeholder={placeholder}
           />
         </Box>
-        <Text>{boxFooter(width)}</Text>
       </Box>
     );
   }
@@ -395,9 +391,9 @@ export function CredentialPrompt({
       : "";
     return (
       <Box flexDirection="column">
-        <Text>{""}</Text>
-        <Text>{boxHeader(`${chosenProvider?.name} API key`, width)}</Text>
-        <Text>{""}</Text>
+        <Box paddingLeft={SPACING.md}>
+          <Text>{tokens.label(`${chosenProvider?.name} API key`)}</Text>
+        </Box>
         <Box paddingLeft={SPACING.md}>
           <Text>{tokens.muted(`Paste your ${chosenProvider?.name} API key${envHint}:`)}</Text>
         </Box>
@@ -422,16 +418,15 @@ export function CredentialPrompt({
             mask
           />
         </Box>
-        <Text>{boxFooter(width)}</Text>
       </Box>
     );
   }
 
   return (
     <Box flexDirection="column">
-      <Text>{""}</Text>
-      <Text>{boxHeader("Choose an AI provider", width)}</Text>
-      <Text>{""}</Text>
+      <Box paddingLeft={SPACING.md}>
+        <Text>{tokens.label("Choose an AI provider")}</Text>
+      </Box>
       <Box paddingLeft={SPACING.md}>
         <Text>
           {tokens.muted("Kuzushi works with any provider below. Pick one to set up credentials.")}
@@ -444,8 +439,6 @@ export function CredentialPrompt({
         onSelect={handleProviderSelect}
         renderItem={providerRenderer}
       />
-
-      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

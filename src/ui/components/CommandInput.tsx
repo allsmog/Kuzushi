@@ -52,8 +52,12 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
 ];
 
 const IDLE_KEYBINDS = [
+  { keys: "1/2/3", label: "Switch view" },
+  { keys: "m", label: "Agents", secondary: true },
+  { keys: "n", label: "Notices", secondary: true },
   { keys: "/", label: "Command" },
   { keys: "?", label: "Help", secondary: true },
+  { keys: "Ctrl+C", label: "Interrupt", secondary: true },
 ];
 
 const COMMAND_KEYBINDS = [

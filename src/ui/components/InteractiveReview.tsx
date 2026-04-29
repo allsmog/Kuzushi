@@ -20,9 +20,7 @@ import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useState } from "react";
 import type { Verdict } from "../../types.js";
-import { boxFooter, boxHeader } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import { isCancelInput } from "../interaction-key-policy.js";
 import type { ActionableFinding } from "../state.js";
@@ -49,7 +47,6 @@ export function InteractiveReview({
 }: InteractiveReviewProps): React.ReactElement {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [tally, setTally] = useState<ReviewTally>({ tp: 0, fp: 0, by_design: 0, skipped: 0 });
-  const width = useTerminalCardWidth();
 
   useRegisterKeybindings([
     { keys: "t", label: "True positive" },
@@ -109,9 +106,9 @@ export function InteractiveReview({
 
   return (
     <Box flexDirection="column">
-      <Text>{""}</Text>
-      <Text>{boxHeader(`Review: ${currentIndex + 1}/${findings.length}`, width)}</Text>
-      <Text>{""}</Text>
+      <Box paddingLeft={SPACING.md}>
+        <Text>{tokens.label(`Review ${currentIndex + 1}/${findings.length}`)}</Text>
+      </Box>
 
       <FindingCard finding={finding} />
 
@@ -127,9 +124,6 @@ export function InteractiveReview({
           </Text>
         </Box>
       )}
-      <Text>{""}</Text>
-
-      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

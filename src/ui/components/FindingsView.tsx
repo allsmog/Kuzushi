@@ -275,7 +275,6 @@ function UnifiedFindings({
       </Box>
 
       <Box marginTop={SPACING.sm} flexDirection="column">
-        <Text>{tokens.strong("Primary action: /open F-NNNN to inspect one finding deeply.")}</Text>
         <FilterChips chips={filters ?? defaultFilters()} />
       </Box>
 
@@ -330,13 +329,6 @@ function UnifiedFindings({
       )}
 
       {findings.length === 0 && <EmptyState kind="findings-never-scanned" />}
-
-      <Box marginTop={SPACING.sm}>
-        <Text>{tokens.muted("─".repeat(78))}</Text>
-      </Box>
-      <Box>
-        <Text>{tokens.hint("j/k move   /open F-NNNN inspect   b back")}</Text>
-      </Box>
     </ScreenContent>
   );
 }
@@ -367,7 +359,7 @@ const LooseRow = React.memo(
       <Box flexDirection="column">
         <Text>
           {"  "}
-          {active ? tokens.accent("› ") : "  "}
+          {active ? tokens.focus("❯ ") : "  "}
           {sevTag}
           {"  "}
           {alias ? `${tokens.accent(alias)}  ` : ""}

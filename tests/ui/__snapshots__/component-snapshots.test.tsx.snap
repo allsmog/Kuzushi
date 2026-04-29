@@ -41,9 +41,7 @@ exports[`Ink component snapshots > ModuleCatalog — grouped by category with la
 "  scope:acme-api · 3 modules
 
 
-  Primary next step: use <module-id> to enter one module workflow.
-
-  OFFENSE
+  OFFENSE  hunt vulnerabilities and prove exploitability
 
   MODULE                 DESCRIPTION                                LAST RUN
 
@@ -52,7 +50,7 @@ exports[`Ink component snapshots > ModuleCatalog — grouped by category with la
   sast                   40+ task pipeline                          ran 2h · 4
   tp
 
-  INTEL
+  INTEL  research targets, map attack surface, gather context
 
   MODULE                 DESCRIPTION                                LAST RUN
 
@@ -61,7 +59,7 @@ exports[`Ink component snapshots > ModuleCatalog — grouped by category with la
   randori                PASTA threat model                         ran 2h · 12
   t…
 
-  GOVERNANCE
+  GOVERNANCE  policy, compliance, and audit-ready evidence
 
   MODULE                 DESCRIPTION                                LAST RUN
 
@@ -142,10 +140,10 @@ exports[`Ink component snapshots > ThreatDfdView — inferred app-model fallback
   from application context.
 
 
-  ! hot path   B boundary   > selected
+  ! hot path   B boundary   ❯ selected
 
   ┌─ INTERNET / UNTRUSTED ────────────────────────────────────────────────────┐
-  │ > E1   (ext) unauth user            public ingress                      │
+  │ ❯ E1   (ext) unauth user            public ingress                      │
   └───────────────────────────────────────────────────────────────────────────┘
      │ B1 perimeter · 1 crossing
   ┌─ EDGE / ENTRYPOINTS ──────────────────────────────────────────────────────┐
@@ -176,10 +174,7 @@ exports[`Ink component snapshots > ThreatDfdView — inferred app-model fallback
 
   STRIDE overlay
     S:0  T:0  R:0  I:0  D:0  E:0   no threats emitted; watch hot paths and
-  privileged choke points
-
-  1 dfd · 2 stride · 3 stories · 4 scope · 5 summary · r regen · q back
-  AI edits: /threats ask <instruction>"
+  privileged choke points"
 `;
 
 exports[`Ink component snapshots > ThreatDfdView — trust zones + boundaries + flows 1`] = `
@@ -190,10 +185,10 @@ exports[`Ink component snapshots > ThreatDfdView — trust zones + boundaries + 
   loaded from /tmp/threat-model.json
 
 
-  ! hot path   B boundary   > selected   ✓ validated
+  ! hot path   B boundary   ❯ selected   ✓ validated
 
   ┌─ INTERNET / UNTRUSTED ────────────────────────────────────────────────────┐
-  │ > E1   (ext) attacker               identity · public ingress           │
+  │ ❯ E1   (ext) attacker               identity · public ingress           │
   └───────────────────────────────────────────────────────────────────────────┘
      │ B1 perimeter · 1 crossing
   ┌─ APP-VPC ─────────────────────────────────────────────────────────────────┐
@@ -217,8 +212,5 @@ exports[`Ink component snapshots > ThreatDfdView — trust zones + boundaries + 
 
   STRIDE overlay
     S:0  T:0  R:0  I:0  D:0  E:0   no threats emitted; watch hot paths and
-  privileged choke points
-
-  1 dfd · 2 stride · 3 stories · 4 scope · 5 summary · r regen · q back
-  AI edits: /threats ask <instruction>"
+  privileged choke points"
 `;

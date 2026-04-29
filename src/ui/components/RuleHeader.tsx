@@ -12,6 +12,7 @@
  */
 import { Box, Text } from "ink";
 import type React from "react";
+import { useLayoutContext } from "../layout-context.js";
 import { Divider } from "../primitives/Divider.js";
 import { SPACING, tokens } from "../tokens.js";
 
@@ -32,6 +33,17 @@ export function RuleHeader({
   status,
   rule = true,
 }: RuleHeaderProps): React.ReactElement {
+  const { navigation } = useLayoutContext();
+  const globalFrameActive = navigation.breadcrumbs.length > 0;
+  if (globalFrameActive) {
+    return status ? (
+      <Box flexDirection="column" marginBottom={SPACING.sm}>
+        <Text>{tokens.muted(status)}</Text>
+      </Box>
+    ) : (
+      <Box />
+    );
+  }
   return (
     <Box flexDirection="column" marginBottom={SPACING.sm}>
       <Box justifyContent="space-between">

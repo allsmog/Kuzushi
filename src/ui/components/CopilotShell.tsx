@@ -81,17 +81,6 @@ interface CopilotShellProps {
   store: UIStore;
 }
 
-const IDLE_KEYBINDS = [
-  { keys: "Enter", label: "Send" },
-  { keys: "←/→", label: "Cursor", secondary: true },
-  { keys: "\u2191/\u2193", label: "History" },
-  { keys: "Tab", label: "Autocomplete", secondary: true },
-  { keys: "?", label: "Help", secondary: true },
-  { keys: "Ctrl+U", label: "Clear line", secondary: true },
-  { keys: "Esc", label: "Clear input", secondary: true },
-  { keys: "Ctrl+C", label: "Exit", secondary: true },
-];
-
 const PROCESSING_KEYBINDS = [
   { keys: "Ctrl+C", label: "Interrupt" },
   { keys: "Ctrl+O", label: "Details", secondary: true },
@@ -270,14 +259,6 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
             />
           </InteractionErrorBoundary>
         ) : null}
-        {(!shell.processing ||
-          shell.shellView === "context-build" ||
-          shell.shellView === "task-story" ||
-          shell.shellView === "module-run" ||
-          shell.shellView === "actor-detail") &&
-        shell.shellView !== "catalog" ? (
-          <ShellWayfinding shell={shell} narrow={columns < 110} />
-        ) : null}
         <ShellTaskStatusLine shell={shell} columns={columns} />
 
         <Ratchet>
@@ -427,15 +408,14 @@ const ShellInputArea = memo(
       [],
     );
 
-    useRegisterKeybindings(
-      shell.processing
-        ? PROCESSING_KEYBINDS
-        : shell.pendingPlan && input.length === 0
-          ? PLAN_KEYBINDS
-          : shell.shellView === "sast-tasks" && input.length === 0
-            ? SAST_TASK_KEYBINDS
-            : IDLE_KEYBINDS,
-    );
+    const inputAreaKeybinds = shell.processing
+      ? PROCESSING_KEYBINDS
+      : shell.pendingPlan && input.length === 0
+        ? PLAN_KEYBINDS
+        : shell.shellView === "sast-tasks" && input.length === 0
+          ? SAST_TASK_KEYBINDS
+          : [];
+    useRegisterKeybindings(inputAreaKeybinds);
 
     useInput(
       (char, key) => {
@@ -822,35 +802,6 @@ const MemoShellLiveHistory = memo(
     prev.suppressRunningToolName === next.suppressRunningToolName &&
     prev.compactRunningToolCalls === next.compactRunningToolCalls,
 );
-
-function ShellWayfinding({
-  shell,
-  narrow,
-}: {
-  shell: ShellState;
-  narrow: boolean;
-}): React.ReactElement {
-  const location = describeShellLocation(shell);
-  const backHint =
-    shell.shellView === "catalog"
-      ? "top-level"
-      : shell.shellView === "finding"
-        ? "/back → findings"
-        : shell.shellView === "module"
-          ? "/back → catalog"
-          : "/back → module";
-  return (
-    <Box marginTop={SPACING.sm} paddingLeft={SPACING.md}>
-      <Text>
-        {tokens.muted("you are in ")}
-        {tokens.strong(location)}
-        {tokens.muted(" · mode ")}
-        {tokens.value(shell.processing ? "running" : "idle")}
-        {!narrow ? tokens.muted(` · ${backHint}`) : null}
-      </Text>
-    </Box>
-  );
-}
 
 function ShellTaskStatusLine({
   shell,

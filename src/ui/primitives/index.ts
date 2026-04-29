@@ -15,6 +15,8 @@ export type { KeybindFooterProps } from "./KeybindFooter.js";
 export { KeybindFooter } from "./KeybindFooter.js";
 export type { MultilineTextProps } from "./MultilineText.js";
 export { MultilineText } from "./MultilineText.js";
+export type { ScreenFrameProps, ScreenTab } from "./ScreenFrame.js";
+export { ScreenFrame, selectedRowText, unselectedRowText } from "./ScreenFrame.js";
 export type { SelectListItem, SelectListProps } from "./SelectList.js";
 export { SelectList } from "./SelectList.js";
 export type {
