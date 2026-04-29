@@ -80,6 +80,8 @@ export interface PipelineParams {
   signal?: AbortSignal;
   returnModeOnComplete?: UIMode;
   origin?: PipelineRunOrigin;
+  /** Shell-embedded single-task run — see {@link RunContext.inline}. */
+  inline?: boolean;
 }
 
 export interface PipelineResult {
@@ -384,6 +386,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     postProcessMode: params.postProcessMode ?? "full",
     reportMode,
     ...(params.gitRoot ? { gitRoot: params.gitRoot } : {}),
+    ...(params.inline ? { inline: true } : {}),
   };
 
   const pipelineComplete = bus
@@ -517,7 +520,12 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
       }
     }
 
-    if (process.stdout.isTTY && reportMode === "full" && params.opts.reviewFindings === true) {
+    if (
+      process.stdout.isTTY &&
+      reportMode === "full" &&
+      params.opts.reviewFindings === true &&
+      !params.inline
+    ) {
       try {
         const { runInteractiveReview } = await import("../../ui/review.js");
         const reviewResult = await runInteractiveReview(
