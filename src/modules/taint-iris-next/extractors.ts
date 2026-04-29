@@ -1,5 +1,13 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  type Dirent,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveCodeQLBinary } from "../../scanners/resolve-codeql.js";
@@ -48,6 +56,28 @@ const LANGUAGE_BY_EXTENSION = new Map<string, string>([
   [".tsx", "typescript"],
 ]);
 
+const FALLBACK_IGNORED_DIRECTORIES = new Set([
+  ".git",
+  ".kuzushi",
+  "node_modules",
+  "vendor",
+  "dist",
+  "build",
+  "coverage",
+  ".next",
+  ".turbo",
+  "target",
+  "__pycache__",
+]);
+
+type StructuralSearchResult = {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  error?: string;
+  warnings?: string[];
+};
+
 export async function extractTaintIrisNextEvidence(
   plan: TaintIrisNextPlan,
   ctx: ExecutionContext,
@@ -78,7 +108,13 @@ export async function runStructuralExtractor(
     if ((perCweCount.get(query.cwe) ?? 0) >= plan.caps.maxEvidencePerCwe) continue;
     if (ctx.signal?.aborted) break;
 
-    const result = await runRg(query.pattern, plan.scanRoot, plan.repoRoot, ctx.signal);
+    const result = await runStructuralSearch(
+      query.pattern,
+      plan.scanRoot,
+      plan.repoRoot,
+      ctx.signal,
+    );
+    if (result.warnings) warnings.push(...result.warnings);
     if (result.error) {
       warnings.push(result.error);
       continue;
@@ -308,7 +344,7 @@ function runRg(
   scanRoot: string,
   repoRoot: string,
   signal: AbortSignal | undefined,
-): Promise<{ code: number | null; stdout: string; stderr: string; error?: string }> {
+): Promise<StructuralSearchResult> {
   const searchPath = relativeSearchPath(repoRoot, scanRoot);
   const args = [
     "--line-number",
@@ -344,6 +380,77 @@ function runRg(
       });
     });
   });
+}
+
+async function runStructuralSearch(
+  pattern: string,
+  scanRoot: string,
+  repoRoot: string,
+  signal: AbortSignal | undefined,
+): Promise<StructuralSearchResult> {
+  const rgResult = await runRg(pattern, scanRoot, repoRoot, signal);
+  if (!rgResult.error) return rgResult;
+  const fallbackResult = runFilesystemSearch(pattern, scanRoot, repoRoot);
+  return { ...fallbackResult, warnings: [rgResult.error] };
+}
+
+function runFilesystemSearch(
+  pattern: string,
+  scanRoot: string,
+  repoRoot: string,
+): StructuralSearchResult {
+  const root = resolveSearchRoot(scanRoot, repoRoot);
+  const stdout = collectSearchFiles(root)
+    .flatMap((filePath) => searchTextFile(pattern, filePath, repoRoot))
+    .join("\n");
+  return { code: stdout ? 0 : 1, stdout, stderr: "" };
+}
+
+function resolveSearchRoot(scanRoot: string, repoRoot: string): string {
+  return path.isAbsolute(scanRoot) ? scanRoot : path.resolve(repoRoot, scanRoot);
+}
+
+function collectSearchFiles(root: string): string[] {
+  const files: string[] = [];
+  visitSearchDirectory(root, files);
+  return files;
+}
+
+function visitSearchDirectory(directory: string, files: string[]): void {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(directory, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory() && shouldSearchDirectory(entry.name)) {
+      visitSearchDirectory(entryPath, files);
+    } else if (entry.isFile()) {
+      files.push(entryPath);
+    }
+  }
+}
+
+function shouldSearchDirectory(name: string): boolean {
+  return !FALLBACK_IGNORED_DIRECTORIES.has(name);
+}
+
+function searchTextFile(pattern: string, filePath: string, repoRoot: string): string[] {
+  let body: string;
+  try {
+    body = readFileSync(filePath, "utf8");
+  } catch {
+    return [];
+  }
+  if (body.includes("\u0000")) return [];
+  const relativePath = normalizePath(repoRoot, filePath);
+  return body
+    .split(/\r?\n/u)
+    .flatMap((line, index) =>
+      line.includes(pattern) ? [`${relativePath}:${index + 1}:${line}`] : [],
+    );
 }
 
 function mergeEvidence(
