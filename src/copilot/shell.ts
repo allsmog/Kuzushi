@@ -341,7 +341,31 @@ function inferWorkspaceNameFromTarget(target: string | undefined): string | unde
     }
   }
 
-  return sanitizeWorkspaceName(path.basename(path.resolve(raw)));
+  // U1: Walk up to the nearest .git ancestor and use `<repo>/<relative>`
+  // as the display name. Without this, scanning a sub-tree of a monorepo
+  // (e.g. `~/monorepo/lab/agents/`) showed `agents` — the basename — making
+  // it impossible to tell which repo was actually in scope.
+  const resolved = path.resolve(raw);
+  const repoRoot = findGitRoot(resolved);
+  if (repoRoot && repoRoot !== resolved) {
+    const repo = path.basename(repoRoot);
+    const rel = path.relative(repoRoot, resolved);
+    return sanitizeWorkspaceName(rel ? `${repo}/${rel}` : repo);
+  }
+  return sanitizeWorkspaceName(path.basename(resolved));
+}
+
+/** Walk up from `dir` to find the nearest ancestor containing a `.git/` (or
+ *  `.git` worktree pointer file). Returns null when none found. */
+function findGitRoot(dir: string): string | null {
+  let cur = dir;
+  for (let depth = 0; depth < 64; depth += 1) {
+    if (existsSync(path.join(cur, ".git"))) return cur;
+    const parent = path.dirname(cur);
+    if (parent === cur) return null;
+    cur = parent;
+  }
+  return null;
 }
 
 function sanitizeWorkspaceName(raw: string | undefined): string | undefined {
