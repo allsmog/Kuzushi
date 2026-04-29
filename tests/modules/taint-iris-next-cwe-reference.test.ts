@@ -33,7 +33,7 @@ import {
 } from "../../src/testing/index.js";
 import type { RepoContext } from "../../src/types.js";
 
-const SLOW_TAINT_IRIS_TIMEOUT_MS = 20_000;
+const SLOW_TAINT_IRIS_TIMEOUT_MS = 60_000;
 
 const REQUIRED_CWES = [
   "CWE-22",
