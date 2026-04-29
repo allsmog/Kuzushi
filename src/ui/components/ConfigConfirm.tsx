@@ -11,6 +11,7 @@ import type React from "react";
 import { boxFooter, boxHeader, formatCost } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useTerminalCardWidth } from "../hooks.js";
+import { isCancelInput } from "../interaction-key-policy.js";
 import type { ConfigConfirmData } from "../preflight-types.js";
 import { Table } from "../primitives/Table.js";
 import { SPACING, tokens } from "../tokens.js";
@@ -46,9 +47,9 @@ export function ConfigConfirm({
   ]);
 
   useInput((input, key) => {
-    if (key.return || input === "y") onProceed();
+    if (isCancelInput(input, key) || input === "q") onQuit();
+    else if (key.return || input === "y") onProceed();
     else if (input === "e") onEdit();
-    else if (input === "q" || key.escape) onQuit();
   });
 
   const modelShort = config.model.replace("anthropic:", "").replace("-latest", "");

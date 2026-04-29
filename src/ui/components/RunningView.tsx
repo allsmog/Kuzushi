@@ -19,6 +19,7 @@ import type { CommandResult, ReplCommand } from "./CommandInput.js";
 import { CommandInput } from "./CommandInput.js";
 import { CostCapHalt } from "./CostCapHalt.js";
 import { CostView } from "./CostView.js";
+import { DelayedBusyIndicator } from "./DelayedBusyIndicator.js";
 import { FindingsView } from "./FindingsView.js";
 import { PipelineIndicator } from "./PipelineIndicator.js";
 import { QualityGate } from "./QualityGate.js";
@@ -202,7 +203,14 @@ function PipelineTab({
   const etaMs = useUISelector(store, (s) => s.etaMs);
   const agentActivity = useUISelector(store, (s) => s.agentActivity);
 
-  if (stages.length === 0) return null;
+  if (stages.length === 0) {
+    return (
+      <DelayedBusyIndicator
+        label="Initializing scan"
+        detail="Preparing the pipeline. Stages will appear as soon as work starts."
+      />
+    );
+  }
   return (
     <PipelineIndicator
       stages={stages}

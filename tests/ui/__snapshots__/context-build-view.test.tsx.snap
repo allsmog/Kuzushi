@@ -61,6 +61,10 @@ exports[`ContextBuildView > initial state — all phases pending 1`] = `
 "  building · 00:12 · run TEST · started 14:08:03
   building OperatorScanContext from ~/src/acme-api
 
+
+    ⠋ Building context · 12.0s
+      Waiting for the first phase event.
+      Ctrl+C interrupt
   ╭─ Phases ───────────────────────────────────────────────────────────────────────╮
   │                                                                                │
   │  ○ 1. manifest probes          pending  5 in parallel                          │
@@ -104,6 +108,10 @@ exports[`ContextBuildView > mid-grep — phases 1-3 done, phase 4 running with p
 "  building · 00:12 · run 9a21 · started 14:08:03
   building OperatorScanContext from ~/src/acme-api
 
+
+    ⠋ Building context · 12.0s
+      grep sweep · 4 domains · 16 workers
+      Ctrl+C interrupt
   ╭─ Phases ───────────────────────────────────────────────────────────────────────╮
   │                                                                                │
   │  ✓ 1. manifest probes          done     5 in parallel · 0.14s                  │

@@ -11,6 +11,7 @@ import { Box, Text, useInput } from "ink";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { icons } from "../icons.js";
+import { isCancelInput } from "../interaction-key-policy.js";
 import { tokens } from "../tokens.js";
 
 export interface SelectListItem<T = string> {
@@ -32,10 +33,12 @@ export interface SelectListProps<T> {
   selectedId?: T;
   onSelect: (id: T) => void;
   onHighlight?: (id: T) => void;
+  onCancel?: () => void;
   isActive?: boolean;
   cursor?: string;
   cursorColor?: (s: string) => string;
   emptyMessage?: string;
+  showPosition?: boolean;
   /**
    * Custom row renderer. Receives the item plus cursor/highlight state and
    * returns a React node (typically a Box). When omitted, the default
@@ -64,10 +67,12 @@ export function SelectList<T = string>(props: SelectListProps<T>): JSX.Element {
     selectedId,
     onSelect,
     onHighlight,
+    onCancel,
     isActive = true,
     cursor = ">",
     cursorColor = tokens.accent,
     emptyMessage,
+    showPosition = true,
     renderItem,
   } = props;
 
@@ -96,6 +101,10 @@ export function SelectList<T = string>(props: SelectListProps<T>): JSX.Element {
 
   useInput(
     (input, key) => {
+      if (isCancelInput(input, key)) {
+        onCancel?.();
+        return;
+      }
       if (items.length === 0) return;
       if (key.upArrow || input === "k") {
         highlight(nextEnabled(items, cursorIdx, -1));
@@ -121,6 +130,13 @@ export function SelectList<T = string>(props: SelectListProps<T>): JSX.Element {
 
   return (
     <Box flexDirection="column">
+      {showPosition && items.length > 1 ? (
+        <Text>
+          {tokens.hint(`(${cursorIdx + 1} of ${items.length})`)}
+          {cursorIdx > 0 ? tokens.hint(" ▲") : ""}
+          {cursorIdx < items.length - 1 ? tokens.hint(" ▼") : ""}
+        </Text>
+      ) : null}
       {items.map((item, idx) => {
         const isCursor = idx === cursorIdx;
         const cursorPrefix = isCursor ? cursorColor(cursor) : cursorPrefixBlank;

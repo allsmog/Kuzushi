@@ -3953,6 +3953,12 @@ async function startInkShell(
             text: execResult.output,
             timestamp: Date.now(),
           });
+        } else {
+          appendToHistory(store, {
+            type: execResult.ok === false ? "error" : "output",
+            text: `${asyncToolLabel} ${execResult.ok === false ? "failed." : "done."}`,
+            timestamp: Date.now(),
+          });
         }
         if (localResult.executedToolName) {
           try {

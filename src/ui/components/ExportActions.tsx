@@ -16,6 +16,7 @@ import { boxFooter, boxHeader } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
+import { isCancelInput } from "../interaction-key-policy.js";
 import type { ActionableFinding } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 
@@ -43,7 +44,7 @@ export function ExportActions({
   ]);
 
   useInput((input, key) => {
-    if (key.return || key.escape) {
+    if (key.return || isCancelInput(input, key)) {
       onDone();
       return;
     }
