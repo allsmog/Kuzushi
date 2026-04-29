@@ -32,6 +32,8 @@ import {
 } from "../../src/testing/index.js";
 import type { RepoContext } from "../../src/types.js";
 
+const SLOW_TAINT_IRIS_TIMEOUT_MS = 20_000;
+
 const REQUIRED_CWES = [
   "CWE-22",
   "CWE-73",
@@ -374,145 +376,159 @@ describe("taint-iris-next CWE reference", () => {
     );
   });
 
-  it("renders the bounded agent prompt with attribution, backend, catalog, and evidence", async () => {
-    const root = tempRepo();
-    mkdirSync(path.join(root, "src"), { recursive: true });
-    writeFileSync(path.join(root, "src", "routes.ts"), "db.query(req.query.id);\n");
-    const context = repoContext({
-      languages: ["TypeScript"],
-      frameworks: ["Express"],
-      ormOrDb: ["PostgreSQL"],
-      entryPoints: ["src/routes.ts"],
-    });
-    const model = threatModel(["CWE-89"]);
-    const ctx = seededContext(root, context, model);
-    const plan = buildTaintIrisNextPlan({ target: root, maxCatalogEntries: 3 }, ctx);
-    const evidence = await runStructuralExtractor(plan, ctx);
+  it(
+    "renders the bounded agent prompt with attribution, backend, catalog, and evidence",
+    async () => {
+      const root = tempRepo();
+      mkdirSync(path.join(root, "src"), { recursive: true });
+      writeFileSync(path.join(root, "src", "routes.ts"), "db.query(req.query.id);\n");
+      const context = repoContext({
+        languages: ["TypeScript"],
+        frameworks: ["Express"],
+        ormOrDb: ["PostgreSQL"],
+        entryPoints: ["src/routes.ts"],
+      });
+      const model = threatModel(["CWE-89"]);
+      const ctx = seededContext(root, context, model);
+      const plan = buildTaintIrisNextPlan({ target: root, maxCatalogEntries: 3 }, ctx);
+      const evidence = await runStructuralExtractor(plan, ctx);
 
-    const prompt = buildTaintIrisNextAgentPrompt(plan, evidence);
-    expect(prompt).toContain("IRIS: LLM-Assisted Static Analysis");
-    expect(prompt).toContain("## CWE Candidate Catalog");
-    expect(prompt).toContain("## Evidence Bundles");
-    expect(prompt).toContain("selected: structural");
-    expect(prompt).toContain("Return strict JSON");
-  });
+      const prompt = buildTaintIrisNextAgentPrompt(plan, evidence);
+      expect(prompt).toContain("IRIS: LLM-Assisted Static Analysis");
+      expect(prompt).toContain("## CWE Candidate Catalog");
+      expect(prompt).toContain("## Evidence Bundles");
+      expect(prompt).toContain("selected: structural");
+      expect(prompt).toContain("Return strict JSON");
+    },
+    SLOW_TAINT_IRIS_TIMEOUT_MS,
+  );
 
-  it("keeps plan mode deterministic and does not call the runtime agent", async () => {
-    const root = tempRepo();
-    mkdirSync(path.join(root, "src"), { recursive: true });
-    writeFileSync(path.join(root, "src", "routes.ts"), "db.query(req.query.id);\n");
-    const runtime = createFakeRuntime([{ match: /Taint IRIS Next/u, output: "{}" }]);
-    const context = repoContext({
-      languages: ["TypeScript"],
-      frameworks: ["Express"],
-      ormOrDb: ["PostgreSQL"],
-      entryPoints: ["src/routes.ts"],
-    });
-    const ctx = createMockToolContext({
-      cwd: root,
-      target: root,
-      runtime,
-      seedTaskOutputs: new Map<string, unknown>([
-        ["context-gatherer", { repoContext: context }],
-        ["threat-model-randori", { document: threatModel(["CWE-89"]), findings: [] }],
-      ]),
-    });
-    const tool = createTaintIrisNextModule().tools.find(
-      (candidate) => candidate.name === "taint-iris-next:hunt",
-    );
+  it(
+    "keeps plan mode deterministic and does not call the runtime agent",
+    async () => {
+      const root = tempRepo();
+      mkdirSync(path.join(root, "src"), { recursive: true });
+      writeFileSync(path.join(root, "src", "routes.ts"), "db.query(req.query.id);\n");
+      const runtime = createFakeRuntime([{ match: /Taint IRIS Next/u, output: "{}" }]);
+      const context = repoContext({
+        languages: ["TypeScript"],
+        frameworks: ["Express"],
+        ormOrDb: ["PostgreSQL"],
+        entryPoints: ["src/routes.ts"],
+      });
+      const ctx = createMockToolContext({
+        cwd: root,
+        target: root,
+        runtime,
+        seedTaskOutputs: new Map<string, unknown>([
+          ["context-gatherer", { repoContext: context }],
+          ["threat-model-randori", { document: threatModel(["CWE-89"]), findings: [] }],
+        ]),
+      });
+      const tool = createTaintIrisNextModule().tools.find(
+        (candidate) => candidate.name === "taint-iris-next:hunt",
+      );
 
-    const result = await tool?.execute({ target: root, mode: "plan", maxCatalogEntries: 1 }, ctx);
-    expect(result?.ok).toBe(true);
-    expect(runtime.calls).toHaveLength(0);
-    expect(result?.data).toEqual(
-      expect.objectContaining({
-        status: "planned",
-        agentPrompt: expect.stringContaining("CWE Candidate Catalog"),
-      }),
-    );
-    expect(getRecordedActivity(ctx).map((call) => call.meta?.phase)).toContain("backend-evidence");
-  });
+      const result = await tool?.execute({ target: root, mode: "plan", maxCatalogEntries: 1 }, ctx);
+      expect(result?.ok).toBe(true);
+      expect(runtime.calls).toHaveLength(0);
+      expect(result?.data).toEqual(
+        expect.objectContaining({
+          status: "planned",
+          agentPrompt: expect.stringContaining("CWE Candidate Catalog"),
+        }),
+      );
+      expect(getRecordedActivity(ctx).map((call) => call.meta?.phase)).toContain(
+        "backend-evidence",
+      );
+    },
+    SLOW_TAINT_IRIS_TIMEOUT_MS,
+  );
 
-  it("runs hunt mode with a mocked agent and normalizes findings with provenance", async () => {
-    const root = tempRepo();
-    mkdirSync(path.join(root, "src"), { recursive: true });
-    writeFileSync(path.join(root, "src", "routes.ts"), "db.query(req.query.id);\n");
-    const runtime = createFakeRuntime([
-      {
-        match: /Taint IRIS Next agent/u,
-        output: "{}",
-        structuredOutput: {
-          selectedCwes: [
-            {
-              cwe: "CWE-89",
-              reason: "raw query receives request data",
-              catalogSignals: ["sink: query"],
-              sourceSpec: "request query parameters",
-              sinkSpec: "database query calls",
-              sanitizerSpec: "parameterized query APIs",
-              customCweRationale: "",
-            },
-          ],
-          findings: [
-            {
-              title: "Request parameter reaches raw SQL query",
-              cwe: "CWE-89",
-              severity: "high",
-              confidence: "medium",
-              filePath: "src/routes.ts",
-              startLine: 1,
-              message: "The query uses request-controlled data in SQL construction.",
-              sourceSinkTrace: "req.query.id -> db.query(sql)",
-              catalogSignals: ["source: query parameter", "sink: query"],
-              customCweRationale: "",
-              taintPath: [
-                {
-                  filePath: "src/routes.ts",
-                  line: 1,
-                  message: "source and SQL construction",
-                  snippet: "db.query(req.query.id)",
-                },
-              ],
-            },
-          ],
-          notes: [],
+  it(
+    "runs hunt mode with a mocked agent and normalizes findings with provenance",
+    async () => {
+      const root = tempRepo();
+      mkdirSync(path.join(root, "src"), { recursive: true });
+      writeFileSync(path.join(root, "src", "routes.ts"), "db.query(req.query.id);\n");
+      const runtime = createFakeRuntime([
+        {
+          match: /Taint IRIS Next agent/u,
+          output: "{}",
+          structuredOutput: {
+            selectedCwes: [
+              {
+                cwe: "CWE-89",
+                reason: "raw query receives request data",
+                catalogSignals: ["sink: query"],
+                sourceSpec: "request query parameters",
+                sinkSpec: "database query calls",
+                sanitizerSpec: "parameterized query APIs",
+                customCweRationale: "",
+              },
+            ],
+            findings: [
+              {
+                title: "Request parameter reaches raw SQL query",
+                cwe: "CWE-89",
+                severity: "high",
+                confidence: "medium",
+                filePath: "src/routes.ts",
+                startLine: 1,
+                message: "The query uses request-controlled data in SQL construction.",
+                sourceSinkTrace: "req.query.id -> db.query(sql)",
+                catalogSignals: ["source: query parameter", "sink: query"],
+                customCweRationale: "",
+                taintPath: [
+                  {
+                    filePath: "src/routes.ts",
+                    line: 1,
+                    message: "source and SQL construction",
+                    snippet: "db.query(req.query.id)",
+                  },
+                ],
+              },
+            ],
+            notes: [],
+          },
         },
-      },
-    ]);
-    const context = repoContext({
-      languages: ["TypeScript"],
-      frameworks: ["Express"],
-      ormOrDb: ["PostgreSQL"],
-      entryPoints: ["src/routes.ts"],
-    });
-    const ctx = createMockToolContext({
-      cwd: root,
-      target: root,
-      runtime,
-      seedTaskOutputs: new Map<string, unknown>([
-        ["context-gatherer", { repoContext: context }],
-        ["threat-model-randori", { document: threatModel(["CWE-89"]), findings: [] }],
-      ]),
-    });
-    const tool = createTaintIrisNextModule().tools.find(
-      (candidate) => candidate.name === "taint-iris-next:hunt",
-    );
+      ]);
+      const context = repoContext({
+        languages: ["TypeScript"],
+        frameworks: ["Express"],
+        ormOrDb: ["PostgreSQL"],
+        entryPoints: ["src/routes.ts"],
+      });
+      const ctx = createMockToolContext({
+        cwd: root,
+        target: root,
+        runtime,
+        seedTaskOutputs: new Map<string, unknown>([
+          ["context-gatherer", { repoContext: context }],
+          ["threat-model-randori", { document: threatModel(["CWE-89"]), findings: [] }],
+        ]),
+      });
+      const tool = createTaintIrisNextModule().tools.find(
+        (candidate) => candidate.name === "taint-iris-next:hunt",
+      );
 
-    const result = await tool?.execute({ target: root, mode: "hunt", maxCatalogEntries: 1 }, ctx);
-    expect(result?.ok).toBe(true);
-    expect(runtime.calls).toHaveLength(1);
+      const result = await tool?.execute({ target: root, mode: "hunt", maxCatalogEntries: 1 }, ctx);
+      expect(result?.ok).toBe(true);
+      expect(runtime.calls).toHaveLength(1);
 
-    const data = result?.data as {
-      findings: Array<{ cwe: string[]; engineProvenance: unknown[] }>;
-    };
-    expect(data.findings).toHaveLength(1);
-    expect(data.findings[0]?.cwe).toEqual(["CWE-89"]);
-    expect(data.findings[0]?.engineProvenance).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ detail: expect.stringContaining("taint-iris-next") }),
-      ]),
-    );
-  });
+      const data = result?.data as {
+        findings: Array<{ cwe: string[]; engineProvenance: unknown[] }>;
+      };
+      expect(data.findings).toHaveLength(1);
+      expect(data.findings[0]?.cwe).toEqual(["CWE-89"]);
+      expect(data.findings[0]?.engineProvenance).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ detail: expect.stringContaining("taint-iris-next") }),
+        ]),
+      );
+    },
+    SLOW_TAINT_IRIS_TIMEOUT_MS,
+  );
 
   it("rejects mocked agent output that selects an unknown CWE without rationale", async () => {
     const root = tempRepo();
@@ -556,41 +572,45 @@ describe("taint-iris-next CWE reference", () => {
     ).rejects.toThrow(/invalid CWEs/u);
   });
 
-  it("threads the ranked catalog and structural query seeds through taint-iris-next output", async () => {
-    const root = tempRepo();
-    mkdirSync(path.join(root, "src"), { recursive: true });
-    writeFileSync(path.join(root, "src", "routes.ts"), "fetch(req.query.url);\ndb.query(sql);\n");
-    const context = repoContext({
-      languages: ["TypeScript"],
-      frameworks: ["Express"],
-      ormOrDb: ["PostgreSQL"],
-      entryPoints: ["src/routes.ts"],
-    });
-    const ctx = createMockToolContext({
-      cwd: root,
-      target: root,
-      seedTaskOutputs: new Map<string, unknown>([
-        ["context-gatherer", { repoContext: context }],
-        ["threat-model-randori", { document: threatModel(["CWE-918"]), findings: [] }],
-      ]),
-    });
-    const tool = createTaintIrisNextModule().tools.find(
-      (candidate) => candidate.name === "taint-iris-next:hunt",
-    );
+  it(
+    "threads the ranked catalog and structural query seeds through taint-iris-next output",
+    async () => {
+      const root = tempRepo();
+      mkdirSync(path.join(root, "src"), { recursive: true });
+      writeFileSync(path.join(root, "src", "routes.ts"), "fetch(req.query.url);\ndb.query(sql);\n");
+      const context = repoContext({
+        languages: ["TypeScript"],
+        frameworks: ["Express"],
+        ormOrDb: ["PostgreSQL"],
+        entryPoints: ["src/routes.ts"],
+      });
+      const ctx = createMockToolContext({
+        cwd: root,
+        target: root,
+        seedTaskOutputs: new Map<string, unknown>([
+          ["context-gatherer", { repoContext: context }],
+          ["threat-model-randori", { document: threatModel(["CWE-918"]), findings: [] }],
+        ]),
+      });
+      const tool = createTaintIrisNextModule().tools.find(
+        (candidate) => candidate.name === "taint-iris-next:hunt",
+      );
 
-    const result = await tool?.execute({ target: root, maxCatalogEntries: 1 }, ctx);
-    expect(result?.ok).toBe(true);
-    expect(result?.output).toContain("CWE Candidate Catalog");
-    expect(result?.output).toContain("CWE-918");
+      const result = await tool?.execute({ target: root, maxCatalogEntries: 1 }, ctx);
+      expect(result?.ok).toBe(true);
+      expect(result?.output).toContain("CWE Candidate Catalog");
+      expect(result?.output).toContain("CWE-918");
 
-    const data = result?.data as {
-      cweCatalog: Array<{ cwe: string }>;
-      structuralQueries: Array<{ cwe: string; pattern: string }>;
-      promptCatalog: string;
-    };
-    expect(data.cweCatalog).toHaveLength(1);
-    expect(data.cweCatalog[0]?.cwe).toBe("CWE-918");
-    expect(data.structuralQueries.some((query) => query.cwe === "CWE-918")).toBe(true);
-    expect(data.promptCatalog).toContain("The agent must choose CWE themes from this catalog");
-  });
+      const data = result?.data as {
+        cweCatalog: Array<{ cwe: string }>;
+        structuralQueries: Array<{ cwe: string; pattern: string }>;
+        promptCatalog: string;
+      };
+      expect(data.cweCatalog).toHaveLength(1);
+      expect(data.cweCatalog[0]?.cwe).toBe("CWE-918");
+      expect(data.structuralQueries.some((query) => query.cwe === "CWE-918")).toBe(true);
+      expect(data.promptCatalog).toContain("The agent must choose CWE themes from this catalog");
+    },
+    SLOW_TAINT_IRIS_TIMEOUT_MS,
+  );
 });

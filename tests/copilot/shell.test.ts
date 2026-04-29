@@ -60,13 +60,6 @@ async function createMockCore() {
     output: JSON.stringify(input),
   }));
 
-  // Legacy aliases so code dispatching on `sast:semgrep` still finds a tool.
-  const aliases: Record<string, string> = {
-    "sast:semgrep": "semgrep:scan",
-    "sast:carlini-threat-hunt": "carlini-threat-hunt:run",
-    "sast:context": "context:build",
-  };
-
   const allTools = () => mods.flatMap((m) => m.tools.map((tool) => ({ module: m, tool })));
 
   const resolveTool = (name: string) => {
@@ -74,8 +67,6 @@ async function createMockCore() {
       const tool = m.tools.find((t) => t.name === name);
       if (tool) return { module: m, tool };
     }
-    const aliased = aliases[name];
-    if (aliased) return resolveTool(aliased);
     return undefined;
   };
 
@@ -319,7 +310,7 @@ describe("local shell commands", () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
     const shellState = createShellState(module.tools.map((tool) => tool.name));
-    const ctx = { focusedModule: null };
+    const ctx = { focusedModule: "sast" };
 
     const workspaceResult = __shellInternals.handleLocalCommand(
       "/workspace acme-pentest",
@@ -545,23 +536,23 @@ describe("local shell commands", () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
     let shellState = createShellState(module.tools.map((tool) => tool.name));
-    const ctx = { focusedModule: "sast" };
+    const ctx = { focusedModule: null };
 
     const optionsResult = __shellInternals.handleLocalCommand(
-      "/options carlini-threat-hunt",
+      "/options carlini-threat-hunt:run",
       core,
       opts,
       ctx,
       shellState,
     );
-    expect(optionsResult?.output).toBe("Showing options for sast:carlini-threat-hunt.");
+    expect(optionsResult?.output).toBe("Showing options for carlini-threat-hunt:run.");
 
     shellState = optionsResult?.shellStateUpdater
       ? optionsResult.shellStateUpdater(shellState)
       : shellState;
     expect(shellState.shellView).toBe("options");
-    expect(shellState.lastUsedTool).toBe("sast:carlini-threat-hunt");
-    expect(shellState.optionsView?.toolName).toBe("sast:carlini-threat-hunt");
+    expect(shellState.lastUsedTool).toBe("carlini-threat-hunt:run");
+    expect(shellState.optionsView?.toolName).toBe("carlini-threat-hunt:run");
     expect(shellState.optionsView?.rows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -579,12 +570,12 @@ describe("local shell commands", () => {
       ctx,
       shellState,
     );
-    expect(setResult?.output).toBe("Set sast:carlini-threat-hunt.maxActors = 7");
+    expect(setResult?.output).toBe("Set carlini-threat-hunt:run.maxActors = 7");
 
     shellState = setResult?.shellStateUpdater
       ? setResult.shellStateUpdater(shellState)
       : shellState;
-    expect(shellState.moduleOptions["sast:carlini-threat-hunt"]).toEqual({ maxActors: 7 });
+    expect(shellState.moduleOptions["carlini-threat-hunt:run"]).toEqual({ maxActors: 7 });
     expect(shellState.optionsView?.rows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -602,7 +593,7 @@ describe("local shell commands", () => {
       ctx,
       shellState,
     );
-    expect(optionsAgain?.output).toBe("Showing options for sast:carlini-threat-hunt.");
+    expect(optionsAgain?.output).toBe("Showing options for carlini-threat-hunt:run.");
     shellState = optionsAgain?.shellStateUpdater
       ? optionsAgain.shellStateUpdater(shellState)
       : shellState;
@@ -1296,7 +1287,7 @@ describe("local shell commands", () => {
       ...createShellState(module.tools.map((tool) => tool.name)),
       focusedModule: "sast" as const,
       moduleOptions: {
-        "sast:carlini-threat-hunt": {
+        "carlini-threat-hunt:run": {
           target: "/stored-target",
           maxActors: 5,
         },
@@ -1332,7 +1323,7 @@ describe("local shell commands", () => {
     };
 
     const qualified = __shellInternals.handleLocalCommand(
-      "sast:semgrep .",
+      "semgrep:scan .",
       core,
       opts,
       { focusedModule: null },
@@ -1340,9 +1331,6 @@ describe("local shell commands", () => {
     );
     expect(qualified?.executedToolName).toBe("semgrep:scan");
 
-    // "semgrep" as a bare word no longer resolves (post-split it's a module id,
-    // not a tool action). The qualified form above covers that path; the bare
-    // `scan .` in focused mode below covers the shorthand path.
     const global = __shellInternals.handleLocalCommand(
       "semgrep:scan .",
       core,
@@ -1574,7 +1562,7 @@ describe("context system", () => {
     expect(result?.shellStateUpdater).toBeUndefined();
   });
 
-  it("/context without snapshot dispatches sast:context tool", async () => {
+  it("/context without snapshot dispatches context:build", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
     opts.target = "./repo";
@@ -1897,13 +1885,12 @@ describe("context system", () => {
     const shellState = createShellState(module.tools.map((t) => t.name));
 
     const result = __shellInternals.handleLocalCommand(
-      "sast:semgrep .",
+      "semgrep:scan .",
       core,
       opts,
       ctx,
       shellState,
     );
-    // sast:semgrep resolves through the registry alias to semgrep:scan.
     expect(result?.executedToolName).toBe("semgrep:scan");
   });
 

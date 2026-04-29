@@ -14,18 +14,18 @@ import { ACTION_TIER_ORDER } from "./types.js";
 
 /** Default tool → tier mappings. Modules can register additional mappings. */
 const DEFAULT_TOOL_TIERS: ToolTierMapping[] = [
-  // SAST tools — all safe scan-tier
-  { toolName: "sast:context", tier: "recon" },
   { toolName: "sast:scan", tier: "scan" },
-  { toolName: "sast:semgrep", tier: "scan" },
-  { toolName: "sast:codeql", tier: "scan" },
-  { toolName: "sast:agentic", tier: "scan" },
-  { toolName: "sast:carlini-threat-hunt", tier: "scan" },
-  { toolName: "sast:taint-iris", tier: "scan" },
-  { toolName: "sast:triage", tier: "scan" },
-  { toolName: "sast:verify", tier: "scan" },
-  { toolName: "sast:patch", tier: "modify" },
-  { toolName: "sast:findings", tier: "recon" },
+  { toolName: "context:build", tier: "recon" },
+  { toolName: "semgrep:scan", tier: "scan" },
+  { toolName: "codeql:scan", tier: "scan" },
+  { toolName: "agentic-sast:scan", tier: "scan" },
+  { toolName: "carlini-threat-hunt:run", tier: "scan" },
+  { toolName: "taint-iris:hunt", tier: "scan" },
+  { toolName: "taint-iris-next:hunt", tier: "scan" },
+  { toolName: "triage:run", tier: "scan" },
+  { toolName: "verify:finding", tier: "scan" },
+  { toolName: "patch:finding", tier: "modify" },
+  { toolName: "findings:list", tier: "recon" },
 ];
 
 export class GovernanceEnforcer {

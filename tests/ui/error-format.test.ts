@@ -156,7 +156,7 @@ describe("nearestMatches", () => {
 
 describe("formatUnknownTool", () => {
   it("includes the typo and a suggestion", () => {
-    const out = formatUnknownTool("sast:sca", ["sast:scan", "sast:semgrep", "sast:codeql"]);
+    const out = formatUnknownTool("sast:sca", ["sast:scan", "semgrep:scan", "codeql:scan"]);
     expect(out).toContain("sast:sca");
     expect(out).toContain("sast:scan");
   });

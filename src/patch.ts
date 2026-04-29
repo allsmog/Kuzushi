@@ -10,6 +10,7 @@ import {
   runStructuredSessionQuery,
 } from "./agent-runtime/execution.js";
 import type { AgentRuntime, AgentSession } from "./agent-runtime/types.js";
+import { parsePatchSynthesisOutput } from "./patch/output-parser.js";
 import { DockerPocExecutor } from "./poc-executor/docker.js";
 import {
   getStoredFinding,
@@ -262,7 +263,7 @@ async function synthesizePatch(
 
   let parsed: { diff: string; explanation: string };
   try {
-    parsed = parsePatchOutput(structuredOutput ?? resultText);
+    parsed = parsePatchSynthesisOutput(structuredOutput ?? resultText);
   } catch (error) {
     throw new PatchExecutionError(
       `Patch synthesis output parse failed: ${toErrorMessage(error)}`,
@@ -323,7 +324,7 @@ async function synthesizePatchViaSession(
 
   let parsed: { diff: string; explanation: string };
   try {
-    parsed = parsePatchOutput(structuredOutput ?? resultText);
+    parsed = parsePatchSynthesisOutput(structuredOutput ?? resultText);
   } catch (error) {
     throw new PatchExecutionError(
       `Patch synthesis output parse failed: ${toErrorMessage(error)}`,
@@ -336,34 +337,6 @@ async function synthesizePatchViaSession(
     explanation: parsed.explanation,
     costUsd,
   };
-}
-
-function parsePatchOutput(raw: unknown): { diff: string; explanation: string } {
-  if (raw != null && typeof raw === "object" && !Array.isArray(raw)) {
-    const record = raw as Record<string, unknown>;
-    const diff = typeof record["diff"] === "string" ? record["diff"] : "";
-    const explanation = typeof record["explanation"] === "string" ? record["explanation"] : "";
-
-    if (!diff || diff.trim().length === 0) {
-      throw new Error("Empty diff in patch synthesis output.");
-    }
-
-    return { diff, explanation };
-  }
-
-  if (typeof raw === "string") {
-    // Try to extract JSON from the response text
-    const braceStart = raw.indexOf("{");
-    const braceEnd = raw.lastIndexOf("}");
-    if (braceStart >= 0 && braceEnd > braceStart) {
-      const jsonStr = raw.slice(braceStart, braceEnd + 1);
-      const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
-      return parsePatchOutput(parsed);
-    }
-    throw new Error("Could not extract JSON from patch synthesis response.");
-  }
-
-  throw new Error("Unexpected patch synthesis output format.");
 }
 
 /**

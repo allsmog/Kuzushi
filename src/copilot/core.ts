@@ -206,25 +206,6 @@ export class CopilotCore {
         if (excluded.has(mod.id)) continue;
         await this.loadWithScope(mod);
       }
-
-      // Backward-compat aliases for one release — legacy sast:<action> names
-      // resolve to their new homes. See src/modules/registry.ts.
-      const aliases: Array<[string, string]> = [
-        ["sast:semgrep", "semgrep:scan"],
-        ["sast:codeql", "codeql:scan"],
-        ["sast:agentic", "agentic-sast:scan"],
-        ["sast:carlini-threat-hunt", "carlini-threat-hunt:run"],
-        ["sast:taint-iris", "taint-iris:hunt"],
-        ["sast:taint-iris-next", "taint-iris-next:hunt"],
-        ["sast:triage", "triage:run"],
-        ["sast:verify", "verify:finding"],
-        ["sast:patch", "patch:finding"],
-        ["sast:findings", "findings:list"],
-        ["sast:context", "context:build"],
-      ];
-      for (const [oldName, newName] of aliases) {
-        this.registry.registerAlias(oldName, newName);
-      }
     }
 
     // Load any additional modules specified at startup
