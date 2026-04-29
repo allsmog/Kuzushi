@@ -12,9 +12,7 @@ import { execSync } from "node:child_process";
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useState } from "react";
-import { boxFooter, boxHeader } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import { isCancelInput } from "../interaction-key-policy.js";
 import type { ActionableFinding } from "../state.js";
@@ -32,7 +30,6 @@ export function ExportActions({
   onDone,
 }: ExportActionsProps): React.ReactElement {
   const [status, setStatus] = useState<string | null>(null);
-  const width = useTerminalCardWidth();
 
   const actionableCount = findings.filter((f) => f.verdict !== "fp").length;
 
@@ -65,13 +62,10 @@ export function ExportActions({
 
   return (
     <Box flexDirection="column">
-      <Text>{""}</Text>
-      <Text>{boxHeader("Export", width)}</Text>
-      <Text>{""}</Text>
       <Box paddingLeft={SPACING.md}>
+        <Text>{tokens.label("Export")}</Text>
         <Text>{tokens.muted(`${actionableCount} actionable findings available`)}</Text>
       </Box>
-      <Text>{""}</Text>
       <Box flexDirection="column" paddingLeft={SPACING.md}>
         <Text>
           {tokens.dangerStrong("[c]")} Copy to clipboard {tokens.muted("(markdown)")}
@@ -85,9 +79,6 @@ export function ExportActions({
           <Text>{tokens.success(status)}</Text>
         </Box>
       )}
-
-      <Text>{""}</Text>
-      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

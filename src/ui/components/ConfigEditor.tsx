@@ -21,10 +21,8 @@ import type React from "react";
 import { useMemo, useState } from "react";
 import type { ConfigPatchEntry } from "../../config.js";
 import type { KuzushiConfig } from "../../types.js";
-import { boxFooter, boxHeader } from "../format.js";
 import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { useTerminalCardWidth } from "../hooks.js";
 import { isCancelInput } from "../interaction-key-policy.js";
 import { SPACING, tokens } from "../tokens.js";
 import {
@@ -160,7 +158,6 @@ export function ConfigEditor({
   onCancel,
 }: ConfigEditorProps): React.ReactElement {
   const [cfg, setCfg] = useState<KuzushiConfig>(initialConfig);
-  const width = useTerminalCardWidth();
   const [expanded, setExpanded] = useState<Set<SectionId>>(() => {
     const initial = new Set<SectionId>();
     const auto = defaultExpandedSection(focusKey);
@@ -441,8 +438,9 @@ export function ConfigEditor({
 
   return (
     <Box flexDirection="column">
-      <Text>{""}</Text>
-      <Text>{boxHeader(drillTitle, width)}</Text>
+      <Box paddingLeft={SPACING.md}>
+        <Text>{tokens.label(drillTitle)}</Text>
+      </Box>
       <Box paddingLeft={SPACING.md}>
         <Text>
           {tokens.muted(
@@ -475,8 +473,6 @@ export function ConfigEditor({
           />
         </Box>
       )}
-
-      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }
@@ -488,25 +484,21 @@ function MainView({ rows, cursor }: { rows: Row[]; cursor: number }): React.Reac
     <Box flexDirection="column">
       {rows.map((row, i) => {
         const isCursor = i === cursor;
-        const cur = isCursor ? tokens.accent(">") : " ";
+        const cur = isCursor ? tokens.focus("❯") : " ";
         if (row.kind === "section") {
           const caret = row.expanded ? "▾" : "▸";
           const title = isCursor ? tokens.strong(row.title) : tokens.label(row.title);
-          return (
-            <Text key={`s-${row.section}`}>
-              {cur} {tokens.accent(caret)} {title} {tokens.muted(`(${row.childCount} fields)`)}
-            </Text>
-          );
+          const line = `${cur} ${tokens.accent(caret)} ${title} ${tokens.muted(`(${row.childCount} fields)`)}`;
+          return <Text key={`s-${row.section}`}>{isCursor ? tokens.selection(line) : line}</Text>;
         }
         if (row.kind === "field") {
           const lbl = isCursor
             ? tokens.strong(row.descriptor.label)
             : tokens.value(row.descriptor.label);
+          const line = `${cur} ${lbl} ${tokens.muted("=")} ${formatValue(row.value, row.descriptor.label)}`;
           return (
             <Box key={`f-${row.descriptor.path}`} flexDirection="column">
-              <Text>
-                {cur} {lbl} {tokens.muted("=")} {formatValue(row.value, row.descriptor.label)}
-              </Text>
+              <Text>{isCursor ? tokens.selection(line) : line}</Text>
               {isCursor ? (
                 <Text>
                   {"      "}
@@ -518,19 +510,13 @@ function MainView({ rows, cursor }: { rows: Row[]; cursor: number }): React.Reac
         }
         if (row.kind === "task") {
           const lbl = isCursor ? tokens.strong(row.taskId) : tokens.value(row.taskId);
-          return (
-            <Text key={`t-${row.taskId}`}>
-              {cur} {tokens.accent("▸")} {lbl} {tokens.muted(`(${row.childCount} keys)`)}
-            </Text>
-          );
+          const line = `${cur} ${tokens.accent("▸")} ${lbl} ${tokens.muted(`(${row.childCount} keys)`)}`;
+          return <Text key={`t-${row.taskId}`}>{isCursor ? tokens.selection(line) : line}</Text>;
         }
         // other
         const lbl = isCursor ? tokens.strong(row.topKey) : tokens.value(row.topKey);
-        return (
-          <Text key={`o-${row.topKey}`}>
-            {cur} {lbl} {tokens.muted("=")} {formatValue(row.value, row.topKey)}
-          </Text>
-        );
+        const line = `${cur} ${lbl} ${tokens.muted("=")} ${formatValue(row.value, row.topKey)}`;
+        return <Text key={`o-${row.topKey}`}>{isCursor ? tokens.selection(line) : line}</Text>;
       })}
     </Box>
   );
@@ -541,23 +527,17 @@ function DrillView({ rows, cursor }: { rows: DrillRow[]; cursor: number }): Reac
     <Box flexDirection="column">
       {rows.map((row, i) => {
         const isCursor = i === cursor;
-        const cur = isCursor ? tokens.accent(">") : " ";
+        const cur = isCursor ? tokens.focus("❯") : " ";
         if (row.kind === "back") {
           const lbl = isCursor ? tokens.strong("← back") : tokens.muted("← back");
-          return (
-            <Text key="back">
-              {cur} {lbl}
-            </Text>
-          );
+          const line = `${cur} ${lbl}`;
+          return <Text key="back">{isCursor ? tokens.selection(line) : line}</Text>;
         }
         const lbl = isCursor
           ? tokens.strong(row.descriptor.label)
           : tokens.value(row.descriptor.label);
-        return (
-          <Text key={row.descriptor.path}>
-            {cur} {lbl} {tokens.muted("=")} {formatValue(row.value, row.descriptor.label)}
-          </Text>
-        );
+        const line = `${cur} ${lbl} ${tokens.muted("=")} ${formatValue(row.value, row.descriptor.label)}`;
+        return <Text key={row.descriptor.path}>{isCursor ? tokens.selection(line) : line}</Text>;
       })}
     </Box>
   );

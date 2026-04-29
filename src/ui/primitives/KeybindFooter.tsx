@@ -6,7 +6,7 @@
  * `bindings` explicitly to bypass the context (useful in tests or static
  * footers).
  */
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import type { FC } from "react";
 import { type Keybinding, useKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
@@ -20,11 +20,14 @@ export interface KeybindFooterProps {
 
 export const KeybindFooter: FC<KeybindFooterProps> = ({ bindings: override, maxShown = 6 }) => {
   const ctx = useKeybindings();
+  const { stdout } = useStdout();
+  const columns = stdout?.columns ?? 100;
   const bindings = override ?? ctx.bindings;
   if (!bindings || bindings.length === 0) return null;
 
-  const extra = bindings.length > maxShown ? bindings.length - (maxShown - 1) : 0;
-  const shown = extra > 0 ? bindings.slice(0, maxShown - 1) : bindings;
+  const responsiveMax = columns < 52 ? 3 : columns < 72 ? 4 : maxShown;
+  const extra = bindings.length > responsiveMax ? bindings.length - (responsiveMax - 1) : 0;
+  const shown = extra > 0 ? bindings.slice(0, responsiveMax - 1) : bindings;
 
   return (
     <Box flexDirection="column">

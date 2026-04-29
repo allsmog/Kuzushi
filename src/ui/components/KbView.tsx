@@ -115,7 +115,7 @@ function ListPane({
         </Text>
         {docs.map((doc, idx) => {
           const isSelected = idx === cursor;
-          const indicator = isSelected ? "▶" : " ";
+          const indicator = isSelected ? tokens.focus("❯") : " ";
           const num = `${pad(String(idx + 1), 2)} `;
           const status = pad(statusGlyph(doc.status), 7);
           const title = pad(doc.title, 36);
@@ -123,7 +123,9 @@ function ListPane({
           const size = pad(formatSize(doc), 10);
           const age = doc.detail.split("·").slice(-1)[0]?.trim() ?? "";
           const line = `${indicator} ${num}${status} ${title} ${kind} ${size} ${age}`;
-          return <Text key={doc.id}>{isSelected ? tokens.strong(line) : tokens.value(line)}</Text>;
+          return (
+            <Text key={doc.id}>{isSelected ? tokens.selection(line) : tokens.value(line)}</Text>
+          );
         })}
       </Box>
     </Box>

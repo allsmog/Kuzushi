@@ -553,7 +553,7 @@ describe("Ink component snapshots", () => {
 
     expect(out).toContain("Phases");
     expect(out).toContain("manifest probes");
-    expect(out).toContain("context-build");
+    expect(out).toContain("building OperatorScanContext");
     expect(out).toContain("q abort");
   });
 

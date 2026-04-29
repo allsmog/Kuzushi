@@ -105,6 +105,7 @@ function AppInner({ store }: AppProps): React.ReactElement {
       shellProcessing: s.shell?.processing ?? false,
       shellWorkspace: s.shell?.workspace ?? null,
       shellTarget: s.shell?.target ?? null,
+      scanView: s.scanView,
       // Most-recently-started active scan sub-task (primary preferred). Drives
       // the chrome subtitle ("running secrets-crypto-detect") so the operator
       // can see what's busy without parsing the tree.
@@ -201,6 +202,7 @@ function AppInner({ store }: AppProps): React.ReactElement {
             }
           : null,
         activeScanTask: routing.activeScanTaskLabel ? { label: routing.activeScanTaskLabel } : null,
+        scanView: routing.scanView,
       }),
     }),
     [
@@ -214,6 +216,7 @@ function AppInner({ store }: AppProps): React.ReactElement {
       routing.shellProcessing,
       routing.shellWorkspace,
       routing.shellTarget,
+      routing.scanView,
       routing.activeScanTaskLabel,
     ],
   );

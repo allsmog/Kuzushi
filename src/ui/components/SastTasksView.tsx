@@ -78,24 +78,19 @@ export function SastTasksView({ shell }: SastTasksViewProps): React.ReactElement
           </Text>
           {rows.map((row, index) => {
             const active = index === summary.activeIndex;
-            const marker = active ? tokens.accent(">") : " ";
+            const marker = active ? tokens.focus("❯") : " ";
             const line =
               `${marker} ${row.state.padEnd(6)}` +
               `${row.label.padEnd(compact ? 20 : 22)}` +
               `${row.source.padEnd(13)}` +
               `${row.cost.padEnd(7)}` +
               (compact ? "" : row.notes);
-            return <Text key={row.id}>{active ? tokens.strong(line) : line}</Text>;
+            return <Text key={row.id}>{active ? tokens.selection(line) : line}</Text>;
           })}
         </Box>
 
         <Box marginTop={SPACING.sm}>
           <Text>{tokens.muted(summary.activeAction)}</Text>
-        </Box>
-        <Box>
-          <Text>
-            {tokens.muted("commands: /task toggle [id] · /task mode toggle · show options")}
-          </Text>
         </Box>
       </Box>
     </ScreenContent>
