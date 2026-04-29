@@ -213,7 +213,7 @@ Kuzushi's capabilities come from `CopilotModule`s that expose tools (for shell a
 
 | Module | Category | What It Does | Key Tools |
 |--------|----------|--------------|-----------|
-| **sast** | offense | 40+ task SAST pipeline: Semgrep, CodeQL, agentic detectors, AI triage, verification, PoC, patch | `sast:scan` plus split-module tools `semgrep:scan`, `codeql:scan`, `agentic-sast:scan`, `triage:run`, `verify:finding`, `patch:finding`, `findings:list`, `context:build`, `threat-hunt:run`, `taint-iris:hunt` |
+| **sast** | offense | 40+ task SAST pipeline: Semgrep, CodeQL, agentic detectors, AI triage, verification, PoC, patch | `sast:scan` plus split-module tools `semgrep:scan`, `codeql:scan`, `agentic-sast:scan`, `triage:run`, `verify:finding`, `patch:finding`, `findings:list`, `context:build`, `carlini-threat-hunt:run`, `taint-iris:hunt` |
 | **randori** | intel | PASTA threat modeling via the `@kuzushi/randori-plugin` — S1–S4 stages plus narrative synthesis, returning a `ThreatModelDocument` | `randori:pasta`, `randori:threat-model` |
 | **vuln-scout** | offense | Whitebox pentest via the `@kuzushi/vuln-scout` plugin — agentic SAST + taint analysis returning normalized Findings | `vuln-scout:audit` |
 | **tob** | offense | Trail of Bits skills audit via `@kuzushi/tob-skills` — fp-check, sharp-edges, insecure-defaults, static-analysis, variant-analysis, and more | `tob:audit`, `tob:skills` |
@@ -577,6 +577,36 @@ The Ink React frontend lives in `src/ui/`:
 | `src/ui/components/` | Feature components (pipeline, findings, setup wizard, copilot shell) composed from the primitives above. |
 
 Styling discipline: components import from `tokens` (never `chalk` directly) and lay out with Ink `<Box>` flexbox properties (`flexDirection`, `justifyContent`, `gap`, `padding`, `margin`) rather than string-padding tricks.
+
+## Troubleshooting
+
+### Running against an internal Anthropic-compatible proxy
+
+Some internal gateways (corporate proxies, vendor-bundled Anthropic-API
+endpoints) accept only `thinking.type=adaptive` or `thinking.type=disabled`
+and reject the SDK's default `thinking.type=enabled`, returning a 400 error.
+
+If you see errors like `thinking.type` rejected by your proxy:
+
+```bash
+export KUZUSHI_DISABLE_THINKING=1   # forces every Claude path to thinking: { type: "disabled" }
+```
+
+Kuzushi prints a one-line warning at shell startup when `ANTHROPIC_BASE_URL`
+points at a host that doesn't end in `anthropic.com`. Silence it with
+`KUZUSHI_QUIET_PROXY_BANNER=1` once you've made the appropriate choice.
+
+### `better-sqlite3` errors on Node 24+
+
+If you see `Error: The module ... was compiled against a different Node.js
+version` after a Node upgrade, the global install needs a native rebuild:
+
+```bash
+pnpm rebuild better-sqlite3   # in the kuzushi install dir
+```
+
+The `postinstall` hook handles this automatically on fresh installs;
+manual rebuild is only needed when you bump Node majors after installing.
 
 ## License
 
