@@ -2,6 +2,29 @@
 
 ## Changelog
 
+### v1.0.0 — Clean Code major refactor
+
+**Breaking:**
+
+- Flat runtime credential config is removed. Replace
+  `agentRuntimeConfig.apiKey` / `agentRuntimeConfig.baseUrl` with an explicit
+  backend slot such as `agentRuntimeConfig.claude.apiKey`,
+  `agentRuntimeConfig.piAi.apiKey`, or `agentRuntimeConfig.codex.apiKey`.
+- `agentRuntimeConfig` object values must use backend slots. The old
+  `{"apiKey":"...","baseUrl":"..."}` shape is rejected by `config set`.
+- Legacy built-in SAST tool aliases are removed. Replace names such as
+  `sast:semgrep`, `sast:codeql`, and `sast:triage` with `semgrep:scan`,
+  `codeql:scan`, and `triage:run`.
+
+**Internal:**
+
+- Shell command dispatch now routes through a table-driven command registry
+  instead of hand-written slash and bare-command ladders.
+- Database schema bootstrap moved behind `src/store/schema.ts`; `src/store.ts`
+  remains the public compatibility facade for existing imports.
+- Patch synthesis output parsing moved behind a focused parser module with
+  unit tests.
+
 ### v0.20.0 — Module SDK hardening
 
 **Breaking:**

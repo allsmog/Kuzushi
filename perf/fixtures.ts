@@ -1,4 +1,4 @@
-import type { AgentTask, TaskOutputKind } from "../src/agents/types.js";
+import type { DagNodeImpl, OutputKind } from "../src/agents/types.js";
 import type { Finding, TaskId } from "../src/scanners/types.js";
 import type { TriageResult } from "../src/types.js";
 
@@ -88,10 +88,10 @@ export function makeTaskRegistrySnapshot(
   seed = 7,
 ): {
   ids: string[];
-  tasks: AgentTask[];
+  tasks: DagNodeImpl[];
 } {
   const rng = prng(seed);
-  const tasks: AgentTask[] = [];
+  const tasks: DagNodeImpl[] = [];
   const ids: string[] = [];
   for (let i = 0; i < count; i++) {
     const id = `task-${i}`;
@@ -109,7 +109,7 @@ export function makeTaskRegistrySnapshot(
     tasks.push({
       id,
       displayName: id,
-      outputKind: "findings" as TaskOutputKind,
+      outputKind: "findings" as OutputKind,
       dependsOn,
       async run(): Promise<unknown> {
         return {};

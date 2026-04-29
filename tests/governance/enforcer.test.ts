@@ -11,7 +11,7 @@ describe("GovernanceEnforcer", () => {
   it("allows scan-tier tools by default", () => {
     const enforcer = createEnforcer();
     expect(enforcer.checkExecution("sast:scan", "./repo")).toEqual({ allowed: true });
-    expect(enforcer.checkExecution("sast:semgrep")).toEqual({ allowed: true });
+    expect(enforcer.checkExecution("semgrep:scan")).toEqual({ allowed: true });
   });
 
   it("blocks tools above maxAutonomousTier when approval required", () => {

@@ -4,7 +4,7 @@ import {
   getProfileForTask,
   withMultiStrategy,
 } from "../strategies/index.js";
-import { canonicalDagId } from "./dag-registry.js";
+import { canonicalDagId } from "./dag-ids.js";
 import { defineDagTool } from "./define.js";
 import type { DagTool, ExecutionContext } from "./types.js";
 

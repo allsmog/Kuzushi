@@ -287,7 +287,7 @@ describe("Ink component snapshots", () => {
               headless: true,
             },
             {
-              name: "sast:triage",
+              name: "triage:run",
               verb: "triage",
               description: "re-triage one finding",
               headless: true,

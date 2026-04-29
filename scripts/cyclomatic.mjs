@@ -15,8 +15,8 @@ import ts from "typescript";
 
 const args = process.argv.slice(2);
 const rootDir = args.find((a) => !a.startsWith("--")) ?? "src";
-const topN = Number(valueOf("--top") ?? 30);
-const minCc = Number(valueOf("--min") ?? 1);
+const topN = Number(flagValue("--top") ?? 30);
+const minCc = Number(flagValue("--min") ?? 1);
 const asJson = args.includes("--json");
 const logicOnly = args.includes("--logic-only");
 const dispatchOnly = args.includes("--dispatch-only");
@@ -282,7 +282,7 @@ if (asJson) {
     `  ---  -----------  -------  ----------------------------------------------  --------`,
   );
   for (const r of filtered.slice(0, topN)) {
-    const name = r.name.length > 46 ? r.name.slice(0, 43) + "..." : r.name.padEnd(46);
+    const name = r.name.length > 46 ? `${r.name.slice(0, 43)}...` : r.name.padEnd(46);
     const kind =
       r.category === "dispatch" ? `[${r.dispatchKind}]`.padEnd(11) : "[logic]    ".padEnd(11);
     const armsCell = r.category === "dispatch" ? `${r.dispatchArms} arms` : "—";

@@ -82,8 +82,8 @@ describe("ModuleRegistry", () => {
     const reg = new ModuleRegistry();
     const tool = makeDummyTool("semgrep:scan");
     reg.register(makeDummyModule("semgrep", [tool]));
-    reg.registerAlias("sast:semgrep", "semgrep:scan");
-    const resolved = reg.resolveTool("sast:semgrep");
+    reg.registerAlias("old-semgrep:scan", "semgrep:scan");
+    const resolved = reg.resolveTool("old-semgrep:scan");
     expect(resolved).toBeDefined();
     expect(resolved!.tool.name).toBe("semgrep:scan");
     expect(resolved!.module.id).toBe("semgrep");
@@ -108,13 +108,13 @@ describe("ModuleRegistry", () => {
 
   it("listAliases returns all registered redirects", () => {
     const reg = new ModuleRegistry();
-    reg.registerAlias("sast:semgrep", "semgrep:scan");
-    reg.registerAlias("sast:codeql", "codeql:scan");
+    reg.registerAlias("old-semgrep:scan", "semgrep:scan");
+    reg.registerAlias("old-codeql:scan", "codeql:scan");
     const entries = reg
       .listAliases()
       .map((a) => `${a.from}=>${a.to}`)
       .sort();
-    expect(entries).toEqual(["sast:codeql=>codeql:scan", "sast:semgrep=>semgrep:scan"]);
+    expect(entries).toEqual(["old-codeql:scan=>codeql:scan", "old-semgrep:scan=>semgrep:scan"]);
   });
 
   it("allTools filters by headless", () => {
@@ -216,8 +216,7 @@ describe("createCoreSastModule", () => {
     }
   });
 
-  it("legacy sast:<action> names resolve through aliases to the sub-modules", async () => {
-    // Mirror what CopilotCore.init() does: load the family + register aliases.
+  it("legacy sast:<action> names are not built-in aliases in the major release", async () => {
     const { createSemgrepModule } = await import("../../src/modules/semgrep/semgrep.js");
     const { createCodeqlModule } = await import("../../src/modules/codeql/codeql.js");
     const { createTriageModule } = await import("../../src/modules/triage/triage.js");
@@ -231,14 +230,13 @@ describe("createCoreSastModule", () => {
       reg.register(m);
       (reg as any).initialized.add(m.id);
     }
-    reg.registerAlias("sast:semgrep", "semgrep:scan");
-    reg.registerAlias("sast:codeql", "codeql:scan");
-    reg.registerAlias("sast:triage", "triage:run");
 
-    expect(reg.resolveTool("sast:semgrep")?.tool.name).toBe("semgrep:scan");
-    expect(reg.resolveTool("sast:codeql")?.tool.name).toBe("codeql:scan");
-    expect(reg.resolveTool("sast:triage")?.tool.name).toBe("triage:run");
-    // Direct `sast:scan` still wins via direct lookup.
     expect(reg.resolveTool("sast:scan")?.tool.name).toBe("sast:scan");
-  });
+    expect(reg.resolveTool("semgrep:scan")?.tool.name).toBe("semgrep:scan");
+    expect(reg.resolveTool("codeql:scan")?.tool.name).toBe("codeql:scan");
+    expect(reg.resolveTool("triage:run")?.tool.name).toBe("triage:run");
+    expect(reg.resolveTool("sast:semgrep")).toBeUndefined();
+    expect(reg.resolveTool("sast:codeql")).toBeUndefined();
+    expect(reg.resolveTool("sast:triage")).toBeUndefined();
+  }, 20_000);
 });
