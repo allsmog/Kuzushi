@@ -24,9 +24,8 @@ interface FilterChipsProps {
 }
 
 export function FilterChips({ chips }: FilterChipsProps): React.ReactElement {
-  const activeCount = chips.filter((chip) => chip.explicit).length;
   return (
-    <Box flexDirection="column">
+    <Box>
       <Text>
         {tokens.label("filter")}
         {"   "}
@@ -36,13 +35,6 @@ export function FilterChips({ chips }: FilterChipsProps): React.ReactElement {
             return chip.explicit ? tokens.accent(body) : tokens.muted(body);
           })
           .join("  ")}
-      </Text>
-      <Text>
-        {tokens.muted(
-          activeCount > 0
-            ? `${activeCount} active · /findings resets the list`
-            : "0 active · /since <ref> scopes changed files",
-        )}
       </Text>
     </Box>
   );

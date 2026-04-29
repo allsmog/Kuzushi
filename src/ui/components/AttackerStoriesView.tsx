@@ -80,8 +80,8 @@ export function AttackerStoriesView({ shell }: AttackerStoriesViewProps): React.
         <Box flexDirection="column" marginTop={SPACING.sm}>
           <Text>{tokens.label("overview")}</Text>
           <Box paddingLeft={SPACING.lg} flexDirection="column" marginTop={SPACING.sm}>
-            {wrap(narrative.overview, 72).map((line, i) => (
-              <Text key={`${i}-${line.slice(0, 6)}`}>{tokens.value(line)}</Text>
+            {wrap(narrative.overview, 72).map((line) => (
+              <Text key={line}>{tokens.value(line)}</Text>
             ))}
           </Box>
         </Box>
@@ -99,8 +99,8 @@ export function AttackerStoriesView({ shell }: AttackerStoriesViewProps): React.
           </Box>
         ) : (
           <Box flexDirection="column" marginTop={SPACING.sm}>
-            {stories.map((story, i) => (
-              <StoryCard key={`${i}-${story.title}`} story={story} />
+            {stories.map((story) => (
+              <StoryCard key={story.title} story={story} />
             ))}
           </Box>
         )}
@@ -135,27 +135,32 @@ function InputCategoriesRail({
         {INPUT_CATEGORY_ORDER.map(({ key, label }) => {
           const items = inputs[key];
           if (!items || items.length === 0) {
-            return <Text key={key}>{tokens.muted(`${label.padEnd(22)}  (none listed)`)}</Text>;
+            return (
+              <Box key={key} flexDirection="row">
+                <Box width={24}>
+                  <Text>{tokens.muted(label)}</Text>
+                </Box>
+                <Text>{tokens.muted("(none listed)")}</Text>
+              </Box>
+            );
           }
           return (
             <Box key={key} flexDirection="column" marginBottom={SPACING.sm}>
-              <Text>
-                {tokens.value(label.padEnd(22))}
-                {tokens.muted(`${items.length} entries`)}
-              </Text>
-              {items.slice(0, 4).map((entry, i) => (
-                <Text key={`${key}-${i}`}>
-                  {"   "}
-                  {tokens.muted("\u00B7")}
-                  {"  "}
-                  {tokens.muted(truncateEnd(entry, 68))}
-                </Text>
+              <Box flexDirection="row">
+                <Box width={24}>
+                  <Text>{tokens.value(label)}</Text>
+                </Box>
+                <Text>{tokens.muted(`${items.length} entries`)}</Text>
+              </Box>
+              {items.slice(0, 4).map((entry) => (
+                <Box key={`${key}-${entry}`} paddingLeft={SPACING.md}>
+                  <Text>{tokens.muted(`· ${truncateEnd(entry, 68)}`)}</Text>
+                </Box>
               ))}
               {items.length > 4 ? (
-                <Text>
-                  {"   "}
-                  {tokens.hint(`\u00B7  (+${items.length - 4} more)`)}
-                </Text>
+                <Box paddingLeft={SPACING.md}>
+                  <Text>{tokens.hint(`· (+${items.length - 4} more)`)}</Text>
+                </Box>
               ) : null}
             </Box>
           );
@@ -167,39 +172,28 @@ function InputCategoriesRail({
 
 function StoryCard({ story }: { story: ThreatModelAttackerStory }): React.ReactElement {
   const width = 74;
-  const bar = "\u2500".repeat(width - 4);
   return (
     <Box flexDirection="column" marginBottom={SPACING.sm}>
-      <Text>
-        {tokens.muted("   \u256D\u2500 ")}
-        {tokens.strong(truncateEnd(story.title, width - 8))}
-        {tokens.muted(` ${bar.slice(0, Math.max(0, width - story.title.length - 4))}\u256E`)}
-      </Text>
+      <Text>{tokens.strong(truncateEnd(story.title, width))}</Text>
 
-      {wrap(story.narrative, width - 4).map((line, i) => (
-        <Text key={`n-${i}-${line.slice(0, 6)}`}>
-          {tokens.muted("   \u2502 ")}
-          {tokens.value(line)}
-        </Text>
+      {wrap(story.narrative, width - 4).map((line) => (
+        <Box key={line} paddingLeft={SPACING.md}>
+          <Text>{tokens.value(line)}</Text>
+        </Box>
       ))}
 
       {story.mitigation ? (
-        <>
-          <Text>{tokens.muted("   \u2502 ")}</Text>
+        <Box paddingLeft={SPACING.md} marginTop={SPACING.xs}>
           <Text>
-            {tokens.muted("   \u2502 ")}
-            {tokens.label("mitigation: ")}
-            {tokens.muted(truncateEnd(story.mitigation, width - 18))}
+            {tokens.label("mitigation")}
+            {tokens.muted(` ${truncateEnd(story.mitigation, width - 18)}`)}
           </Text>
-        </>
+        </Box>
       ) : null}
 
-      <Text>
-        {tokens.muted("   \u2502 ")}
-        {renderThreatChips(story.threatIds)}
-      </Text>
-
-      <Text>{tokens.muted(`   \u2570${"\u2500".repeat(width - 2)}\u256F`)}</Text>
+      <Box paddingLeft={SPACING.md}>
+        <Text>{renderThreatChips(story.threatIds)}</Text>
+      </Box>
     </Box>
   );
 }
@@ -208,7 +202,7 @@ function renderThreatChips(threatIds: ReadonlyArray<string> | undefined): string
   if (!threatIds || threatIds.length === 0) {
     return tokens.hint("(unmapped — no linked STRIDE threats)");
   }
-  const chips = threatIds.slice(0, 6).map((id) => tokens.info(`[${id}]`));
+  const chips = threatIds.slice(0, 6).map((id) => tokens.accent(`[${id}]`));
   const extra = threatIds.length > 6 ? tokens.muted(`  +${threatIds.length - 6} more`) : "";
   return `${chips.join(" ")}${extra}`;
 }

@@ -36,7 +36,7 @@ import { formatCost, formatDuration, truncateEnd } from "../format.js";
 import { STEP_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { Table } from "../primitives/Table.js";
-import { normalizeSeverity, type Severity, severityChalk, severityStyle } from "../severity.js";
+import { normalizeSeverity, type Severity, severityStyle } from "../severity.js";
 import type { AgentActivityLine, ModuleRunArtifact, ModuleRunStep, ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { actorLabelFromFingerprint, actorShortId, toCompactRow } from "../transcript-format.js";
@@ -122,7 +122,7 @@ export function ModuleRunView({
 
   return (
     <ScreenContent>
-      <RuleHeader breadcrumb={breadcrumb} status={status} />
+      <RuleHeader breadcrumb={breadcrumb} status={status} rule={false} />
       {run ? (
         <>
           {liveControls ? <LiveControlsHint /> : null}
@@ -170,7 +170,7 @@ function ToolHeader({ run }: { run: NonNullable<ShellState["moduleRun"]> }): Rea
     run.status === "running"
       ? null
       : run.status === "done"
-        ? tokens.success(STEP_GLYPH.done)
+        ? tokens.value(STEP_GLYPH.done)
         : run.status === "aborted"
           ? tokens.muted("·")
           : tokens.danger("✗");
@@ -215,7 +215,7 @@ function TerminalRunBanner({
   const outcome =
     run.status === "done" ? "complete" : run.status === "aborted" ? "aborted" : "failed";
   const color =
-    run.status === "done" ? tokens.success : run.status === "aborted" ? tokens.warn : tokens.danger;
+    run.status === "done" ? tokens.value : run.status === "aborted" ? tokens.warn : tokens.danger;
   const scanOnlyNote =
     run.postProcessMode === "scan-only" && run.status === "done" && findingCount > 0
       ? "scan-only: saved as needs_review; triage pending"
@@ -255,7 +255,7 @@ function StepsBlock({
 function StepRow({ step }: { step: ModuleRunStep }): React.ReactElement {
   const glyph =
     step.status === "done"
-      ? tokens.success(STEP_GLYPH.done)
+      ? tokens.value(STEP_GLYPH.done)
       : step.status === "running"
         ? tokens.warn(STEP_GLYPH.running)
         : step.status === "error"
@@ -374,10 +374,15 @@ export function computePauseHint(rows: ReadonlyArray<ActorRow>): string | null {
 
 function ActorCard({ row }: { row: ActorRow }): React.ReactElement {
   const heading = (
-    <Text>
-      {tokens.accent(row.shortId.padEnd(8))} {tokens.value(row.label.padEnd(30))}
-      {tokens.muted(row.status)}
-    </Text>
+    <Box flexDirection="row">
+      <Box width={9}>
+        <Text>{tokens.accent(row.shortId)}</Text>
+      </Box>
+      <Box width={30}>
+        <Text>{tokens.value(row.label)}</Text>
+      </Box>
+      <Text>{tokens.muted(row.status)}</Text>
+    </Box>
   );
   return (
     <Box flexDirection="column" marginBottom={SPACING.xs}>
@@ -392,7 +397,7 @@ function ActivityChip({ line }: { line: AgentActivityLine }): React.ReactElement
   const compact = toCompactRow(line);
   const color =
     line.kind === "tool-complete"
-      ? tokens.success
+      ? tokens.value
       : line.kind === "tool-start" || line.kind === "tool-progress"
         ? tokens.warn
         : tokens.muted;
@@ -519,7 +524,13 @@ function displaySeverity(finding: ActorViewFinding): Severity {
 function severityTokenForFinding(finding: ActorViewFinding): string {
   const severity = displaySeverity(finding);
   const style = severityStyle(severity);
-  return severityChalk(severity)(`${style.glyph} ${style.label}`);
+  return shellSeverity(severity)(`${style.glyph} ${style.label}`);
+}
+
+function shellSeverity(severity: Severity): (text: string) => string {
+  if (severity === "critical" || severity === "high") return tokens.danger;
+  if (severity === "medium") return tokens.warn;
+  return tokens.muted;
 }
 
 const SCAN_ONLY_PLACEHOLDER_RE = /captured in scan-only mode/i;
@@ -539,21 +550,30 @@ function MetaRow({ run }: { run: NonNullable<ShellState["moduleRun"]> }): React.
   // /set effort max actually took effect.
   const effort = run.effort ?? "default";
   const thinking = run.thinkingDisabled ? "disabled" : "enabled";
+  const rows = [
+    { label: "cost", value: cost },
+    { label: "model", value: model },
+    { label: "effort", value: effort },
+    { label: "thinking", value: thinking },
+    { label: "prompts", value: "kuzushi/<module>/prompts" },
+  ];
   return (
     <Section title="run facts">
       <Box paddingLeft={SPACING.md}>
-        <Text>
-          {tokens.muted("cost     ")}
-          {tokens.value(cost)}
-          {tokens.muted("    model ")}
-          {tokens.value(model)}
-          {tokens.muted("    effort ")}
-          {tokens.value(effort)}
-          {tokens.muted("    thinking ")}
-          {tokens.value(thinking)}
-          {tokens.muted("    prompts ")}
-          {tokens.value("kuzushi/<module>/prompts")}
-        </Text>
+        <Table
+          showHeader={false}
+          divider={false}
+          gap={2}
+          columns={[
+            {
+              key: "label",
+              width: 10,
+              render: (row: (typeof rows)[number]) => tokens.muted(row.label),
+            },
+            { key: "value", flex: 1, truncate: "middle" },
+          ]}
+          rows={rows}
+        />
       </Box>
     </Section>
   );

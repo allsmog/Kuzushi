@@ -633,7 +633,7 @@ describe("Ink component snapshots", () => {
 
     expect(out).toContain("sast home");
     expect(out).toContain("task selection");
-    expect(out).toContain("tasks opens scanners/detectors");
+    expect(out).toContain("profile standard");
     expect(out).not.toContain("agentic SAST orchestration");
   });
 

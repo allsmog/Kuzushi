@@ -23,7 +23,6 @@ import type React from "react";
 import type { StrideCategory } from "../../agents/tasks/threat-modeling/types.js";
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { type Severity, severityChalk, severityStyle } from "../severity.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { ContextStrip } from "./ContextStrip.js";
@@ -143,14 +142,7 @@ function Counts({
         {SEVERITY_ORDER.map((tier) => {
           const n = bySeverity[tier] ?? 0;
           return (
-            <Text key={tier}>
-              {"   "}
-              {severityBadge(tier)}
-              {"  "}
-              {tokens.muted(`${n}`.padStart(3))}
-              {"  "}
-              {bar(n, maxSev, tier)}
-            </Text>
+            <CountRow key={tier} label={severityBadge(tier)} value={n} bar={bar(n, maxSev, tier)} />
           );
         })}
       </Box>
@@ -160,13 +152,12 @@ function Counts({
         {STRIDE_ORDER.map((s) => {
           const n = byCategory?.[s.category] ?? 0;
           return (
-            <Text key={s.category}>
-              {"   "}
-              {tokens.value(s.label.padEnd(18))}
-              {tokens.muted(`${n}`.padStart(3))}
-              {"  "}
-              {bar(n, maxCat, "info")}
-            </Text>
+            <CountRow
+              key={s.category}
+              label={tokens.value(s.label)}
+              value={n}
+              bar={bar(n, maxCat, "info")}
+            />
           );
         })}
       </Box>
@@ -175,12 +166,10 @@ function Counts({
 }
 
 function severityBadge(tier: string): string {
-  const sev = (
-    tier === "critical" || tier === "high" || tier === "medium" || tier === "low" ? tier : "info"
-  ) as Severity;
-  const style = severityStyle(sev);
-  // Glyph + short label — readable under NO_COLOR and for screen readers.
-  return severityChalk(sev)(`${style.glyph} ${style.label}`);
+  if (tier === "critical") return tokens.danger("■ CRIT");
+  if (tier === "high") return tokens.danger("▲ HIGH");
+  if (tier === "medium") return tokens.warn("◆ MED");
+  return tokens.muted("● LOW");
 }
 
 function bar(n: number, max: number, colorKey: string): string {
@@ -188,29 +177,45 @@ function bar(n: number, max: number, colorKey: string): string {
   const width = 24;
   const filled = Math.max(1, Math.round((n / max) * width));
   const segment = "\u2588".repeat(filled);
-  if (
-    colorKey === "critical" ||
-    colorKey === "high" ||
-    colorKey === "medium" ||
-    colorKey === "low" ||
-    colorKey === "info"
-  ) {
-    return severityChalk(colorKey)(segment);
-  }
-  return tokens.accent(segment);
+  if (colorKey === "critical" || colorKey === "high") return tokens.danger(segment);
+  if (colorKey === "medium") return tokens.warn(segment);
+  return tokens.muted(segment);
+}
+
+function CountRow({
+  label,
+  value,
+  bar,
+}: {
+  label: string;
+  value: number;
+  bar: string;
+}): React.ReactElement {
+  return (
+    <Box flexDirection="row">
+      <Box width={20}>
+        <Text>{label}</Text>
+      </Box>
+      <Box width={4} justifyContent="flex-end" marginRight={2}>
+        <Text>{tokens.muted(String(value))}</Text>
+      </Box>
+      <Text>{bar}</Text>
+    </Box>
+  );
 }
 
 function Drives(): React.ReactElement {
-  const moduleWidth = Math.max(...DRIVES.map((d) => d.module.length));
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>{tokens.label("drives")}</Text>
       <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.lg}>
         {DRIVES.map((d) => (
-          <Text key={d.module}>
-            {tokens.accent(d.module.padEnd(moduleWidth + 2))}
-            {tokens.muted(d.consumes)}
-          </Text>
+          <Box key={d.module} flexDirection="row">
+            <Box width={22}>
+              <Text>{tokens.accent(d.module)}</Text>
+            </Box>
+            <Text>{tokens.muted(d.consumes)}</Text>
+          </Box>
         ))}
       </Box>
     </Box>
@@ -254,15 +259,16 @@ function Artifacts({ shell }: { shell: ShellState }): React.ReactElement {
       <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.lg}>
         {paths.map((p) => (
           <Box key={p.path} flexDirection="column" marginBottom={SPACING.sm}>
-            <Text>
-              {tokens.muted(p.label.padEnd(12))}
-              {tokens.value(shortPath(p.path))}
-            </Text>
+            <Box flexDirection="row">
+              <Box width={12}>
+                <Text>{tokens.muted(p.label)}</Text>
+              </Box>
+              <Text>{tokens.value(shortPath(p.path))}</Text>
+            </Box>
             {p.note ? (
-              <Text>
-                {tokens.muted(" ".repeat(12))}
-                {tokens.hint(p.note)}
-              </Text>
+              <Box paddingLeft={12}>
+                <Text>{tokens.hint(p.note)}</Text>
+              </Box>
             ) : null}
           </Box>
         ))}

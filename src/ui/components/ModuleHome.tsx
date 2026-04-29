@@ -89,12 +89,7 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
 
       {busy ? null : (
         <>
-          <Section
-            label="tools"
-            hint={
-              narrow ? undefined : "(invoke from this shell as verb, or headless via kuzushi run)"
-            }
-          >
+          <Section label="tools">
             {visibleTools.length === 0 ? (
               <Box paddingLeft={3}>
                 <EmptyState kind="module-no-tools" context={{ moduleId }} />
@@ -120,6 +115,7 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
                       truncate: "end",
                     },
                   ]}
+                  divider={false}
                   rows={tableRows}
                 />
                 {hiddenCount > 0 ? (
@@ -162,7 +158,7 @@ function SastTaskSelectionSummary({ shell }: { shell: ShellState }): React.React
   const blockedLabel = disabled.length > 0 ? disabled.join(", ") : "none";
 
   return (
-    <Section label="task selection" hint="tasks opens scanners/detectors">
+    <Section label="task selection">
       <Box flexDirection="column" paddingLeft={3}>
         <Text>{tokens.value(formatSastTaskStateLine(summary))}</Text>
         <Text>

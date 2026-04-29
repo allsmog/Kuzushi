@@ -155,7 +155,7 @@ function severityBadge(tier: keyof ThreatModelCriticalityBuckets): string {
     case "medium":
       return tokens.warn("MED ");
     case "low":
-      return tokens.info("LOW ");
+      return tokens.muted("LOW ");
   }
 }
 
@@ -210,7 +210,7 @@ function OperatorEdits({ tm }: { tm: ThreatModelDocument }): React.ReactElement 
       {confirmed.length > 0 ? (
         <Box flexDirection="column" marginTop={SPACING.sm} paddingLeft={SPACING.lg}>
           <Text>
-            {tokens.success("\u25CF  ")}
+            {tokens.muted("\u25CF  ")}
             {tokens.strong(`confirmed mitigations (${confirmed.length})`)}
           </Text>
           {confirmed.slice(0, 6).map((item, i) => (

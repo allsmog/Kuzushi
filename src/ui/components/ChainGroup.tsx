@@ -1,18 +1,11 @@
 /**
- * ChainGroup — renders an `ExploitChain` as a bordered grouping of the
- * findings that compose it (Ink UI v2 screen 04 inner box).
- *
- * The visual model is a single bordered rectangle labeled with the chain id
- * and severity, enclosing the member findings. The caller is expected to
- * pass pre-resolved `ActionableFinding`s in step order — we don't reach back
- * into the store here so this stays a pure presentational component.
+ * ChainGroup — renders an `ExploitChain` as a quiet grouped table.
  */
 
 import { Box, Text } from "ink";
 import type React from "react";
-import { boxBottomLine, boxTopLine } from "../format.js";
 import { Table } from "../primitives/Table.js";
-import { severityChalk, severityStyle } from "../severity.js";
+import { severityStyle } from "../severity.js";
 import type { ActionableFinding } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 
@@ -32,24 +25,20 @@ export function ChainGroup({
   severity,
   verified,
   findings,
-  width = 78,
+  width: _width = 78,
 }: ChainGroupProps): React.ReactElement {
   const sevBadge = severityBadge(severity);
-  const rightMeta = verified ? `${sevBadge}${tokens.success(" · verified")} ` : `${sevBadge} `;
-  const chainLabel = title
-    ? `${tokens.muted(" exploit chain · ")}${tokens.strong(chainId)}${tokens.muted(` · ${title} `)}`
-    : `${tokens.muted(" exploit chain · ")}${tokens.strong(chainId)} `;
+  const meta = verified ? `${sevBadge} · verified` : sevBadge;
 
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
-      <Text>
-        {boxTopLine({
-          width,
-          variant: "square",
-          left: `${tokens.metadata("─")}${chainLabel}`,
-          right: rightMeta,
-        })}
-      </Text>
+      <Box justifyContent="space-between">
+        <Text>
+          {tokens.label(chainId)}
+          {title ? tokens.muted(` · ${title}`) : ""}
+        </Text>
+        <Text>{meta}</Text>
+      </Box>
       <Box paddingLeft={SPACING.md}>
         <Table
           gap={1}
@@ -83,9 +72,9 @@ export function ChainGroup({
           ]}
           rows={findings}
           showHeader
+          divider={false}
         />
       </Box>
-      <Text>{boxBottomLine({ width, variant: "square" })}</Text>
     </Box>
   );
 }
@@ -94,5 +83,6 @@ function severityBadge(severity: "CRITICAL" | "HIGH" | "MEDIUM"): string {
   const tier = severity === "CRITICAL" ? "critical" : severity === "HIGH" ? "high" : "medium";
   const style = severityStyle(tier);
   // Glyph + lowercase label — pairing guarantees tier is readable without color.
-  return severityChalk(tier)(`${style.glyph} ${tier}`);
+  const text = `${style.glyph} ${tier}`;
+  return tier === "medium" ? tokens.warn(text) : tokens.danger(text);
 }
