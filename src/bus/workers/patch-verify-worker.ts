@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
 import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
-import type { TaskRegistry } from "../../agents/registry.js";
-import type { TaskContext } from "../../agents/types.js";
 import { resolveTaskConfig as resolveConfiguredTaskConfig } from "../../capabilities.js";
+import type { DagRegistry } from "../../modules/dag-registry.js";
+import type { ExecutionContext } from "../../modules/types.js";
 import { getPatchResultsForFinding, updatePatchResultStatus } from "../../store/patch-results.js";
 import type { KuzushiConfig, ScanOpts } from "../../types.js";
 import { toErrorMessage } from "../../utils.js";
@@ -17,14 +17,14 @@ export interface PatchVerifyWorkerDeps {
   db: Database.Database;
   config: KuzushiConfig;
   runtime: AgentRuntime;
-  taskRegistry: TaskRegistry;
+  dagRegistry: DagRegistry;
 }
 
 /**
  * Worker that re-verifies patched code by running configured finding tasks on the worktree.
  */
 export function registerPatchVerifyWorker(deps: PatchVerifyWorkerDeps): void {
-  const { bus, db, config, runtime, taskRegistry } = deps;
+  const { bus, db, config, runtime, dagRegistry } = deps;
 
   bus.subscribe<PatchVerifyRequestedEvent>("patch-verify:requested", async (event) => {
     const { context, fingerprint, worktreePath, depth } = event.payload;
@@ -40,7 +40,7 @@ export function registerPatchVerifyWorker(deps: PatchVerifyWorkerDeps): void {
         context.repoName,
         config,
         runtime,
-        taskRegistry,
+        dagRegistry,
       );
 
       const patchResults = getPatchResultsForFinding(db, fingerprint);
@@ -85,7 +85,7 @@ async function verifyPatch(
   repoName: string,
   config: KuzushiConfig,
   runtime: AgentRuntime,
-  taskRegistry: TaskRegistry,
+  dagRegistry: DagRegistry,
 ): Promise<boolean> {
   const silentBus: MessageBus = {
     async publish() {},
@@ -98,8 +98,8 @@ async function verifyPatch(
   };
 
   for (const taskId of config.tasks) {
-    if (!taskRegistry.has(taskId)) continue;
-    const task = taskRegistry.get(taskId);
+    if (!dagRegistry.has(taskId)) continue;
+    const task = dagRegistry.get(taskId);
     if (task.outputKind !== "findings" && task.outputKind !== "threat-model") {
       continue;
     }
@@ -111,23 +111,26 @@ async function verifyPatch(
       tasks: [taskId],
       fresh: true,
     };
-    const taskContext: TaskContext = {
-      runId: `patch-verify:${fingerprint}`,
-      projectRoot,
-      workRoot: worktreePath,
-      repoRoot: worktreePath,
-      scanPath: worktreePath,
-      repoName,
+    const execContext: ExecutionContext = {
+      cwd: worktreePath,
+      target: worktreePath,
       config,
       runtime,
       bus: silentBus,
-      upstreamOutputs: new Map(),
+      dag: {
+        runId: `patch-verify:${fingerprint}`,
+        repoRoot: projectRoot,
+        workRoot: worktreePath,
+        scanPath: worktreePath,
+        repoName,
+        upstreamOutputs: new Map(),
+      },
     };
     const taskConfig = resolveConfiguredTaskConfig(config, taskId);
     if (task.init) {
       await task.init(taskConfig);
     }
-    const output = await task.run(scanOpts, taskContext);
+    const output = await task.run(scanOpts, execContext);
     const emittedFindings = extractTaskFindings(task.outputKind, output);
 
     for (const finding of emittedFindings) {

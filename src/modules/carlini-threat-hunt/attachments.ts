@@ -15,7 +15,7 @@ import {
   type KindSpec,
 } from "../_shared/attachments/index.js";
 
-export type ThreatHuntKind =
+export type CarliniThreatHuntKind =
   | "incident"
   | "runtime-log"
   | "prior-finding"
@@ -24,8 +24,8 @@ export type ThreatHuntKind =
   | "playbook"
   | "other";
 
-export const THREAT_HUNT_KIND_SPEC: KindSpec<ThreatHuntKind> = {
-  moduleId: "threat-hunt",
+export const CARLINI_THREAT_HUNT_KIND_SPEC: KindSpec<CarliniThreatHuntKind> = {
+  moduleId: "carlini-threat-hunt",
   default: "other",
   kinds: [
     "incident",
@@ -47,12 +47,14 @@ export const THREAT_HUNT_KIND_SPEC: KindSpec<ThreatHuntKind> = {
   label: (kind) => kind,
 };
 
-/** Default storage adapter — `.kuzushi/threat-hunt/attachments.json`. */
-export function threatHuntAttachmentAdapter(): AttachmentStorageAdapter<ThreatHuntKind> {
-  return defaultAttachmentAdapter<ThreatHuntKind>("threat-hunt");
+/** Default storage adapter — `.kuzushi/carlini-threat-hunt/attachments.json`. */
+export function carliniThreatHuntAttachmentAdapter(): AttachmentStorageAdapter<CarliniThreatHuntKind> {
+  return defaultAttachmentAdapter<CarliniThreatHuntKind>("carlini-threat-hunt");
 }
 
-/** Convenience loader — used by `threat-hunt:run` to seed the per-actor prompt. */
-export function loadThreatHuntAttachments(cwd: string): AttachmentDocument<ThreatHuntKind>[] {
-  return threatHuntAttachmentAdapter().read(cwd);
+/** Convenience loader — used by `carlini-threat-hunt:run` to seed the per-actor prompt. */
+export function loadCarliniThreatHuntAttachments(
+  cwd: string,
+): AttachmentDocument<CarliniThreatHuntKind>[] {
+  return carliniThreatHuntAttachmentAdapter().read(cwd);
 }

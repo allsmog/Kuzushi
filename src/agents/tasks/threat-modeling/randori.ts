@@ -15,7 +15,7 @@ import {
   savePersistentThreatModel,
 } from "../../../threat-model-renderer.js";
 import type { ScanOpts } from "../../../types.js";
-import type { AgentTask } from "../../types.js";
+import type { DagNodeImpl } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
 import { resolveThreatModelConfig } from "./config.js";
 import { applyThreatModelMethodology } from "./methodology.js";
@@ -29,7 +29,7 @@ export { assessNarrativeArtifact } from "./randori-runner.js";
 
 const log = createLogger({ stage: "threat-model-randori" });
 
-export const threatModelRandoriTask: AgentTask<
+export const threatModelRandoriTask: DagNodeImpl<
   ScanOpts,
   { document: ThreatModelDocument; findings: Finding[] }
 > = {

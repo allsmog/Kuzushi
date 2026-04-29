@@ -191,7 +191,7 @@ const pastaTool: ModuleTool = {
         `  Stages:   ${stages.join(", ")}`,
         `  Artifact: ${artifactDir}`,
         `  Threats:  ${result.document.threats.length}`,
-        `  DFD:      ${result.document.dfd.elements.length} elements`,
+        `  DFD:      ${result.document.dfd.nodes.length} nodes · ${result.document.dfd.flows.length} flows`,
         `  Findings: ${result.findings.length}${emitFindings ? "" : " (emitFindings=false)"}`,
         `  Cost:     $${result.costUsd.toFixed(4)}`,
       ];
@@ -295,12 +295,32 @@ const threatModelTool: ModuleTool = {
       output: [
         `Loaded threat model for ${name} from ${outputDir}`,
         `  Threats: ${document.threats.length}`,
-        `  DFD:     ${document.dfd.elements.length} elements`,
+        `  DFD:     ${dfdNodeCount(document)} nodes · ${dfdFlowCount(document)} flows`,
       ].join("\n"),
       data: { target: root, repoName: name, outputDir, document, artifacts },
     };
   },
 };
+
+function dfdNodeCount(
+  document: import("../../agents/tasks/threat-modeling/types.js").ThreatModelDocument,
+): number {
+  if (Array.isArray(document.dfd.nodes)) return document.dfd.nodes.length;
+  return (
+    document.dfd.elements?.filter((element) => (element as { type?: string }).type !== "data-flow")
+      .length ?? 0
+  );
+}
+
+function dfdFlowCount(
+  document: import("../../agents/tasks/threat-modeling/types.js").ThreatModelDocument,
+): number {
+  if (Array.isArray(document.dfd.flows)) return document.dfd.flows.length;
+  return (
+    document.dfd.elements?.filter((element) => (element as { type?: string }).type === "data-flow")
+      .length ?? 0
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Module factory

@@ -1,0 +1,65 @@
+# Taint IRIS Next
+
+`taint-iris-next` is Kuzushi's experimental, agent-forward taint hunting module inspired by the IRIS neuro-symbolic SAST paper.
+
+Inspired by "IRIS: LLM-Assisted Static Analysis for Detecting Security Vulnerabilities" (Li, Dutta, Naik; ICLR 2025). This module adapts the paper's source/sink inference and taint-spec workflow to Kuzushi's context map, threat model, agent progress UI, and pluggable evidence backends. It is not affiliated with or endorsed by the IRIS authors.
+
+References:
+
+- https://openreview.net/forum?id=G3GvXMpzXM
+- https://github.com/iris-sast/iris
+
+## Positioning
+
+The IRIS idea is to use LLMs to infer taint specifications, run static analysis to find whole-repo source-to-sink paths, and apply contextual analysis to filter false positives.
+
+Kuzushi's adaptation keeps that source/sink and taint-spec workflow as inspiration, but drives the hunt from Kuzushi's context and threat-model modules. The intended flow is context/threat-model driven hunt planning, tree-sitter/ast-grep/Semgrep-style structural extraction, scoped agents, and optional CodeQL/Joern/language backends for deeper evidence.
+
+## Engine V1
+
+The public tool is `taint-iris-next:hunt`.
+
+- `mode=plan` runs only deterministic planning and evidence extraction. It returns the ranked catalog, structural query seeds, evidence rows, backend choice, and the bounded prompt that hunt mode would send to the agent.
+- `mode=hunt` runs the same deterministic prepass, then sends one bounded agent session the context summary, threat-model summary, CWE Candidate Catalog, and evidence bundles.
+- `backend=auto` uses structural extraction first. If an existing CodeQL DB is present under `.kuzushi/codeql-db` or `.codeql/db`, V1 also runs read-only CodeQL analysis against that DB and converts matching SARIF findings into catalog-scoped evidence rows.
+- `backend=codeql` is opt-in and uses an existing DB only. If no DB exists, V1 falls back to structural evidence and reports a warning. It never creates a CodeQL database.
+- If a DB exists but the CodeQL CLI is not installed, V1 keeps the structural evidence and reports the CLI problem explicitly.
+- `backend=semgrep|joern|language` is reserved behind the same evidence interface; V1 falls back to structural evidence until those adapters land.
+
+Caps keep the run bounded: `maxCatalogEntries`, `maxEvidencePerCwe`, `maxFilesPerQuery`, and `maxAgentFindings`.
+
+The module will not run cold in the shell. Prepare the repository first with `/context`, then `/threats regen dfd`, then rerun `taint-iris-next`.
+
+## CWE Reference
+
+`taint-iris-next` owns a typed CWE catalog in `src/modules/taint-iris-next/cwe-reference.ts`. The deterministic prepass filters and ranks this catalog using detected languages, frameworks, data stores, entrypoints, and threat-model `relatedCwe` fields. The agent-facing prompt receives the bounded "CWE Candidate Catalog" section from this reference file and must cite catalog signals when selecting CWEs.
+
+The catalog seeds structural extraction with source, sink, sanitizer, and backend-neutral query signals for common taint classes across mixed-language repos, including Rust, Ruby, JavaScript/TypeScript, Python, Go, Java, PHP, and C#.
+
+## Data Flow
+
+Deterministic:
+
+- Load context snapshot and threat-model document.
+- Inventory language hints when context is sparse.
+- Filter and rank the full CWE catalog.
+- Generate backend-neutral structural query seeds.
+- Extract bounded evidence rows with `rg` by default.
+- When CodeQL is selected and an existing DB plus CLI are available, run the language security-and-quality suite read-only and map CodeQL findings back to the bounded candidate CWE catalog.
+- Choose backend and record provenance without silently creating heavyweight databases.
+
+Agentic:
+
+- Choose final CWE themes from the provided catalog.
+- Refine source, sink, and sanitizer specs.
+- Use evidence bundles and optional backend hints to decide whether a source-to-sink story is defensible.
+- Return strict JSON findings that cite catalog signals.
+
+## Runtime Header
+
+```text
+┌─ Taint IRIS Next ───────────────────────────────────────────────────────────┐
+│ inspired by IRIS, ICLR 2025 · Kuzushi agent-forward adaptation              │
+│ context loaded · threat model loaded · structural trace · backend auto       │
+└─────────────────────────────────────────────────────────────────────────────┘
+```

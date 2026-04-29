@@ -11,7 +11,7 @@ import { formatProfilesForPrompt, getProfilesForTask } from "../../security-prof
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { DagNodeImpl, DagRunContext } from "../types.js";
 import {
   computeDetectionFingerprint,
   dedupAndRankFindings,
@@ -92,7 +92,7 @@ interface NosqlInjectionConfig {
   maxFindings: number;
 }
 
-function resolveConfig(ctx: TaskContext): NosqlInjectionConfig {
+function resolveConfig(ctx: DagRunContext): NosqlInjectionConfig {
   const model = resolveTaskModel(ctx, "nosql-injection");
   const maxFindings = resolveTaskPositiveInt(ctx, "nosql-injection", "maxFindings", 50);
   return { model, maxFindings };
@@ -277,7 +277,7 @@ function computeFingerprint(repoName: string, filePath: string, f: NosqlInjectio
   ]);
 }
 
-export const nosqlInjectionTask: AgentTask<ScanOpts, Finding[]> = {
+export const nosqlInjectionTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "nosql-injection-detect",
   displayName: "NoSQL Injection Detector",
   outputKind: "findings",
@@ -397,7 +397,7 @@ export const nosqlInjectionTask: AgentTask<ScanOpts, Finding[]> = {
 
 function runNosqlLens(
   prompt: string,
-  context: TaskContext,
+  context: DagRunContext,
   model: string,
   tag: string,
 ): Promise<LensResult> {

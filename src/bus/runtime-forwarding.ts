@@ -6,11 +6,11 @@
  * and calls `.query(...)` inherits per-message UI activity for free.
  *
  * Installed at:
- *   - `TaskContext` construction (scan-worker, patch-verify-worker,
+ *   - `DagRunContext` construction (scan-worker, patch-verify-worker,
  *     taint-analysis-refinement-worker, orchestrator's nested contexts,
  *     cross-service analyze's per-stage contexts)
  *   - `ExecutionContext` construction (copilot/core.ts executeTool)
- *   - Verifier workers that iterate `runtime.query` outside a TaskContext
+ *   - Verifier workers that iterate `runtime.query` outside a DagRunContext
  *     (cheap-verify, verify-gate)
  */
 
@@ -98,7 +98,7 @@ export function wrapRuntimeWithActivityForwarding(
       // backends and doesn't depend on every detector remembering to
       // set `phase`/`fingerprint` in its query options. The event
       // shape is `ScanAgentActivityEvent` (taskId-keyed) — distinct
-      // from threat-hunt's fingerprint-keyed `TaskAgentActivityEvent`.
+      // from carlini-threat-hunt's fingerprint-keyed `TaskAgentActivityEvent`.
       const emitScanActivity = (payload: ScanAgentActivityEvent["payload"]): void => {
         const envelope = {
           type: "scan:agent-activity" as const,
@@ -160,7 +160,7 @@ export function wrapRuntimeWithActivityForwarding(
           // best-effort — never break the caller's stream on a publish failure
         }
       } else if (phase) {
-        // Non-scan phase wraps (threat-hunt, etc.) keep the
+        // Non-scan phase wraps (carlini-threat-hunt, etc.) keep the
         // fingerprint-keyed `${phase}:agent-activity` shape that the
         // existing handlers consume.
         try {
@@ -199,7 +199,7 @@ export function wrapRuntimeWithActivityForwarding(
   // Claude runtime's tool-use → bus pipeline (`emitToolUseActivity` in
   // src/agent-runtime/claude.ts) fires `${phase}:agent-activity` events
   // and the report-worker turns them into per-sub-task `activityLines`
-  // under the active scan task. Caller-set values win — threat-hunt
+  // under the active scan task. Caller-set values win — carlini-threat-hunt
   // and other modules that already route their own phase keep doing so.
   const stampOptions = (options: AgentQueryOptions): AgentQueryOptions => {
     if (!phase) return options;

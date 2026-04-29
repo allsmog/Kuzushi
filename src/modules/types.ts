@@ -11,13 +11,13 @@
 
 import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../agent-runtime/types.js";
-import type { TaskOutputKind } from "../agents/types.js";
+import type { OutputKind as DagOutputKind } from "../agents/types.js";
 import type { MessageBus } from "../bus/types.js";
 import type { PrintSink } from "../copilot/print.js";
-import type { KnowledgeModule } from "../knowledge/types.js";
+import type { KnowledgeModule, KnowledgeRegistry } from "../knowledge/types.js";
 import type { ToolPolicy } from "../prompts/tool-policy.js";
 import type { Finding, TriageAgentConfig } from "../scanners/types.js";
-import type { KuzushiConfig } from "../types.js";
+import type { KuzushiConfig, SecurityProfile } from "../types.js";
 import type {
   HostInfo,
   HostUiHandle,
@@ -103,7 +103,7 @@ export interface ModuleNotes {
  *
  *  - snapshot: a field on the active ShellState.contextSnapshot must be
  *    present. Used when sub-module A consumes sub-module B's in-memory
- *    output (e.g. threat-hunt needs context.appModel + threat-model.threatModel).
+ *    output (e.g. carlini-threat-hunt needs context.appModel + threat-model.threatModel).
  *  - findings: the workspace DB must contain at least `minCount` findings.
  *    Used by triage/verify/patch which operate on previously stored findings
  *    regardless of which scanner produced them.
@@ -149,23 +149,18 @@ export type CopilotModuleRequirement =
     };
 
 // ---------------------------------------------------------------------------
-// DAG-aware tool types (module-forward merge of AgentTask into ModuleTool)
+// DAG-aware tool types
 // ---------------------------------------------------------------------------
 
 /**
- * Re-export of `TaskOutputKind` from `src/agents/types.ts`. During the
- * module-forward merge both names co-exist; once `AgentTask` is demoted to an
- * internal adapter shape (Step 4 of the reconciliation plan) the canonical
- * name becomes `OutputKind` on the module side. Keeping these as the same
- * underlying type today means the bridge is a no-op cast rather than a
- * structural translation.
+ * Canonical output categories for DAG nodes.
  */
-export type OutputKind = TaskOutputKind;
+export type OutputKind = DagOutputKind;
 
 /**
  * Kinds of per-agent activity a DagTool (or ModuleTool that fans out sub-
  * agents) can emit. Mirrors the shapes used by triage / verification /
- * poc-harness / dynamic-analysis / threat-hunt today; unifying them here is
+ * poc-harness / dynamic-analysis / carlini-threat-hunt today; unifying them here is
  * step 1 toward the single `TaskAgentActivityEvent` bus envelope.
  */
 export type AgentActivityKind = "tool-start" | "tool-progress" | "tool-complete" | "reasoning";
@@ -191,7 +186,7 @@ export interface AgentActivityMeta {
  */
 export interface DagContext {
   runId: string;
-  /** Effective scan scope (same semantics as TaskContext.workRoot). */
+  /** Effective scan scope (same semantics as DagRunContext.workRoot). */
   workRoot?: string;
   /** Git toplevel when the operator targeted a subdirectory of a repo. */
   repoRoot: string;
@@ -244,6 +239,12 @@ export interface ExecutionContext {
   bus: MessageBus;
   /** Full config for reading module-specific settings. */
   config: KuzushiConfig;
+  /** Domain-specific security profiles loaded from project config. */
+  securityProfiles?: SecurityProfile[];
+  /** Knowledge base registry for domain-specific vulnerability knowledge. */
+  knowledgeRegistry?: KnowledgeRegistry;
+  /** Optional per-execution model override used by internal orchestration features. */
+  modelOverride?: string;
   /** Abort signal for cancellation. */
   signal?: AbortSignal;
   /**
@@ -363,7 +364,7 @@ export interface ExecutionContext {
    *   2. `ctx.config.taskConfig[<moduleId>][<key>]` — persisted overrides
    *   3. `ctx.config.taskConfig[<moduleId>][<lowercased-key>]`
    * Returns `undefined` on miss. Replaces the duplicated "read
-   * `THREAT_HUNT_PROMPT` from the module, `promptOverride` from the task"
+   * `CARLINI_THREAT_HUNT_PROMPT` from the module, `promptOverride` from the task"
    * pattern that exists across every task-wrapping module today.
    *
    * Optional because some test paths don't populate the host fallback
@@ -374,10 +375,10 @@ export interface ExecutionContext {
    * Report per-sub-agent activity to the bus as a `${moduleId}:agent-activity`
    * event (formally typed by `TaskAgentActivityEvent`). The orchestrator and
    * report-worker subscribe to the template-literal pattern so every module
-   * that fans out sub-agents (threat-hunt, verify, poc-harness, triage, …)
+   * that fans out sub-agents (carlini-threat-hunt, verify, poc-harness, triage, …)
    * gets identical UI plumbing for free.
    *
-   * `fingerprint` is a stable per-row id (e.g. an actor name for threat-hunt,
+   * `fingerprint` is a stable per-row id (e.g. an actor name for carlini-threat-hunt,
    * a finding id for verify). `kind: "tool-complete"` with `meta.done: true`
    * tells the UI to drop the row from its active-agents map.
    */
@@ -426,6 +427,13 @@ export interface ModuleTool {
     resume: "checkpoint" | "restart-only" | "none";
     liveControl?: "pause-resume";
     pipelineTasks?: "any" | string[];
+    /**
+     * Controls whether the shell/run-mode DagTool wrapper should inject the
+     * default context-gatherer/enricher stages around this single task. Most
+     * scanners keep the default; tasks that already consume persisted
+     * artifacts can opt out.
+     */
+    pipelineContext?: "default" | "none";
   };
   // --- Optional display hooks (shell rendering) ---
   /**
@@ -474,15 +482,10 @@ export interface ModuleTool {
 // ---------------------------------------------------------------------------
 
 /**
- * Pipeline-only spec for a `DagTool`. Mirrors the fields formerly declared on
- * `AgentTask` (dependsOn / outputKind / condition / promptMode / toolPolicy /
- * triageAgentConfig) so the bridge at `src/modules/dag-bridge.ts` can adapt
- * a DagTool into an AgentTask for the orchestrator's existing TaskRegistry
- * plumbing.
+ * Pipeline-only spec for a `DagTool`.
  *
  * All string references in `dependsOn` are **qualified tool names**
- * (`"threat-model-randori:build"`), not bare task ids. The bridge rewrites
- * these back to bare ids when populating the TaskRegistry during migration.
+ * (`"threat-model:threat-model-randori"`), not bare task ids.
  */
 export interface DagToolSpec {
   outputKind: OutputKind;
@@ -516,9 +519,8 @@ export interface DagToolSpec {
  * explicit rather than a `.upstreamOutputs` on undefined.
  *
  * DagTools use a separate `run()` method (returning the typed output) rather
- * than `execute()` (returning `ToolResult`). The bridge wraps `run` into the
- * `execute` contract for shell/run-mode invocations, converting the output
- * via the module's `outputKind` (e.g. `Finding[]` → `ToolResult.data`).
+ * than `execute()` (returning `ToolResult`). The module registry installs the
+ * shell/run `execute()` wrapper for visible DagTools.
  */
 export interface DagTool<Id extends string = string, TI = unknown, TO = unknown>
   extends ModuleTool {
@@ -530,7 +532,7 @@ export interface DagTool<Id extends string = string, TI = unknown, TO = unknown>
 /**
  * Structural guard — returns true when a `ModuleTool` carries a `dag` spec.
  * Used by `ModuleRegistry.loadModule` to auto-register DagTools into the
- * shared TaskRegistry, and by the shell/search UI to distinguish "DAG
+ * shared DagRegistry, and by the shell/search UI to distinguish "DAG
  * participant" from "interactive-only" tools.
  */
 export function isDagTool(tool: ModuleTool): tool is DagTool {
@@ -623,7 +625,7 @@ export interface ModuleContext {
  *
  * Each module exposes:
  * - **tools**: callable from shell (NL dispatch), run mode (headless), or as agent tools
- * - **tasks**: AgentTasks for DAG pipeline execution (optional)
+ * - **tools**: DagTools for DAG pipeline execution when they include a `dag` block
  * - **knowledge**: domain-specific vuln knowledge for triage/detection (optional)
  * - **events**: bus events this module produces/consumes (optional)
  *

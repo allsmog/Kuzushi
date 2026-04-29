@@ -3,7 +3,7 @@ import { coerceRepoContext } from "../../../repo-context.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { RepoContext, ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
-import type { AgentTask } from "../../types.js";
+import type { DagNodeImpl } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
 import {
   INVARIANT_EXTRACT_SCHEMA,
@@ -139,7 +139,7 @@ function normalizeUnitNumber(value: unknown): number {
   return Math.max(0, Math.min(1, numeric));
 }
 
-export const invariantExtractTask: AgentTask<ScanOpts, InvariantDocument> = {
+export const invariantExtractTask: DagNodeImpl<ScanOpts, InvariantDocument> = {
   id: "invariant-extract",
   displayName: "Invariant Extraction",
   outputKind: "custom",

@@ -691,7 +691,7 @@ export function registerReportWorker(
       summary?: string;
       fingerprint?: string;
       /**
-       * Only set by `threat-hunt:agent-activity` producers. Signals the actor
+       * Only set by `carlini-threat-hunt:agent-activity` producers. Signals the actor
        * hunt has finished — drop the fingerprint from the UI's active-agents
        * map so its row disappears from `HeartbeatStrip` as each actor
        * completes, rather than all at once when the whole task ends.
@@ -707,7 +707,7 @@ export function registerReportWorker(
       // post-mortem block after the hunt returns (HeartbeatStrip only
       // lives during the `running` phase; without this archive step the
       // breakdown would be unrecoverable once the tool resolves).
-      // Currently only threat-hunt producers set `done: true`, so the
+      // Currently only carlini-threat-hunt producers set `done: true`, so the
       // other handlers fall through to the no-op branch unchanged.
       store.archiveAgentActivity(fingerprint);
       store.clearAgentActivity(fingerprint);
@@ -770,7 +770,7 @@ export function registerReportWorker(
   bus.subscribe<TaskAgentActivityEvent>("triage:agent-activity", handleAgentActivity);
   bus.subscribe<TaskAgentActivityEvent>("verification:agent-activity", handleAgentActivity);
   bus.subscribe<TaskAgentActivityEvent>("poc-harness:agent-activity", handleAgentActivity);
-  bus.subscribe<TaskAgentActivityEvent>("threat-hunt:agent-activity", handleAgentActivity);
+  bus.subscribe<TaskAgentActivityEvent>("carlini-threat-hunt:agent-activity", handleAgentActivity);
 
   // Scan-time agent activity — keyed by taskId (not fingerprint)
   bus.subscribe<ScanAgentActivityEvent>("scan:agent-activity", (event) => {
@@ -1403,7 +1403,7 @@ function scanTaskStartDetail(taskId: string): string {
       return "enriching context";
     case "threat-model-randori":
       return "modeling threats";
-    case "threat-hunt":
+    case "carlini-threat-hunt":
       return "analyzing threats from attack surface";
     default:
       return "preparing task";

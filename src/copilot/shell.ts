@@ -698,6 +698,8 @@ function seedFocusedModuleRun(
   startedAtMs: number,
   inputSummary?: string,
   model?: string,
+  effort?: string,
+  thinkingDisabled?: boolean,
 ): void {
   if (!store) return;
   const moduleId = moduleIdFromToolName(tool.name);
@@ -722,6 +724,10 @@ function seedFocusedModuleRun(
           : {}),
         ...(tool.runLifecycle?.liveControl ? { liveControl: tool.runLifecycle.liveControl } : {}),
         ...((model ?? existing?.model) ? { model: model ?? existing?.model } : {}),
+        ...((effort ?? existing?.effort) ? { effort: effort ?? existing?.effort } : {}),
+        ...((thinkingDisabled ?? existing?.thinkingDisabled) !== undefined
+          ? { thinkingDisabled: thinkingDisabled ?? existing?.thinkingDisabled }
+          : {}),
         startedAtMs: existing?.startedAtMs ?? startedAtMs,
         status: "running",
         steps: existing?.steps ?? [],
@@ -740,9 +746,20 @@ function seedCheckpointModuleRun(
   startedAtMs: number,
   inputSummary?: string,
   model?: string,
+  effort?: string,
+  thinkingDisabled?: boolean,
 ): void {
   if (!store || tool.runLifecycle?.persistence !== "pipeline-checkpoint") return;
-  seedFocusedModuleRun(store, shellState, tool, startedAtMs, inputSummary, model);
+  seedFocusedModuleRun(
+    store,
+    shellState,
+    tool,
+    startedAtMs,
+    inputSummary,
+    model,
+    effort,
+    thinkingDisabled,
+  );
 }
 
 function patchCheckpointModuleRunTerminal(
@@ -1270,6 +1287,18 @@ function readStoredModelOption(options: Record<string, unknown>): string | undef
   const modelKey = Object.keys(options).find((key) => key.toUpperCase() === "MODEL");
   const value = modelKey ? options[modelKey] : undefined;
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function readStoredEffortOption(options: Record<string, unknown>): string | undefined {
+  const value = options["effort"];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function readStoredThinkingDisabledOption(options: Record<string, unknown>): boolean | undefined {
+  const thinking = options["thinking"];
+  if (typeof thinking === "boolean") return !thinking;
+  const thinkingDisabled = options["thinkingDisabled"];
+  return typeof thinkingDisabled === "boolean" ? thinkingDisabled : undefined;
 }
 
 function stripSyntheticModelOptionFromInput(
@@ -6571,6 +6600,8 @@ async function executeResumeTool(
     Date.now(),
     `resume ${runId}`,
     modelDatastore.datastore?.get<string>("model"),
+    readStoredEffortOption(input),
+    readStoredThinkingDisabledOption(input),
   );
   const result = await core.executeTool(tool.name, toolInput, {
     cwd: /^[a-z][a-z0-9+.-]*:\/\//i.test(target) ? process.cwd() : path.resolve(target),
@@ -6723,6 +6754,8 @@ function resolveToolExecution(
         Date.now(),
         inputSummary,
         modelDatastore.datastore?.get<string>("model"),
+        readStoredEffortOption(mergedArgs),
+        readStoredThinkingDisabledOption(mergedArgs),
       );
 
       const result = await core.executeTool(finalToolName, toolInput, {
@@ -6768,7 +6801,21 @@ function getContextRequirementError(
 ): string | undefined {
   if (!CONTEXT_REQUIRED_TOOLS.has(toolName)) return undefined;
   const snapshot = shellState.contextSnapshot;
+  const inputTarget =
+    typeof input.target === "string" && input.target.trim() ? input.target : undefined;
+  const target = inputTarget ?? opts.target ?? snapshot?.target;
+  const persistentThreatModel =
+    target && !/^[a-z][a-z0-9+.-]*:\/\//i.test(target)
+      ? loadPersistentThreatModel(path.resolve(target))
+      : null;
+
   if (!snapshot) {
+    if (toolName === "carlini-threat-hunt:run" && persistentThreatModel) {
+      return undefined;
+    }
+    if (toolName === "carlini-threat-hunt:run") {
+      return `Threat model required for ${toolName}. Run /use threat-model, then run .`;
+    }
     if (toolName === "taint-iris-next:hunt") {
       return `Context required for ${toolName}. Run /context, then /threats regen dfd.`;
     }
@@ -6779,16 +6826,9 @@ function getContextRequirementError(
   const needsThreatModel =
     toolName === "carlini-threat-hunt:run" || toolName === "taint-iris-next:hunt";
   const needsAppModel =
-    needsThreatModel || toolName === "taint-iris:hunt" || toolName === "sast:taint-iris";
-
-  const target =
-    typeof input.target === "string" && input.target.trim()
-      ? input.target
-      : (opts.target ?? snapshot.target);
-  const persistentThreatModel =
-    target && !/^[a-z][a-z0-9+.-]*:\/\//i.test(target)
-      ? loadPersistentThreatModel(path.resolve(target))
-      : null;
+    toolName === "taint-iris-next:hunt" ||
+    toolName === "taint-iris:hunt" ||
+    toolName === "sast:taint-iris";
   const hasThreatModel = !!(shellState.threatModel ?? persistentThreatModel);
 
   if (needsThreatModel && !hasThreatModel) {
@@ -6826,6 +6866,8 @@ function resolveOptionsTool(
   }
 
   if (focusedModule && !lastUsedTool.startsWith(`${focusedModule}:`)) {
+    const fallbackToolName = pickDefaultToolName(core, focusedModule);
+    if (fallbackToolName) return { ok: true, toolName: fallbackToolName };
     return {
       ok: false,
       output: `No active tool selected for ${focusedModule}. Use /options <tool> first.`,
@@ -7761,11 +7803,12 @@ function formatBackendSlots(
     | {
         claude?: { apiKey?: string; baseUrl?: string };
         piAi?: { apiKey?: string; baseUrl?: string };
+        codex?: { apiKey?: string; baseUrl?: string };
       }
     | undefined,
 ): string[] {
   const out: string[] = [];
-  for (const slot of ["claude", "piAi"] as const) {
+  for (const slot of ["claude", "piAi", "codex"] as const) {
     const s = cfg?.[slot];
     if (s && (s.apiKey || s.baseUrl)) {
       out.push(
@@ -7785,7 +7828,7 @@ function formatBackendSlots(
       continue;
     }
     out.push(
-      `  ${slot.padEnd(6)} (unset — run /backend ${slot === "piAi" ? "pi-ai" : "claude"} then /auth)`,
+      `  ${slot.padEnd(6)} (unset — run /backend ${slot === "piAi" ? "pi-ai" : slot} then /auth)`,
     );
   }
   return out;
@@ -7798,11 +7841,17 @@ function formatBackendSlots(
  * see a misleading "unset" status.
  */
 function probeEnvCredsForSlot(
-  slot: "claude" | "piAi",
+  slot: "claude" | "piAi" | "codex",
 ): { apiKey?: string; baseUrl?: string } | null {
   if (slot === "claude") {
     const apiKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
     const baseUrl = process.env.ANTHROPIC_BASE_URL;
+    if (apiKey || baseUrl) return { apiKey, baseUrl };
+    return null;
+  }
+  if (slot === "codex") {
+    const apiKey = process.env.OPENAI_API_KEY;
+    const baseUrl = process.env.OPENAI_BASE_URL;
     if (apiKey || baseUrl) return { apiKey, baseUrl };
     return null;
   }
@@ -7950,19 +7999,18 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
         const persisted = loadConfig().agentRuntimeBackend ?? "pi-ai";
         const lines = [`Shell backend (live): ${current}`, `Persisted backend:    ${persisted}`];
         if (persisted !== current) {
-          lines.push(
-            `(Swapped for this session because "${persisted}" doesn't support interactive shell.)`,
-          );
+          lines.push("(This shell is using a per-session backend override.)");
         }
         lines.push("", "Credentials (per backend):");
         lines.push(...formatBackendSlots(opts.config.agentRuntimeConfig));
         lines.push(
           "",
-          "Available: pi-ai (default, 20+ providers), claude (legacy CC subprocess)",
+          "Available: pi-ai (default, 20+ providers), claude (legacy CC subprocess), codex",
           "Usage:",
           "  /backend show           Show current + persisted backend + credentials",
           "  /backend pi-ai          Use pi-ai — multi-provider, in-process (recommended)",
           "  /backend claude         Use Claude Code SDK — Anthropic only, subprocess-per-task",
+          "  /backend codex          Use Codex SDK — OpenAI/Codex models",
           "",
           "For provider/model selection, use /provider instead.",
           `Persists to ${configPath()}.`,
@@ -7972,11 +8020,11 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
     };
   }
 
-  if (sub !== "claude" && sub !== "pi-ai") {
-    const suggestion = closestBackend(sub, ["claude", "pi-ai"]);
+  if (sub !== "claude" && sub !== "pi-ai" && sub !== "codex") {
+    const suggestion = closestBackend(sub, ["claude", "pi-ai", "codex"]);
     const hint = suggestion ? ` Did you mean "${suggestion}"?` : "";
     return {
-      output: `Unknown backend "${sub}".${hint} Available: claude, pi-ai. Run /backend show for help.`,
+      output: `Unknown backend "${sub}".${hint} Available: claude, pi-ai, codex. Run /backend show for help.`,
     };
   }
 
@@ -7997,12 +8045,14 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
       const note =
         sub === "claude"
           ? "Shell sessions and future `kuzushi scan ...` runs will use claude. Restart the shell to pick up the change."
-          : "Shell sessions and future `kuzushi scan ...` runs will use pi-ai. Restart the shell to pick up the change.";
+          : sub === "codex"
+            ? "Shell sessions and future `kuzushi scan ...` runs will use codex. Restart the shell to pick up the change."
+            : "Shell sessions and future `kuzushi scan ...` runs will use pi-ai. Restart the shell to pick up the change.";
       const lines = [`Backend persisted as "${sub}" in ${configPath()}.`, note];
       // Each backend has its own credential slot now, so switching can't leak
       // creds between backends. Just hint when the new slot is empty so the
       // operator knows to /auth.
-      const slot = sub === "pi-ai" ? "piAi" : "claude";
+      const slot = sub === "pi-ai" ? "piAi" : sub;
       const slotCreds = opts.config.agentRuntimeConfig?.[slot];
       if (!slotCreds || (!slotCreds.apiKey && !slotCreds.baseUrl)) {
         lines.push(

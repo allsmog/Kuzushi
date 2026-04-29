@@ -24,12 +24,9 @@ All three converge on `CopilotCore.executeTool(...)` and the
 exposes one or more `ModuleTool`s. DAG participants are `DagTool`s — a
 narrow extension of `ModuleTool` with a `dag` block (`outputKind`,
 `dependsOn`, optional `condition`/`promptMode`/`toolPolicy`/
-`triageAgentConfig`). The legacy `AgentTask` type still exists as an
-internal adapter shape but is no longer an authoring surface — new DAG
-nodes go on a module via `defineDagTool` (visible) or
-`exposeAgentTaskAsHiddenDagTool` (hidden infrastructure). The bridge at
-`src/modules/dag-bridge.ts` turns these into `AgentTask` adapters so the
-orchestrator's `TaskRegistry` sees them without authors needing to know.
+`triageAgentConfig`). `DagTool` is the DAG execution contract: scan-mode
+registration stores module-owned `DagTool`s in `DagRegistry`, and workers call
+`DagTool.run(input, ExecutionContext)` with `ctx.dag` populated.
 
 ### Key files
 
@@ -40,9 +37,8 @@ orchestrator's `TaskRegistry` sees them without authors needing to know.
   `HostInfo`) exposed via `ExecutionContext`.
 - `src/modules/define.ts` — `defineModule`/`defineTool`/`defineDagTool`
   authoring helpers with compile-time tool-name-prefix enforcement.
-- `src/modules/dag-bridge.ts` — `exposeAgentTaskAsHiddenDagTool` helper
-  plus the `registerDagToolsInTaskRegistry` bridge that auto-populates
-  the orchestrator's `TaskRegistry` from a module's `tools[]`.
+- `src/modules/dag-registry.ts` — native `DagTool` registry and DAG ordering.
+- `src/modules/hidden-dag-node.ts` — helper for hidden built-in DAG nodes.
 - `src/modules/errors.ts` — `ModuleLoadError` with `code` discriminator.
 - `src/modules/loader.ts` — Zod-backed manifest validation + shape checks;
   enforces tool-name prefix and duplicate-name rejection.
@@ -77,7 +73,7 @@ orchestrator's `TaskRegistry` sees them without authors needing to know.
 - If you add DAG-participating modules, include tests around dependency
   ordering (see `tests/modules/` + `tests/bus/orchestrator.test.ts`).
 - Scan-mode bootstrap lives in `src/agents/index.ts`
-  (`createDefaultTaskRegistry`). New built-in modules that contribute DAG
+  (`createDefaultDagRegistry`). New built-in modules that contribute DAG
   nodes must be added to that factory's module list so the scan CLI sees
   their tasks without needing full CopilotCore init.
 

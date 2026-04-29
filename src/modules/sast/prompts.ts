@@ -2,7 +2,7 @@
  * Shared helper for resolving operator-overridable agent prompts.
  *
  * The pattern: each agentic sub-module (`triage`, `verify`, `patch`,
- * `threat-hunt`, `agentic-sast`, `context`) registers an advanced `*_PROMPT`
+ * `carlini-threat-hunt`, `agentic-sast`, `context`) registers an advanced `*_PROMPT`
  * option via `Opt.string`. Operators set it via `set TRIAGE_PROMPT ./mine.md`
  * or `setg TRIAGE_PROMPT "inline text"`, then `run` picks it up and threads
  * it into the task config as `promptOverride`.
@@ -21,7 +21,7 @@ export const PROMPT_OPTION_KEYS = [
   "TRIAGE_PROMPT",
   "VERIFY_PROMPT",
   "PATCH_PROMPT",
-  "THREAT_HUNT_PROMPT",
+  "CARLINI_THREAT_HUNT_PROMPT",
   "CONTEXT_PROMPT",
 ] as const;
 

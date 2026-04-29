@@ -30,7 +30,7 @@ export const CONFIG_KEY_DOCS: ConfigKeyDoc[] = [
     type: "enum",
     summary: "Which agent runtime drives LLM calls.",
     default: "pi-ai",
-    values: ["pi-ai", "claude"],
+    values: ["pi-ai", "claude", "codex"],
   },
   {
     key: "agentRuntimeConfig.apiKey",

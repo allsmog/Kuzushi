@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentRuntime } from "../../src/agent-runtime/types.js";
-import { TaskRegistry } from "../../src/agents/registry.js";
-import type { AgentTask } from "../../src/agents/types.js";
+import type { DagNodeImpl } from "../../src/agents/types.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import type {
   PipelineCompleteEvent,
@@ -12,6 +11,7 @@ import { createEvent, generateRunId } from "../../src/bus/helpers.js";
 import { registerOrchestrator } from "../../src/bus/orchestrator.js";
 import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
 import { registerStoreWorker } from "../../src/bus/workers/store-worker.js";
+import { DagRegistry } from "../../src/modules/dag-registry.js";
 import type { Finding } from "../../src/scanners/types.js";
 import { createRun, getRun, initDb } from "../../src/store.js";
 import type { KuzushiConfig, ScanOpts, TriageResult } from "../../src/types.js";
@@ -75,8 +75,8 @@ describe("run metrics persistence", () => {
     const db = initDb(":memory:");
     const config = makeConfig();
 
-    const taskRegistry = new TaskRegistry();
-    taskRegistry.register({
+    const dagRegistry = new DagRegistry();
+    dagRegistry.register({
       id: "semgrep",
       displayName: "Semgrep",
       outputKind: "findings",
@@ -84,10 +84,10 @@ describe("run metrics persistence", () => {
       async run() {
         return [makeFinding()];
       },
-    } as AgentTask<any, any>);
+    } as DagNodeImpl<any, any>);
 
-    registerScanWorker(bus, { taskRegistry, config, runtime: {} as AgentRuntime });
-    registerOrchestrator(bus, { taskRegistry, db, runtime: {} as AgentRuntime });
+    registerScanWorker(bus, { dagRegistry, config, runtime: {} as AgentRuntime });
+    registerOrchestrator(bus, { dagRegistry, db, runtime: {} as AgentRuntime });
     registerStoreWorker(bus, { db });
 
     bus.subscribe<TriageBatchQueuedEvent>("triage:batch-queued", async (event) => {

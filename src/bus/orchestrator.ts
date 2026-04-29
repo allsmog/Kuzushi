@@ -1,16 +1,16 @@
 import type Database from "better-sqlite3";
-import { normalizeTaskIds } from "../agents/registry.js";
 import { callGraphAssistTask } from "../agents/tasks/call-graph-assist.js";
 import { chainAnalysisTask } from "../agents/tasks/chain-analysis.js";
 import { reachabilityCheckTask } from "../agents/tasks/reachability-check.js";
 import { resolveStageModel } from "../agents/tasks/runtime-overrides.js";
 import { SELECTABLE_TASK_IDS } from "../agents/tasks/task-selector.js";
-import type { AgentTask, TaskContext as AgentTaskContext } from "../agents/types.js";
+import type { DagRunContext as AgentDagRunContext, DagNodeImpl } from "../agents/types.js";
 import { normalizeTaskCapabilityIds, resolveCapabilityConfigKey } from "../capabilities.js";
 import { PipelineHookChain } from "../hooks/chain.js";
 import { loadHooksFromFile } from "../hooks/loader.js";
 import type { HookContext } from "../hooks/types.js";
 import { getLogger } from "../logger.js";
+import { normalizeDagIds } from "../modules/dag-registry.js";
 import { loadPrecedents } from "../precedents.js";
 import { evaluateQualityGates, type QualityGateResult } from "../quality-gate.js";
 import { coerceContextEnrichment, coerceRepoContext } from "../repo-context.js";
@@ -133,6 +133,9 @@ function hasMultiStrategyEvidence(finding: Finding): boolean {
   );
 }
 const log = getLogger("orchestrator");
+const CONTEXT_GATHERER_ID = "context:context-gatherer";
+const CONTEXT_ENRICHER_ID = "context:context-enricher";
+const TASK_SELECTOR_ID = "pipeline:task-selector";
 
 /** CWE classes that are auth/logic bugs — not pattern-matchable by Semgrep. Skip rule gen. */
 const SKIP_RULE_GEN_CWES = new Set(["285", "862", "863", "639", "284", "269", "915"]);
@@ -320,7 +323,10 @@ export class PipelineOrchestrator {
     const runId = event.meta.runId;
     const { context, config, scanOpts, resumeRunId, seedTaskOutputs } = event.payload;
 
-    const tasks = normalizeTaskIds(scanOpts.tasks ?? config.tasks ?? ["semgrep"]);
+    const tasks = normalizeDagIds(
+      scanOpts.tasks ?? config.tasks ?? ["semgrep"],
+      this.deps.dagRegistry,
+    );
 
     const state: RunState = {
       context,
@@ -836,7 +842,7 @@ export class PipelineOrchestrator {
   private async runTaskDag(state: RunState, runId: string): Promise<void> {
     let taskPlan: ReturnType<typeof resolveInitialTaskPlan>;
     try {
-      taskPlan = resolveInitialTaskPlan(this.deps.taskRegistry, state.tasks, state.config, {
+      taskPlan = resolveInitialTaskPlan(this.deps.dagRegistry, state.tasks, state.config, {
         disabledTasks: state.scanOpts.disabledTasks,
       });
     } catch (error) {
@@ -861,7 +867,7 @@ export class PipelineOrchestrator {
 
     // Track already-completed tasks for dynamic re-resolution
     const completedTaskIds = new Set<string>(
-      [...state.taskOutputs.keys()].filter((taskId) => this.deps.taskRegistry!.has(taskId)),
+      [...state.taskOutputs.keys()].filter((taskId) => this.deps.dagRegistry!.has(taskId)),
     );
     const taskRetryCount = new Map<string, number>();
     const dynamicTasksProcessed = new Set<string>();
@@ -869,7 +875,7 @@ export class PipelineOrchestrator {
 
     let stages: string[][];
     try {
-      stages = resolveOrderWithPolicyEdges(this.deps.taskRegistry, enabledTaskIds);
+      stages = resolveOrderWithPolicyEdges(this.deps.dagRegistry, enabledTaskIds);
     } catch (error) {
       await this.bus.publish(
         createEvent("pipeline:error", runId, {
@@ -908,7 +914,7 @@ export class PipelineOrchestrator {
       const tasksToRun: string[] = [];
       const tasksToSkip: string[] = [];
       for (const taskId of pendingGroup) {
-        const task = this.deps.taskRegistry.get(taskId);
+        const task = this.deps.dagRegistry.get(taskId);
         if (task.condition && !task.condition(state.taskOutputs, state.config)) {
           tasksToSkip.push(taskId);
         } else {
@@ -944,7 +950,7 @@ export class PipelineOrchestrator {
       const outcomes = tasksToRun.map((taskId) => this.waitForTaskOutcome(runId, taskId));
 
       for (const taskId of tasksToRun) {
-        const task = this.deps.taskRegistry.get(taskId);
+        const task = this.deps.dagRegistry.get(taskId);
         await this.bus.publish(
           createEvent("task:start", runId, {
             context: state.context,
@@ -971,7 +977,7 @@ export class PipelineOrchestrator {
         const retryIds = retryableFailures
           .map((f) => f.event.payload.taskId)
           .filter(
-            (id) => id !== "task-selector" && (taskRetryCount.get(id) ?? 0) < MAX_TASK_RETRIES,
+            (id) => id !== TASK_SELECTOR_ID && (taskRetryCount.get(id) ?? 0) < MAX_TASK_RETRIES,
           );
         if (retryIds.length === 0) break;
 
@@ -982,7 +988,7 @@ export class PipelineOrchestrator {
 
         const retryOutcomes = retryIds.map((taskId) => this.waitForTaskOutcome(runId, taskId));
         for (const taskId of retryIds) {
-          const task = this.deps.taskRegistry!.get(taskId);
+          const task = this.deps.dagRegistry!.get(taskId);
           await this.bus.publish(
             createEvent("task:start", runId, {
               context: state.context,
@@ -1024,7 +1030,7 @@ export class PipelineOrchestrator {
       // Determine if the actually-dispatched tasks include findings producers
       // (exclude condition-skipped tasks — their absence is intentional)
       const stageHasFindingsProducers = tasksToRun.some((taskId) => {
-        const task = this.deps.taskRegistry!.get(taskId);
+        const task = this.deps.dagRegistry!.get(taskId);
         return task.outputKind === "findings" || task.outputKind === "threat-model";
       });
 
@@ -1092,26 +1098,29 @@ export class PipelineOrchestrator {
         );
         if (dynamicTasks.length > 0) {
           // Resolve capability IDs (e.g. "taint-analysis") to task IDs (e.g. "taint-cwe-select", "taint-iris")
-          const resolved = normalizeTaskCapabilityIds(dynamicTasks);
+          const resolved = normalizeDagIds(
+            normalizeTaskCapabilityIds(dynamicTasks),
+            this.deps.dagRegistry,
+          );
           const newTaskIds = resolved.filter(
             (id) =>
               !enabledTaskIds.includes(id) &&
-              this.deps.taskRegistry!.has(id) &&
+              this.deps.dagRegistry!.has(id) &&
               !disabledTaskIds.has(id),
           );
 
           if (newTaskIds.length > 0) {
             log.info(`Dynamic task selection added: ${newTaskIds.join(", ")}`);
-            const candidateIds = injectThreatModelPolicyCandidates(this.deps.taskRegistry, [
+            const candidateIds = injectThreatModelPolicyCandidates(this.deps.dagRegistry, [
               ...enabledTaskIds,
-              ...collectTransitiveDeps(this.deps.taskRegistry, newTaskIds).filter(
+              ...collectTransitiveDeps(this.deps.dagRegistry, newTaskIds).filter(
                 (id) => !enabledTaskIds.includes(id),
               ),
             ]).filter((id) => !disabledTaskIds.has(id));
 
             // Re-resolve remaining stages — only commit enabledTaskIds on success
             try {
-              const fullStages = resolveOrderWithPolicyEdges(this.deps.taskRegistry, candidateIds);
+              const fullStages = resolveOrderWithPolicyEdges(this.deps.dagRegistry, candidateIds);
               enabledTaskIds = candidateIds;
               // Replace remaining stages — skip stages already completed
               const remaining = fullStages
@@ -1129,32 +1138,32 @@ export class PipelineOrchestrator {
       // non-failed selectable tasks are enabled, re-add all selectable tasks so
       // the pipeline doesn't produce zero detection results.
       if (dynamicSelectionActive && !taskSelectorFallbackApplied) {
-        const selectorSettled = completedTaskIds.has("task-selector");
+        const selectorSettled = completedTaskIds.has(TASK_SELECTOR_ID);
         const hasSelectableTasks = enabledTaskIds.some(
           (id) => SELECTABLE_TASK_IDS.has(id) && !state.failedTasks.includes(id),
         );
 
         if (selectorSettled && !hasSelectableTasks) {
-          const selectorFailed = state.failedTasks.includes("task-selector");
+          const selectorFailed = state.failedTasks.includes(TASK_SELECTOR_ID);
           const reason = selectorFailed ? "failed" : "recommended no selectable tasks";
           const fallbackIds = [...SELECTABLE_TASK_IDS].filter(
             (id) =>
               !enabledTaskIds.includes(id) &&
-              this.deps.taskRegistry!.has(id) &&
+              this.deps.dagRegistry!.has(id) &&
               !disabledTaskIds.has(id),
           );
           if (fallbackIds.length > 0) {
             log.warn(
               `task-selector ${reason} — falling back to all selectable tasks: ${fallbackIds.join(", ")}`,
             );
-            const candidateIds = injectThreatModelPolicyCandidates(this.deps.taskRegistry, [
+            const candidateIds = injectThreatModelPolicyCandidates(this.deps.dagRegistry, [
               ...enabledTaskIds,
-              ...collectTransitiveDeps(this.deps.taskRegistry, fallbackIds).filter(
+              ...collectTransitiveDeps(this.deps.dagRegistry, fallbackIds).filter(
                 (id) => !enabledTaskIds.includes(id),
               ),
             ]).filter((id) => !disabledTaskIds.has(id));
             try {
-              const fullStages = resolveOrderWithPolicyEdges(this.deps.taskRegistry, candidateIds);
+              const fullStages = resolveOrderWithPolicyEdges(this.deps.dagRegistry, candidateIds);
               enabledTaskIds = candidateIds;
               taskSelectorFallbackApplied = true;
               const remaining = fullStages
@@ -1186,12 +1195,12 @@ export class PipelineOrchestrator {
       }
     }
 
-    const gatheredContext = coerceRepoContext(state.taskOutputs.get("context-gatherer"));
+    const gatheredContext = coerceRepoContext(state.taskOutputs.get(CONTEXT_GATHERER_ID));
     if (gatheredContext) {
       state.repoContext = gatheredContext;
     }
 
-    const enrichedContext = coerceContextEnrichment(state.taskOutputs.get("context-enricher"));
+    const enrichedContext = coerceContextEnrichment(state.taskOutputs.get(CONTEXT_ENRICHER_ID));
     if (enrichedContext) {
       state.enrichedRepoContext = enrichedContext;
     }
@@ -1292,7 +1301,7 @@ export class PipelineOrchestrator {
         processedTaskIds.add(taskId);
       }
     }
-    return normalizeTaskIds(dynamicTasks);
+    return normalizeDagIds(dynamicTasks, this.deps.dagRegistry);
   }
 
   private waitForTaskOutcome(runId: string, taskId: string): Promise<TaskOutcome> {
@@ -1645,7 +1654,7 @@ export class PipelineOrchestrator {
     runId: string;
     taskId: string;
     detail?: string;
-    task: AgentTask;
+    task: DagNodeImpl;
     input: Finding[];
   }): Promise<Finding[]> {
     const { state, runId, taskId, detail, task, input } = args;
@@ -1663,7 +1672,7 @@ export class PipelineOrchestrator {
     );
 
     try {
-      const taskContext: AgentTaskContext = {
+      const taskContext: AgentDagRunContext = {
         runId,
         projectRoot: state.context.repoRoot,
         workRoot: state.context.scanPath ?? state.context.repoRoot,
@@ -2057,7 +2066,7 @@ export class PipelineOrchestrator {
       "verification:agent-activity",
       "poc-harness:agent-activity",
       "dynamic:agent-activity",
-      "threat-hunt:agent-activity",
+      "carlini-threat-hunt:agent-activity",
       // Triage assertions are informational quality scoring; a DB error
       // in their persistence path must never tear down the run.
       "triage:assertions",
@@ -2272,7 +2281,7 @@ export class PipelineOrchestrator {
           }),
         );
         try {
-          const taskContext: AgentTaskContext = {
+          const taskContext: AgentDagRunContext = {
             runId,
             projectRoot: state.context.repoRoot,
             workRoot: state.context.scanPath ?? state.context.repoRoot,

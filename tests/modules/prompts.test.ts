@@ -62,7 +62,7 @@ describe("PROMPT_OPTION_KEYS", () => {
     expect(PROMPT_OPTION_KEYS).toContain("TRIAGE_PROMPT");
     expect(PROMPT_OPTION_KEYS).toContain("VERIFY_PROMPT");
     expect(PROMPT_OPTION_KEYS).toContain("PATCH_PROMPT");
-    expect(PROMPT_OPTION_KEYS).toContain("THREAT_HUNT_PROMPT");
+    expect(PROMPT_OPTION_KEYS).toContain("CARLINI_THREAT_HUNT_PROMPT");
     expect(PROMPT_OPTION_KEYS).toContain("CONTEXT_PROMPT");
   });
 });

@@ -1,4 +1,4 @@
-import type { TaskContext } from "../agents/types.js";
+import type { DagRunContext } from "../agents/types.js";
 import { createLogger } from "../logger.js";
 import { toErrorMessage } from "../utils.js";
 import type { CweStrategyProfile } from "./cwe-strategy-map.js";
@@ -39,7 +39,7 @@ export function resolveStrategyBudget(config: Record<string, unknown>): Strategy
 /** Execute strategies for a CWE profile according to mode. */
 export async function executeStrategies(
   profile: CweStrategyProfile,
-  context: TaskContext,
+  context: DagRunContext,
   registry: StrategyRegistry,
   mode: MultiStrategyMode,
   baseInput: Omit<StrategyInput, "budgetUsd">,

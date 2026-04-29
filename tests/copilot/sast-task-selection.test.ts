@@ -70,8 +70,9 @@ describe("SAST task selection summary", () => {
   });
 
   it("resolves task ids and display ids to known row capabilities", () => {
-    expect(resolveSastTaskCapability("ssrf-detect")?.id).toBe("ssrf");
-    expect(resolveSastTaskCapability("context-gatherer")?.toggleable).toBe(false);
+    expect(resolveSastTaskCapability("agentic-sast:ssrf-detect")?.id).toBe("ssrf");
+    expect(resolveSastTaskCapability("ssrf")?.id).toBe("ssrf");
+    expect(resolveSastTaskCapability("context:context-gatherer")?.toggleable).toBe(false);
     expect(resolveSastTaskCapability("not-real")).toBeUndefined();
   });
 });

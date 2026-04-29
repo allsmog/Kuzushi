@@ -28,7 +28,7 @@ const TASK_COST_ESTIMATE: Record<string, number> = {
   "deserialization-detect": 0.75,
   "auth-logic-detect": 0.85,
   "threat-model-randori": 0.6,
-  "threat-hunt": 0.9,
+  "carlini-threat-hunt": 0.9,
   "sharp-edges-detect": 0.5,
   "taint-iris": 1.5,
 };

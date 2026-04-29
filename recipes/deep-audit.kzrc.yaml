@@ -8,7 +8,7 @@ commands:
   - use randori
   - run
   - back
-  - use threat-hunt
+  - use carlini-threat-hunt
   - run
   - back
   - use agentic-sast

@@ -63,19 +63,27 @@ describe("resume selection", () => {
     );
   });
 
-  it("matches legacy task metadata for sast, semgrep, and threat-hunt tools", () => {
+  it("matches legacy task metadata for sast, semgrep, and carlini-threat-hunt tools", () => {
     const sast = tool("sast:scan", "any");
     const semgrep = tool("semgrep:scan", ["semgrep"]);
-    const threatHunt = tool("threat-hunt:run", ["threat-hunt"]);
+    const carliniThreatHunt = tool("carlini-threat-hunt:run", ["carlini-threat-hunt"]);
 
     expect(runMatchesTool(run("run-1", "triaging", ["semgrep"]), "sast", sast)).toBe(true);
     expect(runMatchesTool(run("run-2", "triaging", ["semgrep"]), "semgrep", semgrep)).toBe(true);
     expect(
-      runMatchesTool(run("run-3", "triaging", ["threat-hunt"]), "threat-hunt", threatHunt),
+      runMatchesTool(
+        run("run-3", "triaging", ["carlini-threat-hunt"]),
+        "carlini-threat-hunt",
+        carliniThreatHunt,
+      ),
     ).toBe(true);
-    expect(runMatchesTool(run("run-4", "triaging", ["semgrep"]), "threat-hunt", threatHunt)).toBe(
-      false,
-    );
+    expect(
+      runMatchesTool(
+        run("run-4", "triaging", ["semgrep"]),
+        "carlini-threat-hunt",
+        carliniThreatHunt,
+      ),
+    ).toBe(false);
   });
 
   it("prefers the latest compatible candidate", () => {

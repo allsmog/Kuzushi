@@ -179,15 +179,15 @@ describe("applyScanCommandConfigOverrides", () => {
   it("applies reference preset with deep-merged taskConfig", () => {
     const config = structuredClone(DEFAULTS);
     const originalSemgrep = { ...config.taskConfig.semgrep };
-    const originalThreatHunt = { ...config.taskConfig["threat-hunt"] };
+    const originalCarliniThreatHunt = { ...config.taskConfig["carlini-threat-hunt"] };
 
     applyScanCommandConfigOverrides(config, makeOptions({ preset: "reference" }));
 
     // Systems-hunt gets Orchid model from the preset
     expect(config.taskConfig["systems-hunt"].model).toBe("anthropic:claude-orchid-preview");
     // Threat-hunt tuning is preserved without overriding its model
-    expect(config.taskConfig["threat-hunt"].model).toBe(originalThreatHunt.model);
-    expect(config.taskConfig["threat-hunt"].runsPerActor).toBe(3);
+    expect(config.taskConfig["carlini-threat-hunt"].model).toBe(originalCarliniThreatHunt.model);
+    expect(config.taskConfig["carlini-threat-hunt"].runsPerActor).toBe(3);
 
     // Other scanner configs survive the deep-merge (not wiped out)
     expect(config.taskConfig.semgrep).toEqual(originalSemgrep);
@@ -218,7 +218,9 @@ describe("applyScanCommandConfigOverrides", () => {
     expect(config.tasks).toEqual(DEFAULTS.tasks);
     // Only systems-hunt gets Orchid from taskConfig deep-merge
     expect(config.taskConfig["systems-hunt"].model).toBe("anthropic:claude-orchid-preview");
-    expect(config.taskConfig["threat-hunt"].model).toBe(DEFAULTS.taskConfig["threat-hunt"].model);
+    expect(config.taskConfig["carlini-threat-hunt"].model).toBe(
+      DEFAULTS.taskConfig["carlini-threat-hunt"].model,
+    );
   });
 
   it("applies fast preset as a true tasks-only mode", () => {
@@ -226,7 +228,7 @@ describe("applyScanCommandConfigOverrides", () => {
 
     applyScanCommandConfigOverrides(config, makeOptions({ preset: "fast" }));
 
-    expect(config.tasks).toEqual(["semgrep"]);
+    expect(config.tasks).toEqual(["semgrep:scan"]);
     expect(config.enableDynamicTaskSelection).toBe(false);
     expect(config.enableContextGathering).toBe(false);
     expect(config.enableContextEnrichment).toBe(false);
@@ -238,12 +240,12 @@ describe("applyScanCommandConfigOverrides", () => {
     applyScanCommandConfigOverrides(config, makeOptions({ preset: "standard" }));
 
     expect(config.tasks).toEqual([
-      "context-gatherer",
-      "context-enricher",
-      "secrets-crypto-detect",
-      "code-config-detect",
-      "taint-cwe-select",
-      "taint-iris",
+      "context:context-gatherer",
+      "context:context-enricher",
+      "agentic-sast:secrets-crypto-detect",
+      "context:code-config-detect",
+      "pipeline:taint-cwe-select",
+      "taint-iris:hunt",
     ]);
     expect(config.enableDynamicTaskSelection).toBe(false);
   });
@@ -254,18 +256,18 @@ describe("applyScanCommandConfigOverrides", () => {
     applyScanCommandConfigOverrides(config, makeOptions({ preset: "deep" }));
 
     expect(config.tasks).toEqual([
-      "context-gatherer",
-      "context-enricher",
-      "secrets-crypto-detect",
-      "code-config-detect",
-      "taint-cwe-select",
-      "taint-iris",
-      "threat-model-randori",
-      "threat-hunt",
-      "systems-context-gatherer",
-      "systems-invariant-extract",
-      "systems-trigger-synth",
-      "systems-hunt",
+      "context:context-gatherer",
+      "context:context-enricher",
+      "agentic-sast:secrets-crypto-detect",
+      "context:code-config-detect",
+      "pipeline:taint-cwe-select",
+      "taint-iris:hunt",
+      "threat-model:threat-model-randori",
+      "carlini-threat-hunt:run",
+      "systems-hunt:systems-context-gatherer",
+      "systems-hunt:systems-invariant-extract",
+      "systems-hunt:systems-trigger-synth",
+      "systems-hunt:systems-hunt",
     ]);
     expect(config.verify).toBe(true);
   });
@@ -281,7 +283,7 @@ describe("applyScanCommandConfigOverrides", () => {
       }),
     );
 
-    expect(config.tasks).toEqual(["semgrep", "custom-detector"]);
+    expect(config.tasks).toEqual(["semgrep:scan", "custom-detector"]);
   });
 
   it("rejects unknown preset names", () => {

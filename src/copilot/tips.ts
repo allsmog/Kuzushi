@@ -7,7 +7,7 @@
 export const TIPS: readonly string[] = [
   "`search rank:gte500 type:module` shows only great/excellent modules.",
   "`set TRIAGE_PROMPT ./my.md` overrides the triage agent's system prompt.",
-  "`recipes run deep-audit` replays the full SAST + threat-hunt chain.",
+  "`recipes run deep-audit` replays the full SAST + carlini-threat-hunt chain.",
   "`history -n 20` prints your last 20 commands.",
   "`info <module>` shows rank, references, required upstream modules.",
   "`search category:offense -cve:2020` excludes tokens with leading dash.",

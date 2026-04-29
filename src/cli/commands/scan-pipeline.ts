@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { configureAgentRuntime } from "../../agent-runtime/index.js";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
-import { createDefaultTaskRegistry } from "../../agents/index.js";
+import { createDefaultDagRegistry } from "../../agents/index.js";
 import {
   createBus,
   createEvent,
@@ -228,7 +228,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
   const runRepoId = params.runRepoId ?? path.resolve(repoRoot);
   const db = initDb(dbPath);
   let bus: ReturnType<typeof createBus> | undefined;
-  let taskRegistry: Awaited<ReturnType<typeof createDefaultTaskRegistry>> | undefined;
+  let dagRegistry: Awaited<ReturnType<typeof createDefaultDagRegistry>> | undefined;
   const shutdownHookDisposers: Array<() => void> = [];
 
   if (opts.fresh) {
@@ -248,8 +248,8 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
       ?.split(",")
       .map((m: string) => m.trim())
       .filter(Boolean);
-    taskRegistry = await createDefaultTaskRegistry(config, repoRoot, { excludeBuiltinModules });
-    await registerAllWorkers(bus, { taskRegistry, db, config, runtime, uiStore: params.uiStore });
+    dagRegistry = await createDefaultDagRegistry(config, repoRoot, { excludeBuiltinModules });
+    await registerAllWorkers(bus, { dagRegistry, db, config, runtime, uiStore: params.uiStore });
   } catch (error) {
     db.close();
     if (ownsRuntime && isShutdownCapableRuntime(runtime)) {
@@ -408,7 +408,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
     : undefined;
 
   // Publish a per-run AbortSignal under this runId so bus workers
-  // (scan-worker, etc.) can populate `TaskContext.signal`. `wireRunAbort`
+  // (scan-worker, etc.) can populate `DagRunContext.signal`. `wireRunAbort`
   // chains the caller's signal (Ctrl+C) and any fatal `pipeline:error`
   // event for this run into a single controller — the latter is the
   // fail-fast path that prevents the dispatchers from churning through
@@ -416,7 +416,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
   wireRunAbort(bus, runId, params.signal);
 
   if (reportMode === "full" && !params.uiStore) {
-    printScanPlan(config, scanOpts, taskRegistry);
+    printScanPlan(config, scanOpts, dagRegistry);
   }
 
   try {
@@ -598,11 +598,11 @@ export const __scanPipelineInternals = {
 export function getScanPlanSummary(
   config: KuzushiConfig,
   scanOpts: ScanOpts,
-  taskRegistry?: Awaited<ReturnType<typeof createDefaultTaskRegistry>>,
+  dagRegistry?: Awaited<ReturnType<typeof createDefaultDagRegistry>>,
 ): ScanPlanSummary {
   const taskIds = scanOpts.tasks ?? config.tasks ?? ["semgrep"];
-  const taskPlan = taskRegistry
-    ? resolveInitialTaskPlan(taskRegistry, taskIds, config, {
+  const taskPlan = dagRegistry
+    ? resolveInitialTaskPlan(dagRegistry, taskIds, config, {
         disabledTasks: scanOpts.disabledTasks,
       })
     : undefined;
@@ -623,12 +623,12 @@ export function getScanPlanSummary(
 function printScanPlan(
   config: KuzushiConfig,
   scanOpts: ScanOpts,
-  taskRegistry?: Awaited<ReturnType<typeof createDefaultTaskRegistry>>,
+  dagRegistry?: Awaited<ReturnType<typeof createDefaultDagRegistry>>,
 ): void {
   const { taskIds, dynamicSelectionActive, taskSummary } = getScanPlanSummary(
     config,
     scanOpts,
-    taskRegistry,
+    dagRegistry,
   );
   const tasks = taskIds.join(", ") || "none";
   console.error("\nScan plan:");

@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import type { Finding } from "../../scanners/types.js";
 import { toErrorMessage } from "../../utils.js";
-import type { TaskContext } from "../types.js";
+import type { DagRunContext } from "../types.js";
 import { resolveTaskAllowedTools, resolveTaskRuntime } from "./runtime-overrides.js";
 
 // ── File-path normalisation ────────────────────────────────────────
@@ -107,7 +107,7 @@ export interface LensResult {
  */
 export async function runLens(
   prompt: string,
-  context: TaskContext,
+  context: DagRunContext,
   model: string,
   tag: string,
   schema: Record<string, unknown>,

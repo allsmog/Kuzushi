@@ -5,7 +5,7 @@ import type { Finding, TaskConfig } from "../../../../scanners/types.js";
 import { attachTaskOutputMeta, getTaskOutputMeta } from "../../../../task-output-meta.js";
 import type { ScanOpts } from "../../../../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../../../../utils.js";
-import type { AgentTask, TaskContext } from "../../../types.js";
+import type { DagNodeImpl, DagRunContext } from "../../../types.js";
 import { taintAnalysisRunTask } from "../analyze.js";
 import { taintAnalysisLabelTask } from "../label.js";
 import { taintAnalysisPreflightTask } from "../preflight.js";
@@ -28,7 +28,7 @@ import {
  * Follows the programmatic task invocation pattern from
  * src/bus/workers/taint-analysis-refinement-worker.ts:107-117.
  */
-export const taintAnalysisCrossAnalyzeTask: AgentTask<ScanOpts, CrossServiceAnalysisOutput> = {
+export const taintAnalysisCrossAnalyzeTask: DagNodeImpl<ScanOpts, CrossServiceAnalysisOutput> = {
   id: "taint-analysis-cross-analyze",
   displayName: "Cross-Service Analyze",
   outputKind: "custom",
@@ -163,7 +163,7 @@ interface AnalyzedServiceResult {
 async function analyzeService(
   service: ServiceDescriptor,
   input: ScanOpts,
-  context: TaskContext,
+  context: DagRunContext,
   boundaryModel: string,
   boundaryThreshold: number,
   continueOnError: boolean,
@@ -232,12 +232,12 @@ async function analyzeService(
  * Invokes the standard 3-step taint-analysis pipeline programmatically for a single service.
  *
  * Pattern from taint-analysis-refinement-worker.ts:107-117:
- * Manually construct TaskContext with appropriate upstreamOutputs and call task.run() directly.
+ * Manually construct DagRunContext with appropriate upstreamOutputs and call task.run() directly.
  */
 async function runTaintAnalysisForService(
   service: ServiceDescriptor,
   input: ScanOpts,
-  parentContext: TaskContext,
+  parentContext: DagRunContext,
 ): Promise<{ findings: Finding[]; costUsd: number }> {
   const serviceRoot = path.resolve(parentContext.repoRoot, service.rootPath);
 
@@ -264,7 +264,7 @@ async function runTaintAnalysisForService(
   };
 
   // Step 1: Preflight
-  const preflightContext: TaskContext = {
+  const preflightContext: DagRunContext = {
     runId: parentContext.runId,
     projectRoot: parentContext.gitRoot ?? parentContext.projectRoot ?? parentContext.repoRoot,
     workRoot: serviceRoot,
@@ -286,7 +286,7 @@ async function runTaintAnalysisForService(
   const preflightOutput = preflight.output;
 
   // Step 2: Label
-  const labelContext: TaskContext = {
+  const labelContext: DagRunContext = {
     ...preflightContext,
     upstreamOutputs: new Map([["taint-analysis-preflight", preflightOutput]]),
   };
@@ -295,7 +295,7 @@ async function runTaintAnalysisForService(
   const labelOutput = label.output;
 
   // Step 3: Run (produces Finding[])
-  const runContext: TaskContext = {
+  const runContext: DagRunContext = {
     ...preflightContext,
     upstreamOutputs: new Map([["taint-analysis-label", labelOutput]]),
   };
@@ -316,9 +316,9 @@ interface NestedTaskResult<TOutput> {
 }
 
 async function executeNestedTask<TOutput>(
-  task: AgentTask<ScanOpts, TOutput>,
+  task: DagNodeImpl<ScanOpts, TOutput>,
   input: ScanOpts,
-  context: TaskContext,
+  context: DagRunContext,
   serviceId: string,
 ): Promise<NestedTaskResult<TOutput>> {
   process.stderr.write(
@@ -352,7 +352,7 @@ async function executeNestedTask<TOutput>(
   }
 }
 
-function resolveTaskConfig(config: TaskContext["config"], taskId: string): TaskConfig {
+function resolveTaskConfig(config: DagRunContext["config"], taskId: string): TaskConfig {
   const raw = config.taskConfig[taskId];
   if (isRecord(raw)) {
     return raw;

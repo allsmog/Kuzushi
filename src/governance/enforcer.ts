@@ -20,7 +20,7 @@ const DEFAULT_TOOL_TIERS: ToolTierMapping[] = [
   { toolName: "sast:semgrep", tier: "scan" },
   { toolName: "sast:codeql", tier: "scan" },
   { toolName: "sast:agentic", tier: "scan" },
-  { toolName: "sast:threat-hunt", tier: "scan" },
+  { toolName: "sast:carlini-threat-hunt", tier: "scan" },
   { toolName: "sast:taint-iris", tier: "scan" },
   { toolName: "sast:triage", tier: "scan" },
   { toolName: "sast:verify", tier: "scan" },

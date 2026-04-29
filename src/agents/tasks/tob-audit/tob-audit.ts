@@ -14,7 +14,7 @@ import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { toErrorMessage } from "../../../utils.js";
-import type { AgentTask, TaskContext } from "../../types.js";
+import type { DagNodeImpl, DagRunContext } from "../../types.js";
 import { runPluginFindingScanner } from "../plugin-finding-scanner.js";
 import {
   resolveTaskAllowedTools,
@@ -31,7 +31,7 @@ interface TobAuditConfig {
   maxFindings: number;
 }
 
-function resolveConfig(ctx: TaskContext): TobAuditConfig {
+function resolveConfig(ctx: DagRunContext): TobAuditConfig {
   const model = resolveTaskModel(ctx, "tob-audit");
   const maxFindings = resolveTaskPositiveInt(ctx, "tob-audit", "maxFindings", 50);
   return { model, maxFindings };
@@ -58,7 +58,7 @@ export function buildTobAuditPrompt(): string {
 // Backwards-compat alias for internal tests/callers.
 const buildPrompt = buildTobAuditPrompt;
 
-async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
+async function run(_input: ScanOpts, context: DagRunContext): Promise<Finding[]> {
   const config = resolveConfig(context);
   const tag = "[tob-audit]";
 
@@ -96,7 +96,7 @@ async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
   return attachTaskOutputMeta(result.findings, { costUsd: result.costUsd });
 }
 
-export const tobAuditTask: AgentTask<ScanOpts, Finding[]> = {
+export const tobAuditTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "tob-audit",
   displayName: "Trail of Bits Audit",
   outputKind: "findings",

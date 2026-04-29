@@ -635,6 +635,7 @@ export const AgentRuntimeCredentialsSchema = z.object({
 export const AgentRuntimeConfigSchema = z.object({
   claude: AgentRuntimeCredentialsSchema.optional(),
   piAi: AgentRuntimeCredentialsSchema.optional(),
+  codex: AgentRuntimeCredentialsSchema.optional(),
 });
 
 export type AgentRuntimeCredentialsZ = z.infer<typeof AgentRuntimeCredentialsSchema>;
@@ -768,6 +769,7 @@ export const KuzushiConfigSchema = z.object({
     })
     .optional(),
   trajectoryMemory: z.boolean().optional(),
+  startupSound: z.boolean().optional(),
   trajectoryMaxExemplars: z.number().optional(),
   triageStrategy: TriageStrategySchema.optional(),
   triageSpecialistMaxTurns: z.number().nullable().optional(),

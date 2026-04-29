@@ -228,11 +228,11 @@ describe("why command", () => {
   it("explains missing snapshot prerequisites", async () => {
     const registry = new ModuleRegistry();
     const mod: CopilotModule = {
-      ...mkModule("threat-hunt", {}),
+      ...mkModule("carlini-threat-hunt", {}),
       requires: [{ kind: "snapshot", moduleId: "context", field: "appModel" }],
     };
     registry.register(mod);
-    (registry as unknown as { initialized: Set<string> }).initialized.add("threat-hunt");
+    (registry as unknown as { initialized: Set<string> }).initialized.add("carlini-threat-hunt");
     const sink = createArraySink();
     const core = new CoreDispatcher({ registry, globals: new Datastore(), history: () => [] });
     const driver = new DispatcherDriver({
@@ -241,7 +241,7 @@ describe("why command", () => {
       print: sink,
       getShellState: () => ({}),
     });
-    await driver.handle("use threat-hunt");
+    await driver.handle("use carlini-threat-hunt");
     const result = await driver.handle("why");
     // The unmet-snapshot renderer prints `<moduleId>.<field>` so the operator
     // sees which module produces the missing artefact (e.g. "context.appModel")

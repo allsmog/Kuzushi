@@ -262,7 +262,7 @@ describe("triage-worker", () => {
         throw new Error("scanner missing");
       },
     };
-    const taskRegistry = {
+    const dagRegistry = {
       has: (id: string) => id === "custom-task",
       get: () => ({
         id: "custom-task",
@@ -285,7 +285,7 @@ describe("triage-worker", () => {
 
     registerTriageWorker(bus, {
       registry: registry as any,
-      taskRegistry: taskRegistry as any,
+      dagRegistry: dagRegistry as any,
       config,
     });
 

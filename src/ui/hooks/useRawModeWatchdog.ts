@@ -1,7 +1,7 @@
 /**
  * useRawModeWatchdog — keep stdin in raw mode while the TUI is alive.
  *
- * The Claude Agent SDK subprocess (spawned by `randori`, `threat-hunt`,
+ * The Claude Agent SDK subprocess (spawned by `randori`, `carlini-threat-hunt`,
  * agentic-sast, taint-iris, etc.) opens `/dev/tty` and disables raw mode
  * on the parent. When it exits it doesn't restore. Once raw mode is off,
  * Ink's `useInput` stops receiving Ctrl+C as `0x03`, the terminal falls

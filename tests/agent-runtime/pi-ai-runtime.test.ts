@@ -32,7 +32,7 @@ vi.mock("@mariozechner/pi-ai", async (importOriginal) => {
  * drove the runtime via completeMock — after the streaming migration,
  * runTurnLoop calls stream() instead of complete().
  */
-function makeEventStream(assistant: ReturnType<typeof makeAssistantMessage>) {
+function _makeEventStream(assistant: ReturnType<typeof makeAssistantMessage>) {
   const events: Array<Record<string, unknown>> = [
     { type: "done", reason: assistant.stopReason, message: assistant },
   ];
@@ -268,6 +268,76 @@ describe("PiAiAgentRuntime", () => {
     expect(
       secondContext.messages.some((message: { role: string }) => message.role === "toolResult"),
     ).toBe(true);
+  });
+
+  it("executes module-scoped custom tools", async () => {
+    const cwd = makeTempDir();
+    completeMock
+      .mockResolvedValueOnce(
+        makeAssistantMessage(
+          [
+            {
+              type: "toolCall",
+              id: "kb-1",
+              name: "ThreatKbSearch",
+              arguments: { query: "tenant reset", actorId: "actor-user" },
+            },
+          ],
+          { stopReason: "toolUse" },
+        ),
+      )
+      .mockResolvedValueOnce(makeAssistantMessage([{ type: "text", text: '{"ok":true}' }]));
+
+    const runtime = new PiAiAgentRuntime();
+    await collectMessages(
+      runtime,
+      makeRequest(cwd, {
+        allowedTools: ["ThreatKbSearch"],
+        customTools: [
+          {
+            name: "ThreatKbSearch",
+            description: "Search threat model KB.",
+            parameters: { type: "object", properties: {} },
+            execute(input, options) {
+              expect(options.cwd).toBe(cwd);
+              expect(options.toolUseId).toBe("kb-1");
+              return JSON.stringify({ input, hits: [{ id: "threat:t1" }] });
+            },
+          },
+        ],
+      }),
+    );
+
+    const firstContext = completeMock.mock.calls[0]?.[1];
+    expect(firstContext.systemPrompt).toContain("ThreatKbSearch");
+    expect(firstContext.tools?.map((tool: { name: string }) => tool.name)).toEqual([
+      "ThreatKbSearch",
+    ]);
+    const secondContext = completeMock.mock.calls[1]?.[1];
+    const toolResult = secondContext.messages.find(
+      (message: { role?: string; toolName?: string }) =>
+        message.role === "toolResult" && message.toolName === "ThreatKbSearch",
+    );
+    expect(JSON.stringify(toolResult)).toContain("threat:t1");
+  });
+
+  it("enables xhigh thinking options for pi-ai providers", async () => {
+    const cwd = makeTempDir();
+    completeMock.mockResolvedValue(
+      makeAssistantMessage([{ type: "text", text: '{"ok":true}' }], { totalCost: 0.0123 }),
+    );
+
+    const runtime = new PiAiAgentRuntime();
+    await collectMessages(runtime, makeRequest(cwd, { effort: "xhigh" }));
+
+    const streamOptions = completeMock.mock.calls[0]?.[2];
+    expect(streamOptions).toMatchObject({
+      thinkingEnabled: true,
+      thinkingDisplay: "summarized",
+      effort: "xhigh",
+      reasoning: "xhigh",
+      reasoningEffort: "xhigh",
+    });
   });
 
   it("treats allowedTools=[] as explicit no-tools mode", async () => {

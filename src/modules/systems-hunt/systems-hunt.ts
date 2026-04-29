@@ -5,7 +5,7 @@
  * (systems-context-gatherer → systems-invariant-extract → systems-trigger-
  * synth → systems-hunt) plus the backward-compatible deep-semantic tasks
  * (deep-semantic-cwe-select, deep-semantic-hunt) via the module registry
- * so operators don't have to reach into `createDefaultTaskRegistry` to
+ * so operators don't have to reach into `createDefaultDagRegistry` to
  * discover what participates in the scan DAG.
  *
  * Operators invoke the chain through the scan CLI (`kuzushi scan ...
@@ -22,16 +22,16 @@ import { systemsContextGathererTask } from "../../agents/tasks/systems-hunt/cont
 import { systemsHuntTask } from "../../agents/tasks/systems-hunt/hunt.js";
 import { systemsInvariantExtractTask } from "../../agents/tasks/systems-hunt/invariant-extract.js";
 import { systemsTriggerSynthTask } from "../../agents/tasks/systems-hunt/trigger-synth.js";
-import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
 import { defineModule } from "../define.js";
+import { defineHiddenDagNodeTool } from "../hidden-dag-node.js";
 import type { CopilotModule } from "../types.js";
 
 export function createSystemsHuntModule(): CopilotModule {
   const hide = (
-    task: Parameters<typeof exposeAgentTaskAsHiddenDagTool<"systems-hunt">>[0],
+    task: Parameters<typeof defineHiddenDagNodeTool<"systems-hunt">>[0],
     multiStrategy = false,
   ) =>
-    exposeAgentTaskAsHiddenDagTool<"systems-hunt">(task, {
+    defineHiddenDagNodeTool<"systems-hunt">(task, {
       moduleId: "systems-hunt",
       multiStrategy,
     });

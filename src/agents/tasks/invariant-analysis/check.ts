@@ -6,7 +6,7 @@ import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
-import type { AgentTask } from "../../types.js";
+import type { DagNodeImpl } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
 import {
   INVARIANT_CHECK_SCHEMA,
@@ -163,7 +163,7 @@ function normalizeUnitNumber(value: unknown): number {
   return Math.max(0, Math.min(1, numeric));
 }
 
-export const invariantCheckTask: AgentTask<ScanOpts, Finding[]> = {
+export const invariantCheckTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "invariant-check",
   displayName: "Invariant Violation Checker",
   outputKind: "findings",

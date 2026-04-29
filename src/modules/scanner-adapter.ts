@@ -8,7 +8,7 @@
  *
  * This adapter wraps that contract as a `DagTool`, hoisting the per-plugin
  * state into a closure so `init()` and `run()` can share it. The DagTool's
- * `run()` does the scan; the module-registry bridge installs a shell-mode
+ * `run()` does the scan; the module registry installs a shell-mode
  * `execute()` that re-enters the pipeline filtered to this one task.
  *
  * Authors writing a new scanner module just call
@@ -70,7 +70,7 @@ export function buildScannerDagTool<Id extends string>(
       persistence: "pipeline-checkpoint",
       resume: "checkpoint",
       liveControl: "pause-resume",
-      pipelineTasks: [plugin.id],
+      pipelineTasks: [spec.name],
     },
     ...(spec.rank ? { rank: spec.rank } : {}),
     formatInput(input) {

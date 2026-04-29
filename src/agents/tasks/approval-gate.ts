@@ -12,7 +12,7 @@
 import { createInterface } from "node:readline";
 import { getLogger } from "../../logger.js";
 import type { KuzushiConfig } from "../../types.js";
-import type { AgentTask, TaskContext, TaskOutputKind } from "../types.js";
+import type { DagNodeImpl, DagRunContext, OutputKind } from "../types.js";
 
 export interface ApprovalGateInput {
   description?: string;
@@ -46,16 +46,16 @@ export function createApprovalGate(
     defaultOnTimeout?: boolean;
     condition?: (upstreamOutputs: ReadonlyMap<string, unknown>, config: KuzushiConfig) => boolean;
   },
-): AgentTask<ApprovalGateInput, ApprovalOutput> {
+): DagNodeImpl<ApprovalGateInput, ApprovalOutput> {
   return {
     id,
     displayName,
-    outputKind: "custom" as TaskOutputKind,
+    outputKind: "custom" as OutputKind,
     dependsOn,
     condition: options?.condition,
     promptMode: "none",
 
-    async run(_input: ApprovalGateInput, context: TaskContext): Promise<ApprovalOutput> {
+    async run(_input: ApprovalGateInput, context: DagRunContext): Promise<ApprovalOutput> {
       const description =
         options?.description ?? `Pipeline requires approval to continue past "${displayName}"`;
       const timeoutMs = options?.timeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;

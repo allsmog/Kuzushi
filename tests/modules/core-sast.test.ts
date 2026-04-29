@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createCarliniThreatHuntModule } from "../../src/modules/carlini-threat-hunt/carlini-threat-hunt.js";
 import { createCoreSastModule } from "../../src/modules/core-sast.js";
 import { wrapDagToolExecute } from "../../src/modules/dag-execute.js";
 import { createSemgrepModule } from "../../src/modules/semgrep/semgrep.js";
@@ -7,11 +8,11 @@ import type { CopilotModule, DagTool, ExecutionContext } from "../../src/modules
 import { isDagTool } from "../../src/modules/types.js";
 import type { KuzushiConfig } from "../../src/types.js";
 
-// threat-hunt is no longer a task-wrapping module — it now runs its agent
+// carlini-threat-hunt is no longer a task-wrapping module — it now runs its agent
 // fan-out directly via the DagTool contract (see
-// `src/modules/threat-hunt/threat-hunt.ts`). The `runPipeline` assertions
+// `src/modules/carlini-threat-hunt/carlini-threat-hunt.ts`). The `runPipeline` assertions
 // that used to live here moved to
-// `tests/modules/threat-hunt/threat-hunt.test.ts`.
+// `tests/modules/carlini-threat-hunt/carlini-threat-hunt.test.ts`.
 
 const {
   runPipelineMock,
@@ -58,7 +59,7 @@ function createConfig(): KuzushiConfig {
     excludePatterns: [],
     taskConfig: {
       semgrep: {},
-      "threat-hunt": { maxActors: 5 },
+      "carlini-threat-hunt": { maxActors: 5 },
     },
   };
 }
@@ -121,17 +122,21 @@ describe("createCoreSastModule tool execution", () => {
     const ctx = createContext();
 
     // The semgrep module ships a DagTool — its shell-mode `execute()` is
-    // installed by the registry bridge at `loadModule` time. This test
+    // installed by the module registry at `loadModule` time. This test
     // exercises tools directly, so install the wrapper ourselves.
     const semgrepTool = pickDagToolWithExecute(createSemgrepModule(), "semgrep:scan");
     const taintIrisTool = pickDagToolWithExecute(createTaintIrisModule(), "taint-iris:hunt");
+    const carliniTool = pickDagToolWithExecute(
+      createCarliniThreatHuntModule(),
+      "carlini-threat-hunt:run",
+    );
 
     await semgrepTool.execute({ target: "/tmp/repo", severity: ["high"] }, ctx);
     expect(runPipelineMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
         postProcessMode: "scan-only",
         scanOpts: expect.objectContaining({
-          tasks: ["semgrep"],
+          tasks: ["semgrep:scan"],
         }),
       }),
     );
@@ -141,7 +146,7 @@ describe("createCoreSastModule tool execution", () => {
       expect.objectContaining({
         postProcessMode: "scan-only",
         scanOpts: expect.objectContaining({
-          tasks: ["taint-cwe-select", "taint-iris"],
+          tasks: ["pipeline:taint-cwe-select", "taint-iris:hunt"],
         }),
       }),
     );
@@ -154,13 +159,44 @@ describe("createCoreSastModule tool execution", () => {
       expect.objectContaining({
         config: expect.objectContaining({
           taskConfig: expect.objectContaining({
-            "taint-cwe-select": expect.objectContaining({
+            "pipeline:taint-cwe-select": expect.objectContaining({
               model: "anthropic:claude-opus-4-6",
             }),
-            "taint-iris": expect.objectContaining({
+            "taint-iris:hunt": expect.objectContaining({
               model: "anthropic:claude-opus-4-6",
             }),
           }),
+        }),
+      }),
+    );
+
+    await carliniTool.execute(
+      {
+        target: "/tmp/repo",
+        model: "codex:gpt-5.5",
+        effort: "xhigh",
+        thinking: true,
+        maxActors: 2,
+      },
+      ctx,
+    );
+    expect(runPipelineMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          enableContextGathering: false,
+          enableContextEnrichment: false,
+          taskConfig: expect.objectContaining({
+            "carlini-threat-hunt:run": expect.objectContaining({
+              model: "codex:gpt-5.5",
+              effort: "xhigh",
+              thinking: true,
+              maxActors: 2,
+            }),
+          }),
+        }),
+        postProcessMode: "scan-only",
+        scanOpts: expect.objectContaining({
+          tasks: ["carlini-threat-hunt:run"],
         }),
       }),
     );

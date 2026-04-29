@@ -14,7 +14,7 @@ import {
   __contextEnricherInternals,
   contextEnricherTask,
 } from "../../../src/agents/tasks/context-enricher.js";
-import type { TaskContext } from "../../../src/agents/types.js";
+import type { DagRunContext } from "../../../src/agents/types.js";
 import { defaultAttachmentAdapter } from "../../../src/modules/_shared/attachments/index.js";
 import { createContextModule } from "../../../src/modules/context/context.js";
 import type { KuzushiConfig } from "../../../src/types.js";
@@ -128,13 +128,13 @@ describe("contextEnricherTask.run reads attachments from disk and injects them",
       },
     };
 
-    const ctx: TaskContext = {
+    const ctx: DagRunContext = {
       runId: "test-run",
       repoRoot: root,
       repoName: "fixture",
       config: makeConfig(),
       runtime,
-      bus: {} as TaskContext["bus"],
+      bus: {} as DagRunContext["bus"],
       upstreamOutputs: new Map(),
     };
 
@@ -168,13 +168,13 @@ describe("contextEnricherTask.run reads attachments from disk and injects them",
         })();
       },
     };
-    const ctx: TaskContext = {
+    const ctx: DagRunContext = {
       runId: "test-run",
       repoRoot: root,
       repoName: "fixture",
       config: makeConfig(),
       runtime,
-      bus: {} as TaskContext["bus"],
+      bus: {} as DagRunContext["bus"],
       upstreamOutputs: new Map(),
     };
     await contextEnricherTask.run(undefined, ctx);

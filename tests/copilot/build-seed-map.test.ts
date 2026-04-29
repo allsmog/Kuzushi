@@ -1,11 +1,11 @@
 /**
  * Regression coverage for context/threat-model → upstreamOutputs seed map.
  *
- * Bug being locked in: threat-hunt (and every other downstream task that
+ * Bug being locked in: carlini-threat-hunt (and every other downstream task that
  * reads `context.upstreamOutputs.get("threat-model-randori")`) dereferences
  * `.document` on the upstream value, because the real task returns
  * `{ document, findings }`. Seeding the bare ThreatModelDocument caused
- * threat-hunt to find 0 actors and emit 0 findings silently.
+ * carlini-threat-hunt to find 0 actors and emit 0 findings silently.
  */
 import { describe, expect, it } from "vitest";
 import { __shellInternals } from "../../src/copilot/shell.js";
@@ -37,8 +37,8 @@ describe("buildSeedMapFromSnapshot", () => {
     expect(seeded.findings).toEqual([]);
   });
 
-  it("threat-hunt's extractActorsWithThreats can deref raw.document from the seed (the whole point)", () => {
-    // Mirrors the null-check in threat-hunt.ts:
+  it("carlini-threat-hunt's extractActorsWithThreats can deref raw.document from the seed (the whole point)", () => {
+    // Mirrors the null-check in carlini-threat-hunt.ts:
     //   if (!isRecord(raw) || !isRecord(raw["document"])) return {...empty};
     const tm = { dfd: { elements: [] }, threats: [] };
     const snap = makeSnapshot();

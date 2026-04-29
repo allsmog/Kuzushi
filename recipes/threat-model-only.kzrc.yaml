@@ -1,5 +1,5 @@
 # Build the context map + PASTA threat model, no scanners.
-# Output feeds later agentic-sast / threat-hunt / taint-iris runs.
+# Output feeds later agentic-sast / carlini-threat-hunt / taint-iris runs.
 commands:
   - use context
   - run
