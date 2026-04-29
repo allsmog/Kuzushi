@@ -17,7 +17,11 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { killAllClaudeSubprocesses, warnIfNonAnthropicProxy } from "../agent-runtime/claude.js";
+import {
+  killAllClaudeSubprocesses,
+  warnIfNonAnthropicProxy,
+  warnIfStaleModel,
+} from "../agent-runtime/claude.js";
 import { configureAgentRuntime } from "../agent-runtime/index.js";
 import {
   describeModelOverrideFormat,
@@ -2546,6 +2550,7 @@ export async function startShell(opts: ShellOptions): Promise<void> {
   // detection rules and the `KUZUSHI_DISABLE_THINKING` / `KUZUSHI_QUIET_PROXY_BANNER`
   // escape hatches.
   warnIfNonAnthropicProxy();
+  warnIfStaleModel(opts.config.model);
   applyImplicitShellTarget(opts);
   // Bare `kuzushi` should still feel scoped to the current repository.
   // Resolve the display name before DB startup so the shell has a useful

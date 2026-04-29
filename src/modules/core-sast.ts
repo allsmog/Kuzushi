@@ -145,7 +145,8 @@ export function createCoreSastModule(): CopilotModule {
     category: "defense",
     version: "0.17.2",
     description:
-      "Umbrella for the full SAST DAG (context → threat-model → scanners → triage → verify → patch). " +
+      "Umbrella for the full SAST DAG (context → threat-model → scanners → triage → verify → patch).",
+    longDescription:
       "For single-capability runs, use the dedicated modules: semgrep, codeql, " +
       "agentic-sast, taint-iris, carlini-threat-hunt, triage, verify, patch, findings, context.",
     rank: "excellent",
