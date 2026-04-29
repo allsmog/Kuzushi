@@ -320,6 +320,13 @@ interface LocalCommandResult {
    * forwarded any unknown input to the agent and invited hallucinated answers.
    */
   askQuestion?: string;
+  /**
+   * Set by `/target <path>` so the input loop can re-mirror `opts.target` into
+   * the globals Datastore. M3: keeps the per-module DelegatingDatastore
+   * fall-through aligned with the active shell target across `run`/`run .`
+   * dispatches.
+   */
+  targetUpdated?: boolean;
 }
 
 interface AsyncExecutionResult {
@@ -331,6 +338,21 @@ interface AsyncExecutionResult {
 function applyImplicitShellTarget(opts: ShellOptions): void {
   if (!opts.target) {
     opts.target = process.cwd();
+  }
+}
+
+/**
+ * Mirror `opts.target` into the globals Datastore so per-module
+ * DelegatingDatastores can fall through to it. Called once at shell startup
+ * and again whenever `/target <path>` updates the active target — keeps
+ * `run` (no args) from spuriously erroring with "Missing required: target"
+ * when the home view shows a perfectly valid target.
+ */
+function syncShellTargetToGlobals(opts: ShellOptions, globals: Datastore): void {
+  if (opts.target) {
+    globals.set("target", opts.target, "global");
+  } else {
+    globals.unset("target", "global");
   }
 }
 
@@ -2803,6 +2825,10 @@ async function startInkShell(
   // Tell CopilotCore about the globals Datastore so BUDGET_USD + <MOD>_MODEL
   // live-settings land. Only needs to happen once per shell boot.
   core.setGlobals(globals);
+  // M3: seed the active shell target into globals so per-module DelegatingDatastores
+  // can fall through to it. Without this, `run` (no args) errors with
+  // "Missing required: target" even when the home view shows an active target.
+  syncShellTargetToGlobals(opts, globals);
 
   const runToolFromDispatcher = async (
     tool: ModuleTool,
@@ -3858,6 +3884,9 @@ async function startInkShell(
 
     if (localResult.setFocus !== undefined) {
       shellCtx.focusedModule = localResult.setFocus;
+    }
+    if (localResult.targetUpdated) {
+      syncShellTargetToGlobals(opts, globals);
     }
     if (localResult.shellStateUpdater) {
       updateShell(store, localResult.shellStateUpdater);
@@ -6315,9 +6344,10 @@ function handleTargetCommand(
       return {
         output: `Target set to: ${newTarget}\n  Context invalidated — run /context to regenerate.`,
         shellStateUpdater: (shell) => ({ ...shell, contextSnapshot: null }),
+        targetUpdated: true,
       };
     }
-    return { output: `Target set to: ${newTarget}` };
+    return { output: `Target set to: ${newTarget}`, targetUpdated: changed };
   }
   return {
     output: opts.target ? `Current target: ${opts.target}` : "No target set. Usage: /target <path>",
