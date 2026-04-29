@@ -334,6 +334,27 @@ function applyImplicitShellTarget(opts: ShellOptions): void {
   }
 }
 
+/**
+ * M1: copy taskConfig entries keyed by a legacy module id forward to the
+ * canonical id. Idempotent. The canonical entry wins on key conflict so an
+ * operator who already has both `taskConfig["threat-hunt"]` and
+ * `taskConfig["carlini-threat-hunt"]` keeps their newer settings.
+ */
+function migrateLegacyTaskConfigKeys(
+  config: KuzushiConfig,
+  aliases: ReadonlyArray<{ from: string; to: string }>,
+): void {
+  if (aliases.length === 0) return;
+  for (const { from, to } of aliases) {
+    const legacy = config.taskConfig[from];
+    if (!legacy) continue;
+    config.taskConfig[to] = {
+      ...legacy,
+      ...(config.taskConfig[to] ?? {}),
+    };
+  }
+}
+
 function inferWorkspaceNameFromTarget(target: string | undefined): string | undefined {
   const raw = target?.trim();
   if (!raw) return undefined;
@@ -2622,6 +2643,12 @@ export async function startShell(opts: ShellOptions): Promise<void> {
   });
 
   await core.init();
+
+  // M1: migrate any legacy `taskConfig[<old-id>]` entries to their canonical
+  // module ids so per-task overrides survive a module rename. The registry
+  // owns the alias map (populated from each module's `legacyIds`) — we walk
+  // it once here and merge legacy keys forward (canonical wins on conflict).
+  migrateLegacyTaskConfigKeys(opts.config, core.registry.listModuleIdAliases());
 
   const systemPrompt = core.buildSystemPromptPrefix();
 
