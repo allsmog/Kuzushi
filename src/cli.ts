@@ -19,35 +19,28 @@ import { configureAgentRuntime } from "./agent-runtime/index.js";
 import { createDefaultDagRegistry } from "./agents/index.js";
 import { runInspectCommand } from "./cli/commands/inspect.js";
 import { runScanCommand } from "./cli/commands/scan.js";
+import { runShellCommand, type ShellCommandOptions } from "./cli/commands/shell.js";
 import { CliUsageError, wrapCliAction } from "./cli/errors.js";
 import { resolveRepo } from "./cli/shared.js";
-import { AGENT_RUNTIME_BACKENDS, DEFAULTS } from "./config/defaults.js";
+import { DEFAULTS } from "./config/defaults.js";
 import { formatConfigValidationIssue, validateKuzushiConfig } from "./config/validation.js";
 import {
   configPath,
   getConfigValue,
-  isClaudeCodeHostManagedAuth,
   loadConfig,
-  providerBaseUrlEnvVar,
-  providerEnvVar,
-  resolveActiveCredentials,
   setConfigValue,
   unsetConfigValue,
 } from "./config.js";
 import { cleanup as cleanupHttpAgents } from "./http-agent.js";
 import { initiateShutdown, registerShutdownHook } from "./lifecycle.js";
-import { getLogger, setGlobalLogLevel } from "./logger.js";
+import { setGlobalLogLevel } from "./logger.js";
 import { defaultDbPath, getRun, initDb, listRuns } from "./store.js";
 
 function maybeWarnPlaintextApiKeyStorage(key: string, value: string): void {
-  // True if the path (after legacy-retarget) stores an apiKey — either a
-  // dotted slot write (claude.apiKey / piAi.apiKey) or a whole-object write
-  // whose shape contains apiKey at any depth.
   const isSlotApiKeyPath =
     key === "agentRuntimeConfig.claude.apiKey" ||
     key === "agentRuntimeConfig.piAi.apiKey" ||
-    key === "agentRuntimeConfig.codex.apiKey" ||
-    key === "agentRuntimeConfig.apiKey"; // legacy form — retargeted, still worth warning
+    key === "agentRuntimeConfig.codex.apiKey";
   let storesApiKey = isSlotApiKeyPath;
 
   if (!storesApiKey && key === "agentRuntimeConfig") {
@@ -116,6 +109,13 @@ program
   .option("--target <path>", "Set initial target (repo path, host, URL)")
   .option("--scope <path>", "Load rules of engagement from YAML file")
   .option("--model <model>", "Default model for AI operations")
+  .option("--effort <level>", "Default reasoning effort for shell-launched tasks")
+  .option(
+    "--task-config <taskId.key=value>",
+    "Set a shell task config override; repeatable",
+    collectRepeatedOption,
+    [],
+  )
   .option("--agent-runtime <backend>", "Agent runtime backend")
   .option("--api-key <key>", "Override active provider API key")
   .option(
@@ -134,213 +134,9 @@ Examples:
   $ kuzushi shell --workspace acme-pentest            # resume a named workspace
   $ kuzushi shell --model anthropic:claude-opus-4-7   # override the default model
   $ kuzushi shell --agent-runtime codex --model codex:gpt-5.4-mini
-`,
+	`,
   )
-  .action(
-    wrapCliAction(
-      async (opts: {
-        workspace?: string;
-        load?: string;
-        exclude?: string;
-        target?: string;
-        scope?: string;
-        model?: string;
-        effort?: string;
-        taskConfig?: string[];
-        agentRuntime?: string;
-        apiKey?: string;
-        inheritClaude?: boolean;
-      }) => {
-        const { startShell } = await import("./copilot/shell.js");
-        const { loadLocalCredentials } = await import("./config.js");
-        const config = loadConfig();
-        if (opts.model) {
-          config.model = opts.model;
-        }
-        if (opts.agentRuntime) {
-          if (!AGENT_RUNTIME_BACKENDS.has(opts.agentRuntime)) {
-            throw new CliUsageError(
-              `Invalid --agent-runtime "${opts.agentRuntime}". Valid values: ${[
-                ...AGENT_RUNTIME_BACKENDS,
-              ].join(", ")}`,
-            );
-          }
-          config.agentRuntimeBackend = opts.agentRuntime as typeof config.agentRuntimeBackend;
-        }
-        // N2: --effort applies a default reasoning effort to ALL configured
-        // task IDs. Operators using `--effort high` save the dance of
-        // entering each module → /tune → set effort high → /back. Per-task
-        // overrides via --task-config still win because they're applied last.
-        if (opts.effort) {
-          const allowedEfforts = new Set(["low", "medium", "high", "xhigh"]);
-          if (!allowedEfforts.has(opts.effort)) {
-            throw new CliUsageError(
-              `Invalid --effort "${opts.effort}". Valid values: low, medium, high, xhigh.`,
-            );
-          }
-          for (const taskId of Object.keys(config.taskConfig)) {
-            config.taskConfig[taskId] = {
-              ...config.taskConfig[taskId],
-              effort: opts.effort,
-            };
-          }
-        }
-        // N2: --task-config <taskId.key=value> writes through to the
-        // per-task config. Repeatable. Mirrors `--task-model` from
-        // `kuzushi scan` (src/cli/scan-config.ts:445-468).
-        if (opts.taskConfig && opts.taskConfig.length > 0) {
-          for (const assignment of opts.taskConfig) {
-            const equalsIndex = assignment.indexOf("=");
-            if (equalsIndex <= 0 || equalsIndex === assignment.length - 1) {
-              throw new CliUsageError(
-                `--task-config must be in the form <taskId.key=value>; received "${assignment}".`,
-              );
-            }
-            const lhs = assignment.slice(0, equalsIndex).trim();
-            const rhs = assignment.slice(equalsIndex + 1).trim();
-            const dotIndex = lhs.lastIndexOf(".");
-            if (dotIndex <= 0 || dotIndex === lhs.length - 1) {
-              throw new CliUsageError(
-                `--task-config must be in the form <taskId.key=value>; received "${assignment}".`,
-              );
-            }
-            const taskId = lhs.slice(0, dotIndex).trim();
-            const key = lhs.slice(dotIndex + 1).trim();
-            if (!taskId || !key || !rhs) {
-              throw new CliUsageError(
-                `--task-config must be in the form <taskId.key=value>; received "${assignment}".`,
-              );
-            }
-            const parsed: unknown =
-              rhs === "true"
-                ? true
-                : rhs === "false"
-                  ? false
-                  : /^-?\d+(\.\d+)?$/.test(rhs)
-                    ? Number(rhs)
-                    : rhs;
-            config.taskConfig[taskId] = {
-              ...(config.taskConfig[taskId] ?? {}),
-              [key]: parsed,
-            };
-          }
-        }
-        // Validate --target up front. Previously a typo'd path
-        // bubbled through to runtime tool calls — catching it here
-        // gives a clearer error before the Ink shell starts.
-        // (Field-test issue #55.) Skip validation for non-path
-        // targets (URLs / hosts) by checking for a scheme prefix.
-        if (opts.target) {
-          const isUrlLike = /^[a-z][a-z0-9+.-]*:/i.test(opts.target);
-          if (!isUrlLike && !existsSync(opts.target)) {
-            throw new CliUsageError(
-              `--target path not found: ${opts.target}\n` +
-                "  Pass an existing repo path, a URL (https://…), or a host:port.",
-            );
-          }
-        }
-        if (opts.inheritClaude) {
-          config.auth = "inherited";
-          config.agentRuntimeBackend = "claude";
-          // Best-effort persist so the choice survives across launches —
-          // matches what picking "Inherited Claude" in the prompt does.
-          try {
-            const { applyConfigPatch } = await import("./config.js");
-            applyConfigPatch([
-              { path: "agentRuntimeBackend", value: "claude" },
-              { path: "auth", value: "inherited" },
-            ]);
-          } catch {
-            // Non-fatal: in-memory flag still applies for this run.
-          }
-        }
-
-        // Project-local credentials (`<cwd>/.kuzushi/credentials.json`)
-        // override env-only state so per-project keys "just work". Local
-        // credentials files now follow the per-backend shape
-        // (`{ claude: {...}, piAi: {...}, codex: {...} }`), but legacy flat files are
-        // migrated by `loadLocalCredentials` into the claude slot.
-        const localCreds = loadLocalCredentials(opts.target ?? process.cwd());
-        if (localCreds) {
-          const existing = config.agentRuntimeConfig ?? {};
-          config.agentRuntimeConfig = {
-            claude: { ...(existing.claude ?? {}), ...(localCreds.claude ?? {}) },
-            piAi: { ...(existing.piAi ?? {}), ...(localCreds.piAi ?? {}) },
-            codex: { ...(existing.codex ?? {}), ...(localCreds.codex ?? {}) },
-          };
-          if (
-            !config.agentRuntimeConfig.claude ||
-            Object.keys(config.agentRuntimeConfig.claude).length === 0
-          ) {
-            delete config.agentRuntimeConfig.claude;
-          }
-          if (
-            !config.agentRuntimeConfig.piAi ||
-            Object.keys(config.agentRuntimeConfig.piAi).length === 0
-          ) {
-            delete config.agentRuntimeConfig.piAi;
-          }
-          if (
-            !config.agentRuntimeConfig.codex ||
-            Object.keys(config.agentRuntimeConfig.codex).length === 0
-          ) {
-            delete config.agentRuntimeConfig.codex;
-          }
-        }
-
-        // Prime env vars from the active backend's slot so child processes
-        // (Claude Code subprocess, Codex SDK, pi-ai fetch) inherit the right credentials.
-        const active = resolveActiveCredentials(config);
-        const activeProvider = config.agentRuntimeBackend === "codex" ? "openai" : "anthropic";
-        const apiKeyEnv = providerEnvVar(activeProvider);
-        const baseUrlEnv = providerBaseUrlEnvVar(activeProvider);
-        if (active.apiKey && apiKeyEnv) process.env[apiKeyEnv] = active.apiKey;
-        if (active.baseUrl && baseUrlEnv) process.env[baseUrlEnv] = active.baseUrl;
-
-        if (opts.apiKey) {
-          const overrideEnv =
-            config.agentRuntimeBackend === "codex" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
-          process.env[overrideEnv] = opts.apiKey;
-        }
-
-        // Inherited mode: walk the OAuth token search path and prime
-        // ANTHROPIC_API_KEY from the first hit. pi-ai's anthropic provider
-        // detects the `sk-ant-oat` prefix and switches to Bearer auth +
-        // Claude Code beta headers automatically.
-        // Skip when running inside a Claude Code host-managed session —
-        // the spawned `claude` CLI uses the host's auth + cache, and
-        // setting ANTHROPIC_API_KEY there forces cache-creation on every
-        // spawn (~12× cost regression — field-test issue #20).
-        if (
-          config.auth === "inherited" &&
-          !process.env.ANTHROPIC_API_KEY &&
-          !isClaudeCodeHostManagedAuth()
-        ) {
-          const { resolveAmbientOauthToken } = await import("./config.js");
-          const ambient = resolveAmbientOauthToken(config);
-          if (ambient) {
-            process.env.ANTHROPIC_API_KEY = ambient.token;
-            getLogger("kuzushi").info(`Using inherited OAuth token (source: ${ambient.source})`);
-          }
-        }
-        const runtime = configureAgentRuntime(config);
-        await startShell({
-          config,
-          runtime,
-          workspace: opts.workspace,
-          modules: opts.load
-            ?.split(",")
-            .map((m) => m.trim())
-            .filter(Boolean),
-          excludeBuiltinModules: opts.exclude
-            ?.split(",")
-            .map((m) => m.trim())
-            .filter(Boolean),
-          target: opts.target,
-        });
-      },
-    ),
-  );
+  .action(wrapCliAction(async (opts: ShellCommandOptions) => runShellCommand(opts)));
 
 // ── scan ──────────────────────────────────────────────────────────────────
 

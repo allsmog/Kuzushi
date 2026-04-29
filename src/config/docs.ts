@@ -33,12 +33,12 @@ export const CONFIG_KEY_DOCS: ConfigKeyDoc[] = [
     values: ["pi-ai", "claude", "codex"],
   },
   {
-    key: "agentRuntimeConfig.apiKey",
+    key: "agentRuntimeConfig.<backend>.apiKey",
     type: "string (sensitive)",
-    summary: "Plaintext provider API key. Strongly discouraged — use env vars or /auth instead.",
+    summary: "Plaintext provider API key for a backend slot. Prefer env vars or /auth.",
     envVar: "provider-specific, such as ANTHROPIC_API_KEY or OPENAI_API_KEY",
     details:
-      "`kuzushi config set agentRuntimeConfig.apiKey ...` triggers a plaintext warning. Prefer /auth, provider env vars, or pass --api-key per invocation.",
+      "Use an explicit backend slot, such as agentRuntimeConfig.claude.apiKey or agentRuntimeConfig.codex.apiKey.",
   },
   {
     key: "busBackend",

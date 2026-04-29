@@ -21,8 +21,7 @@ SEMGREP_RULES_DIR="${REPO_DIR}/tests/e2e/fixtures/semgrep-rules"
 # The CLI surfaces a hard error if Anthropic credentials are completely
 # absent, even when a non-Anthropic agent runtime is selected (here: pi-ai
 # pointing at the mock server). Set a dummy key so credential preflight
-# passes — the mock server ignores it. This matches the apiKey already
-# set in agentRuntimeConfig.apiKey below.
+# passes — the mock server ignores it. This matches the piAi credential slot below.
 export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-fake-key}"
 
 # Command used to invoke the Kuzushi CLI. Default `pnpm dev` (tsx) is handy
@@ -100,7 +99,7 @@ cat > "${TEST_APP_DIR}/.kuzushi/config.json" <<JSON
 {
   "model": "anthropic:claude-sonnet-4-6",
   "agentRuntimeBackend": "pi-ai",
-  "agentRuntimeConfig": { "baseUrl": "${MOCK_BASE_URL}", "apiKey": "fake-key" },
+  "agentRuntimeConfig": { "piAi": { "baseUrl": "${MOCK_BASE_URL}", "apiKey": "fake-key" } },
   "scanners": ["semgrep"],
   "enabledTasks": ["context-gatherer"],
   "verify": false,

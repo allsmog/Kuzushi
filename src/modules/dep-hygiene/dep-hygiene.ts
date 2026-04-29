@@ -224,7 +224,7 @@ function analyzePyprojectToml(filePath: string, raw: string): DepFinding[] {
 
 function analyzePep508(filePath: string, spec: string): DepFinding | null {
   const cleaned = spec.split(";")[0]!.trim();
-  const match = cleaned.match(/^([A-Za-z0-9_.\-]+)\s*(.*)$/);
+  const match = cleaned.match(/^([A-Za-z0-9_.-]+)\s*(.*)$/);
   if (!match) return null;
   const name = match[1]!;
   const constraint = (match[2] ?? "").trim();

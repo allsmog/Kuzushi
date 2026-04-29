@@ -113,8 +113,10 @@ describe("loadConfig", () => {
         verifyRefinementMaxIterations: 5,
         verifyReflectionInterval: 4,
         agentRuntimeConfig: {
-          apiKey: "sk-test",
-          baseUrl: "https://api.example.com/",
+          claude: {
+            apiKey: "sk-test",
+            baseUrl: "https://api.example.com/",
+          },
         },
         taskConfig: {
           semgrep: { verify: false },
@@ -174,7 +176,9 @@ describe("loadConfig", () => {
       TMP_CONFIG_PATH,
       JSON.stringify({
         agentRuntimeConfig: {
-          apiKey: "global-key",
+          claude: {
+            apiKey: "global-key",
+          },
         },
       }),
     );
@@ -182,7 +186,9 @@ describe("loadConfig", () => {
       TMP_PROJECT_CONFIG_PATH,
       JSON.stringify({
         agentRuntimeConfig: {
-          baseUrl: "https://api.example.com/",
+          claude: {
+            baseUrl: "https://api.example.com/",
+          },
         },
       }),
     );
@@ -198,7 +204,9 @@ describe("loadConfig", () => {
       TMP_CONFIG_PATH,
       JSON.stringify({
         agentRuntimeConfig: {
-          apiKey: "global-key",
+          claude: {
+            apiKey: "global-key",
+          },
         },
       }),
     );
@@ -207,7 +215,9 @@ describe("loadConfig", () => {
       JSON.stringify({
         model: "project-model",
         agentRuntimeConfig: {
-          baseUrl: "https://evil.example/",
+          claude: {
+            baseUrl: "https://evil.example/",
+          },
         },
         taskConfig: {
           semgrep: {
@@ -235,7 +245,9 @@ describe("loadConfig", () => {
       TMP_PROJECT_CONFIG_PATH,
       JSON.stringify({
         agentRuntimeConfig: {
-          baseUrl: "https://trusted.example/",
+          claude: {
+            baseUrl: "https://trusted.example/",
+          },
         },
       }),
     );
@@ -422,7 +434,7 @@ describe("setConfigValue", () => {
   it("sets agentRuntimeConfig as an object", () => {
     setConfigValue(
       "agentRuntimeConfig",
-      '{"apiKey":"sk-test","baseUrl":"https://api.example.com/"}',
+      '{"claude":{"apiKey":"sk-test","baseUrl":"https://api.example.com/"}}',
     );
     expect(getConfigValue("agentRuntimeConfig")).toEqual({
       claude: { apiKey: "sk-test", baseUrl: "https://api.example.com/" },
@@ -430,10 +442,19 @@ describe("setConfigValue", () => {
   });
 
   it("sets nested agentRuntimeConfig values", () => {
-    setConfigValue("agentRuntimeConfig.apiKey", "sk-inline");
-    setConfigValue("agentRuntimeConfig.baseUrl", "https://proxy.example/");
-    expect(getConfigValue("agentRuntimeConfig.apiKey")).toBe("sk-inline");
-    expect(getConfigValue("agentRuntimeConfig.baseUrl")).toBe("https://proxy.example/");
+    setConfigValue("agentRuntimeConfig.claude.apiKey", "sk-inline");
+    setConfigValue("agentRuntimeConfig.claude.baseUrl", "https://proxy.example/");
+    expect(getConfigValue("agentRuntimeConfig.claude.apiKey")).toBe("sk-inline");
+    expect(getConfigValue("agentRuntimeConfig.claude.baseUrl")).toBe("https://proxy.example/");
+  });
+
+  it("rejects legacy flat agentRuntimeConfig values", () => {
+    expect(() => setConfigValue("agentRuntimeConfig.apiKey", "sk-inline")).toThrow(
+      "Legacy config key",
+    );
+    expect(() => setConfigValue("agentRuntimeConfig", '{"apiKey":"sk-test"}')).toThrow(
+      "Legacy flat agentRuntimeConfig",
+    );
   });
 
   it("sets codex agentRuntimeConfig slot values", () => {
@@ -660,8 +681,8 @@ describe("unsetConfigValue", () => {
   });
 
   it("resets agentRuntimeConfig to default", () => {
-    setConfigValue("agentRuntimeConfig.apiKey", "sk-inline");
-    setConfigValue("agentRuntimeConfig.baseUrl", "https://proxy.example/");
+    setConfigValue("agentRuntimeConfig.claude.apiKey", "sk-inline");
+    setConfigValue("agentRuntimeConfig.claude.baseUrl", "https://proxy.example/");
     unsetConfigValue("agentRuntimeConfig");
     expect(getConfigValue("agentRuntimeConfig")).toBe(DEFAULTS.agentRuntimeConfig);
   });

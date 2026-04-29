@@ -182,8 +182,10 @@ cat > "$TARGET_DIR/.kuzushi/config.json" << 'CONFIG'
   "triageModel": "openai:qwen3:8b",
   "verifyModel": "openai:qwen3:8b",
   "agentRuntimeConfig": {
-    "apiKey": "ollama",
-    "baseUrl": "http://localhost:11434/v1"
+    "piAi": {
+      "apiKey": "ollama",
+      "baseUrl": "http://localhost:11434/v1"
+    }
   },
   "scanners": ["semgrep"],
   "verify": true,

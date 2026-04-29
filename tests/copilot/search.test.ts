@@ -27,7 +27,7 @@ const modules: CopilotModule[] = [
       { type: "CVE", value: "2024-1234" },
       { type: "CWE", value: "79" },
     ],
-    tools: [tool("sast:scan", "Run the SAST pipeline"), tool("sast:triage", "Triage findings")],
+    tools: [tool("sast:scan", "Run the SAST pipeline"), tool("triage:run", "Triage findings")],
   },
   {
     id: "randori",

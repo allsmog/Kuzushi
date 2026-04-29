@@ -2,7 +2,7 @@
  * Shared helpers for the SAST module family.
  *
  * Everything in this file is infrastructure that 2+ sub-modules need:
- *   - `generateContextSnapshot` + friends: context-gathering DAG for `sast:context`
+ *   - `generateContextSnapshot` + friends: context-gathering DAG for `context:build`
  *   - `formatContextSummary` + friends: rendering for the context summary view
  *   - Runtime shape helpers (`asRepoContext`, `asAppModel`)
  *

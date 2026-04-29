@@ -40,14 +40,14 @@ describe("prompt-edit helpers", () => {
     });
 
     it("reports 'default' when no override is set", () => {
-      const out = readEffectivePrompt("sast:triage", "TRIAGE_PROMPT", undefined, workDir);
+      const out = readEffectivePrompt("triage:run", "TRIAGE_PROMPT", undefined, workDir);
       expect(out.source).toBe("default");
       expect(out.resolved).toBeUndefined();
     });
 
     it("reports 'inline' for plain string overrides", () => {
       const out = readEffectivePrompt(
-        "sast:triage",
+        "triage:run",
         "TRIAGE_PROMPT",
         { TRIAGE_PROMPT: "be more careful" },
         workDir,
@@ -61,7 +61,7 @@ describe("prompt-edit helpers", () => {
       const file = path.join(workDir, "triage.md");
       writeFileSync(file, "# my override\n");
       const out = readEffectivePrompt(
-        "sast:triage",
+        "triage:run",
         "TRIAGE_PROMPT",
         { TRIAGE_PROMPT: file },
         workDir,
@@ -73,7 +73,7 @@ describe("prompt-edit helpers", () => {
 
     it("reports 'unset' when the override points at a missing file", () => {
       const out = readEffectivePrompt(
-        "sast:triage",
+        "triage:run",
         "TRIAGE_PROMPT",
         { TRIAGE_PROMPT: "./missing.md" },
         workDir,
@@ -88,14 +88,14 @@ describe("prompt-edit helpers", () => {
       expect(
         formatEffectivePromptLine({
           promptKey: "TRIAGE_PROMPT",
-          toolName: "sast:triage",
+          toolName: "triage:run",
           source: "default",
         }),
       ).toContain("default");
       expect(
         formatEffectivePromptLine({
           promptKey: "TRIAGE_PROMPT",
-          toolName: "sast:triage",
+          toolName: "triage:run",
           source: "inline",
           resolved: "x",
           byteLen: 1,
@@ -104,7 +104,7 @@ describe("prompt-edit helpers", () => {
       expect(
         formatEffectivePromptLine({
           promptKey: "TRIAGE_PROMPT",
-          toolName: "sast:triage",
+          toolName: "triage:run",
           source: "file",
           filePath: "/tmp/x.md",
           byteLen: 42,
@@ -119,20 +119,20 @@ describe("prompt-edit helpers", () => {
     it("renders audit rows in a table", () => {
       const table = formatPromptAuditTable([
         {
-          moduleId: "sast",
-          toolName: "sast:triage",
+          moduleId: "triage",
+          toolName: "triage:run",
           verb: "triage",
           promptKey: "TRIAGE_PROMPT",
           effective: {
             promptKey: "TRIAGE_PROMPT",
-            toolName: "sast:triage",
+            toolName: "triage:run",
             source: "inline",
             resolved: "x",
             byteLen: 1,
           },
         },
       ]);
-      expect(table).toContain("sast:triage");
+      expect(table).toContain("triage:run");
       expect(table).toContain("TRIAGE_PROMPT");
       expect(table).toContain("inline");
     });

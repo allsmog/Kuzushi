@@ -23,8 +23,6 @@ describe("UIStore agentActivity memory retention", () => {
   it("caps the agentActivity map at MAX_AGENT_ACTIVITY_ENTRIES under sustained growth", () => {
     const store = new UIStore();
 
-    // Simulate 10k distinct-fingerprint updates — a long-running scan would normally
-    // grow the map unboundedly. The cap keeps memory bounded.
     for (let i = 0; i < 10_000; i++) {
       store.addAgentActivity(`fp-${i}`, {
         kind: "tool-start",
@@ -40,9 +38,8 @@ describe("UIStore agentActivity memory retention", () => {
     expect(state.agentActivity.size).toBeLessThanOrEqual(1000);
     // The most recent entries must be retained (FIFO eviction).
     expect(state.agentActivity.has("fp-9999")).toBe(true);
-    // Oldest entries are dropped.
     expect(state.agentActivity.has("fp-0")).toBe(false);
-  });
+  }, 10_000);
 
   it("clearStaleActivity drops entries older than the TTL", async () => {
     const store = new UIStore();
