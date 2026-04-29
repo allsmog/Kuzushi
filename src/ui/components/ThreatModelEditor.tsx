@@ -18,6 +18,7 @@ import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
+import { isCancelInput } from "../interaction-key-policy.js";
 import { TextInput } from "../primitives/TextInput.js";
 import { dangerStrong, info, muted, SPACING, tokens, warnStrong } from "../tokens.js";
 
@@ -147,7 +148,7 @@ export function ThreatModelEditor({
       } else if (input === "a" && threat) {
         setAnnotateBuffer(model.userAnnotations?.[threat.id] ?? "");
         setAnnotateMode(true);
-      } else if (input === "q" || key.escape) {
+      } else if (input === "q" || isCancelInput(input, key)) {
         finish();
       } else if (input === "S") {
         onSkip();
@@ -200,6 +201,11 @@ export function ThreatModelEditor({
         <Text>
           {tokens.success(`${activeCount} active`)} {tokens.muted(`${dismissedCount} dismissed`)}{" "}
           {tokens.info(`${mitigatedCount} mitigated`)}
+        </Text>
+        <Text>
+          {tokens.hint(`(${selectedIdx + 1} of ${threats.length})`)}
+          {selectedIdx > 0 ? tokens.hint(" ▲") : ""}
+          {selectedIdx < threats.length - 1 ? tokens.hint(" ▼") : ""}
         </Text>
       </Box>
       <Text>{""}</Text>

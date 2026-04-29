@@ -49,6 +49,15 @@ export function SastTasksView({ shell }: SastTasksViewProps): React.ReactElement
         <Box marginTop={SPACING.xs}>
           <Text>{tokens.muted(formatSastTaskLegend())}</Text>
         </Box>
+        {rows.length > 1 ? (
+          <Box marginTop={SPACING.xs}>
+            <Text>
+              {tokens.hint(`(${summary.activeIndex + 1} of ${rows.length})`)}
+              {summary.activeIndex > 0 ? tokens.hint(" ▲") : ""}
+              {summary.activeIndex < rows.length - 1 ? tokens.hint(" ▼") : ""}
+            </Text>
+          </Box>
+        ) : null}
 
         <Box flexDirection="column" marginTop={SPACING.sm}>
           <Text>

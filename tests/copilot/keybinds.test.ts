@@ -492,6 +492,76 @@ describe("resolveKeybind — SAST task selector", () => {
   });
 });
 
+describe("resolveKeybind — KB attachment list", () => {
+  function kbState(cursor = 0) {
+    const docs = [
+      { id: "doc-a", title: "a.md" },
+      { id: "doc-b", title: "b.md" },
+      { id: "doc-c", title: "c.md" },
+    ];
+    const shell = baseShell({
+      shellView: "kb",
+      focusedModule: "threat-model",
+      kb: { moduleId: "threat-model", cursor, collapsed: false },
+      kbState: { "threat-model": { documents: docs } },
+    } as unknown as Partial<ShellState>);
+    const state = baseState(shell);
+    return { shell, state };
+  }
+
+  it("j/k and arrow keys move the KB cursor and clamp to available rows", () => {
+    const { state } = kbState(1);
+    expect(
+      resolveKeybind({
+        stroke: stroke({ char: "j" }),
+        input: "",
+        state,
+        looseFindingCount: 0,
+        now: 0,
+      }),
+    ).toEqual({ type: "set-kb-cursor", cursor: 2 });
+    expect(
+      resolveKeybind({
+        stroke: stroke({ key: { upArrow: true } }),
+        input: "",
+        state,
+        looseFindingCount: 0,
+        now: 0,
+      }),
+    ).toEqual({ type: "set-kb-cursor", cursor: 0 });
+  });
+
+  it("g/G jump to top and bottom", () => {
+    const { state } = kbState(1);
+    expect(dispatch("g", state.shell!, state)).toEqual({ type: "set-kb-cursor", cursor: 0 });
+    expect(dispatch("G", state.shell!, state)).toEqual({ type: "set-kb-cursor", cursor: 2 });
+  });
+
+  it("d and r dispatch commands for the selected attachment", () => {
+    const { state } = kbState(1);
+    expect(dispatch("d", state.shell!, state)).toEqual({
+      type: "dispatch",
+      command: "detach doc-b",
+    });
+    expect(dispatch("r", state.shell!, state)).toEqual({
+      type: "dispatch",
+      command: "reparse doc-b",
+    });
+  });
+
+  it("ignores list movement while typing", () => {
+    const { state } = kbState(1);
+    const action = resolveKeybind({
+      stroke: stroke({ char: "j" }),
+      input: "attach ",
+      state,
+      looseFindingCount: 0,
+      now: 0,
+    });
+    expect(action.type).toBe("none");
+  });
+});
+
 describe("resolveKeybind — q, Esc, and /back", () => {
   it("L toggles the context-build tail while work is in flight", () => {
     const shell = baseShell({
@@ -534,6 +604,12 @@ describe("resolveKeybind — q, Esc, and /back", () => {
     const shell = baseShell({ shellView: "findings" });
     const state = baseState(shell);
     expect(dispatch("q", shell, state)).toEqual({ type: "dispatch", command: "/back" });
+  });
+
+  it("b on a backable view with empty buffer dispatches /back", () => {
+    const shell = baseShell({ shellView: "kb" });
+    const state = baseState(shell);
+    expect(dispatch("b", shell, state)).toEqual({ type: "dispatch", command: "/back" });
   });
 
   it("q on the catalog is a no-op (prevents recursing out of the shell)", () => {

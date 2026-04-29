@@ -638,14 +638,36 @@ export interface ModuleContext {
 export interface CopilotModule {
   /** Unique module identifier (e.g. "sast", "blackbox", "honeypot"). */
   readonly id: string;
+  /**
+   * Legacy module identifiers that continue to resolve to this module via
+   * the registry's alias map. Lets a rename (`threat-hunt` →
+   * `carlini-threat-hunt`) keep working for old `taskConfig` keys, the
+   * `/use <id>` shell verb, and any persisted resume metadata. M1 of the
+   * v0.21 followups.
+   */
+  readonly legacyIds?: ReadonlyArray<string>;
   /** Human-readable name shown in UI. */
   readonly displayName: string;
   /** Module category for grouping/filtering. */
   readonly category: ModuleCategory;
   /** Semver version string. */
   readonly version: string;
-  /** Short description of what the module does. */
+  /**
+   * Short description of what the module does. Surfaced in the catalog row,
+   * `/modules` table, and module-picker. Kept to one sentence (≤ 140 chars)
+   * so it renders cleanly at narrow widths — see `longDescription` for the
+   * fuller story.
+   */
   readonly description: string;
+
+  /**
+   * Optional longer-form description surfaced by `/help <module>` and the
+   * module home view. Use this when the one-sentence `description` can't
+   * carry the full story (cross-module dependencies, methodology citations,
+   * etc.). Free-form Markdown — kept out of the catalog row so narrow
+   * terminals stay readable.
+   */
+  readonly longDescription?: string;
 
   /**
    * Reliability tier — inherited by tools that don't override `rank`.

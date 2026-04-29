@@ -1,0 +1,15 @@
+{
+  "name": "dep-hygiene-node-fixture",
+  "version": "0.0.0",
+  "dependencies": {
+    "lodash": "latest",
+    "express": "*",
+    "react": "^18.2.0",
+    "axios": ">=1.0.0",
+    "left-pad": "^0.1.0",
+    "good-lib": "1.2.3"
+  },
+  "devDependencies": {
+    "vitest": "latest"
+  }
+}

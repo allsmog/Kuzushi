@@ -12,6 +12,7 @@
 
 import { useInput } from "ink";
 import { useEffect, useState } from "react";
+import { isCancelInput, isPlainTextInput } from "../interaction-key-policy.js";
 import { applyBackspace, isCtrlChord } from "./text-edit-actions.js";
 
 export interface UseTextEditorProps {
@@ -46,12 +47,12 @@ export function useTextEditor({
 
   useInput(
     (input, key) => {
-      if (key.return) {
-        onSubmit?.(value);
+      if (isCancelInput(input, key)) {
+        onCancel?.();
         return;
       }
-      if (key.escape) {
-        onCancel?.();
+      if (key.return) {
+        onSubmit?.(value);
         return;
       }
       if (key.leftArrow) {
@@ -86,8 +87,7 @@ export function useTextEditor({
         setCursor(edit.cursor);
         return;
       }
-      if (key.ctrl || key.meta) return;
-      if (!input) return;
+      if (!isPlainTextInput(input, key)) return;
       const next = value.slice(0, cursor) + input + value.slice(cursor);
       if (typeof maxLength === "number" && next.length > maxLength) return;
       onChange(next);

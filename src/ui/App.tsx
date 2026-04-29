@@ -18,6 +18,7 @@ import { ConfigEditor } from "./components/ConfigEditor.js";
 import { ContextIntake } from "./components/ContextIntake.js";
 import { CopilotShell } from "./components/CopilotShell.js";
 import { CredentialPrompt } from "./components/CredentialPrompt.js";
+import { InteractionErrorBoundary } from "./components/InteractionErrorBoundary.js";
 import { InteractiveReview } from "./components/InteractiveReview.js";
 import { NoticeRail } from "./components/NoticeRail.js";
 import { QualityGate } from "./components/QualityGate.js";
@@ -29,6 +30,7 @@ import { ThreatModelEditor } from "./components/ThreatModelEditor.js";
 import { KeybindingsProvider } from "./hooks/useKeybindings.js";
 import { useRawModeWatchdog } from "./hooks/useRawModeWatchdog.js";
 import { shallowEqual, useUISelector } from "./hooks.js";
+import { isAbortInput } from "./interaction-key-policy.js";
 import { deriveNavigation, LayoutProvider, STANDARD_LAYOUT_THEME } from "./layout-context.js";
 import { KeybindFooter } from "./primitives/KeybindFooter.js";
 import { SpinnerClockProvider } from "./primitives/SpinnerClock.js";
@@ -44,7 +46,9 @@ export function App({ store }: AppProps): React.ReactElement {
   return (
     <KeybindingsProvider>
       <SpinnerClockProvider>
-        <AppInner store={store} />
+        <InteractionErrorBoundary label="Kuzushi UI">
+          <AppInner store={store} />
+        </InteractionErrorBoundary>
       </SpinnerClockProvider>
     </KeybindingsProvider>
   );
@@ -120,6 +124,8 @@ function AppInner({ store }: AppProps): React.ReactElement {
       heartbeatExpanded: s.heartbeatExpanded,
       noticeRailExpanded: s.noticeRailExpanded,
       shellAbort: s.shell?.onAbort,
+      preflight: s.preflight,
+      review: s.review,
     }),
     shallowEqual,
   );
@@ -154,6 +160,27 @@ function AppInner({ store }: AppProps): React.ReactElement {
       else if (input === "n") store.update({ noticeRailExpanded: !keyState.noticeRailExpanded });
     },
     { isActive: keyState.mode === "running" && process.stdin.isTTY === true },
+  );
+
+  useInput(
+    (input, key) => {
+      if (!isAbortInput(input, key)) return;
+      if (keyState.mode === "preflight") {
+        const preflight = keyState.preflight;
+        if (!preflight) return;
+        if (preflight.kind === "confirm") preflight.onQuit();
+        else preflight.onCancel();
+        return;
+      }
+      if (keyState.mode === "review") {
+        keyState.review?.onQuit();
+      }
+    },
+    {
+      isActive:
+        process.stdin.isTTY === true &&
+        (keyState.mode === "preflight" || keyState.mode === "review"),
+    },
   );
 
   const layoutContext = React.useMemo(

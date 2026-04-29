@@ -25,6 +25,7 @@ import { boxFooter, boxHeader } from "../format.js";
 import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useTerminalCardWidth } from "../hooks.js";
+import { isCancelInput } from "../interaction-key-policy.js";
 import { SPACING, tokens } from "../tokens.js";
 import {
   FIELDS,
@@ -312,7 +313,7 @@ export function ConfigEditor({
         commitSave();
         return;
       }
-      if (key.escape) {
+      if (isCancelInput(input, key)) {
         if (drill) {
           setDrill(null);
           nav.setIndex(0);
@@ -448,6 +449,13 @@ export function ConfigEditor({
             `Source: ${cfgPath}${dirty ? `  •  ${tokens.warn("unsaved changes")}` : ""}`,
           )}
         </Text>
+        {(drill ? drillRows : rows).length > 0 ? (
+          <Text>
+            {tokens.hint(`(${safeCursor + 1} of ${(drill ? drillRows : rows).length})`)}
+            {safeCursor > 0 ? tokens.hint(" ▲") : ""}
+            {safeCursor < (drill ? drillRows : rows).length - 1 ? tokens.hint(" ▼") : ""}
+          </Text>
+        ) : null}
       </Box>
       <Text>{""}</Text>
 

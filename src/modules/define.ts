@@ -101,15 +101,41 @@ export function defineDagTool<Id extends string, TI = unknown, TO = unknown>(
 
 /** Specification for a module. `tools` are validated at runtime against `id`. */
 export interface DefineModuleSpec<Id extends string = string>
-  extends Omit<CopilotModule, "id" | "tools"> {
+  extends Omit<CopilotModule, "id" | "tools" | "legacyIds"> {
   id: Id;
+  /**
+   * Legacy module ids that should keep resolving to this module via the
+   * registry's alias map. Use when renaming a module to preserve any
+   * `taskConfig[old-id]` keys, `/use old-id` shell verbs, and persisted
+   * checkpoints / catalog cards. M1 of the v0.21 followups.
+   */
+  legacyIds?: ReadonlyArray<string>;
   tools: ReadonlyArray<(DefineToolSpec<Id> & ModuleTool) | DagTool<Id>>;
+}
+
+/** Soft cap on the catalog-row description. Above this we throw. */
+const DESCRIPTION_MAX_CHARS = 140;
+
+/**
+ * Heuristic sentence-count: split on `. ` (period followed by space + capital
+ * letter) so domain names ("anthropic.com"), parenthesised periods
+ * ("(default: 5).") and abbreviations don't false-positive.
+ */
+function countSentences(description: string): number {
+  if (!description.trim()) return 0;
+  const matches = description.match(/\. [A-Z]/g);
+  return (matches?.length ?? 0) + 1;
 }
 
 /**
  * Author-facing module builder. Performs a runtime check that every tool
  * name starts with `<id>:` — the same guard the loader enforces, fail-fast
  * at construction time so authors catch mistakes immediately.
+ *
+ * Also enforces the one-sentence catalog-description rule: the catalog,
+ * `/modules`, and the module picker all render `description` in a narrow
+ * column. Multi-sentence copy belongs in `longDescription` (surfaced by
+ * `/help <module>` and the module-home view).
  */
 export function defineModule<Id extends string>(spec: DefineModuleSpec<Id>): CopilotModule {
   for (let i = 0; i < spec.tools.length; i++) {
@@ -119,6 +145,26 @@ export function defineModule<Id extends string>(spec: DefineModuleSpec<Id>): Cop
         "SHAPE_INVALID",
         `Module "${spec.id}" tools[${i}].name "${String(tool.name)}" does not start with "${spec.id}:".`,
         { moduleId: spec.id, toolIndex: i, toolName: tool.name },
+      );
+    }
+  }
+  if (typeof spec.description === "string") {
+    if (spec.description.length > DESCRIPTION_MAX_CHARS) {
+      throw new ModuleLoadError(
+        "SHAPE_INVALID",
+        `Module "${spec.id}" description is ${spec.description.length} chars (max ${DESCRIPTION_MAX_CHARS}). Move the overflow into longDescription.`,
+        {
+          moduleId: spec.id,
+          descriptionLength: spec.description.length,
+          maxLength: DESCRIPTION_MAX_CHARS,
+        },
+      );
+    }
+    if (countSentences(spec.description) > 1) {
+      throw new ModuleLoadError(
+        "SHAPE_INVALID",
+        `Module "${spec.id}" description must be a single sentence. Move the rest to longDescription (surfaced by /help <module>).`,
+        { moduleId: spec.id, description: spec.description },
       );
     }
   }

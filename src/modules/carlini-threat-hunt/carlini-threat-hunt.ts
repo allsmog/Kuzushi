@@ -1049,12 +1049,17 @@ export function createCarliniThreatHuntModule(): CopilotModule {
   );
   return defineModule({
     id: "carlini-threat-hunt",
+    // M1: keep legacy `threat-hunt` ids resolvable. Operators with old
+    // taskConfig keys, /use threat-hunt verbs, or persisted resume metadata
+    // continue to work after the rename.
+    legacyIds: ["threat-hunt"],
     displayName: "Carlini Threat Hunt",
     category: "offense",
     version: "0.17.2",
-    description:
-      "Inspired by Nicholas Carlini's [un]prompted talk on parallel scoped agents. " +
-      "Not affiliated with or endorsed by Nicholas Carlini. Hunts threats from the active threat-model document. " +
+    description: "Hunts threats from the active threat-model document via parallel scoped agents.",
+    longDescription:
+      "Inspired by Nicholas Carlini's [un]prompted talk on parallel scoped agents — " +
+      "not affiliated with or endorsed by Nicholas Carlini. " +
       "Attach reference material (incidents, runtime logs, prior findings) with `attach`.",
     rank: "good",
     references: [{ type: "URL", value: "https://unprompted.ai/" }],

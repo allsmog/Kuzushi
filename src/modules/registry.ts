@@ -39,6 +39,13 @@ export class ModuleRegistry {
    * making them part of the built-in public surface.
    */
   private readonly aliases = new Map<string, string>();
+  /**
+   * Module-id aliases. Keyed by legacy id (e.g. "threat-hunt"), value is
+   * the canonical id (e.g. "carlini-threat-hunt"). Populated automatically
+   * from each registered module's `legacyIds` field; `get()`, `has()`,
+   * and `resolveModuleId()` walk this map. M1 of the v0.21 followups.
+   */
+  private readonly moduleIdAliases = new Map<string, string>();
 
   /**
    * Register a module instance. Does NOT call init — use loadModule() for full lifecycle.
@@ -51,6 +58,16 @@ export class ModuleRegistry {
       });
     }
     this.modules.set(mod.id, mod);
+    if (mod.legacyIds) {
+      for (const legacy of mod.legacyIds) {
+        if (!legacy || legacy === mod.id) continue;
+        if (this.modules.has(legacy)) {
+          // A real module already owns this id — don't shadow it.
+          continue;
+        }
+        this.moduleIdAliases.set(legacy, mod.id);
+      }
+    }
   }
 
   /**
@@ -137,15 +154,23 @@ export class ModuleRegistry {
    * Unload a module: call dispose(), remove from registry.
    */
   async unloadModule(moduleId: string): Promise<void> {
-    const mod = this.modules.get(moduleId);
+    const canonical = this.resolveModuleId(moduleId);
+    const mod = this.modules.get(canonical);
     if (!mod) return;
 
-    if (mod.dispose && this.initialized.has(moduleId)) {
+    if (mod.dispose && this.initialized.has(canonical)) {
       await mod.dispose();
     }
 
-    this.modules.delete(moduleId);
-    this.initialized.delete(moduleId);
+    this.modules.delete(canonical);
+    this.initialized.delete(canonical);
+    if (mod.legacyIds) {
+      for (const legacy of mod.legacyIds) {
+        if (this.moduleIdAliases.get(legacy) === canonical) {
+          this.moduleIdAliases.delete(legacy);
+        }
+      }
+    }
   }
 
   /**
@@ -162,18 +187,34 @@ export class ModuleRegistry {
   // Queries
   // -------------------------------------------------------------------------
 
-  /** Get a module by ID. Throws if not found. */
+  /**
+   * Resolve a (possibly legacy) module id to the canonical id currently
+   * registered. Returns the input unchanged when no alias is mapped.
+   * M1 — used by `get()`, `has()`, taskConfig lookups, and `/use <id>`.
+   */
+  resolveModuleId(id: string): string {
+    if (this.modules.has(id)) return id;
+    return this.moduleIdAliases.get(id) ?? id;
+  }
+
+  /** Get a module by ID (or legacy alias). Throws if not found. */
   get(id: string): CopilotModule {
-    const mod = this.modules.get(id);
+    const canonical = this.resolveModuleId(id);
+    const mod = this.modules.get(canonical);
     if (!mod) {
       throw new ModuleLoadError("ID_MISMATCH", `Unknown module: "${id}"`, { moduleId: id });
     }
     return mod;
   }
 
-  /** Check if a module is registered. */
+  /** Check if a module is registered (matches direct id or legacy alias). */
   has(id: string): boolean {
-    return this.modules.has(id);
+    return this.modules.has(id) || this.moduleIdAliases.has(id);
+  }
+
+  /** Snapshot of all registered module-id aliases. */
+  listModuleIdAliases(): Array<{ from: string; to: string }> {
+    return [...this.moduleIdAliases.entries()].map(([from, to]) => ({ from, to }));
   }
 
   /** Check if a module has been initialized. */

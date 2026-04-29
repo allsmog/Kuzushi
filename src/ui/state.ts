@@ -165,6 +165,15 @@ export interface AgentActivityLine {
   elapsedSeconds?: number;
   index: number;
   total: number;
+  /**
+   * O3: epoch-ms timestamp of when this activity line was emitted. Optional
+   * for backward compat — older callers may omit it; consumers should fall
+   * back to "no pause-line render" rather than failing. ModuleRunView's
+   * ActorsBlock uses this to surface "waiting on actor N of M — last
+   * activity Ys ago" when the latest line is older than a stalled-actor
+   * threshold.
+   */
+  tsMs?: number;
 }
 
 /**
