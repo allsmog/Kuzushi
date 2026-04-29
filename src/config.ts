@@ -59,9 +59,7 @@ export function localCredentialsPath(cwd: string = process.cwd()): string {
 /**
  * Read the project-local credentials file at `<cwd>/.kuzushi/credentials.json`.
  *
- * Accepts both the modern per-backend shape (`{ claude: {...}, piAi: {...}, codex: {...} }`)
- * and the legacy flat shape (`{ apiKey, baseUrl }`). Legacy input is migrated
- * into the `claude` slot so pre-split creds continue to work without operator action.
+ * Accepts the per-backend shape: `{ claude: {...}, piAi: {...}, codex: {...} }`.
  */
 export function loadLocalCredentials(cwd: string = process.cwd()): AgentRuntimeConfig | undefined {
   const filePath = localCredentialsPath(cwd);
@@ -219,11 +217,6 @@ function writeConfigFile(targetPath: string, config: unknown): void {
 export function getConfigValue(key: string, repoRoot?: string): unknown {
   const config = loadConfig(repoRoot);
 
-  const legacyAgentMatch = key.match(/^agentRuntimeConfig\.(apiKey|baseUrl)$/);
-  if (legacyAgentMatch) {
-    key = `agentRuntimeConfig.claude.${legacyAgentMatch[1]}`;
-  }
-
   if (!key.includes(".")) {
     if (!VALID_TOP_LEVEL_KEYS.has(key)) return undefined;
     return config[key as keyof KuzushiConfig];
@@ -235,14 +228,7 @@ export function getConfigValue(key: string, repoRoot?: string): unknown {
 /** Set a config value by key (supports dotted paths like taskConfig.semgrep.binary). */
 export function setConfigValue(key: string, raw: string, repoRoot?: string): void {
   const config = loadWritableConfigLayer(repoRoot);
-
-  // Legacy dotted paths `agentRuntimeConfig.apiKey` / `.baseUrl` retarget to
-  // the claude slot after the per-backend split. Users with the old scripts
-  // keep working; new callers should use `agentRuntimeConfig.claude.apiKey`.
-  const legacyAgentMatch = key.match(/^agentRuntimeConfig\.(apiKey|baseUrl)$/);
-  if (legacyAgentMatch) {
-    key = `agentRuntimeConfig.claude.${legacyAgentMatch[1]}`;
-  }
+  rejectLegacyAgentRuntimePath(key);
 
   if (key.includes(".")) {
     const parts = key.split(".");
@@ -370,6 +356,7 @@ export const TOP_LEVEL_CONFIG_SETTERS: Record<string, ConfigSetter> = {
     if (!isRecord(parsed)) {
       throw new Error("agentRuntimeConfig must be an object");
     }
+    rejectLegacyAgentRuntimeConfig(parsed);
     config.agentRuntimeConfig = normalizeAgentRuntimeConfig(parsed);
   },
   auth: (config, raw) => {
@@ -528,11 +515,7 @@ export function applyConfigPatch(entries: ConfigPatchEntry[], repoRoot?: string)
 /** Unset a config key (supports dotted paths). */
 export function unsetConfigValue(key: string, repoRoot?: string): void {
   const config = loadWritableConfigLayer(repoRoot);
-
-  const legacyAgentMatch = key.match(/^agentRuntimeConfig\.(apiKey|baseUrl)$/);
-  if (legacyAgentMatch) {
-    key = `agentRuntimeConfig.claude.${legacyAgentMatch[1]}`;
-  }
+  rejectLegacyAgentRuntimePath(key);
 
   if (key.includes(".")) {
     const parts = key.split(".");
@@ -881,6 +864,21 @@ function saveUpdatedConfigLayer(config: WritableConfigLayer, repoRoot?: string):
   const layer = sanitizeConfigLayer(config) as WritableConfigLayer;
   validateConfigLayer(layer, repoRoot);
   saveConfigLayer(layer, repoRoot);
+}
+
+function rejectLegacyAgentRuntimePath(key: string): void {
+  if (!/^agentRuntimeConfig\.(apiKey|baseUrl)$/.test(key)) return;
+  const field = key.split(".").at(-1);
+  throw new Error(
+    `Legacy config key "${key}" was removed. Use "agentRuntimeConfig.claude.${field}" instead.`,
+  );
+}
+
+function rejectLegacyAgentRuntimeConfig(value: Record<string, unknown>): void {
+  if (!("apiKey" in value || "baseUrl" in value)) return;
+  throw new Error(
+    'Legacy flat agentRuntimeConfig was removed. Use {"claude":{"apiKey":"..."}} or another backend slot.',
+  );
 }
 
 function validateConfigLayer(layer: WritableConfigLayer, repoRoot?: string): void {
@@ -1388,43 +1386,22 @@ function normalizeAgentRuntimeCredentials(value: unknown): AgentRuntimeCredentia
   return out;
 }
 
-/**
- * Normalize `agentRuntimeConfig` input from any layer (config file, setConfigValue
- * JSON, local credentials file). Accepts:
- *
- *   - Modern per-backend shape:  { claude: {...}, piAi: {...}, codex: {...} }
- *   - Legacy flat shape:         { apiKey, baseUrl }  → migrates to { claude: {...} }
- *   - Mixed (flat + per-backend): flat keys route to `claude` unless it's already set.
- *
- * Returns undefined when no credentials are present in any slot.
- */
 function normalizeAgentRuntimeConfig(value: unknown): AgentRuntimeConfig | undefined {
   if (!isRecord(value)) return undefined;
 
   const claudeFromSlot = normalizeAgentRuntimeCredentials(value["claude"]);
   const piAiFromSlot = normalizeAgentRuntimeCredentials(value["piAi"]);
   const codexFromSlot = normalizeAgentRuntimeCredentials(value["codex"]);
-  const legacyFlat = normalizeAgentRuntimeCredentials(value);
 
-  // Merge legacy flat into claude only when the claude slot hasn't been set
-  // explicitly — we don't want legacy keys to silently overwrite a modern
-  // config. Order: modern slot wins, legacy fills the gap.
-  const claude: AgentRuntimeCredentials | undefined = claudeFromSlot ?? legacyFlat;
-
-  if (!claude && !piAiFromSlot && !codexFromSlot) return undefined;
+  if (!claudeFromSlot && !piAiFromSlot && !codexFromSlot) return undefined;
 
   const out: AgentRuntimeConfig = {};
-  if (claude) out.claude = claude;
+  if (claudeFromSlot) out.claude = claudeFromSlot;
   if (piAiFromSlot) out.piAi = piAiFromSlot;
   if (codexFromSlot) out.codex = codexFromSlot;
   return out;
 }
 
-/**
- * Pick the credentials slot that matches the active `agentRuntimeBackend`.
- * The single choke point for "which creds should this run use?" — used by
- * agent-runtime, CLI env-var priming, and the shell credential flow.
- */
 export function resolveActiveCredentials(
   config: Pick<KuzushiConfig, "agentRuntimeBackend" | "agentRuntimeConfig">,
 ): AgentRuntimeCredentials {

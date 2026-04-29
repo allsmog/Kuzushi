@@ -45,29 +45,29 @@ exports[`Ink component snapshots > ModuleCatalog — grouped by category with la
 
   OFFENSE
 
-  MODULE         DESCRIPTION                                      LAST RUN
+  MODULE                 DESCRIPTION                                LAST RUN
 
   ──────────────────────────────────────────────────────────────────────────────
   ──
-  sast           40+ task pipeline                                ran 2h · 4 tp
-
+  sast                   40+ task pipeline                          ran 2h · 4
+  tp
 
   INTEL
 
-  MODULE         DESCRIPTION                                      LAST RUN
+  MODULE                 DESCRIPTION                                LAST RUN
 
   ──────────────────────────────────────────────────────────────────────────────
   ──
-  randori        PASTA threat model                               ran 2h · 12
-  thr…
+  randori                PASTA threat model                         ran 2h · 12
+  t…
 
   GOVERNANCE
 
-  MODULE         DESCRIPTION                                      LAST RUN
+  MODULE                 DESCRIPTION                                LAST RUN
 
   ──────────────────────────────────────────────────────────────────────────────
   ──
-  shinsa         ISO 27001 + NIST 800-53                          never run"
+  shinsa                 ISO 27001 + NIST 800-53                    never run"
 `;
 
 exports[`Ink component snapshots > ModuleHome — tools table + last-run summary 1`] = `
@@ -80,7 +80,7 @@ exports[`Ink component snapshots > ModuleHome — tools table + last-run summary
   VERB           NAME                  DESC
   ─────────────────────────────────────────────────────────────────────────
   scan           scan                  run the full pipeline
-  triage         triage                re-triage one finding
+  triage         triage:run            re-triage one finding
 
   task selection   tasks opens scanners/detectors
 

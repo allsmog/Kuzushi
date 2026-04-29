@@ -35,9 +35,8 @@ export class ModuleRegistry {
   private readonly initialized = new Set<string>();
   /**
    * Tool-name aliases. Keyed by old fully-qualified name, value is the new
-   * fully-qualified name. Used for backward-compat when a tool moves between
-   * modules (e.g. `sast:semgrep` → `semgrep:scan`). `resolveTool()` consults
-   * this map after a direct lookup misses.
+   * fully-qualified name. External modules can opt into redirects without
+   * making them part of the built-in public surface.
    */
   private readonly aliases = new Map<string, string>();
 
@@ -214,8 +213,7 @@ export class ModuleRegistry {
 
   /**
    * Resolve a fully-qualified tool name ("module:action") to the ModuleTool.
-   * Returns undefined if not found. Falls back to the alias map on miss so
-   * legacy names (e.g. `sast:semgrep`) resolve to their current home.
+   * Returns undefined if not found. Falls back to explicitly registered aliases.
    */
   resolveTool(qualifiedName: string): { module: CopilotModule; tool: ModuleTool } | undefined {
     const [moduleId, ...rest] = qualifiedName.split(":");

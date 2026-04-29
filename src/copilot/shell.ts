@@ -128,6 +128,13 @@ import {
   updateDisabledSastTask,
 } from "./sast-task-selection.js";
 import {
+  commandMatches,
+  defineShellRoutes,
+  routeShellInput,
+  type ShellRoute,
+  type ShellRouteDefinition,
+} from "./shell/router.js";
+import {
   buildShellPrompt,
   type CommandSurfaceKind,
   collectKnownVerbs,
@@ -161,12 +168,7 @@ const CANCELLED_TOOL_MESSAGE = "Cancelled active operation.";
 const CANCELLED_AGENT_MESSAGE = "Cancelled active request.";
 const SIGNAL_DUPLICATE_GRACE_MS = 150;
 
-/** Tools that require a ContextSnapshot before they can execute from the shell. */
 const CONTEXT_REQUIRED_TOOLS = new Set([
-  // Legacy sast:* names (resolved via registry alias).
-  "sast:carlini-threat-hunt",
-  "sast:taint-iris",
-  // New sub-module names.
   "carlini-threat-hunt:run",
   "taint-iris:hunt",
   "taint-iris-next:hunt",
@@ -4930,6 +4932,535 @@ function shouldRouteShellInputBeforeDispatcher(
   );
 }
 
+interface ShellRouteEnvironment {
+  core: CopilotCore;
+  opts: ShellOptions;
+  shellContext: ShellContext;
+  shellState: ShellState;
+}
+
+interface BareShellInput {
+  raw: string;
+  trimmed: string;
+  lower: string;
+  words: string[];
+}
+
+interface SlashShellInput {
+  raw: string;
+  command: string;
+  args: string[];
+}
+
+type BareShellRoute = ShellRoute<BareShellInput, ShellRouteEnvironment, LocalCommandResult>;
+type SlashShellRoute = ShellRoute<SlashShellInput, ShellRouteEnvironment, LocalCommandResult>;
+type BareShellRouteDefinition = ShellRouteDefinition<
+  BareShellInput,
+  ShellRouteEnvironment,
+  LocalCommandResult
+>;
+type SlashShellRouteDefinition = ShellRouteDefinition<
+  SlashShellInput,
+  ShellRouteEnvironment,
+  LocalCommandResult
+>;
+
+const BARE_SHELL_ROUTES: readonly BareShellRoute[] = defineShellRoutes<
+  BareShellInput,
+  ShellRouteEnvironment,
+  LocalCommandResult
+>([
+  {
+    id: "exit",
+    matches: ({ lower }) => ["exit", "quit", "q"].includes(lower),
+    execute: () => ({ exit: true }),
+  },
+  {
+    id: "help-advanced",
+    matches: ({ lower }) => lower === "help advanced",
+    execute: (_input, { core, opts, shellContext, shellState }) => {
+      recordCommandUsage(shellContext, shellState, "/help");
+      return { output: formatHelp(core, opts, { includeAdvanced: true }) };
+    },
+  },
+  {
+    id: "help",
+    matches: ({ lower }) => lower === "help",
+    execute: (_input, { core, opts, shellContext, shellState }) => {
+      recordCommandUsage(shellContext, shellState, "/help");
+      return { output: formatHelp(core, opts) };
+    },
+  },
+  {
+    id: "modules",
+    matches: ({ lower }) => ["modules", "m"].includes(lower),
+    execute: (_input, { core, shellState }) => ({
+      output: formatModuleList(core, shellState.moduleCatalog),
+    }),
+  },
+  {
+    id: "tools",
+    matches: ({ lower }) => lower === "tools",
+    execute: (_input, { core, shellContext }) => ({
+      output: formatTools(core, shellContext.focusedModule),
+    }),
+  },
+  {
+    id: "use",
+    matches: ({ lower }) => lower.startsWith("use "),
+    execute: ({ words }, { core, opts, shellContext }) =>
+      handleUseCommand(words.slice(1), core, opts, shellContext),
+  },
+  {
+    id: "back",
+    matches: ({ lower }) => ["back", "b"].includes(lower),
+    execute: (_input, { opts, shellContext, shellState }) =>
+      handleBackCommand(opts, shellContext, shellState),
+  },
+  {
+    id: "findings",
+    matches: ({ lower }) => ["findings", "f"].includes(lower),
+    execute: () => ({
+      shellStateUpdater: (shell) => ({ ...shell, shellView: "findings", openFindingId: null }),
+      output: "Showing current findings.",
+    }),
+  },
+  {
+    id: "tune",
+    matches: ({ lower }) => ["tune", "t"].includes(lower),
+    execute: (_input, { shellContext }) => openTuneView(shellContext),
+  },
+  {
+    id: "kb",
+    matches: ({ lower }) => ["kb", "attachments"].includes(lower),
+    execute: (_input, { core, opts, shellContext, shellState }) =>
+      handleKbCommand(core, opts, shellContext, shellState),
+  },
+  {
+    id: "tasks",
+    matches: ({ lower }) => lower === "tasks",
+    execute: (_input, { core, opts, shellContext, shellState }) => {
+      recordCommandUsage(shellContext, shellState, "/tasks");
+      return handleSastTasksCommand(core, opts, shellContext, shellState);
+    },
+  },
+  {
+    id: "story",
+    matches: ({ lower }) => lower === "story",
+    execute: (_input, { shellContext, shellState }) => {
+      recordCommandUsage(shellContext, shellState, "/story");
+      return handleStoryCommand(shellState);
+    },
+  },
+  {
+    id: "prompts",
+    matches: ({ lower }) => lower === "prompts",
+    execute: (_input, { core, opts, shellContext, shellState }) => {
+      recordCommandUsage(shellContext, shellState, "/prompts");
+      return handlePromptsListCommand(core, opts, shellContext, shellState);
+    },
+  },
+  {
+    id: "resume",
+    matches: ({ lower }) => lower === "resume" || lower.startsWith("resume "),
+    execute: ({ words }, { core, opts, shellContext, shellState }) => {
+      recordCommandUsage(shellContext, shellState, "/resume");
+      return handleResumeCommand(words.slice(1), core, opts, shellContext, shellState);
+    },
+  },
+  {
+    id: "prompt-editor",
+    matches: (input, { shellContext, shellState }) =>
+      isPromptEditorInput(input, shellContext, shellState),
+    execute: (input, environment) => routePromptEditorInput(input, environment),
+  },
+  {
+    id: "sast-task-editor",
+    matches: (input, { shellState }) => isSastTaskEditorInput(input, shellState),
+    execute: ({ words }, { shellContext, shellState }) => {
+      const [taskVerb = "", ...taskArgs] = words;
+      recordCommandUsage(shellContext, shellState, `/task ${taskVerb.toLowerCase()}`);
+      return handleSastTaskCommand([taskVerb.toLowerCase(), ...taskArgs], shellState);
+    },
+  },
+  {
+    id: "options",
+    matches: ({ lower }) => lower === "options",
+    execute: (_input, { core, opts, shellContext, shellState }) => {
+      recordCommandUsage(shellContext, shellState, "/options");
+      return handleOptionsCommand([], core, opts, shellContext, shellState);
+    },
+  },
+  {
+    id: "show-options",
+    matches: ({ lower }) => lower === "show options" || lower.startsWith("show options "),
+    execute: ({ words }, { core, opts, shellContext, shellState }) => {
+      recordCommandUsage(shellContext, shellState, "/options");
+      return handleOptionsCommand(words.slice(2), core, opts, shellContext, shellState);
+    },
+  },
+  {
+    id: "show-advanced-options",
+    matches: ({ lower }, { shellState }) =>
+      shellState.shellView === "options" && lower === "show advanced",
+    execute: (_input, { core, opts, shellContext, shellState }) =>
+      showAdvancedOptions(core, opts, shellContext, shellState),
+  },
+  {
+    id: "set",
+    matches: ({ lower }) => lower.startsWith("set "),
+    execute: ({ words }, { core, opts, shellContext, shellState }) => {
+      recordCommandUsage(shellContext, shellState, "/set");
+      return handleSetCommand(words.slice(1), core, opts, shellContext.focusedModule, shellState);
+    },
+  },
+  {
+    id: "context-dfd",
+    matches: ({ lower }, { shellContext }) =>
+      shellContext.focusedModule === "context" && lower === "dfd",
+    execute: (_input, { core, opts, shellContext, shellState }) => {
+      recordCommandUsage(shellContext, shellState, "/context dfd");
+      return handleContextCommand(["dfd"], core, opts, shellContext, shellState);
+    },
+  },
+  {
+    id: "context-regen",
+    matches: ({ lower }, { shellContext }) =>
+      shellContext.focusedModule === "context" && lower.startsWith("regen "),
+    execute: ({ words }, { core, opts, shellContext, shellState }) => {
+      recordCommandUsage(shellContext, shellState, "/context regen");
+      return handleContextCommand(
+        ["regen", ...words.slice(1)],
+        core,
+        opts,
+        shellContext,
+        shellState,
+      );
+    },
+  },
+  {
+    id: "vendor-clear-scope",
+    matches: ({ lower }, { shellContext }) =>
+      shellContext.focusedModule === "vendor-assessment" && lower === "clear scope",
+    execute: (_input, { core, opts, shellContext, shellState }) =>
+      resolveToolExecution(
+        "vendor-assessment:scope",
+        ["clear=true"],
+        core,
+        opts,
+        shellContext,
+        shellState,
+      ),
+  },
+  {
+    id: "open",
+    matches: ({ lower }) => lower.startsWith("open "),
+    execute: ({ words }) => handleOpenCommand(words.slice(1)),
+  },
+  {
+    id: "scan",
+    matches: ({ lower }) => lower === "scan" || lower.startsWith("scan "),
+    execute: ({ words }, { core, opts, shellContext, shellState }) =>
+      resolveToolExecution("sast:scan", words.slice(1), core, opts, shellContext, shellState),
+  },
+] satisfies readonly BareShellRouteDefinition[]);
+
+const SLASH_SHELL_ROUTES: readonly SlashShellRoute[] = defineShellRoutes<
+  SlashShellInput,
+  ShellRouteEnvironment,
+  LocalCommandResult
+>([
+  {
+    id: "help",
+    aliases: ["help"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { core, opts }) => showHelp(args, core, opts),
+  },
+  {
+    id: "modules",
+    aliases: ["modules", "m"],
+    matches: slashCommandMatches,
+    execute: (_input, { core, shellState }) => ({
+      output: formatModuleList(core, shellState.moduleCatalog),
+    }),
+  },
+  {
+    id: "tools",
+    aliases: ["tools"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { core, shellContext }) => ({
+      output: formatTools(core, shellContext.focusedModule, {
+        includeHidden: args.includes("--all"),
+      }),
+    }),
+  },
+  {
+    id: "scan",
+    aliases: ["scan"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { core, opts, shellContext, shellState }) =>
+      resolveToolExecution("sast:scan", args, core, opts, shellContext, shellState),
+  },
+  {
+    id: "pause",
+    aliases: ["pause"],
+    matches: slashCommandMatches,
+    execute: (_input, { core, shellContext, shellState }) =>
+      handleLiveQueueControl(true, core, shellContext, shellState),
+  },
+  {
+    id: "resume",
+    aliases: ["resume"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { core, opts, shellContext, shellState }) =>
+      isLivePauseResumeActive(shellState)
+        ? handleLiveQueueControl(false, core, shellContext, shellState)
+        : handleResumeCommand(args, core, opts, shellContext, shellState),
+  },
+  {
+    id: "use",
+    aliases: ["use"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { core, opts, shellContext }) =>
+      handleUseCommand(args, core, opts, shellContext),
+  },
+  {
+    id: "back",
+    aliases: ["back", "b"],
+    matches: slashCommandMatches,
+    execute: (_input, { opts, shellContext, shellState }) =>
+      handleBackCommand(opts, shellContext, shellState),
+  },
+  {
+    id: "findings",
+    aliases: ["findings", "f"],
+    matches: slashCommandMatches,
+    execute: () => ({
+      shellStateUpdater: (shell) => ({
+        ...shell,
+        shellView: "findings",
+        openFindingId: null,
+        diffSince: undefined,
+        findingScope: { kind: "all" },
+      }),
+      output: "Showing all current findings.",
+    }),
+  },
+  {
+    id: "tune",
+    aliases: ["tune", "t"],
+    matches: slashCommandMatches,
+    execute: (_input, { shellContext }) => openSlashTuneView(shellContext),
+  },
+  {
+    id: "kb",
+    aliases: ["kb"],
+    matches: slashCommandMatches,
+    execute: (_input, { core, opts, shellContext, shellState }) =>
+      handleKbCommand(core, opts, shellContext, shellState),
+  },
+  {
+    id: "story",
+    aliases: ["story"],
+    matches: slashCommandMatches,
+    execute: (_input, { shellState }) => handleStoryCommand(shellState),
+  },
+  {
+    id: "open",
+    aliases: ["open"],
+    matches: slashCommandMatches,
+    execute: ({ args }) => handleOpenCommand(args),
+  },
+  {
+    id: "plan",
+    aliases: ["plan"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { core, opts, shellContext, shellState }) =>
+      handlePlanCommand(args, core, opts, shellContext, shellState),
+  },
+  {
+    id: "apply-plan",
+    aliases: ["yes", "apply-plan"],
+    matches: slashCommandMatches,
+    execute: (_input, { core, shellState }) => handleApplyPlanCommand(core, shellState),
+  },
+  {
+    id: "discard-plan",
+    aliases: ["no", "discard-plan"],
+    matches: slashCommandMatches,
+    execute: (_input, { shellState }) => handleDiscardPlanCommand(shellState),
+  },
+  {
+    id: "prompt",
+    aliases: ["prompt"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { core, opts, shellContext, shellState }) =>
+      handlePromptCommand(args, core, opts, shellContext, shellState),
+  },
+  {
+    id: "prompts",
+    aliases: ["prompts"],
+    matches: slashCommandMatches,
+    execute: (_input, { core, opts, shellContext, shellState }) =>
+      handlePromptsListCommand(core, opts, shellContext, shellState),
+  },
+  {
+    id: "actor",
+    aliases: ["actor"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { shellContext, shellState }) =>
+      handleActorCommand(args, shellContext, shellState),
+  },
+  {
+    id: "show",
+    aliases: ["show"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { core, opts, shellContext, shellState }) =>
+      handleShowCommand(args, core, opts, shellContext, shellState),
+  },
+  {
+    id: "runs",
+    aliases: ["runs"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { shellContext }) => handleShowRunsCommand(args, shellContext),
+  },
+  {
+    id: "replay",
+    aliases: ["replay"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { shellContext }) => handleReplayCommand(args, shellContext),
+  },
+  {
+    id: "trace",
+    aliases: ["trace"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { shellContext }) => handleTraceCommand(args, shellContext),
+  },
+  {
+    id: "options",
+    aliases: ["options"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { core, opts, shellContext, shellState }) =>
+      handleOptionsCommand(args, core, opts, shellContext, shellState),
+  },
+  {
+    id: "tasks",
+    aliases: ["tasks"],
+    matches: slashCommandMatches,
+    execute: (_input, { core, opts, shellContext, shellState }) =>
+      handleSastTasksCommand(core, opts, shellContext, shellState),
+  },
+  {
+    id: "task",
+    aliases: ["task"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { shellState }) => handleSastTaskCommand(args, shellState),
+  },
+  {
+    id: "set",
+    aliases: ["set"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { core, opts, shellContext, shellState }) =>
+      handleSetCommand(args, core, opts, shellContext.focusedModule, shellState),
+  },
+  {
+    id: "config",
+    aliases: ["config"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { shellContext }) => handleConfigCommand(args, shellContext),
+  },
+  {
+    id: "auth",
+    aliases: ["auth"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { opts, shellContext }) => handleAuthCommand(args, opts, shellContext),
+  },
+  {
+    id: "ask",
+    aliases: ["ask"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { opts, shellState }) => handleAskCommand(args, opts, shellState),
+  },
+  {
+    id: "backend",
+    aliases: ["backend"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { opts }) => handleBackendCommand(args, opts),
+  },
+  {
+    id: "cost",
+    aliases: ["cost"],
+    matches: slashCommandMatches,
+    execute: (_input, { opts, shellState }) => handleCostCommand(opts, shellState),
+  },
+  {
+    id: "provider",
+    aliases: ["provider"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { opts }) => handleProviderCommand(args, opts),
+  },
+  {
+    id: "context",
+    aliases: ["context"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { core, opts, shellContext, shellState }) =>
+      handleContextCommand(args, core, opts, shellContext, shellState),
+  },
+  {
+    id: "since",
+    aliases: ["since"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { opts, shellContext }) => handleSinceCommand(args, opts, shellContext),
+  },
+  {
+    id: "threats",
+    aliases: ["threats"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { core, opts, shellContext, shellState }) =>
+      handleThreatsCommand(args, core, opts, shellContext, shellState),
+  },
+  {
+    id: "target",
+    aliases: ["target"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { opts, shellState }) => handleTargetCommand(args, opts, shellState),
+  },
+  {
+    id: "workspace",
+    aliases: ["workspace"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { opts, shellContext }) => handleWorkspaceCommand(args, opts, shellContext),
+  },
+  {
+    id: "clear",
+    aliases: ["clear"],
+    matches: slashCommandMatches,
+    execute: () => ({
+      clearHistory: true,
+      resetSession: true,
+      output: "Conversation cleared.",
+    }),
+  },
+  {
+    id: "history",
+    aliases: ["history"],
+    matches: slashCommandMatches,
+    execute: (_input, { shellState }) => ({ output: formatHistory(shellState.commandHistory) }),
+  },
+  {
+    id: "load",
+    aliases: ["load"],
+    matches: slashCommandMatches,
+    execute: ({ args }, { core }) => handleLoadCommand(args, core),
+  },
+  {
+    id: "exit",
+    aliases: ["exit"],
+    matches: slashCommandMatches,
+    execute: () => ({ exit: true }),
+  },
+] satisfies readonly SlashShellRouteDefinition[]);
+
 function routeInput(
   input: string,
   core: CopilotCore,
@@ -4939,6 +5470,7 @@ function routeInput(
 ): LocalCommandResult {
   const trimmed = input.trim();
   const lower = trimmed.toLowerCase();
+  const environment = { core, opts, shellContext: ctx, shellState };
 
   if (trimmed.startsWith("?")) {
     recordCommandUsage(ctx, shellState, "/ask");
@@ -4950,162 +5482,13 @@ function routeInput(
     return handleSlashCommand(trimmed, core, opts, ctx, shellState);
   }
 
-  if (lower === "exit" || lower === "quit" || lower === "q") {
-    return { exit: true };
-  }
-
-  if (lower === "help") {
-    recordCommandUsage(ctx, shellState, "/help");
-    return { output: formatHelp(core, opts) };
-  }
-  if (lower === "help advanced") {
-    recordCommandUsage(ctx, shellState, "/help");
-    return { output: formatHelp(core, opts, { includeAdvanced: true }) };
-  }
-  if (lower === "modules" || lower === "m") {
-    return { output: formatModuleList(core, shellState.moduleCatalog) };
-  }
-  if (lower === "tools") {
-    return { output: formatTools(core, ctx.focusedModule) };
-  }
-  if (lower.startsWith("use ")) {
-    return handleUseCommand(trimmed.split(/\s+/).slice(1), core, opts, ctx);
-  }
-  if (lower === "back" || lower === "b") {
-    return handleBackCommand(opts, ctx, shellState);
-  }
-  if (lower === "findings" || lower === "f") {
-    return {
-      shellStateUpdater: (shell) => ({ ...shell, shellView: "findings", openFindingId: null }),
-      output: "Showing current findings.",
-    };
-  }
-  if (lower === "tune" || lower === "t") {
-    if (!ctx.focusedModule) return { output: "Use a module first: use <module>" };
-    return {
-      shellStateUpdater: (shell) => ({ ...shell, shellView: "tune" }),
-      output: `Tuning ${ctx.focusedModule}. Use prompt edit <verb> for prompt overrides.`,
-    };
-  }
-  // `attachments` typed bare in a focused KB-enabled module flips to the
-  // `/kb` view AND populates `shell.kbState[focusedModule]` from disk so
-  // operators don't have to remember the slash form. The actual `<id>:
-  // attachments` tool is also reachable via `run attachments` for headless /
-  // CI workflows that want the text output.
-  if (lower === "kb" || lower === "attachments") {
-    return handleKbCommand(core, opts, ctx, shellState);
-  }
-  if (lower === "tasks") {
-    recordCommandUsage(ctx, shellState, "/tasks");
-    return handleSastTasksCommand(core, opts, ctx, shellState);
-  }
-  if (lower === "story") {
-    recordCommandUsage(ctx, shellState, "/story");
-    return handleStoryCommand(shellState);
-  }
-  if (lower === "prompts") {
-    recordCommandUsage(ctx, shellState, "/prompts");
-    return handlePromptsListCommand(core, opts, ctx, shellState);
-  }
-  if (lower === "resume" || lower.startsWith("resume ")) {
-    recordCommandUsage(ctx, shellState, "/resume");
-    return handleResumeCommand(trimmed.split(/\s+/).slice(1), core, opts, ctx, shellState);
-  }
-  // Bare verbs scoped to the prompts-editor view route through the existing
-  // /prompt edit / /prompt show / /prompt diff / /prompt reset / /set
-  // handlers. Operators don't need to type the slash prefix once they're
-  // inside `kuzushi/<module>/prompts>`.
-  if (shellState.shellView === "prompts-editor" && ctx.focusedModule) {
-    if (lower.startsWith("edit ")) {
-      const verb = trimmed.split(/\s+/).slice(1).join(" ").trim();
-      recordCommandUsage(ctx, shellState, "/prompt edit");
-      return handlePromptEditCommand(verb || undefined, core, opts, ctx, shellState);
-    }
-    if (lower.startsWith("show ")) {
-      const verb = trimmed.split(/\s+/).slice(1).join(" ").trim();
-      recordCommandUsage(ctx, shellState, "/prompt show");
-      return handlePromptShowCommand(verb || undefined, core, opts, ctx, shellState);
-    }
-    if (lower.startsWith("diff ")) {
-      const verb = trimmed.split(/\s+/).slice(1).join(" ").trim();
-      recordCommandUsage(ctx, shellState, "/prompt diff");
-      return handlePromptDiffCommand(verb || undefined, core, opts, ctx, shellState);
-    }
-    if (lower.startsWith("reset ")) {
-      const verb = trimmed.split(/\s+/).slice(1).join(" ").trim();
-      recordCommandUsage(ctx, shellState, "/prompt reset");
-      return handlePromptResetCommand(verb || undefined, core, opts, ctx, shellState);
-    }
-    if (lower.startsWith("set ")) {
-      recordCommandUsage(ctx, shellState, "/prompt set");
-      return handlePromptInlineSetCommand(trimmed, core, opts, ctx, shellState);
-    }
-  }
-  if (shellState.shellView === "sast-tasks") {
-    const [verb = "", ...taskArgs] = trimmed.split(/\s+/);
-    const taskVerb = verb.toLowerCase();
-    if (["toggle", "block", "allow", "mode", "reset"].includes(taskVerb)) {
-      recordCommandUsage(ctx, shellState, `/task ${taskVerb}`);
-      return handleSastTaskCommand([taskVerb, ...taskArgs], shellState);
-    }
-  }
-  if (lower === "options") {
-    recordCommandUsage(ctx, shellState, "/options");
-    return handleOptionsCommand([], core, opts, ctx, shellState);
-  }
-  if (lower === "show options" || lower.startsWith("show options ")) {
-    recordCommandUsage(ctx, shellState, "/options");
-    return handleOptionsCommand(trimmed.split(/\s+/).slice(2), core, opts, ctx, shellState);
-  }
-  if (shellState.shellView === "options" && lower === "show advanced") {
-    const toolName = shellState.optionsView?.toolName ?? shellState.lastUsedTool;
-    if (!toolName) {
-      return { output: "No options are loaded. Run show options first." };
-    }
-    recordCommandUsage(ctx, shellState, "/options");
-    return { output: formatOptions(core, toolName, opts, shellState) };
-  }
-  if (lower.startsWith("set ")) {
-    const setArgs = trimmed.split(/\s+/).slice(1);
-    recordCommandUsage(ctx, shellState, "/set");
-    return handleSetCommand(setArgs, core, opts, ctx.focusedModule, shellState);
-  }
-  if (ctx.focusedModule === "context" && lower === "dfd") {
-    recordCommandUsage(ctx, shellState, "/context dfd");
-    return handleContextCommand(["dfd"], core, opts, ctx, shellState);
-  }
-  if (ctx.focusedModule === "context" && lower.startsWith("regen ")) {
-    recordCommandUsage(ctx, shellState, "/context regen");
-    return handleContextCommand(
-      ["regen", ...trimmed.split(/\s+/).slice(1)],
-      core,
-      opts,
-      ctx,
-      shellState,
-    );
-  }
-  if (ctx.focusedModule === "vendor-assessment" && lower === "clear scope") {
-    return resolveToolExecution(
-      "vendor-assessment:scope",
-      ["clear=true"],
-      core,
-      opts,
-      ctx,
-      shellState,
-    );
-  }
-  if (lower.startsWith("open ")) {
-    return handleOpenCommand(trimmed.split(/\s+/).slice(1));
-  }
-  if (lower === "scan" || lower.startsWith("scan ")) {
-    return resolveToolExecution(
-      "sast:scan",
-      trimmed.split(/\s+/).slice(1),
-      core,
-      opts,
-      ctx,
-      shellState,
-    );
+  const routed = routeShellInput(
+    toBareShellInput(input, trimmed, lower),
+    environment,
+    BARE_SHELL_ROUTES,
+  );
+  if (routed) {
+    return routed;
   }
 
   const toolResult = resolveDirectToolDispatch(trimmed, core, opts, ctx, shellState);
@@ -5130,6 +5513,86 @@ function routeInput(
   return { output: base + hint };
 }
 
+function toBareShellInput(raw: string, trimmed: string, lower: string): BareShellInput {
+  return { raw, trimmed, lower, words: splitShellWords(trimmed) };
+}
+
+function splitShellWords(input: string): string[] {
+  return input.split(/\s+/).filter(Boolean);
+}
+
+function openTuneView(shellContext: ShellContext): LocalCommandResult {
+  if (!shellContext.focusedModule) return { output: "Use a module first: use <module>" };
+  return {
+    shellStateUpdater: (shell) => ({ ...shell, shellView: "tune" }),
+    output: `Tuning ${shellContext.focusedModule}. Use prompt edit <verb> for prompt overrides.`,
+  };
+}
+
+function openSlashTuneView(shellContext: ShellContext): LocalCommandResult {
+  if (!shellContext.focusedModule) {
+    return { output: "Usage: /use <module> first, then /tune." };
+  }
+  return openTuneView(shellContext);
+}
+
+function isPromptEditorInput(
+  input: BareShellInput,
+  shellContext: ShellContext,
+  shellState: ShellState,
+): boolean {
+  if (shellState.shellView !== "prompts-editor" || !shellContext.focusedModule) return false;
+  if (input.words.length < 2) return false;
+  return ["edit", "show", "diff", "reset", "set"].includes(input.words[0]?.toLowerCase() ?? "");
+}
+
+function routePromptEditorInput(
+  input: BareShellInput,
+  { core, opts, shellContext, shellState }: ShellRouteEnvironment,
+): LocalCommandResult {
+  const verb = input.words[0]?.toLowerCase();
+  const promptName = input.words.slice(1).join(" ").trim() || undefined;
+  if (verb === "edit") {
+    recordCommandUsage(shellContext, shellState, "/prompt edit");
+    return handlePromptEditCommand(promptName, core, opts, shellContext, shellState);
+  }
+  if (verb === "show") {
+    recordCommandUsage(shellContext, shellState, "/prompt show");
+    return handlePromptShowCommand(promptName, core, opts, shellContext, shellState);
+  }
+  if (verb === "diff") {
+    recordCommandUsage(shellContext, shellState, "/prompt diff");
+    return handlePromptDiffCommand(promptName, core, opts, shellContext, shellState);
+  }
+  if (verb === "reset") {
+    recordCommandUsage(shellContext, shellState, "/prompt reset");
+    return handlePromptResetCommand(promptName, core, opts, shellContext, shellState);
+  }
+  recordCommandUsage(shellContext, shellState, "/prompt set");
+  return handlePromptInlineSetCommand(input.trimmed, core, opts, shellContext, shellState);
+}
+
+function isSastTaskEditorInput(input: BareShellInput, shellState: ShellState): boolean {
+  if (shellState.shellView !== "sast-tasks") return false;
+  return ["toggle", "block", "allow", "mode", "reset"].includes(
+    input.words[0]?.toLowerCase() ?? "",
+  );
+}
+
+function showAdvancedOptions(
+  core: CopilotCore,
+  opts: ShellOptions,
+  shellContext: ShellContext,
+  shellState: ShellState,
+): LocalCommandResult {
+  const toolName = shellState.optionsView?.toolName ?? shellState.lastUsedTool;
+  if (!toolName) {
+    return { output: "No options are loaded. Run show options first." };
+  }
+  recordCommandUsage(shellContext, shellState, "/options");
+  return { output: formatOptions(core, toolName, opts, shellState) };
+}
+
 function handleSlashCommand(
   input: string,
   core: CopilotCore,
@@ -5138,206 +5601,68 @@ function handleSlashCommand(
   shellState: ShellState,
 ): LocalCommandResult {
   const { cmd, args } = parseCommand(input.slice(1));
-  const command = cmd.toLowerCase();
-
-  switch (command) {
-    case "help":
-      // `/help <verb>` prints the one-line row from the commands table plus a
-      // short expanded description; bare `/help` falls through to the grouped
-      // top-level help. Both surfaces render from SHELL_COMMAND_CATALOG so
-      // drift is impossible.
-      if (args[0]?.toLowerCase() === "advanced") {
-        return { output: formatHelp(core, opts, { includeAdvanced: true }) };
-      }
-      if (args[0]) return { output: formatHelpForVerb(args[0]) };
-      return { output: formatHelp(core, opts) };
-
-    case "modules":
-    case "m":
-      return { output: formatModuleList(core, shellState.moduleCatalog) };
-
-    case "tools":
-      return {
-        output: formatTools(core, ctx.focusedModule, { includeHidden: args.includes("--all") }),
-      };
-
-    case "scan":
-      return resolveToolExecution("sast:scan", args, core, opts, ctx, shellState);
-
-    case "pause":
-      return handleLiveQueueControl(true, core, ctx, shellState);
-
-    case "resume":
-      if (isLivePauseResumeActive(shellState)) {
-        return handleLiveQueueControl(false, core, ctx, shellState);
-      }
-      return handleResumeCommand(args, core, opts, ctx, shellState);
-
-    case "use":
-      return handleUseCommand(args, core, opts, ctx);
-
-    case "back":
-    case "b":
-      return handleBackCommand(opts, ctx, shellState);
-
-    case "findings":
-    case "f":
-      return {
-        shellStateUpdater: (shell) => ({
-          ...shell,
-          shellView: "findings",
-          openFindingId: null,
-          diffSince: undefined,
-          findingScope: { kind: "all" },
-        }),
-        output: "Showing all current findings.",
-      };
-
-    case "tune":
-    case "t":
-      if (!ctx.focusedModule) {
-        return { output: "Usage: /use <module> first, then /tune." };
-      }
-      return {
-        shellStateUpdater: (shell) => ({ ...shell, shellView: "tune" }),
-        output: `Tuning ${ctx.focusedModule}. Use prompt edit <verb> for prompt overrides.`,
-      };
-
-    case "kb":
-      return handleKbCommand(core, opts, ctx, shellState);
-
-    case "story":
-      return handleStoryCommand(shellState);
-
-    case "open":
-      return handleOpenCommand(args);
-
-    case "plan":
-      return handlePlanCommand(args, core, opts, ctx, shellState);
-
-    case "yes":
-    case "apply-plan":
-      return handleApplyPlanCommand(core, shellState);
-
-    case "no":
-    case "discard-plan":
-      return handleDiscardPlanCommand(shellState);
-
-    case "prompt": {
-      const sub = args[0]?.toLowerCase();
-      const verb = args[1];
-      if (sub === "edit") {
-        return handlePromptEditCommand(verb, core, opts, ctx, shellState);
-      }
-      if (sub === "show") {
-        return handlePromptShowCommand(verb, core, opts, ctx, shellState);
-      }
-      if (sub === "reset") {
-        return handlePromptResetCommand(verb, core, opts, ctx, shellState);
-      }
-      if (sub === "diff") {
-        return handlePromptDiffCommand(verb, core, opts, ctx, shellState);
-      }
-      if (sub === "list" || sub === undefined) {
-        if (sub === "list" || ctx.focusedModule) {
-          return handlePromptsListCommand(core, opts, ctx, shellState);
-        }
-      }
-      return {
-        output: [
-          "Usage:",
-          "  /prompt edit <verb>    open the operator override in $EDITOR",
-          "  /prompt show <verb>    print the current effective prompt + source",
-          "  /prompt diff <verb>    show the override file's path for git diff",
-          "  /prompt reset <verb>   delete the override and revert to default",
-          "  /prompt list           open the prompts editor for the focused module",
-          "  /show prompts          cross-module audit of all *_PROMPT keys",
-        ].join("\n"),
-      };
+  const slashInput = { raw: input, command: cmd.toLowerCase(), args };
+  const environment = { core, opts, shellContext: ctx, shellState };
+  return (
+    routeShellInput(slashInput, environment, SLASH_SHELL_ROUTES) ?? {
+      output: formatUnknownVerb(slashInput.command, collectKnownVerbs()),
     }
+  );
+}
 
-    case "prompts":
-      return handlePromptsListCommand(core, opts, ctx, shellState);
+function slashCommandMatches(
+  input: SlashShellInput,
+  _environment: ShellRouteEnvironment,
+  route: SlashShellRoute,
+): boolean {
+  return commandMatches(input.command, route.aliases ?? []);
+}
 
-    case "actor":
-      return handleActorCommand(args, ctx, shellState);
-
-    case "show":
-      return handleShowCommand(args, core, opts, ctx, shellState);
-
-    case "runs":
-      return handleShowRunsCommand(args, ctx);
-
-    case "replay":
-      return handleReplayCommand(args, ctx);
-
-    case "trace":
-      return handleTraceCommand(args, ctx);
-
-    case "options":
-      return handleOptionsCommand(args, core, opts, ctx, shellState);
-
-    case "tasks":
-      return handleSastTasksCommand(core, opts, ctx, shellState);
-
-    case "task":
-      return handleSastTaskCommand(args, shellState);
-
-    case "set":
-      return handleSetCommand(args, core, opts, ctx.focusedModule, shellState);
-
-    case "config":
-      return handleConfigCommand(args, ctx);
-
-    case "auth":
-      return handleAuthCommand(args, opts, ctx);
-
-    case "ask":
-      return handleAskCommand(args, opts, shellState);
-
-    case "backend":
-      return handleBackendCommand(args, opts);
-
-    case "cost":
-      return handleCostCommand(opts, shellState);
-
-    case "provider":
-      return handleProviderCommand(args, opts);
-
-    case "context":
-      return handleContextCommand(args, core, opts, ctx, shellState);
-
-    case "since":
-      return handleSinceCommand(args, opts, ctx);
-
-    case "threats":
-      return handleThreatsCommand(args, core, opts, ctx, shellState);
-
-    case "target":
-      return handleTargetCommand(args, opts, shellState);
-
-    case "workspace":
-      return handleWorkspaceCommand(args, opts, ctx);
-
-    case "clear":
-      return {
-        clearHistory: true,
-        resetSession: true,
-        output: "Conversation cleared.",
-      };
-
-    case "history":
-      return { output: formatHistory(shellState.commandHistory) };
-
-    case "load":
-      return handleLoadCommand(args, core);
-
-    case "exit":
-      return { exit: true };
-
-    default:
-      return { output: formatUnknownVerb(command, collectKnownVerbs()) };
+function showHelp(args: string[], core: CopilotCore, opts: ShellOptions): LocalCommandResult {
+  if (args[0]?.toLowerCase() === "advanced") {
+    return { output: formatHelp(core, opts, { includeAdvanced: true }) };
   }
+  if (args[0]) return { output: formatHelpForVerb(args[0]) };
+  return { output: formatHelp(core, opts) };
+}
+
+function handlePromptCommand(
+  args: string[],
+  core: CopilotCore,
+  opts: ShellOptions,
+  shellContext: ShellContext,
+  shellState: ShellState,
+): LocalCommandResult {
+  const subcommand = args[0]?.toLowerCase();
+  const verb = args[1];
+  if (subcommand === "edit") {
+    return handlePromptEditCommand(verb, core, opts, shellContext, shellState);
+  }
+  if (subcommand === "show") {
+    return handlePromptShowCommand(verb, core, opts, shellContext, shellState);
+  }
+  if (subcommand === "reset") {
+    return handlePromptResetCommand(verb, core, opts, shellContext, shellState);
+  }
+  if (subcommand === "diff") {
+    return handlePromptDiffCommand(verb, core, opts, shellContext, shellState);
+  }
+  if (subcommand === "list" || (subcommand === undefined && shellContext.focusedModule)) {
+    return handlePromptsListCommand(core, opts, shellContext, shellState);
+  }
+  return { output: formatPromptCommandUsage() };
+}
+
+function formatPromptCommandUsage(): string {
+  return [
+    "Usage:",
+    "  /prompt edit <verb>    open the operator override in $EDITOR",
+    "  /prompt show <verb>    print the current effective prompt + source",
+    "  /prompt diff <verb>    show the override file's path for git diff",
+    "  /prompt reset <verb>   delete the override and revert to default",
+    "  /prompt list           open the prompts editor for the focused module",
+    "  /show prompts          cross-module audit of all *_PROMPT keys",
+  ].join("\n");
 }
 
 function handleUseCommand(
@@ -8306,9 +8631,6 @@ function handleAuthImportFromConfig(opts: ShellOptions): LocalCommandResult {
       if (!arc || typeof arc !== "object") {
         return `${cfgPath} has no agentRuntimeConfig block — nothing to import.`;
       }
-      // Accept both nested form ({claude: {apiKey}, piAi: {...}}) and the
-      // legacy flat form ({apiKey, baseUrl}) which the loader retargets to
-      // the claude slot.
       const arcRec = arc as Record<string, unknown>;
       const credsToWrite: Record<string, { apiKey?: string; baseUrl?: string }> = {};
       for (const slot of ["claude", "piAi", "codex"] as const) {
@@ -8320,7 +8642,6 @@ function handleAuthImportFromConfig(opts: ShellOptions): LocalCommandResult {
           if (apiKey || baseUrl) credsToWrite[slot] = { apiKey, baseUrl };
         }
       }
-      // Legacy flat form → claude slot.
       if (
         Object.keys(credsToWrite).length === 0 &&
         (typeof arcRec.apiKey === "string" || typeof arcRec.baseUrl === "string")
