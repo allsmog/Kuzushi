@@ -3327,13 +3327,30 @@ async function startInkShell(
         ? { contextSnapshot: shell.contextSnapshot, threatModel: shell.threatModel }
         : undefined;
     },
-    // Workspace-DB finding count for triage/verify/patch requires. Optional —
-    // when no workspace is active the count defaults to 0 and the preflight
-    // fires the expected "run a scanner first" hint.
+    // Workspace-DB finding count for triage/verify/patch requires. Walks
+    // BOTH stores: the workspace vulns table AND the scan_findings table
+    // (where carlini-threat-hunt / scan-mode tasks persist). Operators who
+    // run a hunt in shell mode then ask for triage previously got "run a
+    // scanner first" because the dispatcher only knew about workspace vulns.
     getFindingCount: () => {
       const wsId = opts.workspace;
-      if (!wsId || !workspaceManager) return 0;
-      return workspaceManager.vulns.listForWorkspace(wsId).length;
+      let workspaceVulns = 0;
+      if (wsId && workspaceManager) {
+        workspaceVulns = workspaceManager.vulns.listForWorkspace(wsId).length;
+      }
+      let scanFindings = 0;
+      if (workspaceManager) {
+        try {
+          const row = workspaceManager
+            .rawDb()
+            .prepare("SELECT COUNT(*) AS n FROM scan_findings")
+            .get() as { n?: number } | undefined;
+          scanFindings = typeof row?.n === "number" ? row.n : 0;
+        } catch {
+          // scan_findings table may not exist on first-run dbs — ignore
+        }
+      }
+      return workspaceVulns + scanFindings;
     },
     getHostCount: () => {
       const wsId = opts.workspace;
@@ -6725,6 +6742,9 @@ function getContextRequirementError(
   if (!CONTEXT_REQUIRED_TOOLS.has(toolName)) return undefined;
   const snapshot = shellState.contextSnapshot;
   if (!snapshot) {
+    if (toolName === "taint-iris-next:hunt") {
+      return `Context required for ${toolName}. Run /context, then /threats regen dfd.`;
+    }
     return `Context required for ${toolName}. Run context (or /context) first.`;
   }
 
@@ -7580,8 +7600,22 @@ function handleSetCommand(
     return { output: "Usage: /set <key> <value>" };
   }
 
-  const activeToolName = shellState.lastUsedTool;
+  // Resolve the tool to apply the option to. Prefer the lastUsedTool when
+  // it belongs to the focused module; otherwise fall back to the focused
+  // module's default tool. The previous behavior errored with "Use /options
+  // <tool> first" even when the operator was clearly inside a focused
+  // module — operators never expect to set an option on something other
+  // than the module they just entered.
+  let activeToolName = shellState.lastUsedTool;
   if (!activeToolName || (focusedModule && !activeToolName.startsWith(`${focusedModule}:`))) {
+    if (focusedModule) {
+      const fallback = pickDefaultToolName(core, focusedModule);
+      if (fallback) {
+        activeToolName = fallback;
+      }
+    }
+  }
+  if (!activeToolName) {
     return { output: "No active tool selected. Use /options <tool> first." };
   }
 

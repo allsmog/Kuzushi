@@ -7,6 +7,7 @@
  * (`src/bus/workers/triage-worker.ts`), not by this module.
  */
 
+import { upsertRawFinding } from "../../store.js";
 import { isRecord } from "../../utils.js";
 import { defineModule, defineTool } from "../define.js";
 import { loadFindingsForTriage } from "../sast/findings-bridge.js";
@@ -69,7 +70,16 @@ export function createTriageModule(): CopilotModule {
       }
       const db = ctx.workspace.rawDb() as import("better-sqlite3").Database;
 
+      // Shell-mode hunt tools (carlini-threat-hunt, taint-iris, etc.) write
+      // their findings to the `scan_findings` buffer table; only the scan
+      // pipeline's report-worker normally drains that buffer into the
+      // `findings` table that triage reads from. Without this promotion,
+      // operators who run `use threat-hunt; run .` then `use triage; run .`
+      // would see "no findings to triage" even though the hunt produced 30+.
       const fingerprints = collectFingerprints(p);
+      const repoForPromote = ctx.target ?? ctx.cwd;
+      promoteScanFindingsIfNeeded(db, repoForPromote);
+
       const findings = loadFindingsForTriage(db, ctx.target, fingerprints);
       if (findings.length === 0) {
         return {
@@ -199,4 +209,47 @@ function readStringArrayField(
   const value = record[key];
   if (!Array.isArray(value)) return undefined;
   return value.filter((item): item is string => typeof item === "string");
+}
+
+/**
+ * Promote rows from the `scan_findings` buffer table into the canonical
+ * `findings` table when the latter has fewer rows for the repo than the
+ * former. Operates per-repo so we don't promote stale findings from other
+ * targets in the same DB. Idempotent: existing rows in `findings` stay
+ * untouched (upsertRawFinding skips when fingerprint+repo+ref already exist
+ * with a real verdict — see scan_findings_store.ts and the INSERT_RAW
+ * SQL guards).
+ *
+ * Why this lives here instead of in scan-mode bootstrap: the scan pipeline's
+ * report-worker drains scan_findings during a normal scan run. Shell-mode
+ * tools persist directly to scan_findings without the worker, so the
+ * triage flow becomes the natural drain point.
+ */
+function promoteScanFindingsIfNeeded(db: import("better-sqlite3").Database, repo: string): void {
+  let scanRows: Array<{ finding_json: string; run_id: string }>;
+  try {
+    scanRows = db
+      .prepare(`SELECT finding_json, run_id FROM scan_findings ORDER BY run_id, ordinal`)
+      .all() as Array<{ finding_json: string; run_id: string }>;
+  } catch {
+    // scan_findings table missing on first-run dbs — nothing to promote.
+    return;
+  }
+  if (scanRows.length === 0) return;
+  type RawFinding = Parameters<typeof upsertRawFinding>[1];
+  for (const row of scanRows) {
+    let finding: RawFinding | undefined;
+    try {
+      finding = JSON.parse(row.finding_json) as RawFinding;
+    } catch {
+      continue;
+    }
+    if (!finding) continue;
+    try {
+      upsertRawFinding(db, finding, repo, row.run_id);
+    } catch {
+      // Per-row failures are non-fatal — log via stderr would spam, so
+      // silently skip and let the operator's empty-result diagnostic surface.
+    }
+  }
 }
