@@ -208,14 +208,14 @@ export function makeActionableFindings(count: number, seed = 42): ActionableFind
 
 /**
  * Build a deterministic `ThreatModelDocument` with two trust zones, four
- * elements, and one threat per STRIDE category. Suitable for all
+ * nodes, and one threat per STRIDE category. Suitable for all
  * `threats-*` shell views.
  */
 export function mockThreatModel(): ThreatModelDocument {
   return {
-    version: "1.0",
+    version: "2.0",
     dfd: {
-      elements: [
+      nodes: [
         {
           id: "EE-user",
           type: "external-entity",
@@ -245,27 +245,51 @@ export function mockThreatModel(): ThreatModelDocument {
           trustZone: "data",
         },
       ],
+      flows: [
+        {
+          id: "F1",
+          name: "Browser API request",
+          description: "End user sends HTTPS requests to the API server",
+          sourceId: "EE-user",
+          targetId: "P-api",
+          protocol: "HTTPS",
+          dataClassification: "session",
+          trustBoundaryIds: ["TB-edge"],
+        },
+        {
+          id: "F2",
+          name: "API database query",
+          description: "API reads and writes user records",
+          sourceId: "P-api",
+          targetId: "DS-db",
+          protocol: "postgres",
+          dataClassification: "PII",
+          trustBoundaryIds: ["TB-data"],
+        },
+      ],
       trustBoundaries: [
         {
           id: "TB-edge",
           name: "Public edge",
           innerZone: "app",
           outerZone: "internet",
-          crossingFlows: [],
+          crossingFlowIds: ["F1"],
         },
         {
           id: "TB-data",
           name: "Data plane",
           innerZone: "data",
           outerZone: "app",
-          crossingFlows: [],
+          crossingFlowIds: ["F2"],
         },
       ],
     },
     threats: [
       {
         id: "T1",
-        elementId: "P-api",
+        targetElementIds: ["P-api"],
+        actorIds: ["EE-user"],
+        flowIds: ["F1"],
         category: "spoofing",
         title: "Forged session token",
         description: "Attacker reuses an unrotated session cookie.",
@@ -280,7 +304,9 @@ export function mockThreatModel(): ThreatModelDocument {
       },
       {
         id: "T2",
-        elementId: "P-api",
+        targetElementIds: ["P-api"],
+        actorIds: ["EE-user"],
+        flowIds: ["F1"],
         category: "tampering",
         title: "Unsigned admin payload",
         description: "Admin write paths accept unsigned JSON.",
@@ -295,7 +321,8 @@ export function mockThreatModel(): ThreatModelDocument {
       },
       {
         id: "T3",
-        elementId: "P-worker",
+        targetElementIds: ["P-worker"],
+        actorIds: ["EE-user"],
         category: "repudiation",
         title: "Audit log gap on retry",
         description: "Job retries dedupe audit lines, hiding actor identity.",
@@ -310,7 +337,9 @@ export function mockThreatModel(): ThreatModelDocument {
       },
       {
         id: "T4",
-        elementId: "DS-db",
+        targetElementIds: ["DS-db"],
+        actorIds: ["EE-user"],
+        flowIds: ["F2"],
         category: "information-disclosure",
         title: "PII in log payloads",
         description: "Error logs include raw user records.",
@@ -325,7 +354,9 @@ export function mockThreatModel(): ThreatModelDocument {
       },
       {
         id: "T5",
-        elementId: "P-api",
+        targetElementIds: ["P-api"],
+        actorIds: ["EE-user"],
+        flowIds: ["F1"],
         category: "denial-of-service",
         title: "Unbounded query expansion",
         description: "GraphQL allows deeply nested queries without depth limits.",
@@ -340,7 +371,8 @@ export function mockThreatModel(): ThreatModelDocument {
       },
       {
         id: "T6",
-        elementId: "P-worker",
+        targetElementIds: ["P-worker"],
+        actorIds: ["EE-user"],
         category: "elevation-of-privilege",
         title: "Privileged job runner",
         description: "Worker runs jobs as the database superuser role.",
@@ -432,7 +464,7 @@ export function mockModuleRun(
     startedSecondsAgo?: number;
   } = {},
 ): ModuleRunSlice {
-  const moduleId = opts.moduleId ?? "threat-hunt";
+  const moduleId = opts.moduleId ?? "carlini-threat-hunt";
   const toolName = opts.toolName ?? `${moduleId}:run`;
   const status = opts.status ?? "running";
   const startedAtMs = Date.now() - (opts.startedSecondsAgo ?? 8) * 1000;
@@ -494,12 +526,12 @@ export function mockEvidenceLines(count: number): AgentActivityLine[] {
 
 /**
  * Build a populated per-actor activity map, keyed by an actor fingerprint
- * the focused-actor drill-in expects (e.g. `threat-hunt:Authenticated_User:0`).
+ * the focused-actor drill-in expects (e.g. `carlini-threat-hunt:Authenticated_User:0`).
  */
 export function mockAgentActivity(
   opts: { fingerprint?: string; count?: number } = {},
 ): Map<string, AgentActivityLine[]> {
-  const fingerprint = opts.fingerprint ?? "threat-hunt:Authenticated_User:0";
+  const fingerprint = opts.fingerprint ?? "carlini-threat-hunt:Authenticated_User:0";
   const lines = mockEvidenceLines(opts.count ?? 6);
   return new Map([[fingerprint, lines]]);
 }
@@ -532,8 +564,8 @@ export function mockShellModuleCards(): ShellModuleCard[] {
       ],
     },
     {
-      id: "threat-hunt",
-      displayName: "Threat Hunt",
+      id: "carlini-threat-hunt",
+      displayName: "Carlini Threat Hunt",
       category: "offense",
       description: "Per-actor agentic vulnerability hunting.",
       rank: "good",
@@ -542,7 +574,7 @@ export function mockShellModuleCards(): ShellModuleCard[] {
       lastRunSummary: "ran 30m ago · 12 paths",
       toolSummaries: [
         {
-          name: "threat-hunt:run",
+          name: "carlini-threat-hunt:run",
           verb: "run",
           description: "Spawn one agent per actor and hunt.",
           headless: false,
@@ -645,29 +677,18 @@ export function mockShellHistoryEntries(): ShellHistoryEntry[] {
 }
 
 /**
- * Build a populated `PromptsEditorSlice` audit table — two verbs, one
- * default, one file-overridden — for the `prompts-editor` view.
+ * Build a populated `PromptsEditorSlice` audit table for the module's single
+ * exposed run prompt.
  */
-export function mockPromptsEditor(moduleId = "threat-hunt"): PromptsEditorSlice {
+export function mockPromptsEditor(moduleId = "carlini-threat-hunt"): PromptsEditorSlice {
   return {
     audit: [
       {
         moduleId,
         toolName: `${moduleId}:run`,
         verb: "run",
-        promptKey: "THREAT_HUNT_PROMPT",
+        promptKey: "CARLINI_THREAT_HUNT_PROMPT",
         effective: { source: "default" },
-      },
-      {
-        moduleId,
-        toolName: `${moduleId}:run`,
-        verb: "actor",
-        promptKey: "THREAT_HUNT_ACTOR_PROMPT",
-        effective: {
-          source: "file",
-          filePath: `/repo/.kuzushi/prompts/${moduleId}/actor.md`,
-          byteLen: 412,
-        },
       },
     ],
   };

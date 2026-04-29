@@ -15,16 +15,17 @@
 import { type Dirent, existsSync, readdirSync } from "node:fs";
 import nodePath from "node:path";
 import type { AgentRuntime } from "../agent-runtime/types.js";
-import type { TaskRegistry } from "../agents/registry.js";
 import { publishAgentActivity, publishTaskActivity, publishTaskOutput } from "../bus/activity.js";
 import { ModuleEventBus, type ModuleEventScope } from "../bus/module-events.js";
 import { wrapRuntimeWithActivityForwarding } from "../bus/runtime-forwarding.js";
 import type { MessageBus } from "../bus/types.js";
 import { createAgenticSastModule } from "../modules/agentic-sast/agentic-sast.js";
 import { ModuleCache } from "../modules/cache.js";
+import { createCarliniThreatHuntModule } from "../modules/carlini-threat-hunt/carlini-threat-hunt.js";
 import { createCodeqlModule } from "../modules/codeql/codeql.js";
 import { createContextModule } from "../modules/context/context.js";
 import { createCoreSastModule } from "../modules/core-sast.js";
+import type { DagRegistry } from "../modules/dag-registry.js";
 import { createFindingsModule } from "../modules/findings/findings.js";
 import {
   formatToolInputValidationError,
@@ -47,7 +48,7 @@ import { createSemgrepModule } from "../modules/semgrep/semgrep.js";
 import { createCoreShinsaModule } from "../modules/shinsa/shinsa.js";
 import { createSystemsHuntModule } from "../modules/systems-hunt/systems-hunt.js";
 import { createTaintIrisModule } from "../modules/taint-iris/taint-iris.js";
-import { createThreatHuntModule } from "../modules/threat-hunt/threat-hunt.js";
+import { createTaintIrisNextModule } from "../modules/taint-iris-next/taint-iris-next.js";
 import { createThreatModelModule } from "../modules/threat-model/threat-model.js";
 import { createCoreTobModule } from "../modules/tob/tob.js";
 import { createTriageModule } from "../modules/triage/triage.js";
@@ -76,8 +77,8 @@ export interface CopilotCoreOptions {
   config: KuzushiConfig;
   /** The .kuzushi data directory for module persistence. */
   dataDir: string;
-  /** Existing task registry (for pipeline mode compatibility). */
-  taskRegistry?: TaskRegistry;
+  /** Existing DAG registry for pipeline mode. */
+  dagRegistry?: DagRegistry;
   /** Module specifiers to load at startup. */
   modules?: string[];
   /** Whether to load the built-in SAST module. Defaults to true. */
@@ -114,7 +115,7 @@ export class CopilotCore {
   /** Materialized metadata cache — written on init, consulted by search/info. */
   readonly moduleCache: ModuleCache;
   private readonly moduleCtx: ModuleContext;
-  private readonly taskRegistry?: TaskRegistry;
+  private readonly dagRegistry?: DagRegistry;
   /** Lifecycle-scoped event handles per module — disposed on unload. */
   private readonly moduleScopes = new Map<string, ModuleEventScope>();
 
@@ -128,7 +129,7 @@ export class CopilotCore {
       config: opts.config,
       dataDir: opts.dataDir,
     };
-    this.taskRegistry = opts.taskRegistry;
+    this.dagRegistry = opts.dagRegistry;
   }
 
   /**
@@ -155,7 +156,7 @@ export class CopilotCore {
     const moduleCtx: ModuleContext = { ...this.moduleCtx, events: scope };
     try {
       await this.registry.loadModule(mod, moduleCtx, {
-        taskRegistry: this.taskRegistry,
+        dagRegistry: this.dagRegistry,
         ...extra,
       });
       this.moduleCache.upsertFromModule(mod);
@@ -172,7 +173,7 @@ export class CopilotCore {
   async init(): Promise<void> {
     // Load the core SAST module family (unless explicitly disabled).
     // The umbrella `sast` module owns the full-DAG `sast:scan`; each
-    // capability (semgrep, codeql, agentic-sast, threat-hunt, taint-iris,
+    // capability (semgrep, codeql, agentic-sast, carlini-threat-hunt, taint-iris,
     // triage, verify, patch, findings, context) is its own CopilotModule so
     // operators can `use <capability>` and get a focused option surface.
     if (this.opts.loadCoreSast !== false) {
@@ -181,8 +182,9 @@ export class CopilotCore {
         createSemgrepModule(),
         createCodeqlModule(),
         createAgenticSastModule(),
-        createThreatHuntModule(),
+        createCarliniThreatHuntModule(),
         createTaintIrisModule(),
+        createTaintIrisNextModule(),
         createSystemsHuntModule(),
         createTriageModule(),
         createVerifyModule(),
@@ -209,8 +211,9 @@ export class CopilotCore {
         ["sast:semgrep", "semgrep:scan"],
         ["sast:codeql", "codeql:scan"],
         ["sast:agentic", "agentic-sast:scan"],
-        ["sast:threat-hunt", "threat-hunt:run"],
+        ["sast:carlini-threat-hunt", "carlini-threat-hunt:run"],
         ["sast:taint-iris", "taint-iris:hunt"],
+        ["sast:taint-iris-next", "taint-iris-next:hunt"],
         ["sast:triage", "triage:run"],
         ["sast:verify", "verify:finding"],
         ["sast:patch", "patch:finding"],
@@ -426,8 +429,8 @@ export class CopilotCore {
       },
       /**
        * Unified operator-option resolver. Replaces the duplicated pattern of
-       * "read `THREAT_HUNT_PROMPT` from the datastore in core-threat-hunt.ts,
-       * then read `promptOverride` from `taskConfig` in threat-hunt.ts" that
+       * "read `CARLINI_THREAT_HUNT_PROMPT` from the datastore in core-carlini-threat-hunt.ts,
+       * then read `promptOverride` from `taskConfig` in carlini-threat-hunt.ts" that
        * exists in every task-wrapping module today.
        *
        * Fallback order:
@@ -435,11 +438,11 @@ export class CopilotCore {
        *   2. `ctx.config.taskConfig[moduleId][key]` — persisted operator overrides
        *
        * Authors that want a legacy-field fallback (e.g.
-       * `taskConfig["threat-hunt"]["promptOverride"]`) should call
+       * `taskConfig["carlini-threat-hunt"]["promptOverride"]`) should call
        * `resolveOption` first and fall back to the legacy lookup explicitly:
        *
-       *   const prompt = ctx.resolveOption<string>("THREAT_HUNT_PROMPT")
-       *     ?? (ctx.config.taskConfig["threat-hunt"]?.["promptOverride"] as string);
+       *   const prompt = ctx.resolveOption<string>("CARLINI_THREAT_HUNT_PROMPT")
+       *     ?? (ctx.config.taskConfig["carlini-threat-hunt"]?.["promptOverride"] as string);
        */
       resolveOption: <T = string>(key: string): T | undefined => {
         const fromStore = datastore?.get<T>(key);
@@ -606,6 +609,9 @@ export class CopilotCore {
         break;
       case "threat-model":
         await this.loadWithScope(createThreatModelModule());
+        break;
+      case "taint-iris-next":
+        await this.loadWithScope(createTaintIrisNextModule());
         break;
       case "vendor-assessment":
         await this.loadWithScope(createVendorAssessmentModule());

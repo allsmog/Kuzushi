@@ -12,7 +12,7 @@
  *     → ...
  *     ○ ...
  *
- *   actors                          (threat-hunt only)
+ *   actors                          (carlini-threat-hunt only)
  *     AUTH-01  active  Unauthenticated User · turn 4/12 · $0.18
  *       ✓ Read src/api/...
  *       → grep "auth"
@@ -31,6 +31,7 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
+import { useEffect, useRef } from "react";
 import { formatCost, formatDuration, truncateEnd } from "../format.js";
 import { BLACK_CIRCLE, STEP_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
@@ -84,6 +85,26 @@ export function ModuleRunView({
   const moduleId = run?.moduleId ?? shell.focusedModule ?? "module";
   const breadcrumb = `kuzushi/${moduleId}/run`;
 
+  // O6: Notify the operator when a long run completes — terminal bell +
+  // macOS notification + stderr badge. Fires once per run via a ref so
+  // re-renders don't spam. Silence with KUZUSHI_QUIET_RUN_NOTIFICATIONS=1.
+  const notifiedRunIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!run) return;
+    const isTerminal = run.status === "done" || run.status === "aborted" || run.status === "error";
+    if (!isTerminal) return;
+    const runId = run.runId ?? `${run.moduleId ?? "module"}:${run.startedAtMs}`;
+    if (notifiedRunIdRef.current === runId) return;
+    notifiedRunIdRef.current = runId;
+    if (process.env.KUZUSHI_QUIET_RUN_NOTIFICATIONS) return;
+    notifyRunComplete({
+      moduleId: run.moduleId ?? shell.focusedModule ?? "module",
+      toolName: run.toolName ?? "tool",
+      status: run.status,
+      elapsedMs: Math.max(0, (run.completedAtMs ?? Date.now()) - run.startedAtMs),
+    });
+  }, [run, shell.focusedModule]);
+
   const now = nowMs ?? Date.now();
   const elapsedMs = run ? Math.max(0, (run.completedAtMs ?? now) - run.startedAtMs) : 0;
   const elapsed = formatDuration(elapsedMs);
@@ -106,7 +127,7 @@ export function ModuleRunView({
           <ToolHeader run={run} />
           <TerminalRunBanner run={run} findings={findings} elapsed={elapsed} />
           <StepsBlock steps={run.steps} />
-          {run.moduleId === "threat-hunt" ? (
+          {run.moduleId === "carlini-threat-hunt" ? (
             <ActorsBlock agentActivity={agentActivity} run={run} />
           ) : null}
           <EvidenceBlock evidence={run.evidenceTail} />
@@ -261,7 +282,7 @@ function actorRowsFromActivity(
   if (!activity) return [];
   const fingerprints: string[] = [];
   for (const fp of activity.keys()) {
-    if (fp.startsWith("threat-hunt:")) fingerprints.push(fp);
+    if (fp.startsWith("carlini-threat-hunt:")) fingerprints.push(fp);
   }
   fingerprints.sort();
   return fingerprints.map((fp, i) => {
@@ -417,8 +438,8 @@ function scopedFindings(
   run: NonNullable<ShellState["moduleRun"]>,
   findings: ReadonlyArray<ActorViewFinding>,
 ): ActorViewFinding[] {
-  if (run.moduleId !== "threat-hunt") return [...findings];
-  return findings.filter((f) => f.actorFingerprint?.startsWith("threat-hunt:"));
+  if (run.moduleId !== "carlini-threat-hunt") return [...findings];
+  return findings.filter((f) => f.actorFingerprint?.startsWith("carlini-threat-hunt:"));
 }
 
 function aliasedFindingRows(
@@ -465,6 +486,12 @@ function findingHeadline(finding: ActorViewFinding): string {
 function MetaRow({ run }: { run: NonNullable<ShellState["moduleRun"]> }): React.ReactElement {
   const cost = run.costUsd != null ? formatCost(run.costUsd) : "—";
   const model = run.model ? truncateEnd(run.model, 44) : "default";
+  // O4: Surface effort + thinking state alongside model. Operators
+  // pinning Opus 4.7 with effort=max care that the run actually inherited
+  // the override; "model default" alone gave no signal whether
+  // /set effort max actually took effect.
+  const effort = run.effort ?? "default";
+  const thinking = run.thinkingDisabled ? "disabled" : "enabled";
   return (
     <Section title="run facts">
       <Box paddingLeft={SPACING.md}>
@@ -473,6 +500,10 @@ function MetaRow({ run }: { run: NonNullable<ShellState["moduleRun"]> }): React.
           {tokens.value(cost)}
           {tokens.muted("    model ")}
           {tokens.value(model)}
+          {tokens.muted("    effort ")}
+          {tokens.value(effort)}
+          {tokens.muted("    thinking ")}
+          {tokens.value(thinking)}
           {tokens.muted("    prompts ")}
           {tokens.value("kuzushi/<module>/prompts")}
         </Text>
@@ -530,4 +561,66 @@ function Section({
       {children}
     </Box>
   );
+}
+
+/**
+ * Surface a long-run completion to the operator via three independent
+ * channels — terminal bell (BEL byte), one-line stderr badge, and a macOS
+ * NotificationCenter ping (osascript) on darwin. Each channel is best-effort
+ * and silent on failure. Operators can disable with KUZUSHI_QUIET_RUN_NOTIFICATIONS=1.
+ */
+export function notifyRunComplete(opts: {
+  moduleId: string;
+  toolName: string;
+  status: "done" | "aborted" | "error" | string;
+  elapsedMs: number;
+}): void {
+  // Skip notifications for short runs — under 30s the operator was almost
+  // certainly watching the terminal already, and the bell becomes noise.
+  if (opts.elapsedMs < 30_000) return;
+  const verb = opts.status === "done" ? "complete" : opts.status;
+  const seconds = Math.round(opts.elapsedMs / 1000);
+  const elapsed = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  // Terminal bell. Most terminals flash + sound; many operators will have
+  // the bell muted, in which case the stderr badge is the actionable signal.
+  try {
+    process.stderr.write("\x07");
+  } catch {
+    /* best-effort */
+  }
+  // Stderr badge — survives the Ink stdout takeover.
+  try {
+    process.stderr.write(
+      `\n[kuzushi] ${opts.moduleId}:${opts.toolName.split(":").slice(-1)[0]} ${verb} after ${elapsed}.\n`,
+    );
+  } catch {
+    /* best-effort */
+  }
+  // macOS NotificationCenter via osascript. Keeps the operator informed
+  // when they've switched to a different app during a 20-minute hunt.
+  if (process.platform === "darwin") {
+    try {
+      const { spawn } = require("node:child_process") as typeof import("node:child_process");
+      const title = `Kuzushi ${verb}`;
+      const message = `${opts.moduleId}:${opts.toolName.split(":").slice(-1)[0]} (${elapsed})`;
+      // Detached so we don't hold up the shell exit. stdio:ignore so a
+      // missing osascript (e.g. CI containers) is silent.
+      const child = spawn(
+        "osascript",
+        [
+          "-e",
+          `display notification "${escapeAppleScript(message)}" with title "${escapeAppleScript(title)}"`,
+        ],
+        { stdio: "ignore", detached: true },
+      );
+      child.unref();
+    } catch {
+      /* best-effort — osascript might be missing or sandboxed */
+    }
+  }
+}
+
+/** Minimal AppleScript string-escape — strips double quotes and backslashes. */
+function escapeAppleScript(s: string): string {
+  return s.replace(/[\\"']/g, "");
 }

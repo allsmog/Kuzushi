@@ -3,7 +3,7 @@ import path from "node:path";
 import { DEFAULT_IGNORED_DIRS, walkRepo as walkRepoEntries } from "../../repo-walk.js";
 import type { FileIndex, RepoContext, ScanOpts, SecurityPatternMatch } from "../../types.js";
 import { isRecord } from "../../utils.js";
-import type { AgentTask } from "../types.js";
+import type { DagNodeImpl } from "../types.js";
 
 const MAX_WALK_DEPTH = 5;
 const MAX_WALK_ENTRIES = 4000;
@@ -229,7 +229,7 @@ interface PathSignals {
 /**
  * Deterministic, non-AI pre-scan repository context gathering task.
  */
-export const contextGathererTask: AgentTask<ScanOpts, ContextGathererOutput> = {
+export const contextGathererTask: DagNodeImpl<ScanOpts, ContextGathererOutput> = {
   id: "context-gatherer",
   displayName: "Context Gatherer",
   outputKind: "custom",

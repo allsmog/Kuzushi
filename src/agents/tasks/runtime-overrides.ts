@@ -9,10 +9,10 @@ import {
 } from "../../prompts/tool-policy.js";
 import type { KuzushiConfig } from "../../types.js";
 import { isRecord } from "../../utils.js";
-import type { TaskContext } from "../types.js";
+import type { DagRunContext } from "../types.js";
 
 export function resolveTaskModel(
-  context: TaskContext,
+  context: DagRunContext,
   configKey: string,
   ...fallbackConfigKeys: string[]
 ): string {
@@ -26,7 +26,7 @@ export function resolveTaskModel(
 }
 
 export function resolveTaskPositiveInt(
-  context: TaskContext,
+  context: DagRunContext,
   configKey: string,
   optionKey: string,
   fallback: number,
@@ -40,7 +40,7 @@ export function resolveTaskPositiveInt(
 }
 
 export function resolveTaskAllowedTools(
-  context: TaskContext,
+  context: DagRunContext,
   taskPolicy?: ToolPolicy,
   baseTools?: string[],
 ): string[] {
@@ -57,7 +57,7 @@ export function resolveTaskAllowedTools(
 }
 
 export function resolveTaskEffort(
-  context: TaskContext,
+  context: DagRunContext,
   configKey: string,
   ...fallbackConfigKeys: string[]
 ): AgentEffort | undefined {
@@ -74,7 +74,7 @@ export function resolveTaskEffort(
 }
 
 export function resolveTaskThinkingDisabled(
-  context: TaskContext,
+  context: DagRunContext,
   configKey: string,
   ...fallbackConfigKeys: string[]
 ): boolean | undefined {
@@ -87,7 +87,7 @@ export function resolveTaskThinkingDisabled(
   return undefined;
 }
 
-export function resolveTaskRuntime(context: TaskContext): AgentRuntime {
+export function resolveTaskRuntime(context: DagRunContext): AgentRuntime {
   return context.runtime;
 }
 
@@ -133,7 +133,7 @@ export function resolveStageThinkingDisabled(
 }
 
 function resolveTaskStringConfig(
-  context: TaskContext,
+  context: DagRunContext,
   configKey: string,
   optionKey: string,
   ...fallbackConfigKeys: string[]
@@ -148,7 +148,7 @@ function resolveTaskStringConfig(
 }
 
 function resolveTaskNumberConfig(
-  context: TaskContext,
+  context: DagRunContext,
   configKey: string,
   optionKey: string,
   ...fallbackConfigKeys: string[]

@@ -62,7 +62,7 @@ describe("wrapRuntimeWithActivityForwarding", () => {
     const wrapped = wrapRuntimeWithActivityForwarding(
       makeRuntime(scripted),
       bus,
-      "threat-hunt",
+      "carlini-threat-hunt",
       "run-1",
     );
 
@@ -80,7 +80,7 @@ describe("wrapRuntimeWithActivityForwarding", () => {
       "Found 14 routes under src/routes",
     ]);
     for (const r of received) {
-      expect(r.payload.taskId).toBe("threat-hunt");
+      expect(r.payload.taskId).toBe("carlini-threat-hunt");
       expect(r.meta["runId"]).toBe("run-1");
     }
     await bus.close();
@@ -225,7 +225,7 @@ describe("wrapRuntimeWithActivityForwarding", () => {
     const wrapped = wrapRuntimeWithActivityForwarding(
       makeRuntime(scripted),
       bus,
-      "threat-hunt",
+      "carlini-threat-hunt",
       "run-1",
     );
 

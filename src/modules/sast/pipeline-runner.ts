@@ -59,6 +59,7 @@ export async function executeSastPipeline(
     summaryLabel?: string;
     tasks?: string[];
     taskConfig?: Record<string, Record<string, unknown>>;
+    configOverrides?: Partial<KuzushiConfig>;
     postProcessMode?: "full" | "scan-only";
   },
 ): Promise<ToolResult> {
@@ -78,7 +79,10 @@ export async function executeSastPipeline(
   const { summarizePipelineResult } = await import("./pipeline-summary.js");
   const path = await import("node:path");
 
-  const mergedConfig = mergeTaskConfig(ctx.config, options?.taskConfig);
+  const taskConfigMerged = mergeTaskConfig(ctx.config, options?.taskConfig);
+  const mergedConfig = options?.configOverrides
+    ? { ...taskConfigMerged, ...options.configOverrides }
+    : taskConfigMerged;
   const scanPath = path.default.resolve(target);
   const { root: repoRoot, name: repoName } = resolveRepo(target);
   const requestedTasks = normalizeStringArrayInput(params.tasks);
@@ -196,12 +200,14 @@ export async function runSingleTaskPipeline(
   extraOpts?: {
     summaryLabel?: string;
     taskConfig?: Record<string, Record<string, unknown>>;
+    configOverrides?: Partial<KuzushiConfig>;
   },
 ): Promise<ToolResult> {
   return executeSastPipeline(input, ctx, {
     summaryLabel: extraOpts?.summaryLabel,
     tasks: taskIds,
     ...(extraOpts?.taskConfig ? { taskConfig: extraOpts.taskConfig } : {}),
+    ...(extraOpts?.configOverrides ? { configOverrides: extraOpts.configOverrides } : {}),
     postProcessMode: "scan-only",
   });
 }

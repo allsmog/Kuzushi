@@ -11,7 +11,7 @@ import { formatProfilesForPrompt, getProfilesForTask } from "../../security-prof
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { DagNodeImpl, DagRunContext } from "../types.js";
 import {
   computeDetectionFingerprint,
   normalizeFilePath,
@@ -95,7 +95,7 @@ interface SupplyChainConfig {
   maxFindings: number;
 }
 
-function resolveConfig(ctx: TaskContext): SupplyChainConfig {
+function resolveConfig(ctx: DagRunContext): SupplyChainConfig {
   const model = resolveTaskModel(ctx, "supply-chain");
   const maxFindings = resolveTaskPositiveInt(ctx, "supply-chain", "maxFindings", 50);
   return { model, maxFindings };
@@ -294,7 +294,7 @@ function computeFingerprint(repoName: string, filePath: string, f: SupplyChainFi
   ]);
 }
 
-export const supplyChainTask: AgentTask<ScanOpts, Finding[]> = {
+export const supplyChainTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "supply-chain-detect",
   displayName: "Supply Chain Detector",
   outputKind: "findings",

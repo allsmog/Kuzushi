@@ -169,6 +169,7 @@ const CONTEXT_REQUIRED_TOOLS = new Set([
   // New sub-module names.
   "carlini-threat-hunt:run",
   "taint-iris:hunt",
+  "taint-iris-next:hunt",
 ]);
 
 /**
@@ -343,7 +344,31 @@ function inferWorkspaceNameFromTarget(target: string | undefined): string | unde
     }
   }
 
-  return sanitizeWorkspaceName(path.basename(path.resolve(raw)));
+  // U1: Walk up to the nearest .git ancestor and use `<repo>/<relative>`
+  // as the display name. Without this, scanning a sub-tree of a monorepo
+  // (e.g. `~/monorepo/lab/agents/`) showed `agents` — the basename — making
+  // it impossible to tell which repo was actually in scope.
+  const resolved = path.resolve(raw);
+  const repoRoot = findGitRoot(resolved);
+  if (repoRoot && repoRoot !== resolved) {
+    const repo = path.basename(repoRoot);
+    const rel = path.relative(repoRoot, resolved);
+    return sanitizeWorkspaceName(rel ? `${repo}/${rel}` : repo);
+  }
+  return sanitizeWorkspaceName(path.basename(resolved));
+}
+
+/** Walk up from `dir` to find the nearest ancestor containing a `.git/` (or
+ *  `.git` worktree pointer file). Returns null when none found. */
+function findGitRoot(dir: string): string | null {
+  let cur = dir;
+  for (let depth = 0; depth < 64; depth += 1) {
+    if (existsSync(path.join(cur, ".git"))) return cur;
+    const parent = path.dirname(cur);
+    if (parent === cur) return null;
+    cur = parent;
+  }
+  return null;
 }
 
 function sanitizeWorkspaceName(raw: string | undefined): string | undefined {
@@ -676,6 +701,8 @@ function seedFocusedModuleRun(
   startedAtMs: number,
   inputSummary?: string,
   model?: string,
+  effort?: string,
+  thinkingDisabled?: boolean,
 ): void {
   if (!store) return;
   const moduleId = moduleIdFromToolName(tool.name);
@@ -700,6 +727,10 @@ function seedFocusedModuleRun(
           : {}),
         ...(tool.runLifecycle?.liveControl ? { liveControl: tool.runLifecycle.liveControl } : {}),
         ...((model ?? existing?.model) ? { model: model ?? existing?.model } : {}),
+        ...((effort ?? existing?.effort) ? { effort: effort ?? existing?.effort } : {}),
+        ...((thinkingDisabled ?? existing?.thinkingDisabled) !== undefined
+          ? { thinkingDisabled: thinkingDisabled ?? existing?.thinkingDisabled }
+          : {}),
         startedAtMs: existing?.startedAtMs ?? startedAtMs,
         status: "running",
         steps: existing?.steps ?? [],
@@ -718,9 +749,20 @@ function seedCheckpointModuleRun(
   startedAtMs: number,
   inputSummary?: string,
   model?: string,
+  effort?: string,
+  thinkingDisabled?: boolean,
 ): void {
   if (!store || tool.runLifecycle?.persistence !== "pipeline-checkpoint") return;
-  seedFocusedModuleRun(store, shellState, tool, startedAtMs, inputSummary, model);
+  seedFocusedModuleRun(
+    store,
+    shellState,
+    tool,
+    startedAtMs,
+    inputSummary,
+    model,
+    effort,
+    thinkingDisabled,
+  );
 }
 
 function patchCheckpointModuleRunTerminal(
@@ -1248,6 +1290,18 @@ function readStoredModelOption(options: Record<string, unknown>): string | undef
   const modelKey = Object.keys(options).find((key) => key.toUpperCase() === "MODEL");
   const value = modelKey ? options[modelKey] : undefined;
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function readStoredEffortOption(options: Record<string, unknown>): string | undefined {
+  const value = options["effort"];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function readStoredThinkingDisabledOption(options: Record<string, unknown>): boolean | undefined {
+  const thinking = options["thinking"];
+  if (typeof thinking === "boolean") return !thinking;
+  const thinkingDisabled = options["thinkingDisabled"];
+  return typeof thinkingDisabled === "boolean" ? thinkingDisabled : undefined;
 }
 
 function stripSyntheticModelOptionFromInput(
@@ -2631,7 +2685,7 @@ async function startInkShell(
   // Strategy: every event we accept adds its runId to `seenRunIdsThisTurn`.
   // On abort, we migrate that set into `abortedRunIds` so any future event
   // with one of those runIds is dropped unconditionally. New turns get new
-  // task runIds (fresh UUIDs from `buildDagRunContext`), so legitimate
+  // task runIds (fresh UUIDs from the DAG execution context), so legitimate
   // progress still flows. Cap the blacklist FIFO to bound memory over
   // a long shell session.
   const seenRunIdsThisTurn = new Set<string>();
@@ -3201,7 +3255,7 @@ async function startInkShell(
     );
   });
 
-  // Threat-hunt actor rail — direct shell runs publish one event stream per
+  // Carlini threat-hunt actor rail — direct shell runs publish one event stream per
   // actor. Keep most actor/tool chatter live-only, but persist terminal actor
   // summaries so the transcript tells a compact progressive story.
   bus.subscribe<import("../bus/events.js").TaskAgentActivityEvent>(
@@ -3335,13 +3389,30 @@ async function startInkShell(
         ? { contextSnapshot: shell.contextSnapshot, threatModel: shell.threatModel }
         : undefined;
     },
-    // Workspace-DB finding count for triage/verify/patch requires. Optional —
-    // when no workspace is active the count defaults to 0 and the preflight
-    // fires the expected "run a scanner first" hint.
+    // Workspace-DB finding count for triage/verify/patch requires. Walks
+    // BOTH stores: the workspace vulns table AND the scan_findings table
+    // (where carlini-threat-hunt / scan-mode tasks persist). Operators who
+    // run a hunt in shell mode then ask for triage previously got "run a
+    // scanner first" because the dispatcher only knew about workspace vulns.
     getFindingCount: () => {
       const wsId = opts.workspace;
-      if (!wsId || !workspaceManager) return 0;
-      return workspaceManager.vulns.listForWorkspace(wsId).length;
+      let workspaceVulns = 0;
+      if (wsId && workspaceManager) {
+        workspaceVulns = workspaceManager.vulns.listForWorkspace(wsId).length;
+      }
+      let scanFindings = 0;
+      if (workspaceManager) {
+        try {
+          const row = workspaceManager
+            .rawDb()
+            .prepare("SELECT COUNT(*) AS n FROM scan_findings")
+            .get() as { n?: number } | undefined;
+          scanFindings = typeof row?.n === "number" ? row.n : 0;
+        } catch {
+          // scan_findings table may not exist on first-run dbs — ignore
+        }
+      }
+      return workspaceVulns + scanFindings;
     },
     getHostCount: () => {
       const wsId = opts.workspace;
@@ -5219,13 +5290,16 @@ function handleSlashCommand(
       return handleConfigCommand(args, ctx);
 
     case "auth":
-      return handleAuthCommand(opts, ctx);
+      return handleAuthCommand(args, opts, ctx);
 
     case "ask":
       return handleAskCommand(args, opts, shellState);
 
     case "backend":
       return handleBackendCommand(args, opts);
+
+    case "cost":
+      return handleCostCommand(opts, shellState);
 
     case "provider":
       return handleProviderCommand(args, opts);
@@ -6488,6 +6562,12 @@ function targetRepoCandidates(opts: ShellOptions, shellState: ShellState): Set<s
   return ids;
 }
 
+function normalizeShellTargetInput(value: unknown, activeTarget: string | undefined): unknown {
+  if (typeof value !== "string" || !activeTarget) return value;
+  const trimmed = value.trim();
+  return trimmed === "." || trimmed === "./" ? activeTarget : value;
+}
+
 async function executeResumeTool(
   tool: ModuleTool,
   runId: string,
@@ -6529,6 +6609,8 @@ async function executeResumeTool(
     Date.now(),
     `resume ${runId}`,
     modelDatastore.datastore?.get<string>("model"),
+    readStoredEffortOption(input),
+    readStoredThinkingDisabledOption(input),
   );
   const result = await core.executeTool(tool.name, toolInput, {
     cwd: /^[a-z][a-z0-9+.-]*:\/\//i.test(target) ? process.cwd() : path.resolve(target),
@@ -6630,6 +6712,9 @@ function resolveToolExecution(
   const storedArgs = shellState.moduleOptions[finalToolName] ?? {};
   const parsedArgs = parseToolArgs(toolArgs);
   const mergedArgs: Record<string, unknown> = { ...storedArgs, ...parsedArgs };
+  if ("target" in mergedArgs) {
+    mergedArgs.target = normalizeShellTargetInput(mergedArgs.target, opts.target);
+  }
   if (!("target" in mergedArgs) && opts.target) {
     mergedArgs.target = opts.target;
   }
@@ -6678,6 +6763,8 @@ function resolveToolExecution(
         Date.now(),
         inputSummary,
         modelDatastore.datastore?.get<string>("model"),
+        readStoredEffortOption(mergedArgs),
+        readStoredThinkingDisabledOption(mergedArgs),
       );
 
       const result = await core.executeTool(finalToolName, toolInput, {
@@ -6723,27 +6810,34 @@ function getContextRequirementError(
 ): string | undefined {
   if (!CONTEXT_REQUIRED_TOOLS.has(toolName)) return undefined;
   const snapshot = shellState.contextSnapshot;
+  const inputTarget =
+    typeof input.target === "string" && input.target.trim() ? input.target : undefined;
+  const target = inputTarget ?? opts.target ?? snapshot?.target;
+  const persistentThreatModel =
+    target && !/^[a-z][a-z0-9+.-]*:\/\//i.test(target)
+      ? loadPersistentThreatModel(path.resolve(target))
+      : null;
+
   if (!snapshot) {
+    if (toolName === "carlini-threat-hunt:run" && persistentThreatModel) {
+      return undefined;
+    }
+    if (toolName === "carlini-threat-hunt:run") {
+      return `Threat model required for ${toolName}. Run /use threat-model, then run .`;
+    }
+    if (toolName === "taint-iris-next:hunt") {
+      return `Context required for ${toolName}. Run /context, then /threats regen dfd.`;
+    }
     return `Context required for ${toolName}. Run context (or /context) first.`;
   }
 
   const missing: string[] = [];
   const needsThreatModel =
-    toolName === "carlini-threat-hunt:run" ||
-    toolName === "sast:carlini-threat-hunt" ||
-    toolName === "taint-iris-next:hunt" ||
-    toolName === "sast:taint-iris-next";
+    toolName === "carlini-threat-hunt:run" || toolName === "taint-iris-next:hunt";
   const needsAppModel =
-    needsThreatModel || toolName === "taint-iris:hunt" || toolName === "sast:taint-iris";
-
-  const target =
-    typeof input.target === "string" && input.target.trim()
-      ? input.target
-      : (opts.target ?? snapshot.target);
-  const persistentThreatModel =
-    target && !/^[a-z][a-z0-9+.-]*:\/\//i.test(target)
-      ? loadPersistentThreatModel(path.resolve(target))
-      : null;
+    toolName === "taint-iris-next:hunt" ||
+    toolName === "taint-iris:hunt" ||
+    toolName === "sast:taint-iris";
   const hasThreatModel = !!(shellState.threatModel ?? persistentThreatModel);
 
   if (needsThreatModel && !hasThreatModel) {
@@ -6781,6 +6875,8 @@ function resolveOptionsTool(
   }
 
   if (focusedModule && !lastUsedTool.startsWith(`${focusedModule}:`)) {
+    const fallbackToolName = pickDefaultToolName(core, focusedModule);
+    if (fallbackToolName) return { ok: true, toolName: fallbackToolName };
     return {
       ok: false,
       output: `No active tool selected for ${focusedModule}. Use /options <tool> first.`,
@@ -7582,8 +7678,22 @@ function handleSetCommand(
     return { output: "Usage: /set <key> <value>" };
   }
 
-  const activeToolName = shellState.lastUsedTool;
+  // Resolve the tool to apply the option to. Prefer the lastUsedTool when
+  // it belongs to the focused module; otherwise fall back to the focused
+  // module's default tool. The previous behavior errored with "Use /options
+  // <tool> first" even when the operator was clearly inside a focused
+  // module — operators never expect to set an option on something other
+  // than the module they just entered.
+  let activeToolName = shellState.lastUsedTool;
   if (!activeToolName || (focusedModule && !activeToolName.startsWith(`${focusedModule}:`))) {
+    if (focusedModule) {
+      const fallback = pickDefaultToolName(core, focusedModule);
+      if (fallback) {
+        activeToolName = fallback;
+      }
+    }
+  }
+  if (!activeToolName) {
     return { output: "No active tool selected. Use /options <tool> first." };
   }
 
@@ -7709,16 +7819,69 @@ function formatBackendSlots(
   const out: string[] = [];
   for (const slot of ["claude", "piAi", "codex"] as const) {
     const s = cfg?.[slot];
-    if (!s || (!s.apiKey && !s.baseUrl)) {
-      const backend = slot === "piAi" ? "pi-ai" : slot;
-      out.push(`  ${slot.padEnd(6)} (unset — run /backend ${backend} then /auth)`);
+    if (s && (s.apiKey || s.baseUrl)) {
+      out.push(
+        `  ${slot.padEnd(6)} apiKey=${maskApiKey(s.apiKey)}  baseUrl=${s.baseUrl ?? "(default)"}`,
+      );
+      continue;
+    }
+    // No file-based creds — probe env vars before reporting "unset". The
+    // claude runtime honors process.env.ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL
+    // at subprocess launch, so reporting "unset" when env vars are set is a
+    // lie that costs operators $0/0-finding wasted runs.
+    const envCreds = probeEnvCredsForSlot(slot);
+    if (envCreds) {
+      out.push(
+        `  ${slot.padEnd(6)} env-only (apiKey=${maskApiKey(envCreds.apiKey)}  baseUrl=${envCreds.baseUrl ?? "(default)"})`,
+      );
       continue;
     }
     out.push(
-      `  ${slot.padEnd(6)} apiKey=${maskApiKey(s.apiKey)}  baseUrl=${s.baseUrl ?? "(default)"}`,
+      `  ${slot.padEnd(6)} (unset — run /backend ${slot === "piAi" ? "pi-ai" : slot} then /auth)`,
     );
   }
   return out;
+}
+
+/**
+ * Probe environment variables for backend credentials. Returns null when
+ * no env-var credentials are present for the slot. Used by `/backend show`
+ * so that operators who set ANTHROPIC_API_KEY in their parent shell don't
+ * see a misleading "unset" status.
+ */
+function probeEnvCredsForSlot(
+  slot: "claude" | "piAi" | "codex",
+): { apiKey?: string; baseUrl?: string } | null {
+  if (slot === "claude") {
+    const apiKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+    const baseUrl = process.env.ANTHROPIC_BASE_URL;
+    if (apiKey || baseUrl) return { apiKey, baseUrl };
+    return null;
+  }
+  if (slot === "codex") {
+    const apiKey = process.env.OPENAI_API_KEY;
+    const baseUrl = process.env.OPENAI_BASE_URL;
+    if (apiKey || baseUrl) return { apiKey, baseUrl };
+    return null;
+  }
+  // pi-ai is multi-provider. Honor the most common provider env vars so
+  // operators see a green light when ANY provider has env-only creds.
+  const piAiVars: Array<[string, string?]> = [
+    ["ANTHROPIC_API_KEY"],
+    ["OPENAI_API_KEY", "OPENAI_BASE_URL"],
+    ["GOOGLE_API_KEY"],
+    ["GROQ_API_KEY"],
+    ["MISTRAL_API_KEY"],
+    ["DEEPSEEK_API_KEY"],
+  ];
+  for (const [keyVar, baseVar] of piAiVars) {
+    const apiKey = process.env[keyVar];
+    if (apiKey) {
+      const baseUrl = baseVar ? process.env[baseVar] : undefined;
+      return { apiKey, baseUrl };
+    }
+  }
+  return null;
 }
 
 /**
@@ -7756,6 +7919,80 @@ function closestBackend(input: string, candidates: readonly string[]): string | 
   return best.distance <= threshold ? best.name : undefined;
 }
 
+/**
+ * `/cost` — Reports session-to-date cost from the live moduleRun + the
+ * persisted `~/.kuzushi/runs/<id>/cost.jsonl` (best-effort). Operators
+ * previously had to grep the audit log to know what they'd spent during
+ * a long shell session; this surfaces it inline.
+ */
+function handleCostCommand(opts: ShellOptions, shellState: ShellState): LocalCommandResult {
+  return {
+    asyncExecute: async () => {
+      const lines: string[] = [];
+      // Live cost from the current module run (if any)
+      const liveCost = shellState.moduleRun?.costUsd ?? 0;
+      const liveTool = shellState.moduleRun?.toolName ?? null;
+      if (liveTool && (shellState.moduleRun?.status === "running" || liveCost > 0)) {
+        const status = shellState.moduleRun?.status ?? "unknown";
+        lines.push(`Active run:  ${liveTool}  $${liveCost.toFixed(4)}  (${status})`);
+      } else {
+        lines.push("Active run:  (none)");
+      }
+
+      // Aggregate from per-run summary.json files in the kuzushi runs dir.
+      // Best-effort: missing dir / unreadable files are silently ignored.
+      try {
+        const fs = await import("node:fs/promises");
+        const path = await import("node:path");
+        const os = await import("node:os");
+        const runsDir = path.join(os.homedir(), ".kuzushi", "runs");
+        const entries = await fs.readdir(runsDir).catch(() => [] as string[]);
+        let totalCost = 0;
+        let runsCount = 0;
+        const recent: Array<{ runId: string; cost: number; ts: number }> = [];
+        for (const runId of entries) {
+          try {
+            const summaryPath = path.join(runsDir, runId, "summary.json");
+            const stat = await fs.stat(summaryPath).catch(() => null);
+            if (!stat) continue;
+            const text = await fs.readFile(summaryPath, "utf-8");
+            const summary = JSON.parse(text) as { totalCost?: number; costUsd?: number };
+            const cost =
+              typeof summary.totalCost === "number"
+                ? summary.totalCost
+                : typeof summary.costUsd === "number"
+                  ? summary.costUsd
+                  : 0;
+            totalCost += cost;
+            runsCount += 1;
+            recent.push({ runId, cost, ts: stat.mtimeMs });
+          } catch {
+            /* per-run failure — skip */
+          }
+        }
+        recent.sort((a, b) => b.ts - a.ts);
+        lines.push(`All runs:    ${runsCount} runs · $${totalCost.toFixed(4)} cumulative`);
+        if (recent.length > 0) {
+          lines.push("");
+          lines.push("Recent runs (last 5):");
+          for (const r of recent.slice(0, 5)) {
+            const when = new Date(r.ts).toISOString().slice(0, 16).replace("T", " ");
+            lines.push(`  ${when}  ${r.runId.slice(0, 12).padEnd(14)} $${r.cost.toFixed(4)}`);
+          }
+        }
+      } catch (error) {
+        lines.push(
+          `(could not read ~/.kuzushi/runs: ${error instanceof Error ? error.message : "unknown"})`,
+        );
+      }
+
+      const ws = opts.workspaceName ?? opts.workspace;
+      if (ws) lines.push("", `Workspace:   ${ws}`);
+      return lines.join("\n");
+    },
+  };
+}
+
 function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandResult {
   const sub = (args[0] ?? "").toLowerCase();
   const current = opts.config.agentRuntimeBackend ?? "pi-ai";
@@ -7771,9 +8008,7 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
         const persisted = loadConfig().agentRuntimeBackend ?? "pi-ai";
         const lines = [`Shell backend (live): ${current}`, `Persisted backend:    ${persisted}`];
         if (persisted !== current) {
-          lines.push(
-            `(Swapped for this session because "${persisted}" doesn't support interactive shell.)`,
-          );
+          lines.push("(This shell is using a per-session backend override.)");
         }
         lines.push("", "Credentials (per backend):");
         lines.push(...formatBackendSlots(opts.config.agentRuntimeConfig));
@@ -7784,7 +8019,7 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
           "  /backend show           Show current + persisted backend + credentials",
           "  /backend pi-ai          Use pi-ai — multi-provider, in-process (recommended)",
           "  /backend claude         Use Claude Code SDK — Anthropic only, subprocess-per-task",
-          "  /backend codex          Use Codex SDK — OpenAI models",
+          "  /backend codex          Use Codex SDK — OpenAI/Codex models",
           "",
           "For provider/model selection, use /provider instead.",
           `Persists to ${configPath()}.`,
@@ -7826,7 +8061,7 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
       // Each backend has its own credential slot now, so switching can't leak
       // creds between backends. Just hint when the new slot is empty so the
       // operator knows to /auth.
-      const slot = sub === "codex" ? "codex" : sub === "pi-ai" ? "piAi" : "claude";
+      const slot = sub === "pi-ai" ? "piAi" : sub;
       const slotCreds = opts.config.agentRuntimeConfig?.[slot];
       if (!slotCreds || (!slotCreds.apiKey && !slotCreds.baseUrl)) {
         lines.push(
@@ -8042,7 +8277,89 @@ function handleAskCommand(
   return { askQuestion: `${contextPrefix}\n\n---\n${question}` };
 }
 
-function handleAuthCommand(opts: ShellOptions, ctx: ShellContext): LocalCommandResult {
+/**
+ * One-shot migration from project config.json (`agentRuntimeConfig` block,
+ * which is silently stripped by UNSAFE_PROJECT_CONFIG_KEYS) to the supported
+ * `.kuzushi/credentials.json` location. Reads project config.json (walking up
+ * from cwd to the nearest ancestor with `.kuzushi/`), extracts the cred
+ * blocks, writes via persistLocalCredentials, and reports.
+ */
+function handleAuthImportFromConfig(opts: ShellOptions): LocalCommandResult {
+  return {
+    asyncExecute: async () => {
+      const { findProjectConfigRoot, projectConfigPath } = await import("../config/paths.js");
+      const { persistLocalCredentials } = await import("../config.js");
+      const root = findProjectConfigRoot(opts.target ?? process.cwd());
+      if (!root) {
+        return "No project config.json found in any ancestor — nothing to import.";
+      }
+      const cfgPath = projectConfigPath(root);
+      let raw: Record<string, unknown>;
+      try {
+        const fs = await import("node:fs");
+        const text = fs.readFileSync(cfgPath, "utf-8");
+        raw = JSON.parse(text) as Record<string, unknown>;
+      } catch (error) {
+        return `Could not read ${cfgPath}: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      const arc = raw.agentRuntimeConfig;
+      if (!arc || typeof arc !== "object") {
+        return `${cfgPath} has no agentRuntimeConfig block — nothing to import.`;
+      }
+      // Accept both nested form ({claude: {apiKey}, piAi: {...}}) and the
+      // legacy flat form ({apiKey, baseUrl}) which the loader retargets to
+      // the claude slot.
+      const arcRec = arc as Record<string, unknown>;
+      const credsToWrite: Record<string, { apiKey?: string; baseUrl?: string }> = {};
+      for (const slot of ["claude", "piAi", "codex"] as const) {
+        const slotVal = arcRec[slot];
+        if (slotVal && typeof slotVal === "object") {
+          const sv = slotVal as Record<string, unknown>;
+          const apiKey = typeof sv.apiKey === "string" ? sv.apiKey : undefined;
+          const baseUrl = typeof sv.baseUrl === "string" ? sv.baseUrl : undefined;
+          if (apiKey || baseUrl) credsToWrite[slot] = { apiKey, baseUrl };
+        }
+      }
+      // Legacy flat form → claude slot.
+      if (
+        Object.keys(credsToWrite).length === 0 &&
+        (typeof arcRec.apiKey === "string" || typeof arcRec.baseUrl === "string")
+      ) {
+        const apiKey = typeof arcRec.apiKey === "string" ? arcRec.apiKey : undefined;
+        const baseUrl = typeof arcRec.baseUrl === "string" ? arcRec.baseUrl : undefined;
+        credsToWrite.claude = { apiKey, baseUrl };
+      }
+      if (Object.keys(credsToWrite).length === 0) {
+        return `${cfgPath} has agentRuntimeConfig but no apiKey/baseUrl to import.`;
+      }
+      const writtenTo = persistLocalCredentials(credsToWrite, root);
+      const slots = Object.keys(credsToWrite).join(", ");
+      return [
+        `Imported ${slots} credentials from ${cfgPath}`,
+        `→ ${writtenTo}`,
+        ".gitignore updated to exclude credentials.json.",
+        "",
+        "You can now safely delete the agentRuntimeConfig block from project config.json.",
+        "Restart the shell to pick up the new credentials.",
+      ].join("\n");
+    },
+  };
+}
+
+function handleAuthCommand(
+  args: string[],
+  opts: ShellOptions,
+  ctx: ShellContext,
+): LocalCommandResult {
+  // /auth import-from-config — migrate creds from project config.json (the
+  // unsupported but natural location) to credentials.json (the supported one).
+  // Saves operators from the silent-strip footgun documented in
+  // sanitizeProjectConfigLayer + the C1 banner.
+  const sub = (args[0] ?? "").toLowerCase();
+  if (sub === "import-from-config") {
+    return handleAuthImportFromConfig(opts);
+  }
+
   // Ink shell: open the modal credential prompt and apply the outcome.
   if (ctx.uiStore) {
     return {

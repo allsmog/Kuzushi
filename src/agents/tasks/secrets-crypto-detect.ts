@@ -11,7 +11,7 @@ import { formatProfilesForPrompt, getProfilesForTask } from "../../security-prof
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { DagNodeImpl, DagRunContext } from "../types.js";
 import { type CategoryRelevance, filterCategories } from "./category-filter.js";
 import {
   computeDetectionFingerprint,
@@ -87,7 +87,7 @@ interface SecretsCryptoConfig {
   maxFindings: number;
 }
 
-function resolveConfig(ctx: TaskContext): SecretsCryptoConfig {
+function resolveConfig(ctx: DagRunContext): SecretsCryptoConfig {
   const model = resolveTaskModel(ctx, "secrets-crypto-detect");
   const maxFindings = resolveTaskPositiveInt(ctx, "secrets-crypto-detect", "maxFindings", 100);
   return { model, maxFindings };
@@ -360,7 +360,7 @@ function computeFingerprint(
   return computeDetectionFingerprint([repoName, prefix, category, filePath, String(startLine)]);
 }
 
-export const secretsCryptoDetectTask: AgentTask<ScanOpts, Finding[]> = {
+export const secretsCryptoDetectTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "secrets-crypto-detect",
   displayName: "Secrets & Crypto Misuse Detector",
   outputKind: "findings",

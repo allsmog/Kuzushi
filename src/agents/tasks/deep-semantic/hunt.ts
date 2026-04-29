@@ -7,7 +7,7 @@
  * bugs: integer overflows, sentinel collisions, buffer overflows,
  * use-after-free, missing mitigations, unsafe block violations.
  *
- * Architecture mirrors threat-hunt.ts (bounded concurrency, one agent per CWE)
+ * Architecture mirrors carlini-threat-hunt.ts (bounded concurrency, one agent per CWE)
  * with IRIS-style tool grants (Bash + Write for CodeQL query authoring).
  */
 import { createHash } from "node:crypto";
@@ -20,7 +20,7 @@ import type { Finding, TaintPathStep, TriageAgentConfig } from "../../../scanner
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
-import type { AgentTask, TaskContext } from "../../types.js";
+import type { DagNodeImpl, DagRunContext } from "../../types.js";
 import {
   resolveTaskAllowedTools,
   resolveTaskModel,
@@ -91,7 +91,7 @@ interface DeepSemanticHuntConfig {
   maxCweClasses: number;
 }
 
-function resolveConfig(ctx: TaskContext): DeepSemanticHuntConfig {
+function resolveConfig(ctx: DagRunContext): DeepSemanticHuntConfig {
   return {
     model: resolveTaskModel(ctx, "deep-semantic-hunt"),
     maxFindings: resolveTaskPositiveInt(ctx, "deep-semantic-hunt", "maxFindings", 30),
@@ -102,7 +102,7 @@ function resolveConfig(ctx: TaskContext): DeepSemanticHuntConfig {
 
 /* ---------- CodeQL database resolution ---------- */
 
-function resolveCodeqlDbPath(context: TaskContext): string | null {
+function resolveCodeqlDbPath(context: DagRunContext): string | null {
   const candidates = [
     path.join(context.repoRoot, ".kuzushi", "codeql-db"),
     path.join(context.repoRoot, ".codeql", "db"),
@@ -368,7 +368,7 @@ interface HuntResult {
 
 async function runCweHunt(
   cwe: CweSelection,
-  context: TaskContext,
+  context: DagRunContext,
   config: DeepSemanticHuntConfig,
   codeqlDbPath: string | null,
 ): Promise<HuntResult> {
@@ -496,7 +496,7 @@ function parseFindings(raw: unknown, repoRoot: string, repoName: string): Findin
 
 /* ---------- main task ---------- */
 
-async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
+async function run(_input: ScanOpts, context: DagRunContext): Promise<Finding[]> {
   const config = resolveConfig(context);
   const cweOutput = context.upstreamOutputs.get("deep-semantic-cwe-select") as
     | CweSelectOutput
@@ -550,7 +550,7 @@ async function run(_input: ScanOpts, context: TaskContext): Promise<Finding[]> {
   return attachTaskOutputMeta(findings, { costUsd: totalCost });
 }
 
-export const deepSemanticHuntTask: AgentTask<ScanOpts, Finding[]> = {
+export const deepSemanticHuntTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "deep-semantic-hunt",
   displayName: "Deep Semantic Vulnerability Hunt",
   outputKind: "findings",

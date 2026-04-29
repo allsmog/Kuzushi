@@ -8,7 +8,7 @@ import { createLogger } from "../../../logger.js";
 import { coerceFileIndex, coerceRepoContext } from "../../../repo-context.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { FileIndex, RepoContext, ScanOpts, SecurityPatternMatch } from "../../../types.js";
-import type { AgentTask } from "../../types.js";
+import type { DagNodeImpl } from "../../types.js";
 import { buildSystemsSurfacePack } from "./helpers.js";
 import {
   hasSystemsSignals,
@@ -75,7 +75,7 @@ type SurfaceAccumulator = RankedSystemsSurface & {
   hardeningSet: Set<string>;
 };
 
-export const systemsContextGathererTask: AgentTask<ScanOpts, SystemsContextOutput> = {
+export const systemsContextGathererTask: DagNodeImpl<ScanOpts, SystemsContextOutput> = {
   id: "systems-context-gatherer",
   displayName: "Systems Context Gatherer",
   outputKind: "custom",

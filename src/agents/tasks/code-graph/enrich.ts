@@ -1,7 +1,7 @@
 import { createLogger } from "../../../logger.js";
 import type { Finding } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
-import type { AgentTask } from "../../types.js";
+import type { DagNodeImpl } from "../../types.js";
 import { getGraphNodeByFileAndLine, getNodeById, getPathsToNode } from "./store.js";
 import type {
   CodeGraphNode,
@@ -133,7 +133,7 @@ function getGraphContextForFinding(
   };
 }
 
-export const codeGraphEnrichTask: AgentTask<Finding[], Finding[]> = {
+export const codeGraphEnrichTask: DagNodeImpl<Finding[], Finding[]> = {
   id: "code-graph-enrich",
   displayName: "Code Graph Enrichment",
   outputKind: "findings",

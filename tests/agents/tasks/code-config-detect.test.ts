@@ -3,19 +3,19 @@ import {
   __codeConfigDetectInternals,
   codeConfigDetectTask,
 } from "../../../src/agents/tasks/code-config-detect.js";
-import type { TaskContext } from "../../../src/agents/types.js";
+import type { DagRunContext } from "../../../src/agents/types.js";
 import type { KuzushiConfig } from "../../../src/types.js";
 
 const { resolveConfig, buildPrompt, normalizeFindings, computeFingerprint, CODE_CONFIG_RELEVANCE } =
   __codeConfigDetectInternals;
 
-function makeContext(overrides: Record<string, unknown> = {}): TaskContext {
+function makeContext(overrides: Record<string, unknown> = {}): DagRunContext {
   return {
     runId: "test-run",
     repoRoot: "/tmp/repo",
     repoName: "test-repo",
     config: makeConfig(overrides),
-    bus: {} as TaskContext["bus"],
+    bus: {} as DagRunContext["bus"],
     upstreamOutputs: new Map(),
   };
 }

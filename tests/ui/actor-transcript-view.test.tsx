@@ -60,7 +60,7 @@ function shell(overrides: Partial<ShellState> = {}): ShellState {
     modules: [],
     moduleCatalog: [],
     tools: [],
-    focusedModule: "threat-hunt",
+    focusedModule: "carlini-threat-hunt",
     shellView: "actor-detail",
     openFindingId: null,
     target: null,
@@ -69,10 +69,10 @@ function shell(overrides: Partial<ShellState> = {}): ShellState {
     commandHistory: [],
     moduleOptions: {},
     processing: true,
-    focusedActor: "threat-hunt:Authenticated_User:0",
+    focusedActor: "carlini-threat-hunt:Authenticated_User:0",
     moduleRun: {
-      moduleId: "threat-hunt",
-      toolName: "threat-hunt:run",
+      moduleId: "carlini-threat-hunt",
+      toolName: "carlini-threat-hunt:run",
       startedAtMs: 0,
       status: "running",
       steps: [],
@@ -94,14 +94,14 @@ describe("ActorTranscriptView", () => {
         shell: shell({ focusedActor: null }),
       }),
     );
-    expect(out).toContain("kuzushi/threat-hunt/run/—");
+    expect(out).toContain("kuzushi/carlini-threat-hunt/run/—");
     expect(out).toContain("(no activity yet)");
   });
 
   it("interleaves tool/result/thinking/finding rows for the focused actor", () => {
     const map = new Map<string, AgentActivityLine[]>([
       [
-        "threat-hunt:Authenticated_User:0",
+        "carlini-threat-hunt:Authenticated_User:0",
         [
           activity({ kind: "tool-start", toolName: "Read", detail: "src/api/admin.ts" }),
           activity({ kind: "tool-complete", toolName: "Read", detail: "138 lines, 4.2KB" }),
@@ -109,7 +109,10 @@ describe("ActorTranscriptView", () => {
           activity({ kind: "finding-preview", detail: "SSRF on /admin/fetch" }),
         ],
       ],
-      ["threat-hunt:Anonymous_Visitor:0", [activity({ kind: "tool-start", toolName: "Grep" })]],
+      [
+        "carlini-threat-hunt:Anonymous_Visitor:0",
+        [activity({ kind: "tool-start", toolName: "Grep" })],
+      ],
     ]);
     const out = renderText(
       createElement(ActorTranscriptView, {
@@ -117,7 +120,7 @@ describe("ActorTranscriptView", () => {
         agentActivity: map,
       }),
     );
-    expect(out).toContain("Threat Hunt(. as <Authenticated User>)");
+    expect(out).toContain("Carlini Threat Hunt(. as <Authenticated User>)");
     // Tool-start / -complete / -reasoning / -finding-preview should each
     // produce one row in the transcript.
     expect(out).toMatch(/Read\(src\/api\/admin\.ts\)/);
@@ -132,13 +135,13 @@ describe("ActorTranscriptView", () => {
   it("synthesizes ★ Finding rows from findings whose actorFingerprint matches", () => {
     const map = new Map<string, AgentActivityLine[]>([
       [
-        "threat-hunt:Authenticated_User:0",
+        "carlini-threat-hunt:Authenticated_User:0",
         [activity({ kind: "tool-start", toolName: "Read", detail: "x.ts" })],
       ],
     ]);
     const findings: Finding[] = [
       {
-        taskId: "threat-hunt",
+        taskId: "carlini-threat-hunt",
         fingerprint: "abcd1234",
         ruleId: "ssrf",
         filePath: "src/api/admin.ts",
@@ -151,10 +154,10 @@ describe("ActorTranscriptView", () => {
         impact: "HIGH",
         cwe: ["CWE-918"],
         score: 9,
-        actorFingerprint: "threat-hunt:Authenticated_User:0",
+        actorFingerprint: "carlini-threat-hunt:Authenticated_User:0",
       },
       {
-        taskId: "threat-hunt",
+        taskId: "carlini-threat-hunt",
         fingerprint: "deadbeef",
         ruleId: "noise",
         filePath: "src/other.ts",
@@ -167,7 +170,7 @@ describe("ActorTranscriptView", () => {
         impact: "LOW",
         cwe: [],
         score: 1,
-        actorFingerprint: "threat-hunt:Other:0",
+        actorFingerprint: "carlini-threat-hunt:Other:0",
       },
     ];
     const out = renderText(

@@ -14,7 +14,7 @@ const API_KEY_SENSITIVE_TASKS = new Set([
   "verify",
   "agentic-sast",
   "taint-iris",
-  "threat-hunt",
+  "carlini-threat-hunt",
   "threat-model-randori",
   "context-enricher",
   "app-model-build",

@@ -15,7 +15,7 @@ import type { Finding, TriageAgentConfig } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord } from "../../utils.js";
-import type { AgentTask } from "../types.js";
+import type { DagNodeImpl } from "../types.js";
 import { computeDetectionFingerprint, normalizeFilePath } from "./detection-task-utils.js";
 import { type PreReadResult, preReadFilesForTask } from "./pre-read.js";
 import {
@@ -263,7 +263,7 @@ function normalizeFindings(
   return [...deduped.values()].sort((a, b) => b.score - a.score).slice(0, maxFindings);
 }
 
-export const commandInjectionTask: AgentTask<ScanOpts, Finding[]> = {
+export const commandInjectionTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "command-injection-detect",
   displayName: "Command Injection Detector",
   outputKind: "findings",

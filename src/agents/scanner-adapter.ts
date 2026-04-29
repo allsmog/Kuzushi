@@ -1,9 +1,9 @@
 import type { Finding, ScannerPlugin } from "../scanners/types.js";
 import type { ScanOpts } from "../types.js";
-import type { AgentTask } from "./types.js";
+import type { DagNodeImpl } from "./types.js";
 
-/** Wrap a ScannerPlugin as a generic AgentTask<ScanOpts, Finding[]>. */
-export function adaptScannerPlugin(plugin: ScannerPlugin): AgentTask<ScanOpts, Finding[]> {
+/** Wrap a ScannerPlugin as a generic DagNodeImpl<ScanOpts, Finding[]>. */
+export function adaptScannerPlugin(plugin: ScannerPlugin): DagNodeImpl<ScanOpts, Finding[]> {
   return {
     id: plugin.id,
     displayName: plugin.displayName,

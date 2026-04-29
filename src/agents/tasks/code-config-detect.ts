@@ -12,7 +12,7 @@ import { formatProfilesForPrompt, getProfilesForTask } from "../../security-prof
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { DagNodeImpl, DagRunContext } from "../types.js";
 import {
   CATEGORY_SCOPE_HEADER,
   type CategoryBlock,
@@ -115,7 +115,7 @@ const _CODE_CONFIG_ANALYSIS_TOOL_POLICY: ToolPolicy = {
   allow: ["group:readonly", "group:analysis"],
 };
 
-function resolveConfig(ctx: TaskContext, configKey = "code-config-detect"): CodeConfigConfig {
+function resolveConfig(ctx: DagRunContext, configKey = "code-config-detect"): CodeConfigConfig {
   const model = resolveTaskModel(ctx, configKey, "code-config-detect");
   const maxFindings = resolveTaskPositiveInt(
     ctx,
@@ -717,7 +717,7 @@ function computeFingerprint(
   return computeDetectionFingerprint([repoName, prefix, category, filePath, String(startLine)]);
 }
 
-export const codeConfigDetectTask: AgentTask<ScanOpts, Finding[]> = {
+export const codeConfigDetectTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "code-config-detect",
   displayName: "Code & Config Security Detector",
   outputKind: "findings",

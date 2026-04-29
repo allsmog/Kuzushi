@@ -3,7 +3,7 @@ import path from "node:path";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { FileIndex, RepoContext, TargetBrief, TargetBriefEvidence } from "../../types.js";
 import { isRecord } from "../../utils.js";
-import type { AgentTask } from "../types.js";
+import type { DagNodeImpl } from "../types.js";
 import { resolveTaskAllowedTools, resolveTaskModel } from "./runtime-overrides.js";
 
 export interface ContextPromptOptions {
@@ -60,7 +60,7 @@ const TARGET_BRIEF_SCHEMA = {
   },
 } as const;
 
-export const contextClassifierTask: AgentTask<unknown, ContextClassifierOutput> = {
+export const contextClassifierTask: DagNodeImpl<unknown, ContextClassifierOutput> = {
   id: "context-classifier",
   displayName: "Context Classifier",
   outputKind: "custom",

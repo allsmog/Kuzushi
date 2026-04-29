@@ -1,7 +1,7 @@
 /**
  * Migration 105 — actor_fingerprint column on findings.
  *
- * Threads the per-actor fingerprint that `threat-hunt` stamps on each
+ * Threads the per-actor fingerprint that `carlini-threat-hunt` stamps on each
  * `Finding` (see `src/scanners/types.ts`) through to the persisted store
  * so the v3 `ActorTranscriptView` can synthesize ★ Finding rows for
  * completed and replayed runs — not just live ones.

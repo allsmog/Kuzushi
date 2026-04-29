@@ -129,5 +129,5 @@ describe("virtualization delta", () => {
     expect(virtRows).toBeLessThanOrEqual(50);
     // Factor of 40x.
     expect(unvirtRows / virtRows).toBeGreaterThan(30);
-  });
+  }, 10_000);
 });

@@ -2,7 +2,7 @@ import { createLogger } from "../../../logger.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
-import type { AgentTask } from "../../types.js";
+import type { DagNodeImpl } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
 import { formatSystemsSurfacePack } from "./helpers.js";
 import type {
@@ -62,7 +62,7 @@ const INVARIANT_SCHEMA = {
   },
 } as const;
 
-export const systemsInvariantExtractTask: AgentTask<ScanOpts, SystemsInvariantOutput> = {
+export const systemsInvariantExtractTask: DagNodeImpl<ScanOpts, SystemsInvariantOutput> = {
   id: "systems-invariant-extract",
   displayName: "Systems Invariant Extractor",
   outputKind: "custom",

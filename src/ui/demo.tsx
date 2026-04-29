@@ -508,8 +508,8 @@ function demoModuleCatalog(): ShellModuleCard[] {
       headless: true,
     },
     {
-      name: "sast:threat-hunt",
-      verb: "threat-hunt",
+      name: "sast:carlini-threat-hunt",
+      verb: "carlini-threat-hunt",
       description: "adversarial agents guided by randori",
       headless: true,
     },

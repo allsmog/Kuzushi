@@ -17,7 +17,7 @@ import type {
   RepoContext,
   ScanOpts,
 } from "../../types.js";
-import type { AgentTask } from "../types.js";
+import type { DagNodeImpl } from "../types.js";
 
 const log = createLogger({ stage: "app-model-build" });
 
@@ -43,7 +43,7 @@ interface SyntheticEntryRoute {
   handlerSymbol?: string;
 }
 
-export const appModelBuildTask: AgentTask<ScanOpts, ApplicationModel> = {
+export const appModelBuildTask: DagNodeImpl<ScanOpts, ApplicationModel> = {
   id: "app-model-build",
   displayName: "Application Model Builder",
   outputKind: "custom",

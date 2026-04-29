@@ -197,6 +197,9 @@ export function buildStridePrompt(
     `Write ${outputDir}/pasta-s4.json with STRIDE threat scenarios grounded in code evidence.`,
     "",
     "CRITICAL requirements for S4 threat scenarios:",
+    "- Include a STRIDE classification for every scenario.",
+    "- Include MITRE ATT&CK + OWASP mappings where applicable.",
+    "- Score each threat with VerSprite 5-factor probability thinking, not generic defaults.",
     "- Every threat MUST have evidence_anchors with file_path, start_line, description",
     "- Use STRIDE categories: spoofing, tampering, repudiation, information-disclosure, denial-of-service, elevation-of-privilege",
     "- Include probability (0-1) and impact (critical/high/medium/low)",
@@ -216,7 +219,103 @@ export function buildStridePrompt(
     "- LLM/AI prompt injection via repository content influencing tool behavior or tool invocation",
     "- Path traversal via symlinks or relative paths in repo content escaping the project root",
     "- Subprocess invocation with repo-derived metadata (names, paths) as unsanitized arguments",
+    "",
+    "Schema guardrails:",
+    "- Use file_path/start_line/content style snake_case evidence anchors.",
+    "- Reject placeholder titles such as Boundary abuse: TB-01 or Entrypoint abuse: EP-01.",
+    ...buildReadBeforeWriteGuard(outputDir, analysisRoot),
   ].join("\n");
+}
+
+export function buildStrideRetryPrompt(
+  outputDir: string,
+  issues: string[],
+  maxThreats: number,
+  analysisRoot?: string,
+): string {
+  return [
+    "The S4 STRIDE artifact was incomplete. Rewrite it, fixing these issues:",
+    ...issues.map((issue) => `- ${issue}`),
+    "",
+    buildStridePrompt(maxThreats, outputDir, null, analysisRoot),
+  ].join("\n");
+}
+
+export function assessStrideArtifact(artifact: unknown): string[] {
+  if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
+    return ["S4 artifact is missing or is not a JSON object."];
+  }
+  const raw = artifact as Record<string, unknown>;
+  const threats = Array.isArray(raw["threats"])
+    ? raw["threats"]
+    : Array.isArray(raw["threat_scenarios"])
+      ? raw["threat_scenarios"]
+      : [];
+  if (threats.length === 0) {
+    return ["S4 artifact must include at least one specific scenario."];
+  }
+
+  const issues: string[] = [];
+  const validEvidenceCount = threats.filter((threat) => hasValidThreatEvidence(threat)).length;
+  if (validEvidenceCount < threats.length) {
+    issues.push(
+      `${threats.length - validEvidenceCount}/${threats.length} threats have no valid evidence_anchors.`,
+    );
+  }
+
+  const titles = threats.map((threat) =>
+    typeof (threat as Record<string, unknown>)["title"] === "string"
+      ? String((threat as Record<string, unknown>)["title"])
+      : "",
+  );
+  if (
+    titles.length > 0 &&
+    titles.every((title) => /^(Boundary abuse|Entrypoint abuse):/i.test(title))
+  ) {
+    issues.push("All threats use placeholder titles instead of concrete scenario names.");
+  }
+
+  const probabilities = threats.map((threat) => (threat as Record<string, unknown>)["probability"]);
+  if (probabilities.some((value) => typeof value !== "number" || value < 0 || value > 1)) {
+    issues.push("One or more threats have an invalid probability; use numbers from 0 to 1.");
+  }
+  if (
+    probabilities.length >= 3 &&
+    probabilities.every((value) => typeof value === "number" && value === 0.5)
+  ) {
+    issues.push("All threats use probability=0.5; calibrate probabilities per scenario.");
+  }
+
+  return issues;
+}
+
+function buildReadBeforeWriteGuard(outputDir: string, analysisRoot?: string): string[] {
+  const outputPath = analysisRoot
+    ? `${analysisRoot}/${outputDir}/pasta-s4.json`
+    : `${outputDir}/pasta-s4.json`;
+  return [
+    "",
+    "Read-before-Write guard:",
+    `- If ${outputPath} already exists, Read it before Write/Edit.`,
+    "- If a tool reports File has not been read yet, call Read on that exact path and retry.",
+  ];
+}
+
+function hasValidThreatEvidence(threat: unknown): boolean {
+  if (!threat || typeof threat !== "object" || Array.isArray(threat)) return false;
+  const raw = threat as Record<string, unknown>;
+  const anchors = Array.isArray(raw["evidence_anchors"])
+    ? raw["evidence_anchors"]
+    : Array.isArray(raw["evidenceAnchors"])
+      ? raw["evidenceAnchors"]
+      : [];
+  return anchors.some((anchor) => {
+    if (!anchor || typeof anchor !== "object" || Array.isArray(anchor)) return false;
+    const item = anchor as Record<string, unknown>;
+    const filePath = item["file_path"] ?? item["filePath"];
+    const startLine = item["start_line"] ?? item["startLine"];
+    return typeof filePath === "string" && filePath.trim() !== "" && Number(startLine) > 0;
+  });
 }
 
 const TOOL_PATH_KEYS: Record<string, string[]> = {
@@ -854,8 +953,8 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
     if (!merged) {
       log.warn(`${tag} Randori produced no usable artifacts — returning empty threat model`);
       const empty: ThreatModelDocument = {
-        version: "1.0",
-        dfd: { elements: [], trustBoundaries: [] },
+        version: "2.0",
+        dfd: { nodes: [], flows: [], trustBoundaries: [] },
         threats: [],
         summary: {
           total: 0,
@@ -872,7 +971,7 @@ export async function runRandoriPasta(params: RandoriRunnerParams): Promise<Rand
     }
 
     log.info(
-      `${tag} Converted ${document.threats.length} threats, ${document.dfd.elements.length} DFD elements`,
+      `${tag} Converted ${document.threats.length} threats, ${document.dfd.nodes.length} DFD nodes, ${document.dfd.flows.length} flows`,
     );
 
     const findings = params.emitFindings

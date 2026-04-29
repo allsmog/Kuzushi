@@ -16,7 +16,7 @@ import {
 } from "../../agents/tasks/tob-audit/resolve-tob-plugin.js";
 import { buildTobAuditPrompt, tobAuditTask } from "../../agents/tasks/tob-audit/tob-audit.js";
 import { resolveRepo } from "../../cli/shared.js";
-import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
+import { defineHiddenDagNodeTool } from "../hidden-dag-node.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
 function resolveTargetPaths(ctx: ExecutionContext, input?: string): { root: string; name: string } {
@@ -236,7 +236,7 @@ const skillsTool: ModuleTool = {
 // ---------------------------------------------------------------------------
 
 export function createCoreTobModule(): CopilotModule {
-  const hiddenTobAudit = exposeAgentTaskAsHiddenDagTool<"tob">(tobAuditTask, {
+  const hiddenTobAudit = defineHiddenDagNodeTool<"tob">(tobAuditTask, {
     moduleId: "tob",
     multiStrategy: true,
   });

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { TaskContext } from "../../../src/agents/types.js";
+import type { DagRunContext } from "../../../src/agents/types.js";
 import { getTaskOutputMeta } from "../../../src/task-output-meta.js";
 import type { KuzushiConfig } from "../../../src/types.js";
 
@@ -75,15 +75,15 @@ function makeFinding(ruleId = "crypto-misuse/timing-attack", fingerprint = "fp-1
 function makeContext(
   findings: ReturnType<typeof makeFinding>[],
   configOverrides: Partial<KuzushiConfig> = {},
-): TaskContext {
+): DagRunContext {
   return {
     runId: "run-1",
     repoRoot: "/tmp/repo",
     repoName: "repo",
     scanPath: "/tmp/repo",
     config: makeConfig(configOverrides),
-    runtime: {} as TaskContext["runtime"],
-    bus: {} as TaskContext["bus"],
+    runtime: {} as DagRunContext["runtime"],
+    bus: {} as DagRunContext["bus"],
     upstreamOutputs: new Map([
       ["secrets-crypto-detect", findings],
       [

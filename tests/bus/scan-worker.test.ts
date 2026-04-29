@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentRuntime } from "../../src/agent-runtime/types.js";
-import { TaskRegistry } from "../../src/agents/registry.js";
-import type { AgentTask, TaskContext } from "../../src/agents/types.js";
+import type { DagNodeImpl, DagRunContext } from "../../src/agents/types.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import type { ScanFindingEvent, TaskCompleteEvent, TaskErrorEvent } from "../../src/bus/events.js";
 import { createEvent, generateRunId } from "../../src/bus/helpers.js";
 import { __clearRunSignalsForTest, registerRunSignal } from "../../src/bus/run-signals.js";
 import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
+import { DagRegistry } from "../../src/modules/dag-registry.js";
 import type { Finding } from "../../src/scanners/types.js";
 import { attachTaskOutputMeta } from "../../src/task-output-meta.js";
 import type { KuzushiConfig, ScanOpts } from "../../src/types.js";
@@ -51,9 +51,9 @@ function makeConfig(overrides: Partial<KuzushiConfig> = {}): KuzushiConfig {
   };
 }
 
-function makeDeps(taskRegistry: TaskRegistry, config?: KuzushiConfig) {
+function makeDeps(dagRegistry: DagRegistry, config?: KuzushiConfig) {
   return {
-    taskRegistry,
+    dagRegistry,
     config: config ?? makeConfig(),
     runtime: {} as AgentRuntime,
   };
@@ -63,13 +63,13 @@ function createFakeTask(
   id: string,
   findings: Finding[],
   tracker?: { roots: string[] },
-): AgentTask<unknown, Finding[]> {
+): DagNodeImpl<unknown, Finding[]> {
   return {
     id,
     displayName: id.toUpperCase(),
     outputKind: "findings" as const,
     dependsOn: [],
-    async run(_input: unknown, context: TaskContext) {
+    async run(_input: unknown, context: DagRunContext) {
       tracker?.roots.push(context.repoRoot);
       return findings;
     },
@@ -81,11 +81,11 @@ describe("scan-worker", () => {
     const bus = new InProcessBus();
     const trackerA = { roots: [] as string[] };
     const trackerB = { roots: [] as string[] };
-    const taskRegistry = new TaskRegistry();
-    taskRegistry.register(createFakeTask("a", [makeFinding("a", "fp-a")], trackerA));
-    taskRegistry.register(createFakeTask("b", [makeFinding("b", "fp-b")], trackerB));
+    const dagRegistry = new DagRegistry();
+    dagRegistry.register(createFakeTask("a", [makeFinding("a", "fp-a")], trackerA));
+    dagRegistry.register(createFakeTask("b", [makeFinding("b", "fp-b")], trackerB));
 
-    registerScanWorker(bus, makeDeps(taskRegistry));
+    registerScanWorker(bus, makeDeps(dagRegistry));
 
     const runId = generateRunId();
     const context = {
@@ -143,10 +143,10 @@ describe("scan-worker", () => {
   it("uses scanPath when provided in run context", async () => {
     const bus = new InProcessBus();
     const tracker = { roots: [] as string[] };
-    const taskRegistry = new TaskRegistry();
-    taskRegistry.register(createFakeTask("a", [makeFinding("a", "fp-a")], tracker));
+    const dagRegistry = new DagRegistry();
+    dagRegistry.register(createFakeTask("a", [makeFinding("a", "fp-a")], tracker));
 
-    registerScanWorker(bus, makeDeps(taskRegistry));
+    registerScanWorker(bus, makeDeps(dagRegistry));
 
     const runId = generateRunId();
     const context = {
@@ -180,8 +180,8 @@ describe("scan-worker", () => {
 
   it("passes projectRoot and workRoot while preserving repoRoot as a legacy alias", async () => {
     const bus = new InProcessBus();
-    const taskRegistry = new TaskRegistry();
-    const task: AgentTask<
+    const dagRegistry = new DagRegistry();
+    const task: DagNodeImpl<
       unknown,
       { projectRoot?: string; workRoot?: string; repoRoot: string; scanPath?: string }
     > = {
@@ -198,9 +198,9 @@ describe("scan-worker", () => {
         };
       },
     };
-    taskRegistry.register(task);
+    dagRegistry.register(task);
 
-    registerScanWorker(bus, makeDeps(taskRegistry));
+    registerScanWorker(bus, makeDeps(dagRegistry));
 
     const runId = generateRunId();
     const context = {
@@ -239,8 +239,8 @@ describe("scan-worker", () => {
 
   it("emits task:error when taskId is not in registry", async () => {
     const bus = new InProcessBus();
-    const taskRegistry = new TaskRegistry();
-    registerScanWorker(bus, makeDeps(taskRegistry));
+    const dagRegistry = new DagRegistry();
+    registerScanWorker(bus, makeDeps(dagRegistry));
 
     const errors: TaskErrorEvent[] = [];
     bus.subscribe<TaskErrorEvent>("task:error", (event) => {
@@ -271,8 +271,8 @@ describe("scan-worker", () => {
 
   it("propagates task cost metadata on task:complete", async () => {
     const bus = new InProcessBus();
-    const taskRegistry = new TaskRegistry();
-    const task: AgentTask<ScanOpts, Finding[]> = {
+    const dagRegistry = new DagRegistry();
+    const task: DagNodeImpl<ScanOpts, Finding[]> = {
       id: "costed-task",
       displayName: "Costed Task",
       outputKind: "findings",
@@ -281,9 +281,9 @@ describe("scan-worker", () => {
         return attachTaskOutputMeta([makeFinding("costed-task", "fp-task")], { costUsd: 0.034 });
       },
     };
-    taskRegistry.register(task);
+    dagRegistry.register(task);
 
-    registerScanWorker(bus, makeDeps(taskRegistry));
+    registerScanWorker(bus, makeDeps(dagRegistry));
 
     const runId = generateRunId();
     const context = {
@@ -320,8 +320,8 @@ describe("scan-worker", () => {
 
   it("fans out eligible agentic tasks across ensemble models and merges findings", async () => {
     const bus = new InProcessBus();
-    const taskRegistry = new TaskRegistry();
-    const task: AgentTask = {
+    const dagRegistry = new DagRegistry();
+    const task: DagNodeImpl = {
       id: "ssrf-detect",
       displayName: "SSRF Detector",
       outputKind: "findings",
@@ -366,11 +366,11 @@ describe("scan-worker", () => {
         },
       ];
     };
-    taskRegistry.register(task as AgentTask<any, any>);
+    dagRegistry.register(task as DagNodeImpl<any, any>);
 
     registerScanWorker(
       bus,
-      makeDeps(taskRegistry, {
+      makeDeps(dagRegistry, {
         ...makeConfig(),
         ensembleModels: ["anthropic:claude-haiku-4-5", "openai:gpt-4o"],
       }),
@@ -426,14 +426,14 @@ describe("scan-worker", () => {
     await bus.close();
   });
 
-  it("populates TaskContext.signal from the run-signal registry", async () => {
+  it("populates DagRunContext.signal from the run-signal registry", async () => {
     // runPipeline registers the pipeline's abort signal under runId before
-    // publishing pipeline:start; scan-worker must forward it into TaskContext
-    // so tasks like threat-hunt can cancel their in-flight runtime.query.
+    // publishing pipeline:start; scan-worker must forward it into DagRunContext
+    // so tasks like carlini-threat-hunt can cancel their in-flight runtime.query.
     const bus = new InProcessBus();
-    const taskRegistry = new TaskRegistry();
+    const dagRegistry = new DagRegistry();
     let captured: AbortSignal | undefined;
-    const task: AgentTask<unknown, Finding[]> = {
+    const task: DagNodeImpl<unknown, Finding[]> = {
       id: "signal-probe",
       displayName: "Signal Probe",
       outputKind: "findings",
@@ -443,8 +443,8 @@ describe("scan-worker", () => {
         return [];
       },
     };
-    taskRegistry.register(task);
-    registerScanWorker(bus, makeDeps(taskRegistry));
+    dagRegistry.register(task);
+    registerScanWorker(bus, makeDeps(dagRegistry));
 
     const runId = generateRunId();
     const controller = new AbortController();
@@ -476,11 +476,11 @@ describe("scan-worker", () => {
     await bus.close();
   });
 
-  it("leaves TaskContext.signal undefined when no signal is registered", async () => {
+  it("leaves DagRunContext.signal undefined when no signal is registered", async () => {
     const bus = new InProcessBus();
-    const taskRegistry = new TaskRegistry();
+    const dagRegistry = new DagRegistry();
     let captured: AbortSignal | undefined;
-    const task: AgentTask<unknown, Finding[]> = {
+    const task: DagNodeImpl<unknown, Finding[]> = {
       id: "signal-absent",
       displayName: "Signal Absent",
       outputKind: "findings",
@@ -490,8 +490,8 @@ describe("scan-worker", () => {
         return [];
       },
     };
-    taskRegistry.register(task);
-    registerScanWorker(bus, makeDeps(taskRegistry));
+    dagRegistry.register(task);
+    registerScanWorker(bus, makeDeps(dagRegistry));
 
     const runId = generateRunId();
     const completePromise = bus.waitFor<TaskCompleteEvent>(

@@ -6,7 +6,7 @@
  *
  * Layer ordering (lowest to highest priority):
  * 1. Global defaults
- * 2. Task-specific policy (from AgentTask.toolPolicy)
+ * 2. Task-specific policy (from DagNodeImpl.toolPolicy)
  * 3. Config-level overrides (from KuzushiConfig.toolPolicies)
  */
 
@@ -129,7 +129,7 @@ export function resolveToolPolicy(availableTools: string[], layers: ToolPolicyLa
 /**
  * Build policy layers from task and config settings.
  *
- * @param taskPolicy - Optional policy from AgentTask.toolPolicy
+ * @param taskPolicy - Optional policy from DagNodeImpl.toolPolicy
  * @param configPolicies - Optional policies from KuzushiConfig.toolPolicies
  * @returns Ordered array of policy layers
  */

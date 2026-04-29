@@ -171,8 +171,8 @@ exports[`Ink component snapshots > ThreatDfdView — inferred app-model fallback
     inputs (none)
     outputs P1
     risks  public ingress
-    next   threat-hunt: run actor-driven adversarial review · taint-iris: trace
-  public inputs across trust boundaries
+    next   carlini-threat-hunt: run actor-driven adversarial review ·
+  taint-iris: trace public inputs across trust boundaries
 
   STRIDE overlay
     S:0  T:0  R:0  I:0  D:0  E:0   no threats emitted; watch hot paths and
@@ -212,8 +212,8 @@ exports[`Ink component snapshots > ThreatDfdView — trust zones + boundaries + 
     inputs (none)
     outputs (none)
     risks  identity · public ingress
-    next   threat-hunt: run actor-driven adversarial review · taint-iris: trace
-  public inputs across trust boundaries
+    next   carlini-threat-hunt: run actor-driven adversarial review ·
+  taint-iris: trace public inputs across trust boundaries
 
   STRIDE overlay
     S:0  T:0  R:0  I:0  D:0  E:0   no threats emitted; watch hot paths and

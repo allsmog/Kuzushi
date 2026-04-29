@@ -71,7 +71,7 @@ export function ActorTranscriptView({
   ]);
 
   const fingerprint = shell.focusedActor ?? null;
-  const allFingerprints = collectThreatHuntFingerprints(agentActivity);
+  const allFingerprints = collectCarliniThreatHuntFingerprints(agentActivity);
   const index = fingerprint ? allFingerprints.indexOf(fingerprint) : -1;
   const shortId = fingerprint && index >= 0 ? actorShortId(fingerprint, index) : "—";
   const breadcrumb = `kuzushi/${shell.moduleRun?.moduleId ?? shell.focusedModule ?? "module"}/run/${shortId}`;
@@ -103,7 +103,7 @@ function Header({ label, subtitle }: { label: string; subtitle: string }): React
   return (
     <Box flexDirection="column" marginBottom={SPACING.sm}>
       <Text>
-        {tokens.accent(BLACK_CIRCLE)} {tokens.label(`Threat Hunt(. as <${label}>)`)}
+        {tokens.accent(BLACK_CIRCLE)} {tokens.label(`Carlini Threat Hunt(. as <${label}>)`)}
       </Text>
       <Box paddingLeft={SPACING.md}>
         <Text>{tokens.muted(subtitle)}</Text>
@@ -196,13 +196,13 @@ function EntryRow({
   );
 }
 
-function collectThreatHuntFingerprints(
+function collectCarliniThreatHuntFingerprints(
   activity: ReadonlyMap<string, ReadonlyArray<AgentActivityLine>> | undefined,
 ): string[] {
   const out: string[] = [];
   if (!activity) return out;
   for (const fp of activity.keys()) {
-    if (fp.startsWith("threat-hunt:")) out.push(fp);
+    if (fp.startsWith("carlini-threat-hunt:")) out.push(fp);
   }
   out.sort();
   return out;

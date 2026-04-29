@@ -168,6 +168,27 @@ describe("CodexAgentRuntime", () => {
     });
   });
 
+  it("uses workspace-write when a task explicitly allows write tools", async () => {
+    codexMock.state.eventBatches.push([
+      {
+        type: "item.completed",
+        item: { id: "msg-1", type: "agent_message", text: "wrote artifacts" },
+      },
+    ]);
+
+    const runtime = new CodexAgentRuntime();
+    await collect(
+      runtime.query({
+        prompt: "write",
+        options: baseOptions({ allowedTools: ["Read", "Write"] }),
+      }),
+    );
+
+    expect(codexMock.state.startThreadOptions[0]).toMatchObject({
+      sandboxMode: "workspace-write",
+    });
+  });
+
   it("surfaces command activity as tool messages", async () => {
     codexMock.state.eventBatches.push([
       {

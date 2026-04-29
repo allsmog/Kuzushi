@@ -110,7 +110,10 @@ function ModuleRows({ rows }: { rows: ShellModuleCard[] }): React.ReactElement {
       showHeader
       gap={1}
       columns={[
-        { key: "id", header: "MODULE", width: 14, truncate: "end", render: (c) => c.id },
+        // U3: Widened from 14 → 22 so `carlini-threat-hunt` (19 chars) fits
+        // without truncation. Operators previously saw `carlini-threa…` and
+        // had to /modules to get the full id, breaking flow.
+        { key: "id", header: "MODULE", width: 22, truncate: "end", render: (c) => c.id },
         {
           key: "description",
           header: "DESCRIPTION",

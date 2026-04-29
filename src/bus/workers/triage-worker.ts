@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
-import type { TaskRegistry } from "../../agents/registry.js";
 import { resolveStageModel } from "../../agents/tasks/runtime-overrides.js";
 import { formatBypassForPrompt, getBypassKnowledge } from "../../bypass-knowledge.js";
 import {
@@ -13,6 +12,7 @@ import {
 import type { PipelineHookChain } from "../../hooks/chain.js";
 import type { HookContext } from "../../hooks/types.js";
 import type { KnowledgeRegistry } from "../../knowledge/types.js";
+import type { DagRegistry } from "../../modules/dag-registry.js";
 import { triageFindingMultiAgent } from "../../multi-agent-triage.js";
 import { formatPrecedentsForPrompt, type Precedents } from "../../precedents.js";
 import { resolveTemplates } from "../../prompts/loader.js";
@@ -49,7 +49,7 @@ import { createEvent } from "../helpers.js";
 import type { MessageBus } from "../types.js";
 
 export interface TriageWorkerDeps {
-  taskRegistry: TaskRegistry;
+  dagRegistry: DagRegistry;
   config: KuzushiConfig;
   runtime: AgentRuntime;
   /** Optional database handle for trajectory memory and calibration features. */
@@ -78,7 +78,7 @@ export interface TriageWorkerDeps {
  * Triage worker: invokes an agentic triage pass per finding.
  */
 export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): void {
-  const triageConfigProvider = createTriageConfigProvider(deps.taskRegistry);
+  const triageConfigProvider = createTriageConfigProvider(deps.dagRegistry);
   const resolvedTemplates = resolveTemplates(deps.config);
   const useMultiAgent = deps.config.triageStrategy === "multi-agent";
   const useTrajectoryMemory = deps.config.trajectoryMemory === true && deps.db != null;
@@ -700,24 +700,24 @@ export function registerTriageWorker(bus: MessageBus, deps: TriageWorkerDeps): v
   });
 }
 
-function createTriageConfigProvider(taskRegistry: TaskRegistry): {
+function createTriageConfigProvider(dagRegistry: DagRegistry): {
   has(id: string): boolean;
   get(id: string): { triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig };
 } {
   return {
     has(id: string): boolean {
-      if (!taskRegistry.has(id)) {
+      if (!dagRegistry.has(id)) {
         return false;
       }
 
-      return typeof taskRegistry.get(id).triageAgentConfig === "function";
+      return typeof dagRegistry.get(id).triageAgentConfig === "function";
     },
     get(id: string): { triageAgentConfig(finding: Finding, repoName: string): TriageAgentConfig } {
-      if (!taskRegistry.has(id)) {
+      if (!dagRegistry.has(id)) {
         throw new Error(`Unknown triage provider: ${id}`);
       }
 
-      const task = taskRegistry.get(id);
+      const task = dagRegistry.get(id);
       const triageAgentConfig = task.triageAgentConfig;
       if (typeof triageAgentConfig !== "function") {
         throw new Error(`Task "${id}" does not define triageAgentConfig`);

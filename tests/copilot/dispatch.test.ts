@@ -11,7 +11,7 @@
  *   - `scan .` at top level used to resolve undefined (multiple modules
  *     exposed `scan`) → fell through to the NL agent which hallucinated a
  *     report from cached `.kuzushi/` artifacts.
- *   - `run .` inside `threat-hunt` used to resolve undefined (`.` is not
+ *   - `run .` inside `carlini-threat-hunt` used to resolve undefined (`.` is not
  *     a tool name) → "Unknown tool: ."
  */
 
@@ -46,7 +46,7 @@ function mod(id: string, toolNames: string[]): CopilotModule {
  * Fixture registry modelled after the real CopilotCore default load-out:
  *   - `sast` umbrella with `sast:scan`
  *   - `semgrep` / `codeql` each with `scan`
- *   - `threat-hunt` with `run`
+ *   - `carlini-threat-hunt` with `run`
  *   - `recon` with multiple tool names (no `scan`)
  */
 function buildFixtureRegistry(): ToolIndex {
@@ -54,7 +54,7 @@ function buildFixtureRegistry(): ToolIndex {
     mod("sast", ["sast:scan"]),
     mod("semgrep", ["semgrep:scan"]),
     mod("codeql", ["codeql:scan"]),
-    mod("threat-hunt", ["threat-hunt:run"]),
+    mod("carlini-threat-hunt", ["carlini-threat-hunt:run"]),
     mod("recon", ["recon:nmap", "recon:subdomain", "recon:http-fingerprint"]),
   ];
 
@@ -86,9 +86,9 @@ describe("resolveTool", () => {
   });
 
   describe("focused-module shorthand", () => {
-    it("maps `run` inside threat-hunt to threat-hunt:run", () => {
-      const r = resolveTool({ input: "run", focusedModule: "threat-hunt", registry });
-      expect(r).toEqual({ kind: "tool", toolName: "threat-hunt:run" });
+    it("maps `run` inside carlini-threat-hunt to carlini-threat-hunt:run", () => {
+      const r = resolveTool({ input: "run", focusedModule: "carlini-threat-hunt", registry });
+      expect(r).toEqual({ kind: "tool", toolName: "carlini-threat-hunt:run" });
     });
 
     it("maps `scan` inside sast to sast:scan", () => {
@@ -146,9 +146,9 @@ describe("resolveTool", () => {
       expect(r).toEqual({ kind: "tool", toolName: "semgrep:scan" });
     });
 
-    it("`threat-hunt` at top level picks the module's `run` action", () => {
-      const r = resolveTool({ input: "threat-hunt", registry });
-      expect(r).toEqual({ kind: "tool", toolName: "threat-hunt:run" });
+    it("`carlini-threat-hunt` at top level picks the module's `run` action", () => {
+      const r = resolveTool({ input: "carlini-threat-hunt", registry });
+      expect(r).toEqual({ kind: "tool", toolName: "carlini-threat-hunt:run" });
     });
   });
 

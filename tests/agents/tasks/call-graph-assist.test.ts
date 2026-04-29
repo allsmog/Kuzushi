@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { callGraphAssistTask } from "../../../src/agents/tasks/call-graph-assist.js";
-import type { TaskContext } from "../../../src/agents/types.js";
+import type { DagRunContext } from "../../../src/agents/types.js";
 import type { Finding } from "../../../src/scanners/types.js";
 
 // Mock the code intelligence provider
@@ -31,7 +31,7 @@ function makeFinding(fp: string, score: number, extras?: Partial<Finding>): Find
   };
 }
 
-function makeContext(): TaskContext {
+function makeContext(): DagRunContext {
   return {
     runId: "test-run",
     repoRoot: "/tmp/repo",

@@ -6,7 +6,7 @@ import { getLogger } from "../../logger.js";
 import type { Finding } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask } from "../types.js";
+import type { DagNodeImpl } from "../types.js";
 import { computeDetectionFingerprint } from "./detection-task-utils.js";
 import { resolveTaskModel, resolveTaskRuntime } from "./runtime-overrides.js";
 import { resolveThreatModelOutput } from "./threat-model-guidance.js";
@@ -61,7 +61,7 @@ const AUTH_LOGIC_SCHEMA = {
  * - Parameter tampering for privilege escalation
  * - Authorization bypass through wrapper functions
  */
-export const authLogicDetectTask: AgentTask<unknown, Finding[]> = {
+export const authLogicDetectTask: DagNodeImpl<unknown, Finding[]> = {
   id: "auth-logic-detect",
   displayName: "Authorization Logic Detector",
   outputKind: "findings",

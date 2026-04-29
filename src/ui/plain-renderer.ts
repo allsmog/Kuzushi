@@ -279,8 +279,14 @@ export function registerPlainTextRenderer(
       if (tmPath && tmPath !== lastThreatModelPath) {
         lastThreatModelPath = tmPath;
         const threats = shell.threatModel?.threats.length ?? 0;
-        const elements = shell.threatModel?.dfd.elements.length ?? 0;
-        emit(chalk.dim(`  [threats] loaded ${tmPath} · ${elements} elements · ${threats} threats`));
+        const dfd = shell.threatModel?.dfd;
+        const nodes = dfd?.nodes?.length ?? dfd?.elements?.length ?? 0;
+        const flows = dfd?.flows?.length ?? 0;
+        emit(
+          chalk.dim(
+            `  [threats] loaded ${tmPath} · ${nodes} nodes · ${flows} flows · ${threats} threats`,
+          ),
+        );
       }
 
       const diffRef = shell.diffSince?.ref ?? null;
@@ -612,8 +618,8 @@ function moduleRunScopedFindings(
   run: NonNullable<ShellState["moduleRun"]>,
   findings: ReadonlyArray<ActionableFinding>,
 ): ActionableFinding[] {
-  if (run.moduleId !== "threat-hunt") return [...findings];
-  return findings.filter((finding) => finding.actorFingerprint?.startsWith("threat-hunt:"));
+  if (run.moduleId !== "carlini-threat-hunt") return [...findings];
+  return findings.filter((finding) => finding.actorFingerprint?.startsWith("carlini-threat-hunt:"));
 }
 
 function moduleRunAliasedFindings(
@@ -1023,8 +1029,11 @@ function printThreatView(
   const suffix = shell.threatTab ?? "summary";
   const tm = shell.threatModel;
   const threats = tm?.threats.length ?? 0;
-  const elements = tm?.dfd.elements.length ?? 0;
-  emit(chalk.dim(`  [threats] ${suffix} · ${elements} elements · ${threats} threats`));
+  const dfdNodes = tm?.dfd.nodes ?? tm?.dfd.elements ?? [];
+  const dfdFlows = tm?.dfd.flows ?? [];
+  const nodes = dfdNodes.length;
+  const flows = dfdFlows.length;
+  emit(chalk.dim(`  [threats] ${suffix} · ${nodes} nodes · ${flows} flows · ${threats} threats`));
   emit(`# THREATS  ${suffix.toUpperCase()}`);
   if (!tm) {
     printEmpty(emit, "threat-model-missing", { threatView: suffix });
@@ -1032,16 +1041,17 @@ function printThreatView(
   }
   switch (suffix) {
     case "dfd": {
-      emit(`elements: ${elements}`);
+      emit(`nodes: ${nodes}`);
+      emit(`flows: ${flows}`);
       emit(`trust boundaries: ${tm.dfd.trustBoundaries?.length ?? 0}`);
       const zones = new Map<string, number>();
-      for (const el of tm.dfd.elements ?? []) {
+      for (const el of dfdNodes) {
         const key = el.trustZone || "(unzoned)";
         zones.set(key, (zones.get(key) ?? 0) + 1);
       }
       if (zones.size > 0) {
         emit("## trust zones");
-        for (const [zone, n] of zones) emit(`- ${zone}: ${n} element(s)`);
+        for (const [zone, n] of zones) emit(`- ${zone}: ${n} node(s)`);
       }
       break;
     }

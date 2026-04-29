@@ -6,7 +6,7 @@ import type { Finding, TaintPathStep, TriageAgentConfig } from "../../../scanner
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isPathWithinRoot, isRecord, toErrorMessage } from "../../../utils.js";
-import type { AgentTask, TaskContext } from "../../types.js";
+import type { DagNodeImpl, DagRunContext } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
 import {
   buildSystemsHuntArtifactDetail,
@@ -182,7 +182,7 @@ interface MergedFinding {
   analysisPath: SystemsAnalysisStep[];
 }
 
-export const systemsHuntTask: AgentTask<ScanOpts, Finding[]> = {
+export const systemsHuntTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "systems-hunt",
   displayName: "Systems Hunt",
   outputKind: "findings",
@@ -378,7 +378,7 @@ async function analyzeSurface(
   surfacePack: SystemsSurfacePack | undefined,
   invariants: SystemsInvariant[],
   triggers: SystemsTriggerHypothesis[],
-  context: TaskContext,
+  context: DagRunContext,
   config: SystemsHuntConfig,
   surfaceOutput: SystemsContextOutput | undefined,
 ): Promise<SurfaceAnalysisResult> {
@@ -578,7 +578,7 @@ async function corroborateFinding(
   surfacePack: SystemsSurfacePack | undefined,
   triggers: SystemsTriggerHypothesis[],
   coherentTrigger: boolean,
-  context: TaskContext,
+  context: DagRunContext,
   config: SystemsHuntConfig,
   codeqlDbPath?: string,
 ): Promise<CorroborationResult> {

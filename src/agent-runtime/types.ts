@@ -12,7 +12,21 @@ export interface AgentHistoryEntry {
   content: string;
 }
 
-export type AgentEffort = "low" | "medium" | "high" | "max";
+export type AgentEffort = "low" | "medium" | "high" | "max" | "xhigh";
+
+export interface AgentRuntimeTool {
+  name: string;
+  description: string;
+  parameters: unknown;
+  execute(
+    input: Record<string, unknown>,
+    options: {
+      cwd: string;
+      signal?: AbortSignal;
+      toolUseId: string;
+    },
+  ): Promise<string> | string;
+}
 
 /**
  * Topic prefixes for `${phase}:agent-activity` bus events. Pinning to a string
@@ -20,7 +34,12 @@ export type AgentEffort = "low" | "medium" | "high" | "max";
  * subscriber in `src/bus/workers/report-worker.ts:591` so the UI counter
  * actually moves when the runtime emits.
  */
-export type AgentActivityPhase = "triage" | "verification" | "poc-harness" | "scan" | "threat-hunt";
+export type AgentActivityPhase =
+  | "triage"
+  | "verification"
+  | "poc-harness"
+  | "scan"
+  | "carlini-threat-hunt";
 
 export interface AgentQueryOptions {
   cwd: string;
@@ -29,6 +48,7 @@ export interface AgentQueryOptions {
   maxOutputTokens?: number;
   allowedTools?: string[];
   disallowedTools?: string[];
+  customTools?: AgentRuntimeTool[];
   permissionMode?: AgentPermissionMode;
   maxBudgetUsd?: number;
   abortController?: AbortController;

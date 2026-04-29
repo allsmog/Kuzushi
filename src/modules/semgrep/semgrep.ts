@@ -4,7 +4,7 @@
  * The `semgrep:scan` DagTool is both:
  *   - The DAG node (its `run()` body calls `SemgrepPlugin.scan`, producing
  *     `Finding[]` for the scan orchestrator).
- *   - The shell-facing tool (the bridge auto-installs an `execute()` that
+ *   - The shell-facing tool (the module registry installs an `execute()` that
  *     re-enters the scan pipeline filtered to just `semgrep`, giving shell
  *     users the same context gathering + findings persistence they get from
  *     `kuzushi scan --tasks semgrep`).

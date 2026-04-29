@@ -154,8 +154,8 @@ export interface StoredFindingRecord {
   blame?: { sha: string; author: string; date: string; summary: string };
   introducedIn?: string;
   /**
-   * Optional per-actor fingerprint stamped by `threat-hunt` (matches
-   * `state.agentActivity` keys, e.g. `"threat-hunt:Foo:0"`). Threaded
+   * Optional per-actor fingerprint stamped by `carlini-threat-hunt` (matches
+   * `state.agentActivity` keys, e.g. `"carlini-threat-hunt:Foo:0"`). Threaded
    * through to `ActionableFinding.actorFingerprint` so the v3
    * `ActorTranscriptView` can render ★ Finding rows for completed and
    * replayed runs.

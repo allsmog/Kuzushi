@@ -8,7 +8,7 @@
  *      chart so a lopsided distribution reads at a glance.
  *
  *   2. Drives — a static panel naming the downstream consumers of this
- *      threat model (threat-hunt, sast/taint-iris, variant-hunter,
+ *      threat model (carlini-threat-hunt, sast/taint-iris, variant-hunter,
  *      report). Each gets a one-line "what it consumes" description so
  *      operators see why the model is worth maintaining.
  *
@@ -43,7 +43,7 @@ const SEVERITY_ORDER: ReadonlyArray<string> = ["critical", "high", "medium", "lo
 
 const DRIVES: ReadonlyArray<{ module: string; consumes: string }> = [
   {
-    module: "threat-hunt",
+    module: "carlini-threat-hunt",
     consumes: "attacker stories + DFD elements → per-actor hunt budgets",
   },
   {
@@ -81,7 +81,11 @@ export function ThreatSummaryExport({ shell }: ThreatSummaryExportProps): React.
   return (
     <ScreenContent>
       <ContextStrip
-        status={[`${totalThreats} threats`, `${tm.dfd.elements.length} elements`]}
+        status={[
+          `${totalThreats} threats`,
+          `${tm.dfd.nodes.length} nodes`,
+          `${tm.dfd.flows.length} flows`,
+        ]}
         subtitle={
           shell.threatModelSource
             ? formatThreatModelSource({
@@ -219,7 +223,7 @@ function Artifacts({ shell }: { shell: ShellState }): React.ReactElement {
     paths.push({
       label: "persistent",
       path: shell.threatModelSource.path,
-      note: "operator-editable · loaded by randori + threat-hunt",
+      note: "operator-editable · loaded by randori + carlini-threat-hunt",
     });
   } else {
     paths.push({

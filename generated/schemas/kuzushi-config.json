@@ -6,7 +6,8 @@
     "agentRuntimeBackend": {
       "enum": [
         "claude",
-        "pi-ai"
+        "pi-ai",
+        "codex"
       ],
       "type": "string"
     },
@@ -14,6 +15,18 @@
       "additionalProperties": false,
       "properties": {
         "claude": {
+          "additionalProperties": false,
+          "properties": {
+            "apiKey": {
+              "type": "string"
+            },
+            "baseUrl": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "codex": {
           "additionalProperties": false,
           "properties": {
             "apiKey": {
@@ -449,6 +462,9 @@
       "type": "array"
     },
     "skipTriageForHighConfidenceAgentic": {
+      "type": "boolean"
+    },
+    "startupSound": {
       "type": "boolean"
     },
     "streamingEnabled": {

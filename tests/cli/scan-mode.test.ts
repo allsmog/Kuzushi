@@ -171,7 +171,7 @@ describe("resolveMonorepoExecution", () => {
     });
   });
 
-  it("promotes tasks-only mode when CLI scanner selections expand to AgentTasks", () => {
+  it("promotes tasks-only mode when CLI scanner selections expand to DagTools", () => {
     const root = makeTempRoot();
     writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "repo" }), "utf-8");
 
@@ -183,7 +183,7 @@ describe("resolveMonorepoExecution", () => {
       }),
     );
 
-    expect(config.tasks).toContain("secrets-crypto-detect");
+    expect(config.tasks).toContain("agentic-sast:secrets-crypto-detect");
     expect(scanOpts.tasks).toContain("secrets");
   });
 });

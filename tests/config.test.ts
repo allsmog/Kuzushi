@@ -415,6 +415,8 @@ describe("setConfigValue", () => {
   it("sets agentRuntimeBackend", () => {
     setConfigValue("agentRuntimeBackend", "pi-ai");
     expect(getConfigValue("agentRuntimeBackend")).toBe("pi-ai");
+    setConfigValue("agentRuntimeBackend", "codex");
+    expect(getConfigValue("agentRuntimeBackend")).toBe("codex");
   });
 
   it("sets agentRuntimeConfig as an object", () => {
@@ -432,6 +434,14 @@ describe("setConfigValue", () => {
     setConfigValue("agentRuntimeConfig.baseUrl", "https://proxy.example/");
     expect(getConfigValue("agentRuntimeConfig.apiKey")).toBe("sk-inline");
     expect(getConfigValue("agentRuntimeConfig.baseUrl")).toBe("https://proxy.example/");
+  });
+
+  it("sets codex agentRuntimeConfig slot values", () => {
+    setConfigValue("agentRuntimeConfig.codex.apiKey", "sk-openai");
+    setConfigValue("agentRuntimeConfig.codex.baseUrl", "https://openai.example/");
+    expect(getConfigValue("agentRuntimeConfig")).toEqual({
+      codex: { apiKey: "sk-openai", baseUrl: "https://openai.example/" },
+    });
   });
 
   it("sets tasks from comma-separated string", () => {

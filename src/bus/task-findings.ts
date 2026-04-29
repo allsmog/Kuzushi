@@ -1,5 +1,5 @@
 import { isHandoff } from "../agents/handoff.js";
-import type { AgentTask } from "../agents/types.js";
+import type { OutputKind } from "../agents/types.js";
 import type {
   CorroboratingSignal,
   EngineProvenance,
@@ -19,10 +19,7 @@ import { isRecord } from "../utils.js";
  * - Anything else — returns `[]` (tasks that produce threat models,
  *   verdicts, or reports emit findings separately via the bus).
  */
-export function extractTaskFindings(
-  outputKind: AgentTask["outputKind"],
-  output: unknown,
-): Finding[] {
+export function extractTaskFindings(outputKind: OutputKind, output: unknown): Finding[] {
   // Unwrap TaskHandoff envelope if present
   const unwrapped = isHandoff(output) ? output.output : output;
 

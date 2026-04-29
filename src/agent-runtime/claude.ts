@@ -95,6 +95,10 @@ function abortResult(durationMs: number, numTurns: number, totalCostUsd: number)
   };
 }
 
+function toClaudeEffort(effort: AgentQueryOptions["effort"]): NonNullable<ClaudeOptions["effort"]> {
+  return effort === "xhigh" ? "high" : (effort as NonNullable<ClaudeOptions["effort"]>);
+}
+
 /**
  * Extension of Anthropic.Message for responses that include parsed structured output.
  * The SDK's ParsedMessage type adds `parsed_output` when structured output (JSON schema)
@@ -1012,7 +1016,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
     // Effort level
     if (request.options.effort) {
-      options.effort = request.options.effort === "xhigh" ? "high" : request.options.effort;
+      options.effort = toClaudeEffort(request.options.effort);
     }
 
     // Thinking — disable only when explicitly requested or for low-effort classification
@@ -1316,7 +1320,7 @@ class ClaudeSession implements AgentSession {
 
     // Effort level
     if (this.baseOptions.effort) {
-      options.effort = this.baseOptions.effort === "xhigh" ? "high" : this.baseOptions.effort;
+      options.effort = toClaudeEffort(this.baseOptions.effort);
     }
 
     // Thinking — disable only when explicitly requested or for low-effort classification

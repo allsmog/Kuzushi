@@ -5,7 +5,7 @@
  * reference material" workflow with a parser pipeline (text/PDF/image), a
  * persisted scope (`.kuzushi/<id>/scope.draft.json`), and a nonce-wrapped
  * prompt-injection guard. This package factors those concerns out so the
- * threat-model, context, and threat-hunt modules can adopt the same pattern
+ * threat-model, context, and carlini-threat-hunt modules can adopt the same pattern
  * without duplicating the parser, prompt rendering, or operator UX. Vendor
  * itself moves onto these types via a custom storage adapter that keeps its
  * existing `scope.draft.json` shape.

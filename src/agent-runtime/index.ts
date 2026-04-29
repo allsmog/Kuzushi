@@ -2,6 +2,7 @@ import { resolveActiveCredentials } from "../config.js";
 import { getLogger } from "../logger.js";
 import type { KuzushiConfig } from "../types.js";
 import { ClaudeAgentRuntime } from "./claude.js";
+import { CodexAgentRuntime } from "./codex.js";
 import { LoggingAgentRuntime } from "./logging-runtime.js";
 import { PiAiAgentRuntime } from "./pi-ai.js";
 import type { AgentRuntime } from "./types.js";
@@ -24,6 +25,9 @@ export function createAgentRuntimeInstance(config: KuzushiConfig): AgentRuntime 
   if (backend === "pi-ai") {
     log.info(`Using pi-ai runtime${creds.baseUrl ? ` (baseUrl=${creds.baseUrl})` : ""}`);
     runtime = new PiAiAgentRuntime(hasCreds);
+  } else if (backend === "codex") {
+    log.info(`Using Codex runtime${creds.baseUrl ? ` (baseUrl=${creds.baseUrl})` : ""}`);
+    runtime = new CodexAgentRuntime(hasCreds);
   } else {
     log.info(`Using Claude Agent SDK runtime${creds.baseUrl ? ` (baseUrl=${creds.baseUrl})` : ""}`);
     runtime = new ClaudeAgentRuntime(hasCreds);
@@ -33,4 +37,4 @@ export function createAgentRuntimeInstance(config: KuzushiConfig): AgentRuntime 
 }
 
 export * from "./types.js";
-export { ClaudeAgentRuntime, PiAiAgentRuntime };
+export { ClaudeAgentRuntime, CodexAgentRuntime, PiAiAgentRuntime };

@@ -50,7 +50,7 @@ export function mergeRandoriStageOutputs(
 ): Record<string, unknown> | null {
   // Build the DFD from S2+S3 regardless of whether S4 exists.
   // Previously this returned null when S4 was missing, which discarded
-  // the entire DFD and left threat-hunt with no external entities.
+  // the entire DFD and left carlini-threat-hunt with no external entities.
   const s2 = artifacts.s2Scope;
   const s3 = artifacts.s3Decomposition;
   const s4 = artifacts.s4Threats;
@@ -83,7 +83,9 @@ export function mergeRandoriStageOutputs(
   // Build DFD from S2 actors/services + S3 dfd_elements + S3 trust boundaries
   const dfd: Record<string, unknown> = {};
   const seenIds = new Set<string>();
+  const seenFlowIds = new Set<string>();
   const elements: Array<Record<string, unknown>> = [];
+  const flows: Array<Record<string, unknown>> = [];
 
   // Synthesize DFD elements from S2 actors and services
   if (s2) {
@@ -130,18 +132,30 @@ export function mergeRandoriStageOutputs(
     // Data flows
     for (const flow of asArray(s2["data_flows"])) {
       const id = str(flow["id"]);
-      if (!id || seenIds.has(id)) continue;
-      seenIds.add(id);
+      if (!id || seenFlowIds.has(id)) continue;
+      const source = str(flow["source"] ?? flow["from"]);
+      const target = str(flow["destination"] ?? flow["target"] ?? flow["to"]);
+      if (!source || !target) continue;
+      seenFlowIds.add(id);
+      const name = str(flow["data"]) || str(flow["label"]) || `${source} → ${target}`;
+      const flowRecord = {
+        id,
+        name,
+        description: str(flow["description"]) || name,
+        source_id: source,
+        target_id: target,
+        protocol: str(flow["protocol"]),
+        data_classification: str(flow["sensitivity"] ?? flow["classification"]),
+        trust_boundary_ids: strArray(flow["crosses"] ?? flow["trust_boundary_ids"]),
+      };
+      flows.push(flowRecord);
       elements.push({
+        ...flowRecord,
         id,
         type: "data-flow",
-        name: str(flow["data"]) || `${str(flow["source"])} → ${str(flow["destination"])}`,
-        description: str(flow["data"]),
         trust_zone: "cross-boundary",
-        source: str(flow["source"]),
-        target: str(flow["destination"]),
-        protocol: str(flow["protocol"]),
-        data_classification: str(flow["sensitivity"]),
+        source,
+        target,
       });
     }
     // Component collections emitted by newer target-brief prompts:
@@ -168,6 +182,58 @@ export function mergeRandoriStageOutputs(
   // Incorporate S3's own dfd_elements (the agent often writes richer elements
   // directly in S3 that aren't present in S2's actor/service breakdown).
   if (s3) {
+    for (const elem of asArray(s3["external_entities"])) {
+      const id = str(elem["id"]);
+      if (!id || seenIds.has(id)) continue;
+      seenIds.add(id);
+      elements.push({
+        id,
+        type: "external-entity",
+        name: str(elem["name"]) || id,
+        description: str(elem["description"]) || str(elem["notes"]) || str(elem["name"]) || id,
+        trust_zone: str(elem["trust_zone"]) || "external",
+      });
+    }
+
+    for (const elem of asArray(s3["entry_points"])) {
+      const id = str(elem["id"]);
+      if (!id || seenIds.has(id)) continue;
+      seenIds.add(id);
+      elements.push({
+        id,
+        type: "process",
+        name: str(elem["name"]) || id,
+        description: str(elem["description"]) || str(elem["notes"]) || str(elem["name"]) || id,
+        trust_zone: str(elem["trust_zone"]) || "entrypoint",
+      });
+    }
+
+    for (const elem of asArray(s3["processes"])) {
+      const id = str(elem["id"]);
+      if (!id || seenIds.has(id)) continue;
+      seenIds.add(id);
+      elements.push({
+        id,
+        type: "process",
+        name: str(elem["name"]) || id,
+        description: str(elem["description"]) || str(elem["notes"]) || str(elem["name"]) || id,
+        trust_zone: str(elem["trust_zone"]) || "internal",
+      });
+    }
+
+    for (const elem of asArray(s3["data_stores"])) {
+      const id = str(elem["id"]);
+      if (!id || seenIds.has(id)) continue;
+      seenIds.add(id);
+      elements.push({
+        id,
+        type: "data-store",
+        name: str(elem["name"]) || id,
+        description: str(elem["description"]) || str(elem["notes"]) || str(elem["name"]) || id,
+        trust_zone: str(elem["trust_zone"]) || "internal",
+      });
+    }
+
     for (const elem of asArrayOrRecordCollections(s3["dfd_elements"])) {
       const id = str(elem["id"]);
       if (!id || seenIds.has(id)) continue;
@@ -181,21 +247,63 @@ export function mergeRandoriStageOutputs(
       });
     }
 
+    for (const flow of asArray(s3["data_flows"])) {
+      const id = str(flow["id"]);
+      if (!id || seenFlowIds.has(id)) continue;
+      const source = str(flow["source_id"] ?? flow["source"] ?? flow["from"]);
+      const target = str(flow["target_id"] ?? flow["target"] ?? flow["to"]);
+      if (!source || !target) continue;
+      seenFlowIds.add(id);
+      const name =
+        str(flow["name"]) || str(flow["label"]) || str(flow["data"]) || `${source} → ${target}`;
+      const trustBoundaryIds = strArray(flow["trust_boundary_ids"] ?? flow["crosses"]);
+      const flowRecord = {
+        id,
+        name,
+        description: str(flow["description"]) || name,
+        source_id: source,
+        target_id: target,
+        protocol: str(flow["protocol"]),
+        data_classification: str(flow["data_classification"] ?? flow["classification"]),
+        trust_boundary_ids: trustBoundaryIds,
+      };
+      flows.push(flowRecord);
+      elements.push({
+        ...flowRecord,
+        id,
+        type: "data-flow",
+        trust_zone: trustBoundaryIds.length > 0 ? trustBoundaryIds.join(",") : "cross-boundary",
+        source,
+        target,
+      });
+    }
+
     // Trust boundaries from S3
     const boundaries: Array<Record<string, unknown>> = [];
     for (const tb of asArray(s3["trust_boundaries"])) {
+      const id = str(tb["id"]);
+      const explicitCrossings = strArray(
+        tb["crossing_flow_ids"] ?? tb["crossing_flows"] ?? tb["flows"],
+      );
+      const inferredCrossings = flows
+        .filter((flow) => strArray(flow["trust_boundary_ids"]).includes(id))
+        .map((flow) => str(flow["id"]));
       boundaries.push({
-        id: str(tb["id"]),
+        id,
         name: str(tb["name"]),
         inner_zone: str(tb["name"]),
         outer_zone: "external",
-        crossing_flows: asArray(tb["components"] ?? tb["crossing_components"]).map((c) => str(c)),
+        crossing_flow_ids: uniqueStrings([...explicitCrossings, ...inferredCrossings]),
       });
     }
     dfd["trust_boundaries"] = boundaries;
   }
 
   dfd["elements"] = elements;
+  dfd["nodes"] = elements.filter(
+    (element) => normalizeDfdType(str(element["type"])) !== "data-flow",
+  );
+  dfd["flows"] = flows;
   merged["dfd"] = dfd;
 
   // Narrative synthesis (S5) — pass through so the adapter can attach it to
@@ -533,8 +641,13 @@ function str(v: unknown): string {
 }
 
 function strArray(v: unknown): string[] {
+  if (typeof v === "string" && v.trim()) return [v.trim()];
   if (!Array.isArray(v)) return [];
   return v.map((item) => String(item).trim()).filter(Boolean);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
