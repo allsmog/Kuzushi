@@ -49,6 +49,8 @@ interface PipelineIndicatorProps {
   agentActivity?: Map<string, AgentActivityLine[]>;
   /** Estimated time remaining in ms for the active phase. */
   etaMs?: number;
+  /** Approximate number of live rows available for stage/sub-task rendering. */
+  rowBudget?: number;
 }
 
 const MAX_VISIBLE_RESULTS = 5;
@@ -84,12 +86,16 @@ export const PipelineIndicator = React.memo(function PipelineIndicator({
   results,
   agentActivity,
   etaMs,
+  rowBudget,
 }: PipelineIndicatorProps): React.ReactElement | null {
   const hasActiveStage = stages.some((stage) => stage.status === "active");
   const nowMs = useUiNow(hasActiveStage ? 5000 : null);
   const { stdout } = useStdout();
   const columns = stdout?.columns ?? 120;
   const compact = columns < 96;
+  const resultRows = results ? Math.min(results.length, MAX_VISIBLE_RESULTS) : 0;
+  const subTaskRowBudget =
+    rowBudget != null ? Math.max(2, rowBudget - stages.length - resultRows - 3) : undefined;
 
   if (stages.length === 0) return null;
 
@@ -116,7 +122,11 @@ export const PipelineIndicator = React.memo(function PipelineIndicator({
 
             {/* Sub-task branches for scanner tasks (scan stage) */}
             {stage.subTasks.length > 0 && (
-              <SubTaskBranches subTasks={stage.subTasks} hasMoreBelow={!isLast} />
+              <SubTaskBranches
+                subTasks={stage.subTasks}
+                hasMoreBelow={!isLast}
+                maxRows={subTaskRowBudget}
+              />
             )}
 
             {/* Result branches for active triage/verify/poc stages */}
@@ -300,9 +310,11 @@ const SubTaskBranches = React.memo(_SubTaskBranches);
 function _SubTaskBranches({
   subTasks,
   hasMoreBelow,
+  maxRows,
 }: {
   subTasks: SubTask[];
   hasMoreBelow: boolean;
+  maxRows?: number;
 }): React.ReactElement {
   const pipe = hasMoreBelow ? tokens.muted(icons.treePipe) : " ";
 
@@ -322,31 +334,63 @@ function _SubTaskBranches({
     const bWeight = b.role === "support" ? 1 : 0;
     return aWeight - bWeight;
   });
+  const { rows: boundedRows, hidden } = boundSubTaskRows(sorted, maxRows);
 
   // Per-list reservation decisions. Only reserve a column if at least one
   // task in the set ever renders that field — otherwise we'd inject empty
   // columns that eat horizontal real estate for lists that don't need them.
-  const anyCount = sorted.some((t) => (t.findingCount ?? 0) > 0);
-  const anyDetail = sorted.some((t) => !!t.detail);
-  const anyElapsed = sorted.some(
+  const anyCount = boundedRows.some((t) => (t.findingCount ?? 0) > 0);
+  const anyDetail = boundedRows.some((t) => !!t.detail);
+  const anyElapsed = boundedRows.some(
     (t) => t.elapsedMs != null || (t.status === "active" && t.startedAt != null),
   );
 
   return (
     <Box flexDirection="column">
-      {sorted.map((task, i) => (
+      {boundedRows.map((task, i) => (
         <SubTaskRow
           key={task.id}
           task={task}
-          isLast={i === sorted.length - 1}
+          isLast={i === boundedRows.length - 1 && hidden === 0}
           pipe={pipe}
           anyCount={anyCount}
           anyDetail={anyDetail}
           anyElapsed={anyElapsed}
         />
       ))}
+      {hidden > 0 ? (
+        <Text>
+          {"  "}
+          {pipe} {tokens.muted(`${icons.treeLast} +${hidden} hidden`)}
+        </Text>
+      ) : null}
     </Box>
   );
+}
+
+function boundSubTaskRows(
+  sorted: SubTask[],
+  maxRows: number | undefined,
+): { rows: SubTask[]; hidden: number } {
+  if (maxRows == null || maxRows <= 0 || sorted.length <= maxRows) {
+    return { rows: sorted, hidden: 0 };
+  }
+
+  const mustShow = new Set(
+    sorted
+      .filter((task) => task.status === "active" || task.status === "error")
+      .map((task) => task.id),
+  );
+  const optionalSlots = Math.max(0, maxRows - mustShow.size);
+  const optionalShown = new Set<string>();
+  for (const task of sorted) {
+    if (mustShow.has(task.id)) continue;
+    if (optionalShown.size >= optionalSlots) continue;
+    optionalShown.add(task.id);
+  }
+
+  const rows = sorted.filter((task) => mustShow.has(task.id) || optionalShown.has(task.id));
+  return { rows, hidden: Math.max(0, sorted.length - rows.length) };
 }
 
 const SubTaskRow = React.memo(SubTaskRowImpl);
@@ -444,9 +488,9 @@ function SubTaskRowImpl({
             const toolConnector = toolIsLast ? icons.treeLast : icons.treeMiddle;
             const branchPipe = isLast ? " " : tokens.muted(icons.treePipe);
             return (
-              // biome-ignore lint/suspicious/noArrayIndexKey: index disambiguates
-              // identical (kind, toolName, detail) lines that legitimately repeat.
-              <Text key={`activity-${li}:${line.kind}:${line.toolName ?? ""}:${line.detail ?? ""}`}>
+              <Text
+                key={`activity:${line.kind}:${line.toolName ?? ""}:${line.detail ?? ""}:${line.elapsedSeconds ?? ""}:${line.index}:${line.total}`}
+              >
                 {pipe} {"  "}
                 {branchPipe} {tokens.muted(toolConnector)} {formatToolLine(line)}
               </Text>

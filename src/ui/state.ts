@@ -165,6 +165,15 @@ export interface AgentActivityLine {
   elapsedSeconds?: number;
   index: number;
   total: number;
+  /**
+   * O3: epoch-ms timestamp of when this activity line was emitted. Optional
+   * for backward compat — older callers may omit it; consumers should fall
+   * back to "no pause-line render" rather than failing. ModuleRunView's
+   * ActorsBlock uses this to surface "waiting on actor N of M — last
+   * activity Ys ago" when the latest line is older than a stalled-actor
+   * threshold.
+   */
+  tsMs?: number;
 }
 
 /**
@@ -925,6 +934,32 @@ export interface TuneSnapshot {
   houseRulesPath?: string;
 }
 
+export interface ShellArtifactStatus {
+  /** Unix epoch ms of the most recent best-effort shell rehydration pass. */
+  refreshedAt: number;
+  /** Filesystem target used for artifact reads; null for URL/non-file targets. */
+  target: string | null;
+  /** Context snapshot path inspected during rehydration. */
+  contextSnapshotPath?: string;
+  /** Threat model source path read during rehydration, when present. */
+  threatModelPath?: string;
+  /** Findings database path read during rehydration, when present. */
+  findingsDbPath?: string;
+  /** Number of persisted pipeline runs visible to the shell catalog. */
+  runCount?: number;
+  /** Actionable findings count from the hydrated summary/database. */
+  findingsCount?: number;
+  /** KB attachment manifest path inspected for the focused KB-enabled module. */
+  kbPath?: string;
+  /** Vendor-assessment draft scope path, when that module is focused. */
+  vendorAssessmentScopePath?: string;
+  /**
+   * Non-fatal refresh issue. Artifact reads are deliberately best-effort so a
+   * broken or missing sidecar file does not crash the shell renderer.
+   */
+  lastError?: string;
+}
+
 export interface ShellState {
   /** Loaded module IDs. */
   modules: string[];
@@ -995,6 +1030,8 @@ export interface ShellState {
   workspace: string | null;
   /** Narrow projection of the user's config used by the v2 Tune screen. */
   tuneSnapshot?: TuneSnapshot;
+  /** Last best-effort artifact refresh used by catalog/status/readiness views. */
+  artifactStatus?: ShellArtifactStatus | null;
   /**
    * Pending NL-planner proposal awaiting operator confirmation. While set,
    * the shell renders the PlanCard and routes `y` / `n` / Esc keys to
@@ -1154,6 +1191,9 @@ const MAX_AGENT_ACTIVITY_ENTRIES = 1000;
 
 /** Default TTL for stale-activity eviction (seconds). */
 const DEFAULT_AGENT_ACTIVITY_TTL_SEC = 600; // 10 minutes
+
+/** Minimum interval before duplicate scan activity can refresh heartbeat state. */
+const SCAN_ACTIVITY_DUPLICATE_REFRESH_MS = 1000;
 
 /**
  * Cap on `shell.moduleRun.evidenceTail` length. The view renders the
@@ -1591,6 +1631,7 @@ export class UIStore {
    */
   addScanActivity(taskId: string, line: Omit<AgentActivityLine, "index" | "total">): void {
     const now = Date.now();
+    let changed = false;
     const stages = this.state.stages.map((s) => {
       if (s.id !== "scan") return s;
       const updated = s.subTasks.map((task) => {
@@ -1604,6 +1645,13 @@ export class UIStore {
           prev.toolName === line.toolName &&
           prev.detail === line.detail
         ) {
+          if (
+            task.lastEventAt != null &&
+            now - task.lastEventAt < SCAN_ACTIVITY_DUPLICATE_REFRESH_MS
+          ) {
+            return task;
+          }
+          changed = true;
           return { ...task, lastEventAt: now };
         }
         const entry = { ...line, index: 0, total: 0 };
@@ -1611,10 +1659,12 @@ export class UIStore {
         // Smart cap: keep narrative lines (reasoning, finding-preview,
         // tool-complete) and only the most recent tool-start/tool-progress.
         const activityLines = curateScanActivityLines(all, 4);
+        changed = true;
         return { ...task, activityLines, lastEventAt: now };
       });
       return { ...s, subTasks: updated };
     });
+    if (!changed) return;
     this.state = { ...this.state, stages };
     this.notify();
   }

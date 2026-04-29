@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveCodeQLBinary } from "../../scanners/resolve-codeql.js";
@@ -48,6 +48,8 @@ const LANGUAGE_BY_EXTENSION = new Map<string, string>([
   [".tsx", "typescript"],
 ]);
 
+const CODEQL_ANALYSIS_TIMEOUT_MS = 60_000;
+
 export async function extractTaintIrisNextEvidence(
   plan: TaintIrisNextPlan,
   ctx: ExecutionContext,
@@ -62,6 +64,7 @@ export async function extractTaintIrisNextEvidence(
     evidence: mergeEvidence(structural.evidence, codeql.evidence, plan.caps.maxEvidencePerCwe),
     queryCount: structural.queryCount + codeql.queryCount,
     warnings: [...structural.warnings, ...codeql.warnings],
+    ...(codeql.artifacts ? { artifacts: codeql.artifacts } : {}),
   };
 }
 
@@ -176,29 +179,58 @@ export async function runCodeqlEvidenceExtractor(
       tool: "codeql",
       evidence: [],
       queryCount: 0,
+      artifacts: {
+        codeqlLanguage: language,
+        codeqlCompileStatus: "not-run",
+      },
       warnings: [
-        `CodeQL DB found for ${language}, but the bounded IRIS Next CodeQL adapter currently supports javascript only; using structural evidence only.`,
+        `CodeQL DB found for ${language}, but the bounded IRIS Next CodeQL adapter does not support that language yet; using structural evidence only.`,
       ],
     };
   }
 
-  const tmpDir = mkdtempSync(path.join(os.tmpdir(), "kuzushi-iris-next-codeql-"));
-  const queryPath = path.join(tmpDir, "iris-next-candidates.ql");
+  const workspaceDir = resolveCodeqlArtifactDir(plan, ctx, language);
+  const queryPath = path.join(workspaceDir, "iris-next-candidates.ql");
+  const artifacts = {
+    codeqlLanguage: language,
+    codeqlQueryPath: queryPath,
+    codeqlCompileStatus: "not-run" as const,
+  };
+  let compilePassed = false;
   try {
+    mkdirSync(workspaceDir, { recursive: true });
     writeFileSync(
-      path.join(tmpDir, "qlpack.yml"),
+      path.join(workspaceDir, "qlpack.yml"),
       [
         "name: kuzushi/taint-iris-next-generated",
         "version: 0.0.0",
         "libraryPathDependencies:",
-        "  - codeql/javascript-all",
+        `  - ${codeqlPackDependencyForLanguage(language)}`,
         "",
       ].join("\n"),
       "utf8",
     );
     writeFileSync(queryPath, query, "utf8");
+    const compile = await compileCodeqlQuery(codeqlBin, queryPath, workspaceDir, ctx.signal);
+    if (!compile.ok) {
+      return {
+        backend: "codeql",
+        tool: "codeql",
+        evidence: [],
+        queryCount: 1,
+        artifacts: {
+          ...artifacts,
+          codeqlCompileStatus: "failed",
+        },
+        warnings: [
+          `Generated ${language} CodeQL query failed validation at ${queryPath}; using structural evidence only. ${compile.stderr || compile.stdout || "compile failed"}`,
+        ],
+      };
+    }
+    compilePassed = true;
     const sarif = await runCodeQL(dbPath, codeqlBin, queryPath, {
       threads: 1,
+      timeoutMs: CODEQL_ANALYSIS_TIMEOUT_MS,
       searchPath: resolveCodeqlPackSearchPath(),
       additionalPacks: resolveCodeqlInstalledPackPaths(),
     });
@@ -209,6 +241,10 @@ export async function runCodeqlEvidenceExtractor(
       tool: "codeql",
       evidence,
       queryCount: 1,
+      artifacts: {
+        ...artifacts,
+        codeqlCompileStatus: "passed",
+      },
       warnings,
     };
   } catch (error) {
@@ -217,16 +253,19 @@ export async function runCodeqlEvidenceExtractor(
       tool: "codeql",
       evidence: [],
       queryCount: 1,
+      artifacts: {
+        ...artifacts,
+        codeqlCompileStatus: compilePassed ? "passed" : "failed",
+      },
       warnings: [
-        `CodeQL read-only analysis failed for ${language}; using structural evidence only. ${toErrorMessage(error)}`,
+        `CodeQL read-only analysis failed for ${language} at ${queryPath}; using structural evidence only. ${toErrorMessage(error)}`,
       ],
     };
-  } finally {
-    rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 
 export function buildCodeqlCatalogQuery(plan: TaintIrisNextPlan, language: string): string | null {
+  if (language === "python") return buildPythonCodeqlCatalogQuery(plan);
   if (language !== "javascript") return null;
   const clauses = buildCodeqlCandidateClauses(plan);
   if (clauses.length === 0) return null;
@@ -252,6 +291,86 @@ export function buildCodeqlCatalogQuery(plan: TaintIrisNextPlan, language: strin
   ].join("\n");
 }
 
+function buildPythonCodeqlCatalogQuery(plan: TaintIrisNextPlan): string | null {
+  const sourceClauses = buildPythonNodeClauses(plan, "source");
+  const sinkClauses = buildPythonCallClauses(plan, "sink");
+  const sanitizerClauses = buildPythonCallClauses(plan, "sanitizer");
+  if (sourceClauses.length === 0 || sinkClauses.length === 0) return null;
+  const scopePredicate = renderPythonScanScopePredicate(plan);
+
+  return [
+    "/**",
+    " * @name Taint IRIS Next Python catalog taint paths",
+    " * @description Bounded Python source-to-sink taint paths generated from the ranked Taint IRIS Next CWE catalog.",
+    " * @kind path-problem",
+    " * @problem.severity recommendation",
+    " * @precision low",
+    " * @id py/taint-iris-next/catalog-taint-path",
+    " * @tags security",
+    " */",
+    "import python",
+    "import semmle.python.dataflow.new.DataFlow",
+    "import semmle.python.dataflow.new.TaintTracking",
+    "import semmle.python.dataflow.new.RemoteFlowSources",
+    "",
+    scopePredicate,
+    "",
+    "private predicate irisSourceNode(DataFlow::Node node, string cwe, string signal) {",
+    "  node instanceof RemoteFlowSource and",
+    "  (",
+    sourceClauses.map((clause) => `    ${clause}`).join("\n    or\n"),
+    "  )",
+    "  or",
+    "  (",
+    sourceClauses
+      .map((clause) => `    (${clause} and node.toString().matches("%" + signal + "%"))`)
+      .join("\n    or\n"),
+    "  )",
+    "}",
+    "",
+    "private predicate irisSinkNode(DataFlow::Node node, string cwe, string signal) {",
+    "  exists(DataFlow::CallCfgNode call |",
+    "    (node = call or node = call.getArg(_)) and",
+    "    (",
+    sinkClauses.map((clause) => `      ${clause}`).join("\n      or\n"),
+    "    )",
+    "  )",
+    "}",
+    "",
+    "private predicate irisSanitizerNode(DataFlow::Node node) {",
+    sanitizerClauses.length > 0
+      ? [
+          "  exists(DataFlow::CallCfgNode call, string cwe, string signal |",
+          "    (node = call or node = call.getArg(_)) and",
+          "    (",
+          sanitizerClauses.map((clause) => `      ${clause}`).join("\n      or\n"),
+          "    )",
+          "  )",
+        ].join("\n")
+      : "  none()",
+    "}",
+    "",
+    "private module IrisNextPythonConfig implements DataFlow::ConfigSig {",
+    "  predicate isSource(DataFlow::Node source) { irisSourceNode(source, _, _) and irisInScanScope(source) }",
+    "  predicate isSink(DataFlow::Node sink) { irisSinkNode(sink, _, _) and irisInScanScope(sink) }",
+    "  predicate isBarrier(DataFlow::Node node) { irisSanitizerNode(node) }",
+    "  predicate observeDiffInformedIncrementalMode() { any() }",
+    "}",
+    "",
+    "module IrisNextPythonFlow = TaintTracking::Global<IrisNextPythonConfig>;",
+    "import IrisNextPythonFlow::PathGraph",
+    "",
+    "from IrisNextPythonFlow::PathNode source, IrisNextPythonFlow::PathNode sink, string cwe, string sourceSignal, string sinkSignal",
+    "where",
+    "  IrisNextPythonFlow::flowPath(source, sink) and",
+    "  irisSourceNode(source.getNode(), cwe, sourceSignal) and",
+    "  irisSinkNode(sink.getNode(), cwe, sinkSignal) and",
+    "  irisInScanScope(sink.getNode())",
+    'select sink.getNode(), source, sink, "Taint IRIS Next " + cwe + " path from $@ to sink catalog signal " + sinkSignal + ".", source.getNode(), sourceSignal',
+    "",
+  ].join("\n");
+}
+
 export function codeqlFindingsToEvidence(
   findings: readonly Finding[],
   plan: TaintIrisNextPlan,
@@ -261,9 +380,11 @@ export function codeqlFindingsToEvidence(
   const perCweCount = new Map<string, number>();
 
   for (const finding of findings) {
+    if (!findingHasScanRootEvidence(finding, plan)) continue;
     const catalogEntries = matchFindingCatalogEntries(finding, plan.catalog);
     for (const entry of catalogEntries) {
       if ((perCweCount.get(entry.cwe) ?? 0) >= plan.caps.maxEvidencePerCwe) continue;
+      const irisMessage = parseIrisNextCodeqlMessage(finding.message);
 
       const steps =
         finding.taintPath && finding.taintPath.length > 0
@@ -279,6 +400,8 @@ export function codeqlFindingsToEvidence(
 
       for (const [index, step] of steps.entries()) {
         if ((perCweCount.get(entry.cwe) ?? 0) >= plan.caps.maxEvidencePerCwe) break;
+        const normalizedStepPath = normalizePath(plan.repoRoot, step.filePath);
+        if (!isPathInPlanScanRoot(plan, normalizedStepPath)) continue;
         const role = roleForCodeqlStep(index, steps.length);
         const key = `${entry.cwe}:${role}:${step.filePath}:${step.line}:${finding.ruleId}`;
         if (seen.has(key)) continue;
@@ -289,12 +412,14 @@ export function codeqlFindingsToEvidence(
           taintClass: entry.taintClass,
           role,
           pattern: finding.ruleId,
-          filePath: normalizePath(plan.repoRoot, step.filePath),
+          filePath: normalizedStepPath,
           line: Math.max(1, step.line),
           snippet: step.snippet ?? step.message ?? finding.message,
           language: languageForPath(step.filePath),
           confidence: confidenceForCodeqlFinding(finding),
-          catalogSignal: `codeql: ${finding.ruleId}`,
+          catalogSignal: irisMessage
+            ? `codeql: ${irisMessage.cwe} source=${irisMessage.sourceSignal} sink=${irisMessage.sinkSignal}`
+            : `codeql: ${finding.ruleId}`,
         });
       }
     }
@@ -374,6 +499,54 @@ function resolveConfiguredCodeqlBinary(ctx: ExecutionContext): string | undefine
   return typeof binary === "string" && binary.trim() ? binary.trim() : undefined;
 }
 
+function resolveCodeqlArtifactDir(
+  plan: TaintIrisNextPlan,
+  ctx: ExecutionContext,
+  language: string,
+): string {
+  const runId = ctx.dag?.runId ?? "adhoc";
+  const segment = sanitizePathSegment(`${language}-${runId}`);
+  const root = path.join(plan.repoRoot, ".kuzushi", "runs", sanitizePathSegment(runId));
+  return path.join(root, "taint-iris-next", segment);
+}
+
+function codeqlPackDependencyForLanguage(language: string): string {
+  if (language === "python") return "codeql/python-all";
+  if (language === "javascript") return "codeql/javascript-all";
+  return `codeql/${language}-all`;
+}
+
+function compileCodeqlQuery(
+  codeqlBin: string,
+  queryPath: string,
+  workspaceDir: string,
+  signal: AbortSignal | undefined,
+): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+  const searchPath = [workspaceDir, resolveCodeqlPackSearchPath()]
+    .filter(Boolean)
+    .join(path.delimiter);
+  const args = ["query", "compile", queryPath, `--search-path=${searchPath}`];
+  const additionalPacks = resolveCodeqlInstalledPackPaths();
+  if (additionalPacks) args.push(`--additional-packs=${additionalPacks}`);
+  return new Promise((resolve) => {
+    const child = spawn(codeqlBin, args, { signal });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.on("error", (error) => {
+      resolve({ ok: false, stdout: Buffer.concat(stdout).toString("utf8"), stderr: error.message });
+    });
+    child.on("close", (code) => {
+      resolve({
+        ok: code === 0,
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: Buffer.concat(stderr).toString("utf8"),
+      });
+    });
+  });
+}
+
 function resolveCodeqlPackSearchPath(): string | undefined {
   const packagesPath = path.join(os.homedir(), ".codeql", "packages");
   return existsSync(packagesPath) ? packagesPath : undefined;
@@ -437,6 +610,57 @@ function normalizeCodeqlLanguage(language: string): string {
   return "unknown";
 }
 
+function buildPythonNodeClauses(plan: TaintIrisNextPlan, role: "source"): string[] {
+  const clauses: string[] = [];
+  const seen = new Set<string>();
+  for (const query of plan.structuralQueries) {
+    if (query.role !== role) continue;
+    const signal = query.pattern.trim();
+    if (!signal) continue;
+    const key = `${query.cwe}:${signal.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    clauses.push(`(cwe = ${qlString(query.cwe)} and signal = ${qlString(signal)})`);
+    if (clauses.length >= 80) break;
+  }
+  return clauses;
+}
+
+function buildPythonCallClauses(plan: TaintIrisNextPlan, role: "sink" | "sanitizer"): string[] {
+  const clauses: string[] = [];
+  const seen = new Set<string>();
+  for (const query of plan.structuralQueries) {
+    if (query.role !== role) continue;
+    const token = normalizeCodeqlPatternToken(query.pattern);
+    if (!token) continue;
+    const key = `${query.cwe}:${role}:${token.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    clauses.push(
+      `(cwe = ${qlString(query.cwe)} and signal = ${qlString(query.pattern)} and (call.getFunction().toString().matches(${qlString(`%${token}%`)}) or call.toString().matches(${qlString(`%${token}%`)})))`,
+    );
+    if (clauses.length >= 120) break;
+  }
+  return clauses;
+}
+
+function renderPythonScanScopePredicate(plan: TaintIrisNextPlan): string {
+  const searchPath = relativeSearchPath(plan.repoRoot, plan.scanRoot).replace(/\\/gu, "/");
+  if (searchPath === ".") {
+    return [
+      "private predicate irisInScanScope(DataFlow::Node node) {",
+      "  exists(node.getLocation().getFile().getRelativePath())",
+      "}",
+    ].join("\n");
+  }
+  const prefix = searchPath.endsWith("/") ? searchPath : `${searchPath}/`;
+  return [
+    "private predicate irisInScanScope(DataFlow::Node node) {",
+    `  node.getLocation().getFile().getRelativePath().matches(${qlString(`${prefix}%`)})`,
+    "}",
+  ].join("\n");
+}
+
 function buildCodeqlCandidateClauses(plan: TaintIrisNextPlan): string[] {
   const clauses: string[] = [];
   const seen = new Set<string>();
@@ -469,6 +693,10 @@ function normalizeCodeqlPatternToken(pattern: string): string | null {
 
 function qlString(value: string): string {
   return `"${value.replace(/\\/gu, "\\\\").replace(/"/gu, '\\"')}"`;
+}
+
+function sanitizePathSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/gu, "_").slice(0, 80) || "adhoc";
 }
 
 function matchFindingCatalogEntries(
@@ -504,6 +732,34 @@ function roleForCodeqlStep(index: number, total: number): TaintIrisNextEvidence[
   if (index === 0) return "source";
   if (index === total - 1) return "sink";
   return "structural";
+}
+
+function parseIrisNextCodeqlMessage(
+  message: string,
+): { cwe: string; sourceSignal: string; sinkSignal: string } | undefined {
+  const match = message.match(
+    /Taint IRIS Next (CWE-\d+) path from .*? to sink catalog signal ([^.]+)\./iu,
+  );
+  if (!match?.[1] || !match?.[2]) return undefined;
+  return {
+    cwe: match[1].toUpperCase(),
+    sourceSignal: "codeql-path-source",
+    sinkSignal: match[2].trim(),
+  };
+}
+
+function findingHasScanRootEvidence(finding: Finding, plan: TaintIrisNextPlan): boolean {
+  if (isPathInPlanScanRoot(plan, normalizePath(plan.repoRoot, finding.filePath))) return true;
+  return (finding.taintPath ?? []).some((step) =>
+    isPathInPlanScanRoot(plan, normalizePath(plan.repoRoot, step.filePath)),
+  );
+}
+
+function isPathInPlanScanRoot(plan: TaintIrisNextPlan, filePath: string): boolean {
+  const searchPath = relativeSearchPath(plan.repoRoot, plan.scanRoot).replace(/\\/gu, "/");
+  if (searchPath === ".") return true;
+  const normalized = filePath.replace(/\\/gu, "/").replace(/^\.\//u, "");
+  return normalized === searchPath || normalized.startsWith(`${searchPath}/`);
 }
 
 function confidenceForCodeqlFinding(finding: Finding): TaintIrisNextEvidenceConfidence {

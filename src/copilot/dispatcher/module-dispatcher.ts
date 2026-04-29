@@ -317,7 +317,14 @@ export class ModuleDispatcher implements CommandDispatcher {
 // helpers
 // ---------------------------------------------------------------------------
 
-function pickDefaultTool(mod: CopilotModule): ModuleTool | undefined {
+/**
+ * Pick the tool that bare `run` (or `run .`) should dispatch when the
+ * operator is focused on a module. Priority order matches `pickDefaultToolName`
+ * in `shell.ts`; the regression suite at `tests/copilot/run-dot-dispatch.test.ts`
+ * pins this so a future module-home wiring change can't silently re-route
+ * `run .` into something destructive.
+ */
+export function pickDefaultTool(mod: CopilotModule): ModuleTool | undefined {
   const preferred = [
     `${mod.id}:run`,
     `${mod.id}:scan`,

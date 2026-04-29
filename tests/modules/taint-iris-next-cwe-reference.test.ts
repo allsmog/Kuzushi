@@ -25,6 +25,7 @@ import {
   chooseBackend,
 } from "../../src/modules/taint-iris-next/planner.js";
 import { createTaintIrisNextModule } from "../../src/modules/taint-iris-next/taint-iris-next.js";
+import type { Finding } from "../../src/scanners/types.js";
 import {
   createFakeRuntime,
   createMockToolContext,
@@ -334,6 +335,105 @@ describe("taint-iris-next CWE reference", () => {
     expect(buildCodeqlCatalogQuery(plan, "ruby")).toBeNull();
   });
 
+  it("generates a Python CodeQL path-problem query from the catalog", () => {
+    const root = tempRepo();
+    const context = repoContext({
+      languages: ["Python"],
+      frameworks: ["FastAPI"],
+      ormOrDb: ["SQLAlchemy"],
+      entryPoints: ["lab/app.py"],
+    });
+    const ctx = seededContext(root, context, threatModel(["CWE-89"]));
+    const basePlan = buildTaintIrisNextPlan({ target: root, maxCatalogEntries: 10 }, ctx);
+    const sqlCatalogEntry = TAINT_IRIS_NEXT_CWE_CATALOG.find((entry) => entry.cwe === "CWE-89");
+    expect(sqlCatalogEntry).toBeDefined();
+    const plan = {
+      ...basePlan,
+      catalog: [sqlCatalogEntry!],
+      structuralQueries: buildStructuralQueriesFromCatalog([sqlCatalogEntry!]),
+    };
+
+    const query = buildCodeqlCatalogQuery(plan, "python");
+    expect(query).toContain("@kind path-problem");
+    expect(query).toContain("import python");
+    expect(query).toContain("TaintTracking::Global");
+    expect(query).toContain("PathGraph");
+    expect(query).toContain("RemoteFlowSources");
+    expect(query).toContain('cwe = "CWE-89"');
+  });
+
+  it("converts Python CodeQL path findings into scoped source/step/sink evidence", () => {
+    const root = tempRepo();
+    const context = repoContext({
+      languages: ["Python"],
+      frameworks: ["FastAPI"],
+      ormOrDb: ["SQLAlchemy"],
+      entryPoints: ["lab/app.py"],
+    });
+    const ctx = seededContext(root, context, threatModel(["CWE-89"]));
+    const plan = buildTaintIrisNextPlan(
+      { target: path.join(root, "lab"), maxCatalogEntries: 1, maxEvidencePerCwe: 10 },
+      ctx,
+    );
+    const findings: Finding[] = [
+      {
+        taskId: "codeql",
+        fingerprint: "f1",
+        ruleId: "py/taint-iris-next/catalog-taint-path",
+        filePath: "lab/app.py",
+        startLine: 20,
+        severity: "WARNING",
+        message: "Taint IRIS Next CWE-89 path from user input to sink catalog signal execute.",
+        evidence: null,
+        scannerConfidence: "MEDIUM",
+        subcategory: ["vuln"],
+        likelihood: "MEDIUM",
+        impact: "MEDIUM",
+        cwe: [],
+        score: 1,
+        proofState: "symbolic_only",
+        engineProvenance: [{ kind: "codeql", detail: "test" }],
+        taintPath: [
+          {
+            filePath: "lab/app.py",
+            line: 10,
+            message: "source",
+            snippet: "q = request.query_params",
+          },
+          { filePath: "lab/service.py", line: 15, message: "step", snippet: "sql = q" },
+          { filePath: "lab/app.py", line: 20, message: "sink", snippet: "session.execute(sql)" },
+        ],
+      },
+      {
+        taskId: "codeql",
+        fingerprint: "f2",
+        ruleId: "py/taint-iris-next/catalog-taint-path",
+        filePath: "other/app.py",
+        startLine: 1,
+        severity: "WARNING",
+        message: "Taint IRIS Next CWE-89 path from user input to sink catalog signal execute.",
+        evidence: null,
+        scannerConfidence: "MEDIUM",
+        subcategory: ["vuln"],
+        likelihood: "MEDIUM",
+        impact: "MEDIUM",
+        cwe: [],
+        score: 1,
+        proofState: "symbolic_only",
+        engineProvenance: [{ kind: "codeql", detail: "test" }],
+        taintPath: [
+          { filePath: "other/app.py", line: 1, message: "sink", snippet: "execute(sql)" },
+        ],
+      },
+    ];
+
+    const evidence = codeqlFindingsToEvidence(findings, plan);
+    expect(evidence.map((item) => item.role)).toEqual(["source", "structural", "sink"]);
+    expect(evidence.every((item) => item.filePath.startsWith("lab/"))).toBe(true);
+    expect(evidence[0]?.catalogSignal).toContain("CWE-89");
+    expect(evidence[2]?.language).toBe("python");
+  });
+
   it("extracts capped structural evidence with snippets and ignored directories", async () => {
     const root = tempRepo();
     mkdirSync(path.join(root, "src"), { recursive: true });
@@ -554,6 +654,61 @@ describe("taint-iris-next CWE reference", () => {
         agentCtx,
       ),
     ).rejects.toThrow(/invalid CWEs/u);
+  });
+
+  it("warns when evidence exists but the agent selects no CWEs", async () => {
+    const root = tempRepo();
+    const context = repoContext({
+      languages: ["TypeScript"],
+      frameworks: ["Express"],
+      ormOrDb: ["PostgreSQL"],
+    });
+    const ctx = seededContext(root, context, threatModel(["CWE-89"]));
+    const plan = buildTaintIrisNextPlan({ target: root, maxCatalogEntries: 1 }, ctx);
+    const runtime = createFakeRuntime([
+      {
+        match: /Taint IRIS Next agent/u,
+        output: "{}",
+        structuredOutput: {
+          selectedCwes: [],
+          findings: [],
+          notes: [],
+        },
+      },
+    ]);
+    const agentCtx = createMockToolContext({
+      cwd: root,
+      target: root,
+      runtime,
+      seedTaskOutputs: ctx.seedTaskOutputs,
+    });
+
+    const result = await runTaintIrisNextAgent(
+      plan,
+      {
+        backend: "structural",
+        tool: "rg",
+        evidence: [
+          {
+            cwe: "CWE-89",
+            taintClass: "sql-injection",
+            role: "sink",
+            pattern: "query",
+            filePath: "src/routes.ts",
+            line: 1,
+            snippet: "db.query(req.query.id)",
+            language: "typescript",
+            confidence: "medium",
+            catalogSignal: "sink: query",
+          },
+        ],
+        queryCount: 1,
+        warnings: [],
+      },
+      agentCtx,
+    );
+
+    expect(result.warnings.join(" ")).toContain("agent selected no CWEs");
   });
 
   it("threads the ranked catalog and structural query seeds through taint-iris-next output", async () => {

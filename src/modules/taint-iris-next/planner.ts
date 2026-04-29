@@ -1,9 +1,12 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import type { ThreatModelDocument } from "../../agents/tasks/threat-modeling/types.js";
+import { resolveRepo } from "../../cli/shared.js";
 import { coerceRepoContext } from "../../repo-context.js";
+import { loadPersistentThreatModel } from "../../threat-model-renderer.js";
 import type { RepoContext } from "../../types.js";
 import { isRecord } from "../../utils.js";
+import { loadContextSnapshot } from "../sast/context-persist.js";
 import type { ExecutionContext } from "../types.js";
 import {
   buildStructuralQueriesFromCatalog,
@@ -74,8 +77,8 @@ export function buildTaintIrisNextPlan(
   const target = resolveTarget(input, ctx);
   const scanRoot = target;
   const repoRoot = resolveRepoRoot(target, ctx);
-  const repoContext = resolveRepoContext(ctx);
-  const threatModel = resolveThreatModel(ctx);
+  const repoContext = resolveRepoContext(ctx, scanRoot);
+  const threatModel = resolveThreatModel(ctx, repoRoot, scanRoot);
   const languages = collectLanguages(repoContext, input.languages ?? [], scanRoot);
   const filtered = filterCatalogForContext(repoContext, threatModel, languages);
   const catalog = rankCatalogEntries(filtered, {
@@ -86,6 +89,7 @@ export function buildTaintIrisNextPlan(
   const structuralQueries = buildStructuralQueriesFromCatalog(catalog);
   const promptCatalog = renderCatalogForPrompt(catalog);
   const backend = chooseBackend(input.backend ?? "auto", repoRoot);
+  const maxBudgetUsd = readPositiveNumber(input.maxBudgetUsd);
 
   return {
     target,
@@ -100,6 +104,7 @@ export function buildTaintIrisNextPlan(
     structuralQueries,
     promptCatalog,
     backend,
+    ...(maxBudgetUsd !== undefined ? { maxBudgetUsd } : {}),
   };
 }
 
@@ -194,7 +199,7 @@ function readMode(value: unknown): TaintIrisNextMode {
 function readCaps(input: TaintIrisNextInput): TaintIrisNextCaps {
   return {
     maxCatalogEntries: readPositiveInt(
-      input.maxCatalogEntries,
+      input.maxCatalogEntries ?? input.maxCwes,
       DEFAULT_TAINT_IRIS_NEXT_CAPS.maxCatalogEntries,
     ),
     maxEvidencePerCwe: readPositiveInt(
@@ -218,6 +223,12 @@ function readPositiveInt(value: unknown, fallback: number): number {
   return Math.floor(numeric);
 }
 
+function readPositiveNumber(value: unknown): number | undefined {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return undefined;
+  return numeric;
+}
+
 function resolveTarget(input: TaintIrisNextInput, ctx: ExecutionContext): string {
   const raw = input.target ?? ctx.target ?? ctx.cwd;
   return path.resolve(ctx.cwd, raw);
@@ -225,6 +236,8 @@ function resolveTarget(input: TaintIrisNextInput, ctx: ExecutionContext): string
 
 function resolveRepoRoot(target: string, ctx: ExecutionContext): string {
   if (ctx.dag?.repoRoot) return ctx.dag.repoRoot;
+  const repo = resolveRepo(target);
+  if (repo.gitRoot) return repo.gitRoot;
   try {
     const stat = statSync(target);
     return stat.isDirectory() ? target : ctx.cwd;
@@ -233,15 +246,22 @@ function resolveRepoRoot(target: string, ctx: ExecutionContext): string {
   }
 }
 
-function resolveRepoContext(ctx: ExecutionContext): RepoContext | undefined {
+function resolveRepoContext(ctx: ExecutionContext, scanRoot: string): RepoContext | undefined {
   for (const raw of readSeededOutputs(ctx, ["context-gatherer", "context:context-gatherer"])) {
     const context = coerceRepoContext(raw);
     if (context) return context;
   }
+  const snapshot = loadContextSnapshot(scanRoot);
+  const context = coerceRepoContext(snapshot);
+  if (context) return context;
   return undefined;
 }
 
-function resolveThreatModel(ctx: ExecutionContext): ThreatModelDocument | undefined {
+function resolveThreatModel(
+  ctx: ExecutionContext,
+  repoRoot: string,
+  scanRoot: string,
+): ThreatModelDocument | undefined {
   for (const raw of readSeededOutputs(ctx, [
     "threat-model-randori",
     "threat-model:threat-model-randori",
@@ -249,6 +269,10 @@ function resolveThreatModel(ctx: ExecutionContext): ThreatModelDocument | undefi
     const document = coerceThreatModelDocument(raw);
     if (document) return document;
   }
+  const fromScanRoot = loadPersistentThreatModel(scanRoot);
+  if (fromScanRoot) return fromScanRoot;
+  const fromRepoRoot = loadPersistentThreatModel(repoRoot);
+  if (fromRepoRoot) return fromRepoRoot;
   return undefined;
 }
 

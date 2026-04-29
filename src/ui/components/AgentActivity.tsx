@@ -10,6 +10,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import { formatCost, formatDuration } from "../format.js";
+import { useElapsed } from "../hooks.js";
 import { icons } from "../icons.js";
 import { ExpandableSection } from "../primitives/ExpandableSection.js";
 import type { AgentActivityLine, UIState } from "../state.js";
@@ -85,10 +86,13 @@ export function HeartbeatStrip({
   state: UIState;
   expanded?: boolean;
 }): React.ReactElement | null {
+  const elapsedMs = useElapsed(
+    state.mode === "running" ? state.pipelineStartedAt : undefined,
+    1000,
+  );
   if (state.mode !== "running") return null;
 
   const activeFingerprints = countActiveFingerprints(state.agentActivity);
-  const elapsedMs = state.pipelineStartedAt ? Date.now() - state.pipelineStartedAt : 0;
   const elapsedStr = elapsedMs > 0 ? formatDuration(elapsedMs) : "0s";
   const costStr = state.runningCostUsd > 0 ? formatCost(state.runningCostUsd) : "$0.00";
   // During the scan phase, `agentActivity` (keyed by triage / verify

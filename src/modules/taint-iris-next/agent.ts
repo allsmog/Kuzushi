@@ -139,6 +139,7 @@ export function buildTaintIrisNextAgentPrompt(
     `- Return at most ${plan.caps.maxAgentFindings} findings.`,
     "- Findings must include filePath, startLine, sourceSinkTrace, catalogSignals, and taintPath.",
     "- Skip weak matches that are only keyword hits without a credible source-to-sink story.",
+    "- If evidence bundles are non-empty but you select no CWEs, notes[0] must start with NO_SELECTION: and explain why the evidence is insufficient.",
   ].join("\n");
 }
 
@@ -177,6 +178,7 @@ export async function runTaintIrisNextAgent(
         taskId: "taint-iris-next:hunt",
         fingerprint,
         phase: "scan",
+        ...(plan.maxBudgetUsd !== undefined ? { maxBudgetUsd: plan.maxBudgetUsd } : {}),
         outputFormat: {
           type: "json_schema",
           schema: TAINT_IRIS_NEXT_AGENT_SCHEMA,
@@ -210,6 +212,17 @@ export async function runTaintIrisNextAgent(
 
   const rawOutput = structuredOutput ?? tryParseJson(resultText);
   const parsed = parseAgentOutput(rawOutput);
+  const warnings: string[] = [];
+  if (!isRecord(rawOutput)) {
+    warnings.push("agent returned no structured JSON output");
+  }
+  if (evidenceResult.evidence.length > 0 && parsed.selectedCwes.length === 0) {
+    const rationale = parsed.notes?.find((note) => note.trim().startsWith("NO_SELECTION:"));
+    warnings.push(
+      rationale ??
+        `agent selected no CWEs from ${evidenceResult.evidence.length} evidence row(s) and did not provide a NO_SELECTION rationale`,
+    );
+  }
   const selectionValidation = validateAgentCweSelections(parsed.selectedCwes, plan.catalog);
   if (!selectionValidation.valid) {
     const rejected = selectionValidation.rejected
@@ -218,7 +231,6 @@ export async function runTaintIrisNextAgent(
     throw new Error(`[taint-iris-next] Agent selected invalid CWEs: ${rejected}`);
   }
 
-  const warnings: string[] = [];
   const findings = normalizeAgentFindings(parsed.findings, plan, evidenceResult.evidence, warnings);
   return {
     selectedCwes: selectionValidation.accepted,

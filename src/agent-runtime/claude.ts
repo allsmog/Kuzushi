@@ -84,6 +84,61 @@ export function _resetProxyBannerForTests(): void {
   proxyBannerEmitted = false;
 }
 
+// Map of stale → recommended Claude model identifiers. Operators carrying an
+// older `model` value in `~/.kuzushi/config.json` keep working — the SDK still
+// accepts older IDs — but they miss the quality + cost improvements of the
+// current generation. The banner is informational only; nothing is rewritten
+// automatically.
+//
+// Keys may use either bare ("claude-opus-4-6") or provider-prefixed
+// ("anthropic:claude-opus-4-6") form. `detectStaleModel` strips a leading
+// "anthropic:" before lookup so both shapes hit the same entry.
+const STALE_MODEL_RECOMMENDATIONS: Readonly<Record<string, string>> = {
+  "claude-opus-4-6": "claude-opus-4-7",
+  "claude-opus-4-5": "claude-opus-4-7",
+  "claude-sonnet-4-5": "claude-sonnet-4-6",
+  "claude-haiku-4-4": "claude-haiku-4-5",
+};
+
+function stripProviderPrefix(model: string): string {
+  const idx = model.indexOf(":");
+  return idx === -1 ? model : model.slice(idx + 1);
+}
+
+// Returns the recommended replacement for a stale model identifier, or null
+// when the model isn't in the stale map. Exported for tests.
+export function detectStaleModel(model: string | undefined): string | null {
+  if (!model) return null;
+  const bare = stripProviderPrefix(model);
+  return STALE_MODEL_RECOMMENDATIONS[bare] ?? null;
+}
+
+// Idempotent banner: emit once per process lifetime when the configured model
+// is on the stale list. Operators can silence with
+// KUZUSHI_QUIET_STALE_MODEL_BANNER=1.
+let staleModelBannerEmitted = false;
+export function warnIfStaleModel(
+  model: string | undefined,
+  stream: NodeJS.WriteStream = process.stderr,
+): void {
+  if (staleModelBannerEmitted) return;
+  if (process.env.KUZUSHI_QUIET_STALE_MODEL_BANNER) return;
+  const recommended = detectStaleModel(model);
+  if (!recommended) return;
+  staleModelBannerEmitted = true;
+  const bareCurrent = stripProviderPrefix(model ?? "");
+  stream.write(
+    `[kuzushi] model "${bareCurrent}" has a newer drop-in replacement: "${recommended}". ` +
+      `Update with \`kuzushi config set model anthropic:${recommended}\` ` +
+      `(silence with KUZUSHI_QUIET_STALE_MODEL_BANNER=1).\n`,
+  );
+}
+
+// Test-only reset for the idempotent banner state.
+export function _resetStaleModelBannerForTests(): void {
+  staleModelBannerEmitted = false;
+}
+
 function abortResult(durationMs: number, numTurns: number, totalCostUsd: number): AgentMessage {
   return {
     type: "result",

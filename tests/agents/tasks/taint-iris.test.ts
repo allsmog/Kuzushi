@@ -1,6 +1,9 @@
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentQueryRequest, AgentRuntime } from "../../../src/agent-runtime/types.js";
-import { taintIrisTask } from "../../../src/agents/tasks/taint-iris/iris.js";
+import { __taintIrisInternals, taintIrisTask } from "../../../src/agents/tasks/taint-iris/iris.js";
 import type { PipelineContext } from "../../../src/agents/types.js";
 import type { KuzushiConfig, ScanOpts } from "../../../src/types.js";
 
@@ -37,9 +40,10 @@ function makeContext(
   taskConfig: KuzushiConfig["taskConfig"],
   signal?: AbortSignal,
 ): PipelineContext {
+  const repoRoot = mkdtempSync(path.join(tmpdir(), "kuzushi-iris-context-"));
   return {
     runId: "run-1",
-    repoRoot: "/repo",
+    repoRoot,
     repoName: "repo",
     config: makeConfig(taskConfig),
     runtime,
@@ -111,5 +115,74 @@ describe("taint-iris task", () => {
 
     controller.abort();
     expect(captured?.options.abortController?.signal.aborted).toBe(true);
+  });
+
+  it("guards legacy IRIS tools to scan root, workspace, and exact CodeQL commands", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "kuzushi-iris-"));
+    try {
+      const scanRoot = path.join(root, "lab");
+      const workspaceDir = path.join(root, ".kuzushi", "runs", "run-1", "taint-iris");
+      const codeqlDbPath = path.join(root, ".kuzushi", "codeql-db");
+      mkdirSync(scanRoot, { recursive: true });
+      mkdirSync(workspaceDir, { recursive: true });
+      mkdirSync(codeqlDbPath, { recursive: true });
+      const denied: string[] = [];
+      const guard = __taintIrisInternals.createIrisToolGuard({
+        scanRoot,
+        workspaceDir,
+        codeqlDbPath,
+        denied,
+      });
+
+      expect(guard("Read", { path: path.join(scanRoot, "app.py") }).behavior).toBe("allow");
+      expect(guard("Write", { file_path: path.join(workspaceDir, "query.ql") }).behavior).toBe(
+        "allow",
+      );
+      expect(
+        guard("Bash", {
+          command: `codeql query compile ${path.join(workspaceDir, "query.ql")} --search-path ${workspaceDir}`,
+        }).behavior,
+      ).toBe("allow");
+      expect(
+        guard("Bash", {
+          command: `codeql database analyze ${codeqlDbPath} ${path.join(workspaceDir, "query.ql")} --format=sarif-latest --output=${path.join(workspaceDir, "results.sarif")}`,
+        }).behavior,
+      ).toBe("allow");
+
+      expect(guard("Read", { path: "/etc/passwd" }).behavior).toBe("deny");
+      expect(guard("Write", { file_path: path.join(scanRoot, "query.ql") }).behavior).toBe("deny");
+      expect(guard("Bash", { command: "find / -type f -name '*.py'" }).behavior).toBe("deny");
+      expect(
+        guard("Bash", {
+          command: `codeql query compile ${path.join(workspaceDir, "query.ql")} --search-path ${workspaceDir} && rm -rf /`,
+        }).behavior,
+      ).toBe("deny");
+      expect(denied.length).toBeGreaterThanOrEqual(4);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves a parent git-root CodeQL DB for a subdirectory scan", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "kuzushi-iris-db-"));
+    try {
+      const lab = path.join(root, "lab");
+      const db = path.join(root, ".kuzushi", "codeql-db");
+      mkdirSync(lab, { recursive: true });
+      mkdirSync(db, { recursive: true });
+      const resolved = __taintIrisInternals.resolveCodeqlDbPath({
+        ...makeContext(
+          makeRuntime(() => undefined),
+          {},
+        ),
+        repoRoot: lab,
+        scanPath: lab,
+        gitRoot: root,
+      });
+
+      expect(resolved).toBe(db);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
