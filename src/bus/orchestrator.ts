@@ -2245,6 +2245,7 @@ export class PipelineOrchestrator {
     }
 
     state.stageTimestamps.triageEnd = new Date().toISOString();
+    state.triageQueue = [];
 
     await this.bus.publish(
       createEvent("triage:complete", runId, {
@@ -3109,6 +3110,8 @@ export class PipelineOrchestrator {
     }
     state.verificationCompleted = true;
     state.stageTimestamps.verifyEnd = new Date().toISOString();
+    state.verifyQueue = [];
+    state.verifyCandidates = [];
 
     await this.bus.publish(
       createEvent("verification:complete", runId, {
@@ -3162,6 +3165,7 @@ export class PipelineOrchestrator {
       index: idx + 1,
       total: state.pocHarnessCandidates.length,
     }));
+    state.pocHarnessCandidates = [];
     state.pocHarnessCursor = 0;
 
     try {
@@ -3420,6 +3424,7 @@ export class PipelineOrchestrator {
       index: idx + 1,
       total: state.dynamicCandidates.length,
     }));
+    state.dynamicCandidates = [];
     state.dynamicCursor = 0;
 
     try {

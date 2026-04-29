@@ -29,6 +29,25 @@ const IMPORT_SCAN_EXTENSIONS = new Set([
   ".py",
   ".go",
 ]);
+const MAX_IMPORT_GRAPH_FILES = 10_000;
+
+class BoundedCache<K, V> {
+  private readonly map = new Map<K, V>();
+
+  constructor(private readonly maxSize: number) {}
+
+  get(key: K): V | undefined {
+    return this.map.get(key);
+  }
+
+  set(key: K, value: V): void {
+    this.map.set(key, value);
+    if (this.map.size <= this.maxSize) return;
+    const oldest = this.map.keys().next().value;
+    if (oldest !== undefined) this.map.delete(oldest);
+  }
+}
+
 const IMPORT_SKIP_DIRS = new Set([
   ".git",
   ".kuzushi",
@@ -88,12 +107,12 @@ async function resolveRepoScopeKey(repoRoot: string): Promise<string> {
 class CachedCodeIntelligenceProvider implements CodeIntelligenceProvider {
   readonly kind = "cached-code-intelligence";
 
-  private readonly definitionCache = new Map<string, Promise<SemanticLocation[]>>();
-  private readonly referenceCache = new Map<string, Promise<SemanticLocation[]>>();
-  private readonly typeCache = new Map<string, Promise<SemanticLocation | undefined>>();
-  private readonly importGraphCache = new Map<string, Promise<ImportGraphEdge[]>>();
-  private readonly callersCache = new Map<string, Promise<string[]>>();
-  private readonly calleesCache = new Map<string, Promise<string[]>>();
+  private readonly definitionCache = new BoundedCache<string, Promise<SemanticLocation[]>>(500);
+  private readonly referenceCache = new BoundedCache<string, Promise<SemanticLocation[]>>(500);
+  private readonly typeCache = new BoundedCache<string, Promise<SemanticLocation | undefined>>(500);
+  private readonly importGraphCache = new BoundedCache<string, Promise<ImportGraphEdge[]>>(5);
+  private readonly callersCache = new BoundedCache<string, Promise<string[]>>(500);
+  private readonly calleesCache = new BoundedCache<string, Promise<string[]>>(500);
 
   constructor(
     private readonly repoRoot: string,
@@ -325,8 +344,12 @@ async function walkImportFiles(
   currentDir: string,
   files: string[],
 ): Promise<void> {
+  if (files.length >= MAX_IMPORT_GRAPH_FILES) return;
+
   const entries = await readdir(currentDir, { withFileTypes: true });
   for (const entry of entries) {
+    if (files.length >= MAX_IMPORT_GRAPH_FILES) return;
+
     const absolutePath = path.join(currentDir, entry.name);
     if (entry.isDirectory()) {
       if (IMPORT_SKIP_DIRS.has(entry.name)) {
