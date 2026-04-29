@@ -22,6 +22,12 @@ interface StatusFooterProps {
   progress: { current: number; total: number };
   startedAt?: number;
   throttle?: { concurrency: number; reason: string } | null;
+  /**
+   * O1: optional cost cap (USD). When set, the meter renders as
+   * `$X.XX / $Y.YY` and switches to a warning color once the spend
+   * crosses 80% of the cap.
+   */
+  costCapUsd?: number;
 }
 
 const SEP = tokens.tertiary(" \u2502 ");
@@ -33,6 +39,7 @@ export const StatusFooter = React.memo(function StatusFooter({
   progress,
   startedAt,
   throttle,
+  costCapUsd,
 }: StatusFooterProps): React.ReactElement | null {
   const columns = useTerminalWidth();
   const widthClass = classifyTerminalWidth(columns);
@@ -55,7 +62,13 @@ export const StatusFooter = React.memo(function StatusFooter({
   const progressStr =
     progress.total > 0 ? `${progress.current}/${progress.total} ${phaseLabel}` : phaseLabel;
 
-  const costStr = runningCostUsd > 0 ? formatCost(runningCostUsd) : "$0.00";
+  const baseCostStr = runningCostUsd > 0 ? formatCost(runningCostUsd) : "$0.00";
+  const costStr =
+    costCapUsd && costCapUsd > 0
+      ? runningCostUsd > 0.8 * costCapUsd
+        ? tokens.warn(`${baseCostStr} / ${formatCost(costCapUsd)}`)
+        : `${baseCostStr} / ${formatCost(costCapUsd)}`
+      : baseCostStr;
 
   const elapsedStr = elapsed > 0 ? formatDuration(elapsed) : "0s";
 

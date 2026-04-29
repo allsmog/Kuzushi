@@ -37,6 +37,31 @@ function normalizeResumeInput(value: unknown): string | boolean | undefined {
   return trimmed;
 }
 
+/**
+ * M5: resolve the canonical post-persistence scan_findings count for a run.
+ * Returns null when the workspace handle isn't reachable or the count query
+ * fails (e.g. fresh DB without the v108 scan_findings table). Callers fall
+ * back to `result.stats.totalFindings` in that case.
+ */
+function resolveCanonicalFindingCount(ctx: ExecutionContext, runId: string): number | null {
+  if (!runId) return null;
+  const workspace = ctx.workspace as { rawDb?: () => unknown } | undefined;
+  const rawDb = workspace?.rawDb?.();
+  if (!rawDb || typeof (rawDb as { prepare?: unknown }).prepare !== "function") {
+    return null;
+  }
+  try {
+    const stmt = (
+      rawDb as { prepare: (sql: string) => { get: (param: string) => unknown } }
+    ).prepare("SELECT COUNT(*) AS n FROM scan_findings WHERE run_id = ?");
+    const row = stmt.get(runId) as { n?: number } | undefined;
+    if (typeof row?.n === "number") return row.n;
+  } catch {
+    // Table missing on fresh DBs / older schemas — fall back to the in-memory stat.
+  }
+  return null;
+}
+
 function normalizeStringArrayInput(value: unknown): string[] | undefined {
   if (value == null) return undefined;
   if (Array.isArray(value)) {
@@ -164,17 +189,31 @@ export async function executeSastPipeline(
     });
 
     const label = options?.summaryLabel ?? "Scan";
+    // M5: prefer the DB-resolved scan_findings count over the in-memory stat
+    // so operators see one canonical number across summary, sub-step, and
+    // /findings views. Falls through to result.stats.totalFindings when the
+    // workspace handle is unavailable (e.g. headless run modes).
+    const canonicalFindingCount = resolveCanonicalFindingCount(ctx, result.runId);
     const summary = summarizePipelineResult({
       result,
       repoName,
       label,
       postProcessMode: options?.postProcessMode ?? "full",
+      ...(canonicalFindingCount !== null ? { canonicalFindingCount } : {}),
     });
 
     return {
       ok: result.status === "complete",
       output: summary,
-      data: { runId: result.runId, status: result.status, stats: result.stats ?? null },
+      data: {
+        runId: result.runId,
+        status: result.status,
+        stats: result.stats
+          ? canonicalFindingCount !== null
+            ? { ...result.stats, totalFindings: canonicalFindingCount }
+            : result.stats
+          : null,
+      },
       costUsd: result.stats?.totalCostUsd,
     };
   } catch (err) {

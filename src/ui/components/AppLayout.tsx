@@ -17,8 +17,13 @@ export function AppLayout({
 }): React.ReactElement {
   const { navigation, theme } = useLayoutContext();
   return (
-    <Box flexDirection="column" flexGrow={1}>
-      <Box flexDirection="column" marginBottom={theme.spacing.sm} paddingLeft={theme.spacing.md}>
+    <Box flexDirection="column" flexGrow={1} height="100%" overflow="hidden">
+      <Box
+        flexDirection="column"
+        marginBottom={theme.spacing.sm}
+        paddingLeft={theme.spacing.md}
+        flexShrink={0}
+      >
         <Text>
           {tokens.strong(navigation.title)}
           {navigation.status.length > 0
@@ -34,10 +39,12 @@ export function AppLayout({
         )}
         {navigation.subtitle && <Text>{tokens.hint(navigation.subtitle)}</Text>}
       </Box>
-      <Box flexDirection="column" flexGrow={1}>
+      <Box flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden">
         {children}
       </Box>
-      <Box marginTop={theme.spacing.sm}>{footer}</Box>
+      <Box marginTop={theme.spacing.sm} flexShrink={0}>
+        {footer}
+      </Box>
     </Box>
   );
 }

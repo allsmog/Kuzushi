@@ -14,6 +14,7 @@ import {
   TAINT_IRIS_NEXT_ATTRIBUTION,
   TAINT_IRIS_NEXT_DISPLAY_NAME,
   TAINT_IRIS_NEXT_ID,
+  TAINT_IRIS_NEXT_LONG_DESCRIPTION,
   TAINT_IRIS_NEXT_REFERENCES,
   TAINT_IRIS_NEXT_SHORT_DESCRIPTION,
   TAINT_IRIS_NEXT_TUI_HEADER_LINES,
@@ -67,9 +68,21 @@ function renderRunOutput(
     plan.backend.codeqlDbPath
       ? `existing CodeQL DB: ${plan.backend.codeqlDbPath}`
       : "existing CodeQL DB: none",
+    `scan root: ${plan.scanRoot}`,
+    `repo root: ${plan.repoRoot}`,
+    evidenceResult.artifacts?.codeqlLanguage
+      ? `CodeQL language: ${evidenceResult.artifacts.codeqlLanguage}`
+      : "",
+    evidenceResult.artifacts?.codeqlQueryPath
+      ? `CodeQL query: ${evidenceResult.artifacts.codeqlQueryPath}`
+      : "",
+    evidenceResult.artifacts?.codeqlCompileStatus
+      ? `CodeQL compile: ${evidenceResult.artifacts.codeqlCompileStatus}`
+      : "",
     `context: ${plan.repoContext ? "loaded" : "missing"}`,
     `threat model: ${plan.threatModel ? "loaded" : "missing"}`,
     `languages: ${plan.languages.join(", ") || "unknown"}`,
+    plan.maxBudgetUsd !== undefined ? `max agent budget: $${plan.maxBudgetUsd}` : "",
     `CWE catalog: ${plan.catalog.length}/${TAINT_IRIS_NEXT_CWE_CATALOG.length} ranked candidates`,
     `structural query seeds: ${plan.structuralQueries.length}`,
     `evidence: ${evidenceResult.evidence.length} matches via ${evidenceResult.tool}`,
@@ -180,6 +193,13 @@ export function createTaintIrisNextModule(): CopilotModule {
           description:
             "Maximum ranked CWE catalog entries to pass into the agent-facing prompt section.",
         },
+        maxCwes: {
+          type: "integer",
+          minimum: 1,
+          description:
+            "Alias for maxCatalogEntries, kept for compatibility with taint-iris-style invocations.",
+          "x-advanced": true,
+        },
         maxEvidencePerCwe: {
           type: "integer",
           default: DEFAULT_TAINT_IRIS_NEXT_CAPS.maxEvidencePerCwe,
@@ -197,6 +217,12 @@ export function createTaintIrisNextModule(): CopilotModule {
           default: DEFAULT_TAINT_IRIS_NEXT_CAPS.maxAgentFindings,
           minimum: 1,
           description: "Maximum findings accepted from the bounded agent session.",
+        },
+        maxBudgetUsd: {
+          type: "number",
+          minimum: 0,
+          description: "Maximum spend for the single IRIS Next agent session.",
+          "x-advanced": true,
         },
       },
       required: ["target"],
@@ -247,11 +273,13 @@ export function createTaintIrisNextModule(): CopilotModule {
             mode: plan.mode,
             backend: plan.backend,
             caps: plan.caps,
+            maxBudgetUsd: plan.maxBudgetUsd,
             languages: plan.languages,
             cweCatalog: plan.catalog,
             promptCatalog: plan.promptCatalog,
             structuralQueries: plan.structuralQueries,
             evidence: evidenceResult.evidence,
+            evidenceResult,
             agentPrompt: buildTaintIrisNextAgentPrompt(plan, evidenceResult),
           },
         };
@@ -276,11 +304,13 @@ export function createTaintIrisNextModule(): CopilotModule {
           mode: plan.mode,
           backend: plan.backend,
           caps: plan.caps,
+          maxBudgetUsd: plan.maxBudgetUsd,
           languages: plan.languages,
           cweCatalog: plan.catalog,
           promptCatalog: plan.promptCatalog,
           structuralQueries: plan.structuralQueries,
           evidence: evidenceResult.evidence,
+          evidenceResult,
           selectedCwes: agentResult.selectedCwes,
           findings: agentResult.findings,
           warnings: agentResult.warnings,
@@ -296,6 +326,7 @@ export function createTaintIrisNextModule(): CopilotModule {
     category: "defense",
     version: "0.17.2",
     description: TAINT_IRIS_NEXT_SHORT_DESCRIPTION,
+    longDescription: TAINT_IRIS_NEXT_LONG_DESCRIPTION,
     rank: "normal",
     references: TAINT_IRIS_NEXT_REFERENCES,
     notes: {

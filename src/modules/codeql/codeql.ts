@@ -30,7 +30,8 @@ export function createCodeqlModule(): CopilotModule {
     displayName: "CodeQL",
     category: "defense",
     version: "0.17.2",
-    description: "GitHub's taint-query semantic analyzer. Deeper than pattern scanners; slower.",
+    description:
+      "GitHub's taint-query semantic analyzer — deeper than pattern scanners but slower.",
     rank: "excellent",
     references: [
       { type: "URL", value: "https://codeql.github.com" },

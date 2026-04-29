@@ -11,6 +11,7 @@
  * safety net.
  */
 import { createUIStore, type UIStore } from "./state.js";
+import { enterAlternateScreen, SHOW_CURSOR } from "./terminal-control.js";
 
 export interface UIRenderer {
   store: UIStore;
@@ -25,9 +26,13 @@ export interface CreateUIRendererOptions {
    * live TUI.
    */
   ci?: boolean;
+  /**
+   * Use the terminal alternate screen buffer for interactive TTY rendering.
+   * Defaults to true for TTY Ink sessions and is ignored for CI/non-TTY
+   * renderers. Tests can pass false to inspect raw frame output.
+   */
+  alternateScreen?: boolean;
 }
-
-const SHOW_CURSOR = "\u001b[?25h";
 
 let exitHandlerInstalled = false;
 
@@ -75,6 +80,10 @@ export async function createUIRenderer(options: CreateUIRendererOptions = {}): P
     const { detectTheme } = await import("./theme.js");
     await detectTheme(200).catch(() => {}); // best-effort, don't block
 
+    const exitAlternateScreen = enterAlternateScreen({
+      enabled: options.alternateScreen !== false,
+    });
+
     // Wrap stdout writes in DEC 2026 synchronized-update markers when the
     // terminal supports them. Eliminates partial-redraw tearing from Ink's
     // frame updates on iTerm2/WezTerm/Ghostty/Kitty/Alacritty/Windows
@@ -101,6 +110,7 @@ export async function createUIRenderer(options: CreateUIRendererOptions = {}): P
       cleanup: () => {
         instance.unmount();
         restoreStdout();
+        exitAlternateScreen();
         // Ensure cursor is visible after unmount even if Ink's default
         // restore ran before our exit handler installs.
         if (process.stdout.isTTY) {
