@@ -77,8 +77,9 @@ describe("ContextHome", () => {
     const out = renderText(createElement(ContextHome, { shell: shell() }));
     expect(out).toContain("kuzushi/context");
     expect(out).toContain("status");
-    expect(out).toContain("(none yet) — run /context build");
+    expect(out).toContain("(none yet) — run .");
     expect(out).toContain("actions");
+    expect(out).toContain("/context build");
     expect(out).toContain("regen <slice>");
     expect(out).toContain("/use threat-model");
     expect(out).toContain("never run for this workspace");

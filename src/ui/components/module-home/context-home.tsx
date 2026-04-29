@@ -38,7 +38,7 @@ function formatAge(ms: number, now: number = Date.now()): string {
 function statusRowsForContext(snapshot: ContextSnapshot | null | undefined): Row[] {
   if (!snapshot) {
     return [
-      { key: "snapshot", value: "(none yet) — run /context build" },
+      { key: "app snapshot", value: "(none yet) — run ." },
       { key: "generated", value: "—" },
       { key: "stale", value: "—" },
     ];
@@ -55,7 +55,7 @@ function statusRowsForContext(snapshot: ContextSnapshot | null | undefined): Row
       : "(none)";
   return [
     {
-      key: "snapshot",
+      key: "app snapshot",
       value: `${formatAge(snapshot.timestamp)} · target ${snapshot.target}`,
     },
     { key: "generated", value: generatedLabel },
@@ -84,6 +84,7 @@ function ActionsBlock({ shell }: ModuleHomeProps): React.ReactElement {
   // type the verb at the prompt; this block just lists what's available.
   const rows: Row[] = [
     { key: "run .", value: "build full context for the current target" },
+    { key: "/context build", value: "build operator scan context notes" },
     { key: "regen <slice>", value: "regenerate one of: repo · enrichment · app-model" },
     { key: "prompts", value: "edit per-tool system prompts" },
     { key: "/use threat-model", value: "open dedicated threat-model workflows" },
