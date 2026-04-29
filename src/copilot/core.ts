@@ -22,6 +22,7 @@ import { wrapRuntimeWithActivityForwarding } from "../bus/runtime-forwarding.js"
 import type { MessageBus } from "../bus/types.js";
 import { createAgenticSastModule } from "../modules/agentic-sast/agentic-sast.js";
 import { ModuleCache } from "../modules/cache.js";
+import { createChromeRceModule } from "../modules/chrome-rce/chrome-rce.js";
 import { createCodeqlModule } from "../modules/codeql/codeql.js";
 import { createContextModule } from "../modules/context/context.js";
 import { createCoreSastModule } from "../modules/core-sast.js";
@@ -191,6 +192,7 @@ export class CopilotCore {
         createContextModule(),
         createThreatModelModule(),
         createVendorAssessmentModule(),
+        createChromeRceModule(),
         // Hidden orchestrator-level module — infrastructure DAG nodes
         // (task-selector, approval gates, taint-iris sub-tasks). Loaded so
         // the module registry owns every scan-DAG participant; the user
