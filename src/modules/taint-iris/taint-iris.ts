@@ -30,6 +30,7 @@ export function createTaintIrisModule(): CopilotModule {
       resume: "checkpoint",
       liveControl: "pause-resume",
       pipelineTasks: ["taint-iris:hunt"],
+      pipelineContext: "none",
     },
     formatInput(input) {
       const p = input as Record<string, unknown> | undefined;
@@ -48,6 +49,18 @@ export function createTaintIrisModule(): CopilotModule {
           type: "string",
           description:
             "Override the taint-iris system prompt. Accepts inline text or a path to .md/.txt.",
+          "x-advanced": true,
+        },
+        maxCwes: {
+          type: "integer",
+          minimum: 1,
+          description: "Maximum selected CWE classes to include in the single IRIS agent session.",
+          "x-advanced": true,
+        },
+        maxBudgetUsd: {
+          type: "number",
+          minimum: 0,
+          description: "Maximum spend for the IRIS agent session.",
           "x-advanced": true,
         },
         resume: {

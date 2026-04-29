@@ -5,6 +5,10 @@
  * `:build` for threat-model; this suite locks the behavior so a future
  * module-home wiring change can't silently re-route the bare `run` /
  * `run .` shortcut into a destructive sibling tool.
+ *
+ * For each module that owns a module-home view (the ones operators most
+ * commonly land on), assert that `pickDefaultTool` returns the same tool
+ * the home view labels as its `run .` action.
  */
 
 import { describe, expect, it } from "vitest";
@@ -37,6 +41,10 @@ function fakeModule(id: string, toolNames: string[]): CopilotModule {
 
 describe("pickDefaultTool — `run .` dispatch contract (M2)", () => {
   it("threat-model dispatches to threat-model:build, not :attach", () => {
+    // threat-model has many tools but the home view labels `run .` as
+    // "build the threat model". `:attach` exists but must never be the
+    // default since attaching with default params overwrites operator
+    // edits.
     const mod = fakeModule("threat-model", [
       "threat-model:attach",
       "threat-model:build",

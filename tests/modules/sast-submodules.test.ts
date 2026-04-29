@@ -84,6 +84,7 @@ describe("SAST sub-modules", () => {
       resume: "checkpoint",
       liveControl: "pause-resume",
       pipelineTasks: ["taint-iris:hunt"],
+      pipelineContext: "none",
     });
     expect(tool?.inputSchema.properties?.resume).toEqual({
       type: ["boolean", "string"],

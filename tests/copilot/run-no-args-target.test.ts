@@ -59,6 +59,7 @@ describe("createModuleDatastore — target fall-through (M3)", () => {
     globals.set("target", "/path/to/repo", "global");
     const local = createModuleDatastore(moduleWithRequiredTarget(), globals);
     expect(local.missingRequired()).not.toContain("target");
+    // and the value resolves through the delegating get():
     expect(local.get("target")).toBe("/path/to/repo");
   });
 
@@ -74,8 +75,10 @@ describe("createModuleDatastore — target fall-through (M3)", () => {
     const globals = new Datastore();
     const local = createModuleDatastore(moduleWithRequiredTarget(), globals);
     expect(local.missingRequired()).toContain("target");
+    // simulate shell calling syncShellTargetToGlobals after /target /repo
     globals.set("target", "/repo", "global");
     expect(local.missingRequired()).not.toContain("target");
+    // and clearing the active target restores the missing-required signal
     globals.unset("target", "global");
     expect(local.missingRequired()).toContain("target");
   });

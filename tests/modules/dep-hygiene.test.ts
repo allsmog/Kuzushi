@@ -36,14 +36,15 @@ describe("analyzeManifest('package.json')", () => {
     const findings = analyzeManifest("package.json", filePath, raw);
     const byPackage = new Map(findings.map((f) => [f.packageName, f]));
 
-    expect(byPackage.get("lodash")?.severity).toBe("high");
-    expect(byPackage.get("express")?.severity).toBe("high");
-    expect(byPackage.get("axios")?.severity).toBe("medium");
-    expect(byPackage.get("left-pad")?.severity).toBe("low");
-    expect(byPackage.get("vitest")?.severity).toBe("high");
+    expect(byPackage.get("lodash")?.severity).toBe("high"); // latest
+    expect(byPackage.get("express")?.severity).toBe("high"); // *
+    expect(byPackage.get("axios")?.severity).toBe("medium"); // >=1.0.0 floor-only
+    expect(byPackage.get("left-pad")?.severity).toBe("low"); // ^0.x
+    expect(byPackage.get("vitest")?.severity).toBe("high"); // devDeps latest
 
+    // explicit-pin: clean, no finding emitted
     expect(byPackage.has("good-lib")).toBe(false);
-    expect(byPackage.has("react")).toBe(false);
+    expect(byPackage.has("react")).toBe(false); // ^18.2.0 — caret on >=1.0 is fine
   });
 
   it("returns an empty list for an unparseable manifest", () => {
@@ -58,15 +59,17 @@ describe("analyzeManifest('pyproject.toml')", () => {
     const findings = analyzeManifest("pyproject.toml", filePath, raw);
     const byPackage = new Map(findings.map((f) => [f.packageName, f]));
 
-    expect(byPackage.get("requests")?.severity).toBe("medium");
-    expect(byPackage.get("flask")?.severity).toBe("high");
-    expect(byPackage.has("django")).toBe(false);
-    expect(byPackage.has("pydantic")).toBe(false);
+    // PEP 508 dependencies
+    expect(byPackage.get("requests")?.severity).toBe("medium"); // >=2.0
+    expect(byPackage.get("flask")?.severity).toBe("high"); // unconstrained
+    expect(byPackage.has("django")).toBe(false); // >=4.0,<5.0 — bounded
+    expect(byPackage.has("pydantic")).toBe(false); // ==2.0.0 — pinned
 
-    expect(byPackage.get("loguru")?.severity).toBe("high");
-    expect(byPackage.get("httpx")?.severity).toBe("medium");
-    expect(byPackage.has("sqlalchemy")).toBe(false);
-    expect(byPackage.has("python")).toBe(false);
+    // Poetry section
+    expect(byPackage.get("loguru")?.severity).toBe("high"); // *
+    expect(byPackage.get("httpx")?.severity).toBe("medium"); // >=0.25
+    expect(byPackage.has("sqlalchemy")).toBe(false); // 2.0.0 — pinned
+    expect(byPackage.has("python")).toBe(false); // ^3.10 — caret >=1.0 is fine
   });
 });
 
@@ -76,9 +79,9 @@ describe("analyzeManifest('Cargo.toml')", () => {
     const findings = analyzeManifest("Cargo.toml", filePath, raw);
     const byPackage = new Map(findings.map((f) => [f.packageName, f]));
 
-    expect(byPackage.get("serde")?.severity).toBe("high");
-    expect(byPackage.get("tokio")?.severity).toBe("medium");
-    expect(byPackage.has("anyhow")).toBe(false);
+    expect(byPackage.get("serde")?.severity).toBe("high"); // *
+    expect(byPackage.get("tokio")?.severity).toBe("medium"); // >=1.0
+    expect(byPackage.has("anyhow")).toBe(false); // 1.0 — implicit caret, fine
     expect(byPackage.has("proptest")).toBe(false);
   });
 });

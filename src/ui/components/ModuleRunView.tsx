@@ -35,6 +35,7 @@ import { useEffect, useRef } from "react";
 import { formatCost, formatDuration, truncateEnd } from "../format.js";
 import { STEP_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useElapsed } from "../hooks.js";
 import { Table } from "../primitives/Table.js";
 import { normalizeSeverity, type Severity, severityChalk, severityStyle } from "../severity.js";
 import type { AgentActivityLine, ModuleRunArtifact, ModuleRunStep, ShellState } from "../state.js";
@@ -86,6 +87,10 @@ export function ModuleRunView({
 
   const moduleId = run?.moduleId ?? shell.focusedModule ?? "module";
   const breadcrumb = `kuzushi/${moduleId}/run`;
+  const liveElapsedMs = useElapsed(
+    run?.status === "running" && nowMs == null ? run.startedAtMs : undefined,
+    1000,
+  );
 
   // O6: Notify the operator when a long run completes — terminal bell +
   // macOS notification + stderr badge. Fires once per run via a ref so
@@ -107,7 +112,7 @@ export function ModuleRunView({
     });
   }, [run, shell.focusedModule]);
 
-  const now = nowMs ?? Date.now();
+  const now = nowMs ?? (run?.status === "running" ? run.startedAtMs + liveElapsedMs : Date.now());
   const elapsedMs = run ? Math.max(0, (run.completedAtMs ?? now) - run.startedAtMs) : 0;
   const elapsed = formatDuration(elapsedMs);
   const status = run

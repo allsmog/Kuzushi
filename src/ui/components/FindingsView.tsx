@@ -19,6 +19,7 @@ import React from "react";
 import { computeFindingAliases } from "../../copilot/finding-alias.js";
 import { colorVerdict } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { computeVisibleSlice } from "../hooks/useVisibleSlice.js";
 import { icons } from "../icons.js";
 import { useRenderCounter } from "../perf.js";
@@ -81,6 +82,10 @@ function FindingsViewImpl(props: FindingsViewProps): React.ReactElement {
 
 function CompactFindings({ results }: { results: ResultLine[] }): React.ReactElement {
   const triageResults = results.filter((r) => r.kind === "triage" && r.verdict);
+  const { rows } = useTerminalSize();
+  const visibleRowCount = Math.max(3, Math.min(50, rows - 12));
+  const visibleResults = triageResults.slice(-visibleRowCount);
+  const hiddenAbove = Math.max(0, triageResults.length - visibleResults.length);
 
   if (triageResults.length === 0) {
     // Infer "in progress" from the source ResultLines: any non-triage row
@@ -114,8 +119,14 @@ function CompactFindings({ results }: { results: ResultLine[] }): React.ReactEle
         {tokens.muted("Fingerprint")}
       </Text>
 
+      {hiddenAbove > 0 ? (
+        <Text>
+          {tokens.muted(`... ${hiddenAbove} earlier triage result${hiddenAbove === 1 ? "" : "s"}`)}
+        </Text>
+      ) : null}
+
       {/* Rows */}
-      {triageResults.map((r) => {
+      {visibleResults.map((r) => {
         const idx = pad(String(r.index), 4);
         const verdict = r.verdict ? colorVerdict(r.verdict) : tokens.muted("—");
         const conf = r.confidence != null ? `${(r.confidence * 100).toFixed(0)}%` : "—";

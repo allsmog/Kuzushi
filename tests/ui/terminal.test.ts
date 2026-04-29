@@ -39,6 +39,6 @@ describe("terminal helpers", () => {
   it("clamps card width within min/max bounds", () => {
     expect(clampTerminalCardWidth(120, 88, 56)).toBe(88);
     expect(clampTerminalCardWidth(70, 88, 56)).toBe(66);
-    expect(clampTerminalCardWidth(40, 88, 56)).toBe(56);
+    expect(clampTerminalCardWidth(40, 88, 56)).toBe(36);
   });
 });

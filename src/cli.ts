@@ -117,10 +117,13 @@ program
   .option("--target <path>", "Set initial target (repo path, host, URL)")
   .option("--scope <path>", "Load rules of engagement from YAML file")
   .option("--model <model>", "Default model for AI operations")
-  .option("--effort <level>", "Default reasoning effort for shell-launched tasks")
+  .option(
+    "--effort <level>",
+    "Default reasoning effort level for AI tasks (low | medium | high | xhigh)",
+  )
   .option(
     "--task-config <taskId.key=value>",
-    "Set a shell task config override; repeatable",
+    "Override a per-task config key (repeatable). Example: --task-config carlini-threat-hunt.effort=high --task-config triage.maxFindings=200",
     collectRepeatedOption,
     [],
   )
@@ -135,12 +138,14 @@ program
     "after",
     `
 Examples:
-  $ kuzushi                                           # start the shell with default modules
-  $ kuzushi --inherit-claude                          # use parent Claude Code session, skip prompt
-  $ kuzushi shell --target ./acme-api                 # pre-set the scan target
-  $ kuzushi shell --load randori,vuln-scout,tob      # pre-load extra built-in modules
-  $ kuzushi shell --workspace acme-pentest            # resume a named workspace
-  $ kuzushi shell --model anthropic:claude-opus-4-7   # override the default model
+  $ kuzushi                                                   # start the shell with default modules
+  $ kuzushi --inherit-claude                                  # use parent Claude Code session, skip prompt
+  $ kuzushi shell --target ./acme-api                         # pre-set the scan target
+  $ kuzushi shell --load randori,vuln-scout,tob              # pre-load extra built-in modules
+  $ kuzushi shell --workspace acme-pentest                    # resume a named workspace
+  $ kuzushi shell --model anthropic:claude-opus-4-7           # override the default model
+  $ kuzushi shell --effort high                               # default reasoning effort across tasks
+  $ kuzushi shell --task-config carlini-threat-hunt.effort=high --task-config triage.maxFindings=200
   $ kuzushi shell --agent-runtime codex --model codex:gpt-5.4-mini
 	`,
   )
