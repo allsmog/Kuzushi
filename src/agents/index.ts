@@ -32,6 +32,7 @@ export async function createDefaultTaskRegistry(
   // lazy-load cost.
   const { registerDagToolsInTaskRegistry } = await import("../modules/dag-bridge.js");
   const { createAgenticSastModule } = await import("../modules/agentic-sast/agentic-sast.js");
+  const { createChromeRceModule } = await import("../modules/chrome-rce/chrome-rce.js");
   const { createCodeqlModule } = await import("../modules/codeql/codeql.js");
   const { createContextModule } = await import("../modules/context/context.js");
   const { createPipelineModule } = await import("../modules/pipeline/pipeline.js");
@@ -53,6 +54,7 @@ export async function createDefaultTaskRegistry(
     createSystemsHuntModule(),
     createCoreTobModule(),
     createCoreVulnScoutModule(),
+    createChromeRceModule(),
   ];
 
   // Symmetric with `kuzushi shell --exclude` — drop modules the
