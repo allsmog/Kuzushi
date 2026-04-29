@@ -25,7 +25,7 @@ import { formatProfilesForPrompt, getProfilesForTask } from "../../security-prof
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { DagNodeImpl, DagRunContext } from "../types.js";
 import {
   computeDetectionFingerprint,
   dedupAndRankFindings,
@@ -132,7 +132,7 @@ interface SharpEdgesConfig {
   maxFindings: number;
 }
 
-function resolveConfig(ctx: TaskContext): SharpEdgesConfig {
+function resolveConfig(ctx: DagRunContext): SharpEdgesConfig {
   const model = resolveTaskModel(ctx, "sharp-edges-detect");
   const maxFindings = resolveTaskPositiveInt(ctx, "sharp-edges-detect", "maxFindings", 50);
   return { model, maxFindings };
@@ -385,7 +385,7 @@ function buildConfusedDeveloperPrompt(
 
 function runSharpEdgesLens(
   prompt: string,
-  context: TaskContext,
+  context: DagRunContext,
   model: string,
   tag: string,
 ): Promise<LensResult> {
@@ -462,7 +462,7 @@ function computeFingerprint(repoName: string, filePath: string, f: SharpEdgesFin
 // Task definition
 // ---------------------------------------------------------------------------
 
-export const sharpEdgesDetectTask: AgentTask<ScanOpts, Finding[]> = {
+export const sharpEdgesDetectTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "sharp-edges-detect",
   displayName: "Sharp Edges Detector (Trail of Bits)",
   outputKind: "findings",

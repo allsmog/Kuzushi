@@ -16,7 +16,7 @@ import type { Finding, TriageAgentConfig } from "../../../scanners/types.js";
 import { getLatestCompletedRunFindings } from "../../../store.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
-import type { AgentTask } from "../../types.js";
+import type { DagNodeImpl } from "../../types.js";
 import {
   type CodeqlProfile,
   candidateProfiles,
@@ -366,7 +366,7 @@ interface RawFindingRecord {
 /**
  * Taint Analysis Step 4-6 task: deterministic library/query generation + analysis + report filtering.
  */
-export const taintAnalysisRunTask: AgentTask<ScanOpts, Finding[]> = {
+export const taintAnalysisRunTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "taint-analysis-run",
   displayName: "Taint Analysis Run",
   outputKind: "findings",

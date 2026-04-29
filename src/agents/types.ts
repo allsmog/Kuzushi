@@ -7,13 +7,13 @@ import type { Finding, TriageAgentConfig } from "../scanners/types.js";
 import type { KuzushiConfig, SecurityProfile } from "../types.js";
 
 /** What kind of output this task produces. */
-export type TaskOutputKind = "findings" | "threat-model" | "verdict" | "report" | "custom";
+export type OutputKind = "findings" | "threat-model" | "verdict" | "report" | "custom";
 
 /** Prompt rendering mode for agent tasks. */
 export type PromptMode = "full" | "minimal" | "none";
 
 /** Shared context provided to every task execution. */
-export interface TaskContext {
+export interface DagRunContext {
   runId: string;
   /** The scan scope (same as `repoRoot` / `workRoot`). Kept for
    *  backward-compatibility with tasks written before scope narrowing;
@@ -64,10 +64,10 @@ export interface TaskContext {
  * A unit of work in the agentic pipeline.
  * Could be a scanner, triage agent, threat modeler, or any custom task.
  */
-export interface AgentTask<TInput = unknown, TOutput = unknown> {
+export interface DagNodeImpl<TInput = unknown, TOutput = unknown> {
   readonly id: string;
   readonly displayName: string;
-  readonly outputKind: TaskOutputKind;
+  readonly outputKind: OutputKind;
   readonly dependsOn: string[];
 
   /** Optional condition evaluated before running. Return false to skip. */
@@ -79,7 +79,7 @@ export interface AgentTask<TInput = unknown, TOutput = unknown> {
   /** Tool policy for this task (allow/deny specific tools). */
   toolPolicy?: ToolPolicy;
 
-  run(input: TInput, context: TaskContext): Promise<TOutput>;
+  run(input: TInput, context: DagRunContext): Promise<TOutput>;
   init?(config: Record<string, unknown>): Promise<void>;
   triageAgentConfig?(finding: Finding, repoName: string): TriageAgentConfig;
 }

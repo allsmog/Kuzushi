@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createAgenticSastModule } from "../../src/modules/agentic-sast/agentic-sast.js";
+import { createCarliniThreatHuntModule } from "../../src/modules/carlini-threat-hunt/carlini-threat-hunt.js";
 import { createCodeqlModule } from "../../src/modules/codeql/codeql.js";
 import { createContextModule } from "../../src/modules/context/context.js";
 import { createFindingsModule } from "../../src/modules/findings/findings.js";
 import { createPatchModule } from "../../src/modules/patch/patch.js";
 import { createSemgrepModule } from "../../src/modules/semgrep/semgrep.js";
 import { createTaintIrisModule } from "../../src/modules/taint-iris/taint-iris.js";
-import { createThreatHuntModule } from "../../src/modules/threat-hunt/threat-hunt.js";
+import { createTaintIrisNextModule } from "../../src/modules/taint-iris-next/taint-iris-next.js";
 import { createTriageModule } from "../../src/modules/triage/triage.js";
 import { createVerifyModule } from "../../src/modules/verify/verify.js";
 
@@ -20,8 +21,19 @@ describe("SAST sub-modules", () => {
       tool: "agentic-sast:scan",
       rank: "good",
     },
-    { factory: createThreatHuntModule, id: "threat-hunt", tool: "threat-hunt:run", rank: "good" },
+    {
+      factory: createCarliniThreatHuntModule,
+      id: "carlini-threat-hunt",
+      tool: "carlini-threat-hunt:run",
+      rank: "good",
+    },
     { factory: createTaintIrisModule, id: "taint-iris", tool: "taint-iris:hunt", rank: "good" },
+    {
+      factory: createTaintIrisNextModule,
+      id: "taint-iris-next",
+      tool: "taint-iris-next:hunt",
+      rank: "normal",
+    },
     { factory: createTriageModule, id: "triage", tool: "triage:run", rank: "good" },
     { factory: createVerifyModule, id: "verify", tool: "verify:finding", rank: "good" },
     { factory: createPatchModule, id: "patch", tool: "patch:finding", rank: "normal" },
@@ -42,7 +54,7 @@ describe("SAST sub-modules", () => {
     });
   }
 
-  it("agentic-sast / taint-iris / threat-hunt declare context snapshot requirements", () => {
+  it("agentic-sast / taint-iris / carlini-threat-hunt declare context snapshot requirements", () => {
     const reqs = (mod: ReturnType<typeof createAgenticSastModule>) =>
       (mod.requires ?? []).filter((r) => r.kind === "snapshot");
     expect(reqs(createAgenticSastModule()).map((r) => r.kind === "snapshot" && r.field)).toEqual([
@@ -51,10 +63,14 @@ describe("SAST sub-modules", () => {
     expect(reqs(createTaintIrisModule()).map((r) => r.kind === "snapshot" && r.field)).toEqual([
       "appModel",
     ]);
-    const hunt = reqs(createThreatHuntModule()).map((r) => r.kind === "snapshot" && r.field);
+    expect(reqs(createTaintIrisNextModule()).map((r) => r.kind === "snapshot" && r.field)).toEqual([
+      "appModel",
+      "threatModel",
+    ]);
+    const hunt = reqs(createCarliniThreatHuntModule()).map((r) => r.kind === "snapshot" && r.field);
     expect(hunt).toContain("appModel");
     expect(hunt).toContain("threatModel");
-    const huntModules = reqs(createThreatHuntModule()).map(
+    const huntModules = reqs(createCarliniThreatHuntModule()).map(
       (r) => r.kind === "snapshot" && r.moduleId,
     );
     expect(huntModules).toContain("context");
@@ -67,7 +83,7 @@ describe("SAST sub-modules", () => {
       persistence: "pipeline-checkpoint",
       resume: "checkpoint",
       liveControl: "pause-resume",
-      pipelineTasks: ["taint-iris"],
+      pipelineTasks: ["taint-iris:hunt"],
     });
     expect(tool?.inputSchema.properties?.resume).toEqual({
       type: ["boolean", "string"],

@@ -46,10 +46,10 @@ export function defineTool<Id extends string>(
 /**
  * Specification for a DAG-participating tool, parameterised by the owning
  * module id. `run()` returns the typed output (e.g. `Finding[]`) rather than
- * a `ToolResult` — the registry bridge adapts into `ToolResult` for shell /
+ * a `ToolResult` — the module registry adapts into `ToolResult` for shell /
  * run-mode invocations.
  *
- * DagTools omit the `execute` field from `ModuleTool` because the bridge
+ * DagTools omit the `execute` field from `ModuleTool` because the registry
  * generates one automatically from `run()` + `dag.outputKind`. Authors that
  * need custom `execute` behavior should author a plain `ModuleTool` instead.
  */
@@ -67,8 +67,8 @@ export type DefineDagToolSpec<Id extends string = string, TI = unknown, TO = unk
  * `moduleId:` prefix at compile time; the runtime guard `isDagTool` uses the
  * presence of `dag` + `run` to detect DagTools at load time.
  *
- *   defineDagTool<"threat-hunt">({
- *     name: "threat-hunt:run",
+ *   defineDagTool<"carlini-threat-hunt">({
+ *     name: "carlini-threat-hunt:run",
  *     inputSchema: { ... },
  *     headless: true,
  *     dag: { outputKind: "findings", dependsOn: ["threat-model-randori:build"] },
@@ -77,13 +77,13 @@ export type DefineDagToolSpec<Id extends string = string, TI = unknown, TO = unk
  *
  * The function is a pass-through so the returned value preserves its literal
  * `Id` type for downstream validation in `defineModule`. The caller's `run`
- * function is *not* wrapped here — the registry bridge installs an `execute`
+ * function is *not* wrapped here — the module registry installs an `execute`
  * wrapper at load time.
  */
 export function defineDagTool<Id extends string, TI = unknown, TO = unknown>(
   spec: DefineDagToolSpec<Id, TI, TO>,
 ): DagTool<Id, TI, TO> {
-  // DagTools don't author an `execute`; the bridge attaches one at load
+  // DagTools don't author an `execute`; the registry attaches one at load
   // time that adapts `run(input, ctx) → TO` into `execute(input, ctx) →
   // ToolResult`. Until the bridge runs, `execute` is a placeholder that
   // throws a descriptive error so any stray direct-execute path surfaces
@@ -92,7 +92,7 @@ export function defineDagTool<Id extends string, TI = unknown, TO = unknown>(
     ...(spec as unknown as DagTool<Id, TI, TO>),
     execute: async () => {
       throw new Error(
-        `DagTool "${spec.name}" was invoked via .execute() before the registry bridge wrapped it — register the owning CopilotModule through ModuleRegistry.loadModule() before executing.`,
+        `DagTool "${spec.name}" was invoked via .execute() before the module registry wrapped it — register the owning CopilotModule through ModuleRegistry.loadModule() before executing.`,
       );
     },
   };

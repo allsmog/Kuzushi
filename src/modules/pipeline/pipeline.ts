@@ -4,21 +4,20 @@
  * Hosts tasks that are part of the scan DAG but aren't user-facing detectors:
  * the dynamic task-selector, approval gates, and future policy hooks. Everything
  * here is `hidden: true` — operators never `/use pipeline; run`. The purpose is
- * to keep `createDefaultTaskRegistry` thin and ensure every DAG node is owned
+ * to keep `createDefaultDagRegistry` thin and ensure every DAG node is owned
  * by some `CopilotModule`.
  */
 
 import { approvalBeforeVerification } from "../../agents/tasks/approval-gate.js";
 import { taintCweSelectTask } from "../../agents/tasks/taint-iris/cwe-select.js";
-import { taintIrisTask } from "../../agents/tasks/taint-iris/iris.js";
 import { taskSelectorTask } from "../../agents/tasks/task-selector.js";
-import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
 import { defineModule } from "../define.js";
+import { defineHiddenDagNodeTool } from "../hidden-dag-node.js";
 import type { CopilotModule } from "../types.js";
 
 export function createPipelineModule(): CopilotModule {
-  const hide = (task: Parameters<typeof exposeAgentTaskAsHiddenDagTool<"pipeline">>[0]) =>
-    exposeAgentTaskAsHiddenDagTool<"pipeline">(task, { moduleId: "pipeline" });
+  const hide = (task: Parameters<typeof defineHiddenDagNodeTool<"pipeline">>[0]) =>
+    defineHiddenDagNodeTool<"pipeline">(task, { moduleId: "pipeline" });
 
   return defineModule({
     id: "pipeline",
@@ -38,12 +37,9 @@ export function createPipelineModule(): CopilotModule {
     tools: [
       hide(taskSelectorTask),
       hide(approvalBeforeVerification),
-      // Taint-iris chain: taint-cwe-select feeds taint-iris. The `taint-iris`
-      // module already exposes a visible `taint-iris:hunt` DagTool; these are
-      // the DAG participants that resolve under bare ids for `dependsOn`
-      // chains inside the orchestrator.
+      // Taint-iris chain: this selector feeds the visible `taint-iris:hunt`
+      // DagTool owned by the taint-iris module.
       hide(taintCweSelectTask),
-      hide(taintIrisTask),
     ],
   });
 }

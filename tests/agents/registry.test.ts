@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { TaskRegistry } from "../../src/agents/registry.js";
-import type { AgentTask } from "../../src/agents/types.js";
+import type { DagNodeImpl } from "../../src/agents/types.js";
+import { DagRegistry } from "../../src/modules/dag-registry.js";
 
-function task(id: string, dependsOn: string[] = []): AgentTask {
+function task(id: string, dependsOn: string[] = []): DagNodeImpl {
   return {
     id,
     displayName: id,
@@ -14,9 +14,9 @@ function task(id: string, dependsOn: string[] = []): AgentTask {
   };
 }
 
-describe("TaskRegistry", () => {
+describe("DagRegistry", () => {
   it("register/get/has/ids work", () => {
-    const registry = new TaskRegistry();
+    const registry = new DagRegistry();
     registry.register(task("a"));
 
     expect(registry.has("a")).toBe(true);
@@ -25,7 +25,7 @@ describe("TaskRegistry", () => {
   });
 
   it("resolves DAG into parallel execution groups", () => {
-    const registry = new TaskRegistry();
+    const registry = new DagRegistry();
     registry.register(task("scanner-a"));
     registry.register(task("scanner-b"));
     registry.register(task("analyzer"));
@@ -44,16 +44,16 @@ describe("TaskRegistry", () => {
   });
 
   it("throws on dependency cycles", () => {
-    const registry = new TaskRegistry();
+    const registry = new DagRegistry();
     registry.register(task("a", ["c"]));
     registry.register(task("b", ["a"]));
     registry.register(task("c", ["b"]));
 
-    expect(() => registry.resolveOrder(["a", "b", "c"])).toThrow("Task dependency cycle detected");
+    expect(() => registry.resolveOrder(["a", "b", "c"])).toThrow("DAG dependency cycle detected");
   });
 
   it("throws when enabled set misses required dependencies", () => {
-    const registry = new TaskRegistry();
+    const registry = new DagRegistry();
     registry.register(task("semgrep"));
     registry.register(task("fp-verification", ["semgrep"]));
 
@@ -61,17 +61,17 @@ describe("TaskRegistry", () => {
   });
 
   it("throws when dependsOn references unknown task", () => {
-    const registry = new TaskRegistry();
+    const registry = new DagRegistry();
     registry.register(task("fp-verification", ["missing-task"]));
 
-    expect(() => registry.validate()).toThrow("depends on unknown task");
+    expect(() => registry.validate()).toThrow("depends on unknown DAG tool");
   });
 
   it("prioritizes unknown enabled task errors over unrelated invalid registrations", () => {
-    const registry = new TaskRegistry();
+    const registry = new DagRegistry();
     registry.register(task("valid"));
     registry.register(task("broken", ["missing-dep"]));
 
-    expect(() => registry.resolveOrder(["unknown-task"])).toThrow("Unknown enabled task");
+    expect(() => registry.resolveOrder(["unknown-task"])).toThrow("Unknown enabled DAG tool");
   });
 });

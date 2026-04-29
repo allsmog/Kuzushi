@@ -17,7 +17,7 @@ kuzushi> resource recipes/quick-scan.kzrc.yaml
 | Recipe              | Stages                                                               |
 |---------------------|----------------------------------------------------------------------|
 | `quick-scan`        | context → semgrep → triage                                           |
-| `deep-audit`        | context → randori → threat-hunt → agentic-sast → taint-iris → triage → verify |
+| `deep-audit`        | context → randori → carlini-threat-hunt → agentic-sast → taint-iris → triage → verify |
 | `ci-fast`           | semgrep → triage                                                     |
 | `ci-deep`           | context → codeql → taint-iris → triage → verify → patch              |
 | `threat-model-only` | context → randori                                                    |

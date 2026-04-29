@@ -71,7 +71,7 @@ describe("core-tob module", () => {
     const mod = createCoreTobModule();
     expect(mod.id).toBe("tob");
     // Visible tools in shell/LLM dispatch. The hidden `tob:tob-audit` DagTool
-    // (wrapping the pipeline's tob-audit AgentTask) is filtered out.
+    // (wrapping the pipeline's tob-audit DagNodeImpl) is filtered out.
     const visibleTools = mod.tools.filter((t) => !t.hidden).map((t) => t.name);
     expect(visibleTools.sort()).toEqual(["tob:audit", "tob:skills"]);
   });

@@ -204,8 +204,36 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
     group: "config",
   },
   {
-    syntax: "/backend [claude|pi-ai]",
+    syntax: "/model",
+    description: "Override the model for the current session (alias for /provider)",
+    longDescription:
+      "Five places set the model, in precedence order: " +
+      "(1) per-tool option `set model anthropic:claude-opus-4-7` while in a focused module, " +
+      "(2) taskConfig[<id>].model in ~/.kuzushi/config.json or .kuzushi/config.json, " +
+      "(3) `/model` or `/provider` for this session only, " +
+      "(4) `setg MODEL ...` for this session globally, " +
+      "(5) `--model` CLI flag at launch. Show resolved with /config raw or /backend show.",
+    group: "config",
+  },
+  {
+    syntax: "/backend [claude|pi-ai|codex]",
     description: "Show or change the agent runtime backend (advanced)",
+    group: "config",
+  },
+  {
+    syntax: "/cost",
+    description: "Session-to-date cost: live run + cumulative across all runs in ~/.kuzushi/runs",
+    group: "config",
+  },
+  {
+    syntax: "/auth import-from-config",
+    description:
+      "One-shot migration: project config.json agentRuntimeConfig → .kuzushi/credentials.json",
+    longDescription:
+      "Reads the project config.json's `agentRuntimeConfig` block (which is silently stripped " +
+      "by the loader for safety) and writes per-slot credentials to the supported " +
+      ".kuzushi/credentials.json location. Updates .gitignore. Use this when you put creds " +
+      "in the natural-but-unsupported per-repo config.json and the strip banner fired.",
     group: "config",
   },
   {

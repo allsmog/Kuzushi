@@ -124,10 +124,10 @@ describe("CoreDispatcher", () => {
   it("use <partial> suggests similar module ids", async () => {
     const registry = new ModuleRegistry();
     registry.register(mkModule("taint-iris", [mkTool("taint-iris:run")]));
-    registry.register(mkModule("threat-hunt", [mkTool("threat-hunt:run")]));
+    registry.register(mkModule("carlini-threat-hunt", [mkTool("carlini-threat-hunt:run")]));
     registry.register(mkModule("triage", [mkTool("triage:run")]));
     (registry as unknown as { initialized: Set<string> }).initialized.add("taint-iris");
-    (registry as unknown as { initialized: Set<string> }).initialized.add("threat-hunt");
+    (registry as unknown as { initialized: Set<string> }).initialized.add("carlini-threat-hunt");
     (registry as unknown as { initialized: Set<string> }).initialized.add("triage");
 
     const sink = createArraySink();
@@ -299,12 +299,12 @@ describe("ModuleDispatcher requires preflight", () => {
 
   it("blocks run when a required snapshot field is missing, with a helpful hint", async () => {
     const registry = new ModuleRegistry();
-    const mod = mkModuleWithRequires("threat-hunt", [
+    const mod = mkModuleWithRequires("carlini-threat-hunt", [
       { kind: "snapshot", moduleId: "context", field: "appModel" },
       { kind: "snapshot", moduleId: "threat-model", field: "threatModel" },
     ]);
     registry.register(mod);
-    (registry as unknown as { initialized: Set<string> }).initialized.add("threat-hunt");
+    (registry as unknown as { initialized: Set<string> }).initialized.add("carlini-threat-hunt");
     const sink = createArraySink();
     const core = new CoreDispatcher({ registry, globals: new Datastore(), history: () => [] });
     // Empty ShellState — no contextSnapshot.
@@ -314,7 +314,7 @@ describe("ModuleDispatcher requires preflight", () => {
       print: sink,
       getShellState: () => ({}),
     });
-    await driver.handle("use threat-hunt");
+    await driver.handle("use carlini-threat-hunt");
     // Satisfy the required option so the check isn't short-circuited by missing RHOST.
     await driver.handle("set RHOST x");
     const result = await driver.handle("run");
@@ -327,11 +327,11 @@ describe("ModuleDispatcher requires preflight", () => {
 
   it("allows run when every snapshot requirement is satisfied", async () => {
     const registry = new ModuleRegistry();
-    const mod = mkModuleWithRequires("threat-hunt", [
+    const mod = mkModuleWithRequires("carlini-threat-hunt", [
       { kind: "snapshot", moduleId: "context", field: "appModel" },
     ]);
     registry.register(mod);
-    (registry as unknown as { initialized: Set<string> }).initialized.add("threat-hunt");
+    (registry as unknown as { initialized: Set<string> }).initialized.add("carlini-threat-hunt");
     const sink = createArraySink();
     const core = new CoreDispatcher({
       registry,
@@ -345,10 +345,10 @@ describe("ModuleDispatcher requires preflight", () => {
       print: sink,
       getShellState: () => ({ contextSnapshot: { appModel: { routes: [] } } }),
     });
-    await driver.handle("use threat-hunt");
+    await driver.handle("use carlini-threat-hunt");
     await driver.handle("set RHOST x");
     const result = await driver.handle("run");
-    expect(result.output).toBe("ran threat-hunt:run");
+    expect(result.output).toBe("ran carlini-threat-hunt:run");
   });
 
   it("blocks run when a hosts requirement is unmet", async () => {

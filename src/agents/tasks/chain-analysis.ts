@@ -7,7 +7,7 @@ import type { Finding } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { TriageResult } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask } from "../types.js";
+import type { DagNodeImpl } from "../types.js";
 
 const log = getLogger("chain-analysis");
 
@@ -187,7 +187,7 @@ function parseOutput(raw: unknown): ChainAnalysisOutput {
   return { chains, analysisNotes };
 }
 
-export const chainAnalysisTask: AgentTask<ChainInput, ChainAnalysisOutput> = {
+export const chainAnalysisTask: DagNodeImpl<ChainInput, ChainAnalysisOutput> = {
   id: "chain-analysis",
   displayName: "Exploitation Chain Analyzer",
   outputKind: "custom",

@@ -16,7 +16,7 @@ import { Divider } from "../primitives/Divider.js";
 import { SPACING, tokens } from "../tokens.js";
 
 export interface RuleHeaderProps {
-  /** Path-style breadcrumb, e.g. `kuzushi/threat-hunt/run`. */
+  /** Path-style breadcrumb, e.g. `kuzushi/carlini-threat-hunt/run`. */
   breadcrumb: string;
   /** Optional right-aligned status, e.g. `12s · running`. */
   status?: string;

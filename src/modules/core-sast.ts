@@ -18,7 +18,7 @@
  * Pipeline infra (runPipeline wrappers, JSONSchema fragments, context DAG,
  * context-summary renderer, runtime shape helpers) lives in ./sast/shared.ts
  * so the per-capability sub-modules (semgrep, codeql, taint-iris, triage,
- * verify, patch, threat-hunt, context, findings) can share it.
+ * verify, patch, carlini-threat-hunt, context, findings) can share it.
  */
 
 import { defineModule, defineTool } from "./define.js";
@@ -147,7 +147,7 @@ export function createCoreSastModule(): CopilotModule {
     description:
       "Umbrella for the full SAST DAG (context → threat-model → scanners → triage → verify → patch). " +
       "For single-capability runs, use the dedicated modules: semgrep, codeql, " +
-      "agentic-sast, taint-iris, threat-hunt, triage, verify, patch, findings, context.",
+      "agentic-sast, taint-iris, carlini-threat-hunt, triage, verify, patch, findings, context.",
     rank: "excellent",
     tools: [scanTool],
 

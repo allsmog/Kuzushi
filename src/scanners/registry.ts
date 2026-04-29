@@ -29,7 +29,7 @@ export class ScannerRegistry {
 
   resolveEnabled(opts: ScanOpts, config: KuzushiConfig): TaskId[] {
     // When the user explicitly passes --tasks, validate unknown IDs.
-    // Keep non-plugin aliases that intentionally map to AgentTasks (e.g. "taint-analysis").
+    // Keep non-plugin aliases that intentionally map to DAG tools (e.g. "taint-analysis").
     const isExplicitOverride = opts.tasks !== undefined;
 
     if (isExplicitOverride) {

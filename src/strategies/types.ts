@@ -1,4 +1,4 @@
-import type { TaskContext } from "../agents/types.js";
+import type { DagRunContext } from "../agents/types.js";
 import type { Finding } from "../scanners/types.js";
 import type { RepoContext } from "../types.js";
 
@@ -32,7 +32,7 @@ export interface StrategyInput {
   finding?: Finding;
   repoRoot: string;
   repoName: string;
-  context: TaskContext;
+  context: DagRunContext;
   budgetUsd?: number;
 }
 

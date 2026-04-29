@@ -32,34 +32,34 @@ function makeFileIndex(overrides: Partial<FileIndex> = {}): FileIndex {
 describe("selectTasks", () => {
   it("always includes runnable secrets-crypto and code-config tasks", () => {
     const result = selectTasks(undefined);
-    expect(result.recommendedTasks).toContain("secrets-crypto-detect");
-    expect(result.recommendedTasks).toContain("code-config-detect");
+    expect(result.recommendedTasks).toContain("agentic-sast:secrets-crypto-detect");
+    expect(result.recommendedTasks).toContain("context:code-config-detect");
   });
 
   it("recommends JS-specific tasks for TypeScript repos", () => {
     const ctx = makeContext({ languages: ["TypeScript"] });
     const result = selectTasks(ctx);
-    expect(result.recommendedTasks).toContain("code-config-detect");
-    expect(result.recommendedTasks).toContain("ssrf-detect");
-    expect(result.recommendedTasks).toContain("secrets-crypto-detect");
-    expect(result.recommendedTasks).toContain("prototype-pollution-detect");
-    expect(result.recommendedTasks).toContain("template-injection-detect");
-    expect(result.recommendedTasks).toContain("supply-chain-detect");
+    expect(result.recommendedTasks).toContain("context:code-config-detect");
+    expect(result.recommendedTasks).toContain("agentic-sast:ssrf-detect");
+    expect(result.recommendedTasks).toContain("agentic-sast:secrets-crypto-detect");
+    expect(result.recommendedTasks).toContain("agentic-sast:prototype-pollution-detect");
+    expect(result.recommendedTasks).toContain("agentic-sast:template-injection-detect");
+    expect(result.recommendedTasks).toContain("agentic-sast:supply-chain-detect");
   });
 
   it("recommends Go-specific tasks for Go repos", () => {
     const ctx = makeContext({ languages: ["Go"] });
     const result = selectTasks(ctx);
-    expect(result.recommendedTasks).toContain("race-condition-detect");
-    expect(result.recommendedTasks).toContain("secrets-crypto-detect");
-    expect(result.recommendedTasks).toContain("supply-chain-detect");
+    expect(result.recommendedTasks).toContain("agentic-sast:race-condition-detect");
+    expect(result.recommendedTasks).toContain("agentic-sast:secrets-crypto-detect");
+    expect(result.recommendedTasks).toContain("agentic-sast:supply-chain-detect");
   });
 
   it("recommends Python-specific tasks", () => {
     const ctx = makeContext({ languages: ["Python"] });
     const result = selectTasks(ctx);
-    expect(result.recommendedTasks).toContain("code-config-detect");
-    expect(result.recommendedTasks).toContain("template-injection-detect");
+    expect(result.recommendedTasks).toContain("context:code-config-detect");
+    expect(result.recommendedTasks).toContain("agentic-sast:template-injection-detect");
   });
 
   it("includes code-config-detect as always-recommended regardless of context", () => {
@@ -68,7 +68,7 @@ describe("selectTasks", () => {
     // resolve to code-config-detect which is already included.
     const emptyCtx = makeContext({});
     const result = selectTasks(emptyCtx);
-    expect(result.recommendedTasks).toContain("code-config-detect");
+    expect(result.recommendedTasks).toContain("context:code-config-detect");
   });
 
   it("recommends NoSQL injection and GraphQL checks when matching context is present", () => {
@@ -78,21 +78,21 @@ describe("selectTasks", () => {
       entryPoints: ["src/graphql/resolvers.ts"],
     });
     const result = selectTasks(ctx);
-    expect(result.recommendedTasks).toContain("nosql-injection-detect");
-    expect(result.recommendedTasks).toContain("graphql-security-detect");
+    expect(result.recommendedTasks).toContain("agentic-sast:nosql-injection-detect");
+    expect(result.recommendedTasks).toContain("agentic-sast:graphql-security-detect");
   });
 
-  it("recommends threat-model-randori and threat-hunt for multi-language repos", () => {
+  it("recommends threat-model-randori and carlini-threat-hunt for multi-language repos", () => {
     const ctx = makeContext({ languages: ["TypeScript", "Python"] });
     const result = selectTasks(ctx);
-    expect(result.recommendedTasks).toContain("threat-model-randori");
-    expect(result.recommendedTasks).toContain("threat-hunt");
+    expect(result.recommendedTasks).toContain("threat-model:threat-model-randori");
+    expect(result.recommendedTasks).toContain("carlini-threat-hunt:run");
   });
 
   it("recommends systems-hunt for Rust repos", () => {
     const ctx = makeContext({ languages: ["Rust"] });
     const result = selectTasks(ctx);
-    expect(result.recommendedTasks).toContain("systems-hunt");
+    expect(result.recommendedTasks).toContain("systems-hunt:systems-hunt");
   });
 
   it("recommends systems-hunt when parser and unsafe signals are present", () => {
@@ -119,17 +119,17 @@ describe("selectTasks", () => {
         },
       }),
     );
-    expect(result.recommendedTasks).toContain("systems-hunt");
+    expect(result.recommendedTasks).toContain("systems-hunt:systems-hunt");
   });
 
   it("provides reasoning for each recommended task", () => {
     const ctx = makeContext({ languages: ["Go"] });
     const result = selectTasks(ctx);
-    expect(result.reasoning["race-condition-detect"]).toBe(
+    expect(result.reasoning["agentic-sast:race-condition-detect"]).toBe(
       "Go: goroutine races, crypto misuse, dependency risk, and command/deserialization checks",
     );
     // secrets-crypto-detect is always-recommended — reasoning should be the default
-    expect(result.reasoning["secrets-crypto-detect"]).toBe(
+    expect(result.reasoning["agentic-sast:secrets-crypto-detect"]).toBe(
       "Always recommended: secrets and crypto detection",
     );
   });
@@ -139,10 +139,10 @@ describe("selectTasks", () => {
     // but the always-recommended reasoning should be preserved
     const ctx = makeContext({ languages: ["TypeScript"] });
     const result = selectTasks(ctx);
-    expect(result.reasoning["secrets-crypto-detect"]).toBe(
+    expect(result.reasoning["agentic-sast:secrets-crypto-detect"]).toBe(
       "Always recommended: secrets and crypto detection",
     );
-    expect(result.reasoning["code-config-detect"]).toBe(
+    expect(result.reasoning["context:code-config-detect"]).toBe(
       "Always recommended: code and config security checks",
     );
   });
@@ -152,7 +152,7 @@ describe("selectTasks", () => {
     // First-match-wins should use the JS/TS reasoning, not Go.
     const ctx = makeContext({ languages: ["TypeScript", "Go"] });
     const result = selectTasks(ctx);
-    expect(result.reasoning["supply-chain-detect"]).toBe(
+    expect(result.reasoning["agentic-sast:supply-chain-detect"]).toBe(
       "JS/TS ecosystem: prioritize dangerous APIs, SSRF, prototype pollution, templating, and package supply-chain risk",
     );
   });
@@ -196,7 +196,7 @@ describe("SELECTABLE_TASK_IDS", () => {
       "taint-analysis-source",
       "taint-analysis-sink",
       "taint-analysis-propagation",
-      "diff-review",
+      "agentic-sast:diff-review",
     ];
     for (const taskId of infrastructureTasks) {
       expect(SELECTABLE_TASK_IDS.has(taskId)).toBe(false);
@@ -204,21 +204,21 @@ describe("SELECTABLE_TASK_IDS", () => {
   });
 
   it("contains threat-model-randori", () => {
-    expect(SELECTABLE_TASK_IDS.has("threat-model-randori")).toBe(true);
+    expect(SELECTABLE_TASK_IDS.has("threat-model:threat-model-randori")).toBe(true);
   });
 
-  it("contains threat-hunt", () => {
-    expect(SELECTABLE_TASK_IDS.has("threat-hunt")).toBe(true);
+  it("contains carlini-threat-hunt", () => {
+    expect(SELECTABLE_TASK_IDS.has("carlini-threat-hunt:run")).toBe(true);
   });
 
   it("contains systems-hunt tasks", () => {
-    expect(SELECTABLE_TASK_IDS.has("systems-context-gatherer")).toBe(true);
-    expect(SELECTABLE_TASK_IDS.has("systems-invariant-extract")).toBe(true);
-    expect(SELECTABLE_TASK_IDS.has("systems-trigger-synth")).toBe(true);
-    expect(SELECTABLE_TASK_IDS.has("systems-hunt")).toBe(true);
+    expect(SELECTABLE_TASK_IDS.has("systems-hunt:systems-context-gatherer")).toBe(true);
+    expect(SELECTABLE_TASK_IDS.has("systems-hunt:systems-invariant-extract")).toBe(true);
+    expect(SELECTABLE_TASK_IDS.has("systems-hunt:systems-trigger-synth")).toBe(true);
+    expect(SELECTABLE_TASK_IDS.has("systems-hunt:systems-hunt")).toBe(true);
   });
 
   it("does not contain diff-review", () => {
-    expect(SELECTABLE_TASK_IDS.has("diff-review")).toBe(false);
+    expect(SELECTABLE_TASK_IDS.has("agentic-sast:diff-review")).toBe(false);
   });
 });

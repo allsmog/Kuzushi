@@ -33,6 +33,15 @@ describe("agent runtime", () => {
     expect(runtime.id).toBe("pi-ai");
   });
 
+  it("configures codex backend", () => {
+    const runtime = configureAgentRuntime(
+      makeConfig({
+        agentRuntimeBackend: "codex",
+      }),
+    );
+    expect(runtime.id).toBe("codex");
+  });
+
   it("creates independent runtime instances without global mutation", () => {
     const first = configureAgentRuntime(
       makeConfig({

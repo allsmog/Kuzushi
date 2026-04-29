@@ -1,5 +1,6 @@
 import type {
-  DfdElement,
+  DfdFlow,
+  DfdNode,
   StrideCategory,
   StrideThreat,
   ThreatModelDocument,
@@ -19,7 +20,7 @@ export interface AttackSurfaceNode {
   description: string;
   risk: "hot" | "watch" | "normal";
   tags: string[];
-  sourceElement?: DfdElement;
+  sourceElement?: DfdNode;
 }
 
 export interface AttackSurfaceFlow {
@@ -31,7 +32,7 @@ export interface AttackSurfaceFlow {
   description: string;
   crosses: string[];
   hot: boolean;
-  sourceElement?: DfdElement;
+  sourceElement?: DfdFlow;
 }
 
 export interface AttackSurfaceBoundary {
@@ -110,11 +111,12 @@ export function deriveAttackSurfaceDfdModel(input: {
         ? ".kuzushi/context-snapshot.json"
         : "no context loaded");
 
-  const dfdElements = threatModel?.dfd?.elements ?? [];
+  const dfdNodes = threatModel?.dfd?.nodes ?? [];
+  const dfdFlows = threatModel?.dfd?.flows ?? [];
   const dfdBoundaries = threatModel?.dfd?.trustBoundaries ?? [];
-  const fromThreatModel = dfdElements.length > 0;
+  const fromThreatModel = dfdNodes.length > 0 || dfdFlows.length > 0;
   const built = fromThreatModel
-    ? buildFromThreatModel(dfdElements, dfdBoundaries, appModel)
+    ? buildFromThreatModel(dfdNodes, dfdFlows, dfdBoundaries, appModel)
     : buildFromApplicationModel(appModel, repoContext);
   const basis: AttackSurfaceDfdBasis = fromThreatModel
     ? "threat-model"
@@ -176,13 +178,14 @@ export function flowsForNode(
 }
 
 function buildFromThreatModel(
-  elements: DfdElement[],
+  elements: DfdNode[],
+  flowElements: DfdFlow[],
   boundaries: Array<{
     id: string;
     name: string;
     innerZone: string;
     outerZone: string;
-    crossingFlows: string[];
+    crossingFlowIds: string[];
   }>,
   appModel: ApplicationModel | null,
 ): {
@@ -195,7 +198,7 @@ function buildFromThreatModel(
     name: boundary.name,
     from: normalizeZone(boundary.outerZone, "external-entity"),
     to: normalizeZone(boundary.innerZone, "process"),
-    crossingFlows: boundary.crossingFlows ?? [],
+    crossingFlows: boundary.crossingFlowIds ?? [],
   }));
   const boundaryByFlow = new Map<string, string[]>();
   for (const boundary of boundaryList) {
@@ -206,46 +209,42 @@ function buildFromThreatModel(
     }
   }
 
-  const nodes = elements
-    .filter((element) => element.type !== "data-flow")
-    .map((element) => {
-      const zone = normalizeZone(element.trustZone, element.type);
-      const tags = inferNodeTags(element, appModel);
-      return {
-        id: element.id,
-        type: element.type as AttackSurfaceNode["type"],
-        name: element.name,
-        zone,
-        description: element.description,
-        risk: inferRisk(element, tags),
-        tags,
-        sourceElement: element,
-      };
-    });
+  const nodes = elements.map((element) => {
+    const zone = normalizeZone(element.trustZone, element.type);
+    const tags = inferNodeTags(element, appModel);
+    return {
+      id: element.id,
+      type: element.type as AttackSurfaceNode["type"],
+      name: element.name,
+      zone,
+      description: element.description,
+      risk: inferRisk(element, tags),
+      tags,
+      sourceElement: element,
+    };
+  });
 
-  const flows = elements
-    .filter((element) => element.type === "data-flow")
-    .map((element) => {
-      const crosses = boundaryByFlow.get(element.id) ?? [];
-      const hot =
-        crosses.length > 0 &&
-        /public|identity|credential|secret|token|admin/i.test(
-          [element.description, element.dataClassification, element.protocol]
-            .filter(Boolean)
-            .join(" "),
-        );
-      return {
-        id: element.id,
-        source: element.source ?? "?",
-        target: element.target ?? "?",
-        protocol: element.protocol,
-        dataClassification: element.dataClassification,
-        description: element.description,
-        crosses,
-        hot,
-        sourceElement: element,
-      };
-    });
+  const flows = flowElements.map((element) => {
+    const crosses = boundaryByFlow.get(element.id) ?? [];
+    const hot =
+      crosses.length > 0 &&
+      /public|identity|credential|secret|token|admin/i.test(
+        [element.description, element.dataClassification, element.protocol]
+          .filter(Boolean)
+          .join(" "),
+      );
+    return {
+      id: element.id,
+      source: element.sourceId,
+      target: element.targetId,
+      protocol: element.protocol,
+      dataClassification: element.dataClassification,
+      description: element.description,
+      crosses,
+      hot,
+      sourceElement: element,
+    };
+  });
 
   return { nodes, flows, boundaries: boundaryList };
 }
@@ -491,7 +490,7 @@ function zoneRank(zone: string): number {
   return ZONE_ORDER.length;
 }
 
-function normalizeZone(zone: string | undefined, type: DfdElement["type"]): string {
+function normalizeZone(zone: string | undefined, type: DfdNode["type"]): string {
   const raw = (zone ?? "").trim().toLowerCase();
   if (/internet|external|untrusted|public/.test(raw)) return "internet / untrusted";
   if (/edge|entry|ingress|router|gateway/.test(raw)) return "edge / entrypoints";
@@ -502,7 +501,7 @@ function normalizeZone(zone: string | undefined, type: DfdElement["type"]): stri
   return type === "external-entity" ? "internet / untrusted" : "application / trusted";
 }
 
-function inferNodeTags(element: DfdElement, appModel: ApplicationModel | null): string[] {
+function inferNodeTags(element: DfdNode, appModel: ApplicationModel | null): string[] {
   const text = `${element.name} ${element.description} ${element.trustZone}`.toLowerCase();
   const tags: string[] = [];
   if (/auth|identity|session|token|sso|oidc/.test(text)) tags.push("identity");
@@ -519,7 +518,7 @@ function inferNodeTags(element: DfdElement, appModel: ApplicationModel | null): 
   return tags.length > 0 ? tags : [element.type];
 }
 
-function inferRisk(element: DfdElement, tags: string[]): AttackSurfaceNode["risk"] {
+function inferRisk(element: DfdNode, tags: string[]): AttackSurfaceNode["risk"] {
   if (element.type === "data-store") return "hot";
   if (tags.some((tag) => /public ingress|high-value|credential|secret/.test(tag))) return "hot";
   if (tags.some((tag) => /identity|privileged|auth/.test(tag))) return "watch";
@@ -540,7 +539,7 @@ function statsFrom(appModel: ApplicationModel | null, threats: StrideThreat[]) {
 
 function nextActions(stats: AttackSurfaceDfdModel["stats"], threatCount: number): string[] {
   const actions = [
-    "threat-hunt: run actor-driven adversarial review",
+    "carlini-threat-hunt: run actor-driven adversarial review",
     "taint-iris: trace public inputs across trust boundaries",
   ];
   if (stats.dataStores > 0) actions.push("/threats scope: inspect high-value stores");
@@ -563,8 +562,64 @@ function parseRepoContext(
 function normalizeThreatModel(value: unknown): ThreatModelDocument | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Partial<ThreatModelDocument>;
-  if (!record.dfd || !Array.isArray(record.dfd.elements)) return null;
-  return record as ThreatModelDocument;
+  if (!record.dfd) return null;
+  if (Array.isArray(record.dfd.nodes) && Array.isArray(record.dfd.flows)) {
+    return record as ThreatModelDocument;
+  }
+  const legacy = record.dfd as unknown as {
+    elements?: Array<Record<string, unknown>>;
+    trustBoundaries?: ThreatModelDocument["dfd"]["trustBoundaries"];
+  };
+  if (!Array.isArray(legacy.elements)) return null;
+  const nodes = legacy.elements
+    .filter((element) => element["type"] !== "data-flow")
+    .map((element) => ({
+      id: String(element["id"] ?? ""),
+      type: normalizeLegacyNodeType(element["type"]),
+      name: String(element["name"] ?? element["id"] ?? ""),
+      description: String(element["description"] ?? ""),
+      trustZone: String(element["trustZone"] ?? element["trust_zone"] ?? ""),
+    }))
+    .filter((node) => node.id && node.name) as DfdNode[];
+  const flows = legacy.elements
+    .filter((element) => element["type"] === "data-flow")
+    .map((element) => ({
+      id: String(element["id"] ?? ""),
+      name: typeof element["name"] === "string" ? element["name"] : undefined,
+      description: String(element["description"] ?? ""),
+      sourceId: String(element["source"] ?? ""),
+      targetId: String(element["target"] ?? ""),
+      protocol: typeof element["protocol"] === "string" ? element["protocol"] : undefined,
+      dataClassification:
+        typeof element["dataClassification"] === "string"
+          ? element["dataClassification"]
+          : undefined,
+      trustBoundaryIds: [],
+    }))
+    .filter((flow) => flow.id && flow.sourceId && flow.targetId) as DfdFlow[];
+  return {
+    ...(record as ThreatModelDocument),
+    dfd: {
+      nodes,
+      flows,
+      trustBoundaries: (legacy.trustBoundaries ?? []).map((boundary) => ({
+        ...boundary,
+        crossingFlowIds:
+          boundary.crossingFlowIds ??
+          (boundary as unknown as { crossingFlows?: string[] }).crossingFlows ??
+          [],
+      })),
+    },
+  };
+}
+
+function normalizeLegacyNodeType(value: unknown): DfdNode["type"] {
+  const raw = typeof value === "string" ? value.toLowerCase() : "";
+  if (raw === "external-entity" || raw === "external_entity" || raw === "external") {
+    return "external-entity";
+  }
+  if (raw === "data-store" || raw === "data_store" || raw === "datastore") return "data-store";
+  return "process";
 }
 
 function first(values: ReadonlyArray<string> | undefined): string | undefined {

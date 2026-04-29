@@ -156,12 +156,17 @@ describe("task story curation", () => {
   });
 
   it("tracks background jobs and formats background story beats", () => {
-    const running = { id: "1", label: "threat-hunt:run", status: "running" as const, startedAt: 1 };
+    const running = {
+      id: "1",
+      label: "carlini-threat-hunt:run",
+      status: "running" as const,
+      startedAt: 1,
+    };
     const done = { ...running, status: "completed" as const, endedAt: 2 };
 
     expect(upsertBackgroundJob([running], done)).toEqual([done]);
     const event = createShellStoryEvent(createBackgroundJobStoryEvent(done));
-    expect(event.message).toBe("threat-hunt:run completed");
+    expect(event.message).toBe("carlini-threat-hunt:run completed");
     expect(event.detail).toBe("job 1");
   });
 

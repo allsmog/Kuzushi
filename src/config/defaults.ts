@@ -3,7 +3,7 @@ import type { KuzushiConfig } from "../types.js";
 
 export const BUS_BACKENDS = new Set<string>(["in-process"]);
 
-export const AGENT_RUNTIME_BACKENDS = new Set<string>(["claude", "pi-ai"]);
+export const AGENT_RUNTIME_BACKENDS = new Set<string>(["claude", "pi-ai", "codex"]);
 
 const DEFAULT_TAINT_ANALYSIS_PATH = process.env["TAINT_ANALYSIS_PATH"]?.trim() || taintAnalysisRoot;
 
@@ -37,7 +37,7 @@ export const DEFAULTS: KuzushiConfig = {
   scanMode: "concurrent",
   agentRuntimeBackend: "pi-ai",
   agentRuntimeConfig: undefined,
-  tasks: ["semgrep"],
+  tasks: ["semgrep:scan"],
   severity: ["ERROR", "WARNING"],
   excludePatterns: [
     "test",
@@ -118,11 +118,11 @@ export const DEFAULTS: KuzushiConfig = {
     semgrep: { configFlag: ["auto", "p/security-audit", "p/owasp-top-ten", "p/cwe-top-25"] },
     agentic: { maxFindings: 20 },
     codeql: {},
-    "secrets-crypto-detect": {},
+    "agentic-sast:secrets-crypto-detect": {},
     "crypto-behavioral-test": {
       timingIterations: 10_000,
     },
-    "threat-hunt": { runsPerActor: 1, maxActors: 5 },
+    "carlini-threat-hunt": { runsPerActor: 1, maxActors: 5 },
     "systems-hunt": {
       maxFindings: 30,
       maxSurfaces: 10,
@@ -138,7 +138,7 @@ export const DEFAULTS: KuzushiConfig = {
       enableCodeqlTemplates: true,
       enableCounterexamplePass: true,
     },
-    "code-config-detect": { maxFindings: 50 },
+    "context:code-config-detect": { maxFindings: 50 },
     "code-graph": {
       maxEntryPoints: 50,
       maxHopsPerTrace: 15,

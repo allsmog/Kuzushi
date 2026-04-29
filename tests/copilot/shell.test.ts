@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -37,7 +37,9 @@ const baseConfig: KuzushiConfig = {
 
 async function createMockCore() {
   const { createSemgrepModule } = await import("../../src/modules/semgrep/semgrep.js");
-  const { createThreatHuntModule } = await import("../../src/modules/threat-hunt/threat-hunt.js");
+  const { createCarliniThreatHuntModule } = await import(
+    "../../src/modules/carlini-threat-hunt/carlini-threat-hunt.js"
+  );
   const { createContextModule } = await import("../../src/modules/context/context.js");
   const { createTaintIrisModule } = await import("../../src/modules/taint-iris/taint-iris.js");
   const { createThreatModelModule } = await import(
@@ -46,11 +48,11 @@ async function createMockCore() {
 
   const sast = createCoreSastModule();
   const semgrep = createSemgrepModule();
-  const threatHunt = createThreatHuntModule();
+  const carliniThreatHunt = createCarliniThreatHuntModule();
   const context = createContextModule();
   const taintIris = createTaintIrisModule();
   const threatModel = createThreatModelModule();
-  const mods = [sast, semgrep, threatHunt, context, taintIris, threatModel];
+  const mods = [sast, semgrep, carliniThreatHunt, context, taintIris, threatModel];
   const module = sast; // back-compat name; older assertions still reference `module`
 
   const executeTool = vi.fn(async (_toolName: string, input: unknown) => ({
@@ -61,7 +63,7 @@ async function createMockCore() {
   // Legacy aliases so code dispatching on `sast:semgrep` still finds a tool.
   const aliases: Record<string, string> = {
     "sast:semgrep": "semgrep:scan",
-    "sast:threat-hunt": "threat-hunt:run",
+    "sast:carlini-threat-hunt": "carlini-threat-hunt:run",
     "sast:context": "context:build",
   };
 
@@ -335,9 +337,9 @@ describe("local shell commands", () => {
 
     ctx.focusedModule = "sast";
     const toolsResult = __shellInternals.handleLocalCommand("tools", core, opts, ctx, shellState);
-    // Post-split the sast umbrella only lists its own `scan` tool; threat-hunt
+    // Post-split the sast umbrella only lists its own `scan` tool; carlini-threat-hunt
     // lives in its own module now. Exercising that here would require focusing
-    // on `threat-hunt`, which is covered by the dispatcher tests.
+    // on `carlini-threat-hunt`, which is covered by the dispatcher tests.
     expect(toolsResult?.output).toContain("scan");
 
     const findingsResult = __shellInternals.handleLocalCommand(
@@ -487,12 +489,12 @@ describe("local shell commands", () => {
     const opts = createShellOptions();
     const shellState: ShellState = {
       ...createShellState([]),
-      focusedModule: "threat-hunt",
+      focusedModule: "carlini-threat-hunt",
       shellView: "module",
       target: "./demo-target",
-      lastUsedTool: "threat-hunt:run",
+      lastUsedTool: "carlini-threat-hunt:run",
     };
-    const ctx = { focusedModule: "threat-hunt" };
+    const ctx = { focusedModule: "carlini-threat-hunt" };
 
     const ask = __shellInternals.handleLocalCommand(
       "/ask what findings stand out?",
@@ -504,9 +506,9 @@ describe("local shell commands", () => {
     expect(ask?.askQuestion).toBeDefined();
     // Context preamble should mention the focused module, shell view, and
     // the actual question so the agent has both framing and intent.
-    expect(ask?.askQuestion).toContain("focused module: threat-hunt");
+    expect(ask?.askQuestion).toContain("focused module: carlini-threat-hunt");
     expect(ask?.askQuestion).toContain("shell view: module");
-    expect(ask?.askQuestion).toContain("last tool: threat-hunt:run");
+    expect(ask?.askQuestion).toContain("last tool: carlini-threat-hunt:run");
     expect(ask?.askQuestion).toContain("Loaded artifacts (.kuzushi/)");
     expect(ask?.askQuestion).toContain("what findings stand out?");
   });
@@ -546,20 +548,20 @@ describe("local shell commands", () => {
     const ctx = { focusedModule: "sast" };
 
     const optionsResult = __shellInternals.handleLocalCommand(
-      "/options threat-hunt",
+      "/options carlini-threat-hunt",
       core,
       opts,
       ctx,
       shellState,
     );
-    expect(optionsResult?.output).toBe("Showing options for sast:threat-hunt.");
+    expect(optionsResult?.output).toBe("Showing options for sast:carlini-threat-hunt.");
 
     shellState = optionsResult?.shellStateUpdater
       ? optionsResult.shellStateUpdater(shellState)
       : shellState;
     expect(shellState.shellView).toBe("options");
-    expect(shellState.lastUsedTool).toBe("sast:threat-hunt");
-    expect(shellState.optionsView?.toolName).toBe("sast:threat-hunt");
+    expect(shellState.lastUsedTool).toBe("sast:carlini-threat-hunt");
+    expect(shellState.optionsView?.toolName).toBe("sast:carlini-threat-hunt");
     expect(shellState.optionsView?.rows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -577,12 +579,12 @@ describe("local shell commands", () => {
       ctx,
       shellState,
     );
-    expect(setResult?.output).toBe("Set sast:threat-hunt.maxActors = 7");
+    expect(setResult?.output).toBe("Set sast:carlini-threat-hunt.maxActors = 7");
 
     shellState = setResult?.shellStateUpdater
       ? setResult.shellStateUpdater(shellState)
       : shellState;
-    expect(shellState.moduleOptions["sast:threat-hunt"]).toEqual({ maxActors: 7 });
+    expect(shellState.moduleOptions["sast:carlini-threat-hunt"]).toEqual({ maxActors: 7 });
     expect(shellState.optionsView?.rows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -600,7 +602,7 @@ describe("local shell commands", () => {
       ctx,
       shellState,
     );
-    expect(optionsAgain?.output).toBe("Showing options for sast:threat-hunt.");
+    expect(optionsAgain?.output).toBe("Showing options for sast:carlini-threat-hunt.");
     shellState = optionsAgain?.shellStateUpdater
       ? optionsAgain.shellStateUpdater(shellState)
       : shellState;
@@ -690,6 +692,25 @@ describe("local shell commands", () => {
     shellState = result?.shellStateUpdater ? result.shellStateUpdater(shellState) : shellState;
     expect(shellState.shellView).toBe("options");
     expect(shellState.optionsView?.toolName).toBe("sast:scan");
+  });
+
+  it("uses the focused module default for show options when the last tool belongs elsewhere", async () => {
+    const { core } = await createMockCore();
+    const opts = createShellOptions();
+    let shellState = {
+      ...createShellState(core.registry.allTools().map(({ tool }) => tool.name)),
+      focusedModule: "carlini-threat-hunt" as const,
+      lastUsedTool: "threat-model:build",
+      shellView: "module" as const,
+    };
+    const ctx = { focusedModule: "carlini-threat-hunt" };
+
+    const result = __shellInternals.handleLocalCommand("show options", core, opts, ctx, shellState);
+
+    expect(result?.output).toBe("Showing options for carlini-threat-hunt:run.");
+    shellState = result?.shellStateUpdater ? result.shellStateUpdater(shellState) : shellState;
+    expect(shellState.lastUsedTool).toBe("carlini-threat-hunt:run");
+    expect(shellState.optionsView?.toolName).toBe("carlini-threat-hunt:run");
   });
 
   it("opens the SAST task selector and stores blocked task options", async () => {
@@ -1000,7 +1021,7 @@ describe("local shell commands", () => {
       ctx,
       shellState,
     );
-    expect(setResult).toEqual({ output: "No active tool selected. Use /options <tool> first." });
+    expect(setResult).toEqual({ output: "Unknown option for sast:scan: maxActors" });
   });
 
   it("routes /use with an unknown module through formatUnknownModule", async () => {
@@ -1049,12 +1070,12 @@ describe("local shell commands", () => {
   });
 
   it("reconcileShellView promotes catalog→module when focus is set via bare `use <mod>`", () => {
-    // Regression: bare `use threat-hunt` pushes a ModuleDispatcher in
+    // Regression: bare `use carlini-threat-hunt` pushes a ModuleDispatcher in
     // core-dispatcher.cmd_use (emits `Selected module: <id>`) but returns no
     // shellStateUpdater. The only sync path is `syncShellState` in shell.ts,
     // which previously left `shellView` untouched — so the prompt read
-    // `kuzushi/threat-hunt>` while StatusFooter still said "you are in catalog".
-    expect(__shellInternals.reconcileShellView("catalog", "threat-hunt")).toBe("module");
+    // `kuzushi/carlini-threat-hunt>` while StatusFooter still said "you are in catalog".
+    expect(__shellInternals.reconcileShellView("catalog", "carlini-threat-hunt")).toBe("module");
 
     // Clearing focus from a module-scoped view (after /back through the stack)
     // must fall back to catalog so we don't leave a dangling module home.
@@ -1275,7 +1296,7 @@ describe("local shell commands", () => {
       ...createShellState(module.tools.map((tool) => tool.name)),
       focusedModule: "sast" as const,
       moduleOptions: {
-        "sast:threat-hunt": {
+        "sast:carlini-threat-hunt": {
           target: "/stored-target",
           maxActors: 5,
         },
@@ -1368,8 +1389,35 @@ describe("local shell commands", () => {
 
     executeTool.mockClear();
 
+    opts.target = "/resolved/repo";
+    const threatModelDefaultRun = __shellInternals.handleLocalCommand(
+      "run .",
+      core,
+      opts,
+      { focusedModule: "threat-model" },
+      { ...shellState, focusedModule: "threat-model", target: "/resolved/repo" },
+    );
+    expect(threatModelDefaultRun?.executedToolName).toBe("threat-model:build");
+    expect(threatModelDefaultRun?.asyncExecute).toBeTypeOf("function");
+
+    await threatModelDefaultRun?.asyncExecute?.();
+
+    expect(executeTool).toHaveBeenCalledWith(
+      "threat-model:build",
+      expect.objectContaining({
+        target: "/resolved/repo",
+      }),
+      expect.objectContaining({
+        cwd: "/resolved/repo",
+        target: "/resolved/repo",
+      }),
+    );
+
+    executeTool.mockClear();
+    opts.target = ".";
+
     const incompleteContext = __shellInternals.handleLocalCommand(
-      "threat-hunt /repo",
+      "carlini-threat-hunt /repo",
       core,
       opts,
       ctx,
@@ -1385,23 +1433,23 @@ describe("local shell commands", () => {
         threatModel: null,
       },
     );
-    expect(incompleteContext?.output).toContain("Context incomplete for threat-hunt:run");
+    expect(incompleteContext?.output).toContain("Context incomplete for carlini-threat-hunt:run");
     expect(incompleteContext?.asyncExecute).toBeUndefined();
 
-    const threatHunt = __shellInternals.handleLocalCommand(
-      "threat-hunt /repo maxActors=7",
+    const carliniThreatHunt = __shellInternals.handleLocalCommand(
+      "carlini-threat-hunt /repo maxActors=7",
       core,
       opts,
       ctx,
       shellState,
     );
-    expect(threatHunt?.executedToolName).toBe("threat-hunt:run");
-    expect(threatHunt?.asyncExecute).toBeTypeOf("function");
+    expect(carliniThreatHunt?.executedToolName).toBe("carlini-threat-hunt:run");
+    expect(carliniThreatHunt?.asyncExecute).toBeTypeOf("function");
 
-    await threatHunt?.asyncExecute?.();
+    await carliniThreatHunt?.asyncExecute?.();
 
     expect(executeTool).toHaveBeenCalledWith(
-      "threat-hunt:run",
+      "carlini-threat-hunt:run",
       expect.objectContaining({
         target: "/repo",
         maxActors: 7,
@@ -1780,24 +1828,49 @@ describe("context system", () => {
     expect(next.contextBuild?.phases.manifests.status).toBe("pending");
   });
 
-  it("context gating blocks threat-hunt without snapshot", async () => {
+  it("context gating blocks carlini-threat-hunt without a persisted threat model", async () => {
     const { core, module } = await createMockCore();
+    const repoRoot = mkdtempSync(path.join(os.tmpdir(), "kuzushi-carlini-no-tm-"));
+    tempDirs.push(repoRoot);
     const opts = createShellOptions();
-    const ctx = { focusedModule: "sast" };
+    opts.target = repoRoot;
+    const ctx = { focusedModule: "carlini-threat-hunt" };
     const shellState = createShellState(module.tools.map((t) => t.name));
 
-    const result = __shellInternals.handleLocalCommand(
-      "threat-hunt .",
+    const result = __shellInternals.resolveDirectToolDispatch(
+      "carlini-threat-hunt:run .",
       core,
       opts,
       ctx,
       shellState,
     );
-    expect(result?.output).toContain("Context required");
+    expect(result?.output).toContain("Threat model required");
     expect(result?.executedToolName).toBeUndefined();
   });
 
-  it("context gating allows threat-hunt with snapshot", async () => {
+  it("context gating allows carlini-threat-hunt with only a persisted threat model", async () => {
+    const { core, module } = await createMockCore();
+    const repoRoot = mkdtempSync(path.join(os.tmpdir(), "kuzushi-carlini-persisted-tm-"));
+    tempDirs.push(repoRoot);
+    mkdirSync(path.join(repoRoot, ".kuzushi"), { recursive: true });
+    writeFileSync(
+      path.join(repoRoot, ".kuzushi", "threat-model.json"),
+      JSON.stringify({
+        version: "2.0",
+        dfd: { nodes: [], flows: [], trustBoundaries: [] },
+        threats: [],
+      }),
+    );
+    const opts = createShellOptions();
+    opts.target = repoRoot;
+    const ctx = { focusedModule: "carlini-threat-hunt" };
+    const shellState = createShellState(module.tools.map((t) => t.name));
+
+    const result = __shellInternals.handleLocalCommand("run .", core, opts, ctx, shellState);
+    expect(result?.executedToolName).toBe("carlini-threat-hunt:run");
+  });
+
+  it("context gating allows carlini-threat-hunt with snapshot", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
     const ctx = { focusedModule: "sast" };
@@ -1808,13 +1881,13 @@ describe("context system", () => {
     };
 
     const result = __shellInternals.handleLocalCommand(
-      "threat-hunt .",
+      "carlini-threat-hunt .",
       core,
       opts,
       ctx,
       shellState,
     );
-    expect(result?.executedToolName).toBe("threat-hunt:run");
+    expect(result?.executedToolName).toBe("carlini-threat-hunt:run");
   });
 
   it("semgrep is not gated regardless of context", async () => {
@@ -2166,8 +2239,8 @@ describe("slash suggestions", () => {
 describe("hunt-post-mortem helpers", () => {
   const { isHuntClassTool, extractHuntStats, formatHuntSummaryLine } = __shellInternals;
 
-  it("recognizes threat-hunt:run as the hunt-class tool", () => {
-    expect(isHuntClassTool("threat-hunt:run")).toBe(true);
+  it("recognizes carlini-threat-hunt:run as the hunt-class tool", () => {
+    expect(isHuntClassTool("carlini-threat-hunt:run")).toBe(true);
     expect(isHuntClassTool("semgrep:scan")).toBe(false);
     expect(isHuntClassTool("triage:run")).toBe(false);
   });

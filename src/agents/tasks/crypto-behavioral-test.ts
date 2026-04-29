@@ -21,7 +21,7 @@ import type { Finding, ProofState } from "../../scanners/types.js";
 import { insertCryptoBehavioralRun } from "../../store/crypto-behavioral.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import { normalizeCostUsd, toErrorMessage } from "../../utils.js";
-import type { AgentTask } from "../types.js";
+import type { DagNodeImpl } from "../types.js";
 import { resolveTaskModel, resolveTaskPositiveInt } from "./runtime-overrides.js";
 
 const log = createLogger({ stage: "crypto-behavioral-test" });
@@ -34,7 +34,7 @@ const PROOF_STATE_PRECEDENCE: Record<ProofState, number> = {
   execution_confirmed: 4,
 };
 
-export const cryptoBehavioralTestTask: AgentTask<unknown, Finding[]> = {
+export const cryptoBehavioralTestTask: DagNodeImpl<unknown, Finding[]> = {
   id: "crypto-behavioral-test",
   displayName: "Crypto Behavioral Test",
   outputKind: "findings",

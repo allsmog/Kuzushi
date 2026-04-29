@@ -1,4 +1,4 @@
-import type { AgentTask, TaskContext } from "../agents/types.js";
+import type { DagNodeImpl, DagRunContext } from "../agents/types.js";
 import { createLogger } from "../logger.js";
 import type { Finding } from "../scanners/types.js";
 import type { CweStrategyProfile } from "./cwe-strategy-map.js";
@@ -14,10 +14,10 @@ const log = createLogger({ stage: "multi-strategy" });
  * Same task ID — transparent replacement.
  */
 export function withMultiStrategy<TInput, TOutput>(
-  wrappedTask: AgentTask<TInput, TOutput>,
+  wrappedTask: DagNodeImpl<TInput, TOutput>,
   profile: CweStrategyProfile,
   getRegistry: () => StrategyRegistry | undefined,
-): AgentTask<TInput, TOutput> {
+): DagNodeImpl<TInput, TOutput> {
   return {
     ...wrappedTask,
     id: wrappedTask.id,
@@ -25,7 +25,7 @@ export function withMultiStrategy<TInput, TOutput>(
     outputKind: wrappedTask.outputKind,
     dependsOn: wrappedTask.dependsOn,
 
-    async run(input: TInput, context: TaskContext): Promise<TOutput> {
+    async run(input: TInput, context: DagRunContext): Promise<TOutput> {
       const mode = resolveMultiStrategyMode(context.config as unknown as Record<string, unknown>);
       if (mode === "off") {
         return wrappedTask.run(input, context);

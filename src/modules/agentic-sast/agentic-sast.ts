@@ -2,21 +2,21 @@
  * Agentic SAST module — LLM-driven bug hunter wrapped as a CopilotModule.
  *
  * Primary tool: `agentic-sast:scan` — delegates to `AgenticPlugin.scan`; the
- * bridge auto-installs a shell-mode `execute()` that re-enters the scan
+ * module registry installs a shell-mode `execute()` that re-enters the scan
  * pipeline with `--tasks agentic`.
  *
  * Hidden detector tools: every LLM-driven detector (SSRF, NoSQL injection,
  * command injection, template injection, deserialization, XXE, prototype
  * pollution, GraphQL, secrets/crypto, race-condition, auth-logic, sharp-
  * edges, supply-chain, reachability-check, diff-review, crypto-behavioral)
- * is exposed here as a hidden DagTool via `exposeAgentTaskAsHiddenDagTool`.
+ * is exposed here as a hidden DagTool via `defineHiddenDagNodeTool`.
  * Operators never invoke them directly — they participate in the scan DAG
  * as `dependsOn: ["ssrf-detect"]` targets — but declaring them on the
  * module puts all 16 detectors in one authoring surface and means the
- * module registry, not `createDefaultTaskRegistry`, owns their lifecycle.
+ * module registry, not `createDefaultDagRegistry`, owns their lifecycle.
  *
  * Tasks flagged `multiStrategy: true` get wrapped with `withMultiStrategy`
- * at registration time (via the bridge's strategy cache), matching the
+ * at registration time (via the hidden DAG node helper), matching the
  * legacy `wrapTask(…)` behaviour from the old registry bootstrapping.
  *
  * Prompt overrides are intentionally not exposed here until the scanner
@@ -41,8 +41,8 @@ import { supplyChainTask } from "../../agents/tasks/supply-chain.js";
 import { templateInjectionTask } from "../../agents/tasks/template-injection.js";
 import { xxeDetectionTask } from "../../agents/tasks/xxe-detection.js";
 import { AgenticPlugin } from "../../scanners/agentic.js";
-import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
 import { defineModule } from "../define.js";
+import { defineHiddenDagNodeTool } from "../hidden-dag-node.js";
 import { severityProperty, targetProperty } from "../sast/schema-fragments.js";
 import { buildScannerDagTool } from "../scanner-adapter.js";
 import type { CopilotModule } from "../types.js";
@@ -65,10 +65,10 @@ export function createAgenticSastModule(): CopilotModule {
   });
 
   const hide = <Id extends "agentic-sast">(
-    task: Parameters<typeof exposeAgentTaskAsHiddenDagTool<Id>>[0],
+    task: Parameters<typeof defineHiddenDagNodeTool<Id>>[0],
     multiStrategy = true,
   ) =>
-    exposeAgentTaskAsHiddenDagTool<Id>(task, {
+    defineHiddenDagNodeTool<Id>(task, {
       moduleId: "agentic-sast" as Id,
       multiStrategy,
     });

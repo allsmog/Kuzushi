@@ -18,7 +18,7 @@ so new callers should use the canonical names:
 - `patch:finding`
 - `findings:list`
 - `context:build`
-- `threat-hunt:run`
+- `carlini-threat-hunt:run`
 - `taint-iris:hunt`
 
 Legacy `sast:<action>` aliases remain registered for backward compatibility,

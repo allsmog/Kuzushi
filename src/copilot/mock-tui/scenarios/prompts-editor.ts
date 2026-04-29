@@ -9,10 +9,10 @@ registerScenario({
     return {
       shell: baseShell({
         shellView: "prompts-editor",
-        focusedModule: "threat-hunt",
+        focusedModule: "carlini-threat-hunt",
         modules: cards.map((c) => c.id),
         moduleCatalog: cards,
-        promptsEditor: mockPromptsEditor("threat-hunt"),
+        promptsEditor: mockPromptsEditor("carlini-threat-hunt"),
         target: process.cwd(),
       }),
     };

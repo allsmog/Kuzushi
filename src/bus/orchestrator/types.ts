@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
-import type { TaskRegistry } from "../../agents/registry.js";
 import type { PipelineHookChain } from "../../hooks/chain.js";
+import type { DagRegistry } from "../../modules/dag-registry.js";
 import type { Precedents } from "../../precedents.js";
 import type { Finding } from "../../scanners/types.js";
 import type { StageTimestamps } from "../../scoring/run-metrics.js";
@@ -194,7 +194,7 @@ export interface RunState {
 }
 
 export interface OrchestratorDeps {
-  taskRegistry: TaskRegistry;
+  dagRegistry: DagRegistry;
   db: Database.Database;
   runtime: AgentRuntime;
 }

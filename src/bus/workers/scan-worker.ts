@@ -1,9 +1,9 @@
 import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../../agent-runtime/types.js";
-import type { TaskRegistry } from "../../agents/registry.js";
-import type { AgentTask, TaskContext } from "../../agents/types.js";
 import { resolveTaskConfig as resolveConfiguredTaskConfig } from "../../capabilities.js";
 import type { KnowledgeRegistry } from "../../knowledge/types.js";
+import type { DagRegistry, DagRegistryEntry } from "../../modules/dag-registry.js";
+import type { ExecutionContext } from "../../modules/types.js";
 import type { Finding, TaskConfig } from "../../scanners/types.js";
 import { loadSecurityProfiles } from "../../security-profiles.js";
 import { attachTaskOutputMeta, getTaskOutputMeta } from "../../task-output-meta.js";
@@ -17,7 +17,7 @@ import { extractTaskFindings } from "../task-findings.js";
 import type { MessageBus } from "../types.js";
 
 export interface ScanWorkerDeps {
-  taskRegistry: TaskRegistry;
+  dagRegistry: DagRegistry;
   config: KuzushiConfig;
   runtime: AgentRuntime;
   knowledgeRegistry?: KnowledgeRegistry;
@@ -25,15 +25,15 @@ export interface ScanWorkerDeps {
 }
 
 const ENSEMBLE_ELIGIBLE_TASK_IDS = new Set([
-  "secrets-crypto-detect",
-  "code-config-detect",
-  "race-condition-detect",
-  "ssrf-detect",
-  "prototype-pollution-detect",
-  "nosql-injection-detect",
-  "template-injection-detect",
-  "supply-chain-detect",
-  "graphql-security-detect",
+  "agentic-sast:secrets-crypto-detect",
+  "context:code-config-detect",
+  "agentic-sast:race-condition-detect",
+  "agentic-sast:ssrf-detect",
+  "agentic-sast:prototype-pollution-detect",
+  "agentic-sast:nosql-injection-detect",
+  "agentic-sast:template-injection-detect",
+  "agentic-sast:supply-chain-detect",
+  "agentic-sast:graphql-security-detect",
 ]);
 
 /** Scan worker: executes finding-producing tasks. */
@@ -42,7 +42,7 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
     const { context, taskId, input, upstreamOutputs } = event.payload;
     const runId = event.meta.runId;
 
-    if (!deps.taskRegistry.has(taskId)) {
+    if (!deps.dagRegistry.has(taskId)) {
       await bus.publish(
         createEvent("task:error", runId, {
           context,
@@ -54,7 +54,7 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
       return;
     }
 
-    const task = deps.taskRegistry.get(taskId);
+    const task = deps.dagRegistry.get(taskId);
 
     try {
       const taskConfig = resolveConfiguredTaskConfig(deps.config, taskId);
@@ -70,32 +70,35 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
 
       // Look up the pipeline's abort signal from the run-signal registry.
       // `runPipeline` registers the operator-provided signal under runId
-      // before publishing `pipeline:start`; without this hop `TaskContext.signal`
-      // stays undefined and tasks like threat-hunt can't honor Ctrl+C.
+      // before publishing `pipeline:start`; without this hop `ctx.signal`
+      // stays undefined and long-running tools can't honor Ctrl+C.
       const runSignal = getRunSignal(runId);
 
-      const taskContext: TaskContext = {
-        runId,
-        projectRoot,
-        workRoot,
-        repoRoot: workRoot,
-        scanPath: context.scanPath,
-        ...(context.gitRoot ? { gitRoot: context.gitRoot } : {}),
-        repoName: context.repoName,
+      const execContext: ExecutionContext = {
+        cwd: workRoot,
+        target: workRoot,
         config: deps.config,
         runtime: wrapRuntimeWithActivityForwarding(deps.runtime, bus, taskId, runId, "scan"),
         bus,
-        upstreamOutputs,
-        securityProfiles,
-        knowledgeRegistry: deps.knowledgeRegistry,
-        db: deps.db,
+        ...(securityProfiles ? { securityProfiles } : {}),
+        ...(deps.knowledgeRegistry ? { knowledgeRegistry: deps.knowledgeRegistry } : {}),
         ...(runSignal ? { signal: runSignal } : {}),
+        dag: {
+          runId,
+          repoRoot: projectRoot,
+          workRoot,
+          scanPath: context.scanPath,
+          ...(context.gitRoot ? { gitRoot: context.gitRoot } : {}),
+          repoName: context.repoName,
+          ...(deps.db ? { db: deps.db } : {}),
+          upstreamOutputs,
+        },
       };
 
       const executed = await executeTaskWithOptionalEnsemble(
         task,
         input,
-        taskContext,
+        execContext,
         taskConfig,
         deps.config,
       );
@@ -144,23 +147,20 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
 }
 
 /**
- * Run a task once, returning the structured result the scan-worker needs
- * (output, emitted findings, wall-clock, cost). Replaces the legacy
- * `executeAgentTask` helper — the bridge now ensures every DAG node is an
- * `AgentTask` adapter registered through a `CopilotModule`, so this inlined
- * call is the only invocation shape left.
+ * Run a DagTool once, returning the structured result the scan-worker needs:
+ * output, emitted findings, wall-clock, and cost.
  */
 async function runTaskOnce(
-  task: AgentTask,
+  task: DagRegistryEntry,
   input: unknown,
-  taskContext: TaskContext,
+  execContext: ExecutionContext,
   taskConfig: TaskConfig,
 ) {
   const startedAt = Date.now();
   if (task.init) {
     await task.init(taskConfig);
   }
-  const output = await task.run(input, taskContext);
+  const output = await task.run(input, execContext);
   return {
     output,
     emittedFindings: extractTaskFindings(task.outputKind, output),
@@ -170,9 +170,9 @@ async function runTaskOnce(
 }
 
 async function executeTaskWithOptionalEnsemble(
-  task: AgentTask,
+  task: DagRegistryEntry,
   input: unknown,
-  taskContext: TaskContext,
+  execContext: ExecutionContext,
   taskConfig: TaskConfig,
   config: KuzushiConfig,
 ) {
@@ -182,7 +182,7 @@ async function executeTaskWithOptionalEnsemble(
     task.outputKind !== "findings" ||
     !ENSEMBLE_ELIGIBLE_TASK_IDS.has(task.id)
   ) {
-    return runTaskOnce(task, input, taskContext, taskConfig);
+    return runTaskOnce(task, input, execContext, taskConfig);
   }
 
   const startedAt = Date.now();
@@ -193,7 +193,7 @@ async function executeTaskWithOptionalEnsemble(
           task,
           input,
           {
-            ...taskContext,
+            ...execContext,
             modelOverride: model,
           },
           taskConfig,

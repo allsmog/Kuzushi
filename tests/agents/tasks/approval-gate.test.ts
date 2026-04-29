@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createApprovalGate } from "../../../src/agents/tasks/approval-gate.js";
-import type { TaskContext } from "../../../src/agents/types.js";
+import type { DagRunContext } from "../../../src/agents/types.js";
 import type { MessageBus } from "../../../src/bus/types.js";
 
 function createMockBus(): MessageBus {
@@ -13,7 +13,7 @@ function createMockBus(): MessageBus {
   };
 }
 
-function createMockContext(bus: MessageBus): TaskContext {
+function createMockContext(bus: MessageBus): DagRunContext {
   return {
     runId: "test-run-1",
     repoRoot: "/tmp/test-repo",

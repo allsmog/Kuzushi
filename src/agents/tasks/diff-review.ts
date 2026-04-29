@@ -8,7 +8,7 @@ import { getFixedFindingsForFiles } from "../../store.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { DagNodeImpl, DagRunContext } from "../types.js";
 import {
   computeDetectionFingerprint,
   normalizeFilePath,
@@ -111,7 +111,7 @@ interface DiffReviewConfig {
   diffBase: string;
 }
 
-function resolveConfig(ctx: TaskContext): DiffReviewConfig {
+function resolveConfig(ctx: DagRunContext): DiffReviewConfig {
   const raw = ctx.config.taskConfig["diff-review"];
   const model =
     isRecord(raw) && typeof raw["model"] === "string" && raw["model"].trim()
@@ -353,7 +353,7 @@ function buildRegressionPrompt(
 }
 
 async function detectRegressions(
-  context: TaskContext,
+  context: DagRunContext,
   previousFindings: Array<{
     fingerprint: string;
     ruleId: string;
@@ -440,7 +440,7 @@ async function detectRegressions(
   return findings;
 }
 
-export const diffReviewTask: AgentTask<ScanOpts, Finding[]> = {
+export const diffReviewTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "diff-review",
   displayName: "Differential Review",
   outputKind: "findings",

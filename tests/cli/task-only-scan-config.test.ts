@@ -51,13 +51,13 @@ describe("task-only scan config", () => {
       makeOptions({
         taskModels: [
           "systems-hunt=anthropic:claude-sonnet-4-6",
-          "threat-hunt=anthropic:claude-opus-4-1",
+          "carlini-threat-hunt=anthropic:claude-opus-4-1",
         ],
       }),
     );
 
     expect(config.taskConfig["systems-hunt"]?.model).toBe("anthropic:claude-sonnet-4-6");
-    expect(config.taskConfig["threat-hunt"]?.model).toBe("anthropic:claude-opus-4-1");
+    expect(config.taskConfig["carlini-threat-hunt"]?.model).toBe("anthropic:claude-opus-4-1");
   });
 
   it("reference preserves configured tasks while deep-merging taskConfig", () => {

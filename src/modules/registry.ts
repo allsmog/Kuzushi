@@ -1,17 +1,17 @@
 /**
  * ModuleRegistry — manages CopilotModule lifecycle and tool resolution.
  *
- * Extends the same patterns as TaskRegistry (agents/registry.ts) but operates
+ * Extends the same patterns as DagRegistry but operates
  * at the module level rather than individual tasks. Each module can contribute
  * both tools (for interactive/headless use) and tasks (for DAG pipeline execution).
  *
  * Module tools are namespaced as "moduleId:toolAction" (e.g. "blackbox:recon").
  */
 
-import type { TaskRegistry } from "../agents/registry.js";
 import type { KnowledgeRegistry } from "../knowledge/types.js";
-import { registerDagToolsInTaskRegistry } from "./dag-bridge.js";
 import { installDagToolExecuteWrappers } from "./dag-execute.js";
+import type { DagRegistry } from "./dag-registry.js";
+import { registerDagToolsInDagRegistry } from "./dag-registry.js";
 import { ModuleLoadError } from "./errors.js";
 import {
   type CopilotModule,
@@ -59,14 +59,14 @@ export class ModuleRegistry {
    * 1. Validate no ID conflict
    * 2. Register
    * 3. Call init() if defined
-   * 4. Register tasks in the TaskRegistry if provided
+   * 4. Register tasks in the DagRegistry if provided
    * 5. Register knowledge modules if provided
    */
   async loadModule(
     mod: CopilotModule,
     ctx: ModuleContext,
     opts?: {
-      taskRegistry?: TaskRegistry;
+      dagRegistry?: DagRegistry;
       knowledgeRegistry?: KnowledgeRegistry;
       moduleConfig?: Record<string, unknown>;
       /**
@@ -99,11 +99,11 @@ export class ModuleRegistry {
       }
       this.initialized.add(mod.id);
 
-      // Register DagTools (module-forward DAG participants) via the bridge.
-      // Safe to call unconditionally — bridge silently skips re-registrations
+      // Register DagTools (module-forward DAG participants) directly.
+      // Safe to call unconditionally — the DAG registry skips re-registrations
       // and modules without any DagTools are a no-op.
-      if (opts?.taskRegistry) {
-        registerDagToolsInTaskRegistry(opts.taskRegistry, mod);
+      if (opts?.dagRegistry) {
+        registerDagToolsInDagRegistry(opts.dagRegistry, mod);
       }
       installDagToolExecuteWrappers(mod);
 

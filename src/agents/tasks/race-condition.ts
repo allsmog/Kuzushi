@@ -11,7 +11,7 @@ import { formatProfilesForPrompt, getProfilesForTask } from "../../security-prof
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { DagNodeImpl, DagRunContext } from "../types.js";
 import {
   computeDetectionFingerprint,
   normalizeFilePath,
@@ -97,7 +97,7 @@ interface RaceConditionConfig {
   maxFindings: number;
 }
 
-function resolveConfig(ctx: TaskContext): RaceConditionConfig {
+function resolveConfig(ctx: DagRunContext): RaceConditionConfig {
   const model = resolveTaskModel(ctx, "race-condition");
   const maxFindings = resolveTaskPositiveInt(ctx, "race-condition", "maxFindings", 50);
   return { model, maxFindings };
@@ -265,7 +265,7 @@ function computeFingerprint(repoName: string, filePath: string, f: RaceCondition
   ]);
 }
 
-export const raceConditionTask: AgentTask<ScanOpts, Finding[]> = {
+export const raceConditionTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "race-condition-detect",
   displayName: "Race Condition Detector",
   outputKind: "findings",

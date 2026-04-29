@@ -14,7 +14,7 @@ describe("prompt-edit helpers", () => {
   describe("verbToPromptKey / promptKeyToVerb", () => {
     it("translates known verbs", () => {
       expect(verbToPromptKey("triage")).toBe("TRIAGE_PROMPT");
-      expect(verbToPromptKey("threat-hunt")).toBe("THREAT_HUNT_PROMPT");
+      expect(verbToPromptKey("carlini-threat-hunt")).toBe("CARLINI_THREAT_HUNT_PROMPT");
       expect(verbToPromptKey("TAINT-IRIS")).toBe("TAINT_IRIS_PROMPT");
     });
 
@@ -24,7 +24,7 @@ describe("prompt-edit helpers", () => {
     });
 
     it("round-trips via promptKeyToVerb", () => {
-      expect(promptKeyToVerb("THREAT_HUNT_PROMPT")).toBe("threat-hunt");
+      expect(promptKeyToVerb("CARLINI_THREAT_HUNT_PROMPT")).toBe("carlini-threat-hunt");
       expect(promptKeyToVerb("TRIAGE_PROMPT")).toBe("triage");
     });
   });

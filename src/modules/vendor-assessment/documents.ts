@@ -3,7 +3,7 @@
  * attachment subsystem (`src/modules/_shared/attachments`). Vendor's
  * domain-specific filename heuristics are expressed as a `KindSpec` and the
  * actual parsing / kind inference / mime detection lives in the shared
- * package, alongside the threat-model / context / threat-hunt KBs.
+ * package, alongside the threat-model / context / carlini-threat-hunt KBs.
  */
 
 import {

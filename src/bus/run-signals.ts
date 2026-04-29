@@ -4,8 +4,8 @@
  * Why this exists: `runPipeline` in `src/cli/commands/scan-pipeline.ts`
  * owns the AbortSignal the shell / tool-dispatcher hands it for the
  * current scan. Workers registered on the bus (scan-worker, triage-worker,
- * etc.) need that signal so they can forward it into `TaskContext.signal`
- * — otherwise a long-running task (e.g. a threat-hunt actor on
+ * etc.) need that signal so they can forward it into `DagRunContext.signal`
+ * — otherwise a long-running task (e.g. a carlini-threat-hunt actor on
  * Opus + max thinking) ignores Ctrl+C because its runtime.query never
  * receives an AbortController.
  *

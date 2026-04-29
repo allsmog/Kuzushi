@@ -8,7 +8,7 @@
  *
  * This module exists to enable the SAST family to be split into per-capability
  * sub-modules (`semgrep`, `codeql`, `taint-iris`, `triage`, `verify`, `patch`,
- * `threat-hunt`, `context`, `findings`) while sharing this infra. Phase 1 of
+ * `carlini-threat-hunt`, `context`, `findings`) while sharing this infra. Phase 1 of
  * that split extracts the helpers; Phase 2 creates the sub-modules.
  */
 
@@ -194,7 +194,7 @@ async function generateSingleProjectContext(
   };
 
   const upstreamOutputs = new Map<string, unknown>();
-  const buildTaskContext = () => ({
+  const buildDagRunContext = () => ({
     runId: crypto.randomUUID(),
     repoRoot,
     scanPath,
@@ -220,7 +220,7 @@ async function generateSingleProjectContext(
   ctx.signal?.throwIfAborted();
   updateProgress("context-gatherer");
   const { contextGathererTask } = await import("../../agents/tasks/context-gatherer.js");
-  const gathererOutput = await contextGathererTask.run(scanOpts, buildTaskContext());
+  const gathererOutput = await contextGathererTask.run(scanOpts, buildDagRunContext());
   upstreamOutputs.set("context-gatherer", gathererOutput);
 
   ctx.signal?.throwIfAborted();
@@ -233,7 +233,7 @@ async function generateSingleProjectContext(
         updateProgress("context-enricher");
         try {
           const { contextEnricherTask } = await import("../../agents/tasks/context-enricher.js");
-          enricherOutput = await contextEnricherTask.run(undefined, buildTaskContext());
+          enricherOutput = await contextEnricherTask.run(undefined, buildDagRunContext());
           upstreamOutputs.set("context-enricher", enricherOutput);
         } catch (err) {
           rethrowIfAborted(err);
@@ -250,7 +250,7 @@ async function generateSingleProjectContext(
   const { appModelBuildTask } = await import("../../agents/tasks/app-model-build.js");
   let appModel: unknown;
   try {
-    appModel = await appModelBuildTask.run(scanOpts, buildTaskContext());
+    appModel = await appModelBuildTask.run(scanOpts, buildDagRunContext());
     upstreamOutputs.set("app-model-build", appModel);
   } catch (err) {
     rethrowIfAborted(err);

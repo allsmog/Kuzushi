@@ -59,7 +59,7 @@ function shell(overrides: Partial<ShellState> = {}): ShellState {
     modules: [],
     moduleCatalog: [],
     tools: [],
-    focusedModule: "threat-hunt",
+    focusedModule: "carlini-threat-hunt",
     shellView: "prompts-editor",
     openFindingId: null,
     target: null,
@@ -74,26 +74,15 @@ function shell(overrides: Partial<ShellState> = {}): ShellState {
 
 const SAMPLE_ROWS: PromptAuditRow[] = [
   {
-    moduleId: "threat-hunt",
-    toolName: "threat-hunt:run",
+    moduleId: "carlini-threat-hunt",
+    toolName: "carlini-threat-hunt:run",
     verb: "run",
-    promptKey: "THREAT_HUNT_PROMPT" as const,
+    promptKey: "CARLINI_THREAT_HUNT_PROMPT" as const,
     effective: {
-      promptKey: "THREAT_HUNT_PROMPT" as const,
-      toolName: "threat-hunt:run",
-      source: "default",
-    },
-  },
-  {
-    moduleId: "threat-hunt",
-    toolName: "threat-hunt:run",
-    verb: "actor",
-    promptKey: "THREAT_HUNT_PROMPT" as const,
-    effective: {
-      promptKey: "THREAT_HUNT_PROMPT" as const,
-      toolName: "threat-hunt:run",
+      promptKey: "CARLINI_THREAT_HUNT_PROMPT" as const,
+      toolName: "carlini-threat-hunt:run",
       source: "file",
-      filePath: "/repo/.kuzushi/prompts/threat-hunt/actor.md",
+      filePath: "/repo/.kuzushi/prompts/carlini-threat-hunt/run.md",
       byteLen: 384,
     },
   },
@@ -108,10 +97,8 @@ describe("PromptsEditorView", () => {
 
   it("renders the table with default + local-edit rows", () => {
     const out = renderText(createElement(PromptsEditorView, { shell: shell(), rows: SAMPLE_ROWS }));
-    expect(out).toContain("2 prompts · 1 local edit");
+    expect(out).toContain("1 prompt · 1 local edit");
     expect(out).toContain("run");
-    expect(out).toContain("default");
-    expect(out).toContain("actor");
     expect(out).toContain("local edit");
     // Action verbs are listed.
     expect(out).toContain("edit <name>");
@@ -125,8 +112,8 @@ describe("PromptsEditorView", () => {
         audit: [],
         lastSavedAt: now - 1_000,
         lastSaved: {
-          name: "actor",
-          path: "/repo/.kuzushi/prompts/threat-hunt/actor.md",
+          name: "run",
+          path: "/repo/.kuzushi/prompts/carlini-threat-hunt/run.md",
           size: 412,
         },
       },
@@ -135,7 +122,7 @@ describe("PromptsEditorView", () => {
       createElement(PromptsEditorView, { shell: state, rows: [], nowMs: now }),
     );
     expect(out).toContain("Saved prompt override");
-    expect(out).toContain("actor");
+    expect(out).toContain("run");
     expect(out).toContain("412 bytes");
     expect(out).toContain("active");
   });
@@ -147,8 +134,8 @@ describe("PromptsEditorView", () => {
         audit: [],
         lastSavedAt: now - 30_000,
         lastSaved: {
-          name: "actor",
-          path: "/repo/.kuzushi/prompts/threat-hunt/actor.md",
+          name: "run",
+          path: "/repo/.kuzushi/prompts/carlini-threat-hunt/run.md",
           size: 12,
         },
       },

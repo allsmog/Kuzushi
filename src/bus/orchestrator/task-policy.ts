@@ -1,24 +1,27 @@
-import { normalizeTaskIds, type TaskRegistry } from "../../agents/registry.js";
 import { normalizeTaskCapabilityIds } from "../../capabilities.js";
+import { type DagRegistry, normalizeDagIds } from "../../modules/dag-registry.js";
 import type { KuzushiConfig } from "../../types.js";
 
 const THREAT_AWARE_DETECTOR_TASK_IDS = new Set([
-  "code-config-detect",
-  "ssrf-detect",
-  "nosql-injection-detect",
-  "prototype-pollution-detect",
-  "template-injection-detect",
-  "graphql-security-detect",
-  "race-condition-detect",
-  "command-injection-detect",
-  "xxe-detect",
-  "deserialization-detect",
-  "supply-chain-detect",
-  "auth-logic-detect",
-  "threat-scenario-build",
+  "context:code-config-detect",
+  "agentic-sast:ssrf-detect",
+  "agentic-sast:nosql-injection-detect",
+  "agentic-sast:prototype-pollution-detect",
+  "agentic-sast:template-injection-detect",
+  "agentic-sast:graphql-security-detect",
+  "agentic-sast:race-condition-detect",
+  "agentic-sast:command-injection-detect",
+  "agentic-sast:xxe-detect",
+  "agentic-sast:deserialization-detect",
+  "agentic-sast:supply-chain-detect",
+  "agentic-sast:auth-logic-detect",
+  "threat-model:threat-scenario-build",
 ]);
 
-const THREAT_MODEL_TASK_ID = "threat-model-randori";
+const THREAT_MODEL_TASK_ID = "threat-model:threat-model-randori";
+const CONTEXT_GATHERER_ID = "context:context-gatherer";
+const CONTEXT_ENRICHER_ID = "context:context-enricher";
+const TASK_SELECTOR_ID = "pipeline:task-selector";
 
 export interface InitialTaskPlan {
   baseTaskIds: string[];
@@ -35,7 +38,7 @@ export interface TaskPolicyOptions {
 }
 
 export function resolveInitialTaskPlan(
-  registry: TaskRegistry,
+  registry: DagRegistry,
   tasks: string[],
   config: Pick<
     KuzushiConfig,
@@ -51,19 +54,19 @@ export function resolveInitialTaskPlan(
   const allRegisteredTasks = registry.ids().filter((id) => !disabledSet.has(id));
   const useAllTasks = configuredTasksRaw.length === 1 && configuredTasksRaw[0] === "*";
   const dynamicSelectionActive =
-    config.enableDynamicTaskSelection === true && registry.has("task-selector");
+    config.enableDynamicTaskSelection === true && registry.has(TASK_SELECTOR_ID);
   const enableContextExplicit =
-    config.enableContextGathering !== false && registry.has("context-gatherer");
+    config.enableContextGathering !== false && registry.has(CONTEXT_GATHERER_ID);
   const enableContextEnrichment =
-    config.enableContextEnrichment === true && registry.has("context-enricher");
+    config.enableContextEnrichment === true && registry.has(CONTEXT_ENRICHER_ID);
   const baseTaskIds = useAllTasks ? allRegisteredTasks : configuredTasks;
 
   const candidateIds = injectThreatModelPolicyCandidates(registry, [
     ...explicitTasks,
-    ...(enableContextExplicit ? ["context-gatherer"] : []),
-    ...(enableContextEnrichment ? ["context-enricher"] : []),
+    ...(enableContextExplicit ? [CONTEXT_GATHERER_ID] : []),
+    ...(enableContextEnrichment ? [CONTEXT_ENRICHER_ID] : []),
     ...baseTaskIds,
-    ...(dynamicSelectionActive ? ["task-selector"] : []),
+    ...(dynamicSelectionActive ? [TASK_SELECTOR_ID] : []),
   ]).filter((id) => !disabledSet.has(id));
 
   let enabledTaskIds = collectTransitiveDeps(registry, candidateIds).filter(
@@ -74,20 +77,20 @@ export function resolveInitialTaskPlan(
   if (config.enableContextGathering === false) {
     const othersDepend = enabledTaskIds.some(
       (id) =>
-        id !== "context-gatherer" &&
+        id !== CONTEXT_GATHERER_ID &&
         registry.has(id) &&
-        registry.get(id).dependsOn.includes("context-gatherer"),
+        registry.get(id).dependsOn.includes(CONTEXT_GATHERER_ID),
     );
 
     if (!othersDepend) {
-      enabledTaskIds = enabledTaskIds.filter((id) => id !== "context-gatherer");
+      enabledTaskIds = enabledTaskIds.filter((id) => id !== CONTEXT_GATHERER_ID);
     } else if (dynamicSelectionActive) {
       contextGatheringForced = true;
     }
   }
 
   return {
-    baseTaskIds: normalizeTaskIds(baseTaskIds),
+    baseTaskIds: normalizeDagIds(baseTaskIds, registry),
     candidateIds,
     enabledTaskIds,
     disabledTaskIds,
@@ -98,7 +101,7 @@ export function resolveInitialTaskPlan(
 }
 
 export function normalizeDisabledTaskIds(
-  registry: TaskRegistry,
+  registry: DagRegistry,
   disabledTasks: readonly string[],
 ): string[] {
   const raw = disabledTasks
@@ -106,7 +109,7 @@ export function normalizeDisabledTaskIds(
     .filter((id) => id.length > 0);
   if (raw.length === 0) return [];
 
-  const normalized = normalizeTaskIds(normalizeTaskCapabilityIds(raw));
+  const normalized = normalizeDagIds(normalizeTaskCapabilityIds(raw), registry);
   const unknown = normalized.filter((id) => !registry.has(id));
   if (unknown.length > 0) {
     throw new Error(
@@ -117,30 +120,30 @@ export function normalizeDisabledTaskIds(
 }
 
 export function filterDisabledTaskIds(ids: string[], disabledSet: ReadonlySet<string>): string[] {
-  if (disabledSet.size === 0) return normalizeTaskIds(ids);
-  return normalizeTaskIds(ids).filter((id) => !disabledSet.has(id));
+  if (disabledSet.size === 0) return normalizeDagIds(ids);
+  return normalizeDagIds(ids).filter((id) => !disabledSet.has(id));
 }
 
 export function injectThreatModelPolicyCandidates(
-  registry: TaskRegistry,
+  registry: DagRegistry,
   candidateIds: string[],
 ): string[] {
-  const normalized = normalizeTaskIds(candidateIds);
+  const normalized = normalizeDagIds(candidateIds, registry);
   if (
     normalized.some((id) => THREAT_AWARE_DETECTOR_TASK_IDS.has(id)) &&
     registry.has(THREAT_MODEL_TASK_ID)
   ) {
-    return normalizeTaskIds([...normalized, THREAT_MODEL_TASK_ID]);
+    return normalizeDagIds([...normalized, THREAT_MODEL_TASK_ID], registry);
   }
 
   return normalized;
 }
 
 export function resolveOrderWithPolicyEdges(
-  registry: TaskRegistry,
+  registry: DagRegistry,
   enabledIds: string[],
 ): string[][] {
-  const enabled = dedupeTaskIds(normalizeTaskIds(enabledIds));
+  const enabled = dedupeTaskIds(normalizeDagIds(enabledIds, registry));
   if (enabled.length === 0) {
     return [];
   }
@@ -208,7 +211,7 @@ export function resolveOrderWithPolicyEdges(
   return groups;
 }
 
-export function collectTransitiveDeps(registry: TaskRegistry, candidateIds: string[]): string[] {
+export function collectTransitiveDeps(registry: DagRegistry, candidateIds: string[]): string[] {
   const all = new Set(candidateIds);
   const queue = [...candidateIds];
 
@@ -226,7 +229,7 @@ export function collectTransitiveDeps(registry: TaskRegistry, candidateIds: stri
     }
   }
 
-  return normalizeTaskIds([...all]);
+  return normalizeDagIds([...all], registry);
 }
 
 function buildThreatModelPolicyDeps(enabledIds: string[]): Map<string, Set<string>> {

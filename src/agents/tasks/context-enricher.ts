@@ -6,7 +6,7 @@ import { coerceRepoContext } from "../../repo-context.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { EnrichedRepoContext, RepoContext } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { DagNodeImpl, DagRunContext } from "../types.js";
 import { resolveTaskAllowedTools, resolveTaskModel } from "./runtime-overrides.js";
 
 const log = getLogger("context-enricher");
@@ -90,7 +90,7 @@ interface ContextEnricherConfig {
   model: string;
 }
 
-function resolveConfig(ctx: TaskContext): ContextEnricherConfig {
+function resolveConfig(ctx: DagRunContext): ContextEnricherConfig {
   const model = resolveTaskModel(ctx, "context-enricher", "context-enrichment");
   return { model };
 }
@@ -212,7 +212,7 @@ function normalizeOutput(raw: unknown): EnrichedRepoContext["enrichment"] {
   };
 }
 
-export const contextEnricherTask: AgentTask<unknown, EnrichedRepoContext["enrichment"]> = {
+export const contextEnricherTask: DagNodeImpl<unknown, EnrichedRepoContext["enrichment"]> = {
   id: "context-enricher",
   displayName: "LLM Context Enricher",
   outputKind: "custom",

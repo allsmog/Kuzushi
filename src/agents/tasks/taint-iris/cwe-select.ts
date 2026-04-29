@@ -9,7 +9,7 @@ import { coerceRepoContext } from "../../../repo-context.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { toErrorMessage } from "../../../utils.js";
-import type { AgentTask } from "../../types.js";
+import type { DagNodeImpl } from "../../types.js";
 import { resolveTaskModel, resolveTaskRuntime } from "../runtime-overrides.js";
 
 const log = createLogger({ stage: "taint-cwe-select" });
@@ -87,7 +87,7 @@ function buildPrompt(repoContext: ReturnType<typeof coerceRepoContext>): string 
   ].join("\n");
 }
 
-export const taintCweSelectTask: AgentTask<ScanOpts, CweSelectOutput> = {
+export const taintCweSelectTask: DagNodeImpl<ScanOpts, CweSelectOutput> = {
   id: "taint-cwe-select",
   displayName: "Taint CWE Selector",
   outputKind: "custom",

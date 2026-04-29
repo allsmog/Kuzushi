@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../agent-runtime/types.js";
-import type { TaskRegistry } from "../agents/registry.js";
 import { createDefaultKnowledgeRegistry } from "../knowledge/index.js";
+import type { DagRegistry } from "../modules/dag-registry.js";
 import { createPocExecutor } from "../poc-executor/index.js";
 import type { KuzushiConfig } from "../types.js";
 import { createBus } from "./adapters/index.js";
@@ -24,7 +24,7 @@ import { registerTriageWorker } from "./workers/triage-worker.js";
 import { registerVerificationWorker } from "./workers/verification-worker.js";
 
 export interface RegisterWorkersDeps {
-  taskRegistry: TaskRegistry;
+  dagRegistry: DagRegistry;
   db: Database.Database;
   config: KuzushiConfig;
   runtime: AgentRuntime;
@@ -44,18 +44,18 @@ export async function registerAllWorkers(
   bus: MessageBus,
   deps: RegisterWorkersDeps,
 ): Promise<void> {
-  const { taskRegistry } = deps;
+  const { dagRegistry } = deps;
   const knowledgeRegistry = createDefaultKnowledgeRegistry();
 
   // Register orchestrator first so workers can reference it for hook resolution
   const orchestrator = registerOrchestrator(bus, {
-    taskRegistry,
+    dagRegistry,
     db: deps.db,
     runtime: deps.runtime,
   });
 
   registerScanWorker(bus, {
-    taskRegistry,
+    dagRegistry,
     config: deps.config,
     runtime: deps.runtime,
     knowledgeRegistry,
@@ -63,7 +63,7 @@ export async function registerAllWorkers(
   });
 
   registerTriageWorker(bus, {
-    taskRegistry,
+    dagRegistry,
     config: deps.config,
     runtime: deps.runtime,
     db: deps.db,
@@ -106,7 +106,7 @@ export async function registerAllWorkers(
 
   registerTaintAnalysisRefinementWorker(bus, {
     db: deps.db,
-    taskRegistry,
+    dagRegistry,
     config: deps.config,
     runtime: deps.runtime,
   });
@@ -126,7 +126,7 @@ export async function registerAllWorkers(
       db: deps.db,
       config: deps.config,
       runtime: deps.runtime,
-      taskRegistry,
+      dagRegistry,
     });
   }
 

@@ -11,7 +11,7 @@ import { formatProfilesForPrompt, getProfilesForTask } from "../../security-prof
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { DagNodeImpl, DagRunContext } from "../types.js";
 import {
   computeDetectionFingerprint,
   normalizeFilePath,
@@ -100,7 +100,7 @@ interface GraphqlSecurityConfig {
   maxFindings: number;
 }
 
-function resolveConfig(ctx: TaskContext): GraphqlSecurityConfig {
+function resolveConfig(ctx: DagRunContext): GraphqlSecurityConfig {
   const model = resolveTaskModel(ctx, "graphql-security");
   const maxFindings = resolveTaskPositiveInt(ctx, "graphql-security", "maxFindings", 50);
   return { model, maxFindings };
@@ -308,7 +308,7 @@ function computeFingerprint(repoName: string, filePath: string, f: GraphqlSecuri
   ]);
 }
 
-export const graphqlSecurityTask: AgentTask<ScanOpts, Finding[]> = {
+export const graphqlSecurityTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "graphql-security-detect",
   displayName: "GraphQL Security Detector",
   outputKind: "findings",

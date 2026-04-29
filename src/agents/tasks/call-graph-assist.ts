@@ -2,7 +2,7 @@ import { getCodeIntelligenceProvider } from "../../analysis-support/code-intelli
 import { createLogger } from "../../logger.js";
 import type { Finding } from "../../scanners/types.js";
 import { toErrorMessage } from "../../utils.js";
-import type { AgentTask } from "../types.js";
+import type { DagNodeImpl } from "../types.js";
 
 const log = createLogger({ stage: "call-graph-assist" });
 
@@ -18,7 +18,7 @@ const MAX_CALLERS = 5;
  *
  * Contributes ranking data + prompt evidence; never gates.
  */
-export const callGraphAssistTask: AgentTask<Finding[], Finding[]> = {
+export const callGraphAssistTask: DagNodeImpl<Finding[], Finding[]> = {
   id: "call-graph-assist",
   displayName: "Call-Graph Assist",
   outputKind: "findings",

@@ -14,7 +14,7 @@ import { resolveVulnScoutPlugin } from "../../agents/tasks/vuln-scout/resolve-vu
 import { buildVulnScoutPrompt, vulnScoutTask } from "../../agents/tasks/vuln-scout/vuln-scout.js";
 import { resolveRepo } from "../../cli/shared.js";
 import { isRecord } from "../../utils.js";
-import { exposeAgentTaskAsHiddenDagTool } from "../dag-bridge.js";
+import { defineHiddenDagNodeTool } from "../hidden-dag-node.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
 interface VulnScoutAuditInput {
@@ -161,7 +161,7 @@ const auditTool: ModuleTool = {
 // ---------------------------------------------------------------------------
 
 export function createCoreVulnScoutModule(): CopilotModule {
-  const hiddenVulnScout = exposeAgentTaskAsHiddenDagTool<"vuln-scout">(vulnScoutTask, {
+  const hiddenVulnScout = defineHiddenDagNodeTool<"vuln-scout">(vulnScoutTask, {
     moduleId: "vuln-scout",
     multiStrategy: true,
   });

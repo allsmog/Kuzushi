@@ -11,7 +11,7 @@ import { formatProfilesForPrompt, getProfilesForTask } from "../../security-prof
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { DagNodeImpl, DagRunContext } from "../types.js";
 import {
   computeDetectionFingerprint,
   normalizeFilePath,
@@ -95,7 +95,7 @@ interface PrototypePollutionConfig {
   maxFindings: number;
 }
 
-function resolveConfig(ctx: TaskContext): PrototypePollutionConfig {
+function resolveConfig(ctx: DagRunContext): PrototypePollutionConfig {
   const model = resolveTaskModel(ctx, "prototype-pollution");
   const maxFindings = resolveTaskPositiveInt(ctx, "prototype-pollution", "maxFindings", 50);
   return { model, maxFindings };
@@ -284,7 +284,7 @@ function computeFingerprint(
   ]);
 }
 
-export const prototypePollutionTask: AgentTask<ScanOpts, Finding[]> = {
+export const prototypePollutionTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "prototype-pollution-detect",
   displayName: "Prototype Pollution Detector",
   outputKind: "findings",

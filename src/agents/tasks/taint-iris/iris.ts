@@ -20,7 +20,7 @@ import type { Finding, TaintPathStep } from "../../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../../task-output-meta.js";
 import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
-import type { AgentTask, TaskContext } from "../../types.js";
+import type { DagNodeImpl, DagRunContext } from "../../types.js";
 import {
   resolveTaskAllowedTools,
   resolveTaskModel,
@@ -79,7 +79,7 @@ const IRIS_FINDING_SCHEMA = {
   },
 } as const;
 
-function resolveCodeqlDbPath(context: TaskContext): string | null {
+function resolveCodeqlDbPath(context: DagRunContext): string | null {
   // Check common locations for a pre-built CodeQL database
   const candidates = [
     path.join(context.repoRoot, ".kuzushi", "codeql-db"),
@@ -95,6 +95,7 @@ function buildIrisPrompt(
   cwes: CweSelection[],
   codeqlDbPath: string | null,
   repoContext: ReturnType<typeof coerceRepoContext>,
+  options: { promptOverride?: string; cweLimitNotice?: string } = {},
 ): string {
   const cweList = cwes.map((c) => `- ${c.id}: ${c.name} (${c.reason})`).join("\n");
   const repoInfo = repoContext
@@ -116,7 +117,7 @@ function buildIrisPrompt(
       ].join("\n")
     : "No CodeQL database available. Use grep-based manual tracing instead.";
 
-  return [
+  const prompt = [
     "You are an IRIS-style security analyst performing taint analysis on a codebase.",
     "Your goal: find exploitable data flow vulnerabilities by combining LLM reasoning with CodeQL.",
     "",
@@ -168,10 +169,17 @@ function buildIrisPrompt(
     "After analyzing ALL CWE classes, return your findings as structured JSON.",
     "Each finding needs: title, CWE, severity, file path, line number, description, source→sink trace,",
     "and a structured taintPath array with each step's filePath, line, message (role like 'source', 'step', 'sink'), and code snippet.",
-  ].join("\n");
+  ];
+  if (options.cweLimitNotice) {
+    prompt.splice(2, 0, "", options.cweLimitNotice);
+  }
+  if (options.promptOverride?.trim()) {
+    prompt.push("", "## Operator Prompt Override", options.promptOverride.trim());
+  }
+  return prompt.join("\n");
 }
 
-export const taintIrisTask: AgentTask<ScanOpts, Finding[]> = {
+export const taintIrisTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "taint-iris",
   displayName: "IRIS Taint Analysis",
   outputKind: "findings",
@@ -182,9 +190,14 @@ export const taintIrisTask: AgentTask<ScanOpts, Finding[]> = {
     return !!cweOutput?.cwes?.length;
   },
 
-  async run(_input, context): Promise<Finding[]> {
+  async run(input, context): Promise<Finding[]> {
     const runtime = resolveTaskRuntime(context);
     const model = resolveTaskModel(context, "taint-iris");
+    const params = (input ?? {}) as unknown as Record<string, unknown>;
+    const taskConfig = {
+      ...(context.config.taskConfig["taint-iris"] ?? {}),
+      ...(context.config.taskConfig["taint-iris:hunt"] ?? {}),
+    };
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const cweOutput = context.upstreamOutputs.get("taint-cwe-select") as
       | CweSelectOutput
@@ -196,11 +209,30 @@ export const taintIrisTask: AgentTask<ScanOpts, Finding[]> = {
       return attachTaskOutputMeta([], { costUsd: 0 });
     }
 
+    const maxCwes = readPositiveInteger(params["maxCwes"] ?? taskConfig["maxCwes"]);
+    const selectedCwes = maxCwes ? cwes.slice(0, maxCwes) : cwes;
+    const cweLimitNotice =
+      maxCwes && cwes.length > selectedCwes.length
+        ? `Analyzing first ${selectedCwes.length} of ${cwes.length} selected CWE classes.`
+        : undefined;
+    const promptOverride = readString(
+      params["TAINT_IRIS_PROMPT"] ?? taskConfig["TAINT_IRIS_PROMPT"],
+    );
+    const maxBudgetUsd = readPositiveNumber(params["maxBudgetUsd"] ?? taskConfig["maxBudgetUsd"]);
+    const abortController = context.signal ? new AbortController() : undefined;
+    if (context.signal && abortController) {
+      if (context.signal.aborted) abortController.abort();
+      else context.signal.addEventListener("abort", () => abortController.abort(), { once: true });
+    }
+
     const codeqlDbPath = resolveCodeqlDbPath(context);
-    const prompt = buildIrisPrompt(cwes, codeqlDbPath, repoContext);
+    const prompt = buildIrisPrompt(selectedCwes, codeqlDbPath, repoContext, {
+      ...(promptOverride ? { promptOverride } : {}),
+      ...(cweLimitNotice ? { cweLimitNotice } : {}),
+    });
 
     log.info(
-      `Starting IRIS taint analysis for ${cwes.length} CWE classes (model=${model}, codeql=${!!codeqlDbPath})`,
+      `Starting IRIS taint analysis for ${selectedCwes.length} CWE classes (model=${model}, codeql=${!!codeqlDbPath})`,
     );
 
     let structuredOutput: unknown;
@@ -215,6 +247,8 @@ export const taintIrisTask: AgentTask<ScanOpts, Finding[]> = {
           model,
           allowedTools: [...resolveTaskAllowedTools(context), "Bash", "Write"],
           permissionMode: "dontAsk",
+          ...(maxBudgetUsd ? { maxBudgetUsd } : {}),
+          ...(abortController ? { abortController } : {}),
           outputFormat: {
             type: "json_schema",
             schema: IRIS_FINDING_SCHEMA,
@@ -340,4 +374,18 @@ function tryParseJson(text: string): unknown {
   } catch {
     return null;
   }
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function readPositiveInteger(value: unknown): number | undefined {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : 0;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+}
+
+function readPositiveNumber(value: unknown): number | undefined {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : 0;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }

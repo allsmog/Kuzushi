@@ -318,8 +318,15 @@ export class ModuleDispatcher implements CommandDispatcher {
 // ---------------------------------------------------------------------------
 
 function pickDefaultTool(mod: CopilotModule): ModuleTool | undefined {
-  // Prefer "<id>:run" or "<id>:scan" or "<id>:exploit", else the first headless tool, else the first tool.
-  const preferred = [`${mod.id}:run`, `${mod.id}:scan`, `${mod.id}:exploit`, `${mod.id}:audit`];
+  const preferred = [
+    `${mod.id}:run`,
+    `${mod.id}:scan`,
+    `${mod.id}:audit`,
+    `${mod.id}:hunt`,
+    `${mod.id}:exploit`,
+    `${mod.id}:build`,
+    `${mod.id}:list`,
+  ];
   for (const name of preferred) {
     const t = mod.tools.find((x) => x.name === name);
     if (t) return t;

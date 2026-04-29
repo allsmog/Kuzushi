@@ -18,11 +18,11 @@ registerScenario({
       summary: baseSummary(findings),
       shell: baseShell({
         shellView: "module-run",
-        focusedModule: "threat-hunt",
+        focusedModule: "carlini-threat-hunt",
         modules: cards.map((c) => c.id),
         moduleCatalog: cards,
         moduleRun: mockModuleRun({
-          moduleId: "threat-hunt",
+          moduleId: "carlini-threat-hunt",
           status: "done",
           startedSecondsAgo: 124,
           evidenceLines: 8,

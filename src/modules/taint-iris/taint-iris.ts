@@ -2,24 +2,20 @@
  * Taint IRIS module — LLM-driven CodeQL taint analysis wrapped as a CopilotModule.
  *
  * The `taint-iris:hunt` DagTool advertises the shell-facing tool shape and
- * declares the DAG dependency on `taint-cwe-select`. Shell-mode `execute()`
- * (installed by the module-registry bridge) re-enters the scan pipeline
+ * declares the DAG dependency on `pipeline:taint-cwe-select`. Shell-mode `execute()`
+ * (installed by the module registry) re-enters the scan pipeline
  * with `chainBefore: ["taint-cwe-select"]` so the cwe-selection runs first
  * and its output populates `ctx.dag.upstreamOutputs` for the IRIS task.
  *
- * The actual DAG-node body still lives at
- * `src/agents/tasks/taint-iris/iris.ts` (registered in
- * `src/agents/index.ts`). The module bridge at
- * `src/modules/dag-bridge.ts:registerDagToolsInTaskRegistry` detects the
- * pre-existing registration and skips re-registering under the same id,
- * so both the module-forward authoring surface and the legacy task wiring
- * coexist without conflict. A future sweep (Step 4) can merge the task body
- * into `run()` once every caller of `taintIrisTask` is gone.
+ * The scanner body lives in `src/agents/tasks/taint-iris/iris.ts`; this
+ * DagTool invokes it through the native `ExecutionContext.dag` contract.
  */
 
+import { taintIrisTask } from "../../agents/tasks/taint-iris/iris.js";
 import type { Finding } from "../../scanners/types.js";
 import type { ScanOpts } from "../../types.js";
 import { defineDagTool, defineModule } from "../define.js";
+import { buildDagRunContextFromExecutionContext } from "../hidden-dag-node.js";
 import { severityProperty, targetProperty } from "../sast/schema-fragments.js";
 import type { CopilotModule, ExecutionContext } from "../types.js";
 
@@ -33,7 +29,7 @@ export function createTaintIrisModule(): CopilotModule {
       persistence: "pipeline-checkpoint",
       resume: "checkpoint",
       liveControl: "pause-resume",
-      pipelineTasks: ["taint-iris"],
+      pipelineTasks: ["taint-iris:hunt"],
     },
     formatInput(input) {
       const p = input as Record<string, unknown> | undefined;
@@ -63,26 +59,13 @@ export function createTaintIrisModule(): CopilotModule {
     },
     dag: {
       outputKind: "findings",
-      dependsOn: ["taint-cwe-select"],
+      dependsOn: ["pipeline:taint-cwe-select"],
       // Shell-mode dispatches need both tasks pinned — pinned mode disables
       // dependency auto-resolution. Full-DAG scan mode ignores this field.
-      chainBefore: ["taint-cwe-select"],
+      chainBefore: ["pipeline:taint-cwe-select"],
     },
-    async run(_input: ScanOpts, _ctx: ExecutionContext): Promise<Finding[]> {
-      // Delegate to the legacy AgentTask registration; the module-registry
-      // bridge detects that "taint-iris" is already registered (from
-      // src/agents/index.ts) and leaves the existing task intact. This
-      // method is structurally present so defineDagTool is happy but is
-      // not invoked by the orchestrator during normal scans.
-      const { taintIrisTask } = await import("../../agents/tasks/taint-iris/iris.js");
-      // Shouldn't be reached via the orchestrator — the AgentTask wins. If
-      // a future call site invokes DagTool.run() directly, surface the
-      // mis-use loudly rather than silently running a half-initialised
-      // TaskContext→ExecutionContext conversion.
-      throw new Error(
-        `DagTool "${taintIrisTask.id}:run" body is not meant to be invoked directly — ` +
-          "the orchestrator runs the legacy AgentTask registered in src/agents/index.ts.",
-      );
+    async run(input: ScanOpts, ctx: ExecutionContext): Promise<Finding[]> {
+      return taintIrisTask.run(input, buildDagRunContextFromExecutionContext(ctx));
     },
   });
 

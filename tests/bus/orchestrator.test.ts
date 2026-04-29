@@ -1,8 +1,7 @@
 import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import type { AgentRuntime } from "../../src/agent-runtime/types.js";
-import { TaskRegistry } from "../../src/agents/registry.js";
-import type { AgentTask } from "../../src/agents/types.js";
+import type { DagNodeImpl } from "../../src/agents/types.js";
 import { InProcessBus } from "../../src/bus/adapters/in-process.js";
 import type {
   PipelineCompleteEvent,
@@ -27,6 +26,7 @@ import { registerOrchestrator } from "../../src/bus/orchestrator.js";
 import { registerScanWorker } from "../../src/bus/workers/scan-worker.js";
 import { registerStoreWorker } from "../../src/bus/workers/store-worker.js";
 import { getScanPlanSummary } from "../../src/cli/commands/scan.js";
+import { DagRegistry } from "../../src/modules/dag-registry.js";
 import type { Finding } from "../../src/scanners/types.js";
 import {
   createRun,
@@ -41,12 +41,12 @@ import {
 } from "../../src/store.js";
 import type { KuzushiConfig, ScanOpts, TriageResult } from "../../src/types.js";
 
-function makeDeps(db: Database.Database, taskRegistry?: TaskRegistry): OrchestratorDeps {
-  return { taskRegistry: taskRegistry ?? new TaskRegistry(), db, runtime: {} as AgentRuntime };
+function makeDeps(db: Database.Database, dagRegistry?: DagRegistry): OrchestratorDeps {
+  return { dagRegistry: dagRegistry ?? new DagRegistry(), db, runtime: {} as AgentRuntime };
 }
 
-function makeScanWorkerDeps(taskRegistry: TaskRegistry, config?: KuzushiConfig) {
-  return { taskRegistry, config: config ?? makeConfig(), runtime: {} as AgentRuntime };
+function makeScanWorkerDeps(dagRegistry: DagRegistry, config?: KuzushiConfig) {
+  return { dagRegistry, config: config ?? makeConfig(), runtime: {} as AgentRuntime };
 }
 
 function makeConfig(): KuzushiConfig {
@@ -56,7 +56,7 @@ function makeConfig(): KuzushiConfig {
     triageBatchSize: 15,
     triageConcurrency: 1,
     scanMode: "sequential",
-    tasks: ["semgrep"],
+    tasks: ["semgrep:scan"],
     severity: ["ERROR", "WARNING"],
     excludePatterns: ["node_modules"],
     taskConfig: {
@@ -67,7 +67,7 @@ function makeConfig(): KuzushiConfig {
 
 function makeFinding(fp: string, score: number): Finding {
   return {
-    taskId: "semgrep",
+    taskId: "semgrep:scan",
     fingerprint: fp,
     ruleId: "test.rule",
     filePath: "src/app.ts",
@@ -95,11 +95,11 @@ function makeResult(fp: string): TriageResult {
   };
 }
 
-/** Create a TaskRegistry with a semgrep task that returns the given findings. */
-function makeRegistryWithFindings(...findings: Finding[]): TaskRegistry {
-  const taskRegistry = new TaskRegistry();
-  taskRegistry.register({
-    id: "semgrep",
+/** Create a DagRegistry with a semgrep task that returns the given findings. */
+function makeRegistryWithFindings(...findings: Finding[]): DagRegistry {
+  const dagRegistry = new DagRegistry();
+  dagRegistry.register({
+    id: "semgrep:scan",
     displayName: "Semgrep",
     outputKind: "findings",
     dependsOn: [],
@@ -107,14 +107,14 @@ function makeRegistryWithFindings(...findings: Finding[]): TaskRegistry {
       return findings;
     },
   });
-  return taskRegistry;
+  return dagRegistry;
 }
 
 function makeScanOpts(): ScanOpts {
   return {
     severity: ["ERROR"],
     excludePatterns: ["node_modules"],
-    tasks: ["semgrep"],
+    tasks: ["semgrep:scan"],
     fresh: false,
   };
 }
@@ -147,9 +147,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const semgrepTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "semgrep",
+    const dagRegistry = new DagRegistry();
+    const semgrepTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "semgrep:scan",
       displayName: "Semgrep",
       outputKind: "findings",
       dependsOn: [],
@@ -157,10 +157,10 @@ describe("PipelineOrchestrator", () => {
         return [makeFinding("fp-start", 80)];
       },
     };
-    taskRegistry.register(semgrepTask);
+    dagRegistry.register(semgrepTask);
 
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -173,7 +173,7 @@ describe("PipelineOrchestrator", () => {
 
     const taskStartPromise = bus.waitFor<TaskStartEvent>(
       "task:start",
-      (event) => event.meta.runId === runId && event.payload.taskId === "semgrep",
+      (event) => event.meta.runId === runId && event.payload.taskId === "semgrep:scan",
     );
 
     await bus.publish(
@@ -185,7 +185,7 @@ describe("PipelineOrchestrator", () => {
     );
 
     const taskStart = await taskStartPromise;
-    expect(taskStart.payload.taskId).toBe("semgrep");
+    expect(taskStart.payload.taskId).toBe("semgrep:scan");
 
     await bus.close();
     db.close();
@@ -197,10 +197,10 @@ describe("PipelineOrchestrator", () => {
 
     const existing = makeFinding("fp-skip", 50);
     const toTriage = makeFinding("fp-triage", 60);
-    const taskRegistry = makeRegistryWithFindings(existing, toTriage);
+    const dagRegistry = makeRegistryWithFindings(existing, toTriage);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     upsertFinding(db, existing, makeResult("fp-skip"), "repo", "HEAD");
@@ -285,9 +285,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    taskRegistry.register({
-      id: "semgrep",
+    const dagRegistry = new DagRegistry();
+    dagRegistry.register({
+      id: "semgrep:scan",
       displayName: "Semgrep",
       outputKind: "findings",
       dependsOn: [],
@@ -302,8 +302,8 @@ describe("PipelineOrchestrator", () => {
         ];
       },
     });
-    taskRegistry.register({
-      id: "codeql",
+    dagRegistry.register({
+      id: "codeql:scan",
       displayName: "CodeQL",
       outputKind: "findings",
       dependsOn: [],
@@ -311,7 +311,7 @@ describe("PipelineOrchestrator", () => {
         return [
           {
             ...makeFinding("fp-codeql", 90),
-            taskId: "codeql",
+            taskId: "codeql:scan",
             ruleId: "js/sql-injection",
             filePath: "src/db.ts",
             startLine: 44,
@@ -321,8 +321,8 @@ describe("PipelineOrchestrator", () => {
       },
     });
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -347,9 +347,9 @@ describe("PipelineOrchestrator", () => {
         context,
         config: {
           ...makeConfig(),
-          tasks: ["semgrep", "codeql"],
+          tasks: ["semgrep:scan", "codeql:scan"],
         },
-        scanOpts: { ...makeScanOpts(), fresh: true, tasks: ["semgrep", "codeql"] },
+        scanOpts: { ...makeScanOpts(), fresh: true, tasks: ["semgrep:scan", "codeql:scan"] },
       }),
     );
 
@@ -369,12 +369,12 @@ describe("PipelineOrchestrator", () => {
     const config: KuzushiConfig = {
       ...makeConfig(),
       skipTriageForHighConfidenceAgentic: true,
-      tasks: ["semgrep", "agentic"],
+      tasks: ["semgrep:scan", "agentic"],
     };
 
-    const taskRegistry = new TaskRegistry();
-    taskRegistry.register({
-      id: "semgrep",
+    const dagRegistry = new DagRegistry();
+    dagRegistry.register({
+      id: "semgrep:scan",
       displayName: "Semgrep",
       outputKind: "findings",
       dependsOn: [],
@@ -382,12 +382,12 @@ describe("PipelineOrchestrator", () => {
         return [
           {
             ...makeFinding("fp-semgrep", 50),
-            taskId: "semgrep",
+            taskId: "semgrep:scan",
           },
         ];
       },
     });
-    taskRegistry.register({
+    dagRegistry.register({
       id: "agentic",
       displayName: "Agentic",
       outputKind: "findings",
@@ -404,8 +404,8 @@ describe("PipelineOrchestrator", () => {
       },
     });
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -429,7 +429,7 @@ describe("PipelineOrchestrator", () => {
       createEvent("pipeline:start", runId, {
         context,
         config,
-        scanOpts: { ...makeScanOpts(), tasks: ["semgrep", "agentic"] },
+        scanOpts: { ...makeScanOpts(), tasks: ["semgrep:scan", "agentic"] },
       }),
     );
 
@@ -454,13 +454,13 @@ describe("PipelineOrchestrator", () => {
       triageConcurrency: 2,
     };
 
-    const taskRegistry = makeRegistryWithFindings(
+    const dagRegistry = makeRegistryWithFindings(
       makeFinding("fp-cost-1", 70),
       makeFinding("fp-cost-2", 60),
     );
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -553,9 +553,9 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    const taskRegistry = makeRegistryWithFindings(makeFinding("fp-no-verify", 55));
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    const dagRegistry = makeRegistryWithFindings(makeFinding("fp-no-verify", 55));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
@@ -625,14 +625,14 @@ describe("PipelineOrchestrator", () => {
       verifyMinConfidence: 0.6,
     };
 
-    const taskRegistry = makeRegistryWithFindings(
+    const dagRegistry = makeRegistryWithFindings(
       makeFinding("fp-low", 70),
       makeFinding("fp-mid", 60),
       makeFinding("fp-high", 50),
     );
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const confidenceMap: Record<string, number> = {
@@ -761,9 +761,9 @@ describe("PipelineOrchestrator", () => {
       pocHarness: true,
     };
 
-    const taskRegistry = makeRegistryWithFindings(makeFinding("fp-dup-verify", 60));
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    const dagRegistry = makeRegistryWithFindings(makeFinding("fp-dup-verify", 60));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
@@ -837,10 +837,10 @@ describe("PipelineOrchestrator", () => {
       verify: true,
       pocHarness: false,
     };
-    const taskRegistry = makeRegistryWithFindings(makeFinding("fp-no-poc", 80));
+    const dagRegistry = makeRegistryWithFindings(makeFinding("fp-no-poc", 80));
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
@@ -912,10 +912,10 @@ describe("PipelineOrchestrator", () => {
       verify: true,
       pocHarness: true,
     };
-    const taskRegistry = makeRegistryWithFindings(makeFinding("fp-no-exploit", 70));
+    const dagRegistry = makeRegistryWithFindings(makeFinding("fp-no-exploit", 70));
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
@@ -988,10 +988,10 @@ describe("PipelineOrchestrator", () => {
       pocHarness: true,
       pocHarnessConcurrency: 1,
     };
-    const taskRegistry = makeRegistryWithFindings(makeFinding("fp-poc-gate", 85));
+    const dagRegistry = makeRegistryWithFindings(makeFinding("fp-poc-gate", 85));
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
@@ -1175,7 +1175,7 @@ describe("PipelineOrchestrator", () => {
     let sawTriageStart = false;
     let sawVerificationStart = false;
     bus.subscribe<TaskStartEvent>("task:start", (event) => {
-      if (event.meta.runId === runId && event.payload.taskId === "semgrep") {
+      if (event.meta.runId === runId && event.payload.taskId === "semgrep:scan") {
         sawScanStart = true;
       }
     });
@@ -1288,7 +1288,7 @@ describe("PipelineOrchestrator", () => {
 
     let sawScanStart = false;
     bus.subscribe<TaskStartEvent>("task:start", (event) => {
-      if (event.meta.runId === runId && event.payload.taskId === "semgrep") {
+      if (event.meta.runId === runId && event.payload.taskId === "semgrep:scan") {
         sawScanStart = true;
       }
     });
@@ -1354,10 +1354,10 @@ describe("PipelineOrchestrator", () => {
   it("resumes scanning-stage runs by restarting scan with stored scan options", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-    const taskRegistry = makeRegistryWithFindings();
+    const dagRegistry = makeRegistryWithFindings();
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const resumeRunId = "resume-scan-stage";
@@ -1474,12 +1474,12 @@ describe("PipelineOrchestrator", () => {
   it("continues triage when cost checkpoint persistence fails", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-    const taskRegistry = makeRegistryWithFindings(makeFinding("fp-cost-fail", 50));
+    const dagRegistry = makeRegistryWithFindings(makeFinding("fp-cost-fail", 50));
 
     // Intentionally no store-worker — this test closes the DB mid-pipeline
     // to verify the orchestrator handles DB failures gracefully.
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
 
     const runId = generateRunId();
     createRun(db, runId, "repo", makeConfig(), makeScanOpts());
@@ -1544,9 +1544,9 @@ describe("PipelineOrchestrator", () => {
   it("converts bus handler failures into fatal pipeline:error events", async () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
-    const taskRegistry = makeRegistryWithFindings();
+    const dagRegistry = makeRegistryWithFindings();
 
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     bus.subscribe("task:start", () => {
@@ -1587,9 +1587,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const semgrepTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "semgrep",
+    const dagRegistry = new DagRegistry();
+    const semgrepTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "semgrep:scan",
       displayName: "Semgrep",
       outputKind: "findings",
       dependsOn: [],
@@ -1598,8 +1598,8 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -1615,11 +1615,11 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    taskRegistry.register(semgrepTask);
-    taskRegistry.register(contextTask);
+    dagRegistry.register(semgrepTask);
+    dagRegistry.register(contextTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -1659,9 +1659,9 @@ describe("PipelineOrchestrator", () => {
 
     let contextGathererRuns = 0;
     const taskStarts: string[] = [];
-    const taskRegistry = new TaskRegistry();
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const dagRegistry = new DagRegistry();
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -1685,13 +1685,13 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const dependentTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "code-config-detect",
+    const dependentTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "context:code-config-detect",
       displayName: "Code Config Detect",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run(_input, context) {
-        const seeded = context.upstreamOutputs.get("context-gatherer") as
+        const seeded = context.upstreamOutputs.get("context:context-gatherer") as
           | Record<string, unknown>
           | undefined;
         if (!seeded || !("repoContext" in seeded)) {
@@ -1701,11 +1701,11 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    taskRegistry.register(contextTask);
-    taskRegistry.register(dependentTask);
+    dagRegistry.register(contextTask);
+    dagRegistry.register(dependentTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
     registerMockBatchTriageWorker(bus, (finding) => makeResult(finding.fingerprint));
 
@@ -1741,7 +1741,7 @@ describe("PipelineOrchestrator", () => {
         context,
         config: {
           ...makeConfig(),
-          tasks: ["code-config-detect"],
+          tasks: ["context:code-config-detect"],
           enableDynamicTaskSelection: false,
         },
         scanOpts: {
@@ -1750,7 +1750,7 @@ describe("PipelineOrchestrator", () => {
         },
         seedTaskOutputs: new Map([
           [
-            "context-gatherer",
+            "context:context-gatherer",
             {
               repoContext: {
                 languages: ["TypeScript"],
@@ -1775,8 +1775,8 @@ describe("PipelineOrchestrator", () => {
     await pipelineCompletePromise;
 
     expect(contextGathererRuns).toBe(0);
-    expect(taskStarts).not.toContain("context-gatherer");
-    expect(taskStarts).toContain("code-config-detect");
+    expect(taskStarts).not.toContain("context:context-gatherer");
+    expect(taskStarts).toContain("context:code-config-detect");
 
     await bus.close();
     db.close();
@@ -1786,9 +1786,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const semgrepTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "semgrep",
+    const dagRegistry = new DagRegistry();
+    const semgrepTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "semgrep:scan",
       displayName: "Semgrep",
       outputKind: "findings",
       dependsOn: [],
@@ -1797,8 +1797,8 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -1814,11 +1814,11 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    const enrichmentTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-enricher",
+    const enrichmentTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-enricher",
       displayName: "Context Enricher",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return {
           customMiddleware: [
@@ -1832,12 +1832,12 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    taskRegistry.register(semgrepTask);
-    taskRegistry.register(contextTask);
-    taskRegistry.register(enrichmentTask);
+    dagRegistry.register(semgrepTask);
+    dagRegistry.register(contextTask);
+    dagRegistry.register(enrichmentTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -1878,9 +1878,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const dagRegistry = new DagRegistry();
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -1895,11 +1895,11 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const selectorTask: AgentTask<ScanOpts, unknown> = {
-      id: "task-selector",
+    const selectorTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "pipeline:task-selector",
       displayName: "Task Selector",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return {
           recommendedTasks: ["dangerous-api", "secrets", "security-misconfig"],
@@ -1907,32 +1907,32 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const codeConfigTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "code-config-detect",
+    const codeConfigTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "context:code-config-detect",
       displayName: "Code & Config",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-dynamic", 91)];
       },
     };
-    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "secrets-crypto-detect",
+    const secretsCryptoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:secrets-crypto-detect",
       displayName: "Secrets & Crypto",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [];
       },
     };
 
-    taskRegistry.register(contextTask);
-    taskRegistry.register(selectorTask);
-    taskRegistry.register(codeConfigTask);
-    taskRegistry.register(secretsCryptoTask);
+    dagRegistry.register(contextTask);
+    dagRegistry.register(selectorTask);
+    dagRegistry.register(codeConfigTask);
+    dagRegistry.register(secretsCryptoTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -1968,9 +1968,9 @@ describe("PipelineOrchestrator", () => {
     );
 
     const triageBatchQueued = await triageBatchQueuedPromise;
-    expect(taskStarts).toContain("task-selector");
-    expect(taskStarts).toContain("code-config-detect");
-    expect(taskStarts).toContain("secrets-crypto-detect");
+    expect(taskStarts).toContain("pipeline:task-selector");
+    expect(taskStarts).toContain("context:code-config-detect");
+    expect(taskStarts).toContain("agentic-sast:secrets-crypto-detect");
     expect(triageBatchQueued.payload.findings.map((finding) => finding.fingerprint)).toEqual([
       "fp-dynamic",
     ]);
@@ -1983,9 +1983,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
+    const dagRegistry = new DagRegistry();
 
-    const failingTask1: AgentTask<ScanOpts, Finding[]> = {
+    const failingTask1: DagNodeImpl<ScanOpts, Finding[]> = {
       id: "fail-task-1",
       displayName: "Fail Task 1",
       outputKind: "findings",
@@ -1995,7 +1995,7 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    const failingTask2: AgentTask<ScanOpts, Finding[]> = {
+    const failingTask2: DagNodeImpl<ScanOpts, Finding[]> = {
       id: "fail-task-2",
       displayName: "Fail Task 2",
       outputKind: "findings",
@@ -2005,16 +2005,16 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    taskRegistry.register(failingTask1);
-    taskRegistry.register(failingTask2);
+    dagRegistry.register(failingTask1);
+    dagRegistry.register(failingTask2);
 
     const config: KuzushiConfig = {
       ...makeConfig(),
       tasks: ["fail-task-1", "fail-task-2"],
     };
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -2050,9 +2050,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
+    const dagRegistry = new DagRegistry();
 
-    const goodScanner: AgentTask<ScanOpts, Finding[]> = {
+    const goodScanner: DagNodeImpl<ScanOpts, Finding[]> = {
       id: "good-scanner",
       displayName: "Good Scanner",
       outputKind: "findings",
@@ -2062,7 +2062,7 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    const badScanner: AgentTask<ScanOpts, Finding[]> = {
+    const badScanner: DagNodeImpl<ScanOpts, Finding[]> = {
       id: "bad-scanner",
       displayName: "Bad Scanner",
       outputKind: "findings",
@@ -2072,16 +2072,16 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    taskRegistry.register(goodScanner);
-    taskRegistry.register(badScanner);
+    dagRegistry.register(goodScanner);
+    dagRegistry.register(badScanner);
 
     const config: KuzushiConfig = {
       ...makeConfig(),
       tasks: ["good-scanner", "bad-scanner"],
     };
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -2129,11 +2129,11 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
+    const dagRegistry = new DagRegistry();
     let upstreamFromSemgrep: unknown;
 
-    const semgrepTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "semgrep",
+    const semgrepTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "semgrep:scan",
       displayName: "Semgrep",
       outputKind: "findings",
       dependsOn: [],
@@ -2142,22 +2142,22 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    const dependentTask: AgentTask<ScanOpts, { ok: boolean }> = {
+    const dependentTask: DagNodeImpl<ScanOpts, { ok: boolean }> = {
       id: "post-analysis",
       displayName: "Post Analysis",
       outputKind: "custom",
-      dependsOn: ["semgrep"],
+      dependsOn: ["semgrep:scan"],
       async run(_input, context) {
-        upstreamFromSemgrep = context.upstreamOutputs.get("semgrep");
+        upstreamFromSemgrep = context.upstreamOutputs.get("semgrep:scan");
         return { ok: true };
       },
     };
 
-    taskRegistry.register(semgrepTask);
-    taskRegistry.register(dependentTask);
+    dagRegistry.register(semgrepTask);
+    dagRegistry.register(dependentTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -2193,7 +2193,7 @@ describe("PipelineOrchestrator", () => {
 
     await stage2Done;
 
-    expect(taskStartOrder).toEqual(["semgrep", "post-analysis"]);
+    expect(taskStartOrder).toEqual(["semgrep:scan", "post-analysis"]);
     expect(Array.isArray(upstreamFromSemgrep)).toBe(true);
     expect((upstreamFromSemgrep as Finding[])[0].fingerprint).toBe("fp-semgrep");
 
@@ -2215,10 +2215,10 @@ describe("PipelineOrchestrator", () => {
       verify: true,
       verifyVerdicts: ["tp"],
     };
-    const taskRegistry = makeRegistryWithFindings(...findings);
+    const dagRegistry = makeRegistryWithFindings(...findings);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     registerMockBatchTriageWorker(bus, (finding) => ({
@@ -2259,9 +2259,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const dagRegistry = new DagRegistry();
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -2276,11 +2276,11 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const selectorTask: AgentTask<ScanOpts, unknown> = {
-      id: "task-selector",
+    const selectorTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "pipeline:task-selector",
       displayName: "Task Selector",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return {
           recommendedTasks: ["secrets", "ssrf"],
@@ -2289,42 +2289,42 @@ describe("PipelineOrchestrator", () => {
       },
     };
     // Register two selectable tasks — only the recommended ones should run
-    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "secrets-crypto-detect",
+    const secretsCryptoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:secrets-crypto-detect",
       displayName: "Secrets & Crypto",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-secrets", 80)];
       },
     };
-    const ssrfTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "ssrf-detect",
+    const ssrfTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:ssrf-detect",
       displayName: "SSRF",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-ssrf", 70)];
       },
     };
-    const protoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "prototype-pollution-detect",
+    const protoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:prototype-pollution-detect",
       displayName: "Prototype Pollution",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-proto", 60)];
       },
     };
 
-    taskRegistry.register(contextTask);
-    taskRegistry.register(selectorTask);
-    taskRegistry.register(secretsCryptoTask);
-    taskRegistry.register(ssrfTask);
-    taskRegistry.register(protoTask);
+    dagRegistry.register(contextTask);
+    dagRegistry.register(selectorTask);
+    dagRegistry.register(secretsCryptoTask);
+    dagRegistry.register(ssrfTask);
+    dagRegistry.register(protoTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -2362,11 +2362,11 @@ describe("PipelineOrchestrator", () => {
     const triageBatchQueued = await triageBatchQueuedPromise;
 
     // Only task-selector-recommended tasks should have run
-    expect(taskStarts).toContain("task-selector");
-    expect(taskStarts).toContain("secrets-crypto-detect");
-    expect(taskStarts).toContain("ssrf-detect");
+    expect(taskStarts).toContain("pipeline:task-selector");
+    expect(taskStarts).toContain("agentic-sast:secrets-crypto-detect");
+    expect(taskStarts).toContain("agentic-sast:ssrf-detect");
     // prototype-pollution-detect was NOT recommended, so it should NOT run
-    expect(taskStarts).not.toContain("prototype-pollution-detect");
+    expect(taskStarts).not.toContain("agentic-sast:prototype-pollution-detect");
     // Findings should come from the two recommended tasks only
     const fps = triageBatchQueued.payload.findings.map((f) => f.fingerprint);
     expect(fps).toContain("fp-secrets");
@@ -2381,9 +2381,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const dagRegistry = new DagRegistry();
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -2398,31 +2398,31 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const failingSelectorTask: AgentTask<ScanOpts, unknown> = {
-      id: "task-selector",
+    const failingSelectorTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "pipeline:task-selector",
       displayName: "Task Selector",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         throw new Error("task-selector crash");
       },
     };
-    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "secrets-crypto-detect",
+    const secretsCryptoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:secrets-crypto-detect",
       displayName: "Secrets & Crypto",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-fallback-secrets", 80)];
       },
     };
 
-    taskRegistry.register(contextTask);
-    taskRegistry.register(failingSelectorTask);
-    taskRegistry.register(secretsCryptoTask);
+    dagRegistry.register(contextTask);
+    dagRegistry.register(failingSelectorTask);
+    dagRegistry.register(secretsCryptoTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -2460,7 +2460,7 @@ describe("PipelineOrchestrator", () => {
     const triageBatchQueued = await triageBatchQueuedPromise;
 
     // Despite task-selector failing, the fallback should enable selectable tasks
-    expect(taskStarts).toContain("secrets-crypto-detect");
+    expect(taskStarts).toContain("agentic-sast:secrets-crypto-detect");
     expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain(
       "fp-fallback-secrets",
     );
@@ -2473,9 +2473,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const dagRegistry = new DagRegistry();
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -2490,11 +2490,11 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const selectorTask: AgentTask<ScanOpts, unknown> = {
-      id: "task-selector",
+    const selectorTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "pipeline:task-selector",
       displayName: "Task Selector",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return {
           recommendedTasks: ["ssrf"],
@@ -2502,32 +2502,32 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "secrets-crypto-detect",
+    const secretsCryptoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:secrets-crypto-detect",
       displayName: "Secrets & Crypto",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-explicit-secrets", 80)];
       },
     };
-    const ssrfTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "ssrf-detect",
+    const ssrfTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:ssrf-detect",
       displayName: "SSRF",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-dynamic-ssrf", 70)];
       },
     };
 
-    taskRegistry.register(contextTask);
-    taskRegistry.register(selectorTask);
-    taskRegistry.register(secretsCryptoTask);
-    taskRegistry.register(ssrfTask);
+    dagRegistry.register(contextTask);
+    dagRegistry.register(selectorTask);
+    dagRegistry.register(secretsCryptoTask);
+    dagRegistry.register(ssrfTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -2557,7 +2557,7 @@ describe("PipelineOrchestrator", () => {
         config: {
           ...makeConfig(),
           enableDynamicTaskSelection: true,
-          tasks: ["secrets-crypto-detect"],
+          tasks: ["agentic-sast:secrets-crypto-detect"],
         },
         scanOpts: { ...makeScanOpts(), tasks: [] },
       }),
@@ -2566,11 +2566,11 @@ describe("PipelineOrchestrator", () => {
     const triageBatchQueued = await triageBatchQueuedPromise;
 
     // Explicit task should always run
-    expect(taskStarts).toContain("secrets-crypto-detect");
+    expect(taskStarts).toContain("agentic-sast:secrets-crypto-detect");
     // task-selector should run even with explicit tasks
-    expect(taskStarts).toContain("task-selector");
+    expect(taskStarts).toContain("pipeline:task-selector");
     // Dynamic ssrf-detect added by task-selector
-    expect(taskStarts).toContain("ssrf-detect");
+    expect(taskStarts).toContain("agentic-sast:ssrf-detect");
     const fps = triageBatchQueued.payload.findings.map((f) => f.fingerprint);
     expect(fps).toContain("fp-explicit-secrets");
     expect(fps).toContain("fp-dynamic-ssrf");
@@ -2583,9 +2583,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const scannerTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "semgrep",
+    const dagRegistry = new DagRegistry();
+    const scannerTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "semgrep:scan",
       displayName: "Semgrep",
       outputKind: "findings",
       dependsOn: [],
@@ -2593,8 +2593,8 @@ describe("PipelineOrchestrator", () => {
         return [makeFinding("fp-semgrep-explicit", 90)];
       },
     };
-    const secretsTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "secrets-crypto-detect",
+    const secretsTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:secrets-crypto-detect",
       displayName: "Secrets & Crypto",
       outputKind: "findings",
       dependsOn: [],
@@ -2602,8 +2602,8 @@ describe("PipelineOrchestrator", () => {
         return [makeFinding("fp-explicit-secrets-only", 80)];
       },
     };
-    const protoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "prototype-pollution-detect",
+    const protoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:prototype-pollution-detect",
       displayName: "Prototype Pollution",
       outputKind: "findings",
       dependsOn: [],
@@ -2612,12 +2612,12 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    taskRegistry.register(scannerTask);
-    taskRegistry.register(secretsTask);
-    taskRegistry.register(protoTask);
+    dagRegistry.register(scannerTask);
+    dagRegistry.register(secretsTask);
+    dagRegistry.register(protoTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -2630,9 +2630,9 @@ describe("PipelineOrchestrator", () => {
     const config = {
       ...makeConfig(),
       enableDynamicTaskSelection: false,
-      tasks: ["semgrep", "secrets-crypto-detect"],
+      tasks: ["semgrep:scan", "agentic-sast:secrets-crypto-detect"],
     };
-    const scanOpts = { ...makeScanOpts(), tasks: ["semgrep"] };
+    const scanOpts = { ...makeScanOpts(), tasks: ["semgrep:scan"] };
 
     const taskStarts: string[] = [];
     bus.subscribe<TaskStartEvent>("task:start", (event) => {
@@ -2655,11 +2655,11 @@ describe("PipelineOrchestrator", () => {
     );
 
     const triageBatchQueued = await triageBatchQueuedPromise;
-    const scanPlan = getScanPlanSummary(config, scanOpts, taskRegistry);
+    const scanPlan = getScanPlanSummary(config, scanOpts, dagRegistry);
 
-    expect(taskStarts).toContain("semgrep");
-    expect(taskStarts).toContain("secrets-crypto-detect");
-    expect(taskStarts).not.toContain("prototype-pollution-detect");
+    expect(taskStarts).toContain("semgrep:scan");
+    expect(taskStarts).toContain("agentic-sast:secrets-crypto-detect");
+    expect(taskStarts).not.toContain("agentic-sast:prototype-pollution-detect");
     expect(scanPlan.dynamicSelectionActive).toBe(false);
     expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint).sort()).toEqual([
       "fp-explicit-secrets-only",
@@ -2676,9 +2676,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const dagRegistry = new DagRegistry();
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -2693,41 +2693,41 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const selectorTask: AgentTask<ScanOpts, unknown> = {
-      id: "task-selector",
+    const selectorTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "pipeline:task-selector",
       displayName: "Task Selector",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return { recommendedTasks: ["secrets"], reasoning: {} };
       },
     };
-    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "secrets-crypto-detect",
+    const secretsCryptoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:secrets-crypto-detect",
       displayName: "Secrets & Crypto",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [];
       },
     };
-    const protoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "prototype-pollution-detect",
+    const protoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:prototype-pollution-detect",
       displayName: "Prototype Pollution",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-proto-compat", 60)];
       },
     };
 
-    taskRegistry.register(contextTask);
-    taskRegistry.register(selectorTask);
-    taskRegistry.register(secretsCryptoTask);
-    taskRegistry.register(protoTask);
+    dagRegistry.register(contextTask);
+    dagRegistry.register(selectorTask);
+    dagRegistry.register(secretsCryptoTask);
+    dagRegistry.register(protoTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -2751,7 +2751,11 @@ describe("PipelineOrchestrator", () => {
     );
 
     // Dynamic selection disabled — explicitly listed tasks run
-    const taskList = ["context-gatherer", "secrets-crypto-detect", "prototype-pollution-detect"];
+    const taskList = [
+      "context:context-gatherer",
+      "agentic-sast:secrets-crypto-detect",
+      "agentic-sast:prototype-pollution-detect",
+    ];
     await bus.publish(
       createEvent("pipeline:start", runId, {
         context,
@@ -2767,8 +2771,8 @@ describe("PipelineOrchestrator", () => {
     const triageBatchQueued = await triageBatchQueuedPromise;
 
     // Both selectable tasks ran
-    expect(taskStarts).toContain("secrets-crypto-detect");
-    expect(taskStarts).toContain("prototype-pollution-detect");
+    expect(taskStarts).toContain("agentic-sast:secrets-crypto-detect");
+    expect(taskStarts).toContain("agentic-sast:prototype-pollution-detect");
     const scanPlan = getScanPlanSummary(
       {
         ...makeConfig(),
@@ -2776,7 +2780,7 @@ describe("PipelineOrchestrator", () => {
         tasks: taskList,
       },
       { ...makeScanOpts(), tasks: taskList },
-      taskRegistry,
+      dagRegistry,
     );
     expect(scanPlan.dynamicSelectionActive).toBe(false);
     expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain(
@@ -2791,9 +2795,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const dagRegistry = new DagRegistry();
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -2808,42 +2812,42 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const selectorTask: AgentTask<ScanOpts, unknown> = {
-      id: "task-selector",
+    const selectorTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "pipeline:task-selector",
       displayName: "Task Selector",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         // Should not matter — ["*"] bypasses dynamic filtering
         return { recommendedTasks: ["secrets"], reasoning: {} };
       },
     };
-    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "secrets-crypto-detect",
+    const secretsCryptoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:secrets-crypto-detect",
       displayName: "Secrets & Crypto",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-star-secrets", 80)];
       },
     };
-    const protoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "prototype-pollution-detect",
+    const protoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:prototype-pollution-detect",
       displayName: "Prototype Pollution",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-star-proto", 60)];
       },
     };
 
-    taskRegistry.register(contextTask);
-    taskRegistry.register(selectorTask);
-    taskRegistry.register(secretsCryptoTask);
-    taskRegistry.register(protoTask);
+    dagRegistry.register(contextTask);
+    dagRegistry.register(selectorTask);
+    dagRegistry.register(secretsCryptoTask);
+    dagRegistry.register(protoTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -2881,8 +2885,8 @@ describe("PipelineOrchestrator", () => {
     const triageBatchQueued = await triageBatchQueuedPromise;
 
     // Both selectable tasks run — ["*"] means run everything, no filtering
-    expect(taskStarts).toContain("secrets-crypto-detect");
-    expect(taskStarts).toContain("prototype-pollution-detect");
+    expect(taskStarts).toContain("agentic-sast:secrets-crypto-detect");
+    expect(taskStarts).toContain("agentic-sast:prototype-pollution-detect");
     const fps = triageBatchQueued.payload.findings.map((f) => f.fingerprint);
     expect(fps).toContain("fp-star-secrets");
     expect(fps).toContain("fp-star-proto");
@@ -2895,9 +2899,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const dagRegistry = new DagRegistry();
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -2912,31 +2916,31 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const emptySelectorTask: AgentTask<ScanOpts, unknown> = {
-      id: "task-selector",
+    const emptySelectorTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "pipeline:task-selector",
       displayName: "Task Selector",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return { recommendedTasks: [], reasoning: {} };
       },
     };
-    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "secrets-crypto-detect",
+    const secretsCryptoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:secrets-crypto-detect",
       displayName: "Secrets & Crypto",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-empty-fallback", 80)];
       },
     };
 
-    taskRegistry.register(contextTask);
-    taskRegistry.register(emptySelectorTask);
-    taskRegistry.register(secretsCryptoTask);
+    dagRegistry.register(contextTask);
+    dagRegistry.register(emptySelectorTask);
+    dagRegistry.register(secretsCryptoTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -2974,7 +2978,7 @@ describe("PipelineOrchestrator", () => {
     const triageBatchQueued = await triageBatchQueuedPromise;
 
     // Despite empty recommendations, fallback should enable all selectable tasks
-    expect(taskStarts).toContain("secrets-crypto-detect");
+    expect(taskStarts).toContain("agentic-sast:secrets-crypto-detect");
     expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain(
       "fp-empty-fallback",
     );
@@ -2987,9 +2991,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const dagRegistry = new DagRegistry();
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -3004,41 +3008,41 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const selectorTask: AgentTask<ScanOpts, unknown> = {
-      id: "task-selector",
+    const selectorTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "pipeline:task-selector",
       displayName: "Task Selector",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return { recommendedTasks: ["secrets"], reasoning: {} };
       },
     };
-    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "secrets-crypto-detect",
+    const secretsCryptoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:secrets-crypto-detect",
       displayName: "Secrets & Crypto",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-disabled-secrets", 80)];
       },
     };
-    const protoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "prototype-pollution-detect",
+    const protoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:prototype-pollution-detect",
       displayName: "Prototype Pollution",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-fallback-proto", 60)];
       },
     };
 
-    taskRegistry.register(contextTask);
-    taskRegistry.register(selectorTask);
-    taskRegistry.register(secretsCryptoTask);
-    taskRegistry.register(protoTask);
+    dagRegistry.register(contextTask);
+    dagRegistry.register(selectorTask);
+    dagRegistry.register(secretsCryptoTask);
+    dagRegistry.register(protoTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -3075,8 +3079,8 @@ describe("PipelineOrchestrator", () => {
 
     const triageBatchQueued = await triageBatchQueuedPromise;
 
-    expect(taskStarts).not.toContain("secrets-crypto-detect");
-    expect(taskStarts).toContain("prototype-pollution-detect");
+    expect(taskStarts).not.toContain("agentic-sast:secrets-crypto-detect");
+    expect(taskStarts).toContain("agentic-sast:prototype-pollution-detect");
     expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toEqual([
       "fp-fallback-proto",
     ]);
@@ -3089,9 +3093,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const dagRegistry = new DagRegistry();
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -3106,42 +3110,42 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const selectorTask: AgentTask<ScanOpts, unknown> = {
-      id: "task-selector",
+    const selectorTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "pipeline:task-selector",
       displayName: "Task Selector",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         // Only recommend secrets — NOT stride or pasta
         return { recommendedTasks: ["secrets"], reasoning: {} };
       },
     };
-    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "secrets-crypto-detect",
+    const secretsCryptoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:secrets-crypto-detect",
       displayName: "Secrets & Crypto",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-secrets-only", 80)];
       },
     };
-    const randoriTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "threat-model-randori",
+    const randoriTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "threat-model:threat-model-randori",
       displayName: "Randori PASTA Threat Model",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-randori", 70)];
       },
     };
 
-    taskRegistry.register(contextTask);
-    taskRegistry.register(selectorTask);
-    taskRegistry.register(secretsCryptoTask);
-    taskRegistry.register(randoriTask);
+    dagRegistry.register(contextTask);
+    dagRegistry.register(selectorTask);
+    dagRegistry.register(secretsCryptoTask);
+    dagRegistry.register(randoriTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -3179,7 +3183,7 @@ describe("PipelineOrchestrator", () => {
     const triageBatchQueued = await triageBatchQueuedPromise;
 
     // Randori should not run — it is selectable and was not recommended
-    expect(taskStarts).not.toContain("threat-model-randori");
+    expect(taskStarts).not.toContain("threat-model:threat-model-randori");
     // Only secrets should have produced findings
     const fps = triageBatchQueued.payload.findings.map((f) => f.fingerprint);
     expect(fps).toContain("fp-secrets-only");
@@ -3193,11 +3197,11 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
+    const dagRegistry = new DagRegistry();
     let ssrfUpstream: Map<string, unknown> | undefined;
 
-    taskRegistry.register({
-      id: "context-gatherer",
+    dagRegistry.register({
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -3215,11 +3219,11 @@ describe("PipelineOrchestrator", () => {
         };
       },
     });
-    taskRegistry.register({
-      id: "threat-model-randori",
+    dagRegistry.register({
+      id: "threat-model:threat-model-randori",
       displayName: "Randori PASTA Threat Model",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return {
           document: {
@@ -3243,19 +3247,19 @@ describe("PipelineOrchestrator", () => {
         };
       },
     });
-    taskRegistry.register({
-      id: "ssrf-detect",
+    dagRegistry.register({
+      id: "agentic-sast:ssrf-detect",
       displayName: "SSRF Detector",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run(_input, context) {
         ssrfUpstream = new Map(context.upstreamOutputs);
         return { findings: ["ssrf"] };
       },
     });
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -3287,7 +3291,7 @@ describe("PipelineOrchestrator", () => {
         context,
         config: {
           ...makeConfig(),
-          tasks: ["ssrf-detect"],
+          tasks: ["agentic-sast:ssrf-detect"],
         },
         scanOpts: { ...makeScanOpts(), tasks: [] },
       }),
@@ -3301,11 +3305,11 @@ describe("PipelineOrchestrator", () => {
     );
     await completePromise;
 
-    expect(taskStarts).toContain("threat-model-randori");
-    expect(taskStarts.indexOf("threat-model-randori")).toBeLessThan(
-      taskStarts.indexOf("ssrf-detect"),
+    expect(taskStarts).toContain("threat-model:threat-model-randori");
+    expect(taskStarts.indexOf("threat-model:threat-model-randori")).toBeLessThan(
+      taskStarts.indexOf("agentic-sast:ssrf-detect"),
     );
-    expect(ssrfUpstream?.has("threat-model-randori")).toBe(true);
+    expect(ssrfUpstream?.has("threat-model:threat-model-randori")).toBe(true);
 
     await bus.close();
     db.close();
@@ -3315,9 +3319,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    taskRegistry.register({
-      id: "context-gatherer",
+    const dagRegistry = new DagRegistry();
+    dagRegistry.register({
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -3335,28 +3339,28 @@ describe("PipelineOrchestrator", () => {
         };
       },
     });
-    taskRegistry.register({
-      id: "threat-model-randori",
+    dagRegistry.register({
+      id: "threat-model:threat-model-randori",
       displayName: "Randori PASTA Threat Model",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return {};
       },
     });
     // Use diff-review as a non-threat-aware task (not in THREAT_AWARE_DETECTOR_TASK_IDS)
-    taskRegistry.register({
-      id: "diff-review",
+    dagRegistry.register({
+      id: "agentic-sast:diff-review",
       displayName: "Diff Review",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return {};
       },
     });
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -3388,7 +3392,7 @@ describe("PipelineOrchestrator", () => {
         context,
         config: {
           ...makeConfig(),
-          tasks: ["diff-review"],
+          tasks: ["agentic-sast:diff-review"],
         },
         scanOpts: { ...makeScanOpts(), tasks: [] },
       }),
@@ -3402,8 +3406,8 @@ describe("PipelineOrchestrator", () => {
     );
     await completePromise;
 
-    expect(taskStarts).toContain("diff-review");
-    expect(taskStarts).not.toContain("threat-model-randori");
+    expect(taskStarts).toContain("agentic-sast:diff-review");
+    expect(taskStarts).not.toContain("threat-model:threat-model-randori");
 
     await bus.close();
     db.close();
@@ -3413,9 +3417,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const dagRegistry = new DagRegistry();
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -3430,31 +3434,31 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const failingSelectorTask: AgentTask<ScanOpts, unknown> = {
-      id: "task-selector",
+    const failingSelectorTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "pipeline:task-selector",
       displayName: "Task Selector",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         throw new Error("task-selector crash");
       },
     };
-    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "secrets-crypto-detect",
+    const secretsCryptoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:secrets-crypto-detect",
       displayName: "Secrets & Crypto",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-no-resched", 80)];
       },
     };
 
-    taskRegistry.register(contextTask);
-    taskRegistry.register(failingSelectorTask);
-    taskRegistry.register(secretsCryptoTask);
+    dagRegistry.register(contextTask);
+    dagRegistry.register(failingSelectorTask);
+    dagRegistry.register(secretsCryptoTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -3492,9 +3496,9 @@ describe("PipelineOrchestrator", () => {
     await triageBatchQueuedPromise;
 
     // task-selector should be started exactly once — not re-scheduled after failure
-    expect(taskStarts.filter((id) => id === "task-selector")).toHaveLength(1);
+    expect(taskStarts.filter((id) => id === "pipeline:task-selector")).toHaveLength(1);
     // Fallback should still fire and run selectable tasks
-    expect(taskStarts).toContain("secrets-crypto-detect");
+    expect(taskStarts).toContain("agentic-sast:secrets-crypto-detect");
 
     await bus.close();
     db.close();
@@ -3504,9 +3508,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const dagRegistry = new DagRegistry();
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -3521,11 +3525,11 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const selectorTask: AgentTask<ScanOpts, unknown> = {
-      id: "task-selector",
+    const selectorTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "pipeline:task-selector",
       displayName: "Task Selector",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         // Recommend only the task that will fail
         return { recommendedTasks: ["secrets"], reasoning: {} };
@@ -3534,33 +3538,33 @@ describe("PipelineOrchestrator", () => {
     // Selectable task that will fail — use "custom" outputKind so the fatal
     // "all findings producers failed" abort doesn't fire (we're testing the
     // hasSelectableTasks fallback guard, not the fatal abort path).
-    const failingSecretsTask: AgentTask<ScanOpts, unknown> = {
-      id: "secrets-crypto-detect",
+    const failingSecretsTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "agentic-sast:secrets-crypto-detect",
       displayName: "Secrets & Crypto",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         throw new Error("secrets-crypto crash");
       },
     };
     // This selectable task should be added by fallback
-    const ssrfTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "ssrf-detect",
+    const ssrfTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:ssrf-detect",
       displayName: "SSRF",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-fallback-ssrf", 70)];
       },
     };
 
-    taskRegistry.register(contextTask);
-    taskRegistry.register(selectorTask);
-    taskRegistry.register(failingSecretsTask);
-    taskRegistry.register(ssrfTask);
+    dagRegistry.register(contextTask);
+    dagRegistry.register(selectorTask);
+    dagRegistry.register(failingSecretsTask);
+    dagRegistry.register(ssrfTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -3598,7 +3602,7 @@ describe("PipelineOrchestrator", () => {
     const triageBatchQueued = await triageBatchQueuedPromise;
 
     // secrets-crypto-detect failed, so fallback should add other selectable tasks
-    expect(taskStarts).toContain("ssrf-detect");
+    expect(taskStarts).toContain("agentic-sast:ssrf-detect");
     expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain(
       "fp-fallback-ssrf",
     );
@@ -3611,9 +3615,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
+    const dagRegistry = new DagRegistry();
 
-    const findingsTask: AgentTask<ScanOpts, Finding[]> = {
+    const findingsTask: DagNodeImpl<ScanOpts, Finding[]> = {
       id: "findings-task",
       displayName: "Findings Task",
       outputKind: "findings",
@@ -3624,7 +3628,7 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    const metaTask: AgentTask<ScanOpts, unknown> = {
+    const metaTask: DagNodeImpl<ScanOpts, unknown> = {
       id: "meta-task",
       displayName: "Meta Task",
       outputKind: "custom",
@@ -3634,16 +3638,16 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    taskRegistry.register(findingsTask);
-    taskRegistry.register(metaTask);
+    dagRegistry.register(findingsTask);
+    dagRegistry.register(metaTask);
 
     const config: KuzushiConfig = {
       ...makeConfig(),
       tasks: ["findings-task", "meta-task"],
     };
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -3689,9 +3693,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const dagRegistry = new DagRegistry();
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -3706,31 +3710,31 @@ describe("PipelineOrchestrator", () => {
         };
       },
     };
-    const selectorTask: AgentTask<ScanOpts, unknown> = {
-      id: "task-selector",
+    const selectorTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "pipeline:task-selector",
       displayName: "Task Selector",
       outputKind: "custom",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return { recommendedTasks: ["secrets"], reasoning: {} };
       },
     };
-    const secretsCryptoTask: AgentTask<ScanOpts, Finding[]> = {
-      id: "secrets-crypto-detect",
+    const secretsCryptoTask: DagNodeImpl<ScanOpts, Finding[]> = {
+      id: "agentic-sast:secrets-crypto-detect",
       displayName: "Secrets & Crypto",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-ctx-kept", 80)];
       },
     };
 
-    taskRegistry.register(contextTask);
-    taskRegistry.register(selectorTask);
-    taskRegistry.register(secretsCryptoTask);
+    dagRegistry.register(contextTask);
+    dagRegistry.register(selectorTask);
+    dagRegistry.register(secretsCryptoTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -3771,9 +3775,9 @@ describe("PipelineOrchestrator", () => {
     const triageBatchQueued = await triageBatchQueuedPromise;
 
     // Pipeline should complete — context-gatherer kept despite enableContextGathering: false
-    expect(taskStarts).toContain("context-gatherer");
-    expect(taskStarts).toContain("task-selector");
-    expect(taskStarts).toContain("secrets-crypto-detect");
+    expect(taskStarts).toContain("context:context-gatherer");
+    expect(taskStarts).toContain("pipeline:task-selector");
+    expect(taskStarts).toContain("agentic-sast:secrets-crypto-detect");
     expect(triageBatchQueued.payload.findings.map((f) => f.fingerprint)).toContain("fp-ctx-kept");
 
     await bus.close();
@@ -3784,10 +3788,10 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
+    const dagRegistry = new DagRegistry();
 
-    const contextTask: AgentTask<ScanOpts, unknown> = {
-      id: "context-gatherer",
+    const contextTask: DagNodeImpl<ScanOpts, unknown> = {
+      id: "context:context-gatherer",
       displayName: "Context Gatherer",
       outputKind: "custom",
       dependsOn: [],
@@ -3796,21 +3800,21 @@ describe("PipelineOrchestrator", () => {
       },
     };
 
-    const dependentTask: AgentTask<ScanOpts, Finding[]> = {
+    const dependentTask: DagNodeImpl<ScanOpts, Finding[]> = {
       id: "dependent-task",
       displayName: "Dependent Task",
       outputKind: "findings",
-      dependsOn: ["context-gatherer"],
+      dependsOn: ["context:context-gatherer"],
       async run() {
         return [makeFinding("fp-dep", 80)];
       },
     };
 
-    taskRegistry.register(contextTask);
-    taskRegistry.register(dependentTask);
+    dagRegistry.register(contextTask);
+    dagRegistry.register(dependentTask);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const runId = generateRunId();
@@ -3865,10 +3869,10 @@ describe("PipelineOrchestrator", () => {
       verifyConcurrency: 1,
       triageConcurrency: 3,
     };
-    const taskRegistry = makeRegistryWithFindings(findingMid, findingLow, findingHigh);
+    const dagRegistry = makeRegistryWithFindings(findingMid, findingLow, findingHigh);
 
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry, config));
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry, config));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
     registerStoreWorker(bus, { db });
 
     const confidenceMap: Record<string, number> = {
@@ -3957,9 +3961,9 @@ describe("PipelineOrchestrator", () => {
 
     // A semgrep task that never completes — keeps run state populated
     // so handleBusHandlerError can find it instead of early-returning.
-    const taskRegistry = new TaskRegistry();
-    taskRegistry.register({
-      id: "semgrep",
+    const dagRegistry = new DagRegistry();
+    dagRegistry.register({
+      id: "semgrep:scan",
       displayName: "Semgrep",
       outputKind: "findings",
       dependsOn: [],
@@ -3970,8 +3974,8 @@ describe("PipelineOrchestrator", () => {
       },
     });
 
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
 
     const runId = generateRunId();
     const context = {
@@ -4021,9 +4025,9 @@ describe("PipelineOrchestrator", () => {
     const bus = new InProcessBus();
     const db = initDb(":memory:");
 
-    const taskRegistry = new TaskRegistry();
-    taskRegistry.register({
-      id: "semgrep",
+    const dagRegistry = new DagRegistry();
+    dagRegistry.register({
+      id: "semgrep:scan",
       displayName: "Semgrep",
       outputKind: "findings",
       dependsOn: [],
@@ -4034,8 +4038,8 @@ describe("PipelineOrchestrator", () => {
       },
     });
 
-    registerOrchestrator(bus, makeDeps(db, taskRegistry));
-    registerScanWorker(bus, makeScanWorkerDeps(taskRegistry));
+    registerOrchestrator(bus, makeDeps(db, dagRegistry));
+    registerScanWorker(bus, makeScanWorkerDeps(dagRegistry));
 
     const runId = generateRunId();
     const context = {

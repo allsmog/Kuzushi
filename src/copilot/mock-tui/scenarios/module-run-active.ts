@@ -8,7 +8,7 @@ import { registerScenario } from "../index.js";
  * lines on a timer and flips the run to `done` after ~6s.
  *
  * Used to visually verify streaming evidence + step-glyph transitions in
- * `ModuleRunView` without a real `threat-hunt` run.
+ * `ModuleRunView` without a real `carlini-threat-hunt` run.
  */
 registerScenario({
   id: "module-run-active",
@@ -18,11 +18,11 @@ registerScenario({
     return {
       shell: baseShell({
         shellView: "module-run",
-        focusedModule: "threat-hunt",
+        focusedModule: "carlini-threat-hunt",
         modules: cards.map((c) => c.id),
         moduleCatalog: cards,
         moduleRun: mockModuleRun({
-          moduleId: "threat-hunt",
+          moduleId: "carlini-threat-hunt",
           status: "running",
           startedSecondsAgo: 4,
           evidenceLines: 3,

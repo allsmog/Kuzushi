@@ -15,4 +15,13 @@ describe("validateModelOverride", () => {
       "only accepts bare Claude model ids",
     );
   });
+
+  it("accepts Codex bare and OpenAI/Codex-prefixed models only", () => {
+    expect(validateModelOverride("codex", "gpt-5.4-mini")).toBeNull();
+    expect(validateModelOverride("codex", "openai:gpt-5.4-mini")).toBeNull();
+    expect(validateModelOverride("codex", "codex:gpt-5.4-mini")).toBeNull();
+    expect(validateModelOverride("codex", "anthropic:claude-opus-4-6")).toContain(
+      "Codex runtime only accepts",
+    );
+  });
 });

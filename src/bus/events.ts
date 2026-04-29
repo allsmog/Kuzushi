@@ -1,4 +1,4 @@
-import type { TaskOutputKind } from "../agents/types.js";
+import type { OutputKind } from "../agents/types.js";
 import type { PocExecutionVerdict, ReportMode } from "../contracts.js";
 import type { ErrorCategory } from "../errors.js";
 import type { QualityGateResult } from "../quality-gate-types.js";
@@ -122,7 +122,7 @@ export type TaskStartEvent = EventEnvelope<
   {
     context: RunContext;
     taskId: string;
-    outputKind: TaskOutputKind;
+    outputKind: OutputKind;
     input: unknown;
     upstreamOutputs: Map<string, unknown>;
   }
@@ -133,7 +133,7 @@ export type TaskProgressEvent = EventEnvelope<
   {
     context: RunContext;
     taskId: string;
-    outputKind: TaskOutputKind;
+    outputKind: OutputKind;
     progress: unknown;
   }
 >;
@@ -143,7 +143,7 @@ export type TaskCompleteEvent = EventEnvelope<
   {
     context: RunContext;
     taskId: string;
-    outputKind: TaskOutputKind;
+    outputKind: OutputKind;
     output: unknown;
     durationMs: number;
     costUsd?: number;
@@ -155,7 +155,7 @@ export type TaskErrorEvent = EventEnvelope<
   {
     context: RunContext;
     taskId: string;
-    outputKind: TaskOutputKind;
+    outputKind: OutputKind;
     error: string;
     errorCategory?: ErrorCategory;
   }
@@ -312,7 +312,7 @@ export type TriageErrorEvent = EventEnvelope<
 /**
  * Shared payload for every `${moduleId}:agent-activity` event. One row in
  * the UI's `agentActivity` map is keyed by `fingerprint` (e.g. finding id
- * for triage/verify/poc, actor name for threat-hunt).
+ * for triage/verify/poc, actor name for carlini-threat-hunt).
  *
  * `done: true` signals the fingerprint's agent has reached a terminal state
  * (success, error, or abort); the shared handler in the report-worker drops
@@ -335,12 +335,12 @@ export interface TaskAgentActivityPayload {
   total: number;
   /**
    * Terminal signal — UI drops this fingerprint's row on the next tick.
-   * Producers that fan out sub-agents (threat-hunt actors, verify finding
+   * Producers that fan out sub-agents (carlini-threat-hunt actors, verify finding
    * workers, …) set `done: true` on the last event for each fingerprint.
    */
   done?: boolean;
   /**
-   * Emitting module id (e.g. `"threat-hunt"`). Optional and derivable from
+   * Emitting module id (e.g. `"carlini-threat-hunt"`). Optional and derivable from
    * the topic name; populated by `ExecutionContext.reportAgentActivity` for
    * subscribers that can't easily pattern-match the topic.
    */
@@ -356,7 +356,7 @@ export interface TaskAgentActivityPayload {
  *
  * The five narrow per-module aliases (`TriageAgentActivityEvent`,
  * `VerificationAgentActivityEvent`, `PocHarnessAgentActivityEvent`,
- * `DynamicAnalysisAgentActivityEvent`, `ThreatHuntAgentActivityEvent`) used
+ * `DynamicAnalysisAgentActivityEvent`, `CarliniThreatHuntAgentActivityEvent`) used
  * to live here for source compatibility. They were collapsed into this
  * supertype as part of the module-forward reconciliation — every consumer
  * now types against `TaskAgentActivityEvent` directly.

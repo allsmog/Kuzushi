@@ -1,6 +1,6 @@
 /**
  * Coverage for the per-runId abort-signal registry that bridges
- * `runPipeline` to bus workers so `TaskContext.signal` can be populated.
+ * `runPipeline` to bus workers so `DagRunContext.signal` can be populated.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import {

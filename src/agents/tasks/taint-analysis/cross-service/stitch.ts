@@ -18,7 +18,7 @@ import {
   normalizeCostUsd,
   toErrorMessage,
 } from "../../../../utils.js";
-import type { AgentTask } from "../../../types.js";
+import type { DagNodeImpl } from "../../../types.js";
 import { resolveTaintAnalysisConfig } from "../types.js";
 import {
   type BoundaryManifest,
@@ -36,7 +36,7 @@ import {
  * Stitching task: connects boundary points across services using heuristic matching
  * and LLM semantic validation, then generates cross-service Findings.
  */
-export const taintAnalysisStitchTask: AgentTask<ScanOpts, Finding[]> = {
+export const taintAnalysisStitchTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "taint-analysis-stitch",
   displayName: "Cross-Service Stitch",
   outputKind: "findings",

@@ -77,7 +77,7 @@ export interface Driver {
   complete(line: string): string[];
   /**
    * Optional peek at the host's ShellState. Module dispatchers use this to
-   * check `requires` preflight constraints (e.g. threat-hunt needs a fresh
+   * check `requires` preflight constraints (e.g. carlini-threat-hunt needs a fresh
    * ContextSnapshot with appModel). Omit in non-shell contexts.
    */
   getShellState?(): { contextSnapshot?: unknown; threatModel?: unknown } | undefined;

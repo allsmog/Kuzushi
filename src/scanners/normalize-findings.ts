@@ -1,6 +1,6 @@
 /**
  * Shared finding normalization — schema, parsing, and selection logic
- * used by both the agentic scanner and threat-hunt task.
+ * used by both the agentic scanner and carlini-threat-hunt task.
  */
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -60,7 +60,7 @@ export interface NormalizedFinding {
   cwe: string[];
   evidence: string;
   /**
-   * Optional sidecar set by threat-hunt before merge — survives
+   * Optional sidecar set by carlini-threat-hunt before merge — survives
    * `selectFindings` so the UI can group findings by hunting actor.
    */
   actorFingerprint?: string;

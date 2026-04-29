@@ -11,7 +11,7 @@ import { formatProfilesForPrompt, getProfilesForTask } from "../../security-prof
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
 import type { ApplicationModel, FileIndex, RepoContext, ScanOpts } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
-import type { AgentTask, TaskContext } from "../types.js";
+import type { DagNodeImpl, DagRunContext } from "../types.js";
 import {
   computeDetectionFingerprint,
   dedupAndRankFindings,
@@ -92,7 +92,7 @@ interface TemplateInjectionConfig {
   maxFindings: number;
 }
 
-function resolveConfig(ctx: TaskContext): TemplateInjectionConfig {
+function resolveConfig(ctx: DagRunContext): TemplateInjectionConfig {
   const model = resolveTaskModel(ctx, "template-injection");
   const maxFindings = resolveTaskPositiveInt(ctx, "template-injection", "maxFindings", 50);
   return { model, maxFindings };
@@ -296,7 +296,7 @@ function computeFingerprint(
   ]);
 }
 
-export const templateInjectionTask: AgentTask<ScanOpts, Finding[]> = {
+export const templateInjectionTask: DagNodeImpl<ScanOpts, Finding[]> = {
   id: "template-injection-detect",
   displayName: "Template Injection Detector",
   outputKind: "findings",
@@ -416,7 +416,7 @@ export const templateInjectionTask: AgentTask<ScanOpts, Finding[]> = {
 
 function runTemplateLens(
   prompt: string,
-  context: TaskContext,
+  context: DagRunContext,
   model: string,
   tag: string,
 ): Promise<LensResult> {

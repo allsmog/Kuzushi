@@ -13,7 +13,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import type {
-  DfdElement,
+  DfdNode,
   StrideCategory,
   StrideThreat,
 } from "../../agents/tasks/threat-modeling/types.js";
@@ -66,7 +66,8 @@ export function computeStrideCell(
 ): CellImpact {
   let best: CellImpact = null;
   for (const t of threats) {
-    if (t.elementId !== elementId || t.category !== category) continue;
+    const targets = t.targetElementIds ?? (t.elementId ? [t.elementId] : []);
+    if (!targets.includes(elementId) || t.category !== category) continue;
     if (best === null || IMPACT_RANK[t.impact] > IMPACT_RANK[best]) {
       best = t.impact;
     }
@@ -127,13 +128,15 @@ export function ThreatStrideMatrix({ shell }: ThreatStrideMatrixProps): React.Re
   const tm = shell.threatModel;
   if (!tm) return <EmptyState />;
 
-  const elements = tm.dfd.elements ?? [];
+  const elements = tm.dfd.nodes ?? [];
   const threats = tm.threats ?? [];
   // Stable but operator-useful ordering: elements that actually have at least
   // one threat come first (sorted by threat count desc), then the rest.
   const elementThreatCount = new Map<string, number>();
   for (const t of threats) {
-    elementThreatCount.set(t.elementId, (elementThreatCount.get(t.elementId) ?? 0) + 1);
+    for (const targetId of t.targetElementIds ?? (t.elementId ? [t.elementId] : [])) {
+      elementThreatCount.set(targetId, (elementThreatCount.get(targetId) ?? 0) + 1);
+    }
   }
   const sortedElements = [...elements].sort((a, b) => {
     const ca = elementThreatCount.get(a.id) ?? 0;
@@ -149,7 +152,7 @@ export function ThreatStrideMatrix({ shell }: ThreatStrideMatrixProps): React.Re
   return (
     <ScreenContent>
       <ContextStrip
-        status={[`${elements.length} elements`, `${threats.length} threats`]}
+        status={[`${elements.length} nodes`, `${threats.length} threats`]}
         subtitle={
           shell.threatModelSource
             ? formatThreatModelSource({
@@ -230,7 +233,7 @@ function MatrixRow({
   idWidth,
   nameWidth,
 }: {
-  element: DfdElement;
+  element: DfdNode;
   threats: ReadonlyArray<StrideThreat>;
   idWidth: number;
   nameWidth: number;
