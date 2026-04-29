@@ -1,5 +1,6 @@
 import type React from "react";
 import { createContext, useContext } from "react";
+import type { ScreenTab } from "./primitives/ScreenFrame.js";
 import type { ShellState, UIState } from "./state.js";
 import { SPACING, WIDTHS } from "./tokens.js";
 
@@ -9,6 +10,8 @@ export interface NavigationMeta {
   status: string[];
   /** Optional subtitle line shown beneath the title (e.g. source path). */
   subtitle?: string;
+  /** Optional view-local tabs shown in the global screen frame. */
+  tabs?: ReadonlyArray<ScreenTab>;
 }
 
 /** Glyph palette — every cursor, selector, and toggle shape lives here. */
@@ -103,6 +106,7 @@ export function useLayoutContext(): LayoutContextValue {
 export function deriveNavigation(
   state: Pick<UIState, "mode" | "phase" | "repoName"> & {
     shell?: ShellNavigationState | null;
+    scanView?: UIState["scanView"];
     /** Optional currently-running scan sub-task; used to specialise the subtitle. */
     activeScanTask?: { label: string } | null;
   },
@@ -113,6 +117,7 @@ export function deriveNavigation(
       title: shellTitle(shell),
       breadcrumbs: shellBreadcrumbs(shell),
       status: shellStatus(shell),
+      tabs: shellTabs(shell),
     };
   }
 
@@ -129,7 +134,10 @@ export function deriveNavigation(
     state.mode === "running"
       ? runningPhaseSubtitle(state.phase, state.activeScanTask?.label)
       : undefined;
-  return subtitle ? { title, breadcrumbs, status, subtitle } : { title, breadcrumbs, status };
+  const tabs = state.mode === "running" ? scanTabs(state.scanView ?? "pipeline") : undefined;
+  return subtitle
+    ? { title, breadcrumbs, status, subtitle, tabs }
+    : { title, breadcrumbs, status, tabs };
 }
 
 function runningPhaseSubtitle(phase: string, activeTaskLabel?: string): string | undefined {
@@ -161,6 +169,28 @@ const THREAT_TAB_TITLES: Record<NonNullable<ShellNavigationState["threatTab"]>, 
   scope: "scope & criticality",
   summary: "threat summary",
 };
+
+function shellTabs(
+  shell: ShellNavigationState | null | undefined,
+): ReadonlyArray<ScreenTab> | undefined {
+  if (!shell || shell.shellView !== "threats") return undefined;
+  const active = shell.threatTab ?? "summary";
+  return [
+    { id: "dfd", label: "DFD", shortcut: "1", active: active === "dfd" },
+    { id: "stride", label: "STRIDE", shortcut: "2", active: active === "stride" },
+    { id: "stories", label: "Stories", shortcut: "3", active: active === "stories" },
+    { id: "scope", label: "Scope", shortcut: "4", active: active === "scope" },
+    { id: "summary", label: "Summary", shortcut: "5", active: active === "summary" },
+  ];
+}
+
+function scanTabs(active: UIState["scanView"]): ReadonlyArray<ScreenTab> {
+  return [
+    { id: "pipeline", label: "Pipeline", shortcut: "1", active: active === "pipeline" },
+    { id: "findings", label: "Findings", shortcut: "2", active: active === "findings" },
+    { id: "cost", label: "Cost", shortcut: "3", active: active === "cost" },
+  ];
+}
 
 function shellTitle(shell: ShellNavigationState | null | undefined): string {
   if (!shell) return "Shell";

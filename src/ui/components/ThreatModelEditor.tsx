@@ -13,10 +13,9 @@ import type {
   StrideThreat,
   ThreatModelDocument,
 } from "../../agents/tasks/threat-modeling/types.js";
-import { badge, boxFooter, boxHeader } from "../format.js";
+import { badge } from "../format.js";
 import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import { isCancelInput } from "../interaction-key-policy.js";
 import { TextInput } from "../primitives/TextInput.js";
@@ -97,7 +96,6 @@ export function ThreatModelEditor({
   const [model, setModel] = useState<ThreatModelDocument>({ ...threatModel });
   const [annotateMode, setAnnotateMode] = useState(false);
   const [annotateBuffer, setAnnotateBuffer] = useState("");
-  const width = useTerminalCardWidth();
 
   const threats = model.threats;
 
@@ -175,14 +173,10 @@ export function ThreatModelEditor({
   if (threats.length === 0) {
     return (
       <Box flexDirection="column">
-        <Text>{""}</Text>
-        <Text>{boxHeader("Threat Model Editor", width)}</Text>
-        <Text>{""}</Text>
         <Box paddingLeft={SPACING.md}>
-          <Text>{tokens.muted("No threats in threat model. Press [q] to continue.")}</Text>
+          <Text>{tokens.label("Threat Model Editor")}</Text>
+          <Text>{tokens.muted("No threats in threat model.")}</Text>
         </Box>
-        <Text>{""}</Text>
-        <Text>{boxFooter(width)}</Text>
       </Box>
     );
   }
@@ -193,11 +187,8 @@ export function ThreatModelEditor({
 
   return (
     <Box flexDirection="column">
-      <Text>{""}</Text>
-      <Text>{boxHeader(`Threat Model Editor (${threats.length} threats)`, width)}</Text>
-      <Text>{""}</Text>
-
       <Box paddingLeft={SPACING.md}>
+        <Text>{tokens.label(`Threat Model Editor (${threats.length} threats)`)}</Text>
         <Text>
           {tokens.success(`${activeCount} active`)} {tokens.muted(`${dismissedCount} dismissed`)}{" "}
           {tokens.info(`${mitigatedCount} mitigated`)}
@@ -214,7 +205,7 @@ export function ThreatModelEditor({
         const realIdx = scrollStart + vi;
         const isSelected = realIdx === selectedIdx;
         const status = getThreatStatus(t, model);
-        const cursor = isSelected ? tokens.accent("> ") : "  ";
+        const cursor = isSelected ? tokens.focus("❯ ") : "  ";
         const annotation = model.userAnnotations?.[t.id];
         const statusCell = statusBadge(status);
 
@@ -228,8 +219,9 @@ export function ThreatModelEditor({
         return (
           <Box key={t.id} flexDirection="column">
             <Text>
-              {cursor}
-              {tokens.muted(t.id)} {titleText} {statusCell}
+              {isSelected
+                ? tokens.selection(`${cursor}${tokens.muted(t.id)} ${titleText} ${statusCell}`)
+                : `${cursor}${tokens.muted(t.id)} ${titleText} ${statusCell}`}
             </Text>
             <Box paddingLeft={SPACING.xxl}>
               <Text>
@@ -289,8 +281,6 @@ export function ThreatModelEditor({
           />
         </Box>
       )}
-
-      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

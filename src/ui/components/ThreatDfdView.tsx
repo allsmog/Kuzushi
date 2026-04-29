@@ -37,6 +37,12 @@ export function ThreatDfdView({ shell }: ThreatDfdViewProps): React.ReactElement
     { keys: "4", label: "scope", secondary: true },
     { keys: "5", label: "summary", secondary: true },
     { keys: "r", label: "regen", secondary: true },
+    ...(shell.pendingThreatPatch
+      ? [
+          { keys: "y", label: "accept patch", secondary: true },
+          { keys: "n", label: "reject patch", secondary: true },
+        ]
+      : []),
     { keys: "q", label: "back", secondary: true },
   ]);
 
@@ -83,7 +89,6 @@ export function ThreatDfdView({ shell }: ThreatDfdViewProps): React.ReactElement
         <RegenerationPalette stale={shell.contextSnapshot?.staleSlices} />
       ) : null}
       {shell.pendingThreatPatch ? <PatchProposalCard shell={shell} /> : null}
-      <ControlHint hasPatch={Boolean(shell.pendingThreatPatch)} />
     </ScreenContent>
   );
 }
@@ -115,7 +120,7 @@ function Legend({ validated }: { validated: boolean }): React.ReactElement {
         {tokens.muted("   ")}
         {tokens.warn("B boundary")}
         {tokens.muted("   ")}
-        {tokens.accent("> selected")}
+        {tokens.focus("❯ selected")}
         {validated ? tokens.muted("   ") : ""}
         {validated ? tokens.success("✓ validated") : ""}
       </Text>
@@ -182,7 +187,7 @@ function NodeRow({
   node: AttackSurfaceNode;
   selected: boolean;
 }): React.ReactElement {
-  const marker = selected ? tokens.accent(">") : node.risk === "hot" ? tokens.danger("!") : " ";
+  const marker = selected ? tokens.focus("❯") : node.risk === "hot" ? tokens.danger("!") : " ";
   const glyph = nodeGlyph(node);
   const label = `${node.id.padEnd(4)} ${glyph} ${node.name}`;
   const detail = node.tags.length > 0 ? node.tags.slice(0, 3).join(" · ") : node.description;
@@ -193,11 +198,13 @@ function NodeRow({
       : node.risk === "watch"
         ? tokens.warn
         : tokens.value;
+  const line = `${marker} ${color(label.padEnd(34))}${tokens.muted(
+    truncateEnd(detail, 36).padEnd(36),
+  )}`;
   return (
     <Text>
       {tokens.muted("│ ")}
-      {marker} {color(label.padEnd(34))}
-      {tokens.muted(truncateEnd(detail, 36).padEnd(36))}
+      {selected ? tokens.selection(line) : line}
       {tokens.muted("│")}
     </Text>
   );
@@ -372,20 +379,6 @@ function PatchProposalCard({ shell }: { shell: ShellState }): React.ReactElement
         </Text>
       ) : null}
       <Text>{tokens.muted("  y accept and save · n reject · /threats ask <revision>")}</Text>
-    </Box>
-  );
-}
-
-function ControlHint({ hasPatch }: { hasPatch: boolean }): React.ReactElement {
-  return (
-    <Box marginTop={SPACING.sm} flexDirection="column">
-      <Text>
-        {tokens.muted("1 dfd · 2 stride · 3 stories · 4 scope · 5 summary · r regen · q back")}
-      </Text>
-      <Text>{tokens.muted("AI edits: /threats ask <instruction>")}</Text>
-      {hasPatch ? (
-        <Text>{tokens.muted("patch proposal: y accept · n reject · /threats ask <revision>")}</Text>
-      ) : null}
     </Box>
   );
 }

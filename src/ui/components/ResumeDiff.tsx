@@ -5,8 +5,6 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
-import { boxFooter, boxHeader } from "../format.js";
-import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import type { ResumeDiffData } from "../resume-types.js";
 import { SPACING, tokens } from "../tokens.js";
@@ -21,12 +19,11 @@ export function ResumeDiff({ data }: ResumeDiffProps): React.ReactElement {
   const prevDate = data.previousRunDate
     ? new Date(data.previousRunDate).toLocaleDateString()
     : "unknown";
-  const width = useTerminalCardWidth();
 
   return (
     <Box flexDirection="column">
-      <Text>{boxHeader("Resume", width)}</Text>
       <Box paddingLeft={SPACING.md} flexDirection="column">
+        <Text>{tokens.label("Resume")}</Text>
         <Text>
           {tokens.muted("Previous run:")} {prevDate} ({data.previousFindingCount} findings,{" "}
           {data.previousTriagedCount} triaged)
@@ -74,7 +71,6 @@ export function ResumeDiff({ data }: ResumeDiffProps): React.ReactElement {
           </>
         )}
       </Box>
-      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

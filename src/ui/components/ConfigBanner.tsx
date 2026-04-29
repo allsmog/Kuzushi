@@ -8,10 +8,10 @@
 
 import { Box, Text } from "ink";
 import type React from "react";
-import { boxFooter, boxHeader, formatCost } from "../format.js";
+import { formatCost } from "../format.js";
 import { useTerminalCardWidth } from "../hooks.js";
 import { Table } from "../primitives/Table.js";
-import { SPACING } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 
 export interface ConfigBannerData {
   model: string;
@@ -56,8 +56,8 @@ export function ConfigBanner({ config }: ConfigBannerProps): React.ReactElement 
 
   return (
     <Box flexDirection="column">
-      <Text>{boxHeader("Config", width)}</Text>
       <Box paddingLeft={SPACING.md}>
+        <Text>{tokens.label("Config")}</Text>
         <Table<Row>
           columns={[
             { key: "label", width: 14, align: "left" },
@@ -70,7 +70,6 @@ export function ConfigBanner({ config }: ConfigBannerProps): React.ReactElement 
           gap={2}
         />
       </Box>
-      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

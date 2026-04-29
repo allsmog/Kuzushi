@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { icons } from "../icons.js";
 import { isCancelInput } from "../interaction-key-policy.js";
+import { useLayoutContext } from "../layout-context.js";
 import { tokens } from "../tokens.js";
 
 export interface SelectListItem<T = string> {
@@ -69,12 +70,13 @@ export function SelectList<T = string>(props: SelectListProps<T>): JSX.Element {
     onHighlight,
     onCancel,
     isActive = true,
-    cursor = ">",
     cursorColor = tokens.accent,
     emptyMessage,
     showPosition = true,
     renderItem,
   } = props;
+  const { theme } = useLayoutContext();
+  const resolvedCursor = props.cursor ?? theme.glyphs.selection;
 
   const initialIndex = useMemo(() => {
     if (selectedId === undefined) return 0;
@@ -126,7 +128,7 @@ export function SelectList<T = string>(props: SelectListProps<T>): JSX.Element {
     );
   }
 
-  const cursorPrefixBlank = " ".repeat(cursor.length);
+  const cursorPrefixBlank = " ".repeat(resolvedCursor.length);
 
   return (
     <Box flexDirection="column">
@@ -139,26 +141,20 @@ export function SelectList<T = string>(props: SelectListProps<T>): JSX.Element {
       ) : null}
       {items.map((item, idx) => {
         const isCursor = idx === cursorIdx;
-        const cursorPrefix = isCursor ? cursorColor(cursor) : cursorPrefixBlank;
+        const cursorPrefix = isCursor ? cursorColor(resolvedCursor) : cursorPrefixBlank;
         if (renderItem) {
           return (
             <Box key={String(item.id)} flexDirection="column">
-              {renderItem({ item, isCursor, cursor, cursorPrefix })}
+              {renderItem({ item, isCursor, cursor: resolvedCursor, cursorPrefix })}
             </Box>
           );
         }
-        const label = item.disabled
-          ? tokens.muted(item.label)
-          : isCursor
-            ? tokens.strong(item.label)
-            : item.label;
+        const label = item.disabled ? tokens.muted(item.label) : item.label;
         const detail = item.detail ? ` ${tokens.subtle(item.detail)}` : "";
+        const line = `${cursorPrefix} ${label}${detail}`;
         return (
           <Box key={String(item.id)} flexDirection="row">
-            <Text>
-              {cursorPrefix} {label}
-              {detail}
-            </Text>
+            <Text>{isCursor && !item.disabled ? tokens.selection(line) : line}</Text>
           </Box>
         );
       })}

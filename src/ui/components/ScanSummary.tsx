@@ -4,14 +4,7 @@
 
 import { Box, Text } from "ink";
 import React from "react";
-import {
-  boxDivider,
-  boxFooter,
-  boxHeader,
-  formatCost,
-  formatDuration,
-  miniBarChart,
-} from "../format.js";
+import { boxDivider, formatCost, formatDuration, miniBarChart } from "../format.js";
 import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import { Table } from "../primitives/Table.js";
@@ -78,12 +71,9 @@ function ScanSummaryImpl({ data }: ScanSummaryProps): React.ReactElement {
       {/* Trophy screen flushes left — handles its own ASCII box framing. */}
       <TrophyScreen data={data} />
 
-      <Text>{""}</Text>
-      <Text>{boxHeader(`${icons.complete} Scan Results`, width)}</Text>
-      <Text>{""}</Text>
-
       {/* Indented body — every row below lands at column 2 via paddingLeft. */}
       <Box flexDirection="column" paddingLeft={SPACING.md}>
+        <Text>{tokens.label(`${icons.complete} Scan Results`)}</Text>
         <Table<VerdictRow>
           columns={[
             { key: "label", width: 14, align: "left" },
@@ -434,8 +424,6 @@ function ScanSummaryImpl({ data }: ScanSummaryProps): React.ReactElement {
         {/* Run metrics */}
         {data.runMetrics && <RunMetricsSummary metrics={data.runMetrics} width={width} />}
       </Box>
-
-      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

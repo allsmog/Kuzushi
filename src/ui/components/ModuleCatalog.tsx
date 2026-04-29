@@ -59,13 +59,6 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
   return (
     <ScreenContent>
       <ContextStrip status={status} />
-      <Box marginTop={SPACING.sm}>
-        <Text>
-          {tokens.strong("Primary next step: ")}
-          {tokens.accent("use <module-id>")}
-          {tokens.muted(" to enter one module workflow.")}
-        </Text>
-      </Box>
 
       {CATEGORY_ORDER.map((cat) => {
         const rows = byCategory[cat];

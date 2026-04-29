@@ -11,10 +11,8 @@ import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useCallback, useState } from "react";
 import type { IntakeItemStatus, OperatorContextItem, OperatorScanContext } from "../../types.js";
-import { boxFooter, boxHeader } from "../format.js";
 import { useBoundedIndex } from "../hooks/useBoundedIndex.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import { isCancelInput } from "../interaction-key-policy.js";
 import { TextInput } from "../primitives/TextInput.js";
@@ -222,7 +220,6 @@ export function ContextIntake({
   const [context, setContext] = useState<OperatorScanContext>({ ...initialContext });
   const [editMode, setEditMode] = useState(false);
   const [editBuffer, setEditBuffer] = useState("");
-  const width = useTerminalCardWidth();
 
   const currentSection = SECTIONS[sectionIdx]!;
   const displayItems = getDisplayItems(context, currentSection);
@@ -326,22 +323,14 @@ export function ContextIntake({
   if (displayItems.length === 0) {
     return (
       <Box flexDirection="column">
-        <Text>{""}</Text>
-        <Text>
-          {boxHeader(
-            `Scan Context: ${SECTION_LABELS[currentSection]} (${sectionIdx + 1}/${SECTIONS.length})`,
-            width,
-          )}
-        </Text>
-        <Text>{""}</Text>
         <Box paddingLeft={SPACING.md}>
+          <Text>
+            {tokens.label(
+              `Scan Context: ${SECTION_LABELS[currentSection]} (${sectionIdx + 1}/${SECTIONS.length})`,
+            )}
+          </Text>
           <Text>{tokens.muted("No items detected for this section.")}</Text>
         </Box>
-        <Box paddingLeft={SPACING.md}>
-          <Text>{tokens.muted("Press [tab] or [enter] to continue, [n] to add items.")}</Text>
-        </Box>
-        <Text>{""}</Text>
-        <Text>{boxFooter(width)}</Text>
       </Box>
     );
   }
@@ -350,16 +339,12 @@ export function ContextIntake({
 
   return (
     <Box flexDirection="column">
-      <Text>{""}</Text>
-      <Text>
-        {boxHeader(
-          `Scan Context: ${SECTION_LABELS[currentSection]} (${sectionIdx + 1}/${SECTIONS.length})`,
-          width,
-        )}
-      </Text>
-      <Text>{""}</Text>
       <Box paddingLeft={SPACING.md}>
         <Text>
+          {tokens.label(
+            `Scan Context: ${SECTION_LABELS[currentSection]} (${sectionIdx + 1}/${SECTIONS.length})`,
+          )}
+          {"  "}
           {tokens.hint(`(${selectedIdx + 1} of ${displayItems.length})`)}
           {selectedIdx > 0 ? tokens.hint(" ▲") : ""}
           {selectedIdx < displayItems.length - 1 ? tokens.hint(" ▼") : ""}
@@ -370,7 +355,7 @@ export function ContextIntake({
         const showGroup = item.groupLabel && item.groupLabel !== lastGroup;
         if (item.groupLabel) lastGroup = item.groupLabel;
         const isSelected = i === selectedIdx;
-        const cursor = isSelected ? tokens.accent("> ") : "  ";
+        const cursor = isSelected ? tokens.focus("❯ ") : "  ";
         const icon = statusIcon(item.status);
         const label =
           item.status === "deleted"
@@ -387,8 +372,9 @@ export function ContextIntake({
               </Box>
             )}
             <Text>
-              {cursor}
-              {icon} {label}
+              {isSelected
+                ? tokens.selection(`${cursor}${icon} ${label}`)
+                : `${cursor}${icon} ${label}`}
             </Text>
           </Box>
         );
@@ -424,8 +410,6 @@ export function ContextIntake({
           </Box>
         );
       })()}
-
-      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

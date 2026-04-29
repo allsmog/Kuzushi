@@ -34,6 +34,10 @@ export interface TableProps<Row> {
   maxWidth?: number;
   gap?: number;
   emptyMessage?: string;
+  /** Optional cursor row. When set, every row reserves a cursor gutter. */
+  selectedIndex?: number;
+  /** Defaults to the app selection glyph. */
+  selectionGlyph?: string;
 }
 
 function computeWidths<Row>(
@@ -54,7 +58,17 @@ function computeWidths<Row>(
 }
 
 export function Table<Row>(props: TableProps<Row>): JSX.Element {
-  const { columns, rows, showHeader, divider = true, maxWidth, gap = 2, emptyMessage } = props;
+  const {
+    columns,
+    rows,
+    showHeader,
+    divider = true,
+    maxWidth,
+    gap = 2,
+    emptyMessage,
+    selectedIndex,
+    selectionGlyph = "❯",
+  } = props;
   const { stdout } = useStdout();
   const totalWidth = maxWidth ?? resolveTerminalColumns(stdout);
   const widths = computeWidths(columns, totalWidth, gap);
@@ -80,12 +94,35 @@ export function Table<Row>(props: TableProps<Row>): JSX.Element {
 
   const gapStr = " ".repeat(gap);
   const dividerWidth = widths.reduce((a, b) => a + b, 0) + gap * Math.max(0, columns.length - 1);
+  const hasSelection = typeof selectedIndex === "number";
+  const rowPrefix = (rowIdx: number): string => {
+    if (!hasSelection) return "";
+    return rowIdx === selectedIndex
+      ? `${tokens.focus(selectionGlyph)} `
+      : " ".repeat(selectionGlyph.length + 1);
+  };
+  const headerPrefix = hasSelection ? " ".repeat(selectionGlyph.length + 1) : "";
+
+  function renderRow(row: Row, rowIdx: number): string {
+    const cells = columns
+      .map((col, i) => {
+        const width = widths[i] ?? 0;
+        const rendered = col.render ? col.render(row) : (row as Record<string, unknown>)[col.key];
+        if (typeof rendered === "string") return renderCell(rendered, col, width);
+        if (rendered == null) return padCell("", width, col.align ?? "left");
+        return renderCell(String(rendered), col, width);
+      })
+      .join(gapStr);
+    const line = `${rowPrefix(rowIdx)}${cells}`;
+    return rowIdx === selectedIndex ? tokens.selection(line) : line;
+  }
 
   return (
     <Box flexDirection="column">
       {headerVisible ? (
         <Box>
           <Text>
+            {headerPrefix}
             {columns
               .map((col, i) =>
                 renderCell(tokens.metadata(col.header ?? col.key), col, widths[i] ?? 0),
@@ -96,27 +133,16 @@ export function Table<Row>(props: TableProps<Row>): JSX.Element {
       ) : null}
       {headerVisible && divider ? (
         <Box>
-          <Text>{tokens.subtle(icons.boxHorizontal.repeat(dividerWidth))}</Text>
+          <Text>
+            {hasSelection ? " ".repeat(selectionGlyph.length + 1) : ""}
+            {tokens.subtle(icons.boxHorizontal.repeat(dividerWidth))}
+          </Text>
         </Box>
       ) : null}
       {rows.map((row, rowIdx) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: Table rows are opaque data; no stable id field. Re-renders replace the full set so keys never collide mid-list.
         <Box key={`row-${rowIdx}`}>
-          <Text>
-            {columns
-              .map((col, i) => {
-                const width = widths[i] ?? 0;
-                const rendered = col.render
-                  ? col.render(row)
-                  : (row as Record<string, unknown>)[col.key];
-                if (typeof rendered === "string") {
-                  return renderCell(rendered, col, width);
-                }
-                if (rendered == null) return padCell("", width, col.align ?? "left");
-                return renderCell(String(rendered), col, width);
-              })
-              .join(gapStr)}
-          </Text>
+          <Text>{renderRow(row, rowIdx)}</Text>
         </Box>
       ))}
     </Box>
