@@ -648,7 +648,10 @@ const ShellInputArea = memo(
         </Box>
         {slashSuggestions.length > 0 ? (
           <Box flexDirection="column" paddingLeft={theme.spacing.md}>
-            <Text>{tokens.tertiary("Suggestions")}</Text>
+            <Text>
+              {tokens.tertiary("Suggestions  ")}
+              {tokens.muted("(Tab: accept · Enter: submit as-typed)")}
+            </Text>
             <Text>{tokens.tertiary(slashSuggestions.join("  ·  "))}</Text>
           </Box>
         ) : (

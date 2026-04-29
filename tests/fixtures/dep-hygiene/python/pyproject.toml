@@ -1,0 +1,15 @@
+[project]
+name = "dep-hygiene-python-fixture"
+version = "0.0.0"
+dependencies = [
+  "requests>=2.0",
+  "flask",
+  "django>=4.0,<5.0",
+  "pydantic==2.0.0"
+]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+loguru = "*"
+httpx = ">=0.25"
+sqlalchemy = "2.0.0"
