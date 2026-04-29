@@ -5243,6 +5243,12 @@ function handleSlashCommand(
 
     case "findings":
     case "f":
+      // N3: `/findings export <fmt> [path]` — dump the workspace's persisted
+      // findings via the existing report formatters. Without a sub-verb the
+      // command keeps its prior behavior (open the findings view).
+      if (args[0]?.toLowerCase() === "export") {
+        return handleFindingsExportCommand(args.slice(1), opts, ctx);
+      }
       return {
         shellStateUpdater: (shell) => ({
           ...shell,
@@ -6690,6 +6696,142 @@ async function executeResumeTool(
   };
 }
 
+/**
+ * N3: dump the workspace's findings to disk via JSON / CSV / SARIF. Reads
+ * `workspaceManager.vulns.listForWorkspace(...)` (the same source `/findings`
+ * renders) so operators get the same view they see in the TUI. Format and
+ * output path:
+ *
+ *   /findings export json [path]    → JSON
+ *   /findings export csv  [path]    → CSV
+ *   /findings export sarif [path]   → SARIF 2.1.0
+ *
+ * If no path is supplied we default to `<dataDir>/findings.<fmt>`.
+ */
+function handleFindingsExportCommand(
+  args: string[],
+  opts: ShellOptions,
+  ctx: ShellContext,
+): LocalCommandResult {
+  const fmt = args[0]?.toLowerCase().trim();
+  if (!fmt || !["json", "csv", "sarif"].includes(fmt)) {
+    return {
+      output: "Usage: /findings export <json|csv|sarif> [path]",
+    };
+  }
+  if (!opts.workspace || !ctx.workspaceManager) {
+    return {
+      output: "/findings export needs an active workspace. Use /workspace use <name> first.",
+    };
+  }
+  const ws = ctx.workspaceManager;
+  const wsId = opts.workspace;
+  const dataDir = ctx.dataDir ?? path.resolve(".kuzushi");
+  const outputPath = args[1]
+    ? path.resolve(args[1]!)
+    : path.join(dataDir, `findings.${fmt === "sarif" ? "sarif.json" : fmt}`);
+
+  return {
+    output: `Exporting findings to ${outputPath}…`,
+    asyncExecute: async () => {
+      const vulns = ws.vulns.listForWorkspace(wsId) as ReadonlyArray<{
+        id: string;
+        name: string;
+        severity: string | null;
+        checkCode: string | null;
+        filePath?: string;
+        startLine?: number;
+        message?: string;
+        references?: ReadonlyArray<unknown>;
+      }>;
+      if (vulns.length === 0) {
+        return `No findings in workspace "${wsId}". Run a scan first.`;
+      }
+      const fs = await import("node:fs/promises");
+      try {
+        if (fmt === "json") {
+          await fs.writeFile(
+            outputPath,
+            JSON.stringify({ workspace: wsId, count: vulns.length, findings: vulns }, null, 2),
+          );
+        } else if (fmt === "csv") {
+          const header = "id,severity,checkCode,name,filePath,startLine,message";
+          const rows = vulns
+            .map((v) =>
+              [
+                csvEscape(v.id),
+                csvEscape(v.severity ?? ""),
+                csvEscape(v.checkCode ?? ""),
+                csvEscape(v.name),
+                csvEscape(v.filePath ?? ""),
+                String(v.startLine ?? ""),
+                csvEscape(v.message ?? ""),
+              ].join(","),
+            )
+            .join("\n");
+          await fs.writeFile(outputPath, `${header}\n${rows}\n`);
+        } else {
+          // SARIF 2.1.0 minimal envelope. The full pipeline-aware report
+          // builder lives in src/report-sarif.ts but it requires a runs DB
+          // and pipeline stats; the workspace-level export only needs the
+          // findings themselves.
+          const sarif = {
+            version: "2.1.0",
+            $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+            runs: [
+              {
+                tool: { driver: { name: "kuzushi", informationUri: "https://kuzushi.io" } },
+                results: vulns.map((v) => ({
+                  ruleId: v.checkCode ?? "kuzushi.finding",
+                  level: severityToSarifLevel(v.severity),
+                  message: { text: v.message ?? v.name },
+                  locations: v.filePath
+                    ? [
+                        {
+                          physicalLocation: {
+                            artifactLocation: { uri: v.filePath },
+                            region: { startLine: v.startLine ?? 1 },
+                          },
+                        },
+                      ]
+                    : [],
+                })),
+              },
+            ],
+          };
+          await fs.writeFile(outputPath, JSON.stringify(sarif, null, 2));
+        }
+        return `Wrote ${vulns.length} finding${vulns.length === 1 ? "" : "s"} → ${outputPath}`;
+      } catch (err) {
+        return `Failed to write ${outputPath}: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+}
+
+function csvEscape(value: string): string {
+  if (!value) return "";
+  if (/[",\n\r]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+function severityToSarifLevel(severity: string | null): "error" | "warning" | "note" | "none" {
+  switch ((severity ?? "").toLowerCase()) {
+    case "critical":
+    case "high":
+      return "error";
+    case "medium":
+      return "warning";
+    case "low":
+    case "info":
+      return "note";
+    default:
+      return "none";
+  }
+}
+
 function handleResumeCommand(
   args: string[],
   core: CopilotCore,
@@ -6698,8 +6840,10 @@ function handleResumeCommand(
   shellState: ShellState,
 ): LocalCommandResult {
   const moduleId = ctx.focusedModule;
+  // N1: top-level `/resume` — when no module is focused, scan EVERY loaded
+  // module's checkpoint candidates, pick the most recent, and resume it.
   if (!moduleId) {
-    return { output: "Use /use <module> first, then /resume [runId]." };
+    return resumeMostRecentAcrossModules(args, core, opts, ctx, shellState);
   }
 
   const tool = pickCheckpointResumeTool(core, moduleId);
@@ -6740,6 +6884,74 @@ function handleResumeCommand(
         }
         const candidate = candidates[0]!;
         return executeResumeTool(tool, candidate.runId, core, opts, ctx, shellState, signal);
+      } finally {
+        db.close();
+      }
+    },
+  };
+}
+
+/**
+ * N1: bare `/resume` (no focused module). Walks every module that exposes
+ * checkpoint resume, gathers candidates, picks the most recent by start
+ * time, and resumes it. With an explicit runId argument, scans every
+ * module for that run and dispatches to the owning module's resume tool.
+ */
+function resumeMostRecentAcrossModules(
+  args: string[],
+  core: CopilotCore,
+  opts: ShellOptions,
+  ctx: ShellContext,
+  shellState: ShellState,
+): LocalCommandResult {
+  const explicitRunId = args[0]?.trim();
+  return {
+    output: explicitRunId
+      ? `Looking for run ${explicitRunId}…`
+      : "Looking for the most recent resumable run across all modules…",
+    asyncExecute: async (signal?: AbortSignal) => {
+      const db = await openRunsDb(ctx, opts.target ?? shellState.target ?? undefined);
+      if (!db) {
+        return "No runs database found. Run a module first, then /resume to continue an unfinished checkpoint.";
+      }
+      try {
+        const { listRuns } = await import("../store.js");
+        const repoIds = targetRepoCandidates(opts, shellState);
+        const runs = listRuns(db, { limit: 250 }).filter((run) => repoIds.has(run.repo));
+        type Pick = {
+          moduleId: string;
+          tool: ModuleTool;
+          candidate: ReturnType<typeof selectResumeCandidates>[number];
+        };
+        const picks: Pick[] = [];
+        for (const mod of core.listModules()) {
+          const tool = pickCheckpointResumeTool(core, mod.id);
+          if (!tool) continue;
+          const candidates = selectResumeCandidates(runs, mod.id, tool);
+          for (const candidate of candidates) {
+            if (explicitRunId && candidate.runId !== explicitRunId) continue;
+            picks.push({ moduleId: mod.id, tool, candidate });
+          }
+        }
+        if (picks.length === 0) {
+          return explicitRunId
+            ? `No resumable run with id "${explicitRunId}" found. /show runs to inspect history.`
+            : "No resumable runs found across loaded modules. /show runs to inspect history.";
+        }
+        picks.sort(
+          (a, b) => Date.parse(b.candidate.startedAt) - Date.parse(a.candidate.startedAt),
+        );
+        const winner = picks[0]!;
+        const restored = { ...ctx, focusedModule: winner.moduleId };
+        return executeResumeTool(
+          winner.tool,
+          winner.candidate.runId,
+          core,
+          opts,
+          restored,
+          shellState,
+          signal,
+        );
       } finally {
         db.close();
       }
