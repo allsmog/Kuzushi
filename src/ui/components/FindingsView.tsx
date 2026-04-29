@@ -16,6 +16,7 @@
 
 import { Box, Text } from "ink";
 import React from "react";
+import { computeFindingAliases } from "../../copilot/finding-alias.js";
 import { colorVerdict } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { computeVisibleSlice } from "../hooks/useVisibleSlice.js";
@@ -218,6 +219,18 @@ function UnifiedFindings({
 
   const counts = React.useMemo(() => tallyCounts(findings), [findings]);
 
+  // O5: Compute F-NNNN aliases so each loose row can show its short ID.
+  // Aliases were already used by the resolver (`/open F-0001`) but never
+  // surfaced in the rendering — operators saw raw 12-char fingerprints
+  // and had no way to know the F-NNNN that resolved to them.
+  const aliasMap = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const entry of computeFindingAliases(findings)) {
+      map.set(entry.target, entry.alias);
+    }
+    return map;
+  }, [findings]);
+
   const resolvedPageSize = pageSize ?? DEFAULT_PAGE_SIZE;
   const slice = React.useMemo(
     () =>
@@ -294,7 +307,7 @@ function UnifiedFindings({
             </Text>
           )}
           {visibleLoose.map((f) => (
-            <LooseRow key={f.fingerprint} finding={f} />
+            <LooseRow key={f.fingerprint} finding={f} alias={aliasMap.get(f.fingerprint)} />
           ))}
           {hiddenBelow > 0 && (
             <Text>
@@ -326,7 +339,13 @@ function UnifiedFindings({
  * it, unchanged rows short-circuit before the function body runs.
  */
 const LooseRow = React.memo(
-  function LooseRow({ finding }: { finding: ActionableFinding }): React.ReactElement {
+  function LooseRow({
+    finding,
+    alias,
+  }: {
+    finding: ActionableFinding;
+    alias?: string;
+  }): React.ReactElement {
     useRenderCounter("LooseRow");
     const title = finding.title ?? finding.ruleId;
     const sev = finding.displaySeverity ?? mapSeverity(finding.severity);
@@ -337,6 +356,7 @@ const LooseRow = React.memo(
           {"  "}
           {sevTag}
           {"  "}
+          {alias ? `${tokens.accent(alias)}  ` : ""}
           {tokens.strong(clip(title, 56))}
           {"  "}
           {tokens.muted(`[${finding.taskId || "sast"}]`)}
@@ -350,7 +370,7 @@ const LooseRow = React.memo(
       </Box>
     );
   },
-  (prev, next) => prev.finding === next.finding,
+  (prev, next) => prev.finding === next.finding && prev.alias === next.alias,
 );
 
 function SeverityCounts({
