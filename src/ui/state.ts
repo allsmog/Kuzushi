@@ -286,7 +286,7 @@ export interface ActionableFinding {
   blame?: { sha: string; author: string; date: string; summary: string };
   introducedIn?: string;
   /**
-   * Per-actor fingerprint stamped by `threat-hunt` so the v3
+   * Per-actor fingerprint stamped by `carlini-threat-hunt` so the v3
    * `ActorTranscriptView` can synthesize ★ Finding rows for completed and
    * replayed runs. Optional — non-actor findings leave it undefined.
    */
@@ -790,7 +790,7 @@ export interface ModuleRunSlice {
   source?: "shell";
   /** Run-id from the bus (mirrors `shell.activeRun?.runId` when known). */
   runId?: string;
-  /** Tool currently running, e.g. `"threat-hunt:run"`. */
+  /** Tool currently running, e.g. `"carlini-threat-hunt:run"`. */
   toolName?: string;
   /** Operator-friendly display name from `ModuleTool.displayName`. */
   displayName?: string;
@@ -812,6 +812,10 @@ export interface ModuleRunSlice {
   findingCount?: number;
   /** Explicit session model override used for this run, when set. */
   model?: string;
+  /** Effort tier (low/medium/high/max/xhigh) the run resolved to, when set. */
+  effort?: string;
+  /** Whether thinking was force-disabled for this run (KUZUSHI_DISABLE_THINKING or proxy). */
+  thinkingDisabled?: boolean;
   /** Step rows in display order (top-to-bottom). */
   steps: ReadonlyArray<ModuleRunStep>;
   /**
@@ -936,7 +940,7 @@ export interface ShellState {
   openFindingId: string | null;
   /**
    * When `shellView === "actor-detail"`, the per-actor fingerprint to
-   * render the transcript for (e.g. `"threat-hunt:Unauthenticated_User:0"`).
+   * render the transcript for (e.g. `"carlini-threat-hunt:Unauthenticated_User:0"`).
    * Optional / null when the drill-in is not active.
    */
   focusedActor?: string | null;
@@ -954,7 +958,7 @@ export interface ShellState {
   vendorAssessment?: VendorAssessmentHomeSlice | null;
   /**
    * Knowledge-base attachments for KB-enabled modules (`threat-model`,
-   * `context`, `threat-hunt`, `vendor-assessment`). Keyed by module id; each
+   * `context`, `carlini-threat-hunt`, `vendor-assessment`). Keyed by module id; each
    * entry is the slice produced by the shared attachment factory's
    * `buildHomeSlice`. Read by both the per-module `AttachmentsBlock` on
    * the module home view and the dedicated `/kb` view.
@@ -1420,7 +1424,7 @@ export class UIStore {
   /**
    * Move a fingerprint's current activity lines into `lastHuntSnapshot`
    * before its `clearAgentActivity` drop. Called from the report-worker's
-   * `handleAgentActivity` on `done:true` threat-hunt events — preserves the
+   * `handleAgentActivity` on `done:true` carlini-threat-hunt events — preserves the
    * per-actor breakdown for the post-mortem block even after `HeartbeatStrip`
    * stops rendering. No-op if the fingerprint has no active lines (e.g. an
    * actor that errored before its first activity tick).

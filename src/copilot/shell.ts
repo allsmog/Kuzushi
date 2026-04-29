@@ -5236,6 +5236,9 @@ function handleSlashCommand(
     case "backend":
       return handleBackendCommand(args, opts);
 
+    case "cost":
+      return handleCostCommand(opts, shellState);
+
     case "provider":
       return handleProviderCommand(args, opts);
 
@@ -7832,6 +7835,80 @@ function closestBackend(input: string, candidates: readonly string[]): string | 
   // to the candidate length. "cluade" → "claude" is distance 2.
   const threshold = Math.max(1, Math.floor(best.name.length / 3));
   return best.distance <= threshold ? best.name : undefined;
+}
+
+/**
+ * `/cost` — Reports session-to-date cost from the live moduleRun + the
+ * persisted `~/.kuzushi/runs/<id>/cost.jsonl` (best-effort). Operators
+ * previously had to grep the audit log to know what they'd spent during
+ * a long shell session; this surfaces it inline.
+ */
+function handleCostCommand(opts: ShellOptions, shellState: ShellState): LocalCommandResult {
+  return {
+    asyncExecute: async () => {
+      const lines: string[] = [];
+      // Live cost from the current module run (if any)
+      const liveCost = shellState.moduleRun?.costUsd ?? 0;
+      const liveTool = shellState.moduleRun?.toolName ?? null;
+      if (liveTool && (shellState.moduleRun?.status === "running" || liveCost > 0)) {
+        const status = shellState.moduleRun?.status ?? "unknown";
+        lines.push(`Active run:  ${liveTool}  $${liveCost.toFixed(4)}  (${status})`);
+      } else {
+        lines.push("Active run:  (none)");
+      }
+
+      // Aggregate from per-run summary.json files in the kuzushi runs dir.
+      // Best-effort: missing dir / unreadable files are silently ignored.
+      try {
+        const fs = await import("node:fs/promises");
+        const path = await import("node:path");
+        const os = await import("node:os");
+        const runsDir = path.join(os.homedir(), ".kuzushi", "runs");
+        const entries = await fs.readdir(runsDir).catch(() => [] as string[]);
+        let totalCost = 0;
+        let runsCount = 0;
+        const recent: Array<{ runId: string; cost: number; ts: number }> = [];
+        for (const runId of entries) {
+          try {
+            const summaryPath = path.join(runsDir, runId, "summary.json");
+            const stat = await fs.stat(summaryPath).catch(() => null);
+            if (!stat) continue;
+            const text = await fs.readFile(summaryPath, "utf-8");
+            const summary = JSON.parse(text) as { totalCost?: number; costUsd?: number };
+            const cost =
+              typeof summary.totalCost === "number"
+                ? summary.totalCost
+                : typeof summary.costUsd === "number"
+                  ? summary.costUsd
+                  : 0;
+            totalCost += cost;
+            runsCount += 1;
+            recent.push({ runId, cost, ts: stat.mtimeMs });
+          } catch {
+            /* per-run failure — skip */
+          }
+        }
+        recent.sort((a, b) => b.ts - a.ts);
+        lines.push(`All runs:    ${runsCount} runs · $${totalCost.toFixed(4)} cumulative`);
+        if (recent.length > 0) {
+          lines.push("");
+          lines.push("Recent runs (last 5):");
+          for (const r of recent.slice(0, 5)) {
+            const when = new Date(r.ts).toISOString().slice(0, 16).replace("T", " ");
+            lines.push(`  ${when}  ${r.runId.slice(0, 12).padEnd(14)} $${r.cost.toFixed(4)}`);
+          }
+        }
+      } catch (error) {
+        lines.push(
+          `(could not read ~/.kuzushi/runs: ${error instanceof Error ? error.message : "unknown"})`,
+        );
+      }
+
+      const ws = opts.workspaceName ?? opts.workspace;
+      if (ws) lines.push("", `Workspace:   ${ws}`);
+      return lines.join("\n");
+    },
+  };
 }
 
 function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandResult {
