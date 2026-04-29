@@ -414,7 +414,8 @@ export function createVendorAssessmentModule(): CopilotModule {
     category: "governance",
     version: "0.1.0",
     description:
-      "Evidence-first vendor assessment workflow with attachment-backed scope, prompt bundles, completeness gates, and local report artifacts.",
+      "Evidence-first vendor assessment workflow with attachment-backed scope and gated reports.",
+    longDescription: "Includes prompt bundles, completeness gates, and local report artifacts.",
     rank: "normal",
     tools: [attachTool, scopeTool, assessTool, promptsTool],
     async init() {

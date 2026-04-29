@@ -25,8 +25,8 @@ export function createPipelineModule(): CopilotModule {
     category: "defense",
     version: "0.17.2",
     description:
-      "Orchestrator-level DAG nodes: dynamic task selection, approval gates, taint pipeline " +
-      "sub-tasks. Not user-facing — loaded so every DAG participant has a module home.",
+      "Orchestrator-level DAG nodes: dynamic task selection, approval gates, taint pipeline sub-tasks.",
+    longDescription: "Not user-facing — loaded so every DAG participant has a module home.",
     rank: "excellent",
     hidden: true,
     notes: {

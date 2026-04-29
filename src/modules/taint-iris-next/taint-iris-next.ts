@@ -14,6 +14,7 @@ import {
   TAINT_IRIS_NEXT_ATTRIBUTION,
   TAINT_IRIS_NEXT_DISPLAY_NAME,
   TAINT_IRIS_NEXT_ID,
+  TAINT_IRIS_NEXT_LONG_DESCRIPTION,
   TAINT_IRIS_NEXT_REFERENCES,
   TAINT_IRIS_NEXT_SHORT_DESCRIPTION,
   TAINT_IRIS_NEXT_TUI_HEADER_LINES,
@@ -296,6 +297,7 @@ export function createTaintIrisNextModule(): CopilotModule {
     category: "defense",
     version: "0.17.2",
     description: TAINT_IRIS_NEXT_SHORT_DESCRIPTION,
+    longDescription: TAINT_IRIS_NEXT_LONG_DESCRIPTION,
     rank: "normal",
     references: TAINT_IRIS_NEXT_REFERENCES,
     notes: {

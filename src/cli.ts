@@ -145,6 +145,8 @@ Examples:
         target?: string;
         scope?: string;
         model?: string;
+        effort?: string;
+        taskConfig?: string[];
         agentRuntime?: string;
         apiKey?: string;
         inheritClaude?: boolean;
@@ -164,6 +166,64 @@ Examples:
             );
           }
           config.agentRuntimeBackend = opts.agentRuntime as typeof config.agentRuntimeBackend;
+        }
+        // N2: --effort applies a default reasoning effort to ALL configured
+        // task IDs. Operators using `--effort high` save the dance of
+        // entering each module → /tune → set effort high → /back. Per-task
+        // overrides via --task-config still win because they're applied last.
+        if (opts.effort) {
+          const allowedEfforts = new Set(["low", "medium", "high", "xhigh"]);
+          if (!allowedEfforts.has(opts.effort)) {
+            throw new CliUsageError(
+              `Invalid --effort "${opts.effort}". Valid values: low, medium, high, xhigh.`,
+            );
+          }
+          for (const taskId of Object.keys(config.taskConfig)) {
+            config.taskConfig[taskId] = {
+              ...config.taskConfig[taskId],
+              effort: opts.effort,
+            };
+          }
+        }
+        // N2: --task-config <taskId.key=value> writes through to the
+        // per-task config. Repeatable. Mirrors `--task-model` from
+        // `kuzushi scan` (src/cli/scan-config.ts:445-468).
+        if (opts.taskConfig && opts.taskConfig.length > 0) {
+          for (const assignment of opts.taskConfig) {
+            const equalsIndex = assignment.indexOf("=");
+            if (equalsIndex <= 0 || equalsIndex === assignment.length - 1) {
+              throw new CliUsageError(
+                `--task-config must be in the form <taskId.key=value>; received "${assignment}".`,
+              );
+            }
+            const lhs = assignment.slice(0, equalsIndex).trim();
+            const rhs = assignment.slice(equalsIndex + 1).trim();
+            const dotIndex = lhs.lastIndexOf(".");
+            if (dotIndex <= 0 || dotIndex === lhs.length - 1) {
+              throw new CliUsageError(
+                `--task-config must be in the form <taskId.key=value>; received "${assignment}".`,
+              );
+            }
+            const taskId = lhs.slice(0, dotIndex).trim();
+            const key = lhs.slice(dotIndex + 1).trim();
+            if (!taskId || !key || !rhs) {
+              throw new CliUsageError(
+                `--task-config must be in the form <taskId.key=value>; received "${assignment}".`,
+              );
+            }
+            const parsed: unknown =
+              rhs === "true"
+                ? true
+                : rhs === "false"
+                  ? false
+                  : /^-?\d+(\.\d+)?$/.test(rhs)
+                    ? Number(rhs)
+                    : rhs;
+            config.taskConfig[taskId] = {
+              ...(config.taskConfig[taskId] ?? {}),
+              [key]: parsed,
+            };
+          }
         }
         // Validate --target up front. Previously a typo'd path
         // bubbled through to runtime tool calls — catching it here

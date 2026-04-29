@@ -282,7 +282,7 @@ function StepRow({ step }: { step: ModuleRunStep }): React.ReactElement {
   );
 }
 
-interface ActorRow {
+export interface ActorRow {
   fingerprint: string;
   shortId: string;
   label: string;
@@ -319,6 +319,9 @@ function actorRowsFromActivity(
   });
 }
 
+/** O3: surface a "waiting on actor N of M" pause line when activity stalls. */
+const STALLED_ACTOR_THRESHOLD_MS = 30_000;
+
 function ActorsBlock({
   agentActivity,
   run,
@@ -329,15 +332,44 @@ function ActorsBlock({
   const rows = actorRowsFromActivity(agentActivity);
   if (rows.length === 0) return <Box />;
   void run; // reserved for future per-run counters
+  const pauseHint = computePauseHint(rows);
   return (
     <Section title="actors" hint="1–4 drill into actor">
       <Box flexDirection="column" paddingLeft={SPACING.md}>
+        {pauseHint ? <Text>{tokens.muted(pauseHint)}</Text> : null}
         {rows.map((row) => (
           <ActorCard key={row.fingerprint} row={row} />
         ))}
       </Box>
     </Section>
   );
+}
+
+/**
+ * O3: build the optional "Currently waiting on actor N of M — last activity Ys ago"
+ * hint. Returns null when no actor is meaningfully stalled (latest activity is
+ * fresh, or no `tsMs` was stamped on any line). Exported for unit tests.
+ */
+export function computePauseHint(rows: ReadonlyArray<ActorRow>): string | null {
+  const total = rows.length;
+  if (total === 0) return null;
+  const now = Date.now();
+  let stalledIndex = -1;
+  let stalledMs = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    const latest = row.running ?? row.lastCompleted;
+    const ts = latest?.tsMs;
+    if (typeof ts !== "number") continue;
+    const age = now - ts;
+    if (age >= STALLED_ACTOR_THRESHOLD_MS && age > stalledMs) {
+      stalledIndex = i;
+      stalledMs = age;
+    }
+  }
+  if (stalledIndex === -1) return null;
+  const seconds = Math.round(stalledMs / 1000);
+  return `Currently waiting on actor ${stalledIndex + 1} of ${total} — last activity ${seconds}s ago`;
 }
 
 function ActorCard({ row }: { row: ActorRow }): React.ReactElement {

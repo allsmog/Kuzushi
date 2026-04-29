@@ -292,6 +292,7 @@ function StatusFooterSlot({ store }: { store: UIStore }): React.ReactElement {
   const progress = useUISelector(store, (s) => s.progress, shallowEqual);
   const pipelineStartedAt = useUISelector(store, (s) => s.pipelineStartedAt);
   const throttle = useUISelector(store, (s) => s.throttle, shallowEqual);
+  const costCapUsd = useUISelector(store, (s) => s.costCapBudgetUsd);
   return (
     <StatusFooter
       model={model}
@@ -300,6 +301,7 @@ function StatusFooterSlot({ store }: { store: UIStore }): React.ReactElement {
       progress={progress}
       startedAt={pipelineStartedAt}
       throttle={throttle}
+      {...(costCapUsd != null ? { costCapUsd } : {})}
     />
   );
 }

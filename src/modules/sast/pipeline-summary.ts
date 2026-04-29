@@ -5,6 +5,16 @@ export interface PipelineSummaryInput {
   repoName: string;
   label: string;
   postProcessMode: "full" | "scan-only";
+  /**
+   * M5: optional canonical finding count to override `result.stats.totalFindings`.
+   * Pass the DB-derived count (e.g. `SELECT COUNT(*) FROM scan_findings WHERE
+   * run_id = ?` resolved via the workspace handle) so the operator-visible
+   * summary line agrees with the persisted DB. Without this, the summary
+   * shows the in-memory orchestrator count which can drift from the DB
+   * after dedup/upsert (carlini-threat-hunt's report stage was observed
+   * showing 32 findings while the DB held 33).
+   */
+  canonicalFindingCount?: number;
 }
 
 const API_KEY_SENSITIVE_TASKS = new Set([
@@ -21,13 +31,13 @@ const API_KEY_SENSITIVE_TASKS = new Set([
 ]);
 
 export function summarizePipelineResult(input: PipelineSummaryInput): string {
-  const { result, repoName, label, postProcessMode } = input;
+  const { result, repoName, label, postProcessMode, canonicalFindingCount } = input;
 
   if (result.aborted) {
     return `${label} cancelled: ${repoName}`;
   }
 
-  const findings = result.stats?.totalFindings ?? 0;
+  const findings = canonicalFindingCount ?? result.stats?.totalFindings ?? 0;
   const triaged = result.stats?.triaged ?? 0;
   const cost = result.stats?.totalCostUsd;
   const costSuffix = cost ? ` ($${cost.toFixed(2)})` : "";
