@@ -297,6 +297,11 @@ program
     "Print the resolved scan plan and then run (operator-friendly preview without a separate --dry-run pass)",
     false,
   )
+  .option(
+    "-y, --yes",
+    "Confirm opt-in for code-execution features (--dynamic-analysis, pocExecute)",
+    false,
+  )
   .option("--confirm-config", "Review effective config before starting an interactive scan", false)
   .option(
     "--review-context",

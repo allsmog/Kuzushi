@@ -20,6 +20,9 @@
             "apiKey": {
               "type": "string"
             },
+            "apiKeyFile": {
+              "type": "string"
+            },
             "baseUrl": {
               "type": "string"
             }
@@ -32,6 +35,9 @@
             "apiKey": {
               "type": "string"
             },
+            "apiKeyFile": {
+              "type": "string"
+            },
             "baseUrl": {
               "type": "string"
             }
@@ -42,6 +48,9 @@
           "additionalProperties": false,
           "properties": {
             "apiKey": {
+              "type": "string"
+            },
+            "apiKeyFile": {
               "type": "string"
             },
             "baseUrl": {

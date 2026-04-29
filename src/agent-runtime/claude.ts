@@ -16,9 +16,13 @@ import Anthropic from "@anthropic-ai/sdk";
 import { publishAgentActivity, publishTaskActivity } from "../bus/activity.js";
 import type { LlmCallCompleteEvent, LlmCallErrorEvent, LlmCallStartEvent } from "../bus/events.js";
 import type { MessageBus } from "../bus/types.js";
+import { resolveAgentRuntimeConfig } from "../credentials.js";
+import { classifyError } from "../errors.js";
 import { getLogger } from "../logger.js";
+import { getRateLimitRegistry } from "../scheduler/index.js";
 import type { AgentRuntimeCredentials } from "../types.js";
 import { normalizeCostUsd, toErrorMessage } from "../utils.js";
+import { buildSubprocessEnv } from "./env.js";
 import type { AgentQueryExecutionResult } from "./execution.js";
 import { buildSdkHooks } from "./sdk-hooks.js";
 import type {
@@ -32,6 +36,7 @@ import type {
 } from "./types.js";
 
 const log = getLogger("claude-runtime");
+let envFilterLogged = false;
 
 function isAbortRequested(options: AgentQueryOptions): boolean {
   return options.abortController?.signal.aborted === true;
@@ -575,11 +580,11 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   runId: string | null = null;
 
   constructor(config?: AgentRuntimeCredentials) {
-    this.config = config;
-    this.oauthMode = !config?.apiKey;
+    this.config = resolveAgentRuntimeConfig(config);
+    this.oauthMode = !this.config?.apiKey;
     this.client = new Anthropic({
-      apiKey: config?.apiKey,
-      baseURL: config?.baseUrl,
+      apiKey: this.config?.apiKey,
+      baseURL: this.config?.baseUrl,
     });
   }
 
@@ -783,6 +788,11 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       }
     }
 
+    const rateLimitModelSpec = request.options.model ?? model;
+    const registry = getRateLimitRegistry();
+    await registry.acquire(rateLimitModelSpec);
+    let rateLimitSuccess = true;
+
     try {
       // Build output_config — effort errors on Haiku, so skip it
       const outputConfig: Record<string, unknown> = {};
@@ -895,8 +905,10 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       };
     } catch (error) {
       const durationMs = Date.now() - startedAtMs;
-      const retryable =
-        error instanceof Anthropic.RateLimitError || error instanceof Anthropic.InternalServerError;
+      const isRateLimit =
+        error instanceof Anthropic.RateLimitError || classifyError(error) === "rate_limit";
+      rateLimitSuccess = !isRateLimit;
+      const retryable = isRateLimit || error instanceof Anthropic.InternalServerError;
       if (isAbortRequested(request.options)) {
         yield abortResult(durationMs, 0, 0);
         return;
@@ -930,6 +942,8 @@ export class ClaudeAgentRuntime implements AgentRuntime {
         numTurns: 0,
         totalCostUsd: 0,
       };
+    } finally {
+      registry.release(rateLimitModelSpec, rateLimitSuccess);
     }
   }
 
@@ -946,6 +960,15 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     }
 
     await acquireSlot();
+    const rateLimitModelSpec = request.options.model ?? "claude-sonnet-4-6";
+    const registry = getRateLimitRegistry();
+    try {
+      await registry.acquire(rateLimitModelSpec);
+    } catch (error) {
+      releaseSlot();
+      throw error;
+    }
+    let rateLimitSuccess = true;
     const startedAtMs = Date.now();
     let totalCostUsd = 0;
     let numTurns = 0;
@@ -1007,20 +1030,28 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
     // API key / base URL from config — always pass env so subprocess
     // inherits credentials even when agentRuntimeConfig is not set.
-    const env: Record<string, string | undefined> = { ...process.env };
+    const extra: Record<string, string | undefined> = {
+      CLAUDE_CODE_MAX_OUTPUT_TOKENS: "100000",
+    };
     if (this.config?.apiKey) {
-      env.ANTHROPIC_API_KEY = this.config.apiKey;
+      extra.ANTHROPIC_API_KEY = this.config.apiKey;
     }
     if (this.config?.baseUrl) {
-      env.ANTHROPIC_BASE_URL = this.config.baseUrl;
+      extra.ANTHROPIC_BASE_URL = this.config.baseUrl;
     }
+    const { env, stripped } = buildSubprocessEnv(process.env, extra);
     // Claude Code refuses to launch inside another Claude Code session.
     // Strip the nesting detection variable so subprocesses can run.
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_SESSION_ID;
-    // Raise the default 32K output token cap so large structured outputs
-    // (e.g., PASTA threat models) don't get truncated mid-response.
-    env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = "100000";
+    if (stripped.length > 0 && !envFilterLogged) {
+      envFilterLogged = true;
+      log.debug(
+        `Filtered ${stripped.length} credential-shaped env vars from agent subprocess (e.g. ${stripped
+          .slice(0, 3)
+          .join(", ")}). See src/agent-runtime/env.ts for the allowlist.`,
+      );
+    }
     options.env = env;
 
     // Plugins — load Claude Code plugins in the subprocess
@@ -1191,6 +1222,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     } catch (error) {
       const durationMs = Date.now() - startedAtMs;
       const wasAborted = isAbortRequested(request.options);
+      rateLimitSuccess = wasAborted ? true : classifyError(error) !== "rate_limit";
       if (!wasAborted) {
         log.error(`Claude SDK query failed (${durationMs}ms): ${toErrorMessage(error)}`);
       }
@@ -1220,7 +1252,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
             payload: {
               model: request.options.model,
               error: toErrorMessage(error),
-              retryable: false,
+              retryable: !rateLimitSuccess,
               runId: turnRunId,
             },
           });
@@ -1241,6 +1273,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       // Defensive reap — normally the SDK's for-await exit cleans up, but
       // a thrown error path may leave survivors.
       killTrackedProcesses(trackedProcesses);
+      registry.release(rateLimitModelSpec, rateLimitSuccess);
       releaseSlot();
     }
   }
@@ -1385,12 +1418,22 @@ class ClaudeSession implements AgentSession {
       options.thinking = { type: "disabled" };
     }
 
-    const env: Record<string, string | undefined> = { ...process.env };
-    if (this.config?.apiKey) env.ANTHROPIC_API_KEY = this.config.apiKey;
-    if (this.config?.baseUrl) env.ANTHROPIC_BASE_URL = this.config.baseUrl;
+    const extra: Record<string, string | undefined> = {
+      CLAUDE_CODE_MAX_OUTPUT_TOKENS: "100000",
+    };
+    if (this.config?.apiKey) extra.ANTHROPIC_API_KEY = this.config.apiKey;
+    if (this.config?.baseUrl) extra.ANTHROPIC_BASE_URL = this.config.baseUrl;
+    const { env, stripped } = buildSubprocessEnv(process.env, extra);
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_SESSION_ID;
-    env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = "100000";
+    if (stripped.length > 0 && !envFilterLogged) {
+      envFilterLogged = true;
+      log.debug(
+        `Filtered ${stripped.length} credential-shaped env vars from agent subprocess (e.g. ${stripped
+          .slice(0, 3)
+          .join(", ")}). See src/agent-runtime/env.ts for the allowlist.`,
+      );
+    }
     options.env = env;
 
     if (this.baseOptions.abortController) {

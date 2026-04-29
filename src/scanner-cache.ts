@@ -165,3 +165,56 @@ export function pruneScannerCache(db: Database.Database, maxAgeDays: number = 30
 
   return result.changes;
 }
+
+/**
+ * File-level cache wrapper for agent tasks that iterate files individually.
+ *
+ * Tasks that opt in pass:
+ *   - `db` — the shared findings DB
+ *   - `taskId` — unique task identifier
+ *   - `config` — task config block (hashed for key)
+ *   - `repoRoot` — used for `git hash-object` lookups
+ *   - `filePaths` — the files this run needs to scan
+ *   - `scan(uncached)` — a function that scans ONLY the uncached files and
+ *     returns their findings, grouped by file path
+ *
+ * The wrapper:
+ *   1. Uses `partitionCachedFiles` to separate already-cached files from new
+ *      work (based on current git blob hash + config hash).
+ *   2. Invokes `scan(uncached)` for anything not in the cache.
+ *   3. Persists the scan output to the cache.
+ *   4. Returns the merged findings.
+ *
+ * This is the blessed on-ramp for new file-iterating detectors so they don't
+ * have to hand-roll blob-hash + config-hash keying. Whole-repo scanners
+ * (Semgrep, CodeQL) are NOT a good fit for this API — they execute a single
+ * external process over the whole tree — but run-level caching for those is
+ * tracked separately.
+ */
+export async function withFileCache(options: {
+  db: Database.Database;
+  taskId: string;
+  config: Record<string, unknown>;
+  repoRoot: string;
+  filePaths: string[];
+  scan: (uncached: string[]) => Promise<Map<string, Finding[]>>;
+}): Promise<Finding[]> {
+  const { db, taskId, config, repoRoot, filePaths, scan } = options;
+  const configHash = hashScannerConfig(taskId, config);
+  const { cached, uncached } = partitionCachedFiles(db, taskId, configHash, repoRoot, filePaths);
+
+  const results: Finding[] = [];
+  for (const findings of cached.values()) {
+    results.push(...findings);
+  }
+
+  if (uncached.length > 0) {
+    const freshByFile = await scan(uncached);
+    persistScanResults(db, taskId, configHash, repoRoot, freshByFile);
+    for (const findings of freshByFile.values()) {
+      results.push(...findings);
+    }
+  }
+
+  return results;
+}

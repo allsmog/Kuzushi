@@ -4,7 +4,9 @@ import type { AgentRuntime } from "../../agent-runtime/types.js";
 import { resolveTaskConfig as resolveConfiguredTaskConfig } from "../../capabilities.js";
 import type { DagRegistry } from "../../modules/dag-registry.js";
 import type { ExecutionContext } from "../../modules/types.js";
+import { untrackWorktree } from "../../patch.js";
 import { getPatchResultsForFinding, updatePatchResultStatus } from "../../store/patch-results.js";
+import { getStoredFinding } from "../../store.js";
 import type { KuzushiConfig, ScanOpts } from "../../types.js";
 import { toErrorMessage } from "../../utils.js";
 import type { PatchVerifyRequestedEvent } from "../events.js";
@@ -33,6 +35,8 @@ export function registerPatchVerifyWorker(deps: PatchVerifyWorkerDeps): void {
     await bus.publish(createEvent("patch-verify:start", runId, { context, fingerprint }));
 
     try {
+      const stored = getStoredFinding(db, fingerprint);
+      const originatingTaskId = stored?.taskId;
       const verified = await verifyPatch(
         fingerprint,
         worktreePath,
@@ -41,6 +45,7 @@ export function registerPatchVerifyWorker(deps: PatchVerifyWorkerDeps): void {
         config,
         runtime,
         dagRegistry,
+        originatingTaskId,
       );
 
       const patchResults = getPatchResultsForFinding(db, fingerprint);
@@ -86,6 +91,7 @@ async function verifyPatch(
   config: KuzushiConfig,
   runtime: AgentRuntime,
   dagRegistry: DagRegistry,
+  originatingTaskId?: string,
 ): Promise<boolean> {
   const silentBus: MessageBus = {
     async publish() {},
@@ -97,7 +103,10 @@ async function verifyPatch(
     async close() {},
   };
 
-  for (const taskId of config.tasks) {
+  const tasksToRun =
+    originatingTaskId && dagRegistry.has(originatingTaskId) ? [originatingTaskId] : config.tasks;
+
+  for (const taskId of tasksToRun) {
     if (!dagRegistry.has(taskId)) continue;
     const task = dagRegistry.get(taskId);
     if (task.outputKind !== "findings" && task.outputKind !== "threat-model") {
@@ -152,5 +161,7 @@ function cleanupWorktree(worktreePath: string, repoRoot: string): void {
     });
   } catch {
     /* best-effort cleanup */
+  } finally {
+    untrackWorktree(worktreePath);
   }
 }

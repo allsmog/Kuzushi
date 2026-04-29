@@ -217,8 +217,9 @@ export function createChromeRceModule(): CopilotModule {
     displayName: "Chrome RCE smells",
     category: "defense",
     version: "0.1.0",
-    description:
-      "Detection rules anchored to verified historical Chrome / Chromium / Google-OSS RCE CVEs. Each rule cites its anchor CVE so triage and review have a concrete historical exemplar to compare against.",
+    description: "Detection rules anchored to verified Chrome / Chromium RCE CVEs.",
+    longDescription:
+      "Each rule cites its anchor CVE so triage and review have a concrete historical exemplar to compare against.",
     rank: "good",
     references: [
       { type: "URL", value: "https://chromereleases.googleblog.com/" },

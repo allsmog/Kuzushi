@@ -111,6 +111,11 @@ export interface ScanCommandOptions {
    * Field-test issue #58.
    */
   showPlan?: boolean;
+  /**
+   * Explicit opt-in for running LLM-generated PoC harnesses via
+   * `--dynamic-analysis` or config `pocExecute`.
+   */
+  yes?: boolean;
   confirmConfig?: boolean;
   reviewContext?: boolean;
   reviewThreatModel?: boolean;

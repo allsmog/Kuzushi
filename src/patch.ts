@@ -103,6 +103,49 @@ function validatePatchEligibility(db: Database.Database, fingerprint: string): S
 }
 
 /**
+ * Registry of currently-active disposable worktrees.
+ *
+ * Patch synthesis creates a worktree at `.kuzushi/worktrees/<uuid>` per
+ * finding. Normally either `runPatchPipeline` (skipCleanup=false) or the
+ * patch-verify worker's finally block removes it. If the user kills the
+ * process between those two points (SIGINT, SIGTERM, OOM), the worktree
+ * was previously orphaned on disk and continued to count against `git
+ * worktree list`. The shutdown hook below ensures we sweep them.
+ */
+const activeWorktrees = new Map<string, string>();
+
+/** Forcibly remove every tracked worktree. Best-effort, swallows errors. */
+export function cleanupActiveWorktreesSync(): void {
+  for (const [worktreePath, repoRoot] of activeWorktrees) {
+    try {
+      execFileSync("git", ["worktree", "remove", "--force", worktreePath], {
+        cwd: repoRoot,
+        stdio: "pipe",
+        timeout: EXEC_TIMEOUT_MS,
+      });
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+  activeWorktrees.clear();
+}
+
+/** Test/debug accessor for the active-worktree registry. */
+export function __getActiveWorktreesForTest(): ReadonlyMap<string, string> {
+  return activeWorktrees;
+}
+
+/**
+ * Untrack a worktree from the active-worktree registry without invoking
+ * `git worktree remove`. Use this from external cleanup paths that have
+ * already removed the worktree themselves, so the shutdown hook doesn't
+ * try to double-free it.
+ */
+export function untrackWorktree(worktreePath: string): void {
+  activeWorktrees.delete(worktreePath);
+}
+
+/**
  * Create a disposable git worktree for safe patch application.
  */
 export function createDisposableWorktree(repoRoot: string): {
@@ -130,6 +173,7 @@ export function createDisposableWorktree(repoRoot: string): {
     stdio: "pipe",
     timeout: EXEC_TIMEOUT_MS,
   });
+  activeWorktrees.set(worktreePath, repoRoot);
 
   const cleanup = async (): Promise<void> => {
     try {
@@ -140,6 +184,8 @@ export function createDisposableWorktree(repoRoot: string): {
       });
     } catch {
       /* best-effort cleanup */
+    } finally {
+      activeWorktrees.delete(worktreePath);
     }
   };
 

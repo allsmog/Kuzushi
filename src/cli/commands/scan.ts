@@ -185,6 +185,7 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   }
 
   const { config, scanOpts } = prepareScanExecution(repoRoot, opts);
+  ensureCodeExecutionOptIn(config, opts);
 
   // Interactive credential prompt when no credentials are detected for the
   // default provider. pi-ai resolves creds from env vars, so setting the
@@ -282,6 +283,38 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     resetTerminalOutput();
     cleanupUI();
   }
+}
+
+function ensureCodeExecutionOptIn(config: KuzushiConfig, opts: ScanCommandOptions): void {
+  const runsGeneratedCode = config.dynamicAnalysisEnabled === true || config.pocExecute === true;
+  if (!runsGeneratedCode) return;
+
+  const explicitYes = opts.yes === true || process.env["KUZUSHI_YES_RUN_GENERATED_CODE"] === "1";
+  if (explicitYes) return;
+
+  if (process.stdout.isTTY && process.stdin.isTTY) return;
+
+  const reasons: string[] = [];
+  if (config.dynamicAnalysisEnabled === true) reasons.push("dynamicAnalysisEnabled");
+  if (config.pocExecute === true) reasons.push("pocExecute");
+
+  throw new CliUsageError(
+    [
+      "Refusing to run LLM-generated code in a non-interactive context.",
+      "",
+      "Enabled code-execution features:",
+      ...reasons.map((reason) => `  - ${reason}`),
+      "",
+      `Even with pocSandbox=${String(config.pocSandbox ?? "process")}, running generated code`,
+      "against the target is a deliberate security decision. Opt in by:",
+      "",
+      "  - kuzushi scan <repo> --yes ...",
+      "  - KUZUSHI_YES_RUN_GENERATED_CODE=1 kuzushi scan <repo> ...",
+      "",
+      "To scan without executing generated code, drop --dynamic-analysis and",
+      "unset `pocExecute` / `dynamicAnalysisEnabled` in your config.",
+    ].join("\n"),
+  );
 }
 
 export async function resolveMonorepoExecution(params: {
