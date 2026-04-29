@@ -505,6 +505,9 @@ function printShellView(emit: Emit, shell: ShellState, state: UIState): void {
     case "findings":
       printFindingsView(emit, shell, state);
       return;
+    case "since":
+      _printDiffSinceView(emit, shell);
+      return;
     case "finding":
       printFindingView(emit, shell, state);
       return;

@@ -1764,6 +1764,27 @@ describe("context system", () => {
     expect(next.shellView).toBe("findings");
   });
 
+  it("/since opens the diff-aware view and /back returns to the module home", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    opts.target = "/repo";
+    const shellState = {
+      ...createShellState(module.tools.map((t) => t.name)),
+      focusedModule: "sast" as const,
+      shellView: "module" as const,
+    };
+    const ctx = { focusedModule: "sast" };
+
+    const since = __shellInternals.handleLocalCommand("/since main", core, opts, ctx, shellState);
+    expect(since?.output).toContain("Diffing HEAD against main");
+    const scopedState = since!.shellStateUpdater!(shellState);
+    expect(scopedState.shellView).toBe("since");
+
+    const back = __shellInternals.handleLocalCommand("/back", core, opts, ctx, scopedState);
+    expect(back?.output).toBe("Back to module home.");
+    expect(back!.shellStateUpdater!(scopedState).shellView).toBe("module");
+  });
+
   it("routes bare /threats to the threat summary view", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();

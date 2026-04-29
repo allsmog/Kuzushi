@@ -199,6 +199,7 @@ function shellTitle(shell: ShellNavigationState | null | undefined): string {
   if (view === "context-build") return "context build";
   if (view === "task-story") return "task details";
   if (view === "findings") return "findings";
+  if (view === "since") return "diff since";
   if (view === "finding") return "finding detail";
   if (view === "tune") return "tune";
   if (view === "options") return "options";
