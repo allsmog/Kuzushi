@@ -24,6 +24,7 @@ import type {
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import { truncateEnd } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { ContextStrip } from "./ContextStrip.js";
@@ -55,6 +56,7 @@ export function AttackerStoriesView({ shell }: AttackerStoriesViewProps): React.
     { keys: "5", label: "summary", secondary: true },
     { keys: "q", label: "back", secondary: true },
   ]);
+  const width = useTerminalCardWidth(78, 44);
   const tm = shell.threatModel;
   if (!tm) return <EmptyState />;
 
@@ -80,8 +82,8 @@ export function AttackerStoriesView({ shell }: AttackerStoriesViewProps): React.
         <Box flexDirection="column" marginTop={SPACING.sm}>
           <Text>{tokens.label("overview")}</Text>
           <Box paddingLeft={SPACING.lg} flexDirection="column" marginTop={SPACING.sm}>
-            {wrap(narrative.overview, 72).map((line, i) => (
-              <Text key={`${i}-${line.slice(0, 6)}`}>{tokens.value(line)}</Text>
+            {wrap(narrative.overview, Math.max(24, width - 6)).map((line) => (
+              <Text key={`overview-${stableTextKey(line)}`}>{tokens.value(line)}</Text>
             ))}
           </Box>
         </Box>
@@ -99,8 +101,12 @@ export function AttackerStoriesView({ shell }: AttackerStoriesViewProps): React.
           </Box>
         ) : (
           <Box flexDirection="column" marginTop={SPACING.sm}>
-            {stories.map((story, i) => (
-              <StoryCard key={`${i}-${story.title}`} story={story} />
+            {stories.map((story) => (
+              <StoryCard
+                key={`${story.title}-${stableTextKey(story.narrative)}`}
+                story={story}
+                width={width}
+              />
             ))}
           </Box>
         )}
@@ -143,8 +149,8 @@ function InputCategoriesRail({
                 {tokens.value(label.padEnd(22))}
                 {tokens.muted(`${items.length} entries`)}
               </Text>
-              {items.slice(0, 4).map((entry, i) => (
-                <Text key={`${key}-${i}`}>
+              {items.slice(0, 4).map((entry) => (
+                <Text key={`${key}-${stableTextKey(entry)}`}>
                   {"   "}
                   {tokens.muted("\u00B7")}
                   {"  "}
@@ -165,8 +171,13 @@ function InputCategoriesRail({
   );
 }
 
-function StoryCard({ story }: { story: ThreatModelAttackerStory }): React.ReactElement {
-  const width = 74;
+function StoryCard({
+  story,
+  width,
+}: {
+  story: ThreatModelAttackerStory;
+  width: number;
+}): React.ReactElement {
   const bar = "\u2500".repeat(width - 4);
   return (
     <Box flexDirection="column" marginBottom={SPACING.sm}>
@@ -176,8 +187,8 @@ function StoryCard({ story }: { story: ThreatModelAttackerStory }): React.ReactE
         {tokens.muted(` ${bar.slice(0, Math.max(0, width - story.title.length - 4))}\u256E`)}
       </Text>
 
-      {wrap(story.narrative, width - 4).map((line, i) => (
-        <Text key={`n-${i}-${line.slice(0, 6)}`}>
+      {wrap(story.narrative, width - 4).map((line) => (
+        <Text key={`n-${stableTextKey(line)}`}>
           {tokens.muted("   \u2502 ")}
           {tokens.value(line)}
         </Text>
@@ -211,6 +222,14 @@ function renderThreatChips(threatIds: ReadonlyArray<string> | undefined): string
   const chips = threatIds.slice(0, 6).map((id) => tokens.info(`[${id}]`));
   const extra = threatIds.length > 6 ? tokens.muted(`  +${threatIds.length - 6} more`) : "";
   return `${chips.join(" ")}${extra}`;
+}
+
+function stableTextKey(value: string): string {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return hash.toString(36);
 }
 
 function wrap(text: string, width: number): string[] {

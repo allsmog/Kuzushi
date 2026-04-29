@@ -61,7 +61,10 @@ describe("ModuleRegistry — module-id legacy aliases (M1)", () => {
 
   it("does NOT shadow a real module that owns the legacy id", () => {
     const registry = new ModuleRegistry();
+    // First register a module called "threat-hunt" — a real module owns this id.
     registry.register(makeModule("threat-hunt"));
+    // Now register carlini-threat-hunt with `threat-hunt` as a legacy alias —
+    // the alias must NOT redirect away from the real "threat-hunt" module.
     registry.register(makeModule("carlini-threat-hunt", ["threat-hunt"]));
     expect(registry.get("threat-hunt").id).toBe("threat-hunt");
     expect(registry.resolveModuleId("threat-hunt")).toBe("threat-hunt");

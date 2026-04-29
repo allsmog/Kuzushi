@@ -7,7 +7,7 @@
  * to minimize flicker from spinner ticks.
  */
 
-import { Static, Text, useInput } from "ink";
+import { Box, Static, Text, useInput } from "ink";
 import React from "react";
 import { AppLayout } from "./components/AppLayout.js";
 import { Banner } from "./components/Banner.js";
@@ -29,6 +29,7 @@ import { SetupWizard } from "./components/SetupWizard.js";
 import { ThreatModelEditor } from "./components/ThreatModelEditor.js";
 import { KeybindingsProvider } from "./hooks/useKeybindings.js";
 import { useRawModeWatchdog } from "./hooks/useRawModeWatchdog.js";
+import { useTerminalSize } from "./hooks/useTerminalSize.js";
 import { shallowEqual, useUISelector } from "./hooks.js";
 import { isAbortInput } from "./interaction-key-policy.js";
 import { deriveNavigation, LayoutProvider, STANDARD_LAYOUT_THEME } from "./layout-context.js";
@@ -226,110 +227,118 @@ function AppInner({ store }: AppProps): React.ReactElement {
       routing.preflight != null ||
       routing.configBanner != null ||
       routing.resumeDiff != null);
+  const terminalSize = useTerminalSize();
 
   return (
-    <LayoutProvider value={layoutContext}>
-      <AppLayout footer={<KeybindFooter />}>
-        {showGlobalBanner && <Banner />}
-        {routing.mode === "shell" && routing.hasShell && <CopilotShell store={store} />}
-        {/*
-         * One-shot banners — config / resume / skip-info — share a single
-         * <Static> region. Multiple Static regions in one Ink tree are
-         * known to cause flicker (see CC's note in
-         * cc-repo/src/utils/staticRender.tsx:8-10), so we batch them into
-         * one items array. Each item carries the data needed to render
-         * the right banner type.
-         */}
-        <PreflightBannersStatic
-          configBanner={routing.mode !== "preflight" ? routing.configBanner : null}
-          resumeDiff={routing.resumeDiff}
-          skipInfo={
-            !routing.resumeDiff &&
-            routing.skippedAlreadyTriaged > 0 &&
-            routing.phase === "triaging" &&
-            routing.mode === "running"
-              ? {
-                  skipped: routing.skippedAlreadyTriaged,
-                  remaining: routing.selectedForTriage,
-                }
-              : null
-          }
-        />
+    <Box
+      flexDirection="column"
+      width={terminalSize.columns}
+      height={terminalSize.rows}
+      overflow="hidden"
+    >
+      <LayoutProvider value={layoutContext}>
+        <AppLayout footer={<KeybindFooter />}>
+          {showGlobalBanner && <Banner />}
+          {routing.mode === "shell" && routing.hasShell && <CopilotShell store={store} />}
+          {/*
+           * One-shot banners — config / resume / skip-info — share a single
+           * <Static> region. Multiple Static regions in one Ink tree are
+           * known to cause flicker (see CC's note in
+           * cc-repo/src/utils/staticRender.tsx:8-10), so we batch them into
+           * one items array. Each item carries the data needed to render
+           * the right banner type.
+           */}
+          <PreflightBannersStatic
+            configBanner={routing.mode !== "preflight" ? routing.configBanner : null}
+            resumeDiff={routing.resumeDiff}
+            skipInfo={
+              !routing.resumeDiff &&
+              routing.skippedAlreadyTriaged > 0 &&
+              routing.phase === "triaging" &&
+              routing.mode === "running"
+                ? {
+                    skipped: routing.skippedAlreadyTriaged,
+                    remaining: routing.selectedForTriage,
+                  }
+                : null
+            }
+          />
 
-        {routing.mode !== "shell" && (
-          <NoticeRail notices={routing.notices} expanded={routing.noticeRailExpanded} />
-        )}
+          {routing.mode !== "shell" && (
+            <NoticeRail notices={routing.notices} expanded={routing.noticeRailExpanded} />
+          )}
 
-        {routing.mode === "preflight" && routing.preflight?.kind === "wizard" && (
-          <SetupWizard
-            repoName={routing.preflight.repoName}
-            onComplete={routing.preflight.onComplete}
-            onCancel={routing.preflight.onCancel}
-          />
-        )}
-        {routing.mode === "preflight" && routing.preflight?.kind === "confirm" && (
-          <ConfigConfirm
-            config={routing.preflight.config}
-            repoName={routing.preflight.repoName}
-            onProceed={routing.preflight.onProceed}
-            onEdit={routing.preflight.onEdit}
-            onQuit={routing.preflight.onQuit}
-          />
-        )}
-        {routing.mode === "preflight" && routing.preflight?.kind === "credentials" && (
-          <CredentialPrompt
-            onComplete={routing.preflight.onComplete}
-            onCancel={routing.preflight.onCancel}
-          />
-        )}
-        {routing.mode === "preflight" && routing.preflight?.kind === "context-intake" && (
-          <ContextIntake
-            initialContext={routing.preflight.initialContext}
-            onComplete={routing.preflight.onComplete}
-            onSkip={routing.preflight.onSkip}
-            onCancel={routing.preflight.onCancel}
-          />
-        )}
-        {routing.mode === "preflight" && routing.preflight?.kind === "threat-editor" && (
-          <ThreatModelEditor
-            threatModel={routing.preflight.threatModel}
-            onComplete={routing.preflight.onComplete}
-            onSkip={routing.preflight.onSkip}
-            onCancel={routing.preflight.onCancel}
-          />
-        )}
-        {routing.mode === "preflight" && routing.preflight?.kind === "config-editor" && (
-          <ConfigEditor
-            initialConfig={routing.preflight.initialConfig}
-            configPath={routing.preflight.configPath}
-            focusKey={routing.preflight.focusKey}
-            onComplete={routing.preflight.onComplete}
-            onCancel={routing.preflight.onCancel}
-          />
-        )}
+          {routing.mode === "preflight" && routing.preflight?.kind === "wizard" && (
+            <SetupWizard
+              repoName={routing.preflight.repoName}
+              onComplete={routing.preflight.onComplete}
+              onCancel={routing.preflight.onCancel}
+            />
+          )}
+          {routing.mode === "preflight" && routing.preflight?.kind === "confirm" && (
+            <ConfigConfirm
+              config={routing.preflight.config}
+              repoName={routing.preflight.repoName}
+              onProceed={routing.preflight.onProceed}
+              onEdit={routing.preflight.onEdit}
+              onQuit={routing.preflight.onQuit}
+            />
+          )}
+          {routing.mode === "preflight" && routing.preflight?.kind === "credentials" && (
+            <CredentialPrompt
+              onComplete={routing.preflight.onComplete}
+              onCancel={routing.preflight.onCancel}
+            />
+          )}
+          {routing.mode === "preflight" && routing.preflight?.kind === "context-intake" && (
+            <ContextIntake
+              initialContext={routing.preflight.initialContext}
+              onComplete={routing.preflight.onComplete}
+              onSkip={routing.preflight.onSkip}
+              onCancel={routing.preflight.onCancel}
+            />
+          )}
+          {routing.mode === "preflight" && routing.preflight?.kind === "threat-editor" && (
+            <ThreatModelEditor
+              threatModel={routing.preflight.threatModel}
+              onComplete={routing.preflight.onComplete}
+              onSkip={routing.preflight.onSkip}
+              onCancel={routing.preflight.onCancel}
+            />
+          )}
+          {routing.mode === "preflight" && routing.preflight?.kind === "config-editor" && (
+            <ConfigEditor
+              initialConfig={routing.preflight.initialConfig}
+              configPath={routing.preflight.configPath}
+              focusKey={routing.preflight.focusKey}
+              onComplete={routing.preflight.onComplete}
+              onCancel={routing.preflight.onCancel}
+            />
+          )}
 
-        {routing.mode === "running" && <RunningView store={store} onCommand={handleCommand} />}
+          {routing.mode === "running" && <RunningView store={store} onCommand={handleCommand} />}
 
-        {routing.mode === "summary" && routing.summary && (
-          <Static items={["scan-summary"]}>
-            {() => (
-              <React.Fragment key="scan-summary">
-                <ScanSummary data={routing.summary!} />
-                {routing.qualityGate && <QualityGate result={routing.qualityGate} />}
-              </React.Fragment>
-            )}
-          </Static>
-        )}
+          {routing.mode === "summary" && routing.summary && (
+            <Static items={["scan-summary"]}>
+              {() => (
+                <React.Fragment key="scan-summary">
+                  <ScanSummary data={routing.summary!} />
+                  {routing.qualityGate && <QualityGate result={routing.qualityGate} />}
+                </React.Fragment>
+              )}
+            </Static>
+          )}
 
-        {routing.mode === "review" && routing.review && (
-          <InteractiveReview
-            findings={routing.review.findings}
-            onVerdict={routing.review.onVerdict}
-            onQuit={routing.review.onQuit}
-          />
-        )}
-      </AppLayout>
-    </LayoutProvider>
+          {routing.mode === "review" && routing.review && (
+            <InteractiveReview
+              findings={routing.review.findings}
+              onVerdict={routing.review.onVerdict}
+              onQuit={routing.review.onQuit}
+            />
+          )}
+        </AppLayout>
+      </LayoutProvider>
+    </Box>
   );
 }
 

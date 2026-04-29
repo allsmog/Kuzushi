@@ -93,8 +93,10 @@ export function _resetProxyBannerForTests(): void {
 // older `model` value in `~/.kuzushi/config.json` keep working — the SDK still
 // accepts older IDs — but they miss the quality + cost improvements of the
 // current generation. The banner is informational only; nothing is rewritten
-// automatically. Keys may use bare ("claude-opus-4-6") or provider-prefixed
-// ("anthropic:claude-opus-4-6") form; `detectStaleModel` strips a leading
+// automatically.
+//
+// Keys may use either bare ("claude-opus-4-6") or provider-prefixed
+// ("anthropic:claude-opus-4-6") form. `detectStaleModel` strips a leading
 // "anthropic:" before lookup so both shapes hit the same entry.
 const STALE_MODEL_RECOMMENDATIONS: Readonly<Record<string, string>> = {
   "claude-opus-4-6": "claude-opus-4-7",

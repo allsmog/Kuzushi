@@ -16,6 +16,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import { boxBottomLine, boxRowPrefix, boxTopLine } from "../format.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import type { ShellPlan, ShellPlanChange } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 
@@ -25,8 +26,13 @@ interface PlanCardProps {
 
 export function PlanCard({ plan }: PlanCardProps): React.ReactElement {
   const { changes, unsupported } = plan;
-  const optionWidth = Math.max("option".length, ...changes.map((c) => c.option.length));
-  const width = 78;
+  const width = useTerminalCardWidth(78, 48);
+  const optionWidth = Math.min(
+    18,
+    Math.max("option".length, ...changes.map((c) => c.option.length)),
+  );
+  const valueWidth = Math.max(10, Math.min(22, Math.floor((width - optionWidth - 18) / 2)));
+  const whyWidth = Math.max(10, width - optionWidth - valueWidth * 2 - 12);
   const topLine = boxTopLine({
     width,
     left: `${tokens.metadata("─")}${tokens.label(" plan ")}${tokens.strong(plan.source)}`,
@@ -54,12 +60,18 @@ export function PlanCard({ plan }: PlanCardProps): React.ReactElement {
         <>
           <Row>
             {tokens.muted("option".padEnd(optionWidth + 2))}
-            {tokens.muted("current".padEnd(22))}
-            {tokens.muted("proposed".padEnd(22))}
+            {tokens.muted("current".padEnd(valueWidth))}
+            {tokens.muted("proposed".padEnd(valueWidth))}
             {tokens.muted("why")}
           </Row>
           {changes.map((change) => (
-            <PlanRow key={change.option} change={change} optionWidth={optionWidth} />
+            <PlanRow
+              key={change.option}
+              change={change}
+              optionWidth={optionWidth}
+              valueWidth={valueWidth}
+              whyWidth={whyWidth}
+            />
           ))}
         </>
       )}
@@ -102,19 +114,23 @@ export function PlanCard({ plan }: PlanCardProps): React.ReactElement {
 function PlanRow({
   change,
   optionWidth,
+  valueWidth,
+  whyWidth,
 }: {
   change: ShellPlanChange;
   optionWidth: number;
+  valueWidth: number;
+  whyWidth: number;
 }): React.ReactElement {
-  const option = change.option.padEnd(optionWidth + 2);
-  const current = formatValue(change.current).padEnd(22);
-  const proposed = formatValue(change.proposed).padEnd(22);
+  const option = truncateText(change.option, optionWidth).padEnd(optionWidth + 2);
+  const current = truncateText(formatValue(change.current), valueWidth - 1).padEnd(valueWidth);
+  const proposed = truncateText(formatValue(change.proposed), valueWidth - 1).padEnd(valueWidth);
   return (
     <Row>
       {tokens.value(option)}
       {tokens.muted(current)}
       {tokens.strong(proposed)}
-      {tokens.muted(change.why)}
+      {tokens.muted(truncateText(change.why, whyWidth))}
     </Row>
   );
 }
@@ -139,6 +155,12 @@ function formatValue(v: unknown): string {
   } catch {
     return String(v);
   }
+}
+
+function truncateText(value: string, width: number): string {
+  if (value.length <= width) return value;
+  if (width <= 1) return value.slice(0, Math.max(0, width));
+  return `${value.slice(0, width - 1)}\u2026`;
 }
 
 function signedCost(n: number): string {

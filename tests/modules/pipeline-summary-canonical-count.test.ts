@@ -44,7 +44,7 @@ describe("summarizePipelineResult — canonical finding count (M5)", () => {
       repoName: "kuzushi",
       label: "Threat hunt",
       postProcessMode: "scan-only",
-      canonicalFindingCount: 33,
+      canonicalFindingCount: 33, // DB-derived; differs from in-memory 32
     });
     expect(summary).toContain("33 findings");
     expect(summary).not.toContain("32 findings");

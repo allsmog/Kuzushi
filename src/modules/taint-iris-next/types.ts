@@ -20,10 +20,12 @@ export interface TaintIrisNextInput {
   backend?: TaintIrisNextBackend;
   mode?: TaintIrisNextMode;
   languages?: string[];
+  maxCwes?: number;
   maxCatalogEntries?: number;
   maxEvidencePerCwe?: number;
   maxFilesPerQuery?: number;
   maxAgentFindings?: number;
+  maxBudgetUsd?: number;
 }
 
 export interface TaintIrisNextCaps {
@@ -54,6 +56,7 @@ export interface TaintIrisNextPlan {
   structuralQueries: TaintIrisNextStructuralQuery[];
   promptCatalog: string;
   backend: TaintIrisNextBackendChoice;
+  maxBudgetUsd?: number;
 }
 
 export type TaintIrisNextEvidenceConfidence = "low" | "medium" | "high";
@@ -78,6 +81,11 @@ export interface TaintIrisNextEvidenceResult {
   evidence: TaintIrisNextEvidence[];
   queryCount: number;
   warnings: string[];
+  artifacts?: {
+    codeqlLanguage?: string;
+    codeqlQueryPath?: string;
+    codeqlCompileStatus?: "not-run" | "passed" | "failed";
+  };
 }
 
 export interface TaintIrisNextAgentSelection {

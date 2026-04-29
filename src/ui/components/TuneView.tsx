@@ -14,6 +14,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import type { ShellState, TuneSnapshot } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { HouseRules } from "./HouseRules.js";
@@ -36,6 +37,7 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
     { keys: "b", label: "back", secondary: true },
   ]);
   const snap = shell.tuneSnapshot;
+  const width = useTerminalCardWidth(88, 40);
 
   return (
     <ScreenContent>

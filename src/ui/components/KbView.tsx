@@ -17,6 +17,7 @@ import type {
   AttachmentsHomeSlice,
 } from "../../modules/_shared/attachments/index.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { RuleHeader } from "./RuleHeader.js";
@@ -47,6 +48,7 @@ export function KbView({ shell }: KbViewProps): React.ReactElement {
   const cursor =
     docs.length === 0 ? 0 : Math.min(Math.max(0, shell.kb?.cursor ?? 0), docs.length - 1);
   const selected = docs.length > 0 ? (docs[cursor] ?? null) : null;
+  const width = useTerminalCardWidth(88, 40);
 
   return (
     <ScreenContent>
@@ -55,8 +57,8 @@ export function KbView({ shell }: KbViewProps): React.ReactElement {
         <EmptyState moduleId={moduleId} />
       ) : (
         <>
-          <ListPane docs={docs} cursor={cursor} />
-          {selected ? <PreviewPane row={selected} /> : null}
+          <ListPane docs={docs} cursor={cursor} width={width} />
+          {selected ? <PreviewPane row={selected} width={width} /> : null}
         </>
       )}
     </ScreenContent>
@@ -96,10 +98,14 @@ function EmptyState({ moduleId }: { moduleId: string }): React.ReactElement {
 function ListPane({
   docs,
   cursor,
+  width,
 }: {
   docs: ReadonlyArray<AttachmentHomeRow>;
   cursor: number;
+  width: number;
 }): React.ReactElement {
+  const titleWidth = Math.max(16, Math.min(36, Math.floor(width * 0.38)));
+  const kindWidth = Math.max(10, Math.min(18, Math.floor(width * 0.2)));
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
       <Box paddingLeft={SPACING.md} flexDirection="column">
@@ -110,7 +116,7 @@ function ListPane({
         </Text>
         <Text>
           {tokens.muted(
-            `${pad("#", 3)} ${pad("STATUS", 7)} ${pad("TITLE", 36)} ${pad("KIND", 18)} ${pad("SIZE", 10)} AGE`,
+            `${pad("#", 3)} ${pad("STATUS", 7)} ${pad("TITLE", titleWidth)} ${pad("KIND", kindWidth)} ${pad("SIZE", 10)} AGE`,
           )}
         </Text>
         {docs.map((doc, idx) => {
@@ -118,8 +124,8 @@ function ListPane({
           const indicator = isSelected ? tokens.focus("❯") : " ";
           const num = `${pad(String(idx + 1), 2)} `;
           const status = pad(statusGlyph(doc.status), 7);
-          const title = pad(doc.title, 36);
-          const kind = pad(doc.kindLabel, 18);
+          const title = pad(doc.title, titleWidth);
+          const kind = pad(doc.kindLabel, kindWidth);
           const size = pad(formatSize(doc), 10);
           const age = doc.detail.split("·").slice(-1)[0]?.trim() ?? "";
           const line = `${indicator} ${num}${status} ${title} ${kind} ${size} ${age}`;
@@ -132,11 +138,17 @@ function ListPane({
   );
 }
 
-function PreviewPane({ row }: { row: AttachmentHomeRow }): React.ReactElement {
+function PreviewPane({
+  row,
+  width,
+}: {
+  row: AttachmentHomeRow;
+  width: number;
+}): React.ReactElement {
   const previewLines = previewBody(row);
   return (
     <Box flexDirection="column" marginTop={SPACING.md}>
-      <Text>{tokens.muted("─".repeat(78))}</Text>
+      <Text>{tokens.muted("─".repeat(Math.max(20, width - 2)))}</Text>
       <Text>
         {tokens.label("preview")}
         {" · "}

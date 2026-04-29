@@ -42,5 +42,7 @@ export function resolveTerminalSize(source?: TerminalLike | null): {
 }
 
 export function clampTerminalCardWidth(columns: number, maxWidth = 88, minWidth = 56): number {
-  return Math.max(minWidth, Math.min(maxWidth, columns - 4));
+  const available = Math.max(20, columns - 4);
+  const effectiveMin = Math.min(minWidth, available);
+  return Math.max(effectiveMin, Math.min(maxWidth, available));
 }

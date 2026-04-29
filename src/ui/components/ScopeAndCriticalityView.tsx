@@ -28,6 +28,7 @@ import type {
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import { truncateEnd } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { ContextStrip } from "./ContextStrip.js";
@@ -50,6 +51,7 @@ export function ScopeAndCriticalityView({
     { keys: "/threats edit", label: "annotate", secondary: true },
     { keys: "q", label: "back", secondary: true },
   ]);
+  const width = useTerminalCardWidth(88, 44);
   const tm = shell.threatModel;
   if (!tm) return <EmptyState />;
 
@@ -71,23 +73,23 @@ export function ScopeAndCriticalityView({
         }
       />
 
-      {buckets ? <CriticalityBuckets buckets={buckets} /> : null}
+      {buckets ? <CriticalityBuckets buckets={buckets} width={width} /> : null}
 
       {outOfScope.length > 0 ? (
         <Box flexDirection="column" marginTop={SPACING.sm}>
           <Text>{tokens.label("out of scope")}</Text>
           <Box flexDirection="column" paddingLeft={SPACING.lg} marginTop={SPACING.sm}>
-            {outOfScope.map((line, i) => (
-              <Text key={`oos-${i}-${line.slice(0, 6)}`}>
+            {outOfScope.map((line) => (
+              <Text key={`oos-${stableTextKey(line)}`}>
                 {tokens.muted("\u00B7  ")}
-                {tokens.muted(truncateEnd(line, 74))}
+                {tokens.muted(truncateEnd(line, Math.max(24, width - 8)))}
               </Text>
             ))}
           </Box>
         </Box>
       ) : null}
 
-      <OperatorEdits tm={tm} />
+      <OperatorEdits tm={tm} width={width} />
     </ScreenContent>
   );
 }
@@ -108,8 +110,10 @@ function EmptyState(): React.ReactElement {
 
 function CriticalityBuckets({
   buckets,
+  width,
 }: {
   buckets: ThreatModelCriticalityBuckets;
+  width: number;
 }): React.ReactElement {
   const order: Array<keyof ThreatModelCriticalityBuckets> = ["critical", "high", "medium", "low"];
   return (
@@ -125,12 +129,12 @@ function CriticalityBuckets({
                 `${buckets[tier]?.length ?? 0} example${(buckets[tier]?.length ?? 0) === 1 ? "" : "s"}`,
               )}
             </Text>
-            {(buckets[tier] ?? []).slice(0, 5).map((item, i) => (
-              <Text key={`${tier}-${i}`}>
+            {(buckets[tier] ?? []).slice(0, 5).map((item) => (
+              <Text key={`${tier}-${stableTextKey(item)}`}>
                 {"   "}
                 {tokens.muted("\u00B7")}
                 {"  "}
-                {tokens.muted(truncateEnd(item, 70))}
+                {tokens.muted(truncateEnd(item, Math.max(24, width - 10)))}
               </Text>
             ))}
             {(buckets[tier] ?? []).length > 5 ? (
@@ -159,7 +163,13 @@ function severityBadge(tier: keyof ThreatModelCriticalityBuckets): string {
   }
 }
 
-function OperatorEdits({ tm }: { tm: ThreatModelDocument }): React.ReactElement {
+function OperatorEdits({
+  tm,
+  width,
+}: {
+  tm: ThreatModelDocument;
+  width: number;
+}): React.ReactElement {
   const annotations = Object.entries(tm.userAnnotations ?? {});
   const confirmed = tm.confirmedMitigations ?? [];
   const dismissed = tm.dismissedThreats ?? [];
@@ -195,7 +205,7 @@ function OperatorEdits({ tm }: { tm: ThreatModelDocument }): React.ReactElement 
               {"   "}
               {tokens.muted(`[${id}]`)}
               {"  "}
-              {tokens.muted(truncateEnd(note, 60))}
+              {tokens.muted(truncateEnd(note, Math.max(20, width - 16)))}
             </Text>
           ))}
           {annotations.length > 6 ? (
@@ -213,11 +223,11 @@ function OperatorEdits({ tm }: { tm: ThreatModelDocument }): React.ReactElement 
             {tokens.success("\u25CF  ")}
             {tokens.strong(`confirmed mitigations (${confirmed.length})`)}
           </Text>
-          {confirmed.slice(0, 6).map((item, i) => (
-            <Text key={`mit-${i}`}>
+          {confirmed.slice(0, 6).map((item) => (
+            <Text key={`mit-${stableTextKey(item)}`}>
               {"   "}
               {tokens.muted("\u00B7  ")}
-              {tokens.value(truncateEnd(item, 70))}
+              {tokens.value(truncateEnd(item, Math.max(20, width - 10)))}
             </Text>
           ))}
           {confirmed.length > 6 ? (
@@ -237,7 +247,7 @@ function OperatorEdits({ tm }: { tm: ThreatModelDocument }): React.ReactElement 
           </Text>
           <Text>
             {"   "}
-            {tokens.muted(dismissed.slice(0, 10).join(", "))}
+            {tokens.muted(truncateEnd(dismissed.slice(0, 10).join(", "), Math.max(20, width - 8)))}
             {dismissed.length > 10 ? tokens.hint(`  (+${dismissed.length - 10} more)`) : ""}
           </Text>
         </Box>
@@ -258,4 +268,12 @@ function summariseEdits(tm: ThreatModelDocument): { total: number } {
     (tm.confirmedMitigations?.length ?? 0) +
     (tm.dismissedThreats?.length ?? 0);
   return { total };
+}
+
+function stableTextKey(value: string): string {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return hash.toString(36);
 }

@@ -34,7 +34,9 @@ describe("budget:exceeded → costCapHalted (O7)", () => {
     };
 
     // Pass `db: undefined` — the worker's budget:exceeded handler doesn't
-    // touch the DB, so we don't need a real sqlite instance.
+    // touch the DB, so we don't need to spin up a real sqlite instance
+    // (which fails in this environment due to a better-sqlite3 native
+    // binding mismatch unrelated to this fix).
     registerReportWorker(bus, { db: undefined, config }, store);
 
     const runId = generateRunId();

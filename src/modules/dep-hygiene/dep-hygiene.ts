@@ -1,8 +1,19 @@
 /**
  * dep-hygiene module — flag risky dependency-version specifiers across
- * common manifest formats (package.json, pyproject.toml, Cargo.toml, go.mod).
+ * common manifest formats (`package.json`, `pyproject.toml`, `Cargo.toml`,
+ * `go.mod`).
  *
- * Pure shell-side tool — does not require an active scan pipeline.
+ * What it catches:
+ *   - `@latest` tags / floating major: `react: latest`, `pkg: *`
+ *   - npm caret/tilde ranges with no upper bound (`^1.0.0`, `~1.0.0`)
+ *   - PyPI un-pinned constraints (`pkg`, `pkg>=1`, no upper bound)
+ *   - Cargo SemVer requirements without an upper bound
+ *   - go.mod entries pinned to commit refs (no immutable tag)
+ *
+ * Pure shell-side tool — does not require an active scan pipeline. Returns
+ * findings as `data.findings` and a one-line scrollback summary; operators
+ * can then decide whether to feed them into the workspace via a follow-on
+ * scan or treat them as advisory.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -97,6 +108,10 @@ export function createDepHygieneModule(): CopilotModule {
     tools: [checkTool],
   });
 }
+
+// ---------------------------------------------------------------------------
+// Per-manifest analysers
+// ---------------------------------------------------------------------------
 
 export function analyzeManifest(
   manifestName: (typeof TARGET_MANIFESTS)[number],
@@ -328,6 +343,10 @@ function analyzeGoMod(filePath: string, raw: string): DepFinding[] {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Output formatter
+// ---------------------------------------------------------------------------
 
 function formatFindings(findings: ReadonlyArray<DepFinding>, target: string): string {
   const lines: string[] = [
