@@ -8,7 +8,7 @@
 
 import { Box, Text, useInput } from "ink";
 import type React from "react";
-import { boxFooter, boxHeader, formatCost } from "../format.js";
+import { formatCost } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useTerminalCardWidth } from "../hooks.js";
 import { isCancelInput } from "../interaction-key-policy.js";
@@ -73,15 +73,9 @@ export function ConfigConfirm({
 
   return (
     <Box flexDirection="column">
-      <Text>{""}</Text>
-      <Text>{boxHeader(`${repoName}`, width)}</Text>
-      <Text>{""}</Text>
       <Box paddingLeft={SPACING.md}>
-        <Text>
-          {tokens.muted("Press Enter to start this scan with the resolved config below.")}
-        </Text>
+        <Text>{tokens.label(repoName)}</Text>
       </Box>
-      <Text>{""}</Text>
       <Box paddingLeft={SPACING.md}>
         <Table<Row>
           columns={[
@@ -95,7 +89,6 @@ export function ConfigConfirm({
           gap={2}
         />
       </Box>
-      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

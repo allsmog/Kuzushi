@@ -162,9 +162,9 @@ describe("KbView", () => {
     expect(out).toContain("rfc-0042-checkout.md");
     expect(out).toContain("arch-diagram.png");
     expect(out).toContain("(2 of 3)");
-    // The selected row gets the ▶ indicator. The cursor=1 means row 2.
+    // The selected row gets the shared ❯ indicator. The cursor=1 means row 2.
     const lines = out.split(/\r?\n/);
-    const selected = lines.find((l) => l.includes("▶"));
+    const selected = lines.find((l) => l.includes("❯"));
     expect(selected).toBeDefined();
     expect(selected).toContain("arch-diagram.png");
   });
@@ -183,7 +183,7 @@ describe("KbView", () => {
     const out = renderToText(createElement(KbView, { shell: shellWith(slice, 99) }));
     // Last row is the runbook (404)
     const lines = out.split(/\r?\n/);
-    const selected = lines.find((l) => l.includes("▶"));
+    const selected = lines.find((l) => l.includes("❯"));
     expect(selected).toContain("wiki/runbook");
   });
 });

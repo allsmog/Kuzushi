@@ -11,9 +11,7 @@
 import { Box, Text, useInput } from "ink";
 import type React from "react";
 import { useState } from "react";
-import { boxFooter, boxHeader } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import { isCancelInput } from "../interaction-key-policy.js";
 import type { WizardResult } from "../preflight-types.js";
@@ -231,7 +229,6 @@ export function SetupWizard({
 }: SetupWizardProps): React.ReactElement {
   const [step, setStep] = useState<WizardStep>("preset");
   const [result, setResult] = useState<Partial<WizardResult>>({});
-  const width = useTerminalCardWidth();
 
   useRegisterKeybindings([
     { keys: "\u2191/\u2193", label: "Navigate" },
@@ -280,14 +277,14 @@ export function SetupWizard({
 
   return (
     <Box flexDirection="column">
-      <Text>{""}</Text>
-      <Text>{boxHeader(stepTitle, width)}</Text>
-      <Text>{""}</Text>
       <Box paddingLeft={SPACING.md}>
-        <Text>{tokens.muted(stepHint)}</Text>
+        <Text>{tokens.label(stepTitle)}</Text>
       </Box>
       <Box paddingLeft={SPACING.md}>
-        <Text>{tokens.hint(`Step ${currentStep} of ${STEP_ORDER.length}`)}</Text>
+        <Text>
+          {tokens.muted(stepHint)}
+          {tokens.hint(`  Step ${currentStep} of ${STEP_ORDER.length}`)}
+        </Text>
       </Box>
       <Text>{""}</Text>
 
@@ -296,8 +293,6 @@ export function SetupWizard({
         onSelect={handleSelect}
         renderItem={richRenderer(currentOptions)}
       />
-
-      <Text>{boxFooter(width)}</Text>
     </Box>
   );
 }

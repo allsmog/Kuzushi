@@ -48,7 +48,6 @@ export function BoolEditor({
         {tokens.label(descriptor.label)} {tokens.muted("=")}{" "}
         {value ? tokens.success("true") : tokens.danger("false")}
       </Text>
-      <Text>{tokens.hint("Space to toggle, Enter to save.")}</Text>
     </Box>
   );
 }
@@ -130,7 +129,7 @@ export function EnumEditor({
       <Text>{tokens.label(descriptor.label)}</Text>
       {values.map((v, i) => {
         const isCursor = i === nav.index;
-        const cursor = isCursor ? tokens.accent(">") : " ";
+        const cursor = isCursor ? tokens.focus("❯") : " ";
         const mark = multi
           ? selected.has(v)
             ? tokens.success("[x]")
@@ -138,14 +137,9 @@ export function EnumEditor({
           : isCursor
             ? tokens.accent("•")
             : " ";
-        const label = isCursor ? tokens.strong(v) : v;
-        return (
-          <Text key={v}>
-            {cursor} {mark} {label}
-          </Text>
-        );
+        const line = `${cursor} ${mark} ${v}`;
+        return <Text key={v}>{isCursor ? tokens.selection(line) : line}</Text>;
       })}
-      <Text>{tokens.hint(multi ? "Space to toggle, Enter to save." : "Enter to select.")}</Text>
     </Box>
   );
 }
@@ -201,7 +195,7 @@ export function NumberEditor({
         onCancel={onCancel}
         placeholder={spec.nullable ? "(empty = null)" : "(number)"}
       />
-      {error ? <Text>{tokens.danger(error)}</Text> : <Text>{tokens.hint("Enter to save.")}</Text>}
+      {error ? <Text>{tokens.danger(error)}</Text> : null}
     </Box>
   );
 }
@@ -244,7 +238,6 @@ export function StringEditor({
         onCancel={onCancel}
         placeholder={spec.optional ? "(empty = unset)" : "(string)"}
       />
-      <Text>{tokens.hint("Enter to save.")}</Text>
     </Box>
   );
 }
@@ -330,17 +323,14 @@ export function StringListEditor({
         {tokens.muted(`(${items.length} item${items.length === 1 ? "" : "s"})`)}
       </Text>
       {items.length === 0 ? (
-        <Text>{tokens.muted("  (empty — press 'a' to add)")}</Text>
+        <Text>{tokens.muted("  (empty)")}</Text>
       ) : (
         items.map((item, i) => {
           const isCursor = mode === "nav" && i === nav.index;
-          const cursor = isCursor ? tokens.accent(">") : " ";
-          const label = isCursor ? tokens.strong(item) : item;
-          return (
-            <Text key={`${i}-${item}`}>
-              {cursor} {label}
-            </Text>
-          );
+          const cursor = isCursor ? tokens.focus("❯") : " ";
+          const line = `${cursor} ${item}`;
+          // biome-ignore lint/suspicious/noArrayIndexKey: string-list editor allows duplicate values and never reorders rows.
+          return <Text key={`${i}-${item}`}>{isCursor ? tokens.selection(line) : line}</Text>;
         })
       )}
       {mode !== "nav" && (
@@ -357,9 +347,6 @@ export function StringListEditor({
             prefix=""
           />
         </Box>
-      )}
-      {mode === "nav" && (
-        <Text>{tokens.hint("[a] add  [e] edit  [d] delete  [s] save  [Esc] cancel")}</Text>
       )}
     </Box>
   );

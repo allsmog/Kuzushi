@@ -98,13 +98,6 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
       </TuneControl>
 
       <Box marginTop={SPACING.sm}>
-        <Text>{tokens.muted("─".repeat(78))}</Text>
-      </Box>
-      <Box marginTop={SPACING.sm}>
-        <Text>{tokens.strong("Primary action: run with the focused module settings.")}</Text>
-      </Box>
-
-      <Box marginTop={SPACING.sm}>
         <HouseRules text={snap?.houseRules} path={snap?.houseRulesPath} />
       </Box>
     </ScreenContent>
