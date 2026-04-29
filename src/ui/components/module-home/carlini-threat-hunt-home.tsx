@@ -10,10 +10,12 @@
 import type React from "react";
 import type { ThreatModelDocument } from "../../../agents/tasks/threat-modeling/types.js";
 import { actorsFromDocument } from "../../../modules/carlini-threat-hunt/selectors.js";
+import { loadContextSnapshot } from "../../../modules/sast/context-persist.js";
 import { readThreatModelKbStatus } from "../../../modules/threat-model/kb-index.js";
+import { loadOperatorScanContext } from "../../../operator-context.js";
 import { loadPersistentThreatModel } from "../../../threat-model-renderer.js";
 import { useRegisterKeybindings } from "../../hooks/useKeybindings.js";
-import type { ShellState } from "../../state.js";
+import type { ContextSnapshot, ShellState } from "../../state.js";
 import { RuleHeader } from "../RuleHeader.js";
 import { ScreenContent } from "../ScreenContent.js";
 import { AttachmentsBlock } from "./AttachmentsBlock.js";
@@ -29,14 +31,27 @@ interface Row {
 
 function formatActors(doc: ThreatModelDocument | null | undefined): string {
   const { prioritized, allActors } = actorsFromDocument(doc);
-  if (allActors.length === 0) return "(no actors yet) — run context first";
+  if (allActors.length === 0) return "(no actors yet) — build threat model first";
   const ready = prioritized.length;
   const deferred = allActors.length - ready;
   return `${ready} ready · ${deferred} deferred`;
 }
 
+function activeTarget(shell: ShellState): string | null {
+  return shell.target ?? shell.contextSnapshot?.target ?? null;
+}
+
+function resolveContextSnapshot(shell: ShellState): ContextSnapshot | null {
+  const target = activeTarget(shell);
+  if (shell.contextSnapshot && (!target || shell.contextSnapshot.target === target)) {
+    return shell.contextSnapshot;
+  }
+  if (!target) return null;
+  return loadContextSnapshot(target);
+}
+
 function resolveThreatModel(shell: ShellState): ThreatModelDocument | null {
-  const target = shell.contextSnapshot?.target ?? shell.target;
+  const target = activeTarget(shell);
   if (target) {
     const persisted = loadPersistentThreatModel(target);
     if (persisted) return persisted;
@@ -44,8 +59,47 @@ function resolveThreatModel(shell: ShellState): ThreatModelDocument | null {
   return shell.threatModel ?? null;
 }
 
+function formatSnapshot(snapshot: ContextSnapshot | null): string {
+  if (!snapshot) return "missing — /use context; run .";
+  const generated = snapshot.generatedSlices?.length
+    ? ` · ${snapshot.generatedSlices.join(", ")}`
+    : "";
+  return `.kuzushi/context-snapshot.json · target ${snapshot.target}${generated}`;
+}
+
+function operatorContextLabel(shell: ShellState): string {
+  const target = activeTarget(shell);
+  if (!target) return "(no target)";
+  const scanContext = loadOperatorScanContext(target);
+  if (!scanContext) return "missing — /context build";
+  const countItems = (value: unknown): number => (Array.isArray(value) ? value.length : 0);
+  const count =
+    countItems(scanContext.trust?.deploymentModel) +
+    countItems(scanContext.trust?.infrastructure) +
+    countItems(scanContext.trust?.externalDefenses) +
+    countItems(scanContext.trust?.confirmedMitigations) +
+    countItems(scanContext.scope?.highValuePaths) +
+    countItems(scanContext.scope?.lowValuePaths) +
+    countItems(scanContext.scope?.sensitiveDataTags) +
+    countItems(scanContext.architecture?.entryPoints) +
+    countItems(scanContext.architecture?.externalDeps) +
+    countItems(scanContext.architecture?.dataFlows) +
+    countItems(scanContext.historical?.suppressedFpFingerprints) +
+    countItems(scanContext.historical?.confirmedTpFingerprints);
+  const review = scanContext.operatorReviewed ? "reviewed" : "unreviewed";
+  return count > 0
+    ? `.kuzushi/scan-context.json · ${count} hint${count === 1 ? "" : "s"} · ${review}`
+    : ".kuzushi/scan-context.json · empty · review with /context edit";
+}
+
+function threatModelLabel(threatModel: ThreatModelDocument | null): string {
+  if (!threatModel) return "missing — /use threat-model; run .";
+  const threats = threatModel.threats.length;
+  return `.kuzushi/threat-model.json · ${threats} threat${threats === 1 ? "" : "s"}`;
+}
+
 function readinessRows(shell: ShellState): Row[] {
-  const snapshot = shell.contextSnapshot ?? null;
+  const snapshot = resolveContextSnapshot(shell);
   const threatModel = resolveThreatModel(shell);
   const dfd = threatModel?.dfd;
   const nodeCount = dfd?.nodes?.length ?? 0;
@@ -63,17 +117,16 @@ function readinessRows(shell: ShellState): Row[] {
     threatModel?.threats.some((threat) => threat.provenance?.fallback)
       ? "fallback"
       : "generated";
-  const snapshotLabel = snapshot
-    ? `target ${snapshot.target}`
-    : "(no snapshot — run /context build)";
   const kbStatus = threatKbStatus(shell);
   return [
-    { key: "context", value: snapshotLabel },
+    { key: "app context", value: formatSnapshot(snapshot) },
+    { key: "operator context", value: operatorContextLabel(shell) },
+    { key: "threat model", value: threatModelLabel(threatModel) },
     {
       key: "attack surface",
       value:
         nodeCount === 0 && flowCount === 0
-          ? "(no DFD)"
+          ? "missing DFD — /use threat-model; run ."
           : `${nodeCount} nodes · ${flowCount} flows · ${boundaryCount} boundaries`,
     },
     { key: "s4 quality", value: `${actorLinkedThreats} actor-linked threats · ${fallback}` },
@@ -83,7 +136,7 @@ function readinessRows(shell: ShellState): Row[] {
 }
 
 function threatKbStatus(shell: ShellState): string {
-  const target = shell.contextSnapshot?.target ?? shell.target;
+  const target = activeTarget(shell);
   if (!target) return "(no target)";
   const status = readThreatModelKbStatus(target, shell.threatModel);
   if (!status.exists) return ".kuzushi/threat-model-kb.sqlite3 · missing";
@@ -112,6 +165,9 @@ function scopeRows(shell: ShellState): Row[] {
 function actionRows(shell: ShellState): Row[] {
   const card = shell.moduleCatalog?.find((c) => c.id === MODULE_ID);
   const rows: Row[] = [
+    { key: "/use context; run .", value: "build app context snapshot" },
+    { key: "/context build", value: "build operator scan context notes" },
+    { key: "/use threat-model; run .", value: "write .kuzushi/threat-model.json" },
     { key: "run .", value: "spawn one agent per ready actor" },
     { key: "run --changed", value: "scope to git-changed files only" },
     { key: "prompts", value: "edit the actor system prompt" },

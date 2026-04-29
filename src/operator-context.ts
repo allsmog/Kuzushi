@@ -73,6 +73,7 @@ export function generateOperatorContextFromOutputs(
   }
 
   const defenses: string[] = [];
+  if (repoContext?.authPatterns) defenses.push(...repoContext.authPatterns);
   if (repoContext?.sanitizationLibs) defenses.push(...repoContext.sanitizationLibs);
   if (enrichedContext?.enrichment?.customMiddleware) {
     for (const mw of enrichedContext.enrichment.customMiddleware) {

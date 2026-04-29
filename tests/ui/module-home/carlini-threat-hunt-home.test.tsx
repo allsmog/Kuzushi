@@ -126,11 +126,15 @@ describe("CarliniThreatHuntHome", () => {
     const out = renderText(createElement(CarliniThreatHuntHome, { shell: shell() }));
     expect(out).toContain("kuzushi/carlini-threat-hunt");
     expect(out).toContain("readiness");
-    expect(out).toContain("(no snapshot");
-    expect(out).toContain("(no DFD)");
+    expect(out).toContain("missing — /use context; run .");
+    expect(out).toContain("missing — /context build");
+    expect(out).toContain("missing — /use threat-model; run .");
+    expect(out).toContain("missing DFD");
     expect(out).toContain("(no actors yet)");
     expect(out).toContain("scope");
     expect(out).toContain("actions");
+    expect(out).toContain("/use threat-model; run .");
+    expect(out).toContain("/context build");
     expect(out).toContain("run --changed");
   });
 
