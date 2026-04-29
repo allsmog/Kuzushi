@@ -23,6 +23,7 @@ import { runShellCommand, type ShellCommandOptions } from "./cli/commands/shell.
 import { CliUsageError, wrapCliAction } from "./cli/errors.js";
 import { resolveRepo } from "./cli/shared.js";
 import { DEFAULTS } from "./config/defaults.js";
+import { formatConfigText } from "./config/render.js";
 import { formatConfigValidationIssue, validateKuzushiConfig } from "./config/validation.js";
 import {
   configPath,
@@ -76,6 +77,13 @@ const program = new Command();
 function collectRepeatedOption(value: string, previous: string[] = []): string[] {
   previous.push(value);
   return previous;
+}
+
+interface ConfigGetOptions {
+  repo?: string;
+  trustRepoConfig?: boolean;
+  all?: boolean;
+  json?: boolean;
 }
 
 program
@@ -541,7 +549,9 @@ const configCmd = program
     "after",
     `
 Examples:
-  $ kuzushi config get                                  # show the full effective config
+  $ kuzushi config get                                  # show overrides (grouped, defaults hidden)
+  $ kuzushi config get --all                            # include defaults
+  $ kuzushi config get --json                           # raw JSON dump (for scripting)
   $ kuzushi config get model                            # get a single key
   $ kuzushi config set model anthropic:claude-opus-4-7  # set a key (warns on plaintext credentials)
   $ kuzushi config unset model                          # reset a key to default
@@ -553,15 +563,25 @@ Examples:
 
 configCmd
   .command("get")
-  .description("Get a config value")
+  .description("Get a config value (grouped summary when no key is given)")
   .argument("[key]", "Config key (omit to show all)")
   .option("-r, --repo <path>", "Include project-level config overlay from this repo")
   .option("--trust-repo-config", "Trust unsafe repo-local config keys", false)
+  .option("-a, --all", "Include keys that still match their default", false)
+  .option("--json", "Emit raw JSON (for scripts). Overrides --all.", false)
   .action(
-    wrapCliAction((key: string | undefined, opts: { repo?: string; trustRepoConfig?: boolean }) => {
-      const config = loadConfig(opts.repo, { trustProjectConfig: opts.trustRepoConfig === true });
+    wrapCliAction((key: string | undefined, opts: ConfigGetOptions) => {
+      const config = loadConfig(opts.repo, {
+        trustProjectConfig: opts.trustRepoConfig === true,
+      });
       if (!key) {
-        console.log(JSON.stringify(config, null, 2));
+        if (opts.json) {
+          console.log(JSON.stringify(config, null, 2));
+          return;
+        }
+        console.log(
+          formatConfigText(config, { showDefaults: opts.all === true, configPath: configPath() }),
+        );
         return;
       }
       const value = getConfigValue(key, opts.repo);

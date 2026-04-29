@@ -8395,6 +8395,8 @@ function redactConfigSecrets(value: unknown): unknown {
 const CONFIG_USAGE = [
   "Usage:",
   "  /config                       Open the interactive config editor (TTY)",
+  "  /config show                  Show overrides (grouped, defaults hidden)",
+  "  /config show --all            Show full config including defaults",
   "  /config raw                   Print the full effective config as JSON",
   "  /config path                  Show config file paths",
   "  /config get <key>             Get a value (supports dotted paths)",
@@ -8996,9 +8998,26 @@ function handleConfigCommand(args: string[], ctx: ShellContext): LocalCommandRes
   const sub = (args[0] ?? "").toLowerCase();
 
   // Default + edit: open the interactive editor (or fall back to raw on no TTY).
-  if (!sub || sub === "list" || sub === "show" || sub === "edit") {
+  if (!sub || sub === "edit") {
     const focusKey = sub === "edit" ? args[1] : undefined;
     return openConfigEditor(ctx, focusKey);
+  }
+
+  if (sub === "list" || sub === "show" || sub === "summary" || sub === "--all" || sub === "-a") {
+    const showDefaults =
+      sub === "--all" || sub === "-a" || args.includes("--all") || args.includes("-a");
+    return {
+      asyncExecute: async () => {
+        const [{ configPath, loadConfig }, { formatConfigText }] = await Promise.all([
+          import("../config.js"),
+          import("../config/render.js"),
+        ]);
+        return formatConfigText(loadConfig(), {
+          showDefaults,
+          configPath: configPath(),
+        });
+      },
+    };
   }
 
   if (sub === "advanced") {
