@@ -179,7 +179,8 @@ export function createContextModule(): CopilotModule {
     category: "intel",
     version: "0.17.2",
     description:
-      "Builds the target context snapshot: repo model, enrichment, and app/surface model. " +
+      "Builds the target context snapshot: repo model, enrichment, and app/surface model.",
+    longDescription:
       "Required by agentic / taint-iris / carlini-threat-hunt. " +
       "Attach reference material (architecture docs, API specs, runbooks) with `attach`.",
     rank: "excellent",
