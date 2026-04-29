@@ -57,6 +57,7 @@ import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { BannerSplash } from "./BannerSplash.js";
 import { ContextBuildView } from "./ContextBuildView.js";
 import { DelayedBusyIndicator } from "./DelayedBusyIndicator.js";
+import { DiffSinceView } from "./DiffSinceView.js";
 import { ErrorCard } from "./ErrorCard.js";
 import { FindingCard } from "./FindingCard.js";
 import { FindingsView } from "./FindingsView.js";
@@ -967,6 +968,8 @@ function ShellViewPanel({
         />
       );
     }
+    case "since":
+      return <DiffSinceView key={view} summary={summary} shell={shell} />;
     case "finding": {
       const openId = shell.openFindingId;
       if (!openId || !summary) return null;
@@ -1053,6 +1056,7 @@ const MemoShellViewPanel = memo(
     prev.shell.findingCursor === next.shell.findingCursor &&
     prev.shell.sastTaskCursor === next.shell.sastTaskCursor &&
     prev.shell.findingPageSize === next.shell.findingPageSize &&
+    prev.shell.diffSince === next.shell.diffSince &&
     prev.shell.moduleCatalog === next.shell.moduleCatalog &&
     prev.shell.moduleOptions === next.shell.moduleOptions &&
     prev.shell.tuneSnapshot === next.shell.tuneSnapshot &&

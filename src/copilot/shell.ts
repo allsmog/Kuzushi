@@ -6312,6 +6312,7 @@ function handleBackCommand(
   }
   if (
     currentView === "findings" ||
+    currentView === "since" ||
     currentView === "tune" ||
     currentView === "options" ||
     currentView === "sast-tasks" ||
@@ -6918,7 +6919,7 @@ function handleSinceCommand(
   const repoRoot = path.resolve(opts.target);
   return {
     output: `Diffing HEAD against ${ref}…`,
-    shellStateUpdater: (shell) => ({ ...shell, shellView: "findings", openFindingId: null }),
+    shellStateUpdater: (shell) => ({ ...shell, shellView: "since", openFindingId: null }),
     asyncExecute: async () => {
       const { computeDiffScope } = await import("./diff-scope.js");
       const scope = computeDiffScope(repoRoot, ref);
