@@ -5,7 +5,7 @@ import {
 import { getLogger } from "../../logger.js";
 import type { Finding } from "../../scanners/types.js";
 import { attachTaskOutputMeta } from "../../task-output-meta.js";
-import type { TriageResult } from "../../types.js";
+import type { ExploitChain, TriageResult } from "../../types.js";
 import { isRecord, toErrorMessage } from "../../utils.js";
 import type { AgentTask } from "../types.js";
 
@@ -15,18 +15,9 @@ export interface ChainInput {
   confirmedFindings: Array<{ finding: Finding; triageResult: TriageResult }>;
 }
 
-export interface ExploitChain {
-  id: string;
-  name: string;
-  steps: Array<{
-    findingFingerprint: string;
-    role: string;
-    description: string;
-  }>;
-  overallSeverity: "CRITICAL" | "HIGH" | "MEDIUM";
-  preconditions: string[];
-  impactDescription: string;
-}
+// `ExploitChain` is canonical in `src/types.ts`; re-export for any
+// downstream consumer that imports it from this task module.
+export type { ExploitChain };
 
 export interface ChainAnalysisOutput {
   chains: ExploitChain[];

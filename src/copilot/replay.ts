@@ -18,13 +18,15 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type { getRun as getRunFn, listRuns as listRunsFn } from "../store.js";
+import type { listRuns as listRunsFn, PipelineRunRecord } from "../store.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type PipelineRunRecord = NonNullable<ReturnType<typeof getRunFn>>;
+// Canonical `PipelineRunRecord` lives in `src/store.ts`. Re-exported here so
+// `replay`-module consumers don't have to chase the persistence layer.
+export type { PipelineRunRecord };
 export type PipelineRunList = ReturnType<typeof listRunsFn>;
 
 /** One line of a triage.jsonl / verify.jsonl audit log. */
