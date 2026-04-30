@@ -21,6 +21,7 @@ import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { computeVisibleSlice } from "../hooks/useVisibleSlice.js";
 import { icons } from "../icons.js";
 import { useRenderCounter } from "../perf.js";
+import { Divider } from "../primitives/Divider.js";
 import { normalizeSeverity, severityChalk, severityStyle } from "../severity.js";
 import type { ActionableFinding, ResultLine } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
@@ -262,12 +263,12 @@ function UnifiedFindings({
       </Box>
 
       <Box marginTop={SPACING.sm} flexDirection="column">
-        <Text>{tokens.strong("Primary action: /open F-NNNN to inspect one finding deeply.")}</Text>
+        <Text>{tokens.value("Primary action: /open F-NNNN to inspect one finding deeply.")}</Text>
         <FilterChips chips={filters ?? defaultFilters()} />
       </Box>
 
       <Box marginTop={SPACING.sm}>
-        <Text>{tokens.muted("─".repeat(78))}</Text>
+        <Divider />
       </Box>
 
       {resolvedChains.map(({ chain, members }) => {
@@ -308,7 +309,7 @@ function UnifiedFindings({
       {findings.length === 0 && <EmptyState kind="findings-never-scanned" />}
 
       <Box marginTop={SPACING.sm}>
-        <Text>{tokens.muted("─".repeat(78))}</Text>
+        <Divider />
       </Box>
       <Box>
         <Text>{tokens.hint("j/k move   /open F-NNNN inspect   b back")}</Text>

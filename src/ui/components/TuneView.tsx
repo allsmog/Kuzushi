@@ -14,6 +14,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { Divider } from "../primitives/Divider.js";
 import type { ShellState, TuneSnapshot } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { HouseRules } from "./HouseRules.js";
@@ -102,10 +103,10 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
       </TuneControl>
 
       <Box marginTop={SPACING.sm}>
-        <Text>{tokens.muted("\u2500".repeat(78))}</Text>
+        <Divider />
       </Box>
       <Box marginTop={SPACING.sm}>
-        <Text>{tokens.strong("Primary action: run with the focused module settings.")}</Text>
+        <Text>{tokens.value("Primary action: run with the focused module settings.")}</Text>
       </Box>
 
       <Box marginTop={SPACING.sm}>
