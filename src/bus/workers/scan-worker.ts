@@ -102,7 +102,7 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
         taskConfig,
         deps.config,
       );
-      const { output, emittedFindings, durationMs, costUsd } = executed;
+      const { output, emittedFindings, durationMs, costUsd, degradation } = executed;
 
       for (const finding of emittedFindings) {
         await bus.publish(
@@ -131,6 +131,7 @@ export function registerScanWorker(bus: MessageBus, deps: ScanWorkerDeps): void 
           output,
           durationMs,
           costUsd,
+          ...(degradation ? { degradation } : {}),
         }),
       );
     } catch (error) {
@@ -161,11 +162,13 @@ async function runTaskOnce(
     await task.init(taskConfig);
   }
   const output = await task.run(input, execContext);
+  const meta = getTaskOutputMeta(output);
   return {
     output,
     emittedFindings: extractTaskFindings(task.outputKind, output),
     durationMs: Date.now() - startedAt,
-    costUsd: normalizeCostUsd(getTaskOutputMeta(output)?.costUsd),
+    costUsd: normalizeCostUsd(meta?.costUsd),
+    ...(meta?.degradation ? { degradation: meta.degradation } : {}),
   };
 }
 

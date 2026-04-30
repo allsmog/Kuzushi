@@ -29,6 +29,7 @@ export async function createDefaultDagRegistry(
   const { createThreatModelModule } = await import("../modules/threat-model/threat-model.js");
   const { createCoreTobModule } = await import("../modules/tob/tob.js");
   const { createCoreVulnScoutModule } = await import("../modules/vuln-scout/vuln-scout.js");
+  const { createXRayModule } = await import("../modules/x-ray/x-ray.js");
 
   const dagModules = [
     createContextModule(),
@@ -39,6 +40,7 @@ export async function createDefaultDagRegistry(
     createTaintIrisModule(),
     createCarliniThreatHuntModule(),
     createThreatModelModule(),
+    createXRayModule(),
     createSystemsHuntModule(),
     createCoreTobModule(),
     createCoreVulnScoutModule(),

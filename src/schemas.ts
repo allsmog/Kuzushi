@@ -630,6 +630,7 @@ export type ScanOptsZ = z.infer<typeof ScanOptsSchema>;
 export const AgentRuntimeCredentialsSchema = z.object({
   apiKey: z.string().optional(),
   apiKeyFile: z.string().optional(),
+  authToken: z.string().optional(),
   baseUrl: z.string().optional(),
 });
 

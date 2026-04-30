@@ -75,6 +75,7 @@ export interface ScanCommandOptions {
   junit?: string;
   agentRuntime?: string;
   apiKey?: string;
+  authToken?: string;
   baseUrl?: string;
   /**
    * Mirror of `kuzushi shell --inherit-claude` for the scan command:
@@ -206,7 +207,7 @@ export function applyScanCommandConfigOverrides(
   if (opts.agentRuntime) {
     config.agentRuntimeBackend = opts.agentRuntime as typeof config.agentRuntimeBackend;
   }
-  if (opts.apiKey || opts.baseUrl) {
+  if (opts.apiKey || opts.authToken || opts.baseUrl) {
     const runtimeConfig = { ...(config.agentRuntimeConfig ?? {}) };
     const slot = backendConfigSlot(config.agentRuntimeBackend);
     const next = { ...(runtimeConfig[slot] ?? {}) };
@@ -214,6 +215,11 @@ export function applyScanCommandConfigOverrides(
     if (opts.apiKey) {
       const apiKey = opts.apiKey.trim();
       next.apiKey = apiKey || undefined;
+    }
+
+    if (opts.authToken) {
+      const authToken = opts.authToken.trim();
+      next.authToken = authToken || undefined;
     }
 
     if (opts.baseUrl) {

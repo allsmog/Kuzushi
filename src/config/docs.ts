@@ -41,6 +41,14 @@ export const CONFIG_KEY_DOCS: ConfigKeyDoc[] = [
       "Use an explicit backend slot, such as agentRuntimeConfig.claude.apiKey or agentRuntimeConfig.codex.apiKey.",
   },
   {
+    key: "agentRuntimeConfig.<backend>.authToken",
+    type: "string (sensitive)",
+    summary: "Plaintext provider bearer/OAuth token for a backend slot. Prefer env vars or /auth.",
+    envVar: "ANTHROPIC_AUTH_TOKEN / ANTHROPIC_OAUTH_TOKEN for Anthropic-backed runtimes",
+    details:
+      "Use an explicit backend slot, such as agentRuntimeConfig.piAi.authToken, when the provider expects Authorization: Bearer instead of X-Api-Key.",
+  },
+  {
     key: "busBackend",
     type: "enum",
     summary: "Message bus backend. Only `in-process` is implemented.",

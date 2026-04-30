@@ -168,8 +168,10 @@ export function createPipelineRuntime(config: KuzushiConfig, scanOpts: ScanOpts)
 
   const isClaudeRuntime = (config.agentRuntimeBackend ?? "pi-ai") === "claude";
   if (!isClaudeRuntime) {
+    const activeCredentials = resolveActiveCredentials(config);
     const missingCredentials = validatePiAiProviderCredentials(activeModels, {
-      anthropicApiKey: resolveActiveCredentials(config).apiKey,
+      anthropicApiKey: activeCredentials.apiKey,
+      anthropicAuthToken: activeCredentials.authToken,
     });
 
     if (missingCredentials.length > 0) {
@@ -179,7 +181,7 @@ export function createPipelineRuntime(config: KuzushiConfig, scanOpts: ScanOpts)
       );
       if (missingCredentials.some((entry) => entry.provider === "anthropic")) {
         details.push(
-          "Tip: for Anthropic models, you can also set agentRuntimeConfig.<backend>.apiKey or pass --api-key for this run.",
+          "Tip: for Anthropic models, you can also set agentRuntimeConfig.<backend>.apiKey, agentRuntimeConfig.<backend>.authToken, or pass --api-key / --auth-token for this run.",
         );
       }
       throw new CliConfigError("missing API credentials for selected model provider(s):", {
@@ -189,8 +191,10 @@ export function createPipelineRuntime(config: KuzushiConfig, scanOpts: ScanOpts)
   }
 
   if (!isClaudeRuntime) {
+    const activeCredentials = resolveActiveCredentials(config);
     warnPiAiBackendApiKeys(activeModels, {
-      anthropicApiKey: resolveActiveCredentials(config).apiKey,
+      anthropicApiKey: activeCredentials.apiKey,
+      anthropicAuthToken: activeCredentials.authToken,
     });
   }
 

@@ -67,4 +67,5 @@ const CANONICAL_DAG_IDS: Record<string, string> = {
   "deep-semantic-hunt": "systems-hunt:deep-semantic-hunt",
   "tob-audit": "tob:tob-audit",
   "vuln-scout": "vuln-scout:vuln-scout",
+  "x-ray": "x-ray:x-ray",
 };

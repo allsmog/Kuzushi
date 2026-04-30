@@ -83,7 +83,7 @@ export type AgentRuntimeBackend = AgentRuntimeBackendZ;
  * Credentials for a single agent runtime backend.
  *
  * Consumed directly by `ClaudeAgentRuntime`, `PiAiAgentRuntime`, and `CodexAgentRuntime`. The shape
- * matches the env-var pair they resolve to.
+ * matches the credential/env-var fields they resolve to.
  */
 export type AgentRuntimeCredentials = AgentRuntimeCredentialsZ;
 
@@ -92,7 +92,7 @@ export type AgentRuntimeCredentials = AgentRuntimeCredentialsZ;
  * slot is active; the unselected slot is preserved so operators can flip back
  * without re-authing.
  *
- * Legacy flat configs (`{ apiKey, baseUrl }` at the top level) are migrated on
+ * Legacy flat configs (`{ apiKey, authToken, baseUrl }` at the top level) are migrated on
  * load into `{ claude: { ... } }` — see `normalizeAgentRuntimeConfig`.
  */
 export type AgentRuntimeConfig = AgentRuntimeConfigZ;

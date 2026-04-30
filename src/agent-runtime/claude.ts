@@ -25,6 +25,7 @@ import { normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { enforceAgentQuery, resolveFallbackConsent } from "./enforcement.js";
 import { buildSubprocessEnv } from "./env.js";
 import type { AgentQueryExecutionResult } from "./execution.js";
+import { assertRuntimeModelSelection } from "./model-validation.js";
 import { buildSdkHooks } from "./sdk-hooks.js";
 import type {
   AgentActivityPhase,
@@ -573,7 +574,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   private readonly config: AgentRuntimeCredentials | undefined;
   private readonly client: Anthropic;
   /**
-   * True when this runtime has no API key configured — the Batch
+   * True when this runtime has no direct SDK credential configured — the Batch
    * API path will throw synchronously on every attempt. Surfaced so
    * callers (`agent-runtime/execution.ts`) can skip Batch outright
    * and avoid logging a fallback warning per batch (#28).
@@ -584,14 +585,16 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
   constructor(config?: AgentRuntimeCredentials) {
     this.config = resolveAgentRuntimeConfig(config);
-    this.oauthMode = !this.config?.apiKey;
+    this.oauthMode = !this.config?.apiKey && !this.config?.authToken;
     this.client = new Anthropic({
       apiKey: this.config?.apiKey,
+      authToken: this.config?.authToken,
       baseURL: this.config?.baseUrl,
     });
   }
 
   createSession(baseOptions: AgentQueryOptions): AgentSession {
+    assertRuntimeModelSelection(this.id, baseOptions.model, baseOptions.fallbackModel);
     return new ClaudeSession(baseOptions, this.config, this.bus, this.runId);
   }
 
@@ -603,6 +606,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     requests: AgentBatchRequest[],
     baseOptions: AgentQueryOptions,
   ): Promise<Map<string, AgentQueryExecutionResult>> {
+    assertRuntimeModelSelection(this.id, baseOptions.model, baseOptions.fallbackModel);
     if (requests.length === 0) return new Map();
 
     enforceAgentQuery({
@@ -614,10 +618,10 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       callsite: "claude.queryBatch",
     });
 
-    // Batch API requires an API key — OAuth mode can't use the direct SDK client.
+    // Batch API requires a direct SDK credential; subprocess-only inherited auth cannot use it.
     // Throw so callers fall back to sequential subprocess queries.
-    if (!this.config?.apiKey) {
-      throw new Error("Batch API requires an API key — not available in OAuth mode");
+    if (!this.config?.apiKey && !this.config?.authToken) {
+      throw new Error("Batch API requires an API key or auth token — not available in OAuth mode");
     }
 
     let model = baseOptions.model;
@@ -969,13 +973,13 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       fallbackConsent: resolveFallbackConsent(request.options.consentToModelFallback),
       callsite: "claude.query",
     });
-
+    assertRuntimeModelSelection(this.id, request.options.model, request.options.fallbackModel);
     // Fast path: tool-less calls go directly to Anthropic API — no subprocess.
-    // Only when an API key is available — OAuth mode must use subprocess path.
+    // Only when a direct SDK credential is available — inherited OAuth mode must use subprocess path.
     if (
       !request.options.allowedTools?.length &&
       !request.options.disallowedTools?.length &&
-      this.config?.apiKey
+      (this.config?.apiKey || this.config?.authToken)
     ) {
       yield* this.queryDirect(request);
       return;
@@ -1057,6 +1061,9 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     };
     if (this.config?.apiKey) {
       extra.ANTHROPIC_API_KEY = this.config.apiKey;
+    }
+    if (this.config?.authToken) {
+      extra.ANTHROPIC_AUTH_TOKEN = this.config.authToken;
     }
     if (this.config?.baseUrl) {
       extra.ANTHROPIC_BASE_URL = this.config.baseUrl;
@@ -1461,6 +1468,7 @@ class ClaudeSession implements AgentSession {
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: "100000",
     };
     if (this.config?.apiKey) extra.ANTHROPIC_API_KEY = this.config.apiKey;
+    if (this.config?.authToken) extra.ANTHROPIC_AUTH_TOKEN = this.config.authToken;
     if (this.config?.baseUrl) extra.ANTHROPIC_BASE_URL = this.config.baseUrl;
     const { env, stripped } = buildSubprocessEnv(process.env, extra);
     delete env.CLAUDECODE;

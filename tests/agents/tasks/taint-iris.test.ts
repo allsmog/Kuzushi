@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentQueryRequest, AgentRuntime } from "../../../src/agent-runtime/types.js";
+import { taintCweSelectTask } from "../../../src/agents/tasks/taint-iris/cwe-select.js";
 import { __taintIrisInternals, taintIrisTask } from "../../../src/agents/tasks/taint-iris/iris.js";
 import type { PipelineContext } from "../../../src/agents/types.js";
+import { getTaskOutputMeta } from "../../../src/task-output-meta.js";
 import type { KuzushiConfig, ScanOpts } from "../../../src/types.js";
 
 function cwe(id: string) {
@@ -184,5 +186,65 @@ describe("taint-iris task", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("marks legacy zero-result runs without query artifacts as inconclusive", async () => {
+    const runtime = makeRuntime(() => undefined);
+    const output = await taintIrisTask.run(
+      { target: ".", maxCwes: 1 } as unknown as ScanOpts,
+      makeContext(runtime, { "taint-iris": { codeqlMode: "off" } }),
+    );
+
+    const meta = getTaskOutputMeta(output);
+    expect(meta?.degradation?.type).toBe("legacy-inconclusive");
+    expect(meta?.degradation?.reason).toBe("no-findings-and-no-generated-query-artifacts");
+    expect(meta?.degradation?.observability).toEqual(
+      expect.objectContaining({
+        queryArtifactCount: 0,
+        legacyComparisonStatus: "legacy-inconclusive",
+      }),
+    );
+  });
+
+  it("runs the legacy task to an inconclusive no-op when CWE selection is empty", async () => {
+    let queried = false;
+    const runtime = makeRuntime(() => {
+      queried = true;
+    });
+    const context = makeContext(runtime, { "taint-iris": { codeqlMode: "off" } });
+    context.upstreamOutputs.set("taint-cwe-select", { cwes: [] });
+
+    expect(taintIrisTask.condition?.(context.upstreamOutputs, context.config)).toBe(true);
+
+    const output = await taintIrisTask.run({ target: "." } as unknown as ScanOpts, context);
+    const meta = getTaskOutputMeta(output);
+
+    expect(queried).toBe(false);
+    expect(meta?.degradation?.type).toBe("legacy-inconclusive");
+    expect(meta?.degradation?.reason).toBe("no-cwes-selected");
+  });
+
+  it("propagates the legacy IRIS budget cap into the CWE selector", async () => {
+    let captured: AgentQueryRequest | undefined;
+    const runtime: AgentRuntime = {
+      id: "test",
+      async *query(request) {
+        captured = request;
+        yield {
+          type: "result",
+          subtype: "success",
+          result: '{"cwes":[]}',
+          structuredOutput: { cwes: [] },
+          totalCostUsd: 0.01,
+        };
+      },
+    };
+
+    await taintCweSelectTask.run(
+      { target: ".", maxBudgetUsd: 0.05 } as unknown as ScanOpts,
+      makeContext(runtime, { "taint-iris": { maxBudgetUsd: 0.05 } }),
+    );
+
+    expect(captured?.options.maxBudgetUsd).toBe(0.05);
   });
 });

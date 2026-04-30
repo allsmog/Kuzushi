@@ -581,8 +581,13 @@ function printModuleRunView(emit: Emit, shell: ShellState, state: UIState): void
     const label = run.displayName ?? run.toolName ?? `${run.moduleId}:run`;
     const findings = moduleRunScopedFindings(run, state.summary?.actionableFindings ?? []);
     const findingCount = run.findingCount ?? findings.length;
+    const review =
+      run.reviewCandidateCount && run.reviewCandidateCount > 0
+        ? ` · ${run.reviewCandidateCount} review candidate${run.reviewCandidateCount === 1 ? "" : "s"}`
+        : "";
+    const agentStatus = run.agentStatus ? ` · ${run.agentStatus}` : "";
     emit(
-      `  ${label} ${run.status === "done" ? "complete" : run.status} · ${findingCount} finding${findingCount === 1 ? "" : "s"} · ${run.costUsd != null ? formatCost(run.costUsd) : "cost n/a"} · ${elapsed}`,
+      `  ${label} ${run.status === "done" ? "complete" : run.status} · ${findingCount} finding${findingCount === 1 ? "" : "s"}${review}${agentStatus} · ${run.costUsd != null ? formatCost(run.costUsd) : "cost n/a"} · ${elapsed}`,
     );
     if (run.postProcessMode === "scan-only" && run.status === "done" && findingCount > 0) {
       emit("  scan-only: saved as needs_review; triage pending");

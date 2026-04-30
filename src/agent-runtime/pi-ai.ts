@@ -27,6 +27,7 @@ import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { maybeCompactContext } from "./context-compactor.js";
 import { enforceAgentQuery, resolveFallbackConsent } from "./enforcement.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
+import { assertRuntimeModelSelection } from "./model-validation.js";
 import { normalizeToolInput } from "./tool-input-normalizer.js";
 import { summarizeToolCompletion } from "./tool-summary.js";
 import { executeTool, PI_AI_TOOL_DEFINITIONS } from "./tools.js";
@@ -304,7 +305,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
       fallbackConsent: resolveFallbackConsent(request.options.consentToModelFallback),
       callsite: "pi-ai.query",
     });
-
+    assertRuntimeModelSelection(this.id, request.options.model, request.options.fallbackModel);
     const restoreRuntimeEnv = applyRuntimeEnvOverrides(this.runtimeConfig);
     const startedAtMs = Date.now();
     const signal = request.options.abortController?.signal;
@@ -365,6 +366,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
       fallbackConsent: resolveFallbackConsent(baseOptions.consentToModelFallback),
       callsite: "pi-ai.session",
     });
+    assertRuntimeModelSelection(this.id, baseOptions.model, baseOptions.fallbackModel);
     return new PiAiSession(this, this.runtimeConfig, baseOptions);
   }
 }
@@ -1214,13 +1216,21 @@ class PiAiSession implements AgentSession {
 
 function applyRuntimeEnvOverrides(runtimeConfig: AgentRuntimeCredentials | undefined): () => void {
   const shouldOverrideApiKey = Boolean(runtimeConfig?.apiKey);
+  const shouldOverrideAuthToken = Boolean(runtimeConfig?.authToken);
   const shouldOverrideBaseUrl = Boolean(runtimeConfig?.baseUrl);
 
   const originalApiKey = process.env["ANTHROPIC_API_KEY"];
+  const originalAuthToken = process.env["ANTHROPIC_AUTH_TOKEN"];
+  const originalOauthToken = process.env["ANTHROPIC_OAUTH_TOKEN"];
   const originalBaseUrl = process.env["ANTHROPIC_BASE_URL"];
 
   if (shouldOverrideApiKey && runtimeConfig?.apiKey) {
     process.env["ANTHROPIC_API_KEY"] = runtimeConfig.apiKey;
+  }
+
+  if (shouldOverrideAuthToken && runtimeConfig?.authToken) {
+    process.env["ANTHROPIC_AUTH_TOKEN"] = runtimeConfig.authToken;
+    process.env["ANTHROPIC_OAUTH_TOKEN"] = runtimeConfig.authToken;
   }
 
   if (shouldOverrideBaseUrl && runtimeConfig?.baseUrl) {
@@ -1233,6 +1243,19 @@ function applyRuntimeEnvOverrides(runtimeConfig: AgentRuntimeCredentials | undef
         delete process.env["ANTHROPIC_API_KEY"];
       } else {
         process.env["ANTHROPIC_API_KEY"] = originalApiKey;
+      }
+    }
+
+    if (shouldOverrideAuthToken) {
+      if (originalAuthToken === undefined) {
+        delete process.env["ANTHROPIC_AUTH_TOKEN"];
+      } else {
+        process.env["ANTHROPIC_AUTH_TOKEN"] = originalAuthToken;
+      }
+      if (originalOauthToken === undefined) {
+        delete process.env["ANTHROPIC_OAUTH_TOKEN"];
+      } else {
+        process.env["ANTHROPIC_OAUTH_TOKEN"] = originalOauthToken;
       }
     }
 

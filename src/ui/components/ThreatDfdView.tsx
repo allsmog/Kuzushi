@@ -20,7 +20,6 @@ import {
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import { truncateEnd } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { useTerminalCardWidth } from "../hooks.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { RuleHeader } from "./RuleHeader.js";
@@ -53,7 +52,6 @@ export function ThreatDfdView({ shell }: ThreatDfdViewProps): React.ReactElement
         mtimeMs: shell.threatModelSource.mtimeMs,
       })
     : undefined;
-  const mapWidth = useTerminalCardWidth(78, 44);
   const model = deriveAttackSurfaceDfdModel({
     threatModel: shell.threatModel,
     contextSnapshot: shell.contextSnapshot,
@@ -84,11 +82,7 @@ export function ThreatDfdView({ shell }: ThreatDfdViewProps): React.ReactElement
       ) : null}
       {model.qualityNotice ? <QualityNotice notice={model.qualityNotice} /> : null}
       <Legend validated={model.basis === "threat-model"} />
-      {model.nodes.length === 0 ? (
-        <EmptyWorkspace />
-      ) : (
-        <AttackSurfaceMap model={model} width={mapWidth} />
-      )}
+      {model.nodes.length === 0 ? <EmptyWorkspace /> : <AttackSurfaceMap model={model} />}
       <SelectedPanel model={model} />
       <StrideOverlay model={model} />
       {shell.contextRegenPaletteOpen ? (
@@ -147,27 +141,16 @@ function EmptyWorkspace(): React.ReactElement {
   );
 }
 
-function AttackSurfaceMap({
-  model,
-  width,
-}: {
-  model: AttackSurfaceDfdModel;
-  width: number;
-}): React.ReactElement {
+function AttackSurfaceMap({ model }: { model: AttackSurfaceDfdModel }): React.ReactElement {
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
       {model.zones.map((zone, index) => (
         <Box key={zone.id} flexDirection="column">
-          <ZoneBlock
-            title={zone.title}
-            nodes={zone.nodes}
-            selectedId={model.selectedId}
-            width={width}
-          />
+          <ZoneBlock title={zone.title} nodes={zone.nodes} selectedId={model.selectedId} />
           {index < model.zones.length - 1 ? <BoundaryBetween model={model} zone={zone.id} /> : null}
         </Box>
       ))}
-      {model.flows.length > 0 ? <HotPaths model={model} width={width} /> : null}
+      {model.flows.length > 0 ? <HotPaths model={model} /> : null}
     </Box>
   );
 }
@@ -176,13 +159,12 @@ function ZoneBlock({
   title,
   nodes,
   selectedId,
-  width,
 }: {
   title: string;
   nodes: AttackSurfaceNode[];
   selectedId?: string;
-  width: number;
 }): React.ReactElement {
+  const width = 76;
   const heading = ` ${title} `;
   const fill = "─".repeat(Math.max(0, width - heading.length - 2));
   return (
@@ -261,26 +243,20 @@ function BoundaryBetween({
   );
 }
 
-function HotPaths({
-  model,
-  width,
-}: {
-  model: AttackSurfaceDfdModel;
-  width: number;
-}): React.ReactElement {
+function HotPaths({ model }: { model: AttackSurfaceDfdModel }): React.ReactElement {
   const hot = model.flows.filter((flow) => flow.hot).slice(0, 5);
   const shown = hot.length > 0 ? hot : model.flows.slice(0, 5);
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>{tokens.label("hot paths")}</Text>
       {shown.map((flow) => (
-        <FlowLine key={flow.id} flow={flow} width={width} />
+        <FlowLine key={flow.id} flow={flow} />
       ))}
     </Box>
   );
 }
 
-function FlowLine({ flow, width }: { flow: AttackSurfaceFlow; width: number }): React.ReactElement {
+function FlowLine({ flow }: { flow: AttackSurfaceFlow }): React.ReactElement {
   const label = `${flow.id.padEnd(4)} ${flow.source} -> ${flow.target}`;
   const meta = [
     flow.protocol,
@@ -290,15 +266,8 @@ function FlowLine({ flow, width }: { flow: AttackSurfaceFlow; width: number }): 
   return (
     <Text>
       {"  "}
-      {flow.hot ? tokens.danger("!") : tokens.muted("·")}{" "}
-      {tokens.value(
-        truncateEnd(label, Math.max(16, Math.floor(width * 0.42))).padEnd(
-          Math.max(16, Math.floor(width * 0.42)),
-        ),
-      )}
-      {flow.hot
-        ? tokens.danger(truncateEnd(meta.join(" · "), Math.max(10, Math.floor(width * 0.46))))
-        : tokens.muted(truncateEnd(meta.join(" · "), Math.max(10, Math.floor(width * 0.46))))}
+      {flow.hot ? tokens.danger("!") : tokens.muted("·")} {tokens.value(label.padEnd(24))}
+      {flow.hot ? tokens.danger(meta.join(" · ")) : tokens.muted(meta.join(" · "))}
     </Text>
   );
 }

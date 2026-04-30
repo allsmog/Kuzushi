@@ -33,10 +33,14 @@ describe("whichSync", () => {
 describe("runPreflight", () => {
   let tmp: string;
   let prevKey: string | undefined;
+  let prevAuthToken: string | undefined;
+  let prevOauthToken: string | undefined;
 
   beforeEach(() => {
     tmp = mkdtempSync(path.join(tmpdir(), "kuzushi-preflight-"));
     prevKey = process.env.ANTHROPIC_API_KEY;
+    prevAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
+    prevOauthToken = process.env.ANTHROPIC_OAUTH_TOKEN;
   });
 
   afterEach(() => {
@@ -45,6 +49,16 @@ describe("runPreflight", () => {
       delete process.env.ANTHROPIC_API_KEY;
     } else {
       process.env.ANTHROPIC_API_KEY = prevKey;
+    }
+    if (prevAuthToken === undefined) {
+      delete process.env.ANTHROPIC_AUTH_TOKEN;
+    } else {
+      process.env.ANTHROPIC_AUTH_TOKEN = prevAuthToken;
+    }
+    if (prevOauthToken === undefined) {
+      delete process.env.ANTHROPIC_OAUTH_TOKEN;
+    } else {
+      process.env.ANTHROPIC_OAUTH_TOKEN = prevOauthToken;
     }
   });
 
@@ -59,7 +73,26 @@ describe("runPreflight", () => {
   });
 
   it("reports credentials ok when ANTHROPIC_API_KEY is set", () => {
-    process.env.ANTHROPIC_API_KEY = "sk-ant-test-" + "x".repeat(40);
+    process.env.ANTHROPIC_API_KEY = `sk-ant-test-${"x".repeat(40)}`;
+    const report = runPreflight(baseConfig(), tmp);
+    const credCheck = report.checks.find((c) => c.name === "credentials");
+    expect(credCheck?.status).toBe("ok");
+    expect(report.issues.some((i) => i.path === "credentials")).toBe(false);
+  });
+
+  it("reports credentials ok when ANTHROPIC_AUTH_TOKEN is set", () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_AUTH_TOKEN = "sk-ant-oat-test";
+    const report = runPreflight(baseConfig(), tmp);
+    const credCheck = report.checks.find((c) => c.name === "credentials");
+    expect(credCheck?.status).toBe("ok");
+    expect(report.issues.some((i) => i.path === "credentials")).toBe(false);
+  });
+
+  it("reports credentials ok when ANTHROPIC_OAUTH_TOKEN is set", () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
+    process.env.ANTHROPIC_OAUTH_TOKEN = "sk-ant-oat-test";
     const report = runPreflight(baseConfig(), tmp);
     const credCheck = report.checks.find((c) => c.name === "credentials");
     expect(credCheck?.status).toBe("ok");
