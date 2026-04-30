@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { CodeIntelligenceProvider } from "../../../analysis-support/types.js";
-import type { FileIndex } from "../../../types.js";
+import { formatProfilesForPrompt, getProfilesForTask } from "../../../security-profiles.js";
+import type { FileIndex, SecurityProfile } from "../../../types.js";
 import type {
   RankedSystemsSurface,
   SystemsCodeLocation,
@@ -47,9 +48,40 @@ const UNSAFE_PATTERNS = [
   /\bFFI\b|\bextern\s+"C"/,
 ] as const;
 
+const RESOURCE_PROVENANCE_PATTERNS = [
+  /\b(?:splice|vmsplice|sendfile|mmap)\s*\(/,
+  /\bAF_ALG\b|\balgif\b/i,
+  /\b(?:scatterlist|sg_chain|sg_page|page[_-]?cache|pipe_buffer|iov_iter)\b/i,
+  /\b(?:kmap_local_page|scatterwalk_map_and_copy|aead_request_set_crypt)\s*\(/,
+] as const;
+
+const ALIASING_PATTERNS = [
+  /\bsrc\s*==\s*dst\b/,
+  /\breq->src\s*=\s*req->dst\b/,
+  /\breq->dst\s*=\s*req->src\b/,
+  /\b(?:in-place|inplace)\b/i,
+  /\bsg_chain\s*\(/,
+  /\baead_request_set_crypt\s*\([^;]*(\bsrc\b|\bdst\b|\brsgl_src\b)[^;]*(\bsrc\b|\bdst\b|\brsgl_src\b)/,
+] as const;
+
+const SCRATCH_WRITE_PATTERNS = [
+  /\bscatterwalk_map_and_copy\s*\(/,
+  /\b(?:scratch|temporary|tmp)\b/i,
+  /\b(?:assoclen|cryptlen|authsize)\b.*\+/,
+  /\b(?:dst|out|output)\s*\[[^\]]+\]\s*=/,
+  /\b(?:write|overwrite|copy).*?(?:tag|tail|after|past|beyond)/i,
+] as const;
+
+const FAILURE_SIDE_EFFECT_PATTERNS = [
+  /\b(?:EBADMSG|EINVAL|EFAULT|EIO|EPERM)\b/,
+  /\b(?:auth|verify|validate|check).*?(?:fail|error|reject)/i,
+  /\breturn\s+-[A-Z0-9_]+/,
+  /\bgoto\s+(?:err|error|fail|free|out)\b/i,
+] as const;
+
 const INPUT_PATTERNS = [
-  /\b(?:recv|recvmsg|read|socket|accept|packet|segment|rpc|xdr|guest|virtio|descriptor|iov|iov_len)\b/i,
-  /\b(?:tcp|udp|nfs|gss|h264|frame|slice|opcode|header)\b/i,
+  /\b(?:recv|recvmsg|read|socket|accept|packet|segment|rpc|xdr|guest|virtio|descriptor|iov|iov_len|splice|vmsplice|sendfile)\b/i,
+  /\b(?:tcp|udp|nfs|gss|h264|frame|slice|opcode|header|AF_ALG|algif|pipe|page)\b/i,
 ] as const;
 
 const HARDENING_PATTERNS = [
@@ -144,6 +176,58 @@ const TEMPLATE_SPECS: readonly TemplateSpec[] = [
       'select m, "Inspect whether hardening is present or missing near the sink."',
     ].join("\n"),
   },
+  {
+    id: "shared-backing-resource",
+    title: "Shared backing resource into writable sink",
+    rationale:
+      "Trace file/page/pipe/shared-buffer provenance into later APIs that may treat the object as writable.",
+    queryText: [
+      "/* CodeQL template: shared-backing-resource */",
+      "import cpp",
+      "from FunctionCall c",
+      'where c.getTarget().getName().regexpMatch(".*(splice|vmsplice|sendfile|mmap|sg_chain|sg_page).*")',
+      'select c, "Inspect whether shared backing resources cross into writable scatterlists or buffers."',
+    ].join("\n"),
+  },
+  {
+    id: "in-place-writable-alias",
+    title: "In-place source/destination alias",
+    rationale:
+      "Inspect operations where source and destination are intentionally aliased across different provenance domains.",
+    queryText: [
+      "/* CodeQL template: in-place-writable-alias */",
+      "import cpp",
+      "from Assignment a",
+      'where a.toString().regexpMatch(".*(src.*=.*dst|dst.*=.*src|in.?place).*")',
+      'select a, "Inspect source/destination aliasing and ownership boundary assumptions."',
+    ].join("\n"),
+  },
+  {
+    id: "scratch-write-boundary",
+    title: "Scratch write outside output contract",
+    rationale:
+      "Look for temporary writes into caller-owned output buffers, especially offsets after tags, headers, or authenticated data.",
+    queryText: [
+      "/* CodeQL template: scratch-write-boundary */",
+      "import cpp",
+      "from FunctionCall c",
+      'where c.getTarget().getName().regexpMatch(".*(scatterwalk_map_and_copy|memcpy|memmove).*")',
+      'select c, "Inspect scratch writes and offsets relative to the API output contract."',
+    ].join("\n"),
+  },
+  {
+    id: "failure-side-effect",
+    title: "Side effect before auth/validation failure",
+    rationale:
+      "Check whether mutations occur before authentication, validation, or tag checks return an error.",
+    queryText: [
+      "/* CodeQL template: failure-side-effect */",
+      "import cpp",
+      "from ReturnStmt r",
+      'where r.toString().regexpMatch(".*-(EBADMSG|EINVAL|EFAULT|EPERM).*")',
+      'select r, "Inspect side effects before this failure return."',
+    ].join("\n"),
+  },
 ] as const;
 
 export async function buildSystemsSurfacePack(args: {
@@ -217,6 +301,34 @@ export async function buildSystemsSurfacePack(args: {
     surfacePackDepth,
     "unsafe memory primitive",
   );
+  const resourceProvenanceSites = await collectPatternLocations(
+    repoRoot,
+    relatedFiles,
+    RESOURCE_PROVENANCE_PATTERNS,
+    surfacePackDepth,
+    "shared-resource provenance transfer",
+  );
+  const aliasingSites = await collectPatternLocations(
+    repoRoot,
+    relatedFiles,
+    ALIASING_PATTERNS,
+    surfacePackDepth,
+    "source/destination alias or in-place operation",
+  );
+  const scratchWriteSites = await collectPatternLocations(
+    repoRoot,
+    relatedFiles,
+    SCRATCH_WRITE_PATTERNS,
+    surfacePackDepth,
+    "scratch write or output-boundary write",
+  );
+  const failureSideEffectSites = await collectPatternLocations(
+    repoRoot,
+    relatedFiles,
+    FAILURE_SIDE_EFFECT_PATTERNS,
+    surfacePackDepth,
+    "failure path that may preserve earlier side effects",
+  );
   const inputSites = dedupeLocations([
     ...(await collectPatternLocations(
       repoRoot,
@@ -263,6 +375,10 @@ export async function buildSystemsSurfacePack(args: {
     sentinelConstants,
     allocationCopySites,
     unsafeSites,
+    resourceProvenanceSites,
+    aliasingSites,
+    scratchWriteSites,
+    failureSideEffectSites,
     inputSites,
     hardeningSites,
     helperTemplates: selectHelperTemplates(surface, enableCodeqlTemplates && Boolean(codeqlDbPath)),
@@ -281,6 +397,10 @@ export function formatSystemsSurfacePack(pack: SystemsSurfacePack): string[] {
     `Sentinel constants: ${formatLocations(pack.sentinelConstants)}`,
     `Allocation/copy sites: ${formatLocations(pack.allocationCopySites)}`,
     `Unsafe sites: ${formatLocations(pack.unsafeSites)}`,
+    `Resource provenance sites: ${formatLocations(pack.resourceProvenanceSites)}`,
+    `Aliasing sites: ${formatLocations(pack.aliasingSites)}`,
+    `Scratch write sites: ${formatLocations(pack.scratchWriteSites)}`,
+    `Failure side-effect sites: ${formatLocations(pack.failureSideEffectSites)}`,
     `Input sites: ${formatLocations(pack.inputSites)}`,
     `Hardening sites: ${formatLocations(pack.hardeningSites)}`,
     `Built-in helpers: ${formatTemplates(pack.helperTemplates)}`,
@@ -340,6 +460,13 @@ export function matchTriggerHypothesisToFinding(args: {
   };
 }
 
+export function formatSystemsHuntProfileLines(
+  securityProfiles: SecurityProfile[] | undefined,
+): string[] {
+  if (!securityProfiles || securityProfiles.length === 0) return [];
+  return formatProfilesForPrompt(getProfilesForTask(securityProfiles, "systems-hunt"));
+}
+
 function selectHelperTemplates(
   surface: RankedSystemsSurface,
   includeQueryText: boolean,
@@ -362,6 +489,15 @@ function selectHelperTemplates(
     surface.domains.includes("unsafe-memory")
   ) {
     selectedIds.add("rust-unsafe-len");
+  }
+  if (
+    surface.kind === "resource-provenance" ||
+    surface.domains.includes("resource-provenance")
+  ) {
+    selectedIds.add("shared-backing-resource");
+    selectedIds.add("in-place-writable-alias");
+    selectedIds.add("scratch-write-boundary");
+    selectedIds.add("failure-side-effect");
   }
 
   return TEMPLATE_SPECS.filter((template) => selectedIds.has(template.id)).map((template) => ({

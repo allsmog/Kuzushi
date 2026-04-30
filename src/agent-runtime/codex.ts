@@ -57,7 +57,7 @@ export function mapCodexEffort(
   effort: AgentEffort | undefined,
   thinkingDisabled?: boolean,
 ): ModelReasoningEffort | undefined {
-  if (thinkingDisabled) return "minimal";
+  if (thinkingDisabled) return "low";
   if (effort === "max" || effort === "xhigh") return "xhigh";
   return effort;
 }

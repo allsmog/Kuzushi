@@ -127,7 +127,7 @@ const SELECTION_RULES: SelectionRule[] = [
     condition: (_ctx, fileIndex) => hasSystemsPatternSignals(fileIndex),
     tasks: ["systems-hunt"],
     reason:
-      "Packet/parser/unsafe/hardening signals detected — run the systems hunt even without explicit language metadata",
+      "Packet/parser/unsafe/resource-provenance/hardening signals detected — run the systems hunt even without explicit language metadata",
   },
   // Note: auth-access and dangerous-api both resolve to code-config-detect,
   // which is already in ALWAYS_RECOMMENDED via security-misconfig. Dedicated
@@ -322,7 +322,11 @@ export const __taskSelectorInternals = {
 
 function hasSystemsPatternSignals(fileIndex: FileIndex | undefined): boolean {
   if (!fileIndex) return false;
-  return ["protocol-parser", "integer-boundary", "unsafe-memory", "hardening"].some(
-    (domain) => (fileIndex.patternMatches[domain]?.length ?? 0) > 0,
-  );
+  return [
+    "protocol-parser",
+    "integer-boundary",
+    "unsafe-memory",
+    "hardening",
+    "resource-provenance",
+  ].some((domain) => (fileIndex.patternMatches[domain]?.length ?? 0) > 0);
 }

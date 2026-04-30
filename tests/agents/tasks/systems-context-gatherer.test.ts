@@ -56,6 +56,76 @@ describe("systems-context-gatherer", () => {
     );
   });
 
+  it("ranks resource provenance surfaces and builds aliasing evidence packs", async () => {
+    const repoRoot = mkdtempSync(path.join(os.tmpdir(), "systems-hunt-rp-"));
+    try {
+      writeFileSync(path.join(repoRoot, "CMakeLists.txt"), "project(resource_provenance C)\n");
+      mkdirSync(path.join(repoRoot, "src", "crypto"), { recursive: true });
+      writeFileSync(
+        path.join(repoRoot, "src", "crypto", "algif_aead.c"),
+        [
+          "struct page { int dirty; };",
+          "struct scatterlist { struct page *page; unsigned int length; };",
+          "struct aead_request { struct scatterlist *src; struct scatterlist *dst; unsigned int assoclen; unsigned int cryptlen; unsigned int authsize; };",
+          "static void sg_chain(struct scatterlist *head, int nents, struct scatterlist *tail) { (void)head; (void)nents; (void)tail; }",
+          "static struct page *sg_page(struct scatterlist *sg) { return sg->page; }",
+          "static void aead_request_set_crypt(struct aead_request *req, struct scatterlist *src, struct scatterlist *dst, unsigned int len, int iv) { req->src = src; req->dst = dst; }",
+          "static void scatterwalk_map_and_copy(char *tag, struct scatterlist *dst, unsigned int off, unsigned int len, int out) { if (out) dst->page->dirty = 1; }",
+          "int algif_aead_recvmsg(struct aead_request *req, struct scatterlist *page_cache_sg, char *tag) {",
+          "  int family = AF_ALG;",
+          "  struct pipe_buffer *pipe = 0;",
+          "  req->src = page_cache_sg;",
+          "  req->dst = req->src;",
+          "  sg_chain(req->dst, 1, page_cache_sg);",
+          "  aead_request_set_crypt(req, req->src, req->dst, req->cryptlen, 0);",
+          "  scatterwalk_map_and_copy(tag, req->dst, req->assoclen + req->cryptlen, req->authsize, 1);",
+          "  return -74;",
+          "}",
+          "int splice_to_algif(void) { return splice(0, 0, 1, 0, 4096, 0); }",
+        ].join("\n"),
+      );
+
+      const context = await gatherContextForRoot(repoRoot);
+      const surfaces = await rankSystemsSurfaces(
+        context.fileIndex,
+        context.repoContext,
+        repoRoot,
+        5,
+      );
+      const surface = surfaces.find((candidate) => candidate.kind === "resource-provenance");
+      expect(surface).toBeTruthy();
+      expect(surface!.domains).toContain("resource-provenance");
+      expect(surface!.attackerControlledFields).toEqual(
+        expect.arrayContaining(["src", "dst", "authsize"]),
+      );
+
+      const provider = await getCodeIntelligenceProvider(repoRoot);
+      const pack = await buildSystemsSurfacePack({
+        repoRoot,
+        fileIndex: context.fileIndex,
+        surface: surface!,
+        provider,
+        surfacePackDepth: 4,
+        enableCodeqlTemplates: false,
+      });
+
+      expect(pack.resourceProvenanceSites.length).toBeGreaterThan(0);
+      expect(pack.aliasingSites.length).toBeGreaterThan(0);
+      expect(pack.scratchWriteSites.length).toBeGreaterThan(0);
+      expect(pack.failureSideEffectSites.length).toBeGreaterThan(0);
+      expect(pack.helperTemplates.map((template) => template.id)).toEqual(
+        expect.arrayContaining([
+          "shared-backing-resource",
+          "in-place-writable-alias",
+          "scratch-write-boundary",
+          "failure-side-effect",
+        ]),
+      );
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
   it("builds deterministic surface packs with related files and probe sites", async () => {
     const repoRoot = mkdtempSync(path.join(os.tmpdir(), "systems-hunt-pack-"));
     try {

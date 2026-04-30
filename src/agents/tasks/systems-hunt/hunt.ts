@@ -13,7 +13,11 @@ import {
   extractSystemsHuntArtifactPath,
   writeSystemsHuntArtifact,
 } from "./artifacts.js";
-import { formatSystemsSurfacePack, matchTriggerHypothesisToFinding } from "./helpers.js";
+import {
+  formatSystemsHuntProfileLines,
+  formatSystemsSurfacePack,
+  matchTriggerHypothesisToFinding,
+} from "./helpers.js";
 import type {
   RankedSystemsSurface,
   SystemsAnalysisStep,
@@ -53,8 +57,14 @@ const LENS_SCHEMA = {
           "message",
           "rationale",
           "triggerHypothesisIds",
+          "violatedInvariantIds",
           "violatedInvariant",
+          "triggerSequence",
+          "attackerControlledFields",
+          "memoryPrimitive",
+          "hardeningNotes",
           "cheapVerifiable",
+          "analysisPath",
         ],
         properties: {
           title: { type: "string" },
@@ -78,7 +88,7 @@ const LENS_SCHEMA = {
             items: {
               type: "object",
               additionalProperties: false,
-              required: ["filePath", "line", "role"],
+              required: ["filePath", "line", "role", "snippet"],
               properties: {
                 filePath: { type: "string" },
                 line: { type: "integer", minimum: 1 },
@@ -96,7 +106,14 @@ const LENS_SCHEMA = {
 const CORROBORATION_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["status", "rationale", "coherentTrigger", "cheapVerifiable"],
+  required: [
+    "status",
+    "rationale",
+    "coherentTrigger",
+    "cheapVerifiable",
+    "guardLocations",
+    "counterexampleNotes",
+  ],
   properties: {
     status: {
       type: "string",
@@ -110,7 +127,7 @@ const CORROBORATION_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["filePath", "line", "role"],
+        required: ["filePath", "line", "role", "snippet"],
         properties: {
           filePath: { type: "string" },
           line: { type: "integer", minimum: 1 },
@@ -209,6 +226,7 @@ export const systemsHuntTask: DagNodeImpl<ScanOpts, Finding[]> = {
     const surfaces = surfaceOutput?.surfaces.slice(0, config.maxSurfaces) ?? [];
     const surfacePacks = surfaceOutput?.surfacePacks ?? [];
     const packBySurfaceId = new Map(surfacePacks.map((pack) => [pack.surfaceId, pack]));
+    const profileLines = formatSystemsHuntProfileLines(context.securityProfiles);
     if (surfaces.length === 0) {
       return attachTaskOutputMeta([], { costUsd: 0 });
     }
@@ -229,6 +247,7 @@ export const systemsHuntTask: DagNodeImpl<ScanOpts, Finding[]> = {
             context,
             config,
             surfaceOutput,
+            profileLines,
           ),
         ),
       );
@@ -262,6 +281,7 @@ export const systemsHuntTask: DagNodeImpl<ScanOpts, Finding[]> = {
         context,
         config,
         surfaceOutput?.metadata.codeqlDbPath,
+        profileLines,
       );
       totalCostUsd += corroboration.costUsd;
       const emission = resolveEmissionDecision({
@@ -350,7 +370,7 @@ export const systemsHuntTask: DagNodeImpl<ScanOpts, Finding[]> = {
       prompt: [
         `You are triaging a systems-code finding in "${repoName}".`,
         "This finding came from a low-level multi-lens hunt focused on protocol state,",
-        "numeric boundary reasoning, unsafe memory operations, and missing mitigations.",
+        "numeric boundary reasoning, resource provenance, unsafe memory operations, and missing mitigations.",
         artifactPath
           ? `First, Read the systems hunt artifact at ${artifactPath}.`
           : "First, inspect the supporting analysis path in the finding evidence.",
@@ -364,6 +384,7 @@ export const systemsHuntTask: DagNodeImpl<ScanOpts, Finding[]> = {
         "Verify these questions explicitly:",
         "- Is the violated invariant real in the code, or already guarded elsewhere?",
         "- Can attacker-controlled packet fields, slice counts, or guest-controlled sizes reach this path?",
+        "- If resource provenance is involved, do origin, ownership boundary, aliasing, and failure-side effects line up?",
         "- Do compiler/runtime mitigations or hardening settings materially block exploitation?",
         "- If the bug is real, what is the concrete crash/corruption primitive?",
       ]
@@ -381,6 +402,7 @@ async function analyzeSurface(
   context: DagRunContext,
   config: SystemsHuntConfig,
   surfaceOutput: SystemsContextOutput | undefined,
+  profileLines: string[] = [],
 ): Promise<SurfaceAnalysisResult> {
   const relevantInvariants = invariants.filter((invariant) => invariant.surfaceId === surface.id);
   const relevantTriggers = triggers.filter((trigger) => trigger.surfaceId === surface.id);
@@ -406,6 +428,7 @@ async function analyzeSurface(
       lens,
       config,
       surfaceOutput?.metadata.codeqlDbPath,
+      profileLines,
     );
     try {
       let structuredOutput: unknown;
@@ -452,6 +475,7 @@ export function buildLensPrompt(
   lens: SystemsHuntLens,
   config: SystemsHuntConfig,
   codeqlDbPath?: string,
+  profileLines: string[] = [],
 ): string {
   const lensGuidance = lensInstructions(lens, surface.kind);
   const invariantLines =
@@ -518,6 +542,7 @@ export function buildLensPrompt(
     "## Trigger hypotheses",
     ...triggerLines,
     "",
+    ...(profileLines.length > 0 ? [...profileLines, ""] : []),
     ...codeqlSection,
     "",
     `Scratch writes, if needed, must stay under ${config.artifactRootRelative}/scratch.`,
@@ -531,6 +556,7 @@ export function buildLensPrompt(
     "- triggerSequence describing the crafted interaction or boundary condition",
     "- attackerControlledFields and memoryPrimitive",
     "- hardeningNotes explaining whether mitigations are absent, partial, or bypassed",
+    "- for resource-provenance findings, include resource origin, ownership boundary, aliasing transition, write primitive, and failure-side-effect evidence in triggerSequence, analysisPath, and rationale",
     "- cheapVerifiable=true only when a single-turn bounded confirmation is realistic",
   ].join("\n");
 }
@@ -563,6 +589,15 @@ function lensInstructions(lens: SystemsHuntLens, surfaceKind: SystemsSurfaceKind
         "- In Rust, inspect unsafe blocks, raw pointer arithmetic, from_raw_parts, get_unchecked, set_len, and FFI.",
         "- In C/C++, inspect memcpy/memmove/strcpy/sprintf-style paths and unchecked stack buffers.",
       ].join("\n");
+    case "resource-provenance":
+      return [
+        "## Lens guidance: resource provenance and writable alias reasoning",
+        "- Track each buffer, page, descriptor, scatterlist, pipe buffer, mmap, DMA/MMIO, guest-memory, or page-cache resource from origin to final write site.",
+        "- Identify the ownership boundary: private allocation, user memory, file/page cache, pipe buffer, read-only mapping, shared backing resource, or caller-owned destination.",
+        "- Look for zero-copy transfers where shared or read-only backing resources are chained into writable destinations or in-place operations.",
+        "- Verify API output contracts: downstream algorithms must not use caller destination buffers as scratch space outside the owned output range.",
+        "- Check whether mutations happen before auth/tag/checksum/validation failure and whether error paths roll back, discard, or preserve those mutations.",
+      ].join("\n");
     case "hardening-bypass":
       return [
         "## Lens guidance: hardening and mitigation reasoning",
@@ -581,6 +616,7 @@ async function corroborateFinding(
   context: DagRunContext,
   config: SystemsHuntConfig,
   codeqlDbPath?: string,
+  profileLines: string[] = [],
 ): Promise<CorroborationResult> {
   if (!config.enableCounterexamplePass) {
     return {
@@ -608,7 +644,14 @@ async function corroborateFinding(
 
   try {
     for await (const message of context.runtime.query({
-      prompt: buildCorroborationPrompt(finding, surfacePack, triggers, config, codeqlDbPath),
+      prompt: buildCorroborationPrompt(
+        finding,
+        surfacePack,
+        triggers,
+        config,
+        codeqlDbPath,
+        profileLines,
+      ),
       options: {
         cwd: context.repoRoot,
         model: config.model,
@@ -655,6 +698,7 @@ export function buildCorroborationPrompt(
   triggers: SystemsTriggerHypothesis[],
   config: SystemsHuntConfig,
   codeqlDbPath?: string,
+  profileLines: string[] = [],
 ): string {
   const triggerLines =
     triggers.length > 0
@@ -685,9 +729,12 @@ export function buildCorroborationPrompt(
     "## Trigger hypotheses",
     ...triggerLines,
     "",
+    ...(profileLines.length > 0 ? [...profileLines, ""] : []),
     codeqlDbPath
       ? `Optional CodeQL database: ${codeqlDbPath}`
       : "No CodeQL database available; use repo reads and bounded Bash probes only.",
+    "",
+    "For resource-provenance findings, actively search for private copies, page duplication/COW, dirty/writeback barriers, privilege checks, non-aliasing src/dst, downstream write-range guards, and failures that roll back or discard mutations.",
     "",
     "Return status=survived only if the bug still holds after searching for counterexamples.",
     "Return status=counterexample-found if a real guard, cap, state reset, or hardening mechanism blocks the trigger or primitive.",

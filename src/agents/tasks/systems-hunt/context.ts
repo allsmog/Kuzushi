@@ -11,6 +11,7 @@ import type { FileIndex, RepoContext, ScanOpts, SecurityPatternMatch } from "../
 import type { DagNodeImpl } from "../../types.js";
 import { buildSystemsSurfacePack } from "./helpers.js";
 import {
+  SYSTEMS_PATTERN_DOMAINS,
   hasSystemsSignals,
   isSystemsLanguage,
   type RankedSystemsSurface,
@@ -28,6 +29,7 @@ const DOMAIN_WEIGHTS: Record<SystemsPatternDomain, number> = {
   "protocol-parser": 7,
   "integer-boundary": 5,
   "unsafe-memory": 6,
+  "resource-provenance": 8,
   hardening: 2,
 };
 
@@ -66,6 +68,12 @@ const PATH_HINTS: Array<{
     kind: "unsafe-region",
     score: 4,
     reason: "unsafe or memory-manipulation path",
+  },
+  {
+    pattern: /(crypto|algif|af_alg|splice|scatterlist|sg_|page_cache|pipe_buffer|iov_iter)/i,
+    kind: "resource-provenance",
+    score: 8,
+    reason: "zero-copy or shared-resource provenance path",
   },
 ];
 
@@ -146,12 +154,7 @@ export async function rankSystemsSurfaces(
 
   const accumulators = new Map<string, SurfaceAccumulator>();
   const hardeningByFile = new Map<string, string[]>();
-  const targetDomains: SystemsPatternDomain[] = [
-    "protocol-parser",
-    "integer-boundary",
-    "unsafe-memory",
-    "hardening",
-  ];
+  const targetDomains: SystemsPatternDomain[] = [...SYSTEMS_PATTERN_DOMAINS];
 
   for (const match of extraMatches) {
     fileIndex.patternMatches["protocol-parser"] = dedupeMatches([
@@ -298,6 +301,14 @@ export function inferSurfaceKind(
   if (/rpc|nfs|gss|xdr/i.test(haystack)) return "rpc-handler";
   if (/codec|decode|parser|h264|slice|frame|ffmpeg|avcodec/i.test(haystack)) return "codec-parser";
   if (/vmm|hypervisor|guest|virt|vmexit|virtio/i.test(haystack)) return "hypervisor-boundary";
+  if (
+    domain === "resource-provenance" ||
+    /splice|vmsplice|sendfile|mmap|af_alg|algif|scatterlist|sg_chain|sg_page|page[_-]?cache|pipe_buffer|iov_iter|kmap_local_page|scatterwalk_map_and_copy|aead_request_set_crypt|req->src\s*=\s*req->dst|req->dst\s*=\s*req->src|src\s*==\s*dst/i.test(
+      haystack,
+    )
+  ) {
+    return "resource-provenance";
+  }
   if (domain === "protocol-parser" || /tcp|udp|packet|segment|socket|skb|sack/i.test(haystack)) {
     return "protocol-parser";
   }
@@ -322,6 +333,8 @@ function describeSignal(domain: SystemsPatternDomain, match: SecurityPatternMatc
       return `Integer boundary or sentinel logic at ${match.filePath}:${match.lineNumber}`;
     case "unsafe-memory":
       return `Unsafe memory primitive at ${match.filePath}:${match.lineNumber}`;
+    case "resource-provenance":
+      return `Shared-resource provenance or writable aliasing signal at ${match.filePath}:${match.lineNumber}`;
     case "hardening":
       return `Hardening signal at ${match.filePath}:${match.lineNumber}`;
   }
@@ -330,8 +343,8 @@ function describeSignal(domain: SystemsPatternDomain, match: SecurityPatternMatc
 function extractAttackerFields(lineContent: string): string[] {
   const fields = new Set<string>();
   const patterns = [
-    /\b(len|length|size|count|offset|index|seq|ack|slice_count|packet_len|frame_size|guest_len|iov_len)\b/gi,
-    /\b(opt|option|segment|packet|request|header|payload|rpc|gss|state)\b/gi,
+    /\b(len|length|size|count|offset|index|seq|ack|slice_count|packet_len|frame_size|guest_len|iov_len|assoclen|cryptlen|authsize|tag|dst|src)\b/gi,
+    /\b(opt|option|segment|packet|request|header|payload|rpc|gss|state|page|pipe|scatterlist|sg|buffer)\b/gi,
   ];
   for (const pattern of patterns) {
     for (const match of lineContent.matchAll(pattern)) {
@@ -366,7 +379,7 @@ async function runBashSurfaceProbe(repoRoot: string): Promise<SecurityPatternMat
         "--with-filename",
         "--glob",
         "*.{c,cc,cpp,cxx,h,hpp,hxx,rs}",
-        String.raw`\b(tcp|udp|packet|rpc|nfs|gss|codec|h264|slice|unsafe|memcpy|memmove|stack_chk_fail|fortify|from_raw_parts|get_unchecked|set_len)\b`,
+        String.raw`\b(tcp|udp|packet|rpc|nfs|gss|codec|h264|slice|unsafe|memcpy|memmove|stack_chk_fail|fortify|from_raw_parts|get_unchecked|set_len|splice|vmsplice|sendfile|mmap|AF_ALG|algif|scatterlist|sg_chain|sg_page|page_cache|pipe_buffer|iov_iter|kmap_local_page|scatterwalk_map_and_copy|aead_request_set_crypt)\b`,
         repoRoot,
       ],
       { cwd: repoRoot, maxBuffer: 1024 * 1024 },

@@ -4,7 +4,7 @@ import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { DagNodeImpl } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
-import { formatSystemsSurfacePack } from "./helpers.js";
+import { formatSystemsHuntProfileLines, formatSystemsSurfacePack } from "./helpers.js";
 import type {
   RankedSystemsSurface,
   SystemsContextOutput,
@@ -44,8 +44,16 @@ const TRIGGER_SCHEMA = {
           surfaceId: { type: "string" },
           orderedSteps: { type: "array", items: { type: "string" } },
           boundaryAssignments: {
-            type: "object",
-            additionalProperties: { type: "string" },
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["field", "value"],
+              properties: {
+                field: { type: "string" },
+                value: { type: "string" },
+              },
+            },
           },
           statePreconditions: { type: "array", items: { type: "string" } },
           attackerControlledFields: { type: "array", items: { type: "string" } },
@@ -90,6 +98,7 @@ export const systemsTriggerSynthTask: DagNodeImpl<ScanOpts, SystemsTriggerOutput
       packs,
       invariantOutput?.invariants ?? [],
       config.maxTriggerHypothesesPerSurface,
+      formatSystemsHuntProfileLines(context.securityProfiles),
     );
     let structuredOutput: unknown;
     let costUsd = 0;
@@ -100,6 +109,8 @@ export const systemsTriggerSynthTask: DagNodeImpl<ScanOpts, SystemsTriggerOutput
         options: {
           cwd: context.repoRoot,
           model: config.model,
+          effort: config.effort,
+          thinkingDisabled: config.thinkingDisabled,
           allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {
@@ -135,6 +146,7 @@ export function buildTriggerPrompt(
   packs: SystemsSurfacePack[],
   invariants: SystemsInvariant[],
   maxTriggerHypothesesPerSurface: number,
+  profileLines: string[] = [],
 ): string {
   const packBySurfaceId = new Map(packs.map((pack) => [pack.surfaceId, pack]));
   const invariantsBySurfaceId = new Map<string, SystemsInvariant[]>();
@@ -165,9 +177,11 @@ export function buildTriggerPrompt(
     "",
     "Each trigger hypothesis must describe a plausible attacker-controlled sequence, not just a local bug statement.",
     "Force explicit multi-step interactions when relevant: packet ordering, option interaction, frame sequencing, RPC auth exchanges, guest/host setup then misuse.",
+    "For resource-provenance cases, force explicit resource-origin, ownership-boundary, aliasing-transition, and failure-side-effect steps.",
     "Force explicit boundary assignments such as wraparound, -1, 0xffff, UINT_MAX, SIZE_MAX, truncation, sentinel collision, or oversized length fields.",
     "Only mark cheapVerifiable=true when a bounded local confirmation is realistically possible.",
     "",
+    ...(profileLines.length > 0 ? [...profileLines, ""] : []),
     ...sections,
   ].join("\n");
 }
@@ -212,6 +226,17 @@ function stringArray(value: unknown): string[] {
 }
 
 function stringRecord(value: unknown): Record<string, string> {
+  if (Array.isArray(value)) {
+    const record: Record<string, string> = {};
+    for (const entry of value) {
+      if (!isRecord(entry)) continue;
+      const key = stringField(entry["field"]);
+      const normalized = stringField(entry["value"]);
+      if (!key || !normalized) continue;
+      record[key] = normalized;
+    }
+    return record;
+  }
   if (!isRecord(value)) return {};
   const record: Record<string, string> = {};
   for (const [key, entry] of Object.entries(value)) {

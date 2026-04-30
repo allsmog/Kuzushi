@@ -54,6 +54,10 @@ function makePack(): SystemsSurfacePack {
       { filePath: "src/net/tcp_input.c", line: 42, snippet: "memcpy(dst, pkt, len)" },
     ],
     unsafeSites: [],
+    resourceProvenanceSites: [],
+    aliasingSites: [],
+    scratchWriteSites: [],
+    failureSideEffectSites: [],
     inputSites: [{ filePath: "src/net/tcp_input.c", line: 41, snippet: "tcp option parsing" }],
     hardeningSites: [{ filePath: "src/net/tcp_input.c", line: 80, snippet: "__stack_chk_fail();" }],
     helperTemplates: [
@@ -96,6 +100,7 @@ describe("systems-trigger-synth", () => {
     expect(prompt).toContain("0xffff");
     expect(prompt).toContain("Related files: src/net/tcp_input.c");
     expect(prompt).toContain("[inv-1] SACK state must be initialized before option processing");
+    expect(prompt).toContain("resource-origin");
   });
 
   it("normalizes trigger hypotheses", () => {
@@ -105,7 +110,10 @@ describe("systems-trigger-synth", () => {
           id: "trig-1",
           surfaceId: "surface-1",
           orderedSteps: ["Send SYN", "Send crafted SACK option"],
-          boundaryAssignments: { ack: "0xffff", seq: "-1 wrapped to max" },
+          boundaryAssignments: [
+            { field: "ack", value: "0xffff" },
+            { field: "seq", value: "-1 wrapped to max" },
+          ],
           statePreconditions: ["state allocated but not initialized"],
           attackerControlledFields: ["ack", "seq"],
           expectedPrimitive: "null pointer dereference",

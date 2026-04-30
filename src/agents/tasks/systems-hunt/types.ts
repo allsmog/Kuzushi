@@ -9,6 +9,7 @@ export const SYSTEMS_PATTERN_DOMAINS = [
   "protocol-parser",
   "integer-boundary",
   "unsafe-memory",
+  "resource-provenance",
   "hardening",
 ] as const;
 
@@ -18,6 +19,7 @@ export const SYSTEMS_HUNT_LENSES = [
   "protocol-state",
   "arithmetic-sentinel",
   "buffer-unsafe",
+  "resource-provenance",
   "hardening-bypass",
 ] as const;
 
@@ -28,6 +30,7 @@ export type SystemsSurfaceKind =
   | "rpc-handler"
   | "codec-parser"
   | "hypervisor-boundary"
+  | "resource-provenance"
   | "unsafe-region"
   | "buffer-operation"
   | "boundary-heavy-routine";
@@ -38,6 +41,9 @@ export type SystemsInvariantKind =
   | "sentinel-boundary"
   | "counter-upper-bound"
   | "length-buffer-coupling"
+  | "resource-provenance"
+  | "aliasing-boundary"
+  | "failure-side-effect"
   | "unsafe-precondition";
 
 export type SystemsHelperTemplateId =
@@ -46,6 +52,10 @@ export type SystemsHelperTemplateId =
   | "stack-length-copy"
   | "rpc-xdr-length"
   | "rust-unsafe-len"
+  | "shared-backing-resource"
+  | "in-place-writable-alias"
+  | "scratch-write-boundary"
+  | "failure-side-effect"
   | "hardening-presence";
 
 export type SystemsCorroborationStatus =
@@ -103,6 +113,10 @@ export interface SystemsSurfacePack {
   sentinelConstants: SystemsCodeLocation[];
   allocationCopySites: SystemsCodeLocation[];
   unsafeSites: SystemsCodeLocation[];
+  resourceProvenanceSites: SystemsCodeLocation[];
+  aliasingSites: SystemsCodeLocation[];
+  scratchWriteSites: SystemsCodeLocation[];
+  failureSideEffectSites: SystemsCodeLocation[];
   inputSites: SystemsCodeLocation[];
   hardeningSites: SystemsCodeLocation[];
   helperTemplates: SystemsHelperTemplate[];
