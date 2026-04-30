@@ -3222,9 +3222,7 @@ export async function startShell(opts: ShellOptions): Promise<void> {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Ink-powered shell (TTY) — conversation stream rendered through React
-// ---------------------------------------------------------------------------
 
 async function startInkShell(
   core: CopilotCore,
@@ -3327,12 +3325,10 @@ async function startInkShell(
     ? new SessionManager(workspaceManager.sessions)
     : (undefined as unknown as SessionManager);
 
-  // ---------------------------------------------------------------------------
   // msfconsole-style CommandDispatcher — first-pass router for help / use /
   // set / setg / unset / show / info / search / history / resource / makerc /
   // banner / exit. Unknown commands fall through to routeInput (second pass)
   // and ultimately the LLM agent (third pass).
-  // ---------------------------------------------------------------------------
   // Audit-trail tee controller. `spool <file>` opens; `spool off` closes.
   const spoolController = new SpoolController();
 
@@ -5220,9 +5216,7 @@ async function startInkShell(
   }
 }
 
-// ---------------------------------------------------------------------------
 // Readline fallback (non-TTY) — for piped input and CI
-// ---------------------------------------------------------------------------
 
 async function startReadlineShell(
   core: CopilotCore,
@@ -5576,9 +5570,7 @@ async function startReadlineShell(
   }
 }
 
-// ---------------------------------------------------------------------------
 // Local commands — handled without the LLM
-// ---------------------------------------------------------------------------
 
 async function writeAndDrain(
   stream: NodeJS.WritableStream & { write(chunk: string): boolean },
@@ -9459,9 +9451,7 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
   };
 }
 
-// ---------------------------------------------------------------------------
 // /provider — show or set the default model (provider:model)
-// ---------------------------------------------------------------------------
 
 /** Common model presets surfaced by `/provider list` for fast switching. */
 const PROVIDER_PRESETS = [
@@ -9531,9 +9521,7 @@ function handleProviderCommand(args: string[], opts: ShellOptions): LocalCommand
   };
 }
 
-// ---------------------------------------------------------------------------
 // /ask — explicit natural-language query, with screen context injected
-// ---------------------------------------------------------------------------
 
 /**
  * Build the "# Current shell context" block prepended to `/ask` queries so

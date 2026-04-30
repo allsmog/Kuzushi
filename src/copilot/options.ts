@@ -17,9 +17,7 @@
 import type { JSONSchema } from "../modules/schema.js";
 import { wrapToWidth } from "../ui/format.js";
 
-// ---------------------------------------------------------------------------
 // Option spec
-// ---------------------------------------------------------------------------
 
 export type OptionType = "string" | "bool" | "int" | "float" | "port" | "address" | "path" | "enum";
 
@@ -70,9 +68,7 @@ export const Opt = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // Coercion + validation
-// ---------------------------------------------------------------------------
 
 export interface CoerceResult<T = unknown> {
   ok: boolean;
@@ -132,9 +128,7 @@ export function validateOption<T>(spec: OptionSpec<T>, value: T): string | null 
   return spec.validate?.(value) ?? null;
 }
 
-// ---------------------------------------------------------------------------
 // JSONSchema bridge
-// ---------------------------------------------------------------------------
 
 /** Convert an OptionSpec list into a JSONSchema `object` (for ModuleTool.inputSchema). */
 export function optionsToJsonSchema(opts: ReadonlyArray<OptionSpec>): JSONSchema {
@@ -178,9 +172,7 @@ export function optionsToJsonSchema(opts: ReadonlyArray<OptionSpec>): JSONSchema
   return schema as JSONSchema;
 }
 
-// ---------------------------------------------------------------------------
 // Layered datastore
-// ---------------------------------------------------------------------------
 
 export type DatastoreScope = "module" | "workspace" | "global";
 
@@ -320,9 +312,7 @@ export class Datastore {
   }
 }
 
-// ---------------------------------------------------------------------------
 // `show options` renderer
-// ---------------------------------------------------------------------------
 
 export interface FormatOptionsOpts {
   advanced?: boolean;

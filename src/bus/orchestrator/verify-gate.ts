@@ -22,9 +22,7 @@ import { isRecord, toErrorMessage } from "../../utils.js";
 
 const log = getLogger("verify-gate");
 
-// ---------------------------------------------------------------------------
 // Sink-pattern extraction
-// ---------------------------------------------------------------------------
 
 /* eslint-disable no-useless-escape -- sink names contain dots and parens */
 const KNOWN_SINKS =
@@ -102,9 +100,7 @@ export function registerVerifiedPattern(
   }
 }
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export type VerifyGateDecision = "verify" | "auto_accept" | "skip" | "cheap_verify";
 
@@ -130,9 +126,7 @@ export interface VerifyGateCandidate {
   triageResult: TriageResult;
 }
 
-// ---------------------------------------------------------------------------
 // Schema for structured output
-// ---------------------------------------------------------------------------
 
 const GATE_SCHEMA = {
   type: "object",
@@ -157,9 +151,7 @@ const GATE_SCHEMA = {
 
 const MAX_CANDIDATES_PER_BATCH = 15;
 
-// ---------------------------------------------------------------------------
 // System prompt
-// ---------------------------------------------------------------------------
 
 const GATE_SYSTEM_PROMPT = [
   "You are a security verification gate. For each finding you receive, decide whether it needs",
@@ -201,9 +193,7 @@ const GATE_SYSTEM_PROMPT = [
   "Return a JSON object with a `decisions` array, one entry per finding.",
 ].join("\n");
 
-// ---------------------------------------------------------------------------
 // Gate implementation
-// ---------------------------------------------------------------------------
 
 export async function gateVerificationCandidates(
   candidates: VerifyGateCandidate[],
@@ -424,9 +414,7 @@ function parseBatchResult(
   });
 }
 
-// ---------------------------------------------------------------------------
 // Prompt formatting
-// ---------------------------------------------------------------------------
 
 function formatCandidateEntry(candidate: VerifyGateCandidate): string {
   const { finding, triageResult } = candidate;

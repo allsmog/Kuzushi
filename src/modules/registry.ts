@@ -183,9 +183,7 @@ export class ModuleRegistry {
     }
   }
 
-  // -------------------------------------------------------------------------
   // Queries
-  // -------------------------------------------------------------------------
 
   /**
    * Resolve a (possibly legacy) module id to the canonical id currently
@@ -248,9 +246,7 @@ export class ModuleRegistry {
     }));
   }
 
-  // -------------------------------------------------------------------------
   // Tool resolution
-  // -------------------------------------------------------------------------
 
   /**
    * Resolve a fully-qualified tool name ("module:action") to the ModuleTool.
@@ -313,9 +309,7 @@ export class ModuleRegistry {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Module specifier parsing
-// ---------------------------------------------------------------------------
 
 /**
  * Parse a module specifier string into a typed ModuleSpecifier.
@@ -344,9 +338,7 @@ export function parseModuleSpecifier(spec: string): ModuleSpecifier {
   return { type: "builtin", id: spec };
 }
 
-// ---------------------------------------------------------------------------
 // Lightweight JSON-Schema validation for `configSchema`
-// ---------------------------------------------------------------------------
 
 /**
  * Minimal JSON-Schema-ish validator — enough to enforce the common manifest

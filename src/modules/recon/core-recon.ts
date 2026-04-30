@@ -242,9 +242,7 @@ export function createReconModule(): CopilotModule {
   };
 }
 
-// ---------------------------------------------------------------------------
 // helpers
-// ---------------------------------------------------------------------------
 
 function parseNmapInput(input: unknown): NmapInput {
   if (!isRecord(input)) return {};

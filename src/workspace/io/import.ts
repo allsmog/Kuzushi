@@ -75,9 +75,7 @@ export function importFile(
   }
 }
 
-// ---------------------------------------------------------------------------
 // SARIF 2.1.0
-// ---------------------------------------------------------------------------
 
 interface SarifLog {
   runs?: Array<{
@@ -145,9 +143,7 @@ export function importSarif(ws: WorkspaceManager, workspaceId: string, raw: stri
   return summary;
 }
 
-// ---------------------------------------------------------------------------
 // nmap XML
-// ---------------------------------------------------------------------------
 
 /**
  * Minimal nmap-XML reader — we only care about host + service rows. We parse
@@ -203,9 +199,7 @@ export function importNmapXml(
   return summary;
 }
 
-// ---------------------------------------------------------------------------
 // Native kz-bundle
-// ---------------------------------------------------------------------------
 
 export interface KzBundle {
   schemaVersion: 1;
