@@ -35,6 +35,7 @@ import { useEffect, useRef } from "react";
 import { formatCost, formatDuration, truncateEnd } from "../format.js";
 import { STEP_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useElapsed } from "../hooks.js";
 import { Table } from "../primitives/Table.js";
 import { normalizeSeverity, type Severity, severityChalk, severityStyle } from "../severity.js";
 import type { AgentActivityLine, ModuleRunArtifact, ModuleRunStep, ShellState } from "../state.js";
@@ -86,6 +87,10 @@ export function ModuleRunView({
 
   const moduleId = run?.moduleId ?? shell.focusedModule ?? "module";
   const breadcrumb = `kuzushi/${moduleId}/run`;
+  const liveElapsedMs = useElapsed(
+    run?.status === "running" && nowMs == null ? run.startedAtMs : undefined,
+    1000,
+  );
 
   // O6: Notify the operator when a long run completes — terminal bell +
   // macOS notification + stderr badge. Fires once per run via a ref so
@@ -107,7 +112,7 @@ export function ModuleRunView({
     });
   }, [run, shell.focusedModule]);
 
-  const now = nowMs ?? Date.now();
+  const now = nowMs ?? (run?.status === "running" ? run.startedAtMs + liveElapsedMs : Date.now());
   const elapsedMs = run ? Math.max(0, (run.completedAtMs ?? now) - run.startedAtMs) : 0;
   const elapsed = formatDuration(elapsedMs);
   const status = run
@@ -211,6 +216,11 @@ function TerminalRunBanner({
   const label = run.displayName ?? run.toolName ?? `${run.moduleId}:run`;
   const findingCount = run.findingCount ?? scopedFindings(run, findings).length;
   const findingText = `${findingCount} finding${findingCount === 1 ? "" : "s"}`;
+  const reviewCandidateText =
+    run.reviewCandidateCount && run.reviewCandidateCount > 0
+      ? ` · ${run.reviewCandidateCount} review candidate${run.reviewCandidateCount === 1 ? "" : "s"}`
+      : "";
+  const agentStatusText = run.agentStatus ? ` · ${run.agentStatus}` : "";
   const cost = run.costUsd != null ? formatCost(run.costUsd) : "—";
   const outcome =
     run.status === "done" ? "complete" : run.status === "aborted" ? "aborted" : "failed";
@@ -225,6 +235,8 @@ function TerminalRunBanner({
     <Box flexDirection="column" marginBottom={SPACING.sm}>
       <Text>
         {color(`${label} ${outcome}`)} {tokens.muted("·")} {tokens.value(findingText)}
+        {reviewCandidateText ? tokens.muted(reviewCandidateText) : null}
+        {agentStatusText ? tokens.muted(agentStatusText) : null}
         {tokens.muted(" · ")}
         {tokens.value(cost)}
         {tokens.muted(" · ")}
@@ -539,6 +551,11 @@ function MetaRow({ run }: { run: NonNullable<ShellState["moduleRun"]> }): React.
   // /set effort max actually took effect.
   const effort = run.effort ?? "default";
   const thinking = run.thinkingDisabled ? "disabled" : "enabled";
+  const backend = run.agentRuntimeBackend ? truncateEnd(run.agentRuntimeBackend, 18) : "default";
+  const evidence =
+    run.candidateCount != null || run.linkedStoryCount != null || run.backendPathCount != null
+      ? `${run.candidateCount ?? 0} cand · ${run.linkedStoryCount ?? 0} linked · ${run.backendPathCount ?? 0} paths`
+      : null;
   return (
     <Section title="run facts">
       <Box paddingLeft={SPACING.md}>
@@ -551,6 +568,19 @@ function MetaRow({ run }: { run: NonNullable<ShellState["moduleRun"]> }): React.
           {tokens.value(effort)}
           {tokens.muted("    thinking ")}
           {tokens.value(thinking)}
+          {tokens.muted("    runtime ")}
+          {tokens.value(backend)}
+          {run.agentStatus ? tokens.muted("    agent ") : null}
+          {run.agentStatus ? tokens.value(run.agentStatus) : null}
+        </Text>
+        {evidence ? (
+          <Text>
+            {tokens.muted("evidence ")}
+            {tokens.value(evidence)}
+            {run.warningCount ? tokens.muted(`    warnings ${run.warningCount}`) : null}
+          </Text>
+        ) : null}
+        <Text>
           {tokens.muted("    prompts ")}
           {tokens.value("kuzushi/<module>/prompts")}
         </Text>

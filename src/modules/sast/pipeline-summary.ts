@@ -43,11 +43,24 @@ export function summarizePipelineResult(input: PipelineSummaryInput): string {
   const costSuffix = cost ? ` ($${cost.toFixed(2)})` : "";
   const failedTasks = result.stats?.failedTasks ?? [];
   const deadLetters = result.stats?.deadLetterCount ?? 0;
+  const legacyIrisDegradation = result.stats?.legacyIrisDegradation;
 
   const findingsFragment =
     postProcessMode === "scan-only"
       ? `${findings} findings${costSuffix}`
       : `${findings} findings, ${triaged} triaged${costSuffix}`;
+
+  if (
+    result.status === "complete" &&
+    failedTasks.length === 0 &&
+    deadLetters === 0 &&
+    legacyIrisDegradation?.type === "legacy-inconclusive"
+  ) {
+    return [
+      `${label} inconclusive: ${repoName} — ${findingsFragment}`,
+      `  ${legacyIrisDegradation.message}`,
+    ].join("\n");
+  }
 
   if (result.status === "complete" && failedTasks.length === 0 && deadLetters === 0) {
     return `${label} complete: ${repoName} — ${findingsFragment}`;
@@ -81,6 +94,10 @@ export function summarizePipelineResult(input: PipelineSummaryInput): string {
 
   if (deadLetters > 0) {
     lines.push(`  ${deadLetters} event${deadLetters === 1 ? "" : "s"} dead-lettered`);
+  }
+
+  if (legacyIrisDegradation) {
+    lines.push(`  ${legacyIrisDegradation.message}`);
   }
 
   if (result.error && result.status !== "complete") {

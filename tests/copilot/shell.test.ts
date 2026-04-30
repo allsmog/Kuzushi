@@ -17,7 +17,13 @@ import {
 } from "../../src/copilot/shell.js";
 import { createCoreSastModule } from "../../src/modules/core-sast.js";
 import { saveContextSnapshot } from "../../src/modules/sast/context-persist.js";
-import { createRun, initDb, updateRunFindings, updateRunStatus } from "../../src/store.js";
+import {
+  createRun,
+  initDb,
+  updateRunFindings,
+  updateRunStatus,
+  upsertFinding,
+} from "../../src/store.js";
 import type { KuzushiConfig } from "../../src/types.js";
 import type { ShellState } from "../../src/ui/state.js";
 
@@ -1012,7 +1018,8 @@ describe("local shell commands", () => {
       ctx,
       shellState,
     );
-    expect(setResult).toEqual({ output: "Unknown option for sast:scan: maxActors" });
+    expect(setResult?.output).toContain("Unknown option for sast:scan: maxActors");
+    expect(setResult?.output).toContain("Available options:");
   });
 
   it("routes /use with an unknown module through formatUnknownModule", async () => {
@@ -1026,6 +1033,38 @@ describe("local shell commands", () => {
     // Nearest-match should pull in real module ids — "sast" is one char off.
     expect(result?.output).toContain("Did you mean");
     expect(result?.output).toContain("sast");
+  });
+
+  it("lists valid modules and task IDs for missing arguments", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = createShellState(module.tools.map((t) => t.name));
+    const ctx = { focusedModule: null };
+
+    const use = __shellInternals.handleLocalCommand("/use", core, opts, ctx, shellState);
+    expect(use?.output).toContain("Available modules:");
+    expect(use?.output).toContain("sast");
+
+    const task = __shellInternals.handleLocalCommand("/task block", core, opts, ctx, shellState);
+    expect(task?.output).toContain("Available task IDs:");
+    expect(task?.output).toContain("semgrep");
+  });
+
+  it("classifies canonical slash meta commands separately from bare actions", () => {
+    expect(__shellInternals.classifyShellInput("/findings", "sast")).toBe("slash-meta");
+    expect(__shellInternals.classifyShellInput("findings", "sast")).toBe("bare-compat-meta");
+    expect(__shellInternals.classifyShellInput("run .", "sast")).toBe("module-action");
+    expect(__shellInternals.classifyShellInput("? what changed", null)).toBe("agent-query");
+  });
+
+  it("does not append a duplicate body when the tool summary already represents it", () => {
+    expect(__shellInternals.shouldAppendSeparateBodyOutput("Read 42 lines", "Read 42 lines")).toBe(
+      false,
+    );
+    expect(
+      __shellInternals.shouldAppendSeparateBodyOutput("Read 42 lines\n\nbody", "Read 42 lines"),
+    ).toBe(true);
+    expect(__shellInternals.shouldAppendSeparateBodyOutput("", "done")).toBe(false);
   });
 
   it("supports short aliases /f, /t, /b, /m", async () => {
@@ -1778,6 +1817,120 @@ describe("context system", () => {
     await expect(result?.asyncExecute?.()).resolves.toContain("Showing data flow diagram");
   });
 
+  it("hydrates catalog, context, threat model, and findings summary from disk", async () => {
+    const { core, module } = await createMockCore();
+    const repoRoot = mkdtempSync(path.join(os.tmpdir(), "kuzushi-hydrate-"));
+    tempDirs.push(repoRoot);
+    const dataDir = path.join(repoRoot, ".kuzushi");
+    mkdirSync(dataDir, { recursive: true });
+    saveContextSnapshot(repoRoot, { ...mockSnapshot, target: repoRoot });
+    writeFileSync(
+      path.join(dataDir, "threat-model.json"),
+      `${JSON.stringify({
+        version: "2.0",
+        dfd: { nodes: [], flows: [], trustBoundaries: [] },
+        threats: [{ id: "T1", title: "Saved threat", category: "spoofing", impact: "high" }],
+        summary: { total: 1, bySeverity: { high: 1 }, byCategory: { spoofing: 1 } },
+      })}\n`,
+    );
+
+    const db = initDb(path.join(dataDir, "findings.sqlite3"));
+    const scanOpts = {
+      severity: ["ERROR"],
+      excludePatterns: [],
+      fresh: false,
+      tasks: ["semgrep"],
+    };
+    createRun(db, "run-hydrate", repoRoot, baseConfig, scanOpts, {
+      moduleId: "sast",
+      toolName: "sast:scan",
+    });
+    updateRunStatus(db, "run-hydrate", "complete");
+    upsertFinding(
+      db,
+      {
+        taskId: "semgrep:scan",
+        fingerprint: "fp-hydrate",
+        ruleId: "test-rule",
+        filePath: "src/a.ts",
+        startLine: 1,
+        severity: "high",
+        message: "test finding",
+        scannerConfidence: "high",
+        subcategory: [],
+        likelihood: "medium",
+        impact: "high",
+        cwe: [],
+        score: 0.9,
+      },
+      {
+        fingerprint: "fp-hydrate",
+        verdict: "tp",
+        confidence: 0.95,
+        rationale: "confirmed",
+        verificationSteps: [],
+        fixPatch: null,
+      },
+      repoRoot,
+      "HEAD",
+    );
+    db.close();
+
+    const opts = createShellOptions();
+    opts.target = repoRoot;
+    const staleShell = {
+      ...createShellState(module.tools.map((t) => t.name)),
+      target: repoRoot,
+      contextSnapshot: null,
+      threatModel: null,
+    };
+
+    const hydrated = await __shellInternals.hydrateShellArtifacts(staleShell, core, opts, dataDir);
+
+    expect(hydrated.shell.contextSnapshot?.target).toBe(repoRoot);
+    expect(hydrated.shell.threatModel?.threats).toHaveLength(1);
+    expect(hydrated.shell.artifactStatus?.findingsCount).toBe(1);
+    expect(hydrated.summary?.actionableFindings).toHaveLength(1);
+    expect(hydrated.shell.moduleCatalog?.find((card) => card.id === "sast")?.runState?.runId).toBe(
+      "run-hydrate",
+    );
+  });
+
+  it("does not overwrite dirty in-memory threat model edits during hydration", async () => {
+    const { core, module } = await createMockCore();
+    const repoRoot = mkdtempSync(path.join(os.tmpdir(), "kuzushi-hydrate-dirty-"));
+    tempDirs.push(repoRoot);
+    const dataDir = path.join(repoRoot, ".kuzushi");
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(
+      path.join(dataDir, "threat-model.json"),
+      `${JSON.stringify({
+        version: "2.0",
+        dfd: { nodes: [], flows: [], trustBoundaries: [] },
+        threats: [{ id: "T1", title: "Disk threat", category: "spoofing", impact: "high" }],
+        summary: { total: 1, bySeverity: { high: 1 }, byCategory: { spoofing: 1 } },
+      })}\n`,
+    );
+    const dirtyModel = {
+      version: "2.0",
+      dfd: { nodes: [], flows: [], trustBoundaries: [] },
+      threats: [{ id: "T-dirty", title: "Unsaved threat", category: "tampering", impact: "high" }],
+      summary: { total: 1, bySeverity: { high: 1 }, byCategory: { tampering: 1 } },
+    };
+    const opts = createShellOptions();
+    opts.target = repoRoot;
+    const shellState = {
+      ...createShellState(module.tools.map((t) => t.name)),
+      target: repoRoot,
+      threatModel: dirtyModel,
+      threatModelDirty: true,
+    };
+
+    const hydrated = await __shellInternals.hydrateShellArtifacts(shellState, core, opts, dataDir);
+
+    expect(hydrated.shell.threatModel).toBe(dirtyModel);
+  });
+
   it("/threats dfd can use the loaded context snapshot target", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
@@ -2234,23 +2387,56 @@ describe("hunt-post-mortem helpers", () => {
 
   it("reads stats.totalFindings + stats.totalCostUsd off the ToolResult", () => {
     const stats = extractHuntStats({
-      data: { stats: { totalFindings: 22, totalCostUsd: 24.3 } },
+      data: {
+        stats: {
+          totalFindings: 22,
+          totalReviewCandidates: 3,
+          totalCandidates: 50,
+          totalLinkedStories: 7,
+          backendPathCount: 2,
+          totalCostUsd: 24.3,
+        },
+        agentRuntimeBackend: "pi-ai",
+        agentStatus: "invalid-json",
+        warnings: ["agent output invalid"],
+      },
     });
-    expect(stats).toEqual({ findingsCount: 22, costUsd: 24.3 });
+    expect(stats).toEqual({
+      findingsCount: 22,
+      reviewCandidateCount: 3,
+      costUsd: 24.3,
+      agentRuntimeBackend: "pi-ai",
+      agentStatus: "invalid-json",
+      candidateCount: 50,
+      linkedStoryCount: 7,
+      backendPathCount: 2,
+      warningCount: 1,
+    });
   });
 
   it("returns zeros when the data shape drifts (safe default)", () => {
-    expect(extractHuntStats({ data: undefined })).toEqual({ findingsCount: 0, costUsd: 0 });
-    expect(extractHuntStats({ data: { stats: {} } })).toEqual({ findingsCount: 0, costUsd: 0 });
+    expect(extractHuntStats({ data: undefined })).toEqual({
+      findingsCount: 0,
+      reviewCandidateCount: 0,
+      costUsd: 0,
+    });
+    expect(extractHuntStats({ data: { stats: {} } })).toEqual({
+      findingsCount: 0,
+      reviewCandidateCount: 0,
+      costUsd: 0,
+    });
     expect(
       extractHuntStats({ data: { stats: { totalFindings: "nope" as unknown as number } } }),
-    ).toEqual({ findingsCount: 0, costUsd: 0 });
+    ).toEqual({ findingsCount: 0, reviewCandidateCount: 0, costUsd: 0 });
   });
 
   it("formats the collapsed headline with correct pluralization", () => {
     expect(formatHuntSummaryLine(1, 0, 0)).toBe("1 actor · 0 findings · $0.00");
     expect(formatHuntSummaryLine(5, 1, 0.05)).toBe("5 actors · 1 finding · $0.05");
     expect(formatHuntSummaryLine(5, 22, 24.3)).toBe("5 actors · 22 findings · $24.30");
+    expect(formatHuntSummaryLine(2, 0, 0.1, 4, "invalid-json")).toBe(
+      "2 actors · 0 findings · 4 review candidates · invalid-json · $0.10",
+    );
   });
 
   it("renders cost with exactly two decimals even for integer dollars", () => {

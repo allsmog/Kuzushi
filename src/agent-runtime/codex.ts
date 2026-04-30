@@ -12,6 +12,7 @@ import { getLogger } from "../logger.js";
 import type { AgentRuntimeCredentials } from "../types.js";
 import { isRecord, toErrorMessage } from "../utils.js";
 import { extractJson } from "./execution.js";
+import { assertRuntimeModelSelection } from "./model-validation.js";
 import type {
   AgentEffort,
   AgentMessage,
@@ -429,6 +430,7 @@ export class CodexAgentRuntime implements AgentRuntime {
   }
 
   query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
+    assertRuntimeModelSelection(this.id, request.options.model, request.options.fallbackModel);
     const thread = this.client.startThread(buildThreadOptions(request.options));
     return runCodexTurn(
       thread,
@@ -439,6 +441,7 @@ export class CodexAgentRuntime implements AgentRuntime {
   }
 
   createSession(baseOptions: AgentQueryOptions): AgentSession {
+    assertRuntimeModelSelection(this.id, baseOptions.model, baseOptions.fallbackModel);
     const thread = this.client.startThread(buildThreadOptions(baseOptions));
     return new CodexSession(thread, baseOptions);
   }

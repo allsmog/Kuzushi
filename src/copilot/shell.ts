@@ -6,6 +6,7 @@
  * so command execution stays predictable.
  */
 
+import { once } from "node:events";
 import {
   appendFileSync,
   existsSync,
@@ -17,6 +18,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   killAllClaudeSubprocesses,
   warnIfNonAnthropicProxy,
@@ -41,6 +43,7 @@ import {
 import { CARLINI_THREAT_HUNT_KIND_SPEC } from "../modules/carlini-threat-hunt/attachments.js";
 import { CONTEXT_KIND_SPEC } from "../modules/context/attachments.js";
 import { formatContextSummary } from "../modules/core-sast.js";
+import { resolveTaintIrisNextPersistentArtifacts } from "../modules/taint-iris-next/planner.js";
 import { THREAT_MODEL_KIND_SPEC } from "../modules/threat-model/attachments.js";
 import type { ModuleInfo, ModuleTool } from "../modules/types.js";
 import { loadDraftScope, scopeToHomeSlice } from "../modules/vendor-assessment/storage.js";
@@ -55,10 +58,12 @@ import type {
   ContextGenerationSlice,
   ContextSnapshot,
   OptionsViewSlice,
+  ShellArtifactStatus,
   ShellHistoryEntry,
   ShellModuleCard,
   ShellState,
   ShellView,
+  SummaryData,
   ThreatTab,
   ToolActivityLine,
   TuneSnapshot,
@@ -126,6 +131,7 @@ import {
   resolveSastTaskAtCursor,
   resolveSastTaskCapability,
   SAST_SCAN_TOOL_NAME,
+  SAST_TASK_CAPABILITIES,
   type SastTaskMode,
   setSastTaskMode,
   toggleDisabledSastTask,
@@ -636,18 +642,219 @@ async function readRunHistoryForCatalog(
   return runs;
 }
 
-async function refreshModuleCatalogFromRuns(
+function normalizeHydrationTarget(raw: string | null | undefined): string | undefined {
+  const trimmed = raw?.trim();
+  if (!trimmed) return undefined;
+  if (/^file:\/\//i.test(trimmed)) {
+    try {
+      return fileURLToPath(trimmed);
+    } catch {
+      return undefined;
+    }
+  }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) && !/^file:\/\//i.test(trimmed)) {
+    return undefined;
+  }
+  return path.resolve(trimmed);
+}
+
+function resolveHydrationTarget(opts: ShellOptions, shell: ShellState): string | undefined {
+  return normalizeHydrationTarget(
+    opts.target ?? shell.target ?? shell.contextSnapshot?.target ?? process.cwd(),
+  );
+}
+
+function noteHydrationError(status: ShellArtifactStatus, label: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  status.lastError = status.lastError
+    ? `${status.lastError}; ${label}: ${message}`
+    : `${label}: ${message}`;
+}
+
+function sortRunsNewestFirst(runs: ReadonlyArray<PipelineRunRecord>): PipelineRunRecord[] {
+  return [...runs].sort((a, b) => runSortTime(b) - runSortTime(a));
+}
+
+function runSortTime(run: PipelineRunRecord): number {
+  const raw = run.completedAt ?? run.updatedAt ?? run.startedAt;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function hydrateSummaryFromDisk(
+  dataDir: string,
+  target: string | undefined,
+  runs: ReadonlyArray<PipelineRunRecord>,
+  status: ShellArtifactStatus,
+): Promise<SummaryData | null> {
+  const dbPaths = await existingRunDbPaths(dataDir, target);
+  const dbPath = dbPaths[0];
+  if (!dbPath) return null;
+  status.findingsDbPath = dbPath;
+  const { getActionableFindings, initDb, listRuns } = await import("../store.js");
+  const { buildSummaryData } = await import("../ui/summary-data.js");
+  const db = initDb(dbPath);
+  try {
+    const sortedRuns = sortRunsNewestFirst(runs);
+    const latestRun = sortedRuns[0] ?? listRuns(db, { limit: 1 })[0];
+    const firstFinding = latestRun
+      ? undefined
+      : getActionableFindings(db, undefined, { includeFalsePositives: true })[0];
+    const repo = latestRun?.repo ?? firstFinding?.repo ?? (target ? path.basename(target) : "");
+    if (!repo) return null;
+    let summary: SummaryData;
+    try {
+      summary = buildSummaryData(db, repo, {
+        ...(latestRun?.runId ? { runId: latestRun.runId } : {}),
+        ...(target ? { repoRoot: target } : {}),
+      });
+    } catch (error) {
+      noteHydrationError(status, "threat-model summary", error);
+      summary = buildSummaryData(db, repo);
+    }
+    status.findingsCount = summary.actionableFindings.length;
+    return summary;
+  } finally {
+    db.close();
+  }
+}
+
+function hydrateKbSlice(
+  shell: ShellState,
+  repoRoot: string,
+  status: ShellArtifactStatus,
+): ShellState {
+  const moduleId = shell.kb?.moduleId ?? shell.focusedModule;
+  if (!moduleId) return shell;
+  const entry = KB_REGISTRY.get(moduleId);
+  if (!entry) return shell;
+  const adapter = entry.adapter ?? defaultAttachmentAdapter<string>(moduleId);
+  const scopePath = adapter.pathFor(repoRoot);
+  const docs = adapter.read(repoRoot);
+  const slice = buildHomeSlice(moduleId, scopePath, docs, entry.spec);
+  const cursor =
+    shell.kb && shell.kb.moduleId === moduleId
+      ? Math.min(shell.kb.cursor, Math.max(0, slice.documents.length - 1))
+      : 0;
+  status.kbPath = scopePath;
+  return {
+    ...shell,
+    kbState: { ...(shell.kbState ?? {}), [moduleId]: slice },
+    ...(shell.shellView === "kb"
+      ? { kb: { moduleId, cursor, collapsed: shell.kb?.collapsed ?? false } }
+      : {}),
+  };
+}
+
+export async function hydrateShellArtifacts(
+  shell: ShellState,
+  core: CopilotCore,
+  opts: ShellOptions,
+  dataDir: string,
+): Promise<{ shell: ShellState; summary?: SummaryData | null }> {
+  const repoRoot = resolveHydrationTarget(opts, shell);
+  const status: ShellArtifactStatus = {
+    refreshedAt: Date.now(),
+    target: repoRoot ?? null,
+  };
+  let nextShell: ShellState = shell;
+  let summary: SummaryData | null | undefined;
+
+  let runs: PipelineRunRecord[] = [];
+  try {
+    runs = sortRunsNewestFirst(await readRunHistoryForCatalog(dataDir, repoRoot));
+    status.runCount = runs.length;
+    nextShell = {
+      ...nextShell,
+      moduleCatalog: buildModuleCatalog(core.listModules(), core, runs),
+    };
+  } catch (error) {
+    noteHydrationError(status, "run history", error);
+  }
+
+  if (repoRoot) {
+    try {
+      const { contextSnapshotPath, loadContextSnapshot } = await import(
+        "../modules/sast/context-persist.js"
+      );
+      status.contextSnapshotPath = contextSnapshotPath(repoRoot);
+      nextShell = {
+        ...nextShell,
+        contextSnapshot: loadContextSnapshot(repoRoot) ?? null,
+      };
+    } catch (error) {
+      noteHydrationError(status, "context snapshot", error);
+    }
+
+    if (!nextShell.threatModelDirty && !nextShell.pendingThreatPatch) {
+      try {
+        const { loadShellThreatModel } = await import("./threat-model-loader.js");
+        const loaded = loadShellThreatModel(repoRoot);
+        status.threatModelPath =
+          loaded?.sourcePath ?? path.join(repoRoot, ".kuzushi", "threat-model.json");
+        nextShell = loaded
+          ? {
+              ...nextShell,
+              threatModel: loaded.document,
+              threatModelSource: { path: loaded.sourcePath, mtimeMs: loaded.mtimeMs },
+            }
+          : {
+              ...nextShell,
+              threatModel: null,
+              threatModelSource: undefined,
+            };
+      } catch (error) {
+        noteHydrationError(status, "threat model", error);
+      }
+    }
+
+    try {
+      nextShell = hydrateKbSlice(nextShell, repoRoot, status);
+    } catch (error) {
+      noteHydrationError(status, "knowledge base", error);
+    }
+
+    if (nextShell.focusedModule === "vendor-assessment" || nextShell.vendorAssessment) {
+      try {
+        const vendorAssessment = scopeToHomeSlice(repoRoot, loadDraftScope(repoRoot));
+        status.vendorAssessmentScopePath = vendorAssessment.scopePath;
+        nextShell = { ...nextShell, vendorAssessment };
+      } catch (error) {
+        noteHydrationError(status, "vendor assessment scope", error);
+      }
+    }
+  }
+
+  try {
+    summary = await hydrateSummaryFromDisk(dataDir, repoRoot, runs, status);
+  } catch (error) {
+    noteHydrationError(status, "findings summary", error);
+  }
+
+  return {
+    shell: {
+      ...nextShell,
+      target: opts.target ?? nextShell.target ?? null,
+      artifactStatus: status,
+    },
+    summary,
+  };
+}
+
+async function hydrateShellStore(
   store: UIStore,
   core: CopilotCore,
+  opts: ShellOptions,
   dataDir: string,
-  target?: string,
 ): Promise<void> {
-  const runs = await readRunHistoryForCatalog(dataDir, target);
-  const modules = core.listModules();
-  updateShell(store, (shell) => ({
-    ...shell,
-    moduleCatalog: buildModuleCatalog(modules, core, runs),
-  }));
+  const shell = store.getState().shell;
+  if (!shell) return;
+  const hydrated = await hydrateShellArtifacts(shell, core, opts, dataDir);
+  const patch: Partial<UIState> = { shell: hydrated.shell };
+  if (hydrated.summary !== undefined) {
+    patch.summary = hydrated.summary;
+  }
+  store.update(patch);
 }
 
 /**
@@ -661,7 +868,9 @@ export function buildModuleCatalog(
   runs: ReadonlyArray<PipelineRunRecord> = [],
 ): ShellModuleCard[] {
   return modules.map((mod) => {
-    const instance = core.registry.has(mod.id) ? core.registry.get(mod.id) : undefined;
+    const registryHas =
+      (core.registry as { has?: (id: string) => boolean }).has?.(mod.id) ?? core.hasModule(mod.id);
+    const instance = registryHas ? core.registry.get(mod.id) : undefined;
     const toolSummaries = instance
       ? instance.tools.map((tool) => ({
           name: tool.name,
@@ -706,13 +915,22 @@ export function buildModuleCatalog(
             actions: [`replay ${completedCandidate.runId}`, "rerun"],
           }
         : undefined;
+    const moduleRun = sortRunsNewestFirst(runs).find((run) => runBelongsToModule(run, mod.id));
+    const genericLastRunAt = moduleRun
+      ? Date.parse(moduleRun.completedAt ?? moduleRun.updatedAt ?? moduleRun.startedAt)
+      : undefined;
+    const genericLastRunSummary =
+      moduleRun && genericLastRunAt !== undefined && Number.isFinite(genericLastRunAt)
+        ? formatPipelineRunRecencySummary(moduleRun, genericLastRunAt)
+        : undefined;
     const lastRunAt = runState
       ? Date.parse(
           runState.kind === "complete"
             ? (completedCandidate?.completedAt ?? completedCandidate?.startedAt ?? "")
             : (resumeCandidate?.updatedAt ?? resumeCandidate?.startedAt ?? ""),
         )
-      : undefined;
+      : genericLastRunAt;
+    const lastRunSummary = runState?.summary ?? genericLastRunSummary;
     return {
       id: mod.id,
       displayName: mod.displayName,
@@ -722,16 +940,37 @@ export function buildModuleCatalog(
       toolCount: mod.toolCount,
       // External packages surface later via a loader flag; default false here.
       external: false,
-      ...(runState
+      ...(lastRunSummary
         ? {
             ...(lastRunAt !== undefined && Number.isFinite(lastRunAt) ? { lastRunAt } : {}),
-            lastRunSummary: runState.summary,
-            runState,
+            lastRunSummary,
+            ...(runState ? { runState } : {}),
           }
         : {}),
       toolSummaries,
     };
   });
+}
+
+function runBelongsToModule(run: PipelineRunRecord, moduleId: string): boolean {
+  return run.moduleId === moduleId || run.toolName?.startsWith(`${moduleId}:`) === true;
+}
+
+function formatPipelineRunRecencySummary(run: PipelineRunRecord, lastRunAt: number): string {
+  const status =
+    run.status === "complete"
+      ? "ok"
+      : run.status === "error"
+        ? "error"
+        : run.status === "interrupted"
+          ? "interrupted"
+          : run.status;
+  const action = run.toolName ? toolActionName(run.toolName) : (run.resumeLabel ?? "run");
+  const cost =
+    typeof run.totalCostUsd === "number" && run.totalCostUsd > 0
+      ? ` · $${run.totalCostUsd.toFixed(2)}`
+      : "";
+  return `${status} · ${action} · ${formatRunRecency(lastRunAt)}${cost}`;
 }
 
 function normalizeAsyncExecutionResult(value: string | AsyncExecutionResult): AsyncExecutionResult {
@@ -1255,9 +1494,86 @@ function formatModuleDescription(description: string): string {
   return firstSentence.endsWith(".") ? firstSentence : `${firstSentence}.`;
 }
 
+function formatChoices(values: ReadonlyArray<string>, limit = 16): string {
+  if (values.length === 0) return "(none)";
+  const shown = values.slice(0, limit);
+  const suffix = values.length > limit ? `, +${values.length - limit} more` : "";
+  return `${shown.join(", ")}${suffix}`;
+}
+
+function formatModuleChoices(core: CopilotCore): string {
+  return formatChoices(
+    core
+      .listModules()
+      .map((module) => module.id)
+      .sort(),
+  );
+}
+
+function formatToolChoices(core: CopilotCore, focusedModule: string | null): string {
+  const tools = core.registry
+    .allTools()
+    .map(({ tool }) => tool.name)
+    .filter((name) => !focusedModule || name.startsWith(`${focusedModule}:`))
+    .sort();
+  return formatChoices(tools);
+}
+
+function formatSastTaskChoices(): string {
+  return formatChoices(
+    SAST_TASK_CAPABILITIES.map((capability) => capability.id),
+    20,
+  );
+}
+
 function parseCommand(input: string): { cmd: string; args: string[] } {
   const [cmd = "", ...args] = input.trim().split(/\s+/);
   return { cmd, args };
+}
+
+export type ShellInputTaxonomy =
+  | "slash-meta"
+  | "bare-compat-meta"
+  | "module-action"
+  | "agent-query"
+  | "exit"
+  | "empty";
+
+const BARE_COMPAT_META_COMMANDS = new Set([
+  "help",
+  "modules",
+  "m",
+  "tools",
+  "use",
+  "back",
+  "b",
+  "findings",
+  "f",
+  "tune",
+  "t",
+  "kb",
+  "attachments",
+  "tasks",
+  "story",
+  "prompts",
+  "resume",
+  "options",
+  "open",
+]);
+
+export function classifyShellInput(
+  input: string,
+  focusedModule: string | null = null,
+): ShellInputTaxonomy {
+  const trimmed = input.trim();
+  if (!trimmed) return "empty";
+  if (trimmed.startsWith("?")) return "agent-query";
+  if (trimmed.startsWith("/")) return "slash-meta";
+  const [verb = ""] = trimmed.toLowerCase().split(/\s+/, 1);
+  if (verb === "exit" || verb === "quit" || verb === "q") return "exit";
+  if (verb === "ask") return "agent-query";
+  if (BARE_COMPAT_META_COMMANDS.has(verb)) return "bare-compat-meta";
+  return focusedModule ? "module-action" : "module-action";
 }
 
 function toolActionName(toolName: string): string {
@@ -1647,6 +1963,31 @@ function appendToHistory(store: UIStore, entry: ShellHistoryEntry): void {
   }));
 }
 
+export function shouldAppendSeparateBodyOutput(
+  bodyOutput: string | undefined,
+  completionSummary: string | undefined,
+): boolean {
+  const body = bodyOutput?.trim();
+  if (!body) return false;
+  const summary = completionSummary?.trim();
+  if (!summary) return true;
+  if (body === summary) return false;
+  const firstLine = body.split(/\r?\n/, 1)[0]?.trim();
+  const rest = body.slice(firstLine?.length ?? 0).trim();
+  return !(firstLine === summary && rest.length === 0);
+}
+
+function latestToolCallResultOutput(shell: ShellState | null | undefined): string | undefined {
+  const history = shell?.history ?? [];
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const entry = history[i];
+    if (entry?.type === "tool-call" && entry.resultOutput) {
+      return entry.resultOutput;
+    }
+  }
+  return undefined;
+}
+
 interface StoryAppendOptions {
   persistHistory?: boolean;
   liveOnly?: boolean;
@@ -1805,6 +2146,7 @@ function finalizeRunningToolCalls(
  */
 const LIVE_ACTIVITY_CAP = 64;
 const LIVE_ACTIVITY_TEXT_CAP = 80;
+const LIVE_ACTIVITY_THROTTLE_MS = 100;
 let liveActivitySeq = 0;
 function pushLiveActivity(store: UIStore, id: string, text: string): void {
   const trimmed =
@@ -1831,13 +2173,64 @@ function pushLiveActivity(store: UIStore, id: string, text: string): void {
   });
 }
 
+interface PendingTaskOutput {
+  entryId?: string;
+  text: string;
+  story?: ShellStoryEventDraft;
+}
+
+const pendingTaskOutputByStore = new WeakMap<
+  UIStore,
+  {
+    latest?: PendingTaskOutput;
+    lastFlushAt: number;
+    timer?: ReturnType<typeof setTimeout>;
+  }
+>();
+
+function pushTaskOutputThrottled(store: UIStore, output: PendingTaskOutput): void {
+  const state = pendingTaskOutputByStore.get(store) ?? { lastFlushAt: 0 };
+  state.latest = output;
+  const now = Date.now();
+  const flush = () => {
+    state.timer = undefined;
+    const latest = state.latest;
+    state.latest = undefined;
+    state.lastFlushAt = Date.now();
+    if (!latest) return;
+    if (latest.entryId) pushLiveActivity(store, latest.entryId, latest.text);
+    if (latest.story) {
+      appendStoryEvent(store, latest.story, { persistHistory: false, liveOnly: true });
+    }
+  };
+
+  if (now - state.lastFlushAt >= LIVE_ACTIVITY_THROTTLE_MS && !state.timer) {
+    pendingTaskOutputByStore.set(store, state);
+    flush();
+    return;
+  }
+
+  if (!state.timer) {
+    state.timer = setTimeout(
+      flush,
+      Math.max(1, LIVE_ACTIVITY_THROTTLE_MS - (now - state.lastFlushAt)),
+    );
+    state.timer.unref?.();
+  }
+  pendingTaskOutputByStore.set(store, state);
+}
+
 /**
  * Tool names whose completion drains `state.lastHuntSnapshot` into a
  * `hunt-post-mortem` scrollback block. Currently just carlini-threat-hunt:run;
  * add other hunt-class tools here when they adopt the per-actor
  * `reportAgentActivity` + `done:true` pattern.
  */
-const HUNT_CLASS_TOOLS = new Set(["carlini-threat-hunt:run"]);
+const HUNT_CLASS_TOOLS = new Set([
+  "carlini-threat-hunt:run",
+  "taint-iris:hunt",
+  "taint-iris-next:hunt",
+]);
 
 function isHuntClassTool(toolName: string): boolean {
   return HUNT_CLASS_TOOLS.has(toolName);
@@ -1845,7 +2238,14 @@ function isHuntClassTool(toolName: string): boolean {
 
 interface HuntStats {
   findingsCount: number;
+  reviewCandidateCount: number;
   costUsd: number;
+  agentRuntimeBackend?: string;
+  agentStatus?: string;
+  candidateCount?: number;
+  linkedStoryCount?: number;
+  backendPathCount?: number;
+  warningCount?: number;
 }
 
 /**
@@ -1855,24 +2255,73 @@ interface HuntStats {
  * rather than a crash.
  */
 function extractHuntStats(result: { data?: unknown }): HuntStats {
-  const stats = (result.data as { stats?: { totalFindings?: unknown; totalCostUsd?: unknown } })
-    ?.stats;
+  const data = result.data as
+    | {
+        stats?: {
+          totalFindings?: unknown;
+          totalReviewCandidates?: unknown;
+          totalCostUsd?: unknown;
+          totalCandidates?: unknown;
+          totalLinkedStories?: unknown;
+          backendPathCount?: unknown;
+        };
+        agentRuntimeBackend?: unknown;
+        agentStatus?: unknown;
+        warnings?: unknown;
+      }
+    | undefined;
+  const stats = data?.stats;
   const findingsCount =
     typeof stats?.totalFindings === "number" && Number.isFinite(stats.totalFindings)
       ? stats.totalFindings
+      : 0;
+  const reviewCandidateCount =
+    typeof stats?.totalReviewCandidates === "number" && Number.isFinite(stats.totalReviewCandidates)
+      ? stats.totalReviewCandidates
       : 0;
   const costUsd =
     typeof stats?.totalCostUsd === "number" && Number.isFinite(stats.totalCostUsd)
       ? stats.totalCostUsd
       : 0;
-  return { findingsCount, costUsd };
+  const candidateCount = finiteOptionalNumber(stats?.totalCandidates);
+  const linkedStoryCount = finiteOptionalNumber(stats?.totalLinkedStories);
+  const backendPathCount = finiteOptionalNumber(stats?.backendPathCount);
+  const warningCount = Array.isArray(data?.warnings) ? data.warnings.length : undefined;
+  return {
+    findingsCount,
+    reviewCandidateCount,
+    costUsd,
+    ...(typeof data?.agentRuntimeBackend === "string"
+      ? { agentRuntimeBackend: data.agentRuntimeBackend }
+      : {}),
+    ...(typeof data?.agentStatus === "string" ? { agentStatus: data.agentStatus } : {}),
+    ...(candidateCount !== undefined ? { candidateCount } : {}),
+    ...(linkedStoryCount !== undefined ? { linkedStoryCount } : {}),
+    ...(backendPathCount !== undefined ? { backendPathCount } : {}),
+    ...(warningCount !== undefined ? { warningCount } : {}),
+  };
 }
 
-function formatHuntSummaryLine(actorCount: number, findingsCount: number, costUsd: number): string {
+function finiteOptionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function formatHuntSummaryLine(
+  actorCount: number,
+  findingsCount: number,
+  costUsd: number,
+  reviewCandidateCount = 0,
+  agentStatus?: string,
+): string {
   const actorsLabel = `${actorCount} actor${actorCount === 1 ? "" : "s"}`;
   const findingsLabel = `${findingsCount} finding${findingsCount === 1 ? "" : "s"}`;
+  const reviewLabel =
+    reviewCandidateCount > 0
+      ? ` · ${reviewCandidateCount} review candidate${reviewCandidateCount === 1 ? "" : "s"}`
+      : "";
+  const agentLabel = agentStatus ? ` · ${agentStatus}` : "";
   const costLabel = `$${costUsd.toFixed(2)}`;
-  return `${actorsLabel} · ${findingsLabel} · ${costLabel}`;
+  return `${actorsLabel} · ${findingsLabel}${reviewLabel}${agentLabel} · ${costLabel}`;
 }
 
 function formatHuntActorLabel(fingerprint: string): string {
@@ -2264,6 +2713,7 @@ function updateToolActivity(store: UIStore, toolName: string, elapsedSeconds: nu
 }
 
 const PHASE_COUNT_RE = /\((\d+)\s*\/\s*(\d+)\)/;
+const PROGRESS_EVENT_THROTTLE_MS = 100;
 
 /**
  * Update the current tool's phase label. Parses a trailing "(N/M)" into
@@ -2359,25 +2809,24 @@ function finalizeCurrentPhase(store: UIStore, outcome: "ok" | "fail" | "abort"):
   });
 }
 
-function appendProgressEvent(
-  store: UIStore,
-  event: {
-    text: string;
-    kind?: ShellHistoryEntry["progressKind"];
-    phase?: string;
-    activity?: string;
-    liveActivity?: string;
-    story?: ShellStoryEventDraft;
-    /**
-     * When true, skip appending a `tool-progress` history entry but still
-     * update `currentTool.activities` + the running tool's `liveActivities`
-     * tail. Used to suppress the scrollback echo of sub-agent tool-call-
-     * start / tool_use lines whose summaries are already captured by the
-     * matching `tool-summary` row.
-     */
-    skipHistory?: boolean;
-  },
-): void {
+interface AppendProgressEventInput {
+  text: string;
+  kind?: ShellHistoryEntry["progressKind"];
+  phase?: string;
+  activity?: string;
+  liveActivity?: string;
+  story?: ShellStoryEventDraft;
+  /**
+   * When true, skip appending a `tool-progress` history entry but still
+   * update `currentTool.activities` + the running tool's `liveActivities`
+   * tail. Used to suppress the scrollback echo of sub-agent tool-call-
+   * start / tool_use lines whose summaries are already captured by the
+   * matching `tool-summary` row.
+   */
+  skipHistory?: boolean;
+}
+
+function appendProgressEvent(store: UIStore, event: AppendProgressEventInput): void {
   const now = Date.now();
   const progressText = event.text;
   const phase = event.phase;
@@ -2516,6 +2965,43 @@ function appendProgressEvent(
       ],
     };
   });
+}
+
+const pendingProgressByStore = new WeakMap<
+  UIStore,
+  {
+    latest?: AppendProgressEventInput;
+    lastFlushAt: number;
+    timer?: ReturnType<typeof setTimeout>;
+  }
+>();
+
+function appendProgressEventThrottled(store: UIStore, event: AppendProgressEventInput): void {
+  const state = pendingProgressByStore.get(store) ?? { lastFlushAt: 0 };
+  state.latest = event;
+  const now = Date.now();
+  const flush = () => {
+    state.timer = undefined;
+    const latest = state.latest;
+    state.latest = undefined;
+    state.lastFlushAt = Date.now();
+    if (latest) appendProgressEvent(store, latest);
+  };
+
+  if (now - state.lastFlushAt >= PROGRESS_EVENT_THROTTLE_MS && !state.timer) {
+    pendingProgressByStore.set(store, state);
+    flush();
+    return;
+  }
+
+  if (!state.timer) {
+    state.timer = setTimeout(
+      flush,
+      Math.max(1, PROGRESS_EVENT_THROTTLE_MS - (now - state.lastFlushAt)),
+    );
+    state.timer.unref?.();
+  }
+  pendingProgressByStore.set(store, state);
 }
 
 function clearTransientShellState(store: UIStore): void {
@@ -2829,7 +3315,10 @@ async function startInkShell(
   core.setGlobals(globals);
   // M3: seed the active shell target into globals so per-module DelegatingDatastores
   // can fall through to it. Without this, `run` (no args) errors with
-  // "Missing required: target" even when the home view shows an active target.
+  // "Missing required: target" even when the home view shows an active target —
+  // because the per-module datastore's "target" OptionSpec is empty and the
+  // missingRequired() check doesn't know about opts.target. Re-synced after
+  // /target updates the active target.
   syncShellTargetToGlobals(opts, globals);
 
   const runToolFromDispatcher = async (
@@ -3025,17 +3514,37 @@ async function startInkShell(
           shell.moduleRun.toolName === tool.name &&
           shell.moduleRun.status === "running"
         ) {
+          const huntStats =
+            finalResult && isHuntClassTool(tool.name) ? extractHuntStats(finalResult) : undefined;
           next.moduleRun = {
             ...shell.moduleRun,
             status: aborted ? "aborted" : ok ? "done" : "error",
             completedAtMs: Date.now(),
+            ...(huntStats ? { findingCount: huntStats.findingsCount } : {}),
+            ...(huntStats ? { reviewCandidateCount: huntStats.reviewCandidateCount } : {}),
+            ...(huntStats?.agentRuntimeBackend
+              ? { agentRuntimeBackend: huntStats.agentRuntimeBackend }
+              : {}),
+            ...(huntStats?.agentStatus ? { agentStatus: huntStats.agentStatus } : {}),
+            ...(huntStats?.candidateCount !== undefined
+              ? { candidateCount: huntStats.candidateCount }
+              : {}),
+            ...(huntStats?.linkedStoryCount !== undefined
+              ? { linkedStoryCount: huntStats.linkedStoryCount }
+              : {}),
+            ...(huntStats?.backendPathCount !== undefined
+              ? { backendPathCount: huntStats.backendPathCount }
+              : {}),
+            ...(huntStats?.warningCount !== undefined
+              ? { warningCount: huntStats.warningCount }
+              : {}),
             ...(finalResult?.costUsd != null ? { costUsd: finalResult.costUsd } : {}),
           };
         }
         return next;
       });
       try {
-        await refreshModuleCatalogFromRuns(store, core, dataDir, opts.target);
+        await hydrateShellStore(store, core, opts, dataDir);
       } catch {
         /* best-effort */
       }
@@ -3051,7 +3560,13 @@ async function startInkShell(
           const stats = extractHuntStats(finalResult);
           appendToHistory(store, {
             type: "hunt-post-mortem",
-            text: formatHuntSummaryLine(perActor.length, stats.findingsCount, stats.costUsd),
+            text: formatHuntSummaryLine(
+              perActor.length,
+              stats.findingsCount,
+              stats.costUsd,
+              stats.reviewCandidateCount,
+              stats.agentStatus,
+            ),
             timestamp: Date.now(),
             huntSummary: {
               actorCount: perActor.length,
@@ -3273,7 +3788,7 @@ async function startInkShell(
     // final results, which prevents the context build from printing both old
     // `⎿ activity` rows and curated story rows for the same work.
     const skipHistory = true;
-    appendProgressEvent(store, {
+    appendProgressEventThrottled(store, {
       text: description,
       activity: description,
       liveActivity: description,
@@ -3299,10 +3814,10 @@ async function startInkShell(
     const runId = event.meta.runId;
     if (!acceptProgressRunId(runId)) return;
     const entryId = store.getState().shell?.currentTool?.historyEntryId;
-    if (entryId) pushLiveActivity(store, entryId, event.payload.line);
-    appendStoryEvent(
-      store,
-      {
+    pushTaskOutputThrottled(store, {
+      ...(entryId ? { entryId } : {}),
+      text: event.payload.line,
+      story: {
         kind: "activity",
         status: "running",
         importance: "debug",
@@ -3311,8 +3826,7 @@ async function startInkShell(
         runId,
         ...(activeTurnId ? { turnId: activeTurnId } : {}),
       },
-      { persistHistory: false, liveOnly: true },
-    );
+    });
   });
 
   // Carlini threat-hunt actor rail — direct shell runs publish one event stream per
@@ -3839,12 +4353,22 @@ async function startInkShell(
     }
     if (dispatched.matched) {
       if (dispatched.push || dispatched.pop) syncFocusFromDispatcher();
+      if (dispatched.push || dispatched.pop) {
+        try {
+          await hydrateShellStore(store, core, opts, dataDir);
+        } catch {
+          /* best-effort */
+        }
+      }
       if (dispatched.output) {
-        appendToHistory(store, {
-          type: "output",
-          text: dispatched.output,
-          timestamp: Date.now(),
-        });
+        const latestSummary = latestToolCallResultOutput(store.getState().shell);
+        if (shouldAppendSeparateBodyOutput(dispatched.output, latestSummary)) {
+          appendToHistory(store, {
+            type: "output",
+            text: dispatched.output,
+            timestamp: Date.now(),
+          });
+        }
         if (!dispatched.push && !dispatched.pop) {
           const nextView = reconcileShellViewAfterPlainOutput(
             shellBeforeDispatch?.shellView ?? "catalog",
@@ -3894,6 +4418,17 @@ async function startInkShell(
       updateShell(store, localResult.shellStateUpdater);
     }
     syncShellState(store, opts, shellCtx.focusedModule, workspaceManager);
+    if (
+      localResult.setFocus !== undefined ||
+      localResult.shellStateUpdater ||
+      localResult.targetUpdated
+    ) {
+      try {
+        await hydrateShellStore(store, core, opts, dataDir);
+      } catch {
+        /* best-effort */
+      }
+    }
     if (localResult.output && !localResult.shellStateUpdater) {
       const nextView = reconcileShellViewAfterPlainOutput(
         shellState.shellView,
@@ -4010,7 +4545,17 @@ async function startInkShell(
             durable: true,
           });
         }
-        if (execResult.output) {
+        try {
+          await hydrateShellStore(store, core, opts, dataDir);
+        } catch {
+          /* best-effort */
+        }
+        if (
+          shouldAppendSeparateBodyOutput(
+            execResult.output,
+            latestToolCallResultOutput(store.getState().shell),
+          )
+        ) {
           appendToHistory(store, {
             type: "output",
             text: execResult.output,
@@ -4022,13 +4567,6 @@ async function startInkShell(
             text: `${asyncToolLabel} ${execResult.ok === false ? "failed." : "done."}`,
             timestamp: Date.now(),
           });
-        }
-        if (localResult.executedToolName) {
-          try {
-            await refreshModuleCatalogFromRuns(store, core, dataDir, opts.target);
-          } catch {
-            /* best-effort */
-          }
         }
       } catch (error) {
         const wasAborted = controller.signal.aborted;
@@ -4070,12 +4608,10 @@ async function startInkShell(
           text: error instanceof Error ? error.message : String(error),
           timestamp: Date.now(),
         });
-        if (localResult.executedToolName) {
-          try {
-            await refreshModuleCatalogFromRuns(store, core, dataDir, opts.target);
-          } catch {
-            /* best-effort */
-          }
+        try {
+          await hydrateShellStore(store, core, opts, dataDir);
+        } catch {
+          /* best-effort */
         }
         clearTransientShellState(store);
         setProcessing(store, false);
@@ -4378,29 +4914,39 @@ async function startInkShell(
       }
     : undefined;
 
+  let initialShell: ShellState = {
+    modules: modules.map((module) => module.id),
+    moduleCatalog: buildModuleCatalog(modules, core, catalogRuns),
+    tools: tools.map(({ tool }) => tool.name),
+    focusedModule: null,
+    shellView: "catalog",
+    openFindingId: null,
+    target: opts.target ?? null,
+    workspace: workspaceDisplayName(opts, workspaceManager),
+    tuneSnapshot: buildTuneSnapshot(opts.config, dataDir, null),
+    history: initialHistory,
+    commandHistory,
+    moduleOptions: {},
+    contextSnapshot: loadedSnapshot ?? undefined,
+    threatModel: initialThreatModel,
+    ...(initialThreatModelSource ? { threatModelSource: initialThreatModelSource } : {}),
+    processing: false,
+    onInput: handleInput,
+    onExit: handleExit,
+    onAbort: abortActiveAction,
+  };
+  const initialHydration = await hydrateShellArtifacts(initialShell, core, opts, dataDir);
+  initialShell = {
+    ...initialHydration.shell,
+    onInput: handleInput,
+    onExit: handleExit,
+    onAbort: abortActiveAction,
+  };
+
   store.update({
     mode: "shell",
-    shell: {
-      modules: modules.map((module) => module.id),
-      moduleCatalog: buildModuleCatalog(modules, core, catalogRuns),
-      tools: tools.map(({ tool }) => tool.name),
-      focusedModule: null,
-      shellView: "catalog",
-      openFindingId: null,
-      target: opts.target ?? null,
-      workspace: workspaceDisplayName(opts, workspaceManager),
-      tuneSnapshot: buildTuneSnapshot(opts.config, dataDir, null),
-      history: initialHistory,
-      commandHistory,
-      moduleOptions: {},
-      contextSnapshot: loadedSnapshot ?? undefined,
-      threatModel: initialThreatModel,
-      ...(initialThreatModelSource ? { threatModelSource: initialThreatModelSource } : {}),
-      processing: false,
-      onInput: handleInput,
-      onExit: handleExit,
-      onAbort: abortActiveAction,
-    },
+    shell: initialShell,
+    ...(initialHydration.summary !== undefined ? { summary: initialHydration.summary } : {}),
   });
 
   // Process-level SIGINT fallback. Ink's `useInput` is the primary Ctrl+C
@@ -4663,6 +5209,11 @@ async function startReadlineShell(
     ...(initialThreatModelSource ? { threatModelSource: initialThreatModelSource } : {}),
     processing: false,
   };
+  try {
+    rlState = (await hydrateShellArtifacts(rlState, core, opts, dataDir)).shell;
+  } catch {
+    /* best-effort */
+  }
 
   let session: AgentSession | undefined;
   let sessionCwd: string | undefined;
@@ -4786,6 +5337,17 @@ async function startReadlineShell(
         target: opts.target ?? null,
         workspace: workspaceDisplayName(opts, workspaceManager),
       };
+      if (
+        localResult.setFocus !== undefined ||
+        localResult.shellStateUpdater ||
+        localResult.targetUpdated
+      ) {
+        try {
+          rlState = (await hydrateShellArtifacts(rlState, core, opts, dataDir)).shell;
+        } catch {
+          /* best-effort */
+        }
+      }
       if (localResult.exit) {
         break;
       }
@@ -4820,7 +5382,12 @@ async function startReadlineShell(
             };
           }
           if (execResult.output) {
-            process.stdout.write(`${execResult.output}\n`);
+            await writeAndDrain(process.stdout, execResult.output);
+          }
+          try {
+            rlState = (await hydrateShellArtifacts(rlState, core, opts, dataDir)).shell;
+          } catch {
+            /* best-effort */
           }
         } catch (error) {
           if (localResult.executedToolName) {
@@ -4838,7 +5405,12 @@ async function startReadlineShell(
             : error instanceof Error
               ? error.message
               : String(error);
-          process.stdout.write(`${message}\n`);
+          await writeAndDrain(process.stdout, message);
+          try {
+            rlState = (await hydrateShellArtifacts(rlState, core, opts, dataDir)).shell;
+          } catch {
+            /* best-effort */
+          }
         }
         activeActionKind = null;
         activeAbortRequested = false;
@@ -4852,7 +5424,7 @@ async function startReadlineShell(
       // message from routeInput, never a silent handoff.
       if (localResult.askQuestion === undefined) {
         if (localResult.output) {
-          process.stdout.write(`${localResult.output}\n`);
+          await writeAndDrain(process.stdout, localResult.output);
         }
         rl.prompt();
         continue;
@@ -4861,8 +5433,9 @@ async function startReadlineShell(
       const agentInput = localResult.askQuestion;
       const currentSession = await ensureSession();
       if (!currentSession) {
-        process.stdout.write(
-          `${assistantDisabledReason ?? sessionError ?? DEFAULT_NO_SESSION_MESSAGE}\n`,
+        await writeAndDrain(
+          process.stdout,
+          assistantDisabledReason ?? sessionError ?? DEFAULT_NO_SESSION_MESSAGE,
         );
         rl.prompt();
         continue;
@@ -4910,9 +5483,9 @@ async function startReadlineShell(
             ? error.message
             : String(error);
         if (pendingAssistantText) {
-          process.stdout.write(`${pendingAssistantText}\n`);
+          await writeAndDrain(process.stdout, pendingAssistantText);
         }
-        process.stdout.write(`${message}\n`);
+        await writeAndDrain(process.stdout, message);
         activeActionKind = null;
         activeAbortRequested = false;
         rl.prompt();
@@ -4920,14 +5493,15 @@ async function startReadlineShell(
       }
 
       if (pendingAssistantText || fallbackResultText) {
-        process.stdout.write(
-          `${finalizeAssistantText(pendingAssistantText, fallbackResultText)}\n`,
+        await writeAndDrain(
+          process.stdout,
+          finalizeAssistantText(pendingAssistantText, fallbackResultText),
         );
       }
       if (pendingErrorText) {
-        process.stdout.write(`${pendingErrorText}\n`);
+        await writeAndDrain(process.stdout, pendingErrorText);
       } else if (activeAbortRequested && !pendingAssistantText && !fallbackResultText) {
-        process.stdout.write(`${CANCELLED_AGENT_MESSAGE}\n`);
+        await writeAndDrain(process.stdout, CANCELLED_AGENT_MESSAGE);
       }
 
       activeActionKind = null;
@@ -4948,6 +5522,16 @@ async function startReadlineShell(
 // ---------------------------------------------------------------------------
 // Local commands — handled without the LLM
 // ---------------------------------------------------------------------------
+
+async function writeAndDrain(
+  stream: NodeJS.WritableStream & { write(chunk: string): boolean },
+  text: string,
+): Promise<void> {
+  const output = text.endsWith("\n") ? text : `${text}\n`;
+  if (!stream.write(output)) {
+    await once(stream, "drain");
+  }
+}
 
 /**
  * One-shot flag — on the operator's first bare-sentence input we prepend a
@@ -5577,10 +6161,31 @@ function routeInput(
   }
 
   const preview = trimmed.length > 60 ? `${trimmed.slice(0, 60)}…` : trimmed;
-  const base = `Unknown command: "${preview}". Try /help, or /ask <question> to ask Claude with current shell context.`;
+  if (lower.startsWith("ask ")) {
+    return {
+      output: `Natural-language chat is explicit. Use /ask ${trimmed.slice(4).trim()} or prefix the question with ?.`,
+    };
+  }
+  if (lower.startsWith("show ")) {
+    return {
+      output: [
+        `Unknown bare show command: "${preview}".`,
+        "Canonical meta-command syntax uses slash commands:",
+        "  /show prompts",
+        "  /show options [tool]",
+        "  /show runs",
+        "  /show aliases [prefix]",
+      ].join("\n"),
+    };
+  }
+  const taxonomy = classifyShellInput(trimmed, ctx.focusedModule);
+  const base =
+    taxonomy === "module-action"
+      ? `Unknown workspace action: "${preview}". Shell meta-commands start with /; module actions are bare after /use <module>. Try /help.`
+      : `Unknown command: "${preview}". Try /help, or /ask <question> to ask Claude with current shell context.`;
   const hint = firstBareSentenceHintShown
     ? ""
-    : "\n(hint: natural-language chat moved to /ask — type /ask <question> or prefix with ?)";
+    : "\n(hint: natural-language chat routes only through /ask or ?)";
   firstBareSentenceHintShown = true;
   return { output: base + hint };
 }
@@ -5745,7 +6350,7 @@ function handleUseCommand(
 ): LocalCommandResult {
   const moduleId = args[0];
   if (!moduleId) {
-    return { output: "Usage: /use <module>" };
+    return { output: `Usage: /use <module>\nAvailable modules: ${formatModuleChoices(core)}` };
   }
   if (!core.hasModule(moduleId)) {
     const loaded = core.listModules().map((m) => m.id);
@@ -5873,12 +6478,13 @@ function handleKbCommand(
   ctx: ShellContext,
   shellState: ShellState,
 ): LocalCommandResult {
-  void core;
-  void opts;
   if (!ctx.focusedModule) {
     return {
-      output:
-        "Usage: /use <module> first, then /kb. Try one of: threat-model, context, carlini-threat-hunt.",
+      output: [
+        "Usage: /use <module> first, then /kb.",
+        `KB-enabled modules: ${formatChoices([...KB_REGISTRY.keys()])}`,
+        `Loaded modules: ${formatModuleChoices(core)}`,
+      ].join("\n"),
     };
   }
   const moduleId = ctx.focusedModule;
@@ -5925,7 +6531,12 @@ function handleStoryCommand(shellState: ShellState): LocalCommandResult {
 function handleOpenCommand(args: string[]): LocalCommandResult {
   const findingId = args[0];
   if (!findingId) {
-    return { output: "Usage: /open <F-NNNN|fingerprint>" };
+    return {
+      output: [
+        "Usage: /open <F-NNNN|fingerprint>",
+        "Find aliases with /show aliases, or list findings with /findings.",
+      ].join("\n"),
+    };
   }
   return {
     shellStateUpdater: (shell) => ({
@@ -5951,14 +6562,18 @@ function handlePlanCommand(
     return { output: 'Usage: /plan "<english>" — e.g. /plan run harder, focus on auth' };
   }
   if (!ctx.focusedModule) {
-    return { output: "No focused module. Use /use <module> first." };
+    return {
+      output: `No focused module. Use /use <module> first.\nAvailable modules: ${formatModuleChoices(core)}`,
+    };
   }
   const activeToolName = shellState.lastUsedTool;
   const fallbackToolName = activeToolName?.startsWith(`${ctx.focusedModule}:`)
     ? activeToolName
     : pickDefaultToolName(core, ctx.focusedModule);
   if (!fallbackToolName) {
-    return { output: `No tool resolved for ${ctx.focusedModule}. Use /options <tool> first.` };
+    return {
+      output: `No tool resolved for ${ctx.focusedModule}. Use /options <tool> first.\nAvailable tools: ${formatToolChoices(core, ctx.focusedModule)}`,
+    };
   }
   const resolved = core.registry.resolveTool(fallbackToolName);
   if (!resolved) {
@@ -6054,7 +6669,7 @@ function handleShowCommand(
     return handleShowRunsCommand(args.slice(1), ctx);
   }
   if (sub === "aliases") {
-    return handleShowAliasesCommand(args.slice(1), ctx);
+    return handleShowAliasesCommand(args.slice(1), ctx, opts);
   }
   if (sub === "options") {
     return handleOptionsCommand(args.slice(1), core, opts, ctx, shellState);
@@ -6127,6 +6742,7 @@ function handleSastTaskCommand(args: string[], shellState: ShellState): LocalCom
         "  /task toggle [id]",
         "  /task mode auto|manual|toggle",
         "  /task reset",
+        `Available task IDs: ${formatSastTaskChoices()}`,
       ].join("\n"),
     };
   }
@@ -6155,14 +6771,22 @@ function handleSastTaskCommand(args: string[], shellState: ShellState): LocalCom
 
   if (sub === "block" || sub === "deny") {
     const id = args[1]?.trim();
-    if (!id) return { output: "Usage: /task block <id>" };
+    if (!id) {
+      return {
+        output: `Usage: /task block <id>\nAvailable task IDs: ${formatSastTaskChoices()}`,
+      };
+    }
     const next = updateDisabledSastTask(currentOptions, id, true);
     return updateOptions(next, feedback(`Blocked SAST task capability: ${id}`, next));
   }
 
   if (sub === "allow" || sub === "unblock") {
     const id = args[1]?.trim();
-    if (!id) return { output: "Usage: /task allow <id>" };
+    if (!id) {
+      return {
+        output: `Usage: /task allow <id>\nAvailable task IDs: ${formatSastTaskChoices()}`,
+      };
+    }
     const next = updateDisabledSastTask(currentOptions, id, false);
     return updateOptions(next, feedback(`Allowed SAST task capability: ${id}`, next));
   }
@@ -6173,7 +6797,9 @@ function handleSastTaskCommand(args: string[], shellState: ShellState): LocalCom
       ? resolveSastTaskCapability(rawId)
       : resolveSastTaskAtCursor(shellState.sastTaskCursor);
     if (!capability) {
-      return { output: `Unknown SAST task capability: ${rawId}` };
+      return {
+        output: `Unknown SAST task capability: ${rawId}\nAvailable task IDs: ${formatSastTaskChoices()}`,
+      };
     }
     if (capability.toggleable === false) {
       return {
@@ -6202,7 +6828,7 @@ function handleSastTaskCommand(args: string[], shellState: ShellState): LocalCom
           ? "manual"
           : "auto";
     if (raw && raw !== "toggle" && raw !== "auto" && raw !== "manual") {
-      return { output: "Usage: /task mode auto|manual|toggle" };
+      return { output: "Usage: /task mode auto|manual|toggle\nValid modes: auto, manual, toggle" };
     }
     const next = setSastTaskMode(
       currentOptions,
@@ -6220,7 +6846,9 @@ function handleSastTaskCommand(args: string[], shellState: ShellState): LocalCom
     return updateOptions(next, feedback("SAST task selection reset.", next));
   }
 
-  return { output: `Unknown /task action: ${sub}` };
+  return {
+    output: `Unknown /task action: ${sub}\nValid actions: block, allow, toggle, mode, reset`,
+  };
 }
 
 function handleContextCommand(
@@ -7036,7 +7664,8 @@ async function executeResumeTool(
  *   /findings export csv  [path]    → CSV
  *   /findings export sarif [path]   → SARIF 2.1.0
  *
- * If no path is supplied we default to `<dataDir>/findings.<fmt>`.
+ * If no path is supplied we default to `<dataDir>/findings.<fmt>`. `dataDir`
+ * comes from ShellContext (resolved at startup).
  */
 function handleFindingsExportCommand(
   args: string[],
@@ -7104,7 +7733,8 @@ function handleFindingsExportCommand(
           // SARIF 2.1.0 minimal envelope. The full pipeline-aware report
           // builder lives in src/report-sarif.ts but it requires a runs DB
           // and pipeline stats; the workspace-level export only needs the
-          // findings themselves.
+          // findings themselves, so we emit the minimum viable shape that
+          // every SARIF consumer accepts.
           const sarif = {
             version: "2.1.0",
             $schema: "https://json.schemastore.org/sarif-2.1.0.json",
@@ -7172,6 +7802,8 @@ function handleResumeCommand(
   const moduleId = ctx.focusedModule;
   // N1: top-level `/resume` — when no module is focused, scan EVERY loaded
   // module's checkpoint candidates, pick the most recent, and resume it.
+  // The catalog already shows the same candidates per module; this is the
+  // shortcut that operators have been asking for.
   if (!moduleId) {
     return resumeMostRecentAcrossModules(args, core, opts, ctx, shellState);
   }
@@ -7420,6 +8052,16 @@ function getContextRequirementError(
       ? loadPersistentThreatModel(path.resolve(target))
       : null;
 
+  if (toolName === "taint-iris-next:hunt" && target && !/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) {
+    const artifacts = resolveTaintIrisNextPersistentArtifacts(path.resolve(target));
+    if (artifacts.contextStatus.ok) return undefined;
+    return [
+      `Context incomplete for ${toolName}. Run /context, then rerun the module.`,
+      `context: ${formatIrisNextArtifactStatus(artifacts.contextStatus)}`,
+      `threat model: ${formatIrisNextArtifactStatus(artifacts.threatModelStatus)} (warning only)`,
+    ].join("\n");
+  }
+
   if (!snapshot) {
     if (toolName === "carlini-threat-hunt:run" && persistentThreatModel) {
       return undefined;
@@ -7428,14 +8070,13 @@ function getContextRequirementError(
       return `Threat model required for ${toolName}. Run /use threat-model, then run .`;
     }
     if (toolName === "taint-iris-next:hunt") {
-      return `Context required for ${toolName}. Run /context, then /threats regen dfd.`;
+      return `Context required for ${toolName}. Run /context first. /threats regen dfd improves ranking but is optional.`;
     }
     return `Context required for ${toolName}. Run context (or /context) first.`;
   }
 
   const missing: string[] = [];
-  const needsThreatModel =
-    toolName === "carlini-threat-hunt:run" || toolName === "taint-iris-next:hunt";
+  const needsThreatModel = toolName === "carlini-threat-hunt:run";
   const needsAppModel =
     toolName === "taint-iris-next:hunt" ||
     toolName === "taint-iris:hunt" ||
@@ -7452,6 +8093,17 @@ function getContextRequirementError(
   if (missing.length === 0) return undefined;
   const hint = needsThreatModel ? "Run /context, then /threats regen dfd." : "Run context first.";
   return `Context incomplete for ${toolName}: missing ${missing.join(" and ")}. ${hint}`;
+}
+
+function formatIrisNextArtifactStatus(status: {
+  ok: boolean;
+  path?: string;
+  reason: string;
+}): string {
+  const state = status.ok ? "loaded" : "missing/incomplete";
+  return status.path
+    ? `${state} (${status.path}; ${status.reason})`
+    : `${state} (${status.reason})`;
 }
 
 function resolveOptionsTool(
@@ -7473,7 +8125,10 @@ function resolveOptionsTool(
       const fallbackToolName = pickDefaultToolName(core, focusedModule);
       if (fallbackToolName) return { ok: true, toolName: fallbackToolName };
     }
-    return { ok: false, output: "Usage: /options <tool>" };
+    return {
+      ok: false,
+      output: `Usage: /options <tool>\nAvailable tools: ${formatToolChoices(core, focusedModule)}`,
+    };
   }
 
   if (focusedModule && !lastUsedTool.startsWith(`${focusedModule}:`)) {
@@ -7481,7 +8136,7 @@ function resolveOptionsTool(
     if (fallbackToolName) return { ok: true, toolName: fallbackToolName };
     return {
       ok: false,
-      output: `No active tool selected for ${focusedModule}. Use /options <tool> first.`,
+      output: `No active tool selected for ${focusedModule}. Use /options <tool> first.\nAvailable tools: ${formatToolChoices(core, focusedModule)}`,
     };
   }
 
@@ -8101,7 +8756,11 @@ async function openRunsDb(ctx: ShellContext, target?: string) {
   return initDb(dbPath);
 }
 
-function handleShowAliasesCommand(args: string[], ctx: ShellContext): LocalCommandResult {
+function handleShowAliasesCommand(
+  args: string[],
+  ctx: ShellContext,
+  opts?: ShellOptions,
+): LocalCommandResult {
   // Prefer live state.summary (post-scan); fall back to the persisted latest
   // run in the DB so `/show aliases` works even immediately after a shell
   // launch with no in-memory summary yet.
@@ -8121,7 +8780,37 @@ function handleShowAliasesCommand(args: string[], ctx: ShellContext): LocalComma
     };
   }
   return {
-    output: "No run summary in memory. Start a scan or use /replay <runId> to hydrate.",
+    output: "Loading aliases from the latest persisted run…",
+    asyncExecute: async () => {
+      const db = await openRunsDb(ctx, opts?.target);
+      if (!db) {
+        return "No run summary in memory and no runs database found. Start a scan or use /replay <runId> to hydrate.";
+      }
+      try {
+        const { listRuns } = await import("../store.js");
+        const { buildSummaryData } = await import("../ui/summary-data.js");
+        const run = listRuns(db, { limit: 1 })[0];
+        if (!run) return "No persisted runs found. Start a scan first.";
+        const repoRoot = opts?.target ? path.resolve(opts.target) : undefined;
+        const summary = buildSummaryData(db, run.repo, {
+          runId: run.runId,
+          ...(repoRoot ? { repoRoot } : {}),
+        });
+        if (ctx.uiStore) ctx.uiStore.update({ summary });
+        const findingAliases = computeFindingAliases(summary.actionableFindings ?? []);
+        const chainAliases = computeChainAliases(summary.exploitChains ?? []);
+        const titles: Record<string, string | undefined> = {};
+        for (const f of summary.actionableFindings ?? []) {
+          titles[f.fingerprint] = f.title ?? f.ruleId;
+        }
+        for (const c of summary.exploitChains ?? []) {
+          titles[c.id] = c.name;
+        }
+        return formatAliasTable(findingAliases, chainAliases, args[0], titles);
+      } finally {
+        db.close();
+      }
+    },
   };
 }
 
@@ -8322,7 +9011,9 @@ function handleSetCommand(
   const canonicalOptionKey = findOptionKey(properties, optionKey);
   const schema = canonicalOptionKey ? properties[canonicalOptionKey] : undefined;
   if (!canonicalOptionKey || !schema) {
-    return { output: `Unknown option for ${activeToolName}: ${optionKey}` };
+    return {
+      output: `Unknown option for ${activeToolName}: ${optionKey}\nAvailable options: ${formatChoices(Object.keys(properties).sort())}`,
+    };
   }
 
   const coercedValue = coerceOptionValue(rawValue, schema);
@@ -9329,6 +10020,7 @@ export const __shellInternals = {
   buildSeedMapFromSnapshot,
   buildShellPrompt,
   capShellHistory,
+  classifyShellInput,
   createShellSession,
   extractAssistantText,
   extractHuntStats,
@@ -9363,6 +10055,7 @@ export const __shellInternals = {
   settleAbortedShellTurn,
   ensureClaudeShellRuntime,
   hasActiveShellCredentials,
+  hydrateShellArtifacts,
   handleLocalCommand: routeInput,
   handleSlashCommand,
   handleStoryCommand,
@@ -9377,4 +10070,5 @@ export const __shellInternals = {
   rebuildShellRuntime,
   resolveDirectToolDispatch,
   saveShellCommandHistory,
+  shouldAppendSeparateBodyOutput,
 };

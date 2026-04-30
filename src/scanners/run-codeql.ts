@@ -1,4 +1,4 @@
-import { type ExecFileException, execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { access, mkdir, readdir } from "node:fs/promises";
@@ -50,6 +50,7 @@ export interface RunCodeQLOptions {
   ram?: number;
   searchPath?: string;
   additionalPacks?: string;
+  timeoutMs?: number;
 }
 
 interface CodeQLSarifDriver {
@@ -295,7 +296,7 @@ async function runCodeQLImpl(
       args.push(`--additional-packs=${additionalPacks}`);
     }
 
-    await execCodeQL(codeqlBin, args);
+    await execCodeQL(codeqlBin, args, undefined, opts.timeoutMs);
 
     const parsed = JSON.parse(readFileSync(outputPath, "utf-8"));
     if (!isRecord(parsed) || !Array.isArray(parsed["runs"])) {
@@ -896,22 +897,72 @@ async function execCodeQL(
   codeqlBin: string,
   args: string[],
   cwd?: string,
+  timeoutMs?: number,
 ): Promise<{ stdout: string; stderr: string }> {
-  try {
-    const result = await execFileAsync(codeqlBin, args, {
+  return new Promise((resolve, reject) => {
+    const child = spawn(codeqlBin, args, {
       cwd,
-      encoding: "utf-8",
-      maxBuffer: 64 * 1024 * 1024,
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
     });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let settled = false;
+    const timer =
+      timeoutMs && timeoutMs > 0
+        ? setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            killProcessGroup(child.pid);
+            reject(
+              new Error(
+                `CodeQL command timed out after ${timeoutMs}ms: ${codeqlBin} ${args.join(" ")}`,
+              ),
+            );
+          }, timeoutMs)
+        : undefined;
 
-    return {
-      stdout: result.stdout,
-      stderr: result.stderr,
-    };
-  } catch (error) {
-    const err = error as ExecFileException & { stderr?: string };
-    const details = err.stderr?.trim() || toErrorMessage(error);
-    throw new Error(`CodeQL command failed: ${codeqlBin} ${args.join(" ")}\n${details}`);
+    child.stdout?.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      reject(new Error(`CodeQL command failed: ${codeqlBin} ${args.join(" ")}\n${error.message}`));
+    });
+    child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      const out = Buffer.concat(stdout).toString("utf8");
+      const err = Buffer.concat(stderr).toString("utf8");
+      if (code === 0) {
+        resolve({ stdout: out, stderr: err });
+        return;
+      }
+      const details = err.trim() || out.trim() || `exit ${code}`;
+      reject(new Error(`CodeQL command failed: ${codeqlBin} ${args.join(" ")}\n${details}`));
+    });
+  });
+}
+
+function killProcessGroup(pid: number | undefined): void {
+  if (!pid) return;
+  try {
+    process.kill(-pid, "SIGTERM");
+    setTimeout(() => {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        /* already exited */
+      }
+    }, 2000).unref();
+  } catch {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      /* already exited */
+    }
   }
 }
 
