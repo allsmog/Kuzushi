@@ -87,3 +87,4 @@ export type {
   VendorAssessmentScope,
 } from "./vendor-assessment/types.js";
 export { createVendorAssessmentModule } from "./vendor-assessment/vendor-assessment.js";
+export { createXRayModule } from "./x-ray/x-ray.js";

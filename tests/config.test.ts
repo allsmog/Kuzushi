@@ -434,22 +434,31 @@ describe("setConfigValue", () => {
   it("sets agentRuntimeConfig as an object", () => {
     setConfigValue(
       "agentRuntimeConfig",
-      '{"claude":{"apiKey":"sk-test","baseUrl":"https://api.example.com/"}}',
+      '{"claude":{"apiKey":"sk-test","authToken":"sk-ant-oat-test","baseUrl":"https://api.example.com/"}}',
     );
     expect(getConfigValue("agentRuntimeConfig")).toEqual({
-      claude: { apiKey: "sk-test", baseUrl: "https://api.example.com/" },
+      claude: {
+        apiKey: "sk-test",
+        authToken: "sk-ant-oat-test",
+        baseUrl: "https://api.example.com/",
+      },
     });
   });
 
   it("sets nested agentRuntimeConfig values", () => {
     setConfigValue("agentRuntimeConfig.claude.apiKey", "sk-inline");
+    setConfigValue("agentRuntimeConfig.claude.authToken", "sk-ant-oat-inline");
     setConfigValue("agentRuntimeConfig.claude.baseUrl", "https://proxy.example/");
     expect(getConfigValue("agentRuntimeConfig.claude.apiKey")).toBe("sk-inline");
+    expect(getConfigValue("agentRuntimeConfig.claude.authToken")).toBe("sk-ant-oat-inline");
     expect(getConfigValue("agentRuntimeConfig.claude.baseUrl")).toBe("https://proxy.example/");
   });
 
   it("rejects legacy flat agentRuntimeConfig values", () => {
     expect(() => setConfigValue("agentRuntimeConfig.apiKey", "sk-inline")).toThrow(
+      "Legacy config key",
+    );
+    expect(() => setConfigValue("agentRuntimeConfig.authToken", "sk-ant-oat-inline")).toThrow(
       "Legacy config key",
     );
     expect(() => setConfigValue("agentRuntimeConfig", '{"apiKey":"sk-test"}')).toThrow(

@@ -1076,10 +1076,10 @@ async function hasActiveShellCredentials(opts: ShellOptions): Promise<boolean> {
 
   if (backend === "claude") {
     const { hasAnthropicCredentials } = await import("../ui/setup.js");
-    return hasAnthropicCredentials(active.apiKey);
+    return hasAnthropicCredentials(active.apiKey, active.authToken);
   }
 
-  if (active.apiKey || active.baseUrl) return true;
+  if (active.apiKey || active.authToken || active.baseUrl) return true;
 
   const { hasAnyProviderCredentials } = await import("../ui/setup.js");
   return hasAnyProviderCredentials();
@@ -1088,7 +1088,7 @@ async function hasActiveShellCredentials(opts: ShellOptions): Promise<boolean> {
 /** Merge `patch` into the active backend's slot in agentRuntimeConfig. */
 function mergeIntoActiveSlot(
   opts: ShellOptions,
-  patch: { apiKey?: string; baseUrl?: string },
+  patch: { apiKey?: string; authToken?: string; baseUrl?: string },
 ): void {
   const backend = opts.config.agentRuntimeBackend ?? "pi-ai";
   const slot = backend === "codex" ? "codex" : backend === "pi-ai" ? "piAi" : "claude";
@@ -8412,18 +8412,18 @@ function maskApiKey(key: string | undefined): string {
 function formatBackendSlots(
   cfg:
     | {
-        claude?: { apiKey?: string; baseUrl?: string };
-        piAi?: { apiKey?: string; baseUrl?: string };
-        codex?: { apiKey?: string; baseUrl?: string };
+        claude?: { apiKey?: string; authToken?: string; baseUrl?: string };
+        piAi?: { apiKey?: string; authToken?: string; baseUrl?: string };
+        codex?: { apiKey?: string; authToken?: string; baseUrl?: string };
       }
     | undefined,
 ): string[] {
   const out: string[] = [];
   for (const slot of ["claude", "piAi", "codex"] as const) {
     const s = cfg?.[slot];
-    if (s && (s.apiKey || s.baseUrl)) {
+    if (s && (s.apiKey || s.authToken || s.baseUrl)) {
       out.push(
-        `  ${slot.padEnd(6)} apiKey=${maskApiKey(s.apiKey)}  baseUrl=${s.baseUrl ?? "(default)"}`,
+        `  ${slot.padEnd(6)} apiKey=${maskApiKey(s.apiKey)}  authToken=${maskApiKey(s.authToken)}  baseUrl=${s.baseUrl ?? "(default)"}`,
       );
       continue;
     }
@@ -8434,7 +8434,7 @@ function formatBackendSlots(
     const envCreds = probeEnvCredsForSlot(slot);
     if (envCreds) {
       out.push(
-        `  ${slot.padEnd(6)} env-only (apiKey=${maskApiKey(envCreds.apiKey)}  baseUrl=${envCreds.baseUrl ?? "(default)"})`,
+        `  ${slot.padEnd(6)} env-only (apiKey=${maskApiKey(envCreds.apiKey)}  authToken=${maskApiKey(envCreds.authToken)}  baseUrl=${envCreds.baseUrl ?? "(default)"})`,
       );
       continue;
     }
@@ -8453,11 +8453,12 @@ function formatBackendSlots(
  */
 function probeEnvCredsForSlot(
   slot: "claude" | "piAi" | "codex",
-): { apiKey?: string; baseUrl?: string } | null {
+): { apiKey?: string; authToken?: string; baseUrl?: string } | null {
   if (slot === "claude") {
     const apiKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+    const authToken = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_OAUTH_TOKEN;
     const baseUrl = process.env.ANTHROPIC_BASE_URL;
-    if (apiKey || baseUrl) return { apiKey, baseUrl };
+    if (apiKey || authToken || baseUrl) return { apiKey, authToken, baseUrl };
     return null;
   }
   if (slot === "codex") {
@@ -8470,6 +8471,8 @@ function probeEnvCredsForSlot(
   // operators see a green light when ANY provider has env-only creds.
   const piAiVars: Array<[string, string?]> = [
     ["ANTHROPIC_API_KEY"],
+    ["ANTHROPIC_AUTH_TOKEN"],
+    ["ANTHROPIC_OAUTH_TOKEN"],
     ["OPENAI_API_KEY", "OPENAI_BASE_URL"],
     ["GOOGLE_API_KEY"],
     ["GROQ_API_KEY"],
@@ -8480,7 +8483,9 @@ function probeEnvCredsForSlot(
     const apiKey = process.env[keyVar];
     if (apiKey) {
       const baseUrl = baseVar ? process.env[baseVar] : undefined;
-      return { apiKey, baseUrl };
+      return keyVar === "ANTHROPIC_AUTH_TOKEN" || keyVar === "ANTHROPIC_OAUTH_TOKEN"
+        ? { authToken: apiKey, baseUrl }
+        : { apiKey, baseUrl };
     }
   }
   return null;
@@ -8909,26 +8914,33 @@ function handleAuthImportFromConfig(opts: ShellOptions): LocalCommandResult {
         return `${cfgPath} has no agentRuntimeConfig block — nothing to import.`;
       }
       const arcRec = arc as Record<string, unknown>;
-      const credsToWrite: Record<string, { apiKey?: string; baseUrl?: string }> = {};
+      const credsToWrite: Record<
+        string,
+        { apiKey?: string; authToken?: string; baseUrl?: string }
+      > = {};
       for (const slot of ["claude", "piAi", "codex"] as const) {
         const slotVal = arcRec[slot];
         if (slotVal && typeof slotVal === "object") {
           const sv = slotVal as Record<string, unknown>;
           const apiKey = typeof sv.apiKey === "string" ? sv.apiKey : undefined;
+          const authToken = typeof sv.authToken === "string" ? sv.authToken : undefined;
           const baseUrl = typeof sv.baseUrl === "string" ? sv.baseUrl : undefined;
-          if (apiKey || baseUrl) credsToWrite[slot] = { apiKey, baseUrl };
+          if (apiKey || authToken || baseUrl) credsToWrite[slot] = { apiKey, authToken, baseUrl };
         }
       }
       if (
         Object.keys(credsToWrite).length === 0 &&
-        (typeof arcRec.apiKey === "string" || typeof arcRec.baseUrl === "string")
+        (typeof arcRec.apiKey === "string" ||
+          typeof arcRec.authToken === "string" ||
+          typeof arcRec.baseUrl === "string")
       ) {
         const apiKey = typeof arcRec.apiKey === "string" ? arcRec.apiKey : undefined;
+        const authToken = typeof arcRec.authToken === "string" ? arcRec.authToken : undefined;
         const baseUrl = typeof arcRec.baseUrl === "string" ? arcRec.baseUrl : undefined;
-        credsToWrite.claude = { apiKey, baseUrl };
+        credsToWrite.claude = { apiKey, authToken, baseUrl };
       }
       if (Object.keys(credsToWrite).length === 0) {
-        return `${cfgPath} has agentRuntimeConfig but no apiKey/baseUrl to import.`;
+        return `${cfgPath} has agentRuntimeConfig but no apiKey/authToken/baseUrl to import.`;
       }
       const writtenTo = persistLocalCredentials(credsToWrite, root);
       const slots = Object.keys(credsToWrite).join(", ");

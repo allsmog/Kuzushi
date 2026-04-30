@@ -7,7 +7,7 @@ const DEFAULT_AGENTIC_MODEL = "anthropic:claude-sonnet-4-6";
 
 function requiredEnvVarsForProvider(provider: string): string[] {
   if (provider === "anthropic") {
-    return ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"];
+    return ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_OAUTH_TOKEN"];
   }
 
   if (provider === "openai") {
@@ -23,7 +23,7 @@ function requiredEnvVarsForProvider(provider: string): string[] {
 
 function maybeWarnPiAiApiKeyForModel(
   model: string | undefined,
-  options: { anthropicApiKey?: string } = {},
+  options: { anthropicApiKey?: string; anthropicAuthToken?: string } = {},
 ): void {
   if (!model) {
     return;
@@ -43,7 +43,8 @@ function maybeWarnPiAiApiKeyForModel(
 
   const hasAny =
     envVars.some((name) => Boolean(process.env[name])) ||
-    (provider === "anthropic" && Boolean(options.anthropicApiKey));
+    (provider === "anthropic" &&
+      (Boolean(options.anthropicApiKey) || Boolean(options.anthropicAuthToken)));
   if (hasAny) {
     return;
   }
@@ -56,7 +57,7 @@ function maybeWarnPiAiApiKeyForModel(
 
 export function warnPiAiBackendApiKeys(
   models: string[],
-  options: { anthropicApiKey?: string } = {},
+  options: { anthropicApiKey?: string; anthropicAuthToken?: string } = {},
 ): void {
   for (const model of models) {
     maybeWarnPiAiApiKeyForModel(model, options);
@@ -163,7 +164,7 @@ export function resolveActivePiAiModels(
 
 export function validatePiAiProviderCredentials(
   models: string[],
-  options: { anthropicApiKey?: string } = {},
+  options: { anthropicApiKey?: string; anthropicAuthToken?: string } = {},
 ): Array<{ provider: string; envVars: string[]; models: string[] }> {
   const missingByProvider = new Map<string, { envVars: string[]; models: Set<string> }>();
 
@@ -182,7 +183,8 @@ export function validatePiAiProviderCredentials(
 
     const hasAny =
       envVars.some((name) => Boolean(process.env[name])) ||
-      (provider === "anthropic" && Boolean(options.anthropicApiKey));
+      (provider === "anthropic" &&
+        (Boolean(options.anthropicApiKey) || Boolean(options.anthropicAuthToken)));
     if (hasAny) {
       continue;
     }

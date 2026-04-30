@@ -26,6 +26,7 @@ export interface ShellCommandOptions {
   taskConfig?: string[];
   agentRuntime?: string;
   apiKey?: string;
+  authToken?: string;
   inheritClaude?: boolean;
 }
 
@@ -35,7 +36,7 @@ export async function runShellCommand(opts: ShellCommandOptions): Promise<void> 
 
   applyShellOptionOverrides(config, opts);
   applyLocalCredentials(config, opts.target);
-  primeCredentialEnvironment(config, opts.apiKey);
+  primeCredentialEnvironment(config, opts.apiKey, opts.authToken);
   await primeInheritedAnthropicToken(config);
 
   await startShell({
@@ -181,9 +182,11 @@ function removeEmptyCredentialSlots(config: AgentRuntimeConfig): AgentRuntimeCon
 function primeCredentialEnvironment(
   config: KuzushiConfig,
   apiKeyOverride: string | undefined,
+  authTokenOverride: string | undefined,
 ): void {
   primeActiveCredentialEnvironment(config);
   if (apiKeyOverride) primeApiKeyOverride(config, apiKeyOverride);
+  if (authTokenOverride) primeAuthTokenOverride(config, authTokenOverride);
 }
 
 function primeActiveCredentialEnvironment(config: KuzushiConfig): void {
@@ -192,6 +195,10 @@ function primeActiveCredentialEnvironment(config: KuzushiConfig): void {
   const apiKeyEnv = providerEnvVar(activeProvider);
   const baseUrlEnv = providerBaseUrlEnvVar(activeProvider);
   if (activeCredentials.apiKey && apiKeyEnv) process.env[apiKeyEnv] = activeCredentials.apiKey;
+  if (activeProvider === "anthropic" && activeCredentials.authToken) {
+    process.env.ANTHROPIC_AUTH_TOKEN = activeCredentials.authToken;
+    process.env.ANTHROPIC_OAUTH_TOKEN = activeCredentials.authToken;
+  }
   if (activeCredentials.baseUrl && baseUrlEnv) {
     process.env[baseUrlEnv] = activeCredentials.baseUrl;
   }
@@ -202,17 +209,31 @@ function primeApiKeyOverride(config: KuzushiConfig, apiKey: string): void {
   process.env[envName] = apiKey;
 }
 
+function primeAuthTokenOverride(config: KuzushiConfig, authToken: string): void {
+  if (config.agentRuntimeBackend === "codex") {
+    process.env.OPENAI_API_KEY = authToken;
+    return;
+  }
+  process.env.ANTHROPIC_AUTH_TOKEN = authToken;
+  process.env.ANTHROPIC_OAUTH_TOKEN = authToken;
+}
+
 async function primeInheritedAnthropicToken(config: KuzushiConfig): Promise<void> {
   if (!shouldLoadInheritedAnthropicToken(config)) return;
   const ambient = resolveAmbientOauthToken(config);
   if (!ambient) return;
-  process.env.ANTHROPIC_API_KEY = ambient.token;
+  process.env.ANTHROPIC_AUTH_TOKEN = ambient.token;
+  process.env.ANTHROPIC_OAUTH_TOKEN = ambient.token;
   getLogger("kuzushi").info(`Using inherited OAuth token (source: ${ambient.source})`);
 }
 
 function shouldLoadInheritedAnthropicToken(config: KuzushiConfig): boolean {
   return (
-    config.auth === "inherited" && !process.env.ANTHROPIC_API_KEY && !isClaudeCodeHostManagedAuth()
+    config.auth === "inherited" &&
+    !process.env.ANTHROPIC_API_KEY &&
+    !process.env.ANTHROPIC_AUTH_TOKEN &&
+    !process.env.ANTHROPIC_OAUTH_TOKEN &&
+    !isClaudeCodeHostManagedAuth()
   );
 }
 

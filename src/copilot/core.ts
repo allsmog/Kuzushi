@@ -58,6 +58,7 @@ import { createVariantHunterModule } from "../modules/variant-hunter.js";
 import { createVendorAssessmentModule } from "../modules/vendor-assessment/vendor-assessment.js";
 import { createVerifyModule } from "../modules/verify/verify.js";
 import { createCoreVulnScoutModule } from "../modules/vuln-scout/vuln-scout.js";
+import { createXRayModule } from "../modules/x-ray/x-ray.js";
 import type { KuzushiConfig } from "../types.js";
 
 /**
@@ -193,6 +194,7 @@ export class CopilotCore {
         createFindingsModule(),
         createContextModule(),
         createThreatModelModule(),
+        createXRayModule(),
         createVendorAssessmentModule(),
         createDepHygieneModule(),
         // Hidden orchestrator-level module — infrastructure DAG nodes
@@ -592,6 +594,9 @@ export class CopilotCore {
         break;
       case "threat-model":
         await this.loadWithScope(createThreatModelModule());
+        break;
+      case "x-ray":
+        await this.loadWithScope(createXRayModule());
         break;
       case "taint-iris-next":
         await this.loadWithScope(createTaintIrisNextModule());
