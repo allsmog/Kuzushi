@@ -1,6 +1,9 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { createLogger } from "../../logger.js";
 import type { FileIndex } from "../../types.js";
+
+const log = createLogger({ stage: "pre-read" });
 
 const MAX_PRE_READ_BYTES = 50_000;
 const MAX_FILES = 20;
@@ -146,7 +149,12 @@ export async function preReadFilesForTask(
       const content = await readFile(absPath, "utf-8");
       files.push({ path: relPath, content });
       totalBytes += Buffer.byteLength(content, "utf-8");
-    } catch {}
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== "ENOENT" && code !== "EACCES" && code !== "EISDIR") {
+        log.warn(`pre-read: skipping ${relPath} due to read error: ${String(err)}`);
+      }
+    }
   }
 
   return {
