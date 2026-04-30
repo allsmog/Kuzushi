@@ -55,6 +55,7 @@ import { ActorTranscriptView } from "./ActorTranscriptView.js";
 import { AttackerStoriesView } from "./AttackerStoriesView.js";
 import { BannerSplash } from "./BannerSplash.js";
 import { ContextBuildView } from "./ContextBuildView.js";
+import { CostCapHalt } from "./CostCapHalt.js";
 import { ErrorMessage } from "./ErrorMessage.js";
 import { FindingCard } from "./FindingCard.js";
 import { FindingsView } from "./FindingsView.js";
@@ -65,6 +66,7 @@ import { OptionsView } from "./OptionsView.js";
 import { PlanCard } from "./PlanCard.js";
 import { PromptsEditorView } from "./PromptsEditorView.js";
 import { PulseDot } from "./PulseDot.js";
+import { RateLimitBanner } from "./RateLimitBanner.js";
 import { SastTasksView } from "./SastTasksView.js";
 import { ScopeAndCriticalityView } from "./ScopeAndCriticalityView.js";
 import { Spinner } from "./Spinner.js";
@@ -87,6 +89,26 @@ const IDLE_KEYBINDS = [
   { keys: "Esc", label: "Clear input", secondary: true },
   { keys: "Ctrl+C", label: "Exit", secondary: true },
 ];
+
+/**
+ * Build the idle-prompt keybinds row, augmenting with a `/back` hint
+ * when the current view has a parent to step up to (catalog has no
+ * parent). Keeps the shell footer's actionable state aligned with the
+ * `ShellWayfinding` "/back -> ..." line above the prompt.
+ *
+ * Exported for tests in `tests/ui/`.
+ */
+export function buildIdleKeybindsForView(
+  shellView: ShellState["shellView"] | undefined,
+): ReadonlyArray<{ keys: string; label: string; secondary?: boolean }> {
+  const base = IDLE_KEYBINDS.slice();
+  if (shellView && shellView !== "catalog") {
+    // Insert /back after Send/History so the discoverable navigation
+    // verb sits next to the primary action keys, not lost in the tail.
+    base.splice(3, 0, { keys: "/back", label: "Back" });
+  }
+  return base;
+}
 
 const PROCESSING_KEYBINDS = [
   { keys: "Ctrl+C", label: "Interrupt" },
@@ -270,6 +292,8 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         ) : null}
         <ShellTaskStatusLine shell={shell} columns={columns} />
 
+        <ShellAdvisoryStack store={store} />
+
         <Ratchet>
           <Box flexDirection="column" minHeight={1}>
             {shell.plannerBusy && !shell.pendingPlan && (
@@ -326,15 +350,40 @@ const ShellInputArea = memo(
     const [historyIndex, setHistoryIndex] = useState<number | null>(null);
     const draftInputRef = useRef("");
 
-    useRegisterKeybindings(
-      shell.processing
-        ? PROCESSING_KEYBINDS
-        : shell.pendingPlan && input.length === 0
-          ? PLAN_KEYBINDS
-          : shell.shellView === "sast-tasks" && input.length === 0
-            ? SAST_TASK_KEYBINDS
-            : IDLE_KEYBINDS,
-    );
+    // Register the *base* row at the input-area level so per-view
+    // components mounted earlier in the tree (FindingsView, ModuleHome,
+    // etc.) can still take LIFO precedence via their own
+    // `useRegisterKeybindings`. The base row is what the catalog and
+    // generic landing surfaces show. Per-view rows mount earlier in the
+    // CopilotShell tree (MemoShellViewPanel renders before
+    // ShellInputArea), so their effects run first and our registration
+    // here ends up *latest* in the LIFO stack — which would shadow the
+    // view's row. To avoid that for views that register their own row,
+    // we only register the base row when the shell is in a "no-view-row"
+    // state: catalog, processing, plan-pending, or sast-tasks (which has
+    // its own dedicated row above).
+    const viewRegistersOwnRow =
+      shell.shellView === "module" ||
+      shell.shellView === "findings" ||
+      shell.shellView === "finding" ||
+      shell.shellView === "tune" ||
+      shell.shellView === "options" ||
+      shell.shellView === "threats" ||
+      shell.shellView === "module-run" ||
+      shell.shellView === "actor-detail" ||
+      shell.shellView === "prompts-editor" ||
+      shell.shellView === "context-build";
+    const idleBindings = buildIdleKeybindsForView(shell.shellView);
+    const activeBindings = shell.processing
+      ? PROCESSING_KEYBINDS
+      : shell.pendingPlan && input.length === 0
+        ? PLAN_KEYBINDS
+        : shell.shellView === "sast-tasks" && input.length === 0
+          ? SAST_TASK_KEYBINDS
+          : viewRegistersOwnRow
+            ? null
+            : idleBindings;
+    useRegisterKeybindings(activeBindings);
 
     useInput(
       (char, key) => {
@@ -573,6 +622,43 @@ const ShellInputArea = memo(
     prev.shell.focusedModule === next.shell.focusedModule &&
     prev.shell.commandHistory === next.shell.commandHistory,
 );
+
+/**
+ * Shell-mode mirror of `RunningView`'s `AdvisoryStack`. Renders the
+ * rate-limit and cost-cap halt surfaces above the input area whenever
+ * `state.throttle` / `state.costCapHalted` are set, regardless of which
+ * `mode` is active. Without this, a triage tool fired from the shell
+ * would silently throttle (CLAUDE.md says the rate-limit banner should
+ * "auto-render" when throttle is set) or hit the cost cap with no
+ * visible card.
+ *
+ * Order is rate-limit (one line) above cost-cap halt (multi-line card),
+ * which mirrors `RunningView` so muscle memory carries between modes.
+ */
+function ShellAdvisoryStack({ store }: { store: UIStore }): React.ReactElement | null {
+  const advisory = useUISelector(
+    store,
+    (s) => ({
+      throttle: s.throttle,
+      costCapHalted: s.costCapHalted,
+      runningCostUsd: s.runningCostUsd ?? 0,
+      budgetUsd: s.costCapBudgetUsd ?? s.configBanner?.budget,
+    }),
+    shallowEqual,
+  );
+  if (!advisory.throttle && !advisory.costCapHalted) return null;
+  return (
+    <Box flexDirection="column">
+      <RateLimitBanner throttle={advisory.throttle} />
+      {advisory.costCapHalted ? (
+        <CostCapHalt
+          runningCostUsd={advisory.runningCostUsd}
+          budgetUsd={advisory.budgetUsd}
+        />
+      ) : null}
+    </Box>
+  );
+}
 
 const SHELL_LIVE_HISTORY_COUNT = 8;
 const LIVE_ACTIVITY_MIN_ROWS = 8;
