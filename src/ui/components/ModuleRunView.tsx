@@ -125,7 +125,7 @@ export function ModuleRunView({
 
 function LiveControlsHint(): React.ReactElement {
   return (
-    <Box marginTop={SPACING.xs} marginBottom={SPACING.xs}>
+    <Box marginBottom={SPACING.sm}>
       <Text>{tokens.muted("p pause · r resume · Ctrl+C abort")}</Text>
     </Box>
   );
