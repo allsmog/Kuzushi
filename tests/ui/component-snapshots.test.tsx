@@ -245,6 +245,9 @@ describe("Ink component snapshots", () => {
           description: "40+ task pipeline",
           toolCount: 10,
           lastRunSummary: "ran 2h · 4 tp",
+          // Mixed severities so the snapshot exercises every tier of the
+          // sparkline ramp (critical → info, left-to-right).
+          lastRunSeverityCounts: { critical: 1, high: 4, medium: 9, low: 2 },
         },
         {
           id: "randori",
@@ -253,6 +256,7 @@ describe("Ink component snapshots", () => {
           description: "PASTA threat model",
           toolCount: 4,
           lastRunSummary: "ran 2h · 12 threats",
+          lastRunSeverityCounts: { high: 12 },
         },
         {
           id: "shinsa",
@@ -354,11 +358,25 @@ describe("Ink component snapshots", () => {
     expect(out).toContain("readiness");
   });
 
-  it("ModuleHome — collapses tools and last-run while processing", () => {
+  it("ModuleHome — collapses tools and last-run while *this* module is running", () => {
+    // The collapse gate was previously `shell.processing === true` which
+    // over-fired (planner / context-build / pending assistant text would
+    // hide the home of a module that wasn't actually running anything).
+    // Now it requires moduleRun.moduleId to match the focused module. Keep
+    // a non-busy sibling check below to lock the narrowed semantics.
     const shell = stubShell({
       focusedModule: "context",
       shellView: "module",
-      processing: true,
+      processing: false,
+      moduleRun: {
+        moduleId: "context",
+        toolName: "context:build",
+        inputSummary: ".",
+        startedAtMs: 0,
+        status: "running",
+        steps: [],
+        evidenceTail: [],
+      },
       moduleCatalog: [
         {
           id: "context",
@@ -385,6 +403,40 @@ describe("Ink component snapshots", () => {
     expect(out).not.toContain("TOOL NAME");
     expect(out).not.toContain("last run");
     expect(out).not.toContain("never run for this workspace");
+  });
+
+  it("ModuleHome — keeps body visible when an unrelated work signal flips processing", () => {
+    // Regression for the narrow busy gate: a planner/assistant flipping
+    // shell.processing must not blank the focused module's home anymore.
+    const shell = stubShell({
+      focusedModule: "context",
+      shellView: "module",
+      processing: true,
+      moduleCatalog: [
+        {
+          id: "context",
+          displayName: "Context",
+          category: "intel",
+          description: "Builds the application context snapshot.",
+          toolCount: 1,
+          toolSummaries: [
+            {
+              name: "context:build",
+              verb: "build",
+              description: "Generate the application context snapshot",
+              headless: true,
+            },
+          ],
+        },
+      ],
+    });
+    const out = renderToString(createElement(ModuleHome, { shell }));
+    // The context module routes through the v3 custom home renderer
+    // (`module-home/registry.ts`), which is the actual surface the operator
+    // sees. With `processing: true` but `moduleRun` empty, the new busy
+    // gate keeps the custom body visible — it used to collapse here.
+    expect(out).toContain("kuzushi/context");
+    expect(out).toContain("status");
   });
 
   it("ModuleHome — hides advanced pipeline steps and shows the hint line", () => {
@@ -631,7 +683,13 @@ describe("Ink component snapshots", () => {
 
     const out = renderToString(createElement(CopilotShell, { store }), 84);
 
-    expect(out).toContain("sast home");
+    // The "▸ sast home · workspace · target" sub-banner used to live here;
+    // it was removed because the chrome (AppLayout/ScreenFrame) already
+    // shows the title and the workspace/target status, and the per-shell
+    // banner triple-printed the same context. The asserts that matter for
+    // this test are: the SAST module body still renders its sections, the
+    // prompt is module-scoped, and the splash never replays.
+    expect(out).toContain("kuzushi/sast>");
     expect(out).toContain("task selection");
     expect(out).toContain("tasks opens scanners/detectors");
     expect(out).not.toContain("agentic SAST orchestration");

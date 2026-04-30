@@ -13,14 +13,13 @@ import type {
   TriageAgentConfig,
 } from "./types.js";
 
-const DEFAULT_MODEL = "anthropic:claude-sonnet-4-6";
 const DEFAULT_MAX_FINDINGS = 40;
 
 export class AgenticPlugin implements ScannerPlugin {
   readonly id = "agentic";
   readonly displayName = "Agentic LLM Scanner";
 
-  private model = DEFAULT_MODEL;
+  private model = "";
   private maxFindings = DEFAULT_MAX_FINDINGS;
   private passes: 1 | 2 = 1;
 
@@ -28,7 +27,17 @@ export class AgenticPlugin implements ScannerPlugin {
     const configuredModel = asOptionalString(config["model"]);
     const configuredMax = asPositiveInt(config["maxFindings"]);
 
-    this.model = configuredModel || DEFAULT_MODEL;
+    if (!configuredModel) {
+      // Registry's `resolvePluginConfig` falls the `model` field back to
+      // the operator's `config.model`, so reaching this branch means the
+      // operator hasn't configured one at all — fail fast rather than
+      // silently substitute a hardcoded default.
+      throw new Error(
+        "agentic scanner: model is required. Kuzushi will not silently substitute a default model. " +
+          "Set `model` in `taskConfig.agentic` or run `kuzushi config set model <provider>:<model>`.",
+      );
+    }
+    this.model = configuredModel;
     this.maxFindings = configuredMax ?? DEFAULT_MAX_FINDINGS;
     this.passes = config["passes"] === 2 ? 2 : 1;
   }

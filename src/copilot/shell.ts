@@ -309,6 +309,11 @@ interface ShellContext {
 interface LocalCommandResult {
   output?: string;
   exit?: boolean;
+  /**
+   * Keep the shell's current turn busy after this local command. Live controls
+   * such as `/pause` and `/resume` change queue state but do not end the run.
+   */
+  keepProcessing?: boolean;
   /** Update focusedModule. */
   setFocus?: string | null;
   /** Clear rendered conversation history. */
@@ -930,6 +935,7 @@ export function buildModuleCatalog(
         )
       : genericLastRunAt;
     const lastRunSummary = runState?.summary ?? genericLastRunSummary;
+    const lastRunSeverityCounts = parseSeverityCounts(moduleRun?.metricsJson);
     return {
       id: mod.id,
       displayName: mod.displayName,
@@ -943,6 +949,7 @@ export function buildModuleCatalog(
         ? {
             ...(lastRunAt !== undefined && Number.isFinite(lastRunAt) ? { lastRunAt } : {}),
             lastRunSummary,
+            ...(lastRunSeverityCounts ? { lastRunSeverityCounts } : {}),
             ...(runState ? { runState } : {}),
           }
         : {}),
@@ -952,7 +959,62 @@ export function buildModuleCatalog(
 }
 
 function runBelongsToModule(run: PipelineRunRecord, moduleId: string): boolean {
-  return run.moduleId === moduleId || run.toolName?.startsWith(`${moduleId}:`) === true;
+  return contributingModuleIds(run).has(moduleId);
+}
+
+/**
+ * Pull a `severityCounts` map out of a pipeline run's `metrics_json` blob.
+ * Returns `undefined` when the column is null, the JSON is malformed, or
+ * the field is missing/empty — callers fall back to a plain summary line.
+ * Non-finite or negative counts are silently dropped so the sparkline
+ * helper never has to defend against bad data.
+ */
+function parseSeverityCounts(metricsJson?: string | null): Record<string, number> | undefined {
+  if (!metricsJson) return undefined;
+  try {
+    const parsed = JSON.parse(metricsJson) as { severityCounts?: unknown };
+    const raw = parsed?.severityCounts;
+    if (!raw || typeof raw !== "object") return undefined;
+    const out: Record<string, number> = {};
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+        out[key] = value;
+      }
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Walk the run record and return every module that contributed to the run —
+ * not just the run owner. A `sast:scan` pipeline includes `semgrep:scan`,
+ * `codeql:scan`, etc. in its `config.tasks` array; without this lookup, the
+ * semgrep card stays "never run" forever even after running inside a sast
+ * pipeline. Reading `tasks` from `configJson` keeps us in sync with how the
+ * pipeline runner already records what it ran.
+ */
+function contributingModuleIds(run: PipelineRunRecord): Set<string> {
+  const ids = new Set<string>();
+  if (run.moduleId) ids.add(run.moduleId);
+  if (run.toolName?.includes(":")) {
+    const owner = run.toolName.split(":")[0];
+    if (owner) ids.add(owner);
+  }
+  try {
+    const cfg = JSON.parse(run.configJson) as { tasks?: unknown };
+    if (Array.isArray(cfg.tasks)) {
+      for (const task of cfg.tasks) {
+        if (typeof task !== "string") continue;
+        const mod = task.split(":")[0];
+        if (mod) ids.add(mod);
+      }
+    }
+  } catch {
+    /* malformed configJson — fall through with what we have */
+  }
+  return ids;
 }
 
 function formatPipelineRunRecencySummary(run: PipelineRunRecord, lastRunAt: number): string {
@@ -1242,36 +1304,23 @@ export function finalizeAssistantText(
 async function ensureClaudeShellRuntime(opts: ShellOptions, store?: UIStore): Promise<void> {
   if (typeof opts.runtime.createSession === "function") return;
   const backend = opts.config.agentRuntimeBackend ?? "pi-ai";
-  try {
-    const { ClaudeAgentRuntime } = await import("../agent-runtime/claude.js");
-    const { LoggingAgentRuntime } = await import("../agent-runtime/logging-runtime.js");
-    // Mark the live config so subsequent calls (and other code that checks the
-    // backend) treat the shell as running on claude. The user's persisted
-    // global config is untouched — switch is per-process unless they /backend.
-    opts.config.agentRuntimeBackend = "claude";
-    const { resolveActiveCredentials } = await import("../config.js");
-    const active = resolveActiveCredentials(opts.config);
-    const creds = Object.keys(active).length > 0 ? active : undefined;
-    opts.runtime = new LoggingAgentRuntime(new ClaudeAgentRuntime(creds));
-    const base = `Note: agent backend "${backend}" does not support interactive sessions. Using "claude" for this shell (your scan backend is unchanged). Run /backend claude to make this the default.`;
-    const hint = !creds
-      ? "\nNo claude credentials configured yet — run /auth to paste an Anthropic key."
-      : "";
-    const message = base + hint;
-    if (store) {
-      appendToHistory(store, { type: "output", text: message, timestamp: Date.now() });
-    } else {
-      process.stderr.write(`${message}\n`);
-    }
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    const message = `Failed to swap in claude runtime for shell: ${detail}`;
-    if (store) {
-      appendToHistory(store, { type: "error", text: message, timestamp: Date.now() });
-    } else {
-      process.stderr.write(`${message}\n`);
-    }
+  // Pre-policy this used to silently construct a ClaudeAgentRuntime and
+  // mutate opts.config.agentRuntimeBackend = "claude". That violates the
+  // "no silent runtime swap" rule — operators who chose a different
+  // backend would suddenly find their shell running on Anthropic Claude
+  // (different provider, different billing) without explicit consent.
+  const message =
+    `Backend "${backend}" does not support interactive sessions. ` +
+    `Kuzushi will not silently switch your shell to "claude". ` +
+    `Run \`/backend claude\` (and \`/provider <anthropic:model>\` if needed) to use the interactive shell, ` +
+    `or use \`kuzushi run\`/\`kuzushi scan\` which work with any backend.`;
+  const { KuzushiSilentFallbackError } = await import("../agent-runtime/enforcement.js");
+  if (store) {
+    appendToHistory(store, { type: "error", text: message, timestamp: Date.now() });
+  } else {
+    process.stderr.write(`${message}\n`);
   }
+  throw new KuzushiSilentFallbackError(message);
 }
 
 /**
@@ -2547,11 +2596,7 @@ export function reconcileShellView(
   if (focusedModule && currentView === "catalog") return "module";
   if (
     !focusedModule &&
-    (currentView === "module" ||
-      currentView === "findings" ||
-      currentView === "finding" ||
-      currentView === "tune" ||
-      currentView === "options")
+    (currentView === "module" || currentView === "tune" || currentView === "options")
   ) {
     return "catalog";
   }
@@ -4547,8 +4592,12 @@ async function startInkShell(
       if (localResult.output) {
         appendToHistory(store, { type: "output", text: localResult.output, timestamp: Date.now() });
       }
-      clearTransientShellState(store);
-      setProcessing(store, false);
+      if (localResult.keepProcessing) {
+        setProcessing(store, true);
+      } else {
+        clearTransientShellState(store);
+        setProcessing(store, false);
+      }
       return;
     }
 
@@ -4856,10 +4905,18 @@ async function startInkShell(
     onAbort: abortActiveAction,
   };
 
+  // Splash policy: render the wordmark splash on the operator's first ever
+  // boot for this workspace (catalogRuns empty), and skip it thereafter so
+  // returning sessions get straight to the catalog. The chrome strip
+  // (workspace/target/scope) carries the same identity context, so the
+  // splash earns its 8 vertical rows only when there's nothing else on
+  // screen to greet the operator.
+  const isFirstBoot = catalogRuns.length === 0;
   store.update({
     mode: "shell",
     shell: initialShell,
     ...(initialHydration.summary !== undefined ? { summary: initialHydration.summary } : {}),
+    ...(isFirstBoot ? {} : { shellSplashShown: true }),
   });
 
   // Process-level SIGINT fallback. Ink's `useInput` is the primary Ctrl+C
@@ -6073,7 +6130,14 @@ function routeInput(
     return toolResult;
   }
 
-  const preview = trimmed.length > 60 ? `${trimmed.slice(0, 60)}…` : trimmed;
+  // Strip stray trailing quotes from the preview so error messages like
+  // `/threats dfd"` (which sometimes occurs when an upstream parser splits
+  // on whitespace and leaves a `"` in `trimmed`) don't carry the artefact
+  // into the user-visible message.
+  const preview = (() => {
+    const raw = trimmed.length > 60 ? `${trimmed.slice(0, 60)}…` : trimmed;
+    return raw.replace(/['"]+$/, "");
+  })();
   if (lower.startsWith("ask ")) {
     return {
       output: `Natural-language chat is explicit. Use /ask ${trimmed.slice(4).trim()} or prefix the question with ?.`,
@@ -7123,7 +7187,7 @@ function handleThreatsCommand(
       asyncExecute: async () => {
         const loaded = await loadThreatWorkspace(repoRoot, shellState);
         if (!loaded) {
-          return "No context or threat model found. Run /context, then /threats regen dfd.";
+          return "No context or threat model found. Run /use context, then run .; then /threats regen dfd.";
         }
         if (viewRoute.threatTab !== "dfd" && !loaded.threatModel) {
           return "No threat model found for this tab. Run /threats regen dfd or /threats edit first.";
@@ -7424,6 +7488,13 @@ function resolveDirectToolDispatch(
     }
   }
 
+  if (cmd.toLowerCase() === "run" && ctx.focusedModule && args.length === 0) {
+    const defaultToolName = pickDefaultToolName(core, ctx.focusedModule);
+    if (defaultToolName) {
+      return resolveToolExecution(defaultToolName, args, core, opts, ctx, shellState);
+    }
+  }
+
   // `run <tool> [args]` explicit escape. Kept after focused-module resolution
   // so that a focused module whose tool is named `run` wins; still available
   // at top level and for explicit cross-module dispatch like `run sast:scan .`.
@@ -7482,6 +7553,18 @@ function handleLiveQueueControl(
     },
   });
   return {
+    keepProcessing: true,
+    shellStateUpdater: (shell) => ({
+      ...shell,
+      processing: true,
+      shellView: "module-run",
+      moduleRun: shell.moduleRun
+        ? {
+            ...shell.moduleRun,
+            status: shell.moduleRun.status === "running" ? "running" : shell.moduleRun.status,
+          }
+        : shell.moduleRun,
+    }),
     output: paused
       ? "Paused queued triage. Current in-flight work will finish."
       : "Resumed queued triage.",
@@ -7967,16 +8050,16 @@ function getContextRequirementError(
       : null;
 
   if (!snapshot) {
-    if (toolName === "carlini-threat-hunt:run" && persistentThreatModel) {
-      return undefined;
-    }
     if (toolName === "carlini-threat-hunt:run") {
-      return `Threat model required for ${toolName}. Run /use threat-model, then run .`;
+      const nextStep = persistentThreatModel
+        ? "Run /use context, then run . to build app/operator context."
+        : "Run /use context, then run .; then /use threat-model and run .";
+      return `Context required for ${toolName}. ${nextStep}`;
     }
     if (toolName === "taint-iris-next:hunt") {
-      return `Context required for ${toolName}. Run /context, then /threats regen dfd.`;
+      return `Context required for ${toolName}. Run /use context, then run .; then /use threat-model and run .`;
     }
-    return `Context required for ${toolName}. Run context (or /context) first.`;
+    return `Context required for ${toolName}. Run /use context, then run .`;
   }
 
   const missing: string[] = [];
@@ -7996,7 +8079,9 @@ function getContextRequirementError(
   }
 
   if (missing.length === 0) return undefined;
-  const hint = needsThreatModel ? "Run /context, then /threats regen dfd." : "Run context first.";
+  const hint = needsThreatModel
+    ? "Run /use context, then run .; then /use threat-model and run ."
+    : "Run /use context, then run .";
   return `Context incomplete for ${toolName}: missing ${missing.join(" and ")}. ${hint}`;
 }
 
@@ -9972,4 +10057,5 @@ export const __shellInternals = {
   resolveDirectToolDispatch,
   saveShellCommandHistory,
   shouldAppendSeparateBodyOutput,
+  parseSeverityCounts,
 };

@@ -60,7 +60,7 @@ function resolveThreatModel(shell: ShellState): ThreatModelDocument | null {
 }
 
 function formatSnapshot(snapshot: ContextSnapshot | null): string {
-  if (!snapshot) return "missing — /use context; run .";
+  if (!snapshot) return "missing — /use context, then run .";
   const generated = snapshot.generatedSlices?.length
     ? ` · ${snapshot.generatedSlices.join(", ")}`
     : "";
@@ -93,7 +93,7 @@ function operatorContextLabel(shell: ShellState): string {
 }
 
 function threatModelLabel(threatModel: ThreatModelDocument | null): string {
-  if (!threatModel) return "missing — /use threat-model; run .";
+  if (!threatModel) return "missing — /use threat-model, then run .";
   const threats = threatModel.threats.length;
   return `.kuzushi/threat-model.json · ${threats} threat${threats === 1 ? "" : "s"}`;
 }
@@ -126,7 +126,7 @@ function readinessRows(shell: ShellState): Row[] {
       key: "attack surface",
       value:
         nodeCount === 0 && flowCount === 0
-          ? "missing DFD — /use threat-model; run ."
+          ? "missing DFD — /use threat-model, then run ."
           : `${nodeCount} nodes · ${flowCount} flows · ${boundaryCount} boundaries`,
     },
     { key: "s4 quality", value: `${actorLinkedThreats} actor-linked threats · ${fallback}` },
@@ -165,9 +165,9 @@ function scopeRows(shell: ShellState): Row[] {
 function actionRows(shell: ShellState): Row[] {
   const card = shell.moduleCatalog?.find((c) => c.id === MODULE_ID);
   const rows: Row[] = [
-    { key: "/use context; run .", value: "build app context snapshot" },
+    { key: "/use context", value: "then run . to build app context snapshot" },
     { key: "/context build", value: "build operator scan context notes" },
-    { key: "/use threat-model; run .", value: "write .kuzushi/threat-model.json" },
+    { key: "/use threat-model", value: "then run . to write .kuzushi/threat-model.json" },
     { key: "run .", value: "spawn one agent per ready actor" },
     { key: "run --changed", value: "scope to git-changed files only" },
     { key: "prompts", value: "edit the actor system prompt" },

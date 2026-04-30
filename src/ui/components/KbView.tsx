@@ -18,8 +18,9 @@ import type {
 } from "../../modules/_shared/attachments/index.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { useTerminalCardWidth } from "../hooks.js";
+import { Divider } from "../primitives/Divider.js";
 import type { ShellState } from "../state.js";
-import { SPACING, tokens } from "../tokens.js";
+import { SPACING, tokens, WIDTHS } from "../tokens.js";
 import { RuleHeader } from "./RuleHeader.js";
 import { ScreenContent } from "./ScreenContent.js";
 
@@ -148,7 +149,7 @@ function PreviewPane({
   const previewLines = previewBody(row);
   return (
     <Box flexDirection="column" marginTop={SPACING.md}>
-      <Text>{tokens.muted("─".repeat(Math.max(20, width - 2)))}</Text>
+      <Divider width={Math.min(WIDTHS.contentRule, Math.max(20, width - 2))} />
       <Text>
         {tokens.label("preview")}
         {" · "}

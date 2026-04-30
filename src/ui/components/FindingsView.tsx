@@ -25,7 +25,8 @@ import { icons } from "../icons.js";
 import { useRenderCounter } from "../perf.js";
 import { normalizeSeverity, severityChalk, severityStyle } from "../severity.js";
 import type { ActionableFinding, ResultLine } from "../state.js";
-import { SPACING, tokens } from "../tokens.js";
+import { Divider } from "../primitives/Divider.js";
+import { SPACING, tokens, WIDTHS } from "../tokens.js";
 import { ChainGroup } from "./ChainGroup.js";
 import { EmptyState } from "./EmptyState.js";
 import { type FilterChip, FilterChips } from "./FilterChips.js";
@@ -66,6 +67,12 @@ interface UnifiedProps {
    * render bill. Virtualization is a no-op when `findings.length <= pageSize`.
    */
   pageSize?: number;
+  /**
+   * Currently-focused module id (if any). Threaded into the empty-state
+   * advice so we don't tell an operator who already `/use`d a module to
+   * "/use <module> to pick a surface".
+   */
+  focusedModule?: string | null;
 }
 
 type FindingsViewProps = CompactProps | UnifiedProps;
@@ -195,6 +202,7 @@ function UnifiedFindings({
   filters,
   findingCursor,
   pageSize,
+  focusedModule,
 }: UnifiedProps): React.ReactElement {
   useRenderCounter("UnifiedFindings");
   useRegisterKeybindings([
@@ -290,7 +298,7 @@ function UnifiedFindings({
       </Box>
 
       <Box marginTop={SPACING.sm}>
-        <Text>{tokens.muted("─".repeat(78))}</Text>
+        <Divider width={WIDTHS.contentRule} />
       </Box>
 
       {resolvedChains.map(({ chain, members }) => {
@@ -339,7 +347,12 @@ function UnifiedFindings({
         </Box>
       )}
 
-      {findings.length === 0 && <EmptyState kind="findings-never-scanned" />}
+      {findings.length === 0 && (
+        <EmptyState
+          kind="findings-never-scanned"
+          context={focusedModule ? { moduleId: focusedModule } : undefined}
+        />
+      )}
     </ScreenContent>
   );
 }

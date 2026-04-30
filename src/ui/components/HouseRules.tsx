@@ -49,6 +49,15 @@ export function HouseRules({ text, path }: HouseRulesProps): React.ReactElement 
           {path ? tokens.muted(` · saved to ${relativeFrom(path)}`) : null}
         </Text>
       </Box>
+      <Box>
+        <Text>
+          {tokens.hint(
+            path
+              ? `   $EDITOR ${relativeFrom(path)} to edit · /tune to reload`
+              : `   /tune writes .kuzushi/house-rules/<moduleId>.md · $EDITOR to fill it in`,
+          )}
+        </Text>
+      </Box>
     </Box>
   );
 }

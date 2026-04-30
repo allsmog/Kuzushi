@@ -294,7 +294,12 @@ export function describeEmptyState(
       return {
         title: "No scan has run yet",
         reason: "Nothing has been triaged for this workspace.",
-        action: "Type /scan to kick a pipeline · /use <module> to pick a surface",
+        // When a module is already focused, the "/use <module>" half is
+        // contradictory — the operator already picked one. Keep just the
+        // /scan hint in that case.
+        action: ctx.moduleId
+          ? "Type /scan to kick a pipeline"
+          : "Type /scan to kick a pipeline · /use <module> to pick a surface",
       };
     case "findings-zero-after-scan":
       return {

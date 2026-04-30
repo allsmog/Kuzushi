@@ -19,7 +19,11 @@ export interface LlmRescoreResult {
 }
 
 export interface RescoreOptions {
-  model?: string;
+  /**
+   * Operator-resolved model. Required — callers must explicitly pick a
+   * model so Kuzushi never silently substitutes a default.
+   */
+  model: string;
   threshold?: number;
   concurrency?: number;
   repoRoot: string;
@@ -61,7 +65,7 @@ export async function rescoreFindings(
   if (findings.length === 0) return [];
 
   const threshold = options.threshold ?? 4;
-  const model = options.model ?? "anthropic:claude-haiku-4-5-20251001";
+  const model = options.model;
 
   // Read file contents once per unique file
   const fileContents = new Map<string, string>();

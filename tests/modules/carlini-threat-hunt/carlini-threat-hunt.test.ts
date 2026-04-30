@@ -351,9 +351,13 @@ describe("carlini-threat-hunt", () => {
       expect(config.kbMaxChunkChars).toBe(1200);
     });
 
-    it("defaults to Opus 4.7 at xhigh effort", async () => {
+    it("falls back to ctx.config.model and xhigh effort by default", async () => {
+      // Pre-policy this returned a hardcoded `anthropic:claude-opus-4-7`
+      // default that silently overrode the operator's `config.model`.
+      // The audit removed that silent substitution — see
+      // `src/modules/carlini-threat-hunt/carlini-threat-hunt.ts:readModel`.
       const config = await runResolve();
-      expect(config.model).toBe("anthropic:claude-opus-4-7");
+      expect(config.model).toBe("anthropic:claude-sonnet-4-6");
       expect(config.effort).toBe("xhigh");
     });
 

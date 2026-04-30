@@ -83,8 +83,20 @@ export interface AgentQueryOptions {
   effort?: AgentEffort;
   /** Disable extended thinking entirely (overrides effort). */
   thinkingDisabled?: boolean;
-  /** Fallback model if primary fails or is unavailable. */
+  /**
+   * Automated-failover model. Forbidden unless the operator has explicitly
+   * consented via `consentToModelFallback: true` on this options object or
+   * the `KUZUSHI_ALLOW_MODEL_FALLBACK=1` env var. Without consent, the
+   * runtime throws `KuzushiSilentFallbackError` before any provider call —
+   * Kuzushi will not silently switch models.
+   */
   fallbackModel?: string;
+  /**
+   * Per-call opt-in to automated model fallback. When `true`, the runtime
+   * will honor `fallbackModel`. Defaults to `false`. The operator can also
+   * opt in globally via `KUZUSHI_ALLOW_MODEL_FALLBACK=1`.
+   */
+  consentToModelFallback?: boolean;
   /** Claude Code plugins to load in the subprocess. */
   plugins?: Array<{ type: "local"; path: string }>;
   canUseTool?: (

@@ -16,7 +16,7 @@ import { ConfigBanner } from "./components/ConfigBanner.js";
 import { ConfigConfirm } from "./components/ConfigConfirm.js";
 import { ConfigEditor } from "./components/ConfigEditor.js";
 import { ContextIntake } from "./components/ContextIntake.js";
-import { CopilotShell } from "./components/CopilotShell.js";
+import { CopilotShell, SAST_TASK_KEYBINDS } from "./components/CopilotShell.js";
 import { CredentialPrompt } from "./components/CredentialPrompt.js";
 import { InteractionErrorBoundary } from "./components/InteractionErrorBoundary.js";
 import { InteractiveReview } from "./components/InteractiveReview.js";
@@ -33,6 +33,7 @@ import { useTerminalSize } from "./hooks/useTerminalSize.js";
 import { shallowEqual, useUISelector } from "./hooks.js";
 import { isAbortInput } from "./interaction-key-policy.js";
 import { deriveNavigation, LayoutProvider, STANDARD_LAYOUT_THEME } from "./layout-context.js";
+import { resolveRunningKey } from "./running-mode-keys.js";
 import { KeybindFooter } from "./primitives/KeybindFooter.js";
 import { SpinnerClockProvider } from "./primitives/SpinnerClock.js";
 import { createReplContext, handleReplCommand } from "./repl.js";
@@ -134,32 +135,37 @@ function AppInner({ store }: AppProps): React.ReactElement {
 
   useInput(
     (input, key) => {
-      if (keyState.costCapHalted) {
-        if (input === "c") {
+      const action = resolveRunningKey(input, key, {
+        costCapHalted: Boolean(keyState.costCapHalted),
+      });
+      switch (action.kind) {
+        case "cost-cap-continue":
           store.update({ costCapHalted: false });
           return;
-        }
-        if (input === "a" || (key.ctrl && input === "c")) {
+        case "cost-cap-abort":
           keyState.shellAbort?.();
           store.update({ costCapHalted: false });
           return;
-        }
-        return;
+        case "abort":
+          // Ctrl+C in running mode aborts the in-flight scan and returns the
+          // operator to the shell prompt. Without this branch Ink's default
+          // exit-on-ctrlC unmounts the tree but the shell-side abort path
+          // never fires, so the scan keeps running in the background and
+          // the prompt looks frozen.
+          keyState.shellAbort?.();
+          return;
+        case "switch-scan-view":
+          store.update({ scanView: action.view });
+          return;
+        case "toggle-heartbeat":
+          store.update({ heartbeatExpanded: !keyState.heartbeatExpanded });
+          return;
+        case "toggle-notice-rail":
+          store.update({ noticeRailExpanded: !keyState.noticeRailExpanded });
+          return;
+        case "none":
+          return;
       }
-      // Ctrl+C in running mode aborts the in-flight scan and returns the
-      // operator to the shell prompt. Without this branch Ink's default
-      // exit-on-ctrlC unmounts the tree but the abort path on the shell
-      // never fires, so the scan keeps running in the background and the
-      // shell prompt looks frozen.
-      if (key.ctrl && input === "c") {
-        keyState.shellAbort?.();
-        return;
-      }
-      if (input === "1") store.update({ scanView: "pipeline" });
-      else if (input === "2") store.update({ scanView: "findings" });
-      else if (input === "3") store.update({ scanView: "cost" });
-      else if (input === "m") store.update({ heartbeatExpanded: !keyState.heartbeatExpanded });
-      else if (input === "n") store.update({ noticeRailExpanded: !keyState.noticeRailExpanded });
     },
     { isActive: keyState.mode === "running" && process.stdin.isTTY === true },
   );
@@ -228,6 +234,8 @@ function AppInner({ store }: AppProps): React.ReactElement {
       routing.configBanner != null ||
       routing.resumeDiff != null);
   const terminalSize = useTerminalSize();
+  const footerBindings =
+    routing.mode === "shell" && routing.shellView === "sast-tasks" ? SAST_TASK_KEYBINDS : undefined;
 
   return (
     <Box
@@ -237,7 +245,7 @@ function AppInner({ store }: AppProps): React.ReactElement {
       overflow="hidden"
     >
       <LayoutProvider value={layoutContext}>
-        <AppLayout footer={<KeybindFooter />}>
+        <AppLayout footer={<KeybindFooter bindings={footerBindings} />}>
           {showGlobalBanner && <Banner />}
           {routing.mode === "shell" && routing.hasShell && <CopilotShell store={store} />}
           {/*

@@ -770,7 +770,6 @@ export const KuzushiConfigSchema = z.object({
     })
     .optional(),
   trajectoryMemory: z.boolean().optional(),
-  startupSound: z.boolean().optional(),
   trajectoryMaxExemplars: z.number().optional(),
   triageStrategy: TriageStrategySchema.optional(),
   triageSpecialistMaxTurns: z.number().nullable().optional(),

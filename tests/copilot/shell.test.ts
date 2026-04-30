@@ -1107,15 +1107,15 @@ describe("local shell commands", () => {
     // `kuzushi/carlini-threat-hunt>` while StatusFooter still said "you are in catalog".
     expect(__shellInternals.reconcileShellView("catalog", "carlini-threat-hunt")).toBe("module");
 
-    // Clearing focus from a module-scoped view (after /back through the stack)
+    // Clearing focus from a module-scoped home (after /back through the stack)
     // must fall back to catalog so we don't leave a dangling module home.
     expect(__shellInternals.reconcileShellView("module", null)).toBe("catalog");
-    expect(__shellInternals.reconcileShellView("findings", null)).toBe("catalog");
-    expect(__shellInternals.reconcileShellView("finding", null)).toBe("catalog");
     expect(__shellInternals.reconcileShellView("tune", null)).toBe("catalog");
 
-    // Threats is an intentionally top-level view that can be entered without
-    // a focused module — don't clobber it.
+    // Unified findings and threats are intentionally top-level views that can
+    // be entered without a focused module — don't clobber them.
+    expect(__shellInternals.reconcileShellView("findings", null)).toBe("findings");
+    expect(__shellInternals.reconcileShellView("finding", null)).toBe("finding");
     expect(__shellInternals.reconcileShellView("threats", null)).toBe("threats");
 
     // And don't demote an already-correct module view.
@@ -1293,6 +1293,43 @@ describe("local shell commands", () => {
     });
   });
 
+  describe("parseSeverityCounts", () => {
+    const parse = __shellInternals.parseSeverityCounts;
+
+    it("returns undefined when metricsJson is null/undefined/empty", () => {
+      expect(parse(null)).toBeUndefined();
+      expect(parse(undefined)).toBeUndefined();
+      expect(parse("")).toBeUndefined();
+    });
+
+    it("returns undefined when JSON is malformed", () => {
+      expect(parse("{not-json")).toBeUndefined();
+    });
+
+    it("returns undefined when severityCounts is missing", () => {
+      expect(parse(JSON.stringify({ otherStuff: 1 }))).toBeUndefined();
+    });
+
+    it("returns the parsed counts when well-formed", () => {
+      const json = JSON.stringify({ severityCounts: { critical: 1, high: 2, medium: 3 } });
+      expect(parse(json)).toEqual({ critical: 1, high: 2, medium: 3 });
+    });
+
+    it("drops non-finite or negative values silently", () => {
+      const json = JSON.stringify({
+        severityCounts: { critical: 1, high: -2, medium: Number.NaN, low: 4 },
+      });
+      // Note: JSON.stringify turns NaN into `null` and negatives are preserved;
+      // both should be filtered out by the parser.
+      expect(parse(json)).toEqual({ critical: 1, low: 4 });
+    });
+
+    it("returns undefined when every entry is filtered out", () => {
+      const json = JSON.stringify({ severityCounts: { high: -1 } });
+      expect(parse(json)).toBeUndefined();
+    });
+  });
+
   it("shows per-module last-run telemetry in /modules output", async () => {
     const { core, module } = await createMockCore();
     const opts = createShellOptions();
@@ -1441,6 +1478,17 @@ describe("local shell commands", () => {
     );
 
     executeTool.mockClear();
+
+    const threatModelBareRun = __shellInternals.handleLocalCommand(
+      "run",
+      core,
+      opts,
+      { focusedModule: "threat-model" },
+      { ...shellState, focusedModule: "threat-model", target: "/resolved/repo" },
+    );
+    expect(threatModelBareRun?.executedToolName).toBe("threat-model:build");
+    expect(threatModelBareRun?.asyncExecute).toBeTypeOf("function");
+
     opts.target = ".";
 
     const incompleteContext = __shellInternals.handleLocalCommand(
@@ -2006,11 +2054,12 @@ describe("context system", () => {
       ctx,
       shellState,
     );
-    expect(result?.output).toContain("Threat model required");
+    expect(result?.output).toContain("Context required");
+    expect(result?.output).toContain("/use threat-model");
     expect(result?.executedToolName).toBeUndefined();
   });
 
-  it("context gating allows carlini-threat-hunt with only a persisted threat model", async () => {
+  it("context gating blocks carlini-threat-hunt with only a persisted threat model", async () => {
     const { core, module } = await createMockCore();
     const repoRoot = mkdtempSync(path.join(os.tmpdir(), "kuzushi-carlini-persisted-tm-"));
     tempDirs.push(repoRoot);
@@ -2029,7 +2078,9 @@ describe("context system", () => {
     const shellState = createShellState(module.tools.map((t) => t.name));
 
     const result = __shellInternals.handleLocalCommand("run .", core, opts, ctx, shellState);
-    expect(result?.executedToolName).toBe("carlini-threat-hunt:run");
+    expect(result?.output).toContain("Context required for carlini-threat-hunt:run");
+    expect(result?.output).toContain("/use context");
+    expect(result?.executedToolName).toBeUndefined();
   });
 
   it("context gating allows carlini-threat-hunt with snapshot", async () => {

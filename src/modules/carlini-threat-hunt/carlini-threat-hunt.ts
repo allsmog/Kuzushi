@@ -178,7 +178,10 @@ function readBooleanOption(
 function readModel(ctx: ExecutionContext, input: Record<string, unknown>): string {
   const explicit = ctx.toolModel ?? readOption<string>(ctx, input, "model", "model");
   if (typeof explicit === "string" && explicit.trim().length > 0) return explicit.trim();
-  return DEFAULT_CARLINI_THREAT_HUNT_MODEL;
+  // Honor the operator's configured model. The DEFAULT_CARLINI_THREAT_HUNT_MODEL
+  // constant remains as the JSON-Schema default on the inline `model` arg
+  // (advisory only) — Kuzushi will not silently override the operator's choice.
+  return ctx.config.model;
 }
 
 function normalizeEffortAlias(value: unknown): AgentEffort | undefined {

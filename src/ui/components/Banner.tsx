@@ -3,8 +3,7 @@
  * Reads pre-generated ANSI-colored logo from assets/ascii/logo-color.txt.
  */
 
-import { spawn } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Box, Static, Text } from "ink";
@@ -23,36 +22,10 @@ function loadLogo(): string[] {
   }
 }
 
-function playStartupSound(): void {
-  try {
-    const soundsDir = path.join(assetsRoot, "sounds");
-    const files = readdirSync(soundsDir).filter((f) => f.endsWith(".wav"));
-    if (files.length === 0) return;
-    const pick = files[Math.floor(Math.random() * files.length)];
-    const filePath = path.join(soundsDir, pick);
-
-    const cmd =
-      process.platform === "darwin" ? "afplay" : process.platform === "linux" ? "aplay" : null;
-    if (!cmd) return;
-
-    const child = spawn(cmd, [filePath], { stdio: "ignore", detached: true });
-    child.unref();
-  } catch {
-    // Best-effort
-  }
-}
-
-let soundPlayed = false;
-
 export const Banner = React.memo(_Banner);
 
 function _Banner(): React.ReactElement {
   const logoLines = loadLogo();
-
-  if (!soundPlayed) {
-    soundPlayed = true;
-    playStartupSound();
-  }
 
   return (
     <Static items={["banner"]}>

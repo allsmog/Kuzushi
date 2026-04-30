@@ -3,8 +3,6 @@ import { resolveStageModel } from "../agents/tasks/runtime-overrides.js";
 import { resolveTaskConfig, TAINT_ANALYSIS_TASK_IDS } from "../capabilities.js";
 import type { KuzushiConfig } from "../types.js";
 
-const DEFAULT_AGENTIC_MODEL = "anthropic:claude-sonnet-4-6";
-
 function requiredEnvVarsForProvider(provider: string): string[] {
   if (provider === "anthropic") {
     return ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"];
@@ -122,7 +120,8 @@ export function resolveActivePiAiModels(
   }
 
   if (enabledTaskSet.has("agentic")) {
-    const model = asModel(resolveTaskConfig(config, "agentic")["model"]) ?? DEFAULT_AGENTIC_MODEL;
+    // Honor the operator's configured model — no silent local default.
+    const model = asModel(resolveTaskConfig(config, "agentic")["model"]) ?? config.model;
     models.add(model);
   }
 

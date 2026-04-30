@@ -162,6 +162,14 @@ export function resolveTaskStoryToggleView(
   return shell.focusedModule ? "module" : "catalog";
 }
 
+function hasAbortableModuleRun(shell: ShellState): boolean {
+  return shell.shellView === "module-run" && shell.moduleRun?.status === "running";
+}
+
+function hasLivePauseResume(shell: ShellState): boolean {
+  return hasAbortableModuleRun(shell) && shell.moduleRun?.liveControl === "pause-resume";
+}
+
 /**
  * Resolve a keystroke into an action, applying the shell's dispatch
  * priority:
@@ -185,7 +193,7 @@ export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
 
   // --- 1. Ctrl+C / Ctrl+D ---------------------------------------------------
   if (isCtrlChord(char, key, "c") || isCtrlChord(char, key, "d")) {
-    if (shell.processing) {
+    if (shell.processing || hasAbortableModuleRun(shell)) {
       return { type: "abort-inflight" };
     }
     const armedAt = state.ctrlCArmedAt ?? 0;
@@ -213,7 +221,7 @@ export function resolveKeybind(inputs: KeybindInputs): KeybindAction {
     }
   }
 
-  if (shell.shellView === "module-run" && shell.processing && input.length === 0) {
+  if (hasLivePauseResume(shell) && input.length === 0) {
     if (char === "p" || char === "P") return { type: "dispatch", command: "/pause" };
     if (char === "r" || char === "R") return { type: "dispatch", command: "/resume" };
   }

@@ -89,7 +89,7 @@ describe("loadConfig", () => {
     writeFileSync(
       TMP_CONFIG_PATH,
       JSON.stringify({
-        model: "custom-model",
+        model: "anthropic:custom-model",
         verify: true,
         verifyMaxTurns: 25,
         verifyConcurrency: 2,
@@ -120,23 +120,23 @@ describe("loadConfig", () => {
         },
         taskConfig: {
           semgrep: { verify: false },
-          triage: { model: "triage-model" },
-          verify: { model: "verify-model" },
-          "poc-harness": { model: "poc-model" },
+          triage: { model: "anthropic:triage-model" },
+          verify: { model: "anthropic:verify-model" },
+          "poc-harness": { model: "anthropic:poc-model" },
         },
       }),
     );
     const config = loadConfig();
-    expect(config.model).toBe("custom-model");
-    expect(config.taskConfig.triage?.model).toBe("triage-model");
+    expect(config.model).toBe("anthropic:custom-model");
+    expect(config.taskConfig.triage?.model).toBe("anthropic:triage-model");
     expect(config.verify).toBe(true);
-    expect(config.taskConfig.verify?.model).toBe("verify-model");
+    expect(config.taskConfig.verify?.model).toBe("anthropic:verify-model");
     expect(config.verifyMaxTurns).toBe(25);
     expect(config.verifyConcurrency).toBe(2);
     expect(config.verifyVerdicts).toEqual(["tp", "needs_review"]);
     expect(config.verifyMinConfidence).toBe(0.7);
     expect(config.pocHarness).toBe(true);
-    expect(config.taskConfig["poc-harness"]?.model).toBe("poc-model");
+    expect(config.taskConfig["poc-harness"]?.model).toBe("anthropic:poc-model");
     expect(config.pocHarnessMaxTurns).toBe(30);
     expect(config.pocHarnessConcurrency).toBe(4);
     expect(config.enableContextGathering).toBe(false);
@@ -160,14 +160,14 @@ describe("loadConfig", () => {
   });
 
   it("applies project-level override when repoRoot is provided", () => {
-    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({ model: "global-model", tasks: ["semgrep"] }));
+    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({ model: "anthropic:global-model", tasks: ["semgrep"] }));
     writeFileSync(
       TMP_PROJECT_CONFIG_PATH,
-      JSON.stringify({ model: "project-model", tasks: ["agentic"] }),
+      JSON.stringify({ model: "anthropic:project-model", tasks: ["agentic"] }),
     );
 
     const config = loadConfig(TMP_REPO);
-    expect(config.model).toBe("project-model");
+    expect(config.model).toBe("anthropic:project-model");
     expect(config.tasks).toEqual(["agentic"]);
   });
 
@@ -213,7 +213,7 @@ describe("loadConfig", () => {
     writeFileSync(
       TMP_PROJECT_CONFIG_PATH,
       JSON.stringify({
-        model: "project-model",
+        model: "anthropic:project-model",
         agentRuntimeConfig: {
           claude: {
             baseUrl: "https://evil.example/",
@@ -231,7 +231,7 @@ describe("loadConfig", () => {
     );
 
     const config = loadConfig(TMP_REPO);
-    expect(config.model).toBe("project-model");
+    expect(config.model).toBe("anthropic:project-model");
     expect(config.agentRuntimeBackend).toBe(DEFAULTS.agentRuntimeBackend);
     expect(config.agentRuntimeConfig).toEqual({
       claude: { apiKey: "global-key" },
@@ -287,17 +287,17 @@ describe("loadConfig", () => {
 
 describe("saveConfig", () => {
   it("writes global config to disk", () => {
-    const config = { ...DEFAULTS, model: "saved-model" };
+    const config = { ...DEFAULTS, model: "anthropic:saved-model" };
     saveConfig(config);
     const raw = JSON.parse(readFileSync(TMP_CONFIG_PATH, "utf-8"));
-    expect(raw.model).toBe("saved-model");
+    expect(raw.model).toBe("anthropic:saved-model");
   });
 
   it("writes project config when repoRoot is provided", () => {
-    const config = { ...DEFAULTS, model: "project-saved" };
+    const config = { ...DEFAULTS, model: "anthropic:project-saved" };
     saveConfig(config, TMP_REPO);
     const raw = JSON.parse(readFileSync(TMP_PROJECT_CONFIG_PATH, "utf-8"));
-    expect(raw.model).toBe("project-saved");
+    expect(raw.model).toBe("anthropic:project-saved");
   });
 
   it("creates config dir if missing", () => {
@@ -309,8 +309,8 @@ describe("saveConfig", () => {
 
 describe("getConfigValue", () => {
   it("returns a specific top-level value", () => {
-    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({ model: "get-test" }));
-    expect(getConfigValue("model")).toBe("get-test");
+    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({ model: "anthropic:get-test" }));
+    expect(getConfigValue("model")).toBe("anthropic:get-test");
   });
 
   it("returns nested taskConfig values", () => {
@@ -328,24 +328,24 @@ describe("getConfigValue", () => {
 
 describe("setConfigValue", () => {
   it("sets a string value", () => {
-    setConfigValue("model", "new-model");
-    expect(getConfigValue("model")).toBe("new-model");
+    setConfigValue("model", "anthropic:new-model");
+    expect(getConfigValue("model")).toBe("anthropic:new-model");
   });
 
   it("sets stage model overrides via taskConfig", () => {
-    setConfigValue("taskConfig.triage.model", "claude-opus-4-20250514");
-    expect(getConfigValue("taskConfig.triage.model")).toBe("claude-opus-4-20250514");
+    setConfigValue("taskConfig.triage.model", "anthropic:claude-opus-4-20250514");
+    expect(getConfigValue("taskConfig.triage.model")).toBe("anthropic:claude-opus-4-20250514");
   });
 
   it("sets verify settings", () => {
     setConfigValue("verify", "true");
-    setConfigValue("taskConfig.verify.model", "claude-haiku-4-5-20251001");
+    setConfigValue("taskConfig.verify.model", "anthropic:claude-haiku-4-5-20251001");
     setConfigValue("verifyMaxTurns", "20");
     setConfigValue("verifyConcurrency", "3");
     setConfigValue("verifyVerdicts", "tp,needs_review");
 
     expect(getConfigValue("verify")).toBe(true);
-    expect(getConfigValue("taskConfig.verify.model")).toBe("claude-haiku-4-5-20251001");
+    expect(getConfigValue("taskConfig.verify.model")).toBe("anthropic:claude-haiku-4-5-20251001");
     expect(getConfigValue("verifyMaxTurns")).toBe(20);
     expect(getConfigValue("verifyConcurrency")).toBe(3);
     expect(getConfigValue("verifyVerdicts")).toEqual(["tp", "needs_review"]);
@@ -353,12 +353,12 @@ describe("setConfigValue", () => {
 
   it("sets poc harness settings", () => {
     setConfigValue("pocHarness", "true");
-    setConfigValue("taskConfig.poc-harness.model", "claude-haiku-4-5-20251001");
+    setConfigValue("taskConfig.poc-harness.model", "anthropic:claude-haiku-4-5-20251001");
     setConfigValue("pocHarnessMaxTurns", "28");
     setConfigValue("pocHarnessConcurrency", "2");
 
     expect(getConfigValue("pocHarness")).toBe(true);
-    expect(getConfigValue("taskConfig.poc-harness.model")).toBe("claude-haiku-4-5-20251001");
+    expect(getConfigValue("taskConfig.poc-harness.model")).toBe("anthropic:claude-haiku-4-5-20251001");
     expect(getConfigValue("pocHarnessMaxTurns")).toBe(28);
     expect(getConfigValue("pocHarnessConcurrency")).toBe(2);
   });
@@ -427,8 +427,8 @@ describe("setConfigValue", () => {
   it("sets agentRuntimeBackend", () => {
     setConfigValue("agentRuntimeBackend", "pi-ai");
     expect(getConfigValue("agentRuntimeBackend")).toBe("pi-ai");
-    setConfigValue("agentRuntimeBackend", "codex");
-    expect(getConfigValue("agentRuntimeBackend")).toBe("codex");
+    setConfigValue("agentRuntimeBackend", "claude");
+    expect(getConfigValue("agentRuntimeBackend")).toBe("claude");
   });
 
   it("sets agentRuntimeConfig as an object", () => {
@@ -484,7 +484,7 @@ describe("setConfigValue", () => {
     writeFileSync(
       TMP_CONFIG_PATH,
       JSON.stringify({
-        model: "global-model",
+        model: "anthropic:global-model",
         verify: true,
         verifyMaxTurns: 25,
       }),
@@ -493,7 +493,7 @@ describe("setConfigValue", () => {
     setConfigValue("scanMode", "concurrent", TMP_REPO);
 
     expect(loadConfig(TMP_REPO)).toMatchObject({
-      model: "global-model",
+      model: "anthropic:global-model",
       verify: true,
       verifyMaxTurns: 25,
       scanMode: "concurrent",
@@ -587,29 +587,29 @@ describe("setConfigValue", () => {
 
 describe("unsetConfigValue", () => {
   it("resets a key to its default", () => {
-    setConfigValue("model", "custom");
-    expect(getConfigValue("model")).toBe("custom");
+    setConfigValue("model", "anthropic:custom");
+    expect(getConfigValue("model")).toBe("anthropic:custom");
     unsetConfigValue("model");
     expect(getConfigValue("model")).toBe(DEFAULTS.model);
   });
 
   it("unsets stage model via taskConfig", () => {
-    setConfigValue("taskConfig.triage.model", "claude-opus-4-20250514");
-    expect(getConfigValue("taskConfig.triage.model")).toBe("claude-opus-4-20250514");
+    setConfigValue("taskConfig.triage.model", "anthropic:claude-opus-4-20250514");
+    expect(getConfigValue("taskConfig.triage.model")).toBe("anthropic:claude-opus-4-20250514");
     unsetConfigValue("taskConfig.triage.model");
     expect(getConfigValue("taskConfig.triage.model")).toBeUndefined();
   });
 
   it("unsets verify model via taskConfig", () => {
-    setConfigValue("taskConfig.verify.model", "claude-haiku-4-5-20251001");
-    expect(getConfigValue("taskConfig.verify.model")).toBe("claude-haiku-4-5-20251001");
+    setConfigValue("taskConfig.verify.model", "anthropic:claude-haiku-4-5-20251001");
+    expect(getConfigValue("taskConfig.verify.model")).toBe("anthropic:claude-haiku-4-5-20251001");
     unsetConfigValue("taskConfig.verify.model");
     expect(getConfigValue("taskConfig.verify.model")).toBeUndefined();
   });
 
   it("unsets poc-harness model via taskConfig", () => {
-    setConfigValue("taskConfig.poc-harness.model", "claude-haiku-4-5-20251001");
-    expect(getConfigValue("taskConfig.poc-harness.model")).toBe("claude-haiku-4-5-20251001");
+    setConfigValue("taskConfig.poc-harness.model", "anthropic:claude-haiku-4-5-20251001");
+    expect(getConfigValue("taskConfig.poc-harness.model")).toBe("anthropic:claude-haiku-4-5-20251001");
     unsetConfigValue("taskConfig.poc-harness.model");
     expect(getConfigValue("taskConfig.poc-harness.model")).toBeUndefined();
   });
@@ -697,14 +697,14 @@ describe("unsetConfigValue", () => {
     writeFileSync(
       TMP_CONFIG_PATH,
       JSON.stringify({
-        model: "global-model",
+        model: "anthropic:global-model",
         verify: true,
       }),
     );
     writeFileSync(
       TMP_PROJECT_CONFIG_PATH,
       JSON.stringify({
-        model: "project-model",
+        model: "anthropic:project-model",
         scanMode: "concurrent",
       }),
     );
@@ -712,7 +712,7 @@ describe("unsetConfigValue", () => {
     unsetConfigValue("model", TMP_REPO);
 
     expect(loadConfig(TMP_REPO)).toMatchObject({
-      model: "global-model",
+      model: "anthropic:global-model",
       verify: true,
       scanMode: "concurrent",
     });

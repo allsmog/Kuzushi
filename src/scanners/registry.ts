@@ -71,7 +71,7 @@ export class ScannerRegistry {
 
     for (const id of enabled) {
       const plugin = this.get(id);
-      const pluginConfig = resolvePluginConfig(config.taskConfig, id);
+      const pluginConfig = resolvePluginConfig(config, id);
 
       if (plugin.init) {
         await plugin.init(pluginConfig);
@@ -85,10 +85,19 @@ export class ScannerRegistry {
   }
 }
 
-function resolvePluginConfig(allConfig: Record<string, TaskConfig>, scannerId: TaskId): TaskConfig {
-  const cfg = allConfig[scannerId];
-  if (!isRecord(cfg)) return {};
-  return cfg;
+/**
+ * Resolve a scanner plugin's per-task config, falling back the `model` field
+ * to the operator's global `config.model`. The fallback is what lets a plugin
+ * honor the operator's choice without having to silently hardcode a default
+ * inside its own `init()`.
+ */
+function resolvePluginConfig(config: KuzushiConfig, scannerId: TaskId): TaskConfig {
+  const cfg = config.taskConfig[scannerId];
+  const taskCfg = isRecord(cfg) ? cfg : {};
+  if (typeof taskCfg["model"] === "string" && taskCfg["model"].trim() !== "") {
+    return taskCfg;
+  }
+  return { ...taskCfg, model: config.model };
 }
 
 function dedupeFindings(findings: Finding[], maxFindings?: number): Finding[] {
