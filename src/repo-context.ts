@@ -218,10 +218,10 @@ export function coerceFileIndex(value: unknown): FileIndex | undefined {
   }
   if (!isRecord(value)) return undefined;
   if ("fileIndex" in value && isRecord(value["fileIndex"])) {
-    return value["fileIndex"] as unknown as FileIndex;
+    return value["fileIndex"] as FileIndex;
   }
   if ("tree" in value && Array.isArray(value["tree"])) {
-    return value as unknown as FileIndex;
+    return value as FileIndex;
   }
   return undefined;
 }
