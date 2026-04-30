@@ -189,6 +189,27 @@ describe("CodexAgentRuntime", () => {
     });
   });
 
+  it("maps disabled thinking to low Codex effort", async () => {
+    codexMock.state.eventBatches.push([
+      {
+        type: "item.completed",
+        item: { id: "msg-1", type: "agent_message", text: "done" },
+      },
+    ]);
+
+    const runtime = new CodexAgentRuntime();
+    await collect(
+      runtime.query({
+        prompt: "fast",
+        options: baseOptions({ thinkingDisabled: true }),
+      }),
+    );
+
+    expect(codexMock.state.startThreadOptions[0]).toMatchObject({
+      modelReasoningEffort: "low",
+    });
+  });
+
   it("surfaces command activity as tool messages", async () => {
     codexMock.state.eventBatches.push([
       {

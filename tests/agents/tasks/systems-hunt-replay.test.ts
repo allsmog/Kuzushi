@@ -41,6 +41,13 @@ const CASES: ReplayCase[] = [
   { fixture: "rpc-stack-negative", shouldFind: false },
   { fixture: "rust-guest-positive", shouldFind: true, expectedPrimitive: "out-of-bounds write" },
   { fixture: "rust-guest-negative", shouldFind: false },
+  {
+    fixture: "resource-provenance-positive",
+    shouldFind: true,
+    expectedPrimitive: "page-cache-backed write",
+  },
+  { fixture: "resource-provenance-negative-copy", shouldFind: false },
+  { fixture: "resource-provenance-negative-validated", shouldFind: false },
 ];
 
 describe("systems-hunt replay fixtures", () => {
@@ -316,16 +323,24 @@ function parseTriggerIds(prompt: string): string[] {
   return [...prompt.matchAll(/\[([^\]]+)\]\s+Steps:/g)].map((match) => match[1]!.trim());
 }
 
-function classifyFixture(
-  filePath: string,
-): "protocol-wraparound" | "sentinel-slice" | "rpc-stack" | "rust-guest" {
+type ReplayFixtureKind =
+  | "protocol-wraparound"
+  | "sentinel-slice"
+  | "rpc-stack"
+  | "rust-guest"
+  | "resource-provenance";
+
+function classifyFixture(filePath: string): ReplayFixtureKind {
+  if (/algif|resource_provenance|resource-provenance/i.test(filePath)) {
+    return "resource-provenance";
+  }
   if (/tcp_sack/i.test(filePath)) return "protocol-wraparound";
   if (/h264_slice/i.test(filePath)) return "sentinel-slice";
   if (/rpcsec_gss/i.test(filePath)) return "rpc-stack";
   return "rust-guest";
 }
 
-function invariantKindFor(kind: ReturnType<typeof classifyFixture>): string {
+function invariantKindFor(kind: ReplayFixtureKind): string {
   switch (kind) {
     case "protocol-wraparound":
       return "packet-ordering";
@@ -335,10 +350,12 @@ function invariantKindFor(kind: ReturnType<typeof classifyFixture>): string {
       return "length-buffer-coupling";
     case "rust-guest":
       return "unsafe-precondition";
+    case "resource-provenance":
+      return "resource-provenance";
   }
 }
 
-function invariantSummaryFor(kind: ReturnType<typeof classifyFixture>): string {
+function invariantSummaryFor(kind: ReplayFixtureKind): string {
   switch (kind) {
     case "protocol-wraparound":
       return "SACK state must remain initialized across crafted option ordering";
@@ -348,10 +365,12 @@ function invariantSummaryFor(kind: ReturnType<typeof classifyFixture>): string {
       return "stack buffer capacity must dominate RPC token length";
     case "rust-guest":
       return "guest_len must be validated before entering unsafe slice construction";
+    case "resource-provenance":
+      return "shared backing page must not become writable scratch output";
   }
 }
 
-function invariantStatementFor(kind: ReturnType<typeof classifyFixture>): string {
+function invariantStatementFor(kind: ReplayFixtureKind): string {
   switch (kind) {
     case "protocol-wraparound":
       return "state != NULL before SACK option dereference";
@@ -361,10 +380,12 @@ function invariantStatementFor(kind: ReturnType<typeof classifyFixture>): string
       return "len <= sizeof(stack_buf)";
     case "rust-guest":
       return "guest_len <= mapped region length";
+    case "resource-provenance":
+      return "shared/page-cache-backed source must be copied or isolated before writable in-place crypto output";
   }
 }
 
-function attackerFieldsFor(kind: ReturnType<typeof classifyFixture>): string[] {
+function attackerFieldsFor(kind: ReplayFixtureKind): string[] {
   switch (kind) {
     case "protocol-wraparound":
       return ["seq", "ack", "len"];
@@ -374,10 +395,12 @@ function attackerFieldsFor(kind: ReturnType<typeof classifyFixture>): string[] {
       return ["len", "token"];
     case "rust-guest":
       return ["guest_len"];
+    case "resource-provenance":
+      return ["src", "dst", "page", "assoclen", "cryptlen", "authsize"];
   }
 }
 
-function triggerStepsFor(kind: ReturnType<typeof classifyFixture>): string[] {
+function triggerStepsFor(kind: ReplayFixtureKind): string[] {
   switch (kind) {
     case "protocol-wraparound":
       return ["Send initial packet", "Send crafted SACK option"];
@@ -387,10 +410,17 @@ function triggerStepsFor(kind: ReturnType<typeof classifyFixture>): string[] {
       return ["Start RPC auth exchange", "Send oversized token"];
     case "rust-guest":
       return ["Map guest memory", "Provide oversized descriptor"];
+    case "resource-provenance":
+      return [
+        "Import page-cache page through zero-copy path",
+        "Alias source and destination scatterlists",
+        "Run in-place authenticated transform",
+        "Fail validation after scratch write",
+      ];
   }
 }
 
-function statePreconditionsFor(kind: ReturnType<typeof classifyFixture>): string[] {
+function statePreconditionsFor(kind: ReplayFixtureKind): string[] {
   switch (kind) {
     case "protocol-wraparound":
       return ["connection state allocated but stale"];
@@ -400,10 +430,12 @@ function statePreconditionsFor(kind: ReturnType<typeof classifyFixture>): string
       return ["auth token copied before cap check"];
     case "rust-guest":
       return ["descriptor accepted before guest_len validation"];
+    case "resource-provenance":
+      return ["shared backing page is chained into writable output before validation"];
   }
 }
 
-function boundaryAssignmentsFor(kind: ReturnType<typeof classifyFixture>): Record<string, string> {
+function boundaryAssignmentsFor(kind: ReplayFixtureKind): Record<string, string> {
   switch (kind) {
     case "protocol-wraparound":
       return { ack: "0xffff", seq: "-1 wrapped against unsigned ack" };
@@ -413,10 +445,12 @@ function boundaryAssignmentsFor(kind: ReturnType<typeof classifyFixture>): Recor
       return { len: "64 > stack_buf[32]" };
     case "rust-guest":
       return { guest_len: "0xffff" };
+    case "resource-provenance":
+      return { authsize: "4-byte tag scratch", dst: "aliases source scatterlist" };
   }
 }
 
-function primitiveFor(kind: ReturnType<typeof classifyFixture>): string {
+function primitiveFor(kind: ReplayFixtureKind): string {
   switch (kind) {
     case "protocol-wraparound":
       return "null pointer dereference";
@@ -426,10 +460,12 @@ function primitiveFor(kind: ReturnType<typeof classifyFixture>): string {
       return "stack buffer overflow";
     case "rust-guest":
       return "out-of-bounds write";
+    case "resource-provenance":
+      return "page-cache-backed write";
   }
 }
 
-function cweFor(kind: ReturnType<typeof classifyFixture>): string {
+function cweFor(kind: ReplayFixtureKind): string {
   switch (kind) {
     case "protocol-wraparound":
       return "CWE-476";
@@ -439,10 +475,12 @@ function cweFor(kind: ReturnType<typeof classifyFixture>): string {
       return "CWE-121";
     case "rust-guest":
       return "CWE-787";
+    case "resource-provenance":
+      return "CWE-668";
   }
 }
 
-function titleFor(kind: ReturnType<typeof classifyFixture>): string {
+function titleFor(kind: ReplayFixtureKind): string {
   switch (kind) {
     case "protocol-wraparound":
       return "Crafted SACK ordering reaches null state dereference";
@@ -452,10 +490,12 @@ function titleFor(kind: ReturnType<typeof classifyFixture>): string {
       return "RPC auth token length overruns stack buffer";
     case "rust-guest":
       return "Guest length corrupts host memory through unsafe slice";
+    case "resource-provenance":
+      return "Zero-copy AF_ALG alias writes scratch data into shared backing page";
   }
 }
 
-function messageFor(kind: ReturnType<typeof classifyFixture>): string {
+function messageFor(kind: ReplayFixtureKind): string {
   switch (kind) {
     case "protocol-wraparound":
       return "Semantic packet ordering reaches a null state dereference in SACK handling";
@@ -465,10 +505,12 @@ function messageFor(kind: ReturnType<typeof classifyFixture>): string {
       return "RPC token length reaches memcpy into a fixed-size stack buffer";
     case "rust-guest":
       return "Unchecked guest_len reaches unsafe slice construction and host memory write";
+    case "resource-provenance":
+      return "Shared page-cache source aliases writable AF_ALG output and is mutated before auth failure";
   }
 }
 
-function lensesFor(kind: ReturnType<typeof classifyFixture>): string[] {
+function lensesFor(kind: ReplayFixtureKind): string[] {
   switch (kind) {
     case "protocol-wraparound":
       return ["protocol-state", "arithmetic-sentinel"];
@@ -478,6 +520,8 @@ function lensesFor(kind: ReturnType<typeof classifyFixture>): string[] {
       return ["protocol-state", "buffer-unsafe"];
     case "rust-guest":
       return ["buffer-unsafe", "arithmetic-sentinel"];
+    case "resource-provenance":
+      return ["resource-provenance", "buffer-unsafe"];
   }
 }
 
@@ -517,6 +561,22 @@ function guardLocationForPrompt(prompt: string): {
       line: 3,
       role: "length-cap",
       snippet: "if (len > sizeof(stack_buf)) { return -1; }",
+    };
+  }
+  if (/algif_aead_copy/.test(prompt)) {
+    return {
+      filePath: location.filePath,
+      line: 19,
+      role: "private-copy",
+      snippet: "req->dst = &private_dst;",
+    };
+  }
+  if (/algif_aead_validated/.test(prompt)) {
+    return {
+      filePath: location.filePath,
+      line: 19,
+      role: "alias-guard",
+      snippet: "if (req->src == req->dst) { return -22; }",
     };
   }
   return {

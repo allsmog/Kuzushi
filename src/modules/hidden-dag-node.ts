@@ -30,7 +30,13 @@ export function defineHiddenDagNodeTool<Id extends string>(
     dag: {
       outputKind: node.outputKind,
       dependsOn: node.dependsOn.map(canonicalDagId),
-      ...(node.condition ? { condition: node.condition } : {}),
+      ...(node.condition
+        ? {
+            condition(upstream, config) {
+              return node.condition?.(withBareOutputKeys(upstream), config) ?? true;
+            },
+          }
+        : {}),
       ...(node.promptMode ? { promptMode: node.promptMode } : {}),
       ...(node.toolPolicy ? { toolPolicy: node.toolPolicy } : {}),
       ...(node.triageAgentConfig ? { triageAgentConfig: node.triageAgentConfig } : {}),

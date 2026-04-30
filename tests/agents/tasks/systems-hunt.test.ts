@@ -95,6 +95,45 @@ describe("systems-hunt", () => {
     expect(prompt).toContain("from_raw_parts");
   });
 
+  it("builds resource provenance lens prompts with profile hints", () => {
+    const prompt = buildLensPrompt(
+      makeSurface({
+        filePath: "src/crypto/algif_aead.c",
+        startLine: 120,
+        displayName: "resource-provenance in src/crypto/algif_aead.c",
+        kind: "resource-provenance",
+        domains: ["resource-provenance", "unsafe-memory"],
+        reasons: ["zero-copy or shared-resource provenance path"],
+        attackerControlledFields: ["src", "dst", "authsize"],
+        evidence: [
+          {
+            domain: "resource-provenance",
+            lineNumber: 120,
+            lineContent: "req->src = req->dst; scatterwalk_map_and_copy(tag, req->dst, off, authsize, 1);",
+            reason: "Shared-resource provenance or writable aliasing signal",
+          },
+        ],
+      }),
+      undefined,
+      [],
+      [],
+      "resource-provenance",
+      makeConfig(),
+      undefined,
+      [
+        "## Domain-Specific Security Categories",
+        "### Xint-style zero-copy scope",
+        "- Prioritize AF_ALG splice/page-cache aliasing boundaries.",
+      ],
+    );
+
+    expect(prompt).toContain("resource provenance and writable alias reasoning");
+    expect(prompt).toContain("resource origin");
+    expect(prompt).toContain("ownership boundary");
+    expect(prompt).toContain("failure-side-effect evidence");
+    expect(prompt).toContain("Xint-style zero-copy scope");
+  });
+
   it("parses and merges lens outputs by location and cwe", () => {
     const protocolFindings = parseLensOutput(
       "protocol-state",
@@ -296,6 +335,10 @@ describe("systems-hunt", () => {
         unsafeSites: [
           { filePath: "src/vmm/guest_mem.rs", line: 88, snippet: "from_raw_parts(ptr, guest_len)" },
         ],
+        resourceProvenanceSites: [],
+        aliasingSites: [],
+        scratchWriteSites: [],
+        failureSideEffectSites: [],
         inputSites: [
           { filePath: "src/vmm/dispatch.rs", line: 22, snippet: "descriptor.guest_len" },
         ],
@@ -323,11 +366,18 @@ describe("systems-hunt", () => {
       ],
       makeConfig(),
       "/tmp/repo/.kuzushi/codeql-db",
+      [
+        "## Domain-Specific Security Categories",
+        "### Resource provenance",
+        "- Confirm failures roll back shared backing mutations.",
+      ],
     );
 
     expect(prompt).toContain("counterexample/corroboration pass");
     expect(prompt).toContain("Map guest memory -> Provide oversized descriptor");
     expect(prompt).toContain("Related files: src/vmm/guest_mem.rs, src/vmm/dispatch.rs");
     expect(prompt).toContain("Optional CodeQL database");
+    expect(prompt).toContain("failures that roll back or discard mutations");
+    expect(prompt).toContain("Resource provenance");
   });
 });

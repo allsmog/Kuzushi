@@ -122,6 +122,25 @@ describe("selectTasks", () => {
     expect(result.recommendedTasks).toContain("systems-hunt:systems-hunt");
   });
 
+  it("recommends systems-hunt when resource provenance signals are present", () => {
+    const result = selectTasks(
+      makeContext({ languages: [] }),
+      makeFileIndex({
+        patternMatches: {
+          "resource-provenance": [
+            {
+              pattern: "splice",
+              filePath: "src/crypto/algif_aead.c",
+              lineNumber: 12,
+              lineContent: "req->src = req->dst; scatterwalk_map_and_copy(tag, req->dst, off, authsize, 1);",
+            },
+          ],
+        },
+      }),
+    );
+    expect(result.recommendedTasks).toContain("systems-hunt:systems-hunt");
+  });
+
   it("provides reasoning for each recommended task", () => {
     const ctx = makeContext({ languages: ["Go"] });
     const result = selectTasks(ctx);

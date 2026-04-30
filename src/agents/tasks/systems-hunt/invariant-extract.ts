@@ -4,7 +4,7 @@ import type { ScanOpts } from "../../../types.js";
 import { isRecord, toErrorMessage } from "../../../utils.js";
 import type { DagNodeImpl } from "../../types.js";
 import { resolveTaskAllowedTools } from "../runtime-overrides.js";
-import { formatSystemsSurfacePack } from "./helpers.js";
+import { formatSystemsHuntProfileLines, formatSystemsSurfacePack } from "./helpers.js";
 import type {
   RankedSystemsSurface,
   SystemsContextOutput,
@@ -34,6 +34,8 @@ const INVARIANT_SCHEMA = {
           "summary",
           "statement",
           "rationale",
+          "evidence",
+          "attackerControlledFields",
           "cheapVerifiable",
         ],
         properties: {
@@ -47,6 +49,9 @@ const INVARIANT_SCHEMA = {
               "sentinel-boundary",
               "counter-upper-bound",
               "length-buffer-coupling",
+              "resource-provenance",
+              "aliasing-boundary",
+              "failure-side-effect",
               "unsafe-precondition",
             ],
           },
@@ -86,7 +91,11 @@ export const systemsInvariantExtractTask: DagNodeImpl<ScanOpts, SystemsInvariant
       return attachTaskOutputMeta({ invariants: [] }, { costUsd: 0 });
     }
 
-    const prompt = buildInvariantPrompt(surfaces, packs);
+    const prompt = buildInvariantPrompt(
+      surfaces,
+      packs,
+      formatSystemsHuntProfileLines(context.securityProfiles),
+    );
     let structuredOutput: unknown;
     let costUsd = 0;
 
@@ -96,6 +105,8 @@ export const systemsInvariantExtractTask: DagNodeImpl<ScanOpts, SystemsInvariant
         options: {
           cwd: context.repoRoot,
           model: config.model,
+          effort: config.effort,
+          thinkingDisabled: config.thinkingDisabled,
           allowedTools: resolveTaskAllowedTools(context),
           permissionMode: "dontAsk",
           outputFormat: {
@@ -127,6 +138,7 @@ export const systemsInvariantExtractTask: DagNodeImpl<ScanOpts, SystemsInvariant
 export function buildInvariantPrompt(
   surfaces: RankedSystemsSurface[],
   packs: SystemsSurfacePack[] = [],
+  profileLines: string[] = [],
 ): string {
   const packBySurfaceId = new Map(packs.map((pack) => [pack.surfaceId, pack]));
   const surfaceLines = surfaces.flatMap((surface, index) => [
@@ -156,6 +168,10 @@ export function buildInvariantPrompt(
         sentinelConstants: [],
         allocationCopySites: [],
         unsafeSites: [],
+        resourceProvenanceSites: [],
+        aliasingSites: [],
+        scratchWriteSites: [],
+        failureSideEffectSites: [],
         inputSites: [],
         hardeningSites: [],
         helperTemplates: [],
@@ -174,7 +190,13 @@ export function buildInvariantPrompt(
     "- sentinel-boundary: reserved sentinel values that must not collide with normal counters",
     "- counter-upper-bound: numeric bounds before indexing, allocation, or comparison",
     "- length-buffer-coupling: buffer size or stack/heap capacity must dominate copy length",
+    "- resource-provenance: resource origin and backing-store identity must be preserved across zero-copy transfers",
+    "- aliasing-boundary: writable aliases must not cross from caller-owned output into shared/read-only backing resources",
+    "- failure-side-effect: validation or authentication failure paths must not preserve earlier mutations",
     "- unsafe-precondition: caller obligations before entering unsafe or raw-pointer code",
+    "",
+    ...(profileLines.length > 0 ? [...profileLines, ""] : []),
+    "For resource-provenance surfaces, explicitly identify the resource origin, ownership boundary, aliasing transition, and whether failure paths leave mutations behind.",
     "",
     "Mark `cheapVerifiable=true` only when a single-turn bounded confirmation would likely be enough.",
     "Examples: a deterministic sentinel collision or a direct unsafe slice-length mismatch.",
@@ -218,6 +240,9 @@ function normalizeInvariantKind(value: unknown): SystemsInvariantKind | undefine
     case "sentinel-boundary":
     case "counter-upper-bound":
     case "length-buffer-coupling":
+    case "resource-provenance":
+    case "aliasing-boundary":
+    case "failure-side-effect":
     case "unsafe-precondition":
       return value;
     default:

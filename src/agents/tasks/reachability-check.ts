@@ -16,7 +16,7 @@ const REACHABILITY_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["fingerprint", "reachable", "reason"],
+        required: ["fingerprint", "reachable", "reason", "entryPoints"],
         properties: {
           fingerprint: { type: "string" },
           reachable: { type: "string", enum: ["true", "false", "unknown"] },
