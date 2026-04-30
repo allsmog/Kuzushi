@@ -24,8 +24,17 @@ describe("ModelFallbackManager", () => {
     expect(manager.selectModel(chain)).toBe("primary");
   });
 
-  it("falls back after 3 consecutive auth failures", () => {
+  it("does not fallback after failures unless the operator consented", () => {
     const chain = ModelFallbackManager.buildChain("primary", ["fallback1"]);
+    manager.recordFailure("primary", "auth");
+    manager.recordFailure("primary", "auth");
+    manager.recordFailure("primary", "auth");
+    expect(manager.selectModel(chain)).toBe("primary");
+    expect(onFallback).not.toHaveBeenCalled();
+  });
+
+  it("falls back after 3 consecutive auth failures when explicitly consented", () => {
+    const chain = ModelFallbackManager.buildChain("primary", ["fallback1"], undefined, true);
     manager.recordFailure("primary", "auth");
     manager.recordFailure("primary", "auth");
     manager.recordFailure("primary", "auth");
@@ -33,8 +42,8 @@ describe("ModelFallbackManager", () => {
     expect(onFallback).toHaveBeenCalledWith("primary", "fallback1");
   });
 
-  it("falls back on budget errors", () => {
-    const chain = ModelFallbackManager.buildChain("primary", ["fallback1"]);
+  it("falls back on budget errors when explicitly consented", () => {
+    const chain = ModelFallbackManager.buildChain("primary", ["fallback1"], undefined, true);
     manager.recordFailure("primary", "budget");
     manager.recordFailure("primary", "budget");
     manager.recordFailure("primary", "budget");
@@ -42,7 +51,7 @@ describe("ModelFallbackManager", () => {
   });
 
   it("recovers after cooldown expires", () => {
-    const chain = ModelFallbackManager.buildChain("primary", ["fallback1"], 10); // 10ms cooldown
+    const chain = ModelFallbackManager.buildChain("primary", ["fallback1"], 10, true); // 10ms cooldown
     manager.recordFailure("primary", "auth");
     manager.recordFailure("primary", "auth");
     manager.recordFailure("primary", "auth");
@@ -67,14 +76,19 @@ describe("ModelFallbackManager", () => {
   });
 
   it("falls through chain when all fallbacks are in cooldown", () => {
-    const chain = ModelFallbackManager.buildChain("primary", ["fallback1", "fallback2"]);
+    const chain = ModelFallbackManager.buildChain(
+      "primary",
+      ["fallback1", "fallback2"],
+      undefined,
+      true,
+    );
     for (let i = 0; i < 3; i++) manager.recordFailure("primary", "auth");
     for (let i = 0; i < 3; i++) manager.recordFailure("fallback1", "auth");
     expect(manager.selectModel(chain)).toBe("fallback2");
   });
 
   it("returns primary as last resort when all models in cooldown", () => {
-    const chain = ModelFallbackManager.buildChain("primary", ["fallback1"]);
+    const chain = ModelFallbackManager.buildChain("primary", ["fallback1"], undefined, true);
     for (let i = 0; i < 3; i++) manager.recordFailure("primary", "auth");
     for (let i = 0; i < 3; i++) manager.recordFailure("fallback1", "auth");
     expect(manager.selectModel(chain)).toBe("primary");
@@ -85,5 +99,6 @@ describe("ModelFallbackManager", () => {
     expect(chain.primary).toBe("model-a");
     expect(chain.fallbacks).toEqual([]);
     expect(chain.cooldownMs).toBe(60_000);
+    expect(chain.operatorConsented).toBe(false);
   });
 });

@@ -1,4 +1,5 @@
 import type { AgentRuntimeBackend } from "../contracts.js";
+import { AGENT_RUNTIME_BACKENDS } from "../contracts.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
 
 export function validateModelOverride(
@@ -59,4 +60,42 @@ export function describeModelOverrideFormat(backend: AgentRuntimeBackend | undef
     return "Model override for this session. Codex accepts bare OpenAI model ids, openai:<model>, or codex:<model>.";
   }
   return "Model override for this session. pi-ai expects provider:<model>.";
+}
+
+export function validateRuntimeModel(runtimeId: string, model: string): string | null {
+  if (!isKnownAgentRuntimeBackend(runtimeId)) return null;
+  return validateModelOverride(runtimeId, model);
+}
+
+export function assertRuntimeModelCompatible(runtimeId: string, model: string): void {
+  const error = validateRuntimeModel(runtimeId, model);
+  if (!error) return;
+  throw new Error(
+    [
+      `Model "${model}" is not compatible with agent runtime "${runtimeId}".`,
+      error,
+      "Choose a compatible model explicitly with /model, /provider, --model, or config set model.",
+      "Kuzushi will not silently switch models or providers.",
+    ].join(" "),
+  );
+}
+
+export function assertRuntimeModelSelection(
+  runtimeId: string,
+  model: string,
+  fallbackModel?: string,
+): void {
+  assertRuntimeModelCompatible(runtimeId, model);
+  if (!fallbackModel || fallbackModel.trim().length === 0) return;
+  throw new Error(
+    [
+      `Fallback model "${fallbackModel}" was provided for agent runtime "${runtimeId}".`,
+      "Automatic model fallback is disabled because Kuzushi must not switch models without operator consent.",
+      "Choose the intended model explicitly with /model, /provider, --model, or config set model.",
+    ].join(" "),
+  );
+}
+
+function isKnownAgentRuntimeBackend(value: string): value is AgentRuntimeBackend {
+  return (AGENT_RUNTIME_BACKENDS as readonly string[]).includes(value);
 }

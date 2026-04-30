@@ -71,4 +71,107 @@ describe("LoggingAgentRuntime decorator", () => {
     });
     expect(result).toBe(expected);
   });
+
+  it("rejects incompatible models at the shared query boundary", async () => {
+    const inner: AgentRuntime = {
+      id: "codex",
+      async *query(): AsyncIterable<AgentMessage> {
+        yield {
+          type: "result",
+          subtype: "success",
+          result: "should not run",
+          totalCostUsd: 0,
+        };
+      },
+    };
+    const logged = new LoggingAgentRuntime(inner);
+
+    await expect(async () => {
+      for await (const _ of logged.query({
+        prompt: "hello",
+        options: {
+          cwd: "/tmp",
+          model: "anthropic:claude-sonnet-4-6",
+        },
+      })) {
+        // no-op
+      }
+    }).rejects.toThrow(/will not silently switch models/u);
+  });
+
+  it("rejects incompatible models before creating sessions or batches", async () => {
+    const inner: AgentRuntime = {
+      id: "claude",
+      async *query(): AsyncIterable<AgentMessage> {},
+      createSession() {
+        throw new Error("should not create session");
+      },
+      async queryBatch() {
+        throw new Error("should not run batch");
+      },
+    };
+    const logged = new LoggingAgentRuntime(inner);
+
+    expect(() =>
+      logged.createSession?.({
+        cwd: "/tmp",
+        model: "openai:gpt-5.4-mini",
+      }),
+    ).toThrow(/will not silently switch models/u);
+    expect(() =>
+      logged.queryBatch?.([{ id: "1", prompt: "hello" }], {
+        cwd: "/tmp",
+        model: "openai:gpt-5.4-mini",
+      }),
+    ).toThrow(/will not silently switch models/u);
+  });
+
+  it("rejects explicit fallbackModel before any runtime call", async () => {
+    const inner: AgentRuntime = {
+      id: "claude",
+      async *query(): AsyncIterable<AgentMessage> {
+        yield {
+          type: "result",
+          subtype: "success",
+          result: "should not run",
+          totalCostUsd: 0,
+        };
+      },
+      createSession() {
+        throw new Error("should not create session");
+      },
+      async queryBatch() {
+        throw new Error("should not run batch");
+      },
+    };
+    const logged = new LoggingAgentRuntime(inner);
+    const message = /Automatic model fallback is disabled/u;
+
+    await expect(async () => {
+      for await (const _ of logged.query({
+        prompt: "hello",
+        options: {
+          cwd: "/tmp",
+          model: "anthropic:claude-sonnet-4-6",
+          fallbackModel: "anthropic:claude-haiku-4-5",
+        },
+      })) {
+        // no-op
+      }
+    }).rejects.toThrow(message);
+    expect(() =>
+      logged.createSession?.({
+        cwd: "/tmp",
+        model: "anthropic:claude-sonnet-4-6",
+        fallbackModel: "anthropic:claude-haiku-4-5",
+      }),
+    ).toThrow(message);
+    expect(() =>
+      logged.queryBatch?.([{ id: "1", prompt: "hello" }], {
+        cwd: "/tmp",
+        model: "anthropic:claude-sonnet-4-6",
+        fallbackModel: "anthropic:claude-haiku-4-5",
+      }),
+    ).toThrow(message);
+  });
 });

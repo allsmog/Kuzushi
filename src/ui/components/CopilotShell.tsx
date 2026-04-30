@@ -225,8 +225,14 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
   if (!shell) return <Text>Loading...</Text>;
 
   return (
-    <Box flexDirection="column" flexGrow={1} justifyContent="space-between">
-      <Box flexDirection="column">
+    <Box
+      flexDirection="column"
+      flexGrow={1}
+      height="100%"
+      overflow="hidden"
+      justifyContent="space-between"
+    >
+      <Box flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden">
         {/* Keep a single historical Static stream in the shell so printed
             banners and scrolled-past transcript lines move upward cleanly
             without competing Static regions fighting for reconciliation. */}
@@ -245,7 +251,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         />
       </Box>
 
-      <Box flexDirection="column">
+      <Box flexDirection="column" flexShrink={0}>
         {!shell.processing ||
         shell.shellView === "context-build" ||
         shell.shellView === "task-story" ||

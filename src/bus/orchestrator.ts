@@ -37,7 +37,7 @@ import {
   getVerifiedFingerprints,
   hasRunCheckpoint,
 } from "../store.js";
-import { getTaskOutputMeta } from "../task-output-meta.js";
+import { attachTaskOutputMeta, getTaskOutputMeta } from "../task-output-meta.js";
 import type {
   KuzushiConfig,
   ScanOpts,
@@ -1052,8 +1052,14 @@ export class PipelineOrchestrator {
 
       for (const outcome of successes) {
         if (outcome.kind === "complete") {
-          const { taskId, outputKind, output, costUsd } = outcome.event.payload;
-          state.taskOutputs.set(taskId, output);
+          const { taskId, outputKind, output, costUsd, degradation } = outcome.event.payload;
+          const outputForState = degradation
+            ? attachTaskOutputMeta(output, {
+                costUsd: normalizeCostUsd(costUsd),
+                degradation,
+              })
+            : output;
+          state.taskOutputs.set(taskId, outputForState);
           completedTaskIds.add(taskId);
 
           // Accumulate scan-phase task LLM costs
@@ -1904,7 +1910,7 @@ export class PipelineOrchestrator {
       // Non-fatal: auto-generation failure shouldn't break pipeline
     }
 
-    const pipelineStats = {
+    const pipelineStats: PipelineStats = {
       tasks: [...state.tasks],
       totalFindings: state.totalFindings,
       queuedForTriage: state.triageTotal,
@@ -1942,6 +1948,16 @@ export class PipelineOrchestrator {
       startedAt: state.startedAt,
       completedAt: event.meta.timestamp,
     };
+    const reportStats = buildReportStats(this.deps.db, state);
+    if (reportStats.legacyIrisDegradation) {
+      pipelineStats.legacyIrisDegradation = reportStats.legacyIrisDegradation;
+    }
+    if (reportStats.stitchDegradation) {
+      pipelineStats.stitchDegradation = reportStats.stitchDegradation;
+    }
+    if (reportStats.extractionDegradation) {
+      pipelineStats.extractionDegradation = reportStats.extractionDegradation;
+    }
 
     // Invoke afterAll hook before emitting pipeline:complete
     if (state.hookChain) {
@@ -3759,6 +3775,28 @@ function buildReportStats(db: Database.Database, state: RunState): Partial<Pipel
     };
   }
 
+  let legacyIrisDegradation: PipelineStats["legacyIrisDegradation"];
+  const legacyIrisOutput =
+    state.taskOutputs.get("taint-iris:hunt") ?? state.taskOutputs.get("taint-iris");
+  const legacyIrisMeta = getTaskOutputMeta(legacyIrisOutput);
+  if (legacyIrisMeta?.degradation) {
+    legacyIrisDegradation = {
+      type: legacyIrisMeta.degradation.type,
+      reason: legacyIrisMeta.degradation.reason,
+      message: legacyIrisMeta.degradation.message,
+    };
+  } else if (
+    (state.tasks.includes("taint-iris:hunt") || state.tasks.includes("taint-iris")) &&
+    state.totalFindings === 0
+  ) {
+    legacyIrisDegradation = {
+      type: "legacy-inconclusive",
+      reason: "no-observable-legacy-iris-output",
+      message:
+        "Legacy taint-iris returned 0 findings without observable CodeQL query artifacts or degradation metadata; treat as inconclusive, not clean.",
+    };
+  }
+
   const completedAt = new Date().toISOString();
   state.stageTimestamps.pipelineEnd = completedAt;
 
@@ -3805,6 +3843,7 @@ function buildReportStats(db: Database.Database, state: RunState): Partial<Pipel
     failedTasks: state.failedTasks.length > 0 ? [...state.failedTasks] : undefined,
     extractionDegradation,
     stitchDegradation,
+    legacyIrisDegradation,
     tiPriorDegraded,
     runMetrics,
     startedAt: state.startedAt,

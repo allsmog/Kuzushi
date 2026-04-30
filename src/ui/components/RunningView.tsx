@@ -10,7 +10,8 @@
 import { Box, Static, Text } from "ink";
 import React from "react";
 import { formatCost, formatDuration } from "../format.js";
-import { shallowEqual, useUISelector } from "../hooks.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
+import { shallowEqual, useElapsed, useUISelector } from "../hooks.js";
 import { Ratchet } from "../primitives/Ratchet.js";
 import type { ResultLine as ResultLineData, UIStore } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
@@ -61,8 +62,14 @@ export const RunningView = React.memo(function RunningView({
   );
 
   return (
-    <Box flexDirection="column" flexGrow={1} justifyContent="space-between">
-      <Box flexDirection="column">
+    <Box
+      flexDirection="column"
+      flexGrow={1}
+      height="100%"
+      overflow="hidden"
+      justifyContent="space-between"
+    >
+      <Box flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden">
         <Static items={staticItems}>
           {(item) => <ResultLine key={item._key} data={item as ResultLineData} />}
         </Static>
@@ -76,7 +83,9 @@ export const RunningView = React.memo(function RunningView({
         <QualityGateSlot store={store} />
       </Box>
 
-      <RunningBottomDock store={store} phase={phase} onCommand={onCommand} />
+      <Box flexShrink={0}>
+        <RunningBottomDock store={store} phase={phase} onCommand={onCommand} />
+      </Box>
     </Box>
   );
 });
@@ -101,13 +110,12 @@ function RunSummaryHeader({
     }),
     shallowEqual,
   );
+  const elapsedMs = useElapsed(state.pipelineStartedAt, 1000);
   const activeStage = state.stages.find((stage) => stage.status === "active");
   const activeTask = activeStage?.subTasks.find((task) => task.status === "active");
   const label = state.repoName || "scan";
   const work = activeTask?.label ?? activeStage?.detail ?? activeStage?.label ?? state.phase;
-  const elapsed = state.pipelineStartedAt
-    ? formatDuration(Date.now() - state.pipelineStartedAt)
-    : "0s";
+  const elapsed = state.pipelineStartedAt ? formatDuration(elapsedMs) : "0s";
   const taskCount = state.tasks.length;
   const findings = `${state.totalFindings} finding${state.totalFindings === 1 ? "" : "s"}`;
   const viewLabel =
@@ -202,6 +210,8 @@ function PipelineTab({
   const throttle = useUISelector(store, (s) => s.throttle, shallowEqual);
   const etaMs = useUISelector(store, (s) => s.etaMs);
   const agentActivity = useUISelector(store, (s) => s.agentActivity);
+  const { rows } = useTerminalSize();
+  const rowBudget = Math.max(6, rows - 12);
 
   if (stages.length === 0) {
     return (
@@ -220,6 +230,7 @@ function PipelineTab({
       results={liveResults}
       agentActivity={agentActivity}
       etaMs={etaMs}
+      rowBudget={rowBudget}
     />
   );
 }

@@ -17,6 +17,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import { boxBottomLine, boxRowPrefix, boxTopLine } from "../format.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import { icons } from "../icons.js";
 import { SPACING, tokens } from "../tokens.js";
 
@@ -29,7 +30,7 @@ export function CostCapHalt({ runningCostUsd, budgetUsd }: CostCapHaltProps): Re
   const over = budgetUsd != null ? Math.max(0, runningCostUsd - budgetUsd) : 0;
   const pct =
     budgetUsd != null && budgetUsd > 0 ? Math.round((runningCostUsd / budgetUsd) * 100) : undefined;
-  const width = 70;
+  const width = useTerminalCardWidth(70, 40);
 
   return (
     <Box

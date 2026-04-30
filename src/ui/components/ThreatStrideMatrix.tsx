@@ -19,6 +19,7 @@ import type {
 } from "../../agents/tasks/threat-modeling/types.js";
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalCardWidth } from "../hooks.js";
 import { severityChalk } from "../severity.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
@@ -125,6 +126,7 @@ export function ThreatStrideMatrix({ shell }: ThreatStrideMatrixProps): React.Re
     { keys: "5", label: "summary", secondary: true },
     { keys: "q", label: "back", secondary: true },
   ]);
+  const width = useTerminalCardWidth(88, 44);
   const tm = shell.threatModel;
   if (!tm) return <EmptyState />;
 
@@ -146,8 +148,12 @@ export function ThreatStrideMatrix({ shell }: ThreatStrideMatrixProps): React.Re
   });
 
   const pivot = computeImpactLikelihoodPivot(threats);
-  const idWidth = Math.max(3, ...sortedElements.map((e) => e.id.length));
-  const nameWidth = Math.max(4, ...sortedElements.map((e) => Math.min(24, e.name.length)));
+  const idWidth = Math.min(12, Math.max(3, ...sortedElements.map((e) => e.id.length)));
+  const cellWidth = STRIDE_COLUMNS.length * 3;
+  const nameWidth = Math.max(
+    8,
+    Math.min(24, width - idWidth - cellWidth - 6, ...sortedElements.map((e) => e.name.length)),
+  );
 
   return (
     <ScreenContent>
@@ -248,13 +254,19 @@ function MatrixRow({
   });
   return (
     <Text>
-      {tokens.muted(element.id.padEnd(idWidth))}
+      {tokens.muted(truncateCell(element.id, idWidth).padEnd(idWidth))}
       {"  "}
       {tokens.value(name.padEnd(nameWidth))}
       {"  "}
       {cells.join("")}
     </Text>
   );
+}
+
+function truncateCell(value: string, width: number): string {
+  if (value.length <= width) return value;
+  if (width <= 1) return value.slice(0, width);
+  return `${value.slice(0, width - 1)}\u2026`;
 }
 
 function colorCell(impact: CellImpact): string {

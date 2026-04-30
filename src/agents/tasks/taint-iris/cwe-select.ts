@@ -93,9 +93,17 @@ export const taintCweSelectTask: DagNodeImpl<ScanOpts, CweSelectOutput> = {
   outputKind: "custom",
   dependsOn: ["context-gatherer"],
 
-  async run(_input, context): Promise<CweSelectOutput> {
+  async run(input, context): Promise<CweSelectOutput> {
     const runtime = resolveTaskRuntime(context);
     const model = resolveTaskModel(context, "taint-cwe-select");
+    const params = (input ?? {}) as unknown as Record<string, unknown>;
+    const taskConfig = {
+      ...(context.config.taskConfig["taint-cwe-select"] ?? {}),
+      ...(context.config.taskConfig["pipeline:taint-cwe-select"] ?? {}),
+      ...(context.config.taskConfig["taint-iris"] ?? {}),
+      ...(context.config.taskConfig["taint-iris:hunt"] ?? {}),
+    };
+    const maxBudgetUsd = readPositiveNumber(params["maxBudgetUsd"] ?? taskConfig["maxBudgetUsd"]);
     const repoContext = coerceRepoContext(context.upstreamOutputs.get("context-gatherer"));
     const prompt = buildPrompt(repoContext);
 
@@ -112,6 +120,7 @@ export const taintCweSelectTask: DagNodeImpl<ScanOpts, CweSelectOutput> = {
           model,
           allowedTools: ["Read", "Grep", "Glob"],
           permissionMode: "dontAsk",
+          ...(maxBudgetUsd !== undefined ? { maxBudgetUsd } : {}),
           outputFormat: {
             type: "json_schema",
             schema: CWE_SELECT_SCHEMA,
@@ -152,4 +161,10 @@ function parseOutput(raw: unknown): CweSelectOutput {
       }))
       .filter((c) => c.id && c.name),
   };
+}
+
+function readPositiveNumber(value: unknown): number | undefined {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return undefined;
+  return numeric;
 }

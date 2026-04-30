@@ -20,6 +20,7 @@ import { getLogger } from "../logger.js";
 import type { AgentRuntimeCredentials } from "../types.js";
 import { normalizeCostUsd, toErrorMessage } from "../utils.js";
 import type { AgentQueryExecutionResult } from "./execution.js";
+import { assertRuntimeModelSelection } from "./model-validation.js";
 import { buildSdkHooks } from "./sdk-hooks.js";
 import type {
   AgentActivityPhase,
@@ -88,8 +89,10 @@ export function _resetProxyBannerForTests(): void {
 // older `model` value in `~/.kuzushi/config.json` keep working — the SDK still
 // accepts older IDs — but they miss the quality + cost improvements of the
 // current generation. The banner is informational only; nothing is rewritten
-// automatically. Keys may use bare ("claude-opus-4-6") or provider-prefixed
-// ("anthropic:claude-opus-4-6") form; `detectStaleModel` strips a leading
+// automatically.
+//
+// Keys may use either bare ("claude-opus-4-6") or provider-prefixed
+// ("anthropic:claude-opus-4-6") form. `detectStaleModel` strips a leading
 // "anthropic:" before lookup so both shapes hit the same entry.
 const STALE_MODEL_RECOMMENDATIONS: Readonly<Record<string, string>> = {
   "claude-opus-4-6": "claude-opus-4-7",
@@ -585,6 +588,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   }
 
   createSession(baseOptions: AgentQueryOptions): AgentSession {
+    assertRuntimeModelSelection(this.id, baseOptions.model, baseOptions.fallbackModel);
     return new ClaudeSession(baseOptions, this.config, this.bus, this.runId);
   }
 
@@ -596,6 +600,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     requests: AgentBatchRequest[],
     baseOptions: AgentQueryOptions,
   ): Promise<Map<string, AgentQueryExecutionResult>> {
+    assertRuntimeModelSelection(this.id, baseOptions.model, baseOptions.fallbackModel);
     if (requests.length === 0) return new Map();
 
     // Batch API requires a direct SDK credential; subprocess-only inherited auth cannot use it.
@@ -935,6 +940,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   }
 
   async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
+    assertRuntimeModelSelection(this.id, request.options.model, request.options.fallbackModel);
     // Fast path: tool-less calls go directly to Anthropic API — no subprocess.
     // Only when a direct SDK credential is available — inherited OAuth mode must use subprocess path.
     if (
