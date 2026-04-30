@@ -36,10 +36,17 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
   // resolved up-front so the legacy keybind registration below stays at
   // the top of the function (rules-of-hooks: same hooks, every render).
   const CustomHome = getModuleHomeRenderer(shell.focusedModule ?? null)?.render;
-  const useCustom = CustomHome != null && shell.processing !== true;
+  // Narrow the busy gate to "*this* module is actively running its tool":
+  // `shell.processing` is a global flag and flips for unrelated work
+  // (planner, context build, pending assistant text), which would
+  // otherwise blank the home of a module that isn't running anything.
+  const isThisModuleBusy =
+    shell.moduleRun?.status === "running" &&
+    shell.moduleRun.moduleId === shell.focusedModule;
+  const useCustom = CustomHome != null && !isThisModuleBusy;
   const { stdout } = useStdout();
   const columns = stdout?.columns ?? 120;
-  const tableMaxWidth = Math.max(44, Math.min(96, columns - SPACING.md * 3));
+  const tableMaxWidth = Math.max(44, Math.min(140, columns - SPACING.md * 3));
   const narrow = columns < 96;
   const moduleId = shell.focusedModule;
   const isSastModule = moduleId === "sast";
@@ -73,10 +80,13 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
         : tool.name,
     description: narrow ? truncateEnd(tool.description, 44) : tool.description,
   }));
-  // While a tool is actively running, the tools table + last-run card are
-  // clutter — the operator has already picked a verb. Collapse to just the
-  // header strip so the progress bar dominates the viewport.
-  const busy = shell.processing === true;
+  // While *this* module's tool is actively running, the tools table +
+  // last-run card are clutter — the operator has already picked a verb.
+  // Collapse to just the header strip so the progress bar dominates the
+  // viewport. Reuses the narrowed gate from above so unrelated processing
+  // (planner / context-build / pending assistant text) no longer blanks
+  // a module that isn't actually running anything.
+  const busy = isThisModuleBusy;
 
   return (
     <ScreenContent>

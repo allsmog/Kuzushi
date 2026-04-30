@@ -22,6 +22,7 @@ import { getLogger } from "../logger.js";
 import { getRateLimitRegistry } from "../scheduler/index.js";
 import type { AgentRuntimeCredentials } from "../types.js";
 import { normalizeCostUsd, toErrorMessage } from "../utils.js";
+import { enforceAgentQuery, resolveFallbackConsent } from "./enforcement.js";
 import { buildSubprocessEnv } from "./env.js";
 import type { AgentQueryExecutionResult } from "./execution.js";
 import { buildSdkHooks } from "./sdk-hooks.js";
@@ -604,13 +605,22 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   ): Promise<Map<string, AgentQueryExecutionResult>> {
     if (requests.length === 0) return new Map();
 
+    enforceAgentQuery({
+      runtimeId: this.id,
+      backend: "claude",
+      model: baseOptions.model,
+      fallbackModel: baseOptions.fallbackModel,
+      fallbackConsent: resolveFallbackConsent(baseOptions.consentToModelFallback),
+      callsite: "claude.queryBatch",
+    });
+
     // Batch API requires an API key — OAuth mode can't use the direct SDK client.
     // Throw so callers fall back to sequential subprocess queries.
     if (!this.config?.apiKey) {
       throw new Error("Batch API requires an API key — not available in OAuth mode");
     }
 
-    let model = baseOptions.model ?? "claude-sonnet-4-6";
+    let model = baseOptions.model;
     if (model.includes(":")) model = model.split(":").slice(1).join(":");
     const isHaiku = model.includes("haiku");
 
@@ -756,8 +766,9 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     const startedAtMs = Date.now();
     const turnRunId = this.runId ?? "";
 
-    // Strip provider prefix
-    let model = request.options.model ?? "claude-sonnet-4-6";
+    // Strip provider prefix. `enforceAgentQuery` (called by `query()`) has
+    // already validated that `request.options.model` is non-empty.
+    let model = request.options.model;
     if (model.includes(":")) model = model.split(":").slice(1).join(":");
     const isHaiku = model.includes("haiku");
 
@@ -950,6 +961,15 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   }
 
   async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
+    enforceAgentQuery({
+      runtimeId: this.id,
+      backend: "claude",
+      model: request.options.model,
+      fallbackModel: request.options.fallbackModel,
+      fallbackConsent: resolveFallbackConsent(request.options.consentToModelFallback),
+      callsite: "claude.query",
+    });
+
     // Fast path: tool-less calls go directly to Anthropic API — no subprocess.
     // Only when an API key is available — OAuth mode must use subprocess path.
     if (
@@ -962,7 +982,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     }
 
     await acquireSlot();
-    const rateLimitModelSpec = request.options.model ?? "claude-sonnet-4-6";
+    const rateLimitModelSpec = request.options.model;
     const registry = getRateLimitRegistry();
     try {
       await registry.acquire(rateLimitModelSpec);
@@ -1092,8 +1112,12 @@ export class ClaudeAgentRuntime implements AgentRuntime {
       else controllerSignal.addEventListener("abort", onAbort, { once: true });
     }
 
-    // Fallback model
-    if (request.options.fallbackModel) {
+    // Fallback model — only applied when the operator explicitly consented.
+    // Without consent, `enforceAgentQuery` already threw before this line.
+    if (
+      request.options.fallbackModel &&
+      resolveFallbackConsent(request.options.consentToModelFallback)
+    ) {
       const fallback = request.options.fallbackModel.includes(":")
         ? request.options.fallbackModel.split(":").slice(1).join(":")
         : request.options.fallbackModel;
@@ -1355,6 +1379,15 @@ class ClaudeSession implements AgentSession {
   private ensureStarted(): void {
     if (this.queryIterator) return;
 
+    enforceAgentQuery({
+      runtimeId: "claude",
+      backend: "claude",
+      model: this.baseOptions.model,
+      fallbackModel: this.baseOptions.fallbackModel,
+      fallbackConsent: resolveFallbackConsent(this.baseOptions.consentToModelFallback),
+      callsite: "claude.session",
+    });
+
     const options: ClaudeOptions = {
       cwd: this.baseOptions.cwd,
       permissionMode: mapPermissionMode(this.baseOptions.permissionMode),
@@ -1398,8 +1431,12 @@ class ClaudeSession implements AgentSession {
       };
     }
 
-    // Fallback model
-    if (this.baseOptions.fallbackModel) {
+    // Fallback model — only applied when the operator explicitly consented.
+    // Without consent, `enforceAgentQuery` already threw in ensureStarted.
+    if (
+      this.baseOptions.fallbackModel &&
+      resolveFallbackConsent(this.baseOptions.consentToModelFallback)
+    ) {
       const fallback = this.baseOptions.fallbackModel.includes(":")
         ? this.baseOptions.fallbackModel.split(":").slice(1).join(":")
         : this.baseOptions.fallbackModel;

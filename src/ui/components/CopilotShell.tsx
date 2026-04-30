@@ -19,7 +19,7 @@ import {
   firstShellSuggestion,
   listShellSuggestions,
 } from "../../copilot/shell-commands.js";
-import { formatClock, truncateEnd, truncateMiddle } from "../format.js";
+import { formatClock, truncateEnd } from "../format.js";
 import { BLACK_CIRCLE, LOWER_HOOK, OUTCOME_GLYPH } from "../glyphs.js";
 import { applyBackspace, isCtrlChord } from "../hooks/text-edit-actions.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
@@ -86,12 +86,19 @@ const PROCESSING_KEYBINDS = [
   { keys: "Ctrl+C", label: "Interrupt" },
   { keys: "Ctrl+O", label: "Details", secondary: true },
 ];
+const MODULE_RUN_LIVE_KEYBINDS = [
+  { keys: "1–4", label: "drill into actor" },
+  { keys: "p", label: "pause queued work", secondary: true },
+  { keys: "r", label: "resume queued work", secondary: true },
+  { keys: "b", label: "back", secondary: true },
+  { keys: "Ctrl+C", label: "interrupt", secondary: true },
+];
 const PLAN_KEYBINDS = [
   { keys: "Y", label: "Apply plan" },
   { keys: "N/Esc", label: "Discard plan" },
   { keys: "Ctrl+C", label: "Exit", secondary: true },
 ];
-const SAST_TASK_KEYBINDS = [
+export const SAST_TASK_KEYBINDS = [
   { keys: "Space", label: "Toggle block" },
   { keys: "j/k", label: "Move", secondary: true },
   { keys: "a", label: "Mode", secondary: true },
@@ -185,6 +192,16 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
     () => splitShellHistory(shell?.history ?? []),
     [shell?.history],
   );
+  const showStaticHistory =
+    shell?.shellView === undefined ||
+    shell.shellView === "catalog" ||
+    shell.shellView === "task-story";
+  const visibleLiveHistory = React.useMemo(() => {
+    if (showStaticHistory) return liveHistory;
+    const lastInputIdx = findLastHistoryInputIndex(liveHistory);
+    const recentHistory = lastInputIdx >= 0 ? liveHistory.slice(lastInputIdx + 1) : liveHistory;
+    return recentHistory.filter((entry) => !isStructuredViewNoise(entry)).slice(-1);
+  }, [liveHistory, showStaticHistory]);
   const suppressRunningToolName =
     shell?.shellView === "module-run" || shell?.shellView === "actor-detail"
       ? shell.moduleRun?.status === "running"
@@ -199,7 +216,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
     shell?.contextBuild?.status === "running";
   const staticItems = React.useMemo<Array<ShellStaticItem>>(() => {
     const items: Array<ShellStaticItem> = [];
-    if (showSplash) {
+    if (showStaticHistory && showSplash) {
       items.push({
         key: "kz-splash",
         kind: "splash",
@@ -207,22 +224,24 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
         target: shell?.target,
       });
     }
-    if (shell && !showCatalog && !shell.processing) {
+    if (showStaticHistory && shell && !showCatalog && !shell.processing) {
       items.push({
         key: "shell-banner",
         kind: "banner",
         shell,
       });
     }
-    for (const entry of staticHistory) {
-      items.push({
-        key: `history:${historyEntryKey(entry)}`,
-        kind: "history",
-        entry,
-      });
+    if (showStaticHistory) {
+      for (const entry of staticHistory) {
+        items.push({
+          key: `history:${historyEntryKey(entry)}`,
+          kind: "history",
+          entry,
+        });
+      }
     }
     return items;
-  }, [shell, showCatalog, showSplash, staticHistory]);
+  }, [shell, showCatalog, showSplash, showStaticHistory, staticHistory]);
   if (!shell) return <Text>Loading...</Text>;
 
   return (
@@ -231,9 +250,14 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
       flexGrow={1}
       height="100%"
       overflow="hidden"
-      justifyContent="space-between"
+      justifyContent={showStaticHistory ? "space-between" : "flex-start"}
     >
-      <Box flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden">
+      <Box
+        flexDirection="column"
+        flexGrow={showStaticHistory ? 1 : 0}
+        flexShrink={showStaticHistory ? 1 : 0}
+        overflow="hidden"
+      >
         {/* Keep a single historical Static stream in the shell so printed
             banners and scrolled-past transcript lines move upward cleanly
             without competing Static regions fighting for reconciliation. */}
@@ -241,32 +265,42 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
           {(item) => <ShellStaticItemView key={item.key} item={item as ShellStaticItem} />}
         </Static>
 
-        {showCatalog && shell.shellView !== "catalog" && !shell.processing ? (
-          <MemoShellBanner shell={shell} columns={columns} />
-        ) : null}
+        {/* The "▸ <view> · <workspace> · <target>" sub-banner used to render
+        here. Removed: ScreenFrame's chrome already shows the view label
+        (breadcrumb) and the workspace + target (status row). The banner was
+        triple-printing the same context across two adjacent rows. */}
 
         <MemoShellLiveHistory
-          history={liveHistory}
+          history={visibleLiveHistory}
           suppressRunningToolName={suppressRunningToolName}
           compactRunningToolCalls={shell.shellView === "task-story"}
         />
       </Box>
 
-      <Box flexDirection="column" flexShrink={0}>
-        {!shell.processing ||
-        shell.shellView === "context-build" ||
-        shell.shellView === "task-story" ||
-        shell.shellView === "module-run" ||
-        shell.shellView === "actor-detail" ? (
-          <InteractionErrorBoundary label={describeShellLocation(shell)}>
-            <MemoShellViewPanel
-              summary={shellState.summary}
-              shell={shell}
-              agentActivity={shellState.agentActivity}
-            />
-          </InteractionErrorBoundary>
+      <Box
+        flexDirection="column"
+        flexGrow={showStaticHistory ? 0 : 1}
+        flexShrink={1}
+        overflow="hidden"
+      >
+        <Box flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden">
+          {!shell.processing ||
+          shell.shellView === "context-build" ||
+          shell.shellView === "task-story" ||
+          shell.shellView === "module-run" ||
+          shell.shellView === "actor-detail" ? (
+            <InteractionErrorBoundary label={describeShellLocation(shell)}>
+              <MemoShellViewPanel
+                summary={shellState.summary}
+                shell={shell}
+                agentActivity={shellState.agentActivity}
+              />
+            </InteractionErrorBoundary>
+          ) : null}
+        </Box>
+        {shell.shellView !== "module-run" ? (
+          <ShellTaskStatusLine shell={shell} columns={columns} />
         ) : null}
-        <ShellTaskStatusLine shell={shell} columns={columns} />
 
         <Ratchet>
           <Box flexDirection="column" minHeight={1}>
@@ -416,7 +450,11 @@ const ShellInputArea = memo(
     );
 
     const inputAreaKeybinds = shell.processing
-      ? PROCESSING_KEYBINDS
+      ? shell.shellView === "module-run" &&
+        shell.moduleRun?.status === "running" &&
+        shell.moduleRun.liveControl === "pause-resume"
+        ? MODULE_RUN_LIVE_KEYBINDS
+        : PROCESSING_KEYBINDS
       : shell.pendingPlan && input.length === 0
         ? PLAN_KEYBINDS
         : shell.shellView === "sast-tasks" && input.length === 0
@@ -722,53 +760,31 @@ function splitShellHistory(history: ReadonlyArray<ShellHistoryEntry>): {
   };
 }
 
+function isStructuredViewNoise(entry: ShellHistoryEntry): boolean {
+  if (entry.type === "input") return true;
+  return entry.type === "output" && /^Focused on .+\. \d+ tools available\.$/.test(entry.text);
+}
+
+function findLastHistoryInputIndex(history: ReadonlyArray<ShellHistoryEntry>): number {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    if (history[i]?.type === "input") return i;
+  }
+  return -1;
+}
+
 function ShellStaticItemView({ item }: { item: ShellStaticItem }): React.ReactElement {
   switch (item.kind) {
     case "splash":
       return <BannerSplash workspace={item.workspace} target={item.target} />;
     case "banner":
-      return <MemoShellBanner shell={item.shell} columns={80} />;
+      // The "banner" Static item is now a no-op — its content (location +
+      // workspace + target) is rendered by the live ScreenFrame chrome. We
+      // keep the kind in the union so prior session state still type-checks.
+      return <Box />;
     case "history":
       return <HistoryEntry entry={item.entry} />;
   }
 }
-
-const MemoShellBanner = memo(
-  function ShellBanner({
-    shell,
-    columns,
-  }: {
-    shell: ShellState;
-    columns: number;
-  }): React.ReactElement {
-    const location = describeShellLocation(shell);
-    const available = Math.max(24, columns - SPACING.md * 2 - 2);
-    const parts: string[] = [location];
-    if (shell.workspace) parts.push(shell.workspace);
-    if (shell.target && shell.target !== shell.workspace) {
-      parts.push(truncateMiddle(shell.target, Math.min(44, available)));
-    }
-    const line = truncateEnd(
-      parts.slice(1).join(" · "),
-      Math.max(0, available - location.length - 3),
-    );
-    return (
-      <Box paddingLeft={SPACING.md} paddingTop={SPACING.xs}>
-        <Text>
-          {tokens.muted("▸ ")}
-          {tokens.strong(parts[0])}
-          {line ? tokens.muted(` · ${line}`) : null}
-        </Text>
-      </Box>
-    );
-  },
-  (prev, next) =>
-    prev.shell.shellView === next.shell.shellView &&
-    prev.shell.focusedModule === next.shell.focusedModule &&
-    prev.shell.workspace === next.shell.workspace &&
-    prev.shell.target === next.shell.target &&
-    prev.columns === next.columns,
-);
 
 const MemoShellLiveHistory = memo(
   function ShellLiveHistory({
@@ -965,6 +981,7 @@ function ShellViewPanel({
           chains={chains}
           findingCursor={shell.findingCursor}
           pageSize={shell.findingPageSize}
+          focusedModule={shell.focusedModule}
         />
       );
     }
@@ -1271,11 +1288,8 @@ function StoryEventLine({
 
   return (
     <Box paddingLeft={compact ? SPACING.sm : SPACING.xs}>
-      <Gutter>
-        <Text>{tokens.tertiary(LOWER_HOOK)}</Text>
-      </Gutter>
       <Text>
-        {color(prefix)}
+        {tokens.tertiary(LOWER_HOOK)} {color(prefix)}
         {tokens.muted(" · ")}
         {event.message}
         {details.length > 0 ? tokens.muted(` · ${details.join(" · ")}`) : null}

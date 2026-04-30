@@ -1560,6 +1560,17 @@ function resolveExtractionModel(cfg: TaintAnalysisTaskConfig): {
     };
   }
 
+  if (cfg.consentToExtractionLabelingFallback !== true) {
+    throw new Error(
+      "taint-analysis preflight: extractionModel is not configured and " +
+        "consentToExtractionLabelingFallback is not enabled. " +
+        "Kuzushi will not silently run extraction on the labeling model. " +
+        "Either set `taskConfig[\"taint-analysis\"].extractionModel` to an explicit model, " +
+        "or set `taskConfig[\"taint-analysis\"].consentToExtractionLabelingFallback = true` " +
+        "if you intentionally want extraction to use the labeling model.",
+    );
+  }
+
   return {
     model: cfg.labelingModel,
     usedLabelingFallback: true,

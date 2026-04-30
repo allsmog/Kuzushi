@@ -6,13 +6,19 @@ import type { ThreatModelConfig } from "./types.js";
 
 export type { ThreatModelConfig } from "./types.js";
 
-// Randori defaults to Opus with max thinking — STRIDE enumeration on
+// Randori benefits from Opus with max thinking — STRIDE enumeration on
 // defended code reliably regresses to "everything is exploitable" on
-// Sonnet without extended reasoning. Operators can downgrade via
-// `taskConfig["threat-model"].model` / `.effort`.
+// Sonnet without extended reasoning. Operators who want that recommended
+// setup should explicitly configure
+// `taskConfig["threat-model"].model = "anthropic:claude-opus-4-6"`. We do
+// NOT bake it into this default object: doing so would silently override
+// the operator's chosen `config.model`, which the project policy forbids.
+// The empty string here is a sentinel — `resolveThreatModelConfig` always
+// overrides it with `config.model` before use, and `enforceAgentQuery`
+// would catch it if anyone ever forgot.
 export const DEFAULT_THREAT_MODEL_CONFIG: ThreatModelConfig = {
   methodology: "pasta",
-  model: "anthropic:claude-opus-4-6",
+  model: "",
   maxElements: 50,
   maxThreats: 20,
   emitFindings: true,

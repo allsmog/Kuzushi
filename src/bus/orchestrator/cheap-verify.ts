@@ -58,7 +58,11 @@ export const CHEAP_VERIFY_SYSTEM_PROMPT = [
 ].join("\n");
 
 export interface CheapVerifyOptions {
-  model?: string;
+  /**
+   * Operator-resolved model. Required — callers must explicitly pick a
+   * model so Kuzushi never silently substitutes a default.
+   */
+  model: string;
   runtime: AgentRuntime;
   repoRoot: string;
 }
@@ -73,7 +77,7 @@ export async function cheapVerifyCandidates(
 ): Promise<CheapVerifyResult[]> {
   if (candidates.length === 0) return [];
 
-  const model = options.model ?? "anthropic:claude-sonnet-4-6";
+  const model = options.model;
   const runtime = options.runtime;
   const results: CheapVerifyResult[] = [];
 

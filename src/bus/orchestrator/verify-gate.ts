@@ -115,7 +115,12 @@ export interface VerifyGateResult {
 }
 
 export interface VerifyGateOptions {
-  model?: string;
+  /**
+   * Operator-resolved model (e.g. via `resolveStageModel(config, "verify-gate", "verify")`).
+   * Required — callers must explicitly pick a model so Kuzushi never silently
+   * substitutes a default.
+   */
+  model: string;
   runtime: AgentRuntime;
   repoRoot: string;
 }
@@ -212,7 +217,7 @@ export async function gateVerificationCandidates(
     return preclassified.results;
   }
 
-  const model = options.model ?? "anthropic:claude-haiku-4-5-20251001";
+  const model = options.model;
 
   // Chunk into batches
   const batches: VerifyGateCandidate[][] = [];

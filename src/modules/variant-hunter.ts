@@ -85,7 +85,8 @@ function resolveModel(ctx: ExecutionContext, override?: string): string {
     | Record<string, unknown>
     | undefined;
   if (variantConfig && typeof variantConfig.model === "string") return variantConfig.model;
-  return ctx.config.model ?? "anthropic:claude-sonnet-4-6";
+  // Honor the operator's configured model — no silent local default.
+  return ctx.config.model;
 }
 
 // ---------------------------------------------------------------------------

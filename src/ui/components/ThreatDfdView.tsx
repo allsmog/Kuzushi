@@ -138,7 +138,11 @@ function EmptyWorkspace(): React.ReactElement {
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
       <Text>{tokens.warn("No threat-model DFD is available yet.")}</Text>
-      <Text>{tokens.muted("Run /context, then /threats regen dfd, or use /threats edit.")}</Text>
+      <Text>
+        {tokens.muted(
+          "Run /use context, then run .; then /threats regen dfd, or use /threats edit.",
+        )}
+      </Text>
     </Box>
   );
 }

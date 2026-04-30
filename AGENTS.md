@@ -77,6 +77,42 @@ registration stores module-owned `DagTool`s in `DagRegistry`, and workers call
   nodes must be added to that factory's module list so the scan CLI sees
   their tasks without needing full CopilotCore init.
 
+### Model & runtime safety (no silent fallback)
+
+Kuzushi will **never silently switch agent runtime, provider, or model**
+without explicit operator consent. The enforcement boundary lives in
+`src/agent-runtime/enforcement.ts` (`enforceAgentQuery`) and is called
+by every concrete adapter (`claude.ts`, `pi-ai.ts`, `codex.ts`) before
+any provider dispatch, plus by `loadConfig` in `src/config.ts` so an
+incompatible runtime/model pair fails at startup.
+
+Allowed fallbacks:
+1. Same-model transport retries (network 5xx, rate limit 429) — handled
+   inside each adapter, model object is reused.
+2. Batch API → sequential per-prompt fallback — see
+   `src/agent-runtime/execution.ts`. Tested in
+   `tests/agent-runtime/batch-preserves-model.test.ts`.
+3. Informational stale-model warnings — see `claude.ts:detectStaleModel`.
+   Banner only, never rewrites the model.
+4. Backend defaults from `src/config/defaults.ts` *only when the operator
+   has not configured a model at all*.
+5. Deterministic non-LLM fallback that is clearly labeled (e.g. extraction
+   degradation in taint-analysis when `consentToExtractionLabelingFallback`
+   is set).
+
+Forbidden behaviors (caught by enforcement):
+- Empty/missing `model` substituted with a backend default.
+- Operator-configured model that is incompatible with the chosen runtime
+  (e.g. `agentRuntimeBackend=codex` + `model=anthropic:claude-...`).
+- `fallbackModel` plumbed through without explicit operator consent
+  (`consentToModelFallback: true` or `KUZUSHI_ALLOW_MODEL_FALLBACK=1`).
+- Hardcoded `?? "anthropic:..."` defaults inside modules / orchestrator
+  helpers — they bypass `ctx.config.model`.
+
+When authoring a new module: derive the model from `ctx.toolModel ??
+ctx.config.model` (or, in DAG tasks, via `resolveTaskModel(context, ...)`).
+Never inline a literal model string as a runtime fallback.
+
 ### Troubleshooting pointers
 
 All `ModuleLoadError` codes and their fixes live in

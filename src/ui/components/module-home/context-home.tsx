@@ -6,10 +6,10 @@
  * for the focused module.
  */
 
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import type React from "react";
+import { padCell, truncateEnd, visibleWidth } from "../../format.js";
 import { useRegisterKeybindings } from "../../hooks/useKeybindings.js";
-import { Table } from "../../primitives/Table.js";
 import type { ContextSnapshot } from "../../state.js";
 import { SPACING, tokens } from "../../tokens.js";
 import { RuleHeader } from "../RuleHeader.js";
@@ -141,21 +141,28 @@ export function KeyValueSection({
   title: string;
   rows: ReadonlyArray<Row>;
 }): React.ReactElement {
+  const { stdout } = useStdout();
+  const sectionWidth = Math.max(44, (stdout?.columns ?? 100) - SPACING.md * 4);
+  const keyWidth = Math.min(34, Math.max(18, Math.floor(sectionWidth * 0.34)));
+  const valueWidth = Math.max(12, sectionWidth - keyWidth - SPACING.md - 2);
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
-      <Text>{tokens.label(title)}</Text>
-      <Box paddingLeft={SPACING.md} marginTop={SPACING.xs}>
-        <Table
-          showHeader={false}
-          divider={false}
-          gap={2}
-          columns={[
-            { key: "key", flex: 2, truncate: "end" },
-            { key: "value", flex: 5, truncate: "end" },
-          ]}
-          rows={rows}
-        />
-      </Box>
+      <Text> </Text>
+      <Text>{padSectionLine(tokens.label(title), sectionWidth)}</Text>
+      {rows.map((row) => (
+        <Text key={row.key}>
+          {" ".repeat(SPACING.md)}
+          {padSectionLine(
+            `${padCell(truncateEnd(row.key, keyWidth), keyWidth)}  ${truncateEnd(row.value, valueWidth)}`,
+            sectionWidth - SPACING.md,
+          )}
+        </Text>
+      ))}
     </Box>
   );
+}
+
+function padSectionLine(text: string, width: number): string {
+  const clipped = truncateEnd(text, width);
+  return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
 }

@@ -750,6 +750,13 @@ export interface ShellModuleCard {
   lastRunAt?: number;
   /** Human-readable one-liner summary of the last run (e.g. "ran 2h · 4 tp"). */
   lastRunSummary?: string;
+  /**
+   * Severity counts from the most recent contributing run, e.g.
+   * `{ critical: 0, high: 2, medium: 5, low: 1, info: 0 }`. Undefined when no
+   * run exists for this module or `metrics_json` was unparseable. Rendered as
+   * a sparkline in the catalog's `LAST RUN` column.
+   */
+  lastRunSeverityCounts?: Record<string, number>;
   /** Best current run action surfaced by ModuleCatalog/ModuleHome. */
   runState?: {
     kind: "resume" | "complete";

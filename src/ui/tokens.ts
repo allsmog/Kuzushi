@@ -153,4 +153,11 @@ export const WIDTHS = {
   constrainedPanel: 70,
   widePanel: 78,
   footerWidth: 80,
+  // Single content-area rule width. All in-screen dividers should clamp to
+  // this so the visual rhythm is consistent across StatusFooter, FindingsView,
+  // KbView, and the catalog category headers. Wider than the legacy 78 to
+  // match modern terminals; capped so the rule stays scannable on ultrawide
+  // displays. Pair with `<Divider width={Math.min(columns, contentRule)} />`
+  // (or just `<Divider />` when full-width is preferred for footer rules).
+  contentRule: 96,
 } as const;

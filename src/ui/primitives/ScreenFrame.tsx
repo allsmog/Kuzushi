@@ -7,7 +7,7 @@
  */
 import { Box, Text, useStdout } from "ink";
 import type React from "react";
-import { visibleWidth } from "../format.js";
+import { truncateEnd, visibleWidth } from "../format.js";
 import { SPACING, tokens } from "../tokens.js";
 
 export interface ScreenTab {
@@ -40,32 +40,66 @@ export function ScreenFrame({
   const columns = stdout?.columns ?? 100;
   const compact = columns < 72;
   const clippedStatus = compact ? status.slice(0, 2) : status;
+  const frameLineWidth = Math.max(20, columns - 6);
+  const titleLine = formatFrameLine(
+    tokens.strong(title),
+    clippedStatus.length > 0 ? tokens.muted(clippedStatus.join(" · ")) : "",
+    frameLineWidth,
+  );
+  const breadcrumbLine =
+    breadcrumbs.length > 0
+      ? padLine(tokens.muted(breadcrumbs.join(" › ")), frameLineWidth)
+      : undefined;
+  const subtitleLine = subtitle ? padLine(tokens.hint(subtitle), frameLineWidth) : undefined;
 
   return (
-    <Box flexDirection="column" flexGrow={1} justifyContent="space-between">
-      <Box flexDirection="column" flexGrow={1}>
-        <Box borderStyle="single" paddingX={1} flexDirection="column">
-          <Box justifyContent="space-between">
-            <Text wrap="truncate-end">{tokens.strong(title)}</Text>
-            {clippedStatus.length > 0 ? (
-              <Text wrap="truncate-start">{tokens.muted(clippedStatus.join(" · "))}</Text>
-            ) : null}
-          </Box>
-          {breadcrumbs.length > 0 ? (
-            <Text wrap="truncate-end">{tokens.muted(breadcrumbs.join(" › "))}</Text>
-          ) : null}
-          {subtitle ? <Text wrap="truncate-end">{tokens.hint(subtitle)}</Text> : null}
+    <Box flexDirection="column" flexGrow={1} flexShrink={1} justifyContent="space-between">
+      <Box flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden">
+        {/* flexShrink={0} so the chrome (title + breadcrumb + status + tabs)
+        survives a tight outer flex layout. Without it, an ancestor with
+        flexShrink={1} + overflow="hidden" can collapse the chrome rows even
+        when the rendered content easily fits — the operator would see only
+        the breadcrumb (or nothing), not the title + status. */}
+        <Box borderStyle="single" paddingX={1} flexDirection="column" flexShrink={0}>
+          <Text>{titleLine}</Text>
+          {breadcrumbLine ? <Text>{breadcrumbLine}</Text> : null}
+          {subtitleLine ? <Text>{subtitleLine}</Text> : null}
           {tabs && tabs.length > 0 ? <TabStrip tabs={tabs} compact={compact} /> : null}
         </Box>
 
-        <Box flexDirection="column" flexGrow={1} marginTop={SPACING.sm}>
+        <Box
+          flexDirection="column"
+          flexGrow={1}
+          flexShrink={1}
+          overflow="hidden"
+          marginTop={SPACING.sm}
+        >
           {children}
         </Box>
       </Box>
 
-      {footer ? <Box marginTop={SPACING.sm}>{footer}</Box> : null}
+      {footer ? (
+        <Box marginTop={SPACING.sm} flexShrink={0}>
+          {footer}
+        </Box>
+      ) : null}
     </Box>
   );
+}
+
+function padLine(text: string, width: number): string {
+  const clipped = truncateEnd(text, width);
+  return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
+}
+
+function formatFrameLine(left: string, right: string, width: number): string {
+  if (!right) return padLine(left, width);
+  const gap = "  ";
+  const leftBudget = Math.max(1, width - visibleWidth(right) - visibleWidth(gap));
+  if (leftBudget <= 1) return padLine(right, width);
+  const clippedLeft = truncateEnd(left, leftBudget);
+  const fill = Math.max(0, width - visibleWidth(clippedLeft) - visibleWidth(right));
+  return `${clippedLeft}${" ".repeat(fill)}${right}`;
 }
 
 function TabStrip({

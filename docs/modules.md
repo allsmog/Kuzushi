@@ -228,6 +228,27 @@ concrete classes so third-party modules don't pick up transitive dependencies
 on host internals. Concrete host objects (e.g. `UIStore`, `WorkspaceManager`)
 are structural supersets — no casts needed when the host passes them in.
 
+### Resolving `model` in a module
+
+Modules **must not** hardcode model strings as fallbacks. The runtime
+boundary (`src/agent-runtime/enforcement.ts`) rejects empty / incompatible
+models, and `loadConfig` validates `agentRuntimeBackend` against
+`config.model` before any LLM call. The right resolution chain is:
+
+```ts
+const model =
+  ctx.toolModel /* setg <MODULE>_MODEL=… or /set model … */ ??
+  (input?.model as string | undefined) /* inline tool arg */ ??
+  ctx.config.model /* operator-configured global */;
+```
+
+For DAG tasks use `resolveTaskModel(context, "<task-id>")` from
+`src/agents/tasks/runtime-overrides.ts`, which already follows this
+precedence and falls back to `context.config.model`.
+
+Anything that looks like `model = X ?? "anthropic:claude-..."` is the
+silent-fallback pattern the audit removed and must not return.
+
 ## 8. `reportActivity` vs `reportOutput`
 
 Use `reportActivity` for **structured phase labels** — they land in the

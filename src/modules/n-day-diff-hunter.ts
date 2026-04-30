@@ -273,7 +273,7 @@ const extractFixPatternTool: ModuleTool = {
 
     const trimmed =
       patchText.length > 18000 ? `${patchText.slice(0, 18000)}\n... [truncated]` : patchText;
-    const model = (params.model as string) ?? ctx.config.model ?? "anthropic:claude-sonnet-4-6";
+    const model = (params.model as string) ?? ctx.config.model;
 
     const prompt = [
       "You are a security researcher extracting a portable fix-shape signature from a CVE patch.",
@@ -462,7 +462,7 @@ const huntVariantsTool: ModuleTool = {
     const maxFindings = Math.max(1, Math.min(100, Number(params.maxFindings) || 15));
     const includeVendored = params.includeVendored !== false;
     const advisoryId = (params.advisoryId as string) ?? "unknown";
-    const model = (params.model as string) ?? ctx.config.model ?? "anthropic:claude-sonnet-4-6";
+    const model = (params.model as string) ?? ctx.config.model;
 
     const { resolveRepo } = await import("../cli/shared.js");
     const { root: repoRoot, name: repoName } = resolveRepo(target);

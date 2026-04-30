@@ -12,6 +12,7 @@ import { resolveAgentRuntimeConfig } from "../credentials.js";
 import { getLogger } from "../logger.js";
 import type { AgentRuntimeCredentials } from "../types.js";
 import { isRecord, toErrorMessage } from "../utils.js";
+import { enforceAgentQuery, resolveFallbackConsent } from "./enforcement.js";
 import { extractJson } from "./execution.js";
 import type {
   AgentEffort,
@@ -24,7 +25,6 @@ import type {
 } from "./types.js";
 
 const log = getLogger("codex-runtime");
-const DEFAULT_CODEX_MODEL = "gpt-5.5";
 
 type ItemTextState = {
   textByItem: Map<string, string>;
@@ -33,7 +33,14 @@ type ItemTextState = {
 };
 
 export function normalizeCodexModel(model: string | undefined): string {
-  const value = model?.trim() || DEFAULT_CODEX_MODEL;
+  // No silent default — `enforceAgentQuery` rejects an empty model before
+  // this is called. If we still see an empty value here it is a bug.
+  const value = model?.trim();
+  if (!value) {
+    throw new Error(
+      "codex.normalizeCodexModel: model is required. Kuzushi will not silently substitute a default model.",
+    );
+  }
   const separator = value.indexOf(":");
   if (separator === -1) return value;
 
@@ -431,6 +438,14 @@ export class CodexAgentRuntime implements AgentRuntime {
   }
 
   query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
+    enforceAgentQuery({
+      runtimeId: this.id,
+      backend: "codex",
+      model: request.options.model,
+      fallbackModel: request.options.fallbackModel,
+      fallbackConsent: resolveFallbackConsent(request.options.consentToModelFallback),
+      callsite: "codex.query",
+    });
     const thread = this.client.startThread(buildThreadOptions(request.options));
     return runCodexTurn(
       thread,
@@ -441,6 +456,14 @@ export class CodexAgentRuntime implements AgentRuntime {
   }
 
   createSession(baseOptions: AgentQueryOptions): AgentSession {
+    enforceAgentQuery({
+      runtimeId: this.id,
+      backend: "codex",
+      model: baseOptions.model,
+      fallbackModel: baseOptions.fallbackModel,
+      fallbackConsent: resolveFallbackConsent(baseOptions.consentToModelFallback),
+      callsite: "codex.session",
+    });
     const thread = this.client.startThread(buildThreadOptions(baseOptions));
     return new CodexSession(thread, baseOptions);
   }

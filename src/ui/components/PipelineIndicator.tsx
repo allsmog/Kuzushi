@@ -480,31 +480,42 @@ function SubTaskRowImpl({
         </Text>
       )}
 
-      {/* Activity lines nested under active scan tasks */}
+      {/* Activity lines nested under active scan tasks.
+       *
+       * Alignment matters here: the subtask row above renders as
+       *   "  " + pipe + " " + connector + " " + label
+       * (outer pipe at col 2, connector at col 4). Activity lines hang one
+       * level deeper from the subtask's connector position, so they need
+       *   "  " + pipe + "  " + branchPipe + " " + toolConnector
+       * (outer pipe at col 2, branch pipe at col 5 — directly under the
+       * subtask's connector — toolConnector at col 7). We build the prefix
+       * as an explicit string instead of relying on JSX whitespace, which
+       * silently collapses or doubles depending on layout. */}
       {task.status === "active" && hasActivity && (
         <Box flexDirection="column">
           {task.activityLines!.map((line, li) => {
             const toolIsLast = li === task.activityLines!.length - 1;
             const toolConnector = toolIsLast ? icons.treeLast : icons.treeMiddle;
             const branchPipe = isLast ? " " : tokens.muted(icons.treePipe);
+            const prefix = `  ${pipe}  ${branchPipe} ${tokens.muted(toolConnector)} `;
             return (
               <Text
                 key={`activity:${line.kind}:${line.toolName ?? ""}:${line.detail ?? ""}:${line.elapsedSeconds ?? ""}:${line.index}:${line.total}`}
               >
-                {pipe} {"  "}
-                {branchPipe} {tokens.muted(toolConnector)} {formatToolLine(line)}
+                {prefix}
+                {formatToolLine(line)}
               </Text>
             );
           })}
         </Box>
       )}
 
-      {/* Heartbeat when quiet */}
+      {/* Heartbeat when quiet — uses the same alignment math as activity
+          lines above so a stale active subtask keeps the tree visually
+          stable when activity lines flush. */}
       {task.status === "active" && !hasActivity && isStale && task.startedAt && (
         <Text>
-          {"  "}
-          {pipe} {"  "}
-          {isLast ? " " : tokens.muted(icons.treePipe)} {tokens.muted(icons.treeLast)}{" "}
+          {`  ${pipe}  ${isLast ? " " : tokens.muted(icons.treePipe)} ${tokens.muted(icons.treeLast)} `}
           {tokens.hint(`still analyzing... ${formatDuration(heartbeatElapsed)}`)}
         </Text>
       )}

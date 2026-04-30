@@ -29,6 +29,7 @@ export function SastTasksView({ shell }: SastTasksViewProps): React.ReactElement
 
   const { stdout } = useStdout();
   const columns = stdout?.columns ?? 120;
+  const terminalRows = stdout?.rows ?? 40;
   const compact = columns < 92;
   const options = shell.moduleOptions[SAST_SCAN_TOOL_NAME] ?? {};
   const rows = buildSastTaskRows({ options, tune: shell.tuneSnapshot });
@@ -38,6 +39,15 @@ export function SastTasksView({ shell }: SastTasksViewProps): React.ReactElement
     cursor: shell.sastTaskCursor,
     rows,
   });
+  const maxVisibleRows =
+    terminalRows < 44 ? Math.max(4, Math.min(6, terminalRows - 32)) : rows.length;
+  const windowStart = Math.max(
+    0,
+    Math.min(rows.length - maxVisibleRows, summary.activeIndex - Math.floor(maxVisibleRows / 2)),
+  );
+  const visibleRows = rows.slice(windowStart, windowStart + maxVisibleRows);
+  const hiddenAbove = windowStart;
+  const hiddenBelow = Math.max(0, rows.length - windowStart - visibleRows.length);
 
   return (
     <ScreenContent>
@@ -76,7 +86,9 @@ export function SastTasksView({ shell }: SastTasksViewProps): React.ReactElement
             {"------".padEnd(7)}
             {compact ? "" : "-------------------------------"}
           </Text>
-          {rows.map((row, index) => {
+          {hiddenAbove > 0 ? <Text>{tokens.muted(`  … ${hiddenAbove} above`)}</Text> : null}
+          {visibleRows.map((row, offset) => {
+            const index = windowStart + offset;
             const active = index === summary.activeIndex;
             const marker = active ? tokens.focus("❯") : " ";
             const line =
@@ -87,6 +99,7 @@ export function SastTasksView({ shell }: SastTasksViewProps): React.ReactElement
               (compact ? "" : row.notes);
             return <Text key={row.id}>{active ? tokens.selection(line) : line}</Text>;
           })}
+          {hiddenBelow > 0 ? <Text>{tokens.muted(`  … ${hiddenBelow} below`)}</Text> : null}
         </Box>
 
         <Box marginTop={SPACING.sm}>

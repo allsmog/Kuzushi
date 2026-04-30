@@ -45,17 +45,33 @@ describe("taint-analysis-preflight internals", () => {
     });
   });
 
-  it("falls back to labelingModel when extractionModel is unset", () => {
+  it("falls back to labelingModel only with explicit consent", () => {
+    // Pre-policy this silently substituted labelingModel for extractionModel.
+    // The audit gated that substitution behind
+    // `taskConfig["taint-analysis"].consentToExtractionLabelingFallback = true`
+    // so Kuzushi never silently runs extraction on a different model than
+    // the operator configured.
     const resolved = __taintAnalysisPreflightInternals.resolveExtractionModel({
       ...DEFAULT_TAINT_ANALYSIS_TASK_CONFIG,
       labelingModel: "label-model",
       extractionModel: undefined,
+      consentToExtractionLabelingFallback: true,
     });
 
     expect(resolved).toEqual({
       model: "label-model",
       usedLabelingFallback: true,
     });
+  });
+
+  it("throws when extractionModel is unset and consent is not granted", () => {
+    expect(() =>
+      __taintAnalysisPreflightInternals.resolveExtractionModel({
+        ...DEFAULT_TAINT_ANALYSIS_TASK_CONFIG,
+        labelingModel: "label-model",
+        extractionModel: undefined,
+      }),
+    ).toThrow(/Kuzushi will not silently run extraction on the labeling model/);
   });
 
   it("creates Taint Analysis workspace directory tree", async () => {

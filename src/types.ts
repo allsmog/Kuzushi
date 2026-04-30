@@ -366,8 +366,6 @@ export interface KuzushiConfig {
   enableContextGathering?: boolean;
   /** Persist per-run JSONL audit logs. */
   auditLog?: boolean;
-  /** Play a local startup sound when the interactive shell opens. */
-  startupSound?: boolean;
   /** Optional markdown report output path. */
   reportOutput?: string;
   /** Optional SARIF report output path. */

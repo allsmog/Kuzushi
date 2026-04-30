@@ -49,6 +49,14 @@ export interface TaintAnalysisTaskConfig {
   passes: TaintAnalysisPassId[];
   labelingModel: string;
   extractionModel?: string;
+  /**
+   * When `true`, the preflight will substitute `labelingModel` for an
+   * unset `extractionModel` instead of erroring. Defaults to `false` so
+   * Kuzushi never silently runs extraction on a different model than the
+   * operator configured. Operators who want the substitution explicitly
+   * opt in via `taskConfig["taint-analysis"].consentToExtractionLabelingFallback = true`.
+   */
+  consentToExtractionLabelingFallback?: boolean;
   labelingBatchSize: number;
   labelingConfidenceThreshold: number;
   workspaceDir: string;

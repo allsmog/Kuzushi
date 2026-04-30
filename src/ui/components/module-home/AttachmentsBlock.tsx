@@ -5,9 +5,10 @@
  * buildHomeSlice`.
  */
 
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import type React from "react";
 import type { AttachmentsHomeSlice } from "../../../modules/_shared/attachments/index.js";
+import { truncateEnd, visibleWidth } from "../../format.js";
 import { Table } from "../../primitives/Table.js";
 import { SPACING, tokens } from "../../tokens.js";
 
@@ -25,22 +26,19 @@ export function AttachmentsBlock({
   moduleId,
   showActions = true,
 }: AttachmentsBlockProps): React.ReactElement {
+  const { stdout } = useStdout();
+  const titleWidth = Math.max(20, (stdout?.columns ?? 100) - SPACING.md * 4);
   const docs = slice?.documents ?? [];
+  const title = `${tokens.label("attachments")}  ${tokens.hint(formatTotals(slice))}`;
+  const titleLine =
+    docs.length === 0
+      ? `${title}  ${tokens.muted("(none attached) — attach <path-or-url>")}`
+      : title;
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
-      <Text>
-        {tokens.label("attachments")}
-        {"  "}
-        {tokens.hint(formatTotals(slice))}
-      </Text>
-      <Box paddingLeft={SPACING.md} marginTop={SPACING.xs} flexDirection="column">
-        {docs.length === 0 ? (
-          <Text>
-            {tokens.muted(
-              `(none attached) — use \`attach <path-or-url>\` to feed this module reference material`,
-            )}
-          </Text>
-        ) : (
+      <Text>{padSectionLine(titleLine, titleWidth)}</Text>
+      {docs.length > 0 ? (
+        <Box paddingLeft={SPACING.md} marginTop={SPACING.xs} flexDirection="column">
           <Table
             showHeader={false}
             divider={false}
@@ -58,15 +56,22 @@ export function AttachmentsBlock({
               detail: doc.detail,
             }))}
           />
-        )}
-      </Box>
+        </Box>
+      ) : null}
       {showActions ? (
         <Box flexDirection="column" marginTop={SPACING.xs} paddingLeft={SPACING.md}>
           <Text>
-            {tokens.muted("actions: attach <path-or-url>  /kb (browse)  detach <id>  reparse <id>")}
+            {padSectionLine(
+              tokens.muted(
+                "actions: attach <path-or-url>  /kb (browse)  detach <id>  reparse <id>",
+              ),
+              titleWidth,
+            )}
           </Text>
           {slice?.scopePath ? (
-            <Text>{tokens.muted(`scope: ${shortPath(slice.scopePath)}`)}</Text>
+            <Text>
+              {padSectionLine(tokens.muted(`scope: ${shortPath(slice.scopePath)}`), titleWidth)}
+            </Text>
           ) : null}
         </Box>
       ) : null}
@@ -75,6 +80,11 @@ export function AttachmentsBlock({
       <Box display={moduleId ? "none" : "flex"} />
     </Box>
   );
+}
+
+function padSectionLine(text: string, width: number): string {
+  const clipped = truncateEnd(text, width);
+  return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
 }
 
 function formatTotals(slice: AttachmentsHomeSlice | null | undefined): string {

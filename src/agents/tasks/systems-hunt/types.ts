@@ -235,8 +235,10 @@ export function resolveSystemsHuntConfig(
     );
   }
 
-  const DEFAULT_MODEL = "anthropic:claude-opus-4-6";
-  const resolvedModel = context.modelOverride ?? configuredModel ?? DEFAULT_MODEL;
+  // Honor the operator's configured model — no silent local default.
+  // Recommendations belong in `kuzushi config init` taskConfig templates,
+  // not in module code that bypasses operator choice.
+  const resolvedModel = context.modelOverride ?? configuredModel ?? context.config.model;
   const configuredEffort = asNonEmptyString(raw["effort"]);
   const effort =
     configuredEffort === "low" ||

@@ -11,10 +11,12 @@
  * to focus a module, just like today's command flow.
  */
 
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import type React from "react";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { Divider } from "../primitives/Divider.js";
 import { Table } from "../primitives/Table.js";
+import { severitySparkline } from "../sparkline.js";
 import type { ShellModuleCard, ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { ContextStrip } from "./ContextStrip.js";
@@ -33,6 +35,14 @@ interface ModuleCatalogProps {
 }
 
 export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement {
+  const { stdout } = useStdout();
+  const columns = stdout?.columns ?? 120;
+  const rows = stdout?.rows ?? 40;
+  // Lifted from 112 → 160 so the description column has room to breathe
+  // on modern terminals; `…` truncation in the column already handles
+  // narrow panes. The chrome is full-width, so the table sitting at 112
+  // cols inside a 200-col chrome read like two different layouts.
+  const tableWidth = Math.max(48, Math.min(160, columns - SPACING.md * 4));
   useRegisterKeybindings([
     { keys: "use <id>", label: "focus module" },
     { keys: "findings", label: "findings", secondary: true },
@@ -40,6 +50,7 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
     { keys: "Ctrl+C", label: "exit", secondary: true },
   ]);
   const cards = shell.moduleCatalog ?? [];
+  const compact = rows < 44 && cards.length > 8;
   const builtIns = cards.filter((c) => !c.external);
   const externals = cards.filter((c) => c.external);
 
@@ -56,6 +67,19 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
     workspace === targetLabel
       ? [`scope:${workspace}`, `${moduleCount} modules`]
       : [`workspace:${workspace}`, `target:${targetLabel}`, `${moduleCount} modules`];
+
+  if (compact) {
+    const orderedRows = [...CATEGORY_ORDER.flatMap((cat) => byCategory[cat] ?? []), ...externals];
+    return (
+      <ScreenContent>
+        <ContextStrip status={status} />
+        <Box marginTop={SPACING.sm}>
+          <ModuleRows rows={orderedRows} maxWidth={tableWidth} compact />
+        </Box>
+      </ScreenContent>
+    );
+  }
+
   return (
     <ScreenContent>
       <ContextStrip status={status} />
@@ -66,28 +90,26 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
         const meta = CATEGORY_META[cat];
         return (
           <Box key={cat} flexDirection="column" marginTop={SPACING.sm}>
-            <Text>
-              {tokens.label(meta.label)}
-              {"  "}
-              {tokens.muted(meta.blurb)}
-            </Text>
-            <Box marginTop={SPACING.sm}>
-              <ModuleRows rows={rows} />
+            {/* `Divider title=` inset gives a single rule + label, replacing
+                the stand-alone label line + table-divider stack. The blurb
+                lives directly below the rule so the section reads as one
+                visual unit. */}
+            <Divider width={tableWidth} title={meta.label} />
+            <Box paddingLeft={SPACING.md}>
+              <Text>{tokens.muted(meta.blurb)}</Text>
             </Box>
+            <ModuleRows rows={rows} maxWidth={tableWidth} />
           </Box>
         );
       })}
 
       {externals.length > 0 && (
         <Box flexDirection="column" marginTop={SPACING.sm}>
-          <Text>
-            {tokens.label("EXTERNAL")}
-            {"  "}
-            {tokens.muted("(loaded via --load package:<name>)")}
-          </Text>
-          <Box marginTop={SPACING.sm}>
-            <ModuleRows rows={externals} />
+          <Divider width={tableWidth} title="EXTERNAL" />
+          <Box paddingLeft={SPACING.md}>
+            <Text>{tokens.muted("(loaded via --load package:<name>)")}</Text>
           </Box>
+          <ModuleRows rows={externals} maxWidth={tableWidth} />
         </Box>
       )}
     </ScreenContent>
@@ -102,7 +124,20 @@ function compactTarget(target: string | null | undefined): string {
   return parts[parts.length - 1] ?? target;
 }
 
-function ModuleRows({ rows }: { rows: ShellModuleCard[] }): React.ReactElement {
+function ModuleRows({
+  rows,
+  maxWidth,
+  compact = false,
+}: {
+  rows: ShellModuleCard[];
+  maxWidth: number;
+  compact?: boolean;
+}): React.ReactElement {
+  // Hide LAST RUN entirely when no module has ever run for this workspace.
+  // Eighteen "never run" cells × 20 cols was the single noisiest visual on
+  // the catalog. Once any module has run, the column re-appears and the
+  // un-run rows render as `—`.
+  const showLastRun = rows.some((r) => !!r.lastRunSummary);
   return (
     <Table
       showHeader
@@ -112,6 +147,17 @@ function ModuleRows({ rows }: { rows: ShellModuleCard[] }): React.ReactElement {
         // without truncation. Operators previously saw `carlini-threa…` and
         // had to /modules to get the full id, breaking flow.
         { key: "id", header: "MODULE", width: 22, truncate: "end", render: (c) => c.id },
+        ...(compact
+          ? [
+              {
+                key: "category",
+                header: "TYPE",
+                width: 10,
+                truncate: "end" as const,
+                render: (c: ShellModuleCard) => (c.external ? "external" : c.category),
+              },
+            ]
+          : []),
         {
           key: "description",
           header: "DESCRIPTION",
@@ -119,15 +165,28 @@ function ModuleRows({ rows }: { rows: ShellModuleCard[] }): React.ReactElement {
           truncate: "end",
           render: (c) => c.description,
         },
-        {
-          key: "last",
-          header: "LAST RUN",
-          flex: 2,
-          truncate: "end",
-          render: (c) => c.lastRunSummary ?? "never run",
-        },
+        ...(showLastRun
+          ? [
+              {
+                // Width 28 fits a 5-glyph sparkline + 2-space gap + a typical
+                // summary like `error · scan · 2m · $0.07`. The description
+                // column gives a few cols back; the catalog cap of 160 still
+                // leaves the description plenty of breathing room.
+                key: "last",
+                header: "LAST RUN",
+                width: 28,
+                truncate: "end" as const,
+                render: (c: ShellModuleCard) => {
+                  const monorepo = severitySparkline(c.lastRunSeverityCounts);
+                  const summary = c.lastRunSummary ?? "—";
+                  return monorepo ? `${monorepo}  ${summary}` : summary;
+                },
+              },
+            ]
+          : []),
       ]}
       rows={rows}
+      maxWidth={maxWidth}
     />
   );
 }

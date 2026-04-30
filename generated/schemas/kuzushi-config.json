@@ -473,9 +473,6 @@
     "skipTriageForHighConfidenceAgentic": {
       "type": "boolean"
     },
-    "startupSound": {
-      "type": "boolean"
-    },
     "streamingEnabled": {
       "type": "boolean"
     },

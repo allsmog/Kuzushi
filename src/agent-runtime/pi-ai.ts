@@ -25,6 +25,7 @@ import { getRateLimitRegistry } from "../scheduler/index.js";
 import type { AgentRuntimeCredentials } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { maybeCompactContext } from "./context-compactor.js";
+import { enforceAgentQuery, resolveFallbackConsent } from "./enforcement.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
 import { normalizeToolInput } from "./tool-input-normalizer.js";
 import { summarizeToolCompletion } from "./tool-summary.js";
@@ -295,6 +296,15 @@ export class PiAiAgentRuntime implements AgentRuntime {
   }
 
   async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
+    enforceAgentQuery({
+      runtimeId: this.id,
+      backend: "pi-ai",
+      model: request.options.model,
+      fallbackModel: request.options.fallbackModel,
+      fallbackConsent: resolveFallbackConsent(request.options.consentToModelFallback),
+      callsite: "pi-ai.query",
+    });
+
     const restoreRuntimeEnv = applyRuntimeEnvOverrides(this.runtimeConfig);
     const startedAtMs = Date.now();
     const signal = request.options.abortController?.signal;
@@ -347,6 +357,14 @@ export class PiAiAgentRuntime implements AgentRuntime {
   }
 
   createSession(baseOptions: AgentQueryOptions): AgentSession {
+    enforceAgentQuery({
+      runtimeId: this.id,
+      backend: "pi-ai",
+      model: baseOptions.model,
+      fallbackModel: baseOptions.fallbackModel,
+      fallbackConsent: resolveFallbackConsent(baseOptions.consentToModelFallback),
+      callsite: "pi-ai.session",
+    });
     return new PiAiSession(this, this.runtimeConfig, baseOptions);
   }
 }

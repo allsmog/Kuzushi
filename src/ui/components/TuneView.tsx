@@ -142,12 +142,16 @@ function Options({
   multi?: boolean;
 }): React.ReactElement {
   const activeSet = new Set(Array.isArray(active) ? active : [active]);
+  // The active value gets bracketed + accent-coloured so a glance can find
+  // it; everything else is muted. Inactive segments stay flat-grey so the
+  // active value pops without colour-fighting other tune rows. Multi-select
+  // controls wrap *every* on value to make the set legible.
   const segs = options.map((opt) => {
     const on = activeSet.has(opt);
-    const pretty = multi ? opt : opt;
-    return on ? tokens.strong(pretty) : tokens.muted(pretty);
+    return on ? tokens.focus(`[${opt}]`) : tokens.muted(opt);
   });
   const sep = tokens.muted("  ──  ");
+  void multi; // multi affects which values are highlighted (handled via activeSet)
   return (
     <Text>
       {"    "}

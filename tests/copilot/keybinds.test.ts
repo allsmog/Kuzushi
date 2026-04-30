@@ -172,6 +172,27 @@ describe("resolveKeybind — Ctrl+C two-stage", () => {
     expect(action).toEqual({ type: "abort-inflight" });
   });
 
+  it("Ctrl+C aborts a running module-run even if processing was cleared", () => {
+    const shell = baseShell({
+      processing: false,
+      shellView: "module-run",
+      moduleRun: {
+        status: "running",
+        toolName: "sast:scan",
+        liveControl: "pause-resume",
+      },
+    } as Partial<ShellState>);
+    const state = baseState(shell, { ctrlCArmedAt: 5_000 });
+    const action = resolveKeybind({
+      stroke: stroke({ char: "c", key: { ctrl: true } }),
+      input: "",
+      state,
+      looseFindingCount: 0,
+      now: 5_250,
+    });
+    expect(action).toEqual({ type: "abort-inflight" });
+  });
+
   it("Ctrl+D follows the same two-stage contract as Ctrl+C", () => {
     const shell = baseShell();
     const state = baseState(shell);
@@ -205,6 +226,42 @@ describe("resolveKeybind — Ctrl+C two-stage", () => {
       now: 222,
     });
     expect(eotAction).toEqual({ type: "arm-exit", at: 222 });
+  });
+});
+
+describe("resolveKeybind — module-run live controls", () => {
+  function liveModuleRunShell(processing = false): ShellState {
+    return baseShell({
+      processing,
+      shellView: "module-run",
+      moduleRun: {
+        status: "running",
+        toolName: "sast:scan",
+        liveControl: "pause-resume",
+      },
+    } as Partial<ShellState>);
+  }
+
+  it("dispatches pause/resume while a live-control module run is active", () => {
+    const state = baseState(liveModuleRunShell(false));
+
+    expect(dispatch("p", state.shell!, state)).toEqual({ type: "dispatch", command: "/pause" });
+    expect(dispatch("r", state.shell!, state)).toEqual({ type: "dispatch", command: "/resume" });
+  });
+
+  it("does not steal p/r from non-live module-run screens", () => {
+    const shell = baseShell({
+      shellView: "module-run",
+      moduleRun: {
+        status: "done",
+        toolName: "sast:scan",
+        liveControl: "pause-resume",
+      },
+    } as Partial<ShellState>);
+    const state = baseState(shell);
+
+    expect(dispatch("p", shell, state)).toEqual({ type: "none" });
+    expect(dispatch("r", shell, state)).toEqual({ type: "none" });
   });
 });
 

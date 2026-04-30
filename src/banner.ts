@@ -1,37 +1,14 @@
-import { spawn } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import chalk from "chalk";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-function playStartupSound(): void {
-  try {
-    const soundsDir = path.resolve(__dirname, "..", "assets", "sounds");
-    const files = readdirSync(soundsDir).filter((f) => f.endsWith(".wav"));
-    if (files.length === 0) return;
-    const pick = files[Math.floor(Math.random() * files.length)];
-    const filePath = path.join(soundsDir, pick);
-
-    const cmd =
-      process.platform === "darwin" ? "afplay" : process.platform === "linux" ? "aplay" : null;
-    if (!cmd) return;
-
-    const child = spawn(cmd, [filePath], { stdio: "ignore", detached: true });
-    child.unref();
-  } catch {
-    // Best-effort cosmetic feature — sound playback may fail due to missing
-    // audio binary, missing assets dir, or headless environment. Never fatal.
-  }
-}
-
 /**
  * Print the Kuzushi startup banner — ASCII logo above the title.
  */
 export function printBanner(): void {
-  playStartupSound();
-
   const rb = chalk.white.bold;
   const dim = chalk.dim;
 

@@ -70,7 +70,8 @@ export function Table<Row>(props: TableProps<Row>): JSX.Element {
     selectionGlyph = "❯",
   } = props;
   const { stdout } = useStdout();
-  const totalWidth = maxWidth ?? resolveTerminalColumns(stdout);
+  const terminalWidth = resolveTerminalColumns(stdout);
+  const totalWidth = Math.max(1, Math.min(maxWidth ?? terminalWidth, terminalWidth));
   const widths = computeWidths(columns, totalWidth, gap);
   const headerVisible = showHeader ?? columns.some((c) => typeof c.header === "string");
 

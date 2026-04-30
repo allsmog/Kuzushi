@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { validateModelOverride } from "./agent-runtime/model-validation.js";
 import { normalizeTaskConfigAliases } from "./capabilities.js";
 import { AGENT_RUNTIME_BACKENDS, BUS_BACKENDS, DEFAULTS } from "./config/defaults.js";
 import {
@@ -41,6 +42,21 @@ import { isPathWithinRoot, isRecord, toErrorMessage } from "./utils.js";
 type ConfigLayer = Record<string, unknown>;
 type WritableConfigLayer = Partial<KuzushiConfig> & ConfigLayer;
 const log = getLogger("config");
+
+/**
+ * Thrown when a loaded config would silently force Kuzushi to switch
+ * runtimes/providers/models. The message always includes a remedy ("run
+ * /provider <id>" / "run /backend <id>") so operators can fix it without
+ * digging through source.
+ */
+export class KuzushiConfigError extends Error {
+  readonly code = "KUZUSHI_CONFIG_INVALID" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "KuzushiConfigError";
+  }
+}
 
 export { configPath, DEFAULTS, projectConfigPath };
 
@@ -655,6 +671,9 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     normalizedTasks.push("code-graph-build", "code-graph-enrich");
   }
 
+  const normalizedTaskConfig = normalizeTaskConfigAliases(coerceTaskConfigMap(config.taskConfig));
+  assertModelRuntimeCompatibility(agentRuntimeBackend, config.model, normalizedTaskConfig);
+
   return {
     ...config,
     verify,
@@ -699,8 +718,67 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     tasks: dedupeStringsPreserveOrder(normalizedTasks),
     severity: severity.length > 0 ? severity : [...DEFAULTS.severity],
     excludePatterns,
-    taskConfig: normalizeTaskConfigAliases(coerceTaskConfigMap(config.taskConfig)),
+    taskConfig: normalizedTaskConfig,
   };
+}
+
+/**
+ * Pre-flight: refuse to load a config that pairs an `agentRuntimeBackend`
+ * with an incompatible top-level `model` or per-task `taskConfig[*].model`.
+ * Without this gate, the runtime first detects the mismatch only on the
+ * first LLM call deep inside a pipeline. The remedy text instructs the
+ * operator how to fix it without grepping the source.
+ *
+ * Allowed scenarios deliberately not flagged:
+ *   - operator did not configure a model at all (handled by global
+ *     `DEFAULTS.model`, which is always pi-ai/claude-compatible);
+ *   - taskConfig entry is a record but lacks a `model` field (the task
+ *     resolver falls back to `config.model`, already validated above).
+ */
+function assertModelRuntimeCompatibility(
+  // `backend` may be undefined when the operator hasn't configured one.
+  // `validateModelOverride` already resolves undefined → "pi-ai", so we just
+  // pass it through; the resulting error message will say
+  // `agentRuntimeBackend "undefined"` which reads acceptably as a hint that
+  // the operator should set one explicitly.
+  backend: AgentRuntimeBackend | undefined,
+  model: string | undefined,
+  taskConfig: Record<string, Record<string, unknown>>,
+): void {
+  if (typeof model === "string" && model.trim() !== "") {
+    const err = validateModelOverride(backend, model);
+    if (err) {
+      throw new KuzushiConfigError(
+        `Configured model "${model}" is incompatible with agentRuntimeBackend "${backend}" (${err}). ` +
+          `Kuzushi will not silently switch runtimes or providers. ` +
+          `Either run \`kuzushi config set model <provider>:<model>\` with a compatible model, ` +
+          `or \`kuzushi config set agentRuntimeBackend <id>\` to a backend that accepts your model.`,
+      );
+    }
+  }
+
+  for (const [taskId, taskCfg] of Object.entries(taskConfig)) {
+    if (!isRecord(taskCfg)) continue;
+    const candidates: Array<[string, unknown]> = [
+      ["model", taskCfg["model"]],
+      ["labelingModel", taskCfg["labelingModel"]],
+      ["extractionModel", taskCfg["extractionModel"]],
+      ["checkModel", taskCfg["checkModel"]],
+      ["strideModel", taskCfg["strideModel"]],
+    ];
+    for (const [field, value] of candidates) {
+      if (typeof value !== "string" || value.trim() === "") continue;
+      const err = validateModelOverride(backend, value);
+      if (err) {
+        throw new KuzushiConfigError(
+          `taskConfig["${taskId}"].${field} = "${value}" is incompatible with agentRuntimeBackend "${backend}" (${err}). ` +
+            `Kuzushi will not silently switch runtimes or providers. ` +
+            `Either set a compatible model for this task or run \`kuzushi config set agentRuntimeBackend <id>\` ` +
+            `to switch backends.`,
+        );
+      }
+    }
+  }
 }
 
 function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {

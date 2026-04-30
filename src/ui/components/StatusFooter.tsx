@@ -11,7 +11,6 @@ import { Box, Text } from "ink";
 import React from "react";
 import { formatCost, formatDuration } from "../format.js";
 import { classifyTerminalWidth, useElapsed, useTerminalWidth } from "../hooks.js";
-import { Divider } from "../primitives/Divider.js";
 import type { Phase } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 
@@ -77,19 +76,31 @@ export const StatusFooter = React.memo(function StatusFooter({
   // Narrow terms (<60 col): drop the model tag to avoid truncation.
   const narrow = widthClass === "tiny";
 
+  // No inner Divider here — the outer KeybindFooter draws the canonical
+  // body→footer rule. Stacking two rules in 5 vertical rows just looked
+  // crowded.
+  //
+  // Layout rhythm: model + phase pin to the left, cost + elapsed pin to the
+  // right via `justifyContent="space-between"`. The previous single-Text
+  // layout was centred and rhythmless. On `tiny` panes the model drops out
+  // of the left half so the right-side cost still has breathing room; if
+  // the right half still overflows after that, Ink truncates the throttle
+  // suffix first, which is the desired graceful degradation.
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
-      <Divider width={Math.min(columns, 80)} />
-      <Text>
-        {narrow ? "" : tokens.strong(modelShort)}
-        {narrow ? "" : SEP}
-        {costStr}
-        {SEP}
-        {progressStr}
-        {SEP}
-        {elapsedStr}
-        {throttleStr}
-      </Text>
+      <Box width={Math.max(0, columns)} justifyContent="space-between">
+        <Text>
+          {narrow ? "" : tokens.strong(modelShort)}
+          {narrow ? "" : SEP}
+          {progressStr}
+        </Text>
+        <Text>
+          {costStr}
+          {SEP}
+          {elapsedStr}
+          {throttleStr}
+        </Text>
+      </Box>
     </Box>
   );
 });
