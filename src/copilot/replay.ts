@@ -20,9 +20,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { listRuns as listRunsFn, PipelineRunRecord } from "../store.js";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 // Canonical `PipelineRunRecord` lives in `src/store.ts`. Re-exported here so
 // `replay`-module consumers don't have to chase the persistence layer.
@@ -39,9 +37,7 @@ export interface TraceEvent {
   source: string;
 }
 
-// ---------------------------------------------------------------------------
 // Runs table
-// ---------------------------------------------------------------------------
 
 export function formatRunsTable(runs: PipelineRunList, limit = 25): string {
   if (runs.length === 0) return "No runs recorded yet. Kick off a scan first.";
@@ -68,9 +64,7 @@ export function formatRunsTable(runs: PipelineRunList, limit = 25): string {
   return [pad(header), pad(hrule), ...rows.map(pad)].join("\n") + footer;
 }
 
-// ---------------------------------------------------------------------------
 // Replay
-// ---------------------------------------------------------------------------
 
 export function formatRunReplay(run: PipelineRunRecord): string {
   const lines: string[] = [];
@@ -129,9 +123,7 @@ export function formatRunReplay(run: PipelineRunRecord): string {
   return lines.join("\n");
 }
 
-// ---------------------------------------------------------------------------
 // Trace
-// ---------------------------------------------------------------------------
 
 export function readTraceEvents(dataDir: string, runId: string): TraceEvent[] {
   const runDir = path.join(dataDir, "runs", runId);
@@ -208,9 +200,7 @@ function summariseTracePayload(e: TraceEvent): string {
   return parts.join("  ");
 }
 
-// ---------------------------------------------------------------------------
 // Small helpers
-// ---------------------------------------------------------------------------
 
 function parseFindings(json: string | null | undefined): Array<Record<string, unknown>> {
   if (!json) return [];

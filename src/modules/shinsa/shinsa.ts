@@ -141,9 +141,7 @@ function listSkillDirs(pluginPath: string): string[] {
     .sort();
 }
 
-// ---------------------------------------------------------------------------
 // shinsa:scan — full ISO 27001 compliance assessment
-// ---------------------------------------------------------------------------
 
 function buildScanTool(mode: ScanMode, toolId: string, title: string, blurb: string): ModuleTool {
   return {
@@ -290,9 +288,7 @@ const nistQuickCheckTool = buildScanTool(
   "Run a fast NIST SP 800-53 Rev 5 check on the highest-signal controls.",
 );
 
-// ---------------------------------------------------------------------------
 // shinsa:frameworks — list supported control families from the plugin's skills/
-// ---------------------------------------------------------------------------
 
 const frameworksTool: ModuleTool = {
   name: "shinsa:frameworks",
@@ -328,9 +324,7 @@ const frameworksTool: ModuleTool = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // Module factory
-// ---------------------------------------------------------------------------
 
 export function createCoreShinsaModule(): CopilotModule {
   return {

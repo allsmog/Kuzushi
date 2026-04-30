@@ -65,9 +65,7 @@ export function AgentActivity({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Heartbeat strip — Phase B.1
-// ---------------------------------------------------------------------------
 
 /**
  * One-line "what's happening right now" strip rendered above StatusFooter

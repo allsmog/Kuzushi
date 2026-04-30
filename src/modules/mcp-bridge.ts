@@ -141,9 +141,7 @@ export async function createMcpModule(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Tool bridging
-// ---------------------------------------------------------------------------
 
 /**
  * Bridge a single MCP `McpToolDefinition` to a Kuzushi `ModuleTool`.
@@ -414,9 +412,7 @@ async function callWithTimeout<T>(
   }
 }
 
-// ---------------------------------------------------------------------------
 // MCP client transports
-// ---------------------------------------------------------------------------
 
 /** Shared shape implemented by both transports. */
 export interface McpClient {
