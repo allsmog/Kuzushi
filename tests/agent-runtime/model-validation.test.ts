@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { validateModelOverride } from "../../src/agent-runtime/model-validation.js";
+import {
+  assertRuntimeModelCompatible,
+  assertRuntimeModelSelection,
+  validateModelOverride,
+  validateRuntimeModel,
+} from "../../src/agent-runtime/model-validation.js";
 
 describe("validateModelOverride", () => {
   it("requires provider:model for pi-ai but allows unknown providers", () => {
@@ -23,5 +28,25 @@ describe("validateModelOverride", () => {
     expect(validateModelOverride("codex", "anthropic:claude-opus-4-6")).toContain(
       "Codex runtime only accepts",
     );
+  });
+
+  it("validates concrete runtime ids and rejects incompatible runtime/model pairs", () => {
+    expect(validateRuntimeModel("codex", "anthropic:claude-opus-4-6")).toContain(
+      "Codex runtime only accepts",
+    );
+    expect(validateRuntimeModel("custom-runtime", "anything")).toBeNull();
+    expect(() => assertRuntimeModelCompatible("codex", "anthropic:claude-opus-4-6")).toThrow(
+      /will not silently switch models/u,
+    );
+  });
+
+  it("rejects fallbackModel unless the operator explicitly chooses a primary model", () => {
+    expect(() =>
+      assertRuntimeModelSelection(
+        "claude",
+        "anthropic:claude-sonnet-4-6",
+        "anthropic:claude-haiku-4-5",
+      ),
+    ).toThrow(/Automatic model fallback is disabled/u);
   });
 });

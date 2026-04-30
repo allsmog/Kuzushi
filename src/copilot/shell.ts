@@ -43,6 +43,7 @@ import {
 import { CARLINI_THREAT_HUNT_KIND_SPEC } from "../modules/carlini-threat-hunt/attachments.js";
 import { CONTEXT_KIND_SPEC } from "../modules/context/attachments.js";
 import { formatContextSummary } from "../modules/core-sast.js";
+import { resolveTaintIrisNextPersistentArtifacts } from "../modules/taint-iris-next/planner.js";
 import { THREAT_MODEL_KIND_SPEC } from "../modules/threat-model/attachments.js";
 import type { ModuleInfo, ModuleTool } from "../modules/types.js";
 import { loadDraftScope, scopeToHomeSlice } from "../modules/vendor-assessment/storage.js";
@@ -2223,7 +2224,11 @@ function pushTaskOutputThrottled(store: UIStore, output: PendingTaskOutput): voi
  * add other hunt-class tools here when they adopt the per-actor
  * `reportAgentActivity` + `done:true` pattern.
  */
-const HUNT_CLASS_TOOLS = new Set(["carlini-threat-hunt:run"]);
+const HUNT_CLASS_TOOLS = new Set([
+  "carlini-threat-hunt:run",
+  "taint-iris:hunt",
+  "taint-iris-next:hunt",
+]);
 
 function isHuntClassTool(toolName: string): boolean {
   return HUNT_CLASS_TOOLS.has(toolName);
@@ -2231,7 +2236,14 @@ function isHuntClassTool(toolName: string): boolean {
 
 interface HuntStats {
   findingsCount: number;
+  reviewCandidateCount: number;
   costUsd: number;
+  agentRuntimeBackend?: string;
+  agentStatus?: string;
+  candidateCount?: number;
+  linkedStoryCount?: number;
+  backendPathCount?: number;
+  warningCount?: number;
 }
 
 /**
@@ -2241,24 +2253,73 @@ interface HuntStats {
  * rather than a crash.
  */
 function extractHuntStats(result: { data?: unknown }): HuntStats {
-  const stats = (result.data as { stats?: { totalFindings?: unknown; totalCostUsd?: unknown } })
-    ?.stats;
+  const data = result.data as
+    | {
+        stats?: {
+          totalFindings?: unknown;
+          totalReviewCandidates?: unknown;
+          totalCostUsd?: unknown;
+          totalCandidates?: unknown;
+          totalLinkedStories?: unknown;
+          backendPathCount?: unknown;
+        };
+        agentRuntimeBackend?: unknown;
+        agentStatus?: unknown;
+        warnings?: unknown;
+      }
+    | undefined;
+  const stats = data?.stats;
   const findingsCount =
     typeof stats?.totalFindings === "number" && Number.isFinite(stats.totalFindings)
       ? stats.totalFindings
+      : 0;
+  const reviewCandidateCount =
+    typeof stats?.totalReviewCandidates === "number" && Number.isFinite(stats.totalReviewCandidates)
+      ? stats.totalReviewCandidates
       : 0;
   const costUsd =
     typeof stats?.totalCostUsd === "number" && Number.isFinite(stats.totalCostUsd)
       ? stats.totalCostUsd
       : 0;
-  return { findingsCount, costUsd };
+  const candidateCount = finiteOptionalNumber(stats?.totalCandidates);
+  const linkedStoryCount = finiteOptionalNumber(stats?.totalLinkedStories);
+  const backendPathCount = finiteOptionalNumber(stats?.backendPathCount);
+  const warningCount = Array.isArray(data?.warnings) ? data.warnings.length : undefined;
+  return {
+    findingsCount,
+    reviewCandidateCount,
+    costUsd,
+    ...(typeof data?.agentRuntimeBackend === "string"
+      ? { agentRuntimeBackend: data.agentRuntimeBackend }
+      : {}),
+    ...(typeof data?.agentStatus === "string" ? { agentStatus: data.agentStatus } : {}),
+    ...(candidateCount !== undefined ? { candidateCount } : {}),
+    ...(linkedStoryCount !== undefined ? { linkedStoryCount } : {}),
+    ...(backendPathCount !== undefined ? { backendPathCount } : {}),
+    ...(warningCount !== undefined ? { warningCount } : {}),
+  };
 }
 
-function formatHuntSummaryLine(actorCount: number, findingsCount: number, costUsd: number): string {
+function finiteOptionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function formatHuntSummaryLine(
+  actorCount: number,
+  findingsCount: number,
+  costUsd: number,
+  reviewCandidateCount = 0,
+  agentStatus?: string,
+): string {
   const actorsLabel = `${actorCount} actor${actorCount === 1 ? "" : "s"}`;
   const findingsLabel = `${findingsCount} finding${findingsCount === 1 ? "" : "s"}`;
+  const reviewLabel =
+    reviewCandidateCount > 0
+      ? ` · ${reviewCandidateCount} review candidate${reviewCandidateCount === 1 ? "" : "s"}`
+      : "";
+  const agentLabel = agentStatus ? ` · ${agentStatus}` : "";
   const costLabel = `$${costUsd.toFixed(2)}`;
-  return `${actorsLabel} · ${findingsLabel} · ${costLabel}`;
+  return `${actorsLabel} · ${findingsLabel}${reviewLabel}${agentLabel} · ${costLabel}`;
 }
 
 function formatHuntActorLabel(fingerprint: string): string {
@@ -3451,10 +3512,30 @@ async function startInkShell(
           shell.moduleRun.toolName === tool.name &&
           shell.moduleRun.status === "running"
         ) {
+          const huntStats =
+            finalResult && isHuntClassTool(tool.name) ? extractHuntStats(finalResult) : undefined;
           next.moduleRun = {
             ...shell.moduleRun,
             status: aborted ? "aborted" : ok ? "done" : "error",
             completedAtMs: Date.now(),
+            ...(huntStats ? { findingCount: huntStats.findingsCount } : {}),
+            ...(huntStats ? { reviewCandidateCount: huntStats.reviewCandidateCount } : {}),
+            ...(huntStats?.agentRuntimeBackend
+              ? { agentRuntimeBackend: huntStats.agentRuntimeBackend }
+              : {}),
+            ...(huntStats?.agentStatus ? { agentStatus: huntStats.agentStatus } : {}),
+            ...(huntStats?.candidateCount !== undefined
+              ? { candidateCount: huntStats.candidateCount }
+              : {}),
+            ...(huntStats?.linkedStoryCount !== undefined
+              ? { linkedStoryCount: huntStats.linkedStoryCount }
+              : {}),
+            ...(huntStats?.backendPathCount !== undefined
+              ? { backendPathCount: huntStats.backendPathCount }
+              : {}),
+            ...(huntStats?.warningCount !== undefined
+              ? { warningCount: huntStats.warningCount }
+              : {}),
             ...(finalResult?.costUsd != null ? { costUsd: finalResult.costUsd } : {}),
           };
         }
@@ -3477,7 +3558,13 @@ async function startInkShell(
           const stats = extractHuntStats(finalResult);
           appendToHistory(store, {
             type: "hunt-post-mortem",
-            text: formatHuntSummaryLine(perActor.length, stats.findingsCount, stats.costUsd),
+            text: formatHuntSummaryLine(
+              perActor.length,
+              stats.findingsCount,
+              stats.costUsd,
+              stats.reviewCandidateCount,
+              stats.agentStatus,
+            ),
             timestamp: Date.now(),
             huntSummary: {
               actorCount: perActor.length,
@@ -7641,6 +7728,16 @@ function getContextRequirementError(
       ? loadPersistentThreatModel(path.resolve(target))
       : null;
 
+  if (toolName === "taint-iris-next:hunt" && target && !/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) {
+    const artifacts = resolveTaintIrisNextPersistentArtifacts(path.resolve(target));
+    if (artifacts.contextStatus.ok) return undefined;
+    return [
+      `Context incomplete for ${toolName}. Run /context, then rerun the module.`,
+      `context: ${formatIrisNextArtifactStatus(artifacts.contextStatus)}`,
+      `threat model: ${formatIrisNextArtifactStatus(artifacts.threatModelStatus)} (warning only)`,
+    ].join("\n");
+  }
+
   if (!snapshot) {
     if (toolName === "carlini-threat-hunt:run" && persistentThreatModel) {
       return undefined;
@@ -7649,14 +7746,13 @@ function getContextRequirementError(
       return `Threat model required for ${toolName}. Run /use threat-model, then run .`;
     }
     if (toolName === "taint-iris-next:hunt") {
-      return `Context required for ${toolName}. Run /context, then /threats regen dfd.`;
+      return `Context required for ${toolName}. Run /context first. /threats regen dfd improves ranking but is optional.`;
     }
     return `Context required for ${toolName}. Run context (or /context) first.`;
   }
 
   const missing: string[] = [];
-  const needsThreatModel =
-    toolName === "carlini-threat-hunt:run" || toolName === "taint-iris-next:hunt";
+  const needsThreatModel = toolName === "carlini-threat-hunt:run";
   const needsAppModel =
     toolName === "taint-iris-next:hunt" ||
     toolName === "taint-iris:hunt" ||
@@ -7673,6 +7769,17 @@ function getContextRequirementError(
   if (missing.length === 0) return undefined;
   const hint = needsThreatModel ? "Run /context, then /threats regen dfd." : "Run context first.";
   return `Context incomplete for ${toolName}: missing ${missing.join(" and ")}. ${hint}`;
+}
+
+function formatIrisNextArtifactStatus(status: {
+  ok: boolean;
+  path?: string;
+  reason: string;
+}): string {
+  const state = status.ok ? "loaded" : "missing/incomplete";
+  return status.path
+    ? `${state} (${status.path}; ${status.reason})`
+    : `${state} (${status.reason})`;
 }
 
 function resolveOptionsTool(

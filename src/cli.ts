@@ -1399,6 +1399,7 @@ program
   .option("--workspace <id>", "Workspace to write results to")
   .option("--load <modules>", "Additional modules to load (comma-separated)")
   .option("--model <model>", "Model override for AI operations")
+  .option("--agent-runtime <backend>", "Agent runtime backend")
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
   .addHelpText(
     "after",
@@ -1426,6 +1427,7 @@ Examples:
           workspace?: string;
           load?: string;
           model?: string;
+          agentRuntime?: string;
           apiKey?: string;
         },
       ) => {
@@ -1465,6 +1467,54 @@ Examples:
         if (opts.model) {
           config.model = opts.model;
         }
+        if (opts.agentRuntime) {
+          if (!AGENT_RUNTIME_BACKENDS.has(opts.agentRuntime)) {
+            throw new CliUsageError(
+              `Invalid --agent-runtime "${opts.agentRuntime}". Valid values: ${[
+                ...AGENT_RUNTIME_BACKENDS,
+              ].join(", ")}`,
+            );
+          }
+          config.agentRuntimeBackend = opts.agentRuntime as typeof config.agentRuntimeBackend;
+        }
+
+        const { loadLocalCredentials } = await import("./config.js");
+        const localCreds = loadLocalCredentials(
+          opts.target ?? (input.target as string | undefined) ?? process.cwd(),
+        );
+        if (localCreds) {
+          const existing = config.agentRuntimeConfig ?? {};
+          config.agentRuntimeConfig = {
+            claude: { ...(existing.claude ?? {}), ...(localCreds.claude ?? {}) },
+            piAi: { ...(existing.piAi ?? {}), ...(localCreds.piAi ?? {}) },
+            codex: { ...(existing.codex ?? {}), ...(localCreds.codex ?? {}) },
+          };
+          if (
+            !config.agentRuntimeConfig.claude ||
+            Object.keys(config.agentRuntimeConfig.claude).length === 0
+          ) {
+            delete config.agentRuntimeConfig.claude;
+          }
+          if (
+            !config.agentRuntimeConfig.piAi ||
+            Object.keys(config.agentRuntimeConfig.piAi).length === 0
+          ) {
+            delete config.agentRuntimeConfig.piAi;
+          }
+          if (
+            !config.agentRuntimeConfig.codex ||
+            Object.keys(config.agentRuntimeConfig.codex).length === 0
+          ) {
+            delete config.agentRuntimeConfig.codex;
+          }
+        }
+
+        const active = resolveActiveCredentials(config);
+        const activeProvider = config.agentRuntimeBackend === "codex" ? "openai" : "anthropic";
+        const apiKeyEnv = providerEnvVar(activeProvider);
+        const baseUrlEnv = providerBaseUrlEnvVar(activeProvider);
+        if (active.apiKey && apiKeyEnv) process.env[apiKeyEnv] = active.apiKey;
+        if (active.baseUrl && baseUrlEnv) process.env[baseUrlEnv] = active.baseUrl;
 
         // Configure runtime
         if (opts.apiKey) {

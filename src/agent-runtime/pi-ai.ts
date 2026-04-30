@@ -25,6 +25,7 @@ import type { AgentRuntimeCredentials } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
 import { maybeCompactContext } from "./context-compactor.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
+import { assertRuntimeModelSelection } from "./model-validation.js";
 import { normalizeToolInput } from "./tool-input-normalizer.js";
 import { summarizeToolCompletion } from "./tool-summary.js";
 import { executeTool, PI_AI_TOOL_DEFINITIONS } from "./tools.js";
@@ -294,6 +295,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
   }
 
   async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
+    assertRuntimeModelSelection(this.id, request.options.model, request.options.fallbackModel);
     const restoreRuntimeEnv = applyRuntimeEnvOverrides(this.runtimeConfig);
     const startedAtMs = Date.now();
     const signal = request.options.abortController?.signal;
@@ -346,6 +348,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
   }
 
   createSession(baseOptions: AgentQueryOptions): AgentSession {
+    assertRuntimeModelSelection(this.id, baseOptions.model, baseOptions.fallbackModel);
     return new PiAiSession(this, this.runtimeConfig, baseOptions);
   }
 }
