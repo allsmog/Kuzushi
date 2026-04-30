@@ -13,9 +13,7 @@ import type Database from "better-sqlite3";
 import type { ModuleReference } from "../modules/reference.js";
 import type { CheckCodeKind } from "../triage/checkcode.js";
 
-// ---------------------------------------------------------------------------
 // Hosts
-// ---------------------------------------------------------------------------
 
 export interface Host {
   id: string;
@@ -158,9 +156,7 @@ function rowToHost(row: HostRow): Host {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Services
-// ---------------------------------------------------------------------------
 
 export interface Service {
   id: string;
@@ -283,9 +279,7 @@ function rowToService(row: ServiceRow): Service {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Vulns
-// ---------------------------------------------------------------------------
 
 export type VulnSeverity = "info" | "low" | "medium" | "high" | "critical";
 
@@ -390,9 +384,7 @@ function rowToVuln(row: VulnRow): Vuln {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Loot
-// ---------------------------------------------------------------------------
 
 export interface Loot {
   id: string;
@@ -489,9 +481,7 @@ function rowToLoot(row: LootRow): Loot {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Notes
-// ---------------------------------------------------------------------------
 
 export interface Note {
   id: string;
@@ -572,9 +562,7 @@ function rowToNote(row: NoteRow): Note {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Creds (Metasploit: Core + Public + Private + Realm)
-// ---------------------------------------------------------------------------
 
 export type PrivateType =
   | "password"
@@ -774,9 +762,7 @@ function rowToCredLogin(row: CredLoginRow): CredLogin {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Sessions
-// ---------------------------------------------------------------------------
 
 export interface SessionRecord {
   id: string;
@@ -938,9 +924,7 @@ function rowToSession(row: SessionRow): SessionRecord {
   };
 }
 
-// ---------------------------------------------------------------------------
 // helpers
-// ---------------------------------------------------------------------------
 
 function safeJson<T>(s: string | null, fallback: T): T {
   if (!s) return fallback;

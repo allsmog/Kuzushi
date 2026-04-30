@@ -78,9 +78,7 @@ export class DispatcherDriver implements Driver {
     return this._jobManager;
   }
 
-  // ---------------------------------------------------------------------
   // Command observers (for macros + audit)
-  // ---------------------------------------------------------------------
 
   private readonly commandObservers: Array<(line: string) => void> = [];
 
@@ -103,9 +101,7 @@ export class DispatcherDriver implements Driver {
     }
   }
 
-  // ---------------------------------------------------------------------
   // Prompt status providers (msfconsole PROMPT-format equivalent)
-  // ---------------------------------------------------------------------
 
   /** Registry of `() => string | undefined` closures that decorate `prompt()`. */
   private readonly statusProviders: Array<() => string | undefined> = [];
@@ -232,9 +228,7 @@ export class DispatcherDriver implements Driver {
     return { matched: false, output: `Unknown command: ${cmd}${hint}` };
   }
 
-  // ---------------------------------------------------------------------
   // Aliases
-  // ---------------------------------------------------------------------
 
   private readonly aliases = new Map<string, string>();
 
@@ -266,9 +260,7 @@ export class DispatcherDriver implements Driver {
     };
   }
 
-  // ---------------------------------------------------------------------
   // Typo suggestions (Levenshtein-based)
-  // ---------------------------------------------------------------------
 
   /** Nearest command name within edit-distance 2, or undefined. */
   private nearestCommand(cmd: string): string | undefined {
@@ -283,9 +275,7 @@ export class DispatcherDriver implements Driver {
     return best?.name;
   }
 
-  // ---------------------------------------------------------------------
   // Output filters (shell-style pipe segments)
-  // ---------------------------------------------------------------------
 
   private async applyFilters(
     output: string | undefined,
@@ -375,9 +365,7 @@ export function tokenize(input: string): string[] {
   return out;
 }
 
-// ---------------------------------------------------------------------------
 // Pipeline splitting + filters
-// ---------------------------------------------------------------------------
 
 /**
  * Split an input line on unquoted `|` characters. Segments are returned as
@@ -526,9 +514,7 @@ async function pageOutput(text: string): Promise<string> {
   });
 }
 
-// ---------------------------------------------------------------------------
 // Levenshtein (small, iterative)
-// ---------------------------------------------------------------------------
 
 function levenshtein(a: string, b: string): number {
   if (a === b) return 0;

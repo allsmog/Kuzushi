@@ -17,9 +17,7 @@ import { scoreFindingMetadata } from "../scanners/scoring.js";
 import type { Finding } from "../scanners/types.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "./types.js";
 
-// ---------------------------------------------------------------------------
 // ndiff:fetch-cve
-// ---------------------------------------------------------------------------
 
 function readNdiffConfig(ctx: ExecutionContext): {
   offline: boolean;
@@ -113,9 +111,7 @@ function formatCveSummary(record: CveRecord): string {
   return lines.filter(Boolean).join("\n");
 }
 
-// ---------------------------------------------------------------------------
 // ndiff:extract-fix-pattern
-// ---------------------------------------------------------------------------
 
 const FIX_PATTERN_SCHEMA = {
   type: "object",
@@ -360,9 +356,7 @@ const extractFixPatternTool: ModuleTool = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // ndiff:hunt-variants
-// ---------------------------------------------------------------------------
 
 const VARIANT_HUNT_SCHEMA = {
   type: "object",
@@ -620,9 +614,7 @@ function normalizeHuntResults(
   }));
 }
 
-// ---------------------------------------------------------------------------
 // Module factory
-// ---------------------------------------------------------------------------
 
 export function createNDayDiffHunterModule(): CopilotModule {
   return {

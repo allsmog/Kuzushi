@@ -5,9 +5,7 @@
  * so callers can inspect `category` and `retryable` to decide how to proceed.
  */
 
-// ---------------------------------------------------------------------------
 // Category
-// ---------------------------------------------------------------------------
 
 export type ErrorCategory = "transient" | "rate_limit" | "validation" | "auth" | "budget" | "fatal";
 
@@ -16,9 +14,7 @@ const RETRYABLE_CATEGORIES: ReadonlySet<ErrorCategory> = new Set<ErrorCategory>(
   "rate_limit",
 ]);
 
-// ---------------------------------------------------------------------------
 // Base class
-// ---------------------------------------------------------------------------
 
 export class KuzushiError extends Error {
   readonly category: ErrorCategory;
@@ -40,9 +36,7 @@ export class KuzushiError extends Error {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Subclasses
-// ---------------------------------------------------------------------------
 
 export class TransientError extends KuzushiError {
   constructor(message: string, options?: { cause?: unknown; costUsd?: number }) {
@@ -86,9 +80,7 @@ export class FatalError extends KuzushiError {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Classification helper
-// ---------------------------------------------------------------------------
 
 /** Status-code tokens extracted from error messages. */
 const STATUS_PATTERNS: Array<{ pattern: RegExp; category: ErrorCategory }> = [
@@ -184,9 +176,7 @@ export function wrapError(error: unknown): KuzushiError {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Internal helpers
-// ---------------------------------------------------------------------------
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {

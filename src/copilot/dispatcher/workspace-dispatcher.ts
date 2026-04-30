@@ -82,9 +82,7 @@ export class WorkspaceDispatcher implements CommandDispatcher {
     }
   }
 
-  // -------------------------------------------------------------------------
   // Entity CRUD
-  // -------------------------------------------------------------------------
 
   private cmd_hosts(args: string[], wid: string): CommandResult {
     if (args[0] === "-d" && args[1]) {
@@ -440,9 +438,7 @@ function resolveSessionRef(
   return result.id;
 }
 
-// ---------------------------------------------------------------------------
 // renderers
-// ---------------------------------------------------------------------------
 
 function pad(s: string, w: number): string {
   return s + " ".repeat(Math.max(0, w - s.length));

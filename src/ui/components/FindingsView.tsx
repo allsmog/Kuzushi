@@ -163,9 +163,7 @@ function pad(text: string, width: number): string {
   return text + " ".repeat(padding);
 }
 
-// ---------------------------------------------------------------------------
 // Unified mode — Ink UI v2 screen 04
-// ---------------------------------------------------------------------------
 
 const SEVERITY_ORDER: Record<string, number> = {
   critical: 0,

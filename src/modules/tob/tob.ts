@@ -40,9 +40,7 @@ function resolveMaxFindings(ctx: ExecutionContext, override?: unknown): number {
   return 50;
 }
 
-// ---------------------------------------------------------------------------
 // tob:audit — run the ToB skills audit
-// ---------------------------------------------------------------------------
 
 const auditTool: ModuleTool = {
   name: "tob:audit",
@@ -183,9 +181,7 @@ const auditTool: ModuleTool = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // tob:skills — list resolvable skill plugins
-// ---------------------------------------------------------------------------
 
 const skillsTool: ModuleTool = {
   name: "tob:skills",
@@ -231,9 +227,7 @@ const skillsTool: ModuleTool = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // Module factory
-// ---------------------------------------------------------------------------
 
 export function createCoreTobModule(): CopilotModule {
   const hiddenTobAudit = exposeAgentTaskAsHiddenDagTool<"tob">(tobAuditTask, {

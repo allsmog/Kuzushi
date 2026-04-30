@@ -14,9 +14,7 @@
 
 import type { ExecutionContext } from "../types.js";
 
-// ---------------------------------------------------------------------------
 // Context snapshot generation
-// ---------------------------------------------------------------------------
 
 export interface ContextGenOptions {
   enrichment: boolean;
@@ -318,9 +316,7 @@ async function generateSingleProjectContext(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Context summary formatting
-// ---------------------------------------------------------------------------
 
 export function formatContextSummary(
   snapshot: import("../../ui/state.js").ContextSnapshot,
@@ -464,9 +460,7 @@ function formatMonorepoContext(snapshot: import("../../ui/state.js").ContextSnap
   return lines.join("\n");
 }
 
-// ---------------------------------------------------------------------------
 // Runtime shape helpers for unknown-typed snapshot fields
-// ---------------------------------------------------------------------------
 
 interface RepoContextShape {
   languages: string[];

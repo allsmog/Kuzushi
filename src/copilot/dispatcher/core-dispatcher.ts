@@ -328,9 +328,7 @@ export class CoreDispatcher implements CommandDispatcher {
     return undefined;
   }
 
-  // -------------------------------------------------------------------------
   // Handlers
-  // -------------------------------------------------------------------------
 
   private cmd_help(ctx: CommandContext): CommandResult {
     const all = ctx.driver.allCommands();
@@ -609,9 +607,7 @@ export class CoreDispatcher implements CommandDispatcher {
     return { output: `[+] Updated ${name} (${updated.length} chars, scope=${scope}).` };
   }
 
-  // -------------------------------------------------------------------------
   // Discovery & learning-curve commands
-  // -------------------------------------------------------------------------
 
   private cmd_tip(): CommandResult {
     return { output: `[*] Tip: ${randomTip()}` };
@@ -684,9 +680,7 @@ export class CoreDispatcher implements CommandDispatcher {
     return { output: lines.join("\n") };
   }
 
-  // -------------------------------------------------------------------------
   // Aliases
-  // -------------------------------------------------------------------------
 
   private cmd_alias(args: string[], ctx: CommandContext): CommandResult {
     const driver = ctx.driver as unknown as {
@@ -719,9 +713,7 @@ export class CoreDispatcher implements CommandDispatcher {
     return { output: removed ? `[+] Removed alias: ${name}` : `[-] No such alias: ${name}` };
   }
 
-  // -------------------------------------------------------------------------
   // Favorites (numeric-recall aliases)
-  // -------------------------------------------------------------------------
 
   private readonly favorites: string[] = [];
 
@@ -758,9 +750,7 @@ export class CoreDispatcher implements CommandDispatcher {
     return { output: `[+] Unstarred ${target}` };
   }
 
-  // -------------------------------------------------------------------------
   // Module stack (pushm / popm / listm)
-  // -------------------------------------------------------------------------
 
   private readonly savedModules: string[] = [];
 
@@ -796,9 +786,7 @@ export class CoreDispatcher implements CommandDispatcher {
     };
   }
 
-  // -------------------------------------------------------------------------
   // Background jobs
-  // -------------------------------------------------------------------------
 
   private async cmd_jobs(args: string[], _ctx: CommandContext): Promise<CommandResult> {
     const mgr = this.opts.jobManager;
@@ -856,9 +844,7 @@ export class CoreDispatcher implements CommandDispatcher {
     return { output: [header, sep, ...rows].join("\n") };
   }
 
-  // -------------------------------------------------------------------------
   // Dev REPL
-  // -------------------------------------------------------------------------
 
   private async cmd_repl(_ctx: CommandContext): Promise<CommandResult> {
     if (!this.opts.openRepl) {
@@ -872,9 +858,7 @@ export class CoreDispatcher implements CommandDispatcher {
     }
   }
 
-  // -------------------------------------------------------------------------
   // Spool — tee shell output to a file
-  // -------------------------------------------------------------------------
 
   private cmd_spool(args: string[], ctx: CommandContext): CommandResult {
     const spool = this.opts.spool;
@@ -900,9 +884,7 @@ export class CoreDispatcher implements CommandDispatcher {
     }
   }
 
-  // -------------------------------------------------------------------------
   // Utility primitives — sleep / wait_for / time / clear / version / logs / connect
-  // -------------------------------------------------------------------------
 
   private async cmd_sleep(args: string[], ctx: CommandContext): Promise<CommandResult> {
     const secs = Number.parseFloat(args[0] ?? "");
@@ -997,9 +979,7 @@ export class CoreDispatcher implements CommandDispatcher {
     };
   }
 
-  // -------------------------------------------------------------------------
   // Macros — record / replay a sequence of commands
-  // -------------------------------------------------------------------------
 
   private readonly macros = new Map<string, string[]>();
   private recordingTarget: string | null = null;
@@ -1161,9 +1141,7 @@ export class CoreDispatcher implements CommandDispatcher {
     return { output: chunks.join("") || "[-] No bytes received." };
   }
 
-  // -------------------------------------------------------------------------
   // helpers
-  // -------------------------------------------------------------------------
 
   /** Find the active module dispatcher's datastore, if a `use` was issued. */
   private findModuleStore(ctx: CommandContext): Datastore | undefined {
@@ -1186,9 +1164,7 @@ export class CoreDispatcher implements CommandDispatcher {
   }
 }
 
-// ---------------------------------------------------------------------------
 // info / module rendering
-// ---------------------------------------------------------------------------
 
 export function formatModuleInfo(mod: CopilotModule): string {
   const lines: string[] = [];

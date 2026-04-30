@@ -159,9 +159,7 @@ export class ModuleRegistry {
     }
   }
 
-  // -------------------------------------------------------------------------
   // Queries
-  // -------------------------------------------------------------------------
 
   /** Get a module by ID. Throws if not found. */
   get(id: string): CopilotModule {
@@ -208,9 +206,7 @@ export class ModuleRegistry {
     }));
   }
 
-  // -------------------------------------------------------------------------
   // Tool resolution
-  // -------------------------------------------------------------------------
 
   /**
    * Resolve a fully-qualified tool name ("module:action") to the ModuleTool.
@@ -274,9 +270,7 @@ export class ModuleRegistry {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Module specifier parsing
-// ---------------------------------------------------------------------------
 
 /**
  * Parse a module specifier string into a typed ModuleSpecifier.
@@ -305,9 +299,7 @@ export function parseModuleSpecifier(spec: string): ModuleSpecifier {
   return { type: "builtin", id: spec };
 }
 
-// ---------------------------------------------------------------------------
 // Lightweight JSON-Schema validation for `configSchema`
-// ---------------------------------------------------------------------------
 
 /**
  * Minimal JSON-Schema-ish validator — enough to enforce the common manifest

@@ -16,9 +16,7 @@
 import type { ExploitChain } from "../types.js";
 import type { ActionableFinding } from "../ui/state.js";
 
-// ---------------------------------------------------------------------------
 // Computation
-// ---------------------------------------------------------------------------
 
 /** A single alias entry (forward + reverse for easy printing). */
 export interface AliasEntry {
@@ -84,9 +82,7 @@ export function computeChainAliases(chains: ReadonlyArray<ExploitChain>): AliasE
     }));
 }
 
-// ---------------------------------------------------------------------------
 // Resolution
-// ---------------------------------------------------------------------------
 
 /**
  * Case-insensitive alias resolver. Accepts the alias itself (`F-0108`),
@@ -136,9 +132,7 @@ function canonicaliseAlias(raw: string): string {
   return `${prefix}-${digits.padStart(width, "0")}`;
 }
 
-// ---------------------------------------------------------------------------
 // Formatters (used by `/show aliases`)
-// ---------------------------------------------------------------------------
 
 /**
  * Format an alias table for a list of findings / chains, optionally filtered

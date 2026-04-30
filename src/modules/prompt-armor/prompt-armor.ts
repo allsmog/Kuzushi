@@ -256,9 +256,7 @@ function buildCommandTool(spec: BuildToolSpec): ModuleTool {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Tool catalog
-// ---------------------------------------------------------------------------
 
 const scanTool = buildCommandTool({
   command: "scan",
@@ -357,9 +355,7 @@ const configTool = buildCommandTool({
   },
 });
 
-// ---------------------------------------------------------------------------
 // Module factory
-// ---------------------------------------------------------------------------
 
 export function createCorePromptArmorModule(): CopilotModule {
   return {

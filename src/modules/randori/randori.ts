@@ -52,9 +52,7 @@ function defaultArtifactDir(runId: string): string {
   return path.join(".kuzushi", "runs", runId, "randori-output");
 }
 
-// ---------------------------------------------------------------------------
 // randori:pasta — run the PASTA analysis
-// ---------------------------------------------------------------------------
 
 const pastaTool: ModuleTool = {
   name: "randori:pasta",
@@ -227,9 +225,7 @@ const pastaTool: ModuleTool = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // randori:threat-model — read artifacts from a prior run
-// ---------------------------------------------------------------------------
 
 const threatModelTool: ModuleTool = {
   name: "randori:threat-model",
@@ -305,9 +301,7 @@ const threatModelTool: ModuleTool = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // Module factory
-// ---------------------------------------------------------------------------
 
 export function createCoreRandoriModule(): CopilotModule {
   // Hidden DagTool wrapper for the scan pipeline's threat-model-randori task.
