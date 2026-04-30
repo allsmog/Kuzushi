@@ -211,7 +211,7 @@ function resolveChalk(severity: Severity, env: NodeJS.ProcessEnv): ChalkInstance
   const highContrast = isHighContrast(env);
   const colorName = highContrast ? HIGH_CONTRAST_COLOR[severity] : BASE_PALETTE[severity].color;
   // Map Ink color name → chalk style. Chalk exposes each as a property.
-  const base = (chalk as unknown as Record<string, ChalkInstance>)[colorName] ?? chalk.white;
+  const base = (chalk as unknown as Record<InkColor, ChalkInstance>)[colorName] ?? chalk.white;
   return highContrast || severity === "critical" ? base.bold : base;
 }
 
