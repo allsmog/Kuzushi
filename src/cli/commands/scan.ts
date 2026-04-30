@@ -142,12 +142,18 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   );
 
   // Inherited auth: walk the OAuth token search path and prime
-  // ANTHROPIC_API_KEY so pi-ai's anthropic provider (and the Claude
+  // ANTHROPIC_AUTH_TOKEN / ANTHROPIC_OAUTH_TOKEN so pi-ai's anthropic provider
+  // (and the Claude
   // Code subprocess) see a credential without requiring the operator
   // to copy-paste anything. Skips when an env var is already set.
   // Also skips when Claude Code's host-managed auth is active — see
   // field-test issue #20 (~12× cost regression from cache misses).
-  if (modeConfig.auth === "inherited" && !process.env.ANTHROPIC_API_KEY) {
+  if (
+    modeConfig.auth === "inherited" &&
+    !process.env.ANTHROPIC_API_KEY &&
+    !process.env.ANTHROPIC_AUTH_TOKEN &&
+    !process.env.ANTHROPIC_OAUTH_TOKEN
+  ) {
     const { resolveAmbientOauthToken, isClaudeCodeHostManagedAuth } = await import(
       "../../config.js"
     );
@@ -155,7 +161,8 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
       const { getLogger } = await import("../../logger.js");
       const ambient = resolveAmbientOauthToken(modeConfig);
       if (ambient) {
-        process.env.ANTHROPIC_API_KEY = ambient.token;
+        process.env.ANTHROPIC_AUTH_TOKEN = ambient.token;
+        process.env.ANTHROPIC_OAUTH_TOKEN = ambient.token;
         getLogger("kuzushi").info(`Using inherited OAuth token (source: ${ambient.source})`);
       }
     }

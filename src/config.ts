@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   lstatSync,
@@ -92,7 +93,7 @@ export function persistLocalCredentials(
 
   const existing = loadLocalCredentials(cwd) ?? {};
   // Deep merge each backend slot so writing claude doesn't wipe piAi, and
-  // each slot's apiKey/baseUrl merge field-wise rather than replacing the
+  // each slot's apiKey/authToken/baseUrl merge field-wise rather than replacing the
   // whole object.
   const merged: AgentRuntimeConfig = {
     claude: { ...(existing.claude ?? {}), ...(creds.claude ?? {}) },
@@ -753,7 +754,7 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
         if (!normalizedLayer) continue;
         const existing = merged.agentRuntimeConfig ?? {};
         // Deep-merge each backend slot so a project layer setting claude.baseUrl
-        // doesn't wipe a global claude.apiKey.
+        // doesn't wipe a global claude.apiKey/authToken.
         merged.agentRuntimeConfig = {
           claude: { ...(existing.claude ?? {}), ...(normalizedLayer.claude ?? {}) },
           piAi: { ...(existing.piAi ?? {}), ...(normalizedLayer.piAi ?? {}) },
@@ -867,7 +868,7 @@ function saveUpdatedConfigLayer(config: WritableConfigLayer, repoRoot?: string):
 }
 
 function rejectLegacyAgentRuntimePath(key: string): void {
-  if (!/^agentRuntimeConfig\.(apiKey|baseUrl)$/.test(key)) return;
+  if (!/^agentRuntimeConfig\.(apiKey|authToken|baseUrl)$/.test(key)) return;
   const field = key.split(".").at(-1);
   throw new Error(
     `Legacy config key "${key}" was removed. Use "agentRuntimeConfig.claude.${field}" instead.`,
@@ -875,7 +876,7 @@ function rejectLegacyAgentRuntimePath(key: string): void {
 }
 
 function rejectLegacyAgentRuntimeConfig(value: Record<string, unknown>): void {
-  if (!("apiKey" in value || "baseUrl" in value)) return;
+  if (!("apiKey" in value || "authToken" in value || "baseUrl" in value)) return;
   throw new Error(
     'Legacy flat agentRuntimeConfig was removed. Use {"claude":{"apiKey":"..."}} or another backend slot.',
   );
@@ -1378,10 +1379,12 @@ function normalizeConfidenceSignalWeights(value: unknown): ConfidenceSignalWeigh
 function normalizeAgentRuntimeCredentials(value: unknown): AgentRuntimeCredentials | undefined {
   if (!isRecord(value)) return undefined;
   const apiKey = normalizeOptionalString(value["apiKey"]);
+  const authToken = normalizeOptionalString(value["authToken"]);
   const baseUrl = normalizeOptionalString(value["baseUrl"]);
-  if (!apiKey && !baseUrl) return undefined;
+  if (!apiKey && !authToken && !baseUrl) return undefined;
   const out: AgentRuntimeCredentials = {};
   if (apiKey) out.apiKey = apiKey;
+  if (authToken) out.authToken = authToken;
   if (baseUrl) out.baseUrl = baseUrl;
   return out;
 }
@@ -1457,6 +1460,7 @@ export interface AmbientOauthResolution {
  *   4. `config.oauthTokenFile` → file contents.
  *   5. `~/.claude/remote/.oauth_token` (Claude Code remote sandbox).
  *   6. `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`.
+ *   7. macOS Keychain `Claude Code-credentials` → `claudeAiOauth.accessToken`.
  *
  * Used by inherited-auth mode so operators in a Claude Code child
  * session don't have to copy-paste a key. Returns `undefined` when no
@@ -1467,7 +1471,7 @@ export function resolveAmbientOauthToken(
   config: Pick<KuzushiConfig, "oauthTokenFile">,
 ): AmbientOauthResolution | undefined {
   const envApi = process.env["ANTHROPIC_API_KEY"]?.trim();
-  if (envApi && envApi.startsWith("sk-ant-oat")) {
+  if (envApi?.startsWith("sk-ant-oat")) {
     return { token: envApi, source: "env:ANTHROPIC_API_KEY" };
   }
 
@@ -1496,7 +1500,7 @@ export function resolveAmbientOauthToken(
   for (const home of homedirs) {
     const remotePath = path.join(home, ".claude", "remote", ".oauth_token");
     const remoteToken = tryReadFile(remotePath)?.trim();
-    if (remoteToken && remoteToken.startsWith("sk-ant-oat")) {
+    if (remoteToken?.startsWith("sk-ant-oat")) {
       return { token: remoteToken, source: `file:${remotePath}` };
     }
   }
@@ -1507,6 +1511,11 @@ export function resolveAmbientOauthToken(
       const parsed = parseCredentialsJson(credsRaw);
       if (parsed) return { token: parsed, source: `file:${credsPath}` };
     }
+  }
+
+  const keychainToken = readClaudeCodeKeychainOauthToken();
+  if (keychainToken) {
+    return { token: keychainToken, source: "macOS Keychain:Claude Code-credentials" };
   }
 
   return undefined;
@@ -1540,6 +1549,24 @@ function parseCredentialsJson(raw: string): string | undefined {
     // fall through
   }
   return undefined;
+}
+
+function readClaudeCodeKeychainOauthToken(): string | undefined {
+  if (process.env["KUZUSHI_OAUTH_DISABLE_KEYCHAIN"] === "1") return undefined;
+  if (process.platform !== "darwin") return undefined;
+  try {
+    const raw = execFileSync(
+      "security",
+      ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      },
+    );
+    return parseCredentialsJson(raw) ?? (raw.trim() || undefined);
+  } catch {
+    return undefined;
+  }
 }
 
 function tryReadFile(filePath: string): string | undefined {

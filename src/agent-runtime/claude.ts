@@ -565,7 +565,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   private readonly config: AgentRuntimeCredentials | undefined;
   private readonly client: Anthropic;
   /**
-   * True when this runtime has no API key configured — the Batch
+   * True when this runtime has no direct SDK credential configured — the Batch
    * API path will throw synchronously on every attempt. Surfaced so
    * callers (`agent-runtime/execution.ts`) can skip Batch outright
    * and avoid logging a fallback warning per batch (#28).
@@ -576,9 +576,10 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
   constructor(config?: AgentRuntimeCredentials) {
     this.config = config;
-    this.oauthMode = !config?.apiKey;
+    this.oauthMode = !config?.apiKey && !config?.authToken;
     this.client = new Anthropic({
       apiKey: config?.apiKey,
+      authToken: config?.authToken,
       baseURL: config?.baseUrl,
     });
   }
@@ -597,10 +598,10 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   ): Promise<Map<string, AgentQueryExecutionResult>> {
     if (requests.length === 0) return new Map();
 
-    // Batch API requires an API key — OAuth mode can't use the direct SDK client.
+    // Batch API requires a direct SDK credential; subprocess-only inherited auth cannot use it.
     // Throw so callers fall back to sequential subprocess queries.
-    if (!this.config?.apiKey) {
-      throw new Error("Batch API requires an API key — not available in OAuth mode");
+    if (!this.config?.apiKey && !this.config?.authToken) {
+      throw new Error("Batch API requires an API key or auth token — not available in OAuth mode");
     }
 
     let model = baseOptions.model ?? "claude-sonnet-4-6";
@@ -935,11 +936,11 @@ export class ClaudeAgentRuntime implements AgentRuntime {
 
   async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
     // Fast path: tool-less calls go directly to Anthropic API — no subprocess.
-    // Only when an API key is available — OAuth mode must use subprocess path.
+    // Only when a direct SDK credential is available — inherited OAuth mode must use subprocess path.
     if (
       !request.options.allowedTools?.length &&
       !request.options.disallowedTools?.length &&
-      this.config?.apiKey
+      (this.config?.apiKey || this.config?.authToken)
     ) {
       yield* this.queryDirect(request);
       return;
@@ -1010,6 +1011,9 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     const env: Record<string, string | undefined> = { ...process.env };
     if (this.config?.apiKey) {
       env.ANTHROPIC_API_KEY = this.config.apiKey;
+    }
+    if (this.config?.authToken) {
+      env.ANTHROPIC_AUTH_TOKEN = this.config.authToken;
     }
     if (this.config?.baseUrl) {
       env.ANTHROPIC_BASE_URL = this.config.baseUrl;
@@ -1387,6 +1391,7 @@ class ClaudeSession implements AgentSession {
 
     const env: Record<string, string | undefined> = { ...process.env };
     if (this.config?.apiKey) env.ANTHROPIC_API_KEY = this.config.apiKey;
+    if (this.config?.authToken) env.ANTHROPIC_AUTH_TOKEN = this.config.authToken;
     if (this.config?.baseUrl) env.ANTHROPIC_BASE_URL = this.config.baseUrl;
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_SESSION_ID;

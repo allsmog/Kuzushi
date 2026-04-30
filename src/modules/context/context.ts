@@ -23,14 +23,19 @@ import { contextEnricherTask } from "../../agents/tasks/context-enricher.js";
 import { contextGathererTask } from "../../agents/tasks/context-gatherer.js";
 import { invariantCheckTask } from "../../agents/tasks/invariant-analysis/check.js";
 import { invariantExtractTask } from "../../agents/tasks/invariant-analysis/extract.js";
-import type { ContextGenerationSlice } from "../../ui/state.js";
+import type { ContextGenerationSlice, ContextSnapshot } from "../../ui/state.js";
+import { indexContextSnapshotArtifact } from "../_shared/artifact-kb/index.js";
 import { createAttachmentTools } from "../_shared/attachments/index.js";
 import { defineModule, defineTool } from "../define.js";
 import { defineHiddenDagNodeTool } from "../hidden-dag-node.js";
 import { saveContextSnapshot } from "../sast/context-persist.js";
 import { formatContextSummary, generateContextSnapshot } from "../sast/shared.js";
 import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
-import { CONTEXT_KIND_SPEC, contextAttachmentAdapter } from "./attachments.js";
+import {
+  CONTEXT_KIND_SPEC,
+  contextAttachmentAdapter,
+  loadContextAttachments,
+} from "./attachments.js";
 
 const CONTEXT_GENERATION_SLICES = [
   "all",
@@ -137,10 +142,26 @@ export function createContextModule(): CopilotModule {
         advance("publish", "done");
 
         advance("save", "running");
-        saveContextSnapshot(target, snapshot);
+        const saved = saveContextSnapshot(target, snapshot);
+        const artifactKb = saved
+          ? tryIndexContextArtifact(target, snapshot, ctx)
+          : {
+              error: "context snapshot was not saved; artifact KB indexing skipped",
+            };
         advance("save", "done");
 
-        return { ok: true, output: formatContextSummary(snapshot), data: snapshot };
+        const output = artifactKb?.indexed
+          ? `${formatContextSummary(snapshot)}\n  Artifact KB: ${artifactKb.indexed.chunks} chunks`
+          : formatContextSummary(snapshot);
+        return {
+          ok: true,
+          output,
+          data: {
+            ...snapshot,
+            ...(artifactKb?.indexed ? { artifactKb: artifactKb.indexed } : {}),
+            ...(artifactKb?.error ? { artifactKbError: artifactKb.error } : {}),
+          },
+        };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         const running = steps.find((s) => s.status === "running");
@@ -192,6 +213,27 @@ export function createContextModule(): CopilotModule {
     },
     tools: [contextBuildTool, ...attachmentTools, ...hiddenInfraDagTools],
   });
+}
+
+function tryIndexContextArtifact(
+  target: string,
+  snapshot: ContextSnapshot,
+  ctx: ExecutionContext,
+): { indexed?: ReturnType<typeof indexContextSnapshotArtifact>; error?: string } {
+  try {
+    const indexed = indexContextSnapshotArtifact({
+      repoRoot: target,
+      snapshot,
+      ...(ctx.workspaceId ? { runId: ctx.workspaceId } : {}),
+      attachments: loadContextAttachments(target),
+    });
+    ctx.reportActivity?.(`indexed Artifact KB (${indexed.chunks} context chunks)`);
+    return { indexed };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    ctx.reportActivity?.(`Artifact KB indexing skipped: ${error}`);
+    return { error };
+  }
 }
 
 function parseContextScope(value: unknown): ContextGenerationSlice {

@@ -258,6 +258,17 @@ describe("carlini-threat-hunt", () => {
       expect(prompt).toContain("Your next actions must inspect repository code");
     });
 
+    it("points downstream agents at the generic Artifact KB", () => {
+      const prompt = buildPrompt(makeDfdNode(), [makeStrideThreat()], [makeDfdFlow()], {
+        artifactKbPath: "/tmp/repo/.kuzushi/artifact-kb.sqlite3",
+        artifactKbSearchAvailable: true,
+      });
+
+      expect(prompt).toContain("ArtifactKbSearch");
+      expect(prompt).toContain("repo structure, entry points, invariants, trust boundaries");
+      expect(prompt).toContain("untrusted reference material");
+    });
+
     it("can inline full threat details only in debug mode", () => {
       const prompt = buildPrompt(makeDfdNode(), [makeStrideThreat()], [], {
         debugInlineThreats: true,

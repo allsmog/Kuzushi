@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentMessage, AgentQueryRequest } from "../../src/agent-runtime/types.js";
 
 const ORIGINAL_ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"];
+const ORIGINAL_ANTHROPIC_AUTH_TOKEN = process.env["ANTHROPIC_AUTH_TOKEN"];
+const ORIGINAL_ANTHROPIC_OAUTH_TOKEN = process.env["ANTHROPIC_OAUTH_TOKEN"];
 const ORIGINAL_ANTHROPIC_BASE_URL = process.env["ANTHROPIC_BASE_URL"];
 
 const { completeMock, getModelMock, validateToolCallMock, streamMock } = vi.hoisted(() => ({
@@ -180,6 +182,18 @@ afterEach(() => {
     process.env["ANTHROPIC_API_KEY"] = ORIGINAL_ANTHROPIC_API_KEY;
   }
 
+  if (ORIGINAL_ANTHROPIC_AUTH_TOKEN === undefined) {
+    delete process.env["ANTHROPIC_AUTH_TOKEN"];
+  } else {
+    process.env["ANTHROPIC_AUTH_TOKEN"] = ORIGINAL_ANTHROPIC_AUTH_TOKEN;
+  }
+
+  if (ORIGINAL_ANTHROPIC_OAUTH_TOKEN === undefined) {
+    delete process.env["ANTHROPIC_OAUTH_TOKEN"];
+  } else {
+    process.env["ANTHROPIC_OAUTH_TOKEN"] = ORIGINAL_ANTHROPIC_OAUTH_TOKEN;
+  }
+
   if (ORIGINAL_ANTHROPIC_BASE_URL === undefined) {
     delete process.env["ANTHROPIC_BASE_URL"];
   } else {
@@ -211,20 +225,27 @@ describe("PiAiAgentRuntime", () => {
   it("applies configured anthropic credentials from runtime config", async () => {
     const cwd = makeTempDir();
     const originalApiKey = process.env["ANTHROPIC_API_KEY"];
+    const originalAuthToken = process.env["ANTHROPIC_AUTH_TOKEN"];
+    const originalOauthToken = process.env["ANTHROPIC_OAUTH_TOKEN"];
     const originalBaseUrl = process.env["ANTHROPIC_BASE_URL"];
     completeMock.mockImplementation(async () => {
       expect(process.env["ANTHROPIC_API_KEY"]).toBe("sk-config");
+      expect(process.env["ANTHROPIC_AUTH_TOKEN"]).toBe("sk-ant-oat-config");
+      expect(process.env["ANTHROPIC_OAUTH_TOKEN"]).toBe("sk-ant-oat-config");
       expect(process.env["ANTHROPIC_BASE_URL"]).toBe("https://api.example.com/");
       return makeAssistantMessage([{ type: "text", text: '{"ok":true}' }]);
     });
 
     const runtime = new PiAiAgentRuntime({
       apiKey: "sk-config",
+      authToken: "sk-ant-oat-config",
       baseUrl: "https://api.example.com/",
     });
     await collectMessages(runtime, makeRequest(cwd));
 
     expect(process.env["ANTHROPIC_API_KEY"]).toBe(originalApiKey);
+    expect(process.env["ANTHROPIC_AUTH_TOKEN"]).toBe(originalAuthToken);
+    expect(process.env["ANTHROPIC_OAUTH_TOKEN"]).toBe(originalOauthToken);
     expect(process.env["ANTHROPIC_BASE_URL"]).toBe(originalBaseUrl);
   });
 

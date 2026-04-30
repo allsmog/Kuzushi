@@ -143,7 +143,7 @@ function checkAgentRuntimeCredentials(config: KuzushiConfig): {
 } {
   const backend = config.agentRuntimeBackend ?? "pi-ai";
   const savedCredentials = resolveActiveCredentials(config);
-  if (savedCredentials.apiKey?.trim()) {
+  if (savedCredentials.apiKey?.trim() || savedCredentials.authToken?.trim()) {
     return {
       check: {
         name: "credentials",
@@ -195,6 +195,28 @@ function checkAgentRuntimeCredentials(config: KuzushiConfig): {
         name: "credentials",
         status: "ok",
         detail: `${envVar} set`,
+      },
+      issue: null,
+    };
+  }
+
+  if (providerId === "anthropic" && process.env.ANTHROPIC_AUTH_TOKEN?.trim()) {
+    return {
+      check: {
+        name: "credentials",
+        status: "ok",
+        detail: "ANTHROPIC_AUTH_TOKEN set",
+      },
+      issue: null,
+    };
+  }
+
+  if (providerId === "anthropic" && process.env.ANTHROPIC_OAUTH_TOKEN?.trim()) {
+    return {
+      check: {
+        name: "credentials",
+        status: "ok",
+        detail: "ANTHROPIC_OAUTH_TOKEN set",
       },
       issue: null,
     };

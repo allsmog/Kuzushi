@@ -179,13 +179,16 @@ function saveWizardConfig(result: WizardResult, repoRoot: string, store?: UIStor
  * Check whether valid Anthropic credentials are available for the Claude backend.
  *
  * Returns `true` when at least one credential source is present:
- *   - explicit `apiKey` in config
+ *   - explicit `apiKey` or `authToken` in config
  *   - `ANTHROPIC_API_KEY` environment variable
+ *   - `ANTHROPIC_AUTH_TOKEN` environment variable
  *   - `ANTHROPIC_OAUTH_TOKEN` environment variable
  */
-export function hasAnthropicCredentials(configApiKey?: string): boolean {
+export function hasAnthropicCredentials(configApiKey?: string, configAuthToken?: string): boolean {
   if (configApiKey) return true;
+  if (configAuthToken) return true;
   if (process.env["ANTHROPIC_API_KEY"]) return true;
+  if (process.env["ANTHROPIC_AUTH_TOKEN"]) return true;
   if (process.env["ANTHROPIC_OAUTH_TOKEN"]) return true;
   // File-based ambient OAuth (Claude Code remote sandbox, local install).
   if (resolveAmbientOauthToken({})) return true;
@@ -202,6 +205,7 @@ export function hasAnthropicCredentials(configApiKey?: string): boolean {
 export function hasAnyProviderCredentials(): boolean {
   const envKeys = [
     "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_OAUTH_TOKEN",
     "OPENAI_API_KEY",
     "GOOGLE_API_KEY",
