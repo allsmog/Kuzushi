@@ -39,8 +39,10 @@ const MODULE_RUN_PHASES = [
   "threat-model",
   "cwe-catalog",
   "structural-extract",
+  "spec-inference",
+  "link-analysis",
   "backend-evidence",
-  "agent-hunt",
+  "contextual-triage",
   "finding-normalize",
 ] as const;
 
@@ -55,7 +57,11 @@ function renderRunOutput(
     ...(agentResult?.warnings ?? []),
   ];
   const findingsCount = agentResult?.findings.length ?? 0;
+  const confirmedFindingsCount = agentResult ? confirmedFindingCount(agentResult) : 0;
+  const reviewCandidateCount = agentResult?.reviewCandidates.length ?? 0;
   const selectedCwes = agentResult?.selectedCwes.map((selection) => selection.cwe) ?? [];
+  const outcome = agentResult?.outcome ?? evidenceResult.outcome;
+  const triageSummary = agentResult?.triageSummary ?? evidenceResult.triageSummary;
 
   return [
     ...TAINT_IRIS_NEXT_TUI_HEADER_LINES,
@@ -64,7 +70,12 @@ function renderRunOutput(
     "",
     `target: ${plan.target}`,
     `mode: ${plan.mode}`,
+    `outcome: ${outcome}`,
     `backend: ${plan.backend.requested} -> ${plan.backend.selected}`,
+    `structural engine: ${evidenceResult.structuralEngine}`,
+    plan.backend.corroborateWithCodeql
+      ? "CodeQL corroboration: enabled"
+      : "CodeQL corroboration: disabled",
     plan.backend.codeqlDbPath
       ? `existing CodeQL DB: ${plan.backend.codeqlDbPath}`
       : "existing CodeQL DB: none",
@@ -76,28 +87,65 @@ function renderRunOutput(
     evidenceResult.artifacts?.codeqlQueryPath
       ? `CodeQL query: ${evidenceResult.artifacts.codeqlQueryPath}`
       : "",
+    evidenceResult.artifacts?.codeqlQueryPaths &&
+    evidenceResult.artifacts.codeqlQueryPaths.length > 1
+      ? `CodeQL queries: ${evidenceResult.artifacts.codeqlQueryPaths.length} per-CWE generated queries`
+      : "",
     evidenceResult.artifacts?.codeqlCompileStatus
       ? `CodeQL compile: ${evidenceResult.artifacts.codeqlCompileStatus}`
       : "",
-    `context: ${plan.repoContext ? "loaded" : "missing"}`,
-    `threat model: ${plan.threatModel ? "loaded" : "missing"}`,
+    evidenceResult.artifacts?.codeqlQueryStatuses?.length
+      ? `CodeQL per-CWE: ${renderCodeqlStatuses(evidenceResult.artifacts.codeqlQueryStatuses)}`
+      : "",
+    `context: ${plan.contextStatus.ok ? "loaded" : "missing/incomplete"} (${plan.contextStatus.path ?? plan.contextStatus.reason})`,
+    `threat model: ${plan.threatModelStatus.ok ? "loaded" : "warning"} (${plan.threatModelStatus.path ?? plan.threatModelStatus.reason})`,
     `languages: ${plan.languages.join(", ") || "unknown"}`,
     plan.maxBudgetUsd !== undefined ? `max agent budget: $${plan.maxBudgetUsd}` : "",
+    `min evidence level: ${plan.caps.minEvidenceLevel}`,
     `CWE catalog: ${plan.catalog.length}/${TAINT_IRIS_NEXT_CWE_CATALOG.length} ranked candidates`,
     `structural query seeds: ${plan.structuralQueries.length}`,
-    `evidence: ${evidenceResult.evidence.length} matches via ${evidenceResult.tool}`,
+    `candidates: ${evidenceResult.candidates.length} (${renderCounts(evidenceResult.candidateCounts)})`,
+    `labeled specs: ${evidenceResult.labeledSpecs.length} (${renderCounts(evidenceResult.labeledSpecCounts)})`,
+    `linked stories: ${evidenceResult.linkedStoryCount}`,
+    evidenceResult.linkedStories.length > 0
+      ? `linked examples: ${renderLinkedStoryExamples(evidenceResult)}`
+      : "",
+    `backend paths: ${evidenceResult.backendPathCount}`,
+    `evidence: ${evidenceResult.evidence.length} rows via ${evidenceResult.tool}`,
+    agentResult?.agentRuntimeBackend ? `agent runtime: ${agentResult.agentRuntimeBackend}` : "",
+    agentResult?.agentStatus ? `agent status: ${agentResult.agentStatus}` : "",
     `agent selected CWEs: ${selectedCwes.length > 0 ? selectedCwes.join(", ") : plan.mode === "hunt" ? "none" : "not run"}`,
-    `findings: ${findingsCount}`,
+    `triage: findings=${triageSummary.finding} candidates=${triageSummary.candidate} rejected=${triageSummary.rejected}`,
+    `findings: ${confirmedFindingsCount}`,
+    reviewCandidateCount > 0 ? `review candidates: ${reviewCandidateCount}` : "",
+    agentResult && !agentResult.structuredOutputValid
+      ? `agent output: invalid strict JSON after ${agentResult.structuredOutputRetryCount} repair retry`
+      : agentResult
+        ? `agent output: valid strict JSON${agentResult.structuredOutputRetryCount ? " after repair retry" : ""}`
+        : "",
+    agentResult?.parseError ? `agent parse error: ${agentResult.parseError}` : "",
+    evidenceResult.legacyComparisonStatus
+      ? `legacy comparison status: ${evidenceResult.legacyComparisonStatus}`
+      : "",
     warnings.length > 0 ? `warnings: ${dedupe(warnings).join("; ")}` : "",
     "",
     plan.mode === "plan"
       ? "Status: deterministic plan complete. Hunt mode will feed this bounded catalog and evidence bundle into one scoped agent session."
-      : "Status: hunt complete.",
+      : outcome === "agent-output-invalid" && findingsCount > 0
+        ? "Status: agent output was invalid; deterministic linked review candidates were emitted."
+        : outcome === "agent-output-invalid"
+          ? "Status: hunt failed closed because the agent did not return valid strict JSON."
+          : "Status: hunt complete.",
     "",
     plan.promptCatalog,
   ]
     .filter((line) => line !== "")
     .join("\n");
+}
+
+function confirmedFindingCount(agentResult: TaintIrisNextAgentResult): number {
+  if (agentResult.reviewCandidates.length === 0) return agentResult.findings.length;
+  return Math.max(0, agentResult.findings.length - agentResult.reviewCandidates.length);
 }
 
 function reportPlanningProgress(ctx: ExecutionContext, plan: TaintIrisNextPlan): void {
@@ -122,12 +170,20 @@ function reportEvidenceProgress(
   evidenceResult: TaintIrisNextEvidenceResult,
 ): void {
   ctx.reportActivity?.(
-    `structural extraction searched ${evidenceResult.queryCount} query seeds; ${evidenceResult.evidence.length} evidence matches`,
+    `structural extraction via ${evidenceResult.structuralEngine} produced ${evidenceResult.candidates.length} candidates from ${evidenceResult.queryCount} query seeds`,
     { phase: "structural-extract", step: 4, total: MODULE_RUN_PHASES.length },
   );
   ctx.reportActivity?.(
-    `backend ${plan.backend.selected} using ${evidenceResult.tool}; active evidence ${evidenceResult.evidence.length}`,
-    { phase: "backend-evidence", step: 5, total: MODULE_RUN_PHASES.length },
+    `spec inference produced ${evidenceResult.labeledSpecs.length} typed IRIS specs`,
+    { phase: "spec-inference", step: 5, total: MODULE_RUN_PHASES.length },
+  );
+  ctx.reportActivity?.(
+    `link analysis produced ${evidenceResult.linkedStoryCount} deterministic source-to-sink/control stories`,
+    { phase: "link-analysis", step: 6, total: MODULE_RUN_PHASES.length },
+  );
+  ctx.reportActivity?.(
+    `backend evidence used ${plan.backend.selected}/${evidenceResult.tool}; backend paths=${evidenceResult.backendPathCount}`,
+    { phase: "backend-evidence", step: 7, total: MODULE_RUN_PHASES.length },
   );
 }
 
@@ -138,17 +194,51 @@ function reportAgentProgress(
 ): void {
   ctx.reportActivity?.(
     `agent selected ${agentResult.selectedCwes.length} CWE themes from ${plan.catalog.length} candidates`,
-    { phase: "agent-hunt", step: 6, total: MODULE_RUN_PHASES.length },
+    { phase: "contextual-triage", step: 8, total: MODULE_RUN_PHASES.length },
   );
   ctx.reportActivity?.(`normalized ${agentResult.findings.length} IRIS Next findings`, {
     phase: "finding-normalize",
-    step: 7,
+    step: 9,
     total: MODULE_RUN_PHASES.length,
   });
 }
 
+function renderCounts(counts: Record<string, number>): string {
+  const entries = Object.entries(counts)
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 6)
+    .map(([cwe, count]) => `${cwe}:${count}`);
+  return entries.join(", ") || "none";
+}
+
 function dedupe(items: readonly string[]): string[] {
   return [...new Set(items.filter((item) => item.trim().length > 0))];
+}
+
+function renderCodeqlStatuses(
+  statuses: NonNullable<TaintIrisNextEvidenceResult["artifacts"]>["codeqlQueryStatuses"],
+): string {
+  return (statuses ?? [])
+    .slice(0, 8)
+    .map(
+      (status) =>
+        `${status.cwe} compile=${status.compileStatus} analyze=${status.analyzeStatus} rows=${status.evidenceRows}`,
+    )
+    .join("; ");
+}
+
+function renderLinkedStoryExamples(evidenceResult: TaintIrisNextEvidenceResult): string {
+  const candidatesById = new Map(
+    evidenceResult.candidates.map((candidate) => [candidate.id, candidate]),
+  );
+  return evidenceResult.linkedStories
+    .slice(0, 4)
+    .map((story) => {
+      const source = candidatesById.get(story.sourceCandidateId);
+      const sink = candidatesById.get(story.sinkCandidateId);
+      return `${story.cwe} ${story.filePath}:${story.sourceLine}->${story.sinkLine} ${source?.pattern ?? "source"} => ${sink?.pattern ?? "sink"}`;
+    })
+    .join("; ");
 }
 
 export function createTaintIrisNextModule(): CopilotModule {
@@ -206,17 +296,45 @@ export function createTaintIrisNextModule(): CopilotModule {
           minimum: 1,
           description: "Maximum deterministic evidence rows retained per CWE.",
         },
+        maxCandidatesPerCwe: {
+          type: "integer",
+          default: DEFAULT_TAINT_IRIS_NEXT_CAPS.maxCandidatesPerCwe,
+          minimum: 1,
+          description: "Maximum candidate APIs retained per CWE after deterministic extraction.",
+        },
         maxFilesPerQuery: {
           type: "integer",
           default: DEFAULT_TAINT_IRIS_NEXT_CAPS.maxFilesPerQuery,
           minimum: 1,
           description: "Maximum distinct files retained for a single structural query pattern.",
         },
+        maxSpecsPerCwe: {
+          type: "integer",
+          default: DEFAULT_TAINT_IRIS_NEXT_CAPS.maxSpecsPerCwe,
+          minimum: 1,
+          description: "Maximum IRIS-style typed source/sink/sanitizer specs retained per CWE.",
+        },
         maxAgentFindings: {
           type: "integer",
           default: DEFAULT_TAINT_IRIS_NEXT_CAPS.maxAgentFindings,
           minimum: 1,
           description: "Maximum findings accepted from the bounded agent session.",
+        },
+        codeqlAnalyzeTimeoutMs: {
+          type: "integer",
+          default: DEFAULT_TAINT_IRIS_NEXT_CAPS.codeqlAnalyzeTimeoutMs,
+          minimum: 30000,
+          maximum: 900000,
+          description:
+            "Timeout for each generated CodeQL database analyze call. V1 keeps a hard upper cap.",
+          "x-advanced": true,
+        },
+        minEvidenceLevel: {
+          type: "string",
+          enum: ["path", "linked", "candidate"],
+          default: DEFAULT_TAINT_IRIS_NEXT_CAPS.minEvidenceLevel,
+          description:
+            "Minimum evidence level accepted for agent findings. path requires backend path evidence; linked allows clear source-to-sink/control stories; candidate allows raw candidates.",
         },
         maxBudgetUsd: {
           type: "number",
@@ -233,9 +351,19 @@ export function createTaintIrisNextModule(): CopilotModule {
     },
     renderResult(result) {
       if (!result.ok) return null;
-      const data = result.data as { mode?: string; findings?: unknown[] } | undefined;
+      const data = result.data as
+        | {
+            mode?: string;
+            findings?: unknown[];
+            stats?: { totalFindings?: number; totalReviewCandidates?: number };
+          }
+        | undefined;
       if (data?.mode === "hunt")
-        return `IRIS Next hunt complete (${data.findings?.length ?? 0} findings)`;
+        return `IRIS Next hunt complete (${data.stats?.totalFindings ?? data.findings?.length ?? 0} findings${
+          data.stats?.totalReviewCandidates
+            ? `, ${data.stats.totalReviewCandidates} review candidates`
+            : ""
+        })`;
       return "IRIS Next plan complete";
     },
     async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
@@ -250,9 +378,11 @@ export function createTaintIrisNextModule(): CopilotModule {
           data: {
             status: "missing-context",
             target: plan.target,
+            contextStatus: plan.contextStatus,
+            threatModelStatus: plan.threatModelStatus,
             missing: {
-              context: !plan.repoContext,
-              threatModel: !plan.threatModel,
+              context: !plan.contextStatus.ok,
+              threatModel: !plan.threatModelStatus.ok,
             },
           },
         };
@@ -279,6 +409,17 @@ export function createTaintIrisNextModule(): CopilotModule {
             promptCatalog: plan.promptCatalog,
             structuralQueries: plan.structuralQueries,
             evidence: evidenceResult.evidence,
+            candidates: evidenceResult.candidates,
+            linkedStories: evidenceResult.linkedStories,
+            labeledSpecs: evidenceResult.labeledSpecs,
+            outcome: evidenceResult.outcome,
+            candidateCounts: evidenceResult.candidateCounts,
+            labeledSpecCounts: evidenceResult.labeledSpecCounts,
+            linkedStoryCount: evidenceResult.linkedStoryCount,
+            backendPathCount: evidenceResult.backendPathCount,
+            structuralEngine: evidenceResult.structuralEngine,
+            triageSummary: evidenceResult.triageSummary,
+            legacyComparisonStatus: evidenceResult.legacyComparisonStatus,
             evidenceResult,
             agentPrompt: buildTaintIrisNextAgentPrompt(plan, evidenceResult),
           },
@@ -286,18 +427,26 @@ export function createTaintIrisNextModule(): CopilotModule {
       }
 
       ctx.reportActivity?.(
-        `agent hunting across ${plan.catalog.length} candidates and ${evidenceResult.evidence.length} evidence rows`,
-        { phase: "agent-hunt", step: 6, total: MODULE_RUN_PHASES.length },
+        `contextual triage across ${plan.catalog.length} catalog candidates and ${evidenceResult.evidence.length} evidence rows`,
+        { phase: "contextual-triage", step: 8, total: MODULE_RUN_PHASES.length },
       );
       const agentResult = await runTaintIrisNextAgent(plan, evidenceResult, ctx);
       reportAgentProgress(ctx, plan, agentResult);
+      const invalidAgentOutput = agentResult.outcome === "agent-output-invalid";
+      const hardInvalidAgentOutput = invalidAgentOutput && agentResult.findings.length === 0;
+      const totalFindings = confirmedFindingCount(agentResult);
+      const totalReviewCandidates = agentResult.reviewCandidates.length;
 
       return {
-        ok: true,
+        ok: !hardInvalidAgentOutput,
         output: renderRunOutput(plan, evidenceResult, agentResult),
         costUsd: agentResult.costUsd,
         data: {
-          status: "hunted",
+          status: invalidAgentOutput
+            ? agentResult.findings.length > 0
+              ? "hunted-with-agent-output-invalid"
+              : "agent-output-invalid"
+            : "hunted",
           attribution: TAINT_IRIS_NEXT_ATTRIBUTION,
           references: TAINT_IRIS_NEXT_REFERENCES,
           target: plan.target,
@@ -310,11 +459,38 @@ export function createTaintIrisNextModule(): CopilotModule {
           promptCatalog: plan.promptCatalog,
           structuralQueries: plan.structuralQueries,
           evidence: evidenceResult.evidence,
+          candidates: evidenceResult.candidates,
+          linkedStories: evidenceResult.linkedStories,
+          labeledSpecs: evidenceResult.labeledSpecs,
+          outcome: agentResult.outcome,
+          candidateCounts: evidenceResult.candidateCounts,
+          labeledSpecCounts: evidenceResult.labeledSpecCounts,
+          linkedStoryCount: evidenceResult.linkedStoryCount,
+          backendPathCount: evidenceResult.backendPathCount,
+          structuralEngine: evidenceResult.structuralEngine,
+          triageSummary: agentResult.triageSummary,
+          legacyComparisonStatus: evidenceResult.legacyComparisonStatus,
+          stats: {
+            totalFindings,
+            totalReviewCandidates,
+            totalCandidates: evidenceResult.candidates.length,
+            totalLinkedStories: evidenceResult.linkedStoryCount,
+            backendPathCount: evidenceResult.backendPathCount,
+            totalCostUsd: agentResult.costUsd,
+          },
           evidenceResult,
+          agentRuntimeBackend: agentResult.agentRuntimeBackend,
+          agentStatus: agentResult.agentStatus,
           selectedCwes: agentResult.selectedCwes,
           findings: agentResult.findings,
+          reviewCandidates: agentResult.reviewCandidates,
+          triage: agentResult.triage,
           warnings: agentResult.warnings,
           rawAgentOutput: agentResult.rawOutput,
+          structuredOutputValid: agentResult.structuredOutputValid,
+          structuredOutputRetryCount: agentResult.structuredOutputRetryCount,
+          parseError: agentResult.parseError,
+          resultTextExcerpt: agentResult.resultTextExcerpt,
         },
       };
     },
@@ -338,10 +514,7 @@ export function createTaintIrisNextModule(): CopilotModule {
         "may run static-analysis backends",
       ],
     },
-    requires: [
-      { kind: "snapshot", moduleId: "context", field: "appModel" },
-      { kind: "snapshot", moduleId: "threat-model", field: "threatModel" },
-    ],
+    requires: [{ kind: "snapshot", moduleId: "context", field: "appModel" }],
     examples: ["use taint-iris-next\nrun . backend=auto mode=plan"],
     tools: [hunt],
   });

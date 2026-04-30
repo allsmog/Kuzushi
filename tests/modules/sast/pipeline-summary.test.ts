@@ -157,6 +157,29 @@ describe("summarizePipelineResult", () => {
     expect(summary).toContain("4 events dead-lettered");
   });
 
+  it("surfaces legacy IRIS inconclusive status instead of clean completion", () => {
+    const result = baseResult({
+      stats: {
+        ...baseResult().stats!,
+        legacyIrisDegradation: {
+          type: "legacy-inconclusive",
+          reason: "no-findings-and-no-generated-query-artifacts",
+          message:
+            "Legacy taint-iris returned 0 findings without generated CodeQL query artifacts; treat as inconclusive, not clean.",
+        },
+      },
+    });
+    const summary = summarizePipelineResult({
+      result,
+      repoName: "lab",
+      label: "Taint IRIS",
+      postProcessMode: "scan-only",
+    });
+
+    expect(summary).toContain("Taint IRIS inconclusive: lab — 0 findings");
+    expect(summary).toContain("treat as inconclusive, not clean");
+  });
+
   it("singularizes task/event counts at 1", () => {
     const result = baseResult({
       stats: {

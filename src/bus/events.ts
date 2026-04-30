@@ -71,6 +71,7 @@ export interface PipelineStats {
   deadLetterCount?: number;
   extractionDegradation?: { status: string; reasons: string[] };
   stitchDegradation?: { type: string; reason: string; message: string };
+  legacyIrisDegradation?: { type: string; reason: string; message: string };
   tiPriorDegraded?: boolean;
   qualityGateResult?: QualityGateResult;
   runMetrics?: RunMetrics;
@@ -147,6 +148,12 @@ export type TaskCompleteEvent = EventEnvelope<
     output: unknown;
     durationMs: number;
     costUsd?: number;
+    degradation?: {
+      type: string;
+      reason: string;
+      message: string;
+      [key: string]: unknown;
+    };
   }
 >;
 

@@ -1,12 +1,13 @@
 /**
- * Model fallback chain: automatic failover to alternate models
- * when the primary model consistently fails with non-transient errors.
+ * Model fallback chain state. Fallback selection is disabled unless the caller
+ * records explicit operator consent in the chain.
  */
 
 export interface FallbackChain {
   primary: string;
   fallbacks: string[];
   cooldownMs: number;
+  operatorConsented: boolean;
 }
 
 interface ModelFailureState {
@@ -30,10 +31,13 @@ export class ModelFallbackManager {
   }
 
   /**
-   * Select the best available model from a fallback chain.
-   * Skips models that are in cooldown.
+   * Select the best available model from a fallback chain. Without explicit
+   * operator consent, this always returns the primary model even if failures
+   * were recorded. Kuzushi must not silently switch models or providers.
    */
   selectModel(chain: FallbackChain): string {
+    if (!chain.operatorConsented) return chain.primary;
+
     const cooldownMs = chain.cooldownMs || DEFAULT_COOLDOWN_MS;
 
     if (!this.isInCooldown(chain.primary, cooldownMs)) {
@@ -74,11 +78,17 @@ export class ModelFallbackManager {
   }
 
   /** Build a FallbackChain from config. */
-  static buildChain(primary: string, fallbacks?: string[], cooldownMs?: number): FallbackChain {
+  static buildChain(
+    primary: string,
+    fallbacks?: string[],
+    cooldownMs?: number,
+    operatorConsented = false,
+  ): FallbackChain {
     return {
       primary,
       fallbacks: fallbacks ?? [],
       cooldownMs: cooldownMs ?? DEFAULT_COOLDOWN_MS,
+      operatorConsented,
     };
   }
 

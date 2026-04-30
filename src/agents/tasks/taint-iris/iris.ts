@@ -11,7 +11,7 @@
  * Framework-agnostic: the LLM knows gRPC, protobuf, GORM, Django, Express, etc.
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import type { AgentToolDecision } from "../../../agent-runtime/types.js";
 import { createLogger } from "../../../logger.js";
@@ -240,9 +240,8 @@ export const taintIrisTask: DagNodeImpl<ScanOpts, Finding[]> = {
   outputKind: "findings",
   dependsOn: ["taint-cwe-select", "context-gatherer"],
 
-  condition(upstreamOutputs) {
-    const cweOutput = upstreamOutputs.get("taint-cwe-select") as CweSelectOutput | undefined;
-    return !!cweOutput?.cwes?.length;
+  condition() {
+    return true;
   },
 
   async run(input, context): Promise<Finding[]> {
@@ -261,7 +260,15 @@ export const taintIrisTask: DagNodeImpl<ScanOpts, Finding[]> = {
 
     if (cwes.length === 0) {
       log.info("No CWE classes selected — skipping IRIS taint analysis");
-      return attachTaskOutputMeta([], { costUsd: 0 });
+      return attachTaskOutputMeta([], {
+        costUsd: 0,
+        degradation: {
+          type: "legacy-inconclusive",
+          reason: "no-cwes-selected",
+          message:
+            "Legacy taint-iris selected no CWE classes, so the classic IRIS agent did not generate or run CodeQL; treat as inconclusive, not clean.",
+        },
+      });
     }
 
     const maxCwes = readPositiveInteger(params["maxCwes"] ?? taskConfig["maxCwes"]);
@@ -277,6 +284,7 @@ export const taintIrisTask: DagNodeImpl<ScanOpts, Finding[]> = {
     const scanRoot = resolveScanRoot(context);
     const workspaceDir = resolveIrisWorkspace(context);
     const guardDenied: string[] = [];
+    const observability = createLegacyIrisObservability();
     const abortController = context.signal ? new AbortController() : undefined;
     if (context.signal && abortController) {
       if (context.signal.aborted) abortController.abort();
@@ -289,6 +297,7 @@ export const taintIrisTask: DagNodeImpl<ScanOpts, Finding[]> = {
       workspaceDir,
       ...(codeqlDbPath ? { codeqlDbPath } : {}),
       denied: guardDenied,
+      observability,
     });
     const prompt = buildIrisPrompt(selectedCwes, codeqlDbPath, repoContext, {
       ...(promptOverride ? { promptOverride } : {}),
@@ -344,27 +353,48 @@ export const taintIrisTask: DagNodeImpl<ScanOpts, Finding[]> = {
       context.repoRoot,
       context.repoName,
     );
+    observability.queryArtifactCount = countGeneratedCodeqlArtifacts(workspaceDir);
+    observability.deniedToolAttempts = new Set(guardDenied).size;
+    observability.legacyComparisonStatus =
+      findings.length === 0 && observability.queryArtifactCount === 0
+        ? "legacy-inconclusive"
+        : "legacy-observable";
 
     log.info(`IRIS analysis complete: ${findings.length} findings, $${costUsd.toFixed(2)}`);
 
-    const degradation =
-      guardDenied.length > 0
-        ? {
-            type: "guarded-tools",
-            reason: "denied-out-of-scope-agent-tool-use",
-            message: `Denied ${new Set(guardDenied).size} out-of-scope IRIS agent tool request(s).`,
-            denied: [...new Set(guardDenied)],
-          }
-        : undefined;
+    const degradation = buildLegacyIrisDegradation(findings.length, guardDenied, observability);
     return attachTaskOutputMeta(findings, { costUsd, ...(degradation ? { degradation } : {}) });
   },
 };
+
+interface LegacyIrisObservability {
+  queryArtifactCount: number;
+  codeqlCommandCount: number;
+  codeqlCompileCount: number;
+  codeqlAnalyzeCount: number;
+  codeqlRunCount: number;
+  deniedToolAttempts: number;
+  legacyComparisonStatus: "legacy-observable" | "legacy-inconclusive";
+}
 
 interface IrisToolGuardOptions {
   scanRoot: string;
   workspaceDir: string;
   codeqlDbPath?: string;
   denied: string[];
+  observability?: LegacyIrisObservability;
+}
+
+function createLegacyIrisObservability(): LegacyIrisObservability {
+  return {
+    queryArtifactCount: 0,
+    codeqlCommandCount: 0,
+    codeqlCompileCount: 0,
+    codeqlAnalyzeCount: 0,
+    codeqlRunCount: 0,
+    deniedToolAttempts: 0,
+    legacyComparisonStatus: "legacy-inconclusive",
+  };
 }
 
 function createIrisToolGuard(options: IrisToolGuardOptions) {
@@ -400,7 +430,18 @@ function createIrisToolGuard(options: IrisToolGuardOptions) {
 
     if (toolName === "Bash") {
       const command = typeof args["command"] === "string" ? args["command"] : "";
-      if (isAllowedCodeqlCommand(command, { scanRoot, workspaceDir, codeqlDbPath })) {
+      const commandKind = classifyAllowedCodeqlCommand(command, {
+        scanRoot,
+        workspaceDir,
+        codeqlDbPath,
+      });
+      if (commandKind) {
+        if (options.observability) {
+          options.observability.codeqlCommandCount += 1;
+          if (commandKind === "compile") options.observability.codeqlCompileCount += 1;
+          if (commandKind === "analyze") options.observability.codeqlAnalyzeCount += 1;
+          if (commandKind === "run") options.observability.codeqlRunCount += 1;
+        }
         return { behavior: "allow" };
       }
       options.denied.push(`Bash: ${command.slice(0, 160)}`);
@@ -422,21 +463,28 @@ interface CodeqlCommandGuardOptions {
 }
 
 function isAllowedCodeqlCommand(command: string, options: CodeqlCommandGuardOptions): boolean {
+  return !!classifyAllowedCodeqlCommand(command, options);
+}
+
+function classifyAllowedCodeqlCommand(
+  command: string,
+  options: CodeqlCommandGuardOptions,
+): "compile" | "run" | "analyze" | null {
   const words = splitShellWords(command);
-  if (!words || words.length < 3) return false;
-  if (!isCodeqlBinaryWord(words[0])) return false;
+  if (!words || words.length < 3) return null;
+  if (!isCodeqlBinaryWord(words[0])) return null;
 
   if (words[1] === "query" && words[2] === "compile") {
-    return isAllowedQueryCompile(words.slice(3), options);
+    return isAllowedQueryCompile(words.slice(3), options) ? "compile" : null;
   }
   if (words[1] === "query" && words[2] === "run") {
-    return isAllowedQueryRun(words.slice(3), options);
+    return isAllowedQueryRun(words.slice(3), options) ? "run" : null;
   }
   if (words[1] === "database" && words[2] === "analyze") {
-    return isAllowedDatabaseAnalyze(words.slice(3), options);
+    return isAllowedDatabaseAnalyze(words.slice(3), options) ? "analyze" : null;
   }
 
-  return false;
+  return null;
 }
 
 function isAllowedQueryCompile(args: string[], options: CodeqlCommandGuardOptions): boolean {
@@ -529,6 +577,54 @@ function isCodeqlBinaryWord(word: string): boolean {
 function isAllowedGeneratedCodeqlPath(filePath: string, workspaceDir: string): boolean {
   if (!isPathWithinRoot(workspaceDir, filePath)) return false;
   return [".ql", ".qll", ".qls", ".yml", ".yaml"].includes(path.extname(filePath));
+}
+
+function countGeneratedCodeqlArtifacts(workspaceDir: string): number {
+  if (!existsSync(workspaceDir)) return 0;
+  let count = 0;
+  const stack = [workspaceDir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    for (const entry of readdirSync(current)) {
+      const fullPath = path.join(current, entry);
+      const stat = statSync(fullPath);
+      if (stat.isDirectory()) {
+        stack.push(fullPath);
+        continue;
+      }
+      if ([".ql", ".qll", ".qls"].includes(path.extname(fullPath))) count += 1;
+    }
+  }
+  return count;
+}
+
+function buildLegacyIrisDegradation(
+  findingsCount: number,
+  denied: readonly string[],
+  observability: LegacyIrisObservability,
+): { type: string; reason: string; message: string; [key: string]: unknown } | undefined {
+  const uniqueDenied = [...new Set(denied)];
+  if (findingsCount === 0 && observability.queryArtifactCount === 0) {
+    return {
+      type: "legacy-inconclusive",
+      reason: "no-findings-and-no-generated-query-artifacts",
+      message:
+        "Legacy taint-iris returned 0 findings without generated CodeQL query artifacts; treat as inconclusive, not clean.",
+      observability,
+      denied: uniqueDenied,
+    };
+  }
+  if (uniqueDenied.length > 0) {
+    return {
+      type: "guarded-tools",
+      reason: "denied-out-of-scope-agent-tool-use",
+      message: `Denied ${uniqueDenied.length} out-of-scope IRIS agent tool request(s).`,
+      observability,
+      denied: uniqueDenied,
+    };
+  }
+  return undefined;
 }
 
 function isPathWithinAnyRoot(filePath: string, roots: readonly string[]): boolean {

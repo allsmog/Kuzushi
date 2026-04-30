@@ -20,6 +20,7 @@ import { getLogger } from "../logger.js";
 import type { AgentRuntimeCredentials } from "../types.js";
 import { normalizeCostUsd, toErrorMessage } from "../utils.js";
 import type { AgentQueryExecutionResult } from "./execution.js";
+import { assertRuntimeModelSelection } from "./model-validation.js";
 import { buildSdkHooks } from "./sdk-hooks.js";
 import type {
   AgentActivityPhase,
@@ -586,6 +587,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   }
 
   createSession(baseOptions: AgentQueryOptions): AgentSession {
+    assertRuntimeModelSelection(this.id, baseOptions.model, baseOptions.fallbackModel);
     return new ClaudeSession(baseOptions, this.config, this.bus, this.runId);
   }
 
@@ -597,6 +599,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
     requests: AgentBatchRequest[],
     baseOptions: AgentQueryOptions,
   ): Promise<Map<string, AgentQueryExecutionResult>> {
+    assertRuntimeModelSelection(this.id, baseOptions.model, baseOptions.fallbackModel);
     if (requests.length === 0) return new Map();
 
     // Batch API requires an API key — OAuth mode can't use the direct SDK client.
@@ -936,6 +939,7 @@ export class ClaudeAgentRuntime implements AgentRuntime {
   }
 
   async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
+    assertRuntimeModelSelection(this.id, request.options.model, request.options.fallbackModel);
     // Fast path: tool-less calls go directly to Anthropic API — no subprocess.
     // Only when an API key is available — OAuth mode must use subprocess path.
     if (

@@ -819,6 +819,20 @@ export interface ModuleRunSlice {
   activeTaskLabel?: string;
   /** Aggregate findings observed for this run. */
   findingCount?: number;
+  /** Review candidates emitted when the agent/backend did not confirm findings. */
+  reviewCandidateCount?: number;
+  /** Agent runtime backend used by the focused module run. */
+  agentRuntimeBackend?: string;
+  /** Normalized agent output status such as valid-json or invalid-json. */
+  agentStatus?: string;
+  /** Deterministic candidate count reported by hunt-class module tools. */
+  candidateCount?: number;
+  /** Deterministic linked source-to-sink/control story count. */
+  linkedStoryCount?: number;
+  /** Backend path evidence count. */
+  backendPathCount?: number;
+  /** Number of warnings surfaced by the module result. */
+  warningCount?: number;
   /** Explicit session model override used for this run, when set. */
   model?: string;
   /** Effort tier (low/medium/high/max/xhigh) the run resolved to, when set. */
