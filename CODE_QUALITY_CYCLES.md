@@ -16,25 +16,22 @@ $ npx madge --circular --extensions ts,tsx src/
 Processed 640 files (7.4s) (13 warnings)
 ✔ No circular dependency found!
 
-$ npx madge --circular --extensions ts,tsx --ts-config tsconfig.json src/
-Processed 640 files (6.5s) (13 warnings)
+$ node_modules/.bin/madge --circular --extensions ts,tsx --ts-config tsconfig.json src/
+Processed 640 files (9.7s) (2 warnings)
 ✔ No circular dependency found!
 ```
 
-No remediation work was required. The "13 warnings / Skipped 13 files"
-line is madge's count of files whose imports it could not fully resolve
-(typically `.js` extension imports under NodeNext that resolve to a
-sibling `.ts` source — a known madge quirk, not a code defect). None
-of the skipped files indicate a hidden cycle: madge still walks both
-directions of the import graph for everything it does parse, and
-graph-internal cycles would be reported regardless of the skipped
-edges' resolution.
+No remediation work was required. With deps uninstalled madge reports
+13 warnings (NodeNext `.js` import-extension quirk for missing
+type-resolution); after `pnpm install` that drops to 2. Neither count
+masks a cycle: madge still walks both directions of the import graph
+and reports graph-internal cycles regardless of unresolved leaf edges.
 
 ## What was checked
 
 - `npx --yes madge --circular --extensions ts,tsx src/`
 - `npx --yes madge --circular --extensions ts,tsx --ts-config tsconfig.json src/`
-- `npx --yes madge --warning --extensions ts,tsq src/` for orphan/skip info
+- `npx --yes madge --warning --extensions ts,tsx src/` for orphan/skip info
 
 ## Hot zones inspected (per CLAUDE.md guidance)
 
