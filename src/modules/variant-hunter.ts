@@ -18,9 +18,7 @@ import type { Finding } from "../scanners/types.js";
 import type { TriageResult, Verdict } from "../types.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "./types.js";
 
-// ---------------------------------------------------------------------------
 // Shared helpers
-// ---------------------------------------------------------------------------
 
 async function loadFindingAndTriage(
   repoRoot: string,
@@ -88,9 +86,7 @@ function resolveModel(ctx: ExecutionContext, override?: string): string {
   return ctx.config.model ?? "anthropic:claude-sonnet-4-6";
 }
 
-// ---------------------------------------------------------------------------
 // variant:lift-pattern — extract a portable semantic signature from a finding
-// ---------------------------------------------------------------------------
 
 const VARIANT_SIGNATURE_SCHEMA = {
   type: "object",
@@ -262,9 +258,7 @@ const liftPatternTool: ModuleTool = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // variant:hunt — run variant analysis for a confirmed finding
-// ---------------------------------------------------------------------------
 
 const DEFAULT_VENDOR_PATHS = [
   "node_modules",
@@ -426,9 +420,7 @@ async function resolveRepoPaths(target: string): Promise<{ repoRoot: string; sca
   return { repoRoot: root, scanPath: path.resolve(target) };
 }
 
-// ---------------------------------------------------------------------------
 // Module factory
-// ---------------------------------------------------------------------------
 
 export function createVariantHunterModule(): CopilotModule {
   return {

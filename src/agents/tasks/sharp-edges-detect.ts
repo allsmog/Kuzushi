@@ -138,9 +138,7 @@ function resolveConfig(ctx: TaskContext): SharpEdgesConfig {
   return { model, maxFindings };
 }
 
-// ---------------------------------------------------------------------------
 // Persona prompts
-// ---------------------------------------------------------------------------
 
 function buildScoundrelPrompt(
   repoContext: RepoContext | undefined,
@@ -379,9 +377,7 @@ function buildConfusedDeveloperPrompt(
     .join("\n");
 }
 
-// ---------------------------------------------------------------------------
 // Lens runner
-// ---------------------------------------------------------------------------
 
 function runSharpEdgesLens(
   prompt: string,
@@ -392,9 +388,7 @@ function runSharpEdgesLens(
   return runLens(prompt, context, model, tag, SHARP_EDGES_SCHEMA);
 }
 
-// ---------------------------------------------------------------------------
 // Finding normalization
-// ---------------------------------------------------------------------------
 
 function normalizeFindings(
   raw: unknown,
@@ -458,9 +452,7 @@ function computeFingerprint(repoName: string, filePath: string, f: SharpEdgesFin
   ]);
 }
 
-// ---------------------------------------------------------------------------
 // Task definition
-// ---------------------------------------------------------------------------
 
 export const sharpEdgesDetectTask: AgentTask<ScanOpts, Finding[]> = {
   id: "sharp-edges-detect",

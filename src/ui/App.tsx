@@ -332,9 +332,7 @@ function pickActiveScanTaskLabel(stages: PipelineStage[] | undefined): string | 
   return best?.label ?? null;
 }
 
-// ---------------------------------------------------------------------------
 // Single-Static banner consolidation
-// ---------------------------------------------------------------------------
 
 type BannerItem =
   | { kind: "config"; data: NonNullable<ReturnType<typeof getConfigBannerType>> }

@@ -36,9 +36,7 @@ import { createRecordingPrintSink } from "./mocks/print-sink.js";
 import { createMockUiStore } from "./mocks/ui-store.js";
 import { createMockWorkspace } from "./mocks/workspace.js";
 
-// ---------------------------------------------------------------------------
 // Defaults
-// ---------------------------------------------------------------------------
 
 const DEFAULT_CONFIG = {
   model: "anthropic:claude-sonnet-4-6",
@@ -70,9 +68,7 @@ export function createMockHostInfo(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Noop / fake runtimes
-// ---------------------------------------------------------------------------
 
 /**
  * Async-generator runtime stub — yields nothing. Use for tools that don't
@@ -85,9 +81,7 @@ export const noopRuntime: AgentRuntime = {
   },
 } as unknown as AgentRuntime;
 
-// ---------------------------------------------------------------------------
 // MessageBus mock (legacy API — unchanged shape for back-compat)
-// ---------------------------------------------------------------------------
 
 /**
  * MessageBus stub that records `emit` calls and dispatches to subscribers
@@ -147,9 +141,7 @@ export function createMockBus(): MessageBus & {
   return bus;
 }
 
-// ---------------------------------------------------------------------------
 // createMockToolContext
-// ---------------------------------------------------------------------------
 
 export type MockToolContextOverrides = Omit<Partial<ExecutionContext>, "config" | "host"> & {
   config?: Partial<KuzushiConfig>;
@@ -263,9 +255,7 @@ export function getRecordedOutput(ctx: ExecutionContext): string[] {
   return ((ctx as unknown as Record<string, unknown>)["__outputCalls"] as string[]) ?? [];
 }
 
-// ---------------------------------------------------------------------------
 // Re-exports (mocks + assertions + shape helper)
-// ---------------------------------------------------------------------------
 
 export { assertToolResult, type ToolResultExpectations } from "./assertions.js";
 export { createMockOptionStore, type MockToolOptionStore } from "./mocks/datastore.js";

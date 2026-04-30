@@ -40,9 +40,7 @@ const PROMPT_OPTION_KEYS = [
 
 export type PromptOptionKey = (typeof PROMPT_OPTION_KEYS)[number];
 
-// ---------------------------------------------------------------------------
 // Key ↔ verb mapping.
-// ---------------------------------------------------------------------------
 
 /**
  * Translate a verb (the text after the colon in a fully-qualified tool name)
@@ -65,9 +63,7 @@ export function promptKeyToVerb(key: PromptOptionKey): string {
     .replace(/_/g, "-");
 }
 
-// ---------------------------------------------------------------------------
 // File I/O.
-// ---------------------------------------------------------------------------
 
 /** `.kuzushi/prompts/<moduleId>/<verb>.md` — per-module prompt override home. */
 export function promptFilePath(dataDir: string, moduleId: string, verb: string): string {
@@ -86,9 +82,7 @@ function safeReadFile(filePath: string): string | undefined {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Edit workflow.
-// ---------------------------------------------------------------------------
 
 export interface EditPromptInput {
   /** `.kuzushi/` directory for this session. */
@@ -157,9 +151,7 @@ export async function editPrompt(input: EditPromptInput): Promise<EditPromptOutp
   return { filePath, promptKey, saved: true, byteLen: Buffer.byteLength(trimmed, "utf-8") + 1 };
 }
 
-// ---------------------------------------------------------------------------
 // Show effective prompt value for one tool.
-// ---------------------------------------------------------------------------
 
 export interface EffectivePrompt {
   promptKey: PromptOptionKey;
@@ -231,9 +223,7 @@ export function readEffectivePrompt(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Cross-module audit (`/show prompts`).
-// ---------------------------------------------------------------------------
 
 export interface PromptAuditRow {
   moduleId: string;
@@ -276,9 +266,7 @@ export function readPromptAudit(
   return rows;
 }
 
-// ---------------------------------------------------------------------------
 // Formatting helpers (used by shell.ts output).
-// ---------------------------------------------------------------------------
 
 function shortPath(abs: string): string {
   const home = process.env["HOME"];

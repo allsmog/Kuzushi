@@ -467,11 +467,9 @@ function printPlainSummary(emit: Emit, data: SummaryData): void {
   emit(chalk.bold("─".repeat(width)));
 }
 
-// ---------------------------------------------------------------------------
 // Phase D.5 + Workstream 5 helpers — shell-view + planner + threats +
 // diff-since + overlays. Each helper takes the `emit` sink as its first
 // argument so tests can inject a capture closure without stubbing console.
-// ---------------------------------------------------------------------------
 
 /**
  * Dispatch the per-view plain render. Headings are structural (`# TITLE`)

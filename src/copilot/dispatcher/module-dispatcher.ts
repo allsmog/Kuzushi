@@ -88,9 +88,7 @@ export class ModuleDispatcher implements CommandDispatcher {
     return [];
   }
 
-  // -------------------------------------------------------------------------
   // Handlers
-  // -------------------------------------------------------------------------
 
   private cmd_tools(args: string[]): CommandResult {
     const includeHidden = args.includes("--all");
@@ -303,9 +301,7 @@ export class ModuleDispatcher implements CommandDispatcher {
   }
 }
 
-// ---------------------------------------------------------------------------
 // helpers
-// ---------------------------------------------------------------------------
 
 function pickDefaultTool(mod: CopilotModule): ModuleTool | undefined {
   // Prefer "<id>:run" or "<id>:scan" or "<id>:exploit", else the first headless tool, else the first tool.

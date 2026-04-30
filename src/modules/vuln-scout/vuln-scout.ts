@@ -52,9 +52,7 @@ function resolveMaxFindings(ctx: ExecutionContext, override?: number): number {
   return 50;
 }
 
-// ---------------------------------------------------------------------------
 // vuln-scout:audit — run the whitebox pentest plugin
-// ---------------------------------------------------------------------------
 
 const auditTool: ModuleTool = {
   name: "vuln-scout:audit",
@@ -156,9 +154,7 @@ const auditTool: ModuleTool = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // Module factory
-// ---------------------------------------------------------------------------
 
 export function createCoreVulnScoutModule(): CopilotModule {
   const hiddenVulnScout = exposeAgentTaskAsHiddenDagTool<"vuln-scout">(vulnScoutTask, {
