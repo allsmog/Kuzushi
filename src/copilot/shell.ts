@@ -43,6 +43,7 @@ import {
 import { CARLINI_THREAT_HUNT_KIND_SPEC } from "../modules/carlini-threat-hunt/attachments.js";
 import { CONTEXT_KIND_SPEC } from "../modules/context/attachments.js";
 import { formatContextSummary } from "../modules/core-sast.js";
+import { resolveTaintIrisNextPersistentArtifacts } from "../modules/taint-iris-next/planner.js";
 import { THREAT_MODEL_KIND_SPEC } from "../modules/threat-model/attachments.js";
 import type { ModuleInfo, ModuleTool } from "../modules/types.js";
 import { loadDraftScope, scopeToHomeSlice } from "../modules/vendor-assessment/storage.js";
@@ -1363,10 +1364,10 @@ async function hasActiveShellCredentials(opts: ShellOptions): Promise<boolean> {
 
   if (backend === "claude") {
     const { hasAnthropicCredentials } = await import("../ui/setup.js");
-    return hasAnthropicCredentials(active.apiKey);
+    return hasAnthropicCredentials(active.apiKey, active.authToken);
   }
 
-  if (active.apiKey || active.baseUrl) return true;
+  if (active.apiKey || active.authToken || active.baseUrl) return true;
 
   const { hasAnyProviderCredentials } = await import("../ui/setup.js");
   return hasAnyProviderCredentials();
@@ -1375,7 +1376,7 @@ async function hasActiveShellCredentials(opts: ShellOptions): Promise<boolean> {
 /** Merge `patch` into the active backend's slot in agentRuntimeConfig. */
 function mergeIntoActiveSlot(
   opts: ShellOptions,
-  patch: { apiKey?: string; baseUrl?: string },
+  patch: { apiKey?: string; authToken?: string; baseUrl?: string },
 ): void {
   const backend = opts.config.agentRuntimeBackend ?? "pi-ai";
   const slot = backend === "codex" ? "codex" : backend === "pi-ai" ? "piAi" : "claude";
@@ -2274,7 +2275,11 @@ function pushTaskOutputThrottled(store: UIStore, output: PendingTaskOutput): voi
  * add other hunt-class tools here when they adopt the per-actor
  * `reportAgentActivity` + `done:true` pattern.
  */
-const HUNT_CLASS_TOOLS = new Set(["carlini-threat-hunt:run"]);
+const HUNT_CLASS_TOOLS = new Set([
+  "carlini-threat-hunt:run",
+  "taint-iris:hunt",
+  "taint-iris-next:hunt",
+]);
 
 function isHuntClassTool(toolName: string): boolean {
   return HUNT_CLASS_TOOLS.has(toolName);
@@ -2282,7 +2287,14 @@ function isHuntClassTool(toolName: string): boolean {
 
 interface HuntStats {
   findingsCount: number;
+  reviewCandidateCount: number;
   costUsd: number;
+  agentRuntimeBackend?: string;
+  agentStatus?: string;
+  candidateCount?: number;
+  linkedStoryCount?: number;
+  backendPathCount?: number;
+  warningCount?: number;
 }
 
 /**
@@ -2292,24 +2304,73 @@ interface HuntStats {
  * rather than a crash.
  */
 function extractHuntStats(result: { data?: unknown }): HuntStats {
-  const stats = (result.data as { stats?: { totalFindings?: unknown; totalCostUsd?: unknown } })
-    ?.stats;
+  const data = result.data as
+    | {
+        stats?: {
+          totalFindings?: unknown;
+          totalReviewCandidates?: unknown;
+          totalCostUsd?: unknown;
+          totalCandidates?: unknown;
+          totalLinkedStories?: unknown;
+          backendPathCount?: unknown;
+        };
+        agentRuntimeBackend?: unknown;
+        agentStatus?: unknown;
+        warnings?: unknown;
+      }
+    | undefined;
+  const stats = data?.stats;
   const findingsCount =
     typeof stats?.totalFindings === "number" && Number.isFinite(stats.totalFindings)
       ? stats.totalFindings
+      : 0;
+  const reviewCandidateCount =
+    typeof stats?.totalReviewCandidates === "number" && Number.isFinite(stats.totalReviewCandidates)
+      ? stats.totalReviewCandidates
       : 0;
   const costUsd =
     typeof stats?.totalCostUsd === "number" && Number.isFinite(stats.totalCostUsd)
       ? stats.totalCostUsd
       : 0;
-  return { findingsCount, costUsd };
+  const candidateCount = finiteOptionalNumber(stats?.totalCandidates);
+  const linkedStoryCount = finiteOptionalNumber(stats?.totalLinkedStories);
+  const backendPathCount = finiteOptionalNumber(stats?.backendPathCount);
+  const warningCount = Array.isArray(data?.warnings) ? data.warnings.length : undefined;
+  return {
+    findingsCount,
+    reviewCandidateCount,
+    costUsd,
+    ...(typeof data?.agentRuntimeBackend === "string"
+      ? { agentRuntimeBackend: data.agentRuntimeBackend }
+      : {}),
+    ...(typeof data?.agentStatus === "string" ? { agentStatus: data.agentStatus } : {}),
+    ...(candidateCount !== undefined ? { candidateCount } : {}),
+    ...(linkedStoryCount !== undefined ? { linkedStoryCount } : {}),
+    ...(backendPathCount !== undefined ? { backendPathCount } : {}),
+    ...(warningCount !== undefined ? { warningCount } : {}),
+  };
 }
 
-function formatHuntSummaryLine(actorCount: number, findingsCount: number, costUsd: number): string {
+function finiteOptionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function formatHuntSummaryLine(
+  actorCount: number,
+  findingsCount: number,
+  costUsd: number,
+  reviewCandidateCount = 0,
+  agentStatus?: string,
+): string {
   const actorsLabel = `${actorCount} actor${actorCount === 1 ? "" : "s"}`;
   const findingsLabel = `${findingsCount} finding${findingsCount === 1 ? "" : "s"}`;
+  const reviewLabel =
+    reviewCandidateCount > 0
+      ? ` · ${reviewCandidateCount} review candidate${reviewCandidateCount === 1 ? "" : "s"}`
+      : "";
+  const agentLabel = agentStatus ? ` · ${agentStatus}` : "";
   const costLabel = `$${costUsd.toFixed(2)}`;
-  return `${actorsLabel} · ${findingsLabel} · ${costLabel}`;
+  return `${actorsLabel} · ${findingsLabel}${reviewLabel}${agentLabel} · ${costLabel}`;
 }
 
 function formatHuntActorLabel(fingerprint: string): string {
@@ -3498,10 +3559,30 @@ async function startInkShell(
           shell.moduleRun.toolName === tool.name &&
           shell.moduleRun.status === "running"
         ) {
+          const huntStats =
+            finalResult && isHuntClassTool(tool.name) ? extractHuntStats(finalResult) : undefined;
           next.moduleRun = {
             ...shell.moduleRun,
             status: aborted ? "aborted" : ok ? "done" : "error",
             completedAtMs: Date.now(),
+            ...(huntStats ? { findingCount: huntStats.findingsCount } : {}),
+            ...(huntStats ? { reviewCandidateCount: huntStats.reviewCandidateCount } : {}),
+            ...(huntStats?.agentRuntimeBackend
+              ? { agentRuntimeBackend: huntStats.agentRuntimeBackend }
+              : {}),
+            ...(huntStats?.agentStatus ? { agentStatus: huntStats.agentStatus } : {}),
+            ...(huntStats?.candidateCount !== undefined
+              ? { candidateCount: huntStats.candidateCount }
+              : {}),
+            ...(huntStats?.linkedStoryCount !== undefined
+              ? { linkedStoryCount: huntStats.linkedStoryCount }
+              : {}),
+            ...(huntStats?.backendPathCount !== undefined
+              ? { backendPathCount: huntStats.backendPathCount }
+              : {}),
+            ...(huntStats?.warningCount !== undefined
+              ? { warningCount: huntStats.warningCount }
+              : {}),
             ...(finalResult?.costUsd != null ? { costUsd: finalResult.costUsd } : {}),
           };
         }
@@ -3524,7 +3605,13 @@ async function startInkShell(
           const stats = extractHuntStats(finalResult);
           appendToHistory(store, {
             type: "hunt-post-mortem",
-            text: formatHuntSummaryLine(perActor.length, stats.findingsCount, stats.costUsd),
+            text: formatHuntSummaryLine(
+              perActor.length,
+              stats.findingsCount,
+              stats.costUsd,
+              stats.reviewCandidateCount,
+              stats.agentStatus,
+            ),
             timestamp: Date.now(),
             huntSummary: {
               actorCount: perActor.length,
@@ -8049,6 +8136,16 @@ function getContextRequirementError(
       ? loadPersistentThreatModel(path.resolve(target))
       : null;
 
+  if (toolName === "taint-iris-next:hunt" && target && !/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) {
+    const artifacts = resolveTaintIrisNextPersistentArtifacts(path.resolve(target));
+    if (artifacts.contextStatus.ok) return undefined;
+    return [
+      `Context incomplete for ${toolName}. Run /context, then rerun the module.`,
+      `context: ${formatIrisNextArtifactStatus(artifacts.contextStatus)}`,
+      `threat model: ${formatIrisNextArtifactStatus(artifacts.threatModelStatus)} (warning only)`,
+    ].join("\n");
+  }
+
   if (!snapshot) {
     if (toolName === "carlini-threat-hunt:run") {
       const nextStep = persistentThreatModel
@@ -8057,14 +8154,13 @@ function getContextRequirementError(
       return `Context required for ${toolName}. ${nextStep}`;
     }
     if (toolName === "taint-iris-next:hunt") {
-      return `Context required for ${toolName}. Run /use context, then run .; then /use threat-model and run .`;
+      return `Context required for ${toolName}. Run /context first. /threats regen dfd improves ranking but is optional.`;
     }
     return `Context required for ${toolName}. Run /use context, then run .`;
   }
 
   const missing: string[] = [];
-  const needsThreatModel =
-    toolName === "carlini-threat-hunt:run" || toolName === "taint-iris-next:hunt";
+  const needsThreatModel = toolName === "carlini-threat-hunt:run";
   const needsAppModel =
     toolName === "taint-iris-next:hunt" ||
     toolName === "taint-iris:hunt" ||
@@ -8083,6 +8179,17 @@ function getContextRequirementError(
     ? "Run /use context, then run .; then /use threat-model and run ."
     : "Run /use context, then run .";
   return `Context incomplete for ${toolName}: missing ${missing.join(" and ")}. ${hint}`;
+}
+
+function formatIrisNextArtifactStatus(status: {
+  ok: boolean;
+  path?: string;
+  reason: string;
+}): string {
+  const state = status.ok ? "loaded" : "missing/incomplete";
+  return status.path
+    ? `${state} (${status.path}; ${status.reason})`
+    : `${state} (${status.reason})`;
 }
 
 function resolveOptionsTool(
@@ -9084,18 +9191,18 @@ function maskApiKey(key: string | undefined): string {
 function formatBackendSlots(
   cfg:
     | {
-        claude?: { apiKey?: string; baseUrl?: string };
-        piAi?: { apiKey?: string; baseUrl?: string };
-        codex?: { apiKey?: string; baseUrl?: string };
+        claude?: { apiKey?: string; authToken?: string; baseUrl?: string };
+        piAi?: { apiKey?: string; authToken?: string; baseUrl?: string };
+        codex?: { apiKey?: string; authToken?: string; baseUrl?: string };
       }
     | undefined,
 ): string[] {
   const out: string[] = [];
   for (const slot of ["claude", "piAi", "codex"] as const) {
     const s = cfg?.[slot];
-    if (s && (s.apiKey || s.baseUrl)) {
+    if (s && (s.apiKey || s.authToken || s.baseUrl)) {
       out.push(
-        `  ${slot.padEnd(6)} apiKey=${maskApiKey(s.apiKey)}  baseUrl=${s.baseUrl ?? "(default)"}`,
+        `  ${slot.padEnd(6)} apiKey=${maskApiKey(s.apiKey)}  authToken=${maskApiKey(s.authToken)}  baseUrl=${s.baseUrl ?? "(default)"}`,
       );
       continue;
     }
@@ -9106,7 +9213,7 @@ function formatBackendSlots(
     const envCreds = probeEnvCredsForSlot(slot);
     if (envCreds) {
       out.push(
-        `  ${slot.padEnd(6)} env-only (apiKey=${maskApiKey(envCreds.apiKey)}  baseUrl=${envCreds.baseUrl ?? "(default)"})`,
+        `  ${slot.padEnd(6)} env-only (apiKey=${maskApiKey(envCreds.apiKey)}  authToken=${maskApiKey(envCreds.authToken)}  baseUrl=${envCreds.baseUrl ?? "(default)"})`,
       );
       continue;
     }
@@ -9125,11 +9232,12 @@ function formatBackendSlots(
  */
 function probeEnvCredsForSlot(
   slot: "claude" | "piAi" | "codex",
-): { apiKey?: string; baseUrl?: string } | null {
+): { apiKey?: string; authToken?: string; baseUrl?: string } | null {
   if (slot === "claude") {
     const apiKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+    const authToken = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_OAUTH_TOKEN;
     const baseUrl = process.env.ANTHROPIC_BASE_URL;
-    if (apiKey || baseUrl) return { apiKey, baseUrl };
+    if (apiKey || authToken || baseUrl) return { apiKey, authToken, baseUrl };
     return null;
   }
   if (slot === "codex") {
@@ -9142,6 +9250,8 @@ function probeEnvCredsForSlot(
   // operators see a green light when ANY provider has env-only creds.
   const piAiVars: Array<[string, string?]> = [
     ["ANTHROPIC_API_KEY"],
+    ["ANTHROPIC_AUTH_TOKEN"],
+    ["ANTHROPIC_OAUTH_TOKEN"],
     ["OPENAI_API_KEY", "OPENAI_BASE_URL"],
     ["GOOGLE_API_KEY"],
     ["GROQ_API_KEY"],
@@ -9152,7 +9262,9 @@ function probeEnvCredsForSlot(
     const apiKey = process.env[keyVar];
     if (apiKey) {
       const baseUrl = baseVar ? process.env[baseVar] : undefined;
-      return { apiKey, baseUrl };
+      return keyVar === "ANTHROPIC_AUTH_TOKEN" || keyVar === "ANTHROPIC_OAUTH_TOKEN"
+        ? { authToken: apiKey, baseUrl }
+        : { apiKey, baseUrl };
     }
   }
   return null;
@@ -9581,26 +9693,33 @@ function handleAuthImportFromConfig(opts: ShellOptions): LocalCommandResult {
         return `${cfgPath} has no agentRuntimeConfig block — nothing to import.`;
       }
       const arcRec = arc as Record<string, unknown>;
-      const credsToWrite: Record<string, { apiKey?: string; baseUrl?: string }> = {};
+      const credsToWrite: Record<
+        string,
+        { apiKey?: string; authToken?: string; baseUrl?: string }
+      > = {};
       for (const slot of ["claude", "piAi", "codex"] as const) {
         const slotVal = arcRec[slot];
         if (slotVal && typeof slotVal === "object") {
           const sv = slotVal as Record<string, unknown>;
           const apiKey = typeof sv.apiKey === "string" ? sv.apiKey : undefined;
+          const authToken = typeof sv.authToken === "string" ? sv.authToken : undefined;
           const baseUrl = typeof sv.baseUrl === "string" ? sv.baseUrl : undefined;
-          if (apiKey || baseUrl) credsToWrite[slot] = { apiKey, baseUrl };
+          if (apiKey || authToken || baseUrl) credsToWrite[slot] = { apiKey, authToken, baseUrl };
         }
       }
       if (
         Object.keys(credsToWrite).length === 0 &&
-        (typeof arcRec.apiKey === "string" || typeof arcRec.baseUrl === "string")
+        (typeof arcRec.apiKey === "string" ||
+          typeof arcRec.authToken === "string" ||
+          typeof arcRec.baseUrl === "string")
       ) {
         const apiKey = typeof arcRec.apiKey === "string" ? arcRec.apiKey : undefined;
+        const authToken = typeof arcRec.authToken === "string" ? arcRec.authToken : undefined;
         const baseUrl = typeof arcRec.baseUrl === "string" ? arcRec.baseUrl : undefined;
-        credsToWrite.claude = { apiKey, baseUrl };
+        credsToWrite.claude = { apiKey, authToken, baseUrl };
       }
       if (Object.keys(credsToWrite).length === 0) {
-        return `${cfgPath} has agentRuntimeConfig but no apiKey/baseUrl to import.`;
+        return `${cfgPath} has agentRuntimeConfig but no apiKey/authToken/baseUrl to import.`;
       }
       const writtenTo = persistLocalCredentials(credsToWrite, root);
       const slots = Object.keys(credsToWrite).join(", ");

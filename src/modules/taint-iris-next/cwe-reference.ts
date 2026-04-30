@@ -104,9 +104,26 @@ export const TAINT_IRIS_NEXT_CWE_CATALOG = [
     taintClass: "os-command-injection",
     languages: ANY,
     sourceSignals: ["request parameter", "CLI argument", "job payload", "webhook body"],
-    sinkSignals: ["child_process.exec", "os.system", "Runtime.exec", "Command::new", "Open3"],
+    sinkSignals: [
+      "child_process.exec",
+      "os.system",
+      "Runtime.exec",
+      "Command::new",
+      "Open3",
+      "subprocess",
+      "Popen",
+      "shell=True",
+    ],
     sanitizerSignals: ["execFile", "argument vector", "allowlist", "shellwords"],
-    structuralQueries: ["child_process", "Runtime.getRuntime().exec", "Open3", "Shellwords"],
+    structuralQueries: [
+      "child_process",
+      "Runtime.getRuntime().exec",
+      "Open3",
+      "Shellwords",
+      "subprocess",
+      "Popen",
+      "shell=True",
+    ],
     backendHints: {
       codeql: "Treat shell command string arguments as sinks and arg-vector APIs as lower risk.",
     },
@@ -562,6 +579,13 @@ export function rankCatalogEntries(
   const hasWeb = options.context
     ? options.context.frameworks.length > 0 || options.context.entryPoints.length > 0
     : false;
+  const sparsePythonContext =
+    languageSet.has("python") &&
+    (!options.context ||
+      options.context.frameworks.length +
+        options.context.ormOrDb.length +
+        options.context.entryPoints.length <
+        2);
 
   return entries
     .map((entry) => {
@@ -571,7 +595,10 @@ export function rankCatalogEntries(
         score += 100;
         reasons.push("threat-model CWE");
       }
-      if (entry.languages.some((language) => languageSet.has(normalizeLanguageName(language)))) {
+      if (
+        entry.languages.some((language) => languageSet.has(normalizeLanguageName(language))) ||
+        (languageSet.size > 0 && entry.languages.includes("any"))
+      ) {
         score += 25;
         reasons.push("language match");
       }
@@ -586,6 +613,10 @@ export function rankCatalogEntries(
       if (hasWeb && WEB_TAINT_CLASSES.has(entry.taintClass)) {
         score += 20;
         reasons.push("web entrypoint context");
+      }
+      if (sparsePythonContext && PYTHON_SPARSE_CONTEXT_PRIORITY.has(entry.taintClass)) {
+        score += 18;
+        reasons.push("python sparse-context priority");
       }
       const keywordHits = countKeywordHits(entry, corpus);
       if (keywordHits > 0) {
@@ -721,6 +752,22 @@ const WEB_TAINT_CLASSES = new Set([
   "prototype-pollution",
   "regex-injection",
   "ssti",
+]);
+
+const PYTHON_SPARSE_CONTEXT_PRIORITY = new Set([
+  "command-injection",
+  "os-command-injection",
+  "sql-injection",
+  "path-traversal",
+  "ssrf",
+  "xss",
+  "deserialization",
+  "xxe",
+  "log-injection",
+  "info-exposure",
+  "missing-authorization",
+  "incorrect-authorization",
+  "hardcoded-credentials",
 ]);
 
 function collectLanguageSet(

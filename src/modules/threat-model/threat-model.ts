@@ -20,6 +20,7 @@ import {
   loadPersistentThreatModel,
   savePersistentThreatModel,
 } from "../../threat-model-renderer.js";
+import { indexThreatModelArtifact } from "../_shared/artifact-kb/index.js";
 import {
   buildHomeSlice,
   createAttachmentTools,
@@ -298,6 +299,14 @@ const buildTool: ModuleTool = {
           costUsd: 0,
         };
       }
+      const artifactKb = tryIndexThreatModelArtifact({
+        root,
+        document: indexedDocument,
+        ctx,
+        runId,
+        sourcePath: path.join(root, ".kuzushi", "threat-model.json"),
+        attachments,
+      });
       const lines = [
         `threat-model:build complete for ${name} (${root})`,
         `  Method:   ${methodologyLabel(methodology)}`,
@@ -309,6 +318,11 @@ const buildTool: ModuleTool = {
         `  Threats:  ${document.threats.length}`,
         `  DFD:      ${document.dfd.nodes.length} nodes · ${document.dfd.flows.length} flows · ${document.dfd.trustBoundaries.length} boundaries`,
         `  KB:       ${kb.rebuilt ? "rebuilt" : "current"} .kuzushi/threat-model-kb.sqlite3 (${kb.stats.chunks} chunks)`,
+        ...(artifactKb.indexed
+          ? [`  Artifact KB: ${artifactKb.indexed.chunks} chunks`]
+          : artifactKb.error
+            ? [`  Artifact KB: skipped (${artifactKb.error})`]
+            : []),
         `  Findings: ${result.findings.length}${emitFindings ? "" : " (emitFindings=false)"}`,
         `  Cost:     $${result.costUsd.toFixed(4)}`,
       ];
@@ -342,6 +356,8 @@ const buildTool: ModuleTool = {
           document,
           findings: result.findings,
           persisted,
+          ...(artifactKb.indexed ? { artifactKb: artifactKb.indexed } : {}),
+          ...(artifactKb.error ? { artifactKbError: artifactKb.error } : {}),
         },
         costUsd: result.costUsd,
       };
@@ -424,14 +440,35 @@ const readTool: ModuleTool = {
     }
 
     const document = applyThreatModelMethodology(converted, methodology);
+    const artifactKb = tryIndexThreatModelArtifact({
+      root,
+      document,
+      ctx,
+      sourcePath: normalizedThreatReadSourcePath(root, outputDir),
+      attachments: loadThreatModelAttachments(root),
+    });
     return {
       ok: true,
       output: [
         `Loaded ${methodologyLabel(methodology)} threat model for ${name} from ${outputDir}`,
         `  Threats: ${document.threats.length}`,
         `  DFD:     ${document.dfd.nodes.length} nodes · ${document.dfd.flows.length} flows`,
+        ...(artifactKb.indexed
+          ? [`  Artifact KB: ${artifactKb.indexed.chunks} chunks`]
+          : artifactKb.error
+            ? [`  Artifact KB: skipped (${artifactKb.error})`]
+            : []),
       ].join("\n"),
-      data: { target: root, repoName: name, outputDir, methodology, document, artifacts },
+      data: {
+        target: root,
+        repoName: name,
+        outputDir,
+        methodology,
+        document,
+        artifacts,
+        ...(artifactKb.indexed ? { artifactKb: artifactKb.indexed } : {}),
+        ...(artifactKb.error ? { artifactKbError: artifactKb.error } : {}),
+      },
     };
   },
 };
@@ -458,6 +495,36 @@ const methodologiesTool: ModuleTool = {
     };
   },
 };
+
+function tryIndexThreatModelArtifact(input: {
+  root: string;
+  document: Parameters<typeof indexThreatModelArtifact>[0]["document"];
+  ctx: ExecutionContext;
+  sourcePath: string;
+  runId?: string;
+  attachments?: Parameters<typeof indexThreatModelArtifact>[0]["attachments"];
+}): { indexed?: ReturnType<typeof indexThreatModelArtifact>; error?: string } {
+  try {
+    const indexed = indexThreatModelArtifact({
+      repoRoot: input.root,
+      document: input.document,
+      sourcePath: input.sourcePath,
+      ...(input.runId ? { runId: input.runId } : {}),
+      attachments: input.attachments ?? [],
+    });
+    input.ctx.reportActivity?.(`indexed Artifact KB (${indexed.chunks} threat-model chunks)`);
+    return { indexed };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    input.ctx.reportActivity?.(`Artifact KB indexing skipped: ${error}`);
+    return { error };
+  }
+}
+
+function normalizedThreatReadSourcePath(root: string, outputDir: string): string {
+  const resolvedOutputDir = path.isAbsolute(outputDir) ? outputDir : path.join(root, outputDir);
+  return path.join(resolvedOutputDir, "normalized-threat-model.json");
+}
 
 export function createThreatModelModule(): CopilotModule {
   // Knowledge-base verbs (`attach` / `attachments` / `detach` / `reparse`)

@@ -2459,23 +2459,56 @@ describe("hunt-post-mortem helpers", () => {
 
   it("reads stats.totalFindings + stats.totalCostUsd off the ToolResult", () => {
     const stats = extractHuntStats({
-      data: { stats: { totalFindings: 22, totalCostUsd: 24.3 } },
+      data: {
+        stats: {
+          totalFindings: 22,
+          totalReviewCandidates: 3,
+          totalCandidates: 50,
+          totalLinkedStories: 7,
+          backendPathCount: 2,
+          totalCostUsd: 24.3,
+        },
+        agentRuntimeBackend: "pi-ai",
+        agentStatus: "invalid-json",
+        warnings: ["agent output invalid"],
+      },
     });
-    expect(stats).toEqual({ findingsCount: 22, costUsd: 24.3 });
+    expect(stats).toEqual({
+      findingsCount: 22,
+      reviewCandidateCount: 3,
+      costUsd: 24.3,
+      agentRuntimeBackend: "pi-ai",
+      agentStatus: "invalid-json",
+      candidateCount: 50,
+      linkedStoryCount: 7,
+      backendPathCount: 2,
+      warningCount: 1,
+    });
   });
 
   it("returns zeros when the data shape drifts (safe default)", () => {
-    expect(extractHuntStats({ data: undefined })).toEqual({ findingsCount: 0, costUsd: 0 });
-    expect(extractHuntStats({ data: { stats: {} } })).toEqual({ findingsCount: 0, costUsd: 0 });
+    expect(extractHuntStats({ data: undefined })).toEqual({
+      findingsCount: 0,
+      reviewCandidateCount: 0,
+      costUsd: 0,
+    });
+    expect(extractHuntStats({ data: { stats: {} } })).toEqual({
+      findingsCount: 0,
+      reviewCandidateCount: 0,
+      costUsd: 0,
+    });
     expect(
       extractHuntStats({ data: { stats: { totalFindings: "nope" as unknown as number } } }),
-    ).toEqual({ findingsCount: 0, costUsd: 0 });
+    ).toEqual({ findingsCount: 0, reviewCandidateCount: 0, costUsd: 0 });
   });
 
   it("formats the collapsed headline with correct pluralization", () => {
     expect(formatHuntSummaryLine(1, 0, 0)).toBe("1 actor · 0 findings · $0.00");
     expect(formatHuntSummaryLine(5, 1, 0.05)).toBe("5 actors · 1 finding · $0.05");
     expect(formatHuntSummaryLine(5, 22, 24.3)).toBe("5 actors · 22 findings · $24.30");
+    expect(formatHuntSummaryLine(2, 0, 0.1, 4, "invalid-json")).toBe(
+      "2 actors · 0 findings · 4 review candidates · invalid-json · $0.10",
+    );
   });
 
   it("renders cost with exactly two decimals even for integer dollars", () => {

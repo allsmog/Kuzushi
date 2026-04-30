@@ -75,6 +75,7 @@
   "files": [
     "dist",
     "assets/ascii",
+    "assets/pashov-xray",
     "README.md",
     "LICENSE"
   ],

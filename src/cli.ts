@@ -38,25 +38,30 @@ import { setGlobalLogLevel } from "./logger.js";
 import { defaultDbPath, getRun, initDb, listRuns } from "./store.js";
 
 function maybeWarnPlaintextApiKeyStorage(key: string, value: string): void {
-  const isSlotApiKeyPath =
+  const isSlotSecretPath =
     key === "agentRuntimeConfig.claude.apiKey" ||
+    key === "agentRuntimeConfig.claude.authToken" ||
     key === "agentRuntimeConfig.piAi.apiKey" ||
-    key === "agentRuntimeConfig.codex.apiKey";
-  let storesApiKey = isSlotApiKeyPath;
+    key === "agentRuntimeConfig.piAi.authToken" ||
+    key === "agentRuntimeConfig.codex.apiKey" ||
+    key === "agentRuntimeConfig.codex.authToken";
+  let storesApiKey = isSlotSecretPath;
 
   if (!storesApiKey && key === "agentRuntimeConfig") {
     try {
       const parsed = JSON.parse(value) as Record<string, unknown> | null;
-      const hasApiKey = (obj: unknown): boolean =>
+      const hasSecret = (obj: unknown): boolean =>
         typeof obj === "object" &&
         obj !== null &&
-        typeof (obj as Record<string, unknown>)["apiKey"] === "string" &&
-        (obj as Record<string, string>)["apiKey"].trim().length > 0;
+        ((typeof (obj as Record<string, unknown>)["apiKey"] === "string" &&
+          (obj as Record<string, string>)["apiKey"].trim().length > 0) ||
+          (typeof (obj as Record<string, unknown>)["authToken"] === "string" &&
+            (obj as Record<string, string>)["authToken"].trim().length > 0));
       storesApiKey =
-        hasApiKey(parsed) ||
-        hasApiKey(parsed?.["claude"]) ||
-        hasApiKey(parsed?.["piAi"]) ||
-        hasApiKey(parsed?.["codex"]);
+        hasSecret(parsed) ||
+        hasSecret(parsed?.["claude"]) ||
+        hasSecret(parsed?.["piAi"]) ||
+        hasSecret(parsed?.["codex"]);
     } catch {
       storesApiKey = false;
     }
@@ -68,7 +73,7 @@ function maybeWarnPlaintextApiKeyStorage(key: string, value: string): void {
 
   console.warn(
     `Warning: ${key} stores API credentials in plaintext at ${configPath()}. ` +
-      "Prefer --api-key for one-off scans or ANTHROPIC_API_KEY from your shell/secret manager.",
+      "Prefer --api-key for one-off scans or provider credential env vars from your shell/secret manager.",
   );
 }
 
@@ -129,6 +134,7 @@ program
   )
   .option("--agent-runtime <backend>", "Agent runtime backend")
   .option("--api-key <key>", "Override active provider API key")
+  .option("--auth-token <token>", "Override active provider bearer/OAuth token")
   .option(
     "--inherit-claude",
     "Skip credential prompt; trust ambient Claude / Claude Code session creds and persist auth: inherited",
@@ -138,14 +144,12 @@ program
     "after",
     `
 Examples:
-  $ kuzushi                                                   # start the shell with default modules
-  $ kuzushi --inherit-claude                                  # use parent Claude Code session, skip prompt
-  $ kuzushi shell --target ./acme-api                         # pre-set the scan target
-  $ kuzushi shell --load randori,vuln-scout,tob              # pre-load extra built-in modules
-  $ kuzushi shell --workspace acme-pentest                    # resume a named workspace
-  $ kuzushi shell --model anthropic:claude-opus-4-7           # override the default model
-  $ kuzushi shell --effort high                               # default reasoning effort across tasks
-  $ kuzushi shell --task-config carlini-threat-hunt.effort=high --task-config triage.maxFindings=200
+  $ kuzushi                                           # start the shell with default modules
+  $ kuzushi --inherit-claude                          # use parent Claude Code session, skip prompt
+  $ kuzushi shell --target ./acme-api                 # pre-set the scan target
+  $ kuzushi shell --load randori,vuln-scout,tob      # pre-load extra built-in modules
+  $ kuzushi shell --workspace acme-pentest            # resume a named workspace
+  $ kuzushi shell --model anthropic:claude-opus-4-7   # override the default model
   $ kuzushi shell --agent-runtime codex --model codex:gpt-5.4-mini
 	`,
   )
@@ -274,6 +278,7 @@ program
   .option("--junit <path>", "Write JUnit XML report to this path (CI test-result aggregation)")
   .option("--agent-runtime <backend>", "Agent runtime backend")
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
+  .option("--auth-token <token>", "Override Anthropic bearer/OAuth token for this run")
   .option("--base-url <url>", "Override ANTHROPIC_BASE_URL for this run")
   .option(
     "--inherit-claude",
@@ -369,6 +374,7 @@ program
   .option("--ci", "CI stream output (one-line-per-event)", false)
   .option("--audit-log", "Persist per-run audit logs", false)
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
+  .option("--auth-token <token>", "Override Anthropic bearer/OAuth token for this run")
   .option("--inherit-claude", "Use parent Claude Code session credentials", false)
   .addHelpText(
     "after",
@@ -397,6 +403,7 @@ Examples:
         auditLog: opts.auditLog === true,
         max: opts.max as number | undefined,
         apiKey: opts.apiKey as string | undefined,
+        authToken: opts.authToken as string | undefined,
         inheritClaude: opts.inheritClaude === true,
         verify: false,
         cryptoBehavioralTest: false,
@@ -1214,6 +1221,7 @@ program
   .option("--load <modules>", "Additional modules to load (comma-separated)")
   .option("--model <model>", "Model override for AI operations")
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
+  .option("--auth-token <token>", "Override Anthropic bearer/OAuth token for this run")
   .addHelpText(
     "after",
     `
@@ -1241,6 +1249,7 @@ Examples:
           load?: string;
           model?: string;
           apiKey?: string;
+          authToken?: string;
         },
       ) => {
         const { executeRun, formatRunOutput, parseToolArgs, parseToolInputJson } = await import(
@@ -1283,6 +1292,10 @@ Examples:
         // Configure runtime
         if (opts.apiKey) {
           process.env.ANTHROPIC_API_KEY = opts.apiKey;
+        }
+        if (opts.authToken) {
+          process.env.ANTHROPIC_AUTH_TOKEN = opts.authToken;
+          process.env.ANTHROPIC_OAUTH_TOKEN = opts.authToken;
         }
         const runtime = configureAgentRuntime(config);
 

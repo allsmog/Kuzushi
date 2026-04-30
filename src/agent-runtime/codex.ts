@@ -14,6 +14,7 @@ import type { AgentRuntimeCredentials } from "../types.js";
 import { isRecord, toErrorMessage } from "../utils.js";
 import { enforceAgentQuery, resolveFallbackConsent } from "./enforcement.js";
 import { extractJson } from "./execution.js";
+import { assertRuntimeModelSelection } from "./model-validation.js";
 import type {
   AgentEffort,
   AgentMessage,
@@ -446,6 +447,7 @@ export class CodexAgentRuntime implements AgentRuntime {
       fallbackConsent: resolveFallbackConsent(request.options.consentToModelFallback),
       callsite: "codex.query",
     });
+    assertRuntimeModelSelection(this.id, request.options.model, request.options.fallbackModel);
     const thread = this.client.startThread(buildThreadOptions(request.options));
     return runCodexTurn(
       thread,
@@ -464,6 +466,7 @@ export class CodexAgentRuntime implements AgentRuntime {
       fallbackConsent: resolveFallbackConsent(baseOptions.consentToModelFallback),
       callsite: "codex.session",
     });
+    assertRuntimeModelSelection(this.id, baseOptions.model, baseOptions.fallbackModel);
     const thread = this.client.startThread(buildThreadOptions(baseOptions));
     return new CodexSession(thread, baseOptions);
   }

@@ -42,6 +42,7 @@ const ENV_KEYS = [
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_OAUTH_TOKEN",
   "ANTHROPIC_OAUTH_TOKEN_FILE",
+  "KUZUSHI_OAUTH_DISABLE_KEYCHAIN",
 ] as const;
 
 function clearEnv(): void {
@@ -49,6 +50,7 @@ function clearEnv(): void {
   // Disable real-host OAuth probes (e.g. /home/claude/.claude/...) so
   // tests can't be polluted by tokens that exist outside the sandbox.
   process.env["KUZUSHI_OAUTH_WELL_KNOWN_HOMES"] = "";
+  process.env["KUZUSHI_OAUTH_DISABLE_KEYCHAIN"] = "1";
 }
 
 function clearFiles(): void {
@@ -65,6 +67,7 @@ beforeEach(() => {
 afterEach(() => {
   clearEnv();
   delete process.env["KUZUSHI_OAUTH_WELL_KNOWN_HOMES"];
+  delete process.env["KUZUSHI_OAUTH_DISABLE_KEYCHAIN"];
   rmSync(TMP_HOME, { recursive: true, force: true });
 });
 

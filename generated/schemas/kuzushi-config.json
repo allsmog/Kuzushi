@@ -23,6 +23,9 @@
             "apiKeyFile": {
               "type": "string"
             },
+            "authToken": {
+              "type": "string"
+            },
             "baseUrl": {
               "type": "string"
             }
@@ -38,6 +41,9 @@
             "apiKeyFile": {
               "type": "string"
             },
+            "authToken": {
+              "type": "string"
+            },
             "baseUrl": {
               "type": "string"
             }
@@ -51,6 +57,9 @@
               "type": "string"
             },
             "apiKeyFile": {
+              "type": "string"
+            },
+            "authToken": {
               "type": "string"
             },
             "baseUrl": {
