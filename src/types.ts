@@ -311,10 +311,16 @@ export interface ExploitChain {
     findingFingerprint: string;
     role: string;
     description: string;
+    /** Optional inline location so renderers don't need to dereference the finding. */
+    filePath?: string;
+    /** Optional inline start line — pairs with `filePath`. */
+    startLine?: number;
   }>;
   overallSeverity: "CRITICAL" | "HIGH" | "MEDIUM";
   preconditions: string[];
   impactDescription: string;
+  /** Optional one-paragraph attacker narrative for PR-comment rendering. */
+  narrative?: string;
 }
 
 /** A file entry in the pre-computed file index. */
