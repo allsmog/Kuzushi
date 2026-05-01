@@ -11,7 +11,8 @@ import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { Table } from "../primitives/Table.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
-import { ContextStrip } from "./ContextStrip.js";
+import { EmptyState } from "./EmptyState.js";
+import { RuleHeader } from "./RuleHeader.js";
 import { ScreenContent } from "./ScreenContent.js";
 
 interface OptionsViewProps {
@@ -28,23 +29,24 @@ export function OptionsView({ shell }: OptionsViewProps): React.ReactElement {
   const view = shell.optionsView;
   const rowCount = view?.rows.length ?? 0;
   const setCount = view?.rows.filter((row) => row.isSet).length ?? 0;
+  const moduleId = shell.focusedModule ?? "module";
+  const breadcrumb = `kuzushi/${moduleId}/options`;
   const status = view
     ? `${view.toolName} · ${rowCount} options · ${setCount} set`
     : "no tool selected";
 
   return (
     <ScreenContent>
-      <ContextStrip status={[status]} />
-      {!view ? <EmptyOptions /> : <OptionsContent view={view} />}
+      <RuleHeader breadcrumb={breadcrumb} status={status} />
+      {!view ? <EmptyOptions moduleId={moduleId} /> : <OptionsContent view={view} />}
     </ScreenContent>
   );
 }
 
-function EmptyOptions(): React.ReactElement {
+function EmptyOptions({ moduleId }: { moduleId: string }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginTop={SPACING.sm}>
-      <Text>{tokens.warn("No options are loaded for this module.")}</Text>
-      <Text>{tokens.muted("Run /options <tool> or return with /back.")}</Text>
+    <Box marginTop={SPACING.sm}>
+      <EmptyState kind="options-none-loaded" context={{ moduleId }} />
     </Box>
   );
 }

@@ -81,15 +81,18 @@ function cacheKey(bindings: ReadonlyArray<Keybinding>): string {
  * Register keybindings for the lifetime of the calling component. Safe to
  * call without a provider (becomes a no-op).
  */
-export function useRegisterKeybindings(bindings: ReadonlyArray<Keybinding>): void {
+export function useRegisterKeybindings(
+  bindings: ReadonlyArray<Keybinding> | null | undefined,
+): void {
   const ctx = useContext(Ctx);
   const register = ctx?.register;
-  const key = cacheKey(bindings);
-  const bindingsRef = useRef(bindings);
-  bindingsRef.current = bindings;
+  const skip = !bindings || bindings.length === 0;
+  const key = skip ? "" : cacheKey(bindings as ReadonlyArray<Keybinding>);
+  const bindingsRef = useRef<ReadonlyArray<Keybinding>>(bindings ?? []);
+  bindingsRef.current = bindings ?? [];
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-register only when logical binding set changes (via cache key), not when the array identity does
   useEffect(() => {
-    if (!register) return;
+    if (!register || skip) return;
     return register(bindingsRef.current);
-  }, [register, key]);
+  }, [register, key, skip]);
 }
