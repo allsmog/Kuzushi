@@ -27,10 +27,10 @@ const WORDMARK = [
 ] as const;
 
 const TIPS: ReadonlyArray<string> = [
-  'type /plan "run harder, focus on auth" to have Haiku propose option changes',
-  "/prompt edit triage opens the triage prompt override in $EDITOR",
-  "/show runs lists every past scan; /replay <id> re-renders the summary",
-  "/threats dfd — ASCII box-and-arrow of the randori data flow diagram (1..5 to cycle)",
+  "msfconsole-style verbs work bare: `use sast`, `info taint-iris`, `search sqli`",
+  "type prose at a focused-module prompt — kuzushi proposes a `set` diff to confirm with `y`",
+  "`browse` lists every loaded module; the bare home stays calm by default",
+  "`show options` prints the full per-tool option table; `set <KEY> <VAL>` updates one",
   "F-0001 / C-01 short-IDs resolve deterministically — /show aliases to list them",
   "house rules live at .kuzushi/house-rules/<moduleId>.md and round-trip with git",
   "two-stage Ctrl+C at the prompt: once to arm, again within 2s to exit",

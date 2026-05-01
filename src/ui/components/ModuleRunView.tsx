@@ -141,6 +141,7 @@ export function ModuleRunView({
           <FindingsBlock run={run} findings={findings} />
           <MetaRow run={run} />
           <ArtifactsBlock artifacts={run.artifacts} />
+          <NextStepsRail steps={run.nextSteps} />
         </>
       ) : (
         <>
@@ -615,6 +616,46 @@ function ArtifactsBlock({
           ]}
           rows={rows}
         />
+      </Box>
+    </Section>
+  );
+}
+
+/**
+ * Phase 6 — post-run "Next:" rail. Renders the module's `suggestNext`
+ * suggestions as one tabular block at the tail of `ModuleRunView`. Two
+ * columns of plain bare-verb commands an analyst can paste into the
+ * prompt — the goal is to keep the next step one keystroke away without
+ * adding any modal navigation. No-op when the module didn't suggest
+ * anything.
+ */
+function NextStepsRail({
+  steps,
+}: {
+  steps?: ReadonlyArray<{ label: string; command: string }>;
+}): React.ReactElement {
+  if (!steps || steps.length === 0) return <Box />;
+  // Two-column flow: pairs of cells per row, each cell `<command>` plus
+  // `<label>` as a muted hint when label and command differ.
+  const cells = steps.map((s) =>
+    s.label === s.command ? s.command : `${s.command}   ${tokens.muted(`(${s.label})`)}`,
+  );
+  const rows: string[][] = [];
+  for (let i = 0; i < cells.length; i += 2) {
+    rows.push(cells.slice(i, i + 2));
+  }
+  return (
+    <Section title="next">
+      <Box flexDirection="column" paddingLeft={SPACING.md}>
+        {rows.map((row, i) => (
+          <Box key={`next-${i}`}>
+            {row.map((c, j) => (
+              <Box key={`cell-${j}`} marginRight={SPACING.lg}>
+                <Text>{c}</Text>
+              </Box>
+            ))}
+          </Box>
+        ))}
       </Box>
     </Section>
   );

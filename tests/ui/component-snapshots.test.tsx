@@ -237,6 +237,9 @@ describe("Ink component snapshots", () => {
     const shell = stubShell({
       workspace: "acme-api",
       target: "./acme-api",
+      // Phase 3.2 — the bare-launch catalog is the prompt-only home; the full
+      // grouped tables only render after `browse` / `show modules` flips this.
+      catalogExpanded: true,
       moduleCatalog: [
         {
           id: "sast",

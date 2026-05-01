@@ -1290,8 +1290,10 @@ describe("local shell commands", () => {
     const help = __shellInternals.handleLocalCommand("/help advanced", core, opts, ctx, shellState);
     const text = help!.output!;
     // Spot-check the group headings that map to CLAUDE.md §12 sections.
+    // The "Natural-language planner" group was retired in Phase 5 cleanup —
+    // analysts type prose at a focused-module prompt directly, then confirm
+    // with bare `y` / `n`. Slash forms still work but stay out of /help.
     expect(text).toContain("Module + view navigation");
-    expect(text).toContain("Natural-language planner");
     expect(text).toContain("Prompt editor");
     expect(text).toContain("Replay & trace");
     expect(text).toContain("Short-ID aliases");

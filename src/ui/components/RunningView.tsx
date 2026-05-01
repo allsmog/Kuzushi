@@ -9,6 +9,7 @@
 
 import { Box, Static, Text } from "ink";
 import React from "react";
+import { classifyContextFreshness } from "../../copilot/context-staleness.js";
 import { formatCost, formatDuration } from "../format.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { shallowEqual, useElapsed, useUISelector } from "../hooks.js";
@@ -315,12 +316,18 @@ function StatusFooterSlot({ store }: { store: UIStore }): React.ReactElement {
       const snapshot = s.shell?.contextSnapshot;
       if (!snapshot) return { state: "missing" as const };
       const ts = typeof snapshot.timestamp === "number" ? snapshot.timestamp : null;
-      // Phase 1.2: presence-only freshness. Phase 4.2/4.3 layers in staleness
-      // detection so this can flip to `stale` when files have changed since
-      // the snapshot was generated.
-      return ts != null
-        ? { state: "fresh" as const, ageMs: Math.max(0, Date.now() - ts) }
-        : { state: "fresh" as const };
+      // Phase 4.3 — when callers have populated `contextChangedPaths` (e.g.
+      // after a `git diff` poll) the footer flips to `stale` based on
+      // `classifyContextFreshness`. When the array is absent the footer
+      // falls back to presence-only freshness.
+      const changed = s.shell?.contextChangedPaths;
+      const state: "fresh" | "stale" =
+        changed && changed.length > 0
+          ? classifyContextFreshness(snapshot, changed) === "stale"
+            ? "stale"
+            : "fresh"
+          : "fresh";
+      return ts != null ? { state, ageMs: Math.max(0, Date.now() - ts) } : { state };
     },
     shallowEqual,
   );

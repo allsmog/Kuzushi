@@ -857,6 +857,26 @@ export interface ModuleRunSlice {
   costUsd?: number;
   /** Artifacts produced — paths the operator may want to crack open. */
   artifacts?: ReadonlyArray<ModuleRunArtifact>;
+  /**
+   * Phase 6 — module-suggested follow-up commands, rendered as the `Next:`
+   * rail at the tail of `ModuleRunView`. Populated by modules via
+   * `ctx.host.suggestNext([...])` (see `host-handles.ts`). Each entry maps
+   * a one-line analyst-facing label to the bare-verb command an operator
+   * can paste into the prompt to execute it.
+   */
+  nextSteps?: ReadonlyArray<NextStep>;
+}
+
+/**
+ * One row in the post-run `Next:` rail. `label` is what the analyst sees
+ * (e.g. `"open F-0001"`); `command` is what gets dispatched if they pick
+ * the row. They're often identical — but kept separate so a label can
+ * read as prose ("Suggest fixes") while the command stays terse
+ * (`"patch F-0001"`).
+ */
+export interface NextStep {
+  label: string;
+  command: string;
 }
 
 /**
@@ -990,6 +1010,14 @@ export interface ShellState {
   tools: string[];
   /** Currently focused module (for shorthand commands). */
   focusedModule: string | null;
+  /**
+   * When the catalog view is mounted, controls whether the per-category
+   * module tables are rendered. Default `false` keeps the bare-launch home
+   * minimal (banner + `[!] no context yet` + prompt). The `browse` /
+   * `show modules` verbs flip this to `true` so analysts see the full list.
+   * Phase 3.2 of the msfconsole + Claude Code fusion redesign.
+   */
+  catalogExpanded?: boolean;
   /** Sub-surface within the shell (catalog / module / findings / finding / tune). */
   shellView: ShellView;
   /** When shellView === "finding", which finding ID is open (e.g. "F-0216"). */
@@ -1110,6 +1138,14 @@ export interface ShellState {
   lastUsedTool?: string;
   /** Generated context for the current target. Platform-level — readable by all modules. */
   contextSnapshot?: ContextSnapshot | null;
+  /**
+   * Phase 4.2/4.3 — paths considered changed since `contextSnapshot.timestamp`.
+   * Populated by callers that compute `git diff --name-only` after a snapshot
+   * is loaded; consumed by the status footer to flip the context state from
+   * `fresh` to `stale`. Optional: when absent, the footer falls back to
+   * presence-only freshness.
+   */
+  contextChangedPaths?: string[];
   /**
    * Live-build progress for the current `/context build` run. Seeded on
    * command entry by `initContextBuildState()`, then mutated by the phase
@@ -1353,6 +1389,20 @@ export class UIStore {
     this.state = {
       ...this.state,
       shell: { ...shell, moduleRun: { ...shell.moduleRun, steps } },
+    };
+    this.notify();
+  }
+
+  /**
+   * Phase 6 — replace the post-run `Next:` rail on the active module run.
+   * No-op when no run is active. See {@link HostUiHandle.suggestNext}.
+   */
+  suggestNext(steps: ReadonlyArray<NextStep>): void {
+    const shell = this.state.shell;
+    if (!shell?.moduleRun) return;
+    this.state = {
+      ...this.state,
+      shell: { ...shell, moduleRun: { ...shell.moduleRun, nextSteps: steps } },
     };
     this.notify();
   }

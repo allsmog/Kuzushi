@@ -5688,6 +5688,7 @@ const BARE_SHELL_ROUTES: readonly BareShellRoute[] = defineShellRoutes<
     matches: ({ lower }) => ["modules", "m"].includes(lower),
     execute: (_input, { core, shellState }) => ({
       output: formatModuleList(core, shellState.moduleCatalog),
+      shellStateUpdater: (shell) => ({ ...shell, catalogExpanded: true }),
     }),
   },
   {
@@ -5911,7 +5912,12 @@ const BARE_SHELL_ROUTES: readonly BareShellRoute[] = defineShellRoutes<
     matches: ({ lower }) => lower === "browse",
     execute: (_input, { core, shellState }) => ({
       output: formatModuleList(core, shellState.moduleCatalog),
-      shellStateUpdater: (shell) => ({ ...shell, shellView: "catalog", focusedModule: null }),
+      shellStateUpdater: (shell) => ({
+        ...shell,
+        shellView: "catalog",
+        focusedModule: null,
+        catalogExpanded: true,
+      }),
     }),
   },
 ] satisfies readonly BareShellRouteDefinition[]);
@@ -6258,6 +6264,28 @@ function routeInput(
       outcome: "started",
     });
     return toolResult;
+  }
+
+  // Phase 5 — pending-plan accept/discard via bare y/n. The Ink PlanCard
+  // renders whenever `shell.pendingPlan` is set; treating bare y/n as the
+  // confirmation verbs lets the analyst walk through "describe → confirm"
+  // without learning `/yes` and `/no` as separate slash commands.
+  if (shellState.pendingPlan && (lower === "y" || lower === "yes")) {
+    return handleApplyPlanCommand(core, shellState);
+  }
+  if (shellState.pendingPlan && (lower === "n" || lower === "no")) {
+    return handleDiscardPlanCommand(shellState);
+  }
+
+  // Phase 5 — natural-language fall-through. When a module is focused and
+  // the input looks like prose (multiple words, no `:` tool reference),
+  // route it through the planner so the analyst can type
+  //   "only look at admin routes"
+  // and get a structured option diff to confirm with `y`. This replaces
+  // the dedicated `/plan` slash command with bare-input behaviour while
+  // keeping the slash form available for muscle memory.
+  if (ctx.focusedModule && /\s/.test(trimmed) && !trimmed.includes(":") && trimmed.length >= 4) {
+    return handlePlanCommand(splitShellWords(trimmed), core, opts, ctx, shellState);
   }
 
   // Strip stray trailing quotes from the preview so error messages like
@@ -8081,13 +8109,26 @@ function resolveToolExecution(
   }
 
   // Context gating — block tools that require context/threat-model state when missing.
+  // Phase 4.1: when only the basic snapshot is missing (the common case for
+  // taint-iris / agentic-sast / sast scans), the analyst should not be lectured
+  // with "Run /use context, then run ." — instead, we inline a `context:build`
+  // step before the requested tool so the run reads as one transcript. The
+  // taint-iris-next on-disk-artifact path and carlini-threat-hunt's
+  // threat-model dependency still produce their precise error messages because
+  // they require operator action beyond a context build.
   const contextRequirementError = getContextRequirementError(
     finalToolName,
     shellState,
     mergedArgs,
     opts,
   );
-  if (contextRequirementError) {
+  const optOutInlineBuild =
+    String(mergedArgs.context ?? mergedArgs.CONTEXT ?? "").toLowerCase() === "skip";
+  const shouldAutoBuildContext =
+    !optOutInlineBuild &&
+    contextRequirementError != null &&
+    shouldInlineBuildContext(finalToolName, shellState);
+  if (contextRequirementError && !shouldAutoBuildContext) {
     return { output: contextRequirementError };
   }
 
@@ -8128,6 +8169,46 @@ function resolveToolExecution(
         readStoredThinkingDisabledOption(mergedArgs),
       );
 
+      // Phase 4.1 — inline `context:build` when the requested tool would
+      // otherwise have failed the context gate. We dispatch through the same
+      // executeTool path so the build's `setModuleRunSteps` events surface in
+      // the run transcript and keep the analyst on a single scrolling screen.
+      if (shouldAutoBuildContext) {
+        const ctxResult = await core.executeTool(
+          "context:build",
+          {
+            ...(target ? { target } : {}),
+          },
+          {
+            cwd: opts.target ? path.resolve(opts.target) : process.cwd(),
+            target: (mergedArgs.target as string) ?? opts.target,
+            workspaceId: opts.workspace,
+            uiStore: ctx.uiStore,
+            signal,
+            ...(modelDatastore.datastore ? { datastore: modelDatastore.datastore } : {}),
+          },
+        );
+        if (!ctxResult.ok) {
+          return {
+            output: `[!] inline context:build failed — ${ctxResult.output ?? "unknown error"}`,
+            ok: false,
+            costUsd: ctxResult.costUsd,
+          };
+        }
+        // Re-seed the focused-module run so the requested tool's transcript
+        // restarts cleanly after the precursor build.
+        seedFocusedModuleRun(
+          ctx.uiStore,
+          shellState,
+          resolvedTool.tool,
+          Date.now(),
+          inputSummary,
+          modelDatastore.datastore?.get<string>("model"),
+          readStoredEffortOption(mergedArgs),
+          readStoredThinkingDisabledOption(mergedArgs),
+        );
+      }
+
       const result = await core.executeTool(finalToolName, toolInput, {
         cwd: opts.target ? path.resolve(opts.target) : process.cwd(),
         target: (mergedArgs.target as string) ?? opts.target,
@@ -8161,6 +8242,22 @@ function resolveToolExecution(
       };
     },
   };
+}
+
+/**
+ * Phase 4.1 — does the requested tool's missing-context state map cleanly to
+ * an inline `context:build` precursor? True when the snapshot is simply
+ * absent and the tool's only missing dependency is the snapshot itself.
+ *
+ * Carlini-threat-hunt also needs a threat model that the operator owns, and
+ * taint-iris-next reads on-disk artefacts, so those keep their explicit
+ * error paths. Everything else in CONTEXT_REQUIRED_TOOLS auto-builds.
+ */
+function shouldInlineBuildContext(toolName: string, shellState: ShellState): boolean {
+  if (!CONTEXT_REQUIRED_TOOLS.has(toolName)) return false;
+  if (toolName === "carlini-threat-hunt:run") return false;
+  if (toolName === "taint-iris-next:hunt") return false;
+  return !shellState.contextSnapshot;
 }
 
 function getContextRequirementError(
