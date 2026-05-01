@@ -18,6 +18,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import { colorVerdict } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { computeVisibleSlice } from "../hooks/useVisibleSlice.js";
 import { icons } from "../icons.js";
 import { useRenderCounter } from "../perf.js";
@@ -185,6 +186,11 @@ function UnifiedFindings({
   pageSize,
 }: UnifiedProps): React.ReactElement {
   useRenderCounter("UnifiedFindings");
+  const { columns } = useTerminalSize();
+  // Dividers and row clips reflow with the terminal so 120/200-col panes
+  // don't show a stranded 78-char rule.
+  const dividerWidth = Math.max(40, Math.min(columns, 200));
+  const titleWidth = Math.max(24, Math.min(columns - 24, 140));
   useRegisterKeybindings([
     { keys: "/open <F-NNNN>", label: "open finding" },
     { keys: "j/k", label: "move cursor", secondary: true },
@@ -267,7 +273,7 @@ function UnifiedFindings({
       </Box>
 
       <Box marginTop={SPACING.sm}>
-        <Text>{tokens.muted("─".repeat(78))}</Text>
+        <Text>{tokens.muted("─".repeat(dividerWidth))}</Text>
       </Box>
 
       {resolvedChains.map(({ chain, members }) => {
@@ -294,7 +300,7 @@ function UnifiedFindings({
             </Text>
           )}
           {visibleLoose.map((f) => (
-            <LooseRow key={f.fingerprint} finding={f} />
+            <LooseRow key={f.fingerprint} finding={f} titleWidth={titleWidth} />
           ))}
           {hiddenBelow > 0 && (
             <Text>
@@ -308,7 +314,7 @@ function UnifiedFindings({
       {findings.length === 0 && <EmptyState kind="findings-never-scanned" />}
 
       <Box marginTop={SPACING.sm}>
-        <Text>{tokens.muted("─".repeat(78))}</Text>
+        <Text>{tokens.muted("─".repeat(dividerWidth))}</Text>
       </Box>
       <Box>
         <Text>{tokens.hint("j/k move   /open F-NNNN inspect   b back")}</Text>
@@ -326,7 +332,13 @@ function UnifiedFindings({
  * it, unchanged rows short-circuit before the function body runs.
  */
 const LooseRow = React.memo(
-  function LooseRow({ finding }: { finding: ActionableFinding }): React.ReactElement {
+  function LooseRow({
+    finding,
+    titleWidth,
+  }: {
+    finding: ActionableFinding;
+    titleWidth: number;
+  }): React.ReactElement {
     useRenderCounter("LooseRow");
     const title = finding.title ?? finding.ruleId;
     const sev = finding.displaySeverity ?? mapSeverity(finding.severity);
@@ -337,7 +349,7 @@ const LooseRow = React.memo(
           {"  "}
           {sevTag}
           {"  "}
-          {tokens.strong(clip(title, 56))}
+          {tokens.strong(clip(title, titleWidth))}
           {"  "}
           {tokens.muted(`[${finding.taskId || "sast"}]`)}
         </Text>
@@ -350,7 +362,7 @@ const LooseRow = React.memo(
       </Box>
     );
   },
-  (prev, next) => prev.finding === next.finding,
+  (prev, next) => prev.finding === next.finding && prev.titleWidth === next.titleWidth,
 );
 
 function SeverityCounts({

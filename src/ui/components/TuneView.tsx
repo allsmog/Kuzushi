@@ -14,6 +14,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import type { ShellState, TuneSnapshot } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { HouseRules } from "./HouseRules.js";
@@ -37,6 +38,8 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
   ]);
   const moduleId = shell.focusedModule ?? "(no module)";
   const snap = shell.tuneSnapshot;
+  const { columns } = useTerminalSize();
+  const dividerWidth = Math.max(40, Math.min(columns, 200));
 
   return (
     <ScreenContent>
@@ -102,7 +105,7 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
       </TuneControl>
 
       <Box marginTop={SPACING.sm}>
-        <Text>{tokens.muted("\u2500".repeat(78))}</Text>
+        <Text>{tokens.muted("\u2500".repeat(dividerWidth))}</Text>
       </Box>
       <Box marginTop={SPACING.sm}>
         <Text>{tokens.strong("Primary action: run with the focused module settings.")}</Text>
