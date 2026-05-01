@@ -17,6 +17,33 @@ npm install -g kuzushi
 kuzushi
 ```
 
+## First 5 minutes
+
+```sh
+# 1. Install (Node 22+)
+npm install -g kuzushi
+
+# 2. Set a provider key. Get one at https://console.anthropic.com/settings/keys
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# 3. Scan the current directory
+kuzushi scan .
+```
+
+The first run launches an interactive wizard: pick a preset (`safe` is the
+recommended starter — context + secrets, capped at 20 findings), pick a
+model, and Kuzushi runs the pipeline. Results stream to `/findings`; the
+SQLite store under `.kuzushi/findings.sqlite3` survives across runs so you
+can `/replay` or `/resume` later.
+
+Prefer the conversational shell? Run `kuzushi` (no args), then type
+`/quickstart` for a guided tour, or `scan .` to kick off the same pipeline
+inside the shell.
+
+If something looks wrong before you start, run `kuzushi doctor` to preflight
+your environment (Node version, scanner binaries, credentials, write
+permissions).
+
 ## Three Ways to Use It
 
 ### Shell (default)

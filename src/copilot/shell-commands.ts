@@ -49,6 +49,13 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
     description: "Show core workflow help; `/help advanced` shows all commands",
     group: "nav",
   },
+  {
+    syntax: "/quickstart",
+    description: "Three-step guided tour for first-time operators (e.g. /quickstart)",
+    group: "nav",
+    longDescription:
+      "Prints the current target, recommends a starter module, and shows the exact verbs to run your first scan. Read-only — does not change config.",
+  },
   { syntax: "/modules", description: "List loaded modules (alias: /m)", group: "nav" },
   { syntax: "/tools", description: "List available tools", group: "nav" },
   { syntax: "/use <module>", description: "Focus on a module", group: "nav" },

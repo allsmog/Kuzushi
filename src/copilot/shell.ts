@@ -5900,6 +5900,12 @@ const SLASH_SHELL_ROUTES: readonly SlashShellRoute[] = defineShellRoutes<
     }),
   },
   {
+    id: "quickstart",
+    aliases: ["quickstart"],
+    matches: slashCommandMatches,
+    execute: (_input, { core, opts }) => ({ output: formatQuickstart(core, opts) }),
+  },
+  {
     id: "tools",
     aliases: ["tools"],
     matches: slashCommandMatches,
@@ -9977,10 +9983,20 @@ function formatHelp(
         ? "  Showing core, advanced, and developer commands."
         : "  Showing core workflow commands. Use /help advanced for the full surface.",
       ...formatLabelValueRows([
+        ["Model:", opts.config.model ?? null],
         ["Modules:", modules.map((module) => module.id).join(", ") || "none"],
         ["Tools:", `${toolCount} available`],
         ["Target:", opts.target ?? null],
         ["Workspace:", opts.workspaceName ?? opts.workspace ?? null],
+      ]),
+    ],
+    [
+      "  Get started",
+      ...formatCommandRows([
+        ["scan .", "Run the default SAST pipeline on the current directory"],
+        ["/use sast", "Focus on the SAST module (then `run scan`, `findings`, `tune`)"],
+        ["/quickstart", "Three-step guided tour for first-time operators"],
+        ["/findings", "Open the findings list (after a scan completes)"],
       ]),
     ],
     ...groupSections,
@@ -10119,7 +10135,72 @@ function formatTools(
 }
 
 /**
+ * `/quickstart` — three-step guided tour. Read-only: does not change config.
+ *
+ * Implementation note (CLAUDE.md guardrail): this is help-text, not a
+ * tool prompt, so the `.kuzushi/prompts/<moduleId>/<verb>.md` rule does
+ * not apply. The text is intentionally short and scannable.
+ */
+export function formatQuickstart(core: CopilotCore, opts: ShellOptions): string {
+  const target = opts.target ?? null;
+  const hasSast = core.hasModule("sast");
+  const recommended = hasSast ? "sast" : (core.listModules()[0]?.id ?? null);
+  const targetLine = target
+    ? `${target}`
+    : "(none — set with `/target <path>` or pass --target on launch)";
+
+  const steps: string[] = [
+    "  Quickstart — three steps to your first useful scan",
+    "",
+    "  1. Confirm a target.",
+    `       Current target: ${targetLine}`,
+    "       Change with:    /target <path>",
+    "",
+  ];
+
+  if (recommended) {
+    steps.push(
+      "  2. Pick a module. The default scanner module is `sast` (SAST pipeline:",
+      "     Semgrep, CodeQL, agentic detectors, AI triage, optional verify + patch).",
+      `       /use ${recommended}`,
+      "",
+      "  3. Kick off a scan.",
+      "       scan .                                # default preset on cwd",
+      "       /plan run lightly, no verify          # English → option diff",
+      "",
+    );
+  } else {
+    steps.push(
+      "  2. No modules are loaded. Restart with `--load <module>` or",
+      "     `/load <specifier>` to add one (e.g. /load builtin:sast).",
+      "",
+      "  3. Once a module is loaded, run `scan .` or `/use <module>`.",
+      "",
+    );
+  }
+
+  steps.push(
+    "  Auth: if a provider key is missing, you'll be prompted on first use.",
+    "        Anthropic keys: https://console.anthropic.com/settings/keys",
+    "",
+    "  Where things land: results stream to /findings; runs persist in",
+    "  .kuzushi/findings.sqlite3. Use /show runs to list, /replay <id> to",
+    "  re-render past runs, /resume to continue an interrupted scan.",
+    "",
+    "  More help:  /help  ·  /help <verb>  ·  /help advanced",
+  );
+
+  return formatSections([steps]);
+}
+
+/**
  * Welcome message shown when the shell starts.
+ *
+ * The first thing a new operator sees. Two goals:
+ *   1. Surface the active model + target so the operator knows what's loaded.
+ *   2. Point at the three highest-value next actions (`scan .`, `/use sast`,
+ *      `/quickstart`). The previous wording said "type 'modules'…" which
+ *      buried the actual next step behind another menu.
  */
 export function formatWelcome(core: CopilotCore, opts: ShellOptions): string {
   const modules = core.listModules();
@@ -10130,12 +10211,19 @@ export function formatWelcome(core: CopilotCore, opts: ShellOptions): string {
       "  Kuzushi",
       "  security-native AI operating environment",
       ...formatLabelValueRows([
+        ["Model:", opts.config.model ?? null],
         ["Modules:", modules.map((module) => module.id).join(", ") || "none"],
         ["Tools:", `${toolCount} available`],
         ["Target:", opts.target ?? null],
         ["Workspace:", opts.workspaceName ?? opts.workspace ?? null],
       ]),
-      '  Type "modules" to choose a workflow, or "/ask <question>" for agent chat.',
+      "",
+      "  Try first:",
+      "    scan .              # run the default SAST pipeline on the cwd",
+      "    /use sast           # focus on SAST (then `run scan`, `findings`, `tune`)",
+      "    /quickstart         # 3-step guided tour for first-time operators",
+      "    /help               # core verbs;  /help advanced shows everything",
+      "    /ask <question>     # ask the agent with current shell context",
     ],
   ]);
 }
@@ -10166,6 +10254,7 @@ export const __shellInternals = {
   formatModuleInfo,
   formatModuleList,
   formatOptions,
+  formatQuickstart,
   formatTools,
   formatArtifactBanner,
   formatContextTrailer,

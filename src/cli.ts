@@ -474,7 +474,10 @@ function compareRuns(id1: string, id2: string, repoPath: string): void {
     const run1 = getRun(db, id1);
     const run2 = getRun(db, id2);
     if (!run1 || !run2) {
-      throw new CliUsageError(`Run not found: ${!run1 ? id1 : id2}`);
+      const missingId = !run1 ? id1 : id2;
+      throw new CliUsageError(
+        `Run not found: "${missingId}". Run \`kuzushi runs list -r ${repoPath}\` to see available run ids.`,
+      );
     }
     const metrics1 = run1.metricsJson ? JSON.parse(run1.metricsJson) : null;
     const metrics2 = run2.metricsJson ? JSON.parse(run2.metricsJson) : null;
@@ -605,7 +608,9 @@ configCmd
       }
       const value = getConfigValue(key, opts.repo);
       if (value === undefined) {
-        throw new CliUsageError(`Unknown config key: ${key}`);
+        throw new CliUsageError(
+          `Unknown config key: "${key}". Run \`kuzushi config explain\` to list documented keys, or \`kuzushi config get\` (no key) to see the full effective config.`,
+        );
       }
       console.log(typeof value === "string" ? value : JSON.stringify(value));
     }),
@@ -711,7 +716,9 @@ configCmd
       }
       const doc = explainConfigKey(key);
       if (!doc) {
-        throw new CliUsageError(`Unknown config key: ${key}`);
+        throw new CliUsageError(
+          `Unknown config key: "${key}". Run \`kuzushi config explain\` (no argument) to list documented keys.`,
+        );
       }
       console.log(`${doc.key}`);
       console.log(`  Type:     ${doc.type}`);
@@ -1417,13 +1424,17 @@ runsCmd
       const { root } = resolveRepo(opts.repo);
       const dbPath = defaultDbPath(root);
       if (!existsSync(dbPath)) {
-        throw new CliUsageError(`No runs database at ${dbPath}.`);
+        throw new CliUsageError(
+          `No runs database at ${dbPath}. Run \`kuzushi scan ${opts.repo}\` first to create one.`,
+        );
       }
       const db = initDb(dbPath);
       try {
         const run = getRun(db, runId);
         if (!run) {
-          throw new CliUsageError(`Run not found: ${runId}`);
+          throw new CliUsageError(
+            `Run not found: "${runId}". Run \`kuzushi runs list -r ${opts.repo}\` to see available run ids.`,
+          );
         }
         if (opts.json) {
           console.log(JSON.stringify(run, null, 2));
