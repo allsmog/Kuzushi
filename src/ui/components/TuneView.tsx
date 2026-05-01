@@ -37,7 +37,6 @@ export function TuneView({ shell }: TuneViewProps): React.ReactElement {
     { keys: "b", label: "back", secondary: true },
   ]);
   const snap = shell.tuneSnapshot;
-
   return (
     <ScreenContent>
       <Box>

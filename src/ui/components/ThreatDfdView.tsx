@@ -20,6 +20,7 @@ import {
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import { truncateEnd } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { RuleHeader } from "./RuleHeader.js";
@@ -142,11 +143,21 @@ function EmptyWorkspace(): React.ReactElement {
 }
 
 function AttackSurfaceMap({ model }: { model: AttackSurfaceDfdModel }): React.ReactElement {
+  const { columns } = useTerminalSize();
+  // Box draws inside the available width; ScreenContent/host padding takes
+  // a couple of cells, so reserve 4 (matches the legacy 76-of-80 ratio).
+  // Clamp [60..140] so the box stays readable on ultrawide panes too.
+  const boxWidth = Math.max(60, Math.min(columns - 4, 140));
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
       {model.zones.map((zone, index) => (
         <Box key={zone.id} flexDirection="column">
-          <ZoneBlock title={zone.title} nodes={zone.nodes} selectedId={model.selectedId} />
+          <ZoneBlock
+            title={zone.title}
+            nodes={zone.nodes}
+            selectedId={model.selectedId}
+            width={boxWidth}
+          />
           {index < model.zones.length - 1 ? <BoundaryBetween model={model} zone={zone.id} /> : null}
         </Box>
       ))}
@@ -159,12 +170,13 @@ function ZoneBlock({
   title,
   nodes,
   selectedId,
+  width,
 }: {
   title: string;
   nodes: AttackSurfaceNode[];
   selectedId?: string;
+  width: number;
 }): React.ReactElement {
-  const width = 76;
   const heading = ` ${title} `;
   const fill = "─".repeat(Math.max(0, width - heading.length - 2));
   return (
@@ -194,11 +206,16 @@ function NodeRow({
   width: number;
 }): React.ReactElement {
   const marker = selected ? tokens.focus("❯") : node.risk === "hot" ? tokens.danger("!") : " ";
-  const labelWidth = Math.max(16, Math.min(34, Math.floor(width * 0.45)));
-  const detailWidth = Math.max(10, width - labelWidth - 7);
   const glyph = nodeGlyph(node);
   const label = `${node.id.padEnd(4)} ${glyph} ${node.name}`;
   const detail = node.tags.length > 0 ? node.tags.slice(0, 3).join(" · ") : node.description;
+  // Inner content is `│ ` + marker + " " + label + detail + `│` = width.
+  // Reserve 6 cells for the frame (`│ `, marker, space, trailing `│`)
+  // then split label/detail at the legacy 34/36 ratio so labels keep
+  // priority on narrow panes while ultrawide adds room to both columns.
+  const inner = Math.max(20, width - 6);
+  const labelWidth = Math.max(12, Math.floor((inner * 34) / 70));
+  const detailWidth = Math.max(8, inner - labelWidth);
   const color = selected
     ? tokens.accent
     : node.risk === "hot"

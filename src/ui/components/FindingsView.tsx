@@ -205,6 +205,10 @@ function UnifiedFindings({
   focusedModule,
 }: UnifiedProps): React.ReactElement {
   useRenderCounter("UnifiedFindings");
+  const { columns } = useTerminalSize();
+  // Row title clip reflows with the terminal so 120/200-col panes
+  // don't truncate at 56 chars when there's pane to spare.
+  const titleWidth = Math.max(24, Math.min(columns - 24, 140));
   useRegisterKeybindings([
     { keys: "/open <F-NNNN>", label: "open finding" },
     { keys: "j/k", label: "move cursor", secondary: true },
@@ -337,6 +341,7 @@ function UnifiedFindings({
               finding={f}
               alias={aliasMap.get(f.fingerprint)}
               active={slice.top + idx === slice.cursor}
+              titleWidth={titleWidth}
             />
           ))}
           {hiddenBelow > 0 && (
@@ -378,10 +383,12 @@ const LooseRow = React.memo(
     finding,
     alias,
     active = false,
+    titleWidth,
   }: {
     finding: ActionableFinding;
     alias?: string;
     active?: boolean;
+    titleWidth: number;
   }): React.ReactElement {
     useRenderCounter("LooseRow");
     const title = finding.title ?? finding.ruleId;
@@ -395,7 +402,7 @@ const LooseRow = React.memo(
           {sevTag}
           {"  "}
           {alias ? `${tokens.accent(alias)}  ` : ""}
-          {tokens.strong(clip(title, 56))}
+          {tokens.strong(clip(title, titleWidth))}
           {"  "}
           {tokens.muted(`[${finding.taskId || "sast"}]`)}
         </Text>
@@ -409,7 +416,10 @@ const LooseRow = React.memo(
     );
   },
   (prev, next) =>
-    prev.finding === next.finding && prev.alias === next.alias && prev.active === next.active,
+    prev.finding === next.finding &&
+    prev.alias === next.alias &&
+    prev.active === next.active &&
+    prev.titleWidth === next.titleWidth,
 );
 
 function SeverityCounts({

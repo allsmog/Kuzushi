@@ -28,7 +28,7 @@ import type {
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import { truncateEnd } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
-import { useTerminalCardWidth } from "../hooks.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { ContextStrip } from "./ContextStrip.js";
@@ -51,8 +51,13 @@ export function ScopeAndCriticalityView({
     { keys: "/threats edit", label: "annotate", secondary: true },
     { keys: "q", label: "back", secondary: true },
   ]);
-  const width = useTerminalCardWidth(88, 44);
   const tm = shell.threatModel;
+  const { columns } = useTerminalSize();
+  // Bullet rows reflow to terminal width with sane bounds so 80-col stays
+  // readable and 200-col stops eating empty pane.
+  const lineWidth = Math.max(40, Math.min(columns - 8, 110));
+  const itemWidth = Math.max(40, Math.min(columns - 12, 110));
+  const noteWidth = Math.max(32, Math.min(columns - 28, 90));
   if (!tm) return <EmptyState />;
 
   const buckets = tm.narrative?.criticalityBuckets;
@@ -73,7 +78,7 @@ export function ScopeAndCriticalityView({
         }
       />
 
-      {buckets ? <CriticalityBuckets buckets={buckets} width={width} /> : null}
+      {buckets ? <CriticalityBuckets buckets={buckets} itemWidth={itemWidth} /> : null}
 
       {outOfScope.length > 0 ? (
         <Box flexDirection="column" marginTop={SPACING.sm}>
@@ -82,14 +87,14 @@ export function ScopeAndCriticalityView({
             {outOfScope.map((line) => (
               <Text key={`oos-${stableTextKey(line)}`}>
                 {tokens.muted("\u00B7  ")}
-                {tokens.muted(truncateEnd(line, Math.max(24, width - 8)))}
+                {tokens.muted(truncateEnd(line, lineWidth))}
               </Text>
             ))}
           </Box>
         </Box>
       ) : null}
 
-      <OperatorEdits tm={tm} width={width} />
+      <OperatorEdits tm={tm} itemWidth={itemWidth} noteWidth={noteWidth} />
     </ScreenContent>
   );
 }
@@ -110,10 +115,10 @@ function EmptyState(): React.ReactElement {
 
 function CriticalityBuckets({
   buckets,
-  width,
+  itemWidth,
 }: {
   buckets: ThreatModelCriticalityBuckets;
-  width: number;
+  itemWidth: number;
 }): React.ReactElement {
   const order: Array<keyof ThreatModelCriticalityBuckets> = ["critical", "high", "medium", "low"];
   return (
@@ -134,7 +139,7 @@ function CriticalityBuckets({
                 {"   "}
                 {tokens.muted("\u00B7")}
                 {"  "}
-                {tokens.muted(truncateEnd(item, Math.max(24, width - 10)))}
+                {tokens.muted(truncateEnd(item, itemWidth))}
               </Text>
             ))}
             {(buckets[tier] ?? []).length > 5 ? (
@@ -165,10 +170,12 @@ function severityBadge(tier: keyof ThreatModelCriticalityBuckets): string {
 
 function OperatorEdits({
   tm,
-  width,
+  itemWidth,
+  noteWidth,
 }: {
   tm: ThreatModelDocument;
-  width: number;
+  itemWidth: number;
+  noteWidth: number;
 }): React.ReactElement {
   const annotations = Object.entries(tm.userAnnotations ?? {});
   const confirmed = tm.confirmedMitigations ?? [];
@@ -205,7 +212,7 @@ function OperatorEdits({
               {"   "}
               {tokens.muted(`[${id}]`)}
               {"  "}
-              {tokens.muted(truncateEnd(note, Math.max(20, width - 16)))}
+              {tokens.muted(truncateEnd(note, noteWidth))}
             </Text>
           ))}
           {annotations.length > 6 ? (
@@ -227,7 +234,7 @@ function OperatorEdits({
             <Text key={`mit-${stableTextKey(item)}`}>
               {"   "}
               {tokens.muted("\u00B7  ")}
-              {tokens.value(truncateEnd(item, Math.max(20, width - 10)))}
+              {tokens.value(truncateEnd(item, itemWidth))}
             </Text>
           ))}
           {confirmed.length > 6 ? (
@@ -247,7 +254,7 @@ function OperatorEdits({
           </Text>
           <Text>
             {"   "}
-            {tokens.muted(truncateEnd(dismissed.slice(0, 10).join(", "), Math.max(20, width - 8)))}
+            {tokens.muted(truncateEnd(dismissed.slice(0, 10).join(", "), itemWidth))}
             {dismissed.length > 10 ? tokens.hint(`  (+${dismissed.length - 10} more)`) : ""}
           </Text>
         </Box>
