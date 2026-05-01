@@ -204,7 +204,9 @@ describe("visual hierarchy", () => {
       // marginBottom and above the ⏺ tool row with a blank line — so
       // the line *immediately* before the ⏺ row should be the hint
       // padding, not the hint itself glued to the rule.
-      const blackCircleIdx = lines.findIndex((l) => /[●⏺]\s*Threat Hunt/.test(l));
+      // For running status the ToolHeader uses a Spinner (no static glyph), so
+      // anchor on the label text and accept any leading content.
+      const blackCircleIdx = lines.findIndex((l) => /Threat Hunt\(/.test(l));
       expect(blackCircleIdx).toBeGreaterThan(hintIdx);
       // At least one blank line between hint and tool header.
       const between = lines.slice(hintIdx + 1, blackCircleIdx);
