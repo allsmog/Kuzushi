@@ -5720,6 +5720,11 @@ const BARE_SHELL_ROUTES: readonly BareShellRoute[] = defineShellRoutes<
     }),
   },
   {
+    id: "quickstart",
+    matches: ({ lower }) => lower === "quickstart",
+    execute: (_input, { core, opts }) => ({ output: formatQuickstart(core, opts) }),
+  },
+  {
     id: "tools",
     matches: ({ lower }) => lower === "tools",
     execute: (_input, { core, shellContext }) => ({

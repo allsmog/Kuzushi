@@ -41,6 +41,9 @@ exports[`Ink component snapshots > ModuleCatalog — grouped by category with la
 "  scope:acme-api · 3 modules
 
 
+  Recommended first: use sast — 40+ task pipeline
+    New to Kuzushi? Type /quickstart for a 3-step guided tour.
+
   ─────────────────────────────── OFFENSE ────────────────────────────────
     hunt vulnerabilities and prove exploitability
   MODULE                 DESCRIPTION          LAST RUN
@@ -151,9 +154,9 @@ exports[`Ink component snapshots > ThreatDfdView — inferred app-model fallback
   └───────────────────────────────────────────────────────────────────────────┘
 
   hot paths
-    ! F1   E1 -> P1                  HTTPS · user-input · crosses B1
-    ! F4   P1 -> P3                  internal · request · crosses B2
-    ! F5   P3 -> D1                  db · sensitive · crosses B3
+    ! F1   E1 -> P1           HTTPS · user-input · crosses B1
+    ! F4   P1 -> P3           internal · request · crosses B2
+    ! F5   P3 -> D1           db · sensitive · crosses B3
 
   Selected  E1 unauth user
     zone   internet / untrusted
@@ -191,7 +194,7 @@ exports[`Ink component snapshots > ThreatDfdView — trust zones + boundaries + 
   └───────────────────────────────────────────────────────────────────────────┘
 
   hot paths
-    · F1   P1 -> D1                  http · cloud-cred · crosses B1
+    · F1   P1 -> D1           http · cloud-cred · crosses B1
 
   Selected  E1 attacker
     zone   internet / untrusted
