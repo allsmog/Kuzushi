@@ -9,6 +9,7 @@
  */
 
 import type { KnowledgeRegistry } from "../knowledge/types.js";
+import { toErrorMessage } from "../utils.js";
 import { installDagToolExecuteWrappers } from "./dag-execute.js";
 import type { DagRegistry } from "./dag-registry.js";
 import { registerDagToolsInDagRegistry } from "./dag-registry.js";
@@ -144,9 +145,7 @@ export class ModuleRegistry {
       if (err instanceof ModuleLoadError) {
         throw err;
       }
-      throw new Error(
-        `Failed to load module "${mod.id}": ${err instanceof Error ? err.message : String(err)}`,
-      );
+      throw new Error(`Failed to load module "${mod.id}": ${toErrorMessage(err)}`);
     }
   }
 
@@ -183,9 +182,7 @@ export class ModuleRegistry {
     }
   }
 
-  // -------------------------------------------------------------------------
   // Queries
-  // -------------------------------------------------------------------------
 
   /**
    * Resolve a (possibly legacy) module id to the canonical id currently
@@ -248,9 +245,7 @@ export class ModuleRegistry {
     }));
   }
 
-  // -------------------------------------------------------------------------
   // Tool resolution
-  // -------------------------------------------------------------------------
 
   /**
    * Resolve a fully-qualified tool name ("module:action") to the ModuleTool.
@@ -313,9 +308,7 @@ export class ModuleRegistry {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Module specifier parsing
-// ---------------------------------------------------------------------------
 
 /**
  * Parse a module specifier string into a typed ModuleSpecifier.
@@ -344,9 +337,7 @@ export function parseModuleSpecifier(spec: string): ModuleSpecifier {
   return { type: "builtin", id: spec };
 }
 
-// ---------------------------------------------------------------------------
 // Lightweight JSON-Schema validation for `configSchema`
-// ---------------------------------------------------------------------------
 
 /**
  * Minimal JSON-Schema-ish validator — enough to enforce the common manifest

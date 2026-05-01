@@ -18,6 +18,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
+import { toErrorMessage } from "../utils.js";
 export interface DiffScope {
   /** The git ref the operator passed. */
   ref: string;
@@ -60,7 +61,7 @@ export function computeDiffScope(repoRoot: string, ref: string): DiffScope {
       .filter(Boolean);
     return { ref, repoRoot, changedFiles, ok: true };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = toErrorMessage(err);
     return { ref, repoRoot, changedFiles: [], ok: false, error: message };
   }
 }

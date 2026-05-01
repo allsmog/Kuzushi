@@ -92,9 +92,7 @@ export class ModuleDispatcher implements CommandDispatcher {
     return [];
   }
 
-  // -------------------------------------------------------------------------
   // Handlers
-  // -------------------------------------------------------------------------
 
   private cmd_tools(args: string[]): CommandResult {
     const includeHidden = args.includes("--all");
@@ -313,9 +311,7 @@ export class ModuleDispatcher implements CommandDispatcher {
   }
 }
 
-// ---------------------------------------------------------------------------
 // helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Pick the tool that bare `run` (or `run .`) should dispatch when the

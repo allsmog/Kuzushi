@@ -63,9 +63,7 @@ export interface FuzzRunner {
   buildRunPlan(input: BuildRunPlanInput): FuzzRunPlan;
 }
 
-// ---------------------------------------------------------------------------
 // libFuzzer (C / C++)
-// ---------------------------------------------------------------------------
 
 export const libfuzzerRunner: FuzzRunner = {
   id: "libfuzzer",
@@ -109,9 +107,7 @@ export const libfuzzerRunner: FuzzRunner = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // AFL++ (C / C++)
-// ---------------------------------------------------------------------------
 
 export const aflRunner: FuzzRunner = {
   id: "afl",
@@ -153,9 +149,7 @@ export const aflRunner: FuzzRunner = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // honggfuzz (C / C++)
-// ---------------------------------------------------------------------------
 
 export const honggfuzzRunner: FuzzRunner = {
   id: "honggfuzz",
@@ -198,9 +192,7 @@ export const honggfuzzRunner: FuzzRunner = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // cargo-fuzz (Rust)
-// ---------------------------------------------------------------------------
 
 export const cargoFuzzRunner: FuzzRunner = {
   id: "cargo-fuzz",
@@ -242,9 +234,7 @@ export const cargoFuzzRunner: FuzzRunner = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // Go native fuzzing (`go test -fuzz`)
-// ---------------------------------------------------------------------------
 
 export const goFuzzRunner: FuzzRunner = {
   id: "go-fuzz",
@@ -282,9 +272,7 @@ export const goFuzzRunner: FuzzRunner = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // jazzer.js (JS / TS)
-// ---------------------------------------------------------------------------
 
 export const jazzerJsRunner: FuzzRunner = {
   id: "jazzer.js",
@@ -325,9 +313,7 @@ export const jazzerJsRunner: FuzzRunner = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // atheris (Python)
-// ---------------------------------------------------------------------------
 
 export const atherisRunner: FuzzRunner = {
   id: "atheris",
@@ -367,9 +353,7 @@ export const atherisRunner: FuzzRunner = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // Registry
-// ---------------------------------------------------------------------------
 
 export const ALL_RUNNERS: FuzzRunner[] = [
   libfuzzerRunner,

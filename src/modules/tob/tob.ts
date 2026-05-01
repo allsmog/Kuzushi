@@ -16,6 +16,7 @@ import {
 } from "../../agents/tasks/tob-audit/resolve-tob-plugin.js";
 import { buildTobAuditPrompt, tobAuditTask } from "../../agents/tasks/tob-audit/tob-audit.js";
 import { resolveRepo } from "../../cli/shared.js";
+import { toErrorMessage } from "../../utils.js";
 import { defineHiddenDagNodeTool } from "../hidden-dag-node.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
@@ -40,9 +41,7 @@ function resolveMaxFindings(ctx: ExecutionContext, override?: unknown): number {
   return 50;
 }
 
-// ---------------------------------------------------------------------------
 // tob:audit — run the ToB skills audit
-// ---------------------------------------------------------------------------
 
 const auditTool: ModuleTool = {
   name: "tob:audit",
@@ -95,7 +94,7 @@ const auditTool: ModuleTool = {
     try {
       plugins = resolveTobPlugins();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return {
         ok: false,
         output:
@@ -177,15 +176,13 @@ const auditTool: ModuleTool = {
         costUsd: result.costUsd,
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return { ok: false, output: `tob:audit error: ${msg}` };
     }
   },
 };
 
-// ---------------------------------------------------------------------------
 // tob:skills — list resolvable skill plugins
-// ---------------------------------------------------------------------------
 
 const skillsTool: ModuleTool = {
   name: "tob:skills",
@@ -203,7 +200,7 @@ const skillsTool: ModuleTool = {
     try {
       plugins = resolveTobPlugins();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return {
         ok: false,
         output:
@@ -231,9 +228,7 @@ const skillsTool: ModuleTool = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // Module factory
-// ---------------------------------------------------------------------------
 
 export function createCoreTobModule(): CopilotModule {
   const hiddenTobAudit = defineHiddenDagNodeTool<"tob">(tobAuditTask, {

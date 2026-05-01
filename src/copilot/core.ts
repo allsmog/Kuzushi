@@ -62,6 +62,8 @@ import { createCoreVulnScoutModule } from "../modules/vuln-scout/vuln-scout.js";
 import { createXRayModule } from "../modules/x-ray/x-ray.js";
 import type { KuzushiConfig } from "../types.js";
 
+import { toErrorMessage } from "../utils.js";
+
 /**
  * Host SDK version injected into `ctx.host.sdkVersion` on every tool call.
  * Read once at load time from the runtime `kuzushi` package.json; falls
@@ -70,9 +72,7 @@ import type { KuzushiConfig } from "../types.js";
  */
 const KUZUSHI_SDK_VERSION: string = readHostKuzushiVersion() ?? "0.0.0";
 
-// ---------------------------------------------------------------------------
 // CopilotCore options
-// ---------------------------------------------------------------------------
 
 export interface CopilotCoreOptions {
   runtime: AgentRuntime;
@@ -107,9 +107,7 @@ export interface CopilotCoreOptions {
   globals?: import("./options.js").Datastore;
 }
 
-// ---------------------------------------------------------------------------
 // CopilotCore
-// ---------------------------------------------------------------------------
 
 export class CopilotCore {
   readonly registry: ModuleRegistry;
@@ -258,9 +256,7 @@ export class CopilotCore {
     }
   }
 
-  // -------------------------------------------------------------------------
   // Tool dispatch
-  // -------------------------------------------------------------------------
 
   /**
    * Execute a tool by its fully-qualified name ("module:action").
@@ -465,7 +461,7 @@ export class CopilotCore {
     } catch (err) {
       scope?.emit("tool:on_error", {
         qualifiedName,
-        error: err instanceof Error ? err.message : String(err),
+        error: toErrorMessage(err),
       });
       throw err;
     }
@@ -497,9 +493,7 @@ export class CopilotCore {
     return result;
   }
 
-  // -------------------------------------------------------------------------
   // Context assembly (for shell mode — builds the agent's system prompt)
-  // -------------------------------------------------------------------------
 
   /**
    * Build a system prompt prefix that gives the LLM awareness of:
@@ -543,9 +537,7 @@ export class CopilotCore {
     return sections.join("\n");
   }
 
-  // -------------------------------------------------------------------------
   // Module queries
-  // -------------------------------------------------------------------------
 
   /** List all loaded modules with summary info. */
   listModules(): ModuleInfo[] {
@@ -557,9 +549,7 @@ export class CopilotCore {
     return this.registry.has(id);
   }
 
-  // -------------------------------------------------------------------------
   // Lifecycle
-  // -------------------------------------------------------------------------
 
   /** Gracefully shut down all modules. */
   async dispose(): Promise<void> {
@@ -568,9 +558,7 @@ export class CopilotCore {
     this.moduleScopes.clear();
   }
 
-  // -------------------------------------------------------------------------
   // Module loaders (private)
-  // -------------------------------------------------------------------------
 
   private async loadBuiltinModule(id: string): Promise<void> {
     // Skip if already loaded
@@ -764,9 +752,7 @@ function readModelOverride(raw: unknown): string | undefined {
   return value.length > 0 ? value : undefined;
 }
 
-// ---------------------------------------------------------------------------
 // Package-shape detection helpers (exported for testing)
-// ---------------------------------------------------------------------------
 
 /**
  * If `packageDir` looks like a Claude Code plugin, return a short description

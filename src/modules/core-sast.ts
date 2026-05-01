@@ -29,9 +29,7 @@ import type { CopilotModule, ExecutionContext, ToolResult } from "./types.js";
 // Re-export so external callers (src/copilot/shell.ts) keep working.
 export const formatContextSummary = sharedFormatContextSummary;
 
-// ---------------------------------------------------------------------------
 // Tool implementations
-// ---------------------------------------------------------------------------
 
 const scanTool = defineTool<"sast">({
   name: "sast:scan",
@@ -127,9 +125,7 @@ const scanTool = defineTool<"sast">({
   },
 });
 
-// ---------------------------------------------------------------------------
 // Module definition
-// ---------------------------------------------------------------------------
 
 /**
  * Create the core SAST module.

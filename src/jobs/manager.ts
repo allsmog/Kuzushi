@@ -23,6 +23,7 @@
 
 import { EventEmitter } from "node:events";
 
+import { toErrorMessage } from "../utils.js";
 export type JobState = "running" | "completed" | "failed" | "cancelled";
 
 export interface JobRecord {
@@ -116,7 +117,7 @@ export class JobManager extends EventEmitter {
         }
         record.state = "failed";
         record.endedAt = Date.now();
-        record.error = err instanceof Error ? err.message : String(err);
+        record.error = toErrorMessage(err);
         this.emit("failed", record);
       }
     })();

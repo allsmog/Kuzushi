@@ -1,6 +1,6 @@
 import type { KuzushiConfig } from "../../types.js";
+import { toErrorMessage } from "../../utils.js";
 import type { ExecutionContext, ToolResult } from "../types.js";
-
 export function mergeTaskConfig(
   config: KuzushiConfig,
   overrides?: Record<string, Record<string, unknown>>,
@@ -224,7 +224,7 @@ export async function executeSastPipeline(
       costUsd: result.stats?.totalCostUsd,
     };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = toErrorMessage(err);
     if (msg.includes("Could not resolve authentication")) {
       return {
         ok: false,

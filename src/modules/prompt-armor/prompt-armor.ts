@@ -22,6 +22,7 @@ import { forwardSubAgentMessage } from "../../agents/tasks/forward-subagent-outp
 import { resolvePromptArmorPluginPath } from "../../agents/tasks/prompt-armor/resolve-promptarmor-plugin.js";
 import { resolveRepo } from "../../cli/shared.js";
 import { createLogger } from "../../logger.js";
+import { toErrorMessage } from "../../utils.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
 const log = createLogger({ stage: "prompt-armor" });
@@ -206,7 +207,7 @@ function buildCommandTool(spec: BuildToolSpec): ModuleTool {
       } catch (err) {
         return {
           ok: false,
-          output: `promptarmor-plugin not resolvable: ${err instanceof Error ? err.message : String(err)}`,
+          output: `promptarmor-plugin not resolvable: ${toErrorMessage(err)}`,
         };
       }
 
@@ -248,7 +249,7 @@ function buildCommandTool(spec: BuildToolSpec): ModuleTool {
           costUsd: result.costUsd,
         };
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = toErrorMessage(err);
         log.warn(`${spec.toolId} error: ${msg}`);
         return { ok: false, output: `${spec.toolId} error: ${msg}` };
       }
@@ -256,9 +257,7 @@ function buildCommandTool(spec: BuildToolSpec): ModuleTool {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Tool catalog
-// ---------------------------------------------------------------------------
 
 const scanTool = buildCommandTool({
   command: "scan",
@@ -357,9 +356,7 @@ const configTool = buildCommandTool({
   },
 });
 
-// ---------------------------------------------------------------------------
 // Module factory
-// ---------------------------------------------------------------------------
 
 export function createCorePromptArmorModule(): CopilotModule {
   return {

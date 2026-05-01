@@ -41,6 +41,7 @@ import {
 } from "../../store.js";
 import type { KuzushiConfig, ScanOpts } from "../../types.js";
 import type { UIMode, UIStore } from "../../ui/state.js";
+import { toErrorMessage } from "../../utils.js";
 import { CliCommandError, CliConfigError, CliUsageError } from "../errors.js";
 import {
   resolveActivePiAiModels,
@@ -54,7 +55,6 @@ import {
   type ScanCommandOptions,
 } from "../scan-config.js";
 import { isShutdownCapableRuntime } from "../shared.js";
-
 export interface PreparedScanExecution {
   config: KuzushiConfig;
   scanOpts: ScanOpts;
@@ -142,9 +142,9 @@ export function prepareScanExecution(
     } catch (err) {
       const { getLogger } = require("../../logger.js") as typeof import("../../logger.js");
       getLogger("scan").warn(
-        `--diff-base ${opts.diffBase}: git diff failed (${
-          err instanceof Error ? err.message : String(err)
-        }). Falling back to full-tree scan.`,
+        `--diff-base ${opts.diffBase}: git diff failed (${toErrorMessage(
+          err,
+        )}). Falling back to full-tree scan.`,
       );
     }
   }
@@ -203,7 +203,7 @@ export function createPipelineRuntime(config: KuzushiConfig, scanOpts: ScanOpts)
   try {
     return configureAgentRuntime(config);
   } catch (error) {
-    throw new CliConfigError(error instanceof Error ? error.message : String(error));
+    throw new CliConfigError(toErrorMessage(error));
   }
 }
 
@@ -242,7 +242,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
       deleteFindingsForRepo(db, repoName);
     } catch (error) {
       db.close();
-      throw new CliCommandError(error instanceof Error ? error.message : String(error));
+      throw new CliCommandError(toErrorMessage(error));
     }
   }
 
@@ -265,7 +265,7 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
         /* best-effort */
       }
     }
-    throw new CliCommandError(error instanceof Error ? error.message : String(error));
+    throw new CliCommandError(toErrorMessage(error));
   }
 
   shutdownHookDisposers.push(

@@ -13,10 +13,10 @@ import { applyConfigPatch, configPath, loadConfig, resolveAmbientOauthToken } fr
 import { saveOperatorScanContext } from "../operator-context.js";
 import { savePersistentThreatModel } from "../threat-model-renderer.js";
 import type { OperatorScanContext } from "../types.js";
+import { toErrorMessage } from "../utils.js";
 import { emitOutputNotice } from "./output.js";
 import type { ConfigConfirmData, CredentialChoice, WizardResult } from "./preflight-types.js";
 import type { UIMode, UIStore } from "./state.js";
-
 export type SetupOutcome =
   | { action: "proceed"; preset?: string; model?: string }
   | { action: "cancel" };
@@ -544,7 +544,7 @@ export async function runConfigEditor(
             store.addNotice({
               level: "error",
               message: "Failed to save config",
-              detail: err instanceof Error ? err.message : String(err),
+              detail: toErrorMessage(err),
               source: "config",
             });
             resolve({ action: "cancelled" });

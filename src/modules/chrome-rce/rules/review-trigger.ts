@@ -23,6 +23,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { Finding } from "../../../scanners/types.js";
 import type { ScanOpts } from "../../../types.js";
+import { toErrorMessage } from "../../../utils.js";
 import { defineDagTool } from "../../define.js";
 import { requireDag } from "../../types.js";
 import { HOT_PATHS, type HotPathEntry } from "../data/hot-paths.js";
@@ -89,7 +90,7 @@ export const reviewTriggerDagTool = defineDagTool<"chrome-rce", ScanOpts, Findin
       changedFiles = listChangedFiles(repoRoot, diffBase);
     } catch (err) {
       ctx.logger?.warn("chrome-rce:review-trigger failed to list changed files", {
-        error: err instanceof Error ? err.message : String(err),
+        error: toErrorMessage(err),
         diffBase,
       });
       return [];

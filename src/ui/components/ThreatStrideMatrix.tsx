@@ -27,9 +27,7 @@ import { ContextStrip } from "./ContextStrip.js";
 import { EmptyState as EmptyStateCard } from "./EmptyState.js";
 import { ScreenContent } from "./ScreenContent.js";
 
-// ---------------------------------------------------------------------------
 // Constants + types exported for the test file
-// ---------------------------------------------------------------------------
 
 export const STRIDE_COLUMNS: ReadonlyArray<{
   category: StrideCategory;
@@ -109,9 +107,7 @@ export function cellGlyph(impact: CellImpact): string {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Component
-// ---------------------------------------------------------------------------
 
 interface ThreatStrideMatrixProps {
   shell: ShellState;
