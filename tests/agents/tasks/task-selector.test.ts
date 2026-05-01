@@ -132,7 +132,8 @@ describe("selectTasks", () => {
               pattern: "splice",
               filePath: "src/crypto/algif_aead.c",
               lineNumber: 12,
-              lineContent: "req->src = req->dst; scatterwalk_map_and_copy(tag, req->dst, off, authsize, 1);",
+              lineContent:
+                "req->src = req->dst; scatterwalk_map_and_copy(tag, req->dst, off, authsize, 1);",
             },
           ],
         },

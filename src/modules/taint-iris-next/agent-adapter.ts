@@ -8,7 +8,6 @@ import type {
 import type { TaintIrisNextAgentStatus } from "./types.js";
 
 export interface IrisAgentQueryAdapterResult {
-  agentRuntimeBackend: string;
   resultText: string;
   structuredOutput: unknown;
   costUsd: number;
@@ -32,7 +31,7 @@ export async function queryIrisAgentOnce(options: {
   signal?: AbortSignal;
   forwardActivity?: (message: AgentMessage) => void;
 }): Promise<IrisAgentQueryAdapterResult> {
-  assertRuntimeModelCompatible(options.runtime.id, options.model);
+  assertRuntimeModelCompatible(options.model);
   let structuredOutput: unknown;
   let resultText = "";
   let streamedText = "";
@@ -85,7 +84,6 @@ export async function queryIrisAgentOnce(options: {
   }
 
   return {
-    agentRuntimeBackend: options.runtime.id,
     resultText: resultText || streamedText,
     structuredOutput,
     costUsd,

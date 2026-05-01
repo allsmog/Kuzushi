@@ -377,7 +377,6 @@ export interface UIState {
     tasks: string[];
     severity?: string[];
     concurrency?: number;
-    backend?: string;
     budget?: number;
     scanMode?: string;
   } | null;

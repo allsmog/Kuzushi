@@ -3,70 +3,20 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
-    "agentRuntimeBackend": {
-      "enum": [
-        "claude",
-        "pi-ai",
-        "codex"
-      ],
-      "type": "string"
-    },
     "agentRuntimeConfig": {
       "additionalProperties": false,
       "properties": {
-        "claude": {
-          "additionalProperties": false,
-          "properties": {
-            "apiKey": {
-              "type": "string"
-            },
-            "apiKeyFile": {
-              "type": "string"
-            },
-            "authToken": {
-              "type": "string"
-            },
-            "baseUrl": {
-              "type": "string"
-            }
-          },
-          "type": "object"
+        "apiKey": {
+          "type": "string"
         },
-        "codex": {
-          "additionalProperties": false,
-          "properties": {
-            "apiKey": {
-              "type": "string"
-            },
-            "apiKeyFile": {
-              "type": "string"
-            },
-            "authToken": {
-              "type": "string"
-            },
-            "baseUrl": {
-              "type": "string"
-            }
-          },
-          "type": "object"
+        "apiKeyFile": {
+          "type": "string"
         },
-        "piAi": {
-          "additionalProperties": false,
-          "properties": {
-            "apiKey": {
-              "type": "string"
-            },
-            "apiKeyFile": {
-              "type": "string"
-            },
-            "authToken": {
-              "type": "string"
-            },
-            "baseUrl": {
-              "type": "string"
-            }
-          },
-          "type": "object"
+        "authToken": {
+          "type": "string"
+        },
+        "baseUrl": {
+          "type": "string"
         }
       },
       "type": "object"
@@ -87,10 +37,6 @@
     "auditLog": {
       "type": "boolean"
     },
-    "auth": {
-      "const": "inherited",
-      "type": "string"
-    },
     "autoPatchAfter": {
       "enum": [
         "verify",
@@ -101,6 +47,12 @@
     },
     "autoPatchEnabled": {
       "type": "boolean"
+    },
+    "availableModels": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "bootstrapFiles": {
       "additionalProperties": false,
@@ -378,9 +330,6 @@
         }
       },
       "type": "object"
-    },
-    "oauthTokenFile": {
-      "type": "string"
     },
     "patchBuildCommand": {
       "type": "string"

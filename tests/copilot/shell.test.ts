@@ -173,8 +173,7 @@ describe("shell runtime auth", () => {
   it("keeps /auth inherited credentials on pi-ai", async () => {
     const opts = createShellOptionsWithConfig({
       ...baseConfig,
-      agentRuntimeBackend: "pi-ai",
-      agentRuntimeConfig: { piAi: { apiKey: "sk-test" } },
+      agentRuntimeConfig: { apiKey: "sk-test" },
     });
 
     await __shellInternals.applyCredentialOutcome(
@@ -182,40 +181,14 @@ describe("shell runtime auth", () => {
       opts,
     );
 
-    expect(opts.config.agentRuntimeBackend).toBe("pi-ai");
     expect(opts.runtime.id).toBe("pi-ai");
   });
 
-  it("inherited-claude flips backend to claude and sets auth flag", async () => {
-    const tmpHome = mkdtempSync(path.join(os.tmpdir(), "kuzushi-inherit-"));
-    tempDirs.push(tmpHome);
-    const oldHome = process.env["HOME"];
-    process.env["HOME"] = tmpHome;
-    try {
-      const opts = createShellOptionsWithConfig({
-        ...baseConfig,
-        agentRuntimeBackend: "pi-ai",
-      });
-
-      await __shellInternals.applyCredentialOutcome(
-        { action: "proceed", choice: { kind: "inherited", providerId: "inherited-claude" } },
-        opts,
-      );
-
-      expect(opts.config.agentRuntimeBackend).toBe("claude");
-      expect(opts.config.auth).toBe("inherited");
-    } finally {
-      if (oldHome === undefined) delete process.env["HOME"];
-      else process.env["HOME"] = oldHome;
-    }
-  });
-
-  it("stores pasted pi-ai provider credentials without switching to claude", async () => {
+  it("stores pasted provider credentials in the flat slot", async () => {
     const oldOpenAiKey = process.env["OPENAI_API_KEY"];
     delete process.env["OPENAI_API_KEY"];
     const opts = createShellOptionsWithConfig({
       ...baseConfig,
-      agentRuntimeBackend: "pi-ai",
       agentRuntimeConfig: {},
     });
 
@@ -228,8 +201,7 @@ describe("shell runtime auth", () => {
         opts,
       );
 
-      expect(opts.config.agentRuntimeBackend).toBe("pi-ai");
-      expect(opts.config.agentRuntimeConfig?.piAi?.apiKey).toBe("sk-openai");
+      expect(opts.config.agentRuntimeConfig?.apiKey).toBe("sk-openai");
       expect(process.env["OPENAI_API_KEY"]).toBe("sk-openai");
       expect(opts.runtime.id).toBe("pi-ai");
     } finally {
@@ -241,11 +213,10 @@ describe("shell runtime auth", () => {
     }
   });
 
-  it("does not fall back to claude when the pi-ai runtime can create sessions", async () => {
+  it("ensureClaudeShellRuntime is a no-op when the runtime supports sessions", async () => {
     const runtime = createSessionRuntime("pi-ai");
     const opts = createShellOptionsWithConfig({
       ...baseConfig,
-      agentRuntimeBackend: "pi-ai",
     });
     opts.runtime = runtime;
 
@@ -253,7 +224,6 @@ describe("shell runtime auth", () => {
 
     expect(opts.runtime).toBe(runtime);
     expect(opts.runtime.id).toBe("pi-ai");
-    expect(opts.config.agentRuntimeBackend).toBe("pi-ai");
   });
 });
 
@@ -891,7 +861,6 @@ describe("local shell commands", () => {
     const { core } = await createMockCore();
     const opts = createShellOptionsWithConfig({
       ...baseConfig,
-      agentRuntimeBackend: "claude",
     });
     let shellState = {
       ...createShellState(core.registry.allTools().map(({ tool }) => tool.name)),
@@ -917,25 +886,25 @@ describe("local shell commands", () => {
       expect.arrayContaining([
         expect.objectContaining({
           optionName: "model",
-          description: expect.stringContaining("Claude accepts bare Claude model ids"),
+          description: expect.stringContaining("pi-ai expects provider:<model>"),
         }),
       ]),
     );
 
     const setResult = __shellInternals.handleLocalCommand(
-      "set model claude-opus-4-6",
+      "set model anthropic:claude-opus-4-6",
       core,
       opts,
       ctx,
       shellState,
     );
-    expect(setResult?.output).toBe("Set taint-iris:hunt.model = claude-opus-4-6");
+    expect(setResult?.output).toBe("Set taint-iris:hunt.model = anthropic:claude-opus-4-6");
 
     shellState = setResult?.shellStateUpdater
       ? setResult.shellStateUpdater(shellState)
       : shellState;
     expect(shellState.moduleOptions["taint-iris:hunt"]).toEqual({
-      model: "claude-opus-4-6",
+      model: "anthropic:claude-opus-4-6",
     });
 
     const optionsAgain = __shellInternals.handleLocalCommand(
@@ -953,7 +922,7 @@ describe("local shell commands", () => {
       expect.arrayContaining([
         expect.objectContaining({
           optionName: "model",
-          valueLabel: "* claude-opus-4-6",
+          valueLabel: "* anthropic:claude-opus-4-6",
         }),
       ]),
     );
@@ -2533,7 +2502,6 @@ describe("hunt-post-mortem helpers", () => {
           backendPathCount: 2,
           totalCostUsd: 24.3,
         },
-        agentRuntimeBackend: "pi-ai",
         agentStatus: "invalid-json",
         warnings: ["agent output invalid"],
       },
@@ -2542,7 +2510,6 @@ describe("hunt-post-mortem helpers", () => {
       findingsCount: 22,
       reviewCandidateCount: 3,
       costUsd: 24.3,
-      agentRuntimeBackend: "pi-ai",
       agentStatus: "invalid-json",
       candidateCount: 50,
       linkedStoryCount: 7,

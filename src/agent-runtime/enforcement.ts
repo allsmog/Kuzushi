@@ -1,12 +1,11 @@
 /**
- * Central enforcement boundary for "no silent model/provider/runtime
- * fallback". Every concrete `AgentRuntime` adapter (claude / pi-ai / codex)
- * calls `enforceAgentQuery` before dispatching a provider request, and
- * `loadConfig` calls the same `validateModelOverride` helper at startup so
- * incompatible runtime/model pairs fail before any LLM invocation.
+ * Central enforcement boundary for "no silent model fallback". The pi-ai
+ * runtime adapter calls `enforceAgentQuery` before dispatching a provider
+ * request, and `loadConfig` calls the same `validateModelOverride` helper
+ * at startup so a misconfigured model fails before any LLM invocation.
  *
  * Allowed fallbacks (per project policy):
- *   - same-model transport retries (handled inside each adapter, model
+ *   - same-model transport retries (handled inside the adapter, model
  *     object is reused);
  *   - batch → sequential when the runtime preserves the same model
  *     (`src/agent-runtime/execution.ts` does this);
@@ -19,20 +18,16 @@
  *
  * Forbidden behaviors caught here:
  *   - empty/missing model substituted with a backend default;
- *   - operator-configured model that is incompatible with the chosen
- *     runtime (e.g. `agentRuntimeBackend=codex` + `model=anthropic:...`);
+ *   - model that doesn't parse as `provider:modelId`;
  *   - `fallbackModel` plumbed through without explicit operator consent.
  */
 
-import type { AgentRuntimeBackend } from "../contracts.js";
 import { validateModelOverride } from "./model-validation.js";
 
 export interface EnforceAgentQueryInput {
-  /** Concrete runtime id, e.g. "claude" / "pi-ai" / "codex". Used in error messages. */
+  /** Concrete runtime id, e.g. "pi-ai". Used in error messages. */
   runtimeId: string;
-  /** The configured backend the runtime was built for. */
-  backend: AgentRuntimeBackend;
-  /** Operator-resolved model — must be non-empty. */
+  /** Operator-resolved model — must be a non-empty `provider:modelId`. */
   model: string | undefined;
   /** Optional automated-failover model. Forbidden unless `fallbackConsent` is true. */
   fallbackModel: string | undefined;
@@ -42,7 +37,7 @@ export interface EnforceAgentQueryInput {
    * `KUZUSHI_ALLOW_MODEL_FALLBACK=1`).
    */
   fallbackConsent: boolean;
-  /** Logical call site, e.g. "claude.query", used in error messages. */
+  /** Logical call site, e.g. "pi-ai.query", used in error messages. */
   callsite: string;
 }
 
@@ -60,21 +55,20 @@ export class KuzushiSilentFallbackError extends Error {
  * Returns void on success so callers can use it as a one-line guard.
  */
 export function enforceAgentQuery(input: EnforceAgentQueryInput): void {
-  const { runtimeId, backend, model, fallbackModel, fallbackConsent, callsite } = input;
+  const { runtimeId, model, fallbackModel, fallbackConsent, callsite } = input;
 
   if (typeof model !== "string" || model.trim() === "") {
     throw new KuzushiSilentFallbackError(
       `${callsite}: model is required. Kuzushi will not silently substitute a default model. ` +
-        `Pass an operator-configured model (e.g. via ctx.config.model) or run /provider <provider>:<model>.`,
+        `Pass an operator-configured model (e.g. via ctx.config.model) or run /model use <provider>:<model>.`,
     );
   }
 
-  const validationError = validateModelOverride(backend, model);
+  const validationError = validateModelOverride(model);
   if (validationError) {
     throw new KuzushiSilentFallbackError(
-      `${callsite}: model "${model}" is not compatible with runtime "${runtimeId}" (${validationError}). ` +
-        `Kuzushi will not silently switch runtimes or providers. ` +
-        `Choose a compatible model or run /backend <id> to switch backends.`,
+      `${callsite}: model "${model}" is not valid for runtime "${runtimeId}" (${validationError}). ` +
+        `Choose a compatible model or run /model edit to change the available pool.`,
     );
   }
 

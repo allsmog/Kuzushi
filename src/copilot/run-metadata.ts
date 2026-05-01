@@ -39,7 +39,6 @@ export interface RunSummaryHouseRule {
 export interface RunSummaryReproducibility {
   kuzushiVersion: string;
   model: string;
-  agentRuntimeBackend?: string;
   configHash: string;
   scanArgs: string[];
   envFingerprint: Record<string, string>;
@@ -180,12 +179,13 @@ export function readPromptOverrideFingerprints(dataDir: string): RunSummaryPromp
   }
   for (const moduleDir of modules) {
     const modPath = path.join(root, moduleDir);
-    let s: ReturnType<typeof statSync>;
+    let s: ReturnType<typeof statSync> | undefined;
     try {
       s = statSync(modPath);
     } catch {
       continue;
     }
+    if (!s) continue;
     if (!s.isDirectory()) continue;
     let files: string[];
     try {
@@ -252,7 +252,6 @@ export interface BuildReproOpts {
   dataDir?: string;
   argv?: readonly string[];
   env?: NodeJS.ProcessEnv;
-  agentRuntimeBackend?: string;
 }
 
 export function buildReproducibility(opts: BuildReproOpts): RunSummaryReproducibility {
@@ -262,11 +261,6 @@ export function buildReproducibility(opts: BuildReproOpts): RunSummaryReproducib
   return {
     kuzushiVersion: readKuzushiVersion(),
     model: opts.config.model,
-    agentRuntimeBackend:
-      opts.agentRuntimeBackend ??
-      ((opts.config as unknown as Record<string, unknown>).agentRuntimeBackend as
-        | string
-        | undefined),
     configHash: hashConfig(opts.config),
     scanArgs,
     envFingerprint: readEnvFingerprint(env),

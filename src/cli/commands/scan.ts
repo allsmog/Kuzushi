@@ -142,32 +142,6 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   );
 
   // Inherited auth: walk the OAuth token search path and prime
-  // ANTHROPIC_AUTH_TOKEN / ANTHROPIC_OAUTH_TOKEN so pi-ai's anthropic provider
-  // (and the Claude
-  // Code subprocess) see a credential without requiring the operator
-  // to copy-paste anything. Skips when an env var is already set.
-  // Also skips when Claude Code's host-managed auth is active — see
-  // field-test issue #20 (~12× cost regression from cache misses).
-  if (
-    modeConfig.auth === "inherited" &&
-    !process.env.ANTHROPIC_API_KEY &&
-    !process.env.ANTHROPIC_AUTH_TOKEN &&
-    !process.env.ANTHROPIC_OAUTH_TOKEN
-  ) {
-    const { resolveAmbientOauthToken, isClaudeCodeHostManagedAuth } = await import(
-      "../../config.js"
-    );
-    if (!isClaudeCodeHostManagedAuth()) {
-      const { getLogger } = await import("../../logger.js");
-      const ambient = resolveAmbientOauthToken(modeConfig);
-      if (ambient) {
-        process.env.ANTHROPIC_AUTH_TOKEN = ambient.token;
-        process.env.ANTHROPIC_OAUTH_TOKEN = ambient.token;
-        getLogger("kuzushi").info(`Using inherited OAuth token (source: ${ambient.source})`);
-      }
-    }
-  }
-
   const monorepoDecision = await resolveMonorepoExecution({
     repoRoot,
     scanPath,
@@ -197,14 +171,10 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
   // Interactive credential prompt when no credentials are detected for the
   // default provider. pi-ai resolves creds from env vars, so setting the
   // right env var per provider is sufficient for the scan run.
-  // Skip entirely when `auth: "inherited"` is configured — the operator
-  // explicitly opted to trust ambient creds, and we shouldn't second-guess.
-  if (!opts.resume && process.stdout.isTTY && config.auth !== "inherited") {
+  if (!opts.resume && process.stdout.isTTY) {
     const { hasAnyProviderCredentials, runCredentialPrompt } = await import("../../ui/setup.js");
     if (!hasAnyProviderCredentials()) {
-      const { providerEnvVar, providerBaseUrlEnvVar, backendConfigSlot } = await import(
-        "../../config.js"
-      );
+      const { providerEnvVar, providerBaseUrlEnvVar } = await import("../../config.js");
       const credOutcome = await runCredentialPrompt(uiStore);
       if (credOutcome.action === "cancel") {
         resetTerminalOutput();
@@ -213,17 +183,12 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
       }
 
       const choice = credOutcome.choice;
-      const slot = backendConfigSlot(config.agentRuntimeBackend);
 
       if (choice.kind === "api-key") {
-        const existing = config.agentRuntimeConfig ?? {};
         config.agentRuntimeConfig = {
-          ...existing,
-          [slot]: {
-            ...(existing[slot] ?? {}),
-            apiKey: choice.value,
-            ...(choice.baseUrl ? { baseUrl: choice.baseUrl } : {}),
-          },
+          ...(config.agentRuntimeConfig ?? {}),
+          apiKey: choice.value,
+          ...(choice.baseUrl ? { baseUrl: choice.baseUrl } : {}),
         };
         const envKey = providerEnvVar(choice.providerId);
         if (envKey) process.env[envKey] = choice.value;
@@ -233,14 +198,10 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
         }
       } else if (choice.kind === "base-url") {
         // Local/proxy providers (Ollama, OpenRouter, etc.)
-        const existing = config.agentRuntimeConfig ?? {};
         config.agentRuntimeConfig = {
-          ...existing,
-          [slot]: {
-            ...(existing[slot] ?? {}),
-            baseUrl: choice.baseUrl,
-            ...(choice.apiKey ? { apiKey: choice.apiKey } : {}),
-          },
+          ...(config.agentRuntimeConfig ?? {}),
+          baseUrl: choice.baseUrl,
+          ...(choice.apiKey ? { apiKey: choice.apiKey } : {}),
         };
         const envUrl = providerBaseUrlEnvVar(choice.providerId);
         if (envUrl) process.env[envUrl] = choice.baseUrl;

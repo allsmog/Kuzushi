@@ -39,20 +39,20 @@ interface ProviderOption {
   name: string;
   description: string;
   detail: string;
-  authKind: "api-key" | "base-url" | "inherited";
+  authKind: "api-key" | "base-url" | "inherited" | "oauth-anthropic";
   envVarHint?: string;
 }
 
 const PROVIDERS: ProviderOption[] = [
   {
-    id: "inherited-claude",
-    name: "Inherited Claude",
-    description: "Use parent Claude Code session — no key needed",
+    id: "anthropic-oauth",
+    name: "Claude Pro / Max (OAuth)",
+    description: "Browser login — no API key required",
     detail:
-      "Trust the ambient credentials your shell / Claude Code already has " +
-      "(ANTHROPIC_API_KEY, ANTHROPIC_OAUTH_TOKEN, or Claude Code OAuth login). " +
-      "Persists to ~/.kuzushi/config.json so future runs skip this prompt.",
-    authKind: "inherited",
+      "Opens claude.ai in your browser, runs the device flow, and stores " +
+      "an auto-refreshing token in ~/.kuzushi/oauth-credentials.json. Best " +
+      "for personal use; uses your Pro/Max subscription quota.",
+    authKind: "oauth-anthropic",
   },
   {
     id: "anthropic",
@@ -269,6 +269,11 @@ export function CredentialPrompt({
   const handleProviderSelect = (id: ProviderId) => {
     const provider = PROVIDERS.find((p) => p.id === id)!;
     setChosenProvider(provider);
+
+    if (provider.authKind === "oauth-anthropic") {
+      onComplete({ kind: "oauth-anthropic" });
+      return;
+    }
 
     if (provider.authKind === "inherited") {
       onComplete({ kind: "inherited", providerId: provider.id });

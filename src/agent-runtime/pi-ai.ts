@@ -21,6 +21,7 @@ import { resolveAgentRuntimeConfig } from "../credentials.js";
 import { KuzushiError, wrapError } from "../errors.js";
 import { installGlobalDispatcher } from "../http-agent.js";
 import { getLogger } from "../logger.js";
+import { getFreshAnthropicAccessToken } from "../oauth-store.js";
 import { getRateLimitRegistry } from "../scheduler/index.js";
 import type { AgentRuntimeCredentials } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
@@ -299,14 +300,17 @@ export class PiAiAgentRuntime implements AgentRuntime {
   async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
     enforceAgentQuery({
       runtimeId: this.id,
-      backend: "pi-ai",
       model: request.options.model,
       fallbackModel: request.options.fallbackModel,
       fallbackConsent: resolveFallbackConsent(request.options.consentToModelFallback),
       callsite: "pi-ai.query",
     });
-    assertRuntimeModelSelection(this.id, request.options.model, request.options.fallbackModel);
-    const restoreRuntimeEnv = applyRuntimeEnvOverrides(this.runtimeConfig);
+    assertRuntimeModelSelection(request.options.model, request.options.fallbackModel);
+    const oauthAccess = await getFreshAnthropicAccessToken();
+    const effectiveConfig: AgentRuntimeCredentials | undefined = oauthAccess
+      ? { ...(this.runtimeConfig ?? {}), authToken: oauthAccess }
+      : this.runtimeConfig;
+    const restoreRuntimeEnv = applyRuntimeEnvOverrides(effectiveConfig);
     const startedAtMs = Date.now();
     const signal = request.options.abortController?.signal;
     const maxBudgetUsd = normalizeBudget(request.options.maxBudgetUsd);
@@ -360,13 +364,12 @@ export class PiAiAgentRuntime implements AgentRuntime {
   createSession(baseOptions: AgentQueryOptions): AgentSession {
     enforceAgentQuery({
       runtimeId: this.id,
-      backend: "pi-ai",
       model: baseOptions.model,
       fallbackModel: baseOptions.fallbackModel,
       fallbackConsent: resolveFallbackConsent(baseOptions.consentToModelFallback),
       callsite: "pi-ai.session",
     });
-    assertRuntimeModelSelection(this.id, baseOptions.model, baseOptions.fallbackModel);
+    assertRuntimeModelSelection(baseOptions.model, baseOptions.fallbackModel);
     return new PiAiSession(this, this.runtimeConfig, baseOptions);
   }
 }
@@ -1178,6 +1181,17 @@ class PiAiSession implements AgentSession {
       throw new Error("pi-ai session query already in flight");
     }
     this.inFlight = true;
+    // Long-lived sessions may outlive an OAuth access token's ~8h validity.
+    // Refresh-from-store before each turn so an overnight shell doesn't die
+    // mid-stream when the access token expires. Pi-ai reads
+    // ANTHROPIC_OAUTH_TOKEN at request time, so writing the latest access
+    // there is enough — no need to thread it through the constructor's
+    // runtimeConfig snapshot.
+    const sessionOauthAccess = await getFreshAnthropicAccessToken();
+    if (sessionOauthAccess) {
+      process.env["ANTHROPIC_OAUTH_TOKEN"] = sessionOauthAccess;
+      process.env["ANTHROPIC_AUTH_TOKEN"] = sessionOauthAccess;
+    }
     const startedAtMs = Date.now();
     this.context.messages.push({
       role: "user",

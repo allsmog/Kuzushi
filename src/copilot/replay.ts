@@ -106,7 +106,6 @@ export function formatRunReplay(run: PipelineRunRecord, summary?: RunSummary): s
     lines.push("reproducibility");
     lines.push(`  kuzushi   ${repro.kuzushiVersion}`);
     lines.push(`  model     ${repro.model}`);
-    if (repro.agentRuntimeBackend) lines.push(`  runtime   ${repro.agentRuntimeBackend}`);
     lines.push(`  config    ${repro.configHash.slice(0, 22)}`);
     if (repro.git?.sha) {
       const shortSha = repro.git.sha.slice(0, 7);

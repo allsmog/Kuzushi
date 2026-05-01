@@ -100,11 +100,8 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   // /help. The same flow is reachable by typing prose at a focused-module
   // prompt (e.g. `kuzushi taint-iris > only look at admin routes`); the
   // resulting plan card is then accepted with bare `y` / dismissed with
-  // bare `n`. (`main` had separately added a parenthetical about `y/n keys,
-  // Esc cancels` to the `/yes | /no` row — that hint is now what the bare
-  // fall-through implements, so the row + the hint are both retired.) The
-  // slash forms remain wired for muscle memory but stay out of the catalog
-  // so analysts don't have to learn two surfaces.
+  // bare `n`. The slash forms remain wired for muscle memory but stay out
+  // of the catalog so analysts don't have to learn two surfaces.
   {
     syntax: "/prompts",
     description: "Open the prompts editor for the focused module",

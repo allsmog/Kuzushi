@@ -6,7 +6,7 @@
  * is still surfaced under the synthetic "Other" section at runtime, so no
  * field can silently disappear from the UI.
  */
-import { AGENT_RUNTIME_BACKENDS, BUS_BACKENDS } from "../../config/defaults.js";
+import { BUS_BACKENDS } from "../../config/defaults.js";
 
 export type SectionId =
   | "runtime"
@@ -87,13 +87,6 @@ export const FIELDS: ReadonlyArray<FieldDescriptor> = [
     label: "model",
     description: "Default LLM identifier (e.g. anthropic:claude-sonnet-4-6).",
     type: { kind: "string" },
-  },
-  {
-    path: "agentRuntimeBackend",
-    section: "runtime",
-    label: "agentRuntimeBackend",
-    description: "Backend used to execute agentic tasks.",
-    type: { kind: "enum", values: [...AGENT_RUNTIME_BACKENDS] },
   },
   {
     path: "busBackend",

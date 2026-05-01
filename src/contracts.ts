@@ -19,9 +19,6 @@ export type BusBackend = (typeof BUS_BACKENDS)[number];
 export const SCAN_MODES = ["sequential", "concurrent"] as const;
 export type ScanMode = (typeof SCAN_MODES)[number];
 
-export const AGENT_RUNTIME_BACKENDS = ["claude", "pi-ai", "codex"] as const;
-export type AgentRuntimeBackend = (typeof AGENT_RUNTIME_BACKENDS)[number];
-
 export const PROOF_VERDICTS = [
   "exploited",
   "blocked_by_security",

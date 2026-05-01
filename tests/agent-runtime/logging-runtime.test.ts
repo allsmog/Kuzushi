@@ -72,9 +72,9 @@ describe("LoggingAgentRuntime decorator", () => {
     expect(result).toBe(expected);
   });
 
-  it("rejects incompatible models at the shared query boundary", async () => {
+  it("rejects unparseable model strings at the shared query boundary", async () => {
     const inner: AgentRuntime = {
-      id: "codex",
+      id: "pi-ai",
       async *query(): AsyncIterable<AgentMessage> {
         yield {
           type: "result",
@@ -91,7 +91,7 @@ describe("LoggingAgentRuntime decorator", () => {
         prompt: "hello",
         options: {
           cwd: "/tmp",
-          model: "anthropic:claude-sonnet-4-6",
+          model: "claude-sonnet-4-6", // missing provider prefix
         },
       })) {
         // no-op
@@ -99,9 +99,9 @@ describe("LoggingAgentRuntime decorator", () => {
     }).rejects.toThrow(/will not silently switch models/u);
   });
 
-  it("rejects incompatible models before creating sessions or batches", async () => {
+  it("rejects unparseable models before creating sessions or batches", async () => {
     const inner: AgentRuntime = {
-      id: "claude",
+      id: "pi-ai",
       async *query(): AsyncIterable<AgentMessage> {},
       createSession() {
         throw new Error("should not create session");
@@ -115,13 +115,13 @@ describe("LoggingAgentRuntime decorator", () => {
     expect(() =>
       logged.createSession?.({
         cwd: "/tmp",
-        model: "openai:gpt-5.4-mini",
+        model: "gpt-5.4-mini", // missing provider prefix
       }),
     ).toThrow(/will not silently switch models/u);
     expect(() =>
       logged.queryBatch?.([{ id: "1", prompt: "hello" }], {
         cwd: "/tmp",
-        model: "openai:gpt-5.4-mini",
+        model: "gpt-5.4-mini",
       }),
     ).toThrow(/will not silently switch models/u);
   });

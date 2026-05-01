@@ -231,7 +231,6 @@ export async function runTaintIrisNextAgent(
   const customTools = createIrisEvidenceTools(plan, evidenceResult);
   let retryCount = 0;
   let queryResult: AgentQueryOnceResult = {
-    agentRuntimeBackend: ctx.runtime.id,
     resultText: "",
     structuredOutput: undefined,
     costUsd: 0,
@@ -264,7 +263,6 @@ export async function runTaintIrisNextAgent(
         customTools,
       });
       queryResult = {
-        agentRuntimeBackend: repair.agentRuntimeBackend,
         resultText: repair.resultText,
         structuredOutput: repair.structuredOutput,
         costUsd: queryResult.costUsd + repair.costUsd,
@@ -293,7 +291,6 @@ export async function runTaintIrisNextAgent(
         );
       }
       return {
-        agentRuntimeBackend: queryResult.agentRuntimeBackend,
         agentStatus: "invalid-json",
         selectedCwes: fallbackSelections,
         findings: fallbackFindings,
@@ -348,7 +345,6 @@ export async function runTaintIrisNextAgent(
         `agent selected no CWEs; returning ${fallbackFindings.length} deterministic linked finding candidate(s) for review`,
       );
       return {
-        agentRuntimeBackend: queryResult.agentRuntimeBackend,
         agentStatus: "no-selection-fallback",
         selectedCwes: fallbackSelections,
         findings: fallbackFindings,
@@ -390,7 +386,6 @@ export async function runTaintIrisNextAgent(
         ? evidenceResult.outcome
         : evidenceResult.outcome;
   return {
-    agentRuntimeBackend: queryResult.agentRuntimeBackend,
     agentStatus,
     selectedCwes: selectionValidation.accepted,
     findings: findings.slice(0, plan.caps.maxAgentFindings),
@@ -407,7 +402,6 @@ export async function runTaintIrisNextAgent(
 }
 
 interface AgentQueryOnceResult {
-  agentRuntimeBackend: string;
   resultText: string;
   structuredOutput: unknown;
   costUsd: number;
@@ -444,7 +438,6 @@ async function queryAgentOnce(options: {
   });
 
   return {
-    agentRuntimeBackend: result.agentRuntimeBackend,
     resultText: result.resultText,
     structuredOutput: result.structuredOutput,
     costUsd: result.costUsd,
