@@ -304,6 +304,50 @@ function StatusFooterSlot({ store }: { store: UIStore }): React.ReactElement {
   const pipelineStartedAt = useUISelector(store, (s) => s.pipelineStartedAt);
   const throttle = useUISelector(store, (s) => s.throttle, shallowEqual);
   const costCapUsd = useUISelector(store, (s) => s.costCapBudgetUsd);
+  // msfconsole-style analyst-context payload: target / focused module / context
+  // freshness / findings summary. Pulled from the shell + summary slices so the
+  // footer is meaningful both during a run and on the home screen.
+  const target = useUISelector(store, (s) => s.shell?.target ?? null);
+  const focusedModule = useUISelector(store, (s) => s.shell?.focusedModule ?? null);
+  const contextProp = useUISelector(
+    store,
+    (s) => {
+      const snapshot = s.shell?.contextSnapshot;
+      if (!snapshot) return { state: "missing" as const };
+      const ts = typeof snapshot.timestamp === "number" ? snapshot.timestamp : null;
+      // Phase 1.2: presence-only freshness. Phase 4.2/4.3 layers in staleness
+      // detection so this can flip to `stale` when files have changed since
+      // the snapshot was generated.
+      return ts != null
+        ? { state: "fresh" as const, ageMs: Math.max(0, Date.now() - ts) }
+        : { state: "fresh" as const };
+    },
+    shallowEqual,
+  );
+  const findings = useUISelector(
+    store,
+    (s) => {
+      const list = s.summary?.actionableFindings ?? [];
+      const total = list.length || s.totalFindings || 0;
+      if (total === 0) return null;
+      const bySeverity: Partial<Record<"critical" | "high" | "medium" | "low" | "info", number>> =
+        {};
+      for (const f of list) {
+        const tier = (f.severity ?? "").toLowerCase();
+        if (
+          tier === "critical" ||
+          tier === "high" ||
+          tier === "medium" ||
+          tier === "low" ||
+          tier === "info"
+        ) {
+          bySeverity[tier] = (bySeverity[tier] ?? 0) + 1;
+        }
+      }
+      return { total, bySeverity };
+    },
+    shallowEqual,
+  );
   return (
     <StatusFooter
       model={model}
@@ -312,6 +356,10 @@ function StatusFooterSlot({ store }: { store: UIStore }): React.ReactElement {
       progress={progress}
       startedAt={pipelineStartedAt}
       throttle={throttle}
+      target={target}
+      focusedModule={focusedModule}
+      context={contextProp}
+      findings={findings}
       {...(costCapUsd != null ? { costCapUsd } : {})}
     />
   );

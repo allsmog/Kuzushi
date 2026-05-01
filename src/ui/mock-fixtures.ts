@@ -647,7 +647,7 @@ export function mockShellHistoryEntries(): ShellHistoryEntry[] {
     {
       type: "input",
       text: "/use sast",
-      prompt: "kuzushi> ",
+      prompt: "kuzushi > ",
       timestamp: Date.now() - 3 * 60_000,
     },
     {
@@ -658,7 +658,7 @@ export function mockShellHistoryEntries(): ShellHistoryEntry[] {
     {
       type: "input",
       text: "scan ./repo",
-      prompt: "kuzushi/sast> ",
+      prompt: "kuzushi sast > ",
       timestamp: Date.now() - 2 * 60_000,
     },
     {

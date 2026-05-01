@@ -95,19 +95,19 @@ describe("plain-renderer Phase D.5 emitters", () => {
       mode: "shell",
       shell: baseShell({
         history: [
-          { type: "input", text: "run scan", prompt: "kuzushi> ", timestamp: 0 },
+          { type: "input", text: "run scan", prompt: "kuzushi > ", timestamp: 0 },
           runningTool,
         ],
       }),
     });
-    expect(lines).toContain("[input] kuzushi> run scan");
+    expect(lines).toContain("[input] kuzushi > run scan");
     expect(lines).toContain("[tool] Scan(./repo) started");
 
     lines.length = 0;
     store.update({
       shell: baseShell({
         history: [
-          { type: "input", text: "run scan", prompt: "kuzushi> ", timestamp: 0 },
+          { type: "input", text: "run scan", prompt: "kuzushi > ", timestamp: 0 },
           {
             ...runningTool,
             status: "ok",
@@ -120,7 +120,7 @@ describe("plain-renderer Phase D.5 emitters", () => {
     unsub();
 
     expect(lines).toContain("[tool:ok] Scan · 3 findings · 4s");
-    expect(lines).not.toContain("[input] kuzushi> run scan");
+    expect(lines).not.toContain("[input] kuzushi > run scan");
   });
 
   it("prints task story view with durable beats only", () => {

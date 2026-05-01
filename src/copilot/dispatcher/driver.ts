@@ -123,9 +123,12 @@ export class DispatcherDriver implements Driver {
 
   prompt(): string {
     const top = this.current();
-    const head = top.name === "core" ? `${this.promptBase}` : `${this.promptBase}/${top.name}`;
+    // msfconsole-style prompt: `kuzushi sast > ` instead of `kuzushi/module(sast)> `.
+    // Strip the `module(...)` wrapper from dispatcher name purely for display.
+    const display = top.name === "core" ? "" : top.name.replace(/^module\((.+)\)$/, "$1");
+    const head = display ? `${this.promptBase} ${display}` : this.promptBase;
     const status = this.renderStatus();
-    return status ? `${head} [${status}]> ` : `${head}> `;
+    return status ? `${head} [${status}] > ` : `${head} > `;
   }
 
   private renderStatus(): string | undefined {
