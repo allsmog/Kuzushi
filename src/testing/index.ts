@@ -23,6 +23,7 @@ import type {
   HostInfo,
   HostUiHandle,
   ModuleEventScope,
+  RunArtifactStore,
   ToolLogger,
   ToolOptionStore,
   WorkspaceHandle,
@@ -33,6 +34,7 @@ import { createMockOptionStore } from "./mocks/datastore.js";
 import { createMockEventScope } from "./mocks/event-scope.js";
 import { createRecordingLogger } from "./mocks/logger.js";
 import { createRecordingPrintSink } from "./mocks/print-sink.js";
+import { createMockRunArtifactStore } from "./mocks/run-artifacts.js";
 import { createMockUiStore } from "./mocks/ui-store.js";
 import { createMockWorkspace } from "./mocks/workspace.js";
 
@@ -178,6 +180,7 @@ export function createMockToolContext(overrides: MockToolContextOverrides = {}):
     reportActivity,
     reportOutput,
     seedTaskOutputs,
+    runArtifacts,
     ...rest
   } = overrides;
 
@@ -203,6 +206,7 @@ export function createMockToolContext(overrides: MockToolContextOverrides = {}):
     events: events ?? createMockEventScope(),
     print: print ?? createRecordingPrintSink(),
     seedTaskOutputs: seedTaskOutputs ?? new Map<string, unknown>(),
+    ...(runArtifacts ? { runArtifacts } : {}),
     reportActivity:
       reportActivity ??
       ((description, meta) => {
@@ -276,6 +280,11 @@ export {
   type FakeRuntime,
   type FakeRuntimeResponse,
 } from "./mocks/runtime.js";
+export {
+  createMockRunArtifactStore,
+  type MockRunArtifactStore,
+  type RunArtifactWrite,
+} from "./mocks/run-artifacts.js";
 export { createMockUiStore, type MockHostUiHandle } from "./mocks/ui-store.js";
 export { createMockWorkspace, type MockWorkspace } from "./mocks/workspace.js";
 export { expectModuleShape, ModuleShapeError } from "./module-shape.js";
@@ -286,6 +295,7 @@ export type {
   HostUiHandle,
   MessageBus,
   ModuleEventScope,
+  RunArtifactStore,
   ToolLogger,
   ToolOptionStore,
   WorkspaceHandle,

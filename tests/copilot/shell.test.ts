@@ -2384,7 +2384,9 @@ describe("slash suggestions", () => {
   it("returns the first N catalog entries for a bare slash", () => {
     const result = listShellSuggestions("/");
     expect(result).toHaveLength(4);
-    expect(result).toEqual(["/help", "/modules", "/tools", "/use <module>"]);
+    // /quickstart sits in the nav group right after /help so first-time
+    // operators see it in the bare-slash suggestion list.
+    expect(result).toEqual(["/help", "/quickstart", "/modules", "/tools"]);
   });
 
   it("narrows by prefix", () => {
@@ -2395,7 +2397,7 @@ describe("slash suggestions", () => {
   it("returns multiple matches when the prefix is ambiguous", () => {
     const showMatches = listShellSuggestions("/show");
     expect(showMatches).toContain("/show prompts");
-    expect(showMatches).toContain("/show runs [repo]");
+    expect(showMatches).toContain("/show runs [repo] [--status s] [--limit n]");
     expect(showMatches).toContain("/show aliases [pfx]");
   });
 
@@ -2413,7 +2415,7 @@ describe("slash suggestions", () => {
   });
 
   it("respects the custom limit", () => {
-    expect(listShellSuggestions("/", 2)).toEqual(["/help", "/modules"]);
+    expect(listShellSuggestions("/", 2)).toEqual(["/help", "/quickstart"]);
     expect(listShellSuggestions("/", 10)).toHaveLength(10);
   });
 
@@ -2445,6 +2447,32 @@ describe("slash suggestions", () => {
     ]) {
       expect(syntaxes).toContain(expected);
     }
+  });
+});
+
+describe("formatHelpForVerb alias resolution", () => {
+  it("resolves /h to the /help row", async () => {
+    const { formatHelpForVerb } = await import("../../src/copilot/shell-commands.js");
+    expect(formatHelpForVerb("h")).toContain("/help");
+    expect(formatHelpForVerb("/h")).toContain("/help");
+  });
+
+  it("resolves single-letter aliases for /f /t /m /b", async () => {
+    const { formatHelpForVerb } = await import("../../src/copilot/shell-commands.js");
+    expect(formatHelpForVerb("f")).toContain("/findings");
+    expect(formatHelpForVerb("t")).toContain("/tune");
+    expect(formatHelpForVerb("m")).toContain("/modules");
+    expect(formatHelpForVerb("b")).toContain("/back");
+  });
+
+  it("falls back to unknown-verb message for nonsense", async () => {
+    const { formatHelpForVerb } = await import("../../src/copilot/shell-commands.js");
+    expect(formatHelpForVerb("zzznope")).toContain("Unknown command");
+  });
+
+  it("returns the usage hint for empty input", async () => {
+    const { formatHelpForVerb } = await import("../../src/copilot/shell-commands.js");
+    expect(formatHelpForVerb("")).toContain("/help [verb]");
   });
 });
 
@@ -2558,5 +2586,116 @@ describe("looksLikeSubagentStartLine — scrollback dedup", () => {
     // relaxation during future edits.
     expect(looksLikeSubagentStartLine("Reading")).toBe(false);
     expect(looksLikeSubagentStartLine("Bashful")).toBe(false);
+  });
+});
+
+describe("/quickstart and onboarding surfaces", () => {
+  it("formatQuickstart names the current target and recommends sast when loaded", async () => {
+    const { core } = await createMockCore();
+    const opts = createShellOptions();
+    const out = __shellInternals.formatQuickstart(core, opts);
+    expect(out).toContain("Quickstart");
+    // Three numbered steps the operator can follow without context-switching.
+    expect(out).toContain("1.");
+    expect(out).toContain("2.");
+    expect(out).toContain("3.");
+    // Pinned to the actual target on the options object so operators see
+    // what `scan .` will actually scan.
+    expect(out).toContain(".");
+    expect(out).toContain("/use sast");
+    expect(out).toContain("scan .");
+    // Anthropic console URL surfaces only here (not in /help) so first-time
+    // operators have one place to find it.
+    expect(out).toContain("console.anthropic.com");
+  });
+
+  it("formatQuickstart degrades gracefully when no modules are loaded", async () => {
+    const opts = createShellOptions();
+    // Stub a core that lists zero modules; quickstart should still produce
+    // text and steer the operator toward `--load`.
+    const emptyCore = {
+      hasModule: () => false,
+      listModules: () => [] as Array<{ id: string; category: string }>,
+    } as unknown as CopilotCore;
+    const out = __shellInternals.formatQuickstart(emptyCore, opts);
+    expect(out).toContain("Quickstart");
+    expect(out).toContain("--load");
+  });
+
+  it("/quickstart slash verb routes through handleSlashCommand", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = createShellState(module.tools.map((t) => t.name));
+    const ctx = { focusedModule: null };
+    const result = __shellInternals.handleLocalCommand(
+      "/quickstart",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(result?.output).toContain("Quickstart");
+    expect(result?.output).toContain("scan .");
+  });
+
+  it("bare `quickstart` (no slash) also routes to the quickstart formatter", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = createShellState(module.tools.map((t) => t.name));
+    const ctx = { focusedModule: null };
+    const result = __shellInternals.handleLocalCommand(
+      "quickstart",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(result?.output).toContain("Quickstart");
+  });
+
+  it("/help advanced lists /quickstart so first-time operators discover it", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = createShellState(module.tools.map((t) => t.name));
+    const ctx = { focusedModule: null };
+    const help = __shellInternals.handleLocalCommand(
+      "/help advanced",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(help?.output).toContain("/quickstart");
+  });
+
+  it("/help renders the Get started block with concrete starter commands", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = createShellState(module.tools.map((t) => t.name));
+    const ctx = { focusedModule: null };
+    const help = __shellInternals.handleLocalCommand("/help", core, opts, ctx, shellState);
+    const text = help?.output ?? "";
+    expect(text).toContain("Get started");
+    expect(text).toContain("scan .");
+    expect(text).toContain("/use sast");
+  });
+
+  it("formatWelcome surfaces concrete next steps including /quickstart", async () => {
+    const { core } = await createMockCore();
+    const opts = createShellOptions();
+    const text = __shellInternals.formatWelcome(core, opts);
+    expect(text).toContain("scan .");
+    expect(text).toContain("/use sast");
+    expect(text).toContain("/quickstart");
+    // Active model is surfaced so operators don't have to guess what
+    // they're paying for.
+    expect(text).toContain(opts.config.model ?? "");
+  });
+
+  it("SHELL_COMMAND_CATALOG declares /quickstart in the nav group", () => {
+    const entry = SHELL_COMMAND_CATALOG.find((e) => e.syntax === "/quickstart");
+    expect(entry).toBeDefined();
+    expect(entry?.group).toBe("nav");
+    expect(entry?.longDescription).toBeDefined();
   });
 });

@@ -238,6 +238,9 @@ function checkAgentRuntimeCredentials(config: KuzushiConfig): {
     }
   }
 
+  const docsLink = providerDocsLink(providerId);
+  const docsHint = docsLink ? ` Get a key at ${docsLink}.` : "";
+
   return {
     check: {
       name: "credentials",
@@ -248,9 +251,35 @@ function checkAgentRuntimeCredentials(config: KuzushiConfig): {
       severity: "error",
       path: "credentials",
       message: `${envVar} is not set.`,
-      hint: `Run \`kuzushi auth\`, export ${envVar}, or pass --api-key to the scan/shell/run command.`,
+      hint:
+        `Pick one of:\n` +
+        `    - export ${envVar}=<key> in your shell.${docsHint}\n` +
+        `    - pass --api-key <key> for a one-off scan.\n` +
+        `    - run \`kuzushi auth\` to save a credential to ~/.kuzushi/config.json.`,
     },
   };
+}
+
+function providerDocsLink(providerId: string): string | null {
+  switch (providerId.toLowerCase()) {
+    case "anthropic":
+      return "https://console.anthropic.com/settings/keys";
+    case "openai":
+      return "https://platform.openai.com/api-keys";
+    case "google":
+    case "gemini":
+      return "https://aistudio.google.com/apikey";
+    case "groq":
+      return "https://console.groq.com/keys";
+    case "mistral":
+      return "https://console.mistral.ai/api-keys/";
+    case "openrouter":
+      return "https://openrouter.ai/keys";
+    case "cerebras":
+      return "https://cloud.cerebras.ai/?tab=api-keys";
+    default:
+      return null;
+  }
 }
 
 export function formatPreflightCheck(check: PreflightCheck): string {

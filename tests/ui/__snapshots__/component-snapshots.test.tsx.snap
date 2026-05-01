@@ -41,6 +41,9 @@ exports[`Ink component snapshots > ModuleCatalog — grouped by category with la
 "  scope:acme-api · 3 modules
 
 
+  Recommended first: use sast — 40+ task pipeline
+    New to Kuzushi? Type /quickstart for a 3-step guided tour.
+
   ─────────────────────────────── OFFENSE ────────────────────────────────
     hunt vulnerabilities and prove exploitability
   MODULE                 DESCRIPTION          LAST RUN

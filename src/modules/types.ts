@@ -22,6 +22,7 @@ import type {
   HostInfo,
   HostUiHandle,
   ModuleEventScope,
+  RunArtifactStore,
   ToolLogger,
   ToolOptionStore,
   WorkspaceHandle,
@@ -36,6 +37,7 @@ export type {
   ModuleEventHandler,
   ModuleEventPayload,
   ModuleEventScope,
+  RunArtifactStore,
   ToolLogger,
   ToolOptionStore,
   UiStatePatch,
@@ -349,6 +351,18 @@ export interface ExecutionContext {
    */
   dag?: DagContext;
   /**
+   * Per-(runId, moduleId) artifact writer for `.kuzushi/runs/<runId>/<moduleId>/...`.
+   * Available only when both a DAG `runId` and a tool `moduleId` are present;
+   * undefined elsewhere. Feature-probe with
+   * `ctx.host?.capabilities.has("run-artifacts")` before use.
+   *
+   * Use for emitting version-controllable per-run artefacts (SBOMs, custom
+   * reports, post-scan diffs) without hardcoding the host's path layout.
+   * The host validates that `name` resolves under the module's run subdir,
+   * so a misbehaving module cannot escape its sandbox.
+   */
+  runArtifacts?: RunArtifactStore;
+  /**
    * Unified operator-option resolver. Falls back through:
    *   1. `ctx.datastore.get(key)`  — per-session `set` / global `setg`
    *   2. `ctx.config.taskConfig[<moduleId>][<key>]` — persisted overrides
@@ -583,6 +597,14 @@ export interface ModuleManifest {
 
 // Module context (provided during init)
 
+/** Summary of a peer module visible during the `ready` lifecycle hook. */
+export interface ReadyPeerInfo {
+  readonly id: string;
+  readonly displayName: string;
+  readonly category: ModuleCategory;
+  readonly version: string;
+}
+
 /** Context provided to a module during initialization. */
 export interface ModuleContext {
   /** Agent runtime for LLM queries. */
@@ -600,6 +622,18 @@ export interface ModuleContext {
   events?: ModuleEventScope;
 }
 
+/**
+ * Context passed to `CopilotModule.ready` after every module in the initial
+ * load batch has finished `init`. Carries a snapshot of peer modules so
+ * cross-module wiring can happen synchronously instead of racing
+ * `module:loaded` events.
+ */
+export interface ModuleReadyContext extends ModuleContext {
+  /** All other modules loaded in the same initial batch. */
+  readonly peers: ReadonlyArray<ReadyPeerInfo>;
+}
+
+// ---------------------------------------------------------------------------
 // CopilotModule — the first-class capability unit
 
 /**
@@ -707,6 +741,22 @@ export interface CopilotModule {
    * Called once when the module is loaded. May be async (e.g. to check binary deps).
    */
   init?(config: Record<string, unknown>, ctx: ModuleContext): Promise<void>;
+
+  /**
+   * Optional post-batch lifecycle hook. Called once, in load order, after
+   * every module in the same initial load batch has completed `init`. Use
+   * this to wire cross-module subscriptions or read peer metadata without
+   * racing `module:loaded` events.
+   *
+   * `ctx.peers` contains the other loaded modules' summary info. Modules
+   * loaded later via `loadModuleFromSpecifier` get a `ready` call with
+   * `peers` reflecting the registry state at that point — i.e. lazy loads
+   * still work, they just don't see future loads.
+   *
+   * Errors thrown from `ready` are logged but do NOT roll back the module
+   * — `init` is the rollback boundary; `ready` is best-effort wiring.
+   */
+  ready?(ctx: ModuleReadyContext): Promise<void>;
 
   /**
    * Graceful shutdown — close connections, stop background processes.

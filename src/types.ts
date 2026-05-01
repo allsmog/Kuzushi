@@ -308,10 +308,16 @@ export interface ExploitChain {
     findingFingerprint: string;
     role: string;
     description: string;
+    /** Optional inline location so renderers don't need to dereference the finding. */
+    filePath?: string;
+    /** Optional inline start line — pairs with `filePath`. */
+    startLine?: number;
   }>;
   overallSeverity: "CRITICAL" | "HIGH" | "MEDIUM";
   preconditions: string[];
   impactDescription: string;
+  /** Optional one-paragraph attacker narrative for PR-comment rendering. */
+  narrative?: string;
 }
 
 /** A file entry in the pre-computed file index. */
@@ -521,6 +527,34 @@ export interface KuzushiConfig {
   llmRescoreEnabled?: boolean;
   /** Minimum score (1-10) to keep a finding after LLM re-score. Default 4. */
   llmRescoreThreshold?: number;
+  /**
+   * Number of findings sent to the LLM rescorer per batched request. Larger
+   * batches mean fewer API calls but risk hitting model token limits on
+   * findings with long evidence strings. Default 25. Override per-run via
+   * `KUZUSHI_LLM_RESCORE_BATCH_SIZE`.
+   */
+  llmRescoreBatchSize?: number;
+  /**
+   * Number of verify-gate candidates per batched LLM call. Larger batches
+   * reduce overhead, smaller batches reduce time-to-first-result on big
+   * scans. Default 15. Override per-run via
+   * `KUZUSHI_VERIFY_GATE_BATCH_SIZE`.
+   */
+  verifyGateBatchSize?: number;
+  /**
+   * Hard cap on the number of source files indexed by the in-memory text
+   * index used for SAST symbol lookup. Larger monorepos may need this
+   * raised — the default truncates silently at this cap. Default 2500.
+   * Override per-run via `KUZUSHI_AST_INDEX_MAX_FILES`.
+   */
+  astIndexMaxFiles?: number;
+  /**
+   * Maximum size of any single file admitted to the in-memory text index.
+   * Files larger than this are skipped to avoid pathological RAM usage
+   * (generated code, lockfiles, vendored bundles). Default 1_000_000 bytes.
+   * Override per-run via `KUZUSHI_AST_INDEX_MAX_FILE_BYTES`.
+   */
+  astIndexMaxFileBytes?: number;
   /** Enable post-triage exploitation chain analysis. Default false. */
   chainAnalysis?: boolean;
   /** Path to organization precedents file. */

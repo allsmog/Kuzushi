@@ -669,6 +669,7 @@ function printActorDetailView(emit: Emit, shell: ShellState, state: UIState): vo
   emit("# ACTOR TRANSCRIPT");
   if (!fp) {
     emit("  No actor focused — press 1-4 to drill into an actor.");
+    emit("hint: 1..4 from module-run picks an actor · /back to return");
     return;
   }
   for (const line of lines) {
@@ -697,6 +698,7 @@ function printActorDetailView(emit: Emit, shell: ShellState, state: UIState): vo
     const detail = line.detail ?? line.toolName ?? line.kind;
     emit(`  ${glyph} ${detail}`);
   }
+  emit("hint: /back returns to module run · 1..4 in module-run picks another actor");
 }
 
 function printPromptsEditorView(emit: Emit, shell: ShellState): void {
@@ -707,11 +709,13 @@ function printPromptsEditorView(emit: Emit, shell: ShellState): void {
   emit("# PROMPTS");
   if (audit.length === 0) {
     emit("  No prompt keys exposed for this module.");
+    emit("hint: /back to return · /prompt edit <verb> opens an override in $EDITOR");
     return;
   }
   for (const row of audit) {
     emit(`  ${row.verb}  source=${row.effective.source}  ${row.effective.filePath ?? ""}`);
   }
+  emit("hint: edit <verb> · show <verb> · diff <verb> · reset <verb> · /back");
 }
 
 function printOptionsView(emit: Emit, shell: ShellState): void {

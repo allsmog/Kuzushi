@@ -45,8 +45,16 @@ export interface ShellCommandEntry {
 export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   {
     syntax: "/help",
-    description: "Show core workflow help; `/help advanced` shows all commands",
+    description:
+      "Show core workflow help (alias: /h); `/help advanced` shows all commands",
     group: "nav",
+  },
+  {
+    syntax: "/quickstart",
+    description: "Three-step guided tour for first-time operators (e.g. /quickstart)",
+    group: "nav",
+    longDescription:
+      "Prints the current target, recommends a starter module, and shows the exact verbs to run your first scan. Read-only — does not change config.",
   },
   { syntax: "/modules", description: "List loaded modules (alias: /m)", group: "nav" },
   { syntax: "/tools", description: "List available tools", group: "nav" },
@@ -84,10 +92,10 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   },
   {
     syntax: "/since <git-ref>",
-    description: "Scope the findings list to files changed since <ref>",
+    description: "Scope the findings list to files changed since <ref> (use /since clear to drop)",
     group: "nav",
     longDescription:
-      "Computes the changed-file set between HEAD and <ref> via git and keeps the user on the findings surface.",
+      "Computes the changed-file set between HEAD and <ref> via git and keeps the user on the findings surface. Use `/since clear` (or `reset`/`off`) to drop the scope.",
   },
   {
     syntax: "/plan <english>",
@@ -98,7 +106,8 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   },
   {
     syntax: "/yes | /no",
-    description: "Apply or discard the pending planner proposal",
+    description:
+      "Apply or discard the pending planner proposal (also: y/n keys, Esc cancels)",
     group: "planner",
   },
   {
@@ -132,8 +141,8 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
     group: "prompt",
   },
   {
-    syntax: "/show runs [repo]",
-    description: "List recent pipeline runs (id · status · cost)",
+    syntax: "/show runs [repo] [--status s] [--limit n]",
+    description: "List recent pipeline runs (id · status · started · duration · cost · findings)",
     group: "replay",
   },
   {
@@ -152,8 +161,8 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
     group: "replay",
   },
   {
-    syntax: "/trace <runId>",
-    description: "Stream the per-event JSONL audit log of a past run",
+    syntax: "/trace <runId> [--json] [--all]",
+    description: "Stream the per-event JSONL audit log of a past run (jq-friendly with --json)",
     group: "replay",
   },
   {
@@ -420,15 +429,26 @@ export function collectKnownVerbs(): string[] {
       verbs.add(head);
     }
   }
-  for (const alias of ["f", "t", "m", "b", "apply-plan", "discard-plan", "runs"]) {
+  for (const alias of ["f", "t", "m", "b", "h", "apply-plan", "discard-plan", "runs"]) {
     verbs.add(alias);
   }
   return Array.from(verbs);
 }
 
+const SHELL_VERB_ALIASES: Record<string, string> = {
+  h: "help",
+  f: "findings",
+  t: "tune",
+  m: "modules",
+  b: "back",
+  "apply-plan": "yes",
+  "discard-plan": "no",
+};
+
 export function formatHelpForVerb(input: string): string {
-  const needle = input.replace(/^\//, "").trim().toLowerCase();
-  if (!needle) return "Usage: /help [verb]";
+  const raw = input.replace(/^\//, "").trim().toLowerCase();
+  if (!raw) return "Usage: /help [verb]";
+  const needle = SHELL_VERB_ALIASES[raw] ?? raw;
   const entries = SHELL_COMMAND_CATALOG.filter((entry) => {
     const head = entry.syntax.replace(/^\//, "").split(/\s+/)[0]?.toLowerCase();
     if (head === needle) return true;
