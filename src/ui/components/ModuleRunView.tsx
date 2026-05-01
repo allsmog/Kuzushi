@@ -597,7 +597,6 @@ function MetaRow({ run }: { run: NonNullable<ShellState["moduleRun"]> }): React.
   // /set effort max actually took effect.
   const effort = run.effort ?? "default";
   const thinking = run.thinkingDisabled ? "disabled" : "enabled";
-  const backend = run.agentRuntimeBackend ? truncateEnd(run.agentRuntimeBackend, 18) : "default";
   const evidence =
     run.candidateCount != null || run.linkedStoryCount != null || run.backendPathCount != null
       ? `${run.candidateCount ?? 0} cand · ${run.linkedStoryCount ?? 0} linked · ${run.backendPathCount ?? 0} paths`
@@ -614,8 +613,6 @@ function MetaRow({ run }: { run: NonNullable<ShellState["moduleRun"]> }): React.
           {tokens.value(effort)}
           {tokens.muted("    thinking ")}
           {tokens.value(thinking)}
-          {tokens.muted("    runtime ")}
-          {tokens.value(backend)}
           {run.agentStatus ? tokens.muted("    agent ") : null}
           {run.agentStatus ? tokens.value(run.agentStatus) : null}
         </Text>

@@ -23,8 +23,10 @@ kuzushi
 # 1. Install (Node 22+)
 npm install -g kuzushi
 
-# 2. Set a provider key. Get one at https://console.anthropic.com/settings/keys
-export ANTHROPIC_API_KEY=sk-ant-...
+# 2. Authenticate — API key or OAuth (pick one)
+export ANTHROPIC_API_KEY=sk-ant-...   # API key
+# — or — OAuth login (no key needed if Claude Code is installed):
+# kuzushi auth login
 
 # 3. Scan the current directory
 kuzushi scan .
@@ -48,7 +50,7 @@ permissions).
 
 ### Shell (default)
 
-Just type `kuzushi`. The interactive copilot shell starts with your loaded modules, available tools, and any active workspace. Talk naturally or use structured commands.
+Just type `kuzushi`. The interactive copilot shell blends a Metasploit-style module navigator with a Claude Code-style conversational agent — operators move between security modules with slash commands while the AI handles natural-language queries, plan synthesis, and tool orchestration in the same prompt.
 
 ```
 kuzushi shell                                  # default — just `kuzushi` works
@@ -60,7 +62,7 @@ kuzushi shell --load randori,vuln-scout,tob    # pre-load specific built-in modu
 ```
 ╭─────────────────────────────────────────────────────────────╮
 │  kuzushi shell                      workspace: acme-api     │
-│  modules: sast, randori, vuln-scout, tob, variant-hunter    │
+│  modules: sast, randori, vuln-scout, tob, variant           │
 │  target: ./acme-api  (Node.js + Express + PostgreSQL)       │
 ╰─────────────────────────────────────────────────────────────╯
 
@@ -168,7 +170,7 @@ kuzushi scan <repo> --resume
 Execute a single module tool without the interactive shell. Scriptable, composable with unix pipes.
 
 ```sh
-kuzushi run sast:scan ./repo --json
+kuzushi run semgrep:scan ./repo --json
 kuzushi run triage:run fingerprint=abc123 --json
 kuzushi run verify:finding fingerprint=abc123 --quiet
 kuzushi run findings:list severity=critical,high --json
@@ -248,6 +250,7 @@ Kuzushi's capabilities come from `CopilotModule`s that expose tools (for shell a
 | **prompt-armor** | offense | LLM red teaming via `promptarmor-plugin` — 80+ attack plugins, 25+ mutation strategies, code-aware remediation (network commands require `authorized: true`) | `prompt-armor:scan`, `prompt-armor:analyze`, `prompt-armor:attack`, `prompt-armor:diff`, `prompt-armor:report`, `prompt-armor:config` |
 | **variant** | offense | Lifts confirmed findings into portable signatures and hunts for variants across the repo (including vendored deps) | `variant:lift-pattern`, `variant:hunt` |
 | **ndiff** | offense | CVE-diff-based n-day hunting and variant search against a target | `ndiff:fetch-cve`, `ndiff:search-patch-shape`, `ndiff:hunt-variants` |
+| **secret-scan** | offense | Deterministic regex + entropy credential scanner — AWS keys, GitHub PATs, PEM private keys, JWTs, generic passwords. Zero LLM cost. | `secret-scan:scan` |
 
 Load with the shell or at startup: `kuzushi shell --load randori,vuln-scout,tob,shinsa,prompt-armor,variant,ndiff` (the bare id works — `builtin:` prefix is optional). Legacy ids `variant-hunter` / `n-day-diff-hunter` still resolve for backward compatibility.
 
@@ -308,7 +311,7 @@ The built-in `sast` module runs a 40+ task DAG pipeline:
 2. **Code graph** — builds entry-point-to-sink graph via static analysis + LLM discovery
 3. **Threat modeling** — Randori PASTA plugin: business objectives, technical scope, DFD decomposition, STRIDE threats with ATT&CK/CAPEC/OWASP mapping and 5-factor probabilistic scoring
 4. **Threat-informed hunting** — adversarial Claude agents per DFD external entity, CTF-style hunting
-5. **Task DAG execution** — Semgrep, CodeQL, agentic scanner, 15+ specialized detectors (SSRF, SQLi, XSS, command injection, XXE, deserialization, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL, secrets/crypto, auth logic, systems-level deep semantic analysis)
+5. **Task DAG execution** — Semgrep, CodeQL, agentic scanner, 15+ specialized detectors (SSRF, SQLi, XSS, command injection, XXE, deserialization, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL, secrets/crypto, auth logic, systems-level deep semantic analysis); **systems-hunt** 4-actor kernel/protocol memory-safety hunter with resource-provenance chain detection (shared-origin → transport → alias → write-through → failure-after-mutation, scored + narrative)
 6. **Classifier funnel** — cheap single-token pre-filter removes ~80% noise before expensive triage
 7. **Deduplication** — fingerprints and merges equivalent findings across scanners
 8. **AI triage** — agent investigates each finding with source context, code graph, evidence chains, threat model, CWE-specific knowledge
@@ -493,7 +496,7 @@ kuzushi runs show <runId> --json           # JSON output for tooling
 ### Run Mode
 
 ```
-kuzushi run sast:scan ./repo --json
+kuzushi run semgrep:scan ./repo --json
 kuzushi run triage:run fingerprint=abc123 --json
 kuzushi run verify:finding fingerprint=abc123 --quiet
 kuzushi run findings:list severity=critical,high --json
@@ -524,7 +527,7 @@ kuzushi config path
 | Key | Default | Description |
 | --- | --- | --- |
 | `model` | `anthropic:claude-sonnet-4-6` | Default LLM model for all tasks and stages |
-| `tasks` | `["semgrep"]` | Enabled task IDs, in execution order |
+| `tasks` | `["semgrep:scan"]` | Enabled task IDs, in execution order |
 | `taskConfig` | `{ semgrep: {...}, triage: {...}, ... }` | Per-task config blocks keyed by task ID or stage ID |
 | `severity` | `["ERROR","WARNING"]` | Semgrep severity filter |
 | `excludePatterns` | `["test","tests","node_modules",...]` | Directories/globs to skip |
@@ -554,6 +557,7 @@ Global config: `~/.kuzushi/config.json`. Project overrides: `<repo>/.kuzushi/con
 | Variable | Required | Description |
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | When using `anthropic:*` models | Anthropic API key |
+| `ANTHROPIC_AUTH_TOKEN` | OAuth flows | Bearer token (set automatically by `kuzushi auth login`) |
 | `OPENAI_API_KEY` | When using `openai:*` models | OpenAI API key |
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | When using `google:*` models | Google API key |
 

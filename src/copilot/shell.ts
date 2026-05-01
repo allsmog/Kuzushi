@@ -2262,7 +2262,6 @@ interface HuntStats {
   findingsCount: number;
   reviewCandidateCount: number;
   costUsd: number;
-  agentRuntimeBackend?: string;
   agentStatus?: string;
   candidateCount?: number;
   linkedStoryCount?: number;
@@ -2287,7 +2286,6 @@ function extractHuntStats(result: { data?: unknown }): HuntStats {
           totalLinkedStories?: unknown;
           backendPathCount?: unknown;
         };
-        agentRuntimeBackend?: unknown;
         agentStatus?: unknown;
         warnings?: unknown;
       }
@@ -2313,9 +2311,6 @@ function extractHuntStats(result: { data?: unknown }): HuntStats {
     findingsCount,
     reviewCandidateCount,
     costUsd,
-    ...(typeof data?.agentRuntimeBackend === "string"
-      ? { agentRuntimeBackend: data.agentRuntimeBackend }
-      : {}),
     ...(typeof data?.agentStatus === "string" ? { agentStatus: data.agentStatus } : {}),
     ...(candidateCount !== undefined ? { candidateCount } : {}),
     ...(linkedStoryCount !== undefined ? { linkedStoryCount } : {}),
@@ -3535,9 +3530,6 @@ async function startInkShell(
             completedAtMs: Date.now(),
             ...(huntStats ? { findingCount: huntStats.findingsCount } : {}),
             ...(huntStats ? { reviewCandidateCount: huntStats.reviewCandidateCount } : {}),
-            ...(huntStats?.agentRuntimeBackend
-              ? { agentRuntimeBackend: huntStats.agentRuntimeBackend }
-              : {}),
             ...(huntStats?.agentStatus ? { agentStatus: huntStats.agentStatus } : {}),
             ...(huntStats?.candidateCount !== undefined
               ? { candidateCount: huntStats.candidateCount }
@@ -9251,13 +9243,7 @@ function handleSetCommand(
   };
 }
 
-const CONFIG_RESTART_KEYS = new Set([
-  "agentRuntimeBackend",
-  "agentRuntimeConfig",
-  "agentModel",
-  "busBackend",
-  "dbPath",
-]);
+const CONFIG_RESTART_KEYS = new Set(["agentRuntimeConfig", "agentModel", "busBackend", "dbPath"]);
 
 const CONFIG_SECRET_KEY_PATTERN = /(apiKey|token|secret|password)/i;
 
