@@ -77,6 +77,16 @@ export interface HostUiHandle {
     costUsd?: number;
     artifacts?: ReadonlyArray<{ label: string; path: string; size?: string }>;
   }): void;
+  /**
+   * Phase 6 — register the post-run `Next:` rail. Modules call this once
+   * a run reaches a meaningful conclusion (findings emitted, scan complete)
+   * to suggest follow-up commands an analyst can paste into the prompt.
+   * No-op when no module run is active.
+   *
+   * Each entry pairs a one-line analyst-facing label with the bare-verb
+   * command that should be executed when the row is picked.
+   */
+  suggestNext?(steps: ReadonlyArray<{ label: string; command: string }>): void;
 }
 
 // ToolOptionStore — minimal Datastore surface

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   type Align,
+  formatContextAge,
+  formatFindingsSummary,
   formatRelativeAgo,
   padCell,
   truncateEnd,
@@ -119,5 +121,65 @@ describe("wrapToWidth", () => {
   });
   it("collapses runs of whitespace", () => {
     expect(wrapToWidth("one   two    three", 40)).toEqual(["one two three"]);
+  });
+});
+
+describe("formatContextAge", () => {
+  it("renders missing without an age", () => {
+    expect(formatContextAge("missing")).toBe("ctx: none");
+  });
+  it("renders building without an age", () => {
+    expect(formatContextAge("building")).toBe("ctx: building…");
+  });
+  it("buckets seconds → s", () => {
+    expect(formatContextAge("fresh", 12_000)).toBe("ctx: fresh 12s");
+  });
+  it("buckets minutes → m", () => {
+    expect(formatContextAge("fresh", 4 * 60_000 + 12_000)).toBe("ctx: fresh 4m");
+  });
+  it("buckets hours → h", () => {
+    expect(formatContextAge("stale", 2 * 3_600_000)).toBe("ctx: stale 2h");
+  });
+  it("buckets days → d once past 24h", () => {
+    expect(formatContextAge("stale", 3 * 86_400_000)).toBe("ctx: stale 3d");
+  });
+  it("falls back to bare label when ageMs is missing for a known state", () => {
+    expect(formatContextAge("fresh")).toBe("ctx: fresh");
+  });
+  it("treats negative ageMs as a missing age", () => {
+    expect(formatContextAge("fresh", -1)).toBe("ctx: fresh");
+  });
+});
+
+describe("formatFindingsSummary", () => {
+  it("renders empty when total is zero", () => {
+    expect(formatFindingsSummary({ total: 0 })).toBe("no findings");
+  });
+  it("uses the highest non-zero severity tier", () => {
+    expect(
+      formatFindingsSummary({
+        total: 7,
+        bySeverity: { high: 1, medium: 2, low: 4 },
+      }),
+    ).toBe("7 findings (1 high)");
+  });
+  it("prefers critical over high", () => {
+    expect(
+      formatFindingsSummary({
+        total: 5,
+        bySeverity: { critical: 1, high: 2, medium: 2 },
+      }),
+    ).toBe("5 findings (1 critical)");
+  });
+  it("falls back to plain count when bySeverity is empty", () => {
+    expect(formatFindingsSummary({ total: 3 })).toBe("3 findings");
+  });
+  it("ignores zero-count tiers", () => {
+    expect(
+      formatFindingsSummary({
+        total: 4,
+        bySeverity: { critical: 0, high: 0, medium: 4 },
+      }),
+    ).toBe("4 findings (4 medium)");
   });
 });

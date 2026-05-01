@@ -258,10 +258,7 @@ function line(kind: string, body: string, atIsoTimestamp?: string): string {
  * fields are populated. We deliberately keep this `key=value` so a CI parser
  * can grep `kuzushi=` without a regex.
  */
-function formatRunContext(
-  ctx: CiStreamOptions["runContext"] | undefined,
-  state: UIState,
-): string {
+function formatRunContext(ctx: CiStreamOptions["runContext"] | undefined, state: UIState): string {
   const fields: string[] = [];
   if (ctx?.runId) fields.push(`run=${ctx.runId.slice(0, 8)}`);
   if (ctx?.kuzushiVersion) fields.push(`kuzushi=${ctx.kuzushiVersion}`);
@@ -288,14 +285,18 @@ function formatResultVerdict(state: UIState): string {
   const sevParts = (["critical", "high", "medium", "low"] as const)
     .filter((s) => counts[s] > 0)
     .map((s) => `${counts[s]} ${s}`);
-  const failedPart = failed.length > 0 ? `, ${failed.length} failed-task${failed.length === 1 ? "" : "s"}` : "";
+  const failedPart =
+    failed.length > 0 ? `, ${failed.length} failed-task${failed.length === 1 ? "" : "s"}` : "";
   const exitHint = verdict === "pass" ? 0 : 1;
   return `${verdict} (${sevParts.join(", ") || "no findings"}${failedPart}) exit_hint=${exitHint}`;
 }
 
-function countBySeverity(
-  findings: ReadonlyArray<ActionableFinding>,
-): { critical: number; high: number; medium: number; low: number } {
+function countBySeverity(findings: ReadonlyArray<ActionableFinding>): {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+} {
   const out = { critical: 0, high: 0, medium: 0, low: 0 };
   for (const f of findings) {
     if (f.verdict !== "tp" || f.suppressed) continue;

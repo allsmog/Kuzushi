@@ -34,7 +34,6 @@ import { createMockOptionStore } from "./mocks/datastore.js";
 import { createMockEventScope } from "./mocks/event-scope.js";
 import { createRecordingLogger } from "./mocks/logger.js";
 import { createRecordingPrintSink } from "./mocks/print-sink.js";
-import { createMockRunArtifactStore } from "./mocks/run-artifacts.js";
 import { createMockUiStore } from "./mocks/ui-store.js";
 import { createMockWorkspace } from "./mocks/workspace.js";
 
@@ -276,15 +275,15 @@ export {
   type RecordingPrintSink,
 } from "./mocks/print-sink.js";
 export {
-  createFakeRuntime,
-  type FakeRuntime,
-  type FakeRuntimeResponse,
-} from "./mocks/runtime.js";
-export {
   createMockRunArtifactStore,
   type MockRunArtifactStore,
   type RunArtifactWrite,
 } from "./mocks/run-artifacts.js";
+export {
+  createFakeRuntime,
+  type FakeRuntime,
+  type FakeRuntimeResponse,
+} from "./mocks/runtime.js";
 export { createMockUiStore, type MockHostUiHandle } from "./mocks/ui-store.js";
 export { createMockWorkspace, type MockWorkspace } from "./mocks/workspace.js";
 export { expectModuleShape, ModuleShapeError } from "./module-shape.js";

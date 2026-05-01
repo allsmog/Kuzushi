@@ -1,7 +1,7 @@
 import { formatUnknownVerb } from "../ui/error-format.js";
 
 export function buildShellPrompt(focusedModule: string | null): string {
-  return focusedModule ? `kuzushi/${focusedModule}> ` : "kuzushi> ";
+  return focusedModule ? `kuzushi ${focusedModule} > ` : "kuzushi > ";
 }
 
 /**
@@ -45,8 +45,7 @@ export interface ShellCommandEntry {
 export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   {
     syntax: "/help",
-    description:
-      "Show core workflow help (alias: /h); `/help advanced` shows all commands",
+    description: "Show core workflow help (alias: /h); `/help advanced` shows all commands",
     group: "nav",
   },
   {
@@ -97,19 +96,15 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
     longDescription:
       "Computes the changed-file set between HEAD and <ref> via git and keeps the user on the findings surface. Use `/since clear` (or `reset`/`off`) to drop the scope.",
   },
-  {
-    syntax: "/plan <english>",
-    description: "Propose option changes from a plain-English request",
-    group: "planner",
-    longDescription:
-      "Translates the request into a proposed option diff the operator can apply with /yes or discard with /no.",
-  },
-  {
-    syntax: "/yes | /no",
-    description:
-      "Apply or discard the pending planner proposal (also: y/n keys, Esc cancels)",
-    group: "planner",
-  },
+  // Phase 5 cleanup — `/plan`, `/yes`, `/no` are no longer advertised in
+  // /help. The same flow is reachable by typing prose at a focused-module
+  // prompt (e.g. `kuzushi taint-iris > only look at admin routes`); the
+  // resulting plan card is then accepted with bare `y` / dismissed with
+  // bare `n`. (`main` had separately added a parenthetical about `y/n keys,
+  // Esc cancels` to the `/yes | /no` row — that hint is now what the bare
+  // fall-through implements, so the row + the hint are both retired.) The
+  // slash forms remain wired for muscle memory but stay out of the catalog
+  // so analysts don't have to learn two surfaces.
   {
     syntax: "/prompts",
     description: "Open the prompts editor for the focused module",

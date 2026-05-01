@@ -15,10 +15,10 @@
  */
 
 import { existsSync } from "node:fs";
-import { resolveRepo } from "../shared.js";
-import { CliUsageError } from "../errors.js";
-import { defaultDbPath, getRun, initDb, listRuns } from "../../store.js";
 import type { PipelineRunRecord } from "../../store.js";
+import { defaultDbPath, getRun, initDb, listRuns } from "../../store.js";
+import { CliUsageError } from "../errors.js";
+import { resolveRepo } from "../shared.js";
 
 export interface RunsDiffOpts {
   repo: string;
@@ -79,15 +79,12 @@ function parseFindings(json: string | null | undefined): Map<string, FindingShap
       fingerprint: fp,
       verdict: typeof obj["verdict"] === "string" ? (obj["verdict"] as string) : undefined,
       displaySeverity:
-        typeof obj["displaySeverity"] === "string"
-          ? (obj["displaySeverity"] as string)
-          : undefined,
+        typeof obj["displaySeverity"] === "string" ? (obj["displaySeverity"] as string) : undefined,
       severity: typeof obj["severity"] === "string" ? (obj["severity"] as string) : undefined,
       confidence: typeof obj["confidence"] === "number" ? (obj["confidence"] as number) : undefined,
       ruleId: typeof obj["ruleId"] === "string" ? (obj["ruleId"] as string) : undefined,
       filePath: typeof obj["filePath"] === "string" ? (obj["filePath"] as string) : undefined,
-      startLine:
-        typeof obj["startLine"] === "number" ? (obj["startLine"] as number) : undefined,
+      startLine: typeof obj["startLine"] === "number" ? (obj["startLine"] as number) : undefined,
       title: typeof obj["title"] === "string" ? (obj["title"] as string) : undefined,
     };
     out.set(fp, shape);
@@ -112,10 +109,7 @@ function toEntry(f: FindingShape): RunsDiffEntry {
 }
 
 /** Pure diff function — exported for tests. */
-export function diffRuns(
-  runA: PipelineRunRecord,
-  runB: PipelineRunRecord,
-): RunsDiffResult {
+export function diffRuns(runA: PipelineRunRecord, runB: PipelineRunRecord): RunsDiffResult {
   const a = parseFindings(runA.findingsJson);
   const b = parseFindings(runB.findingsJson);
   const added: RunsDiffEntry[] = [];
