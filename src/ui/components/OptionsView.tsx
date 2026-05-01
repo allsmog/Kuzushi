@@ -11,6 +11,7 @@ import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { Table } from "../primitives/Table.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
+import { EmptyState } from "./EmptyState.js";
 import { RuleHeader } from "./RuleHeader.js";
 import { ScreenContent } from "./ScreenContent.js";
 
@@ -37,16 +38,15 @@ export function OptionsView({ shell }: OptionsViewProps): React.ReactElement {
   return (
     <ScreenContent>
       <RuleHeader breadcrumb={breadcrumb} status={status} />
-      {!view ? <EmptyOptions /> : <OptionsContent view={view} />}
+      {!view ? <EmptyOptions moduleId={moduleId} /> : <OptionsContent view={view} />}
     </ScreenContent>
   );
 }
 
-function EmptyOptions(): React.ReactElement {
+function EmptyOptions({ moduleId }: { moduleId: string }): React.ReactElement {
   return (
-    <Box flexDirection="column" marginTop={SPACING.sm}>
-      <Text>{tokens.warn("No options are loaded for this module.")}</Text>
-      <Text>{tokens.muted("Run /options <tool> or return with /back.")}</Text>
+    <Box marginTop={SPACING.sm}>
+      <EmptyState kind="options-none-loaded" context={{ moduleId }} />
     </Box>
   );
 }

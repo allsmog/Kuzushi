@@ -105,7 +105,7 @@ describe("PromptsEditorView", () => {
     const out = renderText(createElement(PromptsEditorView, { shell: shell(), rows: [] }));
     expect(out).toContain("kuzushi/threat-hunt/prompts");
     expect(out).toContain("0 prompts");
-    expect(out).toContain("No prompt overrides for this module.");
+    expect(out).toContain("No prompt keys");
   });
 
   it("renders the table with default + local-edit rows", () => {

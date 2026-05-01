@@ -40,6 +40,8 @@ import type { AgentActivityLine, ModuleRunArtifact, ModuleRunStep, ShellState } 
 import { SPACING, tokens } from "../tokens.js";
 import { actorLabelFromFingerprint, actorShortId, toCompactRow } from "../transcript-format.js";
 import type { ActorViewFinding } from "./ActorTranscriptView.js";
+import { EmptyState } from "./EmptyState.js";
+import { ErrorCard } from "./ErrorCard.js";
 import { RuleHeader } from "./RuleHeader.js";
 import { ScreenContent } from "./ScreenContent.js";
 
@@ -105,6 +107,18 @@ export function ModuleRunView({
           {liveControls ? <LiveControlsHint /> : null}
           <ToolHeader run={run} />
           <TerminalRunBanner run={run} findings={findings} elapsed={elapsed} />
+          {run.status === "error" ? (
+            <Box marginTop={SPACING.sm}>
+              <ErrorCard
+                message={`${run.displayName ?? run.toolName ?? `${run.moduleId}:run`} failed`}
+                category="fatal"
+                code="E_TOOL_RUN"
+                toolName={run.toolName}
+                toolInput={run.inputSummary}
+                hint="Re-run the verb (e.g. run, scan) to retry · /back to return to the module home."
+              />
+            </Box>
+          ) : null}
           <StepsBlock steps={run.steps} />
           {run.moduleId === "threat-hunt" ? (
             <ActorsBlock agentActivity={agentActivity} run={run} />
@@ -116,7 +130,7 @@ export function ModuleRunView({
         </>
       ) : (
         <Box marginTop={SPACING.sm}>
-          <Text>{tokens.muted("No active run for this module yet.")}</Text>
+          <EmptyState kind="module-run-idle" context={{ moduleId }} />
         </Box>
       )}
     </ScreenContent>

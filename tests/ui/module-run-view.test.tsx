@@ -90,7 +90,7 @@ describe("ModuleRunView", () => {
   it("renders the empty state when shell.moduleRun is null", () => {
     const out = renderText(createElement(ModuleRunView, { shell: shell({ moduleRun: null }) }));
     expect(out).toContain("kuzushi/threat-hunt/run");
-    expect(out).toContain("No active run for this module yet.");
+    expect(out).toContain("No active run");
   });
 
   it("renders header + steps + meta row for a running threat-hunt", () => {
