@@ -1,7 +1,7 @@
 {
   "name": "kuzushi",
   "version": "0.23.0",
-  "description": "Kuzushi — security-native AI operating environment",
+  "description": "Kuzushi — AI cybersecurity copilot and security harness",
   "author": "Shayaun Nejad",
   "repository": {
     "type": "git",
