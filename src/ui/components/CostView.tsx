@@ -18,6 +18,7 @@ import React from "react";
 import { formatCost, miniBarChart } from "../format.js";
 import type { ResultLine } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
+import { EmptyState } from "./EmptyState.js";
 
 interface CostViewProps {
   results: ResultLine[];
@@ -58,7 +59,9 @@ function _CostView({ results, runningCostUsd, budget }: CostViewProps): React.Re
       {chartLines.length > 0 ? (
         chartLines.map((line, i) => <Text key={i}> {line}</Text>)
       ) : (
-        <Text> {tokens.muted("No cost data yet...")}</Text>
+        <Box paddingLeft={SPACING.sm}>
+          <EmptyState kind="cost-no-data" context={{ scanInProgress: results.length > 0 }} />
+        </Box>
       )}
 
       <Text>{""}</Text>
