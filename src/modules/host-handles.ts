@@ -131,6 +131,20 @@ export interface WorkspaceServiceStore {
 }
 export interface WorkspaceVulnStore {
   listForWorkspace(workspaceId: string): ReadonlyArray<unknown>;
+  /**
+   * Persist a finding to the workspace `vulns` table. Input is treated as
+   * opaque from the SDK's perspective — the host's concrete `VulnStore`
+   * (in `src/workspace/entities.ts`) accepts a `VulnInsert` shape with
+   * `workspaceId` + `name` required and the rest optional. Returns the
+   * created row (typed as `unknown` here so the SDK doesn't pin against
+   * host schema details).
+   *
+   * Added so third-party scanner modules can record findings without
+   * reaching into `rawDb()` to write SQL or duplicating the `VulnStore`
+   * insert path. See `core-sast.ts` for an exemplar guarded by
+   * `ctx.host?.capabilities.has("workspace")`.
+   */
+  create?(input: object): unknown;
 }
 export interface WorkspaceNoteStore {
   create(input: object): unknown;
@@ -156,6 +170,46 @@ export interface WorkspaceHandle {
   rawDb(): unknown;
 }
 
+// ---------------------------------------------------------------------------
+// RunArtifactStore — typed writer for `.kuzushi/runs/<runId>/<moduleId>/...`
+// ---------------------------------------------------------------------------
+
+/**
+ * Sandboxed per-(runId, moduleId) artifact writer. Modules use this to drop
+ * version-controllable artefacts into the run dir without hardcoding the
+ * `.kuzushi/runs/<runId>/...` path layout (which is a host concern that may
+ * evolve). The host materialises the directory lazily on first write.
+ *
+ * Available on `ExecutionContext.runArtifacts` only when both a DAG
+ * `runId` and a tool `moduleId` are present — i.e. during scan-mode DAG
+ * execution. Outside that, the field is `undefined`; modules that use it
+ * must feature-probe with `ctx.host?.capabilities.has("run-artifacts")`.
+ *
+ * Names are validated as relative paths under the module's run subdirectory
+ * — leading `/` and `..` segments are rejected. The host resolves the final
+ * absolute path via `path()` so callers can hand it to subprocesses.
+ */
+export interface RunArtifactStore {
+  /** Module id this store is scoped to. Useful for prefixing log lines. */
+  readonly moduleId: string;
+  /** The active runId the store is scoped to. */
+  readonly runId: string;
+  /**
+   * Write `content` (string or Buffer) to `<runRoot>/<moduleId>/<name>`.
+   * Creates parent directories on demand. Throws on path-escape attempts.
+   * Returns the absolute on-disk path of the written file.
+   */
+  write(name: string, content: string | Uint8Array): string;
+  /**
+   * Resolve `name` to an absolute path under the module's run subdirectory
+   * without writing anything. Useful when a module wants to hand the path
+   * to a subprocess that does its own writing (e.g. `git diff > $path`).
+   * Throws on path-escape attempts.
+   */
+  path(name: string): string;
+}
+
+// ---------------------------------------------------------------------------
 // ModuleEventScope — re-export the bus/module-events shape
 
 /**
@@ -221,6 +275,7 @@ export type HostCapability =
   | "module-events"
   | "structured-output"
   | "tool-model"
+  | "run-artifacts"
   | (string & {});
 
 export interface HostInfo {

@@ -46,8 +46,31 @@ const SKIP_DIRS = new Set([
   "target",
   "vendor",
 ]);
-const MAX_FILE_SIZE_BYTES = 1_000_000;
-const MAX_INDEXED_FILES = 2_500;
+const DEFAULT_MAX_FILE_SIZE_BYTES = 1_000_000;
+const DEFAULT_MAX_INDEXED_FILES = 2_500;
+
+export interface SimpleTextIndexOptions {
+  /** Cap on number of files indexed. Default 2500. */
+  maxFiles?: number;
+  /** Cap on per-file byte size. Default 1_000_000. */
+  maxFileBytes?: number;
+}
+
+interface ResolvedIndexLimits {
+  maxFiles: number;
+  maxFileBytes: number;
+}
+
+function resolveLimits(opts?: SimpleTextIndexOptions): ResolvedIndexLimits {
+  return {
+    maxFiles:
+      opts?.maxFiles && opts.maxFiles > 0 ? Math.floor(opts.maxFiles) : DEFAULT_MAX_INDEXED_FILES,
+    maxFileBytes:
+      opts?.maxFileBytes && opts.maxFileBytes > 0
+        ? Math.floor(opts.maxFileBytes)
+        : DEFAULT_MAX_FILE_SIZE_BYTES,
+  };
+}
 
 interface IndexedFile {
   filePath: string;
@@ -63,8 +86,11 @@ export class SimpleTextIndexProvider implements IndexProvider, SymbolLookup, Dif
     private readonly files: IndexedFile[],
   ) {}
 
-  static async create(repoRoot: string): Promise<SimpleTextIndexProvider> {
-    const files = await collectIndexedFiles(repoRoot);
+  static async create(
+    repoRoot: string,
+    options?: SimpleTextIndexOptions,
+  ): Promise<SimpleTextIndexProvider> {
+    const files = await collectIndexedFiles(repoRoot, resolveLimits(options));
     return new SimpleTextIndexProvider(repoRoot, files);
   }
 
@@ -253,9 +279,12 @@ function estimateArityHint(line: string, baseSymbol: string): number | undefined
   return parts.length;
 }
 
-async function collectIndexedFiles(repoRoot: string): Promise<IndexedFile[]> {
+async function collectIndexedFiles(
+  repoRoot: string,
+  limits: ResolvedIndexLimits,
+): Promise<IndexedFile[]> {
   const files: IndexedFile[] = [];
-  await walkDirectory(repoRoot, repoRoot, files);
+  await walkDirectory(repoRoot, repoRoot, files, limits);
   return files;
 }
 
@@ -263,14 +292,15 @@ async function walkDirectory(
   repoRoot: string,
   currentDir: string,
   files: IndexedFile[],
+  limits: ResolvedIndexLimits,
 ): Promise<void> {
-  if (files.length >= MAX_INDEXED_FILES) {
+  if (files.length >= limits.maxFiles) {
     return;
   }
 
   const entries = await readdir(currentDir, { withFileTypes: true });
   for (const entry of entries) {
-    if (files.length >= MAX_INDEXED_FILES) {
+    if (files.length >= limits.maxFiles) {
       return;
     }
 
@@ -278,7 +308,7 @@ async function walkDirectory(
       if (SKIP_DIRS.has(entry.name)) {
         continue;
       }
-      await walkDirectory(repoRoot, path.join(currentDir, entry.name), files);
+      await walkDirectory(repoRoot, path.join(currentDir, entry.name), files, limits);
       continue;
     }
 
@@ -293,7 +323,7 @@ async function walkDirectory(
 
     const absolutePath = path.join(currentDir, entry.name);
     const metadata = await stat(absolutePath);
-    if (metadata.size > MAX_FILE_SIZE_BYTES) {
+    if (metadata.size > limits.maxFileBytes) {
       continue;
     }
 
@@ -308,8 +338,9 @@ async function walkDirectory(
 
 export async function createSimpleTextIndexProvider(
   repoRoot: string,
+  options?: SimpleTextIndexOptions,
 ): Promise<SimpleTextIndexProvider> {
-  return SimpleTextIndexProvider.create(repoRoot);
+  return SimpleTextIndexProvider.create(repoRoot, options);
 }
 
 async function runGitNameOnly(repoRoot: string, args: string[]): Promise<string[]> {

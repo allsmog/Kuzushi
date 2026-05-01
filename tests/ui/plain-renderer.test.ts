@@ -988,7 +988,7 @@ describe("plain-renderer v3 views", () => {
     const joined = lines.join("\n");
     expect(joined).toContain("[run] carlini-threat-hunt · idle");
     expect(joined).toContain("# RUN");
-    expect(joined).toContain("(no active run)");
+    expect(joined).toContain("No active run");
   });
 
   it("module-run with steps prints the elapsed banner and step glyphs", () => {
@@ -1094,7 +1094,10 @@ describe("plain-renderer v3 views", () => {
     const joined = lines.join("\n");
     expect(joined).toContain("[actor] (none)");
     expect(joined).toContain("# ACTOR TRANSCRIPT");
-    expect(joined).toContain("(no actor focused)");
+    expect(joined).toContain("No actor focused");
+    // Plain-text hint so non-TTY operators know how to leave the view.
+    expect(joined).toContain("hint:");
+    expect(joined).toContain("/back");
   });
 
   it("actor-detail emits one row per agent activity entry with the right glyph", () => {
@@ -1140,6 +1143,8 @@ describe("plain-renderer v3 views", () => {
     expect(joined).toContain("⎿ Read");
     expect(joined).toContain("✻ checking sanitizers");
     expect(joined).toContain("★ SSRF on /admin/fetch");
+    // Hint line is appended after the transcript.
+    expect(joined).toContain("hint: /back returns to module run");
   });
 
   it("prompts-editor empty list emits the (no prompt keys) advisory", () => {
@@ -1155,7 +1160,8 @@ describe("plain-renderer v3 views", () => {
     const joined = lines.join("\n");
     expect(joined).toContain("[prompts] carlini-threat-hunt · 0 overrides");
     expect(joined).toContain("# PROMPTS");
-    expect(joined).toContain("(no prompt keys)");
+    expect(joined).toContain("No prompt keys");
+    expect(joined).toContain("hint: /back to return");
   });
 
   it("prompts-editor populated audit lists each verb + source", () => {

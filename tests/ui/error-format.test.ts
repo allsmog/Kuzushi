@@ -198,3 +198,46 @@ describe("formatUnknownVerb", () => {
     expect(out).toContain("/help");
   });
 });
+
+describe("preflight credentials error wording", () => {
+  // Golden checks for the operator-actionable replacement of the bare
+  // `${envVar} is not set.` message. We import lazily to avoid touching the
+  // full preflight in modules that don't need it.
+  it("links to the Anthropic console + names the three resolution paths", async () => {
+    const { runPreflight } = await import("../../src/cli/preflight.js");
+    const config = {
+      model: "anthropic:claude-sonnet-4-6",
+      busBackend: "in-process",
+      triageBatchSize: 15,
+      triageConcurrency: 2,
+      scanMode: "parallel",
+      tasks: [],
+      severity: ["ERROR"],
+      excludePatterns: [],
+      taskConfig: {},
+      agentRuntimeBackend: "claude" as const,
+    };
+    // Drop any inherited env vars so the missing-cred path triggers.
+    const saved = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    try {
+      const report = runPreflight(
+        config as unknown as Parameters<typeof runPreflight>[0],
+        process.cwd(),
+      );
+      const issue = report.issues.find((i) => i.path === "credentials");
+      expect(issue).toBeDefined();
+      // Names the env var rather than mumbling "credentials are missing".
+      expect(issue!.message).toContain("ANTHROPIC_API_KEY");
+      // Provides three concrete resolution paths.
+      expect(issue!.hint).toContain("export ANTHROPIC_API_KEY");
+      expect(issue!.hint).toContain("--api-key");
+      expect(issue!.hint).toContain("kuzushi auth");
+      // Anthropic console link is present so first-time operators don't
+      // have to bounce to a search engine.
+      expect(issue!.hint).toContain("console.anthropic.com");
+    } finally {
+      if (saved) process.env.ANTHROPIC_API_KEY = saved;
+    }
+  });
+});

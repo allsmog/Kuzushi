@@ -28,6 +28,8 @@ export interface RescoreOptions {
   concurrency?: number;
   repoRoot: string;
   runtime: AgentRuntime;
+  /** Override the per-batch finding count. Defaults to 25 when unset. */
+  batchSize?: number;
 }
 
 const BATCH_RESCORE_SCHEMA = {
@@ -51,7 +53,7 @@ const BATCH_RESCORE_SCHEMA = {
   },
 } as const;
 
-const MAX_FINDINGS_PER_BATCH = 25;
+const DEFAULT_MAX_FINDINGS_PER_BATCH = 25;
 
 /**
  * Re-score findings using batched LLM calls.
@@ -84,9 +86,13 @@ export async function rescoreFindings(
   }
 
   // Chunk findings into batches
+  const batchSize =
+    options.batchSize && options.batchSize > 0
+      ? Math.floor(options.batchSize)
+      : DEFAULT_MAX_FINDINGS_PER_BATCH;
   const batches: Finding[][] = [];
-  for (let i = 0; i < findings.length; i += MAX_FINDINGS_PER_BATCH) {
-    batches.push(findings.slice(i, i + MAX_FINDINGS_PER_BATCH));
+  for (let i = 0; i < findings.length; i += batchSize) {
+    batches.push(findings.slice(i, i + batchSize));
   }
 
   const allResults: LlmRescoreResult[] = [];

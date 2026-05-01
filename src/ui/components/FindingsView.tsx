@@ -23,10 +23,10 @@ import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { computeVisibleSlice } from "../hooks/useVisibleSlice.js";
 import { icons } from "../icons.js";
 import { useRenderCounter } from "../perf.js";
+import { Divider } from "../primitives/Divider.js";
 import { normalizeSeverity, severityChalk, severityStyle } from "../severity.js";
 import type { ActionableFinding, ResultLine } from "../state.js";
-import { Divider } from "../primitives/Divider.js";
-import { SPACING, tokens, WIDTHS } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import { ChainGroup } from "./ChainGroup.js";
 import { EmptyState } from "./EmptyState.js";
 import { type FilterChip, FilterChips } from "./FilterChips.js";
@@ -203,6 +203,10 @@ function UnifiedFindings({
   focusedModule,
 }: UnifiedProps): React.ReactElement {
   useRenderCounter("UnifiedFindings");
+  const { columns } = useTerminalSize();
+  // Row title clip reflows with the terminal so 120/200-col panes
+  // don't truncate at 56 chars when there's pane to spare.
+  const titleWidth = Math.max(24, Math.min(columns - 24, 140));
   useRegisterKeybindings([
     { keys: "/open <F-NNNN>", label: "open finding" },
     { keys: "j/k", label: "move cursor", secondary: true },
@@ -292,11 +296,12 @@ function UnifiedFindings({
       </Box>
 
       <Box marginTop={SPACING.sm} flexDirection="column">
+        <Text>{tokens.value("Primary action: /open F-NNNN to inspect one finding deeply.")}</Text>
         <FilterChips chips={filters ?? defaultFilters()} />
       </Box>
 
       <Box marginTop={SPACING.sm}>
-        <Divider width={WIDTHS.contentRule} />
+        <Divider />
       </Box>
 
       {resolvedChains.map(({ chain, members }) => {
@@ -334,6 +339,7 @@ function UnifiedFindings({
               finding={f}
               alias={aliasMap.get(f.fingerprint)}
               active={slice.top + idx === slice.cursor}
+              titleWidth={titleWidth}
             />
           ))}
           {hiddenBelow > 0 && (
@@ -351,6 +357,13 @@ function UnifiedFindings({
           context={focusedModule ? { moduleId: focusedModule } : undefined}
         />
       )}
+
+      <Box marginTop={SPACING.sm}>
+        <Divider />
+      </Box>
+      <Box>
+        <Text>{tokens.hint("j/k move   /open F-NNNN inspect   b back")}</Text>
+      </Box>
     </ScreenContent>
   );
 }
@@ -368,10 +381,12 @@ const LooseRow = React.memo(
     finding,
     alias,
     active = false,
+    titleWidth,
   }: {
     finding: ActionableFinding;
     alias?: string;
     active?: boolean;
+    titleWidth: number;
   }): React.ReactElement {
     useRenderCounter("LooseRow");
     const title = finding.title ?? finding.ruleId;
@@ -385,7 +400,7 @@ const LooseRow = React.memo(
           {sevTag}
           {"  "}
           {alias ? `${tokens.accent(alias)}  ` : ""}
-          {tokens.strong(clip(title, 56))}
+          {tokens.strong(clip(title, titleWidth))}
           {"  "}
           {tokens.muted(`[${finding.taskId || "sast"}]`)}
         </Text>
@@ -399,7 +414,10 @@ const LooseRow = React.memo(
     );
   },
   (prev, next) =>
-    prev.finding === next.finding && prev.alias === next.alias && prev.active === next.active,
+    prev.finding === next.finding &&
+    prev.alias === next.alias &&
+    prev.active === next.active &&
+    prev.titleWidth === next.titleWidth,
 );
 
 function SeverityCounts({

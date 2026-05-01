@@ -41,6 +41,9 @@ exports[`Ink component snapshots > ModuleCatalog — grouped by category with la
 "  scope:acme-api · 3 modules
 
 
+  Recommended first: use sast — 40+ task pipeline
+    New to Kuzushi? Type /quickstart for a 3-step guided tour.
+
   ─────────────────────────────── OFFENSE ────────────────────────────────
     hunt vulnerabilities and prove exploitability
   MODULE                 DESCRIPTION          LAST RUN
@@ -85,7 +88,9 @@ exports[`Ink component snapshots > ModuleHome — tools table + last-run summary
 `;
 
 exports[`Ink component snapshots > OptionsView — focused tool options without module home 1`] = `
-"  context:build · 4 options · 2 set
+"  kuzushi/context/options                                          context:build · 4 options · 2 set
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+  ──
 
 
   Options                  * = set in this shell
@@ -134,26 +139,26 @@ exports[`Ink component snapshots > ThreatDfdView — inferred app-model fallback
   ! hot path   B boundary   ❯ selected
 
   ┌─ INTERNET / UNTRUSTED ────────────────────────────────────────────────────┐
-  │ ❯ E1   (ext) unauth user            public ingress                     │
+  │ ❯ E1   (ext) unauth user            public ingress                      │
   └───────────────────────────────────────────────────────────────────────────┘
      │ B1 perimeter · 1 crossing
   ┌─ EDGE / ENTRYPOINTS ──────────────────────────────────────────────────────┐
-  │ ! P1   [proc] web router            routes 1 · public 1 · auth 0       │
-  │   P2   [proc] auth-module           identity · sessions                │
+  │ ! P1   [proc] web router            routes 1 · public 1 · auth 0        │
+  │   P2   [proc] auth-module           identity · sessions                 │
   └───────────────────────────────────────────────────────────────────────────┘
      │ B2 service edge · 1 crossing
   ┌─ APPLICATION / TRUSTED ───────────────────────────────────────────────────┐
-  │   P3   [proc] public router         entrypoint                         │
+  │   P3   [proc] public router         entrypoint                          │
   └───────────────────────────────────────────────────────────────────────────┘
      │ B3 data boundary · 1 crossing
   ┌─ DATA / HIGH VALUE ───────────────────────────────────────────────────────┐
-  │ ! D1   <<data>> users db            high-value data · postgres         │
+  │ ! D1   <<data>> users db            high-value data · postgres          │
   └───────────────────────────────────────────────────────────────────────────┘
 
   hot paths
-    ! F1   E1 -> P1                  HTTPS · user-input · crosses B1
-    ! F4   P1 -> P3                  internal · request · crosses B2
-    ! F5   P3 -> D1                  db · sensitive · crosses B3
+    ! F1   E1 -> P1           HTTPS · user-input · crosses B1
+    ! F4   P1 -> P3           internal · request · crosses B2
+    ! F5   P3 -> D1           db · sensitive · crosses B3
 
   Selected  E1 unauth user
     zone   internet / untrusted
@@ -179,19 +184,19 @@ exports[`Ink component snapshots > ThreatDfdView — trust zones + boundaries + 
   ! hot path   B boundary   ❯ selected   ✓ validated
 
   ┌─ INTERNET / UNTRUSTED ────────────────────────────────────────────────────┐
-  │ ❯ E1   (ext) attacker               identity · public ingress          │
+  │ ❯ E1   (ext) attacker               identity · public ingress           │
   └───────────────────────────────────────────────────────────────────────────┘
      │ B1 perimeter · 1 crossing
   ┌─ APP-VPC ─────────────────────────────────────────────────────────────────┐
-  │   P1   [proc] admin router          privileged                         │
+  │   P1   [proc] admin router          privileged                          │
   └───────────────────────────────────────────────────────────────────────────┘
      │
   ┌─ DATA / HIGH VALUE ───────────────────────────────────────────────────────┐
-  │ ! D1   <<data>> IMDS                high-value data                    │
+  │ ! D1   <<data>> IMDS                high-value data                     │
   └───────────────────────────────────────────────────────────────────────────┘
 
   hot paths
-    · F1   P1 -> D1                  http · cloud-cred · crosses B1
+    · F1   P1 -> D1           http · cloud-cred · crosses B1
 
   Selected  E1 attacker
     zone   internet / untrusted

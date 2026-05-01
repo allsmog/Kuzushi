@@ -18,6 +18,8 @@ import { Command } from "commander";
 import { configureAgentRuntime } from "./agent-runtime/index.js";
 import { createDefaultDagRegistry } from "./agents/index.js";
 import { runInspectCommand } from "./cli/commands/inspect.js";
+import { runRunsDiff } from "./cli/commands/runs-diff.js";
+import { runRunsPrune } from "./cli/commands/runs-prune.js";
 import { runScanCommand } from "./cli/commands/scan.js";
 import { runShellCommand, type ShellCommandOptions } from "./cli/commands/shell.js";
 import { CliUsageError, wrapCliAction } from "./cli/errors.js";
@@ -472,7 +474,10 @@ function compareRuns(id1: string, id2: string, repoPath: string): void {
     const run1 = getRun(db, id1);
     const run2 = getRun(db, id2);
     if (!run1 || !run2) {
-      throw new CliUsageError(`Run not found: ${!run1 ? id1 : id2}`);
+      const missingId = !run1 ? id1 : id2;
+      throw new CliUsageError(
+        `Run not found: "${missingId}". Run \`kuzushi runs list -r ${repoPath}\` to see available run ids.`,
+      );
     }
     const metrics1 = run1.metricsJson ? JSON.parse(run1.metricsJson) : null;
     const metrics2 = run2.metricsJson ? JSON.parse(run2.metricsJson) : null;
@@ -584,7 +589,9 @@ configCmd
       }
       const value = getConfigValue(key, opts.repo);
       if (value === undefined) {
-        throw new CliUsageError(`Unknown config key: ${key}`);
+        throw new CliUsageError(
+          `Unknown config key: "${key}". Run \`kuzushi config explain\` to list documented keys, or \`kuzushi config get\` (no key) to see the full effective config.`,
+        );
       }
       console.log(typeof value === "string" ? value : JSON.stringify(value));
     }),
@@ -690,7 +697,9 @@ configCmd
       }
       const doc = explainConfigKey(key);
       if (!doc) {
-        throw new CliUsageError(`Unknown config key: ${key}`);
+        throw new CliUsageError(
+          `Unknown config key: "${key}". Run \`kuzushi config explain\` (no argument) to list documented keys.`,
+        );
       }
       console.log(`${doc.key}`);
       console.log(`  Type:     ${doc.type}`);
@@ -1396,13 +1405,17 @@ runsCmd
       const { root } = resolveRepo(opts.repo);
       const dbPath = defaultDbPath(root);
       if (!existsSync(dbPath)) {
-        throw new CliUsageError(`No runs database at ${dbPath}.`);
+        throw new CliUsageError(
+          `No runs database at ${dbPath}. Run \`kuzushi scan ${opts.repo}\` first to create one.`,
+        );
       }
       const db = initDb(dbPath);
       try {
         const run = getRun(db, runId);
         if (!run) {
-          throw new CliUsageError(`Run not found: ${runId}`);
+          throw new CliUsageError(
+            `Run not found: "${runId}". Run \`kuzushi runs list -r ${opts.repo}\` to see available run ids.`,
+          );
         }
         if (opts.json) {
           console.log(JSON.stringify(run, null, 2));
@@ -1445,6 +1458,133 @@ runsCmd
     wrapCliAction((id1: string, id2: string, options: { repo: string }) => {
       compareRuns(id1, id2, options.repo);
     }),
+  );
+
+runsCmd
+  .command("diff")
+  .description("Show new/fixed/drifted findings between two runs")
+  .argument("<id1>", "Older run ID (baseline)")
+  .argument("<id2>", "Newer run ID")
+  .option("-r, --repo <path>", "Repository path", ".")
+  .option("--json", "Emit a structured JSON diff (jq-friendly)", false)
+  .action(
+    wrapCliAction((id1: string, id2: string, opts: { repo: string; json?: boolean }) => {
+      runRunsDiff(id1, id2, { repo: opts.repo, json: opts.json === true });
+    }),
+  );
+
+runsCmd
+  .command("prune")
+  .description("Delete old run artefacts under .kuzushi/runs/ + their DB rows")
+  .option("-r, --repo <path>", "Repository path", ".")
+  .option("--older-than <duration>", "Drop runs older than e.g. 7d / 12h / 30m")
+  .option("--keep-last <n>", "Keep only the N most recent runs per repo", (v) => parseInt(v, 10))
+  .option("--status <status>", "Restrict to runs matching this status")
+  .option("--include-active", "Include runs in active states (scanning|running|...)", false)
+  .option("--dry-run", "List candidates without deleting", false)
+  .action(
+    wrapCliAction(
+      (opts: {
+        repo: string;
+        olderThan?: string;
+        keepLast?: number;
+        status?: string;
+        includeActive?: boolean;
+        dryRun?: boolean;
+      }) => {
+        runRunsPrune({
+          repo: opts.repo,
+          ...(opts.olderThan ? { olderThan: opts.olderThan } : {}),
+          ...(opts.keepLast != null ? { keepLast: opts.keepLast } : {}),
+          ...(opts.status ? { status: opts.status } : {}),
+          ...(opts.includeActive ? { includeActive: true } : {}),
+          ...(opts.dryRun ? { dryRun: true } : {}),
+        });
+      },
+    ),
+  );
+
+runsCmd
+  .command("replay")
+  .description("Re-render the summary of a past run (no re-execution)")
+  .argument("<runId>", "Run ID (or unique prefix)")
+  .option("-r, --repo <path>", "Repository path", ".")
+  .option("--json", "Emit the underlying record as JSON", false)
+  .action(
+    wrapCliAction(async (runId: string, opts: { repo: string; json?: boolean }) => {
+      const { root } = resolveRepo(opts.repo);
+      const dbPath = defaultDbPath(root);
+      if (!existsSync(dbPath)) {
+        throw new CliUsageError(`No runs database at ${dbPath}.`);
+      }
+      const db = initDb(dbPath);
+      try {
+        let run = getRun(db, runId);
+        if (!run) {
+          const matches = (await import("./store.js"))
+            .listRuns(db, { limit: 250 })
+            .filter((r) => r.runId.startsWith(runId));
+          if (matches.length === 1) run = matches[0]!;
+          else if (matches.length > 1) {
+            throw new CliUsageError(
+              `Ambiguous runId prefix "${runId}" — matches: ${matches.map((m) => m.runId).join(", ")}`,
+            );
+          }
+        }
+        if (!run) throw new CliUsageError(`Run not found: ${runId}`);
+        if (opts.json) {
+          console.log(JSON.stringify(run, null, 2));
+          return;
+        }
+        const { formatRunReplay } = await import("./copilot/replay.js");
+        console.log(formatRunReplay(run));
+      } finally {
+        db.close();
+      }
+    }),
+  );
+
+runsCmd
+  .command("trace")
+  .description("Stream the per-event JSONL audit trail for a run")
+  .argument("<runId>", "Run ID (or unique prefix)")
+  .option("-r, --repo <path>", "Repository path", ".")
+  .option("--json", "Emit one stable-shape JSON object per line (jq-friendly)", false)
+  .option("--all", "Show every event (default truncates the tail)", false)
+  .option("--limit <n>", "Cap to last N events when not --all", (v) => parseInt(v, 10))
+  .action(
+    wrapCliAction(
+      async (
+        runId: string,
+        opts: { repo: string; json?: boolean; all?: boolean; limit?: number },
+      ) => {
+        const { root } = resolveRepo(opts.repo);
+        const dataDir = path.join(root, ".kuzushi");
+        // Resolve the prefix via the DB so trace and replay share semantics.
+        let fullRunId = runId;
+        const dbPath = defaultDbPath(root);
+        if (existsSync(dbPath)) {
+          const db = initDb(dbPath);
+          try {
+            const matches = listRuns(db, { limit: 250 }).filter((r) => r.runId.startsWith(runId));
+            if (matches.length === 1) fullRunId = matches[0]!.runId;
+          } finally {
+            db.close();
+          }
+        }
+        const { readTraceEvents, formatRunTrace, formatRunTraceJson } = await import(
+          "./copilot/replay.js"
+        );
+        const events = readTraceEvents(dataDir, fullRunId);
+        if (opts.json) {
+          console.log(formatRunTraceJson(events, opts.all === true ? undefined : opts.limit));
+          return;
+        }
+        console.log(
+          formatRunTrace(fullRunId, events, opts.all === true ? events.length : (opts.limit ?? 80)),
+        );
+      },
+    ),
   );
 
 // ── intel (security intelligence management) ──────────────────────────────
