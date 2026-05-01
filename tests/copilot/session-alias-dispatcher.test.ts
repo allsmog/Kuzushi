@@ -42,7 +42,7 @@ function mkDispatcher(): {
       stack: () => [dispatcher],
       push: () => {},
       pop: () => undefined,
-      prompt: () => "kuzushi> ",
+      prompt: () => "kuzushi > ",
       handle: async () => ({}),
       allCommands: () => [],
       complete: () => [],
