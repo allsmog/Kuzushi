@@ -14,6 +14,7 @@ import type React from "react";
 import { formatCost, truncateEnd } from "../format.js";
 import { BLACK_CIRCLE, FINDING_GLYPH, LOWER_HOOK, THINKING_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import type { AgentActivityLine, ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import {
@@ -70,6 +71,12 @@ export function ActorTranscriptView({
     { keys: "Ctrl+C", label: "interrupt", secondary: true },
   ]);
 
+  const { columns } = useTerminalSize();
+  // Body lines previously truncated at a fixed 160 chars - overflowed an
+  // 80-col terminal hard. Heads at 80 wasted half the pane at 200 cols.
+  const headClipWidth = Math.max(40, Math.min(columns - 6, 160));
+  const bodyClipWidth = Math.max(40, Math.min(columns - 8, 200));
+
   const fingerprint = shell.focusedActor ?? null;
   const allFingerprints = collectThreatHuntFingerprints(agentActivity);
   const index = fingerprint ? allFingerprints.indexOf(fingerprint) : -1;
@@ -93,7 +100,13 @@ export function ActorTranscriptView({
       {fingerprint ? (
         <Header label={actorLabelFromFingerprint(fingerprint)} subtitle={subtitle} />
       ) : null}
-      <Transcript lines={lines} findings={actorFindings} maxRows={maxRows} />
+      <Transcript
+        lines={lines}
+        findings={actorFindings}
+        maxRows={maxRows}
+        headClipWidth={headClipWidth}
+        bodyClipWidth={bodyClipWidth}
+      />
       <OtherActors current={fingerprint} fingerprints={allFingerprints} findings={findings} />
     </ScreenContent>
   );
@@ -120,10 +133,14 @@ function Transcript({
   lines,
   findings,
   maxRows,
+  headClipWidth,
+  bodyClipWidth,
 }: {
   lines: ReadonlyArray<AgentActivityLine>;
   findings: ReadonlyArray<ActorViewFinding>;
   maxRows: number;
+  headClipWidth: number;
+  bodyClipWidth: number;
 }): React.ReactElement {
   const tail = lines.slice(-maxRows);
   const entries = tail.map((line, idx) => ({
@@ -145,6 +162,8 @@ function Transcript({
             head={entry.head}
             body={entry.body}
             inProgress={entry.inProgress}
+            headClipWidth={headClipWidth}
+            bodyClipWidth={bodyClipWidth}
           />
         ))
       )}
@@ -152,8 +171,10 @@ function Transcript({
         <EntryRow
           key={`f:${f.fingerprint}`}
           glyph={FINDING_GLYPH}
-          head={`Finding — ${truncateEnd(findingHeadline(f), 80)}`}
+          head={`Finding — ${truncateEnd(findingHeadline(f), Math.max(20, headClipWidth - 11))}`}
           body={`${f.severity} · ${f.filePath}:${f.startLine}`}
+          headClipWidth={headClipWidth}
+          bodyClipWidth={bodyClipWidth}
         />
       ))}
     </Box>
@@ -165,11 +186,15 @@ function EntryRow({
   head,
   body,
   inProgress,
+  headClipWidth,
+  bodyClipWidth,
 }: {
   glyph: string;
   head: string;
   body?: string;
   inProgress?: boolean;
+  headClipWidth: number;
+  bodyClipWidth: number;
 }): React.ReactElement {
   const glyphColor =
     glyph === LOWER_HOOK
@@ -185,11 +210,11 @@ function EntryRow({
   return (
     <Box flexDirection="column">
       <Text>
-        {glyphColor(glyph)} {headColor(head)}
+        {glyphColor(glyph)} {headColor(truncateEnd(head, headClipWidth))}
       </Text>
       {body ? (
         <Box paddingLeft={SPACING.md}>
-          <Text>{tokens.muted(truncateEnd(body, 160))}</Text>
+          <Text>{tokens.muted(truncateEnd(body, bodyClipWidth))}</Text>
         </Box>
       ) : null}
     </Box>
