@@ -1,6 +1,6 @@
 <img src="kuzushi.png" alt="Kuzushi" width="200" />
 
-# Kuzushi — Security-Native AI Operating Environment
+# Kuzushi — AI Cybersecurity Copilot
 
 [![CI](https://github.com/allsmog/Kuzushi/actions/workflows/ci.yml/badge.svg)](https://github.com/allsmog/Kuzushi/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/kuzushi)](https://www.npmjs.com/package/kuzushi)
@@ -8,7 +8,7 @@
 
 [kuzushi.dev](https://kuzushi.dev)
 
-Kuzushi combines offensive security, defensive operations, and compliance governance into a single interactive platform — powered by LLM agents, backed by a persistent workspace, and delivered through a rich terminal UI.
+Kuzushi is an AI cybersecurity copilot and security harness in one — a conversational terminal environment where LLM agents drive offense, defense, and compliance through a persistent agentic pipeline.
 
 Find the vulnerability. Prove it's exploitable. Deploy a honeypot to detect it. Check if it violates PCI DSS. Generate the patch. One tool, one conversation.
 
