@@ -4,7 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { executeTool } from "../agent-runtime/tools.js";
 import { getLogger } from "../logger.js";
-import { createSimpleTextIndexProvider } from "./simple-index.js";
+import { createSimpleTextIndexProvider, type SimpleTextIndexOptions } from "./simple-index.js";
 import type {
   CodeIntelligenceProvider,
   ImportGraphEdge,
@@ -64,15 +64,19 @@ const providerCache = new Map<string, Promise<CodeIntelligenceProvider>>();
 
 export async function getCodeIntelligenceProvider(
   repoRoot: string,
+  indexOptions?: SimpleTextIndexOptions,
 ): Promise<CodeIntelligenceProvider> {
   const scopeKey = await resolveRepoScopeKey(repoRoot);
-  const cacheKey = `${repoRoot}\x00${scopeKey}`;
+  // Bake limits into the cache key so a caller raising astIndexMaxFiles
+  // mid-process gets a fresh, larger index instead of the cached truncated one.
+  const limitsKey = `${indexOptions?.maxFiles ?? "_"}:${indexOptions?.maxFileBytes ?? "_"}`;
+  const cacheKey = `${repoRoot}\x00${scopeKey}\x00${limitsKey}`;
   const existing = providerCache.get(cacheKey);
   if (existing) {
     return existing;
   }
 
-  const created = createProvider(repoRoot, scopeKey);
+  const created = createProvider(repoRoot, scopeKey, indexOptions);
   providerCache.set(cacheKey, created);
   return created;
 }
@@ -80,8 +84,9 @@ export async function getCodeIntelligenceProvider(
 async function createProvider(
   repoRoot: string,
   scopeKey: string,
+  indexOptions?: SimpleTextIndexOptions,
 ): Promise<CodeIntelligenceProvider> {
-  const fallback = await createSimpleTextIndexProvider(repoRoot);
+  const fallback = await createSimpleTextIndexProvider(repoRoot, indexOptions);
   return new CachedCodeIntelligenceProvider(repoRoot, scopeKey, fallback);
 }
 
