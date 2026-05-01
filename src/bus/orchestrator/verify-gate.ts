@@ -123,6 +123,8 @@ export interface VerifyGateOptions {
   model: string;
   runtime: AgentRuntime;
   repoRoot: string;
+  /** Override the per-batch candidate count. Defaults to 15 when unset. */
+  batchSize?: number;
 }
 
 export interface VerifyGateCandidate {
@@ -155,7 +157,7 @@ const GATE_SCHEMA = {
   },
 } as const;
 
-const MAX_CANDIDATES_PER_BATCH = 15;
+const DEFAULT_MAX_CANDIDATES_PER_BATCH = 15;
 
 // ---------------------------------------------------------------------------
 // System prompt
@@ -220,9 +222,13 @@ export async function gateVerificationCandidates(
   const model = options.model;
 
   // Chunk into batches
+  const batchSize =
+    options.batchSize && options.batchSize > 0
+      ? Math.floor(options.batchSize)
+      : DEFAULT_MAX_CANDIDATES_PER_BATCH;
   const batches: VerifyGateCandidate[][] = [];
-  for (let i = 0; i < remainingCandidates.length; i += MAX_CANDIDATES_PER_BATCH) {
-    batches.push(remainingCandidates.slice(i, i + MAX_CANDIDATES_PER_BATCH));
+  for (let i = 0; i < remainingCandidates.length; i += batchSize) {
+    batches.push(remainingCandidates.slice(i, i + batchSize));
   }
 
   const allResults: VerifyGateResult[] = [...preclassified.results];

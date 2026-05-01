@@ -5,7 +5,20 @@
  * register named hooks with priority, then drain them in order with a timeout.
  */
 
-const SHUTDOWN_TIMEOUT_MS = 10_000;
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
+
+/**
+ * Total wall-clock budget for shutdown-hook drain. Operators can raise this
+ * via `KUZUSHI_SHUTDOWN_TIMEOUT_MS` when CI runs need more time to flush
+ * SQLite and remote sessions. Invalid values fall through to the default.
+ */
+function resolveShutdownTimeoutMs(): number {
+  const raw = process.env["KUZUSHI_SHUTDOWN_TIMEOUT_MS"];
+  if (raw == null || raw.trim() === "") return DEFAULT_SHUTDOWN_TIMEOUT_MS;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_SHUTDOWN_TIMEOUT_MS;
+  return Math.floor(n);
+}
 
 interface ShutdownHook {
   name: string;
@@ -55,7 +68,7 @@ export async function initiateShutdown(code: number): Promise<never> {
 
   const sorted = [...hooks].sort((a, b) => a.priority - b.priority);
 
-  const deadline = Date.now() + SHUTDOWN_TIMEOUT_MS;
+  const deadline = Date.now() + resolveShutdownTimeoutMs();
 
   for (const hook of sorted) {
     const remaining = deadline - Date.now();
