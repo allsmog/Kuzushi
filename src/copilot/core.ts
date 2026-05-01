@@ -46,6 +46,7 @@ import {
 import { createCorePromptArmorModule } from "../modules/prompt-armor/prompt-armor.js";
 import { createCoreRandoriModule } from "../modules/randori/randori.js";
 import { ModuleRegistry, parseModuleSpecifier } from "../modules/registry.js";
+import { createSecretScanModule } from "../modules/secret-scan/secret-scan.js";
 import { createSemgrepModule } from "../modules/semgrep/semgrep.js";
 import { createCoreShinsaModule } from "../modules/shinsa/shinsa.js";
 import { createSystemsHuntModule } from "../modules/systems-hunt/systems-hunt.js";
@@ -199,6 +200,7 @@ export class CopilotCore {
         createVendorAssessmentModule(),
         createChromeRceModule(),
         createDepHygieneModule(),
+        createSecretScanModule(),
         // Hidden orchestrator-level module — infrastructure DAG nodes
         // (task-selector, approval gates, taint-iris sub-tasks). Loaded so
         // the module registry owns every scan-DAG participant; the user
@@ -617,6 +619,9 @@ export class CopilotCore {
         break;
       case "prompt-armor":
         await this.loadWithScope(createCorePromptArmorModule());
+        break;
+      case "secret-scan":
+        await this.loadWithScope(createSecretScanModule());
         break;
       // Future built-in modules go here as they're ported
       default:
