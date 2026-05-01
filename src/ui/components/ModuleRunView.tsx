@@ -35,6 +35,7 @@ import { useEffect, useRef } from "react";
 import { formatCost, formatDuration, truncateEnd } from "../format.js";
 import { STEP_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { useElapsed } from "../hooks.js";
 import { Table } from "../primitives/Table.js";
 import { normalizeSeverity, type Severity, severityChalk, severityStyle } from "../severity.js";
@@ -91,6 +92,12 @@ export function ModuleRunView({
     run?.status === "running" && nowMs == null ? run.startedAtMs : undefined,
     1000,
   );
+  const { columns } = useTerminalSize();
+  // ToolHeader args + ActivityChip trail clip to the available width with
+  // sensible bounds so 80-col panes stay parsable and 200-col panes don't
+  // truncate at 56/80 chars when there's pane to spare.
+  const inputClipWidth = Math.max(32, Math.min(columns - 12, 140));
+  const trailClipWidth = Math.max(40, Math.min(columns - 8, 160));
 
   // O6: Notify the operator when a long run completes — terminal bell +
   // macOS notification + stderr badge. Fires once per run via a ref so
@@ -131,30 +138,26 @@ export function ModuleRunView({
       {run ? (
         <>
           {liveControls ? <LiveControlsHint /> : null}
-          <ToolHeader run={run} />
+          <ToolHeader run={run} inputClipWidth={inputClipWidth} />
           <TerminalRunBanner run={run} findings={findings} elapsed={elapsed} />
           <StepsBlock steps={run.steps} />
           {run.moduleId === "carlini-threat-hunt" ? (
-            <ActorsBlock agentActivity={agentActivity} run={run} />
+            <ActorsBlock agentActivity={agentActivity} run={run} trailClipWidth={trailClipWidth} />
           ) : null}
           <EvidenceBlock evidence={run.evidenceTail} />
           <FindingsBlock run={run} findings={findings} />
           <MetaRow run={run} />
           <ArtifactsBlock artifacts={run.artifacts} />
         </>
+      ) : shell.processing ? (
+        <DelayedBusyIndicator
+          label="Starting module run"
+          detail="Waiting for the first run event."
+        />
       ) : (
-        <>
-          {shell.processing ? (
-            <DelayedBusyIndicator
-              label="Starting module run"
-              detail="Waiting for the first run event."
-            />
-          ) : (
-            <Box marginTop={SPACING.sm}>
-              <Text>{tokens.muted("No active run for this module yet.")}</Text>
-            </Box>
-          )}
-        </>
+        <Box marginTop={SPACING.sm}>
+          <Text>{tokens.muted("No active run for this module yet.")}</Text>
+        </Box>
       )}
     </ScreenContent>
   );
@@ -168,9 +171,15 @@ function LiveControlsHint(): React.ReactElement {
   );
 }
 
-function ToolHeader({ run }: { run: NonNullable<ShellState["moduleRun"]> }): React.ReactElement {
+function ToolHeader({
+  run,
+  inputClipWidth,
+}: {
+  run: NonNullable<ShellState["moduleRun"]>;
+  inputClipWidth: number;
+}): React.ReactElement {
   const label = run.displayName ?? run.toolName ?? `${run.moduleId}:run`;
-  const args = run.inputSummary ? `(${truncateEnd(run.inputSummary, 56)})` : "";
+  const args = run.inputSummary ? `(${truncateEnd(run.inputSummary, inputClipWidth)})` : "";
   const glyph =
     run.status === "running"
       ? null
@@ -340,9 +349,11 @@ const STALLED_ACTOR_THRESHOLD_MS = 30_000;
 function ActorsBlock({
   agentActivity,
   run,
+  trailClipWidth,
 }: {
   agentActivity?: ReadonlyMap<string, ReadonlyArray<AgentActivityLine>>;
   run: NonNullable<ShellState["moduleRun"]>;
+  trailClipWidth: number;
 }): React.ReactElement {
   const rows = actorRowsFromActivity(agentActivity);
   if (rows.length === 0) return <Box />;
@@ -353,7 +364,7 @@ function ActorsBlock({
       <Box flexDirection="column" paddingLeft={SPACING.md}>
         {pauseHint ? <Text>{tokens.muted(pauseHint)}</Text> : null}
         {rows.map((row) => (
-          <ActorCard key={row.fingerprint} row={row} />
+          <ActorCard key={row.fingerprint} row={row} trailClipWidth={trailClipWidth} />
         ))}
       </Box>
     </Section>
@@ -387,7 +398,13 @@ export function computePauseHint(rows: ReadonlyArray<ActorRow>): string | null {
   return `Currently waiting on actor ${stalledIndex + 1} of ${total} — last activity ${seconds}s ago`;
 }
 
-function ActorCard({ row }: { row: ActorRow }): React.ReactElement {
+function ActorCard({
+  row,
+  trailClipWidth,
+}: {
+  row: ActorRow;
+  trailClipWidth: number;
+}): React.ReactElement {
   const heading = (
     <Text>
       {tokens.accent(row.shortId.padEnd(8))} {tokens.value(row.label.padEnd(30))}
@@ -397,13 +414,21 @@ function ActorCard({ row }: { row: ActorRow }): React.ReactElement {
   return (
     <Box flexDirection="column" marginBottom={SPACING.xs}>
       {heading}
-      {row.lastCompleted ? <ActivityChip line={row.lastCompleted} /> : null}
-      {row.running ? <ActivityChip line={row.running} /> : null}
+      {row.lastCompleted ? (
+        <ActivityChip line={row.lastCompleted} trailClipWidth={trailClipWidth} />
+      ) : null}
+      {row.running ? <ActivityChip line={row.running} trailClipWidth={trailClipWidth} /> : null}
     </Box>
   );
 }
 
-function ActivityChip({ line }: { line: AgentActivityLine }): React.ReactElement {
+function ActivityChip({
+  line,
+  trailClipWidth,
+}: {
+  line: AgentActivityLine;
+  trailClipWidth: number;
+}): React.ReactElement {
   const compact = toCompactRow(line);
   // Match `runningStyle()` — in-progress lives on `accent` (blue) so the
   // chip and the spinner above it agree on hue. `warn` would collide with
@@ -418,7 +443,7 @@ function ActivityChip({ line }: { line: AgentActivityLine }): React.ReactElement
   return (
     <Box paddingLeft={SPACING.md}>
       <Text>
-        {color(compact.glyph)} {tokens.muted(truncateEnd(trail, 80))}
+        {color(compact.glyph)} {tokens.muted(truncateEnd(trail, trailClipWidth))}
       </Text>
     </Box>
   );
