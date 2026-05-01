@@ -1,4 +1,5 @@
 import { createLogger } from "../logger.js";
+import { toErrorMessage } from "../utils.js";
 import type { DagNodeImpl, DagRunContext } from "./types.js";
 
 const log = createLogger({ stage: "task-wrappers" });
@@ -144,7 +145,7 @@ export function withLogging<TInput = unknown, TOutput = unknown>(
           {
             taskId: task.id,
             durationMs,
-            error: err instanceof Error ? err.message : String(err),
+            error: toErrorMessage(err),
           },
           "Task execution failed",
         );

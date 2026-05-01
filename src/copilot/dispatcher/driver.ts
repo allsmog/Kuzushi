@@ -7,9 +7,9 @@
  */
 
 import type { JobManager } from "../../jobs/manager.js";
+import { toErrorMessage } from "../../utils.js";
 import type { PrintSink } from "../print.js";
 import type { CommandContext, CommandDispatcher, CommandResult, Driver } from "./types.js";
-
 export interface DriverOptions {
   print: PrintSink;
   cwd: string;
@@ -482,7 +482,7 @@ async function applyOneFilter(input: string, filter: string): Promise<string> {
         await writeFile(target, input.endsWith("\n") ? input : `${input}\n`, "utf8");
         return `[+] Wrote ${input.split("\n").length} lines to ${target}`;
       } catch (err) {
-        return `[-] save: ${err instanceof Error ? err.message : String(err)}`;
+        return `[-] save: ${toErrorMessage(err)}`;
       }
     }
     case "page": {

@@ -13,12 +13,12 @@ import type { AgentRuntimeBackend } from "../../contracts.js";
 import type { ModuleRegistry } from "../../modules/registry.js";
 import type { CopilotModule } from "../../modules/types.js";
 import { wrapToWidth } from "../../ui/format.js";
+import { toErrorMessage } from "../../utils.js";
 import { type Datastore, formatOptionsTable } from "../options.js";
 import { formatSearchResult, searchCatalog } from "../search.js";
 import { randomTip } from "../tips.js";
 import { ModuleDispatcher, type ModuleToolRunner, modelOptionSpec } from "./module-dispatcher.js";
 import type { CommandContext, CommandDispatcher, CommandResult } from "./types.js";
-
 export interface CoreDispatcherOptions {
   registry: ModuleRegistry;
   /** Global datastore — stores `setg`-set keys. */
@@ -529,7 +529,7 @@ export class CoreDispatcher implements CommandDispatcher {
       await this.opts.runResource(file, ctx.signal);
       return {};
     } catch (err) {
-      return { output: `[-] Resource failed: ${err instanceof Error ? err.message : String(err)}` };
+      return { output: `[-] Resource failed: ${toErrorMessage(err)}` };
     }
   }
 
@@ -541,7 +541,7 @@ export class CoreDispatcher implements CommandDispatcher {
       await this.opts.makeResource(file);
       return { output: `Saved resource script to ${file}` };
     } catch (err) {
-      return { output: `[-] makerc failed: ${err instanceof Error ? err.message : String(err)}` };
+      return { output: `[-] makerc failed: ${toErrorMessage(err)}` };
     }
   }
 
@@ -576,7 +576,7 @@ export class CoreDispatcher implements CommandDispatcher {
         await this.opts.runResource(file, ctx.signal);
         return {};
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = toErrorMessage(err);
         return { output: `[-] Recipe failed: ${msg}` };
       }
     }
@@ -602,7 +602,7 @@ export class CoreDispatcher implements CommandDispatcher {
     try {
       updated = await this.opts.openEditor(initial);
     } catch (err) {
-      return { output: `[-] edit failed: ${err instanceof Error ? err.message : String(err)}` };
+      return { output: `[-] edit failed: ${toErrorMessage(err)}` };
     }
     if (updated == null) return { output: "[*] Edit cancelled — value unchanged." };
 
@@ -866,7 +866,7 @@ export class CoreDispatcher implements CommandDispatcher {
       await this.opts.openRepl();
       return { output: "[*] REPL session ended." };
     } catch (err) {
-      return { output: `[-] REPL failed: ${err instanceof Error ? err.message : String(err)}` };
+      return { output: `[-] REPL failed: ${toErrorMessage(err)}` };
     }
   }
 
@@ -892,7 +892,7 @@ export class CoreDispatcher implements CommandDispatcher {
       const resolved = spool.start(sub, ctx.cwd);
       return { output: `[+] Spooling to ${resolved}` };
     } catch (err) {
-      return { output: `[-] spool failed: ${err instanceof Error ? err.message : String(err)}` };
+      return { output: `[-] spool failed: ${toErrorMessage(err)}` };
     }
   }
 
@@ -1108,7 +1108,7 @@ export class CoreDispatcher implements CommandDispatcher {
           output: `[+] Scheduled '${entry.label}' every ${entry.interval} → ${entry.command}`,
         };
       } catch (err) {
-        return { output: `[-] ${err instanceof Error ? err.message : String(err)}` };
+        return { output: `[-] ${toErrorMessage(err)}` };
       }
     }
     return {

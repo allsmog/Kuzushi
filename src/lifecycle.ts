@@ -1,3 +1,5 @@
+import { toErrorMessage } from "./utils.js";
+
 /**
  * Graceful shutdown coordinator.
  *
@@ -72,9 +74,7 @@ export async function initiateShutdown(code: number): Promise<never> {
         ),
       ]);
     } catch (err) {
-      console.error(
-        `[shutdown] Hook "${hook.name}" failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      console.error(`[shutdown] Hook "${hook.name}" failed: ${toErrorMessage(err)}`);
     }
   }
 

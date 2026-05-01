@@ -16,6 +16,7 @@ import {
 } from "../../agents/tasks/tob-audit/resolve-tob-plugin.js";
 import { buildTobAuditPrompt, tobAuditTask } from "../../agents/tasks/tob-audit/tob-audit.js";
 import { resolveRepo } from "../../cli/shared.js";
+import { toErrorMessage } from "../../utils.js";
 import { defineHiddenDagNodeTool } from "../hidden-dag-node.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
@@ -93,7 +94,7 @@ const auditTool: ModuleTool = {
     try {
       plugins = resolveTobPlugins();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return {
         ok: false,
         output:
@@ -175,7 +176,7 @@ const auditTool: ModuleTool = {
         costUsd: result.costUsd,
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return { ok: false, output: `tob:audit error: ${msg}` };
     }
   },
@@ -199,7 +200,7 @@ const skillsTool: ModuleTool = {
     try {
       plugins = resolveTobPlugins();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return {
         ok: false,
         output:

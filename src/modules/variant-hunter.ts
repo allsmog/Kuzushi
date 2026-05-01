@@ -16,6 +16,7 @@ import path from "node:path";
 import { analyzeVariants } from "../agents/tasks/variant-analysis.js";
 import type { Finding } from "../scanners/types.js";
 import type { TriageResult, Verdict } from "../types.js";
+import { toErrorMessage } from "../utils.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "./types.js";
 
 // Shared helpers
@@ -34,7 +35,7 @@ async function loadFindingAndTriage(
   try {
     db = initDb(dbPath);
   } catch (err) {
-    return `Could not open findings DB at ${dbPath}: ${err instanceof Error ? err.message : String(err)}`;
+    return `Could not open findings DB at ${dbPath}: ${toErrorMessage(err)}`;
   }
 
   try {
@@ -226,7 +227,7 @@ const liftPatternTool: ModuleTool = {
         }
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return { ok: false, output: `variant:lift-pattern error: ${msg}`, costUsd };
     }
 
@@ -409,7 +410,7 @@ const huntTool: ModuleTool = {
         costUsd: result.costUsd,
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return { ok: false, output: `variant:hunt error: ${msg}` };
     }
   },

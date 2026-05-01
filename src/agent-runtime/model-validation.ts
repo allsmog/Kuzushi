@@ -1,7 +1,7 @@
 import type { AgentRuntimeBackend } from "../contracts.js";
 import { AGENT_RUNTIME_BACKENDS } from "../contracts.js";
+import { toErrorMessage } from "../utils.js";
 import { parsePiAiModelSpec } from "./model-spec.js";
-
 export function validateModelOverride(
   backend: AgentRuntimeBackend | undefined,
   model: string,
@@ -17,7 +17,7 @@ export function validateModelOverride(
       parsePiAiModelSpec(value);
       return null;
     } catch (err) {
-      return err instanceof Error ? err.message : String(err);
+      return toErrorMessage(err);
     }
   }
 

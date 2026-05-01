@@ -9,6 +9,7 @@
  */
 
 import type { KnowledgeRegistry } from "../knowledge/types.js";
+import { toErrorMessage } from "../utils.js";
 import { installDagToolExecuteWrappers } from "./dag-execute.js";
 import type { DagRegistry } from "./dag-registry.js";
 import { registerDagToolsInDagRegistry } from "./dag-registry.js";
@@ -144,9 +145,7 @@ export class ModuleRegistry {
       if (err instanceof ModuleLoadError) {
         throw err;
       }
-      throw new Error(
-        `Failed to load module "${mod.id}": ${err instanceof Error ? err.message : String(err)}`,
-      );
+      throw new Error(`Failed to load module "${mod.id}": ${toErrorMessage(err)}`);
     }
   }
 

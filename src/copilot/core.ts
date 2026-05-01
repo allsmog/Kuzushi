@@ -62,6 +62,8 @@ import { createCoreVulnScoutModule } from "../modules/vuln-scout/vuln-scout.js";
 import { createXRayModule } from "../modules/x-ray/x-ray.js";
 import type { KuzushiConfig } from "../types.js";
 
+import { toErrorMessage } from "../utils.js";
+
 /**
  * Host SDK version injected into `ctx.host.sdkVersion` on every tool call.
  * Read once at load time from the runtime `kuzushi` package.json; falls
@@ -459,7 +461,7 @@ export class CopilotCore {
     } catch (err) {
       scope?.emit("tool:on_error", {
         qualifiedName,
-        error: err instanceof Error ? err.message : String(err),
+        error: toErrorMessage(err),
       });
       throw err;
     }

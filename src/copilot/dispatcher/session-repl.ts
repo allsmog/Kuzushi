@@ -10,6 +10,7 @@
  */
 
 import type { SessionHandle } from "../../sessions/manager.js";
+import { toErrorMessage } from "../../utils.js";
 import type { CommandContext, CommandDispatcher, CommandResult } from "./types.js";
 
 const COMMANDS: Record<string, string> = {
@@ -63,7 +64,7 @@ export class InteractiveSessionDispatcher implements CommandDispatcher {
       return { output: out };
     } catch (err) {
       return {
-        output: `[-] session: ${err instanceof Error ? err.message : String(err)}`,
+        output: `[-] session: ${toErrorMessage(err)}`,
       };
     }
   }

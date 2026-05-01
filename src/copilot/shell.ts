@@ -85,8 +85,8 @@ import {
   shouldPersistStoryEvent,
   upsertBackgroundJob,
 } from "../ui/task-story.js";
+import { toErrorMessage } from "../utils.js";
 import { CopilotCore } from "./core.js";
-
 import { looksLikePath, resolveTool } from "./dispatch/resolve-tool.js";
 import { CoreDispatcher, DispatcherDriver, WorkspaceDispatcher } from "./dispatcher/index.js";
 import { ModuleDispatcher } from "./dispatcher/module-dispatcher.js";
@@ -670,7 +670,7 @@ function resolveHydrationTarget(opts: ShellOptions, shell: ShellState): string |
 }
 
 function noteHydrationError(status: ShellArtifactStatus, label: string, error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = toErrorMessage(error);
   status.lastError = status.lastError
     ? `${status.lastError}; ${label}: ${message}`
     : `${label}: ${message}`;
@@ -1416,7 +1416,7 @@ async function applyCredentialOutcome(
         ]);
         persistedTo = configPath();
       } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
+        const detail = toErrorMessage(error);
         await rebuildShellRuntime(opts);
         return {
           enabled: true,
@@ -1468,7 +1468,7 @@ async function applyCredentialOutcome(
         persistedTo: writtenTo,
       };
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+      const detail = toErrorMessage(error);
       return {
         enabled: true,
         message: `Copilot enabled (in-memory). Failed to persist credentials: ${detail}`,
@@ -1492,7 +1492,7 @@ export function createShellSession(
       session: runtime.createSession(options),
     };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
+    const detail = toErrorMessage(error);
     return {
       session: undefined,
       error: `Failed to create agent session: ${detail}`,
@@ -4369,7 +4369,7 @@ async function startInkShell(
         }
         appendToHistory(store, {
           type: "error",
-          text: err instanceof Error ? err.message : String(err),
+          text: toErrorMessage(err),
           timestamp: Date.now(),
         });
         finishActiveAction();
@@ -4638,7 +4638,7 @@ async function startInkShell(
             status: "fail",
             importance: "primary",
             message: `${asyncToolLabel} failed`,
-            detail: error instanceof Error ? error.message : String(error),
+            detail: toErrorMessage(error),
             source: localResult.executedToolName,
             ...(activeTurnId ? { turnId: activeTurnId } : {}),
             durable: true,
@@ -4646,7 +4646,7 @@ async function startInkShell(
         }
         appendToHistory(store, {
           type: "error",
-          text: error instanceof Error ? error.message : String(error),
+          text: toErrorMessage(error),
           timestamp: Date.now(),
         });
         try {
@@ -4857,7 +4857,7 @@ async function startInkShell(
         ensureRawMode();
         return;
       }
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       appendStoryEvent(store, {
         kind: "result",
         status: "fail",
@@ -5144,7 +5144,7 @@ async function startInkShell(
       };
       ttyStream.on("data", devTtyListener);
       ttyStream.on("error", (err) => {
-        abortDebug(`dev-tty: stream error ${err instanceof Error ? err.message : String(err)}`);
+        abortDebug(`dev-tty: stream error ${toErrorMessage(err)}`);
       });
       devTtyAbortTeardown = () => {
         try {
@@ -5157,9 +5157,7 @@ async function startInkShell(
       };
       abortDebug("dev-tty: reader installed on /dev/tty");
     } catch (err) {
-      abortDebug(
-        `dev-tty: could not open /dev/tty: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      abortDebug(`dev-tty: could not open /dev/tty: ${toErrorMessage(err)}`);
     }
   }
 
@@ -5451,11 +5449,7 @@ async function startReadlineShell(
               ),
             };
           }
-          const message = activeAbortRequested
-            ? CANCELLED_TOOL_MESSAGE
-            : error instanceof Error
-              ? error.message
-              : String(error);
+          const message = activeAbortRequested ? CANCELLED_TOOL_MESSAGE : toErrorMessage(error);
           await writeAndDrain(process.stdout, message);
           try {
             rlState = (await hydrateShellArtifacts(rlState, core, opts, dataDir)).shell;
@@ -5528,11 +5522,7 @@ async function startReadlineShell(
           }
         }
       } catch (error) {
-        const message = activeAbortRequested
-          ? CANCELLED_AGENT_MESSAGE
-          : error instanceof Error
-            ? error.message
-            : String(error);
+        const message = activeAbortRequested ? CANCELLED_AGENT_MESSAGE : toErrorMessage(error);
         if (pendingAssistantText) {
           await writeAndDrain(process.stdout, pendingAssistantText);
         }
@@ -6660,7 +6650,7 @@ function handlePlanCommand(
           abortController,
         });
       } catch (err) {
-        errorMsg = err instanceof Error ? err.message : String(err);
+        errorMsg = toErrorMessage(err);
       }
       if (ctx.uiStore) {
         updateShell(ctx.uiStore, (shell) => ({
@@ -7534,7 +7524,7 @@ function handleLoadCommand(args: string[], core: CopilotCore): LocalCommandResul
         const tools = core.registry.allTools();
         return `Module loaded: ${specifier}\n  ${modules.length} modules, ${tools.length} tools available.`;
       } catch (err) {
-        return `Failed to load module: ${err instanceof Error ? err.message : String(err)}`;
+        return `Failed to load module: ${toErrorMessage(err)}`;
       }
     },
   };
@@ -7839,7 +7829,7 @@ function handleFindingsExportCommand(
         }
         return `Wrote ${vulns.length} finding${vulns.length === 1 ? "" : "s"} → ${outputPath}`;
       } catch (err) {
-        return `Failed to write ${outputPath}: ${err instanceof Error ? err.message : String(err)}`;
+        return `Failed to write ${outputPath}: ${toErrorMessage(err)}`;
       }
     },
   };
@@ -8555,7 +8545,7 @@ function handlePromptEditCommand(
           `Set ${promptOptionRef(target.toolName, outcome.promptKey)} = ${outcome.filePath}`,
         ].join("\n");
       } catch (err) {
-        return `Prompt editor error: ${err instanceof Error ? err.message : String(err)}`;
+        return `Prompt editor error: ${toErrorMessage(err)}`;
       }
     },
   };
@@ -8675,7 +8665,7 @@ function handlePromptResetCommand(
     }
   } catch (err) {
     return {
-      output: `Failed to delete ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+      output: `Failed to delete ${filePath}: ${toErrorMessage(err)}`,
     };
   }
   return {
@@ -9425,7 +9415,7 @@ function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandR
       try {
         applyConfigPatch([{ path: "agentRuntimeBackend", value: sub }]);
       } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
+        const detail = toErrorMessage(error);
         return `Failed to update backend: ${detail}`;
       }
       opts.config.agentRuntimeBackend = sub;
@@ -9508,7 +9498,7 @@ function handleProviderCommand(args: string[], opts: ShellOptions): LocalCommand
       try {
         applyConfigPatch([{ path: "model", value: modelId }]);
       } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
+        const detail = toErrorMessage(error);
         return `Failed to set model: ${detail}`;
       }
       opts.config.model = modelId;
@@ -9674,7 +9664,7 @@ function handleAuthImportFromConfig(opts: ShellOptions): LocalCommandResult {
         const text = fs.readFileSync(cfgPath, "utf-8");
         raw = JSON.parse(text) as Record<string, unknown>;
       } catch (error) {
-        return `Could not read ${cfgPath}: ${error instanceof Error ? error.message : String(error)}`;
+        return `Could not read ${cfgPath}: ${toErrorMessage(error)}`;
       }
       const arc = raw.agentRuntimeConfig;
       if (!arc || typeof arc !== "object") {
@@ -9848,7 +9838,7 @@ function handleConfigCommand(args: string[], ctx: ShellContext): LocalCommandRes
         try {
           setConfigValue(key, raw);
         } catch (err) {
-          return `Failed to set ${key}: ${err instanceof Error ? err.message : String(err)}`;
+          return `Failed to set ${key}: ${toErrorMessage(err)}`;
         }
         const topLevel = key.split(".")[0] ?? key;
         const needsRestart = CONFIG_RESTART_KEYS.has(topLevel);
