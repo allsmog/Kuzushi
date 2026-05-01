@@ -44,7 +44,6 @@ export class AgenticPlugin implements ScannerPlugin {
     if (!this.model) {
       throw new Error("agentic scanner used before init() — model is not configured");
     }
-    const model = this.model;
     const repoName = path.basename(repoRoot);
     const model = asOptionalString(_config["model"]) || this.model;
     if (!model) {

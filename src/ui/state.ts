@@ -853,8 +853,6 @@ export interface ModuleRunSlice {
   findingCount?: number;
   /** Review candidates emitted when the agent/backend did not confirm findings. */
   reviewCandidateCount?: number;
-  /** Agent runtime backend used by the focused module run. */
-  agentRuntimeBackend?: string;
   /** Normalized agent output status such as valid-json or invalid-json. */
   agentStatus?: string;
   /** Deterministic candidate count reported by hunt-class module tools. */
