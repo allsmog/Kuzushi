@@ -45,8 +45,7 @@ export interface ShellCommandEntry {
 export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   {
     syntax: "/help",
-    description:
-      "Show core workflow help (alias: /h); `/help advanced` shows all commands",
+    description: "Show core workflow help (alias: /h); `/help advanced` shows all commands",
     group: "nav",
   },
   {
@@ -106,8 +105,7 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
   },
   {
     syntax: "/yes | /no",
-    description:
-      "Apply or discard the pending planner proposal (also: y/n keys, Esc cancels)",
+    description: "Apply or discard the pending planner proposal (also: y/n keys, Esc cancels)",
     group: "planner",
   },
   {

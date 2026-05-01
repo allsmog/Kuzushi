@@ -12,7 +12,7 @@ import { accessSync, constants, existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { parsePiAiModelSpec } from "../agent-runtime/model-spec.js";
 import type { ConfigValidationIssue } from "../config/validation.js";
-import { providerEnvVar, resolveActiveCredentials, resolveAmbientOauthToken } from "../config.js";
+import { providerEnvVar, resolveActiveCredentials } from "../config.js";
 import type { KuzushiConfig } from "../types.js";
 
 /** Return the first directory on PATH containing an executable named `bin`, or null. */
@@ -141,39 +141,23 @@ function checkAgentRuntimeCredentials(config: KuzushiConfig): {
   check: PreflightCheck;
   issue: ConfigValidationIssue | null;
 } {
-  const backend = config.agentRuntimeBackend ?? "pi-ai";
   const savedCredentials = resolveActiveCredentials(config);
   if (savedCredentials.apiKey?.trim() || savedCredentials.authToken?.trim()) {
     return {
       check: {
         name: "credentials",
         status: "ok",
-        detail: `saved ${backend} provider credentials are configured`,
+        detail: "saved provider credentials are configured",
       },
       issue: null,
     };
   }
 
-  let providerId = "anthropic";
-  if (backend === "pi-ai") {
-    try {
-      providerId = parsePiAiModelSpec(config.model ?? "").provider;
-    } catch {
-      providerId = "";
-    }
-  } else if (backend === "claude") {
-    providerId = "anthropic";
-  } else if (backend === "codex") {
-    providerId = "openai";
-  } else {
-    return {
-      check: {
-        name: "credentials",
-        status: "skipped",
-        detail: `backend "${backend}" manages its own credentials`,
-      },
-      issue: null,
-    };
+  let providerId = "";
+  try {
+    providerId = parsePiAiModelSpec(config.model ?? "").provider;
+  } catch {
+    providerId = "";
   }
 
   const envVar = providerId ? providerEnvVar(providerId) : undefined;
@@ -220,22 +204,6 @@ function checkAgentRuntimeCredentials(config: KuzushiConfig): {
       },
       issue: null,
     };
-  }
-
-  // Inherited-auth mode: a discoverable OAuth token (env var, configured
-  // file, or `~/.claude/...`) is treated as a valid credential.
-  if (config.auth === "inherited" && providerId === "anthropic") {
-    const ambient = resolveAmbientOauthToken(config);
-    if (ambient) {
-      return {
-        check: {
-          name: "credentials",
-          status: "ok",
-          detail: `inherited OAuth (${ambient.source})`,
-        },
-        issue: null,
-      };
-    }
   }
 
   const docsLink = providerDocsLink(providerId);

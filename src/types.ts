@@ -3,7 +3,6 @@ import type { DiscoveredModule } from "./discovery/types.js";
 import type { QualityGateConfig } from "./quality-gate-types.js";
 import type { TaskConfig, TaskId } from "./scanners/types.js";
 import type {
-  AgentRuntimeBackendZ,
   AgentRuntimeConfigZ,
   AgentRuntimeCredentialsZ,
   AttackPathAnalysisZ,
@@ -80,24 +79,15 @@ export type BusBackend = BusBackendZ;
 /** Scanner execution mode. */
 export type ScanMode = ScanModeZ;
 
-/** Runtime provider for agent execution. */
-export type AgentRuntimeBackend = AgentRuntimeBackendZ;
-
 /**
- * Credentials for a single agent runtime backend.
- *
- * Consumed directly by `ClaudeAgentRuntime`, `PiAiAgentRuntime`, and `CodexAgentRuntime`. The shape
- * matches the credential/env-var fields they resolve to.
+ * Credentials for the agent runtime (pi-ai). The shape matches the
+ * credential/env-var fields the underlying provider drivers resolve to.
  */
 export type AgentRuntimeCredentials = AgentRuntimeCredentialsZ;
 
 /**
- * Per-backend credentials bag. Switching `agentRuntimeBackend` selects which
- * slot is active; the unselected slot is preserved so operators can flip back
- * without re-authing.
- *
- * Legacy flat configs (`{ apiKey, authToken, baseUrl }` at the top level) are migrated on
- * load into `{ claude: { ... } }` — see `normalizeAgentRuntimeConfig`.
+ * Runtime credentials bag — currently a single flat slot for pi-ai. Kept as a
+ * named alias so future per-provider plumbing has a stable type seat.
  */
 export type AgentRuntimeConfig = AgentRuntimeConfigZ;
 
@@ -345,6 +335,11 @@ export interface FileIndex {
 export interface KuzushiConfig {
   /** Default model identifier for AI tasks and stages (e.g. "anthropic:claude-sonnet-4-6"). */
   model: string;
+  /**
+   * Operator-curated pool of models the shell's `/model` switcher offers.
+   * Invariant: `availableModels` (when set) contains `model`.
+   */
+  availableModels?: string[];
   /** Enable post-triage exploitability verification phase. */
   verify?: boolean;
   /** Max turns for verification agents. */
@@ -417,24 +412,8 @@ export interface KuzushiConfig {
   triageConcurrency: number;
   /** Scanner execution strategy. */
   scanMode: ScanMode;
-  /** Backend used for agent execution. */
-  agentRuntimeBackend?: AgentRuntimeBackend;
   /** Optional runtime-level credentials and endpoint overrides. */
   agentRuntimeConfig?: AgentRuntimeConfig;
-  /**
-   * Auth mode. `"inherited"` means "trust whatever credentials the parent
-   * process / Claude Code session already has" — the credential prompt is
-   * skipped on subsequent launches. Set by picking "Inherited Claude" in
-   * the credential prompt or via `--inherit-claude` on the CLI.
-   */
-  auth?: "inherited";
-  /**
-   * Path to a file containing an Anthropic OAuth bearer token (raw token
-   * starting with `sk-ant-oat...`, or a Claude Code `.credentials.json`
-   * with `claudeAiOauth.accessToken`). Used by inherited-auth mode when
-   * no `ANTHROPIC_API_KEY` / `ANTHROPIC_OAUTH_TOKEN` env var is set.
-   */
-  oauthTokenFile?: string;
   /** Enabled task IDs, in execution order. */
   tasks: TaskId[];
   /** Default severity filter. */

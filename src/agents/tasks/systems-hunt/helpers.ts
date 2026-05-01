@@ -490,10 +490,7 @@ function selectHelperTemplates(
   ) {
     selectedIds.add("rust-unsafe-len");
   }
-  if (
-    surface.kind === "resource-provenance" ||
-    surface.domains.includes("resource-provenance")
-  ) {
+  if (surface.kind === "resource-provenance" || surface.domains.includes("resource-provenance")) {
     selectedIds.add("shared-backing-resource");
     selectedIds.add("in-place-writable-alias");
     selectedIds.add("scratch-write-boundary");

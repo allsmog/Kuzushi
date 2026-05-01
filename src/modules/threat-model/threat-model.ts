@@ -295,8 +295,8 @@ const buildTool: ModuleTool = {
             `threat-model:build returned 0 elements with $0 LLM cost — the runtime appears unauthenticated.\n` +
             `  Target:   ${name} (${root})\n` +
             `  Stages:   ${stages.join(", ")} (each returned empty)\n` +
-            `  Diagnose: /backend show — verify a credential slot has apiKey set or that ANTHROPIC_API_KEY is in env.\n` +
-            `  Note:     project config.json keys 'agentRuntimeConfig'/'agentRuntimeBackend' are stripped for safety; use .kuzushi/credentials.json instead.`,
+            `  Diagnose: verify agentRuntimeConfig.apiKey is set or ANTHROPIC_API_KEY is in env.\n` +
+            `  Note:     project config.json key 'agentRuntimeConfig' is stripped for safety; use .kuzushi/credentials.json instead.`,
           costUsd: 0,
         };
       }

@@ -33,7 +33,7 @@ export class LoggingAgentRuntime implements AgentRuntime {
 
     if (inner.createSession) {
       this.createSession = (baseOptions: AgentQueryOptions): AgentSession => {
-        assertRuntimeModelSelection(this.id, baseOptions.model, baseOptions.fallbackModel);
+        assertRuntimeModelSelection(baseOptions.model, baseOptions.fallbackModel);
         // Non-null because we only assign `this.createSession` when inner has it.
         const innerSession = inner.createSession!(baseOptions);
         const origQuery = innerSession.query.bind(innerSession);
@@ -58,7 +58,7 @@ export class LoggingAgentRuntime implements AgentRuntime {
 
     if (inner.queryBatch) {
       this.queryBatch = (requests: AgentBatchRequest[], baseOptions: AgentQueryOptions) => {
-        assertRuntimeModelSelection(this.id, baseOptions.model, baseOptions.fallbackModel);
+        assertRuntimeModelSelection(baseOptions.model, baseOptions.fallbackModel);
         log.info(`Batch request: ${requests.length} prompts -> ${baseOptions.model}`);
         return inner.queryBatch!(requests, baseOptions);
       };
@@ -67,7 +67,7 @@ export class LoggingAgentRuntime implements AgentRuntime {
 
   async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
     const { prompt, options } = request;
-    assertRuntimeModelSelection(this.id, options.model, options.fallbackModel);
+    assertRuntimeModelSelection(options.model, options.fallbackModel);
     const lines = prompt.split("\n");
     const preview = lines.slice(0, 5).join("\n");
     const suffix = lines.length > 5 ? `\n  ... (${lines.length} lines total)` : "";

@@ -18,12 +18,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type {
-  getRun as getRunFn,
-  listRuns as listRunsFn,
-  PipelineRunRecord,
-} from "../store.js";
-import { readRunSummary, type RunSummary } from "./run-metadata.js";
+import type { listRuns as listRunsFn, PipelineRunRecord } from "../store.js";
+import { type RunSummary, readRunSummary } from "./run-metadata.js";
 
 // Types
 
@@ -110,7 +106,6 @@ export function formatRunReplay(run: PipelineRunRecord, summary?: RunSummary): s
     lines.push("reproducibility");
     lines.push(`  kuzushi   ${repro.kuzushiVersion}`);
     lines.push(`  model     ${repro.model}`);
-    if (repro.agentRuntimeBackend) lines.push(`  runtime   ${repro.agentRuntimeBackend}`);
     lines.push(`  config    ${repro.configHash.slice(0, 22)}`);
     if (repro.git?.sha) {
       const shortSha = repro.git.sha.slice(0, 7);
@@ -369,7 +364,10 @@ function truncate(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max - 1)}\u2026`;
 }
 
-function formatDuration(startedAt: string | null | undefined, completedAt: string | null | undefined): string {
+function formatDuration(
+  startedAt: string | null | undefined,
+  completedAt: string | null | undefined,
+): string {
   if (!startedAt || !completedAt) return "-";
   const a = Date.parse(startedAt);
   const b = Date.parse(completedAt);

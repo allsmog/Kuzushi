@@ -19,11 +19,6 @@ import {
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  killAllClaudeSubprocesses,
-  warnIfNonAnthropicProxy,
-  warnIfStaleModel,
-} from "../agent-runtime/claude.js";
 import { configureAgentRuntime } from "../agent-runtime/index.js";
 import {
   describeModelOverrideFormat,
@@ -178,7 +173,7 @@ const SHELL_ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Bash", "LS"];
 const SHELL_HISTORY_FILENAME = "shell-history.json";
 const MAX_SHELL_HISTORY = 1000;
 const DEFAULT_NO_SESSION_MESSAGE =
-  "Copilot disabled — no interactive agent session is available. Run /backend pi-ai, /backend claude, or /backend codex, then /auth to set credentials.";
+  "Copilot disabled — no interactive agent session is available. Run /auth to set credentials, then /model to pick a provider model.";
 const CREDENTIALS_CANCELLED_MESSAGE =
   "Copilot disabled. Run /auth to enable it later, export a provider API key, or save credentials to ./.kuzushi/credentials.json.";
 const CANCELLED_TOOL_MESSAGE = "Cancelled active operation.";
@@ -1311,17 +1306,9 @@ export function finalizeAssistantText(
  */
 async function ensureClaudeShellRuntime(opts: ShellOptions, store?: UIStore): Promise<void> {
   if (typeof opts.runtime.createSession === "function") return;
-  const backend = opts.config.agentRuntimeBackend ?? "pi-ai";
-  // Pre-policy this used to silently construct a ClaudeAgentRuntime and
-  // mutate opts.config.agentRuntimeBackend = "claude". That violates the
-  // "no silent runtime swap" rule — operators who chose a different
-  // backend would suddenly find their shell running on Anthropic Claude
-  // (different provider, different billing) without explicit consent.
   const message =
-    `Backend "${backend}" does not support interactive sessions. ` +
-    `Kuzushi will not silently switch your shell to "claude". ` +
-    `Run \`/backend claude\` (and \`/provider <anthropic:model>\` if needed) to use the interactive shell, ` +
-    `or use \`kuzushi run\`/\`kuzushi scan\` which work with any backend.`;
+    "The active runtime does not support interactive sessions. " +
+    "Use `kuzushi run` / `kuzushi scan` for headless work, or restart the shell.";
   const { KuzushiSilentFallbackError } = await import("../agent-runtime/enforcement.js");
   if (store) {
     appendToHistory(store, { type: "error", text: message, timestamp: Date.now() });
@@ -1358,21 +1345,8 @@ async function rebuildShellRuntime(opts: ShellOptions): Promise<void> {
 }
 
 async function hasActiveShellCredentials(opts: ShellOptions): Promise<boolean> {
-  // Inherited mode: the operator opted to trust whatever the parent process
-  // / Claude Code session already has. Skip the prompt unconditionally —
-  // the SDK subprocess will resolve creds at query time and surface a real
-  // error if none are reachable, which is more useful than a generic
-  // "no creds" preflight.
-  if (opts.config.auth === "inherited") return true;
-
   const { resolveActiveCredentials } = await import("../config.js");
   const active = resolveActiveCredentials(opts.config);
-  const backend = opts.config.agentRuntimeBackend ?? "pi-ai";
-
-  if (backend === "claude") {
-    const { hasAnthropicCredentials } = await import("../ui/setup.js");
-    return hasAnthropicCredentials(active.apiKey, active.authToken);
-  }
 
   if (active.apiKey || active.authToken || active.baseUrl) return true;
 
@@ -1380,19 +1354,12 @@ async function hasActiveShellCredentials(opts: ShellOptions): Promise<boolean> {
   return hasAnyProviderCredentials();
 }
 
-/** Merge `patch` into the active backend's slot in agentRuntimeConfig. */
+/** Merge `patch` into the (single, flat) agentRuntimeConfig slot. */
 function mergeIntoActiveSlot(
   opts: ShellOptions,
   patch: { apiKey?: string; authToken?: string; baseUrl?: string },
 ): void {
-  const backend = opts.config.agentRuntimeBackend ?? "pi-ai";
-  const slot = backend === "codex" ? "codex" : backend === "pi-ai" ? "piAi" : "claude";
-  const existing = opts.config.agentRuntimeConfig?.[slot] ?? {};
-  const nextSlot = { ...existing, ...patch };
-  opts.config.agentRuntimeConfig = {
-    ...opts.config.agentRuntimeConfig,
-    [slot]: nextSlot,
-  };
+  opts.config.agentRuntimeConfig = { ...(opts.config.agentRuntimeConfig ?? {}), ...patch };
 }
 
 async function applyCredentialOutcome(
@@ -1405,52 +1372,19 @@ async function applyCredentialOutcome(
 
   const choice = outcome.choice;
   if (choice.kind === "inherited") {
-    // "Inherited Claude" — flip to the claude backend and persist `auth:
-    // "inherited"` to the global config so future launches skip the prompt
-    // even when no API key is in env. Generic "Use environment" (no
-    // providerId or providerId === "inherited") only rebuilds the runtime;
-    // it relies on whatever env vars already exist and re-prompts later
-    // if they're missing.
-    if (choice.providerId === "inherited-claude") {
-      opts.config.agentRuntimeBackend = "claude";
-      opts.config.auth = "inherited";
-      let persistedTo: string | undefined;
-      try {
-        const { applyConfigPatch, configPath } = await import("../config.js");
-        applyConfigPatch([
-          { path: "agentRuntimeBackend", value: "claude" },
-          { path: "auth", value: "inherited" },
-        ]);
-        persistedTo = configPath();
-      } catch (error) {
-        const detail = toErrorMessage(error);
-        await rebuildShellRuntime(opts);
-        return {
-          enabled: true,
-          message: `Inherited Claude enabled (in-memory). Failed to persist: ${detail}`,
-        };
-      }
-      await rebuildShellRuntime(opts);
-      return {
-        enabled: true,
-        message: `Inherited Claude enabled. Saved to ${persistedTo}.`,
-        persistedTo,
-      };
-    }
     await rebuildShellRuntime(opts);
     return { enabled: true };
   }
 
-  const { providerEnvVar, providerBaseUrlEnvVar, backendConfigSlot, persistLocalCredentials } =
-    await import("../config.js");
+  const { providerEnvVar, providerBaseUrlEnvVar, persistLocalCredentials } = await import(
+    "../config.js"
+  );
 
   const providerLabel = choice.providerId;
   const apiKey = choice.kind === "api-key" ? choice.value : choice.apiKey;
   const baseUrl = choice.baseUrl;
   const persist = choice.persist === true;
 
-  // Merge the new creds into the active backend slot so rebuildShellRuntime
-  // can pick them up this session.
   const slotPatch: Record<string, string> = {};
   if (apiKey) slotPatch.apiKey = apiKey;
   if (baseUrl) slotPatch.baseUrl = baseUrl;
@@ -1467,11 +1401,10 @@ async function applyCredentialOutcome(
   if (persist) {
     try {
       const targetCwd = opts.target ? path.resolve(opts.target) : process.cwd();
-      const slot = backendConfigSlot(opts.config.agentRuntimeBackend);
-      const writtenTo = persistLocalCredentials({ [slot]: slotPatch }, targetCwd);
+      const writtenTo = persistLocalCredentials(slotPatch, targetCwd);
       return {
         enabled: true,
-        message: `Copilot enabled. ${providerLabel} credentials saved to ${writtenTo} (${slot} slot).`,
+        message: `Copilot enabled. ${providerLabel} credentials saved to ${writtenTo}.`,
         persistedTo: writtenTo,
       };
     } catch (error) {
@@ -1660,7 +1593,7 @@ function getEffectiveToolProperties(
 ): Record<string, ToolPropertySchema> {
   const properties = getToolProperties(tool);
   const modelKey = findOptionKey(properties, "model");
-  const modelDescription = describeModelOverrideFormat(config.agentRuntimeBackend);
+  const modelDescription = describeModelOverrideFormat();
   if (modelKey) {
     return {
       ...properties,
@@ -1698,13 +1631,13 @@ function schemaAcceptsToolProperty(tool: ModuleTool, optionKey: string): boolean
 function validateModelOptionValue(
   optionKey: string,
   value: unknown,
-  config: KuzushiConfig,
+  _config: KuzushiConfig,
 ): string | undefined {
   if (optionKey.toUpperCase() !== "MODEL") return undefined;
   if (typeof value !== "string") {
     return "Invalid value for model: expected a string.";
   }
-  return validateModelOverride(config.agentRuntimeBackend, value) ?? undefined;
+  return validateModelOverride(value) ?? undefined;
 }
 
 function readStoredModelOption(options: Record<string, unknown>): string | undefined {
@@ -1740,12 +1673,12 @@ function stripSyntheticModelOptionFromInput(
 }
 
 function createShellModelDatastore(
-  config: KuzushiConfig,
+  _config: KuzushiConfig,
   options: Record<string, unknown>,
 ): { datastore?: Datastore; error?: string } {
   const model = readStoredModelOption(options);
   if (!model) return {};
-  const error = validateModelOverride(config.agentRuntimeBackend, model);
+  const error = validateModelOverride(model);
   if (error) return { error };
   const datastore = new Datastore();
   datastore.set("model", model);
@@ -3127,13 +3060,6 @@ async function closeShellSession(session: AgentSession | undefined): Promise<voi
  * Non-TTY: readline fallback with plain text.
  */
 export async function startShell(opts: ShellOptions): Promise<void> {
-  // Surface a one-line banner before Ink takes over the terminal when the
-  // operator is pointed at a non-Anthropic proxy. Goes to stderr so it
-  // survives the Ink stdout takeover. See `warnIfNonAnthropicProxy` for the
-  // detection rules and the `KUZUSHI_DISABLE_THINKING` / `KUZUSHI_QUIET_PROXY_BANNER`
-  // escape hatches.
-  warnIfNonAnthropicProxy();
-  warnIfStaleModel(opts.config.model);
   applyImplicitShellTarget(opts);
   // Bare `kuzushi` should still feel scoped to the current repository.
   // Resolve the display name before DB startup so the shell has a useful
@@ -3947,7 +3873,6 @@ async function startInkShell(
   const coreDispatcher = new CoreDispatcher({
     registry: core.registry,
     globals,
-    agentRuntimeBackend: opts.config.agentRuntimeBackend,
     history: () => store.getState().shell?.commandHistory ?? [],
     clearHistory: () => {
       updateShell(store, (shell) => ({ ...shell, commandHistory: [] }));
@@ -4218,17 +4143,9 @@ async function startInkShell(
       abortDebug("abortActiveAction: no active action, skipping");
       return;
     }
-    // Belt-and-suspenders: hard-kill every tracked Claude subprocess
-    // before running the cooperative abort. If the onAbort handler
-    // (or anything it calls) is stuck on an await, at least the
-    // subprocess dies immediately. Per-session abort listeners still
-    // fire their own kills — those are idempotent with this one.
-    const killed = killAllClaudeSubprocesses();
     const onAbort = store.getState().shell?.onAbort;
     abortDebug(
-      `abortActiveAction: kind=${activeActionKind} killed=${killed} onAbort=${
-        onAbort ? "set" : "missing"
-      }`,
+      `abortActiveAction: kind=${activeActionKind} onAbort=${onAbort ? "set" : "missing"}`,
     );
     // Pure delegation. Each setXAbort installer owns the
     // activeAbortRequested flag AND the kind-specific teardown
@@ -5058,14 +4975,7 @@ async function startInkShell(
       // Belt-and-suspenders. The onAbort chain (abortActiveAction →
       // handler → controller.abort() → per-scope kill listener) is
       // supposed to reach the Claude SDK subprocess, but if any hop on
-      // that path is racing / stuck / not yet wired (e.g. a subprocess
-      // that just spawned hasn't had its abort listener attached yet),
-      // the spinner keeps spinning. Hard-killing every tracked Claude
-      // subprocess up front guarantees Ctrl+C actually stops work —
-      // the cooperative abort still runs right after to tear the UI
-      // down and return the operator to the prompt.
-      const killed = killAllClaudeSubprocesses();
-      abortDebug(`SIGINT: activeActionKind=${activeActionKind} killed=${killed}`);
+      abortDebug(`SIGINT: activeActionKind=${activeActionKind}`);
       abortActiveAction();
       return;
     }
@@ -5110,8 +5020,6 @@ async function startInkShell(
     if (maybeSwallowDuplicateAbortSignal("raw-stdin")) return;
     if (!activeActionKind) return;
     abortDebug(`raw-stdin: 0x03/0x04 detected, activeActionKind=${activeActionKind}`);
-    const killed = killAllClaudeSubprocesses();
-    abortDebug(`raw-stdin: killed=${killed} subprocesses`);
     abortActiveAction();
   };
   try {
@@ -5151,8 +5059,6 @@ async function startInkShell(
         abortDebug(
           `dev-tty: 0x03/0x04 detected on /dev/tty fd, activeActionKind=${activeActionKind}`,
         );
-        const killed = killAllClaudeSubprocesses();
-        abortDebug(`dev-tty: killed=${killed} subprocesses`);
         abortActiveAction();
       };
       ttyStream.on("data", devTtyListener);
@@ -6101,22 +6007,16 @@ const SLASH_SHELL_ROUTES: readonly SlashShellRoute[] = defineShellRoutes<
     execute: ({ args }, { opts, shellState }) => handleAskCommand(args, opts, shellState),
   },
   {
-    id: "backend",
-    aliases: ["backend"],
+    id: "model",
+    aliases: ["model"],
     matches: slashCommandMatches,
-    execute: ({ args }, { opts }) => handleBackendCommand(args, opts),
+    execute: ({ args }, { opts }) => handleModelCommand(args, opts),
   },
   {
     id: "cost",
     aliases: ["cost"],
     matches: slashCommandMatches,
     execute: (_input, { opts, shellState }) => handleCostCommand(opts, shellState),
-  },
-  {
-    id: "provider",
-    aliases: ["provider"],
-    matches: slashCommandMatches,
-    execute: ({ args }, { opts }) => handleProviderCommand(args, opts),
   },
   {
     id: "context",
@@ -9201,129 +9101,6 @@ const CONFIG_USAGE = [
   "  /config edit [key]            Alias for /config (optionally focused)",
 ].join("\n");
 
-function maskApiKey(key: string | undefined): string {
-  if (!key) return "(unset)";
-  if (key.length <= 11) return `${key.slice(0, 3)}…`;
-  return `${key.slice(0, 7)}…${key.slice(-4)}`;
-}
-
-function formatBackendSlots(
-  cfg:
-    | {
-        claude?: { apiKey?: string; authToken?: string; baseUrl?: string };
-        piAi?: { apiKey?: string; authToken?: string; baseUrl?: string };
-        codex?: { apiKey?: string; authToken?: string; baseUrl?: string };
-      }
-    | undefined,
-): string[] {
-  const out: string[] = [];
-  for (const slot of ["claude", "piAi", "codex"] as const) {
-    const s = cfg?.[slot];
-    if (s && (s.apiKey || s.authToken || s.baseUrl)) {
-      out.push(
-        `  ${slot.padEnd(6)} apiKey=${maskApiKey(s.apiKey)}  authToken=${maskApiKey(s.authToken)}  baseUrl=${s.baseUrl ?? "(default)"}`,
-      );
-      continue;
-    }
-    // No file-based creds — probe env vars before reporting "unset". The
-    // claude runtime honors process.env.ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL
-    // at subprocess launch, so reporting "unset" when env vars are set is a
-    // lie that costs operators $0/0-finding wasted runs.
-    const envCreds = probeEnvCredsForSlot(slot);
-    if (envCreds) {
-      out.push(
-        `  ${slot.padEnd(6)} env-only (apiKey=${maskApiKey(envCreds.apiKey)}  authToken=${maskApiKey(envCreds.authToken)}  baseUrl=${envCreds.baseUrl ?? "(default)"})`,
-      );
-      continue;
-    }
-    out.push(
-      `  ${slot.padEnd(6)} (unset — run /backend ${slot === "piAi" ? "pi-ai" : slot} then /auth)`,
-    );
-  }
-  return out;
-}
-
-/**
- * Probe environment variables for backend credentials. Returns null when
- * no env-var credentials are present for the slot. Used by `/backend show`
- * so that operators who set ANTHROPIC_API_KEY in their parent shell don't
- * see a misleading "unset" status.
- */
-function probeEnvCredsForSlot(
-  slot: "claude" | "piAi" | "codex",
-): { apiKey?: string; authToken?: string; baseUrl?: string } | null {
-  if (slot === "claude") {
-    const apiKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
-    const authToken = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_OAUTH_TOKEN;
-    const baseUrl = process.env.ANTHROPIC_BASE_URL;
-    if (apiKey || authToken || baseUrl) return { apiKey, authToken, baseUrl };
-    return null;
-  }
-  if (slot === "codex") {
-    const apiKey = process.env.OPENAI_API_KEY;
-    const baseUrl = process.env.OPENAI_BASE_URL;
-    if (apiKey || baseUrl) return { apiKey, baseUrl };
-    return null;
-  }
-  // pi-ai is multi-provider. Honor the most common provider env vars so
-  // operators see a green light when ANY provider has env-only creds.
-  const piAiVars: Array<[string, string?]> = [
-    ["ANTHROPIC_API_KEY"],
-    ["ANTHROPIC_AUTH_TOKEN"],
-    ["ANTHROPIC_OAUTH_TOKEN"],
-    ["OPENAI_API_KEY", "OPENAI_BASE_URL"],
-    ["GOOGLE_API_KEY"],
-    ["GROQ_API_KEY"],
-    ["MISTRAL_API_KEY"],
-    ["DEEPSEEK_API_KEY"],
-  ];
-  for (const [keyVar, baseVar] of piAiVars) {
-    const apiKey = process.env[keyVar];
-    if (apiKey) {
-      const baseUrl = baseVar ? process.env[baseVar] : undefined;
-      return keyVar === "ANTHROPIC_AUTH_TOKEN" || keyVar === "ANTHROPIC_OAUTH_TOKEN"
-        ? { authToken: apiKey, baseUrl }
-        : { apiKey, baseUrl };
-    }
-  }
-  return null;
-}
-
-/**
- * Levenshtein edit distance — used by `/backend <name>` typo suggestion.
- */
-function levenshtein(a: string, b: string): number {
-  if (a === b) return 0;
-  if (!a.length) return b.length;
-  if (!b.length) return a.length;
-  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
-  let curr = new Array<number>(b.length + 1);
-  for (let i = 1; i <= a.length; i += 1) {
-    curr[0] = i;
-    for (let j = 1; j <= b.length; j += 1) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
-    }
-    [prev, curr] = [curr, prev];
-  }
-  return prev[b.length];
-}
-
-function closestBackend(input: string, candidates: readonly string[]): string | undefined {
-  const needle = input.trim().toLowerCase();
-  if (!needle) return undefined;
-  let best: { name: string; distance: number } | undefined;
-  for (const name of candidates) {
-    const distance = levenshtein(needle, name.toLowerCase());
-    if (!best || distance < best.distance) best = { name, distance };
-  }
-  if (!best) return undefined;
-  // Only suggest when the typo is plausibly the same word: short edits relative
-  // to the candidate length. "cluade" → "claude" is distance 2.
-  const threshold = Math.max(1, Math.floor(best.name.length / 3));
-  return best.distance <= threshold ? best.name : undefined;
-}
-
 /**
  * `/cost` — Reports session-to-date cost from the live moduleRun + the
  * persisted `~/.kuzushi/runs/<id>/cost.jsonl` (best-effort). Operators
@@ -9398,154 +9175,101 @@ function handleCostCommand(opts: ShellOptions, shellState: ShellState): LocalCom
   };
 }
 
-function handleBackendCommand(args: string[], opts: ShellOptions): LocalCommandResult {
+/**
+ * `/model` — single verb for the active model and the operator-curated pool.
+ *
+ * Subcommands:
+ *   /model              Show active model, available pool, and current creds.
+ *   /model use <id>     Switch the active model (persists). Validates the spec.
+ *   /model add <id>     Add `<id>` to availableModels.
+ *   /model rm  <id>     Remove `<id>` from availableModels (must not be active).
+ */
+function handleModelCommand(args: string[], opts: ShellOptions): LocalCommandResult {
   const sub = (args[0] ?? "").toLowerCase();
-  const current = opts.config.agentRuntimeBackend ?? "pi-ai";
-  // `current` is what the live shell session uses, which may differ from the
-  // persisted ~/.kuzushi/config.json value when ensureClaudeShellRuntime has
-  // swapped a non-claude backend for the shell. /backend should always compare
-  // against the persisted value so that the user can promote the swap.
 
-  if (!sub || sub === "show" || sub === "list") {
+  if (!sub || sub === "show") {
+    const active = opts.config.model ?? "(unset)";
+    const pool = opts.config.availableModels ?? [];
+    const lines = [`Active model: ${active}`];
+    if (pool.length > 0) {
+      lines.push("Available pool:");
+      for (const id of pool) {
+        lines.push(`  ${id === active ? "★" : " "} ${id}`);
+      }
+    } else {
+      lines.push("Available pool: (empty — add with /model add <provider:model>)");
+    }
+    lines.push(
+      "",
+      "Usage:",
+      "  /model                Show active model + pool",
+      "  /model use <id>       Switch active model (persists)",
+      "  /model add <id>       Add to pool",
+      "  /model rm <id>        Remove from pool",
+    );
+    return { output: lines.join("\n") };
+  }
+
+  const idArg = args.slice(1).join(" ").trim();
+
+  if (sub === "use") {
+    if (!idArg) return { output: "Usage: /model use <provider:model>" };
+    const error = validateModelOverride(idArg);
+    if (error) return { output: `Invalid model spec "${idArg}": ${error}` };
     return {
       asyncExecute: async () => {
-        const { loadConfig, configPath } = await import("../config.js");
-        const persisted = loadConfig().agentRuntimeBackend ?? "pi-ai";
-        const lines = [`Shell backend (live): ${current}`, `Persisted backend:    ${persisted}`];
-        if (persisted !== current) {
-          lines.push("(This shell is using a per-session backend override.)");
+        const { applyConfigPatch, configPath } = await import("../config.js");
+        try {
+          applyConfigPatch([{ path: "model", value: idArg }]);
+        } catch (err) {
+          return `Failed to set model: ${toErrorMessage(err)}`;
         }
-        lines.push("", "Credentials (per backend):");
-        lines.push(...formatBackendSlots(opts.config.agentRuntimeConfig));
-        lines.push(
-          "",
-          "Available: pi-ai (default, 20+ providers), claude (legacy CC subprocess), codex (Codex SDK)",
-          "Usage:",
-          "  /backend show           Show current + persisted backend + credentials",
-          "  /backend pi-ai          Use pi-ai — multi-provider, in-process (recommended)",
-          "  /backend claude         Use Claude Code SDK — Anthropic only, subprocess-per-task",
-          "  /backend codex          Use Codex SDK — OpenAI/Codex models",
-          "",
-          "For provider/model selection, use /provider instead.",
-          `Persists to ${configPath()}.`,
-        );
-        return lines.join("\n");
+        opts.config.model = idArg;
+        return `Model set to "${idArg}" in ${configPath()}.`;
       },
     };
   }
 
-  if (sub !== "claude" && sub !== "pi-ai" && sub !== "codex") {
-    const suggestion = closestBackend(sub, ["claude", "pi-ai", "codex"]);
-    const hint = suggestion ? ` Did you mean "${suggestion}"?` : "";
+  if (sub === "add") {
+    if (!idArg) return { output: "Usage: /model add <provider:model>" };
+    const error = validateModelOverride(idArg);
+    if (error) return { output: `Invalid model spec "${idArg}": ${error}` };
+    const next = Array.from(new Set([...(opts.config.availableModels ?? []), idArg]));
     return {
-      output: `Unknown backend "${sub}".${hint} Available: claude, pi-ai, codex. Run /backend show for help.`,
+      asyncExecute: async () => {
+        const { applyConfigPatch } = await import("../config.js");
+        try {
+          applyConfigPatch([{ path: "availableModels", value: JSON.stringify(next) }]);
+        } catch (err) {
+          return `Failed to update pool: ${toErrorMessage(err)}`;
+        }
+        opts.config.availableModels = next;
+        return `Added "${idArg}" to the model pool (${next.length} total).`;
+      },
     };
   }
 
-  return {
-    asyncExecute: async () => {
-      const { applyConfigPatch, configPath, loadConfig } = await import("../config.js");
-      const persisted = loadConfig().agentRuntimeBackend ?? "pi-ai";
-      if (persisted === sub) {
-        return `Persisted backend in ${configPath()} is already "${sub}". No change.`;
-      }
-      try {
-        applyConfigPatch([{ path: "agentRuntimeBackend", value: sub }]);
-      } catch (error) {
-        const detail = toErrorMessage(error);
-        return `Failed to update backend: ${detail}`;
-      }
-      opts.config.agentRuntimeBackend = sub;
-      const note =
-        sub === "claude"
-          ? "Shell sessions and future `kuzushi scan ...` runs will use claude. Restart the shell to pick up the change."
-          : sub === "codex"
-            ? "Shell sessions and future `kuzushi scan ...` runs will use codex. Restart the shell to pick up the change."
-            : "Shell sessions and future `kuzushi scan ...` runs will use pi-ai. Restart the shell to pick up the change.";
-      const lines = [`Backend persisted as "${sub}" in ${configPath()}.`, note];
-      // Each backend has its own credential slot now, so switching can't leak
-      // creds between backends. Just hint when the new slot is empty so the
-      // operator knows to /auth.
-      const slot = sub === "pi-ai" ? "piAi" : sub;
-      const slotCreds = opts.config.agentRuntimeConfig?.[slot];
-      if (!slotCreds || (!slotCreds.apiKey && !slotCreds.baseUrl)) {
-        lines.push(
-          `No ${slot} credentials configured yet — run /auth to paste an API key (and optional base URL).`,
-        );
-      }
-      return lines.join("\n");
-    },
-  };
-}
-
-// /provider — show or set the default model (provider:model)
-
-/** Common model presets surfaced by `/provider list` for fast switching. */
-const PROVIDER_PRESETS = [
-  { id: "anthropic:claude-sonnet-4-6", label: "Anthropic — Claude Sonnet (recommended)" },
-  { id: "anthropic:claude-opus-4-6", label: "Anthropic — Claude Opus (accurate)" },
-  { id: "anthropic:claude-haiku-4-5", label: "Anthropic — Claude Haiku (fast)" },
-  { id: "openai:gpt-5-mini", label: "OpenAI — GPT-5 mini" },
-  { id: "openai:gpt-5", label: "OpenAI — GPT-5" },
-  { id: "google:gemini-2.5-pro", label: "Google — Gemini 2.5 Pro" },
-  { id: "google:gemini-2.5-flash", label: "Google — Gemini 2.5 Flash" },
-  { id: "groq:llama-3.3-70b-versatile", label: "Groq — Llama 3.3 70B" },
-  { id: "openrouter:anthropic/claude-sonnet-4-6", label: "OpenRouter — Sonnet proxy" },
-] as const;
-
-function handleProviderCommand(args: string[], opts: ShellOptions): LocalCommandResult {
-  const sub = (args[0] ?? "").toLowerCase();
-
-  if (!sub || sub === "show") {
-    return {
-      output: [
-        `Current model: ${opts.config.model ?? "(unset)"}`,
-        "",
-        "Usage:",
-        "  /provider show             Show current model",
-        "  /provider list             List preset provider:model combos",
-        "  /provider <provider:model> Set model (persists to config.json)",
-        "",
-        "Credentials for the chosen provider must be set via /auth.",
-      ].join("\n"),
-    };
-  }
-
-  if (sub === "list") {
-    const lines = ["Preset provider:model combos:"];
-    for (const preset of PROVIDER_PRESETS) {
-      const active = preset.id === opts.config.model ? " (active)" : "";
-      lines.push(`  ${preset.id.padEnd(44)} ${preset.label}${active}`);
+  if (sub === "rm" || sub === "remove") {
+    if (!idArg) return { output: "Usage: /model rm <provider:model>" };
+    if (idArg === opts.config.model) {
+      return { output: `Cannot remove the active model. Run \`/model use <other>\` first.` };
     }
-    lines.push("", "Set one with: /provider <id>");
-    lines.push("See pi-ai docs for the full list of supported models.");
-    return { output: lines.join("\n") };
-  }
-
-  // Otherwise treat `sub` as a raw model id (e.g. `/provider openai:gpt-5`)
-  const modelId = args.join(" ").trim();
-  if (!modelId.includes(":")) {
+    const next = (opts.config.availableModels ?? []).filter((m) => m !== idArg);
     return {
-      output: `Model id must be "<provider>:<model>" (e.g. "openai:gpt-5-mini"). Got: ${modelId}`,
+      asyncExecute: async () => {
+        const { applyConfigPatch } = await import("../config.js");
+        try {
+          applyConfigPatch([{ path: "availableModels", value: JSON.stringify(next) }]);
+        } catch (err) {
+          return `Failed to update pool: ${toErrorMessage(err)}`;
+        }
+        opts.config.availableModels = next;
+        return `Removed "${idArg}" from the model pool (${next.length} remaining).`;
+      },
     };
   }
-  return {
-    asyncExecute: async () => {
-      const { applyConfigPatch, configPath } = await import("../config.js");
-      try {
-        applyConfigPatch([{ path: "model", value: modelId }]);
-      } catch (error) {
-        const detail = toErrorMessage(error);
-        return `Failed to set model: ${detail}`;
-      }
-      opts.config.model = modelId;
-      const providerId = modelId.split(":")[0];
-      return [
-        `Model set to "${modelId}" in ${configPath()}.`,
-        `Ensure ${providerId} credentials are configured (run /auth if not).`,
-      ].join("\n");
-    },
-  };
+
+  return { output: `Unknown subcommand "${sub}". Try /model show.` };
 }
 
 // /ask — explicit natural-language query, with screen context injected

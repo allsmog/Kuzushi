@@ -182,7 +182,9 @@ function renderChainsBlock(
   const sorted = [...chains].sort(
     (a, b) => chainSeverityRank(a.overallSeverity) - chainSeverityRank(b.overallSeverity),
   );
-  const blocks: string[] = [`#### 🔗 Exploit chain${sorted.length === 1 ? "" : "s"} (${sorted.length})`];
+  const blocks: string[] = [
+    `#### 🔗 Exploit chain${sorted.length === 1 ? "" : "s"} (${sorted.length})`,
+  ];
   sorted.forEach((chain, idx) => {
     const alias = `C-${String(idx + 1).padStart(2, "0")}`;
     const sev = chain.overallSeverity;
@@ -204,7 +206,9 @@ function renderChainsBlock(
     });
     if (chain.impactDescription || chain.preconditions.length > 0) {
       blocks.push("");
-      const impact = chain.impactDescription ? `**Impact:** ${escapeMd(chain.impactDescription)}` : "";
+      const impact = chain.impactDescription
+        ? `**Impact:** ${escapeMd(chain.impactDescription)}`
+        : "";
       const pre =
         chain.preconditions.length > 0
           ? `**Preconditions:** ${chain.preconditions.map(escapeMd).join("; ")}`
@@ -244,7 +248,9 @@ function renderFindingsBlock(
   });
   if (topN != null && totalCount > rows.length) {
     out.push("");
-    out.push(`_… and **${totalCount - rows.length}** more findings (truncated; raise \`topN\` to see them)._`);
+    out.push(
+      `_… and **${totalCount - rows.length}** more findings (truncated; raise \`topN\` to see them)._`,
+    );
   }
   return out.join("\n");
 }

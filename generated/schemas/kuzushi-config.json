@@ -3,70 +3,20 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
-    "agentRuntimeBackend": {
-      "enum": [
-        "claude",
-        "pi-ai",
-        "codex"
-      ],
-      "type": "string"
-    },
     "agentRuntimeConfig": {
       "additionalProperties": false,
       "properties": {
-        "claude": {
-          "additionalProperties": false,
-          "properties": {
-            "apiKey": {
-              "type": "string"
-            },
-            "apiKeyFile": {
-              "type": "string"
-            },
-            "authToken": {
-              "type": "string"
-            },
-            "baseUrl": {
-              "type": "string"
-            }
-          },
-          "type": "object"
+        "apiKey": {
+          "type": "string"
         },
-        "codex": {
-          "additionalProperties": false,
-          "properties": {
-            "apiKey": {
-              "type": "string"
-            },
-            "apiKeyFile": {
-              "type": "string"
-            },
-            "authToken": {
-              "type": "string"
-            },
-            "baseUrl": {
-              "type": "string"
-            }
-          },
-          "type": "object"
+        "apiKeyFile": {
+          "type": "string"
         },
-        "piAi": {
-          "additionalProperties": false,
-          "properties": {
-            "apiKey": {
-              "type": "string"
-            },
-            "apiKeyFile": {
-              "type": "string"
-            },
-            "authToken": {
-              "type": "string"
-            },
-            "baseUrl": {
-              "type": "string"
-            }
-          },
-          "type": "object"
+        "authToken": {
+          "type": "string"
+        },
+        "baseUrl": {
+          "type": "string"
         }
       },
       "type": "object"
@@ -74,12 +24,18 @@
     "astIndexEnabled": {
       "type": "boolean"
     },
+    "astIndexMaxFileBytes": {
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991,
+      "type": "integer"
+    },
+    "astIndexMaxFiles": {
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991,
+      "type": "integer"
+    },
     "auditLog": {
       "type": "boolean"
-    },
-    "auth": {
-      "const": "inherited",
-      "type": "string"
     },
     "autoPatchAfter": {
       "enum": [
@@ -91,6 +47,12 @@
     },
     "autoPatchEnabled": {
       "type": "boolean"
+    },
+    "availableModels": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "bootstrapFiles": {
       "additionalProperties": false,
@@ -250,6 +212,11 @@
     "jsonlOutput": {
       "type": "string"
     },
+    "llmRescoreBatchSize": {
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991,
+      "type": "integer"
+    },
     "llmRescoreEnabled": {
       "type": "boolean"
     },
@@ -363,9 +330,6 @@
         }
       },
       "type": "object"
-    },
-    "oauthTokenFile": {
-      "type": "string"
     },
     "patchBuildCommand": {
       "type": "string"
@@ -650,6 +614,11 @@
     },
     "verifyConcurrency": {
       "type": "number"
+    },
+    "verifyGateBatchSize": {
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991,
+      "type": "integer"
     },
     "verifyMaxTurns": {
       "type": "number"

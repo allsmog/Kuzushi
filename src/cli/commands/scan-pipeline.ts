@@ -165,38 +165,31 @@ export function prepareScanExecution(
 
 export function createPipelineRuntime(config: KuzushiConfig, scanOpts: ScanOpts): AgentRuntime {
   const activeModels = resolveActivePiAiModels(config, scanOpts.tasks ?? [], config.tasks ?? []);
+  const activeCredentials = resolveActiveCredentials(config);
+  const missingCredentials = validatePiAiProviderCredentials(activeModels, {
+    anthropicApiKey: activeCredentials.apiKey,
+    anthropicAuthToken: activeCredentials.authToken,
+  });
 
-  const isClaudeRuntime = (config.agentRuntimeBackend ?? "pi-ai") === "claude";
-  if (!isClaudeRuntime) {
-    const activeCredentials = resolveActiveCredentials(config);
-    const missingCredentials = validatePiAiProviderCredentials(activeModels, {
-      anthropicApiKey: activeCredentials.apiKey,
-      anthropicAuthToken: activeCredentials.authToken,
-    });
-
-    if (missingCredentials.length > 0) {
-      const details = missingCredentials.map(
-        (entry) =>
-          `  - ${entry.provider}: set one of [${entry.envVars.join(", ")}] (used by: ${entry.models.join(", ")})`,
+  if (missingCredentials.length > 0) {
+    const details = missingCredentials.map(
+      (entry) =>
+        `  - ${entry.provider}: set one of [${entry.envVars.join(", ")}] (used by: ${entry.models.join(", ")})`,
+    );
+    if (missingCredentials.some((entry) => entry.provider === "anthropic")) {
+      details.push(
+        "Tip: for Anthropic models, you can also set agentRuntimeConfig.apiKey, agentRuntimeConfig.authToken, or pass --api-key / --auth-token for this run.",
       );
-      if (missingCredentials.some((entry) => entry.provider === "anthropic")) {
-        details.push(
-          "Tip: for Anthropic models, you can also set agentRuntimeConfig.<backend>.apiKey, agentRuntimeConfig.<backend>.authToken, or pass --api-key / --auth-token for this run.",
-        );
-      }
-      throw new CliConfigError("missing API credentials for selected model provider(s):", {
-        details,
-      });
     }
-  }
-
-  if (!isClaudeRuntime) {
-    const activeCredentials = resolveActiveCredentials(config);
-    warnPiAiBackendApiKeys(activeModels, {
-      anthropicApiKey: activeCredentials.apiKey,
-      anthropicAuthToken: activeCredentials.authToken,
+    throw new CliConfigError("missing API credentials for selected model provider(s):", {
+      details,
     });
   }
+
+  warnPiAiBackendApiKeys(activeModels, {
+    anthropicApiKey: activeCredentials.apiKey,
+    anthropicAuthToken: activeCredentials.authToken,
+  });
 
   configureRateLimitRegistry(config.triageConcurrency);
 

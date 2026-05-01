@@ -26,27 +26,16 @@ export const CONFIG_KEY_DOCS: ConfigKeyDoc[] = [
       "Format: <provider>:<model-id>. Override per-stage with --task-model or via taskConfig.<task>.model in this file.",
   },
   {
-    key: "agentRuntimeBackend",
-    type: "enum",
-    summary: "Which agent runtime drives LLM calls.",
-    default: "pi-ai",
-    values: ["pi-ai", "claude", "codex"],
-  },
-  {
-    key: "agentRuntimeConfig.<backend>.apiKey",
+    key: "agentRuntimeConfig.apiKey",
     type: "string (sensitive)",
-    summary: "Plaintext provider API key for a backend slot. Prefer env vars or /auth.",
+    summary: "Plaintext provider API key. Prefer env vars or /auth.",
     envVar: "provider-specific, such as ANTHROPIC_API_KEY or OPENAI_API_KEY",
-    details:
-      "Use an explicit backend slot, such as agentRuntimeConfig.claude.apiKey or agentRuntimeConfig.codex.apiKey.",
   },
   {
-    key: "agentRuntimeConfig.<backend>.authToken",
+    key: "agentRuntimeConfig.authToken",
     type: "string (sensitive)",
-    summary: "Plaintext provider bearer/OAuth token for a backend slot. Prefer env vars or /auth.",
-    envVar: "ANTHROPIC_AUTH_TOKEN / ANTHROPIC_OAUTH_TOKEN for Anthropic-backed runtimes",
-    details:
-      "Use an explicit backend slot, such as agentRuntimeConfig.piAi.authToken, when the provider expects Authorization: Bearer instead of X-Api-Key.",
+    summary: "Plaintext provider bearer/OAuth token. Prefer env vars or /auth.",
+    envVar: "ANTHROPIC_AUTH_TOKEN / ANTHROPIC_OAUTH_TOKEN for Anthropic-backed providers",
   },
   {
     key: "busBackend",

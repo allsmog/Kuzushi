@@ -45,16 +45,6 @@ interface ProviderOption {
 
 const PROVIDERS: ProviderOption[] = [
   {
-    id: "inherited-claude",
-    name: "Inherited Claude",
-    description: "Use parent Claude Code session — no key needed",
-    detail:
-      "Trust the ambient credentials your shell / Claude Code already has " +
-      "(ANTHROPIC_API_KEY, ANTHROPIC_OAUTH_TOKEN, or Claude Code OAuth login). " +
-      "Persists to ~/.kuzushi/config.json so future runs skip this prompt.",
-    authKind: "inherited",
-  },
-  {
     id: "anthropic",
     name: "Anthropic",
     description: "Claude — Opus, Sonnet, Haiku",

@@ -1,6 +1,5 @@
 import path from "node:path";
 import { isValidPreset, SCAN_PRESETS } from "../config/presets.js";
-import { backendConfigSlot } from "../config.js";
 import type { KuzushiConfig } from "../types.js";
 import { CliUsageError } from "./errors.js";
 import { parseCommaSeparatedList } from "./shared.js";
@@ -73,17 +72,9 @@ export interface ScanCommandOptions {
   csv?: string;
   jsonl?: string;
   junit?: string;
-  agentRuntime?: string;
   apiKey?: string;
   authToken?: string;
   baseUrl?: string;
-  /**
-   * Mirror of `kuzushi shell --inherit-claude` for the scan command:
-   * sets `config.auth = "inherited"` for this run so the OAuth ambient
-   * resolver primes ANTHROPIC_API_KEY without persisting state.
-   * Field-test issue #49.
-   */
-  inheritClaude?: boolean;
   /**
    * Built-in module ids to skip during the default load (comma-separated).
    * Same semantics as `kuzushi shell --exclude`, exposed symmetrically
@@ -148,13 +139,6 @@ export function applyScanCommandConfigOverrides(
     }
   }
 
-  // `--inherit-claude` mirrors the shell flag for one-off scans —
-  // doesn't persist to disk, but flags the run as inherited so the
-  // OAuth ambient resolver in scan.ts can prime credentials. (#49)
-  if (opts.inheritClaude) {
-    config.auth = "inherited";
-  }
-
   if (opts.model) config.model = opts.model;
   if (opts.ensembleModels) config.ensembleModels = parseCommaSeparatedList(opts.ensembleModels);
   applyTaskModelOverrides(config, opts.taskModels);
@@ -204,31 +188,12 @@ export function applyScanCommandConfigOverrides(
   if (opts.csv) config.csvOutput = path.resolve(opts.csv);
   if (opts.jsonl) config.jsonlOutput = path.resolve(opts.jsonl);
   if (opts.junit) config.junitOutput = path.resolve(opts.junit);
-  if (opts.agentRuntime) {
-    config.agentRuntimeBackend = opts.agentRuntime as typeof config.agentRuntimeBackend;
-  }
   if (opts.apiKey || opts.authToken || opts.baseUrl) {
-    const runtimeConfig = { ...(config.agentRuntimeConfig ?? {}) };
-    const slot = backendConfigSlot(config.agentRuntimeBackend);
-    const next = { ...(runtimeConfig[slot] ?? {}) };
-
-    if (opts.apiKey) {
-      const apiKey = opts.apiKey.trim();
-      next.apiKey = apiKey || undefined;
-    }
-
-    if (opts.authToken) {
-      const authToken = opts.authToken.trim();
-      next.authToken = authToken || undefined;
-    }
-
-    if (opts.baseUrl) {
-      const baseUrl = opts.baseUrl.trim();
-      next.baseUrl = baseUrl || undefined;
-    }
-
-    runtimeConfig[slot] = next;
-    config.agentRuntimeConfig = runtimeConfig;
+    const next = { ...(config.agentRuntimeConfig ?? {}) };
+    if (opts.apiKey) next.apiKey = opts.apiKey.trim() || undefined;
+    if (opts.authToken) next.authToken = opts.authToken.trim() || undefined;
+    if (opts.baseUrl) next.baseUrl = opts.baseUrl.trim() || undefined;
+    config.agentRuntimeConfig = next;
   }
 
   if (opts.tasks) {

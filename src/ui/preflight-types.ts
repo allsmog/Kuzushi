@@ -21,8 +21,7 @@ export type ProviderId =
   | "openrouter"
   | "bedrock"
   | "ollama"
-  | "inherited"
-  | "inherited-claude";
+  | "inherited";
 
 export type CredentialChoice =
   | { kind: "api-key"; providerId: ProviderId; value: string; baseUrl?: string; persist: boolean }
@@ -31,7 +30,10 @@ export type CredentialChoice =
 
 export interface WizardResult {
   preset: string;
+  /** Default model — first selected in the multi-select pool. */
   model?: string;
+  /** Operator-curated pool of models the shell's `/model` switcher offers. */
+  availableModels?: string[];
   verify?: boolean;
   pocHarness?: boolean;
   severity?: string[];

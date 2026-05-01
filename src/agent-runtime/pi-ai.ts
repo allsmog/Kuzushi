@@ -299,13 +299,12 @@ export class PiAiAgentRuntime implements AgentRuntime {
   async *query(request: AgentQueryRequest): AsyncIterable<AgentMessage> {
     enforceAgentQuery({
       runtimeId: this.id,
-      backend: "pi-ai",
       model: request.options.model,
       fallbackModel: request.options.fallbackModel,
       fallbackConsent: resolveFallbackConsent(request.options.consentToModelFallback),
       callsite: "pi-ai.query",
     });
-    assertRuntimeModelSelection(this.id, request.options.model, request.options.fallbackModel);
+    assertRuntimeModelSelection(request.options.model, request.options.fallbackModel);
     const restoreRuntimeEnv = applyRuntimeEnvOverrides(this.runtimeConfig);
     const startedAtMs = Date.now();
     const signal = request.options.abortController?.signal;
@@ -360,13 +359,12 @@ export class PiAiAgentRuntime implements AgentRuntime {
   createSession(baseOptions: AgentQueryOptions): AgentSession {
     enforceAgentQuery({
       runtimeId: this.id,
-      backend: "pi-ai",
       model: baseOptions.model,
       fallbackModel: baseOptions.fallbackModel,
       fallbackConsent: resolveFallbackConsent(baseOptions.consentToModelFallback),
       callsite: "pi-ai.session",
     });
-    assertRuntimeModelSelection(this.id, baseOptions.model, baseOptions.fallbackModel);
+    assertRuntimeModelSelection(baseOptions.model, baseOptions.fallbackModel);
     return new PiAiSession(this, this.runtimeConfig, baseOptions);
   }
 }

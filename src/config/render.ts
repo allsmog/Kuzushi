@@ -52,7 +52,6 @@ const GROUP_RULES: Array<{ title: string; match: (key: string) => boolean }> = [
     title: "Model & runtime",
     match: (k) =>
       k === "model" ||
-      k === "agentRuntimeBackend" ||
       k === "agentRuntimeConfig" ||
       k === "busBackend" ||
       k === "streamingEnabled" ||
@@ -279,7 +278,7 @@ export function formatConfigText(config: KuzushiConfig, opts: FormatOptions = {}
   const rendered = renderConfig(config);
 
   const lines: string[] = [];
-  lines.push("Kuzushi config" + (showDefaults ? " (all keys)" : " (overrides only)"));
+  lines.push(`Kuzushi config${showDefaults ? " (all keys)" : " (overrides only)"}`);
   if (configPath) lines.push(`  source: ${configPath}`);
   lines.push("");
 

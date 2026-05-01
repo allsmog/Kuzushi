@@ -1,6 +1,5 @@
 import path from "node:path";
 import type { KuzushiConfig } from "../types.js";
-import { AGENT_RUNTIME_BACKENDS } from "./defaults.js";
 
 export type ConfigValidationSeverity = "error" | "warning";
 
@@ -13,18 +12,6 @@ export interface ConfigValidationIssue {
 
 export function validateKuzushiConfig(config: KuzushiConfig): ConfigValidationIssue[] {
   const issues: ConfigValidationIssue[] = [];
-
-  if (
-    config.agentRuntimeBackend != null &&
-    !AGENT_RUNTIME_BACKENDS.has(String(config.agentRuntimeBackend))
-  ) {
-    issues.push({
-      severity: "error",
-      path: "agentRuntimeBackend",
-      message: `Unsupported agent runtime backend "${String(config.agentRuntimeBackend)}".`,
-      hint: `Valid values: ${[...AGENT_RUNTIME_BACKENDS].join(", ")}.`,
-    });
-  }
 
   if (config.busBackend !== "in-process") {
     issues.push({

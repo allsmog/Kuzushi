@@ -41,8 +41,7 @@ export function ModuleHome({ shell }: ModuleHomeProps): React.ReactElement {
   // (planner, context build, pending assistant text), which would
   // otherwise blank the home of a module that isn't running anything.
   const isThisModuleBusy =
-    shell.moduleRun?.status === "running" &&
-    shell.moduleRun.moduleId === shell.focusedModule;
+    shell.moduleRun?.status === "running" && shell.moduleRun.moduleId === shell.focusedModule;
   const useCustom = CustomHome != null && !isThisModuleBusy;
   const { stdout } = useStdout();
   const columns = stdout?.columns ?? 120;
