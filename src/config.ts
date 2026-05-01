@@ -473,6 +473,10 @@ export const TOP_LEVEL_CONFIG_SETTERS: Record<string, ConfigSetter> = {
     }
     config.llmRescoreThreshold = n;
   },
+  llmRescoreBatchSize: setPositiveInt("llmRescoreBatchSize"),
+  verifyGateBatchSize: setPositiveInt("verifyGateBatchSize"),
+  astIndexMaxFiles: setPositiveInt("astIndexMaxFiles"),
+  astIndexMaxFileBytes: setPositiveInt("astIndexMaxFileBytes"),
 
   skipTriageForHighConfidenceAgentic: setBool("skipTriageForHighConfidenceAgentic"),
   ensembleModels: setStringList("ensembleModels"),
@@ -659,6 +663,23 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   );
   const monorepo = normalizeMonorepoConfig(config.monorepo);
 
+  const llmRescoreBatchSize = normalizePositiveInt(
+    readEnvPositiveInt("KUZUSHI_LLM_RESCORE_BATCH_SIZE") ?? config.llmRescoreBatchSize,
+    DEFAULTS.llmRescoreBatchSize ?? 25,
+  );
+  const verifyGateBatchSize = normalizePositiveInt(
+    readEnvPositiveInt("KUZUSHI_VERIFY_GATE_BATCH_SIZE") ?? config.verifyGateBatchSize,
+    DEFAULTS.verifyGateBatchSize ?? 15,
+  );
+  const astIndexMaxFiles = normalizePositiveInt(
+    readEnvPositiveInt("KUZUSHI_AST_INDEX_MAX_FILES") ?? config.astIndexMaxFiles,
+    DEFAULTS.astIndexMaxFiles ?? 2_500,
+  );
+  const astIndexMaxFileBytes = normalizePositiveInt(
+    readEnvPositiveInt("KUZUSHI_AST_INDEX_MAX_FILE_BYTES") ?? config.astIndexMaxFileBytes,
+    DEFAULTS.astIndexMaxFileBytes ?? 1_000_000,
+  );
+
   const skipTriageForHighConfidenceAgentic = normalizeBoolean(
     config.skipTriageForHighConfidenceAgentic,
     DEFAULTS.skipTriageForHighConfidenceAgentic ?? false,
@@ -715,6 +736,10 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     cryptoBehavioralMaxFindings,
     cryptoBehavioralPerFindingBudgetUsd,
     monorepo,
+    llmRescoreBatchSize,
+    verifyGateBatchSize,
+    astIndexMaxFiles,
+    astIndexMaxFileBytes,
     skipTriageForHighConfidenceAgentic,
     tasks: dedupeStringsPreserveOrder(normalizedTasks),
     severity: severity.length > 0 ? severity : [...DEFAULTS.severity],
@@ -1297,6 +1322,24 @@ function normalizePositiveInt(value: unknown, fallback: number): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 1) {
     return fallback;
+  }
+  return Math.floor(n);
+}
+
+/**
+ * Read a `KUZUSHI_*` env var and parse it as a positive integer. Returns
+ * `undefined` if the var is unset or fails validation, so callers can fall
+ * back to the config-file value with `??`. Parsing errors log a warning and
+ * fall through (we never want a typo'd env var to silently override a
+ * sensible default — the warning makes it diagnosable).
+ */
+function readEnvPositiveInt(name: string): number | undefined {
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === "") return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) {
+    log.warn(`${name}="${raw}" is not a positive integer; ignoring`);
+    return undefined;
   }
   return Math.floor(n);
 }

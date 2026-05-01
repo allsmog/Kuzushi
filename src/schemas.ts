@@ -574,11 +574,14 @@ export const ExploitChainSchema = z.object({
       findingFingerprint: z.string(),
       role: z.string(),
       description: z.string(),
+      filePath: z.string().optional(),
+      startLine: z.number().optional(),
     }),
   ),
   overallSeverity: ExploitChainSeveritySchema,
   preconditions: z.array(z.string()),
   impactDescription: z.string(),
+  narrative: z.string().optional(),
 });
 
 export type ExploitChainZ = z.infer<typeof ExploitChainSchema>;
@@ -723,6 +726,10 @@ export const KuzushiConfigSchema = z.object({
   patchConcurrency: z.number().int().positive().optional(),
   llmRescoreEnabled: z.boolean().optional(),
   llmRescoreThreshold: z.number().optional(),
+  llmRescoreBatchSize: z.number().int().positive().optional(),
+  verifyGateBatchSize: z.number().int().positive().optional(),
+  astIndexMaxFiles: z.number().int().positive().optional(),
+  astIndexMaxFileBytes: z.number().int().positive().optional(),
   chainAnalysis: z.boolean().optional(),
   precedentsPath: z.string().optional(),
   securityProfilesPath: z.string().optional(),

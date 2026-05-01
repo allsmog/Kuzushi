@@ -126,6 +126,81 @@ The most common agent-facing surprises:
 
 ---
 
+## Mode parity (scan / shell / run)
+
+Audit + matrix in [docs/assessments/mode-parity.md](./docs/assessments/mode-parity.md).
+The bullets below codify intentional asymmetries between the three modes —
+features that *only* exist in one mode by design. Anything not listed here
+is expected to behave identically and should be filed as a parity bug.
+
+### Shared by all three modes
+
+- `CopilotCore.executeTool(...)` is the single tool-dispatch path. `scan`
+  also reaches it indirectly via bus workers; the contract (input
+  validation, governance enforcer, audit-trail, runtime activity tee,
+  capability probe, `resolveOption` fallback) is the same.
+- `ExecutionContext.host`, `ctx.config`, `ctx.cwd`, `ctx.target`,
+  `ctx.runtime`, `ctx.bus` are populated identically.
+- Adaptive concurrency (`scheduler/configureRateLimitRegistry`) is seeded
+  from `config.triageConcurrency` in **all three** modes (shell + run
+  added in the parity audit; scan was the seed implementation).
+- Prompt overrides in `.kuzushi/prompts/<moduleId>/<verb>.md` are
+  auto-loaded by `core.executeTool`'s `resolveOption` fallback. Order:
+  `Datastore` (shell-only) → `taskConfig[moduleId][KEY]` →
+  on-disk file. So shell `set TRIAGE_PROMPT ./mine.md`,
+  `kuzushi run` with `--input '{"TRIAGE_PROMPT":"…"}'`, and a checked-in
+  `.kuzushi/prompts/triage/run.md` all reach the same tool the same way.
+- `dataDir` resolution prefers `<target>/.kuzushi` when `--target`
+  resolves to a directory (scan, run); shell falls back to
+  `process.cwd()/.kuzushi` because its workspace lifecycle anchors there.
+
+### Intentional asymmetries
+
+- **Two-stage Ctrl+C, NL planner (`/plan`), prompt editor view, threat
+  views, finding alias drill, replay/trace, cost-cap halt card, module-run
+  transcript, actor-detail view, tune view** — interactive only. They
+  live behind `process.stdout.isTTY` paths in `shell.ts`.
+- **`--ci` is scan-only.** Single-tool `kuzushi run` uses `--json` for
+  machine-readable output; the shell is interactive by definition. Don't
+  add `--ci` to `run`.
+- **`/replay <runId>` and `/trace <runId>` are shell-only operator
+  surfaces** that *consume* scan-produced `.kuzushi/runs/<runId>/`
+  artefacts. They are read-only over a shared on-disk format.
+- **Per-run artefacts (`.kuzushi/runs/<runId>/`) are scan-only.**
+  `kuzushi run` and shell tool dispatch don't mint a `runId` and don't
+  produce `summary.json` / `triage.jsonl` / `verify.jsonl`. The
+  audit-worker is registered only by `registerAllWorkers` (scan).
+- **`ExecutionContext.workspace` handle is shell-only.** `kuzushi run`
+  takes `--workspace <id>` (forwarded to tools that look the workspace
+  up themselves) but does not wire the `WorkspaceHandle` capability —
+  that needs the shell's `WorkspaceManager` lifecycle.
+- **`ExecutionContext.datastore` is shell-only.** Scan + run modes
+  consult `taskConfig` and the on-disk prompt files via
+  `ctx.resolveOption`; they don't expose a live key/value store. New
+  agentic capabilities should read through `resolveOption`, not from
+  `ctx.datastore` directly.
+- **`ExecutionContext.uiStore` is for live UI feedback only.** Scan
+  workers populate it; run mode leaves it undefined; shell wires it for
+  TTY paths. Tools must treat `uiStore` as optional (already enforced by
+  the type and the `host.capabilities.has("ui-store")` probe).
+- **`scan` mode loads only modules that contribute DAG nodes**
+  (via `createDefaultTaskRegistry`). A module that exposes only
+  shell-only `ModuleTool`s never has its `init()` called during scan —
+  it isn't in scope for the pipeline. Use `createDagTool`/
+  `exposeAgentTaskAsHiddenDagTool` to surface DAG-time work.
+
+### When you add a new feature
+
+1. Decide which mode(s) it belongs in. Default: all three.
+2. If shell-only, gate it on `process.stdout.isTTY` and add a one-liner
+   to the "Intentional asymmetries" list above.
+3. If shared, add it to `core.ts` (or a helper consumed by `executeRun`,
+   `startShell`, and `runPipeline`) — never duplicate config plumbing
+   per mode.
+4. Update the matrix in `docs/assessments/mode-parity.md`.
+
+---
+
 ## Shell UX — Ink TUI surfaces (Phases A–C)
 
 The interactive shell (`kuzushi shell` or bare `kuzushi`) is the main

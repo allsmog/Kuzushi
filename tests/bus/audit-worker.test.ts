@@ -157,6 +157,23 @@ describe("audit-worker", () => {
     expect(triageContent).toContain("triage:result");
     expect(verifyContent).toContain("verification:error");
 
+    // Reproducibility metadata is embedded in run.json.
+    const runJson = JSON.parse(readFileSync(runFile, "utf-8")) as {
+      reproducibility?: {
+        kuzushiVersion?: string;
+        nodeVersion?: string;
+        platform?: string;
+        configHash?: string;
+        model?: string;
+      };
+    };
+    expect(runJson.reproducibility).toBeDefined();
+    expect(runJson.reproducibility?.kuzushiVersion).toMatch(/^\d+\.\d+\.\d+/);
+    expect(runJson.reproducibility?.nodeVersion).toBe(process.versions.node);
+    expect(runJson.reproducibility?.platform).toBe(process.platform);
+    expect(runJson.reproducibility?.configHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(runJson.reproducibility?.model).toBe("anthropic:claude-sonnet-4-6");
+
     await bus.close();
   });
 });
