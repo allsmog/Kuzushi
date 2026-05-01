@@ -280,12 +280,8 @@ describe("executeRun — dataDir resolution from --target", () => {
   });
 
   it("falls back when target is a URL-shaped string (host, http://...)", () => {
-    expect(
-      resolveRunDataDir({ target: "http://example.com", dataDir: "/tmp/x" }),
-    ).toBe("/tmp/x");
-    expect(
-      resolveRunDataDir({ target: "ssh://host:22", dataDir: "/tmp/x" }),
-    ).toBe("/tmp/x");
+    expect(resolveRunDataDir({ target: "http://example.com", dataDir: "/tmp/x" })).toBe("/tmp/x");
+    expect(resolveRunDataDir({ target: "ssh://host:22", dataDir: "/tmp/x" })).toBe("/tmp/x");
   });
 
   it("falls back when no target is provided", () => {

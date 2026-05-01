@@ -237,6 +237,9 @@ describe("Ink component snapshots", () => {
     const shell = stubShell({
       workspace: "acme-api",
       target: "./acme-api",
+      // Phase 3.2 — the bare-launch catalog is the prompt-only home; the full
+      // grouped tables only render after `browse` / `show modules` flips this.
+      catalogExpanded: true,
       moduleCatalog: [
         {
           id: "sast",
@@ -532,7 +535,7 @@ describe("Ink component snapshots", () => {
             {
               type: "input",
               text: "run .",
-              prompt: "kuzushi/context> ",
+              prompt: "kuzushi context > ",
               timestamp: 0,
             },
             {
@@ -622,7 +625,7 @@ describe("Ink component snapshots", () => {
             {
               type: "input",
               text: "run .",
-              prompt: "kuzushi/context> ",
+              prompt: "kuzushi context > ",
               timestamp: 0,
             },
             {
@@ -689,7 +692,7 @@ describe("Ink component snapshots", () => {
     // banner triple-printed the same context. The asserts that matter for
     // this test are: the SAST module body still renders its sections, the
     // prompt is module-scoped, and the splash never replays.
-    expect(out).toContain("kuzushi/sast>");
+    expect(out).toContain("kuzushi sast >");
     expect(out).toContain("task selection");
     expect(out).toContain("tasks opens scanners/detectors");
     expect(out).not.toContain("agentic SAST orchestration");

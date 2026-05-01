@@ -22,20 +22,12 @@ describe("pickRecommendedFirst", () => {
   });
 
   it("prefers `sast` whenever it is loaded", () => {
-    const cards = [
-      card("randori", "intel"),
-      card("shinsa", "governance"),
-      card("sast", "offense"),
-    ];
+    const cards = [card("randori", "intel"), card("shinsa", "governance"), card("sast", "offense")];
     expect(pickRecommendedFirst(cards)?.id).toBe("sast");
   });
 
   it("falls back to the first offense module when sast is not loaded", () => {
-    const cards = [
-      card("randori", "intel"),
-      card("vuln-scout", "offense"),
-      card("tob", "offense"),
-    ];
+    const cards = [card("randori", "intel"), card("vuln-scout", "offense"), card("tob", "offense")];
     expect(pickRecommendedFirst(cards)?.id).toBe("vuln-scout");
   });
 

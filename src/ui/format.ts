@@ -465,6 +465,55 @@ export function truncateMiddle(s: string, maxWidth: number, ellipsis = "\u2026")
 }
 
 /**
+ * Compact "fresh 4m" / "stale 2h" / "missing" badge for the persistent
+ * status footer's context segment. The unit is bucketed (seconds → s,
+ * minutes → m, hours → h, days → d) so the footer stays one line wide
+ * across very stale snapshots.
+ */
+export function formatContextAge(
+  state: "fresh" | "stale" | "missing" | "building",
+  ageMs?: number,
+): string {
+  if (state === "missing") return "ctx: none";
+  if (state === "building") return "ctx: building…";
+  if (typeof ageMs !== "number" || ageMs < 0) return `ctx: ${state}`;
+  const seconds = Math.floor(ageMs / 1000);
+  let age: string;
+  if (seconds < 60) age = `${seconds}s`;
+  else if (seconds < 3600) age = `${Math.floor(seconds / 60)}m`;
+  else if (seconds < 86_400) age = `${Math.floor(seconds / 3600)}h`;
+  else age = `${Math.floor(seconds / 86_400)}d`;
+  return `ctx: ${state} ${age}`;
+}
+
+/**
+ * Compact `N findings (M high)` summary for the status footer. Pulls
+ * the highest non-zero severity bucket so an analyst sees the worst tier
+ * at a glance.
+ */
+export function formatFindingsSummary(summary: {
+  total: number;
+  bySeverity?: Partial<Record<"critical" | "high" | "medium" | "low" | "info", number>>;
+}): string {
+  if (!summary || summary.total === 0) return "no findings";
+  const sev = summary.bySeverity ?? {};
+  const order: Array<"critical" | "high" | "medium" | "low" | "info"> = [
+    "critical",
+    "high",
+    "medium",
+    "low",
+    "info",
+  ];
+  for (const tier of order) {
+    const count = sev[tier];
+    if (count && count > 0) {
+      return `${summary.total} findings (${count} ${tier})`;
+    }
+  }
+  return `${summary.total} findings`;
+}
+
+/**
  * Render a wall-clock HH:MM:SS for a UNIX-ms timestamp. Used by shell history
  * rows to mark when each event was appended.
  */

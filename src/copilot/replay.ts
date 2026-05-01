@@ -18,12 +18,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import type {
-  getRun as getRunFn,
-  listRuns as listRunsFn,
-  PipelineRunRecord,
-} from "../store.js";
-import { readRunSummary, type RunSummary } from "./run-metadata.js";
+import type { listRuns as listRunsFn, PipelineRunRecord } from "../store.js";
+import { type RunSummary, readRunSummary } from "./run-metadata.js";
 
 // Types
 
@@ -369,7 +365,10 @@ function truncate(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max - 1)}\u2026`;
 }
 
-function formatDuration(startedAt: string | null | undefined, completedAt: string | null | undefined): string {
+function formatDuration(
+  startedAt: string | null | undefined,
+  completedAt: string | null | undefined,
+): string {
   if (!startedAt || !completedAt) return "-";
   const a = Date.parse(startedAt);
   const b = Date.parse(completedAt);

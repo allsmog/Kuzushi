@@ -43,10 +43,10 @@ import {
   ProblemCode,
   problemToolResult,
 } from "../modules/problem-details.js";
-import { createRunArtifactStore } from "../modules/run-artifacts.js";
 import { createCorePromptArmorModule } from "../modules/prompt-armor/prompt-armor.js";
 import { createCoreRandoriModule } from "../modules/randori/randori.js";
 import { ModuleRegistry, parseModuleSpecifier } from "../modules/registry.js";
+import { createRunArtifactStore } from "../modules/run-artifacts.js";
 import { createSecretScanModule } from "../modules/secret-scan/secret-scan.js";
 import { createSemgrepModule } from "../modules/semgrep/semgrep.js";
 import { createCoreShinsaModule } from "../modules/shinsa/shinsa.js";
@@ -439,14 +439,13 @@ export class CopilotCore {
     // and a moduleId — i.e. during scan-mode DAG execution. Outside that,
     // modules don't have a stable run dir to write into, so the handle
     // stays undefined and the capability stays unset.
-    const runArtifacts =
-      ctxOverrides?.dag?.runId
-        ? createRunArtifactStore({
-            dataDir: this.opts.dataDir,
-            runId: ctxOverrides.dag.runId,
-            moduleId,
-          })
-        : undefined;
+    const runArtifacts = ctxOverrides?.dag?.runId
+      ? createRunArtifactStore({
+          dataDir: this.opts.dataDir,
+          runId: ctxOverrides.dag.runId,
+          moduleId,
+        })
+      : undefined;
     if (runArtifacts) capabilities.add("run-artifacts");
 
     const host = {

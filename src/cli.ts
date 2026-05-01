@@ -1566,9 +1566,7 @@ runsCmd
         if (existsSync(dbPath)) {
           const db = initDb(dbPath);
           try {
-            const matches = listRuns(db, { limit: 250 }).filter((r) =>
-              r.runId.startsWith(runId),
-            );
+            const matches = listRuns(db, { limit: 250 }).filter((r) => r.runId.startsWith(runId));
             if (matches.length === 1) fullRunId = matches[0]!.runId;
           } finally {
             db.close();

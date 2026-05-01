@@ -9,9 +9,9 @@
  * for breaking changes and never silently flips behaviour.
  */
 
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import type { KuzushiConfig, ScanOpts } from "../types.js";
@@ -180,7 +180,7 @@ export function readPromptOverrideFingerprints(dataDir: string): RunSummaryPromp
   }
   for (const moduleDir of modules) {
     const modPath = path.join(root, moduleDir);
-    let s;
+    let s: ReturnType<typeof statSync>;
     try {
       s = statSync(modPath);
     } catch {
@@ -292,8 +292,7 @@ export function countFindingsBy(
       (typeof f["severity"] === "string" && (f["severity"] as string).toLowerCase()) ||
       "unknown";
     bySeverity[sev] = (bySeverity[sev] ?? 0) + 1;
-    const verdict =
-      typeof f["verdict"] === "string" ? (f["verdict"] as string) : "unknown";
+    const verdict = typeof f["verdict"] === "string" ? (f["verdict"] as string) : "unknown";
     byVerdict[verdict] = (byVerdict[verdict] ?? 0) + 1;
   }
   return { total: findings.length, bySeverity, byVerdict };
