@@ -2397,7 +2397,7 @@ describe("slash suggestions", () => {
   it("returns multiple matches when the prefix is ambiguous", () => {
     const showMatches = listShellSuggestions("/show");
     expect(showMatches).toContain("/show prompts");
-    expect(showMatches).toContain("/show runs [repo]");
+    expect(showMatches).toContain("/show runs [repo] [--status s] [--limit n]");
     expect(showMatches).toContain("/show aliases [pfx]");
   });
 
