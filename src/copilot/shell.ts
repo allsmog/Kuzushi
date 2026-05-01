@@ -1376,6 +1376,22 @@ async function applyCredentialOutcome(
     return { enabled: true };
   }
 
+  if (choice.kind === "oauth-anthropic") {
+    const { loginAnthropicAndPersist } = await import("../oauth-flow.js");
+    try {
+      const result = await loginAnthropicAndPersist();
+      mergeIntoActiveSlot(opts, { authToken: result.accessToken });
+      await rebuildShellRuntime(opts);
+      return {
+        enabled: true,
+        message: `Claude OAuth logged in. Credentials saved to ${result.persistedTo} (auto-refresh enabled).`,
+        persistedTo: result.persistedTo,
+      };
+    } catch (error) {
+      return { enabled: false, message: `OAuth login failed: ${toErrorMessage(error)}` };
+    }
+  }
+
   const { providerEnvVar, providerBaseUrlEnvVar, persistLocalCredentials } = await import(
     "../config.js"
   );
@@ -9199,18 +9215,31 @@ function handleModelCommand(args: string[], opts: ShellOptions): LocalCommandRes
     } else {
       lines.push("Available pool: (empty — add with /model add <provider:model>)");
     }
+    const overrides = collectTaskModelOverrides(opts.config.taskConfig);
+    if (overrides.length > 0) {
+      lines.push("", "Per-task overrides:");
+      for (const { taskId, model } of overrides) {
+        lines.push(`  ${taskId.padEnd(28)} ${model}`);
+      }
+    }
     lines.push(
       "",
       "Usage:",
-      "  /model                Show active model + pool",
-      "  /model use <id>       Switch active model (persists)",
-      "  /model add <id>       Add to pool",
-      "  /model rm <id>        Remove from pool",
+      "  /model                       Show active model + pool + per-task overrides",
+      "  /model use <id>              Switch active model (persists)",
+      "  /model add <id>              Add to pool",
+      "  /model rm <id>               Remove from pool",
+      "  /model task <task> <id>      Pin <task> to a specific model",
+      "  /model task rm <task>        Drop the per-task override (fall back to active)",
     );
     return { output: lines.join("\n") };
   }
 
   const idArg = args.slice(1).join(" ").trim();
+
+  if (sub === "task") {
+    return handleModelTaskSubcommand(args.slice(1), opts);
+  }
 
   if (sub === "use") {
     if (!idArg) return { output: "Usage: /model use <provider:model>" };
@@ -9270,6 +9299,78 @@ function handleModelCommand(args: string[], opts: ShellOptions): LocalCommandRes
   }
 
   return { output: `Unknown subcommand "${sub}". Try /model show.` };
+}
+
+/**
+ * `/model task <task-id> <provider:model>` — pin a single task to a specific
+ * model. Writes to `taskConfig[<task-id>].model`, which the runtime already
+ * honors at dispatch time. `/model task rm <task-id>` drops the override.
+ */
+function handleModelTaskSubcommand(args: string[], opts: ShellOptions): LocalCommandResult {
+  const head = (args[0] ?? "").toLowerCase();
+
+  if (!head) {
+    return {
+      output: "Usage: /model task <task-id> <provider:model>  (or  /model task rm <task-id>)",
+    };
+  }
+
+  if (head === "rm" || head === "remove") {
+    const taskId = (args[1] ?? "").trim();
+    if (!taskId) return { output: "Usage: /model task rm <task-id>" };
+    const existing = opts.config.taskConfig?.[taskId] as Record<string, unknown> | undefined;
+    if (!existing || typeof existing.model !== "string") {
+      return { output: `No per-task model override for "${taskId}".` };
+    }
+    return {
+      asyncExecute: async () => {
+        const { applyConfigPatch } = await import("../config.js");
+        try {
+          applyConfigPatch([{ path: `taskConfig.${taskId}.model`, value: null }]);
+        } catch (err) {
+          return `Failed to drop override: ${toErrorMessage(err)}`;
+        }
+        const liveTask = opts.config.taskConfig?.[taskId] as Record<string, unknown> | undefined;
+        if (liveTask) delete (liveTask as { model?: unknown }).model;
+        return `Dropped per-task override for "${taskId}" (will use active model "${opts.config.model}").`;
+      },
+    };
+  }
+
+  const taskId = head;
+  const modelId = args.slice(1).join(" ").trim();
+  if (!modelId) {
+    return { output: `Usage: /model task ${taskId} <provider:model>` };
+  }
+  const error = validateModelOverride(modelId);
+  if (error) return { output: `Invalid model spec "${modelId}": ${error}` };
+
+  return {
+    asyncExecute: async () => {
+      const { applyConfigPatch } = await import("../config.js");
+      try {
+        applyConfigPatch([{ path: `taskConfig.${taskId}.model`, value: modelId }]);
+      } catch (err) {
+        return `Failed to set per-task model: ${toErrorMessage(err)}`;
+      }
+      const liveConfig = opts.config.taskConfig ?? (opts.config.taskConfig = {});
+      liveConfig[taskId] = { ...(liveConfig[taskId] ?? {}), model: modelId };
+      return `Pinned "${taskId}" to "${modelId}".`;
+    },
+  };
+}
+
+function collectTaskModelOverrides(
+  taskConfig: KuzushiConfig["taskConfig"] | undefined,
+): Array<{ taskId: string; model: string }> {
+  if (!taskConfig) return [];
+  const out: Array<{ taskId: string; model: string }> = [];
+  for (const [taskId, cfg] of Object.entries(taskConfig)) {
+    if (cfg && typeof (cfg as Record<string, unknown>).model === "string") {
+      out.push({ taskId, model: (cfg as Record<string, string>).model });
+    }
+  }
+  return out.sort((a, b) => a.taskId.localeCompare(b.taskId));
 }
 
 // /ask — explicit natural-language query, with screen context injected
