@@ -445,9 +445,7 @@ function parseControls(value: unknown): SecurityControl[] | undefined {
   return controls.length > 0 ? controls : undefined;
 }
 
-// ---------------------------------------------------------------------------
 // Batch verification
-// ---------------------------------------------------------------------------
 
 export const BATCH_VERIFICATION_SCHEMA = {
   type: "object",

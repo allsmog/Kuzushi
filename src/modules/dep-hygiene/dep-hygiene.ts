@@ -18,6 +18,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { toErrorMessage } from "../../utils.js";
 import { defineModule, defineTool } from "../define.js";
 import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
 
@@ -74,9 +75,7 @@ export function createDepHygieneModule(): CopilotModule {
           const raw = readFileSync(manifestPath, "utf8");
           findings.push(...analyzeManifest(manifestName, manifestPath, raw));
         } catch (err) {
-          ctx.logger?.warn?.(
-            `dep-hygiene: failed to read ${manifestPath}: ${err instanceof Error ? err.message : String(err)}`,
-          );
+          ctx.logger?.warn?.(`dep-hygiene: failed to read ${manifestPath}: ${toErrorMessage(err)}`);
         }
       }
 

@@ -26,8 +26,8 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { toErrorMessage } from "../utils.js";
 import type { CommandResult, Driver } from "./dispatcher/types.js";
-
 export interface ResourceScript {
   workspace?: string;
   setg?: Record<string, string | number | boolean>;
@@ -122,7 +122,7 @@ export async function runResourceScript(
       result.executed++;
       if (out.exit) return result;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       result.errors.push({ command, error: msg });
       opts.driver.print.error(`resource: ${command}: ${msg}`);
       if (stopOnError) return result;

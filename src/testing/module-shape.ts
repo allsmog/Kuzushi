@@ -12,6 +12,7 @@ import { ModuleLoadError } from "../modules/errors.js";
 import { validateModuleExport } from "../modules/loader.js";
 import type { CopilotModule } from "../modules/types.js";
 
+import { toErrorMessage } from "../utils.js";
 /**
  * Error thrown by `expectModuleShape` when the input does not satisfy the
  * `CopilotModule` contract. `issues` is the structured list of violations
@@ -53,7 +54,7 @@ export function expectModuleShape(mod: unknown): asserts mod is CopilotModule {
     }
     // Anything else is unexpected — re-wrap with a single-item issues list
     // so test authors still see the helper-level error type.
-    throw new ModuleShapeError([error instanceof Error ? error.message : String(error)], error);
+    throw new ModuleShapeError([toErrorMessage(error)], error);
   }
 }
 

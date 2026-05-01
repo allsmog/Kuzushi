@@ -9,9 +9,7 @@ import type { RepoContext } from "../types.js";
 import { getLanguageProfiles } from "./languages/index.js";
 import type { FrameworkGuidance, LanguageFewShot, VulnClassContent } from "./languages/types.js";
 
-// ---------------------------------------------------------------------------
 // Task ID -> canonical vuln class mapping
-// ---------------------------------------------------------------------------
 
 const TASK_TO_VULN_CLASS: Record<string, string | string[]> = {
   // Detection tasks
@@ -41,9 +39,7 @@ const TASK_TO_VULN_CLASS: Record<string, string | string[]> = {
   ],
 };
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 export interface LanguageTuningOpts {
   /** The task ID requesting tuning */
@@ -214,9 +210,7 @@ export function languageGeneralHintsModule(repoContext: RepoContext | undefined)
   return lines.join("\n");
 }
 
-// ---------------------------------------------------------------------------
 // Internals
-// ---------------------------------------------------------------------------
 
 interface ResolvedEntry {
   profile: { languageId: string };

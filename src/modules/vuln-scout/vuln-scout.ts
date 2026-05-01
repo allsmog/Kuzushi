@@ -13,7 +13,7 @@ import { runPluginFindingScanner } from "../../agents/tasks/plugin-finding-scann
 import { resolveVulnScoutPlugin } from "../../agents/tasks/vuln-scout/resolve-vuln-scout.js";
 import { buildVulnScoutPrompt, vulnScoutTask } from "../../agents/tasks/vuln-scout/vuln-scout.js";
 import { resolveRepo } from "../../cli/shared.js";
-import { isRecord } from "../../utils.js";
+import { isRecord, toErrorMessage } from "../../utils.js";
 import { defineHiddenDagNodeTool } from "../hidden-dag-node.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
@@ -52,9 +52,7 @@ function resolveMaxFindings(ctx: ExecutionContext, override?: number): number {
   return 50;
 }
 
-// ---------------------------------------------------------------------------
 // vuln-scout:audit — run the whitebox pentest plugin
-// ---------------------------------------------------------------------------
 
 const auditTool: ModuleTool = {
   name: "vuln-scout:audit",
@@ -98,7 +96,7 @@ const auditTool: ModuleTool = {
     try {
       plugin = resolveVulnScoutPlugin();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return {
         ok: false,
         output:
@@ -150,15 +148,13 @@ const auditTool: ModuleTool = {
         costUsd: result.costUsd,
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return { ok: false, output: `vuln-scout:audit error: ${msg}` };
     }
   },
 };
 
-// ---------------------------------------------------------------------------
 // Module factory
-// ---------------------------------------------------------------------------
 
 export function createCoreVulnScoutModule(): CopilotModule {
   const hiddenVulnScout = defineHiddenDagNodeTool<"vuln-scout">(vulnScoutTask, {

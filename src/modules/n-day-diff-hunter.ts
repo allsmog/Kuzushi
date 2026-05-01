@@ -15,11 +15,10 @@ import {
 } from "../intel/cve-feed.js";
 import { scoreFindingMetadata } from "../scanners/scoring.js";
 import type { Finding } from "../scanners/types.js";
+import { toErrorMessage } from "../utils.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "./types.js";
 
-// ---------------------------------------------------------------------------
 // ndiff:fetch-cve
-// ---------------------------------------------------------------------------
 
 function readNdiffConfig(ctx: ExecutionContext): {
   offline: boolean;
@@ -87,7 +86,7 @@ const fetchCveTool: ModuleTool = {
     } catch (err) {
       return {
         ok: false,
-        output: `ndiff:fetch-cve error: ${err instanceof Error ? err.message : String(err)}`,
+        output: `ndiff:fetch-cve error: ${toErrorMessage(err)}`,
       };
     }
   },
@@ -113,9 +112,7 @@ function formatCveSummary(record: CveRecord): string {
   return lines.filter(Boolean).join("\n");
 }
 
-// ---------------------------------------------------------------------------
 // ndiff:extract-fix-pattern
-// ---------------------------------------------------------------------------
 
 const FIX_PATTERN_SCHEMA = {
   type: "object",
@@ -242,7 +239,7 @@ const extractFixPatternTool: ModuleTool = {
         } catch (err) {
           return {
             ok: false,
-            output: `Could not fetch ${id}: ${err instanceof Error ? err.message : String(err)}`,
+            output: `Could not fetch ${id}: ${toErrorMessage(err)}`,
           };
         }
         if (record && !patchUrl) {
@@ -326,7 +323,7 @@ const extractFixPatternTool: ModuleTool = {
         }
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return { ok: false, output: `ndiff:extract-fix-pattern error: ${msg}`, costUsd };
     }
 
@@ -360,9 +357,7 @@ const extractFixPatternTool: ModuleTool = {
   },
 };
 
-// ---------------------------------------------------------------------------
 // ndiff:hunt-variants
-// ---------------------------------------------------------------------------
 
 const VARIANT_HUNT_SCHEMA = {
   type: "object",
@@ -528,7 +523,7 @@ const huntVariantsTool: ModuleTool = {
         }
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return { ok: false, output: `ndiff:hunt-variants error: ${msg}`, costUsd };
     }
 
@@ -620,9 +615,7 @@ function normalizeHuntResults(
   }));
 }
 
-// ---------------------------------------------------------------------------
 // Module factory
-// ---------------------------------------------------------------------------
 
 export function createNDayDiffHunterModule(): CopilotModule {
   return {

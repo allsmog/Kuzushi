@@ -5,7 +5,7 @@ import {
   type XRayReportData,
 } from "../../agents/tasks/x-ray/runner.js";
 import { resolveRepo } from "../../cli/shared.js";
-import { isRecord } from "../../utils.js";
+import { isRecord, toErrorMessage } from "../../utils.js";
 import { indexXRayArtifacts } from "../_shared/artifact-kb/index.js";
 import { defineDagTool, defineModule, defineTool } from "../define.js";
 import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
@@ -116,7 +116,7 @@ const runTool = defineTool<"x-ray">({
         costUsd: data.costUsd,
       };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = toErrorMessage(err);
       return { ok: false, output: `x-ray:run error: ${message}` };
     }
   },
@@ -157,7 +157,7 @@ const readTool = defineTool<"x-ray">({
         },
       };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = toErrorMessage(err);
       return { ok: false, output: `x-ray:read error: ${message}` };
     }
   },
@@ -342,7 +342,7 @@ function tryIndexXRayArtifacts(
     ctx.reportActivity?.(`indexed Artifact KB (${indexed.chunks} X-Ray chunks)`);
     return { indexed };
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
+    const error = toErrorMessage(err);
     ctx.reportActivity?.(`Artifact KB indexing skipped: ${error}`);
     return { error };
   }

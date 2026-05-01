@@ -293,7 +293,7 @@ async function executeStructuredAgentQuery(
     // Emit llm:call-error on thrown error
     if (bus) {
       try {
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage = toErrorMessage(error);
         await bus.publish<LlmCallErrorEvent>({
           type: "llm:call-error",
           meta: {

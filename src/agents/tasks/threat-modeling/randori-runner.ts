@@ -42,9 +42,7 @@ const IMPACT_TO_SEVERITY: Record<string, string> = {
   low: "INFO",
 };
 
-// ---------------------------------------------------------------------------
 // Prompt builders
-// ---------------------------------------------------------------------------
 
 function buildAnalysisRootPromptLines(analysisRoot?: string): string[] {
   const root = analysisRoot?.trim();
@@ -392,9 +390,7 @@ export function createRandoriToolGuard(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Narrative validation
-// ---------------------------------------------------------------------------
 
 /**
  * Assess an already-written pasta-narrative.json and return a list of
@@ -451,9 +447,7 @@ function toCamel(snake: string): string {
   return snake.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 }
 
-// ---------------------------------------------------------------------------
 // Finding conversion
-// ---------------------------------------------------------------------------
 
 export function threatsToFindings(
   threats: StrideThreat[],
@@ -551,9 +545,7 @@ function normalizeFilePath(repoRoot: string, filePath: string): string {
   return relative || filePath;
 }
 
-// ---------------------------------------------------------------------------
 // Streaming activity extraction
-// ---------------------------------------------------------------------------
 
 const ACTIVITY_MAX = 80;
 

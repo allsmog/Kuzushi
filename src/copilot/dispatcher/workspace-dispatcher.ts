@@ -10,13 +10,13 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { SessionManager } from "../../sessions/manager.js";
+import { toErrorMessage } from "../../utils.js";
 import { type CredsExportFormat, exportCreds } from "../../workspace/creds-export.js";
 import type { PrivateType } from "../../workspace/entities.js";
 import { type ExportFormat, exportToFile } from "../../workspace/io/export.js";
 import { type ImportFormat, importFile } from "../../workspace/io/import.js";
 import type { WorkspaceManager } from "../../workspace/manager.js";
 import type { CommandContext, CommandDispatcher, CommandResult } from "./types.js";
-
 export interface WorkspaceDispatcherOptions {
   workspaces: WorkspaceManager;
   /** Resolver for the currently-active workspace ID (if any). */
@@ -83,9 +83,7 @@ export class WorkspaceDispatcher implements CommandDispatcher {
     }
   }
 
-  // -------------------------------------------------------------------------
   // Entity CRUD
-  // -------------------------------------------------------------------------
 
   private cmd_hosts(args: string[], wid: string): CommandResult {
     if (args[0] === "-d" && args[1]) {
@@ -288,7 +286,7 @@ export class WorkspaceDispatcher implements CommandDispatcher {
       for (const w of summary.warnings) lines.push(`      ! ${w}`);
       return { output: lines.join("\n") };
     } catch (err) {
-      return { output: `[-] Import failed: ${err instanceof Error ? err.message : String(err)}` };
+      return { output: `[-] Import failed: ${toErrorMessage(err)}` };
     }
   }
 
@@ -312,7 +310,7 @@ export class WorkspaceDispatcher implements CommandDispatcher {
       const { bytes } = exportToFile(this.opts.workspaces, wid, fmt as ExportFormat, resolved);
       return { output: `[+] Exported ${fmt} → ${resolved} (${bytes} bytes)` };
     } catch (err) {
-      return { output: `[-] Export failed: ${err instanceof Error ? err.message : String(err)}` };
+      return { output: `[-] Export failed: ${toErrorMessage(err)}` };
     }
   }
 
@@ -441,9 +439,7 @@ function resolveSessionRef(
   return result.id;
 }
 
-// ---------------------------------------------------------------------------
 // renderers
-// ---------------------------------------------------------------------------
 
 function pad(s: string, w: number): string {
   return s + " ".repeat(Math.max(0, w - s.length));

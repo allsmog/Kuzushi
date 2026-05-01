@@ -257,9 +257,7 @@ function _FindingCard({ finding, mode }: FindingCardProps): React.ReactElement {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Linear mode — Ink UI v2 screen 05 (finding deep page)
-// ---------------------------------------------------------------------------
 
 const STATE_STRIP: ReadonlyArray<{ key: string; label: string }> = [
   { key: "new", label: "new" },

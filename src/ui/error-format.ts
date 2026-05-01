@@ -140,9 +140,7 @@ export function formatError(err: unknown, options: FormatErrorOptions = {}): For
   };
 }
 
-// ---------------------------------------------------------------------------
 // Nearest-match suggestions + canonical "unknown X" copy
-// ---------------------------------------------------------------------------
 
 /**
  * Classic Levenshtein (iterative, two-row buffer) in ~15 lines. Good enough
@@ -222,9 +220,7 @@ export function formatUnknownVerb(name: string, knownVerbs?: ReadonlyArray<strin
   return `${head}${tail}`;
 }
 
-// ---------------------------------------------------------------------------
 // Empty-state copy builder — consumed by <EmptyState> and plain-renderer.
-// ---------------------------------------------------------------------------
 
 export type EmptyStateKind =
   | "module-none-focused"
