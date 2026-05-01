@@ -331,12 +331,6 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
             </InteractionErrorBoundary>
           ) : null}
         </Box>
-        {!shell.processing ||
-        shell.shellView === "task-story" ||
-        shell.shellView === "module-run" ||
-        shell.shellView === "actor-detail" ? (
-          <ShellWayfinding shell={shell} narrow={columns < 110} />
-        ) : null}
         {shell.shellView !== "module-run" ? (
           <ShellTaskStatusLine shell={shell} columns={columns} />
         ) : null}
