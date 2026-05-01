@@ -12,7 +12,7 @@
  * - Shell mode: loads all requested modules, routes LLM tool calls interactively
  */
 
-import { type Dirent, existsSync, readdirSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
 import nodePath from "node:path";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import { publishAgentActivity, publishTaskActivity, publishTaskOutput } from "../bus/activity.js";
@@ -107,6 +107,15 @@ export interface CopilotCoreOptions {
    *                      (upper-cased, e.g. TRIAGE_MODEL / VERIFY_MODEL)
    */
   globals?: import("./options.js").Datastore;
+  /**
+   * Free-form label used as the synthetic `runId` argument to
+   * `wrapRuntimeWithActivityForwarding` for ad-hoc tool dispatch (i.e. the
+   * runId the runtime tee tags onto `task:activity` events when no scan-time
+   * runId is in scope). Defaults to `"shell"` for backward compatibility;
+   * `kuzushi run` passes `"run"` so observers can distinguish CLI-originated
+   * activity from interactive shell activity.
+   */
+  activitySource?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -414,7 +423,7 @@ export class CopilotCore {
       ctxOverrides?.runtime ?? this.opts.runtime,
       ctxBus,
       qualifiedName,
-      "shell",
+      this.opts.activitySource ?? "shell",
     );
     // HOST-21 — build the per-call capability probe. Modules call
     // `ctx.host?.capabilities.has("workspace")` to guard optional features.
@@ -503,6 +512,27 @@ export class CopilotCore {
           | undefined;
         if (moduleBucket && key in moduleBucket) {
           return moduleBucket[key] as T;
+        }
+        // Last-resort fallback for `*_PROMPT` keys: load
+        // `<dataDir>/prompts/<moduleId>/<verb>.md` produced by the shell's
+        // `/prompt edit <verb>` workflow. Without this fallback the file is
+        // dead in scan + run modes — only the shell's in-memory Datastore
+        // round-trip would surface it. Keeping the read here means all
+        // three modes (scan, shell, run) consult the same on-disk
+        // override file when no explicit Datastore/`taskConfig` value is set.
+        if (key.endsWith("_PROMPT")) {
+          const verb = qualifiedName.includes(":")
+            ? qualifiedName.slice(qualifiedName.indexOf(":") + 1)
+            : qualifiedName;
+          const file = nodePath.join(this.opts.dataDir, "prompts", moduleId, `${verb}.md`);
+          if (existsSync(file)) {
+            try {
+              const body = readFileSync(file, "utf-8").trim();
+              if (body.length > 0) return body as unknown as T;
+            } catch {
+              // ignore — best-effort fallback, never throw on a stale fs handle
+            }
+          }
         }
         return undefined;
       },

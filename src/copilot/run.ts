@@ -13,10 +13,13 @@
  *   2 — usage error (bad arguments, unknown module/tool)
  */
 
+import { existsSync, statSync } from "node:fs";
+import path from "node:path";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { MessageBus } from "../bus/types.js";
 import { MAX_TOOL_INPUT_BYTES } from "../modules/input-validation.js";
 import type { ExecutionContext, ToolResult } from "../modules/types.js";
+import { configureRateLimitRegistry } from "../scheduler/index.js";
 import type { KuzushiConfig } from "../types.js";
 import { CopilotCore } from "./core.js";
 
@@ -62,12 +65,37 @@ export interface RunResult {
  * 5. Returns the result with appropriate exit code
  */
 export async function executeRun(opts: RunOptions): Promise<RunResult> {
+  // Parity with scan-mode: when `--target` resolves to a directory, prefer
+  // `<target>/.kuzushi` for dataDir so prompt-overrides, house-rules, and
+  // findings cache come from the target repo (not cwd). Falls back to the
+  // caller-provided dataDir when the target is missing or is a non-directory
+  // (URL, host:port, etc.).
+  const dataDir = resolveRunDataDir(opts);
+
+  // Parity with scan-mode: seed the rate-limit registry so the scheduler
+  // honors the operator's `triageConcurrency` instead of the lazy default.
+  // Safe to call repeatedly — `configureRateLimitRegistry` destroys any
+  // previous singleton.
+  configureRateLimitRegistry(opts.config.triageConcurrency);
+
+  // Parity with scan-mode: route SIGINT into an AbortController so tools
+  // that respect `ctx.signal` (taint-iris, threat-hunt, agentic-sast,
+  // randori) actually short-circuit on Ctrl+C. The `kuzushi run` CLI was
+  // previously a black box w.r.t. cancellation — SIGINT collapsed straight
+  // to the process-wide `initiateShutdown(...)`.
+  const abortController = new AbortController();
+  const sigintHandler = (): void => {
+    if (!abortController.signal.aborted) abortController.abort();
+  };
+  process.on("SIGINT", sigintHandler);
+
   const core = new CopilotCore({
     runtime: opts.runtime,
     bus: opts.bus,
     config: opts.config,
-    dataDir: opts.dataDir,
+    dataDir,
     modules: opts.modules,
+    activitySource: "run",
   });
 
   try {
@@ -104,6 +132,7 @@ export async function executeRun(opts: RunOptions): Promise<RunResult> {
       cwd: opts.cwd,
       target: opts.target,
       workspaceId: opts.workspaceId,
+      signal: abortController.signal,
     };
 
     const toolResult = await core.executeTool(opts.toolName, opts.input, ctxOverrides);
@@ -114,8 +143,32 @@ export async function executeRun(opts: RunOptions): Promise<RunResult> {
       exitCode: toolResult.ok ? 0 : 1,
     };
   } finally {
+    process.removeListener("SIGINT", sigintHandler);
     await core.dispose();
   }
+}
+
+/**
+ * Pick the `.kuzushi` directory for a `kuzushi run` invocation. Mirrors
+ * `scan-pipeline.ts:resolveDbPath` so all three modes resolve dataDir from
+ * the operator-provided target before falling back to cwd.
+ *
+ * Exported for unit tests.
+ */
+export function resolveRunDataDir(opts: Pick<RunOptions, "target" | "dataDir">): string {
+  const target = opts.target;
+  if (target && !/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) {
+    try {
+      const abs = path.resolve(target);
+      if (existsSync(abs) && statSync(abs).isDirectory()) {
+        return path.join(abs, ".kuzushi");
+      }
+    } catch {
+      // fall through — non-directory targets (sockets, missing paths) keep
+      // the caller-provided dataDir.
+    }
+  }
+  return opts.dataDir;
 }
 
 /**

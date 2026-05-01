@@ -3151,6 +3151,12 @@ export async function startShell(opts: ShellOptions): Promise<void> {
     mkdirSync(dataDir, { recursive: true });
   }
 
+  // Parity with scan-mode: seed the rate-limit registry so the scheduler
+  // honors the operator's `triageConcurrency` instead of the lazy default
+  // when shell-dispatched tools hit a 429. See `docs/assessments/mode-parity.md`.
+  const { configureRateLimitRegistry } = await import("../scheduler/index.js");
+  configureRateLimitRegistry(opts.config.triageConcurrency);
+
   // Initialize workspace persistence
   let workspaceManager: import("../workspace/manager.js").WorkspaceManager | undefined;
   let loadedSnapshot: ContextSnapshot | null = null;
