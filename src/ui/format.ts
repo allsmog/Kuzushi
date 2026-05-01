@@ -11,15 +11,6 @@ import { normalizeSeverity, severityChalk, severityStyle } from "./severity.js";
 import { clampTerminalCardWidth, resolveTerminalColumns } from "./terminal.js";
 import { tokens } from "./tokens.js";
 
-/**
- * Returns a chalk function appropriate for "secondary" text based on theme.
- * Delegates to `tokens.muted` — kept for backwards compatibility with older
- * call sites. New code should prefer `tokens.muted` directly.
- */
-export function secondary(text: string): string {
-  return tokens.muted(text);
-}
-
 // Partial block characters from thin to full (8 steps)
 const PARTIAL_BLOCKS = [" ", "\u258F", "\u258E", "\u258D", "\u258C", "\u258B", "\u258A", "\u2589"];
 const FULL_BLOCK = "\u2588"; // █

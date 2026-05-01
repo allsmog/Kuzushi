@@ -459,25 +459,6 @@ function compareRuns(id1: string, id2: string, repoPath: string): void {
   }
 }
 
-program
-  .command("compare-runs <id1> <id2>", { hidden: true })
-  .description("Compare metrics and assertions between two pipeline runs")
-  .option("-r, --repo <path>", "Repository path", ".")
-  .addHelpText(
-    "after",
-    `
-Examples:
-  $ kuzushi compare-runs 2026-04-15-abc 2026-04-17-xyz    # diff two runs
-  $ kuzushi compare-runs last-main last-pr -r ./repo      # scoped to a specific repo
-`,
-  )
-  .action(
-    wrapCliAction(async (id1: string, id2: string, options: { repo: string }) => {
-      console.warn("Warning: `kuzushi compare-runs` is deprecated. Use `kuzushi runs compare`.");
-      compareRuns(id1, id2, options.repo);
-    }),
-  );
-
 // ── config get/set/unset ──────────────────────────────────────────────────
 
 const configCmd = program

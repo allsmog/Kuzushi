@@ -40,11 +40,6 @@ export interface LayoutTheme {
   widths: typeof WIDTHS;
   glyphs: ThemeGlyphs;
   drawing: ThemeDrawing;
-  /**
-   * @deprecated Use `glyphs.selection`. Kept for one release for any
-   * out-of-tree consumers that snapshot the theme shape.
-   */
-  selectionGlyph: string;
 }
 
 export interface LayoutContextValue {
@@ -72,7 +67,6 @@ export const STANDARD_LAYOUT_THEME: LayoutTheme = {
     breadcrumbSeparator: " / ",
     statusSeparator: " · ",
   },
-  selectionGlyph: "❯",
 };
 
 const defaultValue: LayoutContextValue = {
