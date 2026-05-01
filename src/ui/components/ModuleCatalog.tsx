@@ -84,6 +84,25 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
     <ScreenContent>
       <ContextStrip status={status} />
 
+      {(() => {
+        const recommended = pickRecommendedFirst(builtIns);
+        if (!recommended) return null;
+        return (
+          <Box marginTop={SPACING.sm} flexDirection="column">
+            <Text>
+              {tokens.strong("Recommended first: ")}
+              {tokens.accent(`use ${recommended.id}`)}
+              {tokens.muted(` — ${shortDescription(recommended.description)}`)}
+            </Text>
+            <Text>
+              {tokens.muted("  New to Kuzushi? Type ")}
+              {tokens.accent("/quickstart")}
+              {tokens.muted(" for a 3-step guided tour.")}
+            </Text>
+          </Box>
+        );
+      })()}
+
       {CATEGORY_ORDER.map((cat) => {
         const rows = byCategory[cat];
         if (!rows || rows.length === 0) return null;
@@ -114,6 +133,37 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
       )}
     </ScreenContent>
   );
+}
+
+/**
+ * Pick the highest-signal "first module" for new operators. Preference order:
+ *   1. `sast` if loaded — it's the only module that scans code by default and
+ *      most operators come to Kuzushi for SAST.
+ *   2. The first offense-category module otherwise.
+ *   3. The first module of any category as a last resort.
+ *
+ * Returning null means the catalog is empty; callers gate the hint on that.
+ */
+export function pickRecommendedFirst(
+  cards: ReadonlyArray<ShellModuleCard>,
+): ShellModuleCard | null {
+  if (cards.length === 0) return null;
+  const sast = cards.find((c) => c.id === "sast");
+  if (sast) return sast;
+  const offense = cards.find((c) => c.category === "offense");
+  if (offense) return offense;
+  return cards[0] ?? null;
+}
+
+/**
+ * Trim a module's description to one short sentence so the hint line stays
+ * single-row even on narrow terminals. Mirrors `formatModuleDescription`
+ * in the shell text path so the two surfaces stay visually aligned.
+ */
+function shortDescription(description: string): string {
+  const first = description.split(".")[0]?.trim() ?? description;
+  if (first.length <= 80) return first;
+  return `${first.slice(0, 79)}…`;
 }
 
 function compactTarget(target: string | null | undefined): string {
