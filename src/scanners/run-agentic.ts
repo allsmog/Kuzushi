@@ -15,30 +15,6 @@ import type { Finding } from "./types.js";
 
 const log = getLogger("agentic-scan");
 
-/**
- * @deprecated Use {@link FINDING_SCHEMA} from `./normalize-findings.js` instead.
- * This alias was retained for backward compatibility when the agentic scanner's
- * schema was consolidated into the shared normalize-findings module.
- * Will be removed in a future major version.
- */
-export { FINDING_SCHEMA as AGENTIC_SCHEMA };
-
-/**
- * @deprecated Use {@link NormalizedFinding} from `./normalize-findings.js` instead.
- * This type alias was retained for backward compatibility when finding types
- * were unified across all scanner backends.
- * Will be removed in a future major version.
- */
-export type AgenticFinding = NormalizedFinding;
-
-/**
- * @deprecated Use {@link FindingOutput} from `./normalize-findings.js` instead.
- * This type alias was retained for backward compatibility when finding output
- * types were unified across all scanner backends.
- * Will be removed in a future major version.
- */
-export type AgenticOutput = FindingOutput;
-
 export interface AgenticRuntimeOptions {
   runtime?: AgentRuntime;
   abortController?: AbortController;
@@ -54,7 +30,7 @@ export async function runAgentic(
   defaultMaxFindings: number,
   runtimeOptions: AgenticRuntimeOptions = {},
   repoContext?: RepoContext,
-): Promise<AgenticOutput> {
+): Promise<FindingOutput> {
   const requestedMax = Math.max(1, opts.maxFindings ?? defaultMaxFindings);
   const prompt = buildPrompt(opts, requestedMax, repoContext);
   const runtime = runtimeOptions.runtime;
@@ -138,7 +114,7 @@ export async function runAgentic(
 
 /** Rank and map agentic findings into Finding records. */
 export function selectAgenticFindings(
-  output: AgenticOutput,
+  output: FindingOutput,
   repoRoot: string,
   repoName: string,
   ref: string,
@@ -154,7 +130,7 @@ export const parseAgenticOutput = parseFindingOutput;
 export function computeAgenticFingerprint(
   repoName: string,
   ref: string,
-  finding: AgenticFinding,
+  finding: NormalizedFinding,
 ): string {
   return computeFingerprint(repoName, ref, "agentic", finding);
 }
