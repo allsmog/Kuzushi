@@ -23,10 +23,10 @@ import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import { computeVisibleSlice } from "../hooks/useVisibleSlice.js";
 import { icons } from "../icons.js";
 import { useRenderCounter } from "../perf.js";
+import { Divider } from "../primitives/Divider.js";
 import { normalizeSeverity, severityChalk, severityStyle } from "../severity.js";
 import type { ActionableFinding, ResultLine } from "../state.js";
-import { Divider } from "../primitives/Divider.js";
-import { SPACING, tokens, WIDTHS } from "../tokens.js";
+import { SPACING, tokens } from "../tokens.js";
 import { ChainGroup } from "./ChainGroup.js";
 import { EmptyState } from "./EmptyState.js";
 import { type FilterChip, FilterChips } from "./FilterChips.js";
@@ -294,11 +294,12 @@ function UnifiedFindings({
       </Box>
 
       <Box marginTop={SPACING.sm} flexDirection="column">
+        <Text>{tokens.value("Primary action: /open F-NNNN to inspect one finding deeply.")}</Text>
         <FilterChips chips={filters ?? defaultFilters()} />
       </Box>
 
       <Box marginTop={SPACING.sm}>
-        <Divider width={WIDTHS.contentRule} />
+        <Divider />
       </Box>
 
       {resolvedChains.map(({ chain, members }) => {
@@ -353,6 +354,13 @@ function UnifiedFindings({
           context={focusedModule ? { moduleId: focusedModule } : undefined}
         />
       )}
+
+      <Box marginTop={SPACING.sm}>
+        <Divider />
+      </Box>
+      <Box>
+        <Text>{tokens.hint("j/k move   /open F-NNNN inspect   b back")}</Text>
+      </Box>
     </ScreenContent>
   );
 }
