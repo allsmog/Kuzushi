@@ -648,7 +648,6 @@ describe("CoreDispatcher runTool wiring", () => {
     const core = new CoreDispatcher({
       registry,
       globals: new Datastore(),
-      agentRuntimeBackend: "claude",
       history: () => [],
       runTool,
     });
@@ -656,7 +655,7 @@ describe("CoreDispatcher runTool wiring", () => {
 
     const globals = await driver.handle("show globals");
     expect(globals.output).toContain("MODEL");
-    const invalid = await driver.handle("setg model openai:gpt-4o");
+    const invalid = await driver.handle("setg model claude-opus-4-6");
     expect(invalid.output).toContain("Invalid value");
     await driver.handle("setg model anthropic:claude-sonnet-4-6");
     await driver.handle("use sast");
@@ -664,12 +663,12 @@ describe("CoreDispatcher runTool wiring", () => {
     expect(options.output).toContain("model");
     expect(options.output).toContain("anthropic:claude-sonnet-4-6");
 
-    await driver.handle("set model claude-opus-4-6");
+    await driver.handle("set model anthropic:claude-opus-4-6");
     const result = await driver.handle("run");
 
     expect(result.output).toBe("ran");
     expect(calls).toHaveLength(1);
-    expect(calls[0].model).toBe("claude-opus-4-6");
+    expect(calls[0].model).toBe("anthropic:claude-opus-4-6");
     expect(calls[0].input).toMatchObject({ TARGET: "." });
     expect(calls[0].input).not.toHaveProperty("model");
   });

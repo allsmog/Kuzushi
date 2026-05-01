@@ -7,7 +7,6 @@
  */
 import { z } from "zod";
 import {
-  AGENT_RUNTIME_BACKENDS,
   BUS_BACKENDS,
   DATA_SENSITIVITIES,
   DISPLAY_SEVERITIES,
@@ -38,9 +37,6 @@ export type BusBackendZ = z.infer<typeof BusBackendSchema>;
 
 export const ScanModeSchema = z.enum(SCAN_MODES);
 export type ScanModeZ = z.infer<typeof ScanModeSchema>;
-
-export const AgentRuntimeBackendSchema = z.enum(AGENT_RUNTIME_BACKENDS);
-export type AgentRuntimeBackendZ = z.infer<typeof AgentRuntimeBackendSchema>;
 
 export const ProofVerdictSchema = z.enum(PROOF_VERDICTS);
 export type ProofVerdictZ = z.infer<typeof ProofVerdictSchema>;
@@ -608,7 +604,7 @@ export const ScanOptsSchema = z.object({
 
 export type ScanOptsZ = z.infer<typeof ScanOptsSchema>;
 
-// Agent runtime config
+// Agent runtime config — single flat slot (pi-ai is the only backend).
 
 export const AgentRuntimeCredentialsSchema = z.object({
   apiKey: z.string().optional(),
@@ -617,11 +613,7 @@ export const AgentRuntimeCredentialsSchema = z.object({
   baseUrl: z.string().optional(),
 });
 
-export const AgentRuntimeConfigSchema = z.object({
-  claude: AgentRuntimeCredentialsSchema.optional(),
-  piAi: AgentRuntimeCredentialsSchema.optional(),
-  codex: AgentRuntimeCredentialsSchema.optional(),
-});
+export const AgentRuntimeConfigSchema = AgentRuntimeCredentialsSchema;
 
 export type AgentRuntimeCredentialsZ = z.infer<typeof AgentRuntimeCredentialsSchema>;
 export type AgentRuntimeConfigZ = z.infer<typeof AgentRuntimeConfigSchema>;
@@ -661,6 +653,7 @@ export type MonorepoConfigZ = z.infer<typeof MonorepoConfigSchema>;
 
 export const KuzushiConfigSchema = z.object({
   model: z.string(),
+  availableModels: z.array(z.string()).optional(),
   verify: z.boolean().optional(),
   verifyMaxTurns: z.number().optional(),
   verifyConcurrency: z.number().optional(),
@@ -684,10 +677,7 @@ export const KuzushiConfigSchema = z.object({
   triageBatchSize: z.number(),
   triageConcurrency: z.number(),
   scanMode: ScanModeSchema,
-  agentRuntimeBackend: AgentRuntimeBackendSchema.optional(),
   agentRuntimeConfig: AgentRuntimeConfigSchema.optional(),
-  auth: z.literal("inherited").optional(),
-  oauthTokenFile: z.string().optional(),
   tasks: z.array(z.string()),
   severity: z.array(z.string()),
   excludePatterns: z.array(z.string()),

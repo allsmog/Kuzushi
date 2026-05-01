@@ -157,7 +157,9 @@ describe("buildPrComment", () => {
   });
 
   it("renders no findings table cleanly when actionable list is empty", () => {
-    const out = buildPrComment(mkSummary({ verdictCounts: { tp: 0, fp: 0, needs_review: 0, by_design: 0 } }));
+    const out = buildPrComment(
+      mkSummary({ verdictCounts: { tp: 0, fp: 0, needs_review: 0, by_design: 0 } }),
+    );
     expect(out).toContain("No findings triaged");
   });
 

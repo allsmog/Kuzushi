@@ -15,6 +15,7 @@ import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { icons } from "../icons.js";
 import { isCancelInput } from "../interaction-key-policy.js";
 import type { WizardResult } from "../preflight-types.js";
+import { MultiSelect, type MultiSelectRenderContext } from "../primitives/MultiSelect.js";
 import {
   SelectList,
   type SelectListItem,
@@ -74,7 +75,7 @@ const PRESETS: RichOption[] = [
   },
   {
     id: "reference",
-    icon: tokens.danger("\u25C9"),
+    icon: tokens.danger("◉"),
     name: "Reference",
     description: "augment current config",
     detail:
@@ -157,7 +158,7 @@ const MODELS: RichOption[] = [
     icon: icons.gear,
     name: "OpenRouter",
     description: "Any model, unified billing",
-    detail: "Proxies 100+ models. Pick any OpenRouter model ID via /config later.",
+    detail: "Proxies 100+ models. Pick any OpenRouter model ID via /model later.",
     summary: "Best when you want to experiment across providers from one key.",
   },
 ];
@@ -222,6 +223,31 @@ function richRenderer(options: RichOption[]) {
   };
 }
 
+function multiRichRenderer(options: RichOption[]) {
+  return (ctx: MultiSelectRenderContext<string>): React.ReactElement => {
+    const opt = options.find((o) => o.id === ctx.item.id);
+    if (!opt) return <Text>{ctx.item.label}</Text>;
+    const name = ctx.isCursor ? tokens.strong(opt.name) : tokens.muted(opt.name);
+    return (
+      <Box flexDirection="column" paddingLeft={SPACING.md}>
+        <Text>
+          {ctx.cursorPrefix} {ctx.checkbox} {opt.icon} {name} {tokens.muted(opt.description)}
+        </Text>
+        {ctx.isCursor && (
+          <>
+            <Box paddingLeft={SPACING.xxxl}>
+              <Text>{tokens.muted(opt.detail)}</Text>
+            </Box>
+            <Box paddingLeft={SPACING.xxxl}>
+              <Text>{tokens.strong(opt.summary)}</Text>
+            </Box>
+          </>
+        )}
+      </Box>
+    );
+  };
+}
+
 export function SetupWizard({
   repoName,
   onComplete,
@@ -229,46 +255,63 @@ export function SetupWizard({
 }: SetupWizardProps): React.ReactElement {
   const [step, setStep] = useState<WizardStep>("preset");
   const [result, setResult] = useState<Partial<WizardResult>>({});
+  const [pickedModels, setPickedModels] = useState<ReadonlySet<string>>(new Set([MODELS[0]!.id]));
 
-  useRegisterKeybindings([
-    { keys: "\u2191/\u2193", label: "Navigate" },
-    { keys: "Enter", label: "Select" },
-    { keys: "q", label: "Quit", secondary: true },
-  ]);
+  const stepKeybinds =
+    step === "model"
+      ? [
+          { keys: "↑/↓", label: "Navigate" },
+          { keys: "Space", label: "Toggle" },
+          { keys: "a/n", label: "All / None", secondary: true },
+          { keys: "Enter", label: "Confirm" },
+          { keys: "q", label: "Quit", secondary: true },
+        ]
+      : [
+          { keys: "↑/↓", label: "Navigate" },
+          { keys: "Enter", label: "Select" },
+          { keys: "q", label: "Quit", secondary: true },
+        ];
+  useRegisterKeybindings(stepKeybinds);
 
-  const currentOptions = step === "preset" ? PRESETS : step === "model" ? MODELS : SAVE_OPTIONS;
+  const currentSingleOptions = step === "preset" ? PRESETS : SAVE_OPTIONS;
 
   const stepTitle =
     step === "preset"
-      ? `Setup \u2014 ${repoName}`
+      ? `Setup — ${repoName}`
       : step === "model"
-        ? "Choose a model"
+        ? "Pick the models you want available"
         : "Save configuration?";
 
   const stepHint =
     step === "preset"
       ? "Choose a scan preset:"
       : step === "model"
-        ? "Which AI model for triage?"
+        ? "Space toggles. Enter confirms. The first picked model becomes the default."
         : "Where should we save these settings?";
 
   const currentStep = STEP_ORDER.indexOf(step) + 1;
 
-  const handleSelect = (id: string) => {
+  const handleSingleSelect = (id: string) => {
     if (step === "preset") {
       setResult((r) => ({ ...r, preset: id }));
       setStep("model");
-    } else if (step === "model") {
-      setResult((r) => ({ ...r, model: id }));
-      setStep("save");
     } else {
       const final: WizardResult = {
         preset: result.preset!,
         model: result.model,
+        availableModels: result.availableModels,
         saveLocation: id as "project" | "global" | "none",
       };
       onComplete(final);
     }
+  };
+
+  const handleModelConfirm = (ids: ReadonlySet<string>): void => {
+    if (ids.size === 0) return;
+    const ordered = MODELS.map((m) => m.id).filter((id) => ids.has(id));
+    const defaultModel = ordered[0]!;
+    setResult((r) => ({ ...r, model: defaultModel, availableModels: ordered }));
+    setStep("save");
   };
 
   // Esc/q handling — delegated to a one-off listener rather than tangling the
@@ -288,11 +331,30 @@ export function SetupWizard({
       </Box>
       <Text>{""}</Text>
 
-      <SelectList
-        items={toSelectItems(currentOptions)}
-        onSelect={handleSelect}
-        renderItem={richRenderer(currentOptions)}
-      />
+      {step === "model" ? (
+        <MultiSelect<string>
+          items={toSelectItems(MODELS)}
+          selectedIds={pickedModels}
+          onToggle={(id) => {
+            setPickedModels((prev) => {
+              const next = new Set(prev);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
+            });
+          }}
+          onReplaceAll={(ids) => setPickedModels(ids)}
+          onConfirm={handleModelConfirm}
+          minSelected={1}
+          renderItem={multiRichRenderer(MODELS)}
+        />
+      ) : (
+        <SelectList
+          items={toSelectItems(currentSingleOptions)}
+          onSelect={handleSingleSelect}
+          renderItem={richRenderer(currentSingleOptions)}
+        />
+      )}
     </Box>
   );
 }

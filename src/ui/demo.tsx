@@ -70,7 +70,6 @@ async function main(): Promise<void> {
       tasks: ["semgrep", "codeql", "agentic"],
       severity: ["ERROR", "WARNING"],
       concurrency: 5,
-      backend: "pi-ai",
     },
   });
   await sleep(600);

@@ -1368,7 +1368,6 @@ describe("taint-iris-next CWE reference", () => {
 
     const result = await runTaintIrisNextAgent(plan, evidenceResult({}), agentCtx);
 
-    expect(result.agentRuntimeBackend).toBe(runtime.id);
     expect(result.agentStatus).toBe("valid-json");
     expect(result.structuredOutputValid).toBe(true);
     expect(result.selectedCwes.map((item) => item.cwe)).toEqual(["CWE-89"]);
@@ -1380,30 +1379,6 @@ describe("taint-iris-next CWE reference", () => {
     expect(runtime.calls[0]?.options.model).toBe(
       runtime.id === "codex" ? "codex:gpt-5.5" : "anthropic:claude-sonnet-4-6",
     );
-  });
-
-  it("rejects runtime/model mismatches instead of silently falling back", async () => {
-    const root = tempRepo();
-    const context = repoContext({ languages: ["TypeScript"], frameworks: ["Express"] });
-    const ctx = seededContext(root, context, threatModel(["CWE-89"]));
-    const plan = buildTaintIrisNextPlan({ target: root, maxCatalogEntries: 1 }, ctx);
-    const runtime = backendRuntime("codex", [
-      {
-        match: /Taint IRIS Next agent/u,
-        output: '{"selectedCwes":[],"findings":[],"triage":[],"notes":[]}',
-      },
-    ]);
-    const agentCtx = createMockToolContext({
-      cwd: root,
-      target: root,
-      runtime,
-      seedTaskOutputs: ctx.seedTaskOutputs,
-    });
-
-    await expect(runTaintIrisNextAgent(plan, evidenceResult({}), agentCtx)).rejects.toThrow(
-      /will not silently switch models/u,
-    );
-    expect(runtime.calls).toHaveLength(0);
   });
 
   it("does not treat unrelated runtime-error JSON as valid agent output", async () => {
@@ -1433,7 +1408,6 @@ describe("taint-iris-next CWE reference", () => {
 
     const result = await runTaintIrisNextAgent(plan, evidenceResult({}), agentCtx);
 
-    expect(result.agentRuntimeBackend).toBe("codex");
     expect(result.agentStatus).toBe("invalid-json");
     expect(result.structuredOutputValid).toBe(false);
     expect(result.parseError).toContain("did not match IRIS agent output schema");
@@ -1563,7 +1537,6 @@ describe("taint-iris-next CWE reference", () => {
     );
 
     expect(runtime.calls).toHaveLength(2);
-    expect(result.agentRuntimeBackend).toBe("pi-ai");
     expect(result.agentStatus).toBe("invalid-json");
     expect(result.structuredOutputValid).toBe(false);
     expect(result.reviewCandidates).toHaveLength(2);

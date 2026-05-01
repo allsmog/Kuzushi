@@ -3,8 +3,6 @@ import type { KuzushiConfig } from "../types.js";
 
 export const BUS_BACKENDS = new Set<string>(["in-process"]);
 
-export const AGENT_RUNTIME_BACKENDS = new Set<string>(["claude", "pi-ai", "codex"]);
-
 const DEFAULT_TAINT_ANALYSIS_PATH = process.env["TAINT_ANALYSIS_PATH"]?.trim() || taintAnalysisRoot;
 
 export const DEFAULTS: KuzushiConfig = {
@@ -35,7 +33,6 @@ export const DEFAULTS: KuzushiConfig = {
   triageBatchSize: 5,
   triageConcurrency: 5,
   scanMode: "concurrent",
-  agentRuntimeBackend: "pi-ai",
   agentRuntimeConfig: undefined,
   tasks: ["semgrep:scan"],
   severity: ["ERROR", "WARNING"],

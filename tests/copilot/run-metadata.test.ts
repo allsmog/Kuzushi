@@ -3,12 +3,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  RUN_SUMMARY_FILENAME,
-  RUN_SUMMARY_SCHEMA_VERSION,
   buildReproducibility,
   canonicalJson,
   countFindingsBy,
   hashConfig,
+  RUN_SUMMARY_FILENAME,
+  RUN_SUMMARY_SCHEMA_VERSION,
   readEnvFingerprint,
   readHouseRulesFingerprints,
   readPromptOverrideFingerprints,
@@ -159,7 +159,7 @@ describe("run-metadata", () => {
     it("composes a full repro blob from disk + config", () => {
       mkdirSync(path.join(dataDir, "prompts", "core-sast"), { recursive: true });
       writeFileSync(path.join(dataDir, "prompts", "core-sast", "triage.md"), "BODY");
-      const config = mkConfig({ agentRuntimeBackend: "claude" });
+      const config = mkConfig({});
       const repro = buildReproducibility({
         config,
         scanOpts: mkScanOpts(),
@@ -167,11 +167,9 @@ describe("run-metadata", () => {
         dataDir,
         argv: ["scan", "./repo", "--preset", "deep"],
         env: { KUZUSHI_DEBUG: "1" } as NodeJS.ProcessEnv,
-        agentRuntimeBackend: "claude",
       });
       expect(repro.kuzushiVersion).toBeTruthy();
       expect(repro.model).toBe(config.model);
-      expect(repro.agentRuntimeBackend).toBe("claude");
       expect(repro.configHash).toMatch(/^sha256:/);
       expect(repro.scanArgs).toEqual(["scan", "./repo", "--preset", "deep"]);
       expect(repro.envFingerprint.KUZUSHI_DEBUG).toBe("1");

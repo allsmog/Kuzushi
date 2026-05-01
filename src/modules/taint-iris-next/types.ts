@@ -285,7 +285,6 @@ export interface TaintIrisNextAgentOutput {
 }
 
 export interface TaintIrisNextAgentResult {
-  agentRuntimeBackend: string;
   agentStatus: TaintIrisNextAgentStatus;
   selectedCwes: TaintIrisNextAgentSelection[];
   findings: Finding[];

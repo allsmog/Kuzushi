@@ -16,7 +16,6 @@ import {
   describeModelOverrideFormat,
   validateModelOverride,
 } from "../../agent-runtime/model-validation.js";
-import type { AgentRuntimeBackend } from "../../contracts.js";
 import type { CopilotModule, JSONSchema, ModuleTool, ToolResult } from "../../modules/types.js";
 import { looksLikePath } from "../dispatch/resolve-tool.js";
 import { Datastore, type OptionSpec } from "../options.js";
@@ -34,8 +33,6 @@ export interface ModuleDispatcherOptions {
   module: CopilotModule;
   /** Shared global datastore (set by `setg`). */
   globals: Datastore;
-  /** Active agent runtime backend, used to validate model overrides. */
-  agentRuntimeBackend?: AgentRuntimeBackend;
   /** Optional executor — when present, `run` invokes the tool. Otherwise prints the call. */
   runTool?: ModuleToolRunner;
 }
@@ -59,9 +56,7 @@ export class ModuleDispatcher implements CommandDispatcher {
       options: "Alias for `show options`",
       tools: "List tools exposed by this module",
     };
-    this.datastore = createModuleDatastore(opts.module, opts.globals, {
-      agentRuntimeBackend: opts.agentRuntimeBackend,
-    });
+    this.datastore = createModuleDatastore(opts.module, opts.globals);
   }
 
   async execute(
@@ -342,11 +337,7 @@ export function pickDefaultTool(mod: CopilotModule): ModuleTool | undefined {
  * If a tool's input properties have `description` + `default`, those become
  * OptionSpecs so `show options` works without per-module wiring.
  */
-export function createModuleDatastore(
-  mod: CopilotModule,
-  globals: Datastore,
-  opts: { agentRuntimeBackend?: AgentRuntimeBackend } = {},
-): Datastore {
+export function createModuleDatastore(mod: CopilotModule, globals: Datastore): Datastore {
   const specs: OptionSpec[] = [];
   const seen = new Set<string>();
   for (const tool of mod.tools) {
@@ -359,7 +350,7 @@ export function createModuleDatastore(
       specs.push(propertyToSpec(name, schema, required.has(name)));
     }
   }
-  installModelOptionSpec(specs, opts.agentRuntimeBackend);
+  installModelOptionSpec(specs);
   // Inherit any globally-set values into the resolved view (no copy — they
   // live in `globals`; the new store and `globals` are queried separately
   // via Datastore.get(), but for the per-module view we want a single store).
@@ -367,32 +358,32 @@ export function createModuleDatastore(
   return new DelegatingDatastore(specs, globals);
 }
 
-export function modelOptionSpec(name: string, backend?: AgentRuntimeBackend): OptionSpec<string> {
+export function modelOptionSpec(name: string): OptionSpec<string> {
   return {
     name,
     type: "string",
     required: false,
-    description: describeModelOverrideFormat(backend),
-    validate: (value) => validateModelOverride(backend, value),
+    description: describeModelOverrideFormat(),
+    validate: (value) => validateModelOverride(value),
   };
 }
 
-function installModelOptionSpec(specs: OptionSpec[], backend?: AgentRuntimeBackend): void {
+function installModelOptionSpec(specs: OptionSpec[]): void {
   const existingIndex = specs.findIndex((spec) => spec.name.toUpperCase() === "MODEL");
   if (existingIndex === -1) {
-    specs.push(modelOptionSpec("model", backend));
+    specs.push(modelOptionSpec("model"));
     return;
   }
 
   const existing = specs[existingIndex]!;
   specs[existingIndex] = {
     ...existing,
-    description: existing.description || describeModelOverrideFormat(backend),
+    description: existing.description || describeModelOverrideFormat(),
     validate: (value: unknown) => {
       const previous = existing.validate?.(value as never);
       if (previous) return previous;
       if (typeof value !== "string") return "model must be a string";
-      return validateModelOverride(backend, value);
+      return validateModelOverride(value);
     },
   };
 }

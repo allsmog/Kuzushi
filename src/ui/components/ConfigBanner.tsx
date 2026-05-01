@@ -18,7 +18,6 @@ export interface ConfigBannerData {
   tasks: string[];
   severity?: string[];
   concurrency?: number;
-  backend?: string;
   budget?: number;
   scanMode?: string;
 }
@@ -38,9 +37,6 @@ export function ConfigBanner({ config }: ConfigBannerProps): React.ReactElement 
     { label: "Model", value: config.model },
     { label: "Tasks", value: config.tasks.join(", ") },
   ];
-  if (config.backend && config.backend !== "claude") {
-    rows.push({ label: "Backend", value: config.backend });
-  }
   if (config.scanMode && config.scanMode !== "sequential") {
     rows.push({ label: "Scan mode", value: config.scanMode });
   }

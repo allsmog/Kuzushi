@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildRunMetadata,
-  getKuzushiVersion,
-  hashConfig,
-} from "../../src/utils/run-metadata.js";
+import { buildRunMetadata, getKuzushiVersion, hashConfig } from "../../src/utils/run-metadata.js";
 
 describe("getKuzushiVersion", () => {
   it("returns a semver-shaped string from package.json", () => {

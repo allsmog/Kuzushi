@@ -372,7 +372,7 @@ export async function runStructuredSessionQuery(
  * Map an async worker over `items` with a bounded concurrency limit. Preserves
  * input order in the result array. Errors propagate (no implicit swallow).
  *
- * Used by the `runStructuredBatchQuery` OAuth fallback so an operator's
+ * Used by the `runStructuredBatchQuery` fallback so an operator's
  * `--triage-concurrency` (or per-task default) actually translates into N
  * parallel agent queries instead of strictly sequential ones. Kept generic so
  * other batch-fallback paths (taint labeling, llm-rescore) can adopt it.
@@ -407,7 +407,7 @@ export async function mapConcurrent<T, R>(
 /**
  * Submit multiple tool-less prompts as a batch for 50% cost reduction.
  * Falls back to bounded-concurrency `runStructuredAgentQuery()` calls if the
- * runtime doesn't support batch processing (e.g. OAuth-mode Claude).
+ * runtime doesn't support batch processing or the batch endpoint errors out.
  */
 export async function runStructuredBatchQuery(
   requests: Array<{ id: string; prompt: string; systemPrompt?: string }>,
@@ -420,8 +420,8 @@ export async function runStructuredBatchQuery(
     thinkingDisabled?: boolean;
     /**
      * Max parallel agent queries when the runtime falls back from the Batch
-     * API to per-prompt calls (OAuth mode, proxy 404, etc.). Defaults to 1
-     * (preserves prior strictly sequential behavior).
+     * API to per-prompt calls. Defaults to 1 (preserves prior strictly
+     * sequential behavior).
      */
     fallbackConcurrency?: number;
   },
@@ -431,14 +431,8 @@ export async function runStructuredBatchQuery(
     throw new Error("Agent runtime is required for batch queries.");
   }
 
-  // Use batch API if available, fall back to sequential on endpoint errors (e.g. proxy 404).
-  // Skip outright when the runtime is in OAuth mode — the throw is
-  // synchronous and logging the same warning per batch is just noise
-  // (field-test issue #28). The runtime exposes an `oauthMode` flag
-  // set in claude.ts when no apiKey is configured.
-  const batchUnavailableUnderOAuth =
-    runtime.queryBatch && (runtime as { oauthMode?: boolean }).oauthMode === true;
-  if (runtime.queryBatch && !batchUnavailableUnderOAuth) {
+  // Use batch API if available, fall back to sequential on endpoint errors.
+  if (runtime.queryBatch) {
     try {
       return await runtime.queryBatch(
         requests.map((r) => ({ id: r.id, prompt: r.prompt, systemPrompt: r.systemPrompt })),
@@ -456,11 +450,9 @@ export async function runStructuredBatchQuery(
     }
   }
 
-  // Fallback: run with bounded concurrency. The agent-runtime spawn
-  // semaphore (claude.ts MAX_CONCURRENT_QUERIES) still caps subprocess
-  // count, but bounded mapConcurrent here gives operators a way to tune
-  // OAuth-mode throughput via --triage-concurrency without unbounded
-  // promise creation.
+  // Fallback: run with bounded concurrency. `mapConcurrent` gives operators
+  // a way to tune fallback throughput via --triage-concurrency without
+  // unbounded promise creation.
   // Do NOT carry over temperature=0 from batch settings — the Batch API
   // handles temperature internally, but sequential queries with thinking
   // enabled require temperature=1 (or omitted to use the default).

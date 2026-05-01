@@ -18,10 +18,10 @@
 
 import { existsSync, rmSync } from "node:fs";
 import path from "node:path";
-import { resolveRepo } from "../shared.js";
-import { CliUsageError } from "../errors.js";
-import { defaultDbPath, deleteRun, initDb, listRuns } from "../../store.js";
 import type { PipelineRunRecord } from "../../store.js";
+import { defaultDbPath, deleteRun, initDb, listRuns } from "../../store.js";
+import { CliUsageError } from "../errors.js";
+import { resolveRepo } from "../shared.js";
 
 export interface RunsPruneOpts {
   repo: string;
@@ -162,14 +162,10 @@ export function executePrune(
 
 export function runRunsPrune(opts: RunsPruneOpts): void {
   if (!opts.olderThan && opts.keepLast == null) {
-    throw new CliUsageError(
-      "Specify exactly one of --older-than <duration> or --keep-last <n>.",
-    );
+    throw new CliUsageError("Specify exactly one of --older-than <duration> or --keep-last <n>.");
   }
   if (opts.olderThan && opts.keepLast != null) {
-    throw new CliUsageError(
-      "Pass only one of --older-than or --keep-last, not both.",
-    );
+    throw new CliUsageError("Pass only one of --older-than or --keep-last, not both.");
   }
   if (opts.keepLast != null && (!Number.isFinite(opts.keepLast) || opts.keepLast < 0)) {
     throw new CliUsageError("--keep-last must be a non-negative integer.");
@@ -216,9 +212,7 @@ export function runRunsPrune(opts: RunsPruneOpts): void {
     console.log(`${action} ${result.candidates.length} run(s):`);
     for (const run of result.candidates) {
       const started = run.startedAt ?? "?";
-      console.log(
-        `  ${run.runId.padEnd(40)} ${(run.status ?? "?").padEnd(12)} ${started}`,
-      );
+      console.log(`  ${run.runId.padEnd(40)} ${(run.status ?? "?").padEnd(12)} ${started}`);
     }
     if (!opts.dryRun) {
       console.log(`\nDeleted ${result.deletedRows} DB row(s), ${result.deletedDirs} dir(s).`);

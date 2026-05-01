@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  executePrune,
-  parseDuration,
-  planPrune,
-} from "../../src/cli/commands/runs-prune.js";
+import { executePrune, parseDuration, planPrune } from "../../src/cli/commands/runs-prune.js";
 import type { PipelineRunRecord } from "../../src/store.js";
 
 function mkRun(overrides: Partial<PipelineRunRecord> = {}): PipelineRunRecord {
@@ -55,8 +51,16 @@ describe("runs-prune", () => {
 
     it("keeps runs newer than the cutoff", () => {
       const runs = [
-        mkRun({ runId: "fresh", startedAt: "2026-04-29T00:00:00Z", completedAt: "2026-04-29T00:01:00Z" }),
-        mkRun({ runId: "old", startedAt: "2026-01-01T00:00:00Z", completedAt: "2026-01-01T00:01:00Z" }),
+        mkRun({
+          runId: "fresh",
+          startedAt: "2026-04-29T00:00:00Z",
+          completedAt: "2026-04-29T00:01:00Z",
+        }),
+        mkRun({
+          runId: "old",
+          startedAt: "2026-01-01T00:00:00Z",
+          completedAt: "2026-01-01T00:01:00Z",
+        }),
       ];
       const out = planPrune(runs, { olderThanMs: 7 * 86400 * 1000, now });
       expect(out.map((r) => r.runId)).toEqual(["old"]);

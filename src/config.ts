@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import {
   existsSync,
   lstatSync,
@@ -7,11 +6,10 @@ import {
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { validateModelOverride } from "./agent-runtime/model-validation.js";
 import { normalizeTaskConfigAliases } from "./capabilities.js";
-import { AGENT_RUNTIME_BACKENDS, BUS_BACKENDS, DEFAULTS } from "./config/defaults.js";
+import { BUS_BACKENDS, DEFAULTS } from "./config/defaults.js";
 import {
   CONFIG_DIR,
   CONFIG_PATH,
@@ -32,7 +30,6 @@ import type { TaskConfig } from "./scanners/types.js";
 import { KuzushiConfigSchema } from "./schemas.js";
 import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
 import type {
-  AgentRuntimeBackend,
   AgentRuntimeConfig,
   AgentRuntimeCredentials,
   KuzushiConfig,
@@ -45,10 +42,9 @@ type WritableConfigLayer = Partial<KuzushiConfig> & ConfigLayer;
 const log = getLogger("config");
 
 /**
- * Thrown when a loaded config would silently force Kuzushi to switch
- * runtimes/providers/models. The message always includes a remedy ("run
- * /provider <id>" / "run /backend <id>") so operators can fix it without
- * digging through source.
+ * Thrown when a loaded config would silently force Kuzushi onto an invalid
+ * model. The message always includes the remedy ("run /model use <id>") so
+ * operators can fix it without digging through source.
  */
 export class KuzushiConfigError extends Error {
   readonly code = "KUZUSHI_CONFIG_INVALID" as const;
@@ -108,17 +104,8 @@ export function persistLocalCredentials(
   }
 
   const existing = loadLocalCredentials(cwd) ?? {};
-  // Deep merge each backend slot so writing claude doesn't wipe piAi, and
-  // each slot's apiKey/authToken/baseUrl merge field-wise rather than replacing the
-  // whole object.
-  const merged: AgentRuntimeConfig = {
-    claude: { ...(existing.claude ?? {}), ...(creds.claude ?? {}) },
-    piAi: { ...(existing.piAi ?? {}), ...(creds.piAi ?? {}) },
-    codex: { ...(existing.codex ?? {}), ...(creds.codex ?? {}) },
-  };
-  if (!merged.claude || Object.keys(merged.claude).length === 0) delete merged.claude;
-  if (!merged.piAi || Object.keys(merged.piAi).length === 0) delete merged.piAi;
-  if (!merged.codex || Object.keys(merged.codex).length === 0) delete merged.codex;
+  // Field-wise merge so writing one cred field doesn't blank others.
+  const merged: AgentRuntimeConfig = { ...existing, ...creds };
   writeFileSync(filePath, `${JSON.stringify(merged, null, 2)}\n`, {
     encoding: "utf-8",
     mode: 0o600,
@@ -157,7 +144,6 @@ export function persistLocalCredentials(
 const VALID_TOP_LEVEL_KEYS = new Set<string>(Object.keys(KuzushiConfigSchema.shape));
 
 const UNSAFE_PROJECT_CONFIG_KEYS = new Set<string>([
-  "agentRuntimeBackend",
   "agentRuntimeConfig",
   "verify",
   "pocHarness",
@@ -245,7 +231,6 @@ export function getConfigValue(key: string, repoRoot?: string): unknown {
 /** Set a config value by key (supports dotted paths like taskConfig.semgrep.binary). */
 export function setConfigValue(key: string, raw: string, repoRoot?: string): void {
   const config = loadWritableConfigLayer(repoRoot);
-  rejectLegacyAgentRuntimePath(key);
 
   if (key.includes(".")) {
     const parts = key.split(".");
@@ -367,25 +352,12 @@ export const TOP_LEVEL_CONFIG_SETTERS: Record<string, ConfigSetter> = {
   scanMode: setEnum("scanMode", new Set(["sequential", "concurrent"])),
 
   // Agent runtime + bus
-  agentRuntimeBackend: setEnum("agentRuntimeBackend", AGENT_RUNTIME_BACKENDS),
   agentRuntimeConfig: (config, raw) => {
     const parsed = parseFlexibleValue(raw);
     if (!isRecord(parsed)) {
       throw new Error("agentRuntimeConfig must be an object");
     }
-    rejectLegacyAgentRuntimeConfig(parsed);
     config.agentRuntimeConfig = normalizeAgentRuntimeConfig(parsed);
-  },
-  auth: (config, raw) => {
-    const v = String(raw).trim().toLowerCase();
-    if (v === "" || v === "none" || v === "null") {
-      delete (config as Partial<KuzushiConfig>).auth;
-      return;
-    }
-    if (v !== "inherited") {
-      throw new Error('auth must be "inherited" or unset');
-    }
-    config.auth = "inherited";
   },
   busBackend: setEnum("busBackend", BUS_BACKENDS),
 
@@ -536,7 +508,6 @@ export function applyConfigPatch(entries: ConfigPatchEntry[], repoRoot?: string)
 /** Unset a config key (supports dotted paths). */
 export function unsetConfigValue(key: string, repoRoot?: string): void {
   const config = loadWritableConfigLayer(repoRoot);
-  rejectLegacyAgentRuntimePath(key);
 
   if (key.includes(".")) {
     const parts = key.split(".");
@@ -625,7 +596,6 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     DEFAULTS.retryBackoffMultiplier ?? 2,
   );
   const scanMode = normalizeScanMode(config.scanMode);
-  const agentRuntimeBackend = normalizeAgentRuntimeBackend(config.agentRuntimeBackend);
   const agentRuntimeConfig = normalizeAgentRuntimeConfig(config.agentRuntimeConfig);
   const confidenceSignalWeights = normalizeConfidenceSignalWeights(config.confidenceSignalWeights);
   const ensembleModels = normalizeStringArray(config.ensembleModels);
@@ -694,7 +664,7 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
   }
 
   const normalizedTaskConfig = normalizeTaskConfigAliases(coerceTaskConfigMap(config.taskConfig));
-  assertModelRuntimeCompatibility(agentRuntimeBackend, config.model, normalizedTaskConfig);
+  assertModelRuntimeCompatibility(config.model, normalizedTaskConfig);
 
   return {
     ...config,
@@ -723,7 +693,6 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
     triageBatchSize,
     triageConcurrency,
     scanMode,
-    agentRuntimeBackend,
     agentRuntimeConfig,
     confidenceSignalWeights,
     ensembleModels,
@@ -749,36 +718,27 @@ function normalizeConfig(config: KuzushiConfig): KuzushiConfig {
 }
 
 /**
- * Pre-flight: refuse to load a config that pairs an `agentRuntimeBackend`
- * with an incompatible top-level `model` or per-task `taskConfig[*].model`.
- * Without this gate, the runtime first detects the mismatch only on the
- * first LLM call deep inside a pipeline. The remedy text instructs the
- * operator how to fix it without grepping the source.
+ * Pre-flight: refuse to load a config whose top-level `model` or per-task
+ * `taskConfig[*].model` doesn't parse as a `provider:modelId` spec the
+ * pi-ai runtime can drive. Without this gate, the mismatch is first
+ * detected only on the first LLM call deep inside a pipeline.
  *
  * Allowed scenarios deliberately not flagged:
  *   - operator did not configure a model at all (handled by global
- *     `DEFAULTS.model`, which is always pi-ai/claude-compatible);
+ *     `DEFAULTS.model`);
  *   - taskConfig entry is a record but lacks a `model` field (the task
  *     resolver falls back to `config.model`, already validated above).
  */
 function assertModelRuntimeCompatibility(
-  // `backend` may be undefined when the operator hasn't configured one.
-  // `validateModelOverride` already resolves undefined → "pi-ai", so we just
-  // pass it through; the resulting error message will say
-  // `agentRuntimeBackend "undefined"` which reads acceptably as a hint that
-  // the operator should set one explicitly.
-  backend: AgentRuntimeBackend | undefined,
   model: string | undefined,
   taskConfig: Record<string, Record<string, unknown>>,
 ): void {
   if (typeof model === "string" && model.trim() !== "") {
-    const err = validateModelOverride(backend, model);
+    const err = validateModelOverride(model);
     if (err) {
       throw new KuzushiConfigError(
-        `Configured model "${model}" is incompatible with agentRuntimeBackend "${backend}" (${err}). ` +
-          `Kuzushi will not silently switch runtimes or providers. ` +
-          `Either run \`kuzushi config set model <provider>:<model>\` with a compatible model, ` +
-          `or \`kuzushi config set agentRuntimeBackend <id>\` to a backend that accepts your model.`,
+        `Configured model "${model}" is not a valid pi-ai model spec (${err}). ` +
+          `Run \`kuzushi config set model <provider>:<model>\` with a compatible value.`,
       );
     }
   }
@@ -794,13 +754,11 @@ function assertModelRuntimeCompatibility(
     ];
     for (const [field, value] of candidates) {
       if (typeof value !== "string" || value.trim() === "") continue;
-      const err = validateModelOverride(backend, value);
+      const err = validateModelOverride(value);
       if (err) {
         throw new KuzushiConfigError(
-          `taskConfig["${taskId}"].${field} = "${value}" is incompatible with agentRuntimeBackend "${backend}" (${err}). ` +
-            `Kuzushi will not silently switch runtimes or providers. ` +
-            `Either set a compatible model for this task or run \`kuzushi config set agentRuntimeBackend <id>\` ` +
-            `to switch backends.`,
+          `taskConfig["${taskId}"].${field} = "${value}" is not a valid pi-ai model spec (${err}). ` +
+            `Set a compatible model for this task or remove the override.`,
         );
       }
     }
@@ -855,32 +813,9 @@ function mergeConfigLayers(...layers: Array<unknown>): KuzushiConfig {
 
         const normalizedLayer = normalizeAgentRuntimeConfig(value);
         if (!normalizedLayer) continue;
-        const existing = merged.agentRuntimeConfig ?? {};
-        // Deep-merge each backend slot so a project layer setting claude.baseUrl
-        // doesn't wipe a global claude.apiKey/authToken.
-        merged.agentRuntimeConfig = {
-          claude: { ...(existing.claude ?? {}), ...(normalizedLayer.claude ?? {}) },
-          piAi: { ...(existing.piAi ?? {}), ...(normalizedLayer.piAi ?? {}) },
-          codex: { ...(existing.codex ?? {}), ...(normalizedLayer.codex ?? {}) },
-        };
-        if (
-          !merged.agentRuntimeConfig.claude ||
-          Object.keys(merged.agentRuntimeConfig.claude).length === 0
-        ) {
-          delete merged.agentRuntimeConfig.claude;
-        }
-        if (
-          !merged.agentRuntimeConfig.piAi ||
-          Object.keys(merged.agentRuntimeConfig.piAi).length === 0
-        ) {
-          delete merged.agentRuntimeConfig.piAi;
-        }
-        if (
-          !merged.agentRuntimeConfig.codex ||
-          Object.keys(merged.agentRuntimeConfig.codex).length === 0
-        ) {
-          delete merged.agentRuntimeConfig.codex;
-        }
+        // Field-wise merge so a project layer setting baseUrl doesn't wipe a
+        // global apiKey/authToken.
+        merged.agentRuntimeConfig = { ...(merged.agentRuntimeConfig ?? {}), ...normalizedLayer };
         continue;
       }
 
@@ -968,22 +903,6 @@ function saveUpdatedConfigLayer(config: WritableConfigLayer, repoRoot?: string):
   const layer = sanitizeConfigLayer(config) as WritableConfigLayer;
   validateConfigLayer(layer, repoRoot);
   saveConfigLayer(layer, repoRoot);
-}
-
-function rejectLegacyAgentRuntimePath(key: string): void {
-  if (!/^agentRuntimeConfig\.(apiKey|apiKeyFile|authToken|baseUrl)$/.test(key)) return;
-  const field = key.split(".").at(-1);
-  throw new Error(
-    `Legacy config key "${key}" was removed. Use "agentRuntimeConfig.claude.${field}" instead.`,
-  );
-}
-
-function rejectLegacyAgentRuntimeConfig(value: Record<string, unknown>): void {
-  if (!("apiKey" in value || "apiKeyFile" in value || "authToken" in value || "baseUrl" in value))
-    return;
-  throw new Error(
-    'Legacy flat agentRuntimeConfig was removed. Use {"claude":{"apiKey":"..."}} or another backend slot.',
-  );
 }
 
 function validateConfigLayer(layer: WritableConfigLayer, repoRoot?: string): void {
@@ -1085,7 +1004,7 @@ function sanitizeProjectConfigLayer(
 }
 
 let credStripBannerEmitted = false;
-const CRED_BEARING_KEYS = new Set(["agentRuntimeConfig", "agentRuntimeBackend", "credentials"]);
+const CRED_BEARING_KEYS = new Set(["agentRuntimeConfig", "credentials"]);
 function surfaceCredStripBanner(strippedKeys: string[], projectPath: string): void {
   if (credStripBannerEmitted) return;
   if (process.env.KUZUSHI_QUIET_CRED_BANNER) return;
@@ -1303,21 +1222,6 @@ function normalizeScanMode(value: unknown): KuzushiConfig["scanMode"] {
   return DEFAULTS.scanMode;
 }
 
-function normalizeAgentRuntimeBackend(value: unknown): KuzushiConfig["agentRuntimeBackend"] {
-  if (typeof value !== "string") {
-    return DEFAULTS.agentRuntimeBackend;
-  }
-
-  if (AGENT_RUNTIME_BACKENDS.has(value)) {
-    return value as KuzushiConfig["agentRuntimeBackend"];
-  }
-
-  throw new Error(
-    `Invalid agentRuntimeBackend "${value}". ` +
-      `Valid values: ${[...AGENT_RUNTIME_BACKENDS].join(", ")}`,
-  );
-}
-
 function normalizePositiveInt(value: unknown, fallback: number): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 1) {
@@ -1515,34 +1419,13 @@ function normalizeAgentRuntimeCredentials(value: unknown): AgentRuntimeCredentia
 
 function normalizeAgentRuntimeConfig(value: unknown): AgentRuntimeConfig | undefined {
   if (!isRecord(value)) return undefined;
-
-  const claudeFromSlot = normalizeAgentRuntimeCredentials(value["claude"]);
-  const piAiFromSlot = normalizeAgentRuntimeCredentials(value["piAi"]);
-  const codexFromSlot = normalizeAgentRuntimeCredentials(value["codex"]);
-
-  if (!claudeFromSlot && !piAiFromSlot && !codexFromSlot) return undefined;
-
-  const out: AgentRuntimeConfig = {};
-  if (claudeFromSlot) out.claude = claudeFromSlot;
-  if (piAiFromSlot) out.piAi = piAiFromSlot;
-  if (codexFromSlot) out.codex = codexFromSlot;
-  return out;
+  return normalizeAgentRuntimeCredentials(value);
 }
 
 export function resolveActiveCredentials(
-  config: Pick<KuzushiConfig, "agentRuntimeBackend" | "agentRuntimeConfig">,
+  config: Pick<KuzushiConfig, "agentRuntimeConfig">,
 ): AgentRuntimeCredentials {
-  const backend = config.agentRuntimeBackend ?? "pi-ai";
-  const slot = backendConfigSlot(backend);
-  return config.agentRuntimeConfig?.[slot] ?? {};
-}
-
-/** Slot name for `agentRuntimeConfig` that matches a backend id. */
-export function backendConfigSlot(
-  backend: AgentRuntimeBackend | undefined,
-): "claude" | "piAi" | "codex" {
-  if (backend === "codex") return "codex";
-  return (backend ?? "pi-ai") === "pi-ai" ? "piAi" : "claude";
+  return config.agentRuntimeConfig ?? {};
 }
 
 /**
@@ -1561,175 +1444,6 @@ export function providerEnvVar(providerId: string): string | undefined {
     openrouter: "OPENROUTER_API_KEY",
   };
   return map[providerId];
-}
-
-export interface AmbientOauthResolution {
-  /** The OAuth bearer token (raw `sk-ant-oat...` string). */
-  token: string;
-  /**
-   * Human-readable description of where the token came from
-   * (e.g. `env:ANTHROPIC_OAUTH_TOKEN`, `file:/home/.../.oauth_token`).
-   * Surfaced in `kuzushi doctor` and the inherited-auth log line.
-   */
-  source: string;
-}
-
-/**
- * Walk a deterministic search path looking for an Anthropic OAuth bearer
- * token to use as the runtime credential. Resolution order:
- *
- *   1. `ANTHROPIC_API_KEY` env var if it has the OAuth shape (`sk-ant-oat`).
- *   2. `ANTHROPIC_OAUTH_TOKEN` env var.
- *   3. `ANTHROPIC_OAUTH_TOKEN_FILE` env var → file contents.
- *   4. `config.oauthTokenFile` → file contents.
- *   5. `~/.claude/remote/.oauth_token` (Claude Code remote sandbox).
- *   6. `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`.
- *   7. macOS Keychain `Claude Code-credentials` → `claudeAiOauth.accessToken`.
- *
- * Used by inherited-auth mode so operators in a Claude Code child
- * session don't have to copy-paste a key. Returns `undefined` when no
- * token is discoverable; callers may then fall through to the existing
- * credential prompt or fail in `kuzushi doctor`.
- */
-export function resolveAmbientOauthToken(
-  config: Pick<KuzushiConfig, "oauthTokenFile">,
-): AmbientOauthResolution | undefined {
-  const envApi = process.env["ANTHROPIC_API_KEY"]?.trim();
-  if (envApi?.startsWith("sk-ant-oat")) {
-    return { token: envApi, source: "env:ANTHROPIC_API_KEY" };
-  }
-
-  const envOauth = process.env["ANTHROPIC_OAUTH_TOKEN"]?.trim();
-  if (envOauth) {
-    return { token: envOauth, source: "env:ANTHROPIC_OAUTH_TOKEN" };
-  }
-
-  const envFile = process.env["ANTHROPIC_OAUTH_TOKEN_FILE"]?.trim();
-  if (envFile) {
-    const tok = readOauthFile(envFile);
-    if (tok) return { token: tok, source: `env:ANTHROPIC_OAUTH_TOKEN_FILE (${envFile})` };
-  }
-
-  if (config.oauthTokenFile) {
-    const tok = readOauthFile(config.oauthTokenFile);
-    if (tok) return { token: tok, source: `config:oauthTokenFile (${config.oauthTokenFile})` };
-  }
-
-  // Probe the current user's home plus any well-known fallbacks (e.g.
-  // `/home/claude`, which Claude Code's remote sandbox mounts the
-  // credential into independent of the running user). The fallback list
-  // is overrideable via `KUZUSHI_OAUTH_WELL_KNOWN_HOMES` (colon-separated)
-  // — set it to an empty string to disable, e.g. in tests.
-  const homedirs = new Set<string>([os.homedir(), ...wellKnownOauthHomes()]);
-  for (const home of homedirs) {
-    const remotePath = path.join(home, ".claude", "remote", ".oauth_token");
-    const remoteToken = tryReadFile(remotePath)?.trim();
-    if (remoteToken?.startsWith("sk-ant-oat")) {
-      return { token: remoteToken, source: `file:${remotePath}` };
-    }
-  }
-  for (const home of homedirs) {
-    const credsPath = path.join(home, ".claude", ".credentials.json");
-    const credsRaw = tryReadFile(credsPath);
-    if (credsRaw) {
-      const parsed = parseCredentialsJson(credsRaw);
-      if (parsed) return { token: parsed, source: `file:${credsPath}` };
-    }
-  }
-
-  const keychainToken = readClaudeCodeKeychainOauthToken();
-  if (keychainToken) {
-    return { token: keychainToken, source: "macOS Keychain:Claude Code-credentials" };
-  }
-
-  return undefined;
-}
-
-/**
- * Read a file that contains either a raw OAuth token or a Claude Code
- * `.credentials.json` document. Trims surrounding whitespace.
- */
-function readOauthFile(filePath: string): string | undefined {
-  const raw = tryReadFile(filePath);
-  if (!raw) return undefined;
-  if (raw.trim().startsWith("{")) {
-    const parsed = parseCredentialsJson(raw);
-    if (parsed) return parsed;
-  }
-  return raw.trim() || undefined;
-}
-
-function parseCredentialsJson(raw: string): string | undefined {
-  try {
-    const j = JSON.parse(raw) as Record<string, unknown>;
-    const oauth = j["claudeAiOauth"];
-    if (oauth && typeof oauth === "object") {
-      const tok = (oauth as Record<string, unknown>)["accessToken"];
-      if (typeof tok === "string" && tok.trim()) return tok.trim();
-    }
-    const flat = j["accessToken"];
-    if (typeof flat === "string" && flat.trim()) return flat.trim();
-  } catch {
-    // fall through
-  }
-  return undefined;
-}
-
-function readClaudeCodeKeychainOauthToken(): string | undefined {
-  if (process.env["KUZUSHI_OAUTH_DISABLE_KEYCHAIN"] === "1") return undefined;
-  if (process.platform !== "darwin") return undefined;
-  try {
-    const raw = execFileSync(
-      "security",
-      ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
-      {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      },
-    );
-    return parseCredentialsJson(raw) ?? (raw.trim() || undefined);
-  } catch {
-    return undefined;
-  }
-}
-
-function tryReadFile(filePath: string): string | undefined {
-  try {
-    return readFileSync(filePath, "utf8");
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * True when the host process is a Claude Code subagent that manages its
- * own auth via the parent's session (file-descriptor or proxy). Setting
- * `ANTHROPIC_API_KEY` in this state is actively harmful: the spawned
- * `claude` CLI treats the env var as a fresh session with its own cache
- * — costing ~12× per spawn vs. inheriting the host-managed cache (see
- * field-test issue #20). Detection signals are env vars set
- * unconditionally by the Claude Code remote runner.
- */
-export function isClaudeCodeHostManagedAuth(): boolean {
-  if (process.env["CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"]) return true;
-  if (process.env["CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"]) return true;
-  return false;
-}
-
-/**
- * Default fallback home directories to probe for ambient OAuth tokens.
- * `KUZUSHI_OAUTH_WELL_KNOWN_HOMES` overrides this (colon-separated, set
- * to "" to disable entirely — useful in tests).
- */
-function wellKnownOauthHomes(): string[] {
-  const override = process.env["KUZUSHI_OAUTH_WELL_KNOWN_HOMES"];
-  if (override !== undefined) {
-    return override
-      .split(":")
-      .map((s) => s.trim())
-      .filter(Boolean);
-  }
-  return ["/home/claude"];
 }
 
 /**

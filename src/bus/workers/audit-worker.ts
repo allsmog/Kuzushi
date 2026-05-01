@@ -117,8 +117,7 @@ function writeSummaryForRun(
   }
 
   let totalCostUsd: number | undefined;
-  const runMetrics = (stats as { runMetrics?: { costBreakdown?: { total?: number } } })
-    .runMetrics;
+  const runMetrics = (stats as { runMetrics?: { costBreakdown?: { total?: number } } }).runMetrics;
   if (runMetrics?.costBreakdown?.total != null) {
     totalCostUsd = runMetrics.costBreakdown.total;
   } else if (typeof stats.totalCostUsd === "number") {
@@ -139,7 +138,6 @@ function writeSummaryForRun(
     config: summaryState.config,
     scanOpts: summaryState.scanOpts,
     repoRoot: summaryState.repoRoot,
-    agentRuntimeBackend: summaryState.config.agentRuntimeBackend,
   });
 
   const summary: RunSummary = {

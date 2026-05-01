@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { ThreatModelDocument } from "../agents/tasks/threat-modeling/types.js";
 import type { ConfigPatchEntry } from "../config.js";
-import { applyConfigPatch, configPath, loadConfig, resolveAmbientOauthToken } from "../config.js";
+import { applyConfigPatch, configPath, loadConfig } from "../config.js";
 import { saveOperatorScanContext } from "../operator-context.js";
 import { savePersistentThreatModel } from "../threat-model-renderer.js";
 import type { OperatorScanContext } from "../types.js";
@@ -190,8 +190,6 @@ export function hasAnthropicCredentials(configApiKey?: string, configAuthToken?:
   if (process.env["ANTHROPIC_API_KEY"]) return true;
   if (process.env["ANTHROPIC_AUTH_TOKEN"]) return true;
   if (process.env["ANTHROPIC_OAUTH_TOKEN"]) return true;
-  // File-based ambient OAuth (Claude Code remote sandbox, local install).
-  if (resolveAmbientOauthToken({})) return true;
   return false;
 }
 
@@ -217,7 +215,6 @@ export function hasAnyProviderCredentials(): boolean {
     "OLLAMA_BASE_URL",
   ];
   if (envKeys.some((k) => Boolean(process.env[k]))) return true;
-  if (resolveAmbientOauthToken({})) return true;
   return false;
 }
 
@@ -335,14 +332,11 @@ export async function runReadlineCredentialPrompt(): Promise<CredentialOutcome> 
     // the most common path and the user can always use the full Ink TTY
     // flow for other providers.
     const choice = await ask(
-      "Authenticate — [c] Inherit Claude (parent session)  [1] Anthropic API key  [i] use env vars  [Enter] Skip: ",
+      "Authenticate — [1] Anthropic API key  [i] use env vars  [Enter] Skip: ",
     );
     if (choice === null) return { action: "cancel" };
     const trimmedChoice = choice.trim().toLowerCase();
     if (trimmedChoice === "" || trimmedChoice === "q") return { action: "cancel" };
-    if (trimmedChoice === "c" || trimmedChoice === "inherited-claude") {
-      return { action: "proceed", choice: { kind: "inherited", providerId: "inherited-claude" } };
-    }
     if (trimmedChoice === "i" || trimmedChoice === "inherited") {
       return { action: "proceed", choice: { kind: "inherited", providerId: "anthropic" } };
     }
@@ -488,13 +482,7 @@ export type ConfigEditorOutcome =
   | { action: "cancelled" }
   | { action: "skipped" };
 
-const CONFIG_RESTART_KEYS = new Set([
-  "agentRuntimeBackend",
-  "agentRuntimeConfig",
-  "agentModel",
-  "busBackend",
-  "dbPath",
-]);
+const CONFIG_RESTART_KEYS = new Set(["agentRuntimeConfig", "agentModel", "busBackend", "dbPath"]);
 
 /**
  * Show the interactive `/config` editor (TTY only). Persists changes to
