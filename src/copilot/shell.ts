@@ -7070,9 +7070,10 @@ function handleSinceCommand(
   // operator on the findings surface.
   const ref = args[0];
   if (!ref) {
-    return { output: "Usage: /since <git-ref>  e.g.  /since main" };
+    return { output: "Usage: /since <git-ref>  e.g.  /since main  ·  /since clear to drop scope" };
   }
-  if (ref.toLowerCase() === "reset") {
+  const lowered = ref.toLowerCase();
+  if (lowered === "reset" || lowered === "clear" || lowered === "off") {
     return {
       output: "Diff scope cleared.",
       shellStateUpdater: (shell) => ({

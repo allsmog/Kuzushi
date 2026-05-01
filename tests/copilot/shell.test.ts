@@ -2450,6 +2450,32 @@ describe("slash suggestions", () => {
   });
 });
 
+describe("formatHelpForVerb alias resolution", () => {
+  it("resolves /h to the /help row", async () => {
+    const { formatHelpForVerb } = await import("../../src/copilot/shell-commands.js");
+    expect(formatHelpForVerb("h")).toContain("/help");
+    expect(formatHelpForVerb("/h")).toContain("/help");
+  });
+
+  it("resolves single-letter aliases for /f /t /m /b", async () => {
+    const { formatHelpForVerb } = await import("../../src/copilot/shell-commands.js");
+    expect(formatHelpForVerb("f")).toContain("/findings");
+    expect(formatHelpForVerb("t")).toContain("/tune");
+    expect(formatHelpForVerb("m")).toContain("/modules");
+    expect(formatHelpForVerb("b")).toContain("/back");
+  });
+
+  it("falls back to unknown-verb message for nonsense", async () => {
+    const { formatHelpForVerb } = await import("../../src/copilot/shell-commands.js");
+    expect(formatHelpForVerb("zzznope")).toContain("Unknown command");
+  });
+
+  it("returns the usage hint for empty input", async () => {
+    const { formatHelpForVerb } = await import("../../src/copilot/shell-commands.js");
+    expect(formatHelpForVerb("")).toContain("/help [verb]");
+  });
+});
+
 describe("hunt-post-mortem helpers", () => {
   const { isHuntClassTool, extractHuntStats, formatHuntSummaryLine } = __shellInternals;
 
