@@ -78,9 +78,9 @@ describe("CoreDispatcher", () => {
     const { driver } = seed();
     const result = await driver.handle("use sast");
     expect(result.output).toContain("Selected module: sast");
-    expect(driver.prompt()).toBe("kuzushi/module(sast)> ");
+    expect(driver.prompt()).toBe("kuzushi sast > ");
     await driver.handle("back");
-    expect(driver.prompt()).toBe("kuzushi> ");
+    expect(driver.prompt()).toBe("kuzushi > ");
   });
 
   it("set requires a module, setg works globally", async () => {
@@ -813,15 +813,15 @@ describe("prompt status providers", () => {
     return new DispatcherDriver({ base: core, cwd: "/tmp", print: createArraySink() });
   }
 
-  it("no providers → plain `kuzushi> ` prompt", () => {
+  it("no providers → plain `kuzushi > ` prompt", () => {
     const driver = basicDriver();
-    expect(driver.prompt()).toBe("kuzushi> ");
+    expect(driver.prompt()).toBe("kuzushi > ");
   });
 
   it("single provider appears in brackets", () => {
     const driver = basicDriver();
     driver.addStatusProvider(() => "2 jobs");
-    expect(driver.prompt()).toBe("kuzushi [2 jobs]> ");
+    expect(driver.prompt()).toBe("kuzushi [2 jobs] > ");
   });
 
   it("multiple providers join with ` · `", () => {
@@ -829,7 +829,7 @@ describe("prompt status providers", () => {
     driver.addStatusProvider(() => "2 jobs");
     driver.addStatusProvider(() => "$1.40");
     driver.addStatusProvider(() => "ws: acme");
-    expect(driver.prompt()).toBe("kuzushi [2 jobs · $1.40 · ws: acme]> ");
+    expect(driver.prompt()).toBe("kuzushi [2 jobs · $1.40 · ws: acme] > ");
   });
 
   it("undefined / empty providers are skipped", () => {
@@ -837,7 +837,7 @@ describe("prompt status providers", () => {
     driver.addStatusProvider(() => undefined);
     driver.addStatusProvider(() => "");
     driver.addStatusProvider(() => "ws: acme");
-    expect(driver.prompt()).toBe("kuzushi [ws: acme]> ");
+    expect(driver.prompt()).toBe("kuzushi [ws: acme] > ");
   });
 
   it("a throwing provider doesn't break the prompt", () => {
@@ -846,14 +846,14 @@ describe("prompt status providers", () => {
       throw new Error("boom");
     });
     driver.addStatusProvider(() => "ok");
-    expect(driver.prompt()).toBe("kuzushi [ok]> ");
+    expect(driver.prompt()).toBe("kuzushi [ok] > ");
   });
 
   it("providers show up with a module on the stack too", async () => {
     const driver = basicDriver();
     driver.addStatusProvider(() => "2 jobs");
     await driver.handle("use sast");
-    expect(driver.prompt()).toBe("kuzushi/module(sast) [2 jobs]> ");
+    expect(driver.prompt()).toBe("kuzushi sast [2 jobs] > ");
   });
 });
 

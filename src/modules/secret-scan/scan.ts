@@ -208,29 +208,32 @@ export function detectSecretsInText(
       : `${detector.pattern.flags}g`;
     const re = new RegExp(detector.pattern.source, flags);
 
-    let m: RegExpExecArray | null;
     // Cap per-detector matches to prevent pathological inputs from blowing
     // up. 200 is far above any realistic per-file finding count.
     let perDetectorCount = 0;
-    while ((m = re.exec(text)) !== null) {
+    let m: RegExpExecArray | null = re.exec(text);
+    while (m !== null) {
       if (perDetectorCount >= 200) break;
       perDetectorCount += 1;
       const captured = m[1] ?? m[0];
+      const matched = m[0];
       if (
         detector.entropyThreshold !== undefined &&
         shannonEntropy(captured) < detector.entropyThreshold
       ) {
         // Avoid zero-length forever-loop on degenerate patterns.
-        if (m[0].length === 0) re.lastIndex += 1;
+        if (matched.length === 0) re.lastIndex += 1;
+        m = re.exec(text);
         continue;
       }
       out.push({
         detector,
-        match: m[0],
+        match: matched,
         index: m.index,
         capturedSecret: captured,
       });
-      if (m[0].length === 0) re.lastIndex += 1;
+      if (matched.length === 0) re.lastIndex += 1;
+      m = re.exec(text);
     }
   }
 

@@ -1215,6 +1215,60 @@ export function formatToolInfo(mod: CopilotModule, tool: CopilotModule["tools"][
   lines.push("");
   lines.push("Description:");
   for (const part of tool.description.split("\n")) lines.push(`  ${part}`);
+
+  // Phase 3.3 — Options block lifted from the tool's JSONSchema so
+  // analysts get the same data `show options` would print without the
+  // extra round trip. Properties without descriptions still surface so
+  // operators learn the option vocabulary the module accepts.
+  const schema = tool.inputSchema as
+    | {
+        properties?: Record<
+          string,
+          {
+            description?: string;
+            default?: unknown;
+            type?: string;
+            enum?: unknown[];
+          }
+        >;
+        required?: string[];
+      }
+    | undefined;
+  const props = schema?.properties ?? {};
+  const requiredSet = new Set(schema?.required ?? []);
+  const propNames = Object.keys(props);
+  if (propNames.length > 0) {
+    lines.push("");
+    lines.push("Options:");
+    const rows = propNames.map((name) => {
+      const def = props[name] ?? {};
+      const requiredCol = requiredSet.has(name) ? "yes" : "no";
+      const defaultCol =
+        def.default === undefined
+          ? ""
+          : typeof def.default === "string"
+            ? def.default
+            : JSON.stringify(def.default);
+      const desc = def.description ?? "";
+      return { name: name.toUpperCase(), default: defaultCol, required: requiredCol, desc };
+    });
+    const w = {
+      name: Math.max(4, ...rows.map((r) => r.name.length)),
+      def: Math.max(7, ...rows.map((r) => r.default.length)),
+      req: 8,
+    };
+    const pad = (s: string, n: number): string => s + " ".repeat(Math.max(0, n - s.length));
+    lines.push(
+      `  ${pad("Name", w.name)}  ${pad("Default", w.def)}  ${pad("Required", w.req)}  Description`,
+    );
+    lines.push(`  ${"-".repeat(w.name)}  ${"-".repeat(w.def)}  ${"-".repeat(w.req)}  -----------`);
+    for (const row of rows) {
+      lines.push(
+        `  ${pad(row.name, w.name)}  ${pad(row.default, w.def)}  ${pad(row.required, w.req)}  ${row.desc}`,
+      );
+    }
+  }
+
   const refs = [...(tool.references ?? []), ...(mod.references ?? [])];
   if (refs.length > 0) {
     lines.push("");

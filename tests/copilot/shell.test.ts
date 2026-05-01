@@ -92,6 +92,8 @@ async function createMockCore() {
     executeTool,
     registry: {
       get: (id: string) => mods.find((m) => m.id === id) ?? module,
+      ids: () => mods.map((m) => m.id),
+      has: (id: string) => mods.some((m) => m.id === id),
       allTools,
       moduleTools: (id: string) =>
         (mods.find((m) => m.id === id)?.tools ?? []) as ReadonlyArray<
@@ -162,8 +164,8 @@ afterEach(() => {
 
 describe("shell prompt", () => {
   it("renders top-level and focused prompts consistently", async () => {
-    expect(buildShellPrompt(null)).toBe("kuzushi> ");
-    expect(buildShellPrompt("sast")).toBe("kuzushi/sast> ");
+    expect(buildShellPrompt(null)).toBe("kuzushi > ");
+    expect(buildShellPrompt("sast")).toBe("kuzushi sast > ");
   });
 });
 
@@ -353,6 +355,39 @@ describe("local shell commands", () => {
     const bareHelp = __shellInternals.handleLocalCommand("help", core, opts, ctx, shellState);
     expect(bareHelp?.output).toContain("Kuzushi");
     expect(bareHelp?.output).toContain("use sast");
+  });
+
+  it("supports msfconsole-style bare verbs (info / search / browse)", async () => {
+    const { core, module } = await createMockCore();
+    const opts = createShellOptions();
+    const shellState = createShellState(module.tools.map((tool) => tool.name));
+    const ctx = { focusedModule: null as string | null };
+
+    const infoResult = __shellInternals.handleLocalCommand(
+      "info sast",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    expect(infoResult?.output).toContain("sast");
+
+    const infoUsage = __shellInternals.handleLocalCommand("info", core, opts, ctx, shellState);
+    expect(infoUsage?.output).toContain("Usage: info");
+
+    const searchResult = __shellInternals.handleLocalCommand(
+      "search sast",
+      core,
+      opts,
+      ctx,
+      shellState,
+    );
+    // formatSearchResult always emits a header, even when empty.
+    expect(typeof searchResult?.output).toBe("string");
+
+    const browseResult = __shellInternals.handleLocalCommand("browse", core, opts, ctx, shellState);
+    expect(browseResult?.shellStateUpdater?.(shellState).shellView).toBe("catalog");
+    expect(browseResult?.shellStateUpdater?.(shellState).focusedModule).toBeNull();
   });
 
   it("routes focused-module resume with an explicit run id", async () => {
@@ -1224,8 +1259,10 @@ describe("local shell commands", () => {
     const help = __shellInternals.handleLocalCommand("/help advanced", core, opts, ctx, shellState);
     const text = help!.output!;
     // Spot-check the group headings that map to CLAUDE.md §12 sections.
+    // The "Natural-language planner" group was retired in Phase 5 cleanup —
+    // analysts type prose at a focused-module prompt directly, then confirm
+    // with bare `y` / `n`. Slash forms still work but stay out of /help.
     expect(text).toContain("Module + view navigation");
-    expect(text).toContain("Natural-language planner");
     expect(text).toContain("Prompt editor");
     expect(text).toContain("Replay & trace");
     expect(text).toContain("Short-ID aliases");

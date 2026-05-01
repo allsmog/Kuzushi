@@ -1,15 +1,24 @@
 /**
- * Persistent status footer — always visible at the bottom of the terminal.
+ * Persistent status footer — pinned at the bottom of the terminal.
  *
- * Shows:  claude-opus │ $0.84 │ 8/42 triaged │ 4m 12s
+ * msfconsole-style payload:
+ *   ./acme-api · ctx: fresh 4m · taint-iris · $0.69 · 3 findings (1 high)
  *
- * Uses useTerminalSize so the divider reflows when the terminal is resized,
- * and the Divider primitive replaces the old "─".repeat hack.
+ * The legacy run-progress payload (model · phase · cost / cap · elapsed)
+ * remains live during a run; the new fields render whenever the analyst
+ * has loaded a target / module / findings, so the footer stays visible
+ * across the home screen too.
  */
 
 import { Box, Text } from "ink";
 import React from "react";
-import { formatCost, formatDuration } from "../format.js";
+import {
+  formatContextAge,
+  formatCost,
+  formatDuration,
+  formatFindingsSummary,
+  truncateMiddle,
+} from "../format.js";
 import { classifyTerminalWidth, useElapsed, useTerminalWidth } from "../hooks.js";
 import type { Phase } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
@@ -27,9 +36,35 @@ interface StatusFooterProps {
    * crosses 80% of the cap.
    */
   costCapUsd?: number;
+  /** Active scan target (path / url). Renders compact-truncated. */
+  target?: string | null;
+  /** Currently focused module id (`use <id>`), if any. */
+  focusedModule?: string | null;
+  /** Context-snapshot freshness for the active target. */
+  context?: { state: "fresh" | "stale" | "missing" | "building"; ageMs?: number } | null;
+  /** Findings summary for the active workspace. */
+  findings?: {
+    total: number;
+    bySeverity?: Partial<Record<"critical" | "high" | "medium" | "low" | "info", number>>;
+  } | null;
 }
 
-const SEP = tokens.tertiary(" \u2502 ");
+function compactTarget(target: string | null | undefined, columns: number): string | null {
+  if (!target) return null;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) {
+    return truncateMiddle(target, Math.min(40, Math.max(16, Math.floor(columns / 4))));
+  }
+  const trimmed = target.replace(/\/+$/, "");
+  const parts = trimmed.split("/").filter(Boolean);
+  const basename = parts[parts.length - 1] ?? target;
+  return `./${basename}`;
+}
+
+function joinSegments(segments: Array<string | null | undefined>): string {
+  return segments
+    .filter((s): s is string => Boolean(s && s.length > 0))
+    .join(tokens.tertiary(" · "));
+}
 
 export const StatusFooter = React.memo(function StatusFooter({
   model,
@@ -39,12 +74,20 @@ export const StatusFooter = React.memo(function StatusFooter({
   startedAt,
   throttle,
   costCapUsd,
+  target,
+  focusedModule,
+  context,
+  findings,
 }: StatusFooterProps): React.ReactElement | null {
   const columns = useTerminalWidth();
   const widthClass = classifyTerminalWidth(columns);
   const elapsed = useElapsed(startedAt);
 
-  if (phase === "idle" || phase === "done") return null;
+  const isRunning = phase !== "idle" && phase !== "done";
+  const hasContextPayload = Boolean(target || focusedModule || context || findings);
+
+  // Quiet when there is neither a running scan nor any analyst context.
+  if (!isRunning && !hasContextPayload) return null;
 
   const modelShort = model.replace("anthropic:", "").replace("claude-", "").replace("-latest", "");
 
@@ -58,8 +101,11 @@ export const StatusFooter = React.memo(function StatusFooter({
     done: "",
   }[phase];
 
-  const progressStr =
-    progress.total > 0 ? `${progress.current}/${progress.total} ${phaseLabel}` : phaseLabel;
+  const progressStr = isRunning
+    ? progress.total > 0
+      ? `${progress.current}/${progress.total} ${phaseLabel}`
+      : phaseLabel
+    : "";
 
   const baseCostStr = runningCostUsd > 0 ? formatCost(runningCostUsd) : "$0.00";
   const costStr =
@@ -69,35 +115,32 @@ export const StatusFooter = React.memo(function StatusFooter({
         : `${baseCostStr} / ${formatCost(costCapUsd)}`
       : baseCostStr;
 
-  const elapsedStr = elapsed > 0 ? formatDuration(elapsed) : "0s";
+  const elapsedStr = isRunning && elapsed > 0 ? formatDuration(elapsed) : "";
 
-  const throttleStr = throttle ? tokens.warn(` \u2502 \u26A0 throttled`) : "";
+  const throttleStr = throttle ? tokens.warn(` │ ⚠ throttled`) : "";
 
   // Narrow terms (<60 col): drop the model tag to avoid truncation.
   const narrow = widthClass === "tiny";
 
-  // No inner Divider here — the outer KeybindFooter draws the canonical
-  // body→footer rule. Stacking two rules in 5 vertical rows just looked
-  // crowded.
-  //
-  // Layout rhythm: model + phase pin to the left, cost + elapsed pin to the
-  // right via `justifyContent="space-between"`. The previous single-Text
-  // layout was centred and rhythmless. On `tiny` panes the model drops out
-  // of the left half so the right-side cost still has breathing room; if
-  // the right half still overflows after that, Ink truncates the throttle
-  // suffix first, which is the desired graceful degradation.
+  // msfconsole-style analyst context: target · ctx: <state> <age> · <module>.
+  const targetSegment = compactTarget(target, columns);
+  const contextSegment = context ? formatContextAge(context.state, context.ageMs) : null;
+  const moduleSegment = focusedModule ? tokens.strong(focusedModule) : null;
+  const findingsSegment = findings ? formatFindingsSummary(findings) : null;
+
+  const leftSegments = isRunning
+    ? [narrow ? null : tokens.strong(modelShort), progressStr]
+    : [targetSegment, contextSegment, moduleSegment];
+  const rightSegments = isRunning
+    ? [costStr, elapsedStr]
+    : [findingsSegment, runningCostUsd > 0 ? baseCostStr : null];
+
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
       <Box width={Math.max(0, columns)} justifyContent="space-between">
+        <Text>{joinSegments(leftSegments)}</Text>
         <Text>
-          {narrow ? "" : tokens.strong(modelShort)}
-          {narrow ? "" : SEP}
-          {progressStr}
-        </Text>
-        <Text>
-          {costStr}
-          {SEP}
-          {elapsedStr}
+          {joinSegments(rightSegments)}
           {throttleStr}
         </Text>
       </Box>

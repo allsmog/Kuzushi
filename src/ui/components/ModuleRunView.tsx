@@ -162,6 +162,7 @@ export function ModuleRunView({
           <FindingsBlock run={run} findings={findings} />
           <MetaRow run={run} />
           <ArtifactsBlock artifacts={run.artifacts} />
+          <NextStepsRail steps={run.nextSteps} />
         </>
       ) : shell.processing ? (
         <DelayedBusyIndicator
@@ -660,6 +661,47 @@ function ArtifactsBlock({
           ]}
           rows={rows}
         />
+      </Box>
+    </Section>
+  );
+}
+
+/**
+ * Phase 6 — post-run "Next:" rail. Renders the module's `suggestNext`
+ * suggestions as one tabular block at the tail of `ModuleRunView`. Two
+ * columns of plain bare-verb commands an analyst can paste into the
+ * prompt — the goal is to keep the next step one keystroke away without
+ * adding any modal navigation. No-op when the module didn't suggest
+ * anything.
+ */
+function NextStepsRail({
+  steps,
+}: {
+  steps?: ReadonlyArray<{ label: string; command: string }>;
+}): React.ReactElement {
+  if (!steps || steps.length === 0) return <Box />;
+  // Two-column flow: pairs of cells per row, each cell `<command>` plus
+  // `<label>` as a muted hint when label and command differ.
+  const cells = steps.map((s) => ({
+    key: s.command,
+    text: s.label === s.command ? s.command : `${s.command}   ${tokens.muted(`(${s.label})`)}`,
+  }));
+  const rows: Array<Array<{ key: string; text: string }>> = [];
+  for (let i = 0; i < cells.length; i += 2) {
+    rows.push(cells.slice(i, i + 2));
+  }
+  return (
+    <Section title="next">
+      <Box flexDirection="column" paddingLeft={SPACING.md}>
+        {rows.map((row) => (
+          <Box key={row.map((c) => c.key).join("|")}>
+            {row.map((c) => (
+              <Box key={c.key} marginRight={SPACING.lg}>
+                <Text>{c.text}</Text>
+              </Box>
+            ))}
+          </Box>
+        ))}
       </Box>
     </Section>
   );
