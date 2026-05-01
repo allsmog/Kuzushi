@@ -43,12 +43,6 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
   // narrow panes. The chrome is full-width, so the table sitting at 112
   // cols inside a 200-col chrome read like two different layouts.
   const tableWidth = Math.max(48, Math.min(160, columns - SPACING.md * 4));
-  useRegisterKeybindings([
-    { keys: "use <id>", label: "focus module" },
-    { keys: "findings", label: "findings", secondary: true },
-    { keys: "?", label: "help", secondary: true },
-    { keys: "Ctrl+C", label: "exit", secondary: true },
-  ]);
   const cards = shell.moduleCatalog ?? [];
   const compact = rows < 44 && cards.length > 8;
   const builtIns = cards.filter((c) => !c.external);
@@ -67,6 +61,47 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
     workspace === targetLabel
       ? [`scope:${workspace}`, `${moduleCount} modules`]
       : [`workspace:${workspace}`, `target:${targetLabel}`, `${moduleCount} modules`];
+
+  // Phase 3.2 — prompt-only home. The bare-launch default keeps the screen
+  // calm: a single context strip plus a one-line nudge toward the verbs an
+  // analyst is most likely to want next. The full per-category catalog only
+  // renders after `browse` / `show modules` flip `shell.catalogExpanded`.
+  const expanded = shell.catalogExpanded === true;
+  useRegisterKeybindings(
+    expanded
+      ? [
+          { keys: "use <id>", label: "focus module" },
+          { keys: "findings", label: "findings", secondary: true },
+          { keys: "?", label: "help", secondary: true },
+          { keys: "Ctrl+C", label: "exit", secondary: true },
+        ]
+      : [
+          { keys: "search <q>", label: "find a module" },
+          { keys: "browse", label: "list all modules", secondary: true },
+          { keys: "use <id>", label: "focus module", secondary: true },
+          { keys: "?", label: "help", secondary: true },
+        ],
+  );
+
+  if (!expanded) {
+    const ctxBuilt = !!shell.contextSnapshot;
+    const noContextHint = ctxBuilt
+      ? null
+      : tokens.warn("[!] no app context built yet — run `context` or just start a scan");
+    return (
+      <ScreenContent>
+        <ContextStrip status={status} />
+        <Box marginTop={SPACING.sm} paddingLeft={SPACING.md} flexDirection="column">
+          {noContextHint ? <Text>{noContextHint}</Text> : null}
+          <Text>
+            {tokens.muted(
+              "Type `help`, `search <query>`, `browse`, or describe what you want to do.",
+            )}
+          </Text>
+        </Box>
+      </ScreenContent>
+    );
+  }
 
   if (compact) {
     const orderedRows = [...CATEGORY_ORDER.flatMap((cat) => byCategory[cat] ?? []), ...externals];
