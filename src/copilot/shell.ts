@@ -106,7 +106,14 @@ import {
 } from "./prompt-edit.js";
 import { listRecipes, resolveRecipePath } from "./recipes.js";
 import { openRepl as openDevRepl } from "./repl.js";
-import { formatRunReplay, formatRunsTable, formatRunTrace, readTraceEvents } from "./replay.js";
+import {
+  formatRunReplay,
+  formatRunsTable,
+  formatRunTrace,
+  formatRunTraceJson,
+  loadRunSummary,
+  readTraceEvents,
+} from "./replay.js";
 import { loadAndRunResource, saveResourceScript } from "./resource.js";
 import {
   formatResumeChooser,
@@ -8906,7 +8913,13 @@ function handleShowRunsCommand(args: string[], ctx: ShellContext): LocalCommandR
     limitFlagIdx >= 0 && args[limitFlagIdx + 1]
       ? Math.max(1, Math.min(250, Number.parseInt(args[limitFlagIdx + 1]!, 10) || 25))
       : 25;
-  const repoFilter = args.find((a) => !a.startsWith("--") && a !== String(limit));
+  const statusFlagIdx = args.indexOf("--status");
+  const status =
+    statusFlagIdx >= 0 && args[statusFlagIdx + 1] ? args[statusFlagIdx + 1] : undefined;
+  const skipPositionals = new Set<string>();
+  if (limitFlagIdx >= 0 && args[limitFlagIdx + 1]) skipPositionals.add(args[limitFlagIdx + 1]!);
+  if (statusFlagIdx >= 0 && args[statusFlagIdx + 1]) skipPositionals.add(args[statusFlagIdx + 1]!);
+  const repoFilter = args.find((a) => !a.startsWith("--") && !skipPositionals.has(a));
   return {
     output: "Listing runs…",
     asyncExecute: async () => {
@@ -8916,7 +8929,7 @@ function handleShowRunsCommand(args: string[], ctx: ShellContext): LocalCommandR
       }
       const { listRuns } = await import("../store.js");
       const runs = listRuns(db, { limit, ...(repoFilter ? { repo: repoFilter } : {}) });
-      return formatRunsTable(runs, limit);
+      return formatRunsTable(runs, { limit, ...(status ? { status } : {}) });
     },
   };
 }
@@ -8932,36 +8945,39 @@ function handleReplayCommand(args: string[], ctx: ShellContext): LocalCommandRes
       const db = await openRunsDb(ctx);
       if (!db) return "No runs database found.";
       const { getRun } = await import("../store.js");
-      const run = getRun(db, runId);
+      let run = getRun(db, runId);
       if (!run) {
-        // Allow prefix match via listRuns so short IDs work.
         const { listRuns } = await import("../store.js");
         const matches = listRuns(db, { limit: 250 }).filter((r) => r.runId.startsWith(runId));
         if (matches.length === 0) return `Unknown runId: ${runId}`;
         if (matches.length > 1) {
           return `Ambiguous runId prefix "${runId}" — matches: ${matches.map((m) => m.runId).join(", ")}`;
         }
-        return formatRunReplay(matches[0]!);
+        run = matches[0]!;
       }
-      return formatRunReplay(run);
+      const summary = ctx.dataDir ? loadRunSummary(ctx.dataDir, run.runId) : undefined;
+      return formatRunReplay(run, summary);
     },
   };
 }
 
 function handleTraceCommand(args: string[], ctx: ShellContext): LocalCommandResult {
-  const runId = args[0];
+  const positional = args.filter((a) => !a.startsWith("--"));
+  const runId = positional[0];
   if (!runId) {
-    return { output: "Usage: /trace <runId>  (find IDs with /show runs)" };
+    return {
+      output: "Usage: /trace <runId> [--json] [--all]  (find IDs with /show runs)",
+    };
   }
   if (!ctx.dataDir) {
     return { output: "No data directory resolved for this shell." };
   }
   const dataDir = ctx.dataDir;
+  const wantJson = args.includes("--json");
+  const wantAll = args.includes("--all");
   return {
     output: `Reading trace for ${runId}…`,
     asyncExecute: async () => {
-      // If the user passed a prefix, resolve it via the DB so trace and
-      // replay share the same short-ID semantics.
       let fullRunId = runId;
       const db = await openRunsDb(ctx);
       if (db) {
@@ -8970,7 +8986,10 @@ function handleTraceCommand(args: string[], ctx: ShellContext): LocalCommandResu
         if (matches.length === 1) fullRunId = matches[0]!.runId;
       }
       const events = readTraceEvents(dataDir, fullRunId);
-      return formatRunTrace(fullRunId, events);
+      if (wantJson) {
+        return formatRunTraceJson(events, wantAll ? undefined : 80);
+      }
+      return formatRunTrace(fullRunId, events, wantAll ? events.length : 80);
     },
   };
 }

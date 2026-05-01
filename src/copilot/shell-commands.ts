@@ -133,8 +133,8 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
     group: "prompt",
   },
   {
-    syntax: "/show runs [repo]",
-    description: "List recent pipeline runs (id · status · cost)",
+    syntax: "/show runs [repo] [--status s] [--limit n]",
+    description: "List recent pipeline runs (id · status · started · duration · cost · findings)",
     group: "replay",
   },
   {
@@ -153,8 +153,8 @@ export const SHELL_COMMAND_CATALOG: readonly ShellCommandEntry[] = [
     group: "replay",
   },
   {
-    syntax: "/trace <runId>",
-    description: "Stream the per-event JSONL audit log of a past run",
+    syntax: "/trace <runId> [--json] [--all]",
+    description: "Stream the per-event JSONL audit log of a past run (jq-friendly with --json)",
     group: "replay",
   },
   {
