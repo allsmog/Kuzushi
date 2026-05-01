@@ -532,7 +532,7 @@ describe("Ink component snapshots", () => {
             {
               type: "input",
               text: "run .",
-              prompt: "kuzushi/context> ",
+              prompt: "kuzushi context > ",
               timestamp: 0,
             },
             {
@@ -622,7 +622,7 @@ describe("Ink component snapshots", () => {
             {
               type: "input",
               text: "run .",
-              prompt: "kuzushi/context> ",
+              prompt: "kuzushi context > ",
               timestamp: 0,
             },
             {
@@ -689,7 +689,7 @@ describe("Ink component snapshots", () => {
     // banner triple-printed the same context. The asserts that matter for
     // this test are: the SAST module body still renders its sections, the
     // prompt is module-scoped, and the splash never replays.
-    expect(out).toContain("kuzushi/sast>");
+    expect(out).toContain("kuzushi sast >");
     expect(out).toContain("task selection");
     expect(out).toContain("tasks opens scanners/detectors");
     expect(out).not.toContain("agentic SAST orchestration");

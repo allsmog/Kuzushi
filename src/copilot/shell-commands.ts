@@ -1,7 +1,7 @@
 import { formatUnknownVerb } from "../ui/error-format.js";
 
 export function buildShellPrompt(focusedModule: string | null): string {
-  return focusedModule ? `kuzushi/${focusedModule}> ` : "kuzushi> ";
+  return focusedModule ? `kuzushi ${focusedModule} > ` : "kuzushi > ";
 }
 
 /**

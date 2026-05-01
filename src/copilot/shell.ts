@@ -88,6 +88,7 @@ import {
 import { toErrorMessage } from "../utils.js";
 import { CopilotCore } from "./core.js";
 import { looksLikePath, resolveTool } from "./dispatch/resolve-tool.js";
+import { formatToolInfo } from "./dispatcher/core-dispatcher.js";
 import { CoreDispatcher, DispatcherDriver, WorkspaceDispatcher } from "./dispatcher/index.js";
 import { ModuleDispatcher } from "./dispatcher/module-dispatcher.js";
 import { openInEditor } from "./editor.js";
@@ -137,6 +138,7 @@ import {
   toggleDisabledSastTask,
   updateDisabledSastTask,
 } from "./sast-task-selection.js";
+import { formatSearchResult, searchCatalog } from "./search.js";
 import {
   commandMatches,
   defineShellRoutes,
@@ -5852,6 +5854,65 @@ const BARE_SHELL_ROUTES: readonly BareShellRoute[] = defineShellRoutes<
     matches: ({ lower }) => lower === "scan" || lower.startsWith("scan "),
     execute: ({ words }, { core, opts, shellContext, shellState }) =>
       resolveToolExecution("sast:scan", words.slice(1), core, opts, shellContext, shellState),
+  },
+  {
+    // msfconsole-style `info <module-or-tool>`. Mirrors the slash-free verb
+    // operators expect coming from msf; resolves both `info <module>` and
+    // `info <module>:<tool>` against the registry.
+    id: "info",
+    matches: ({ lower }) => lower === "info" || lower.startsWith("info "),
+    execute: ({ words }, { core }) => {
+      const ref = words[1];
+      if (!ref) return { output: "Usage: info <module-or-tool>" };
+      if (ref.includes(":")) {
+        const resolved = core.registry.resolveTool(ref);
+        if (!resolved) return { output: `Unknown tool: ${ref}` };
+        return { output: formatToolInfo(resolved.module, resolved.tool) };
+      }
+      // formatModuleInfo handles the unknown-module case with a helpful hint.
+      return { output: formatModuleInfo(core, ref) };
+    },
+  },
+  {
+    // msfconsole-style `search <query>` — fuzzy match across module name,
+    // description, category, and tool names. Uses the canonical
+    // `searchCatalog` helper so behaviour stays identical to the
+    // dispatcher's `cmd_search`.
+    id: "search",
+    matches: ({ lower }) => lower === "search" || lower.startsWith("search "),
+    execute: ({ words }, { core }) => {
+      const query = words.slice(1).join(" ");
+      const list = core.registry.ids().map((id) => core.registry.get(id));
+      const result = searchCatalog(list, query);
+      return { output: formatSearchResult(result) };
+    },
+  },
+  {
+    // Bare alias for `/target <path>` — analysts coming from msfconsole type
+    // `target ./acme-api` rather than `/target ./acme-api`.
+    id: "target",
+    matches: ({ lower }) => lower === "target" || lower.startsWith("target "),
+    execute: ({ words }, { opts, shellState }) =>
+      handleTargetCommand(words.slice(1), opts, shellState),
+  },
+  {
+    // Bare alias for `/context …`. Lets analysts type `context build` or
+    // `context refresh` directly.
+    id: "context",
+    matches: ({ lower }) => lower === "context" || lower.startsWith("context "),
+    execute: ({ words }, { core, opts, shellContext, shellState }) =>
+      handleContextCommand(words.slice(1), core, opts, shellContext, shellState),
+  },
+  {
+    // `browse` is an alias for the catalog list. Promoted to a bare verb so
+    // the prompt-only home (Phase 3.2) can advertise it as the explicit
+    // discovery entry-point alongside `search`.
+    id: "browse",
+    matches: ({ lower }) => lower === "browse",
+    execute: (_input, { core, shellState }) => ({
+      output: formatModuleList(core, shellState.moduleCatalog),
+      shellStateUpdater: (shell) => ({ ...shell, shellView: "catalog", focusedModule: null }),
+    }),
   },
 ] satisfies readonly BareShellRouteDefinition[]);
 

@@ -8,7 +8,7 @@ function renderText(parts: ReturnType<typeof renderShellInputSegments>): string 
 describe("renderShellInputSegments", () => {
   it("keeps short focused-module input inline", () => {
     const parts = renderShellInputSegments({
-      prompt: "kuzushi/carlini-threat-hunt> ",
+      prompt: "kuzushi carlini-threat-hunt > ",
       input: "us",
       cursor: 2,
       columns: 80,
@@ -16,7 +16,7 @@ describe("renderShellInputSegments", () => {
     });
 
     expect(parts).toEqual({
-      prompt: "kuzushi/carlini-threat-hunt> ",
+      prompt: "kuzushi carlini-threat-hunt > ",
       beforeCursor: "us",
       cursorText: "█",
       afterCursor: "",
@@ -25,7 +25,7 @@ describe("renderShellInputSegments", () => {
 
   it("horizontally scrolls long input instead of exceeding the terminal width", () => {
     const parts = renderShellInputSegments({
-      prompt: "kuzushi/carlini-threat-hunt> ",
+      prompt: "kuzushi carlini-threat-hunt > ",
       input: `run ${"x".repeat(80)}`,
       cursor: 84,
       columns: 32,
@@ -35,12 +35,12 @@ describe("renderShellInputSegments", () => {
     const rendered = renderText(parts);
     expect(rendered).toHaveLength(32);
     expect(rendered.endsWith("█")).toBe(true);
-    expect(parts.prompt).toBe("kuzushi/carlini-threat-hunt> ");
+    expect(parts.prompt).toBe("kuzushi carlini-threat-hunt > ");
   });
 
   it("fits very long module prompts while preserving an editor cell", () => {
     const parts = renderShellInputSegments({
-      prompt: "kuzushi/really-long-carlini-threat-hunting-module> ",
+      prompt: "kuzushi really-long-carlini-threat-hunting-module > ",
       input: "u",
       cursor: 1,
       columns: 20,
@@ -55,7 +55,7 @@ describe("renderShellInputSegments", () => {
 
   it("keeps the active character under the cursor visible", () => {
     const parts = renderShellInputSegments({
-      prompt: "kuzushi> ",
+      prompt: "kuzushi > ",
       input: "abcdef",
       cursor: 2,
       columns: 80,
