@@ -313,7 +313,7 @@ function PivotTable({
       </Text>
       {impacts.map((impact) => (
         <Text key={impact}>
-          {tokens.value(impact.padEnd(22))}
+          {tokens.muted(impact.padEnd(22))}
           {likelihoods
             .map((l) => {
               const n = pivot[impact][l];

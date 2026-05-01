@@ -150,7 +150,10 @@ export function ErrorCard({
       {nextStep ? (
         <Box paddingLeft={SPACING.md} marginTop={SPACING.sm}>
           <Text>
-            {tokens.successStrong("Next step:")} {nextStep}
+            {/* `accent` reads as advisory; the previous `successStrong`
+                (green bold) was repurposing the success hue inside an
+                error card and could mislead a quick scan. */}
+            {tokens.accent("Next step:")} {nextStep}
           </Text>
         </Box>
       ) : null}

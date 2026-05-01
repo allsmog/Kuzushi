@@ -40,6 +40,13 @@ describe("describeEmptyState", () => {
     "findings-compact-idle",
     "threat-model-missing",
     "diff-since-idle",
+    "catalog-no-modules",
+    "options-none-loaded",
+    "prompts-none",
+    "actor-none-focused",
+    "module-run-idle",
+    "context-build-idle",
+    "cost-no-data",
     "generic",
   ];
 
@@ -106,6 +113,41 @@ describe("describeEmptyState", () => {
 
   it("diff-since-idle suggests /since <git-ref>", () => {
     expect(describeEmptyState("diff-since-idle").action).toContain("/since");
+  });
+
+  it("catalog-no-modules suggests --load", () => {
+    expect(describeEmptyState("catalog-no-modules").action).toContain("--load");
+  });
+
+  it("options-none-loaded carries the module id when given", () => {
+    expect(describeEmptyState("options-none-loaded", { moduleId: "sast" }).reason).toContain(
+      "sast",
+    );
+    expect(describeEmptyState("options-none-loaded").action).toContain("show options");
+  });
+
+  it("prompts-none mentions the module id and routes to /prompts", () => {
+    expect(describeEmptyState("prompts-none", { moduleId: "context" }).reason).toContain("context");
+    expect(describeEmptyState("prompts-none").action).toContain("/prompts");
+  });
+
+  it("actor-none-focused suggests /back", () => {
+    expect(describeEmptyState("actor-none-focused").action).toContain("/back");
+  });
+
+  it("module-run-idle suggests run/scan", () => {
+    expect(describeEmptyState("module-run-idle", { moduleId: "sast" }).action).toMatch(/run|scan/);
+  });
+
+  it("context-build-idle suggests /context build", () => {
+    expect(describeEmptyState("context-build-idle").action).toContain("/context build");
+  });
+
+  it("cost-no-data shifts copy when scan is in progress", () => {
+    const running = describeEmptyState("cost-no-data", { scanInProgress: true });
+    expect(running.reason).toMatch(/triage/i);
+    const idle = describeEmptyState("cost-no-data");
+    expect(idle.reason).toMatch(/billed|nothing/i);
   });
 });
 

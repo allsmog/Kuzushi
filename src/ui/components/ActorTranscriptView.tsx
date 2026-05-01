@@ -14,6 +14,7 @@ import type React from "react";
 import { formatCost, truncateEnd } from "../format.js";
 import { BLACK_CIRCLE, FINDING_GLYPH, LOWER_HOOK, THINKING_GLYPH } from "../glyphs.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import type { AgentActivityLine, ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import {
@@ -21,6 +22,7 @@ import {
   actorShortId,
   toTranscriptEntry,
 } from "../transcript-format.js";
+import { EmptyState } from "./EmptyState.js";
 import { RuleHeader } from "./RuleHeader.js";
 import { ScreenContent } from "./ScreenContent.js";
 
@@ -70,6 +72,12 @@ export function ActorTranscriptView({
     { keys: "Ctrl+C", label: "interrupt", secondary: true },
   ]);
 
+  const { columns } = useTerminalSize();
+  // Body lines previously truncated at a fixed 160 chars - overflowed an
+  // 80-col terminal hard. Heads at 80 wasted half the pane at 200 cols.
+  const headClipWidth = Math.max(40, Math.min(columns - 6, 160));
+  const bodyClipWidth = Math.max(40, Math.min(columns - 8, 200));
+
   const fingerprint = shell.focusedActor ?? null;
   const allFingerprints = collectCarliniThreatHuntFingerprints(agentActivity);
   const index = fingerprint ? allFingerprints.indexOf(fingerprint) : -1;
@@ -87,13 +95,28 @@ export function ActorTranscriptView({
     ? `turn ${turnTotal}/${turnTotal} · ${formatCost(cost)} · ${FINDING_GLYPH} ${actorFindings.length} findings`
     : "(no actor focused)";
 
+  if (!fingerprint) {
+    return (
+      <ScreenContent>
+        <RuleHeader breadcrumb={breadcrumb} status={subtitle} />
+        <Box marginTop={SPACING.sm}>
+          <EmptyState kind="actor-none-focused" />
+        </Box>
+      </ScreenContent>
+    );
+  }
+
   return (
     <ScreenContent>
       <RuleHeader breadcrumb={breadcrumb} status={subtitle} />
-      {fingerprint ? (
-        <Header label={actorLabelFromFingerprint(fingerprint)} subtitle={subtitle} />
-      ) : null}
-      <Transcript lines={lines} findings={actorFindings} maxRows={maxRows} />
+      <Header label={actorLabelFromFingerprint(fingerprint)} subtitle={subtitle} />
+      <Transcript
+        lines={lines}
+        findings={actorFindings}
+        maxRows={maxRows}
+        headClipWidth={headClipWidth}
+        bodyClipWidth={bodyClipWidth}
+      />
       <OtherActors current={fingerprint} fingerprints={allFingerprints} findings={findings} />
     </ScreenContent>
   );
@@ -120,10 +143,14 @@ function Transcript({
   lines,
   findings,
   maxRows,
+  headClipWidth,
+  bodyClipWidth,
 }: {
   lines: ReadonlyArray<AgentActivityLine>;
   findings: ReadonlyArray<ActorViewFinding>;
   maxRows: number;
+  headClipWidth: number;
+  bodyClipWidth: number;
 }): React.ReactElement {
   const tail = lines.slice(-maxRows);
   const hidden = Math.max(0, lines.length - tail.length);
@@ -152,6 +179,8 @@ function Transcript({
             head={entry.head}
             body={entry.body}
             inProgress={entry.inProgress}
+            headClipWidth={headClipWidth}
+            bodyClipWidth={bodyClipWidth}
           />
         ))
       )}
@@ -159,8 +188,10 @@ function Transcript({
         <EntryRow
           key={`f:${f.fingerprint}`}
           glyph={FINDING_GLYPH}
-          head={`Finding — ${truncateEnd(findingHeadline(f), 80)}`}
+          head={`Finding — ${truncateEnd(findingHeadline(f), Math.max(20, headClipWidth - 11))}`}
           body={`${f.severity} · ${f.filePath}:${f.startLine}`}
+          headClipWidth={headClipWidth}
+          bodyClipWidth={bodyClipWidth}
         />
       ))}
     </Box>
@@ -172,12 +203,25 @@ function EntryRow({
   head,
   body,
   inProgress,
+  headClipWidth,
+  bodyClipWidth,
 }: {
   glyph: string;
   head: string;
   body?: string;
   inProgress?: boolean;
+  headClipWidth: number;
+  bodyClipWidth: number;
 }): React.ReactElement {
+  // Glyph hue convention (matches `runningStyle` and the rest of the
+  // shell): completed Tool glyphs stay on `accent` (the canonical
+  // "identifier" hue); in-progress also lives on `accent` so the spinner
+  // and the static glyph share one hue family. `warn` was previously
+  // applied to in-progress here, but that collides with the
+  // caution/skipped meaning warn carries elsewhere — and yellow + blue
+  // are both used in this view, splitting the visual story. The ★
+  // finding marker keeps `warn` because it signals "needs human
+  // attention" (caution-class) rather than active work.
   const glyphColor =
     glyph === LOWER_HOOK
       ? tokens.muted
@@ -185,18 +229,17 @@ function EntryRow({
         ? tokens.warn
         : glyph === THINKING_GLYPH
           ? tokens.tertiary
-          : inProgress
-            ? tokens.warn
-            : tokens.accent;
+          : tokens.accent;
+  void inProgress; // Kept for callsite compat; no longer hue-discriminated.
   const headColor = glyph === FINDING_GLYPH ? tokens.warn : tokens.value;
   return (
     <Box flexDirection="column">
       <Text>
-        {glyphColor(glyph)} {headColor(head)}
+        {glyphColor(glyph)} {headColor(truncateEnd(head, headClipWidth))}
       </Text>
       {body ? (
         <Box paddingLeft={SPACING.md}>
-          <Text>{tokens.muted(truncateEnd(body, 160))}</Text>
+          <Text>{tokens.muted(truncateEnd(body, bodyClipWidth))}</Text>
         </Box>
       ) : null}
     </Box>
