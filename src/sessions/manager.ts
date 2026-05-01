@@ -9,8 +9,8 @@
 
 import { EventEmitter } from "node:events";
 import type { PrintSink } from "../copilot/print.js";
+import { toErrorMessage } from "../utils.js";
 import type { SessionInsert, SessionRecord, SessionStore } from "../workspace/entities.js";
-
 export interface SessionHandle {
   /** DB row mirror — updated when metadata changes. */
   record: SessionRecord;
@@ -69,9 +69,7 @@ export class SessionManager extends EventEmitter {
       try {
         await handle.close();
       } catch (err) {
-        this.print?.warn(
-          `Session ${id.slice(0, 8)} close error: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        this.print?.warn(`Session ${id.slice(0, 8)} close error: ${toErrorMessage(err)}`);
       }
     }
     this.store.close(id, reason);

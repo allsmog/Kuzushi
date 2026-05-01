@@ -11,7 +11,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
-import { isRecord } from "../utils.js";
+import { isRecord, toErrorMessage } from "../utils.js";
 import {
   formatToolInputValidationError,
   normalizeToolInputKeys,
@@ -207,7 +207,7 @@ export function bridgeTool(
       } catch (err) {
         return {
           ok: false,
-          output: `MCP tool error: ${err instanceof Error ? err.message : String(err)}`,
+          output: `MCP tool error: ${toErrorMessage(err)}`,
         };
       }
     },

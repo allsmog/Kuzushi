@@ -10,10 +10,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { toErrorMessage } from "../utils.js";
 import { ModuleLoadError } from "./errors.js";
 import { zModuleManifest } from "./schema.js";
 import type { CopilotModule, ModuleManifest } from "./types.js";
-
 /**
  * Load and validate a module manifest from a directory.
  * Looks for `module.manifest.json` in the given path.
@@ -35,8 +35,8 @@ export function loadManifestFromPath(dirPath: string): ModuleManifest {
   } catch (err) {
     throw new ModuleLoadError(
       "MANIFEST_INVALID",
-      `Failed to parse module manifest at ${manifestPath}: ${err instanceof Error ? err.message : String(err)}`,
-      { path: manifestPath, cause: err instanceof Error ? err.message : String(err) },
+      `Failed to parse module manifest at ${manifestPath}: ${toErrorMessage(err)}`,
+      { path: manifestPath, cause: toErrorMessage(err) },
     );
   }
   const manifest = validateManifest(raw, manifestPath);

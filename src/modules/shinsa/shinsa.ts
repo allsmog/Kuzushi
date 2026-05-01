@@ -16,6 +16,7 @@ import type { AgentRuntime } from "../../agent-runtime/types.js";
 import { resolveShinsaPluginPath } from "../../agents/tasks/shinsa/resolve-shinsa-plugin.js";
 import { resolveRepo } from "../../cli/shared.js";
 import { createLogger } from "../../logger.js";
+import { toErrorMessage } from "../../utils.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
 const log = createLogger({ stage: "shinsa" });
@@ -191,7 +192,7 @@ function buildScanTool(mode: ScanMode, toolId: string, title: string, blurb: str
       } catch (err) {
         return {
           ok: false,
-          output: `shinsa-plugin not resolvable: ${err instanceof Error ? err.message : String(err)}`,
+          output: `shinsa-plugin not resolvable: ${toErrorMessage(err)}`,
         };
       }
 
@@ -252,7 +253,7 @@ function buildScanTool(mode: ScanMode, toolId: string, title: string, blurb: str
           costUsd: result.costUsd,
         };
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = toErrorMessage(err);
         log.warn(`${toolId} error: ${msg}`);
         return { ok: false, output: `${toolId} error: ${msg}` };
       }
@@ -306,7 +307,7 @@ const frameworksTool: ModuleTool = {
     try {
       pluginPath = resolveShinsaPluginPath();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return { ok: false, output: `shinsa-plugin not resolvable: ${msg}` };
     }
 

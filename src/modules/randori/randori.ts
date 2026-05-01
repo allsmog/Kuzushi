@@ -18,6 +18,7 @@ import { runRandoriPasta } from "../../agents/tasks/threat-modeling/randori-runn
 import { resolveRandoriPluginPath } from "../../agents/tasks/threat-modeling/resolve-randori.js";
 import { resolveRepo } from "../../cli/shared.js";
 import { loadPersistentThreatModel } from "../../threat-model-renderer.js";
+import { toErrorMessage } from "../../utils.js";
 import type { CopilotModule, ExecutionContext, ModuleTool, ToolResult } from "../types.js";
 
 const DEFAULT_STAGES = ["s1", "s2", "s3", "s4"] as const;
@@ -125,7 +126,7 @@ const pastaTool: ModuleTool = {
     try {
       pluginPath = resolveRandoriPluginPath();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return {
         ok: false,
         output:
@@ -216,7 +217,7 @@ const pastaTool: ModuleTool = {
         costUsd: result.costUsd,
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return { ok: false, output: `randori:pasta error: ${msg}` };
     }
   },
