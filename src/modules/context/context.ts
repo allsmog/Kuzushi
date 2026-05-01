@@ -24,6 +24,7 @@ import { contextGathererTask } from "../../agents/tasks/context-gatherer.js";
 import { invariantCheckTask } from "../../agents/tasks/invariant-analysis/check.js";
 import { invariantExtractTask } from "../../agents/tasks/invariant-analysis/extract.js";
 import type { ContextGenerationSlice, ContextSnapshot } from "../../ui/state.js";
+import { toErrorMessage } from "../../utils.js";
 import { indexContextSnapshotArtifact } from "../_shared/artifact-kb/index.js";
 import { createAttachmentTools } from "../_shared/attachments/index.js";
 import { defineModule, defineTool } from "../define.js";
@@ -163,7 +164,7 @@ export function createContextModule(): CopilotModule {
           },
         };
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = toErrorMessage(err);
         const running = steps.find((s) => s.status === "running");
         if (running) advance(running.id, "error");
         return { ok: false, output: `Context generation error: ${msg}` };
@@ -230,7 +231,7 @@ function tryIndexContextArtifact(
     ctx.reportActivity?.(`indexed Artifact KB (${indexed.chunks} context chunks)`);
     return { indexed };
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
+    const error = toErrorMessage(err);
     ctx.reportActivity?.(`Artifact KB indexing skipped: ${error}`);
     return { error };
   }

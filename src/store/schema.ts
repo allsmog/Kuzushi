@@ -4,6 +4,8 @@ import Database from "better-sqlite3";
 import { allMigrations, runMigrations } from "../migrations/index.js";
 import { ensureScannerCacheSchema } from "../scanner-cache.js";
 
+import { toErrorMessage } from "../utils.js";
+
 const CURRENT_SCHEMA_VERSION = 108;
 const POST_RESET_BASELINE_VERSION = 100;
 
@@ -49,11 +51,7 @@ export function initDb(dbPath: string, opts?: InitDbOpts): Database.Database {
   try {
     ensureScannerCacheSchema(db);
   } catch (error) {
-    console.warn(
-      `[store] failed to ensure scanner_cache schema: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
+    console.warn(`[store] failed to ensure scanner_cache schema: ${toErrorMessage(error)}`);
   }
   db.pragma("wal_checkpoint(TRUNCATE)");
 

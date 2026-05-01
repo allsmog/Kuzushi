@@ -12,8 +12,8 @@ import type {
   TrustBoundary,
 } from "../../agents/tasks/threat-modeling/types.js";
 import { loadPersistentThreatModel } from "../../threat-model-renderer.js";
+import { toErrorMessage } from "../../utils.js";
 import { contextSnapshotPath } from "../sast/context-persist.js";
-
 export const THREAT_MODEL_KB_SCHEMA_VERSION = "1";
 const KB_FILENAME = "threat-model-kb.sqlite3";
 const THREAT_MODEL_FILENAME = ".kuzushi/threat-model.json";
@@ -239,7 +239,7 @@ export function readThreatModelKbStatus(
       path: kbPath,
       exists: true,
       current: false,
-      staleReason: `unreadable: ${error instanceof Error ? error.message : String(error)}`,
+      staleReason: `unreadable: ${toErrorMessage(error)}`,
       ...(expected ? { expected } : {}),
     };
   } finally {

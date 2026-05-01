@@ -150,7 +150,12 @@ async function loadCandidateFiles(
       }
       const content = await readFile(absolutePath, "utf-8");
       loaded.push({ filePath, content });
-    } catch {}
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== "ENOENT" && code !== "EACCES" && code !== "EISDIR") {
+        log.warn(`app-model-build: skipping ${filePath} due to read error: ${String(err)}`);
+      }
+    }
   }
 
   return loaded;

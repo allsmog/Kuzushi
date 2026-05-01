@@ -193,6 +193,24 @@ export function severityToken(severity: Severity, env: NodeJS.ProcessEnv = proce
 }
 
 /**
+ * ASCII-only severity label for the plain-text renderer / CI stream /
+ * piped output. Returns a bracketed token (`"[CRIT]" | "[HIGH]" |
+ * "[MED ]" | "[LOW ]" | "[INFO]"`) — fixed-width so columns line up
+ * without padding and no Unicode glyphs that mangle on dumb terminals.
+ */
+const PLAIN_SEVERITY_LABEL: Record<Severity, string> = {
+  critical: "[CRIT]",
+  high: "[HIGH]",
+  medium: "[MED ]",
+  low: "[LOW ]",
+  info: "[INFO]",
+};
+
+export function severityPlainLabel(severity: Severity): string {
+  return PLAIN_SEVERITY_LABEL[severity];
+}
+
+/**
  * Chalk-wrapped string helper for callsites that already compose strings
  * (pre-Ink output like `plain-renderer.ts`, CI stream, exports).
  *
@@ -211,7 +229,7 @@ function resolveChalk(severity: Severity, env: NodeJS.ProcessEnv): ChalkInstance
   const highContrast = isHighContrast(env);
   const colorName = highContrast ? HIGH_CONTRAST_COLOR[severity] : BASE_PALETTE[severity].color;
   // Map Ink color name → chalk style. Chalk exposes each as a property.
-  const base = (chalk as unknown as Record<string, ChalkInstance>)[colorName] ?? chalk.white;
+  const base = (chalk as unknown as Record<InkColor, ChalkInstance>)[colorName] ?? chalk.white;
   return highContrast || severity === "critical" ? base.bold : base;
 }
 

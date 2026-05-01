@@ -18,11 +18,9 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 
-// ---------------------------------------------------------------------------
 // Minimal type surface for the parts of undici we touch at runtime.
 // We load undici via require() to keep startup light and avoid ESM/CJS interop
 // friction in this module.
-// ---------------------------------------------------------------------------
 
 interface UndiciDispatcher {
   close(): Promise<void>;
@@ -46,9 +44,7 @@ interface UndiciModule {
   getGlobalDispatcher(): UndiciDispatcher;
 }
 
-// ---------------------------------------------------------------------------
 // Configuration
-// ---------------------------------------------------------------------------
 
 /** Resolve proxy URL from env vars, checking both upper and lowercase variants. */
 function resolveProxyUrl(): string | undefined {
@@ -67,9 +63,7 @@ function resolveMaxSockets(): number {
   return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : 10;
 }
 
-// ---------------------------------------------------------------------------
 // Cached agents (lazy singletons)
-// ---------------------------------------------------------------------------
 
 let cachedHttpAgent: http.Agent | undefined;
 let cachedHttpsAgent: https.Agent | undefined;
@@ -182,9 +176,7 @@ export function cleanup(): void {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Attempt to create an HTTPS proxy agent via `https-proxy-agent`.

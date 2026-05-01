@@ -34,6 +34,10 @@ import type {
 import type { ConfidenceSignalWeights } from "./scoring/composite-confidence.js";
 
 export type { CryptoBehavioralRun } from "./crypto-behavioral/types.js";
+// Canonical Precedents lives in `./precedents.ts` alongside the loader.
+// Re-exported here so the historical `import { Precedents } from "./types"`
+// path keeps working without a second declaration drifting.
+export type { Precedents } from "./precedents.js";
 // Re-export Zod schemas for consumers that need runtime validation.
 export {
   ApplicationModelSchema,
@@ -287,13 +291,6 @@ export interface ThreatScenario {
     detail?: string;
   };
   evidenceAnchors: ModelEvidenceAnchor[];
-}
-
-/** Parsed organization precedents for triage/verification prompt injection. */
-export interface Precedents {
-  hardExclusions: string[];
-  signalCriteria: string[];
-  architecturalPrecedents: string[];
 }
 
 /** A domain-specific security vulnerability category profile. */

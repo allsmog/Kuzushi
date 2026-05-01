@@ -11,15 +11,6 @@ import { normalizeSeverity, severityChalk, severityStyle } from "./severity.js";
 import { clampTerminalCardWidth, resolveTerminalColumns } from "./terminal.js";
 import { tokens } from "./tokens.js";
 
-/**
- * Returns a chalk function appropriate for "secondary" text based on theme.
- * Delegates to `tokens.muted` — kept for backwards compatibility with older
- * call sites. New code should prefer `tokens.muted` directly.
- */
-export function secondary(text: string): string {
-  return tokens.muted(text);
-}
-
 // Partial block characters from thin to full (8 steps)
 const PARTIAL_BLOCKS = [" ", "\u258F", "\u258E", "\u258D", "\u258C", "\u258B", "\u258A", "\u2589"];
 const FULL_BLOCK = "\u2588"; // █
@@ -171,14 +162,19 @@ export type StatusBadgeKind = "stage" | "task" | "result";
  * `PipelineIndicator`, `ResultLine`, and `MonorepoProgress` — previously each
  * had its own ad-hoc status→icon/color ternary.
  *
- * Semantic choices (preserved from the scattered prior implementation):
- *   - pending → hollow circle, muted (not-yet-started)
- *   - active  → filled circle, `dangerStrong` for the attention-getting
- *               "currently scanning" alarmist vibe used throughout the scan
- *               pipeline today. (Spinner call-sites use `accent` for the
- *               animated frame; this is for the *static* glyph variant.)
- *   - done    → diamond, muted (retired to history)
- *   - error   → cross, `danger`
+ * Semantic choices (canonical across the TUI; sibling helper `runningStyle`
+ * applies the same hue map to live transcript glyphs):
+ *   - pending → hollow circle, `muted` (not-yet-started)
+ *   - active  → filled circle, `focus` (blue bold) — pairs with the
+ *               in-progress `accent` spinner so animated and static
+ *               renderings of "currently working" share one hue family.
+ *   - done    → diamond, `success` (green) — paired with the ✓ glyph in
+ *               `STEP_GLYPH.done` for color-stripped renderings.
+ *   - error   → cross, `danger` (red)
+ *
+ * Yellow / `warn` is intentionally NOT used for active here — it is reserved
+ * for cautions, skipped, and needs-review across the rest of the shell so
+ * "in-progress" and "needs-attention" are never the same color.
  */
 export function statusBadge(
   _kind: StatusBadgeKind,
@@ -193,6 +189,41 @@ export function statusBadge(
       return { icon: icons.complete, color: tokens.success };
     case "error":
       return { icon: icons.error, color: tokens.danger };
+  }
+}
+
+/**
+ * Live transcript step status — `done | running | pending | error`.
+ *
+ * Centralizes the glyph + token used by `ModuleRunView.StepRow`,
+ * `ActorTranscriptView`, and `AgentActivity` so live and static renderings
+ * of the same status agree.
+ *
+ * Color choices intentionally mirror `statusBadge`:
+ *   - done    → ✓, `tokens.success` (green)
+ *   - running → →, `tokens.accent` (blue) — NOT yellow/`warn`, which is
+ *               reserved for cautions/skipped/needs-review.
+ *   - pending → ○, `tokens.muted`
+ *   - error   → ✗, `tokens.danger`
+ *
+ * Every entry pairs a glyph with the token, so `NO_COLOR` and color-blind
+ * readers still distinguish state by shape alone.
+ */
+export type RunningStatus = "done" | "running" | "pending" | "error";
+
+export function runningStyle(status: RunningStatus): {
+  glyph: string;
+  color: (text: string) => string;
+} {
+  switch (status) {
+    case "done":
+      return { glyph: "✓" /* ✓ */, color: tokens.success };
+    case "running":
+      return { glyph: "→" /* → */, color: tokens.accent };
+    case "pending":
+      return { glyph: "○" /* ○ */, color: tokens.muted };
+    case "error":
+      return { glyph: "✗" /* ✗ */, color: tokens.danger };
   }
 }
 

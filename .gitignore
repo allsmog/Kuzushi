@@ -30,3 +30,6 @@ perf/results.json
 
 # Local Claude Design / scratch prompts — do not commit
 kuzushi-*-prompt.md
+
+# Agent scratch audit docs
+.tmp-*.md

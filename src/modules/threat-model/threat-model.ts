@@ -20,6 +20,7 @@ import {
   loadPersistentThreatModel,
   savePersistentThreatModel,
 } from "../../threat-model-renderer.js";
+import { toErrorMessage } from "../../utils.js";
 import { indexThreatModelArtifact } from "../_shared/artifact-kb/index.js";
 import {
   buildHomeSlice,
@@ -207,7 +208,7 @@ const buildTool: ModuleTool = {
     try {
       pluginPath = resolveRandoriPluginPath();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return {
         ok: false,
         output:
@@ -362,7 +363,7 @@ const buildTool: ModuleTool = {
         costUsd: result.costUsd,
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       return { ok: false, output: `threat-model:build error: ${msg}` };
     }
   },
@@ -515,7 +516,7 @@ function tryIndexThreatModelArtifact(input: {
     input.ctx.reportActivity?.(`indexed Artifact KB (${indexed.chunks} threat-model chunks)`);
     return { indexed };
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
+    const error = toErrorMessage(err);
     input.ctx.reportActivity?.(`Artifact KB indexing skipped: ${error}`);
     return { error };
   }

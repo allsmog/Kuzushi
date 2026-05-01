@@ -50,16 +50,12 @@ export type {
 export type { ModuleReference } from "./reference.js";
 export type { JSONSchema } from "./schema.js";
 
-// ---------------------------------------------------------------------------
 // Module categories
-// ---------------------------------------------------------------------------
 
 /** High-level classification for module capabilities. */
 export type ModuleCategory = "offense" | "defense" | "governance" | "intel";
 
-// ---------------------------------------------------------------------------
 // Module ranking + provenance metadata (msfconsole-inspired)
-// ---------------------------------------------------------------------------
 
 /**
  * Reliability/quality tier. Mirrors Metasploit's Rank system so operators have
@@ -94,9 +90,7 @@ export interface ModuleNotes {
   sideEffects?: string[];
 }
 
-// ---------------------------------------------------------------------------
 // Module dependencies
-// ---------------------------------------------------------------------------
 
 /**
  * A declared prerequisite for running a module. Checked in the shell's `run`
@@ -150,9 +144,7 @@ export type CopilotModuleRequirement =
       name: string;
     };
 
-// ---------------------------------------------------------------------------
 // DAG-aware tool types
-// ---------------------------------------------------------------------------
 
 /**
  * Canonical output categories for DAG nodes.
@@ -201,9 +193,7 @@ export interface DagContext {
   upstreamOutputs: ReadonlyMap<string, unknown>;
 }
 
-// ---------------------------------------------------------------------------
 // Module tool types
-// ---------------------------------------------------------------------------
 
 /** Result returned by a tool execution. */
 export interface ToolResult {
@@ -491,9 +481,7 @@ export interface ModuleTool {
   execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult>;
 }
 
-// ---------------------------------------------------------------------------
 // DagTool — a ModuleTool that also participates in the scan DAG
-// ---------------------------------------------------------------------------
 
 /**
  * Pipeline-only spec for a `DagTool`.
@@ -571,9 +559,7 @@ export function requireDag(ctx: ExecutionContext): DagContext {
   return ctx.dag;
 }
 
-// ---------------------------------------------------------------------------
 // Module manifest (for external/npm modules)
-// ---------------------------------------------------------------------------
 
 /** Requirements that must be satisfied before a module can load. */
 export interface ModuleRequirements {
@@ -609,9 +595,7 @@ export interface ModuleManifest {
   kuzushiSdkVersion?: string;
 }
 
-// ---------------------------------------------------------------------------
 // Module context (provided during init)
-// ---------------------------------------------------------------------------
 
 /** Summary of a peer module visible during the `ready` lifecycle hook. */
 export interface ReadyPeerInfo {
@@ -651,7 +635,6 @@ export interface ModuleReadyContext extends ModuleContext {
 
 // ---------------------------------------------------------------------------
 // CopilotModule — the first-class capability unit
-// ---------------------------------------------------------------------------
 
 /**
  * A CopilotModule is a pluggable capability package.
@@ -782,9 +765,7 @@ export interface CopilotModule {
   dispose?(): Promise<void>;
 }
 
-// ---------------------------------------------------------------------------
 // Module specifier (how modules are referenced for loading)
-// ---------------------------------------------------------------------------
 
 /** How a module is referenced for loading. */
 export type ModuleSpecifier =
@@ -793,9 +774,7 @@ export type ModuleSpecifier =
   | { type: "package"; name: string }
   | { type: "mcp"; serverUrl: string };
 
-// ---------------------------------------------------------------------------
 // Module registry query types
-// ---------------------------------------------------------------------------
 
 /** Summary info for listing modules. */
 export interface ModuleInfo {

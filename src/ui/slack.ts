@@ -1,3 +1,5 @@
+import { toErrorMessage } from "../utils.js";
+
 /**
  * Slack webhook notifier — posts a short message when opted in.
  *
@@ -41,6 +43,6 @@ export async function postSlack(opts: SlackPostOptions): Promise<SlackPostResult
     }
     return { posted: true };
   } catch (err) {
-    return { posted: false, warning: err instanceof Error ? err.message : String(err) };
+    return { posted: false, warning: toErrorMessage(err) };
   }
 }

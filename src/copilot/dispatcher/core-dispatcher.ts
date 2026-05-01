@@ -13,12 +13,12 @@ import type { AgentRuntimeBackend } from "../../contracts.js";
 import type { ModuleRegistry } from "../../modules/registry.js";
 import type { CopilotModule } from "../../modules/types.js";
 import { wrapToWidth } from "../../ui/format.js";
+import { toErrorMessage } from "../../utils.js";
 import { type Datastore, formatOptionsTable } from "../options.js";
 import { formatSearchResult, searchCatalog } from "../search.js";
 import { randomTip } from "../tips.js";
 import { ModuleDispatcher, type ModuleToolRunner, modelOptionSpec } from "./module-dispatcher.js";
 import type { CommandContext, CommandDispatcher, CommandResult } from "./types.js";
-
 export interface CoreDispatcherOptions {
   registry: ModuleRegistry;
   /** Global datastore — stores `setg`-set keys. */
@@ -332,9 +332,7 @@ export class CoreDispatcher implements CommandDispatcher {
     return undefined;
   }
 
-  // -------------------------------------------------------------------------
   // Handlers
-  // -------------------------------------------------------------------------
 
   private cmd_help(ctx: CommandContext): CommandResult {
     const all = ctx.driver.allCommands();
@@ -531,7 +529,7 @@ export class CoreDispatcher implements CommandDispatcher {
       await this.opts.runResource(file, ctx.signal);
       return {};
     } catch (err) {
-      return { output: `[-] Resource failed: ${err instanceof Error ? err.message : String(err)}` };
+      return { output: `[-] Resource failed: ${toErrorMessage(err)}` };
     }
   }
 
@@ -543,7 +541,7 @@ export class CoreDispatcher implements CommandDispatcher {
       await this.opts.makeResource(file);
       return { output: `Saved resource script to ${file}` };
     } catch (err) {
-      return { output: `[-] makerc failed: ${err instanceof Error ? err.message : String(err)}` };
+      return { output: `[-] makerc failed: ${toErrorMessage(err)}` };
     }
   }
 
@@ -578,7 +576,7 @@ export class CoreDispatcher implements CommandDispatcher {
         await this.opts.runResource(file, ctx.signal);
         return {};
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = toErrorMessage(err);
         return { output: `[-] Recipe failed: ${msg}` };
       }
     }
@@ -604,7 +602,7 @@ export class CoreDispatcher implements CommandDispatcher {
     try {
       updated = await this.opts.openEditor(initial);
     } catch (err) {
-      return { output: `[-] edit failed: ${err instanceof Error ? err.message : String(err)}` };
+      return { output: `[-] edit failed: ${toErrorMessage(err)}` };
     }
     if (updated == null) return { output: "[*] Edit cancelled — value unchanged." };
 
@@ -613,9 +611,7 @@ export class CoreDispatcher implements CommandDispatcher {
     return { output: `[+] Updated ${name} (${updated.length} chars, scope=${scope}).` };
   }
 
-  // -------------------------------------------------------------------------
   // Discovery & learning-curve commands
-  // -------------------------------------------------------------------------
 
   private cmd_tip(): CommandResult {
     return { output: `[*] Tip: ${randomTip()}` };
@@ -696,9 +692,7 @@ export class CoreDispatcher implements CommandDispatcher {
     return { output: lines.join("\n") };
   }
 
-  // -------------------------------------------------------------------------
   // Aliases
-  // -------------------------------------------------------------------------
 
   private cmd_alias(args: string[], ctx: CommandContext): CommandResult {
     const driver = ctx.driver as unknown as {
@@ -731,9 +725,7 @@ export class CoreDispatcher implements CommandDispatcher {
     return { output: removed ? `[+] Removed alias: ${name}` : `[-] No such alias: ${name}` };
   }
 
-  // -------------------------------------------------------------------------
   // Favorites (numeric-recall aliases)
-  // -------------------------------------------------------------------------
 
   private readonly favorites: string[] = [];
 
@@ -770,9 +762,7 @@ export class CoreDispatcher implements CommandDispatcher {
     return { output: `[+] Unstarred ${target}` };
   }
 
-  // -------------------------------------------------------------------------
   // Module stack (pushm / popm / listm)
-  // -------------------------------------------------------------------------
 
   private readonly savedModules: string[] = [];
 
@@ -808,9 +798,7 @@ export class CoreDispatcher implements CommandDispatcher {
     };
   }
 
-  // -------------------------------------------------------------------------
   // Background jobs
-  // -------------------------------------------------------------------------
 
   private async cmd_jobs(args: string[], _ctx: CommandContext): Promise<CommandResult> {
     const mgr = this.opts.jobManager;
@@ -868,9 +856,7 @@ export class CoreDispatcher implements CommandDispatcher {
     return { output: [header, sep, ...rows].join("\n") };
   }
 
-  // -------------------------------------------------------------------------
   // Dev REPL
-  // -------------------------------------------------------------------------
 
   private async cmd_repl(_ctx: CommandContext): Promise<CommandResult> {
     if (!this.opts.openRepl) {
@@ -880,13 +866,11 @@ export class CoreDispatcher implements CommandDispatcher {
       await this.opts.openRepl();
       return { output: "[*] REPL session ended." };
     } catch (err) {
-      return { output: `[-] REPL failed: ${err instanceof Error ? err.message : String(err)}` };
+      return { output: `[-] REPL failed: ${toErrorMessage(err)}` };
     }
   }
 
-  // -------------------------------------------------------------------------
   // Spool — tee shell output to a file
-  // -------------------------------------------------------------------------
 
   private cmd_spool(args: string[], ctx: CommandContext): CommandResult {
     const spool = this.opts.spool;
@@ -908,13 +892,11 @@ export class CoreDispatcher implements CommandDispatcher {
       const resolved = spool.start(sub, ctx.cwd);
       return { output: `[+] Spooling to ${resolved}` };
     } catch (err) {
-      return { output: `[-] spool failed: ${err instanceof Error ? err.message : String(err)}` };
+      return { output: `[-] spool failed: ${toErrorMessage(err)}` };
     }
   }
 
-  // -------------------------------------------------------------------------
   // Utility primitives — sleep / wait_for / time / clear / version / logs / connect
-  // -------------------------------------------------------------------------
 
   private async cmd_sleep(args: string[], ctx: CommandContext): Promise<CommandResult> {
     const secs = Number.parseFloat(args[0] ?? "");
@@ -1009,9 +991,7 @@ export class CoreDispatcher implements CommandDispatcher {
     };
   }
 
-  // -------------------------------------------------------------------------
   // Macros — record / replay a sequence of commands
-  // -------------------------------------------------------------------------
 
   private readonly macros = new Map<string, string[]>();
   private recordingTarget: string | null = null;
@@ -1128,7 +1108,7 @@ export class CoreDispatcher implements CommandDispatcher {
           output: `[+] Scheduled '${entry.label}' every ${entry.interval} → ${entry.command}`,
         };
       } catch (err) {
-        return { output: `[-] ${err instanceof Error ? err.message : String(err)}` };
+        return { output: `[-] ${toErrorMessage(err)}` };
       }
     }
     return {
@@ -1173,9 +1153,7 @@ export class CoreDispatcher implements CommandDispatcher {
     return { output: chunks.join("") || "[-] No bytes received." };
   }
 
-  // -------------------------------------------------------------------------
   // helpers
-  // -------------------------------------------------------------------------
 
   /** Find the active module dispatcher's datastore, if a `use` was issued. */
   private findModuleStore(ctx: CommandContext): Datastore | undefined {
@@ -1198,9 +1176,7 @@ export class CoreDispatcher implements CommandDispatcher {
   }
 }
 
-// ---------------------------------------------------------------------------
 // info / module rendering
-// ---------------------------------------------------------------------------
 
 export function formatModuleInfo(mod: CopilotModule): string {
   const lines: string[] = [];

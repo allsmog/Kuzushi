@@ -20,6 +20,7 @@ import { severitySparkline } from "../sparkline.js";
 import type { ShellModuleCard, ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { ContextStrip } from "./ContextStrip.js";
+import { EmptyState } from "./EmptyState.js";
 import { ScreenContent } from "./ScreenContent.js";
 
 const CATEGORY_ORDER = ["offense", "intel", "governance", "defense"] as const;
@@ -83,6 +84,12 @@ export function ModuleCatalog({ shell }: ModuleCatalogProps): React.ReactElement
   return (
     <ScreenContent>
       <ContextStrip status={status} />
+
+      {cards.length === 0 ? (
+        <Box marginTop={SPACING.sm}>
+          <EmptyState kind="catalog-no-modules" />
+        </Box>
+      ) : null}
 
       {(() => {
         const recommended = pickRecommendedFirst(builtIns);

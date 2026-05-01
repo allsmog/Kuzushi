@@ -25,9 +25,7 @@ import {
   VERDICTS,
 } from "./contracts.js";
 
-// ---------------------------------------------------------------------------
 // Shared enums / literals
-// ---------------------------------------------------------------------------
 
 export const VerdictSchema = z.enum(VERDICTS);
 export type VerdictZ = z.infer<typeof VerdictSchema>;
@@ -70,9 +68,7 @@ export type DynamicCoverageModeZ = z.infer<typeof DynamicCoverageModeSchema>;
 export const PatchStatusSchema = z.enum(PATCH_STATUSES);
 export type PatchStatusZ = z.infer<typeof PatchStatusSchema>;
 
-// ---------------------------------------------------------------------------
 // Finding (task output)
-// ---------------------------------------------------------------------------
 
 export const TaintPathStepSchema = z.object({
   filePath: z.string(),
@@ -132,9 +128,7 @@ export const FindingSchema = z.object({
 
 export type FindingZ = z.infer<typeof FindingSchema>;
 
-// ---------------------------------------------------------------------------
 // Triage types
-// ---------------------------------------------------------------------------
 
 export const TriagePathAssessmentSchema = z.object({
   why: z.string(),
@@ -213,9 +207,7 @@ export const TriageResultSchema = z.object({
 
 export type TriageResultZ = z.infer<typeof TriageResultSchema>;
 
-// ---------------------------------------------------------------------------
 // Verification types
-// ---------------------------------------------------------------------------
 
 export const VerificationResultSchema = z.object({
   fingerprint: z.string(),
@@ -239,9 +231,7 @@ export const VerificationResultSchema = z.object({
 
 export type VerificationResultZ = z.infer<typeof VerificationResultSchema>;
 
-// ---------------------------------------------------------------------------
 // PoC Harness types
-// ---------------------------------------------------------------------------
 
 export const PocHarnessResultSchema = z.object({
   fingerprint: z.string(),
@@ -393,9 +383,7 @@ export const FindingMetadataSchema = z.object({
 
 export type FindingMetadataZ = z.infer<typeof FindingMetadataSchema>;
 
-// ---------------------------------------------------------------------------
 // Repo context types
-// ---------------------------------------------------------------------------
 
 export const RepoContextSchema = z.object({
   languages: z.array(z.string()),
@@ -558,9 +546,7 @@ export const ThreatScenarioSchema = z.object({
 export type ApplicationModelZ = z.infer<typeof ApplicationModelSchema>;
 export type ThreatScenarioZ = z.infer<typeof ThreatScenarioSchema>;
 
-// ---------------------------------------------------------------------------
 // Precedents & security profiles
-// ---------------------------------------------------------------------------
 
 export const PrecedentsSchema = z.object({
   hardExclusions: z.array(z.string()),
@@ -578,9 +564,7 @@ export const SecurityProfileSchema = z.object({
 
 export type SecurityProfileZ = z.infer<typeof SecurityProfileSchema>;
 
-// ---------------------------------------------------------------------------
 // Exploit chains
-// ---------------------------------------------------------------------------
 
 export const ExploitChainSchema = z.object({
   id: z.string(),
@@ -602,9 +586,7 @@ export const ExploitChainSchema = z.object({
 
 export type ExploitChainZ = z.infer<typeof ExploitChainSchema>;
 
-// ---------------------------------------------------------------------------
 // ScanOpts
-// ---------------------------------------------------------------------------
 
 export const ScanOptsSchema = z.object({
   severity: z.array(z.string()),
@@ -626,9 +608,7 @@ export const ScanOptsSchema = z.object({
 
 export type ScanOptsZ = z.infer<typeof ScanOptsSchema>;
 
-// ---------------------------------------------------------------------------
 // Agent runtime config
-// ---------------------------------------------------------------------------
 
 export const AgentRuntimeCredentialsSchema = z.object({
   apiKey: z.string().optional(),
@@ -677,9 +657,7 @@ export const MonorepoConfigSchema = z.object({
 
 export type MonorepoConfigZ = z.infer<typeof MonorepoConfigSchema>;
 
-// ---------------------------------------------------------------------------
 // KuzushiConfig — the full configuration object
-// ---------------------------------------------------------------------------
 
 export const KuzushiConfigSchema = z.object({
   model: z.string(),
@@ -848,9 +826,7 @@ export const KuzushiConfigSchema = z.object({
 
 export type KuzushiConfigZ = z.infer<typeof KuzushiConfigSchema>;
 
-// ---------------------------------------------------------------------------
 // FindingRow (SQLite persistence)
-// ---------------------------------------------------------------------------
 
 export const FindingRowSchema = z.object({
   taskId: z.string(),
@@ -899,9 +875,7 @@ export const FindingRowSchema = z.object({
 
 export type FindingRowZ = z.infer<typeof FindingRowSchema>;
 
-// ---------------------------------------------------------------------------
 // LLM output schemas (snake_case — used to validate raw LLM JSON)
-// ---------------------------------------------------------------------------
 
 /**
  * Schema for raw triage agent LLM output (snake_case keys).
@@ -1058,9 +1032,7 @@ export const RawPocHarnessOutputSchema = z.object({
 
 export type RawPocHarnessOutput = z.infer<typeof RawPocHarnessOutputSchema>;
 
-// ---------------------------------------------------------------------------
 // Validation helpers
-// ---------------------------------------------------------------------------
 
 export interface ValidationError {
   path: string;

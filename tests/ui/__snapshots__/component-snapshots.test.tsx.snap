@@ -88,7 +88,9 @@ exports[`Ink component snapshots > ModuleHome — tools table + last-run summary
 `;
 
 exports[`Ink component snapshots > OptionsView — focused tool options without module home 1`] = `
-"  context:build · 4 options · 2 set
+"  kuzushi/context/options                                          context:build · 4 options · 2 set
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+  ──
 
 
   Options                  * = set in this shell
@@ -137,20 +139,20 @@ exports[`Ink component snapshots > ThreatDfdView — inferred app-model fallback
   ! hot path   B boundary   ❯ selected
 
   ┌─ INTERNET / UNTRUSTED ────────────────────────────────────────────────────┐
-  │ ❯ E1   (ext) unauth user            public ingress                     │
+  │ ❯ E1   (ext) unauth user            public ingress                      │
   └───────────────────────────────────────────────────────────────────────────┘
      │ B1 perimeter · 1 crossing
   ┌─ EDGE / ENTRYPOINTS ──────────────────────────────────────────────────────┐
-  │ ! P1   [proc] web router            routes 1 · public 1 · auth 0       │
-  │   P2   [proc] auth-module           identity · sessions                │
+  │ ! P1   [proc] web router            routes 1 · public 1 · auth 0        │
+  │   P2   [proc] auth-module           identity · sessions                 │
   └───────────────────────────────────────────────────────────────────────────┘
      │ B2 service edge · 1 crossing
   ┌─ APPLICATION / TRUSTED ───────────────────────────────────────────────────┐
-  │   P3   [proc] public router         entrypoint                         │
+  │   P3   [proc] public router         entrypoint                          │
   └───────────────────────────────────────────────────────────────────────────┘
      │ B3 data boundary · 1 crossing
   ┌─ DATA / HIGH VALUE ───────────────────────────────────────────────────────┐
-  │ ! D1   <<data>> users db            high-value data · postgres         │
+  │ ! D1   <<data>> users db            high-value data · postgres          │
   └───────────────────────────────────────────────────────────────────────────┘
 
   hot paths
@@ -182,15 +184,15 @@ exports[`Ink component snapshots > ThreatDfdView — trust zones + boundaries + 
   ! hot path   B boundary   ❯ selected   ✓ validated
 
   ┌─ INTERNET / UNTRUSTED ────────────────────────────────────────────────────┐
-  │ ❯ E1   (ext) attacker               identity · public ingress          │
+  │ ❯ E1   (ext) attacker               identity · public ingress           │
   └───────────────────────────────────────────────────────────────────────────┘
      │ B1 perimeter · 1 crossing
   ┌─ APP-VPC ─────────────────────────────────────────────────────────────────┐
-  │   P1   [proc] admin router          privileged                         │
+  │   P1   [proc] admin router          privileged                          │
   └───────────────────────────────────────────────────────────────────────────┘
      │
   ┌─ DATA / HIGH VALUE ───────────────────────────────────────────────────────┐
-  │ ! D1   <<data>> IMDS                high-value data                    │
+  │ ! D1   <<data>> IMDS                high-value data                     │
   └───────────────────────────────────────────────────────────────────────────┘
 
   hot paths

@@ -21,12 +21,11 @@ export type ShellCommandGroup =
   | "kb"
   | "session";
 
-export type CommandSurfaceKind = "core" | "advanced" | "dev" | "deprecated";
+export type CommandSurfaceKind = "core" | "advanced" | "dev";
 
 export interface CommandMetadata {
   readonly surface: CommandSurfaceKind;
   readonly canonical?: string;
-  readonly deprecatedSince?: string;
 }
 
 export interface ShellActionHint {
