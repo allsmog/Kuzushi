@@ -264,7 +264,9 @@ export function buildReproducibility(opts: BuildReproOpts): RunSummaryReproducib
     model: opts.config.model,
     agentRuntimeBackend:
       opts.agentRuntimeBackend ??
-      ((opts.config as Record<string, unknown>).agentRuntimeBackend as string | undefined),
+      ((opts.config as unknown as Record<string, unknown>).agentRuntimeBackend as
+        | string
+        | undefined),
     configHash: hashConfig(opts.config),
     scanArgs,
     envFingerprint: readEnvFingerprint(env),
