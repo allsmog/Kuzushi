@@ -43,6 +43,7 @@ import {
   ProblemCode,
   problemToolResult,
 } from "../modules/problem-details.js";
+import { createRunArtifactStore } from "../modules/run-artifacts.js";
 import { createCorePromptArmorModule } from "../modules/prompt-armor/prompt-armor.js";
 import { createCoreRandoriModule } from "../modules/randori/randori.js";
 import { ModuleRegistry, parseModuleSpecifier } from "../modules/registry.js";
@@ -229,6 +230,52 @@ export class CopilotCore {
     } catch {
       // Ignore — a missing/unwritable dataDir should never break init.
     }
+
+    // After every module in the load batch has finished `init`, run the
+    // optional `ready(ctx)` hook on each in load order. `ready` is the
+    // post-batch wiring hook that lets a module enumerate peer modules
+    // synchronously instead of racing `module:loaded` events. Errors are
+    // logged + swallowed — `init` is the rollback boundary, not `ready`.
+    await this.runReadyHooks();
+  }
+
+  /**
+   * Iterate every loaded module in registration order and call its
+   * optional `ready(ctx)` lifecycle hook. The `peers` snapshot reflects
+   * the registry at the moment `ready` is invoked — modules loaded
+   * later via `loadModuleFromSpecifier` get their own `ready` call with
+   * the registry state at that point.
+   */
+  private async runReadyHooks(): Promise<void> {
+    for (const id of this.registry.ids()) {
+      const mod = this.registry.get(id);
+      if (!mod.ready) continue;
+      const peers = this.registry
+        .list()
+        .filter((m) => m.id !== id)
+        .map((m) => ({
+          id: m.id,
+          displayName: m.displayName,
+          category: m.category,
+          version: m.version,
+        }));
+      const scope = this.moduleScopes.get(id);
+      const readyCtx = {
+        ...this.moduleCtx,
+        ...(scope ? { events: scope } : {}),
+        peers,
+      };
+      try {
+        await mod.ready(readyCtx);
+      } catch (err) {
+        // ready is best-effort wiring; log + swallow so a buggy module's
+        // post-batch hook can't take down the entire init flow.
+        scope?.emit("module:ready_error", {
+          moduleId: id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   }
 
   /**
@@ -383,6 +430,20 @@ export class CopilotCore {
     // still probe the runtime directly.
     if (toolRuntime) capabilities.add("structured-output");
 
+    // run-artifacts is wired only when the call carries both a DAG runId
+    // and a moduleId — i.e. during scan-mode DAG execution. Outside that,
+    // modules don't have a stable run dir to write into, so the handle
+    // stays undefined and the capability stays unset.
+    const runArtifacts =
+      ctxOverrides?.dag?.runId
+        ? createRunArtifactStore({
+            dataDir: this.opts.dataDir,
+            runId: ctxOverrides.dag.runId,
+            moduleId,
+          })
+        : undefined;
+    if (runArtifacts) capabilities.add("run-artifacts");
+
     const host = {
       sdkVersion: KUZUSHI_SDK_VERSION,
       capabilities: capabilities as ReadonlySet<string>,
@@ -409,6 +470,7 @@ export class CopilotCore {
       ...(ctxOverrides?.workspace ? { workspace: ctxOverrides.workspace } : {}),
       ...(scope ? { events: scope } : {}),
       ...(toolModel ? { toolModel } : {}),
+      ...(runArtifacts ? { runArtifacts } : {}),
       host,
       reportActivity: (description, meta) => {
         void publishTaskActivity(ctxBus, qualifiedName, description, meta ?? {});
