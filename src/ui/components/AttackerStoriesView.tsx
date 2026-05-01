@@ -24,6 +24,7 @@ import type {
 import { formatThreatModelSource } from "../../copilot/threat-model-loader.js";
 import { truncateEnd } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { ContextStrip } from "./ContextStrip.js";
@@ -56,6 +57,12 @@ export function AttackerStoriesView({ shell }: AttackerStoriesViewProps): React.
     { keys: "q", label: "back", secondary: true },
   ]);
   const tm = shell.threatModel;
+  const { columns } = useTerminalSize();
+  // Story cards and overview wrap to terminal width with a readable
+  // upper bound so long lines stay scannable on ultrawide panes.
+  const cardWidth = Math.max(56, Math.min(columns - 4, 120));
+  const overviewWidth = Math.max(48, Math.min(columns - 8, 110));
+  const inputClipWidth = Math.max(40, Math.min(columns - 12, 110));
   if (!tm) return <EmptyState />;
 
   const narrative = tm.narrative;
@@ -80,14 +87,14 @@ export function AttackerStoriesView({ shell }: AttackerStoriesViewProps): React.
         <Box flexDirection="column" marginTop={SPACING.sm}>
           <Text>{tokens.label("overview")}</Text>
           <Box paddingLeft={SPACING.lg} flexDirection="column" marginTop={SPACING.sm}>
-            {wrap(narrative.overview, 72).map((line, i) => (
+            {wrap(narrative.overview, overviewWidth).map((line, i) => (
               <Text key={`${i}-${line.slice(0, 6)}`}>{tokens.value(line)}</Text>
             ))}
           </Box>
         </Box>
       ) : null}
 
-      {inputs ? <InputCategoriesRail inputs={inputs} /> : null}
+      {inputs ? <InputCategoriesRail inputs={inputs} clipWidth={inputClipWidth} /> : null}
 
       <Box flexDirection="column" marginTop={SPACING.sm}>
         <Text>{tokens.label(`attacker stories (${stories.length})`)}</Text>
@@ -100,7 +107,7 @@ export function AttackerStoriesView({ shell }: AttackerStoriesViewProps): React.
         ) : (
           <Box flexDirection="column" marginTop={SPACING.sm}>
             {stories.map((story, i) => (
-              <StoryCard key={`${i}-${story.title}`} story={story} />
+              <StoryCard key={`${i}-${story.title}`} story={story} width={cardWidth} />
             ))}
           </Box>
         )}
@@ -125,8 +132,10 @@ function EmptyState(): React.ReactElement {
 
 function InputCategoriesRail({
   inputs,
+  clipWidth,
 }: {
   inputs: ThreatModelInputCategories;
+  clipWidth: number;
 }): React.ReactElement {
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
@@ -148,7 +157,7 @@ function InputCategoriesRail({
                   {"   "}
                   {tokens.muted("\u00B7")}
                   {"  "}
-                  {tokens.muted(truncateEnd(entry, 68))}
+                  {tokens.muted(truncateEnd(entry, clipWidth))}
                 </Text>
               ))}
               {items.length > 4 ? (
@@ -165,9 +174,14 @@ function InputCategoriesRail({
   );
 }
 
-function StoryCard({ story }: { story: ThreatModelAttackerStory }): React.ReactElement {
-  const width = 74;
-  const bar = "\u2500".repeat(width - 4);
+function StoryCard({
+  story,
+  width,
+}: {
+  story: ThreatModelAttackerStory;
+  width: number;
+}): React.ReactElement {
+  const bar = "\u2500".repeat(Math.max(0, width - 4));
   return (
     <Box flexDirection="column" marginBottom={SPACING.sm}>
       <Text>
