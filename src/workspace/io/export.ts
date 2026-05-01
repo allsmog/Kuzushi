@@ -30,9 +30,7 @@ export function exportToFile(
   return { format, bytes: content.length };
 }
 
-// ---------------------------------------------------------------------------
 // SARIF — minimal schema compatible with what import.ts expects
-// ---------------------------------------------------------------------------
 
 const SEVERITY_TO_LEVEL: Record<string, "error" | "warning" | "note"> = {
   critical: "error",
@@ -82,9 +80,7 @@ export function exportSarif(ws: WorkspaceManager, workspaceId: string): string {
   return `${JSON.stringify(sarif, null, 2)}\n`;
 }
 
-// ---------------------------------------------------------------------------
 // kz-bundle — structural snapshot; re-importable via importKzBundle
-// ---------------------------------------------------------------------------
 
 export function exportKzBundle(ws: WorkspaceManager, workspaceId: string): string {
   const workspace = ws.get(workspaceId);
@@ -192,9 +188,7 @@ export function exportKzBundle(ws: WorkspaceManager, workspaceId: string): strin
   return `${JSON.stringify(bundle, null, 2)}\n`;
 }
 
-// ---------------------------------------------------------------------------
 // Markdown engagement report — human-readable summary
-// ---------------------------------------------------------------------------
 
 /**
  * Render a workspace as a markdown engagement report. Distinct from SARIF

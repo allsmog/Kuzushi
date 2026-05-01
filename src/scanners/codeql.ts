@@ -1,6 +1,7 @@
 import path from "node:path";
 import { formatTaintPathForPrompt } from "../findings/taint-path.js";
 import type { ScanOpts } from "../types.js";
+import { toErrorMessage } from "../utils.js";
 import { resolveCodeQLBinary } from "./resolve-codeql.js";
 import {
   detectAllCodeQLLanguages,
@@ -9,7 +10,6 @@ import {
   selectFindings,
 } from "./run-codeql.js";
 import type { Finding, ScannerPlugin, TaskConfig, TriageAgentConfig } from "./types.js";
-
 export class CodeQLPlugin implements ScannerPlugin {
   readonly id = "codeql";
   readonly displayName = "CodeQL";
@@ -46,7 +46,7 @@ export class CodeQLPlugin implements ScannerPlugin {
       this.unavailableReason = undefined;
     } catch (err) {
       this.codeqlBin = "";
-      this.unavailableReason = err instanceof Error ? err.message : String(err);
+      this.unavailableReason = toErrorMessage(err);
     }
   }
 

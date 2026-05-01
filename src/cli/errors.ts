@@ -1,3 +1,5 @@
+import { toErrorMessage } from "../utils.js";
+
 /**
  * CLI error shapes and centralized exit-code semantics.
  *
@@ -71,7 +73,7 @@ export function wrapCliAction<Args extends unknown[]>(
         }
         process.exit(error.exitCode);
       }
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toErrorMessage(error);
       console.error(formatCliErrorMessage(message));
       if (error instanceof Error && isDebugMode() && error.stack) {
         console.error("");

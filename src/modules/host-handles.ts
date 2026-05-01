@@ -13,9 +13,7 @@
  * a new method. Keeping them thin protects third parties from host churn.
  */
 
-// ---------------------------------------------------------------------------
 // HostUiHandle — minimal UIStore surface
-// ---------------------------------------------------------------------------
 
 /**
  * Shallow patch object passed to `HostUiHandle.update`. Modules treat this
@@ -81,9 +79,7 @@ export interface HostUiHandle {
   }): void;
 }
 
-// ---------------------------------------------------------------------------
 // ToolOptionStore — minimal Datastore surface
-// ---------------------------------------------------------------------------
 
 /**
  * Narrow key/value option store exposed to modules. The concrete host
@@ -107,9 +103,7 @@ export interface ToolOptionStore {
   has(key: string): boolean;
 }
 
-// ---------------------------------------------------------------------------
 // WorkspaceHandle — minimal WorkspaceManager surface
-// ---------------------------------------------------------------------------
 
 // The individual store types are re-declared here as opaque object types so
 // modules can describe them without importing the concrete `better-sqlite3`-
@@ -207,7 +201,6 @@ export interface RunArtifactStore {
 
 // ---------------------------------------------------------------------------
 // ModuleEventScope — re-export the bus/module-events shape
-// ---------------------------------------------------------------------------
 
 /**
  * Cross-module pub/sub handle. Concrete implementation lives in
@@ -232,9 +225,7 @@ export interface ModuleEventScope {
   disposeAll(): void;
 }
 
-// ---------------------------------------------------------------------------
 // ToolLogger — optional structured diagnostics surface
-// ---------------------------------------------------------------------------
 
 /**
  * Lightweight structured logger for module-facing diagnostics. Distinct from
@@ -250,9 +241,7 @@ export interface ToolLogger {
   debug(message: string, meta?: Record<string, unknown>): void;
 }
 
-// ---------------------------------------------------------------------------
 // HostInfo — capability probe (populated by CopilotCore)
-// ---------------------------------------------------------------------------
 
 /**
  * The set of host capabilities available at tool-execution time. Strings are

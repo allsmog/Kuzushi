@@ -95,7 +95,7 @@ describe("ActorTranscriptView", () => {
       }),
     );
     expect(out).toContain("kuzushi/carlini-threat-hunt/run/—");
-    expect(out).toContain("(no activity yet)");
+    expect(out).toContain("No actor focused");
   });
 
   it("interleaves tool/result/thinking/finding rows for the focused actor", () => {

@@ -20,9 +20,7 @@
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { ModuleTool } from "../modules/types.js";
 
-// ---------------------------------------------------------------------------
 // Public types (also imported by the UI layer via state.ts).
-// ---------------------------------------------------------------------------
 
 /** One proposed change to a single option key. */
 export interface ShellPlanChange {
@@ -83,9 +81,7 @@ export interface PlannerInput {
   abortController?: AbortController;
 }
 
-// ---------------------------------------------------------------------------
 // JSON schema the planner LLM must conform to.
-// ---------------------------------------------------------------------------
 
 const PLAN_JSON_SCHEMA = {
   type: "object",
@@ -118,9 +114,7 @@ const PLAN_JSON_SCHEMA = {
   },
 } as const;
 
-// ---------------------------------------------------------------------------
 // Prompt building.
-// ---------------------------------------------------------------------------
 
 interface ToolPropertyLite {
   key: string;
@@ -220,9 +214,7 @@ function buildUserPrompt(input: PlannerInput): string {
   return `${header}\n\nReturn a JSON plan.`;
 }
 
-// ---------------------------------------------------------------------------
 // Planner entry point.
-// ---------------------------------------------------------------------------
 
 /**
  * Rough-estimate bounds. The planner can produce silly outputs; we clamp

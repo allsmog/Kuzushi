@@ -7,6 +7,7 @@ import type {
   ThreatModelDocument,
   TrustBoundary,
 } from "./agents/tasks/threat-modeling/types.js";
+import { toErrorMessage } from "./utils.js";
 
 export type ThreatPatchTarget = "element" | "flow" | "boundary" | "threat" | "metadata";
 export type ThreatPatchOp = "add" | "update" | "remove";
@@ -105,7 +106,7 @@ export async function proposeThreatModelPatch(input: {
       if (errors?.length) errorText = errors.join("; ");
     }
   } catch (err) {
-    errorText = err instanceof Error ? err.message : String(err);
+    errorText = toErrorMessage(err);
   }
 
   const proposal = parseStructuredProposal(input.instruction, structured, producedAt, costUsd);

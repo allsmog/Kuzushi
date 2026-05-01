@@ -38,6 +38,7 @@ import {
   type ShellStoryEventDraft,
   shouldPersistStoryEvent,
 } from "../ui/task-story.js";
+import { toErrorMessage } from "../utils.js";
 
 const FLUSH_INTERVAL_MS = 100;
 const TAIL_BUFFER_LIMIT = 200;
@@ -85,7 +86,7 @@ export async function runContextBuildLive(
       patcher.flushSync();
       return "context:build aborted — no snapshot written.";
     }
-    const message = err instanceof Error ? err.message : String(err);
+    const message = toErrorMessage(err);
     patcher.markFailed(message);
     patcher.flushSync();
     throw err;

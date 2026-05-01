@@ -472,10 +472,8 @@ function makeFakeFindings(): ActionableFinding[] {
   ];
 }
 
-// ---------------------------------------------------------------------------
 // Shell-view demos — scripted snapshots for the Ink UI v2 screens so we can
 // eyeball each layout without running the full pipeline simulation.
-// ---------------------------------------------------------------------------
 
 function demoModuleCatalog(): ShellModuleCard[] {
   const sastTools: ShellModuleToolSummary[] = [

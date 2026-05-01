@@ -173,9 +173,7 @@ export class RateLimitRegistry extends EventEmitter {
     this.removeAllListeners();
   }
 
-  // ---------------------------------------------------------------------------
   // Internal helpers
-  // ---------------------------------------------------------------------------
 
   private getOrCreateState(model: string): ProviderState {
     let state = this.providers.get(model);
@@ -290,9 +288,7 @@ export class RateLimitRegistry extends EventEmitter {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Utility functions
-// ---------------------------------------------------------------------------
 
 /**
  * Parse `Retry-After` header value to milliseconds.

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { toErrorMessage } from "../../../utils.js";
 export type XRayRuntimeMode = "claude" | "pi-ai" | "codex";
 
 export interface XRaySkillPack {
@@ -184,7 +185,7 @@ function readText(filePath: string): string {
   try {
     return readFileSync(filePath, "utf8");
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = toErrorMessage(err);
     throw new Error(`Unable to read X-Ray skill asset ${filePath}: ${message}`);
   }
 }

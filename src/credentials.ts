@@ -25,6 +25,8 @@ import { readFileSync, statSync } from "node:fs";
 import { getLogger } from "./logger.js";
 import type { AgentRuntimeCredentials } from "./types.js";
 
+import { toErrorMessage } from "./utils.js";
+
 const log = getLogger("credentials");
 
 /** One-time warning guard so a lax-perms file doesn't spam every run. */
@@ -40,9 +42,7 @@ export function readApiKeyFromFile(filePath: string): string | undefined {
   try {
     content = readFileSync(filePath, "utf8");
   } catch (err) {
-    log.warn(
-      `Could not read apiKeyFile "${filePath}": ${err instanceof Error ? err.message : String(err)}`,
-    );
+    log.warn(`Could not read apiKeyFile "${filePath}": ${toErrorMessage(err)}`);
     return undefined;
   }
 

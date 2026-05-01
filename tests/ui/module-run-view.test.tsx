@@ -92,7 +92,7 @@ describe("ModuleRunView", () => {
       createElement(ModuleRunView, { shell: shell({ moduleRun: null, processing: false }) }),
     );
     expect(out).toContain("kuzushi/carlini-threat-hunt/run");
-    expect(out).toContain("No active run for this module yet.");
+    expect(out).toContain("No active run");
   });
 
   it("renders header + steps + meta row for a running carlini-threat-hunt", () => {

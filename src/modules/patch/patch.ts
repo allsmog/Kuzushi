@@ -8,7 +8,7 @@
  * diff. No scan DAG participation.
  */
 
-import { isRecord } from "../../utils.js";
+import { isRecord, toErrorMessage } from "../../utils.js";
 import { defineModule, defineTool } from "../define.js";
 import type { CopilotModule, ExecutionContext, ToolResult } from "../types.js";
 
@@ -114,7 +114,7 @@ export function createPatchModule(): CopilotModule {
           costUsd: result.costUsd,
         };
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = toErrorMessage(err);
         return { ok: false, output: `[-] patch:finding failed: ${msg}` };
       }
     },

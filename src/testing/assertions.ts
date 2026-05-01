@@ -9,6 +9,7 @@
 
 import type { ToolResult } from "../modules/types.js";
 
+import { toErrorMessage } from "../utils.js";
 export interface ToolResultExpectations {
   /** Expected value of `result.ok`. */
   ok?: boolean;
@@ -91,10 +92,7 @@ export function assertToolResult(result: ToolResult, expectations: ToolResultExp
     try {
       ok = expectations.dataShape(result.data) === true;
     } catch (error) {
-      throw matchFail(
-        result,
-        `dataShape predicate threw: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      throw matchFail(result, `dataShape predicate threw: ${toErrorMessage(error)}`);
     }
     if (!ok) {
       throw matchFail(result, "dataShape predicate returned false");

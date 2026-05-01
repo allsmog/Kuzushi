@@ -473,11 +473,9 @@ function printPlainSummary(emit: Emit, data: SummaryData): void {
   emit(chalk.bold("─".repeat(width)));
 }
 
-// ---------------------------------------------------------------------------
 // Phase D.5 + Workstream 5 helpers — shell-view + planner + threats +
 // diff-since + overlays. Each helper takes the `emit` sink as its first
 // argument so tests can inject a capture closure without stubbing console.
-// ---------------------------------------------------------------------------
 
 /**
  * Dispatch the per-view plain render. Headings are structural (`# TITLE`)
@@ -565,7 +563,7 @@ function printModuleRunView(emit: Emit, shell: ShellState, state: UIState): void
   if (!run) {
     emit(`  [run] ${shell.focusedModule ?? "module"} · idle`);
     emit("# RUN");
-    emit("  (no active run)");
+    emit("  No active run for this module yet.");
     return;
   }
   const elapsed = formatDuration(Math.max(0, (run.completedAtMs ?? Date.now()) - run.startedAtMs));
@@ -670,7 +668,7 @@ function printActorDetailView(emit: Emit, shell: ShellState, state: UIState): vo
   emit(`  [actor] ${fp || "(none)"} · ${lines.length} events`);
   emit("# ACTOR TRANSCRIPT");
   if (!fp) {
-    emit("  (no actor focused)");
+    emit("  No actor focused — press 1-4 to drill into an actor.");
     emit("hint: 1..4 from module-run picks an actor · /back to return");
     return;
   }
@@ -710,7 +708,7 @@ function printPromptsEditorView(emit: Emit, shell: ShellState): void {
   emit(`  [prompts] ${moduleId} · ${localEdits} override${localEdits === 1 ? "" : "s"}`);
   emit("# PROMPTS");
   if (audit.length === 0) {
-    emit("  (no prompt keys)");
+    emit("  No prompt keys exposed for this module.");
     emit("hint: /back to return · /prompt edit <verb> opens an override in $EDITOR");
     return;
   }
