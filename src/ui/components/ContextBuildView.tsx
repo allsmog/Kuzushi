@@ -22,6 +22,8 @@ import type { ContextBuildGrepDomainSlice, ContextBuildState, ShellState } from 
 import { SPACING, tokens } from "../tokens.js";
 import { ContextStrip } from "./ContextStrip.js";
 import { DelayedBusyIndicator } from "./DelayedBusyIndicator.js";
+import { EmptyState } from "./EmptyState.js";
+import { ErrorCard } from "./ErrorCard.js";
 import { ScreenContent } from "./ScreenContent.js";
 
 const PHASE_ROWS: ReadonlyArray<{
@@ -103,7 +105,7 @@ export function ContextBuildView({ shell }: ContextBuildViewProps): React.ReactE
   if (!cb) {
     return (
       <ScreenContent>
-        <Text>{tokens.hint("No build in progress. Run /context build to start.")}</Text>
+        <EmptyState kind="context-build-idle" />
       </ScreenContent>
     );
   }
@@ -122,6 +124,16 @@ export function ContextBuildView({ shell }: ContextBuildViewProps): React.ReactE
           startedAt={cb.startedAtMs}
           delayMs={0}
         />
+      ) : null}
+      {cb.status === "failed" ? (
+        <Box marginBottom={SPACING.sm}>
+          <ErrorCard
+            message={`Context build failed${cb.errorMessage ? ` — ${cb.errorMessage}` : ""}`}
+            category="fatal"
+            code="E_CONTEXT_BUILD"
+            hint="Run /context build to retry · check the tail log below for the failing phase."
+          />
+        </Box>
       ) : null}
       <PhasesBox state={cb} width={frameWidth} />
       <PillarPreview state={cb} colWidth={pillarColWidth} />

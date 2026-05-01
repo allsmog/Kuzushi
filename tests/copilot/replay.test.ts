@@ -6,8 +6,15 @@ import {
   formatRunReplay,
   formatRunsTable,
   formatRunTrace,
+  formatRunTraceJson,
+  loadRunSummary,
   readTraceEvents,
 } from "../../src/copilot/replay.js";
+import {
+  RUN_SUMMARY_FILENAME,
+  RUN_SUMMARY_SCHEMA_VERSION,
+  type RunSummary,
+} from "../../src/copilot/run-metadata.js";
 
 // Minimal mock that matches the subset of PipelineRunRecord the formatters read.
 // Using `as any` (via unknown) so we don't need to import the private type.
@@ -55,6 +62,32 @@ describe("replay helpers", () => {
       const out = formatRunsTable(runs, 10);
       expect(out).toContain("showing 10 of 40");
     });
+
+    it("renders a duration column derived from started/completed", () => {
+      const run = makeRun({
+        startedAt: "2026-01-01T00:00:00.000Z",
+        completedAt: "2026-01-01T00:01:30.000Z",
+      });
+      const out = formatRunsTable([run]);
+      expect(out).toContain("duration");
+      expect(out).toContain("1m30s");
+    });
+
+    it("filters by status when opts.status is set", () => {
+      const runs = [
+        makeRun({ runId: "ok", status: "complete" }),
+        makeRun({ runId: "stuck", status: "interrupted" }),
+      ];
+      const out = formatRunsTable(runs, { status: "interrupted" });
+      expect(out).toContain("stuck");
+      expect(out).not.toContain("ok ");
+    });
+
+    it("emits a friendly empty-state message when no runs match the status", () => {
+      const runs = [makeRun({ status: "complete" })];
+      const out = formatRunsTable(runs, { status: "interrupted" });
+      expect(out).toContain('No runs match status="interrupted"');
+    });
   });
 
   describe("formatRunReplay", () => {
@@ -88,6 +121,73 @@ describe("replay helpers", () => {
     it("handles a run with no findings gracefully", () => {
       const out = formatRunReplay(makeRun({ findingsJson: null }));
       expect(out).toContain("no findings persisted");
+    });
+
+    it("surfaces reproducibility metadata when summary.json is provided", () => {
+      const run = makeRun({});
+      const summary: RunSummary = {
+        schemaVersion: RUN_SUMMARY_SCHEMA_VERSION,
+        runId: run.runId,
+        status: "complete",
+        startedAt: run.startedAt,
+        completedAt: run.completedAt!,
+        reproducibility: {
+          kuzushiVersion: "0.20.0",
+          model: "anthropic:claude-opus-4-7",
+          agentRuntimeBackend: "claude",
+          configHash: "sha256:abc123def456",
+          scanArgs: ["scan", "."],
+          envFingerprint: { KUZUSHI_DEBUG: "1" },
+          git: { sha: "deadbeef1234", branch: "main", dirty: false },
+          promptOverrides: [{ module: "core-sast", verb: "triage", sha256: "x" }],
+          houseRules: [],
+        },
+        repo: { root: run.repo },
+      };
+      const out = formatRunReplay(run, summary);
+      expect(out).toContain("reproducibility");
+      expect(out).toContain("0.20.0");
+      expect(out).toContain("anthropic:claude-opus-4-7");
+      expect(out).toContain("deadbee");
+      expect(out).toContain("1 override(s)");
+    });
+  });
+
+  describe("loadRunSummary", () => {
+    let dataDir: string;
+    beforeEach(() => {
+      dataDir = path.join(tmpdir(), `kuzushi-summary-test-${Date.now()}`);
+    });
+    afterEach(() => {
+      rmSync(dataDir, { recursive: true, force: true });
+    });
+
+    it("returns undefined when the run dir is missing", () => {
+      expect(loadRunSummary(dataDir, "nope")).toBeUndefined();
+    });
+
+    it("loads a summary.json from the run dir", () => {
+      const runId = "abc";
+      const dir = path.join(dataDir, "runs", runId);
+      mkdirSync(dir, { recursive: true });
+      const summary: RunSummary = {
+        schemaVersion: RUN_SUMMARY_SCHEMA_VERSION,
+        runId,
+        status: "complete",
+        startedAt: new Date().toISOString(),
+        reproducibility: {
+          kuzushiVersion: "0.20.0",
+          model: "m",
+          configHash: "sha256:x",
+          scanArgs: [],
+          envFingerprint: {},
+          promptOverrides: [],
+          houseRules: [],
+        },
+        repo: { root: "/x" },
+      };
+      writeFileSync(path.join(dir, RUN_SUMMARY_FILENAME), JSON.stringify(summary));
+      expect(loadRunSummary(dataDir, runId)?.runId).toBe(runId);
     });
   });
 
@@ -142,6 +242,44 @@ describe("replay helpers", () => {
       expect(out2).toContain("triage:result");
       expect(out2).toContain("tp");
       expect(out2).toContain("rule/x");
+    });
+
+    it("formatRunTraceJson emits one stable-shape JSON per line", () => {
+      writeFileSync(
+        path.join(runDir, "triage.jsonl"),
+        [
+          `{"type":"triage:result","timestamp":"2026-01-01T00:00:01Z","fingerprint":"abcd","payload":{"costUsd":0.01}}`,
+          `{"type":"triage:result","timestamp":"2026-01-01T00:00:02Z","payload":{}}`,
+        ].join("\n"),
+      );
+      const events = readTraceEvents(dataDir, runId);
+      const out = formatRunTraceJson(events);
+      const lines = out.split("\n");
+      expect(lines).toHaveLength(2);
+      for (const line of lines) {
+        const parsed = JSON.parse(line);
+        // Stable shape: every field present (possibly null) on every line.
+        expect(parsed).toHaveProperty("timestamp");
+        expect(parsed).toHaveProperty("type");
+        expect(parsed).toHaveProperty("source");
+        expect(parsed).toHaveProperty("fingerprint");
+        expect(parsed).toHaveProperty("payload");
+      }
+      // Second event has no fingerprint → emitted as null, not undefined.
+      const second = JSON.parse(lines[1]!);
+      expect(second.fingerprint).toBeNull();
+    });
+
+    it("formatRunTraceJson respects the limit", () => {
+      const lines = Array.from(
+        { length: 5 },
+        (_, i) =>
+          `{"type":"triage:result","timestamp":"2026-01-01T00:00:0${i}Z","fingerprint":"a${i}","payload":{}}`,
+      );
+      writeFileSync(path.join(runDir, "triage.jsonl"), lines.join("\n"));
+      const events = readTraceEvents(dataDir, runId);
+      const out = formatRunTraceJson(events, 2);
+      expect(out.split("\n")).toHaveLength(2);
     });
   });
 });

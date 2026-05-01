@@ -300,6 +300,32 @@ export interface ActionableFinding {
    * replayed runs. Optional — non-actor findings leave it undefined.
    */
   actorFingerprint?: string;
+  /**
+   * Stable, durable id for the finding, separate from the (per-run-derived)
+   * fingerprint used by the deduper. Operators rely on this for issue
+   * trackers and suppression rules; it MUST survive scanner refactors that
+   * legitimately change the fingerprint. Optional for backwards-compat —
+   * when missing the fingerprint is the canonical id.
+   */
+  id?: string;
+  /** CWE identifiers attributed to this finding (e.g. `["CWE-918", "CWE-601"]`). */
+  cwe?: string[];
+  /** Optional one-line remediation hint surfaced in PR comments / CI output. */
+  remediation?: string;
+  /** External references (vendor docs, OWASP, advisory URLs). */
+  references?: string[];
+  /** True when the finding is suppressed from PR / dashboard surfaces. */
+  suppressed?: boolean;
+  /** Deferred-until timestamp (ISO 8601). */
+  snoozedUntil?: string;
+  /** First time this finding was observed in this repo (ISO 8601). */
+  firstSeenAt?: string;
+  /**
+   * Calibrated confidence score `[0, 1]` separate from triage `confidence`
+   * so post-processors (rescore, corroboration) can write through without
+   * trampling triage's raw output. Optional.
+   */
+  confidenceScore?: number;
 }
 
 export interface UIState {

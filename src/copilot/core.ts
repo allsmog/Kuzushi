@@ -12,7 +12,7 @@
  * - Shell mode: loads all requested modules, routes LLM tool calls interactively
  */
 
-import { type Dirent, existsSync, readdirSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
 import nodePath from "node:path";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import { publishAgentActivity, publishTaskActivity, publishTaskOutput } from "../bus/activity.js";
@@ -46,6 +46,8 @@ import {
 import { createCorePromptArmorModule } from "../modules/prompt-armor/prompt-armor.js";
 import { createCoreRandoriModule } from "../modules/randori/randori.js";
 import { ModuleRegistry, parseModuleSpecifier } from "../modules/registry.js";
+import { createRunArtifactStore } from "../modules/run-artifacts.js";
+import { createSecretScanModule } from "../modules/secret-scan/secret-scan.js";
 import { createSemgrepModule } from "../modules/semgrep/semgrep.js";
 import { createCoreShinsaModule } from "../modules/shinsa/shinsa.js";
 import { createSystemsHuntModule } from "../modules/systems-hunt/systems-hunt.js";
@@ -105,6 +107,15 @@ export interface CopilotCoreOptions {
    *                      (upper-cased, e.g. TRIAGE_MODEL / VERIFY_MODEL)
    */
   globals?: import("./options.js").Datastore;
+  /**
+   * Free-form label used as the synthetic `runId` argument to
+   * `wrapRuntimeWithActivityForwarding` for ad-hoc tool dispatch (i.e. the
+   * runId the runtime tee tags onto `task:activity` events when no scan-time
+   * runId is in scope). Defaults to `"shell"` for backward compatibility;
+   * `kuzushi run` passes `"run"` so observers can distinguish CLI-originated
+   * activity from interactive shell activity.
+   */
+  activitySource?: string;
 }
 
 // CopilotCore
@@ -197,6 +208,7 @@ export class CopilotCore {
         createVendorAssessmentModule(),
         createChromeRceModule(),
         createDepHygieneModule(),
+        createSecretScanModule(),
         // Hidden orchestrator-level module — infrastructure DAG nodes
         // (task-selector, approval gates, taint-iris sub-tasks). Loaded so
         // the module registry owns every scan-DAG participant; the user
@@ -224,6 +236,52 @@ export class CopilotCore {
       this.moduleCache.save();
     } catch {
       // Ignore — a missing/unwritable dataDir should never break init.
+    }
+
+    // After every module in the load batch has finished `init`, run the
+    // optional `ready(ctx)` hook on each in load order. `ready` is the
+    // post-batch wiring hook that lets a module enumerate peer modules
+    // synchronously instead of racing `module:loaded` events. Errors are
+    // logged + swallowed — `init` is the rollback boundary, not `ready`.
+    await this.runReadyHooks();
+  }
+
+  /**
+   * Iterate every loaded module in registration order and call its
+   * optional `ready(ctx)` lifecycle hook. The `peers` snapshot reflects
+   * the registry at the moment `ready` is invoked — modules loaded
+   * later via `loadModuleFromSpecifier` get their own `ready` call with
+   * the registry state at that point.
+   */
+  private async runReadyHooks(): Promise<void> {
+    for (const id of this.registry.ids()) {
+      const mod = this.registry.get(id);
+      if (!mod.ready) continue;
+      const peers = this.registry
+        .list()
+        .filter((m) => m.id !== id)
+        .map((m) => ({
+          id: m.id,
+          displayName: m.displayName,
+          category: m.category,
+          version: m.version,
+        }));
+      const scope = this.moduleScopes.get(id);
+      const readyCtx = {
+        ...this.moduleCtx,
+        ...(scope ? { events: scope } : {}),
+        peers,
+      };
+      try {
+        await mod.ready(readyCtx);
+      } catch (err) {
+        // ready is best-effort wiring; log + swallow so a buggy module's
+        // post-batch hook can't take down the entire init flow.
+        scope?.emit("module:ready_error", {
+          moduleId: id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
 
@@ -361,7 +419,7 @@ export class CopilotCore {
       ctxOverrides?.runtime ?? this.opts.runtime,
       ctxBus,
       qualifiedName,
-      "shell",
+      this.opts.activitySource ?? "shell",
     );
     // HOST-21 — build the per-call capability probe. Modules call
     // `ctx.host?.capabilities.has("workspace")` to guard optional features.
@@ -376,6 +434,19 @@ export class CopilotCore {
     // the upstream runtime as sufficient; tools that need the feature can
     // still probe the runtime directly.
     if (toolRuntime) capabilities.add("structured-output");
+
+    // run-artifacts is wired only when the call carries both a DAG runId
+    // and a moduleId — i.e. during scan-mode DAG execution. Outside that,
+    // modules don't have a stable run dir to write into, so the handle
+    // stays undefined and the capability stays unset.
+    const runArtifacts = ctxOverrides?.dag?.runId
+      ? createRunArtifactStore({
+          dataDir: this.opts.dataDir,
+          runId: ctxOverrides.dag.runId,
+          moduleId,
+        })
+      : undefined;
+    if (runArtifacts) capabilities.add("run-artifacts");
 
     const host = {
       sdkVersion: KUZUSHI_SDK_VERSION,
@@ -403,6 +474,7 @@ export class CopilotCore {
       ...(ctxOverrides?.workspace ? { workspace: ctxOverrides.workspace } : {}),
       ...(scope ? { events: scope } : {}),
       ...(toolModel ? { toolModel } : {}),
+      ...(runArtifacts ? { runArtifacts } : {}),
       host,
       reportActivity: (description, meta) => {
         void publishTaskActivity(ctxBus, qualifiedName, description, meta ?? {});
@@ -435,6 +507,27 @@ export class CopilotCore {
           | undefined;
         if (moduleBucket && key in moduleBucket) {
           return moduleBucket[key] as T;
+        }
+        // Last-resort fallback for `*_PROMPT` keys: load
+        // `<dataDir>/prompts/<moduleId>/<verb>.md` produced by the shell's
+        // `/prompt edit <verb>` workflow. Without this fallback the file is
+        // dead in scan + run modes — only the shell's in-memory Datastore
+        // round-trip would surface it. Keeping the read here means all
+        // three modes (scan, shell, run) consult the same on-disk
+        // override file when no explicit Datastore/`taskConfig` value is set.
+        if (key.endsWith("_PROMPT")) {
+          const verb = qualifiedName.includes(":")
+            ? qualifiedName.slice(qualifiedName.indexOf(":") + 1)
+            : qualifiedName;
+          const file = nodePath.join(this.opts.dataDir, "prompts", moduleId, `${verb}.md`);
+          if (existsSync(file)) {
+            try {
+              const body = readFileSync(file, "utf-8").trim();
+              if (body.length > 0) return body as unknown as T;
+            } catch {
+              // ignore — best-effort fallback, never throw on a stale fs handle
+            }
+          }
         }
         return undefined;
       },
@@ -605,6 +698,9 @@ export class CopilotCore {
         break;
       case "prompt-armor":
         await this.loadWithScope(createCorePromptArmorModule());
+        break;
+      case "secret-scan":
+        await this.loadWithScope(createSecretScanModule());
         break;
       // Future built-in modules go here as they're ported
       default:

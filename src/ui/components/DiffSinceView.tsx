@@ -26,6 +26,7 @@ import { type Severity, severityChalk, severityStyle } from "../severity.js";
 import type { ActionableFinding, ShellState, SummaryData } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
 import { EmptyState as EmptyStateCard } from "./EmptyState.js";
+import { ErrorCard } from "./ErrorCard.js";
 import { ScreenContent } from "./ScreenContent.js";
 
 interface DiffSinceViewProps {
@@ -56,10 +57,12 @@ export function DiffSinceView({ summary, shell }: DiffSinceViewProps): React.Rea
 
       {diff.error ? (
         <Box marginTop={SPACING.sm}>
-          <Text>
-            {tokens.warn("git diff failed: ")}
-            {tokens.muted(diff.error)}
-          </Text>
+          <ErrorCard
+            message={`git diff failed against ${diff.ref}`}
+            category="validation"
+            code="E_GIT_DIFF"
+            hint={`Run /since reset to clear the scope, or /since <git-ref> with a valid ref. (${diff.error})`}
+          />
         </Box>
       ) : null}
 

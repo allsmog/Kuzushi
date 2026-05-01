@@ -24,7 +24,7 @@
 import { defineModule, defineTool } from "./define.js";
 import { executeSastPipeline } from "./sast/pipeline-runner.js";
 import { formatContextSummary as sharedFormatContextSummary } from "./sast/shared.js";
-import type { CopilotModule, ExecutionContext, ToolResult } from "./types.js";
+import type { CopilotModule, ExecutionContext, ModuleReadyContext, ToolResult } from "./types.js";
 
 // Re-export so external callers (src/copilot/shell.ts) keep working.
 export const formatContextSummary = sharedFormatContextSummary;
@@ -121,6 +121,18 @@ const scanTool = defineTool<"sast">({
         sdkVersion: ctx.host?.sdkVersion,
       });
     }
+    // Exemplar: capture a per-run scan-input snapshot via the run-artifact
+    // handle when available. Best-effort — failure to write must not affect
+    // the pipeline result.
+    if (ctx.host?.capabilities.has("run-artifacts") && ctx.runArtifacts) {
+      try {
+        ctx.runArtifacts.write("scan-input.json", `${JSON.stringify(input, null, 2)}\n`);
+      } catch (err) {
+        ctx.logger?.warn("sast:scan failed to persist scan-input artifact", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     return executeSastPipeline(input, ctx, { summaryLabel: "Scan", postProcessMode: "full" });
   },
 });
@@ -163,6 +175,28 @@ export function createCoreSastModule(): CopilotModule {
     async init(_config, _ctx) {
       // The SAST pipeline is initialized by the existing orchestrator flow.
       // No additional init needed at the module level.
+    },
+
+    /**
+     * Post-batch lifecycle hook. Runs once after every module in the same
+     * load batch has finished `init`. Use it to assert peer-module
+     * expectations (the SAST umbrella expects the per-capability sub-modules
+     * — semgrep, codeql, agentic-sast, etc. — to be loaded alongside it)
+     * and to subscribe to peer-emitted events without racing.
+     *
+     * `ready` errors are non-fatal — the host logs and continues.
+     */
+    async ready(ctx: ModuleReadyContext) {
+      const expected = ["semgrep", "codeql", "triage", "verify", "patch", "findings"];
+      const present = new Set(ctx.peers.map((p) => p.id));
+      for (const id of expected) {
+        if (!present.has(id)) {
+          ctx.events?.emit("sast:peer_warning", {
+            missing: id,
+            note: "SAST sub-module not loaded; sast:scan may fall back to defaults.",
+          });
+        }
+      }
     },
 
     async dispose() {

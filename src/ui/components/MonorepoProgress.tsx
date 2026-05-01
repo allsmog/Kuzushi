@@ -68,7 +68,10 @@ function _MonorepoProgress({
         <Spinner color="accent" />
         <Text>
           {" "}
-          {tokens.dangerStrong(padCell(phaseLabel ?? "Scanning", 14))}{" "}
+          {/* `focus` (blue bold) is the canonical "active" hue — see
+              `statusBadge('active')`. Red was reading as an error rather
+              than as a running phase. */}
+          {tokens.focus(padCell(phaseLabel ?? "Scanning", 14))}{" "}
           {tokens.strong(`${done}/${total} modules`)}
         </Text>
       </Box>

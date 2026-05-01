@@ -23,6 +23,7 @@ import type {
   HostInfo,
   HostUiHandle,
   ModuleEventScope,
+  RunArtifactStore,
   ToolLogger,
   ToolOptionStore,
   WorkspaceHandle,
@@ -178,6 +179,7 @@ export function createMockToolContext(overrides: MockToolContextOverrides = {}):
     reportActivity,
     reportOutput,
     seedTaskOutputs,
+    runArtifacts,
     ...rest
   } = overrides;
 
@@ -203,6 +205,7 @@ export function createMockToolContext(overrides: MockToolContextOverrides = {}):
     events: events ?? createMockEventScope(),
     print: print ?? createRecordingPrintSink(),
     seedTaskOutputs: seedTaskOutputs ?? new Map<string, unknown>(),
+    ...(runArtifacts ? { runArtifacts } : {}),
     reportActivity:
       reportActivity ??
       ((description, meta) => {
@@ -272,6 +275,11 @@ export {
   type RecordingPrintSink,
 } from "./mocks/print-sink.js";
 export {
+  createMockRunArtifactStore,
+  type MockRunArtifactStore,
+  type RunArtifactWrite,
+} from "./mocks/run-artifacts.js";
+export {
   createFakeRuntime,
   type FakeRuntime,
   type FakeRuntimeResponse,
@@ -286,6 +294,7 @@ export type {
   HostUiHandle,
   MessageBus,
   ModuleEventScope,
+  RunArtifactStore,
   ToolLogger,
   ToolOptionStore,
   WorkspaceHandle,

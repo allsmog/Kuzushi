@@ -179,6 +179,12 @@ export function createSyntacticStrategy(strategyId: string, cweIds: string[]): A
 
       const runtime = input.context.runtime;
       const cwd = input.context.scanPath ?? input.context.repoRoot;
+      const model = input.context.config?.model;
+      if (!model) {
+        throw new Error(
+          "syntactic strategy requires input.context.config.model — caller must initialize TaskContext with a config",
+        );
+      }
 
       for (const { pattern, description } of patterns) {
         try {
@@ -186,7 +192,7 @@ export function createSyntacticStrategy(strategyId: string, cweIds: string[]): A
             prompt: `Search the codebase for the regex pattern: ${pattern}\nUse the Grep tool. Return file paths and line numbers.`,
             options: {
               cwd,
-              model: "anthropic:claude-haiku-4-5",
+              model,
               allowedTools: ["Grep", "Glob"],
               permissionMode: "dontAsk",
             },

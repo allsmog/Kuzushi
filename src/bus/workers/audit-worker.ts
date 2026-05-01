@@ -1,6 +1,15 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { KuzushiConfig } from "../../types.js";
+import {
+  buildReproducibility,
+  countFindingsBy,
+  RUN_SUMMARY_FILENAME,
+  RUN_SUMMARY_SCHEMA_VERSION,
+  type RunSummary,
+  type RunSummaryFindingCounts,
+} from "../../copilot/run-metadata.js";
+import type { KuzushiConfig, ScanOpts } from "../../types.js";
+import { buildRunMetadata } from "../../utils/run-metadata.js";
 import { safeJsonStringify } from "../../utils/safe-json.js";
 import type {
   PipelineCompleteEvent,
@@ -25,7 +34,17 @@ interface RunAuditState {
   scanLogPath: string;
 }
 
+interface SummaryRunState {
+  runDir: string;
+  startedAt: string;
+  config: KuzushiConfig;
+  scanOpts: ScanOpts;
+  repoRoot: string;
+  repoName?: string;
+}
+
 const scanRunState = new Map<string, { runDir: string; scanLogPath: string }>();
+const summaryRunState = new Map<string, SummaryRunState>();
 
 /**
  * Always-on scan-events writer: subscribes to `pipeline:start` so every
@@ -34,6 +53,10 @@ const scanRunState = new Map<string, { runDir: string; scanLogPath: string }>();
  * audit log is enabled. Cheap (one append per tool event) and
  * orthogonal to the rest of audit-worker, which is gated on
  * `config.auditLog`.
+ *
+ * This handler also writes the always-on `summary.json` reproducibility
+ * record on `pipeline:complete`, so operators get a stable, jq-friendly
+ * digest of every run on disk regardless of `--audit-log`.
  */
 export function registerScanEventLog(bus: MessageBus): void {
   bus.subscribe<PipelineStartEvent>("pipeline:start", (event) => {
@@ -42,6 +65,14 @@ export function registerScanEventLog(bus: MessageBus): void {
     scanRunState.set(event.meta.runId, {
       runDir,
       scanLogPath: path.join(runDir, "scan.jsonl"),
+    });
+    summaryRunState.set(event.meta.runId, {
+      runDir,
+      startedAt: event.meta.timestamp,
+      config: event.payload.config,
+      scanOpts: event.payload.scanOpts,
+      repoRoot: event.payload.context.repoRoot,
+      repoName: event.payload.context.repoName,
     });
   });
 
@@ -64,8 +95,77 @@ export function registerScanEventLog(bus: MessageBus): void {
   });
 
   bus.subscribe<PipelineCompleteEvent>("pipeline:complete", (event) => {
+    writeSummaryForRun(event.meta.runId, event.meta.timestamp, event.payload.stats);
     scanRunState.delete(event.meta.runId);
+    summaryRunState.delete(event.meta.runId);
   });
+}
+
+function writeSummaryForRun(
+  runId: string,
+  completedAt: string,
+  stats: PipelineCompleteEvent["payload"]["stats"],
+): void {
+  const summaryState = summaryRunState.get(runId);
+  if (!summaryState) return;
+
+  let durationMs: number | undefined;
+  const startMs = Date.parse(summaryState.startedAt);
+  const endMs = Date.parse(completedAt);
+  if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs) {
+    durationMs = endMs - startMs;
+  }
+
+  let totalCostUsd: number | undefined;
+  const runMetrics = (stats as { runMetrics?: { costBreakdown?: { total?: number } } }).runMetrics;
+  if (runMetrics?.costBreakdown?.total != null) {
+    totalCostUsd = runMetrics.costBreakdown.total;
+  } else if (typeof stats.totalCostUsd === "number") {
+    totalCostUsd = stats.totalCostUsd;
+  }
+
+  // pipeline:complete carries summary stats but not the full finding list;
+  // counts come from the persisted `findings_json` blob via replay paths.
+  // `countFindingsBy` is exported from run-metadata.ts for downstream
+  // consumers that have full findings in hand.
+  void countFindingsBy;
+  const findingCounts: RunSummaryFindingCounts | undefined =
+    typeof stats.totalFindings === "number"
+      ? { total: stats.totalFindings, bySeverity: {}, byVerdict: {} }
+      : undefined;
+
+  const reproducibility = buildReproducibility({
+    config: summaryState.config,
+    scanOpts: summaryState.scanOpts,
+    repoRoot: summaryState.repoRoot,
+    agentRuntimeBackend: summaryState.config.agentRuntimeBackend,
+  });
+
+  const summary: RunSummary = {
+    schemaVersion: RUN_SUMMARY_SCHEMA_VERSION,
+    runId,
+    status: "complete",
+    startedAt: summaryState.startedAt,
+    completedAt,
+    ...(durationMs != null ? { durationMs } : {}),
+    ...(totalCostUsd != null ? { totalCostUsd } : {}),
+    reproducibility,
+    ...(findingCounts ? { findings: findingCounts } : {}),
+    repo: {
+      root: summaryState.repoRoot,
+      ...(summaryState.repoName ? { name: summaryState.repoName } : {}),
+    },
+  };
+
+  try {
+    ensureDir(summaryState.runDir);
+    writeFileSync(
+      path.join(summaryState.runDir, RUN_SUMMARY_FILENAME),
+      safeJsonStringify(summary, 2),
+    );
+  } catch {
+    // Persisting summary.json is best-effort — never crash the bus on FS errors.
+  }
 }
 
 /**
@@ -91,6 +191,23 @@ export function registerAuditWorker(bus: MessageBus, deps: AuditWorkerDeps): voi
 
     runState.set(event.meta.runId, state);
 
+    // Reproducibility metadata: a triage analyst three weeks later
+    // needs kuzushi version, model, git sha, config hash, node version
+    // and platform to repro the run. Computed lazily so a missing git
+    // binary / detached worktree never blocks the run.
+    let reproducibility: ReturnType<typeof buildRunMetadata> | undefined;
+    try {
+      reproducibility = buildRunMetadata({
+        repoRoot: event.payload.context.repoRoot,
+        config: event.payload.config,
+        model: event.payload.config?.model,
+        scanArgs: event.payload.scanOpts?.tasks,
+        startedAt: event.meta.timestamp,
+      });
+    } catch {
+      /* best-effort metadata only — never block the run */
+    }
+
     writeFileSync(
       path.join(runDir, "run.json"),
       safeJsonStringify(
@@ -101,6 +218,7 @@ export function registerAuditWorker(bus: MessageBus, deps: AuditWorkerDeps): voi
           context: event.payload.context,
           config: event.payload.config,
           scanOpts: event.payload.scanOpts,
+          reproducibility,
         },
         2,
       ),

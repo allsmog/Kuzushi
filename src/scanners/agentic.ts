@@ -49,6 +49,10 @@ export class AgenticPlugin implements ScannerPlugin {
     runtime?: AgentRuntime,
     scanContext?: ScanContext,
   ): Promise<Finding[]> {
+    if (!this.model) {
+      throw new Error("agentic scanner used before init() — model is not configured");
+    }
+    const model = this.model;
     const repoName = path.basename(repoRoot);
 
     // Build activity callback so the UI can show live scan progress.
@@ -69,7 +73,7 @@ export class AgenticPlugin implements ScannerPlugin {
           }
         : undefined;
 
-    const output = await runAgentic(repoRoot, opts, this.model, this.maxFindings, {
+    const output = await runAgentic(repoRoot, opts, model, this.maxFindings, {
       runtime,
       activityCallback,
     });
@@ -85,7 +89,7 @@ export class AgenticPlugin implements ScannerPlugin {
           // Inject first-pass findings summary into the second pass context
           agenticReviewContext: summarizeFindingsForReview(findings),
         } as ScanOpts,
-        this.model,
+        model,
         this.maxFindings,
         { runtime, activityCallback },
       );

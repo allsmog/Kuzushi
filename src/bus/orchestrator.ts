@@ -2830,6 +2830,7 @@ export class PipelineOrchestrator {
           runId,
         ),
         repoRoot: state.context.scanPath ?? state.context.repoRoot,
+        batchSize: state.config.verifyGateBatchSize,
       });
 
       const gateMap = new Map<string, VerifyGateResult>();

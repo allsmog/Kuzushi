@@ -1962,6 +1962,17 @@ ${PIPELINE_RUN_SELECT_COLUMNS}
   return row;
 }
 
+/**
+ * Delete a run row from `pipeline_runs`. Returns true when a row was
+ * removed. Does not touch the run's on-disk artefacts under
+ * `.kuzushi/runs/<runId>/` — callers that want a full prune should
+ * remove the dir separately.
+ */
+export function deleteRun(db: Database.Database, runId: string): boolean {
+  const info = db.prepare("DELETE FROM pipeline_runs WHERE run_id = ?").run(runId);
+  return info.changes > 0;
+}
+
 /** Load the latest completed pipeline run's serialized findings for a repo path. */
 export function getLatestCompletedRunFindings(db: Database.Database, repo: string): Finding[] {
   const row = db

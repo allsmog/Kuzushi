@@ -17,7 +17,7 @@
  *   [2026-04-20T14:21:20Z] exit: 1
  */
 
-import type { PipelineStage, ResultLine, UIState, UIStore } from "./state.js";
+import type { ActionableFinding, PipelineStage, ResultLine, UIState, UIStore } from "./state.js";
 
 export interface CiStreamOptions {
   /** Where each line is written. Defaults to process.stdout. */
@@ -34,6 +34,17 @@ export interface CiStreamOptions {
    * Field-test issue #14.
    */
   heartbeatSeconds?: number;
+  /**
+   * Optional run-context stamps appended to the `scan: started` line and
+   * referenced in the closing `result:` line. Operators can grep these out
+   * of CI logs without parsing JSON.
+   */
+  runContext?: {
+    runId?: string;
+    kuzushiVersion?: string;
+    model?: string;
+    gitSha?: string;
+  };
 }
 
 /**
@@ -65,7 +76,11 @@ export function attachCiStream(store: UIStore, opts: CiStreamOptions = {}): () =
     if (state.mode !== "running" && !startAnnounced) return;
 
     if (!startAnnounced && state.repoName) {
-      writeWithHeartbeatReset(line("scan", `${state.repoName} started`));
+      const ctxStamp = formatRunContext(opts.runContext, state);
+      const startLine = ctxStamp
+        ? `${state.repoName} started ${ctxStamp}`
+        : `${state.repoName} started`;
+      writeWithHeartbeatReset(line("scan", startLine));
       startAnnounced = true;
     }
 
@@ -111,6 +126,14 @@ export function attachCiStream(store: UIStore, opts: CiStreamOptions = {}): () =
     if ((state.mode === "summary" || state.phase === "done") && !endAnnounced) {
       if (state.summary) {
         writeWithHeartbeatReset(line("summary", formatSummary(state)));
+        // Emit one `error:` line per failed task so a CI grep
+        // (`grep '^\[.*\] error:'`) can pull them without context.
+        for (const failed of state.summary.failedTasks ?? []) {
+          writeWithHeartbeatReset(line("error", `stage=task task=${failed} msg="task failed"`));
+        }
+        // Final `result:` line: structured verdict + exit hint so CI
+        // glue scripts can branch on it without JSON parsing.
+        writeWithHeartbeatReset(line("result", formatResultVerdict(state)));
       }
       endAnnounced = true;
     }
@@ -225,8 +248,65 @@ function formatDuration(ms: number): string {
   return remMin > 0 && hours < 10 ? `${hours}h ${remMin}m` : `${hours}h`;
 }
 
-function line(kind: string, body: string): string {
-  return `[${new Date().toISOString()}] ${kind}: ${body}`;
+function line(kind: string, body: string, atIsoTimestamp?: string): string {
+  const ts = atIsoTimestamp ?? new Date().toISOString();
+  return `[${ts}] ${kind}: ${body}`;
+}
+
+/**
+ * Format the run-context stamp for the opening `scan:` line. Empty when no
+ * fields are populated. We deliberately keep this `key=value` so a CI parser
+ * can grep `kuzushi=` without a regex.
+ */
+function formatRunContext(ctx: CiStreamOptions["runContext"] | undefined, state: UIState): string {
+  const fields: string[] = [];
+  if (ctx?.runId) fields.push(`run=${ctx.runId.slice(0, 8)}`);
+  if (ctx?.kuzushiVersion) fields.push(`kuzushi=${ctx.kuzushiVersion}`);
+  const model = ctx?.model ?? state.model;
+  if (model) fields.push(`model=${model}`);
+  if (ctx?.gitSha) fields.push(`git=${ctx.gitSha.slice(0, 7)}`);
+  return fields.join(" ");
+}
+
+/**
+ * Final `result:` line — verdict + exit hint, designed for grep'ing in CI:
+ *
+ *   grep '^\[.*\] result:' build.log
+ *
+ * Exit hint is `1` when there's any tp finding or any failed task, else `0`.
+ */
+function formatResultVerdict(state: UIState): string {
+  const summary = state.summary;
+  if (!summary) return "unknown";
+  const counts = countBySeverity(summary.actionableFindings ?? []);
+  const failed = summary.failedTasks ?? [];
+  const tpTotal = (summary.verdictCounts?.tp ?? 0) + (summary.verdictCounts?.needs_review ?? 0);
+  const verdict = tpTotal > 0 || failed.length > 0 ? "fail" : "pass";
+  const sevParts = (["critical", "high", "medium", "low"] as const)
+    .filter((s) => counts[s] > 0)
+    .map((s) => `${counts[s]} ${s}`);
+  const failedPart =
+    failed.length > 0 ? `, ${failed.length} failed-task${failed.length === 1 ? "" : "s"}` : "";
+  const exitHint = verdict === "pass" ? 0 : 1;
+  return `${verdict} (${sevParts.join(", ") || "no findings"}${failedPart}) exit_hint=${exitHint}`;
+}
+
+function countBySeverity(findings: ReadonlyArray<ActionableFinding>): {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+} {
+  const out = { critical: 0, high: 0, medium: 0, low: 0 };
+  for (const f of findings) {
+    if (f.verdict !== "tp" || f.suppressed) continue;
+    const sev = (f.displaySeverity ?? f.severity ?? "").toLowerCase();
+    if (sev.includes("crit")) out.critical += 1;
+    else if (sev.includes("high")) out.high += 1;
+    else if (sev.includes("med")) out.medium += 1;
+    else out.low += 1;
+  }
+  return out;
 }
 
 function formatStage(stage: PipelineStage): string {
@@ -240,6 +320,19 @@ function formatResult(r: ResultLine): string {
   const conf = r.confidence != null ? ` ${(r.confidence * 100).toFixed(0)}%` : "";
   const cost = r.costUsd != null ? ` $${r.costUsd.toFixed(4)}` : "";
   return `${r.fingerprint.slice(0, 12)} ${verdict}${conf}${cost}`;
+}
+
+/**
+ * Detail line for an actionable finding. Designed for grep:
+ *
+ *   grep -E '^\[.*\] finding:.*(critical|high)' build.log
+ */
+export function formatActionableFindingLine(f: ActionableFinding, alias: string): string {
+  const sev = (f.displaySeverity ?? f.severity ?? "low").toLowerCase();
+  const cwe = (f.cwe ?? [])[0] ?? "—";
+  const loc = `${f.filePath ?? "?"}:${f.startLine ?? "?"}`;
+  const title = (f.title ?? f.ruleId ?? "(untitled)").replace(/\n/g, " ");
+  return `${alias} ${f.verdict} ${sev} ${cwe} ${loc} ${title}`;
 }
 
 function formatSummary(state: UIState): string {

@@ -19,6 +19,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { listRuns as listRunsFn, PipelineRunRecord } from "../store.js";
+import { type RunSummary, readRunSummary } from "./run-metadata.js";
 
 // Types
 
@@ -39,16 +40,35 @@ export interface TraceEvent {
 
 // Runs table
 
-export function formatRunsTable(runs: PipelineRunList, limit = 25): string {
-  if (runs.length === 0) return "No runs recorded yet. Kick off a scan first.";
-  const header = ["run", "repo", "status", "started", "cost", "findings"];
-  const rows = runs.slice(0, limit).map((r) => {
+export interface FormatRunsTableOpts {
+  limit?: number;
+  /** Filter by run status (case-insensitive). */
+  status?: string;
+}
+
+export function formatRunsTable(
+  runs: PipelineRunList,
+  limitOrOpts: number | FormatRunsTableOpts = 25,
+): string {
+  const opts: FormatRunsTableOpts =
+    typeof limitOrOpts === "number" ? { limit: limitOrOpts } : limitOrOpts;
+  const limit = opts.limit ?? 25;
+  const filtered = opts.status
+    ? runs.filter((r) => (r.status ?? "").toLowerCase() === opts.status!.toLowerCase())
+    : runs;
+  if (filtered.length === 0) {
+    if (opts.status) return `No runs match status="${opts.status}".`;
+    return "No runs recorded yet. Kick off a scan first.";
+  }
+  const header = ["run", "repo", "status", "started", "duration", "cost", "findings"];
+  const rows = filtered.slice(0, limit).map((r) => {
     const findings = countFindings(r.findingsJson);
     return [
       shortRunId(r.runId),
       truncate(basenameOrRepo(r.repo), 26),
       r.status,
       relativeTime(r.startedAt),
+      formatDuration(r.startedAt, r.completedAt),
       `$${(r.totalCostUsd ?? 0).toFixed(2)}`,
       findings != null ? String(findings) : "-",
     ];
@@ -60,19 +80,51 @@ export function formatRunsTable(runs: PipelineRunList, limit = 25): string {
     row.map((cell, i) => cell.padEnd(widths[i] ?? cell.length)).join("  ");
   const hrule = header.map((h) => "\u2500".repeat(h.length));
   const footer =
-    runs.length > limit ? `\n(showing ${limit} of ${runs.length}; pass --limit for more)` : "";
+    filtered.length > limit
+      ? `\n(showing ${limit} of ${filtered.length}; pass --limit for more)`
+      : "";
   return [pad(header), pad(hrule), ...rows.map(pad)].join("\n") + footer;
 }
 
 // Replay
 
-export function formatRunReplay(run: PipelineRunRecord): string {
+export function formatRunReplay(run: PipelineRunRecord, summary?: RunSummary): string {
   const lines: string[] = [];
   lines.push(`run ${shortRunId(run.runId)}   ${run.status}   ${run.repo}`);
   lines.push(`started   ${run.startedAt}`);
   if (run.completedAt) lines.push(`completed ${run.completedAt}`);
+  const dur = formatDuration(run.startedAt, run.completedAt);
+  if (dur !== "-") lines.push(`duration  ${dur}`);
   lines.push(`cost      $${(run.totalCostUsd ?? 0).toFixed(4)}`);
   if (run.promptHash) lines.push(`prompt    ${run.promptHash.slice(0, 12)}`);
+
+  // Reproducibility surface — only available when summary.json is present.
+  // Old runs degrade gracefully to the legacy view.
+  const repro = summary?.reproducibility;
+  if (repro) {
+    lines.push("");
+    lines.push("reproducibility");
+    lines.push(`  kuzushi   ${repro.kuzushiVersion}`);
+    lines.push(`  model     ${repro.model}`);
+    if (repro.agentRuntimeBackend) lines.push(`  runtime   ${repro.agentRuntimeBackend}`);
+    lines.push(`  config    ${repro.configHash.slice(0, 22)}`);
+    if (repro.git?.sha) {
+      const shortSha = repro.git.sha.slice(0, 7);
+      const branch = repro.git.branch ? ` (${repro.git.branch})` : "";
+      const dirty = repro.git.dirty ? " [dirty]" : "";
+      lines.push(`  git       ${shortSha}${branch}${dirty}`);
+    }
+    if (repro.scanArgs.length > 0) {
+      const argv = repro.scanArgs.join(" ");
+      lines.push(`  argv      ${truncate(argv, 80)}`);
+    }
+    if (repro.promptOverrides.length > 0) {
+      lines.push(`  prompts   ${repro.promptOverrides.length} override(s)`);
+    }
+    if (repro.houseRules.length > 0) {
+      lines.push(`  house     ${repro.houseRules.length} rule file(s)`);
+    }
+  }
 
   // Severity + verdict counts come from the persisted findings_json blob.
   const findings = parseFindings(run.findingsJson);
@@ -123,6 +175,17 @@ export function formatRunReplay(run: PipelineRunRecord): string {
   return lines.join("\n");
 }
 
+/**
+ * Best-effort loader for a run's `summary.json` reproducibility blob.
+ * Returns undefined when the run dir is missing or pre-dates summary.json.
+ */
+export function loadRunSummary(dataDir: string, runId: string): RunSummary | undefined {
+  const runDir = path.join(dataDir, "runs", runId);
+  if (!existsSync(runDir)) return undefined;
+  return readRunSummary(runDir);
+}
+
+// ---------------------------------------------------------------------------
 // Trace
 
 export function readTraceEvents(dataDir: string, runId: string): TraceEvent[] {
@@ -159,13 +222,34 @@ export function formatRunTrace(runId: string, events: TraceEvent[], limit = 80):
   if (events.length === 0) {
     return `No trace events found for run ${shortRunId(runId)}. Audit logging may have been disabled.`;
   }
-  const kept = events.slice(-limit);
+  const kept = limit >= events.length ? events : events.slice(-limit);
   const lines = kept.map((e) => formatTraceLine(e));
   const footer =
-    events.length > limit
-      ? `\n(showing last ${limit} of ${events.length}; trace logs are append-only)`
+    events.length > kept.length
+      ? `\n(showing last ${kept.length} of ${events.length}; trace logs are append-only)`
       : "";
   return lines.join("\n") + footer;
+}
+
+/**
+ * Emit one stable-shape JSON object per line — jq-friendly. The shape
+ * is the union of every field a TraceEvent can carry: every key is
+ * present on every line (with `null` when absent) so downstream tools
+ * can rely on stable selectors.
+ */
+export function formatRunTraceJson(events: TraceEvent[], limit?: number): string {
+  const kept = limit && limit < events.length ? events.slice(-limit) : events;
+  return kept.map((e) => JSON.stringify(stableTraceShape(e))).join("\n");
+}
+
+function stableTraceShape(e: TraceEvent): Record<string, unknown> {
+  return {
+    timestamp: e.timestamp || null,
+    type: e.type,
+    source: e.source,
+    fingerprint: e.fingerprint ?? null,
+    payload: e.payload ?? null,
+  };
 }
 
 function formatTraceLine(e: TraceEvent): string {
@@ -279,6 +363,22 @@ function basenameOrRepo(repo: string): string {
 
 function truncate(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max - 1)}\u2026`;
+}
+
+function formatDuration(
+  startedAt: string | null | undefined,
+  completedAt: string | null | undefined,
+): string {
+  if (!startedAt || !completedAt) return "-";
+  const a = Date.parse(startedAt);
+  const b = Date.parse(completedAt);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return "-";
+  const sec = Math.floor((b - a) / 1000);
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m${sec % 60 > 0 ? `${sec % 60}s` : ""}`;
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return m > 0 ? `${h}h${m}m` : `${h}h`;
 }
 
 function relativeTime(iso: string): string {

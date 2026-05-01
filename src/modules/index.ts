@@ -36,6 +36,7 @@ export { createNDayDiffHunterModule } from "./n-day-diff-hunter.js";
 // Registry + specifier parsing — re-export so third parties can do static
 // analysis of their own module specifiers without importing deep paths.
 export { ModuleRegistry, parseModuleSpecifier } from "./registry.js";
+export { createSecretScanModule } from "./secret-scan/secret-scan.js";
 export type {
   RankedTaintIrisNextCweCatalogEntry,
   TaintIrisNextAgentCweSelection,

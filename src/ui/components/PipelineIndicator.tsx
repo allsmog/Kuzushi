@@ -574,7 +574,7 @@ function _ResultBranches({
               <Text>
                 {pipe} {tokens.muted(connector)}{" "}
               </Text>
-              <Spinner color="warn" />
+              <Spinner color="accent" />
               <Text>
                 {" "}
                 {tokens.strong(prefix)} {tokens.muted(fp.slice(0, 12))}...
