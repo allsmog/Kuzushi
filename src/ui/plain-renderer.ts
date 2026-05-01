@@ -575,7 +575,7 @@ function printModuleRunView(emit: Emit, shell: ShellState, state: UIState): void
   if (!run) {
     emit(`  [run] ${shell.focusedModule ?? "module"} | idle`);
     emit("# RUN");
-    emit("  (no active run)");
+    printEmpty(emit, "module-run-idle", { moduleId: shell.focusedModule ?? undefined });
     return;
   }
   const elapsed = formatDuration(Math.max(0, (run.completedAtMs ?? Date.now()) - run.startedAtMs));
@@ -602,6 +602,9 @@ function printModuleRunView(emit: Emit, shell: ShellState, state: UIState): void
     if (run.postProcessMode === "scan-only" && run.status === "done" && findingCount > 0) {
       emit("  scan-only: saved as needs_review; triage pending");
     }
+  }
+  if (run.status === "error") {
+    emit("[!] tool run failed — re-run the verb to retry, or /back to return.");
   }
   for (const step of run.steps) {
     const glyph =
@@ -680,7 +683,7 @@ function printActorDetailView(emit: Emit, shell: ShellState, state: UIState): vo
   emit(`  [actor] ${fp || "(none)"} | ${lines.length} events`);
   emit("# ACTOR TRANSCRIPT");
   if (!fp) {
-    emit("  (no actor focused)");
+    printEmpty(emit, "actor-none-focused");
     return;
   }
   for (const line of lines) {
@@ -724,7 +727,7 @@ function printPromptsEditorView(emit: Emit, shell: ShellState): void {
   emit(`  [prompts] ${moduleId} | ${localEdits} override${localEdits === 1 ? "" : "s"}`);
   emit("# PROMPTS");
   if (audit.length === 0) {
-    emit("  (no prompt keys)");
+    printEmpty(emit, "prompts-none", { moduleId });
     return;
   }
   for (const row of audit) {
@@ -740,7 +743,7 @@ function printOptionsView(emit: Emit, shell: ShellState): void {
   emit(`  [options] ${view?.toolName ?? moduleId} | ${rows.length} options | ${setCount} set`);
   emit(`# OPTIONS  ${moduleId}`);
   if (!view) {
-    emit("  (no options loaded - run show options)");
+    printEmpty(emit, "options-none-loaded", { moduleId });
     return;
   }
   if (view.taskSummary) {
@@ -793,8 +796,13 @@ function printContextBuildView(emit: Emit, shell: ShellState): void {
   const cb = shell.contextBuild;
   if (!cb) {
     emit("# CONTEXT BUILD");
-    emit("  (no build in progress - run /context build)");
+    printEmpty(emit, "context-build-idle");
     return;
+  }
+  if (cb.status === "failed") {
+    emit(
+      `[!] context build failed${cb.errorMessage ? ` — ${cb.errorMessage}` : ""} · /context build to retry`,
+    );
   }
   const phaseOrder: ReadonlyArray<"manifests" | "walk" | "path-signals" | "grep" | "assemble"> = [
     "manifests",
@@ -829,7 +837,7 @@ function printCatalogView(emit: Emit, shell: ShellState): void {
   emit(`  [shell] catalog | ${count} modules`);
   emit("# CATALOG");
   if (count === 0) {
-    printEmpty(emit, "module-no-tools", { moduleId: "(no modules loaded)" });
+    printEmpty(emit, "catalog-no-modules");
     return;
   }
   // Group by category so the structural order matches the Ink layout.
