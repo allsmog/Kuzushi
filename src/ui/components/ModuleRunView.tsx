@@ -265,11 +265,14 @@ function StepsBlock({
 }
 
 function StepRow({ step }: { step: ModuleRunStep }): React.ReactElement {
+  // Canonical status hues from `runningStyle()` — keep "in-progress" on
+  // `accent` (blue), reserving yellow/`warn` for caution-class states.
+  // The glyph differs per status so color-stripped renderings still parse.
   const glyph =
     step.status === "done"
       ? tokens.success(STEP_GLYPH.done)
       : step.status === "running"
-        ? tokens.warn(STEP_GLYPH.running)
+        ? tokens.accent(STEP_GLYPH.running)
         : step.status === "error"
           ? tokens.danger("✗")
           : tokens.muted(STEP_GLYPH.pending);
@@ -402,11 +405,14 @@ function ActorCard({ row }: { row: ActorRow }): React.ReactElement {
 
 function ActivityChip({ line }: { line: AgentActivityLine }): React.ReactElement {
   const compact = toCompactRow(line);
+  // Match `runningStyle()` — in-progress lives on `accent` (blue) so the
+  // chip and the spinner above it agree on hue. `warn` would collide with
+  // the caution/skipped tier elsewhere in the shell.
   const color =
     line.kind === "tool-complete"
       ? tokens.success
       : line.kind === "tool-start" || line.kind === "tool-progress"
-        ? tokens.warn
+        ? tokens.accent
         : tokens.muted;
   const trail = [compact.action, compact.target ?? compact.summary].filter(Boolean).join(" ");
   return (

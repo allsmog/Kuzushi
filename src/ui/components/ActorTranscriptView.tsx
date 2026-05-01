@@ -178,6 +178,15 @@ function EntryRow({
   body?: string;
   inProgress?: boolean;
 }): React.ReactElement {
+  // Glyph hue convention (matches `runningStyle` and the rest of the
+  // shell): completed Tool glyphs stay on `accent` (the canonical
+  // "identifier" hue); in-progress also lives on `accent` so the spinner
+  // and the static glyph share one hue family. `warn` was previously
+  // applied to in-progress here, but that collides with the
+  // caution/skipped meaning warn carries elsewhere — and yellow + blue
+  // are both used in this view, splitting the visual story. The ★
+  // finding marker keeps `warn` because it signals "needs human
+  // attention" (caution-class) rather than active work.
   const glyphColor =
     glyph === LOWER_HOOK
       ? tokens.muted
@@ -185,9 +194,8 @@ function EntryRow({
         ? tokens.warn
         : glyph === THINKING_GLYPH
           ? tokens.tertiary
-          : inProgress
-            ? tokens.warn
-            : tokens.accent;
+          : tokens.accent;
+  void inProgress; // Kept for callsite compat; no longer hue-discriminated.
   const headColor = glyph === FINDING_GLYPH ? tokens.warn : tokens.value;
   return (
     <Box flexDirection="column">

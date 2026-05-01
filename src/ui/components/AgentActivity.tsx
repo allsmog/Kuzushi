@@ -38,7 +38,7 @@ export function AgentActivity({
       <Text>
         [{latest.index}/{latest.total}]{" "}
       </Text>
-      <Spinner color="warn" />
+      <Spinner color="accent" />
       <Text> {tokens.muted(fingerprint.slice(0, 12))}\u2026</Text>
     </Box>
   );
