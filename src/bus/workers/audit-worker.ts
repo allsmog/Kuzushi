@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { KuzushiConfig } from "../../types.js";
+import { buildRunMetadata } from "../../utils/run-metadata.js";
 import { safeJsonStringify } from "../../utils/safe-json.js";
 import type {
   PipelineCompleteEvent,
@@ -91,6 +92,23 @@ export function registerAuditWorker(bus: MessageBus, deps: AuditWorkerDeps): voi
 
     runState.set(event.meta.runId, state);
 
+    // Reproducibility metadata: a triage analyst three weeks later
+    // needs kuzushi version, model, git sha, config hash, node version
+    // and platform to repro the run. Computed lazily so a missing git
+    // binary / detached worktree never blocks the run.
+    let reproducibility: ReturnType<typeof buildRunMetadata> | undefined;
+    try {
+      reproducibility = buildRunMetadata({
+        repoRoot: event.payload.context.repoRoot,
+        config: event.payload.config,
+        model: event.payload.config?.model,
+        scanArgs: event.payload.scanOpts?.tasks,
+        startedAt: event.meta.timestamp,
+      });
+    } catch {
+      /* best-effort metadata only — never block the run */
+    }
+
     writeFileSync(
       path.join(runDir, "run.json"),
       safeJsonStringify(
@@ -101,6 +119,7 @@ export function registerAuditWorker(bus: MessageBus, deps: AuditWorkerDeps): voi
           context: event.payload.context,
           config: event.payload.config,
           scanOpts: event.payload.scanOpts,
+          reproducibility,
         },
         2,
       ),

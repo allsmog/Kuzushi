@@ -590,11 +590,14 @@ export const ExploitChainSchema = z.object({
       findingFingerprint: z.string(),
       role: z.string(),
       description: z.string(),
+      filePath: z.string().optional(),
+      startLine: z.number().optional(),
     }),
   ),
   overallSeverity: ExploitChainSeveritySchema,
   preconditions: z.array(z.string()),
   impactDescription: z.string(),
+  narrative: z.string().optional(),
 });
 
 export type ExploitChainZ = z.infer<typeof ExploitChainSchema>;
