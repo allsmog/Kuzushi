@@ -21,6 +21,8 @@ export interface MockWorkspace extends WorkspaceHandle {
   readonly serviceUpserts: object[];
   /** Notes observed via `notes.create`. */
   readonly noteCreates: object[];
+  /** Vulns observed via `vulns.create`. */
+  readonly vulnCreates: object[];
   /** Pre-seeded vulns returned from `vulns.listForWorkspace`. */
   readonly vulnRows: unknown[];
   /** Add rows that `vulns.listForWorkspace` should return. */
@@ -45,6 +47,7 @@ export function createMockWorkspace(): MockWorkspace {
   const hostUpserts: object[] = [];
   const serviceUpserts: object[] = [];
   const noteCreates: object[] = [];
+  const vulnCreates: object[] = [];
   let vulnRows: unknown[] = [];
 
   const hosts: WorkspaceHostStore = {
@@ -68,6 +71,13 @@ export function createMockWorkspace(): MockWorkspace {
     listForWorkspace() {
       return vulnRows;
     },
+    create(input) {
+      vulnCreates.push(input);
+      // Also add to the readable list so a tool that creates and then
+      // immediately reads sees its own write.
+      vulnRows = [...vulnRows, input];
+      return input;
+    },
   };
 
   const notes: WorkspaceNoteStore = {
@@ -85,6 +95,7 @@ export function createMockWorkspace(): MockWorkspace {
     hostUpserts,
     serviceUpserts,
     noteCreates,
+    vulnCreates,
     get vulnRows() {
       return vulnRows;
     },
@@ -98,6 +109,7 @@ export function createMockWorkspace(): MockWorkspace {
       hostUpserts.length = 0;
       serviceUpserts.length = 0;
       noteCreates.length = 0;
+      vulnCreates.length = 0;
       vulnRows = [];
     },
   };
