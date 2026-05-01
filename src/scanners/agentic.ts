@@ -27,17 +27,9 @@ export class AgenticPlugin implements ScannerPlugin {
     const configuredModel = asOptionalString(config["model"]);
     const configuredMax = asPositiveInt(config["maxFindings"]);
 
-    if (!configuredModel) {
-      // Registry's `resolvePluginConfig` falls the `model` field back to
-      // the operator's `config.model`, so reaching this branch means the
-      // operator hasn't configured one at all — fail fast rather than
-      // silently substitute a hardcoded default.
-      throw new Error(
-        "agentic scanner: model is required. Kuzushi will not silently substitute a default model. " +
-          "Set `model` in `taskConfig.agentic` or run `kuzushi config set model <provider>:<model>`.",
-      );
+    if (configuredModel) {
+      this.model = configuredModel;
     }
-    this.model = configuredModel;
     this.maxFindings = configuredMax ?? DEFAULT_MAX_FINDINGS;
     this.passes = config["passes"] === 2 ? 2 : 1;
   }
@@ -54,6 +46,13 @@ export class AgenticPlugin implements ScannerPlugin {
     }
     const model = this.model;
     const repoName = path.basename(repoRoot);
+    const model = asOptionalString(_config["model"]) || this.model;
+    if (!model) {
+      throw new Error(
+        "agentic scanner: model is required. Kuzushi will not silently substitute a default model. " +
+          "Set `model` in `taskConfig.agentic` or run `kuzushi config set model <provider>:<model>`.",
+      );
+    }
 
     // Build activity callback so the UI can show live scan progress.
     const activityCallback =

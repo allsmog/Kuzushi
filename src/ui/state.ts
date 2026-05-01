@@ -1300,6 +1300,8 @@ export class UIStore {
   private preflightReturnMode: UIMode = "running";
   private reviewReturnMode: UIMode = "summary";
   private agentActivityTimestamps = new Map<string, number>();
+  private batchDepth = 0;
+  private pendingNotify = false;
 
   constructor() {
     this.state = {
@@ -1336,6 +1338,25 @@ export class UIStore {
 
   getState(): UIState {
     return this.state;
+  }
+
+  /**
+   * Batch multiple state mutations into a single subscriber notification.
+   *
+   * This keeps high-churn worker paths (task/progress/result handlers)
+   * from forcing several Ink re-renders for one logical event.
+   */
+  batch<T>(fn: () => T): T {
+    this.batchDepth += 1;
+    try {
+      return fn();
+    } finally {
+      this.batchDepth = Math.max(0, this.batchDepth - 1);
+      if (this.batchDepth === 0 && this.pendingNotify) {
+        this.pendingNotify = false;
+        this.flushNotify();
+      }
+    }
   }
 
   update(partial: Partial<UIState>): void {
@@ -1550,6 +1571,9 @@ export class UIStore {
   }
 
   clearAgentActivity(fingerprint: string): void {
+    if (!this.state.agentActivity.has(fingerprint)) {
+      return;
+    }
     const newMap = new Map(this.state.agentActivity);
     newMap.delete(fingerprint);
     this.agentActivityTimestamps.delete(fingerprint);
@@ -1767,27 +1791,34 @@ export class UIStore {
 
   /** Clear activity lines for a scan sub-task (e.g. on completion). */
   clearScanActivity(taskId: string): void {
+    let changed = false;
     const stages = this.state.stages.map((s) => {
       if (s.id !== "scan") return s;
       const updated = s.subTasks.map((task) => {
         if (task.id !== taskId || !task.activityLines?.length) return task;
+        changed = true;
         const { activityLines: _, ...rest } = task;
         return rest;
       });
       return { ...s, subTasks: updated };
     });
+    if (!changed) return;
     this.state = { ...this.state, stages };
     this.notify();
   }
 
   /** Update the detail text on an active stage. */
   updateStageDetail(stageId: string, detail: string): void {
+    let changed = false;
     const stages = this.state.stages.map((s) => {
       if (s.id === stageId) {
+        if (s.detail === detail) return s;
+        changed = true;
         return { ...s, detail };
       }
       return s;
     });
+    if (!changed) return;
     this.state = { ...this.state, stages };
     this.notify();
   }
@@ -1800,6 +1831,14 @@ export class UIStore {
   }
 
   private notify(): void {
+    if (this.batchDepth > 0) {
+      this.pendingNotify = true;
+      return;
+    }
+    this.flushNotify();
+  }
+
+  private flushNotify(): void {
     for (const listener of this.listeners) {
       listener();
     }

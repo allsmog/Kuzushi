@@ -107,6 +107,94 @@ describe("UIStore agentActivity memory retention", () => {
     expect(store.getState().agentActivity.get("fp")).toHaveLength(1);
   });
 
+  it("does not notify when clearing missing agent activity", () => {
+    const store = new UIStore();
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+
+    store.clearAgentActivity("missing");
+    unsubscribe();
+
+    expect(notifications).toBe(0);
+  });
+
+  it("does not notify when clearing absent scan activity", () => {
+    const store = new UIStore();
+    store.initStages([{ id: "scan", label: "Scan" }]);
+    store.upsertSubTask("scan", {
+      id: "semgrep",
+      label: "semgrep",
+      status: "active",
+    });
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+
+    store.clearScanActivity("semgrep");
+    unsubscribe();
+
+    expect(notifications).toBe(0);
+  });
+
+  it("does not notify when stage detail is unchanged", () => {
+    const store = new UIStore();
+    store.initStages([{ id: "scan", label: "Scan" }]);
+    store.updateStageDetail("scan", "running semgrep");
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+
+    store.updateStageDetail("scan", "running semgrep");
+    unsubscribe();
+
+    expect(notifications).toBe(0);
+  });
+
+  it("coalesces multiple updates into one notification inside batch()", () => {
+    const store = new UIStore();
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+
+    store.batch(() => {
+      store.update({ mode: "running", phase: "scanning" });
+      store.update({ repoName: "repo-a" });
+      store.update({ progress: { current: 1, total: 10 } });
+    });
+    unsubscribe();
+
+    expect(notifications).toBe(1);
+    expect(store.getState().repoName).toBe("repo-a");
+    expect(store.getState().progress).toEqual({ current: 1, total: 10 });
+  });
+
+  it("keeps nested batch() notifications collapsed", () => {
+    const store = new UIStore();
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+
+    store.batch(() => {
+      store.update({ mode: "running" });
+      store.batch(() => {
+        store.update({ phase: "scanning" });
+        store.update({ repoName: "repo-b" });
+      });
+      store.update({ tasks: ["semgrep"] });
+    });
+    unsubscribe();
+
+    expect(notifications).toBe(1);
+    expect(store.getState().repoName).toBe("repo-b");
+    expect(store.getState().tasks).toEqual(["semgrep"]);
+  });
+
   it("dedupes repeated module-run evidence rows", () => {
     const store = new UIStore();
     store.update({

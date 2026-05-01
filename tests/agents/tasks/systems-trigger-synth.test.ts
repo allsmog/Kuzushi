@@ -58,6 +58,9 @@ function makePack(): SystemsSurfacePack {
     aliasingSites: [],
     scratchWriteSites: [],
     failureSideEffectSites: [],
+    provenanceFacts: [],
+    provenanceSummaries: [],
+    provenanceChains: [],
     inputSites: [{ filePath: "src/net/tcp_input.c", line: 41, snippet: "tcp option parsing" }],
     hardeningSites: [{ filePath: "src/net/tcp_input.c", line: 80, snippet: "__stack_chk_fail();" }],
     helperTemplates: [

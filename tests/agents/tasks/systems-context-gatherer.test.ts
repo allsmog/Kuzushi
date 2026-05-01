@@ -113,6 +113,25 @@ describe("systems-context-gatherer", () => {
       expect(pack.aliasingSites.length).toBeGreaterThan(0);
       expect(pack.scratchWriteSites.length).toBeGreaterThan(0);
       expect(pack.failureSideEffectSites.length).toBeGreaterThan(0);
+      expect(pack.provenanceFacts.map((fact) => fact.state)).toEqual(
+        expect.arrayContaining([
+          "PIPE_PAGE_SHARED",
+          "SG_SHARED",
+          "REQ_ALIAS_MUST",
+          "MUTATED_SHARED",
+          "FAILED_AFTER_MUTATION",
+        ]),
+      );
+      expect(pack.provenanceFacts.some((fact) => fact.strength === "strong")).toBe(true);
+      expect(pack.provenanceSummaries.map((summary) => summary.functionName)).toEqual(
+        expect.arrayContaining(["algif_aead_recvmsg", "scatterwalk_map_and_copy"]),
+      );
+      expect(
+        pack.provenanceSummaries.some(
+          (summary) => summary.aliasBehavior !== "none" || summary.writesThroughSharedAlias,
+        ),
+      ).toBe(true);
+      expect(pack.provenanceChains.some((chain) => chain.status === "complete")).toBe(true);
       expect(pack.helperTemplates.map((template) => template.id)).toEqual(
         expect.arrayContaining([
           "shared-backing-resource",

@@ -131,7 +131,8 @@ describe("systems-hunt", () => {
     expect(prompt).toContain("resource provenance and writable alias reasoning");
     expect(prompt).toContain("resource origin");
     expect(prompt).toContain("ownership boundary");
-    expect(prompt).toContain("failure-side-effect evidence");
+    expect(prompt).toContain("validation/failure ordering");
+    expect(prompt).toContain("hard-guard/counterexample");
     expect(prompt).toContain("Xint-style zero-copy scope");
   });
 
@@ -340,6 +341,9 @@ describe("systems-hunt", () => {
         aliasingSites: [],
         scratchWriteSites: [],
         failureSideEffectSites: [],
+        provenanceFacts: [],
+        provenanceSummaries: [],
+        provenanceChains: [],
         inputSites: [
           { filePath: "src/vmm/dispatch.rs", line: 22, snippet: "descriptor.guest_len" },
         ],

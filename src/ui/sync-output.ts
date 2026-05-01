@@ -36,9 +36,10 @@ export function supportsSyncOutput(): boolean {
   if (force === "1" || force === "true") return true;
   if (force === "0" || force === "false") return false;
 
-  const term = process.env["TERM_PROGRAM"] ?? "";
-  if (term === "iTerm.app" || term === "WezTerm" || term === "ghostty") return true;
-  if (term === "vscode") return true;
+  const termProgram = process.env["TERM_PROGRAM"] ?? "";
+  if (termProgram === "iTerm.app" || termProgram === "WezTerm" || termProgram === "ghostty")
+    return true;
+  if (termProgram === "vscode") return true;
 
   if (process.env["KITTY_WINDOW_ID"]) return true;
   if (process.env["ALACRITTY_LOG"]) return true;
@@ -46,7 +47,13 @@ export function supportsSyncOutput(): boolean {
   // Windows Terminal sets WT_SESSION.
   if (process.env["WT_SESSION"]) return true;
 
-  return false;
+  const term = (process.env["TERM"] ?? "").toLowerCase();
+  if (!term || term === "dumb") return false;
+
+  // Most modern terminals ignore unsupported private modes gracefully.
+  // Prefer enabling atomic frames by default for interactive shells so
+  // flicker reduction works out-of-the-box without per-terminal env setup.
+  return true;
 }
 
 /**

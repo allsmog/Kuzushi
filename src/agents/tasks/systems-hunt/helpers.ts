@@ -3,11 +3,19 @@ import path from "node:path";
 import type { CodeIntelligenceProvider } from "../../../analysis-support/types.js";
 import { formatProfilesForPrompt, getProfilesForTask } from "../../../security-profiles.js";
 import type { FileIndex, SecurityProfile } from "../../../types.js";
+import { buildProvenanceChains } from "./provenance-chain.js";
+import { buildProvenanceSummaries } from "./provenance-summary.js";
 import type {
   RankedSystemsSurface,
   SystemsCodeLocation,
   SystemsHelperTemplate,
   SystemsHelperTemplateId,
+  SystemsProvenanceChain,
+  SystemsProvenanceFact,
+  SystemsProvenanceFactKind,
+  SystemsProvenanceFactStrength,
+  SystemsProvenanceState,
+  SystemsProvenanceSummary,
   SystemsSurfacePack,
 } from "./types.js";
 
@@ -50,9 +58,11 @@ const UNSAFE_PATTERNS = [
 
 const RESOURCE_PROVENANCE_PATTERNS = [
   /\b(?:splice|vmsplice|sendfile|mmap)\s*\(/,
+  /\b(?:splice_to_pipe|splice_direct_to_actor|filemap_splice_read|copy_page_to_iter_pipe|push_pipe)\b/,
   /\bAF_ALG\b|\balgif\b/i,
-  /\b(?:scatterlist|sg_chain|sg_page|page[_-]?cache|pipe_buffer|iov_iter)\b/i,
-  /\b(?:kmap_local_page|scatterwalk_map_and_copy|aead_request_set_crypt)\s*\(/,
+  /\b(?:scatterlist|sg_set_page|sg_chain|sg_page|page[_-]?cache|pipe_buffer|iov_iter)\b/i,
+  /\b(?:ITER_PIPE|ITER_XARRAY|ITER_FOLIOQ|ITER_BVEC)\b/,
+  /\b(?:kmap_local_page|scatterwalk_map_and_copy|memcpy_to_sglist|aead_request_set_crypt)\s*\(/,
 ] as const;
 
 const ALIASING_PATTERNS = [
@@ -77,6 +87,176 @@ const FAILURE_SIDE_EFFECT_PATTERNS = [
   /\b(?:auth|verify|validate|check).*?(?:fail|error|reject)/i,
   /\breturn\s+-[A-Z0-9_]+/,
   /\bgoto\s+(?:err|error|fail|free|out)\b/i,
+] as const;
+
+interface ProvenanceRule {
+  state: SystemsProvenanceState;
+  kind: SystemsProvenanceFactKind;
+  strength: SystemsProvenanceFactStrength;
+  resourceFamily: string;
+  reason: string;
+  patterns: readonly RegExp[];
+}
+
+const PROVENANCE_RULES: readonly ProvenanceRule[] = [
+  {
+    state: "FILE_BACKED_SHARED",
+    kind: "shared-origin",
+    strength: "signal",
+    resourceFamily: "file/page-cache",
+    reason: "file mapping or page-cache backing can preserve shared storage identity",
+    patterns: [
+      /\bpage[_-]?cache\b/i,
+      /\bpage->mapping\b/,
+      /\bmmap\s*\(/,
+      /\bfilemap_[A-Za-z0-9_]*\b/,
+      /\bread[_-]?only\b/i,
+    ],
+  },
+  {
+    state: "PIPE_PAGE_SHARED",
+    kind: "alias-preserving-transport",
+    strength: "strong",
+    resourceFamily: "pipe/page",
+    reason: "zero-copy pipe/splice transport can move page references without copying",
+    patterns: [
+      /\b(?:splice|vmsplice|sendfile|splice_to_pipe|splice_direct_to_actor|filemap_splice_read|copy_page_to_iter_pipe|push_pipe)\b/,
+      /\bpipe_buffer\b/,
+      /\bMSG_SPLICE_PAGES\b/,
+    ],
+  },
+  {
+    state: "ITER_SHARED",
+    kind: "iterator-propagation",
+    strength: "signal",
+    resourceFamily: "iov_iter",
+    reason: "iterator-backed segments may carry shared xarray, folio, pipe, or bvec storage",
+    patterns: [
+      /\biov_iter\b/,
+      /\bITER_(?:PIPE|XARRAY|FOLIOQ|BVEC)\b/,
+      /\bcopy_(?:page_)?to_iter\b/,
+      /\bcopy_from_iter\b/,
+    ],
+  },
+  {
+    state: "SG_SHARED",
+    kind: "scatterlist-alias",
+    strength: "strong",
+    resourceFamily: "scatterlist/page",
+    reason: "scatterlist APIs preserve page references across crypto and scatterwalk calls",
+    patterns: [
+      /\bscatterlist\b/,
+      /\bsg_set_page\s*\(/,
+      /\bsg_page\s*\(/,
+      /\bsg_chain\s*\(/,
+      /\bscatterwalk_[A-Za-z0-9_]*\b/,
+    ],
+  },
+  {
+    state: "REQ_ALIAS_MUST",
+    kind: "request-alias",
+    strength: "strong",
+    resourceFamily: "request src/dst",
+    reason: "source and destination are explicitly the same request object or branch-refined alias",
+    patterns: [
+      /\breq->src\s*=\s*req->dst\b/,
+      /\breq->dst\s*=\s*req->src\b/,
+      /\bareq->aead_req\.src\s*=\s*areq->aead_req\.dst\b/,
+      /\bsrc\s*==\s*dst\b/,
+      /\breq->src\s*==\s*req->dst\b/,
+      /\baead_req\.src\s*==\s*aead_req\.dst\b/,
+    ],
+  },
+  {
+    state: "REQ_ALIAS_MAY",
+    kind: "request-alias",
+    strength: "signal",
+    resourceFamily: "request src/dst",
+    reason: "request setup may bind caller source and destination into an in-place operation",
+    patterns: [/\baead_request_set_crypt\s*\(/, /\b(?:in-place|inplace)\b/i],
+  },
+  {
+    state: "MUTATED_SHARED",
+    kind: "write-through-shared",
+    strength: "strong",
+    resourceFamily: "scatterlist/page",
+    reason: "write primitive can mutate through a scatterlist or page-backed alias",
+    patterns: [
+      /\bscatterwalk_map_and_copy\s*\([^;\n]*,\s*1\s*\)/,
+      /\bmemcpy_to_sglist\s*\(/,
+      /\bmemcpy_to_page\s*\(/,
+      /\b(?:cursor|dst|sg)->page->/i,
+      /\bpage->dirty\s*=/,
+    ],
+  },
+  {
+    state: "VALIDATION_PENDING",
+    kind: "validation-before-trust",
+    strength: "signal",
+    resourceFamily: "auth/tag/checksum",
+    reason:
+      "authentication, tag, checksum, or validation result still gates whether output is trusted",
+    patterns: [
+      /\b(?:auth|verify|validate|checksum|integrity|tag).*?(?:check|ok|fail|error|reject)/i,
+      /\btag_ok\b/,
+      /\bauthsize\b/,
+      /\bcrypto_aead_decrypt\b/,
+    ],
+  },
+  {
+    state: "FAILED_AFTER_MUTATION",
+    kind: "failure-after-mutation",
+    strength: "strong",
+    resourceFamily: "failure path",
+    reason: "error return may preserve earlier writes unless a rollback or discard is proven",
+    patterns: [
+      /\bEBADMSG\b/,
+      /\breturn\s+-E[A-Z0-9_]+\b/,
+      /\breturn\s+-74\b/,
+      /\bgoto\s+(?:err|error|fail|out)\b/i,
+    ],
+  },
+  {
+    state: "PRIVATE_OWNED",
+    kind: "private-copy-guard",
+    strength: "hard-guard",
+    resourceFamily: "private copy",
+    reason: "fresh private allocation or private copy can break shared-resource provenance",
+    patterns: [
+      /\b(?:kmalloc|kzalloc|malloc|calloc|alloc_page|__get_free_page|alloca)\s*\(/,
+      /\bprivate_(?:dst|src|buf|page|copy)\b/i,
+      /\bcopy_(?:page|from_iter_full|to_iter_full)\b/,
+      /\b(?:clone|duplicate|dup)\b/i,
+    ],
+  },
+  {
+    state: "SAFE_COUNTEREXAMPLE",
+    kind: "nonalias-guard",
+    strength: "hard-guard",
+    resourceFamily: "nonalias/shared guard",
+    reason: "explicit non-alias or not-shared check can kill the provenance bug path",
+    patterns: [
+      /\bsrc\s*!=\s*dst\b/,
+      /\breq->src\s*!=\s*req->dst\b/,
+      /\bif\s*\([^)]*src\s*==\s*dst[^)]*\)\s*\{\s*return\b/,
+      /\bif\s*\([^)]*req->src\s*==\s*req->dst[^)]*\)\s*\{\s*return\b/,
+      /\bpage->mapping\s*==\s*NULL\b/,
+      /\b!page->mapping\b/,
+      /\bnot[_-]?shared\b/i,
+    ],
+  },
+  {
+    state: "SAFE_COUNTEREXAMPLE",
+    kind: "rollback-guard",
+    strength: "hard-guard",
+    resourceFamily: "rollback/discard",
+    reason: "failure path appears to restore, discard, wipe, or overwrite the mutated region",
+    patterns: [
+      /\b(?:rollback|restore|discard|revert|undo)\b/i,
+      /\b(?:memzero_explicit|memset|wipe)\s*\(/,
+      /\b(?:drop|release|put)_page\b/,
+    ],
+  },
 ] as const;
 
 const INPUT_PATTERNS = [
@@ -329,6 +509,23 @@ export async function buildSystemsSurfacePack(args: {
     surfacePackDepth,
     "failure path that may preserve earlier side effects",
   );
+  const provenanceFacts = await collectProvenanceFacts(
+    repoRoot,
+    relatedFiles,
+    Math.max(surfacePackDepth * 6, surfacePackDepth),
+  );
+  const provenanceSummaries = await buildProvenanceSummaries({
+    repoRoot,
+    filePaths: relatedFiles,
+    facts: provenanceFacts,
+    limit: Math.max(surfacePackDepth * 2, surfacePackDepth),
+  });
+  const provenanceChains = buildProvenanceChains({
+    surfaceId: surface.id,
+    facts: provenanceFacts,
+    summaries: provenanceSummaries,
+    limit: Math.max(1, Math.min(3, surfacePackDepth)),
+  });
   const inputSites = dedupeLocations([
     ...(await collectPatternLocations(
       repoRoot,
@@ -379,6 +576,9 @@ export async function buildSystemsSurfacePack(args: {
     aliasingSites,
     scratchWriteSites,
     failureSideEffectSites,
+    provenanceFacts,
+    provenanceSummaries,
+    provenanceChains,
     inputSites,
     hardeningSites,
     helperTemplates: selectHelperTemplates(surface, enableCodeqlTemplates && Boolean(codeqlDbPath)),
@@ -401,6 +601,9 @@ export function formatSystemsSurfacePack(pack: SystemsSurfacePack): string[] {
     `Aliasing sites: ${formatLocations(pack.aliasingSites)}`,
     `Scratch write sites: ${formatLocations(pack.scratchWriteSites)}`,
     `Failure side-effect sites: ${formatLocations(pack.failureSideEffectSites)}`,
+    `Provenance facts: ${formatProvenanceFacts(pack.provenanceFacts)}`,
+    `Function provenance summaries: ${formatProvenanceSummaries(pack.provenanceSummaries)}`,
+    `Provenance chains: ${formatProvenanceChains(pack.provenanceChains)}`,
     `Input sites: ${formatLocations(pack.inputSites)}`,
     `Hardening sites: ${formatLocations(pack.hardeningSites)}`,
     `Built-in helpers: ${formatTemplates(pack.helperTemplates)}`,
@@ -580,6 +783,79 @@ async function collectPatternLocations(
   return dedupeLocations(matches).slice(0, limit);
 }
 
+async function collectProvenanceFacts(
+  repoRoot: string,
+  filePaths: string[],
+  limit: number,
+): Promise<SystemsProvenanceFact[]> {
+  const facts: SystemsProvenanceFact[] = [];
+  const candidateLimit = Math.max(limit * 8, limit);
+  for (const filePath of filePaths) {
+    if (facts.length >= candidateLimit) break;
+    const lines = await readLines(repoRoot, filePath);
+    if (!lines) continue;
+
+    for (let index = 0; index < lines.length && facts.length < candidateLimit; index += 1) {
+      const line = lines[index];
+      if (line.length > PACK_SCAN_LIMIT) continue;
+      const snippet = line.trim();
+      if (!snippet) continue;
+
+      for (const rule of PROVENANCE_RULES) {
+        if (!rule.patterns.some((pattern) => pattern.test(snippet))) continue;
+        facts.push({
+          filePath,
+          line: index + 1,
+          snippet,
+          reason: rule.reason,
+          state: rule.state,
+          kind: rule.kind,
+          strength: rule.strength,
+          resourceFamily: rule.resourceFamily,
+        });
+        if (facts.length >= candidateLimit) break;
+      }
+      const contextualGuard = inferContextualProvenanceGuard(filePath, index, lines);
+      if (contextualGuard && facts.length < candidateLimit) {
+        facts.push(contextualGuard);
+      }
+    }
+  }
+  return prioritizeProvenanceFacts(dedupeProvenanceFacts(facts)).slice(0, limit);
+}
+
+function inferContextualProvenanceGuard(
+  filePath: string,
+  index: number,
+  lines: string[],
+): SystemsProvenanceFact | undefined {
+  const snippet = lines[index]?.trim() ?? "";
+  if (
+    !/\b(?:src|req->src|(?:\w+->)?aead_req\.src)\s*==\s*(?:dst|req->dst|(?:\w+->)?aead_req\.dst)\b/.test(
+      snippet,
+    )
+  ) {
+    return undefined;
+  }
+  const lookahead = lines
+    .slice(index, Math.min(lines.length, index + 4))
+    .map((line) => line.trim())
+    .join(" ");
+  if (!/\breturn\s+-E[A-Z0-9_]+\b/.test(lookahead) && !/\breturn\s+-\d+\b/.test(lookahead)) {
+    return undefined;
+  }
+  return {
+    filePath,
+    line: index + 1,
+    snippet,
+    reason: "alias equality is rejected before the downstream write path",
+    state: "SAFE_COUNTEREXAMPLE",
+    kind: "nonalias-guard",
+    strength: "hard-guard",
+    resourceFamily: "nonalias/shared guard",
+  };
+}
+
 function collectDomainLocations(
   fileIndex: FileIndex | undefined,
   filePaths: string[],
@@ -665,6 +941,38 @@ function formatTemplates(templates: SystemsHelperTemplate[]): string {
   return templates.map((template) => `${template.id}: ${template.title}`).join(" | ");
 }
 
+function formatProvenanceFacts(facts: SystemsProvenanceFact[]): string {
+  if (facts.length === 0) return "none";
+  return facts
+    .map(
+      (fact) =>
+        `[${fact.state}/${fact.kind}/${fact.strength}] ${fact.filePath}:${fact.line} ${fact.snippet} (${fact.reason})`,
+    )
+    .join(" | ");
+}
+
+function formatProvenanceSummaries(summaries: SystemsProvenanceSummary[]): string {
+  if (summaries.length === 0) return "none";
+  return summaries
+    .map(
+      (summary) =>
+        `[score=${summary.score}] ${summary.filePath}:${summary.startLine}-${summary.endLine} ${summary.summary}`,
+    )
+    .join(" | ");
+}
+
+function formatProvenanceChains(chains: SystemsProvenanceChain[]): string {
+  if (chains.length === 0) return "none";
+  return chains
+    .map(
+      (chain) =>
+        `[${chain.status} score=${chain.score}] ${chain.narrative}${
+          chain.guardSummary ? ` guard=${chain.guardSummary}` : ""
+        }`,
+    )
+    .join(" | ");
+}
+
 function dedupeLocations(locations: SystemsCodeLocation[]): SystemsCodeLocation[] {
   const seen = new Set<string>();
   const deduped: SystemsCodeLocation[] = [];
@@ -677,11 +985,55 @@ function dedupeLocations(locations: SystemsCodeLocation[]): SystemsCodeLocation[
   return deduped;
 }
 
+function dedupeProvenanceFacts(facts: SystemsProvenanceFact[]): SystemsProvenanceFact[] {
+  const seen = new Set<string>();
+  const deduped: SystemsProvenanceFact[] = [];
+  for (const fact of facts) {
+    const key = `${fact.filePath}:${fact.line}:${fact.state}:${fact.kind}:${fact.snippet}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(fact);
+  }
+  return deduped;
+}
+
+function prioritizeProvenanceFacts(facts: SystemsProvenanceFact[]): SystemsProvenanceFact[] {
+  const weight: Record<SystemsProvenanceFactStrength, number> = {
+    "hard-guard": 3,
+    strong: 2,
+    signal: 1,
+  };
+  const stateWeight: Record<SystemsProvenanceState, number> = {
+    SAFE_COUNTEREXAMPLE: 7,
+    PRIVATE_OWNED: 6,
+    FAILED_AFTER_MUTATION: 5,
+    MUTATED_SHARED: 5,
+    REQ_ALIAS_MUST: 4,
+    PIPE_PAGE_SHARED: 4,
+    FILE_BACKED_SHARED: 3,
+    SG_SHARED: 3,
+    REQ_ALIAS_MAY: 2,
+    ITER_SHARED: 2,
+    VALIDATION_PENDING: 1,
+  };
+  return [...facts].sort((left, right) => {
+    if (weight[right.strength] !== weight[left.strength]) {
+      return weight[right.strength] - weight[left.strength];
+    }
+    if (stateWeight[right.state] !== stateWeight[left.state]) {
+      return stateWeight[right.state] - stateWeight[left.state];
+    }
+    if (left.filePath !== right.filePath) return left.filePath.localeCompare(right.filePath);
+    return left.line - right.line;
+  });
+}
+
 function dedupeStrings(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
 
 export const __systemsHelperInternals = {
+  collectProvenanceFacts,
   inferAnchorSymbol,
   matchTriggerHypothesisToFinding,
 };

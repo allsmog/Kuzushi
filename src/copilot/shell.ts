@@ -636,16 +636,31 @@ async function readRunHistoryForCatalog(
   dataDir: string,
   target?: string,
 ): Promise<PipelineRunRecord[]> {
-  const dbPaths = await existingRunDbPaths(dataDir, target);
+  let dbPaths: string[];
+  try {
+    dbPaths = await existingRunDbPaths(dataDir, target);
+  } catch {
+    return [];
+  }
   if (dbPaths.length === 0) return [];
-  const { initDb, listRuns } = await import("../store.js");
+  let storeApi: typeof import("../store.js");
+  try {
+    storeApi = await import("../store.js");
+  } catch {
+    return [];
+  }
+  const { initDb, listRuns } = storeApi;
   const runs: PipelineRunRecord[] = [];
   for (const dbPath of dbPaths) {
-    const db = initDb(dbPath);
+    let db: ReturnType<typeof initDb> | undefined;
     try {
+      db = initDb(dbPath);
       runs.push(...listRuns(db, { limit: 250 }));
+    } catch {
+      // Catalog history is opportunistic. A missing native sqlite binding,
+      // corrupt DB, or stale lock should not prevent the shell from starting.
     } finally {
-      db.close();
+      db?.close();
     }
   }
   return runs;
@@ -10254,6 +10269,7 @@ export const __shellInternals = {
   loadArtifactManifest,
   loadShellCommandHistory,
   rebuildShellRuntime,
+  readRunHistoryForCatalog,
   resolveDirectToolDispatch,
   saveShellCommandHistory,
   shouldAppendSeparateBodyOutput,

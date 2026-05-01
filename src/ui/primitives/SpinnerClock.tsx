@@ -7,9 +7,9 @@
  * subtree re-renders at slightly-offset times — visible as flicker.
  *
  * With this context, all spinners read `frame` from one clock and tick
- * in phase. The clock only runs while at least one spinner is mounted
- * (tracked via a subscriber counter ref) so we don't burn CPU when the
- * UI is in preflight/summary/done modes.
+ * in phase. The clock only runs while a small number of indicators is
+ * mounted; crowded views render static glyphs because many animated
+ * cells force whole-frame terminal repaints that read as flicker.
  *
  * Inspired by CC's useAnimationFrame hook in cc-repo/src/ink/hooks/
  * use-animation-frame.ts.
@@ -17,13 +17,16 @@
 
 import React from "react";
 
-const FRAME_INTERVAL_MS = 200;
+const FRAME_INTERVAL_MS = 400;
+const MAX_ANIMATED_SUBSCRIBERS = 3;
 
 const SpinnerClockContext = React.createContext<{
   frame: number;
+  motionEnabled: boolean;
   register: () => () => void;
 }>({
   frame: 0,
+  motionEnabled: false,
   register: () => () => {},
 });
 
@@ -33,37 +36,28 @@ export function SpinnerClockProvider({
   children: React.ReactNode;
 }): React.ReactElement {
   const [frame, setFrame] = React.useState(0);
-  const subscriberCountRef = React.useRef(0);
-  const intervalRef = React.useRef<NodeJS.Timeout | null>(null);
-
-  const startTicking = React.useCallback(() => {
-    if (intervalRef.current != null) return;
-    intervalRef.current = setInterval(() => {
-      setFrame((f) => (f + 1) % 10_000);
-    }, FRAME_INTERVAL_MS);
-  }, []);
-
-  const stopTicking = React.useCallback(() => {
-    if (intervalRef.current == null) return;
-    clearInterval(intervalRef.current);
-    intervalRef.current = null;
-  }, []);
+  const [subscriberCount, setSubscriberCount] = React.useState(0);
+  const motionEnabled = subscriberCount > 0 && subscriberCount <= MAX_ANIMATED_SUBSCRIBERS;
 
   const register = React.useCallback((): (() => void) => {
-    subscriberCountRef.current += 1;
-    if (subscriberCountRef.current === 1) startTicking();
+    setSubscriberCount((count) => count + 1);
     return () => {
-      subscriberCountRef.current = Math.max(0, subscriberCountRef.current - 1);
-      if (subscriberCountRef.current === 0) stopTicking();
+      setSubscriberCount((count) => Math.max(0, count - 1));
     };
-  }, [startTicking, stopTicking]);
+  }, []);
 
   React.useEffect(() => {
-    // Cleanup on unmount: stop the interval regardless of counter state.
-    return () => stopTicking();
-  }, [stopTicking]);
+    if (!motionEnabled) return;
+    const id = setInterval(() => {
+      setFrame((f) => (f + 1) % 10_000);
+    }, FRAME_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [motionEnabled]);
 
-  const value = React.useMemo(() => ({ frame, register }), [frame, register]);
+  const value = React.useMemo(
+    () => ({ frame: motionEnabled ? frame : 0, motionEnabled, register }),
+    [frame, motionEnabled, register],
+  );
 
   return <SpinnerClockContext.Provider value={value}>{children}</SpinnerClockContext.Provider>;
 }

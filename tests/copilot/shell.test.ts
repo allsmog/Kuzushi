@@ -1971,6 +1971,16 @@ describe("context system", () => {
     );
   });
 
+  it("treats unreadable catalog run history as optional", async () => {
+    const repoRoot = mkdtempSync(path.join(os.tmpdir(), "kuzushi-bad-history-"));
+    tempDirs.push(repoRoot);
+    const dataDir = path.join(repoRoot, ".kuzushi");
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(path.join(dataDir, "findings.sqlite3"), "not a sqlite database");
+
+    await expect(__shellInternals.readRunHistoryForCatalog(dataDir)).resolves.toEqual([]);
+  });
+
   it("does not overwrite dirty in-memory threat model edits during hydration", async () => {
     const { core, module } = await createMockCore();
     const repoRoot = mkdtempSync(path.join(os.tmpdir(), "kuzushi-hydrate-dirty-"));

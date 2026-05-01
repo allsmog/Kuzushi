@@ -1,11 +1,12 @@
 import { Writable } from "node:stream";
-import { render } from "ink";
-import { createElement, type ReactElement } from "react";
-import { describe, expect, it } from "vitest";
+import { Box, render, Text } from "ink";
+import { act, createElement, type ReactElement } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../src/ui/App.js";
 import { createManualUiClock, UiClockProvider } from "../../src/ui/clock.js";
 import { FindingsView } from "../../src/ui/components/FindingsView.js";
 import { PipelineIndicator } from "../../src/ui/components/PipelineIndicator.js";
+import { SpinnerClockProvider, useSpinnerFrame } from "../../src/ui/primitives/SpinnerClock.js";
 import { createUIStore, type ResultLine, type ShellState } from "../../src/ui/state.js";
 
 class FrameCaptureStream extends Writable {
@@ -42,6 +43,10 @@ class FrameCaptureStream extends Writable {
     return "";
   }
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function renderToString(node: ReactElement, columns = 80, rows = 24): string {
   const stream = new FrameCaptureStream(columns, rows);
@@ -152,4 +157,37 @@ describe("Ink flicker bounds", () => {
     expect(out).toContain("hidden");
     expect(out).not.toContain("done-15");
   });
+
+  it("freezes spinner animation when the screen has many live indicators", async () => {
+    vi.useFakeTimers();
+    const stream = new FrameCaptureStream(80, 24);
+    const probes = Array.from({ length: 4 }, (_, i) =>
+      createElement(FrameProbe, { key: i, label: `p${i}` }),
+    );
+    const instance = render(
+      createElement(
+        SpinnerClockProvider,
+        null,
+        createElement(Box, { flexDirection: "column" }, ...probes),
+      ),
+      {
+        stdout: stream as unknown as Writable & NodeJS.WriteStream,
+        debug: true,
+      },
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(1600);
+    });
+    instance.unmount();
+
+    const out = stripAnsi(stream.lastFrame());
+    expect(out).toContain("p0:0");
+    expect(out).toContain("p3:0");
+  });
 });
+
+function FrameProbe({ label }: { label: string }): ReactElement {
+  const frame = useSpinnerFrame();
+  return createElement(Text, null, `${label}:${frame}`);
+}

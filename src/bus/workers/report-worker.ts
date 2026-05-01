@@ -133,52 +133,52 @@ export function registerReportWorker(
         }
         return;
       }
-      // Build pipeline stages from config
-      const stageList: Array<{ id: string; label: string }> = [{ id: "scan", label: "Scan" }];
-      if (!scanOnly) {
-        stageList.push({ id: "triage", label: "Triage" });
-        if (event.payload.config.verify) {
-          stageList.push({ id: "verify", label: "Verify" });
+      store.batch(() => {
+        // Build pipeline stages from config
+        const stageList: Array<{ id: string; label: string }> = [{ id: "scan", label: "Scan" }];
+        if (!scanOnly) {
+          stageList.push({ id: "triage", label: "Triage" });
+          if (event.payload.config.verify) {
+            stageList.push({ id: "verify", label: "Verify" });
+          }
+          if (event.payload.config.pocHarness) {
+            stageList.push({ id: "poc", label: "PoC Harness" });
+          }
         }
-        if (event.payload.config.pocHarness) {
-          stageList.push({ id: "poc", label: "PoC Harness" });
-        }
-      }
-      stageList.push({ id: "report", label: "Report" });
+        stageList.push({ id: "report", label: "Report" });
 
-      store.initStages(stageList);
-      store.activateStage("scan", state.tasks?.join(", "));
-      if (shellRun) {
-        const taskSteps = (state.tasks ?? []).map((taskId) => moduleRunStep(taskId, "pending"));
-        store.patchModuleRun({
-          runId: event.meta.runId,
-          activeTaskLabel: "preparing task",
-          steps: [...taskSteps, moduleRunStep("report", "pending", "report")],
-          model: shellRun.model ?? event.payload.config.model,
-          postProcessMode: event.payload.context.postProcessMode,
-        });
-      }
-      store.update({
-        tasks: state.tasks,
-        pipelineStartedAt: Date.now(),
-        configBanner: {
-          model: event.payload.config.model,
-          tasks: state.tasks ?? [],
-          severity: event.payload.scanOpts.severity,
-          concurrency: event.payload.config.triageConcurrency,
-          scanMode: event.payload.config.scanMode,
+        store.initStages(stageList);
+        store.activateStage("scan", state.tasks?.join(", "));
+        if (shellRun) {
+          const taskSteps = (state.tasks ?? []).map((taskId) => moduleRunStep(taskId, "pending"));
+          store.patchModuleRun({
+            runId: event.meta.runId,
+            activeTaskLabel: "preparing task",
+            steps: [...taskSteps, moduleRunStep("report", "pending", "report")],
+            model: shellRun.model ?? event.payload.config.model,
+            postProcessMode: event.payload.context.postProcessMode,
+          });
+        }
+        store.update({
+          tasks: state.tasks,
+          pipelineStartedAt: Date.now(),
+          configBanner: {
+            model: event.payload.config.model,
+            tasks: state.tasks ?? [],
+            severity: event.payload.scanOpts.severity,
+            concurrency: event.payload.config.triageConcurrency,
+            scanMode: event.payload.config.scanMode,
+            ...(typeof event.payload.config.costBudgetUsd === "number"
+              ? { budget: event.payload.config.costBudgetUsd }
+              : {}),
+          },
           ...(typeof event.payload.config.costBudgetUsd === "number"
-            ? { budget: event.payload.config.costBudgetUsd }
+            ? { costCapBudgetUsd: event.payload.config.costBudgetUsd }
             : {}),
-        },
-        // O1: surface the budget cap so StatusFooter can render
-        // `$X.XX / $Y.YY` and the CostCapHalt card has a value to compare.
-        ...(typeof event.payload.config.costBudgetUsd === "number"
-          ? { costCapBudgetUsd: event.payload.config.costBudgetUsd }
-          : {}),
-        ...(!shellRun ? { mode: "running" as const } : {}),
+          ...(!shellRun ? { mode: "running" as const } : {}),
+        });
+        store.clearNotices();
       });
-      store.clearNotices();
 
       // Bridge rate limit events to UIStore
       try {
@@ -214,42 +214,44 @@ export function registerReportWorker(
         return;
       }
 
-      store.update({
-        tasks: state.tasks,
-        phase: "scanning",
-        ...(!shellRun ? { mode: "running" as const } : {}),
+      store.batch(() => {
+        store.update({
+          tasks: state.tasks,
+          phase: "scanning",
+          ...(!shellRun ? { mode: "running" as const } : {}),
+        });
+        // Every DAG task gets a sub-task row so the operator can see what's
+        // running. Tasks with non-finding output kinds (custom upstream
+        // setup, verdict aggregation, report shaping) are flagged as
+        // `support` so the renderer mutes them and the active-task picker
+        // prefers primary detectors when summarising the stage.
+        const role =
+          SUPPORT_TASK_IDS.has(event.payload.taskId) ||
+          (event.payload.outputKind !== "findings" && event.payload.outputKind !== "threat-model")
+            ? ("support" as const)
+            : ("primary" as const);
+        store.upsertSubTask("scan", {
+          id: event.payload.taskId,
+          label: event.payload.taskId,
+          status: "active",
+          startedAt: Date.now(),
+          detail: scanTaskStartDetail(event.payload.taskId),
+          role,
+        });
+        patchModuleRunTask(
+          store,
+          event.payload.taskId,
+          {
+            status: "running",
+            count: undefined,
+          },
+          event.meta.runId,
+        );
+        if (shellRun) {
+          store.patchModuleRun({ activeTaskLabel: event.payload.taskId });
+        }
+        updateScanStageDetail(store);
       });
-      // Every DAG task gets a sub-task row so the operator can see what's
-      // running. Tasks with non-finding output kinds (custom upstream
-      // setup, verdict aggregation, report shaping) are flagged as
-      // `support` so the renderer mutes them and the active-task picker
-      // prefers primary detectors when summarising the stage.
-      const role =
-        SUPPORT_TASK_IDS.has(event.payload.taskId) ||
-        (event.payload.outputKind !== "findings" && event.payload.outputKind !== "threat-model")
-          ? ("support" as const)
-          : ("primary" as const);
-      store.upsertSubTask("scan", {
-        id: event.payload.taskId,
-        label: event.payload.taskId,
-        status: "active",
-        startedAt: Date.now(),
-        detail: scanTaskStartDetail(event.payload.taskId),
-        role,
-      });
-      patchModuleRunTask(
-        store,
-        event.payload.taskId,
-        {
-          status: "running",
-          count: undefined,
-        },
-        event.meta.runId,
-      );
-      if (shellRun) {
-        store.patchModuleRun({ activeTaskLabel: event.payload.taskId });
-      }
-      updateScanStageDetail(store);
     }
   });
 
@@ -276,33 +278,35 @@ export function registerReportWorker(
       // instead of the previous double-printed
       //   ◉ semgrep   32 findings   32 findings · javascript.lang.security.audit.proto…
       const detail = lastFinding ? truncateLastFinding(lastFinding) : "complete";
-      store.clearScanActivity(event.payload.taskId);
-      store.upsertSubTask("scan", {
-        id: event.payload.taskId,
-        label: event.payload.taskId,
-        status: "done",
-        elapsedMs: event.payload.durationMs,
-        findingCount,
-        lastFinding,
-        detail,
-      });
-      patchModuleRunTask(
-        store,
-        event.payload.taskId,
-        {
+      store.batch(() => {
+        store.clearScanActivity(event.payload.taskId);
+        store.upsertSubTask("scan", {
+          id: event.payload.taskId,
+          label: event.payload.taskId,
           status: "done",
-          elapsedSeconds: Math.max(0, Math.round(event.payload.durationMs / 1000)),
-          count:
-            findingCount > 0
-              ? `${findingCount} finding${findingCount === 1 ? "" : "s"}`
-              : undefined,
-        },
-        event.meta.runId,
-      );
-      if (event.payload.costUsd != null) {
-        incrementModuleRunCost(store, event.payload.costUsd, event.meta.runId);
-      }
-      updateScanStageDetail(store);
+          elapsedMs: event.payload.durationMs,
+          findingCount,
+          lastFinding,
+          detail,
+        });
+        patchModuleRunTask(
+          store,
+          event.payload.taskId,
+          {
+            status: "done",
+            elapsedSeconds: Math.max(0, Math.round(event.payload.durationMs / 1000)),
+            count:
+              findingCount > 0
+                ? `${findingCount} finding${findingCount === 1 ? "" : "s"}`
+                : undefined,
+          },
+          event.meta.runId,
+        );
+        if (event.payload.costUsd != null) {
+          incrementModuleRunCost(store, event.payload.costUsd, event.meta.runId);
+        }
+        updateScanStageDetail(store);
+      });
     }
   });
 
@@ -320,14 +324,16 @@ export function registerReportWorker(
       });
       return;
     }
-    store.recordSubTaskFinding("scan", event.payload.taskId, detail);
-    incrementModuleRunFinding(store, event.payload.taskId, detail, event.meta.runId);
-    // Inject the provisional finding as a story beat in the activity lines.
-    store.addScanActivity(event.payload.taskId, {
-      kind: "finding-preview",
-      detail: `Found: ${detail}`,
+    store.batch(() => {
+      store.recordSubTaskFinding("scan", event.payload.taskId, detail);
+      incrementModuleRunFinding(store, event.payload.taskId, detail, event.meta.runId);
+      // Inject the provisional finding as a story beat in the activity lines.
+      store.addScanActivity(event.payload.taskId, {
+        kind: "finding-preview",
+        detail: `Found: ${detail}`,
+      });
+      updateScanStageDetail(store);
     });
-    updateScanStageDetail(store);
   });
 
   // Post-DAG ranking helpers (`reachability-check`, `call-graph-assist`)
@@ -338,15 +344,17 @@ export function registerReportWorker(
   bus.subscribe<ScanPostTaskStartEvent>("scan:post-task-start", (event) => {
     if (!store) return;
     const role = SUPPORT_TASK_IDS.has(event.payload.taskId) ? "support" : "primary";
-    store.upsertSubTask("scan", {
-      id: event.payload.taskId,
-      label: event.payload.taskId,
-      status: "active",
-      startedAt: Date.now(),
-      detail: event.payload.detail ?? scanTaskStartDetail(event.payload.taskId),
-      role,
+    store.batch(() => {
+      store.upsertSubTask("scan", {
+        id: event.payload.taskId,
+        label: event.payload.taskId,
+        status: "active",
+        startedAt: Date.now(),
+        detail: event.payload.detail ?? scanTaskStartDetail(event.payload.taskId),
+        role,
+      });
+      updateScanStageDetail(store);
     });
-    updateScanStageDetail(store);
   });
 
   bus.subscribe<ScanPostTaskCompleteEvent>("scan:post-task-complete", (event) => {
@@ -356,27 +364,29 @@ export function registerReportWorker(
       .stages.find((stage) => stage.id === "scan")
       ?.subTasks.find((task) => task.id === event.payload.taskId);
     const findingCount = existing?.findingCount ?? 0;
-    store.clearScanActivity(event.payload.taskId);
-    if (event.payload.error) {
-      store.upsertSubTask("scan", {
-        id: event.payload.taskId,
-        label: event.payload.taskId,
-        status: "error",
-        elapsedMs: event.payload.durationMs,
-        detail: event.payload.error.slice(0, 60),
-        lastError: event.payload.error.slice(0, 120),
-      });
-    } else {
-      store.upsertSubTask("scan", {
-        id: event.payload.taskId,
-        label: event.payload.taskId,
-        status: "done",
-        elapsedMs: event.payload.durationMs,
-        findingCount,
-        detail: "complete",
-      });
-    }
-    updateScanStageDetail(store);
+    store.batch(() => {
+      store.clearScanActivity(event.payload.taskId);
+      if (event.payload.error) {
+        store.upsertSubTask("scan", {
+          id: event.payload.taskId,
+          label: event.payload.taskId,
+          status: "error",
+          elapsedMs: event.payload.durationMs,
+          detail: event.payload.error.slice(0, 60),
+          lastError: event.payload.error.slice(0, 120),
+        });
+      } else {
+        store.upsertSubTask("scan", {
+          id: event.payload.taskId,
+          label: event.payload.taskId,
+          status: "done",
+          elapsedMs: event.payload.durationMs,
+          findingCount,
+          detail: "complete",
+        });
+      }
+      updateScanStageDetail(store);
+    });
   });
 
   bus.subscribe<TaskErrorEvent>("task:error", (event) => {
@@ -400,34 +410,36 @@ export function registerReportWorker(
         .stages.find((stage) => stage.id === "scan")
         ?.subTasks.find((task) => task.id === event.payload.taskId);
       const prevRetries = existing?.retryCount ?? 0;
-      store.clearScanActivity(event.payload.taskId);
-      store.upsertSubTask("scan", {
-        id: event.payload.taskId,
-        label: event.payload.taskId,
-        status: "error",
-        detail: event.payload.error?.slice(0, 60),
-        lastError: event.payload.error?.slice(0, 120),
-        retryCount: prevRetries,
-      });
-      patchModuleRunTask(
-        store,
-        event.payload.taskId,
-        {
+      store.batch(() => {
+        store.clearScanActivity(event.payload.taskId);
+        store.upsertSubTask("scan", {
+          id: event.payload.taskId,
+          label: event.payload.taskId,
           status: "error",
-          error: truncate(event.payload.error, 120),
-        },
-        event.meta.runId,
-      );
-      if (shellRun) {
-        store.patchModuleRun({ activeTaskLabel: event.payload.taskId });
-      }
-      store.addNotice({
-        level: "error",
-        message: `Task failed: ${event.payload.taskId}`,
-        detail: truncate(event.payload.error, 120),
-        source: "scan",
+          detail: event.payload.error?.slice(0, 60),
+          lastError: event.payload.error?.slice(0, 120),
+          retryCount: prevRetries,
+        });
+        patchModuleRunTask(
+          store,
+          event.payload.taskId,
+          {
+            status: "error",
+            error: truncate(event.payload.error, 120),
+          },
+          event.meta.runId,
+        );
+        if (shellRun) {
+          store.patchModuleRun({ activeTaskLabel: event.payload.taskId });
+        }
+        store.addNotice({
+          level: "error",
+          message: `Task failed: ${event.payload.taskId}`,
+          detail: truncate(event.payload.error, 120),
+          source: "scan",
+        });
+        updateScanStageDetail(store);
       });
-      updateScanStageDetail(store);
     }
   });
 
@@ -437,23 +449,25 @@ export function registerReportWorker(
     const inline = state.inline ?? event.payload.context.inline === true;
 
     if (store) {
-      store.update({ totalFindings: state.totalFindings });
-      const shellRun = getShellOwnedModuleRun(store, event.meta.runId);
-      if (shellRun) {
-        store.patchModuleRun({ findingCount: state.totalFindings });
-      }
-      if (inline && !shellRun) {
-        // Inline runs have no "scan" stage — skip the detail update.
+      store.batch(() => {
+        store.update({ totalFindings: state.totalFindings });
+        const shellRun = getShellOwnedModuleRun(store, event.meta.runId);
+        if (shellRun) {
+          store.patchModuleRun({ findingCount: state.totalFindings });
+        }
+        if (inline && !shellRun) {
+          // Inline runs have no "scan" stage — skip the detail update.
+          maybeUpdateStartBanner(store, state, event.payload.context.repoName);
+          return;
+        }
+        // Signal that scan tasks are done but post-processing (dedup, filter, rank) is happening.
+        const count = event.payload.totalFindings;
+        store.updateStageDetail(
+          "scan",
+          `${count} finding${count === 1 ? "" : "s"} · deduplicating and ranking`,
+        );
         maybeUpdateStartBanner(store, state, event.payload.context.repoName);
-        return;
-      }
-      // Signal that scan tasks are done but post-processing (dedup, filter, rank) is happening.
-      const count = event.payload.totalFindings;
-      store.updateStageDetail(
-        "scan",
-        `${count} finding${count === 1 ? "" : "s"} · deduplicating and ranking`,
-      );
-      maybeUpdateStartBanner(store, state, event.payload.context.repoName);
+      });
     } else {
       maybePrintStartBanner(state, event.payload.context.repoName);
     }
@@ -524,36 +538,38 @@ export function registerReportWorker(
         filtered > 0
           ? `${selected} of ${total} findings selected · ${filtered} filtered`
           : `${selected} findings via ${event.payload.model}`;
-      // Mark scan stage as complete when triage starts so the CI
-      // stream gets a `stage: scan → done` line (issue #37 — stage
-      // transitions used to go quiet after the first activate event).
-      store.completeStage("scan");
-      store.activateStage("triage", triageDetail);
-      triageStartedAt = Date.now();
+      store.batch(() => {
+        // Mark scan stage as complete when triage starts so the CI
+        // stream gets a `stage: scan → done` line (issue #37 — stage
+        // transitions used to go quiet after the first activate event).
+        store.completeStage("scan");
+        store.activateStage("triage", triageDetail);
+        triageStartedAt = Date.now();
 
-      const skipped = event.payload.skippedAlreadyTriaged ?? 0;
-      if (skipped > 0) {
+        const skipped = event.payload.skippedAlreadyTriaged ?? 0;
+        if (skipped > 0) {
+          store.update({
+            resumeDiff: {
+              previousFindingCount: state.totalFindings ?? 0,
+              previousTriagedCount: skipped,
+              newFindings: event.payload.findingCount,
+              skipped,
+              pendingRetriage: 0,
+              verdictChanges: [],
+            },
+          });
+        }
+
         store.update({
-          resumeDiff: {
-            previousFindingCount: state.totalFindings ?? 0,
-            previousTriagedCount: skipped,
-            newFindings: event.payload.findingCount,
-            skipped,
-            pendingRetriage: 0,
-            verdictChanges: [],
-          },
+          phase: "triaging",
+          selectedForTriage: event.payload.findingCount,
+          skippedAlreadyTriaged: skipped,
+          model: event.payload.model,
+          progress: { current: 0, total: event.payload.findingCount },
+          ...(!getShellOwnedModuleRun(store, event.meta.runId) ? { mode: "running" as const } : {}),
         });
-      }
-
-      store.update({
-        phase: "triaging",
-        selectedForTriage: event.payload.findingCount,
-        skippedAlreadyTriaged: skipped,
-        model: event.payload.model,
-        progress: { current: 0, total: event.payload.findingCount },
-        ...(!getShellOwnedModuleRun(store, event.meta.runId) ? { mode: "running" as const } : {}),
+        maybeUpdateStartBanner(store, state, event.payload.context.repoName);
       });
-      maybeUpdateStartBanner(store, state, event.payload.context.repoName);
     } else {
       maybePrintStartBanner(state, event.payload.context.repoName);
       if (event.payload.findingCount > 0) {
@@ -568,27 +584,29 @@ export function registerReportWorker(
     const { result, index, total, attempts } = event.payload;
 
     if (store) {
-      store.addResult({
-        kind: "triage",
-        verdict: result.verdict,
-        confidence: result.confidence,
-        costUsd: result.triageCostUsd,
-        fingerprint: result.fingerprint,
-        index,
-        total,
-        attempts,
-      });
-      store.clearAgentActivity(result.fingerprint);
+      store.batch(() => {
+        store.addResult({
+          kind: "triage",
+          verdict: result.verdict,
+          confidence: result.confidence,
+          costUsd: result.triageCostUsd,
+          fingerprint: result.fingerprint,
+          index,
+          total,
+          attempts,
+        });
+        store.clearAgentActivity(result.fingerprint);
 
-      // Compute ETA from running average (only after 3+ findings for stability)
-      if (triageStartedAt && index >= 3 && index < total) {
-        const elapsed = Date.now() - triageStartedAt;
-        const avgPerFinding = elapsed / index;
-        const remaining = (total - index) * avgPerFinding;
-        store.update({ etaMs: Math.round(remaining) });
-      } else if (index >= total) {
-        store.update({ etaMs: undefined });
-      }
+        // Compute ETA from running average (only after 3+ findings for stability)
+        if (triageStartedAt && index >= 3 && index < total) {
+          const elapsed = Date.now() - triageStartedAt;
+          const avgPerFinding = elapsed / index;
+          const remaining = (total - index) * avgPerFinding;
+          store.update({ etaMs: Math.round(remaining) });
+        } else if (index >= total) {
+          store.update({ etaMs: undefined });
+        }
+      });
     } else {
       printTriageProgress(result, index, total, attempts);
     }
@@ -598,16 +616,18 @@ export function registerReportWorker(
     const { finding, error, index, total, attempts } = event.payload;
 
     if (store) {
-      store.addResult({
-        kind: "error",
-        errorStage: "triage",
-        errorMessage: truncate(error, 160),
-        fingerprint: finding.fingerprint,
-        index,
-        total,
-        attempts,
+      store.batch(() => {
+        store.addResult({
+          kind: "error",
+          errorStage: "triage",
+          errorMessage: truncate(error, 160),
+          fingerprint: finding.fingerprint,
+          index,
+          total,
+          attempts,
+        });
+        store.clearAgentActivity(finding.fingerprint);
       });
-      store.clearAgentActivity(finding.fingerprint);
     } else {
       const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
       console.log(
@@ -619,18 +639,20 @@ export function registerReportWorker(
 
   bus.subscribe<VerificationStartEvent>("verification:start", (event) => {
     if (store) {
-      // Mark triage as complete when verification starts (issue #37).
-      store.completeStage("triage");
-      store.activateStage(
-        "verify",
-        `${event.payload.findingCount} findings via ${event.payload.model}`,
-      );
-      store.update({
-        phase: "verifying",
-        model: event.payload.model,
-        progress: { current: 0, total: event.payload.findingCount },
-        results: [], // clear triage results from live view
-        ...(!getShellOwnedModuleRun(store, event.meta.runId) ? { mode: "running" as const } : {}),
+      store.batch(() => {
+        // Mark triage as complete when verification starts (issue #37).
+        store.completeStage("triage");
+        store.activateStage(
+          "verify",
+          `${event.payload.findingCount} findings via ${event.payload.model}`,
+        );
+        store.update({
+          phase: "verifying",
+          model: event.payload.model,
+          progress: { current: 0, total: event.payload.findingCount },
+          results: [], // clear triage results from live view
+          ...(!getShellOwnedModuleRun(store, event.meta.runId) ? { mode: "running" as const } : {}),
+        });
       });
     } else {
       if (event.payload.findingCount > 0) {
@@ -645,16 +667,18 @@ export function registerReportWorker(
     const { result, index, total, attempts } = event.payload;
 
     if (store) {
-      store.addResult({
-        kind: "verify",
-        exploitable: result.exploitable,
-        costUsd: result.verifyCostUsd,
-        fingerprint: result.fingerprint,
-        index,
-        total,
-        attempts,
+      store.batch(() => {
+        store.addResult({
+          kind: "verify",
+          exploitable: result.exploitable,
+          costUsd: result.verifyCostUsd,
+          fingerprint: result.fingerprint,
+          index,
+          total,
+          attempts,
+        });
+        store.clearAgentActivity(result.fingerprint);
       });
-      store.clearAgentActivity(result.fingerprint);
     } else {
       const status = result.exploitable ? "EXPLOITABLE" : "not exploitable";
       const cost =
@@ -672,16 +696,18 @@ export function registerReportWorker(
     const { finding, error, index, total, attempts } = event.payload;
 
     if (store) {
-      store.addResult({
-        kind: "error",
-        errorStage: "verify",
-        errorMessage: truncate(error, 160),
-        fingerprint: finding.fingerprint,
-        index,
-        total,
-        attempts,
+      store.batch(() => {
+        store.addResult({
+          kind: "error",
+          errorStage: "verify",
+          errorMessage: truncate(error, 160),
+          fingerprint: finding.fingerprint,
+          index,
+          total,
+          attempts,
+        });
+        store.clearAgentActivity(finding.fingerprint);
       });
-      store.clearAgentActivity(finding.fingerprint);
     } else {
       const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
       console.log(
@@ -693,18 +719,20 @@ export function registerReportWorker(
 
   bus.subscribe<PocHarnessStartEvent>("poc-harness:start", (event) => {
     if (store) {
-      // Mark verify as complete when PoC harness starts (issue #37).
-      store.completeStage("verify");
-      store.activateStage(
-        "poc",
-        `${event.payload.findingCount} harnesses via ${event.payload.model}`,
-      );
-      store.update({
-        phase: "poc",
-        model: event.payload.model,
-        progress: { current: 0, total: event.payload.findingCount },
-        results: [],
-        ...(!getShellOwnedModuleRun(store, event.meta.runId) ? { mode: "running" as const } : {}),
+      store.batch(() => {
+        // Mark verify as complete when PoC harness starts (issue #37).
+        store.completeStage("verify");
+        store.activateStage(
+          "poc",
+          `${event.payload.findingCount} harnesses via ${event.payload.model}`,
+        );
+        store.update({
+          phase: "poc",
+          model: event.payload.model,
+          progress: { current: 0, total: event.payload.findingCount },
+          results: [],
+          ...(!getShellOwnedModuleRun(store, event.meta.runId) ? { mode: "running" as const } : {}),
+        });
       });
     } else {
       if (event.payload.findingCount > 0) {
@@ -719,17 +747,19 @@ export function registerReportWorker(
     const { result, index, total, attempts } = event.payload;
 
     if (store) {
-      store.addResult({
-        kind: "poc",
-        skipped: result.skipped,
-        parsed: result.parsed,
-        costUsd: result.costUsd,
-        fingerprint: result.fingerprint,
-        index,
-        total,
-        attempts,
+      store.batch(() => {
+        store.addResult({
+          kind: "poc",
+          skipped: result.skipped,
+          parsed: result.parsed,
+          costUsd: result.costUsd,
+          fingerprint: result.fingerprint,
+          index,
+          total,
+          attempts,
+        });
+        store.clearAgentActivity(result.fingerprint);
       });
-      store.clearAgentActivity(result.fingerprint);
     } else {
       const status = result.skipped ? "SKIPPED" : "GENERATED";
       const parsed = result.skipped ? "" : result.parsed ? " parsed" : " parse-error";
@@ -745,16 +775,18 @@ export function registerReportWorker(
     const { finding, error, index, total, attempts } = event.payload;
 
     if (store) {
-      store.addResult({
-        kind: "error",
-        errorStage: "poc",
-        errorMessage: truncate(error, 160),
-        fingerprint: finding.fingerprint,
-        index,
-        total,
-        attempts,
+      store.batch(() => {
+        store.addResult({
+          kind: "error",
+          errorStage: "poc",
+          errorMessage: truncate(error, 160),
+          fingerprint: finding.fingerprint,
+          index,
+          total,
+          attempts,
+        });
+        store.clearAgentActivity(finding.fingerprint);
       });
-      store.clearAgentActivity(finding.fingerprint);
     } else {
       const retrySuffix = attempts && attempts > 1 ? ` (retry #${attempts})` : "";
       console.log(
@@ -794,8 +826,10 @@ export function registerReportWorker(
       // breakdown would be unrecoverable once the tool resolves).
       // Currently only carlini-threat-hunt producers set `done: true`, so the
       // other handlers fall through to the no-op branch unchanged.
-      store.archiveAgentActivity(fingerprint);
-      store.clearAgentActivity(fingerprint);
+      store.batch(() => {
+        store.archiveAgentActivity(fingerprint);
+        store.clearAgentActivity(fingerprint);
+      });
       return;
     }
 
@@ -821,10 +855,12 @@ export function registerReportWorker(
         // stalls. Optional on the type so older callers stay valid.
         tsMs: Date.now(),
       };
-      const changed = store.addAgentActivity(fingerprint, line);
-      // Mirror into moduleRun.evidenceTail so ModuleRunView's "Evidence"
-      // tail fills regardless of which fingerprint owns the event.
-      if (changed) store.pushModuleRunActivity(line);
+      store.batch(() => {
+        const changed = store.addAgentActivity(fingerprint, line);
+        // Mirror into moduleRun.evidenceTail so ModuleRunView's "Evidence"
+        // tail fills regardless of which fingerprint owns the event.
+        if (changed) store.pushModuleRunActivity(line);
+      });
       return;
     }
 
@@ -885,21 +921,23 @@ export function registerReportWorker(
         }
         return;
       }
-      store.addScanActivity(taskId, {
-        kind: kind as "tool-start" | "tool-progress" | "tool-complete" | "summary" | "reasoning",
-        toolName,
-        detail,
-        elapsedSeconds,
-      });
-      // Mirror into moduleRun.evidenceTail. ScanAgentActivity carries no
-      // (index,total) — synth zeros so the type matches AgentActivityLine.
-      store.pushModuleRunActivity({
-        kind: kind as "tool-start" | "tool-progress" | "tool-complete" | "summary" | "reasoning",
-        toolName,
-        detail,
-        elapsedSeconds,
-        index: 0,
-        total: 0,
+      store.batch(() => {
+        store.addScanActivity(taskId, {
+          kind: kind as "tool-start" | "tool-progress" | "tool-complete" | "summary" | "reasoning",
+          toolName,
+          detail,
+          elapsedSeconds,
+        });
+        // Mirror into moduleRun.evidenceTail. ScanAgentActivity carries no
+        // (index,total) — synth zeros so the type matches AgentActivityLine.
+        store.pushModuleRunActivity({
+          kind: kind as "tool-start" | "tool-progress" | "tool-complete" | "summary" | "reasoning",
+          toolName,
+          detail,
+          elapsedSeconds,
+          index: 0,
+          total: 0,
+        });
       });
       return;
     }
@@ -956,12 +994,14 @@ export function registerReportWorker(
       // renders. The UI card, key bindings (c/a in App.tsx), and store
       // field already exist; the missing piece was a subscriber to
       // `budget:exceeded` that toggled `costCapHalted = true`.
-      store.update({ costCapHalted: true });
-      store.addNotice({
-        level: "error",
-        message: "Budget exceeded",
-        detail,
-        source: "budget",
+      store.batch(() => {
+        store.update({ costCapHalted: true });
+        store.addNotice({
+          level: "error",
+          message: "Budget exceeded",
+          detail,
+          source: "budget",
+        });
       });
       return;
     }
@@ -997,30 +1037,32 @@ export function registerReportWorker(
     if (store) {
       const shellRun = getShellOwnedModuleRun(store, event.meta.runId);
       if (reportMode === "full" && !(inline && !shellRun)) {
-        maybeUpdateStartBanner(store, state, event.payload.context.repoName);
+        store.batch(() => {
+          maybeUpdateStartBanner(store, state, event.payload.context.repoName);
 
-        if (state.totalFindings === 0) {
-          store.addNotice({
-            level: "success",
-            message: "No findings from tasks",
-            detail: "Code looks clean.",
-            source: "report",
-          });
-        } else if (scanOnly) {
-          store.addNotice({
-            level: "info",
-            message: "Scan-only run complete",
-            detail: "Findings were saved as needs_review without running triage.",
-            source: "report",
-          });
-        } else if ((state.selectedForTriage ?? 0) === 0) {
-          store.addNotice({
-            level: "info",
-            message: "All findings already triaged",
-            detail: "Nothing new to review in this run.",
-            source: "report",
-          });
-        }
+          if (state.totalFindings === 0) {
+            store.addNotice({
+              level: "success",
+              message: "No findings from tasks",
+              detail: "Code looks clean.",
+              source: "report",
+            });
+          } else if (scanOnly) {
+            store.addNotice({
+              level: "info",
+              message: "Scan-only run complete",
+              detail: "Findings were saved as needs_review without running triage.",
+              source: "report",
+            });
+          } else if ((state.selectedForTriage ?? 0) === 0) {
+            store.addNotice({
+              level: "info",
+              message: "All findings already triaged",
+              detail: "Nothing new to review in this run.",
+              source: "report",
+            });
+          }
+        });
 
         const summaryData = buildSummaryData(deps.db, event.payload.context.repoName, {
           stats: event.payload.stats,
@@ -1039,52 +1081,54 @@ export function registerReportWorker(
             ? summaryFindingCount
             : state.totalFindings);
 
-        store.activateStage("report");
-        store.completeStage("report");
-        completeOpenModuleRunTasks(store, event.meta.runId);
-        patchModuleRunTask(
-          store,
-          "report",
-          {
-            status: "done",
-            count: `${finalFindingCount} finding${finalFindingCount === 1 ? "" : "s"}`,
-          },
-          event.meta.runId,
-        );
-        if (shellRun?.moduleId === "taint-iris") {
+        store.batch(() => {
+          store.activateStage("report");
+          store.completeStage("report");
+          completeOpenModuleRunTasks(store, event.meta.runId);
           patchModuleRunTask(
             store,
-            "taint-iris",
+            "report",
             {
+              status: "done",
               count: `${finalFindingCount} finding${finalFindingCount === 1 ? "" : "s"}`,
             },
             event.meta.runId,
           );
-        }
-        store.update({
-          phase: "summary",
-          summary: summaryData,
-          qualityGate: qualityGateResult,
-          ...(!shellRun ? { mode: "summary" as const } : {}),
-        });
-        if (shellRun) {
-          const costUsd =
-            event.payload.stats?.totalCostUsd ??
-            summaryData.triageCostUsd +
-              summaryData.verificationCostUsd +
-              summaryData.pocHarnessCostUsd +
-              summaryData.variantAnalysisCostUsd +
-              summaryData.dynamicCostUsd +
-              summaryData.patchCostUsd;
-          store.patchModuleRun({
-            activeTaskLabel: undefined,
-            status: "done",
-            completedAtMs: Date.now(),
-            postProcessMode: event.payload.context.postProcessMode,
-            findingCount: finalFindingCount,
-            costUsd,
+          if (shellRun?.moduleId === "taint-iris") {
+            patchModuleRunTask(
+              store,
+              "taint-iris",
+              {
+                count: `${finalFindingCount} finding${finalFindingCount === 1 ? "" : "s"}`,
+              },
+              event.meta.runId,
+            );
+          }
+          store.update({
+            phase: "summary",
+            summary: summaryData,
+            qualityGate: qualityGateResult,
+            ...(!shellRun ? { mode: "summary" as const } : {}),
           });
-        }
+          if (shellRun) {
+            const costUsd =
+              event.payload.stats?.totalCostUsd ??
+              summaryData.triageCostUsd +
+                summaryData.verificationCostUsd +
+                summaryData.pocHarnessCostUsd +
+                summaryData.variantAnalysisCostUsd +
+                summaryData.dynamicCostUsd +
+                summaryData.patchCostUsd;
+            store.patchModuleRun({
+              activeTaskLabel: undefined,
+              status: "done",
+              completedAtMs: Date.now(),
+              postProcessMode: event.payload.context.postProcessMode,
+              findingCount: finalFindingCount,
+              costUsd,
+            });
+          }
+        });
 
         // Send completion notification
         const { title, message } = buildScanNotification({
