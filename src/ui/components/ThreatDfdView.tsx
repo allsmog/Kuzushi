@@ -137,10 +137,10 @@ function EmptyWorkspace(): React.ReactElement {
 
 function AttackSurfaceMap({ model }: { model: AttackSurfaceDfdModel }): React.ReactElement {
   const { columns } = useTerminalSize();
-  // Box draws inside the available width; clamp so 80-col terminals still
-  // fit the box and 200-col panes use real estate without ballooning past
-  // a readable line length.
-  const boxWidth = Math.max(60, Math.min(columns - 2, 140));
+  // Box draws inside the available width; ScreenContent/host padding takes
+  // a couple of cells, so reserve 4 (matches the legacy 76-of-80 ratio).
+  // Clamp [60..140] so the box stays readable on ultrawide panes too.
+  const boxWidth = Math.max(60, Math.min(columns - 4, 140));
   return (
     <Box flexDirection="column" marginTop={SPACING.sm}>
       {model.zones.map((zone, index) => (
@@ -204,9 +204,10 @@ function NodeRow({
   const detail = node.tags.length > 0 ? node.tags.slice(0, 3).join(" · ") : node.description;
   // Inner content is `│ ` + marker + " " + label + detail + `│` = width.
   // Reserve 6 cells for the frame (`│ `, marker, space, trailing `│`)
-  // then split label/detail roughly 45/55 so labels stay readable.
+  // then split label/detail at the legacy 34/36 ratio so labels keep
+  // priority on narrow panes while ultrawide adds room to both columns.
   const inner = Math.max(20, width - 6);
-  const labelWidth = Math.max(12, Math.floor(inner * 0.45));
+  const labelWidth = Math.max(12, Math.floor((inner * 34) / 70));
   const detailWidth = Math.max(8, inner - labelWidth);
   const color = selected
     ? tokens.accent
