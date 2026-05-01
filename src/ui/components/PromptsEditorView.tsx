@@ -16,6 +16,7 @@ import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import { Table } from "../primitives/Table.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
+import { EmptyState } from "./EmptyState.js";
 import { RuleHeader } from "./RuleHeader.js";
 import { ScreenContent } from "./ScreenContent.js";
 
@@ -79,6 +80,18 @@ export function PromptsEditorView({
   const rows: ReadonlyArray<AnyRow> = rowsProp ?? shell.promptsEditor?.audit ?? [];
   const localEdits = rows.filter((r) => r.effective.source === "file").length;
   const status = `${rows.length} prompt${rows.length === 1 ? "" : "s"} · ${localEdits} local edit${localEdits === 1 ? "" : "s"}`;
+
+  if (rows.length === 0) {
+    return (
+      <ScreenContent>
+        <RuleHeader breadcrumb={breadcrumb} status={status} />
+        <SavedConfirmation editor={shell.promptsEditor} nowMs={nowMs ?? Date.now()} />
+        <Box marginTop={SPACING.sm}>
+          <EmptyState kind="prompts-none" context={{ moduleId }} />
+        </Box>
+      </ScreenContent>
+    );
+  }
 
   return (
     <ScreenContent>

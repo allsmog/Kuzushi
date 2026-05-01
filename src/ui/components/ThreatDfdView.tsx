@@ -22,6 +22,7 @@ import { truncateEnd } from "../format.js";
 import { useRegisterKeybindings } from "../hooks/useKeybindings.js";
 import type { ShellState } from "../state.js";
 import { SPACING, tokens } from "../tokens.js";
+import { EmptyState } from "./EmptyState.js";
 import { RuleHeader } from "./RuleHeader.js";
 import { ScreenContent } from "./ScreenContent.js";
 
@@ -125,11 +126,8 @@ function Legend({ validated }: { validated: boolean }): React.ReactElement {
 
 function EmptyWorkspace(): React.ReactElement {
   return (
-    <Box flexDirection="column" marginTop={SPACING.sm}>
-      <Text>{tokens.warn("No context-backed DFD is available yet.")}</Text>
-      <Text>
-        {tokens.muted("Run /context, /context regen dfd, or /threats edit to create one.")}
-      </Text>
+    <Box marginTop={SPACING.sm}>
+      <EmptyState kind="threat-model-missing" context={{ threatView: "dfd" }} />
     </Box>
   );
 }

@@ -236,6 +236,13 @@ export type EmptyStateKind =
   | "findings-compact-idle"
   | "threat-model-missing"
   | "diff-since-idle"
+  | "catalog-no-modules"
+  | "options-none-loaded"
+  | "prompts-none"
+  | "actor-none-focused"
+  | "module-run-idle"
+  | "context-build-idle"
+  | "cost-no-data"
   | "generic";
 
 export interface EmptyStateContext {
@@ -344,6 +351,50 @@ export function describeEmptyState(
         title: "No diff scope set",
         reason: "Findings aren't currently narrowed to a git range.",
         action: "/since <git-ref> to scope (e.g. /since main, /since HEAD~5)",
+      };
+    case "catalog-no-modules":
+      return {
+        title: "No modules loaded",
+        reason: "The catalog is empty — nothing to focus or run.",
+        action: "Restart with --load <spec> to attach a module · /help for verbs",
+      };
+    case "options-none-loaded":
+      return {
+        title: "No options to show",
+        reason: `${ctx.moduleId ?? "This module"} hasn't surfaced a tool option set yet.`,
+        action: "show options to refresh · /back to return to the module home",
+      };
+    case "prompts-none":
+      return {
+        title: "No prompt keys",
+        reason: `${ctx.moduleId ?? "This module"} declares no overridable prompts.`,
+        action: "/prompts on a different module · /back to return",
+      };
+    case "actor-none-focused":
+      return {
+        title: "No actor focused",
+        reason: "Nothing is selected from the running module's actor list.",
+        action: "/back to return to the module run · 1..4 to drill into an actor",
+      };
+    case "module-run-idle":
+      return {
+        title: "No active run",
+        reason: `${ctx.moduleId ?? "This module"} hasn't started a tool yet.`,
+        action: "Type a verb (e.g. run, scan) to start · /back to return",
+      };
+    case "context-build-idle":
+      return {
+        title: "No build in progress",
+        reason: "The context-build pipeline isn't running for this workspace.",
+        action: "/context build to gather scan context · /back to return",
+      };
+    case "cost-no-data":
+      return {
+        title: "No cost data yet",
+        reason: ctx.scanInProgress
+          ? "Triage is still running — costs land as each worker finishes."
+          : "Nothing has been billed for this run.",
+        action: "Wait for triage to land · Ctrl+C to abort the run",
       };
     default:
       return {

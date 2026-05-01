@@ -21,6 +21,7 @@ import {
   actorShortId,
   toTranscriptEntry,
 } from "../transcript-format.js";
+import { EmptyState } from "./EmptyState.js";
 import { RuleHeader } from "./RuleHeader.js";
 import { ScreenContent } from "./ScreenContent.js";
 
@@ -87,12 +88,21 @@ export function ActorTranscriptView({
     ? `turn ${turnTotal}/${turnTotal} · ${formatCost(cost)} · ${FINDING_GLYPH} ${actorFindings.length} findings`
     : "(no actor focused)";
 
+  if (!fingerprint) {
+    return (
+      <ScreenContent>
+        <RuleHeader breadcrumb={breadcrumb} status={subtitle} />
+        <Box marginTop={SPACING.sm}>
+          <EmptyState kind="actor-none-focused" />
+        </Box>
+      </ScreenContent>
+    );
+  }
+
   return (
     <ScreenContent>
       <RuleHeader breadcrumb={breadcrumb} status={subtitle} />
-      {fingerprint ? (
-        <Header label={actorLabelFromFingerprint(fingerprint)} subtitle={subtitle} />
-      ) : null}
+      <Header label={actorLabelFromFingerprint(fingerprint)} subtitle={subtitle} />
       <Transcript lines={lines} findings={actorFindings} maxRows={maxRows} />
       <OtherActors current={fingerprint} fingerprints={allFingerprints} findings={findings} />
     </ScreenContent>
