@@ -58,6 +58,97 @@ export type SystemsHelperTemplateId =
   | "failure-side-effect"
   | "hardening-presence";
 
+export const SYSTEMS_PROVENANCE_STATES = [
+  "PRIVATE_OWNED",
+  "FILE_BACKED_SHARED",
+  "PIPE_PAGE_SHARED",
+  "ITER_SHARED",
+  "SG_SHARED",
+  "REQ_ALIAS_MAY",
+  "REQ_ALIAS_MUST",
+  "MUTATED_SHARED",
+  "VALIDATION_PENDING",
+  "FAILED_AFTER_MUTATION",
+  "SAFE_COUNTEREXAMPLE",
+] as const;
+
+export type SystemsProvenanceState = (typeof SYSTEMS_PROVENANCE_STATES)[number];
+
+export type SystemsProvenanceFactKind =
+  | "shared-origin"
+  | "alias-preserving-transport"
+  | "iterator-propagation"
+  | "scatterlist-alias"
+  | "request-alias"
+  | "write-through-shared"
+  | "validation-before-trust"
+  | "failure-after-mutation"
+  | "private-copy-guard"
+  | "nonalias-guard"
+  | "rollback-guard";
+
+export type SystemsProvenanceFactStrength = "signal" | "strong" | "hard-guard";
+
+export interface SystemsProvenanceFact extends SystemsCodeLocation {
+  state: SystemsProvenanceState;
+  kind: SystemsProvenanceFactKind;
+  strength: SystemsProvenanceFactStrength;
+  resourceFamily: string;
+}
+
+export type SystemsAliasBehavior =
+  | "none"
+  | "preserves-alias"
+  | "creates-alias"
+  | "breaks-alias"
+  | "requires-unknown-alias";
+
+export interface SystemsProvenanceSummary {
+  functionName: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  states: SystemsProvenanceState[];
+  factKinds: SystemsProvenanceFactKind[];
+  resourceFamilies: string[];
+  aliasBehavior: SystemsAliasBehavior;
+  writesThroughSharedAlias: boolean;
+  validationFailureAfterMutation: boolean;
+  hardGuards: string[];
+  evidence: SystemsCodeLocation[];
+  summary: string;
+  score: number;
+}
+
+export type SystemsProvenanceChainRole =
+  | "origin"
+  | "transport"
+  | "alias"
+  | "write"
+  | "validation"
+  | "failure"
+  | "guard";
+
+export type SystemsProvenanceChainStatus = "complete" | "blocked-by-guard" | "partial";
+
+export interface SystemsProvenanceChainStep extends SystemsCodeLocation {
+  role: SystemsProvenanceChainRole;
+  state: SystemsProvenanceState;
+  kind: SystemsProvenanceFactKind;
+  resourceFamily: string;
+  functionName?: string;
+}
+
+export interface SystemsProvenanceChain {
+  id: string;
+  status: SystemsProvenanceChainStatus;
+  score: number;
+  steps: SystemsProvenanceChainStep[];
+  missingRoles: SystemsProvenanceChainRole[];
+  guardSummary?: string;
+  narrative: string;
+}
+
 export type SystemsCorroborationStatus =
   | "survived"
   | "counterexample-found"
@@ -117,6 +208,9 @@ export interface SystemsSurfacePack {
   aliasingSites: SystemsCodeLocation[];
   scratchWriteSites: SystemsCodeLocation[];
   failureSideEffectSites: SystemsCodeLocation[];
+  provenanceFacts: SystemsProvenanceFact[];
+  provenanceSummaries: SystemsProvenanceSummary[];
+  provenanceChains: SystemsProvenanceChain[];
   inputSites: SystemsCodeLocation[];
   hardeningSites: SystemsCodeLocation[];
   helperTemplates: SystemsHelperTemplate[];

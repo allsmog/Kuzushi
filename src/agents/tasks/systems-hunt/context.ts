@@ -70,7 +70,8 @@ const PATH_HINTS: Array<{
     reason: "unsafe or memory-manipulation path",
   },
   {
-    pattern: /(crypto|algif|af_alg|splice|scatterlist|sg_|page_cache|pipe_buffer|iov_iter)/i,
+    pattern:
+      /(crypto|algif|af_alg|splice|sendfile|vmsplice|scatterlist|sg_|page_cache|page->mapping|pipe_buffer|iov_iter|ITER_(PIPE|XARRAY|FOLIOQ|BVEC))/i,
     kind: "resource-provenance",
     score: 8,
     reason: "zero-copy or shared-resource provenance path",
@@ -303,7 +304,7 @@ export function inferSurfaceKind(
   if (/vmm|hypervisor|guest|virt|vmexit|virtio/i.test(haystack)) return "hypervisor-boundary";
   if (
     domain === "resource-provenance" ||
-    /splice|vmsplice|sendfile|mmap|af_alg|algif|scatterlist|sg_chain|sg_page|page[_-]?cache|pipe_buffer|iov_iter|kmap_local_page|scatterwalk_map_and_copy|aead_request_set_crypt|req->src\s*=\s*req->dst|req->dst\s*=\s*req->src|src\s*==\s*dst/i.test(
+    /splice|vmsplice|sendfile|splice_to_pipe|filemap_splice_read|copy_page_to_iter_pipe|push_pipe|mmap|af_alg|algif|scatterlist|sg_set_page|sg_chain|sg_page|page[_-]?cache|page->mapping|pipe_buffer|iov_iter|ITER_(PIPE|XARRAY|FOLIOQ|BVEC)|kmap_local_page|scatterwalk_map_and_copy|memcpy_to_sglist|aead_request_set_crypt|req->src\s*=\s*req->dst|req->dst\s*=\s*req->src|req->src\s*!=\s*req->dst|src\s*==\s*dst|src\s*!=\s*dst/i.test(
       haystack,
     )
   ) {
@@ -379,7 +380,7 @@ async function runBashSurfaceProbe(repoRoot: string): Promise<SecurityPatternMat
         "--with-filename",
         "--glob",
         "*.{c,cc,cpp,cxx,h,hpp,hxx,rs}",
-        String.raw`\b(tcp|udp|packet|rpc|nfs|gss|codec|h264|slice|unsafe|memcpy|memmove|stack_chk_fail|fortify|from_raw_parts|get_unchecked|set_len|splice|vmsplice|sendfile|mmap|AF_ALG|algif|scatterlist|sg_chain|sg_page|page_cache|pipe_buffer|iov_iter|kmap_local_page|scatterwalk_map_and_copy|aead_request_set_crypt)\b`,
+        String.raw`\b(tcp|udp|packet|rpc|nfs|gss|codec|h264|slice|unsafe|memcpy|memmove|stack_chk_fail|fortify|from_raw_parts|get_unchecked|set_len|splice|vmsplice|sendfile|splice_to_pipe|filemap_splice_read|copy_page_to_iter_pipe|push_pipe|mmap|AF_ALG|algif|scatterlist|sg_set_page|sg_chain|sg_page|page_cache|pipe_buffer|iov_iter|ITER_PIPE|ITER_XARRAY|ITER_FOLIOQ|ITER_BVEC|kmap_local_page|scatterwalk_map_and_copy|memcpy_to_sglist|aead_request_set_crypt)\b`,
         repoRoot,
       ],
       { cwd: repoRoot, maxBuffer: 1024 * 1024 },

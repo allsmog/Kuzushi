@@ -177,7 +177,7 @@ export function buildTriggerPrompt(
     "",
     "Each trigger hypothesis must describe a plausible attacker-controlled sequence, not just a local bug statement.",
     "Force explicit multi-step interactions when relevant: packet ordering, option interaction, frame sequencing, RPC auth exchanges, guest/host setup then misuse.",
-    "For resource-provenance cases, force explicit resource-origin, ownership-boundary, aliasing-transition, and failure-side-effect steps.",
+    "For resource-provenance cases, start from deterministic Provenance chains, facts, and function summaries, then force explicit resource-origin, ownership-boundary, aliasing-transition, write-through, validation/failure, and hard-guard/counterexample steps.",
     "Force explicit boundary assignments such as wraparound, -1, 0xffff, UINT_MAX, SIZE_MAX, truncation, sentinel collision, or oversized length fields.",
     "Only mark cheapVerifiable=true when a bounded local confirmation is realistically possible.",
     "",

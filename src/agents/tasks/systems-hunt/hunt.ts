@@ -556,7 +556,7 @@ export function buildLensPrompt(
     "- triggerSequence describing the crafted interaction or boundary condition",
     "- attackerControlledFields and memoryPrimitive",
     "- hardeningNotes explaining whether mitigations are absent, partial, or bypassed",
-    "- for resource-provenance findings, include resource origin, ownership boundary, aliasing transition, write primitive, and failure-side-effect evidence in triggerSequence, analysisPath, and rationale",
+    "- for resource-provenance findings, prefer complete deterministic Provenance chains over isolated facts; include resource origin, ownership boundary, aliasing transition, write primitive, validation/failure ordering, and hard-guard/counterexample evidence in triggerSequence, analysisPath, and rationale",
     "- cheapVerifiable=true only when a single-turn bounded confirmation is realistic",
   ].join("\n");
 }
@@ -597,6 +597,8 @@ function lensInstructions(lens: SystemsHuntLens, surfaceKind: SystemsSurfaceKind
         "- Look for zero-copy transfers where shared or read-only backing resources are chained into writable destinations or in-place operations.",
         "- Verify API output contracts: downstream algorithms must not use caller destination buffers as scratch space outside the owned output range.",
         "- Check whether mutations happen before auth/tag/checksum/validation failure and whether error paths roll back, discard, or preserve those mutations.",
+        "- Prefer complete Provenance chains; treat partial chains as hypotheses that need local confirmation.",
+        "- Treat Provenance facts with strength=hard-guard or summaries with alias=breaks-alias as likely counterexamples unless nearby code shows the guard does not dominate the write/failure path.",
       ].join("\n");
     case "hardening-bypass":
       return [
@@ -734,7 +736,7 @@ export function buildCorroborationPrompt(
       ? `Optional CodeQL database: ${codeqlDbPath}`
       : "No CodeQL database available; use repo reads and bounded Bash probes only.",
     "",
-    "For resource-provenance findings, actively search for private copies, page duplication/COW, dirty/writeback barriers, privilege checks, non-aliasing src/dst, downstream write-range guards, and failures that roll back or discard mutations.",
+    "For resource-provenance findings, actively search from the deterministic Provenance chains, facts, and function summaries for private copies, page duplication/COW, dirty/writeback barriers, privilege checks, non-aliasing src/dst, downstream write-range guards, and failures that roll back or discard mutations.",
     "",
     "Return status=survived only if the bug still holds after searching for counterexamples.",
     "Return status=counterexample-found if a real guard, cap, state reset, or hardening mechanism blocks the trigger or primitive.",

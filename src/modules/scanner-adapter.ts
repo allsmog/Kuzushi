@@ -17,6 +17,7 @@
  * the canonical call sites.
  */
 
+import { resolveTaskConfig } from "../capabilities.js";
 import type { Finding, ScannerPlugin, TaskConfig } from "../scanners/types.js";
 import type { ScanOpts } from "../types.js";
 import { defineDagTool } from "./define.js";
@@ -49,6 +50,32 @@ function withResumeProperty(schema: DagTool["inputSchema"]): DagTool["inputSchem
       resume: resumeProperty,
     },
   };
+}
+
+function asOptionalString(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.trim();
+}
+
+function resolveRunTaskConfig(
+  stateConfig: TaskConfig,
+  ctx: ExecutionContext,
+  toolName: string,
+): TaskConfig {
+  const configuredTaskConfig = resolveTaskConfig(ctx.config, toolName);
+  const taskConfig: TaskConfig = {
+    ...stateConfig,
+    ...configuredTaskConfig,
+  };
+  const modelOverride = asOptionalString(ctx.modelOverride) || asOptionalString(ctx.toolModel);
+  if (modelOverride) {
+    return { ...taskConfig, model: modelOverride };
+  }
+  if (!asOptionalString(configuredTaskConfig["model"])) {
+    const currentGlobalModel = asOptionalString(ctx.config.model);
+    if (currentGlobalModel) return { ...taskConfig, model: currentGlobalModel };
+  }
+  return taskConfig;
 }
 
 /**
@@ -94,7 +121,10 @@ export function buildScannerDagTool<Id extends string>(
     async run(input: ScanOpts, ctx: ExecutionContext): Promise<Finding[]> {
       const dag = requireDag(ctx);
       const repoRoot = dag.scanPath ?? dag.workRoot ?? dag.repoRoot;
-      return plugin.scan(repoRoot, input, state.taskConfig, ctx.runtime, {
+      const taskConfig = resolveRunTaskConfig(state.taskConfig, ctx, spec.name);
+      state.taskConfig = taskConfig;
+      await plugin.init?.(taskConfig);
+      return plugin.scan(repoRoot, input, taskConfig, ctx.runtime, {
         bus: ctx.bus,
         taskId: plugin.id,
         runId: dag.runId,
