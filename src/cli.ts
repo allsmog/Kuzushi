@@ -40,38 +40,24 @@ import { setGlobalLogLevel } from "./logger.js";
 import { defaultDbPath, getRun, initDb, listRuns } from "./store.js";
 
 function maybeWarnPlaintextApiKeyStorage(key: string, value: string): void {
-  const isSlotSecretPath =
-    key === "agentRuntimeConfig.claude.apiKey" ||
-    key === "agentRuntimeConfig.claude.authToken" ||
-    key === "agentRuntimeConfig.piAi.apiKey" ||
-    key === "agentRuntimeConfig.piAi.authToken" ||
-    key === "agentRuntimeConfig.codex.apiKey" ||
-    key === "agentRuntimeConfig.codex.authToken";
-  let storesApiKey = isSlotSecretPath;
+  const isSecretPath =
+    key === "agentRuntimeConfig.apiKey" || key === "agentRuntimeConfig.authToken";
+  let storesApiKey = isSecretPath;
 
   if (!storesApiKey && key === "agentRuntimeConfig") {
     try {
       const parsed = JSON.parse(value) as Record<string, unknown> | null;
-      const hasSecret = (obj: unknown): boolean =>
-        typeof obj === "object" &&
-        obj !== null &&
-        ((typeof (obj as Record<string, unknown>)["apiKey"] === "string" &&
-          (obj as Record<string, string>)["apiKey"].trim().length > 0) ||
-          (typeof (obj as Record<string, unknown>)["authToken"] === "string" &&
-            (obj as Record<string, string>)["authToken"].trim().length > 0));
       storesApiKey =
-        hasSecret(parsed) ||
-        hasSecret(parsed?.["claude"]) ||
-        hasSecret(parsed?.["piAi"]) ||
-        hasSecret(parsed?.["codex"]);
+        typeof parsed === "object" &&
+        parsed !== null &&
+        ((typeof parsed["apiKey"] === "string" && parsed["apiKey"].trim().length > 0) ||
+          (typeof parsed["authToken"] === "string" && parsed["authToken"].trim().length > 0));
     } catch {
       storesApiKey = false;
     }
   }
 
-  if (!storesApiKey) {
-    return;
-  }
+  if (!storesApiKey) return;
 
   console.warn(
     `Warning: ${key} stores API credentials in plaintext at ${configPath()}. ` +
@@ -134,25 +120,17 @@ program
     collectRepeatedOption,
     [],
   )
-  .option("--agent-runtime <backend>", "Agent runtime backend")
   .option("--api-key <key>", "Override active provider API key")
   .option("--auth-token <token>", "Override active provider bearer/OAuth token")
-  .option(
-    "--inherit-claude",
-    "Skip credential prompt; trust ambient Claude / Claude Code session creds and persist auth: inherited",
-    false,
-  )
   .addHelpText(
     "after",
     `
 Examples:
   $ kuzushi                                           # start the shell with default modules
-  $ kuzushi --inherit-claude                          # use parent Claude Code session, skip prompt
   $ kuzushi shell --target ./acme-api                 # pre-set the scan target
   $ kuzushi shell --load randori,vuln-scout,tob      # pre-load extra built-in modules
   $ kuzushi shell --workspace acme-pentest            # resume a named workspace
   $ kuzushi shell --model anthropic:claude-opus-4-7   # override the default model
-  $ kuzushi shell --agent-runtime codex --model codex:gpt-5.4-mini
 	`,
   )
   .action(wrapCliAction(async (opts: ShellCommandOptions) => runShellCommand(opts)));
@@ -278,15 +256,9 @@ program
   .option("--csv <path>", "Write CSV report to this path")
   .option("--jsonl <path>", "Write JSONL report to this path")
   .option("--junit <path>", "Write JUnit XML report to this path (CI test-result aggregation)")
-  .option("--agent-runtime <backend>", "Agent runtime backend")
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
   .option("--auth-token <token>", "Override Anthropic bearer/OAuth token for this run")
   .option("--base-url <url>", "Override ANTHROPIC_BASE_URL for this run")
-  .option(
-    "--inherit-claude",
-    "Use parent Claude Code session credentials for this run; sets `auth: inherited` in-memory.",
-    false,
-  )
   .option(
     "--exclude <modules>",
     "Default modules to skip (comma-separated). Use to opt out of e.g. `codeql` when its CLI isn't installed.",
@@ -377,7 +349,6 @@ program
   .option("--audit-log", "Persist per-run audit logs", false)
   .option("--api-key <key>", "Override ANTHROPIC_API_KEY for this run")
   .option("--auth-token <token>", "Override Anthropic bearer/OAuth token for this run")
-  .option("--inherit-claude", "Use parent Claude Code session credentials", false)
   .addHelpText(
     "after",
     `
@@ -406,7 +377,6 @@ Examples:
         max: opts.max as number | undefined,
         apiKey: opts.apiKey as string | undefined,
         authToken: opts.authToken as string | undefined,
-        inheritClaude: opts.inheritClaude === true,
         verify: false,
         cryptoBehavioralTest: false,
         codeGraph: false,
@@ -748,7 +718,6 @@ Examples:
 
       const starter = {
         model: DEFAULTS.model,
-        agentRuntimeBackend: DEFAULTS.agentRuntimeBackend,
         busBackend: DEFAULTS.busBackend,
         triageBatchSize: DEFAULTS.triageBatchSize,
         triageConcurrency: DEFAULTS.triageConcurrency,

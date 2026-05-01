@@ -113,10 +113,8 @@ describe("loadConfig", () => {
         verifyRefinementMaxIterations: 5,
         verifyReflectionInterval: 4,
         agentRuntimeConfig: {
-          claude: {
-            apiKey: "sk-test",
-            baseUrl: "https://api.example.com/",
-          },
+          apiKey: "sk-test",
+          baseUrl: "https://api.example.com/",
         },
         taskConfig: {
           semgrep: { verify: false },
@@ -154,13 +152,17 @@ describe("loadConfig", () => {
     expect(config.verifyRefinementMaxIterations).toBe(5);
     expect(config.verifyReflectionInterval).toBe(4);
     expect(config.agentRuntimeConfig).toEqual({
-      claude: { apiKey: "sk-test", baseUrl: "https://api.example.com/" },
+      apiKey: "sk-test",
+      baseUrl: "https://api.example.com/",
     });
     expect(config.taskConfig.semgrep?.verify).toBe(false);
   });
 
   it("applies project-level override when repoRoot is provided", () => {
-    writeFileSync(TMP_CONFIG_PATH, JSON.stringify({ model: "anthropic:global-model", tasks: ["semgrep"] }));
+    writeFileSync(
+      TMP_CONFIG_PATH,
+      JSON.stringify({ model: "anthropic:global-model", tasks: ["semgrep"] }),
+    );
     writeFileSync(
       TMP_PROJECT_CONFIG_PATH,
       JSON.stringify({ model: "anthropic:project-model", tasks: ["agentic"] }),
@@ -175,27 +177,20 @@ describe("loadConfig", () => {
     writeFileSync(
       TMP_CONFIG_PATH,
       JSON.stringify({
-        agentRuntimeConfig: {
-          claude: {
-            apiKey: "global-key",
-          },
-        },
+        agentRuntimeConfig: { apiKey: "global-key" },
       }),
     );
     writeFileSync(
       TMP_PROJECT_CONFIG_PATH,
       JSON.stringify({
-        agentRuntimeConfig: {
-          claude: {
-            baseUrl: "https://api.example.com/",
-          },
-        },
+        agentRuntimeConfig: { baseUrl: "https://api.example.com/" },
       }),
     );
 
     const config = loadConfig(TMP_REPO, { trustProjectConfig: true });
     expect(config.agentRuntimeConfig).toEqual({
-      claude: { apiKey: "global-key", baseUrl: "https://api.example.com/" },
+      apiKey: "global-key",
+      baseUrl: "https://api.example.com/",
     });
   });
 
@@ -203,22 +198,14 @@ describe("loadConfig", () => {
     writeFileSync(
       TMP_CONFIG_PATH,
       JSON.stringify({
-        agentRuntimeConfig: {
-          claude: {
-            apiKey: "global-key",
-          },
-        },
+        agentRuntimeConfig: { apiKey: "global-key" },
       }),
     );
     writeFileSync(
       TMP_PROJECT_CONFIG_PATH,
       JSON.stringify({
         model: "anthropic:project-model",
-        agentRuntimeConfig: {
-          claude: {
-            baseUrl: "https://evil.example/",
-          },
-        },
+        agentRuntimeConfig: { baseUrl: "https://evil.example/" },
         taskConfig: {
           semgrep: {
             binary: "/tmp/evil-semgrep",
@@ -232,10 +219,7 @@ describe("loadConfig", () => {
 
     const config = loadConfig(TMP_REPO);
     expect(config.model).toBe("anthropic:project-model");
-    expect(config.agentRuntimeBackend).toBe(DEFAULTS.agentRuntimeBackend);
-    expect(config.agentRuntimeConfig).toEqual({
-      claude: { apiKey: "global-key" },
-    });
+    expect(config.agentRuntimeConfig).toEqual({ apiKey: "global-key" });
     expect(config.taskConfig.semgrep?.binary).toBeUndefined();
     expect(config.taskConfig["code-graph"]?.maxEntryPoints).toBe(5);
   });
@@ -244,18 +228,12 @@ describe("loadConfig", () => {
     writeFileSync(
       TMP_PROJECT_CONFIG_PATH,
       JSON.stringify({
-        agentRuntimeConfig: {
-          claude: {
-            baseUrl: "https://trusted.example/",
-          },
-        },
+        agentRuntimeConfig: { baseUrl: "https://trusted.example/" },
       }),
     );
 
     const config = loadConfig(TMP_REPO, { trustProjectConfig: true });
-    expect(config.agentRuntimeConfig).toEqual({
-      claude: { baseUrl: "https://trusted.example/" },
-    });
+    expect(config.agentRuntimeConfig).toEqual({ baseUrl: "https://trusted.example/" });
   });
 
   it("rejects file references that escape the config directory", () => {
@@ -358,7 +336,9 @@ describe("setConfigValue", () => {
     setConfigValue("pocHarnessConcurrency", "2");
 
     expect(getConfigValue("pocHarness")).toBe(true);
-    expect(getConfigValue("taskConfig.poc-harness.model")).toBe("anthropic:claude-haiku-4-5-20251001");
+    expect(getConfigValue("taskConfig.poc-harness.model")).toBe(
+      "anthropic:claude-haiku-4-5-20251001",
+    );
     expect(getConfigValue("pocHarnessMaxTurns")).toBe(28);
     expect(getConfigValue("pocHarnessConcurrency")).toBe(2);
   });
@@ -424,54 +404,25 @@ describe("setConfigValue", () => {
     expect(getConfigValue("busBackend")).toBe("in-process");
   });
 
-  it("sets agentRuntimeBackend", () => {
-    setConfigValue("agentRuntimeBackend", "pi-ai");
-    expect(getConfigValue("agentRuntimeBackend")).toBe("pi-ai");
-    setConfigValue("agentRuntimeBackend", "claude");
-    expect(getConfigValue("agentRuntimeBackend")).toBe("claude");
-  });
-
   it("sets agentRuntimeConfig as an object", () => {
     setConfigValue(
       "agentRuntimeConfig",
-      '{"claude":{"apiKey":"sk-test","authToken":"sk-ant-oat-test","baseUrl":"https://api.example.com/"}}',
+      '{"apiKey":"sk-test","authToken":"sk-ant-oat-test","baseUrl":"https://api.example.com/"}',
     );
     expect(getConfigValue("agentRuntimeConfig")).toEqual({
-      claude: {
-        apiKey: "sk-test",
-        authToken: "sk-ant-oat-test",
-        baseUrl: "https://api.example.com/",
-      },
+      apiKey: "sk-test",
+      authToken: "sk-ant-oat-test",
+      baseUrl: "https://api.example.com/",
     });
   });
 
   it("sets nested agentRuntimeConfig values", () => {
-    setConfigValue("agentRuntimeConfig.claude.apiKey", "sk-inline");
-    setConfigValue("agentRuntimeConfig.claude.authToken", "sk-ant-oat-inline");
-    setConfigValue("agentRuntimeConfig.claude.baseUrl", "https://proxy.example/");
-    expect(getConfigValue("agentRuntimeConfig.claude.apiKey")).toBe("sk-inline");
-    expect(getConfigValue("agentRuntimeConfig.claude.authToken")).toBe("sk-ant-oat-inline");
-    expect(getConfigValue("agentRuntimeConfig.claude.baseUrl")).toBe("https://proxy.example/");
-  });
-
-  it("rejects legacy flat agentRuntimeConfig values", () => {
-    expect(() => setConfigValue("agentRuntimeConfig.apiKey", "sk-inline")).toThrow(
-      "Legacy config key",
-    );
-    expect(() => setConfigValue("agentRuntimeConfig.authToken", "sk-ant-oat-inline")).toThrow(
-      "Legacy config key",
-    );
-    expect(() => setConfigValue("agentRuntimeConfig", '{"apiKey":"sk-test"}')).toThrow(
-      "Legacy flat agentRuntimeConfig",
-    );
-  });
-
-  it("sets codex agentRuntimeConfig slot values", () => {
-    setConfigValue("agentRuntimeConfig.codex.apiKey", "sk-openai");
-    setConfigValue("agentRuntimeConfig.codex.baseUrl", "https://openai.example/");
-    expect(getConfigValue("agentRuntimeConfig")).toEqual({
-      codex: { apiKey: "sk-openai", baseUrl: "https://openai.example/" },
-    });
+    setConfigValue("agentRuntimeConfig.apiKey", "sk-inline");
+    setConfigValue("agentRuntimeConfig.authToken", "sk-ant-oat-inline");
+    setConfigValue("agentRuntimeConfig.baseUrl", "https://proxy.example/");
+    expect(getConfigValue("agentRuntimeConfig.apiKey")).toBe("sk-inline");
+    expect(getConfigValue("agentRuntimeConfig.authToken")).toBe("sk-ant-oat-inline");
+    expect(getConfigValue("agentRuntimeConfig.baseUrl")).toBe("https://proxy.example/");
   });
 
   it("sets tasks from comma-separated string", () => {
@@ -571,12 +522,6 @@ describe("setConfigValue", () => {
     expect(() => setConfigValue("busBackend", "reddis")).toThrow("busBackend must be one of");
   });
 
-  it("throws on invalid agentRuntimeBackend", () => {
-    expect(() => setConfigValue("agentRuntimeBackend", "anthropic")).toThrow(
-      "agentRuntimeBackend must be one of",
-    );
-  });
-
   it("throws on invalid agentRuntimeConfig", () => {
     expect(() => setConfigValue("agentRuntimeConfig", "not-object")).toThrow(
       "agentRuntimeConfig must be an object",
@@ -618,7 +563,9 @@ describe("unsetConfigValue", () => {
 
   it("unsets poc-harness model via taskConfig", () => {
     setConfigValue("taskConfig.poc-harness.model", "anthropic:claude-haiku-4-5-20251001");
-    expect(getConfigValue("taskConfig.poc-harness.model")).toBe("anthropic:claude-haiku-4-5-20251001");
+    expect(getConfigValue("taskConfig.poc-harness.model")).toBe(
+      "anthropic:claude-haiku-4-5-20251001",
+    );
     unsetConfigValue("taskConfig.poc-harness.model");
     expect(getConfigValue("taskConfig.poc-harness.model")).toBeUndefined();
   });

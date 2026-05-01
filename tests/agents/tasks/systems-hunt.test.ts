@@ -109,7 +109,8 @@ describe("systems-hunt", () => {
           {
             domain: "resource-provenance",
             lineNumber: 120,
-            lineContent: "req->src = req->dst; scatterwalk_map_and_copy(tag, req->dst, off, authsize, 1);",
+            lineContent:
+              "req->src = req->dst; scatterwalk_map_and_copy(tag, req->dst, off, authsize, 1);",
             reason: "Shared-resource provenance or writable aliasing signal",
           },
         ],

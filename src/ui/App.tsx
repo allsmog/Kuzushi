@@ -33,10 +33,10 @@ import { useTerminalSize } from "./hooks/useTerminalSize.js";
 import { shallowEqual, useUISelector } from "./hooks.js";
 import { isAbortInput } from "./interaction-key-policy.js";
 import { deriveNavigation, LayoutProvider, STANDARD_LAYOUT_THEME } from "./layout-context.js";
-import { resolveRunningKey } from "./running-mode-keys.js";
 import { KeybindFooter } from "./primitives/KeybindFooter.js";
 import { SpinnerClockProvider } from "./primitives/SpinnerClock.js";
 import { createReplContext, handleReplCommand } from "./repl.js";
+import { resolveRunningKey } from "./running-mode-keys.js";
 import type { PipelineStage, UIStore } from "./state.js";
 import { tokens } from "./tokens.js";
 

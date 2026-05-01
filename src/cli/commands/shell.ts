@@ -1,18 +1,14 @@
 import { existsSync } from "node:fs";
 import { configureAgentRuntime } from "../../agent-runtime/index.js";
-import { AGENT_RUNTIME_BACKENDS } from "../../config/defaults.js";
+import { parsePiAiModelSpec } from "../../agent-runtime/model-spec.js";
 import {
-  applyConfigPatch,
-  isClaudeCodeHostManagedAuth,
   loadConfig,
   loadLocalCredentials,
   providerBaseUrlEnvVar,
   providerEnvVar,
   resolveActiveCredentials,
-  resolveAmbientOauthToken,
 } from "../../config.js";
-import { getLogger } from "../../logger.js";
-import type { AgentRuntimeConfig, KuzushiConfig } from "../../types.js";
+import type { KuzushiConfig } from "../../types.js";
 import { CliUsageError } from "../errors.js";
 
 export interface ShellCommandOptions {
@@ -24,10 +20,8 @@ export interface ShellCommandOptions {
   model?: string;
   effort?: string;
   taskConfig?: string[];
-  agentRuntime?: string;
   apiKey?: string;
   authToken?: string;
-  inheritClaude?: boolean;
 }
 
 export async function runShellCommand(opts: ShellCommandOptions): Promise<void> {
@@ -37,7 +31,6 @@ export async function runShellCommand(opts: ShellCommandOptions): Promise<void> 
   applyShellOptionOverrides(config, opts);
   applyLocalCredentials(config, opts.target);
   primeCredentialEnvironment(config, opts.apiKey, opts.authToken);
-  await primeInheritedAnthropicToken(config);
 
   await startShell({
     config,
@@ -51,20 +44,9 @@ export async function runShellCommand(opts: ShellCommandOptions): Promise<void> 
 
 function applyShellOptionOverrides(config: KuzushiConfig, opts: ShellCommandOptions): void {
   if (opts.model) config.model = opts.model;
-  if (opts.agentRuntime) setAgentRuntimeBackend(config, opts.agentRuntime);
   applyDefaultEffort(config, opts.effort);
   applyTaskConfigOverrides(config, opts.taskConfig ?? []);
   validateShellTarget(opts.target);
-  if (opts.inheritClaude) applyInheritedClaudeAuth(config);
-}
-
-function setAgentRuntimeBackend(config: KuzushiConfig, backend: string): void {
-  if (!AGENT_RUNTIME_BACKENDS.has(backend)) {
-    throw new CliUsageError(
-      `Invalid --agent-runtime "${backend}". Valid values: ${[...AGENT_RUNTIME_BACKENDS].join(", ")}`,
-    );
-  }
-  config.agentRuntimeBackend = backend as typeof config.agentRuntimeBackend;
 }
 
 function validateShellTarget(target: string | undefined): void {
@@ -138,45 +120,10 @@ function invalidTaskConfigAssignment(assignment: string): CliUsageError {
   );
 }
 
-function applyInheritedClaudeAuth(config: KuzushiConfig): void {
-  config.auth = "inherited";
-  config.agentRuntimeBackend = "claude";
-  tryPersistInheritedClaude();
-}
-
-function tryPersistInheritedClaude(): void {
-  try {
-    applyConfigPatch([
-      { path: "agentRuntimeBackend", value: "claude" },
-      { path: "auth", value: "inherited" },
-    ]);
-  } catch {
-    return;
-  }
-}
-
 function applyLocalCredentials(config: KuzushiConfig, target: string | undefined): void {
   const localCredentials = loadLocalCredentials(target ?? process.cwd());
   if (!localCredentials) return;
-  config.agentRuntimeConfig = mergeCredentialSlots(config.agentRuntimeConfig, localCredentials);
-}
-
-function mergeCredentialSlots(
-  existing: AgentRuntimeConfig | undefined,
-  localCredentials: AgentRuntimeConfig,
-): AgentRuntimeConfig {
-  return removeEmptyCredentialSlots({
-    claude: { ...(existing?.claude ?? {}), ...(localCredentials.claude ?? {}) },
-    piAi: { ...(existing?.piAi ?? {}), ...(localCredentials.piAi ?? {}) },
-    codex: { ...(existing?.codex ?? {}), ...(localCredentials.codex ?? {}) },
-  });
-}
-
-function removeEmptyCredentialSlots(config: AgentRuntimeConfig): AgentRuntimeConfig {
-  for (const slot of ["claude", "piAi", "codex"] as const) {
-    if (config[slot] && Object.keys(config[slot]).length === 0) delete config[slot];
-  }
-  return config;
+  config.agentRuntimeConfig = { ...(config.agentRuntimeConfig ?? {}), ...localCredentials };
 }
 
 function primeCredentialEnvironment(
@@ -186,14 +133,14 @@ function primeCredentialEnvironment(
 ): void {
   primeActiveCredentialEnvironment(config);
   if (apiKeyOverride) primeApiKeyOverride(config, apiKeyOverride);
-  if (authTokenOverride) primeAuthTokenOverride(config, authTokenOverride);
+  if (authTokenOverride) primeAuthTokenOverride(authTokenOverride);
 }
 
 function primeActiveCredentialEnvironment(config: KuzushiConfig): void {
   const activeCredentials = resolveActiveCredentials(config);
-  const activeProvider = config.agentRuntimeBackend === "codex" ? "openai" : "anthropic";
-  const apiKeyEnv = providerEnvVar(activeProvider);
-  const baseUrlEnv = providerBaseUrlEnvVar(activeProvider);
+  const activeProvider = providerFromModel(config.model);
+  const apiKeyEnv = activeProvider ? providerEnvVar(activeProvider) : undefined;
+  const baseUrlEnv = activeProvider ? providerBaseUrlEnvVar(activeProvider) : undefined;
   if (activeCredentials.apiKey && apiKeyEnv) process.env[apiKeyEnv] = activeCredentials.apiKey;
   if (activeProvider === "anthropic" && activeCredentials.authToken) {
     process.env.ANTHROPIC_AUTH_TOKEN = activeCredentials.authToken;
@@ -205,36 +152,23 @@ function primeActiveCredentialEnvironment(config: KuzushiConfig): void {
 }
 
 function primeApiKeyOverride(config: KuzushiConfig, apiKey: string): void {
-  const envName = config.agentRuntimeBackend === "codex" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
-  process.env[envName] = apiKey;
+  const provider = providerFromModel(config.model);
+  const envName = provider ? providerEnvVar(provider) : undefined;
+  if (envName) process.env[envName] = apiKey;
 }
 
-function primeAuthTokenOverride(config: KuzushiConfig, authToken: string): void {
-  if (config.agentRuntimeBackend === "codex") {
-    process.env.OPENAI_API_KEY = authToken;
-    return;
-  }
+function primeAuthTokenOverride(authToken: string): void {
   process.env.ANTHROPIC_AUTH_TOKEN = authToken;
   process.env.ANTHROPIC_OAUTH_TOKEN = authToken;
 }
 
-async function primeInheritedAnthropicToken(config: KuzushiConfig): Promise<void> {
-  if (!shouldLoadInheritedAnthropicToken(config)) return;
-  const ambient = resolveAmbientOauthToken(config);
-  if (!ambient) return;
-  process.env.ANTHROPIC_AUTH_TOKEN = ambient.token;
-  process.env.ANTHROPIC_OAUTH_TOKEN = ambient.token;
-  getLogger("kuzushi").info(`Using inherited OAuth token (source: ${ambient.source})`);
-}
-
-function shouldLoadInheritedAnthropicToken(config: KuzushiConfig): boolean {
-  return (
-    config.auth === "inherited" &&
-    !process.env.ANTHROPIC_API_KEY &&
-    !process.env.ANTHROPIC_AUTH_TOKEN &&
-    !process.env.ANTHROPIC_OAUTH_TOKEN &&
-    !isClaudeCodeHostManagedAuth()
-  );
+function providerFromModel(model: string | undefined): string | undefined {
+  if (!model) return undefined;
+  try {
+    return parsePiAiModelSpec(model).provider;
+  } catch {
+    return undefined;
+  }
 }
 
 function commaSeparatedList(value: string | undefined): string[] | undefined {

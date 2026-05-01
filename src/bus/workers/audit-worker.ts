@@ -138,7 +138,6 @@ function writeSummaryForRun(
     config: summaryState.config,
     scanOpts: summaryState.scanOpts,
     repoRoot: summaryState.repoRoot,
-    agentRuntimeBackend: summaryState.config.agentRuntimeBackend,
   });
 
   const summary: RunSummary = {

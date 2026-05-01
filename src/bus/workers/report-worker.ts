@@ -166,7 +166,6 @@ export function registerReportWorker(
           tasks: state.tasks ?? [],
           severity: event.payload.scanOpts.severity,
           concurrency: event.payload.config.triageConcurrency,
-          backend: event.payload.config.agentRuntimeBackend,
           scanMode: event.payload.config.scanMode,
           ...(typeof event.payload.config.costBudgetUsd === "number"
             ? { budget: event.payload.config.costBudgetUsd }

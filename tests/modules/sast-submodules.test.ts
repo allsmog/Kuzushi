@@ -65,7 +65,6 @@ describe("SAST sub-modules", () => {
     ]);
     expect(reqs(createTaintIrisNextModule()).map((r) => r.kind === "snapshot" && r.field)).toEqual([
       "appModel",
-      "threatModel",
     ]);
     const hunt = reqs(createCarliniThreatHuntModule()).map((r) => r.kind === "snapshot" && r.field);
     expect(hunt).toContain("appModel");

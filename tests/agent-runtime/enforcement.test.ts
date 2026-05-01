@@ -9,8 +9,7 @@ describe("enforceAgentQuery", () => {
   it("rejects an empty model with KuzushiSilentFallbackError", () => {
     expect(() =>
       enforceAgentQuery({
-        runtimeId: "claude",
-        backend: "claude",
+        runtimeId: "pi-ai",
         model: "",
         fallbackModel: undefined,
         fallbackConsent: false,
@@ -23,7 +22,6 @@ describe("enforceAgentQuery", () => {
     expect(() =>
       enforceAgentQuery({
         runtimeId: "pi-ai",
-        backend: "pi-ai",
         model: undefined,
         fallbackModel: undefined,
         fallbackConsent: false,
@@ -35,8 +33,7 @@ describe("enforceAgentQuery", () => {
   it("rejects whitespace-only model", () => {
     expect(() =>
       enforceAgentQuery({
-        runtimeId: "claude",
-        backend: "claude",
+        runtimeId: "pi-ai",
         model: "   ",
         fallbackModel: undefined,
         fallbackConsent: false,
@@ -45,76 +42,22 @@ describe("enforceAgentQuery", () => {
     ).toThrow(/model is required/);
   });
 
-  it("rejects claude backend paired with non-anthropic provider", () => {
-    expect(() =>
-      enforceAgentQuery({
-        runtimeId: "claude",
-        backend: "claude",
-        model: "openai:gpt-4",
-        fallbackModel: undefined,
-        fallbackConsent: false,
-        callsite: "test.claude.openai",
-      }),
-    ).toThrow(/will not silently switch runtimes/);
-  });
-
-  it("rejects codex backend paired with anthropic model", () => {
-    expect(() =>
-      enforceAgentQuery({
-        runtimeId: "codex",
-        backend: "codex",
-        model: "anthropic:claude-sonnet-4-6",
-        fallbackModel: undefined,
-        fallbackConsent: false,
-        callsite: "test.codex.anthropic",
-      }),
-    ).toThrow(/will not silently switch runtimes/);
-  });
-
-  it("rejects pi-ai backend with bare model id (no provider prefix)", () => {
+  it("rejects bare model id without provider prefix", () => {
     expect(() =>
       enforceAgentQuery({
         runtimeId: "pi-ai",
-        backend: "pi-ai",
         model: "claude-sonnet-4-6",
         fallbackModel: undefined,
         fallbackConsent: false,
         callsite: "test.pi-ai.bare",
       }),
-    ).toThrow(/will not silently switch runtimes/);
+    ).toThrow(/not valid for runtime "pi-ai"/);
   });
 
-  it("accepts compatible claude + anthropic-prefixed model", () => {
-    expect(() =>
-      enforceAgentQuery({
-        runtimeId: "claude",
-        backend: "claude",
-        model: "anthropic:claude-sonnet-4-6",
-        fallbackModel: undefined,
-        fallbackConsent: false,
-        callsite: "test.claude.ok",
-      }),
-    ).not.toThrow();
-  });
-
-  it("accepts compatible claude + bare model id", () => {
-    expect(() =>
-      enforceAgentQuery({
-        runtimeId: "claude",
-        backend: "claude",
-        model: "claude-sonnet-4-6",
-        fallbackModel: undefined,
-        fallbackConsent: false,
-        callsite: "test.claude.bare",
-      }),
-    ).not.toThrow();
-  });
-
-  it("accepts compatible pi-ai + provider-prefixed model", () => {
+  it("accepts compatible provider-prefixed model", () => {
     expect(() =>
       enforceAgentQuery({
         runtimeId: "pi-ai",
-        backend: "pi-ai",
         model: "anthropic:claude-sonnet-4-6",
         fallbackModel: undefined,
         fallbackConsent: false,
@@ -123,24 +66,10 @@ describe("enforceAgentQuery", () => {
     ).not.toThrow();
   });
 
-  it("accepts compatible codex + bare openai model id", () => {
-    expect(() =>
-      enforceAgentQuery({
-        runtimeId: "codex",
-        backend: "codex",
-        model: "gpt-5.5",
-        fallbackModel: undefined,
-        fallbackConsent: false,
-        callsite: "test.codex.bare",
-      }),
-    ).not.toThrow();
-  });
-
   it("rejects fallbackModel without consent", () => {
     expect(() =>
       enforceAgentQuery({
-        runtimeId: "claude",
-        backend: "claude",
+        runtimeId: "pi-ai",
         model: "anthropic:claude-sonnet-4-6",
         fallbackModel: "anthropic:claude-haiku-4-5",
         fallbackConsent: false,
@@ -152,8 +81,7 @@ describe("enforceAgentQuery", () => {
   it("rejects fallbackModel error message names the fallback model", () => {
     try {
       enforceAgentQuery({
-        runtimeId: "claude",
-        backend: "claude",
+        runtimeId: "pi-ai",
         model: "anthropic:claude-sonnet-4-6",
         fallbackModel: "anthropic:claude-haiku-4-5",
         fallbackConsent: false,
@@ -170,8 +98,7 @@ describe("enforceAgentQuery", () => {
   it("accepts fallbackModel when consent is true", () => {
     expect(() =>
       enforceAgentQuery({
-        runtimeId: "claude",
-        backend: "claude",
+        runtimeId: "pi-ai",
         model: "anthropic:claude-sonnet-4-6",
         fallbackModel: "anthropic:claude-haiku-4-5",
         fallbackConsent: true,
@@ -183,8 +110,7 @@ describe("enforceAgentQuery", () => {
   it("treats empty fallbackModel as no fallback request", () => {
     expect(() =>
       enforceAgentQuery({
-        runtimeId: "claude",
-        backend: "claude",
+        runtimeId: "pi-ai",
         model: "anthropic:claude-sonnet-4-6",
         fallbackModel: "",
         fallbackConsent: false,
@@ -196,16 +122,15 @@ describe("enforceAgentQuery", () => {
   it("error message mentions callsite for debuggability", () => {
     try {
       enforceAgentQuery({
-        runtimeId: "claude",
-        backend: "claude",
+        runtimeId: "pi-ai",
         model: "",
         fallbackModel: undefined,
         fallbackConsent: false,
-        callsite: "claude.queryBatch",
+        callsite: "pi-ai.queryBatch",
       });
       throw new Error("should have thrown");
     } catch (err) {
-      expect((err as Error).message).toMatch(/^claude\.queryBatch:/);
+      expect((err as Error).message).toMatch(/^pi-ai\.queryBatch:/);
     }
   });
 });

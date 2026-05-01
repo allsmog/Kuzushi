@@ -9,7 +9,6 @@
  * `back` pops it.
  */
 
-import type { AgentRuntimeBackend } from "../../contracts.js";
 import type { ModuleRegistry } from "../../modules/registry.js";
 import type { CopilotModule } from "../../modules/types.js";
 import { wrapToWidth } from "../../ui/format.js";
@@ -23,8 +22,6 @@ export interface CoreDispatcherOptions {
   registry: ModuleRegistry;
   /** Global datastore — stores `setg`-set keys. */
   globals: Datastore;
-  /** Active agent runtime backend, used to validate universal model overrides. */
-  agentRuntimeBackend?: AgentRuntimeBackend;
   /** Source of command history (for `history`). */
   history: () => string[];
   /** Sink to mutate history (for `history -c`). */
@@ -147,7 +144,7 @@ export class CoreDispatcher implements CommandDispatcher {
 
   constructor(private readonly opts: CoreDispatcherOptions) {
     if (!opts.globals.spec("MODEL")) {
-      opts.globals.registerOption(modelOptionSpec("MODEL", opts.agentRuntimeBackend));
+      opts.globals.registerOption(modelOptionSpec("MODEL"));
     }
   }
 
@@ -403,7 +400,6 @@ export class CoreDispatcher implements CommandDispatcher {
     const dispatcher = new ModuleDispatcher({
       module: mod,
       globals: this.opts.globals,
-      agentRuntimeBackend: this.opts.agentRuntimeBackend,
       ...(this.opts.runTool ? { runTool: this.opts.runTool } : {}),
     });
     return { push: dispatcher, output: `Selected module: ${mod.id}` };

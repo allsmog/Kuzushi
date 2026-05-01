@@ -12,6 +12,7 @@ export interface ConfigConfirmData {
 /** Provider ids aligned with pi-ai's builtin providers. */
 export type ProviderId =
   | "anthropic"
+  | "anthropic-oauth"
   | "openai"
   | "google"
   | "mistral"
@@ -21,17 +22,20 @@ export type ProviderId =
   | "openrouter"
   | "bedrock"
   | "ollama"
-  | "inherited"
-  | "inherited-claude";
+  | "inherited";
 
 export type CredentialChoice =
   | { kind: "api-key"; providerId: ProviderId; value: string; baseUrl?: string; persist: boolean }
   | { kind: "base-url"; providerId: ProviderId; baseUrl: string; apiKey?: string; persist: boolean }
-  | { kind: "inherited"; providerId?: ProviderId };
+  | { kind: "inherited"; providerId?: ProviderId }
+  | { kind: "oauth-anthropic" };
 
 export interface WizardResult {
   preset: string;
+  /** Default model — first selected in the multi-select pool. */
   model?: string;
+  /** Operator-curated pool of models the shell's `/model` switcher offers. */
+  availableModels?: string[];
   verify?: boolean;
   pocHarness?: boolean;
   severity?: string[];

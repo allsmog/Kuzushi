@@ -11,12 +11,12 @@ import type { FileIndex, RepoContext, ScanOpts, SecurityPatternMatch } from "../
 import type { DagNodeImpl } from "../../types.js";
 import { buildSystemsSurfacePack } from "./helpers.js";
 import {
-  SYSTEMS_PATTERN_DOMAINS,
   hasSystemsSignals,
   isSystemsLanguage,
   type RankedSystemsSurface,
   resolveSystemsCodeqlDbPath,
   resolveSystemsHuntConfig,
+  SYSTEMS_PATTERN_DOMAINS,
   type SystemsContextOutput,
   type SystemsPatternDomain,
   type SystemsSurfaceKind,
