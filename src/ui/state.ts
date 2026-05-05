@@ -27,7 +27,12 @@ import type {
   SecurityControl,
   Verdict,
 } from "../types.js";
-import type { ConfigConfirmData, CredentialChoice, WizardResult } from "./preflight-types.js";
+import type {
+  ConfigConfirmData,
+  CredentialChoice,
+  ModelPickerData,
+  WizardResult,
+} from "./preflight-types.js";
 import type { ResumeDiffData } from "./resume-types.js";
 import type { ShellStoryEvent, ShellTaskStoryState } from "./task-story.js";
 
@@ -68,6 +73,11 @@ export type PreflightState =
       onComplete: (choice: CredentialChoice) => void;
       onCancel: () => void;
     }
+  | ({
+      kind: "model";
+      onComplete: (modelId: string) => void;
+      onCancel: () => void;
+    } & ModelPickerData)
   | {
       kind: "context-intake";
       repoName: string;
@@ -429,6 +439,7 @@ const PREFLIGHT_STEP_ORDER = [
   "wizard",
   "confirm",
   "credentials",
+  "model",
   "context-intake",
   "threat-editor",
   "config-editor",
@@ -438,6 +449,7 @@ const PREFLIGHT_SEGMENT_LABELS: Record<(typeof PREFLIGHT_STEP_ORDER)[number], st
   wizard: "Preset",
   confirm: "Confirm",
   credentials: "Credentials",
+  model: "Model",
   "context-intake": "Context Intake",
   "threat-editor": "Threat Model",
   "config-editor": "Config",

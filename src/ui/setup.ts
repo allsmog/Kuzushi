@@ -10,12 +10,18 @@ import path from "node:path";
 import type { ThreatModelDocument } from "../agents/tasks/threat-modeling/types.js";
 import type { ConfigPatchEntry } from "../config.js";
 import { applyConfigPatch, configPath, loadConfig } from "../config.js";
+import { readOauthCredentials } from "../oauth-store.js";
 import { saveOperatorScanContext } from "../operator-context.js";
 import { savePersistentThreatModel } from "../threat-model-renderer.js";
 import type { OperatorScanContext } from "../types.js";
 import { toErrorMessage } from "../utils.js";
 import { emitOutputNotice } from "./output.js";
-import type { ConfigConfirmData, CredentialChoice, WizardResult } from "./preflight-types.js";
+import type {
+  ConfigConfirmData,
+  CredentialChoice,
+  ModelPickerData,
+  WizardResult,
+} from "./preflight-types.js";
 import type { UIMode, UIStore } from "./state.js";
 export type SetupOutcome =
   | { action: "proceed"; preset?: string; model?: string }
@@ -215,6 +221,8 @@ export function hasAnyProviderCredentials(): boolean {
     "OLLAMA_BASE_URL",
   ];
   if (envKeys.some((k) => Boolean(process.env[k]))) return true;
+  const oauth = readOauthCredentials();
+  if (oauth?.anthropic || oauth?.["openai-codex"]) return true;
   return false;
 }
 
@@ -332,13 +340,21 @@ export async function runReadlineCredentialPrompt(): Promise<CredentialOutcome> 
     // the most common path and the user can always use the full Ink TTY
     // flow for other providers.
     const choice = await ask(
-      "Authenticate — [o] Claude Pro/Max OAuth  [1] Anthropic API key  [i] use env vars  [Enter] Skip: ",
+      "Authenticate — [o] Claude Pro/Max OAuth  [c] ChatGPT Codex OAuth  [1] Anthropic API key  [i] use env vars  [Enter] Skip: ",
     );
     if (choice === null) return { action: "cancel" };
     const trimmedChoice = choice.trim().toLowerCase();
     if (trimmedChoice === "" || trimmedChoice === "q") return { action: "cancel" };
     if (trimmedChoice === "o" || trimmedChoice === "oauth" || trimmedChoice === "anthropic-oauth") {
       return { action: "proceed", choice: { kind: "oauth-anthropic" } };
+    }
+    if (
+      trimmedChoice === "c" ||
+      trimmedChoice === "codex" ||
+      trimmedChoice === "openai-codex" ||
+      trimmedChoice === "openai-codex-oauth"
+    ) {
+      return { action: "proceed", choice: { kind: "oauth-openai-codex" } };
     }
     if (trimmedChoice === "i" || trimmedChoice === "inherited") {
       return { action: "proceed", choice: { kind: "inherited", providerId: "anthropic" } };
@@ -370,6 +386,36 @@ export async function runReadlineCredentialPrompt(): Promise<CredentialOutcome> 
   } finally {
     rl.close();
   }
+}
+
+export type ModelPromptOutcome = { action: "proceed"; model: string } | { action: "cancel" };
+
+export async function runModelPrompt(
+  store: UIStore | undefined,
+  data: ModelPickerData,
+  returnMode: UIMode = "shell",
+): Promise<ModelPromptOutcome> {
+  if (!process.stdout.isTTY || !store) {
+    return { action: "cancel" };
+  }
+
+  return new Promise<ModelPromptOutcome>((resolve) => {
+    store.setPreflight(
+      {
+        kind: "model",
+        ...data,
+        onComplete: (modelId: string) => {
+          store.setPreflight(null);
+          resolve({ action: "proceed", model: modelId });
+        },
+        onCancel: () => {
+          store.setPreflight(null);
+          resolve({ action: "cancel" });
+        },
+      },
+      returnMode,
+    );
+  });
 }
 
 // ── Context Intake ──

@@ -39,7 +39,7 @@ interface ProviderOption {
   name: string;
   description: string;
   detail: string;
-  authKind: "api-key" | "base-url" | "inherited" | "oauth-anthropic";
+  authKind: "api-key" | "base-url" | "inherited" | "oauth-anthropic" | "oauth-openai-codex";
   envVarHint?: string;
 }
 
@@ -53,6 +53,15 @@ const PROVIDERS: ProviderOption[] = [
       "an auto-refreshing token in ~/.kuzushi/oauth-credentials.json. Best " +
       "for personal use; uses your Pro/Max subscription quota.",
     authKind: "oauth-anthropic",
+  },
+  {
+    id: "openai-codex-oauth",
+    name: "ChatGPT Codex (OAuth)",
+    description: "Browser login — no API key required",
+    detail:
+      "Opens the ChatGPT OAuth flow, then stores an auto-refreshing Codex token " +
+      "in ~/.kuzushi/oauth-credentials.json. Use with openai-codex:<model>.",
+    authKind: "oauth-openai-codex",
   },
   {
     id: "anthropic",
@@ -272,6 +281,11 @@ export function CredentialPrompt({
 
     if (provider.authKind === "oauth-anthropic") {
       onComplete({ kind: "oauth-anthropic" });
+      return;
+    }
+
+    if (provider.authKind === "oauth-openai-codex") {
+      onComplete({ kind: "oauth-openai-codex" });
       return;
     }
 

@@ -7,24 +7,25 @@
  *     reachable (e.g. SSH, devcontainer, sandboxed runner)
  *   - persisting the resulting credentials to `~/.kuzushi/oauth-credentials.json`
  *
- * Returns the freshly-issued access token so callers can also export it
- * to `process.env.ANTHROPIC_OAUTH_TOKEN` for the running shell to pick
- * up without a restart.
+ * Returns the freshly-issued access token so callers can prime the live shell
+ * without a restart.
  */
 
 import { spawn } from "node:child_process";
-import { loginAnthropic } from "@mariozechner/pi-ai/oauth";
+import { loginAnthropic, loginOpenAICodex } from "@mariozechner/pi-ai/oauth";
 import { getLogger } from "./logger.js";
 import {
   type AnthropicOauthCredentials,
+  type OpenAICodexOauthCredentials,
   oauthCredentialsPath,
+  type ProviderOauthCredentials,
   readOauthCredentials,
   writeOauthCredentials,
 } from "./oauth-store.js";
 
 const log = getLogger("oauth-flow");
 
-export interface AnthropicLoginCallbacks {
+export interface OAuthLoginCallbacks {
   /**
    * Display the auth URL to the operator. Default opens the system
    * browser and writes the URL to stdout. Override to inject the URL
@@ -41,11 +42,23 @@ export interface AnthropicLoginCallbacks {
   onManualCodeInput?: () => Promise<string>;
 }
 
+export type AnthropicLoginCallbacks = OAuthLoginCallbacks;
+export type OpenAICodexLoginCallbacks = OAuthLoginCallbacks;
+
 export interface AnthropicLoginResult {
   /** The fresh access token (Bearer-ready). Same as `credentials.access`. */
   accessToken: string;
   /** Full credential object as persisted. Refresh tokens included. */
   credentials: AnthropicOauthCredentials;
+  /** Path of the credentials file the result was written to. */
+  persistedTo: string;
+}
+
+export interface OpenAICodexLoginResult {
+  /** The fresh access token (Bearer-ready). Same as `credentials.access`. */
+  accessToken: string;
+  /** Full credential object as persisted. Refresh tokens included. */
+  credentials: OpenAICodexOauthCredentials;
   /** Path of the credentials file the result was written to. */
   persistedTo: string;
 }
@@ -59,45 +72,11 @@ export interface AnthropicLoginResult {
 export async function loginAnthropicAndPersist(
   callbacks: AnthropicLoginCallbacks = {},
 ): Promise<AnthropicLoginResult> {
-  const onAuth =
-    callbacks.onAuth ??
-    ((info) => {
-      const line = `Open this URL to authorize: ${info.url}`;
-      process.stdout.write(`${line}\n`);
-      tryOpenBrowser(info.url);
-    });
-
-  const onProgress = callbacks.onProgress ?? ((msg) => log.info(`[oauth] ${msg}`));
-
-  const onManualCodeInput =
-    callbacks.onManualCodeInput ??
-    (async () => {
-      throw new Error(
-        "OAuth callback server unreachable and no manual paste-back handler was supplied. " +
-          "Re-run from a terminal that can bind 127.0.0.1:53692.",
-      );
-    });
-
-  const creds = await loginAnthropic({
-    onAuth,
-    onPrompt: async () => "",
-    onProgress,
-    onManualCodeInput,
+  const { persistable } = await runOAuthLogin({
+    callbacks,
+    login: loginAnthropic,
+    providerLabel: "Anthropic",
   });
-
-  // Pi-ai's OAuthCredentials shape is `{ refresh, access, expires, ... }`.
-  // Coerce to our store's named type so consumers don't pull pi-ai's
-  // type alias.
-  const persistable: AnthropicOauthCredentials = {
-    ...creds,
-    refresh: String(creds["refresh"] ?? ""),
-    access: String(creds["access"] ?? ""),
-    expires: Number(creds["expires"] ?? 0),
-  };
-
-  if (!persistable.refresh || !persistable.access) {
-    throw new Error("Anthropic OAuth flow returned no usable credentials");
-  }
 
   const existing = readOauthCredentials() ?? {};
   const persistedTo = writeOauthCredentials({ ...existing, anthropic: persistable });
@@ -109,6 +88,80 @@ export async function loginAnthropicAndPersist(
   process.env["ANTHROPIC_AUTH_TOKEN"] = persistable.access;
 
   return { accessToken: persistable.access, credentials: persistable, persistedTo };
+}
+
+/**
+ * Run the OpenAI Codex OAuth login flow and persist the result. Use a model
+ * like `openai-codex:gpt-5.4-mini` to consume the stored token.
+ */
+export async function loginOpenAICodexAndPersist(
+  callbacks: OpenAICodexLoginCallbacks = {},
+): Promise<OpenAICodexLoginResult> {
+  const { persistable } = await runOAuthLogin({
+    callbacks,
+    login: loginOpenAICodex,
+    providerLabel: "OpenAI Codex",
+  });
+
+  const existing = readOauthCredentials() ?? {};
+  const persistedTo = writeOauthCredentials({ ...existing, "openai-codex": persistable });
+  log.info(`OpenAI Codex OAuth credentials saved to ${persistedTo}`);
+
+  return { accessToken: persistable.access, credentials: persistable, persistedTo };
+}
+
+async function runOAuthLogin<TCreds extends Record<string, unknown>>(opts: {
+  callbacks: OAuthLoginCallbacks;
+  login: (options: {
+    onAuth: (info: { url: string; instructions?: string }) => void;
+    onPrompt: (prompt: { message: string; placeholder?: string }) => Promise<string>;
+    onProgress?: (message: string) => void;
+    onManualCodeInput?: () => Promise<string>;
+  }) => Promise<TCreds>;
+  providerLabel: string;
+}): Promise<{ creds: TCreds; persistable: ProviderOauthCredentials }> {
+  const { callbacks, login, providerLabel } = opts;
+  const onAuth =
+    callbacks.onAuth ??
+    ((info) => {
+      const line = `Open this URL to authorize: ${info.url}`;
+      process.stdout.write(`${line}\n`);
+      tryOpenBrowser(info.url);
+    });
+
+  const onProgress = callbacks.onProgress ?? ((msg) => log.info(`[oauth] ${msg}`));
+
+  const defaultManualPrompt =
+    !callbacks.onManualCodeInput && process.stdin.isTTY ? createManualCodePrompt() : undefined;
+  const onManualCodeInput = callbacks.onManualCodeInput ?? defaultManualPrompt?.promptManualCode;
+
+  const loginOptions: Parameters<typeof login>[0] = {
+    onAuth,
+    onPrompt: defaultManualPrompt?.promptManualCode ?? (async () => ""),
+    onProgress,
+  };
+  if (onManualCodeInput) loginOptions.onManualCodeInput = onManualCodeInput;
+
+  const creds = await (async () => {
+    try {
+      return await login(loginOptions);
+    } finally {
+      defaultManualPrompt?.abort();
+    }
+  })();
+
+  const persistable: ProviderOauthCredentials = {
+    ...creds,
+    refresh: String(creds["refresh"] ?? ""),
+    access: String(creds["access"] ?? ""),
+    expires: Number(creds["expires"] ?? 0),
+  };
+
+  if (!persistable.refresh || !persistable.access) {
+    throw new Error(`${providerLabel} OAuth flow returned no usable credentials`);
+  }
+
+  return { creds, persistable };
 }
 
 /**
@@ -129,6 +182,54 @@ function tryOpenBrowser(url: string): void {
     });
   } catch {
     /* ignore */
+  }
+}
+
+function createManualCodePrompt(): {
+  promptManualCode: () => Promise<string>;
+  abort: () => void;
+} {
+  const controller = new AbortController();
+  return {
+    promptManualCode: () => promptManualCode(controller.signal),
+    abort: () => controller.abort(),
+  };
+}
+
+async function promptManualCode(signal: AbortSignal): Promise<string> {
+  process.stdout.write(
+    [
+      "",
+      "If the browser cannot reach the local callback, paste the final redirect URL here.",
+      "You can also paste the code#state fragment.",
+      "> ",
+    ].join("\n"),
+  );
+
+  const rawMode =
+    typeof process.stdin.setRawMode === "function" && process.stdin.isTTY
+      ? process.stdin.isRaw
+      : undefined;
+  if (typeof process.stdin.setRawMode === "function" && process.stdin.isTTY) {
+    process.stdin.setRawMode(false);
+  }
+
+  try {
+    const readline = await import("node:readline/promises");
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      terminal: process.stdin.isTTY,
+    });
+    try {
+      return (await rl.question("", { signal })).trim();
+    } finally {
+      rl.close();
+    }
+  } finally {
+    if (rawMode !== undefined && typeof process.stdin.setRawMode === "function") {
+      process.stdin.setRawMode(rawMode);
+    }
   }
 }
 
