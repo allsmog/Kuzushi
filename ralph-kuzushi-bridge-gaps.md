@@ -330,5 +330,5 @@ ralph \
   --agent codex \
   --model gpt-5.5 \
   --completion-promise KUZUSHI_BRIDGE_GAPS_COMPLETE \
-  --max-iterations 12
+  --max-iterations 20
 ```
