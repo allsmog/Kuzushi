@@ -59,11 +59,80 @@ pub enum ModuleKind {
     Workspace,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolDescriptor {
     pub name: String,
     pub description: String,
     pub headless: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<OptionSpec>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum OptionType {
+    String,
+    Bool,
+    Int,
+    Float,
+    Path,
+    Enum,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OptionSpec {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub option_type: OptionType,
+    pub description: String,
+    pub required: bool,
+    pub advanced: bool,
+    pub evasion: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<String>,
+}
+
+impl OptionSpec {
+    fn new(name: &str, option_type: OptionType, description: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            option_type,
+            description: description.to_string(),
+            required: false,
+            advanced: false,
+            evasion: false,
+            default: None,
+            choices: Vec::new(),
+        }
+    }
+
+    fn required(mut self) -> Self {
+        self.required = true;
+        self
+    }
+
+    fn advanced(mut self) -> Self {
+        self.advanced = true;
+        self
+    }
+
+    fn evasion(mut self) -> Self {
+        self.evasion = true;
+        self
+    }
+
+    fn default(mut self, value: Value) -> Self {
+        self.default = Some(value);
+        self
+    }
+
+    fn choices(mut self, choices: &[&str]) -> Self {
+        self.choices = choices.iter().map(|choice| (*choice).to_string()).collect();
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -185,10 +254,15 @@ impl ModuleRegistry {
         ctx: &ToolExecutionContext<'_>,
         runtime: Option<&dyn AgentRuntime>,
     ) -> Result<Value> {
-        let is_tool = self.resolve_tool(name).is_some();
-        if !is_tool && !self.is_registered_dag_node(name) {
+        let tool = self.resolve_tool(name);
+        if tool.is_none() && !self.is_registered_dag_node(name) {
             anyhow::bail!("unknown tool {name:?}");
         }
+        let input = if let Some(tool) = tool {
+            validate_tool_input_options(tool, input)?
+        } else {
+            input
+        };
 
         match name {
             "catalog:modules" => Ok(json!(self
@@ -6707,6 +6781,107 @@ fn json_summary(value: &Value) -> String {
     }
 }
 
+fn validate_tool_input_options(tool: &ToolDescriptor, input: Value) -> Result<Value> {
+    if tool.options.is_empty() {
+        return Ok(input);
+    }
+
+    let mut object = match input {
+        Value::Null => Map::new(),
+        Value::Object(object) => object,
+        other => {
+            anyhow::bail!(
+                "{} expects a JSON object input when option metadata is declared, got {}",
+                tool.name,
+                json_summary(&other)
+            );
+        }
+    };
+
+    for spec in &tool.options {
+        match object.remove(&spec.name) {
+            Some(value) => {
+                let coerced = coerce_option_value(spec, value)
+                    .with_context(|| format!("{} option {}", tool.name, spec.name))?;
+                object.insert(spec.name.clone(), coerced);
+            }
+            None if spec.required => {
+                anyhow::bail!("{} requires option {}", tool.name, spec.name);
+            }
+            None => {
+                if let Some(default) = spec.default.clone() {
+                    object.insert(spec.name.clone(), default);
+                }
+            }
+        }
+    }
+
+    Ok(Value::Object(object))
+}
+
+fn coerce_option_value(spec: &OptionSpec, value: Value) -> Result<Value> {
+    let coerced = match spec.option_type {
+        OptionType::String | OptionType::Path => match value {
+            Value::String(value) => Value::String(value),
+            other => anyhow::bail!("must be a string, got {}", json_summary(&other)),
+        },
+        OptionType::Bool => match value {
+            Value::Bool(value) => Value::Bool(value),
+            Value::String(value) => Value::Bool(parse_bool_option(&value)?),
+            other => anyhow::bail!("must be a boolean, got {}", json_summary(&other)),
+        },
+        OptionType::Int => match value {
+            Value::Number(number) if number.as_i64().is_some() || number.as_u64().is_some() => {
+                Value::Number(number)
+            }
+            Value::String(value) => {
+                let parsed = value
+                    .trim()
+                    .parse::<i64>()
+                    .with_context(|| format!("must be an integer, got {value:?}"))?;
+                Value::Number(parsed.into())
+            }
+            other => anyhow::bail!("must be an integer, got {}", json_summary(&other)),
+        },
+        OptionType::Float => match value {
+            Value::Number(number) if number.as_f64().is_some() => Value::Number(number),
+            Value::String(value) => {
+                let parsed = value
+                    .trim()
+                    .parse::<f64>()
+                    .with_context(|| format!("must be a number, got {value:?}"))?;
+                let number =
+                    serde_json::Number::from_f64(parsed).context("must be a finite JSON number")?;
+                Value::Number(number)
+            }
+            other => anyhow::bail!("must be a number, got {}", json_summary(&other)),
+        },
+        OptionType::Enum => match value {
+            Value::String(value) => Value::String(value),
+            other => anyhow::bail!("must be a string enum value, got {}", json_summary(&other)),
+        },
+    };
+
+    if spec.option_type == OptionType::Enum {
+        let value = coerced
+            .as_str()
+            .context("enum coercion produced a non-string value")?;
+        if !spec.choices.iter().any(|choice| choice == value) {
+            anyhow::bail!("must be one of {}, got {value:?}", spec.choices.join("|"));
+        }
+    }
+
+    Ok(coerced)
+}
+
+fn parse_bool_option(value: &str) -> Result<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "t" | "yes" | "y" | "1" | "on" => Ok(true),
+        "false" | "f" | "no" | "n" | "0" | "off" => Ok(false),
+        _ => anyhow::bail!("must be a boolean (true/false/yes/no/1/0), got {value:?}"),
+    }
+}
+
 pub struct ToolExecutionContext<'a> {
     pub config: &'a V2Config,
     pub workspace: Option<&'a WorkspaceTarget>,
@@ -6758,9 +6933,30 @@ fn context_module() -> BuiltinModule {
         "Context",
         ModuleKind::Intel,
         "Build and persist repository context snapshots for scanner and shell use.",
-        vec![tool(
+        vec![tool_with_options(
             "context:build",
             "Build a lightweight native repository context snapshot.",
+            vec![
+                opt(
+                    "sampleLimit",
+                    OptionType::Int,
+                    "Maximum source files to sample in the context snapshot.",
+                )
+                .default(json!(200)),
+                opt("discovery", OptionType::Enum, "Repository discovery mode.")
+                    .choices(&["auto", "flat", "modules"])
+                    .default(json!("auto")),
+                opt(
+                    "enrichment",
+                    OptionType::Bool,
+                    "Request LLM-backed context enrichment when supported.",
+                )
+                .default(json!(false))
+                .advanced(),
+                opt("scope", OptionType::Enum, "Context slice to build.")
+                    .choices(&["all", "repo", "enrichment", "app-model"])
+                    .default(json!("all")),
+            ],
         )],
         vec![dag("context:build", "context", &[])],
     )
@@ -6783,9 +6979,35 @@ fn sast_module() -> BuiltinModule {
         "SAST Pipeline",
         ModuleKind::Defense,
         "Full SAST pipeline: context, scanners, AI triage, verification, patch, and report.",
-        vec![tool(
+        vec![tool_with_options(
             "sast:scan",
             "Run the full SAST pipeline for the current target.",
+            vec![
+                opt("taskMode", OptionType::Enum, "Task-selection mode.")
+                    .choices(&["auto", "manual"])
+                    .default(json!("auto")),
+                opt(
+                    "triage",
+                    OptionType::Bool,
+                    "Run model-backed triage after static scanners.",
+                )
+                .default(json!(false)),
+                opt(
+                    "verify",
+                    OptionType::Bool,
+                    "Run exploitability verification after triage.",
+                )
+                .default(json!(false))
+                .advanced(),
+                opt(
+                    "autoPatch",
+                    OptionType::Bool,
+                    "Generate patches for verified true positives.",
+                )
+                .default(json!(false))
+                .advanced(),
+                model_option(),
+            ],
         )],
         vec![dag("sast:scan", "report", &["context:build"])],
     )
@@ -6797,9 +7019,15 @@ fn semgrep_module() -> BuiltinModule {
         "Semgrep Scan",
         ModuleKind::Defense,
         "Native SAST path using semgrep JSON output.",
-        vec![tool(
+        vec![tool_with_options(
             "semgrep:scan",
             "Run semgrep and persist normalized findings.",
+            vec![
+                target_option(),
+                binary_option("Semgrep binary path."),
+                opt("config", OptionType::String, "Semgrep config name or path.")
+                    .default(json!("auto")),
+            ],
         )],
         vec![dag("semgrep:scan", "findings", &["context:build"])],
     )
@@ -6811,9 +7039,38 @@ fn codeql_module() -> BuiltinModule {
         "CodeQL",
         ModuleKind::Defense,
         "GitHub's taint-query semantic analyzer: deeper than pattern scanners but slower.",
-        vec![tool(
+        vec![tool_with_options(
             "codeql:scan",
             "Run CodeQL and normalize semantic findings.",
+            vec![
+                target_option(),
+                binary_option("CodeQL binary path."),
+                opt("dbPath", OptionType::Path, "Existing CodeQL database path.").advanced(),
+                opt("language", OptionType::Enum, "CodeQL language to analyze.").choices(&[
+                    "javascript",
+                    "python",
+                    "csharp",
+                    "c#",
+                    "java",
+                    "go",
+                    "cpp",
+                    "c++",
+                    "c-cpp",
+                    "swift",
+                    "ruby",
+                    "rust",
+                    "typescript",
+                ]),
+                opt("suite", OptionType::String, "CodeQL query suite.").advanced(),
+                opt("threads", OptionType::Int, "CodeQL worker thread count.").advanced(),
+                opt("ram", OptionType::Int, "CodeQL RAM budget in MB.").advanced(),
+                opt(
+                    "multiLanguage",
+                    OptionType::Bool,
+                    "Analyze all detected CodeQL languages.",
+                )
+                .default(json!(false)),
+            ],
         )],
         vec![dag("codeql:scan", "findings", &["context:build"])],
     )
@@ -6825,9 +7082,15 @@ fn agentic_sast_module() -> BuiltinModule {
         "Agentic SAST",
         ModuleKind::Defense,
         "LLM-driven detectors that reason about data flow and intent rather than pattern-match.",
-        vec![tool(
+        vec![tool_with_options(
             "agentic-sast:scan",
             "Run agentic SAST detectors for the current target.",
+            vec![
+                target_option(),
+                max_findings_option(40),
+                opt("passes", OptionType::Int, "Agentic review pass count.").default(json!(1)),
+                model_option(),
+            ],
         )],
         vec![dag("agentic-sast:scan", "findings", &["context:build"])],
     )
@@ -6839,9 +7102,10 @@ fn carlini_threat_hunt_module() -> BuiltinModule {
         "Carlini Threat Hunt",
         ModuleKind::Offense,
         "Hunt threats from the active threat-model document via parallel scoped agents.",
-        vec![tool(
+        vec![tool_with_options(
             "carlini-threat-hunt:run",
             "Run threat-model-scoped offensive hunting agents.",
+            vec![target_option(), max_findings_option(20), model_option()],
         )],
         vec![dag(
             "carlini-threat-hunt:run",
@@ -6857,9 +7121,10 @@ fn taint_iris_module() -> BuiltinModule {
         "Taint IRIS",
         ModuleKind::Defense,
         "LLM-driven taint analysis selecting relevant CWEs then tracing source to sink.",
-        vec![tool(
+        vec![tool_with_options(
             "taint-iris:hunt",
             "Run IRIS-style taint hunting over the current target.",
+            vec![target_option(), max_findings_option(20), model_option()],
         )],
         vec![dag("taint-iris:hunt", "findings", &["context:build"])],
     )
@@ -6871,9 +7136,10 @@ fn taint_iris_next_module() -> BuiltinModule {
         "Taint IRIS Next",
         ModuleKind::Defense,
         "Bounded IRIS-style taint analysis with deterministic evidence extraction and agent review.",
-        vec![tool(
+        vec![tool_with_options(
             "taint-iris-next:hunt",
             "Run the next-generation bounded taint hunting pipeline.",
+            vec![target_option(), max_findings_option(20), model_option()],
         )],
         vec![dag("taint-iris-next:hunt", "findings", &["context:build"])],
     )
@@ -6927,7 +7193,25 @@ fn triage_module() -> BuiltinModule {
         "Triage",
         ModuleKind::Defense,
         "LLM-driven triage of scanner findings with evidence-backed verdicts.",
-        vec![tool("triage:run", "Triage findings with pi-agent-core.")],
+        vec![tool_with_options(
+            "triage:run",
+            "Triage findings with pi-agent-core.",
+            vec![
+                opt("scanId", OptionType::String, "Scan run id to triage."),
+                opt(
+                    "fingerprint",
+                    OptionType::String,
+                    "Single finding fingerprint to triage.",
+                ),
+                opt(
+                    "batchSize",
+                    OptionType::Int,
+                    "Maximum findings per runtime batch.",
+                )
+                .default(json!(20)),
+                model_option(),
+            ],
+        )],
         vec![dag("triage:run", "triage", &["semgrep:scan"])],
     )
 }
@@ -6938,9 +7222,10 @@ fn verify_module() -> BuiltinModule {
         "Verify",
         ModuleKind::Offense,
         "Exploitability verification through proof-of-concept construction and sandboxed execution.",
-        vec![tool(
+        vec![tool_with_options(
             "verify:finding",
             "Verify whether a finding is exploitable.",
+            vec![fingerprint_option(), model_option()],
         )],
         vec![dag("verify:finding", "verification", &["triage:run"])],
     )
@@ -6952,7 +7237,26 @@ fn patch_module() -> BuiltinModule {
         "Patch",
         ModuleKind::Defense,
         "Generate and validate a patch for a finding.",
-        vec![tool("patch:finding", "Generate a patch for a finding.")],
+        vec![tool_with_options(
+            "patch:finding",
+            "Generate a patch for a finding.",
+            vec![
+                fingerprint_option(),
+                opt("maxIterations", OptionType::Int, "Maximum patch attempts.").default(json!(3)),
+                opt(
+                    "buildCmd",
+                    OptionType::String,
+                    "Build command used for patch validation.",
+                )
+                .advanced(),
+                opt(
+                    "testCmd",
+                    OptionType::String,
+                    "Test command used for patch validation.",
+                )
+                .advanced(),
+            ],
+        )],
         vec![dag("patch:finding", "patch", &["verify:finding"])],
     )
 }
@@ -6963,7 +7267,19 @@ fn findings_module() -> BuiltinModule {
         "Findings",
         ModuleKind::Defense,
         "Persist and inspect findings in SQLite.",
-        vec![tool("findings:list", "List persisted findings.")],
+        vec![tool_with_options(
+            "findings:list",
+            "List persisted findings.",
+            vec![
+                opt("limit", OptionType::Int, "Maximum findings to return.").default(json!(50)),
+                opt(
+                    "name",
+                    OptionType::String,
+                    "Substring filter for finding titles.",
+                ),
+                opt("filePath", OptionType::Path, "File path filter."),
+            ],
+        )],
         vec![],
     )
 }
@@ -6975,9 +7291,20 @@ fn threat_model_module() -> BuiltinModule {
         ModuleKind::Intel,
         "Build and read threat-model artifacts and methodology overlays.",
         vec![
-            tool(
+            tool_with_options(
                 "threat-model:build",
                 "Build a threat model for the current target.",
+                vec![
+                    target_option(),
+                    opt(
+                        "methodology",
+                        OptionType::Enum,
+                        "Threat-model methodology overlay.",
+                    )
+                    .choices(&["pasta", "stride", "randori"])
+                    .default(json!("stride")),
+                    model_option(),
+                ],
             ),
             tool(
                 "threat-model:read",
@@ -7003,7 +7330,26 @@ fn x_ray_module() -> BuiltinModule {
         ModuleKind::Intel,
         "Pashov X-Ray repository analysis and report artifacts.",
         vec![
-            tool("x-ray:run", "Run repository X-Ray analysis."),
+            tool_with_options(
+                "x-ray:run",
+                "Run repository X-Ray analysis.",
+                vec![
+                    target_option(),
+                    model_option(),
+                    opt(
+                        "effort",
+                        OptionType::String,
+                        "Runtime reasoning effort hint.",
+                    )
+                    .advanced(),
+                    opt(
+                        "maxBudgetUsd",
+                        OptionType::Float,
+                        "Maximum runtime budget for the X-Ray request.",
+                    )
+                    .advanced(),
+                ],
+            ),
             tool("x-ray:read", "Read the latest X-Ray analysis report."),
         ],
         vec![dag("x-ray:x-ray", "report", &["context:build"])],
@@ -7017,19 +7363,34 @@ fn vendor_assessment_module() -> BuiltinModule {
         ModuleKind::Governance,
         "Vendor security assessment workspace: attach docs, set scope, generate prompts, assess.",
         vec![
-            tool(
+            tool_with_options(
                 "vendor-assessment:attach",
                 "Attach vendor evidence documents.",
+                vec![
+                    opt("source", OptionType::String, "Evidence source path or URL."),
+                    opt("path", OptionType::Path, "Evidence document path."),
+                    opt("url", OptionType::String, "Evidence document URL."),
+                ],
             ),
-            tool(
+            tool_with_options(
                 "vendor-assessment:scope",
                 "Set or inspect assessment scope.",
+                vec![
+                    opt("vendorName", OptionType::String, "Vendor name."),
+                    opt("productName", OptionType::String, "Product name."),
+                    opt("profile", OptionType::String, "Assessment profile.")
+                        .default(json!("enterprise-ai")),
+                ],
             ),
             tool(
                 "vendor-assessment:prompts",
                 "Generate assessment prompt packets.",
             ),
-            tool("vendor-assessment:assess", "Run vendor assessment."),
+            tool_with_options(
+                "vendor-assessment:assess",
+                "Run vendor assessment.",
+                vec![model_option()],
+            ),
         ],
         vec![],
     )
@@ -7042,10 +7403,22 @@ fn chrome_rce_module() -> BuiltinModule {
         ModuleKind::Defense,
         "Detection rules anchored to verified Chrome and Chromium RCE CVEs.",
         vec![
-            tool("chrome-rce:scan", "Scan for Chrome RCE bug patterns."),
-            tool(
+            tool_with_options(
+                "chrome-rce:scan",
+                "Scan for Chrome RCE bug patterns.",
+                vec![target_option(), max_findings_option(50)],
+            ),
+            tool_with_options(
                 "chrome-rce:review-trigger",
                 "Review candidate Chrome RCE trigger paths.",
+                vec![
+                    target_option(),
+                    opt(
+                        "diffBase",
+                        OptionType::String,
+                        "Git reference for PR hot-path review.",
+                    ),
+                ],
             ),
         ],
         vec![
@@ -7061,7 +7434,11 @@ fn dep_hygiene_module() -> BuiltinModule {
         "Dependency Hygiene",
         ModuleKind::Defense,
         "Check dependency manifests for stale, vulnerable, or policy-risky packages.",
-        vec![tool("dep-hygiene:check", "Run dependency hygiene checks.")],
+        vec![tool_with_options(
+            "dep-hygiene:check",
+            "Run dependency hygiene checks.",
+            vec![target_option()],
+        )],
         vec![dag("dep-hygiene:check", "findings", &["context:build"])],
     )
 }
@@ -7072,9 +7449,19 @@ fn secret_scan_module() -> BuiltinModule {
         "Secret Scan",
         ModuleKind::Defense,
         "Fast deterministic secret scanner over source files.",
-        vec![tool(
+        vec![tool_with_options(
             "secret-scan:scan",
             "Scan source files for high-confidence secrets.",
+            vec![
+                target_option(),
+                opt(
+                    "maxFileBytes",
+                    OptionType::Int,
+                    "Maximum file size to scan.",
+                )
+                .default(json!(524288)),
+                max_findings_option(1000),
+            ],
         )],
         vec![dag("secret-scan:scan", "findings", &["context:build"])],
     )
@@ -7114,11 +7501,21 @@ fn variant_module() -> BuiltinModule {
         ModuleKind::Offense,
         "Lift exploit patterns from confirmed findings and hunt sibling variants.",
         vec![
-            tool(
+            tool_with_options(
                 "variant:lift-pattern",
                 "Lift a reusable vulnerability pattern from a confirmed finding.",
+                vec![fingerprint_option(), model_option()],
             ),
-            tool("variant:hunt", "Hunt variants of a confirmed finding."),
+            tool_with_options(
+                "variant:hunt",
+                "Hunt variants of a confirmed finding.",
+                vec![
+                    target_option(),
+                    fingerprint_option(),
+                    max_findings_option(25),
+                    model_option(),
+                ],
+            ),
         ],
         vec![dag("variant:hunt", "findings", &["variant:lift-pattern"])],
     )
@@ -7131,14 +7528,20 @@ fn ndiff_module() -> BuiltinModule {
         ModuleKind::Intel,
         "Fetch CVE fix context, extract fix patterns, and hunt n-day variants.",
         vec![
-            tool("ndiff:fetch-cve", "Fetch CVE and patch metadata."),
-            tool(
+            tool_with_options(
+                "ndiff:fetch-cve",
+                "Fetch CVE and patch metadata.",
+                vec![opt("id", OptionType::String, "CVE or advisory id to fetch.").required()],
+            ),
+            tool_with_options(
                 "ndiff:extract-fix-pattern",
                 "Extract a vulnerability fix pattern from a patch.",
+                vec![model_option()],
             ),
-            tool(
+            tool_with_options(
                 "ndiff:hunt-variants",
                 "Hunt variants using an extracted n-day fix pattern.",
+                vec![target_option(), max_findings_option(25), model_option()],
             ),
         ],
         vec![dag(
@@ -7156,8 +7559,16 @@ fn randori_module() -> BuiltinModule {
         ModuleKind::Intel,
         "PASTA and randori threat-model generation.",
         vec![
-            tool("randori:pasta", "Generate a PASTA threat model."),
-            tool("randori:threat-model", "Generate a randori threat model."),
+            tool_with_options(
+                "randori:pasta",
+                "Generate a PASTA threat model.",
+                vec![target_option(), model_option()],
+            ),
+            tool_with_options(
+                "randori:threat-model",
+                "Generate a randori threat model.",
+                vec![target_option(), model_option()],
+            ),
         ],
         vec![dag(
             "randori:threat-model",
@@ -7173,7 +7584,11 @@ fn vuln_scout_module() -> BuiltinModule {
         "Vuln Scout",
         ModuleKind::Offense,
         "Whitebox pentest wrapper around the @kuzushi/vuln-scout Claude Code plugin.",
-        vec![tool("vuln-scout:audit", "Run the Vuln Scout audit plugin.")],
+        vec![tool_with_options(
+            "vuln-scout:audit",
+            "Run the Vuln Scout audit plugin.",
+            vec![target_option(), model_option()],
+        )],
         vec![dag("vuln-scout:audit", "findings", &["context:build"])],
     )
 }
@@ -7185,7 +7600,11 @@ fn tob_module() -> BuiltinModule {
         ModuleKind::Offense,
         "Audit wrapper around the @kuzushi/tob-skills Claude Code plugin collection.",
         vec![
-            tool("tob:audit", "Run a Trail of Bits skills audit."),
+            tool_with_options(
+                "tob:audit",
+                "Run a Trail of Bits skills audit.",
+                vec![target_option(), model_option()],
+            ),
             tool("tob:skills", "List available Trail of Bits skill modules."),
         ],
         vec![dag("tob:audit", "findings", &["context:build"])],
@@ -7199,18 +7618,25 @@ fn shinsa_module() -> BuiltinModule {
         ModuleKind::Governance,
         "Compliance assessment wrapper around the shinsa-plugin Claude Code plugin.",
         vec![
-            tool(
+            tool_with_options(
                 "shinsa:scan",
                 "Run a full ISO 27001 Annex A compliance assessment.",
+                vec![target_option(), model_option()],
             ),
-            tool("shinsa:quick-check", "Run a fast ISO 27001 Annex A check."),
-            tool(
+            tool_with_options(
+                "shinsa:quick-check",
+                "Run a fast ISO 27001 Annex A check.",
+                vec![target_option(), model_option()],
+            ),
+            tool_with_options(
                 "shinsa:nist-scan",
                 "Run a full NIST SP 800-53 Rev 5 compliance assessment.",
+                vec![target_option(), model_option()],
             ),
-            tool(
+            tool_with_options(
                 "shinsa:nist-quick-check",
                 "Run a fast NIST SP 800-53 Rev 5 check.",
+                vec![target_option(), model_option()],
             ),
             tool("shinsa:frameworks", "List supported compliance frameworks."),
         ],
@@ -7228,23 +7654,73 @@ fn prompt_armor_module() -> BuiltinModule {
         ModuleKind::Offense,
         "LLM red-team wrapper around promptarmor-plugin attack suites and mutations.",
         vec![
-            tool("prompt-armor:scan", "Run a full LLM red-team scan."),
-            tool(
+            tool_with_options(
+                "prompt-armor:scan",
+                "Run a full LLM red-team scan.",
+                vec![
+                    target_option(),
+                    opt(
+                        "authorized",
+                        OptionType::Bool,
+                        "Confirm authorization to test.",
+                    )
+                    .default(json!(false)),
+                    opt(
+                        "payload",
+                        OptionType::String,
+                        "Single attack payload to test.",
+                    )
+                    .evasion(),
+                    model_option(),
+                ],
+            ),
+            tool_with_options(
                 "prompt-armor:analyze",
                 "Statically analyze prompt-injection surface.",
+                vec![target_option(), model_option()],
             ),
-            tool(
+            tool_with_options(
                 "prompt-armor:attack",
                 "Send a single authorized attack payload and judge the response.",
+                vec![
+                    target_option(),
+                    opt(
+                        "authorized",
+                        OptionType::Bool,
+                        "Confirm authorization to test.",
+                    )
+                    .default(json!(false)),
+                    opt(
+                        "payload",
+                        OptionType::String,
+                        "Single attack payload to test.",
+                    )
+                    .evasion(),
+                    model_option(),
+                ],
             ),
-            tool("prompt-armor:diff", "Diff two prior red-team runs."),
-            tool(
+            tool_with_options(
+                "prompt-armor:diff",
+                "Diff two prior red-team runs.",
+                vec![
+                    opt("runA", OptionType::Path, "Baseline prompt-armor run path.").required(),
+                    opt(
+                        "runB",
+                        OptionType::Path,
+                        "Comparison prompt-armor run path.",
+                    )
+                    .required(),
+                ],
+            ),
+            tool_with_options(
                 "prompt-armor:report",
                 "Generate a consolidated red-team report.",
+                vec![target_option()],
             ),
-            tool(
+            tool_with_options(
                 "prompt-armor:config",
                 "Inspect or scaffold promptarmor.yaml.",
+                vec![target_option()],
             ),
         ],
         vec![dag("prompt-armor:scan", "findings", &["context:build"])],
@@ -7258,11 +7734,50 @@ fn recon_module() -> BuiltinModule {
         ModuleKind::Intel,
         "Network and web reconnaissance tools.",
         vec![
-            tool("recon:nmap", "Run nmap reconnaissance."),
-            tool("recon:subdomain", "Run subdomain reconnaissance."),
-            tool(
+            tool_with_options(
+                "recon:nmap",
+                "Run nmap reconnaissance.",
+                vec![
+                    opt("target", OptionType::String, "Host or network target.").required(),
+                    opt(
+                        "ports",
+                        OptionType::String,
+                        "Port set or comma-separated port list.",
+                    )
+                    .default(json!("top100")),
+                    binary_option("nmap binary path."),
+                ],
+            ),
+            tool_with_options(
+                "recon:subdomain",
+                "Run subdomain reconnaissance.",
+                vec![
+                    opt("domain", OptionType::String, "Domain to enumerate.").required(),
+                    opt("source", OptionType::Enum, "Subdomain source.")
+                        .choices(&["crtsh", "wayback", "both"])
+                        .default(json!("both")),
+                    opt(
+                        "timeoutSeconds",
+                        OptionType::Int,
+                        "HTTP fetch timeout in seconds.",
+                    )
+                    .default(json!(20)),
+                    binary_option("curl binary path."),
+                ],
+            ),
+            tool_with_options(
                 "recon:http-fingerprint",
                 "Fingerprint HTTP services and technology stacks.",
+                vec![
+                    opt("target", OptionType::String, "HTTP service URL or host.").required(),
+                    opt(
+                        "timeoutSeconds",
+                        OptionType::Int,
+                        "HTTP fetch timeout in seconds.",
+                    )
+                    .default(json!(10)),
+                    binary_option("curl binary path."),
+                ],
             ),
         ],
         vec![dag("recon:http-fingerprint", "context", &["context:build"])],
@@ -7275,9 +7790,30 @@ fn iac_scan_module() -> BuiltinModule {
         "IaC Scan",
         ModuleKind::Defense,
         "Scan IaC manifests for security misconfigurations.",
-        vec![tool(
+        vec![tool_with_options(
             "iac-scan:scan",
             "Scan Terraform, Kubernetes, and related IaC manifests.",
+            vec![
+                target_option(),
+                opt("kind", OptionType::Enum, "IaC file family to scan.")
+                    .choices(&[
+                        "all",
+                        "dockerfile",
+                        "docker",
+                        "github-actions",
+                        "github_actions",
+                        "actions",
+                        "terraform",
+                        "tf",
+                    ])
+                    .default(json!("all")),
+                opt(
+                    "maxFileBytes",
+                    OptionType::Int,
+                    "Maximum file size to scan.",
+                )
+                .default(json!(524288)),
+            ],
         )],
         vec![dag("iac-scan:scan", "findings", &["context:build"])],
     )
@@ -7328,11 +7864,59 @@ fn module(
 }
 
 fn tool(name: &str, description: &str) -> ToolDescriptor {
+    tool_with_options(name, description, vec![])
+}
+
+fn tool_with_options(name: &str, description: &str, options: Vec<OptionSpec>) -> ToolDescriptor {
     ToolDescriptor {
         name: name.to_string(),
         description: description.to_string(),
         headless: true,
+        options,
     }
+}
+
+fn opt(name: &str, option_type: OptionType, description: &str) -> OptionSpec {
+    OptionSpec::new(name, option_type, description)
+}
+
+fn target_option() -> OptionSpec {
+    opt(
+        "target",
+        OptionType::Path,
+        "Repository or workspace path; defaults to the active workspace when supported.",
+    )
+}
+
+fn model_option() -> OptionSpec {
+    opt(
+        "model",
+        OptionType::String,
+        "Explicit provider:model override for this tool run.",
+    )
+    .advanced()
+}
+
+fn max_findings_option(default: usize) -> OptionSpec {
+    opt(
+        "maxFindings",
+        OptionType::Int,
+        "Maximum findings or candidates to return.",
+    )
+    .default(json!(default))
+}
+
+fn fingerprint_option() -> OptionSpec {
+    opt(
+        "fingerprint",
+        OptionType::String,
+        "Finding fingerprint or stable finding alias.",
+    )
+    .required()
+}
+
+fn binary_option(description: &str) -> OptionSpec {
+    opt("binary", OptionType::Path, description).advanced()
 }
 
 fn dag(id: &str, output_kind: &str, depends_on: &[&str]) -> DagNodeDescriptor {
@@ -8266,6 +8850,182 @@ OUT
                 String::from_utf8_lossy(&output.stderr)
             );
         }
+    }
+
+    #[test]
+    fn validates_and_coerces_declared_tool_options() {
+        let descriptor = tool_with_options(
+            "test:demo",
+            "exercise option validation",
+            vec![
+                opt("enabled", OptionType::Bool, "boolean option").default(json!(false)),
+                opt("limit", OptionType::Int, "integer option").default(json!(10)),
+                opt("ratio", OptionType::Float, "floating-point option"),
+                opt("target", OptionType::Path, "path option").required(),
+                opt("label", OptionType::String, "string option"),
+                opt("mode", OptionType::Enum, "enum option")
+                    .choices(&["auto", "manual"])
+                    .default(json!("auto")),
+            ],
+        );
+
+        let validated = validate_tool_input_options(
+            &descriptor,
+            json!({
+                "enabled": "yes",
+                "limit": "42",
+                "ratio": "0.75",
+                "target": "./repo",
+                "label": "baseline",
+                "mode": "manual",
+                "extra": {"left": "untouched"}
+            }),
+        )
+        .unwrap();
+        assert_eq!(validated["enabled"], json!(true));
+        assert_eq!(validated["limit"], json!(42));
+        assert_eq!(validated["ratio"], json!(0.75));
+        assert_eq!(validated["target"], json!("./repo"));
+        assert_eq!(validated["label"], json!("baseline"));
+        assert_eq!(validated["mode"], json!("manual"));
+        assert_eq!(validated["extra"], json!({"left": "untouched"}));
+
+        let with_defaults = validate_tool_input_options(
+            &descriptor,
+            json!({
+                "target": "./repo",
+                "ratio": 1.25
+            }),
+        )
+        .unwrap();
+        assert_eq!(with_defaults["enabled"], json!(false));
+        assert_eq!(with_defaults["limit"], json!(10));
+        assert_eq!(with_defaults["mode"], json!("auto"));
+    }
+
+    #[test]
+    fn rejects_missing_required_and_invalid_option_values() {
+        let descriptor = tool_with_options(
+            "test:demo",
+            "exercise option validation",
+            vec![
+                opt("enabled", OptionType::Bool, "boolean option"),
+                opt("limit", OptionType::Int, "integer option"),
+                opt("ratio", OptionType::Float, "floating-point option"),
+                opt("target", OptionType::Path, "path option").required(),
+                opt("mode", OptionType::Enum, "enum option").choices(&["auto", "manual"]),
+            ],
+        );
+
+        for (input, expected) in [
+            (json!({}), "requires option target"),
+            (
+                json!({"target": "./repo", "enabled": "maybe"}),
+                "must be a boolean",
+            ),
+            (
+                json!({"target": "./repo", "limit": "many"}),
+                "must be an integer",
+            ),
+            (
+                json!({"target": "./repo", "ratio": "wide"}),
+                "must be a number",
+            ),
+            (
+                json!({"target": "./repo", "mode": "toggle"}),
+                "must be one of auto|manual",
+            ),
+        ] {
+            let error = validate_tool_input_options(&descriptor, input).unwrap_err();
+            let error = format!("{error:#}");
+            assert!(
+                error.contains(expected),
+                "expected {error:?} to contain {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn exposes_option_specs_for_visible_tool_descriptors() {
+        let registry = ModuleRegistry::with_v2_builtins();
+
+        let semgrep = registry.resolve_tool("semgrep:scan").unwrap();
+        assert!(semgrep.options.iter().any(|option| option.name == "config"
+            && option.option_type == OptionType::String
+            && option.default == Some(json!("auto"))));
+
+        let codeql = registry.resolve_tool("codeql:scan").unwrap();
+        assert!(codeql.options.iter().any(|option| option.name == "language"
+            && option.option_type == OptionType::Enum
+            && option.choices.contains(&"javascript".to_string())));
+        assert!(codeql
+            .options
+            .iter()
+            .any(|option| option.name == "multiLanguage"
+                && option.option_type == OptionType::Bool
+                && option.default == Some(json!(false))));
+
+        let x_ray = registry.resolve_tool("x-ray:run").unwrap();
+        assert!(x_ray.options.iter().any(|option| {
+            option.name == "maxBudgetUsd"
+                && option.option_type == OptionType::Float
+                && option.advanced
+        }));
+
+        let recon = registry.resolve_tool("recon:nmap").unwrap();
+        assert!(recon.options.iter().any(|option| option.name == "target"
+            && option.option_type == OptionType::String
+            && option.required));
+
+        let iac = registry.resolve_tool("iac-scan:scan").unwrap();
+        assert!(iac.options.iter().any(|option| option.name == "kind"
+            && option.option_type == OptionType::Enum
+            && option.choices.contains(&"terraform".to_string())));
+
+        let prompt_armor = registry.resolve_tool("prompt-armor:attack").unwrap();
+        assert!(prompt_armor
+            .options
+            .iter()
+            .any(|option| option.name == "payload" && option.evasion));
+    }
+
+    #[test]
+    fn catalog_tool_serialization_keeps_core_descriptor_fields() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let ctx = ToolExecutionContext {
+            config: &V2Config::default(),
+            workspace: None,
+            findings_store: None,
+        };
+
+        let tools = registry
+            .execute_tool("catalog:tools", Value::Null, &ctx)
+            .unwrap();
+        let catalog_modules = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "catalog:modules")
+            .unwrap();
+        assert_eq!(
+            catalog_modules["description"],
+            json!("List native modules.")
+        );
+        assert_eq!(catalog_modules["headless"], json!(true));
+        assert!(catalog_modules.get("options").is_none());
+
+        let semgrep = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "semgrep:scan")
+            .unwrap();
+        assert_eq!(semgrep["headless"], json!(true));
+        assert!(semgrep["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|option| option["name"] == "config"));
     }
 
     #[test]
