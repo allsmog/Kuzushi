@@ -151,14 +151,27 @@ mod tests {
 
     #[test]
     fn parses_kept_commands() {
+        assert_eq!(parse_command("/help"), ShellCommand::Help);
+        assert_eq!(parse_command("/h"), ShellCommand::Help);
+        assert_eq!(parse_command("?"), ShellCommand::Help);
         assert_eq!(parse_command("/modules"), ShellCommand::Modules);
         assert_eq!(parse_command("/tools"), ShellCommand::Tools);
         assert_eq!(parse_command("/findings"), ShellCommand::Findings);
+        assert_eq!(parse_command("/f"), ShellCommand::Findings);
+        assert_eq!(parse_command("/back"), ShellCommand::Back);
         assert_eq!(
             parse_command("/threats stride"),
             ShellCommand::Threat(ThreatView::Stride)
         );
+        assert_eq!(
+            parse_command("/threats 5"),
+            ShellCommand::Threat(ThreatView::Summary)
+        );
         assert_eq!(parse_command("/prompts"), ShellCommand::Prompts);
+        assert_eq!(
+            parse_command("/prompt show run"),
+            ShellCommand::Prompt("show run".to_string())
+        );
         assert_eq!(
             parse_command("/open abc123"),
             ShellCommand::Open("abc123".to_string())
@@ -171,6 +184,36 @@ mod tests {
             parse_command("/model openai:gpt-4.1"),
             ShellCommand::Model(Some("openai:gpt-4.1".to_string()))
         );
+        assert_eq!(parse_command("/config"), ShellCommand::Config);
+        assert_eq!(
+            parse_command("/use semgrep"),
+            ShellCommand::Use("semgrep".to_string())
+        );
+        assert_eq!(parse_command("/tune"), ShellCommand::Tune);
+        assert_eq!(parse_command("/t"), ShellCommand::Tune);
+        assert_eq!(parse_command("/actor 1"), ShellCommand::Actor(1));
+        assert_eq!(parse_command("/show runs"), ShellCommand::ShowRuns);
+        assert_eq!(
+            parse_command("/show aliases F-00"),
+            ShellCommand::ShowAliases(Some("F-00".to_string()))
+        );
+        assert_eq!(parse_command("/show prompts"), ShellCommand::Prompts);
+        assert_eq!(
+            parse_command("/since main"),
+            ShellCommand::Since("main".to_string())
+        );
+        assert_eq!(
+            parse_command("/replay run-123"),
+            ShellCommand::Replay("run-123".to_string())
+        );
+        assert_eq!(
+            parse_command("/trace run-123"),
+            ShellCommand::Trace("run-123".to_string())
+        );
+        assert_eq!(
+            parse_command("/plan only admin routes"),
+            ShellCommand::Plan("only admin routes".to_string())
+        );
         assert_eq!(
             parse_command("/run dep-hygiene:check {\"target\":\".\"}"),
             ShellCommand::RunTool {
@@ -178,11 +221,57 @@ mod tests {
                 input: Some("{\"target\":\".\"}".to_string())
             }
         );
+        assert_eq!(parse_command("/exit"), ShellCommand::Quit);
+        assert_eq!(parse_command("/quit"), ShellCommand::Quit);
     }
 
     #[test]
     fn accepts_commands_without_slash_for_log_prompt() {
         assert_eq!(parse_command("help"), ShellCommand::Help);
+        assert_eq!(parse_command("modules"), ShellCommand::Modules);
+        assert_eq!(parse_command("tools"), ShellCommand::Tools);
+        assert_eq!(parse_command("findings"), ShellCommand::Findings);
+        assert_eq!(
+            parse_command("scan ./repo"),
+            ShellCommand::Scan(Some(PathBuf::from("./repo")))
+        );
         assert_eq!(parse_command("q"), ShellCommand::Quit);
+    }
+
+    #[test]
+    fn tracks_high_priority_legacy_gap_commands_until_ported() {
+        for input in [
+            "/options",
+            "show options",
+            "/set target .",
+            "set target .",
+            "/tasks",
+            "/task toggle semgrep",
+            "/kb",
+            "attachments",
+            "attach notes.md",
+            "detach abc123",
+            "reparse abc123",
+            "/context",
+            "/context build",
+            "/workspace",
+            "/auth",
+            "/provider",
+            "/backend",
+            "/cost",
+            "/ask what changed?",
+            "?what changed?",
+            "/history",
+            "/clear",
+            "/load builtin:sast",
+            "/resume",
+            "/pause",
+            "/story",
+        ] {
+            assert!(
+                matches!(parse_command(input), ShellCommand::Unknown(_)),
+                "{input:?} should stay visible as a bridge-gap command until its Rust route is implemented"
+            );
+        }
     }
 }
