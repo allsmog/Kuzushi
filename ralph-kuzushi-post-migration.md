@@ -1,5 +1,9 @@
 # Ralph Loop Prompt: Kuzushi Post-Migration Work
 
+Superseded for new runs by `ralph-kuzushi-finish-from-bridge.md`, which folds
+the bridge-gap phase, this post-migration phase, and whitebox-static into one
+ordered prompt. Keep this file as historical detail/reference.
+
 You are working in `/Users/operator/VibeCode/open-sourced/kuzushi`.
 
 Kuzushi is an open-source AI cybersecurity copilot. The Rust/pi-agent-core migration is already complete and pushed on branch `incoming-changes` at commit `f17dc699859d2e618c3452ff3c20c2b907a12d80`.
@@ -590,4 +594,3 @@ Only then emit:
 ```text
 <promise>KUZUSHI_POST_MIGRATION_COMPLETE</promise>
 ```
-
