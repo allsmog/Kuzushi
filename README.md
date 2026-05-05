@@ -1,644 +1,258 @@
 <img src="kuzushi.png" alt="Kuzushi" width="200" />
 
-# Kuzushi — AI Cybersecurity Copilot
+# Kuzushi
 
-[![CI](https://github.com/allsmog/Kuzushi/actions/workflows/ci.yml/badge.svg)](https://github.com/allsmog/Kuzushi/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/kuzushi)](https://www.npmjs.com/package/kuzushi)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+Kuzushi is an open-source AI cybersecurity copilot. The primary product path is
+the native Rust CLI and Ratatui shell; the npm package is a thin wrapper around
+that native binary.
 
-[kuzushi.dev](https://kuzushi.dev)
+## Install
 
-Kuzushi is an AI cybersecurity copilot and security harness in one — a conversational terminal environment where LLM agents drive offense, defense, and compliance through a persistent agentic pipeline.
-
-Find the vulnerability. Prove it's exploitable. Deploy a honeypot to detect it. Check if it violates PCI DSS. Generate the patch. One tool, one conversation.
-
-```sh
+```bash
 npm install -g kuzushi
-kuzushi
+kuzushi --help
 ```
 
-## First 5 minutes
+From a source checkout:
 
-```sh
-# 1. Install (Node 22+)
-npm install -g kuzushi
-
-# 2. Authenticate — API key or OAuth (pick one)
-export ANTHROPIC_API_KEY=sk-ant-...   # API key
-# — or — OAuth login (no key needed if Claude Code is installed):
-# kuzushi auth login
-
-# 3. Scan the current directory
-kuzushi scan .
+```bash
+pnpm setup
+pnpm dev -- --help
+pnpm build:native
+node bin/kuzushi-rs.mjs --help
 ```
 
-The first run launches an interactive wizard: pick a preset (`safe` is the
-recommended starter — context + secrets, capped at 20 findings), pick a
-model, and Kuzushi runs the pipeline. Results stream to `/findings`; the
-SQLite store under `.kuzushi/findings.sqlite3` survives across runs so you
-can `/replay` or `/resume` later.
-
-Prefer the conversational shell? Run `kuzushi` (no args), then type
-`/quickstart` for a guided tour, or `scan .` to kick off the same pipeline
-inside the shell.
-
-If something looks wrong before you start, run `kuzushi doctor` to preflight
-your environment (Node version, scanner binaries, credentials, write
-permissions).
-
-## Three Ways to Use It
-
-### Shell (default)
-
-Just type `kuzushi`. The interactive copilot shell blends a Metasploit-style module navigator with a Claude Code-style conversational agent — operators move between security modules with slash commands while the AI handles natural-language queries, plan synthesis, and tool orchestration in the same prompt.
-
-```
-kuzushi shell                                  # default — just `kuzushi` works
-kuzushi shell --workspace acme-pentest         # resume an engagement
-kuzushi shell --target ./repo                  # set initial target
-kuzushi shell --load randori,vuln-scout,tob    # pre-load specific built-in modules
-```
-
-```
-╭─────────────────────────────────────────────────────────────╮
-│  kuzushi shell                      workspace: acme-api     │
-│  modules: sast, randori, vuln-scout, tob, variant           │
-│  target: ./acme-api  (Node.js + Express + PostgreSQL)       │
-╰─────────────────────────────────────────────────────────────╯
-
-kuzushi> modules
-kuzushi> use sast
-kuzushi/sast> run scan ./repo preset=deep
-kuzushi/sast> back
-kuzushi> tools
-kuzushi> run verify:finding fingerprint=abc123
-kuzushi> exit
-```
-
-#### Common shell flows
-
-```
-# Catalog / module home / tune
-kuzushi> use sast             # focus → module home
-kuzushi/sast> findings        # unified list with filter chips + chain boxing
-kuzushi/sast> open F-0001     # linear deep page for a finding
-kuzushi/sast> tune            # six plain controls + optional "house rules"
-kuzushi/sast> back            # step up one level
-
-# Natural-language planner — English → option diff → y/n apply
-kuzushi/sast> /plan run harder, focus on auth, stop wasting money
-kuzushi/sast> y               # apply the proposed changes
-
-# Prompt editor — per-tool system-prompt override in $EDITOR
-kuzushi/sast> /prompt edit triage          # opens .kuzushi/prompts/sast/triage.md
-kuzushi/sast> /prompt show verify          # show effective prompt + source
-kuzushi/sast> /show prompts                # cross-module audit table
-
-# Replay / trace — re-read the outcome of a past run, no re-exec
-kuzushi> /show runs                        # list recent runs
-kuzushi> /replay 7f3a                      # re-render a past summary
-kuzushi> /trace 7f3a                       # stream the per-event JSONL log
-
-# Threat-model views — five screens over the randori output
-kuzushi> /threats dfd                      # ASCII data flow diagram
-kuzushi> /threats stride                   # element × STRIDE heat matrix
-kuzushi> /threats stories                  # attacker narrative cards
-kuzushi> /threats scope                    # criticality + operator edits
-kuzushi> /threats summary                  # counts, drives, export paths
-# Press 1..5 at any threat view to cycle.
-
-# Short-ID aliases — F-0001 / C-01 resolve through a deterministic map
-kuzushi/sast> /show aliases F-             # filter by prefix
-kuzushi/sast> open F-0003                  # same as typing the fingerprint
-
-# Diff-aware — pivot to "what changed since <ref>" without restarting
-kuzushi> /since main                       # findings + threats scoped to changed files
-kuzushi> /since v1.2.0                     # works with any git ref (tags, SHAs, HEAD~5)
-```
-
-#### Keyboard shortcuts
-
-| Key            | While running                     | At the idle prompt                  |
-| -------------- | --------------------------------- | ----------------------------------- |
-| `Ctrl+C`       | Abort the running tool / turn     | First press arms, second exits (2s) |
-| `Ctrl+D`       | Abort (same as `Ctrl+C`)          | Exits                               |
-| `Enter`        | —                                 | Send input                          |
-| `↑` / `↓`      | —                                 | Previous / next command             |
-| `Esc`          | —                                 | Clear input buffer                  |
-| `1`–`5`        | —                                 | Cycle threat-model sub-views        |
-
-Ctrl+C aborts through four independent paths (Ink `useInput` on raw stdin,
-a byte-level stdin watcher, `SIGINT`, and a dedicated `/dev/tty` reader)
-so long-running LLM tools still cancel cleanly even when a subprocess has
-grabbed the terminal's foreground group. Under abort every Claude Agent
-SDK subprocess (and its descendants) receives `SIGTERM` directly — no
-relying on the SDK's own signal handling.
-
-Set `KUZUSHI_ABORT_DEBUG=1` to trace the abort path to stderr when
-diagnosing Ctrl+C issues.
-
-#### On-disk artefacts
-
-Operators can version-control any of these and have them round-trip with
-the shell — `/prompt edit` and `/tune` write here, and randori / scan runs
-read from here.
-
-| Path                                       | Role                                       |
-| ------------------------------------------ | ------------------------------------------ |
-| `~/.kuzushi/config.json`                   | Global config (`/config`)                  |
-| `.kuzushi/threat-model.json`               | Persistent threat model (editable)         |
-| `.kuzushi/house-rules/<moduleId>.md`       | Operator nudges per module (`/tune`)       |
-| `.kuzushi/prompts/<moduleId>/<verb>.md`    | Per-tool system-prompt override            |
-| `.kuzushi/runs/<runId>/summary.json`       | Run summary (for `/replay`)                |
-| `.kuzushi/runs/<runId>/triage.jsonl`       | Per-event triage audit log (for `/trace`)  |
-| `.kuzushi/runs/<runId>/verify.jsonl`       | Per-event verify audit log (for `/trace`)  |
-| `.kuzushi/findings.sqlite3`                | Findings + pipeline_runs DB                |
-
-### Scan (headless pipeline)
-
-The full SAST pipeline — 40+ agent tasks orchestrated as a DAG. Semgrep, CodeQL, 30+ agentic detectors, AI triage, verification, PoC generation, patch synthesis. CI/CD-native with SARIF, quality gates, and exit codes.
-
-```sh
-kuzushi scan <repo>
-kuzushi scan <repo> --preset deep --verify --auto-patch
-kuzushi scan <repo> --sarif report.sarif --fail-on-tp --quality-gate
-kuzushi scan <repo> --resume
-```
-
-### Run (headless module tool)
-
-Execute a single module tool without the interactive shell. Scriptable, composable with unix pipes.
-
-```sh
-kuzushi run semgrep:scan ./repo --json
-kuzushi run triage:run fingerprint=abc123 --json
-kuzushi run verify:finding fingerprint=abc123 --quiet
-kuzushi run findings:list severity=critical,high --json
-```
+The published `kuzushi` command resolves `native/<platform>-<arch>/kuzushi`
+first, then local Cargo build outputs. Set `KUZUSHI_NATIVE_BIN` to point the
+wrapper at a specific binary.
 
 ## Quick Start
 
-Prereqs: Node 22+, and either an API key or Claude Code OAuth login.
-
-```sh
-# Install globally
-npm install -g kuzushi
-
-# Start the copilot shell (default)
+```bash
+# Start the Rust terminal shell.
 kuzushi
 
-# Or run a headless scan
-kuzushi scan /path/to/your/repo
+# Run the default native scan path against a repo.
+kuzushi scan .
 
-# With specific providers
-export ANTHROPIC_API_KEY=sk-ant-...
-kuzushi scan /path/to/your/repo
+# Persisted findings can be reviewed headlessly.
+kuzushi findings --target .
 
-# With OpenAI, Google, Groq, Mistral, or 15+ other providers
-kuzushi scan /path/to/repo --model openai:gpt-4o
-kuzushi scan /path/to/repo --model google:gemini-2.0-flash
+# Or execute one tool through the same Rust registry.
+kuzushi --target . run secret-scan:scan --input '{}'
 ```
 
-Kuzushi auto-downloads Opengrep if you don't have a scanner installed. Zero dependencies to manage.
+Fresh native state is stored under `.kuzushi/v2/`; scan-run summaries and
+triage/verification JSONL remain under `.kuzushi/runs/<runId>/`.
 
-## Quick Start (Contributors)
+There is no Rust `kuzushi doctor` subcommand in this cutover. In a source
+checkout, `pnpm doctor` runs the read-only development environment diagnostic.
 
-Two commands, deterministic, loud on failure:
+## Native CLI
 
-```sh
-git clone https://github.com/allsmog/Kuzushi.git
-cd Kuzushi
-pnpm setup      # verifies Node 22+, pins pnpm via corepack, checks externals, pnpm install
-pnpm doctor     # optional: re-verify the environment at any time
+```text
+kuzushi [--target <path>] [command]
 ```
 
-Then:
+Bare `kuzushi` starts the shell.
 
-```sh
-pnpm dev --help       # run the CLI from source via tsx
-pnpm test             # unit tests (vitest)
-pnpm check:types      # typecheck src + benchmarks + perf (in parallel)
-pnpm build            # incremental compile to dist/ — incremental, fast
-pnpm build:clean      # wipe dist/ and rebuild from scratch (used by `pnpm prepack`)
-```
-
-Optional benchmark corpuses (clones 3rd-party vulnerable apps on demand):
-
-```sh
-pnpm setup:benchmarks list          # list available corpuses
-pnpm setup:benchmarks govwa         # clone one
-pnpm setup:benchmarks all           # clone everything
-```
-
-Prefer a containerised environment? Open the repo in VS Code / Codespaces and
-"Reopen in Container" — the `.devcontainer/devcontainer.json` runs
-`pnpm setup --strict` automatically and installs semgrep + python for you.
-
-## Module System
-
-Kuzushi's capabilities come from `CopilotModule`s that expose tools (for shell and run modes) and optionally pipeline tasks (for scan mode DAG execution), plus a set of Claude Code plugins that are wrapped by built-in modules. Three buckets:
-
-### Built-in `CopilotModule`s (always available)
-
-| Module | Category | What It Does | Key Tools |
-|--------|----------|--------------|-----------|
-| **sast** | offense | 40+ task SAST pipeline: Semgrep, CodeQL, agentic detectors, AI triage, verification, PoC, patch | `sast:scan` plus split-module tools `semgrep:scan`, `codeql:scan`, `agentic-sast:scan`, `triage:run`, `verify:finding`, `patch:finding`, `findings:list`, `context:build`, `carlini-threat-hunt:run`, `taint-iris:hunt` |
-| **randori** | intel | PASTA threat modeling via the `@kuzushi/randori-plugin` — S1–S4 stages plus narrative synthesis, returning a `ThreatModelDocument` | `randori:pasta`, `randori:threat-model` |
-| **vuln-scout** | offense | Whitebox pentest via the `@kuzushi/vuln-scout` plugin — agentic SAST + taint analysis returning normalized Findings | `vuln-scout:audit` |
-| **tob** | offense | Trail of Bits skills audit via `@kuzushi/tob-skills` — fp-check, sharp-edges, insecure-defaults, static-analysis, variant-analysis, and more | `tob:audit`, `tob:skills` |
-| **shinsa** | governance | ISO 27001 Annex A + NIST SP 800-53 Rev 5 compliance assessment via `shinsa-plugin` — evidence-backed controls mapped to file:line citations | `shinsa:scan`, `shinsa:quick-check`, `shinsa:nist-scan`, `shinsa:nist-quick-check`, `shinsa:frameworks` |
-| **prompt-armor** | offense | LLM red teaming via `promptarmor-plugin` — 80+ attack plugins, 25+ mutation strategies, code-aware remediation (network commands require `authorized: true`) | `prompt-armor:scan`, `prompt-armor:analyze`, `prompt-armor:attack`, `prompt-armor:diff`, `prompt-armor:report`, `prompt-armor:config` |
-| **variant** | offense | Lifts confirmed findings into portable signatures and hunts for variants across the repo (including vendored deps) | `variant:lift-pattern`, `variant:hunt` |
-| **ndiff** | offense | CVE-diff-based n-day hunting and variant search against a target | `ndiff:fetch-cve`, `ndiff:search-patch-shape`, `ndiff:hunt-variants` |
-| **secret-scan** | offense | Deterministic regex + entropy credential scanner — AWS keys, GitHub PATs, PEM private keys, JWTs, generic passwords. Zero LLM cost. | `secret-scan:scan` |
-
-Load with the shell or at startup: `kuzushi shell --load randori,vuln-scout,tob,shinsa,prompt-armor,variant,ndiff` (the bare id works — `builtin:` prefix is optional). Legacy ids `variant-hunter` / `n-day-diff-hunter` still resolve for backward compatibility.
-
-Legacy `sast:<action>` aliases for split-module tools still resolve for backward compatibility, but new scripts and docs should use the canonical tool names shown above.
-
-### External `CopilotModule` packages
-
-| Package | Module ID | Usage |
-|---------|-----------|-------|
-| `@kuzushi/augur` | `augur` | Neuro-symbolic SAST (IRIS/ICLR 2025 LLM-driven CodeQL taint analysis). Load with `--load package:@kuzushi/augur`. |
-
-### Referenced Claude Code plugins
-
-These are dependencies consumed by the built-in wrappers above, not directly loadable as `CopilotModule`s. Attempting `--load package:@kuzushi/randori-plugin` (etc.) prints a pointer to the corresponding built-in module.
-
-| Package | Wrapped by | Notes |
-|---------|------------|-------|
-| `@kuzushi/randori-plugin` | built-in `randori` | PASTA threat-modeling plugin (commands, agents, skills, hooks). |
-| `@kuzushi/vuln-scout` | built-in `vuln-scout` | Whitebox pentest skill pack under `whitebox-pentest/`. |
-| `@kuzushi/tob-skills` | built-in `tob` | Fork of trailofbits/skills — security-relevant plugins under `plugins/`. |
-| `shinsa-plugin` | built-in `shinsa` | ISO 27001 + NIST 800-53 compliance assessment (4 commands, 10 assessor agents). |
-| `promptarmor-plugin` | built-in `prompt-armor` | LLM red teaming (6 commands + MCP server under `server/`). |
-
-### Roadmap (not yet shipped)
-
-`blackbox`, `pwn`, `pentest`, `honeypot`, `yokai`, `revgraph` — referenced in the long-term vision but not currently implemented as loadable modules. See [VISION.md](VISION.md) for direction.
-
-### Authoring your own module
-
-```sh
-kuzushi create-module my-module --template offense   # scaffolds manifest + starter tool + vitest
-```
-
-The scaffolder emits `module.manifest.json` (with `kuzushiSdkVersion` and `$schema`), a TypeScript starter using `defineModule`/`defineTool`, and a vitest skeleton using `kuzushi/testing`. Import surface:
-
-```ts
-import { defineModule, defineTool, ModuleLoadError } from "kuzushi/modules"
-import type { CopilotModule, ToolExecutionContext, ToolResult } from "kuzushi/modules"
-import { createMockToolContext, assertToolResult, expectModuleShape } from "kuzushi/testing"
-```
-
-Load a local build with `--load file:///abs/path/to/my-module`, a published package with `--load package:@scope/name`, or an MCP server with `--load mcp:<spec>`. The full authoring guide — manifest, `ToolExecutionContext` reference, capability probes, load errors, testing, MCP bridging — lives in **[docs/modules.md](docs/modules.md)**.
-
-## The SAST Pipeline
-
-The built-in `sast` module runs a 40+ task DAG pipeline:
-
-```
-  ┌─────────────┐     ┌──────────────┐     ┌──────────────┐     ┌─────────┐     ┌──────────┐
-  │  Task DAG    │────>│  AI Triage   │────>│ Verification │────>│  Patch  │────>│  Report  │
-  │ Semgrep      │     │ Investigate  │     │ Construct    │     │ Generate │     │ TP only  │
-  │ CodeQL       │     │ each finding │     │ PoC exploits │     │ & verify │     │ + export │
-  │ 30+ tasks    │     │ with context │     │ (optional)   │     │ (opt-in) │     │ + stream │
-  └─────────────┘     └──────────────┘     └──────────────┘     └─────────┘     └──────────┘
-```
-
-1. **Context gathering** — auto-detects tech stack, frameworks, auth patterns, ORMs, sanitization
-2. **Code graph** — builds entry-point-to-sink graph via static analysis + LLM discovery
-3. **Threat modeling** — Randori PASTA plugin: business objectives, technical scope, DFD decomposition, STRIDE threats with ATT&CK/CAPEC/OWASP mapping and 5-factor probabilistic scoring
-4. **Threat-informed hunting** — adversarial Claude agents per DFD external entity, CTF-style hunting
-5. **Task DAG execution** — Semgrep, CodeQL, agentic scanner, 15+ specialized detectors (SSRF, SQLi, XSS, command injection, XXE, deserialization, NoSQL injection, template injection, prototype pollution, race conditions, supply chain, GraphQL, secrets/crypto, auth logic, systems-level deep semantic analysis); **systems-hunt** 4-actor kernel/protocol memory-safety hunter with resource-provenance chain detection (shared-origin → transport → alias → write-through → failure-after-mutation, scored + narrative)
-6. **Classifier funnel** — cheap single-token pre-filter removes ~80% noise before expensive triage
-7. **Deduplication** — fingerprints and merges equivalent findings across scanners
-8. **AI triage** — agent investigates each finding with source context, code graph, evidence chains, threat model, CWE-specific knowledge
-9. **Variant analysis** — confirmed TPs trigger automatic search for similar patterns
-10. **Verification** (optional) — constructs concrete PoC exploit payloads
-11. **PoC harness** (optional) — produces runnable exploit scripts with execution feedback
-12. **Dynamic analysis** (optional) — executes harnesses in Docker sandbox
-13. **Auto-patch** (optional) — generates, validates, and re-verifies patches in disposable worktrees
-14. **Report** — terminal display + SARIF, Markdown, JSON, CSV, JSONL; optional SSE streaming
-
-For each finding, you get: **verdict** (tp/fp/by_design/needs_review), **confidence** (0-1), **rationale** with code references, **verification steps**, **fix suggestion**, optional **PoC exploit**, and **cost in USD**.
-
-## CI Integration
-
-### GitHub Actions
-
-```yaml
-name: Security Scan
-on: [push, pull_request]
-jobs:
-  kuzushi:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npx kuzushi scan . --sarif results.sarif --junit results.xml --quality-gate --fail-on-tp
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      - uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: results.sarif
-```
-
-Exit codes: `0` clean, `1` findings (or task failures), `2` usage/config/auth, `3` unexpected crash. See `.github/workflows/kuzushi-reference.yml` for a reference workflow with SARIF upload, JUnit publish, and PR sticky comment.
-
-#### `--ci` stream mode
-
-`--ci` disables the Ink TUI and attaches a plain-text stream formatter
-that writes one line per meaningful pipeline event. Log-renderer-friendly,
-grep-friendly, and free of ANSI control codes:
-
-```sh
-kuzushi scan ./repo --ci --sarif results.sarif
-```
-
-```
-[2026-04-20T14:20:01Z] scan: ./repo started
-[2026-04-20T14:20:01Z] phase: (init) → scanning
-[2026-04-20T14:20:12Z] stage: scan → done [8.3s]
-[2026-04-20T14:20:12Z] stage: triage → active (15 findings)
-[2026-04-20T14:20:45Z] finding: abc123def456 tp 92% $0.0041
-[2026-04-20T14:21:20Z] summary: 4 tp · 10 fp · $0.87 · 1m 18s
-```
-
-Honoured from a TTY too — `kuzushi scan … --ci | tee run.log` works.
-
-#### PR comments
-
-`buildPrComment(summary, { repoName, runUrl })` (in `src/report-pr-comment.ts`)
-renders a GitHub-markdown block suitable for `gh pr comment -F -`. Includes
-verdict counts, exploitable badge, cost + duration, and a top-10 TP table
-with severity emojis.
-
-### Quality Gates
-
-```sh
-kuzushi scan <repo> --quality-gate         # fail CI on threshold violations
-kuzushi scan <repo> --fail-on-tp           # fail if any high/critical TP is found
-kuzushi scan <repo> --sarif results.sarif  # export SARIF for GitHub Code Scanning
-kuzushi scan <repo> --ci                   # plain-text stream mode (no Ink)
-```
-
-## Scan Presets
-
-```sh
-kuzushi scan <repo> --preset safe        # first-run friendly: context + secrets/crypto, $5 cost cap
-kuzushi scan <repo> --preset fast        # semgrep only, no context/enrichment
-kuzushi scan <repo> --preset standard    # semgrep + IRIS taint + secrets/crypto
-kuzushi scan <repo> --preset deep        # + verification + threat modeling + systems hunt
-kuzushi scan <repo> --preset reference   # + PoC + threat-informed hunting + frontier model
-```
-
-## Key Features
-
-**Vendor-agnostic LLM runtime** — Anthropic, OpenAI, Google, Groq, Mistral, and 15+ providers. Swap models at runtime with `--model provider:modelId`. Runs airgapped with Ollama.
-
-**Exploit verification** — constructs concrete PoC payloads (SQL injection strings, XSS vectors, etc.) that prove exploitability, not just theoretical possibility.
-
-**IRIS-style taint analysis** — LLM-driven CodeQL taint analysis (ICLR 2025). LLM selects CWE classes, writes CodeQL queries dynamically, labels candidates, generates TaintTracking configs, iteratively refines on failure.
-
-**Randori PASTA threat modeling** — 4-stage PASTA analysis (objectives, scope, DFD, STRIDE threats) via Claude Code plugin. Threat leads injected into all detector prompts. ATT&CK, CAPEC, OWASP mapping.
-
-**Systems-level deep semantic hunt** — finds bugs that survive decades of review: integer overflow, sentinel collisions, signed/unsigned comparison, buffer overflows, use-after-free in protocol state machines, unsafe Rust blocks. LLM writes CodeQL queries using range analysis, not TaintTracking.
-
-**Multi-strategy analysis** — 2-4 analytical approaches per vulnerability class with confidence boosting when strategies agree. Auto-generates Semgrep rules from confirmed findings.
-
-**Auto-patch with closed-loop verification** — generates patches in disposable worktrees, validates, re-runs the scanner to confirm the vulnerability is gone.
-
-**Crypto behavioral testing** — generates and executes behavioral test harnesses in Docker for crypto misuse: timing side-channels, ECB mode, weak hashes, weak PRNGs.
-
-**Language-tuned detection** — auto-detects languages and frameworks, injects language-specific sinks, safe patterns, few-shot examples, anti-hallucination constraints. 8 ecosystems: C/C++, Java/Kotlin, Python, Go, JS/TS, Rust, PHP, Ruby.
-
-**Resumable runs** — checkpoints to SQLite. `--resume` picks up where you left off.
-
-**Interactive terminal UI** — React+Ink-powered live display with pipeline progress tree, spinners, trophy screen for confirmed exploits. REPL during scans (pause, skip, inspect). First-run setup wizard. Falls back to plain text in non-TTY. Built on a unified primitive library (`src/ui/primitives/`: `SelectList`, `TextInput`, `ConfirmDialog`, `Table`, `Breadcrumb`, `KeybindFooter`, `ExpandableSection`, `Divider`, `MultilineText`) with shared hooks (`src/ui/hooks/`: `useBoundedIndex`, `useFocusTrap`, `useTerminalSize`, `useCursorVisibility`, `useExpanded`, `useKeybindings`, `useRawModeWatchdog`, `useTextEditor`, `useVisibleSlice`) for consistent focus, keyboard navigation, and resize handling.
-
-**Incremental scanning** — skips re-triage for unchanged findings. Dependency-aware invalidation via import graph.
-
-**Audit logging** — JSONL audit trail of every agent decision.
-
-<details>
-<summary><strong>All Scan Commands</strong></summary>
-
-### Scan
-
-```
-kuzushi scan <repo>                        # scan with defaults
-kuzushi scan <repo> --tasks codeql
-kuzushi scan <repo> --tasks semgrep,codeql
-kuzushi scan <repo> --severity ERROR
-kuzushi scan <repo> --max 20
-kuzushi scan <repo> --model anthropic:claude-sonnet-4-6
-kuzushi scan <repo> --task-model triage=openai:gpt-4o
-kuzushi scan <repo> --fresh
-kuzushi scan <repo> --resume
-```
-
-### Verification & PoC
-
-```
-kuzushi scan <repo> --verify
-kuzushi scan <repo> --verify --poc-harness
-kuzushi scan <repo> --verify --poc-harness --dynamic-analysis
-```
-
-### Multi-Strategy & Code Graph
-
-```
-kuzushi scan <repo> --multi-strategy
-kuzushi scan <repo> --multi-strategy-full
-kuzushi scan <repo> --code-graph
-```
-
-### Auto-Patch
-
-```
-kuzushi scan <repo> --verify --auto-patch
-kuzushi scan <repo> --auto-patch --patch-verify-depth full
-```
-
-### Diff-Aware & Crypto
-
-```
-kuzushi scan <repo> --taint-diff-base main
-kuzushi scan <repo> --crypto-behavioral-test
-```
-
-### Output
-
-```
-kuzushi scan <repo> --output report.md
-kuzushi scan <repo> --sarif results.sarif
-kuzushi scan <repo> --json results.json
-kuzushi scan <repo> --csv results.csv
-kuzushi scan <repo> --junit results.xml
-kuzushi scan <repo> --stream
-kuzushi scan <repo> --audit-log
-```
-
-### Run History
-
-```
-kuzushi runs list                          # 50 most recent runs
-kuzushi runs list --status interrupted     # only resumable runs
-kuzushi runs show <runId> --costs          # details + cost breakdown
-kuzushi runs show <runId> --json           # JSON output for tooling
-```
-
-### Run Mode
-
-```
-kuzushi run semgrep:scan ./repo --json
-kuzushi run triage:run fingerprint=abc123 --json
-kuzushi run verify:finding fingerprint=abc123 --quiet
-kuzushi run findings:list severity=critical,high --json
-```
-
-### Patch
-
-```
-kuzushi patch <repo> --fingerprint <fp>
-kuzushi patch <repo> --fingerprint <fp> --build-cmd "npm run build" --test-cmd "npm test"
-```
-
-### Config
-
-```
-kuzushi config get
-kuzushi config set model anthropic:claude-sonnet-4-6
-kuzushi config set tasks semgrep,agentic
-kuzushi config validate --repo .
-kuzushi config path
-```
-
-</details>
-
-<details>
-<summary><strong>Configuration Reference</strong></summary>
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `model` | `anthropic:claude-sonnet-4-6` | Default LLM model for all tasks and stages |
-| `tasks` | `["semgrep:scan"]` | Enabled task IDs, in execution order |
-| `taskConfig` | `{ semgrep: {...}, triage: {...}, ... }` | Per-task config blocks keyed by task ID or stage ID |
-| `severity` | `["ERROR","WARNING"]` | Semgrep severity filter |
-| `excludePatterns` | `["test","tests","node_modules",...]` | Directories/globs to skip |
-| `triageConcurrency` | `5` | Parallel LLM triage calls |
-| `scanMode` | `"concurrent"` | Task execution mode |
-| `verify` | `false` | Enable proof-of-exploitability verification |
-| `pocHarness` | `false` | Enable PoC harness generation |
-| `cryptoBehavioralTestEnabled` | `false` | Enable crypto behavioral testing |
-| `codeGraphEnabled` | `true` | Enable LLM code graph |
-| `multiStrategyMode` | `"off"` | Multi-strategy analysis (`off`, `adaptive`, `full`) |
-| `autoPatchEnabled` | `false` | Enable auto-patch generation |
-| `incrementalCache` | `true` | Enable incremental scanning |
-| `auditLog` | `false` | Write JSONL audit files |
-
-**Stage model overrides** via `taskConfig`:
-
-| Key | Purpose |
+| Command | Purpose |
 | --- | --- |
-| `taskConfig.triage.model` | Model for triage agents |
-| `taskConfig.verify.model` | Model for verification agents |
-| `taskConfig.poc-harness.model` | Model for PoC harness generation |
+| `kuzushi shell [--target <repo>]` | Start the Ratatui shell. |
+| `kuzushi scan <repo> [--tasks a,b] [--triage] [--json]` | Run the Rust SAST umbrella executor and persist findings. |
+| `kuzushi findings --target <repo> [--severity high,critical] [--verdict true_positive] [--name text] [--file-path path] [--limit 50] [--json]` | List persisted findings. |
+| `kuzushi modules [--json]` | List visible native modules. |
+| `kuzushi tools [--json]` | List visible executable tool descriptors. |
+| `kuzushi run <module:tool> --input '<json>'` | Execute one tool through the Rust registry. Use global `--target` for workspace-backed tools. |
+| `kuzushi config show` | Print effective config. |
+| `kuzushi config init [--force]` | Write the default global config. |
+| `kuzushi config path` | Print the global config path. |
 
-Global config: `~/.kuzushi/config.json`. Project overrides: `<repo>/.kuzushi/config.json`. CLI flags override config.
-
-### Environment Variables
-
-| Variable | Required | Description |
-| --- | --- | --- |
-| `ANTHROPIC_API_KEY` | When using `anthropic:*` models | Anthropic API key |
-| `ANTHROPIC_AUTH_TOKEN` | OAuth flows | Bearer token (set automatically by `kuzushi auth login`) |
-| `OPENAI_API_KEY` | When using `openai:*` models | OpenAI API key |
-| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | When using `google:*` models | Google API key |
-
-</details>
-
-<details>
-<summary><strong>CodeQL Setup</strong></summary>
-
-The `codeql` scanner requires the [CodeQL CLI](https://github.com/github/codeql-cli-binaries/releases) installed separately (not auto-downloaded).
-
-```sh
-# Via GitHub CLI (recommended):
-gh extension install github/gh-codeql && gh codeql install-stub
-
-# Or download directly from:
-# https://github.com/github/codeql-cli-binaries/releases
-```
-
-CodeQL is opt-in. Enable it:
-
-```sh
-kuzushi scan <repo> --tasks codeql
-kuzushi scan <repo> --tasks semgrep,codeql
-kuzushi config set tasks semgrep,codeql
-```
-
-</details>
-
-## Architecture
-
-See [VISION.md](VISION.md) for the full architecture vision, module system design, workspace/knowledge graph, intel layer, governance model, and implementation roadmap.
-
-### Terminal UI layer
-
-The Ink React frontend lives in `src/ui/`:
-
-| Path | Role |
-| --- | --- |
-| `src/ui/App.tsx` | Root Ink component; dispatches on `UIState.mode` (`preflight`, `running`, `summary`, `review`, `done`, `shell`). |
-| `src/ui/state.ts` | `UIStore` — observer-pattern state + `useSyncExternalStore` binding. |
-| `src/ui/render.ts` | Entry point; TTY detection and Ink mount / plain fallback. |
-| `src/ui/plain-renderer.ts` | Non-TTY subscriber that prints delta-based updates. |
-| `src/ui/tokens.ts` | Semantic color/typography tokens + `SPACING` / `COLUMN_WIDTHS` constants. |
-| `src/ui/format.ts` | Terminal formatting utilities — progress bars, cost/duration, column padding, ANSI-aware truncation (`truncateEnd`, `truncateMiddle`, `padCell`, `visibleWidth`). |
-| `src/ui/error-format.ts` | Ink-free error classification (`classifyError`, `formatError`, `suggestNextStep`) consumed by `ErrorCard`. |
-| `src/ui/primitives/` | Reusable building blocks: `SelectList`, `TextInput`, `ConfirmDialog`, `Table`, `Breadcrumb`, `KeybindFooter`, `ExpandableSection`, `Divider`, `MultilineText`. |
-| `src/ui/hooks/` | Behavioral hooks: `useBoundedIndex`, `useFocusTrap`, `useTerminalSize` (SIGWINCH-aware), `useCursorVisibility`, `useExpanded`, `useKeybindings`, `useRawModeWatchdog` (re-asserts raw mode after SDK subprocesses exit), `useTextEditor` (shared caret logic), `useVisibleSlice` (cursor-centered windowing). |
-| `src/ui/components/` | Feature components (pipeline, findings, setup wizard, copilot shell) composed from the primitives above. |
-
-Styling discipline: components import from `tokens` (never `chalk` directly) and lay out with Ink `<Box>` flexbox properties (`flexDirection`, `justifyContent`, `gap`, `padding`, `margin`) rather than string-padding tricks.
-
-## Troubleshooting
-
-### Running against an internal Anthropic-compatible proxy
-
-Some internal gateways (corporate proxies, vendor-bundled Anthropic-API
-endpoints) accept only `thinking.type=adaptive` or `thinking.type=disabled`
-and reject the SDK's default `thinking.type=enabled`, returning a 400 error.
-
-If you see errors like `thinking.type` rejected by your proxy:
+Examples:
 
 ```bash
-export KUZUSHI_DISABLE_THINKING=1   # forces every Claude path to thinking: { type: "disabled" }
+kuzushi scan . --tasks semgrep,secret-scan --json
+kuzushi scan . --tasks agentic-sast --triage --json
+kuzushi --target . run semgrep:scan --input '{"config":"p/default"}'
+kuzushi --target . run findings:list --input '{"severity":["high"],"limit":10}'
+kuzushi --target . run triage:run --input '{"fingerprints":["abc123"]}'
 ```
 
-Kuzushi prints a one-line warning at shell startup when `ANTHROPIC_BASE_URL`
-points at a host that doesn't end in `anthropic.com`. Silence it with
-`KUZUSHI_QUIET_PROXY_BANNER=1` once you've made the appropriate choice.
-
-### `better-sqlite3` errors on Node 24+
-
-If you see `Error: The module ... was compiled against a different Node.js
-version` after a Node upgrade, the global install needs a native rebuild:
+Agentic tools require an explicit model. Set it in config or with
+`KUZUSHI_MODEL=provider:model`, for example:
 
 ```bash
-pnpm rebuild better-sqlite3   # in the kuzushi install dir
+kuzushi config init
+KUZUSHI_MODEL=openai:gpt-4.1 kuzushi scan . --tasks agentic-sast --json
 ```
 
-The `postinstall` hook handles this automatically on fresh installs;
-manual rebuild is only needed when you bump Node majors after installing.
+Kuzushi does not silently choose a fallback model. If a runtime-backed tool has
+no explicit model or an incompatible model/provider pair, startup or dispatch
+fails with an actionable error.
 
-## License
+## Rust Shell
 
-MIT
+The shell routes slash commands and their bare equivalents through the Rust
+command parser. Useful commands:
+
+| Command | Purpose |
+| --- | --- |
+| `/help` | Show shell help. |
+| `/modules` | Browse visible native modules. |
+| `/tools` | Show executable tool descriptors. |
+| `/use <module>` | Focus a module. |
+| `/run [tool] [json]` | Run a tool; focused modules can omit the prefix when unambiguous. |
+| `/scan [target]` | Start a native scan in the shell. |
+| `/findings` | Load persisted findings. |
+| `/open <fingerprint-or-prefix>` | Open a finding. |
+| `/model [provider:model]` | Show or set the in-memory shell model. |
+| `/config` | Show runtime/model config in the shell. |
+| `/threats [dfd|stride|stories|scope|summary|1..5]` | Switch threat-model views. |
+| `/prompts`, `/prompt <verb>` | Inspect prompt override surfaces. |
+| `/show runs`, `/replay <runId>`, `/trace <runId>` | Inspect scan-run artifacts. |
+| `/since <git-ref>` | Switch to a diff-scoped findings view. |
+| `/back` | Step up one view. |
+| `/quit` | Exit. |
+
+`?` is currently an alias for help in the Rust shell; agent chat is not
+advertised as a shell route in this cutover.
+
+## Built-In Modules
+
+`kuzushi modules` is the source of truth for the visible native registry. The
+current built-ins are:
+
+| Module | Primary tools |
+| --- | --- |
+| `context` | `context:build` |
+| `sast` | `sast:scan` |
+| `semgrep` | `semgrep:scan` |
+| `codeql` | `codeql:scan` |
+| `agentic-sast` | `agentic-sast:scan` |
+| `carlini-threat-hunt` | `carlini-threat-hunt:run` |
+| `taint-iris` | `taint-iris:hunt` |
+| `taint-iris-next` | `taint-iris-next:hunt` |
+| `triage` | `triage:run` |
+| `verify` | `verify:finding` |
+| `patch` | `patch:finding` |
+| `findings` | `findings:list` |
+| `threat-model` | `threat-model:build`, `threat-model:read`, `threat-model:methodologies` |
+| `randori` | `randori:pasta`, `randori:threat-model` |
+| `x-ray` | `x-ray:run`, `x-ray:read` |
+| `vendor-assessment` | `vendor-assessment:attach`, `vendor-assessment:scope`, `vendor-assessment:prompts`, `vendor-assessment:assess` |
+| `chrome-rce` | `chrome-rce:scan`, `chrome-rce:review-trigger` |
+| `dep-hygiene` | `dep-hygiene:check` |
+| `secret-scan` | `secret-scan:scan` |
+| `variant` | `variant:lift-pattern`, `variant:hunt` |
+| `ndiff` | `ndiff:fetch-cve`, `ndiff:extract-fix-pattern`, `ndiff:hunt-variants` |
+| `vuln-scout` | `vuln-scout:audit` |
+| `tob` | `tob:audit`, `tob:skills` |
+| `shinsa` | `shinsa:scan`, `shinsa:quick-check`, `shinsa:nist-scan`, `shinsa:nist-quick-check`, `shinsa:frameworks` |
+| `prompt-armor` | `prompt-armor:scan`, `prompt-armor:analyze`, `prompt-armor:attack`, `prompt-armor:diff`, `prompt-armor:report`, `prompt-armor:config` |
+| `recon` | `recon:nmap`, `recon:subdomain`, `recon:http-fingerprint` |
+| `iac-scan` | `iac-scan:scan` |
+| `catalog` | `catalog:modules`, `catalog:tools` |
+| `config` | `config:show` |
+| `workspace` | `workspace:status` |
+
+Internal DAG modules such as `context-lite`, `pipeline`, and `systems-hunt`
+stay hidden from `kuzushi modules`.
+
+## External Dependencies
+
+Native deterministic tools run without an LLM: `context`, `findings`,
+`dep-hygiene`, `secret-scan`, `iac-scan`, Chrome RCE native checks, and local
+artifact readers.
+
+Subprocess-backed tools require the operator to install or configure binaries:
+
+| Tool | Dependency |
+| --- | --- |
+| `semgrep:scan` | `semgrep`, or pass `{"binary":"/path/to/semgrep"}`. |
+| `codeql:scan` | CodeQL CLI, or pass `{"binary":"/path/to/codeql"}`. |
+| `recon:nmap` | `nmap`, or pass a binary override. |
+| `recon:subdomain`, `recon:http-fingerprint`, online `ndiff:fetch-cve` | `curl`, unless using offline/local input. |
+
+pi-agent-core-backed tools require Node, `@mariozechner/pi-agent-core`,
+`@mariozechner/pi-ai`, a configured model, and provider credentials. A custom
+bridge can be supplied through `runtime.agent_bridge_command` in config or
+`KUZUSHI_AGENT_BRIDGE`.
+
+Plugin-backed wrappers also require explicit plugin roots:
+
+| Module | Environment variable |
+| --- | --- |
+| `vuln-scout` | `KUZUSHI_VULN_SCOUT_PLUGIN` |
+| `tob` | `KUZUSHI_TOB_SKILLS_DIR` |
+| `shinsa` | `KUZUSHI_SHINSA_PLUGIN` |
+| `prompt-armor` | `KUZUSHI_PROMPT_ARMOR_PLUGIN` |
+
+Missing subprocesses, models, bridges, or plugin roots fail explicitly. They do
+not silently succeed and they do not substitute a different model.
+
+## Artifacts And State
+
+| Path | Produced by |
+| --- | --- |
+| `~/.kuzushi/v2/config.toml` | `kuzushi config init` |
+| `.kuzushi/v2/config.toml` | Optional project override |
+| `.kuzushi/v2/findings.sqlite3` | scan, shell, and run-mode tool persistence |
+| `.kuzushi/context-snapshot.json` | `context:build` |
+| `.kuzushi/threat-model.json` | `threat-model:*`, `randori:*`, and threat-model readers |
+| `.kuzushi/runs/<runId>/summary.json` | `sast:scan` |
+| `.kuzushi/runs/<runId>/triage.jsonl` | `sast:scan --triage` and post-scan triage |
+| `.kuzushi/runs/<runId>/verify.jsonl` | `sast:scan` with verify/auto-patch inputs |
+| `x-ray/` | `x-ray:run` |
+| `.kuzushi/vendor-assessment/` | vendor assessment tools |
+| `.prompt-armor/` | PromptArmor deterministic config/report tools |
+
+See [docs/rust-migration-status.md](docs/rust-migration-status.md) for the
+module-by-module cutover ledger, intentional removals, artifact compatibility
+notes, and TypeScript/Ink retention audit.
+
+## Development
+
+```bash
+pnpm setup
+cargo fmt --all
+cargo test --workspace
+cargo build --workspace
+pnpm test:e2e
+pnpm verify:pack
+```
+
+Useful package scripts:
+
+| Script | Purpose |
+| --- | --- |
+| `pnpm dev -- <args>` | Run the native Rust CLI from source. |
+| `pnpm build:native` | Build and stage the native binary for npm packaging. |
+| `pnpm build` | Compile retained TypeScript library exports. |
+| `pnpm test` | Run retained TypeScript unit/reference tests. |
+| `pnpm test:rust` | Run `cargo test --workspace`. |
+| `pnpm test:e2e` | Run the native smoke test. |
+| `pnpm doctor` | Run source-checkout diagnostics. |
+
+## TypeScript Retention
+
+The old TypeScript/Ink CLI is no longer the npm runtime path:
+
+- `bin.kuzushi` points to `bin/kuzushi-rs.mjs`.
+- The `kuzushi-ts` npm bin is removed.
+- The `dev:ts` package script and `scripts/kuzushi-dev` source CLI helper are
+  removed.
+- The old `dist/cli*` TypeScript CLI build outputs are excluded from the npm
+  tarball.
+
+Retained TypeScript is classified as one of:
+
+- Published library/API surface: `dist/`, `kuzushi/modules`, and
+  `kuzushi/testing`.
+- Reference implementation for migration parity: legacy `src/modules/`,
+  `src/agents/`, scanner normalization, and report helpers.
+- Test-only or fixture UI code: Ink/React components, mock TUI scenarios, and
+  Vitest suites that preserve expected behavior while the Rust shell matures.
+
+Do not add new runtime CLI behavior in TypeScript. New product execution paths
+belong in `crates/kuzushi-core`, `crates/kuzushi-cli`, `crates/kuzushi-tui`,
+or `crates/kuzushi-openai`.

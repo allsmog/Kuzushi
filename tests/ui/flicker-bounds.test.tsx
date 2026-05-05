@@ -87,7 +87,7 @@ function stubShell(overrides: Partial<ShellState> = {}): ShellState {
 }
 
 describe("Ink flicker bounds", () => {
-  it("clips App output to the terminal viewport", () => {
+  it("lets shell output grow into terminal scrollback", () => {
     const store = createUIStore();
     store.update({
       mode: "shell",
@@ -104,7 +104,8 @@ describe("Ink flicker bounds", () => {
     });
 
     const out = renderToString(createElement(App, { store }), 64, 8);
-    expect(out.split("\n").length).toBeLessThanOrEqual(8);
+    expect(out.split("\n").length).toBeGreaterThan(8);
+    expect(out).toContain("module catalog");
   });
 
   it("bounds compact running findings to recent rows", () => {

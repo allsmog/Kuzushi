@@ -1,0 +1,122 @@
+---
+title: "Kuzushi - Current Rust Architecture"
+---
+flowchart LR
+  %% Current as of 2026-05-05 after the Rust/pi-agent-core cutover.
+
+  subgraph Entry["Entry points"]
+    Npm["npm bin<br/>bin/kuzushi-rs.mjs"]
+    CLI["Rust CLI<br/>crates/kuzushi-cli/src/main.rs"]
+    ShellCmd["shell command<br/>kuzushi / kuzushi shell"]
+    ScanCmd["scan command<br/>kuzushi scan"]
+    RunCmd["run command<br/>kuzushi run"]
+    ConfigCmd["config/modules/tools/findings<br/>native subcommands"]
+  end
+
+  subgraph Shell["Interactive shell mode"]
+    TuiApp["Ratatui shell app<br/>crates/kuzushi-tui/src/app.rs"]
+    Commands["Rust command parser<br/>crates/kuzushi-tui/src/commands.rs"]
+    Renderer["Ratatui renderer<br/>crates/kuzushi-tui/src/renderer.rs"]
+    ShellViews["Catalog, module, run,<br/>findings, threats, prompts"]
+  end
+
+  subgraph Core["Shared Rust core"]
+    Registry["ModuleRegistry<br/>crates/kuzushi-core/src/modules.rs"]
+    ToolCtx["ToolExecutionContext<br/>config, workspace, findings store"]
+    Workspace["WorkspaceTarget<br/>crates/kuzushi-core/src/workspace.rs"]
+    Findings["FindingStore<br/>crates/kuzushi-core/src/findings.rs"]
+    ScanCore["ScanEngine trait and scan runner<br/>crates/kuzushi-core/src/scan.rs"]
+  end
+
+  subgraph Modules["Native module executors"]
+    NativeTools["Deterministic Rust tools<br/>context, findings, secrets,<br/>dep hygiene, IaC, Chrome RCE"]
+    SubprocessTools["Subprocess adapters<br/>semgrep, codeql, recon, curl/nmap"]
+    AgenticTools["pi-agent-core tools<br/>triage, verify, patch,<br/>agentic SAST, threat-model,<br/>x-ray, variants, plugins"]
+    HiddenDag["Hidden DAG/internal nodes<br/>context-lite, pipeline,<br/>systems-hunt internals"]
+  end
+
+  subgraph Runtime["Agent runtime"]
+    RuntimeTrait["AgentRuntime trait<br/>crates/kuzushi-core/src/runtime.rs"]
+    PiBridge["PiAgentCoreRuntime<br/>crates/kuzushi-openai/src/lib.rs"]
+    BridgeScript["Node bridge<br/>scripts/pi-agent-core-bridge.mjs"]
+    Provider["Configured provider/model<br/>explicit, no silent fallback"]
+  end
+
+  subgraph Storage["Persistence and artifacts"]
+    Config["~/.kuzushi/v2/config.toml<br/>.kuzushi/v2/config.toml"]
+    Db[".kuzushi/v2/findings.sqlite3"]
+    Runs[".kuzushi/runs/&lt;runId&gt;/<br/>summary.json, triage.jsonl, verify.jsonl"]
+    Artifacts["context-snapshot.json<br/>threat-model.json<br/>x-ray/ and module artifacts"]
+  end
+
+  subgraph External["External dependencies"]
+    Repo["Target repository"]
+    Semgrep["semgrep"]
+    Codeql["CodeQL CLI"]
+    NetTools["curl / nmap / git"]
+    Plugins["Optional plugin roots"]
+    ProviderApis["Provider APIs or local endpoints"]
+  end
+
+  Npm --> CLI
+  CLI --> ShellCmd
+  CLI --> ScanCmd
+  CLI --> RunCmd
+  CLI --> ConfigCmd
+
+  ShellCmd --> TuiApp
+  TuiApp --> Commands
+  TuiApp --> Renderer
+  Renderer --> ShellViews
+  TuiApp --> Registry
+
+  ScanCmd --> Registry
+  ScanCmd --> ScanCore
+  RunCmd --> Registry
+  ConfigCmd --> Registry
+  ConfigCmd --> Findings
+
+  Registry --> ToolCtx
+  ToolCtx --> Workspace
+  ToolCtx --> Findings
+  Registry --> NativeTools
+  Registry --> SubprocessTools
+  Registry --> AgenticTools
+  Registry --> HiddenDag
+  ScanCore --> SubprocessTools
+  ScanCore --> NativeTools
+
+  AgenticTools --> RuntimeTrait
+  RuntimeTrait --> PiBridge
+  PiBridge --> BridgeScript
+  BridgeScript --> Provider
+
+  Workspace --> Config
+  Findings --> Db
+  ScanCore --> Runs
+  NativeTools --> Artifacts
+  AgenticTools --> Artifacts
+
+  NativeTools --> Repo
+  SubprocessTools --> Repo
+  SubprocessTools --> Semgrep
+  SubprocessTools --> Codeql
+  SubprocessTools --> NetTools
+  AgenticTools --> Plugins
+  Provider --> ProviderApis
+
+  classDef entry fill:#1f77b4,stroke:#0b3d66,color:#fff,stroke-width:2px
+  classDef shell fill:#17a2b8,stroke:#0d5966,color:#fff,stroke-width:2px
+  classDef core fill:#6f42c1,stroke:#3f2470,color:#fff,stroke-width:2px
+  classDef modules fill:#2ca02c,stroke:#145214,color:#fff,stroke-width:2px
+  classDef runtime fill:#d62728,stroke:#701313,color:#fff,stroke-width:2px
+  classDef storage fill:#20c997,stroke:#0f7055,color:#111,stroke-width:2px
+  classDef external fill:#6c757d,stroke:#343a40,color:#fff,stroke-width:2px
+
+  class Npm,CLI,ShellCmd,ScanCmd,RunCmd,ConfigCmd entry
+  class TuiApp,Commands,Renderer,ShellViews shell
+  class Registry,ToolCtx,Workspace,Findings,ScanCore core
+  class NativeTools,SubprocessTools,AgenticTools,HiddenDag modules
+  class RuntimeTrait,PiBridge,BridgeScript,Provider runtime
+  class Config,Db,Runs,Artifacts storage
+  class Repo,Semgrep,Codeql,NetTools,Plugins,ProviderApis external

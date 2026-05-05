@@ -29,6 +29,7 @@ import type { AgentQueryOptions, AgentRuntime, AgentSession } from "../agent-run
 import { createBus } from "../bus/index.js";
 import type { MessageBus } from "../bus/types.js";
 import { JobManager } from "../jobs/manager.js";
+import { MODEL_PROVIDERS, modelOptionsForProvider, providerFromModelId } from "../model-catalog.js";
 import {
   type AttachmentStorageAdapter,
   buildHomeSlice,
@@ -1367,8 +1368,100 @@ async function hasActiveShellCredentials(opts: ShellOptions): Promise<boolean> {
 
   if (active.apiKey || active.authToken || active.baseUrl) return true;
 
-  const { hasAnyProviderCredentials } = await import("../ui/setup.js");
-  return hasAnyProviderCredentials();
+  const refreshed = await refreshShellCredentialsFromDisk(opts);
+  if (refreshed.loaded) return true;
+
+  return hasCredentialsForActiveModelProvider(opts.config.model);
+}
+
+async function refreshShellCredentialsFromDisk(
+  opts: ShellOptions,
+): Promise<{ loaded: boolean; path?: string }> {
+  const { findLocalCredentialsRoot, loadLocalCredentials, localCredentialsPath } = await import(
+    "../config.js"
+  );
+  const lookupStart = resolveCredentialLookupStart(opts);
+  const root = findLocalCredentialsRoot(lookupStart);
+  if (!root) return { loaded: false };
+
+  const credentials = loadLocalCredentials(root);
+  if (!credentials || !hasCredentialMaterial(credentials)) return { loaded: false };
+
+  opts.config.agentRuntimeConfig = {
+    ...(opts.config.agentRuntimeConfig ?? {}),
+    ...credentials,
+  };
+  await primeShellCredentialEnvironment(opts);
+  await rebuildShellRuntime(opts);
+  return { loaded: true, path: localCredentialsPath(root) };
+}
+
+function hasCredentialMaterial(value: {
+  apiKey?: string;
+  authToken?: string;
+  baseUrl?: string;
+  apiKeyFile?: string;
+}): boolean {
+  return Boolean(value.apiKey || value.authToken || value.baseUrl || value.apiKeyFile);
+}
+
+function resolveCredentialLookupStart(opts: ShellOptions): string {
+  const rawTarget = opts.target?.trim();
+  if (!rawTarget || /^[a-z][a-z0-9+.-]*:/i.test(rawTarget)) return process.cwd();
+
+  const resolved = path.resolve(rawTarget);
+  try {
+    const stat = statSync(resolved);
+    return stat.isDirectory() ? resolved : path.dirname(resolved);
+  } catch {
+    return process.cwd();
+  }
+}
+
+async function primeShellCredentialEnvironment(opts: ShellOptions): Promise<void> {
+  const credentials = opts.config.agentRuntimeConfig;
+  if (!credentials) return;
+
+  const { providerBaseUrlEnvVar, providerEnvVar } = await import("../config.js");
+  const activeProvider = providerFromModelId(opts.config.model);
+  if (!activeProvider) return;
+
+  const apiKeyEnv = providerEnvVar(activeProvider);
+  if (credentials.apiKey && apiKeyEnv) process.env[apiKeyEnv] = credentials.apiKey;
+
+  if (activeProvider === "anthropic" && credentials.authToken) {
+    process.env.ANTHROPIC_AUTH_TOKEN = credentials.authToken;
+    process.env.ANTHROPIC_OAUTH_TOKEN = credentials.authToken;
+  }
+
+  const baseUrlEnv = providerBaseUrlEnvVar(activeProvider);
+  if (credentials.baseUrl && baseUrlEnv) process.env[baseUrlEnv] = credentials.baseUrl;
+}
+
+async function hasCredentialsForActiveModelProvider(model: string | undefined): Promise<boolean> {
+  const provider = providerFromModelId(model);
+  if (!provider) return false;
+
+  const { providerBaseUrlEnvVar, providerEnvVar } = await import("../config.js");
+  const apiKeyEnv = providerEnvVar(provider);
+  if (apiKeyEnv && process.env[apiKeyEnv]?.trim()) return true;
+
+  const baseUrlEnv = providerBaseUrlEnvVar(provider);
+  if (baseUrlEnv && process.env[baseUrlEnv]?.trim()) return true;
+  if (provider === "ollama" && process.env.OLLAMA_BASE_URL?.trim()) return true;
+
+  if (
+    provider === "anthropic" &&
+    (process.env.ANTHROPIC_AUTH_TOKEN?.trim() || process.env.ANTHROPIC_OAUTH_TOKEN?.trim())
+  ) {
+    return true;
+  }
+
+  const { readOauthCredentials } = await import("../oauth-store.js");
+  const oauth = readOauthCredentials();
+  if (provider === "anthropic" && oauth?.anthropic) return true;
+  if (provider === "openai-codex" && oauth?.["openai-codex"]) return true;
+  return false;
 }
 
 /** Merge `patch` into the (single, flat) agentRuntimeConfig slot. */
@@ -1406,6 +1499,23 @@ async function applyCredentialOutcome(
       };
     } catch (error) {
       return { enabled: false, message: `OAuth login failed: ${toErrorMessage(error)}` };
+    }
+  }
+
+  if (choice.kind === "oauth-openai-codex") {
+    const { loginOpenAICodexAndPersist } = await import("../oauth-flow.js");
+    try {
+      const result = await loginOpenAICodexAndPersist();
+      await rebuildShellRuntime(opts);
+      return {
+        enabled: true,
+        message:
+          `ChatGPT Codex OAuth logged in. Credentials saved to ${result.persistedTo} ` +
+          "(auto-refresh enabled). Use /model use openai-codex:gpt-5.4-mini to route calls through Codex OAuth.",
+        persistedTo: result.persistedTo,
+      };
+    } catch (error) {
+      return { enabled: false, message: `Codex OAuth login failed: ${toErrorMessage(error)}` };
     }
   }
 
@@ -4943,18 +5053,13 @@ async function startInkShell(
     onAbort: abortActiveAction,
   };
 
-  // Splash policy: render the wordmark splash on the operator's first ever
-  // boot for this workspace (catalogRuns empty), and skip it thereafter so
-  // returning sessions get straight to the catalog. The chrome strip
-  // (workspace/target/scope) carries the same identity context, so the
-  // splash earns its 8 vertical rows only when there's nothing else on
-  // screen to greet the operator.
-  const isFirstBoot = catalogRuns.length === 0;
+  // Render the wordmark once per TTY shell process. CopilotShell flips
+  // shellSplashShown after the initial Static render so it stays in scrollback
+  // without reappearing on every state update.
   store.update({
     mode: "shell",
     shell: initialShell,
     ...(initialHydration.summary !== undefined ? { summary: initialHydration.summary } : {}),
-    ...(isFirstBoot ? {} : { shellSplashShown: true }),
   });
 
   // Process-level SIGINT fallback. Ink's `useInput` is the primary Ctrl+C
@@ -6100,7 +6205,7 @@ const SLASH_SHELL_ROUTES: readonly SlashShellRoute[] = defineShellRoutes<
     id: "model",
     aliases: ["model"],
     matches: slashCommandMatches,
-    execute: ({ args }, { opts }) => handleModelCommand(args, opts),
+    execute: ({ args }, { opts, shellContext }) => handleModelCommand(args, opts, shellContext),
   },
   {
     id: "cost",
@@ -9359,39 +9464,41 @@ function handleCostCommand(opts: ShellOptions, shellState: ShellState): LocalCom
  *   /model add <id>     Add `<id>` to availableModels.
  *   /model rm  <id>     Remove `<id>` from availableModels (must not be active).
  */
-function handleModelCommand(args: string[], opts: ShellOptions): LocalCommandResult {
+function handleModelCommand(
+  args: string[],
+  opts: ShellOptions,
+  ctx?: ShellContext,
+): LocalCommandResult {
   const sub = (args[0] ?? "").toLowerCase();
 
-  if (!sub || sub === "show") {
-    const active = opts.config.model ?? "(unset)";
-    const pool = opts.config.availableModels ?? [];
-    const lines = [`Active model: ${active}`];
-    if (pool.length > 0) {
-      lines.push("Available pool:");
-      for (const id of pool) {
-        lines.push(`  ${id === active ? "★" : " "} ${id}`);
-      }
-    } else {
-      lines.push("Available pool: (empty — add with /model add <provider:model>)");
+  if (!sub) {
+    if (ctx?.uiStore && process.stdout.isTTY) {
+      return {
+        output: "Opening model picker...",
+        resetSession: true,
+        asyncExecute: async () => {
+          const { runModelPrompt } = await import("../ui/setup.js");
+          const credentialedProviders = await detectCredentialedModelProviders(opts);
+          const outcome = await runModelPrompt(
+            ctx.uiStore,
+            {
+              activeModel: opts.config.model,
+              availableModels: opts.config.availableModels,
+              credentialedProviders,
+            },
+            "shell",
+          );
+          if (outcome.action === "cancel") return "Model unchanged.";
+          return persistActiveModelSelection(outcome.model, opts);
+        },
+      };
     }
-    const overrides = collectTaskModelOverrides(opts.config.taskConfig);
-    if (overrides.length > 0) {
-      lines.push("", "Per-task overrides:");
-      for (const { taskId, model } of overrides) {
-        lines.push(`  ${taskId.padEnd(28)} ${model}`);
-      }
-    }
-    lines.push(
-      "",
-      "Usage:",
-      "  /model                       Show active model + pool + per-task overrides",
-      "  /model use <id>              Switch active model (persists)",
-      "  /model add <id>              Add to pool",
-      "  /model rm <id>               Remove from pool",
-      "  /model task <task> <id>      Pin <task> to a specific model",
-      "  /model task rm <task>        Drop the per-task override (fall back to active)",
-    );
-    return { output: lines.join("\n") };
+
+    return { output: formatModelCommandStatus(opts.config) };
+  }
+
+  if (sub === "show" || sub === "list") {
+    return { output: formatModelCommandStatus(opts.config) };
   }
 
   const idArg = args.slice(1).join(" ").trim();
@@ -9405,16 +9512,8 @@ function handleModelCommand(args: string[], opts: ShellOptions): LocalCommandRes
     const error = validateModelOverride(idArg);
     if (error) return { output: `Invalid model spec "${idArg}": ${error}` };
     return {
-      asyncExecute: async () => {
-        const { applyConfigPatch, configPath } = await import("../config.js");
-        try {
-          applyConfigPatch([{ path: "model", value: idArg }]);
-        } catch (err) {
-          return `Failed to set model: ${toErrorMessage(err)}`;
-        }
-        opts.config.model = idArg;
-        return `Model set to "${idArg}" in ${configPath()}.`;
-      },
+      resetSession: true,
+      asyncExecute: async () => persistActiveModelSelection(idArg, opts),
     };
   }
 
@@ -9427,7 +9526,7 @@ function handleModelCommand(args: string[], opts: ShellOptions): LocalCommandRes
       asyncExecute: async () => {
         const { applyConfigPatch } = await import("../config.js");
         try {
-          applyConfigPatch([{ path: "availableModels", value: JSON.stringify(next) }]);
+          applyConfigPatch([{ path: "availableModels", value: next }]);
         } catch (err) {
           return `Failed to update pool: ${toErrorMessage(err)}`;
         }
@@ -9447,7 +9546,7 @@ function handleModelCommand(args: string[], opts: ShellOptions): LocalCommandRes
       asyncExecute: async () => {
         const { applyConfigPatch } = await import("../config.js");
         try {
-          applyConfigPatch([{ path: "availableModels", value: JSON.stringify(next) }]);
+          applyConfigPatch([{ path: "availableModels", value: next }]);
         } catch (err) {
           return `Failed to update pool: ${toErrorMessage(err)}`;
         }
@@ -9458,6 +9557,114 @@ function handleModelCommand(args: string[], opts: ShellOptions): LocalCommandRes
   }
 
   return { output: `Unknown subcommand "${sub}". Try /model show.` };
+}
+
+function formatModelCommandStatus(config: KuzushiConfig): string {
+  const active = config.model ?? "(unset)";
+  const pool = config.availableModels ?? [];
+  const lines = [`Active model: ${active}`];
+  if (pool.length > 0) {
+    lines.push("Available pool:");
+    for (const id of pool) {
+      lines.push(`  ${id === active ? "*" : " "} ${id}`);
+    }
+  } else {
+    lines.push("Available pool: (empty - add with /model add <provider:model>)");
+  }
+
+  const activeProvider = providerFromModelId(config.model);
+  if (activeProvider) {
+    const suggestions = modelOptionsForProvider(activeProvider, {
+      activeModel: config.model,
+      availableModels: config.availableModels,
+    }).filter((entry) => entry.id !== config.model);
+    if (suggestions.length > 0) {
+      lines.push("", `Suggested for ${activeProvider}:`);
+      for (const entry of suggestions.slice(0, 6)) {
+        lines.push(`  ${entry.id.padEnd(42)} ${entry.description}`);
+      }
+    }
+  }
+
+  const overrides = collectTaskModelOverrides(config.taskConfig);
+  if (overrides.length > 0) {
+    lines.push("", "Per-task overrides:");
+    for (const { taskId, model } of overrides) {
+      lines.push(`  ${taskId.padEnd(28)} ${model}`);
+    }
+  }
+  lines.push(
+    "",
+    "Usage:",
+    "  /model                       Open the model picker in the TTY shell",
+    "  /model show                  Show active model + pool + per-task overrides",
+    "  /model use <id>              Switch active model (persists)",
+    "  /model add <id>              Add to pool",
+    "  /model rm <id>               Remove from pool",
+    "  /model task <task> <id>      Pin <task> to a specific model",
+    "  /model task rm <task>        Drop the per-task override (fall back to active)",
+  );
+  return lines.join("\n");
+}
+
+async function persistActiveModelSelection(modelId: string, opts: ShellOptions): Promise<string> {
+  const error = validateModelOverride(modelId);
+  if (error) return `Invalid model spec "${modelId}": ${error}`;
+
+  const { applyConfigPatch, configPath } = await import("../config.js");
+  const nextPool = ensureModelInPool(opts.config.availableModels, modelId);
+  try {
+    applyConfigPatch([
+      { path: "model", value: modelId },
+      { path: "availableModels", value: nextPool },
+    ]);
+  } catch (err) {
+    return `Failed to set model: ${toErrorMessage(err)}`;
+  }
+
+  opts.config.model = modelId;
+  opts.config.availableModels = nextPool;
+  await primeShellCredentialEnvironment(opts);
+  await rebuildShellRuntime(opts);
+  return `Model set to "${modelId}" in ${configPath()}.`;
+}
+
+function ensureModelInPool(pool: ReadonlyArray<string> | undefined, modelId: string): string[] {
+  return Array.from(new Set([...(pool ?? []), modelId]));
+}
+
+async function detectCredentialedModelProviders(opts: ShellOptions): Promise<string[]> {
+  const providers = new Set<string>();
+  const activeProvider = providerFromModelId(opts.config.model);
+  const credentials = opts.config.agentRuntimeConfig;
+  if (activeProvider && credentials && hasCredentialMaterial(credentials)) {
+    providers.add(activeProvider);
+  }
+
+  const { providerBaseUrlEnvVar, providerEnvVar } = await import("../config.js");
+  for (const provider of MODEL_PROVIDERS) {
+    const apiKeyEnv = providerEnvVar(provider.id);
+    const baseUrlEnv = providerBaseUrlEnvVar(provider.id);
+    if ((apiKeyEnv && process.env[apiKeyEnv]) || (baseUrlEnv && process.env[baseUrlEnv])) {
+      providers.add(provider.id);
+    }
+  }
+
+  if (process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_OAUTH_TOKEN) {
+    providers.add("anthropic");
+  }
+
+  const { readOauthCredentials } = await import("../oauth-store.js");
+  const oauth = readOauthCredentials();
+  if (oauth?.anthropic) providers.add("anthropic");
+  if (oauth?.["openai-codex"]) providers.add("openai-codex");
+
+  const local = await refreshShellCredentialsFromDisk(opts);
+  if (local.loaded && activeProvider) providers.add(activeProvider);
+
+  return MODEL_PROVIDERS.map((provider) => provider.id).filter((provider) =>
+    providers.has(provider),
+  );
 }
 
 /**
@@ -9512,7 +9719,8 @@ function handleModelTaskSubcommand(args: string[], opts: ShellOptions): LocalCom
       } catch (err) {
         return `Failed to set per-task model: ${toErrorMessage(err)}`;
       }
-      const liveConfig = opts.config.taskConfig ?? (opts.config.taskConfig = {});
+      if (!opts.config.taskConfig) opts.config.taskConfig = {};
+      const liveConfig = opts.config.taskConfig;
       liveConfig[taskId] = { ...(liveConfig[taskId] ?? {}), model: modelId };
       return `Pinned "${taskId}" to "${modelId}".`;
     },
@@ -9590,30 +9798,65 @@ function buildAskContextPrefix(shellState: ShellState, opts: ShellOptions): stri
  * printed verbatim inside the context block.
  */
 function loadArtifactManifest(repoRoot: string): string[] {
-  const out: string[] = [];
+  return loadArtifactManifestEntries(repoRoot).map(({ rel, label, mtime }) =>
+    mtime ? `${rel} - ${label}; modified ${mtime}` : `${rel} - ${label}`,
+  );
+}
+
+type ArtifactManifestEntry = {
+  rel: string;
+  label: string;
+  bannerLabel: string;
+  dateVerb: "from" | "modified";
+  mtime?: string;
+};
+
+function loadArtifactManifestEntries(repoRoot: string): ArtifactManifestEntry[] {
   const kuzushiDir = path.join(repoRoot, ".kuzushi");
-  if (!existsSync(kuzushiDir)) return out;
-  const files: Array<{ rel: string; label: string }> = [
-    { rel: "scan-context.json", label: "operator-authored scan context" },
-    { rel: "threat-model.json", label: "persistent threat model" },
+  if (!existsSync(kuzushiDir)) return [];
+  const files: Array<Omit<ArtifactManifestEntry, "mtime">> = [
+    {
+      rel: "scan-context.json",
+      label: "operator-authored scan context",
+      bannerLabel: "scan context",
+      dateVerb: "from",
+    },
+    {
+      rel: "threat-model.json",
+      label: "persistent threat model",
+      bannerLabel: "persisted threat model",
+      dateVerb: "from",
+    },
     // context-snapshot.json is what enables /use carlini-threat-hunt (etc.) to pass
     // the appModel prereq check without re-running context:build.
     // Surface it by name so operators understand what's carrying them.
-    { rel: "context-snapshot.json", label: "context snapshot (repo + app model)" },
-    { rel: "findings.sqlite3", label: "prior findings DB" },
+    {
+      rel: "context-snapshot.json",
+      label: "context snapshot (repo + app model)",
+      bannerLabel: "context",
+      dateVerb: "from",
+    },
+    {
+      rel: "findings.sqlite3",
+      label: "prior findings DB",
+      bannerLabel: "prior findings",
+      dateVerb: "modified",
+    },
   ];
-  for (const { rel, label } of files) {
+  const entries: ArtifactManifestEntry[] = [];
+  for (const spec of files) {
+    const { rel } = spec;
     const full = path.join(kuzushiDir, rel);
     if (!existsSync(full)) continue;
     try {
       const stat = statSync(full);
       const mtime = stat.mtime.toISOString().slice(0, 10);
-      out.push(`${rel} - ${label}; modified ${mtime}`);
+      entries.push({ ...spec, mtime });
     } catch {
-      out.push(`${rel} - ${label}`);
+      entries.push(spec);
     }
   }
-  return out;
+  return entries;
 }
 
 /**
@@ -9638,12 +9881,16 @@ function formatContextTrailer(repoRoot: string): string {
  * callers can skip rendering entirely.
  */
 function formatArtifactBanner(repoRoot: string): string {
-  const manifest = loadArtifactManifest(repoRoot);
-  if (manifest.length === 0) return "";
+  const entries = loadArtifactManifestEntries(repoRoot);
+  if (entries.length === 0) return "";
   return [
-    "Available .kuzushi context:",
-    ...manifest.map((m) => `  - ${m}`),
-    "Reused by /ask and context-aware modules. Run /context to refresh.",
+    "Found .kuzushi context:",
+    ...entries.map((entry) =>
+      entry.mtime
+        ? `  - found ${entry.bannerLabel} ${entry.dateVerb} ${entry.mtime}`
+        : `  - found ${entry.bannerLabel}`,
+    ),
+    "Please refresh in the proper module if needed.",
   ].join("\n");
 }
 
@@ -9757,6 +10004,13 @@ function handleAuthCommand(
       // applyCredentialOutcome → rebuildShellRuntime swaps in.
       resetSession: true,
       asyncExecute: async () => {
+        const active = (await import("../config.js")).resolveActiveCredentials(opts.config);
+        if (!hasCredentialMaterial(active)) {
+          const refreshed = await refreshShellCredentialsFromDisk(opts);
+          if (refreshed.loaded) {
+            return `Copilot enabled. Picked up project credentials from ${refreshed.path}.`;
+          }
+        }
         const { runCredentialPrompt } = await import("../ui/setup.js");
         const credentialOutcome = await runCredentialPrompt(ctx.uiStore, "shell");
         const result = await applyCredentialOutcome(credentialOutcome, opts);

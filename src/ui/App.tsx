@@ -20,6 +20,7 @@ import { CopilotShell, SAST_TASK_KEYBINDS } from "./components/CopilotShell.js";
 import { CredentialPrompt } from "./components/CredentialPrompt.js";
 import { InteractionErrorBoundary } from "./components/InteractionErrorBoundary.js";
 import { InteractiveReview } from "./components/InteractiveReview.js";
+import { ModelPrompt } from "./components/ModelPrompt.js";
 import { NoticeRail } from "./components/NoticeRail.js";
 import { QualityGate } from "./components/QualityGate.js";
 import { ResumeDiff } from "./components/ResumeDiff.js";
@@ -241,11 +242,13 @@ function AppInner({ store }: AppProps): React.ReactElement {
     <Box
       flexDirection="column"
       width={terminalSize.columns}
-      height={terminalSize.rows}
-      overflow="hidden"
+      {...(routing.mode === "shell" ? {} : { height: terminalSize.rows, overflow: "hidden" })}
     >
       <LayoutProvider value={layoutContext}>
-        <AppLayout footer={<KeybindFooter bindings={footerBindings} />}>
+        <AppLayout
+          footer={<KeybindFooter bindings={footerBindings} />}
+          scrollback={routing.mode === "shell"}
+        >
           {showGlobalBanner && <Banner />}
           {routing.mode === "shell" && routing.hasShell && <CopilotShell store={store} />}
           {/*
@@ -294,6 +297,15 @@ function AppInner({ store }: AppProps): React.ReactElement {
           )}
           {routing.mode === "preflight" && routing.preflight?.kind === "credentials" && (
             <CredentialPrompt
+              onComplete={routing.preflight.onComplete}
+              onCancel={routing.preflight.onCancel}
+            />
+          )}
+          {routing.mode === "preflight" && routing.preflight?.kind === "model" && (
+            <ModelPrompt
+              activeModel={routing.preflight.activeModel}
+              availableModels={routing.preflight.availableModels}
+              credentialedProviders={routing.preflight.credentialedProviders}
               onComplete={routing.preflight.onComplete}
               onCancel={routing.preflight.onCancel}
             />

@@ -229,6 +229,7 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
     shell?.shellView === undefined ||
     shell.shellView === "catalog" ||
     shell.shellView === "task-story";
+  const pinViewBelowStaticHistory = shell?.shellView === "task-story";
   const visibleLiveHistory = React.useMemo(() => {
     if (showStaticHistory) return liveHistory;
     const lastInputIdx = findLastHistoryInputIndex(liveHistory);
@@ -281,15 +282,13 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
     <Box
       flexDirection="column"
       flexGrow={1}
-      height="100%"
-      overflow="hidden"
-      justifyContent={showStaticHistory ? "space-between" : "flex-start"}
+      justifyContent={pinViewBelowStaticHistory ? "space-between" : "flex-start"}
     >
       <Box
         flexDirection="column"
-        flexGrow={showStaticHistory ? 1 : 0}
-        flexShrink={showStaticHistory ? 1 : 0}
-        overflow="hidden"
+        flexGrow={pinViewBelowStaticHistory ? 1 : 0}
+        flexShrink={pinViewBelowStaticHistory ? 1 : 0}
+        {...(pinViewBelowStaticHistory ? { overflow: "hidden" } : {})}
       >
         {/* Keep a single historical Static stream in the shell so printed
             banners and scrolled-past transcript lines move upward cleanly
@@ -312,11 +311,16 @@ export function CopilotShell({ store }: CopilotShellProps): React.ReactElement {
 
       <Box
         flexDirection="column"
-        flexGrow={showStaticHistory ? 0 : 1}
+        flexGrow={pinViewBelowStaticHistory ? 0 : 1}
         flexShrink={1}
-        overflow="hidden"
+        {...(pinViewBelowStaticHistory ? { overflow: "hidden" } : {})}
       >
-        <Box flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden">
+        <Box
+          flexDirection="column"
+          flexGrow={1}
+          flexShrink={1}
+          {...(pinViewBelowStaticHistory ? { overflow: "hidden" } : {})}
+        >
           {!shell.processing ||
           shell.shellView === "context-build" ||
           shell.shellView === "task-story" ||

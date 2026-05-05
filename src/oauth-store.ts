@@ -15,7 +15,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { refreshAnthropicToken } from "@mariozechner/pi-ai/oauth";
+import { refreshAnthropicToken, refreshOpenAICodexToken } from "@mariozechner/pi-ai/oauth";
 import { getLogger } from "./logger.js";
 import { isRecord } from "./utils.js";
 
@@ -26,18 +26,22 @@ const log = getLogger("oauth-store");
  * into Kuzushi consumers that don't depend on pi-ai. The unknown-key
  * passthrough mirrors pi-ai's `[key: string]: unknown` extension slot.
  */
-export interface AnthropicOauthCredentials {
+export interface ProviderOauthCredentials {
   /** Long-lived refresh token. Never log this. */
   refresh: string;
   /** Short-lived access token used as Authorization: Bearer. */
   access: string;
-  /** Expiry as unix-ms. Pi-ai subtracts a 5-minute safety margin at write time. */
+  /** Expiry as unix-ms. Providers may subtract a safety margin at write time. */
   expires: number;
   [key: string]: unknown;
 }
 
+export type AnthropicOauthCredentials = ProviderOauthCredentials;
+export type OpenAICodexOauthCredentials = ProviderOauthCredentials;
+
 export interface OAuthCredentialBag {
   anthropic?: AnthropicOauthCredentials;
+  "openai-codex"?: OpenAICodexOauthCredentials;
 }
 
 const FILENAME = "oauth-credentials.json";
@@ -54,8 +58,11 @@ export function readOauthCredentials(home: string = os.homedir()): OAuthCredenti
     const parsed = JSON.parse(raw) as unknown;
     if (!isRecord(parsed)) return undefined;
     const out: OAuthCredentialBag = {};
-    if (isAnthropicCreds(parsed["anthropic"])) {
+    if (isProviderCreds(parsed["anthropic"])) {
       out.anthropic = parsed["anthropic"] as AnthropicOauthCredentials;
+    }
+    if (isProviderCreds(parsed["openai-codex"])) {
+      out["openai-codex"] = parsed["openai-codex"] as OpenAICodexOauthCredentials;
     }
     return out;
   } catch (err) {
@@ -64,7 +71,7 @@ export function readOauthCredentials(home: string = os.homedir()): OAuthCredenti
   }
 }
 
-function isAnthropicCreds(value: unknown): value is AnthropicOauthCredentials {
+function isProviderCreds(value: unknown): value is ProviderOauthCredentials {
   if (!isRecord(value)) return false;
   return (
     typeof value["refresh"] === "string" &&
@@ -137,6 +144,39 @@ export async function getFreshAnthropicAccessToken(): Promise<string | undefined
     );
     return undefined;
   }
+}
+
+/**
+ * Resolve a fresh OpenAI Codex access token, refreshing transparently when
+ * the stored access token is expired. Returns `undefined` when no Codex OAuth
+ * credentials are stored.
+ */
+export async function getFreshOpenAICodexAccessToken(): Promise<string | undefined> {
+  const bag = readOauthCredentials();
+  const creds = bag?.["openai-codex"];
+  if (!creds) return undefined;
+
+  if (Date.now() < creds.expires) return creds.access;
+
+  log.info("OpenAI Codex OAuth access token expired — refreshing");
+  try {
+    const next = await refreshOpenAICodexToken(creds.refresh);
+    writeOauthCredentials({ ...(bag ?? {}), "openai-codex": next });
+    return typeof next.access === "string" ? next.access : undefined;
+  } catch (err) {
+    log.warn(
+      `OpenAI Codex OAuth refresh failed: ${String(err)}. Re-run \`kuzushi auth\` to log in again.`,
+    );
+    return undefined;
+  }
+}
+
+export async function getFreshOAuthAccessTokenForProvider(
+  provider: string,
+): Promise<string | undefined> {
+  if (provider === "anthropic") return getFreshAnthropicAccessToken();
+  if (provider === "openai-codex") return getFreshOpenAICodexAccessToken();
+  return undefined;
 }
 
 /** Test/debug helper: clear the per-process world-readable warning memo. */

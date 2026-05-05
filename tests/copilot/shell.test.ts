@@ -251,10 +251,16 @@ describe("artifact visibility", () => {
   it("banner lists scan-context + threat-model as reusable context", async () => {
     const dir = makeTempRepo(true, ["scan-context.json", "threat-model.json"]);
     const banner = __shellInternals.formatArtifactBanner(dir);
-    expect(banner).toContain("Available .kuzushi context:");
-    expect(banner).toContain("scan-context.json");
-    expect(banner).toContain("threat-model.json");
-    expect(banner).toContain("Reused by /ask and context-aware modules.");
+    expect(banner).toContain("Found .kuzushi context:");
+    expect(banner).toContain("found scan context from");
+    expect(banner).toContain("found persisted threat model from");
+    expect(banner).toContain("Please refresh in the proper module if needed.");
+  });
+
+  it("banner calls out prior findings with modified wording", async () => {
+    const dir = makeTempRepo(true, ["findings.sqlite3"]);
+    const banner = __shellInternals.formatArtifactBanner(dir);
+    expect(banner).toContain("found prior findings modified");
   });
 
   it("trailer is a compact filename list — keeps tool-summary readable", async () => {

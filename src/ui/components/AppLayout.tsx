@@ -9,9 +9,12 @@ import { ScreenFrame } from "../primitives/ScreenFrame.js";
  */
 export function AppLayout({
   footer,
+  scrollback = false,
   children,
 }: {
   footer: React.ReactNode;
+  /** Let content grow into terminal scrollback instead of clipping to one viewport. */
+  scrollback?: boolean;
   children: React.ReactNode;
 }): React.ReactElement {
   const { navigation } = useLayoutContext();
@@ -23,6 +26,7 @@ export function AppLayout({
       subtitle={navigation.subtitle}
       tabs={navigation.tabs}
       footer={footer}
+      scrollback={scrollback}
     >
       {children}
     </ScreenFrame>
