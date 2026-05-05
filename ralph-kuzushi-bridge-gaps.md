@@ -41,6 +41,12 @@ If investigation contradicts these facts, record the corrected fact in `RALPH_RU
 
 ## Ralph Rules
 
+Run this prompt in normal Ralph mode, not `--tasks` mode. The bridge backlog
+lives in this file and in `RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`. Ralph
+`--tasks` mode reads `.ralph/ralph-tasks.md`, which may still contain completed
+migration tasks from an earlier loop and can cause a false one-iteration
+completion before any bridge work is attempted.
+
 Each iteration must:
 
 1. Inspect `git status --short`.
@@ -323,6 +329,6 @@ ralph \
   --prompt-file ./ralph-kuzushi-bridge-gaps.md \
   --agent codex \
   --model gpt-5.5 \
-  --tasks \
+  --completion-promise KUZUSHI_BRIDGE_GAPS_COMPLETE \
   --max-iterations 12
 ```
