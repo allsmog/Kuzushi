@@ -31,12 +31,16 @@ experiments/xint-eval/
 ## Workflow
 
 ```bash
-# One-time setup
+# Wiring sanity check (no LLM cost) — runs the integration tests
+# against synthetic mini-slices to verify FindingStore → CLI → scorer
+# is intact end-to-end. Use this after any architectural change.
+scripts/self-test.sh
+
+# Live recall (real LLM, real slices) — requires OAuth credentials
+# and pinned pre-patch SHAs.
 scripts/verify-tooling.sh          # checks oauth credentials, semgrep, codeql, tree-sitter
 scripts/fetch-slices.sh            # add submodules, sparse-checkout, pin SHAs
-
-# Run a full eval (4 panes in tmux, one per slice)
-scripts/run-all.sh
+scripts/run-all.sh                 # 4 tmux panes, one per slice
 
 # Or one slice at a time
 scripts/run-slice.sh linux
