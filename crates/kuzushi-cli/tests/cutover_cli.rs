@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -129,4 +130,59 @@ fn npm_wrapper_help_reaches_the_rust_binary() {
     assert!(out.contains("modules"));
     assert!(out.contains("tools"));
     assert!(!out.contains("TypeScript"));
+}
+
+#[test]
+fn npm_package_runtime_surface_is_rust_only() {
+    let package_raw = fs::read_to_string(repo_root().join("package.json")).unwrap();
+    let package: Value = serde_json::from_str(&package_raw).unwrap();
+    let bin = package.get("bin").and_then(Value::as_object).unwrap();
+
+    assert_eq!(bin.len(), 1, "package should expose only the Rust CLI bin");
+    assert_eq!(
+        bin.get("kuzushi").and_then(Value::as_str),
+        Some("./bin/kuzushi-rs.mjs")
+    );
+    assert!(!bin.contains_key("kuzushi-ts"));
+
+    let files = package
+        .get("files")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    assert!(files.contains(&"native"));
+    for removed in [
+        "!dist/cli",
+        "!dist/cli.d.ts",
+        "!dist/cli.js",
+        "!dist/cli.js.map",
+    ] {
+        assert!(
+            files.contains(&removed),
+            "package files should exclude old TS CLI artifact {removed}"
+        );
+    }
+
+    let dependencies = package
+        .get("dependencies")
+        .and_then(Value::as_object)
+        .unwrap();
+    for runtime_dep in ["ink", "react", "@types/react"] {
+        assert!(
+            !dependencies.contains_key(runtime_dep),
+            "{runtime_dep} must not be a production dependency of normal CLI execution"
+        );
+    }
+
+    let wrapper = fs::read_to_string(repo_root().join("bin/kuzushi-rs.mjs")).unwrap();
+    assert!(wrapper.contains("native"));
+    assert!(wrapper.contains("KUZUSHI_NATIVE_BIN"));
+    for removed in ["ink", "react", "src/cli.ts", "dist/cli.js"] {
+        assert!(
+            !wrapper.to_ascii_lowercase().contains(removed),
+            "wrapper must not reference legacy runtime surface {removed}"
+        );
+    }
 }
