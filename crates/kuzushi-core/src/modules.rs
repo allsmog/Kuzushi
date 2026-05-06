@@ -8266,7 +8266,20 @@ fn build_context_snapshot(input: Value, ctx: &ToolExecutionContext<'_>) -> Resul
     let repo_context = infer_repo_context(workspace.root(), &files_sample)?;
     let repository_inventory =
         crate::repository_inventory::build_repository_inventory(workspace.root())?;
-    let app_model_routes = repository_inventory_routes(&repository_inventory);
+    let attack_surface_map = crate::attack_surface::build_attack_surface_map_from_inventory(
+        workspace.root(),
+        &repository_inventory,
+    )?;
+    let app_model_routes = attack_surface_routes(&attack_surface_map);
+    let app_model_background_jobs = attack_surface_app_model_items(
+        &attack_surface_map,
+        crate::attack_surface::AttackSurfaceKind::BackgroundJob,
+    );
+    let app_model_data_stores = attack_surface_app_model_items(
+        &attack_surface_map,
+        crate::attack_surface::AttackSurfaceKind::DbQueryBoundary,
+    );
+    let app_model_service_boundaries = attack_surface_service_boundaries(&attack_surface_map);
     let file_tree = files_sample
         .iter()
         .map(|path| json!({ "path": path }))
@@ -8284,6 +8297,7 @@ fn build_context_snapshot(input: Value, ctx: &ToolExecutionContext<'_>) -> Resul
         },
         "repoContext": repo_context,
         "repositoryInventory": repository_inventory,
+        "attackSurfaceMap": attack_surface_map,
         "fileIndex": {
             "tree": file_tree,
             "totalFiles": files_indexed,
@@ -8293,9 +8307,9 @@ fn build_context_snapshot(input: Value, ctx: &ToolExecutionContext<'_>) -> Resul
         "appModel": {
             "routes": app_model_routes,
             "outboundClients": [],
-            "serviceBoundaries": [],
-            "dataStores": [],
-            "backgroundJobs": [],
+            "serviceBoundaries": app_model_service_boundaries,
+            "dataStores": app_model_data_stores,
+            "backgroundJobs": app_model_background_jobs,
         },
         "generatedSlices": generated_context_slices(scope, enrichment),
         "staleSlices": stale_context_slices(scope),
@@ -8325,20 +8339,67 @@ fn build_context_snapshot(input: Value, ctx: &ToolExecutionContext<'_>) -> Resul
     }))
 }
 
-fn repository_inventory_routes(
-    inventory: &crate::repository_inventory::RepositoryInventory,
-) -> Vec<Value> {
-    inventory
-        .routes_controllers
+fn attack_surface_routes(map: &crate::attack_surface::AttackSurfaceMap) -> Vec<Value> {
+    map.surfaces
         .iter()
-        .filter(|item| item.kind == "route")
-        .map(|item| {
+        .filter(|surface| surface.kind == crate::attack_surface::AttackSurfaceKind::HttpRoute)
+        .map(|surface| {
             json!({
-                "path": item.route,
-                "method": item.method,
-                "source": item.path,
-                "line": item.line,
-                "framework": item.framework,
+                "id": surface.id,
+                "path": surface.route,
+                "method": surface.method,
+                "source": surface.path,
+                "line": surface.line,
+                "framework": surface.framework,
+                "evidence": surface.evidence,
+            })
+        })
+        .collect()
+}
+
+fn attack_surface_app_model_items(
+    map: &crate::attack_surface::AttackSurfaceMap,
+    kind: crate::attack_surface::AttackSurfaceKind,
+) -> Vec<Value> {
+    map.surfaces
+        .iter()
+        .filter(|surface| surface.kind == kind)
+        .map(|surface| {
+            json!({
+                "id": surface.id,
+                "kind": surface.kind.as_str(),
+                "source": surface.path,
+                "line": surface.line,
+                "title": surface.title,
+                "evidence": surface.evidence,
+                "boundary": surface.boundary,
+            })
+        })
+        .collect()
+}
+
+fn attack_surface_service_boundaries(map: &crate::attack_surface::AttackSurfaceMap) -> Vec<Value> {
+    map.surfaces
+        .iter()
+        .filter(|surface| {
+            matches!(
+                surface.kind,
+                crate::attack_surface::AttackSurfaceKind::AuthBoundary
+                    | crate::attack_surface::AttackSurfaceKind::CommandExecutionBoundary
+                    | crate::attack_surface::AttackSurfaceKind::FileUploadParsePath
+                    | crate::attack_surface::AttackSurfaceKind::RpcHandler
+            )
+        })
+        .map(|surface| {
+            json!({
+                "id": surface.id,
+                "kind": surface.kind.as_str(),
+                "source": surface.path,
+                "line": surface.line,
+                "title": surface.title,
+                "route": surface.route,
+                "method": surface.method,
+                "boundary": surface.boundary,
             })
         })
         .collect()

@@ -149,7 +149,7 @@
       "acceptance": ["Produce source-derived attack surfaces for routes, RPC, CLI, jobs, deserialization, upload/parse, auth, DB, and command boundaries.", "Start with Node/Express fixtures without live app execution."],
       "storyGate": "cargo test -p kuzushi-core attack_surface",
       "forbidden": ["live app execution"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-012",

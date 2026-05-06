@@ -1,5 +1,6 @@
 pub mod artifact_kb;
 pub mod attachments;
+pub mod attack_surface;
 pub mod carlini_threat_hunt;
 pub mod config;
 pub mod dep_hygiene;
@@ -35,6 +36,10 @@ pub use attachments::{
     attach_source, attachment_store_path, detach_source, is_supported_attachment_module,
     known_artifacts, list_attachments, reparse_source, AttachmentKind, AttachmentRecord,
     KnownArtifact, SUPPORTED_ATTACHMENT_MODULES,
+};
+pub use attack_surface::{
+    build_attack_surface_map, build_attack_surface_map_from_inventory, AttackSurface,
+    AttackSurfaceKind, AttackSurfaceMap, AttackSurfaceSummary,
 };
 pub use carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hunt_report};
 pub use config::{
