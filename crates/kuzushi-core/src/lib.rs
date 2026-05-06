@@ -8,6 +8,7 @@ pub mod concurrency;
 pub mod config;
 pub mod deep_auditor;
 pub mod dep_hygiene;
+pub mod diff_scope;
 pub mod events;
 pub mod findings;
 pub mod full_mode_multi;
@@ -63,6 +64,7 @@ pub use dep_hygiene::{
     analyze_manifest as analyze_dep_hygiene_manifest, check_dependency_hygiene, DepHygieneFinding,
     DepHygieneReport, DepHygieneScanner, DepHygieneSeverity, ManifestKind,
 };
+pub use diff_scope::{git_diff_files, DiffScope};
 pub use findings::{
     compute_dedup_key, extract_cwe, normalize_cwe, Finding, FindingListFilter, FindingListReport,
     FindingStore, FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus, Severity,

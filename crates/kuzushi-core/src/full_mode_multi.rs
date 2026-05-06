@@ -81,6 +81,11 @@ pub struct FullModeConfig {
     /// If `true`, the dispatcher returns the chunk plan + cost estimate
     /// without invoking any model. Always run this on a fresh slice.
     pub dry_run: bool,
+    /// Optional diff-scope filter: when set, only files whose relative
+    /// path appears in `scope_files` are included in the plan. Used by
+    /// the `--since <ref>` flag to scan only what changed.
+    #[serde(default)]
+    pub scope_files: Option<Vec<PathBuf>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -99,6 +104,7 @@ impl Default for FullModeConfig {
             include_extensions: Vec::new(),
             language: FullModeLanguage::C,
             dry_run: false,
+            scope_files: None,
         }
     }
 }
@@ -257,6 +263,11 @@ fn walk_files(cfg: &FullModeConfig) -> Result<Vec<FileBucket>> {
     };
     let mut out = Vec::new();
     walk_recursive(&cfg.workspace_root, &cfg.workspace_root, &extensions, &mut out)?;
+    if let Some(scope) = &cfg.scope_files {
+        let allowed: std::collections::HashSet<&Path> =
+            scope.iter().map(|p| p.as_path()).collect();
+        out.retain(|fb| allowed.contains(Path::new(&fb.path)));
+    }
     Ok(out)
 }
 
@@ -624,6 +635,28 @@ mod tests {
         // Files sorted by path → chunks are directory-affine.
         let chunk0_paths: Vec<&str> = plan.chunks[0].files.iter().map(|f| f.path.as_str()).collect();
         assert!(chunk0_paths.iter().any(|p| p.starts_with("src/")));
+    }
+
+    #[test]
+    fn scope_files_filter_narrows_the_plan_to_diff_set() {
+        let big = "// padding\n".repeat(1_500);
+        let tmp = make_workspace(&[
+            ("src/a.c", &big),
+            ("src/b.c", &big),
+            ("src/c.c", &big),
+        ]);
+        let cfg = FullModeConfig {
+            workspace_root: tmp.path().to_path_buf(),
+            scope_files: Some(vec![PathBuf::from("src/b.c")]),
+            ..Default::default()
+        };
+        let plan = plan(&cfg).unwrap();
+        let paths: Vec<&str> = plan
+            .chunks
+            .iter()
+            .flat_map(|c| c.files.iter().map(|f| f.path.as_str()))
+            .collect();
+        assert_eq!(paths, vec!["src/b.c"]);
     }
 
     #[test]
