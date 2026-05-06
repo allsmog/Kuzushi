@@ -27,6 +27,7 @@ use crate::scan::{
     SemgrepPersistedRun, SemgrepScanReport, SemgrepScanner,
 };
 use crate::secret_scan::{scan_for_secrets, SecretScanOptions};
+use crate::semgrep_rule_synthesis::synthesize_candidate_semgrep_rules;
 use crate::static_evidence::StaticEvidenceStore;
 use crate::static_narrative::build_static_narrative_report;
 use crate::static_proof_validator::{
@@ -839,6 +840,13 @@ fn run_sast_scan(
     } else {
         None
     };
+    let candidate_semgrep_rules = if whitebox_static.is_some() {
+        Some(write_candidate_semgrep_rules_json(
+            workspace, store, &run_ids, &artifacts,
+        )?)
+    } else {
+        None
+    };
 
     let triage = if triage_requested {
         let fingerprints = fingerprints_for_sast_runs(store, &run_ids)?;
@@ -926,6 +934,21 @@ fn run_sast_scan(
                 "  Static variants: {count} code-cited candidate(s), none confirmed by inheritance"
             ));
         }
+        if let Some(count) = candidate_semgrep_rules
+            .as_ref()
+            .and_then(|rules| rules.get("count"))
+            .and_then(Value::as_u64)
+            .filter(|count| *count > 0)
+        {
+            let validated = candidate_semgrep_rules
+                .as_ref()
+                .and_then(|rules| rules.get("validationPassed"))
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            lines.push(format!(
+                "  Candidate Semgrep rules: {count} disabled candidate(s), {validated} fixture-validated"
+            ));
+        }
     }
     lines.push(format!("  Engines: {}", engine_ids.join(", ")));
     if let Some(triage_output) = triage
@@ -953,6 +976,13 @@ fn run_sast_scan(
         artifacts
             .dir
             .join("static-variants.json")
+            .display()
+            .to_string()
+    });
+    let candidate_semgrep_rules_artifact = candidate_semgrep_rules.as_ref().map(|_| {
+        artifacts
+            .dir
+            .join("candidate-semgrep-rules.json")
             .display()
             .to_string()
     });
@@ -986,6 +1016,7 @@ fn run_sast_scan(
             "staticRanking": static_ranking,
             "staticNarratives": static_narratives,
             "staticVariants": static_variants,
+            "candidateSemgrepRules": candidate_semgrep_rules,
             "triage": triage.as_ref().and_then(|value| value.get("data")).cloned(),
             "verification": {
                 "verified": verification_results.len(),
@@ -1006,6 +1037,7 @@ fn run_sast_scan(
                 "summary": artifacts.summary.display().to_string(),
                 "staticNarratives": static_narratives_artifact,
                 "staticVariants": static_variants_artifact,
+                "candidateSemgrepRules": candidate_semgrep_rules_artifact,
                 "triageJsonl": artifacts.triage_jsonl.display().to_string(),
                 "verifyJsonl": artifacts.verify_jsonl.display().to_string(),
             },
@@ -1193,6 +1225,33 @@ fn write_static_variants_json(
         "artifact": artifact_path.display().to_string(),
         "deterministic": variant_report.deterministic,
         "policy": "whitebox-static variants are code-cited candidates only; no variant is statically_confirmed by inheritance",
+    });
+    fs::write(
+        &artifact_path,
+        format!("{}\n", serde_json::to_string_pretty(&report)?),
+    )
+    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    Ok(report)
+}
+
+fn write_candidate_semgrep_rules_json(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    run_ids: &SastRunIds,
+    artifacts: &SastRunArtifacts,
+) -> Result<Value> {
+    let findings = findings_for_sast_runs(store, run_ids)?;
+    let evidence_store = StaticEvidenceStore::open(workspace).ok();
+    let synthesis_report =
+        synthesize_candidate_semgrep_rules(&findings, evidence_store.as_ref(), &[])?;
+    let artifact_path = artifacts.dir.join("candidate-semgrep-rules.json");
+    let report = json!({
+        "count": synthesis_report.count,
+        "validationPassed": synthesis_report.validation_passed,
+        "candidates": synthesis_report.candidates,
+        "artifact": artifact_path.display().to_string(),
+        "deterministic": synthesis_report.deterministic,
+        "policy": "candidate Semgrep rules are generated only from statically_confirmed findings and remain disabled until fixture validation passes and an operator enables them",
     });
     fs::write(
         &artifact_path,
