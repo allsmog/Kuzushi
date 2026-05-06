@@ -17,6 +17,7 @@ pub mod scan;
 pub mod secret_scan;
 pub mod source_span;
 pub mod static_evidence;
+pub mod static_registry;
 pub mod systems_hunt;
 pub mod threat_model;
 pub mod variant_ndiff;
@@ -81,6 +82,11 @@ pub use static_evidence::{
     StaticEvidenceEdge, StaticEvidenceEdgeKind, StaticEvidenceIndexReport, StaticEvidenceNode,
     StaticEvidenceNodeKind, StaticEvidenceStore, STATIC_EVIDENCE_EDGE_KINDS,
     STATIC_EVIDENCE_NODE_KINDS,
+};
+pub use static_registry::{
+    default_static_registry, match_static_registry, static_registry_version, StaticRegistryEntry,
+    StaticRegistryKind, StaticRegistryMatch, StaticRegistryPatternKind, StaticRegistryQuery,
+    STATIC_REGISTRY_VERSION,
 };
 pub use systems_hunt::{execute_systems_hunt_tool, run_systems_hunt_report, SystemsHuntReport};
 pub use threat_model::{
