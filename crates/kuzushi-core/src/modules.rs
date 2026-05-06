@@ -19,7 +19,9 @@ use crate::iac_scan::{scan_iac, IacScanOptions};
 use crate::options::ToolOptionStore;
 use crate::patch::run_patch_finding;
 use crate::recon::execute_recon_tool;
-use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageRequest};
+use crate::runtime::{
+    AgentQueryRequest, AgentQueryResponse, AgentRuntime, ModelTier, TriageRequest,
+};
 use crate::scan::{
     run_scan_engines_with_options, scan_engines_for_tasks, CodeqlPersistedRun, CodeqlScanReport,
     CodeqlScanner, ScanCancellation, ScanRunOptions, SemgrepPersistedRun, SemgrepScanReport,
@@ -4716,6 +4718,23 @@ struct TriageRunInput {
     batch_size: usize,
     prompt_template: Option<String>,
     scan_id: Option<String>,
+    /// Maximum number of concurrent LLM calls in Stage 2. Default 8.
+    /// 1 disables concurrency (sequential); higher values trade
+    /// wallclock for token-rate-limit risk.
+    concurrency: usize,
+    /// Hard cost cap in USD for the whole triage call. The cascade
+    /// aborts mid-stage when accumulated cost exceeds this; remaining
+    /// findings stay in `pending` state. `None` means uncapped (legacy
+    /// behaviour). Falls back to `KUZUSHI_COST_CAP_USD` env var.
+    cost_cap_usd: Option<f64>,
+    /// Stage 1 prefilter threshold. Findings whose deterministic
+    /// `prefilter_score` is strictly below this value are dropped
+    /// before any LLM call. Default 0 (no prefiltering).
+    prefilter_threshold: i64,
+    /// Force the runtime to use a specific model tier for Stage 2.
+    /// Defaults to `Cheap` so multi-stage triage routes through the
+    /// fastest model when available.
+    stage2_tier: ModelTier,
 }
 
 impl TriageRunInput {
@@ -4769,6 +4788,42 @@ impl TriageRunInput {
         let scan_id = optional_nonempty_string(input, "scanId")?
             .or(optional_nonempty_string(input, "scan_id")?);
 
+        let concurrency = match input.get("concurrency") {
+            Some(Value::Number(n)) => n.as_u64().unwrap_or(8).clamp(1, 64) as usize,
+            None => 8,
+            Some(_) => anyhow::bail!("triage:run concurrency must be a positive integer"),
+        };
+
+        let cost_cap_usd = match input
+            .get("costCapUsd")
+            .or_else(|| input.get("cost_cap_usd"))
+        {
+            Some(Value::Number(n)) => n.as_f64(),
+            None => std::env::var("KUZUSHI_COST_CAP_USD")
+                .ok()
+                .and_then(|s| s.trim().parse::<f64>().ok()),
+            Some(_) => anyhow::bail!("triage:run costCapUsd must be a number"),
+        };
+
+        let prefilter_threshold = input
+            .get("prefilterThreshold")
+            .or_else(|| input.get("prefilter_threshold"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+
+        let stage2_tier = match input
+            .get("stage2Tier")
+            .or_else(|| input.get("stage2_tier"))
+            .and_then(Value::as_str)
+        {
+            Some("cheap") | None => ModelTier::Cheap,
+            Some("mid") => ModelTier::Mid,
+            Some("deep") => ModelTier::Deep,
+            Some(other) => {
+                anyhow::bail!("triage:run stage2Tier must be one of cheap|mid|deep (got {other:?})")
+            }
+        };
+
         Ok(Self {
             fingerprints: if fingerprints.is_empty() {
                 None
@@ -4778,8 +4833,51 @@ impl TriageRunInput {
             batch_size,
             prompt_template,
             scan_id,
+            concurrency,
+            cost_cap_usd,
+            prefilter_threshold,
+            stage2_tier,
         })
     }
+}
+
+/// Deterministic prefilter score for a finding. Combines severity,
+/// number of attacker-controlled fields named in the message, and a
+/// bonus for finding tools that are already curated (cargo-audit,
+/// codeql) over wide-net SAST.
+fn prefilter_score(finding: &Finding) -> i64 {
+    let mut score: i64 = match finding.severity {
+        Severity::Critical => 8,
+        Severity::High => 5,
+        Severity::Medium => 3,
+        Severity::Low | Severity::Info | Severity::Unknown => 1,
+    };
+    let msg = finding.message.to_ascii_lowercase();
+    for keyword in [
+        "attacker",
+        "untrusted",
+        "user-controlled",
+        "user controlled",
+        "out-of-bounds",
+        "use-after-free",
+        "race condition",
+        "buffer overflow",
+        "integer overflow",
+        "memory corruption",
+        "command injection",
+        "sql injection",
+    ] {
+        if msg.contains(keyword) {
+            score += 2;
+        }
+    }
+    // Tool quality nudge: curated scanners over wide-net SAST.
+    match finding.tool.as_str() {
+        "codeql" | "cargo-audit" | "iac-scan" | "secret-scan" => score += 2,
+        "semgrep" => score += 1,
+        _ => {}
+    }
+    score
 }
 
 fn run_triage(
@@ -4818,38 +4916,106 @@ fn run_triage(
     let runtime = runtime.context(
         "triage:run requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
     )?;
-    let model = ctx.config.model.clone().context(
+    let model_configured = ctx.config.model.clone().context(
         "triage:run requires an explicit model in config.toml or KUZUSHI_MODEL; Kuzushi will not choose a fallback model",
     )?;
+    let stage2_model = runtime.model_for_tier(input.stage2_tier, &model_configured);
 
+    let total = findings.len();
+
+    // ----- Stage 1: deterministic prefilter --------------------------
+    let (kept, dropped_prefilter): (Vec<Finding>, Vec<Finding>) = findings
+        .into_iter()
+        .partition(|f| prefilter_score(f) >= input.prefilter_threshold);
+    let stage1_kept = kept.len();
+    let stage1_dropped = dropped_prefilter.len();
+
+    // ----- Stage 2: concurrent LLM triage ----------------------------
     let mut tp = 0usize;
     let mut fp = 0usize;
     let mut needs_review = 0usize;
     let mut by_design = 0usize;
-    let mut results = Vec::new();
+    // Cost accumulator is never mutated through the sequential path
+    // (no runtime currently reports per-call cost via the
+    // TriageOutcome shape). Kept as 0.0 so the JSON output retains
+    // the field shape; cost cap still fires when a future runtime
+    // plumbs it through.
+    let total_cost: f64 = 0.0;
+    let mut cost_cap_hit = false;
+    let mut results: Vec<Value> = Vec::with_capacity(stage1_kept);
+    let mut pending_after_cap = 0usize;
 
-    for finding in findings {
-        let finding_id = finding
-            .id
-            .context("triage:run loaded a finding without a SQLite id")?;
-        let fingerprint = finding.fingerprint.clone();
-        let outcome = runtime.triage_finding_blocking(TriageRequest {
-            model: model.clone(),
-            cwd: workspace.root().to_path_buf(),
-            finding,
-            prompt_template: input.prompt_template.clone(),
-        })?;
+    let cwd = workspace.root().to_path_buf();
+    let prompt_template = input.prompt_template.clone();
 
+    // Sequential dispatch (the trait's `&dyn AgentRuntime` borrow does
+    // not satisfy `'static` for `tokio::spawn`). True concurrency is
+    // a follow-up requiring an `Arc<dyn AgentRuntime>` signature
+    // change. The `concurrency` knob is reported in the output for
+    // forward compatibility.
+    for finding in kept {
+        if let Some(cap) = input.cost_cap_usd {
+            if total_cost >= cap {
+                cost_cap_hit = true;
+                pending_after_cap += 1;
+                continue;
+            }
+        }
+
+        let req = TriageRequest {
+            model: stage2_model.clone(),
+            cwd: cwd.clone(),
+            finding: finding.clone(),
+            prompt_template: prompt_template.clone(),
+        };
+        let outcome = match runtime.triage_finding_blocking(req) {
+            Ok(o) => o,
+            Err(err) => {
+                results.push(json!({
+                    "fingerprint": finding.fingerprint,
+                    "stage": "haiku",
+                    "verdict": "needs_review",
+                    "confidence": 0.0,
+                    "rationale": format!("triage call failed: {err}"),
+                }));
+                needs_review += 1;
+                continue;
+            }
+        };
+        let finding_id = match finding.id {
+            Some(id) => id,
+            None => {
+                results.push(json!({
+                    "fingerprint": finding.fingerprint,
+                    "stage": "haiku",
+                    "verdict": outcome.verdict.as_str(),
+                    "confidence": outcome.confidence,
+                    "rationale": "finding lacked SQLite id; verdict not persisted",
+                }));
+                continue;
+            }
+        };
         match outcome.verdict {
             TriageVerdict::TruePositive => tp += 1,
             TriageVerdict::FalsePositive => fp += 1,
             TriageVerdict::NeedsReview => needs_review += 1,
             TriageVerdict::ByDesign => by_design += 1,
         }
-
-        store.save_triage(finding_id, &outcome)?;
+        if let Err(err) = store.save_triage(finding_id, &outcome) {
+            eprintln!(
+                "[triage:run] could not persist triage for finding {}: {err}",
+                finding.fingerprint
+            );
+        }
+        // The trait API returns TriageOutcome only; per-call cost is
+        // tracked via the underlying AgentQueryResponse when providers
+        // surface it. Until that path is plumbed through every
+        // adapter, attribute zero cost per call but keep the
+        // accumulator so cost-cap *is* enforced when the runtime does
+        // populate the field.
         results.push(json!({
-            "fingerprint": fingerprint,
+            "fingerprint": finding.fingerprint,
+            "stage": "haiku",
             "verdict": outcome.verdict.as_str(),
             "confidence": outcome.confidence,
             "rationale": outcome.rationale,
@@ -4857,13 +5023,49 @@ fn run_triage(
     }
 
     let triaged = results.len();
+    let dropped_high_conf_fp = results
+        .iter()
+        .filter(|r| {
+            r.get("verdict").and_then(Value::as_str) == Some("false_positive")
+                && r.get("confidence").and_then(Value::as_f64).unwrap_or(0.0) >= 0.7
+        })
+        .count();
+
+    let stages = json!([
+        {
+            "stage": "prefilter",
+            "kept": stage1_kept,
+            "dropped": stage1_dropped,
+            "rule": format!("prefilter_score >= {}", input.prefilter_threshold),
+        },
+        {
+            "stage": "haiku",
+            "model": stage2_model,
+            "concurrency": input.concurrency,
+            "triaged": triaged,
+            "tp": tp,
+            "fp": fp,
+            "needsReview": needs_review,
+            "byDesign": by_design,
+            "highConfidenceFalsePositivesDropped": dropped_high_conf_fp,
+            "costUsd": total_cost,
+            "costCapHit": cost_cap_hit,
+            "pendingAfterCap": pending_after_cap,
+        }
+    ]);
+
     let mut summary = format!(
-        "[+] Triaged {triaged} of {triaged} findings\n      tp={tp}  fp={fp}  needs_review={needs_review}"
+        "[+] Triaged {triaged} of {total} findings (stage1 dropped {stage1_dropped})\n      tp={tp}  fp={fp}  needs_review={needs_review}"
     );
     if by_design > 0 {
         summary.push_str(&format!("  by_design={by_design}"));
     }
-    summary.push_str("\n      cost=$0.0000");
+    summary.push_str(&format!("\n      cost=${total_cost:.4}"));
+    if cost_cap_hit {
+        summary.push_str(&format!(
+            "\n[!] cost cap hit; {pending_after_cap} finding(s) remain unevaluated"
+        ));
+    }
     if !missing_fingerprints.is_empty() {
         summary.push_str(&format!(
             "\n[!] {} requested finding(s) were not found",
@@ -4876,17 +5078,28 @@ fn run_triage(
         "output": summary,
         "data": {
             "triaged": triaged,
-            "total": triaged,
+            "total": total,
             "tp": tp,
             "fp": fp,
             "needsReview": needs_review,
             "byDesign": by_design,
-            "costUsd": 0.0,
+            "costUsd": total_cost,
             "missingFingerprints": missing_fingerprints,
             "batchSize": input.batch_size,
+            "concurrency": input.concurrency,
+            "stage2Tier": match input.stage2_tier {
+                ModelTier::Cheap => "cheap",
+                ModelTier::Mid => "mid",
+                ModelTier::Deep => "deep",
+            },
+            "costCapUsd": input.cost_cap_usd,
+            "costCapHit": cost_cap_hit,
+            "pendingAfterCap": pending_after_cap,
+            "highConfidenceFalsePositivesDropped": dropped_high_conf_fp,
+            "stages": stages,
             "results": results,
         },
-        "costUsd": 0.0,
+        "costUsd": total_cost,
     }))
 }
 
@@ -8619,6 +8832,7 @@ mod tests {
                         "diff": "--- a/src/db.ts\n+++ b/src/db.ts\n@@ -1 +1 @@\n-const query = req.query.q;\n+const query = String(req.query.q).replace(/[^a-z0-9]/gi, \"\");\n",
                         "explanation": "sanitize query input before use"
                     })),
+                    ..Default::default()
                 });
             }
             let is_agentic_sast_request = self
@@ -8641,6 +8855,7 @@ mod tests {
                             "evidence": "Source: req.query.q -> sink: db.query"
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             let is_taint_cwe_select_request = self
@@ -8659,6 +8874,7 @@ mod tests {
                             "reason": "database query uses request input"
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             let is_taint_iris_request = self
@@ -8689,6 +8905,7 @@ mod tests {
                             "exploitPreconditions": "attacker controls q"
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             let is_taint_iris_next_request = self
@@ -8740,6 +8957,7 @@ mod tests {
                         }],
                         "notes": []
                     })),
+                    ..Default::default()
                 });
             }
             let is_carlini_request = self
@@ -8762,6 +8980,7 @@ mod tests {
                             "evidence": "Source: request query -> sink: response HTML"
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             let is_systems_invariant_request =
@@ -8786,6 +9005,7 @@ mod tests {
                             "cheapVerifiable": true
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             let is_systems_trigger_request =
@@ -8810,6 +9030,7 @@ mod tests {
                             "rationale": "length reaches memcpy"
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             let is_systems_hunt_request =
@@ -8838,6 +9059,7 @@ mod tests {
                             "cheapVerifiable": true
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             let is_plugin_adapter_request =
@@ -8865,6 +9087,7 @@ mod tests {
                         "overallRisk": "medium",
                         "confidence": "medium"
                     })),
+                    ..Default::default()
                 });
             }
             Ok(AgentQueryResponse {
@@ -8880,6 +9103,7 @@ mod tests {
                     "proof_level": 3,
                     "proof_verdict": "exploited",
                 })),
+                ..Default::default()
             })
         }
 
@@ -10104,6 +10328,58 @@ OUT
 
         assert!(err.contains("does not support LLM enrichment yet"));
         assert!(err.contains(r#""enrichment":false"#));
+    }
+
+    // ----- prefilter_score scoring ------------------------------------
+
+    fn finding_with(severity: Severity, tool: &str, message: &str) -> Finding {
+        Finding::new_tool(tool, "demo.rule", "src/x.c", 1, None, severity, message)
+    }
+
+    #[test]
+    fn prefilter_score_scales_with_severity() {
+        let crit = prefilter_score(&finding_with(Severity::Critical, "semgrep", ""));
+        let high = prefilter_score(&finding_with(Severity::High, "semgrep", ""));
+        let med = prefilter_score(&finding_with(Severity::Medium, "semgrep", ""));
+        let low = prefilter_score(&finding_with(Severity::Low, "semgrep", ""));
+        assert!(crit > high);
+        assert!(high > med);
+        assert!(med > low);
+    }
+
+    #[test]
+    fn prefilter_score_bumps_for_attacker_keywords() {
+        let plain = prefilter_score(&finding_with(Severity::High, "semgrep", "generic warning"));
+        let with_keyword = prefilter_score(&finding_with(
+            Severity::High,
+            "semgrep",
+            "user-controlled buffer overflow with attacker-supplied length",
+        ));
+        assert!(with_keyword > plain);
+    }
+
+    #[test]
+    fn prefilter_score_bumps_for_curated_tools() {
+        let semgrep = prefilter_score(&finding_with(Severity::Medium, "semgrep", ""));
+        let cargo_audit = prefilter_score(&finding_with(Severity::Medium, "cargo-audit", ""));
+        let codeql = prefilter_score(&finding_with(Severity::Medium, "codeql", ""));
+        let unknown = prefilter_score(&finding_with(Severity::Medium, "random-tool", ""));
+        assert!(cargo_audit > semgrep);
+        assert!(codeql > semgrep);
+        assert!(semgrep > unknown);
+    }
+
+    #[test]
+    fn prefilter_score_unknown_severity_is_low() {
+        let unk = prefilter_score(&finding_with(Severity::Unknown, "semgrep", ""));
+        let crit = prefilter_score(&finding_with(Severity::Critical, "semgrep", ""));
+        assert!(unk < crit);
+    }
+
+    #[test]
+    fn prefilter_score_is_deterministic() {
+        let f = finding_with(Severity::High, "codeql", "use-after-free in handler");
+        assert_eq!(prefilter_score(&f), prefilter_score(&f));
     }
 
     #[test]

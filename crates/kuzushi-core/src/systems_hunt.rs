@@ -1766,6 +1766,7 @@ mod tests {
                             "cheapVerifiable": true
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             if system_prompt == SYSTEMS_TRIGGER_SYSTEM_PROMPT {
@@ -1784,6 +1785,7 @@ mod tests {
                             "rationale": "length reaches memcpy"
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             if system_prompt == SYSTEMS_HUNT_SYSTEM_PROMPT {
@@ -1806,6 +1808,7 @@ mod tests {
                             "cheapVerifiable": true
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             anyhow::bail!("unexpected prompt {system_prompt}")

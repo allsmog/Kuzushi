@@ -15,7 +15,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageOutcome, TriageRequest,
+    AgentQueryRequest, AgentQueryResponse, AgentRuntime, ModelTier, TriageOutcome, TriageRequest,
     TriageVerdict,
 };
 use serde::{Deserialize, Serialize};
@@ -177,7 +177,59 @@ impl AnthropicOAuthRuntime {
             .join("");
         let structured = maybe_parse_json(&text);
 
-        Ok(AgentQueryResponse { text, structured })
+        let (input_tokens, output_tokens) = parsed
+            .usage
+            .as_ref()
+            .map(|u| (u.input_tokens, u.output_tokens))
+            .unwrap_or((0, 0));
+        let cost_usd = estimate_cost_usd(&model, input_tokens, output_tokens);
+
+        Ok(AgentQueryResponse {
+            text,
+            structured,
+            cost_usd,
+            input_tokens,
+            output_tokens,
+        })
+    }
+}
+
+/// Per-model rate table (USD per token). Numbers are approximate
+/// public prices and are recomputed against the response's
+/// `usage.input_tokens` / `usage.output_tokens` per call. Operators
+/// who want exact billing should rely on Anthropic's invoiced totals;
+/// this is only used to drive in-process cost caps.
+fn estimate_cost_usd(model: &str, input_tokens: u32, output_tokens: u32) -> f64 {
+    // (input_per_1k, output_per_1k) — Mar 2026 list prices.
+    let m = model.to_ascii_lowercase();
+    let (in_per_1k, out_per_1k) = if m.contains("opus") {
+        (15.0e-3, 75.0e-3)
+    } else if m.contains("sonnet") {
+        (3.0e-3, 15.0e-3)
+    } else if m.contains("haiku") {
+        (0.8e-3, 4.0e-3)
+    } else {
+        // Unknown model: use Sonnet rates as a conservative default
+        // (errs on the side of overcounting cost).
+        (3.0e-3, 15.0e-3)
+    };
+    (input_tokens as f64) / 1000.0 * in_per_1k + (output_tokens as f64) / 1000.0 * out_per_1k
+}
+
+/// Resolve a tier handle to a concrete Anthropic model name. Operators
+/// that want a different mapping (e.g. pin Cheap to a specific Haiku
+/// minor version) override via the `configured` argument.
+fn anthropic_model_for_tier(tier: ModelTier, configured: &str) -> String {
+    let configured_clean = strip_provider_prefix(configured);
+    let already_haiku = configured_clean.contains("haiku");
+    let already_sonnet = configured_clean.contains("sonnet");
+    let already_opus = configured_clean.contains("opus");
+    match tier {
+        ModelTier::Cheap if !already_haiku => "claude-haiku-4-5-20251001".to_string(),
+        ModelTier::Mid if !already_sonnet => "claude-sonnet-4-6".to_string(),
+        ModelTier::Deep if !already_opus => "claude-opus-4-7".to_string(),
+        // Configured model already matches the requested tier — keep it.
+        _ => configured_clean,
     }
 }
 
@@ -251,6 +303,10 @@ Reply only with JSON of the shape \
 
 #[async_trait]
 impl AgentRuntime for AnthropicOAuthRuntime {
+    fn model_for_tier(&self, tier: ModelTier, configured: &str) -> String {
+        anthropic_model_for_tier(tier, configured)
+    }
+
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         // Build a *current-thread* runtime so this call doesn't depend
         // on being driven from inside an async context. Slightly more
@@ -435,5 +491,71 @@ mod tests {
         outcome.confidence = -0.3;
         outcome = clamp_outcome(outcome);
         assert_eq!(outcome.confidence, 0.0);
+    }
+
+    // ----- cost estimation -----------------------------------------
+
+    #[test]
+    fn cost_estimate_uses_haiku_rates_for_haiku_models() {
+        let cost = estimate_cost_usd("claude-haiku-4-5-20251001", 1000, 1000);
+        // Haiku: $0.0008/k in + $0.004/k out × 1k each.
+        assert!((cost - (0.0008 + 0.004)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cost_estimate_uses_sonnet_rates_for_sonnet_models() {
+        let cost = estimate_cost_usd("claude-sonnet-4-6", 1000, 1000);
+        assert!((cost - (0.003 + 0.015)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cost_estimate_uses_opus_rates_for_opus_models() {
+        let cost = estimate_cost_usd("claude-opus-4-7", 1000, 1000);
+        assert!((cost - (0.015 + 0.075)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cost_estimate_falls_back_to_sonnet_rates_for_unknown_models() {
+        let unknown = estimate_cost_usd("some-future-model", 1000, 1000);
+        let sonnet = estimate_cost_usd("claude-sonnet-4-6", 1000, 1000);
+        assert!((unknown - sonnet).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cost_estimate_zero_when_no_tokens() {
+        assert_eq!(estimate_cost_usd("claude-haiku-4-5", 0, 0), 0.0);
+    }
+
+    // ----- model_for_tier ------------------------------------------
+
+    #[test]
+    fn model_for_tier_promotes_haiku_when_cheap_requested_with_sonnet() {
+        let resolved = anthropic_model_for_tier(ModelTier::Cheap, "anthropic:claude-sonnet-4-6");
+        assert!(resolved.contains("haiku"));
+    }
+
+    #[test]
+    fn model_for_tier_promotes_opus_when_deep_requested_with_haiku() {
+        let resolved =
+            anthropic_model_for_tier(ModelTier::Deep, "anthropic:claude-haiku-4-5-20251001");
+        assert!(resolved.contains("opus"));
+    }
+
+    #[test]
+    fn model_for_tier_keeps_configured_when_already_correct_tier() {
+        let resolved =
+            anthropic_model_for_tier(ModelTier::Cheap, "anthropic:claude-haiku-4-5-20251001");
+        assert_eq!(resolved, "claude-haiku-4-5-20251001");
+    }
+
+    #[test]
+    fn runtime_model_for_tier_dispatches_through_anthropic_helper() {
+        let runtime = AnthropicOAuthRuntime::new(AnthropicOAuthRuntimeOptions::from_token(
+            "sk-ant-oat01-XYZ",
+        ))
+        .unwrap();
+        // Ask for Cheap on an Opus-configured model — should down-shift.
+        let model = runtime.model_for_tier(ModelTier::Cheap, "anthropic:claude-opus-4-7");
+        assert!(model.contains("haiku"));
     }
 }

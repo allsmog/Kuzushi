@@ -1664,6 +1664,7 @@ mod tests {
             Ok(AgentQueryResponse {
                 text: String::new(),
                 structured: Some(self.response.clone()),
+                ..Default::default()
             })
         }
 
