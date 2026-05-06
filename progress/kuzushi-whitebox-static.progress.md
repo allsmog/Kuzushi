@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-008 - Normalize CodeQL SARIF code flows into static evidence
-Status: WB-007 complete in iteration 35; WB-008 pending
+Active story: WB-009 - Build deterministic repository inventory
+Status: WB-008 complete in iteration 36; WB-009 pending
 
 ## Stage 3 Checklist
 
@@ -13,7 +13,7 @@ Status: WB-007 complete in iteration 35; WB-008 pending
 - WB-005 Add static evidence graph: complete in iteration 33.
 - WB-006 Add source span extractor: complete in iteration 34.
 - WB-007 Normalize Semgrep findings into static evidence: complete in iteration 35.
-- WB-008 Normalize CodeQL SARIF code flows into static evidence: pending.
+- WB-008 Normalize CodeQL SARIF code flows into static evidence: complete in iteration 36.
 - WB-009 Build deterministic repository inventory: pending.
 - WB-010 Build source/sink/sanitizer/guard registry: pending.
 - WB-011 Add attack-surface map from source: pending.
@@ -30,6 +30,51 @@ Status: WB-007 complete in iteration 35; WB-008 pending
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 36 - WB-008
+
+- Task attempted: normalize CodeQL SARIF code-flow evidence into the shared
+  whitebox-static evidence graph without making exploitability claims.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `crates/kuzushi-core/src/lib.rs`
+  - `crates/kuzushi-core/src/modules.rs`
+  - `crates/kuzushi-core/src/scan.rs`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `git status --short --branch` in the clean isolated clone
+  - `sed -n '1,260p' RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+  - `sed -n '1,220p' RALPH_RUST_UX_PROGRESS.md`
+  - `sed -n '1,260p' progress/kuzushi-whitebox-static.progress.md`
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core codeql_static_evidence`
+  - `cargo test -p kuzushi-core normalizes_codeql_sarif_to_findings`
+  - `cargo test -p kuzushi-core dispatches_codeql_scan_and_persists_findings`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `pnpm eval:kuzushi-whitebox-static`
+  - `cargo test -p kuzushi-core codeql`
+- Result: implementation complete. CodeQL scanner execution can now return
+  SARIF artifacts alongside normalized findings, while normal `codeql:scan`
+  behavior remains unchanged. In `whitebox-static` mode, direct `codeql:scan`
+  and native scan-run indexing stamp CodeQL findings as `signal_only`, persist
+  `scanner_signal`, `code_span`, and `dataflow_step` nodes, and link adjacent
+  SARIF flow locations with `flows_to` edges. Scanner signal metadata records
+  `truePositiveByDefault: false`; no runtime exploitability claim is added.
+  WB-008 is marked `passes: true` in the PRD after the story gate and fast
+  whitebox checks passed.
+- Remaining work: WB-009 through WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files. This iteration created and worked
+    in a clean nested clone at
+    `/Users/operator/VibeCode/open-sourced/kuzushi/.codex-active/kuzushi-stage3`
+    because the `apply_patch` tool rejected direct edits to `/private/tmp`.
+  - GitHub network resolution failed from the primary checkout earlier in this
+    iteration (`Could not resolve host: github.com`); the push gate was retried
+    after local verification.
 
 ### Iteration 35 - WB-007
 
