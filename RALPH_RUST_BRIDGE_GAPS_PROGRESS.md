@@ -1173,3 +1173,38 @@ Legacy command classifications:
   - `touch .git/codex-write-probe-iteration-22` fails with `Operation not permitted`, confirming Git metadata writes remain blocked.
   - `HUSKY=0 git commit --no-verify -m "ralph: verify bridge gaps pushed"` fails with `fatal: Unable to create '/Users/operator/VibeCode/open-sourced/kuzushi/.git/index.lock': Operation not permitted`.
   - `git -c http.lowSpeedLimit=1 -c http.lowSpeedTime=8 ls-remote --heads origin incoming-changes` fails with `Could not resolve host: github.com`, so push remains unavailable from this sandbox.
+
+### Iteration 41 - Xint Tier 0 (cargo audit)
+
+- Task attempted: incorporate the first Xint Code differentiator (ground-truth supply-chain scanner output) into the Rust port by adding `CargoAuditScanner` next to the existing text-parse `DepHygieneScanner`. Scope-limited to Rust crates per operator instruction.
+- Files changed:
+  - `crates/kuzushi-core/src/dep_hygiene.rs` — added `CargoAuditScanner` (`ScanEngine` impl), `parse_cargo_audit_output`, and `severity_from_cvss` with both numeric-score and CVSS-vector heuristics. Lockfile-gated and binary-availability-gated so it is a no-op when `Cargo.lock` is absent or `cargo-audit` is not on PATH.
+  - `crates/kuzushi-core/src/scan.rs` — registered `CargoAuditScanner` in `default_scan_engines()` and added `cargo-audit` / `cargo-audit:scan` to `scan_engines_for_tasks` plus the supported-tasks error string.
+  - `crates/kuzushi-core/src/lib.rs` — re-exported `CargoAuditScanner` and `parse_cargo_audit_output`.
+- Tests/checks run:
+  - `cargo fmt -p kuzushi-core`
+  - `cargo build -p kuzushi-core`
+  - `cargo test -p kuzushi-core dep_hygiene` — 15 pass (5 new: `parse_cargo_audit_emits_finding_per_advisory`, `parse_cargo_audit_returns_empty_for_invalid_json`, `parse_cargo_audit_returns_empty_when_no_vulnerabilities_key`, `cargo_audit_severity_buckets_match_cvss_score`, `cargo_audit_scanner_no_lockfile_returns_empty`).
+  - `cargo test -p kuzushi-core --lib scan::` — 19 pass.
+  - `cargo clippy -p kuzushi-core --lib --tests` — no new warnings introduced (37 pre-existing on origin/main; verified via worktree on `c77e414`).
+- Result: complete. Lockfile-gated, binary-gated, parser-only by default — fails open when cargo-audit is unavailable so existing scan flows are unaffected.
+- Remaining work: Tier 1 (`kuzushi-index` crate), Tier 2 (`kuzushi-sandbox` + `verify` module), Tier 3 (`spawn_subagent` on `AgentRuntime` + Rust specialists in `systems_hunt`).
+- Blockers or repo facts that contradicted this prompt:
+  - Three pre-existing `modules::tests` failures on `origin/main` (`dispatches_chrome_rce_review_trigger_with_git_diff`, `dispatches_patch_finding_through_runtime_and_persists_result`, `sast_scan_runs_verify_patch_and_writes_run_artifacts`) reproduce on a clean `git worktree add origin/main` checkout. They are environmental (git signing-config namespace warning), unrelated to Tier 0.
+
+### Iteration 42 - Xint Tier 3 foundation (spawn_subagent)
+
+- Task attempted: incorporate the RoboDuck sub-agent decomposition primitive into the Rust `AgentRuntime` trait so future agentic modules (verify, taint, systems-hunt specialists) can spawn role-scoped sub-agents without provider-side changes. The full systems-hunt branching (Plan Tier 3) is deferred; this iteration ships only the foundational trait extension so it can be merged independently.
+- Files changed:
+  - `crates/kuzushi-core/src/runtime.rs` — added `SubagentRole` enum (`Generic`, `UnsafeBlockReasoner`, `LifetimeAliasingReasoner`, `FfiBoundaryReasoner`) with `name()` and `system_prompt_prefix()`; added `spawn_subagent_blocking` and `spawn_subagent` methods to the `AgentRuntime` trait with default impls that prepend the role preamble and forward to `query_blocking`. Trait change is fully additive — every existing `impl AgentRuntime` keeps compiling. Unit tests cover the no-op `Generic` path, role-prefix prepending, empty-base-prompt edge case, and stable role names.
+  - `crates/kuzushi-core/src/lib.rs` — re-exported `SubagentRole`.
+- Tests/checks run:
+  - `cargo fmt -p kuzushi-core`
+  - `cargo build --workspace` — clean.
+  - `cargo test -p kuzushi-core --lib runtime::` — 4 new tests pass.
+  - `cargo test -p kuzushi-openai` — pre-existing 2 tests still pass, confirming the trait default-method addition is non-breaking for `PiAgentCoreRuntime`.
+  - `cargo clippy -p kuzushi-core --lib --tests` — no new warnings introduced in `runtime.rs` (verified via per-file grep over warning locations).
+- Result: complete. The trait extension is opt-in for callers (every existing call site keeps working) and provider-transparent (no `kuzushi-openai` change needed). Future Tier 3 work (specialist-mode branching inside `systems_hunt.rs` for Rust unsafe-region surfaces) becomes a single-file, single-crate change that builds on this foundation.
+- Remaining work: Tier 1 (`kuzushi-index` tree-sitter crate), Tier 2 (`kuzushi-sandbox` + `verify` module with cargo-test exploit gate), full Tier 3 (`systems_hunt.rs` specialist branching using the new trait method).
+- Blockers or repo facts that contradicted this prompt:
+  - Same three pre-existing environmental `modules::tests` failures as Iteration 41; reproduced on a clean `origin/main` worktree at `c77e414`.
