@@ -2287,7 +2287,7 @@ fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
         ];
     }
 
-    match app.shell_view {
+    let mut bindings = match app.shell_view {
         ShellView::Catalog if !app.catalog_expanded => vec![
             ("modules", "browse"),
             ("use <id>", "focus module"),
@@ -2372,7 +2372,9 @@ fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
             ("help", "help"),
             ("Ctrl+C", "exit"),
         ],
-    }
+    };
+    bindings.insert(0, ("Tab", "complete"));
+    bindings
 }
 
 fn render_lines(frame: &mut Frame<'_>, area: Rect, lines: Vec<Line<'static>>) {
@@ -2926,6 +2928,7 @@ mod tests {
 
         assert!(rendered.contains("kuzushi shell"));
         assert!(rendered.contains("kuzushi>"));
+        assert!(rendered.contains("[Tab] complete"));
         assert!(rendered.contains("[modules]"));
         assert!(!rendered.contains("command log"));
         assert!(!rendered.contains("┌"));
