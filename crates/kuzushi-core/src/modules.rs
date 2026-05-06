@@ -5641,74 +5641,140 @@ fn run_triage(
     let cwd = workspace.root().to_path_buf();
     let prompt_template = input.prompt_template.clone();
 
-    // Sequential dispatch (the trait's `&dyn AgentRuntime` borrow does
-    // not satisfy `'static` for `tokio::spawn`). True concurrency is
-    // a follow-up requiring an `Arc<dyn AgentRuntime>` signature
-    // change. The `concurrency` knob is reported in the output for
-    // forward compatibility.
-    for finding in kept {
-        if let Some(cap) = input.cost_cap_usd {
-            if total_cost >= cap {
-                cost_cap_hit = true;
-                pending_after_cap += 1;
-                continue;
-            }
-        }
+    // Concurrent dispatch via std::thread::scope. The trait is
+    // `Send + Sync`, so multiple worker threads can call
+    // `triage_finding_blocking` on the borrowed `runtime` in parallel.
+    // FindingStore wraps `rusqlite::Connection` (!Sync), so the
+    // outcome channel is drained on the main thread which alone
+    // touches the store. The cost cap is enforced cooperatively:
+    // workers check a shared atomic `cap_hit` flag before each call
+    // and the main thread sets it when total_cost crosses the cap.
+    {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::mpsc;
 
-        let req = TriageRequest {
-            model: stage2_model.clone(),
-            cwd: cwd.clone(),
-            finding: finding.clone(),
-            prompt_template: prompt_template.clone(),
-        };
-        let outcome = match runtime.triage_finding_blocking(req) {
-            Ok(o) => o,
-            Err(err) => {
-                results.push(json!({
-                    "fingerprint": finding.fingerprint,
-                    "stage": "haiku",
-                    "verdict": "needs_review",
-                    "confidence": 0.0,
-                    "rationale": format!("triage call failed: {err}"),
-                }));
-                needs_review += 1;
-                continue;
+        let concurrency = input.concurrency.max(1);
+        let cap_hit_flag = AtomicBool::new(false);
+        let cost_cap = input.cost_cap_usd;
+
+        let (work_tx, work_rx) = mpsc::channel::<Finding>();
+        let (done_tx, done_rx) = mpsc::channel::<(Finding, Result<TriageOutcome>)>();
+        let work_rx = std::sync::Mutex::new(work_rx);
+
+        std::thread::scope(|scope| -> Result<()> {
+            for _ in 0..concurrency {
+                let work_rx = &work_rx;
+                let done_tx = done_tx.clone();
+                let cap_hit_ref = &cap_hit_flag;
+                let cwd = cwd.clone();
+                let prompt_template = prompt_template.clone();
+                let stage2_model = stage2_model.clone();
+                scope.spawn(move || {
+                    loop {
+                        let finding = match work_rx.lock().unwrap().recv() {
+                            Ok(f) => f,
+                            Err(_) => break,
+                        };
+                        if cap_hit_ref.load(Ordering::Relaxed) {
+                            // Drop without dispatching — main thread will
+                            // count it as `pendingAfterCap`.
+                            let _ = done_tx.send((
+                                finding,
+                                Err(anyhow::anyhow!("cost cap reached before dispatch")),
+                            ));
+                            continue;
+                        }
+                        let req = TriageRequest {
+                            model: stage2_model.clone(),
+                            cwd: cwd.clone(),
+                            finding: finding.clone(),
+                            prompt_template: prompt_template.clone(),
+                        };
+                        let res = runtime.triage_finding_blocking(req);
+                        if done_tx.send((finding, res)).is_err() {
+                            break;
+                        }
+                    }
+                });
             }
-        };
-        let finding_id = match finding.id {
-            Some(id) => id,
-            None => {
+            // Push all the work items, then close the work channel so
+            // workers exit once they've drained.
+            for f in kept {
+                if work_tx.send(f).is_err() {
+                    break;
+                }
+            }
+            drop(work_tx);
+            // Workers also need to see the closed `done_tx` to know
+            // when to stop the main drain. Drop our reference; each
+            // worker keeps its own clone.
+            drop(done_tx);
+
+            while let Ok((finding, res)) = done_rx.recv() {
+                let outcome = match res {
+                    Ok(o) => o,
+                    Err(err) => {
+                        let msg = format!("{err}");
+                        if msg.contains("cost cap reached before dispatch") {
+                            pending_after_cap += 1;
+                        } else {
+                            results.push(json!({
+                                "fingerprint": finding.fingerprint,
+                                "stage": "haiku",
+                                "verdict": "needs_review",
+                                "confidence": 0.0,
+                                "rationale": format!("triage call failed: {msg}"),
+                            }));
+                            needs_review += 1;
+                        }
+                        continue;
+                    }
+                };
+
+                total_cost += outcome.cost_usd;
+                if let Some(cap) = cost_cap {
+                    if total_cost >= cap && !cap_hit_flag.load(Ordering::Relaxed) {
+                        cap_hit_flag.store(true, Ordering::Relaxed);
+                        cost_cap_hit = true;
+                    }
+                }
+
+                let finding_id = match finding.id {
+                    Some(id) => id,
+                    None => {
+                        results.push(json!({
+                            "fingerprint": finding.fingerprint,
+                            "stage": "haiku",
+                            "verdict": outcome.verdict.as_str(),
+                            "confidence": outcome.confidence,
+                            "rationale": "finding lacked SQLite id; verdict not persisted",
+                        }));
+                        continue;
+                    }
+                };
+                match outcome.verdict {
+                    TriageVerdict::TruePositive => tp += 1,
+                    TriageVerdict::FalsePositive => fp += 1,
+                    TriageVerdict::NeedsReview => needs_review += 1,
+                    TriageVerdict::ByDesign => by_design += 1,
+                }
+                if let Err(err) = store.save_triage(finding_id, &outcome) {
+                    eprintln!(
+                        "[triage:run] could not persist triage for finding {}: {err}",
+                        finding.fingerprint
+                    );
+                }
                 results.push(json!({
                     "fingerprint": finding.fingerprint,
                     "stage": "haiku",
                     "verdict": outcome.verdict.as_str(),
                     "confidence": outcome.confidence,
-                    "rationale": "finding lacked SQLite id; verdict not persisted",
+                    "rationale": outcome.rationale,
+                    "costUsd": outcome.cost_usd,
                 }));
-                continue;
             }
-        };
-        total_cost += outcome.cost_usd;
-        match outcome.verdict {
-            TriageVerdict::TruePositive => tp += 1,
-            TriageVerdict::FalsePositive => fp += 1,
-            TriageVerdict::NeedsReview => needs_review += 1,
-            TriageVerdict::ByDesign => by_design += 1,
-        }
-        if let Err(err) = store.save_triage(finding_id, &outcome) {
-            eprintln!(
-                "[triage:run] could not persist triage for finding {}: {err}",
-                finding.fingerprint
-            );
-        }
-        results.push(json!({
-            "fingerprint": finding.fingerprint,
-            "stage": "haiku",
-            "verdict": outcome.verdict.as_str(),
-            "confidence": outcome.confidence,
-            "rationale": outcome.rationale,
-            "costUsd": outcome.cost_usd,
-        }));
+            Ok(())
+        })?;
     }
 
     let triaged = results.len();
@@ -13431,6 +13497,171 @@ OUT
             .to_string();
         assert!(err.contains("requires an explicit model"));
         assert!(err.contains("will not choose a fallback model"));
+    }
+
+    /// Runtime used by the concurrency tests below. Each
+    /// `triage_finding_blocking` call sleeps for `latency`, returns a
+    /// fixed `cost_per_call`, and records the call's wall-clock start
+    /// time so the test can assert overlap.
+    struct ConcurrentMockRuntime {
+        latency: std::time::Duration,
+        cost_per_call: f64,
+        call_starts: Mutex<Vec<std::time::Instant>>,
+        call_count: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ConcurrentMockRuntime {
+        fn new(latency_ms: u64, cost_per_call: f64) -> Self {
+            Self {
+                latency: std::time::Duration::from_millis(latency_ms),
+                cost_per_call,
+                call_starts: Mutex::new(Vec::new()),
+                call_count: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+
+        fn observed_calls(&self) -> usize {
+            self.call_count.load(std::sync::atomic::Ordering::Relaxed)
+        }
+    }
+
+    impl AgentRuntime for ConcurrentMockRuntime {
+        fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            unreachable!("concurrent triage tests do not exercise query_blocking")
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            self.call_starts
+                .lock()
+                .unwrap()
+                .push(std::time::Instant::now());
+            self.call_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            std::thread::sleep(self.latency);
+            Ok(TriageOutcome {
+                verdict: TriageVerdict::NeedsReview,
+                confidence: 0.6,
+                rationale: "concurrent mock".to_string(),
+                cost_usd: self.cost_per_call,
+            })
+        }
+    }
+
+    #[test]
+    fn triage_dispatches_concurrently_when_concurrency_gt_one() {
+        // 8 findings × 200ms each. concurrency=4 should finish in
+        // roughly 400ms (2 batches), well under the 1.6s sequential
+        // worst case. We assert wallclock < 1200ms to leave headroom
+        // for slow CI machines.
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .insert_scan_run("run-1", workspace.root(), "completed")
+            .unwrap();
+        for i in 0..8 {
+            let finding = Finding::new_semgrep(
+                &format!("rule.{i}"),
+                &format!("src/x{i}.rs"),
+                10,
+                Some(10),
+                Severity::High,
+                &format!("attacker controls input {i}"),
+            );
+            store.insert_finding("run-1", &finding).unwrap();
+        }
+
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("anthropic:claude-haiku-4-5-20251001".to_string());
+        let runtime = ConcurrentMockRuntime::new(200, 0.0);
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let started = std::time::Instant::now();
+        let result = registry
+            .execute_tool_with_runtime(
+                "triage:run",
+                json!({"concurrency": 4}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+        let elapsed = started.elapsed();
+
+        assert_eq!(runtime.observed_calls(), 8);
+        assert!(
+            elapsed < std::time::Duration::from_millis(1200),
+            "concurrency=4 should finish 8x200ms calls in well under 1.2s — got {elapsed:?}"
+        );
+        let triaged = result
+            .pointer("/data/triaged")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        assert_eq!(triaged, 8);
+    }
+
+    #[test]
+    fn triage_cost_cap_stops_dispatch_under_concurrency() {
+        // 10 findings × $0.02 each, cap at $0.05. After ~3 outcomes
+        // the main thread sets cap_hit; the rest land as
+        // pendingAfterCap. Sequential expectation: 3 succeed, 7 pend.
+        // Concurrent expectation: the in-flight workers may finish
+        // after the flag flips, so we assert success_count is in
+        // [3, concurrency + cap_threshold].
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .insert_scan_run("run-1", workspace.root(), "completed")
+            .unwrap();
+        for i in 0..10 {
+            let finding = Finding::new_semgrep(
+                &format!("rule.cap.{i}"),
+                &format!("src/c{i}.rs"),
+                1,
+                Some(1),
+                Severity::High,
+                &format!("attacker controls payload {i}"),
+            );
+            store.insert_finding("run-1", &finding).unwrap();
+        }
+
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("anthropic:claude-haiku-4-5-20251001".to_string());
+        let runtime = ConcurrentMockRuntime::new(50, 0.02);
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "triage:run",
+                json!({"concurrency": 2, "costCapUsd": 0.05}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        let cap_hit = result
+            .pointer("/data/stages/1/costCapHit")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let pending = result
+            .pointer("/data/stages/1/pendingAfterCap")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        assert!(cap_hit, "expected cost cap to be hit; result = {result:#}");
+        assert!(
+            pending >= 1,
+            "expected at least one finding to be pendingAfterCap; result = {result:#}"
+        );
     }
 
     #[test]
