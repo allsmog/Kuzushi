@@ -581,6 +581,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+ "tokio",
  "toml",
  "uuid",
 ]
@@ -591,9 +592,11 @@ version = "0.24.0-alpha.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "dirs",
  "kuzushi-core",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
