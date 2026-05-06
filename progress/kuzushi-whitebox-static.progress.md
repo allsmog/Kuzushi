@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-007 - Normalize Semgrep findings into static evidence
-Status: WB-006 complete in iteration 34; WB-007 pending
+Active story: WB-008 - Normalize CodeQL SARIF code flows into static evidence
+Status: WB-007 complete in iteration 35; WB-008 pending
 
 ## Stage 3 Checklist
 
@@ -12,7 +12,7 @@ Status: WB-006 complete in iteration 34; WB-007 pending
 - WB-004 Add static proof taxonomy: complete in iteration 32.
 - WB-005 Add static evidence graph: complete in iteration 33.
 - WB-006 Add source span extractor: complete in iteration 34.
-- WB-007 Normalize Semgrep findings into static evidence: pending.
+- WB-007 Normalize Semgrep findings into static evidence: complete in iteration 35.
 - WB-008 Normalize CodeQL SARIF code flows into static evidence: pending.
 - WB-009 Build deterministic repository inventory: pending.
 - WB-010 Build source/sink/sanitizer/guard registry: pending.
@@ -30,6 +30,52 @@ Status: WB-006 complete in iteration 34; WB-007 pending
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 35 - WB-007
+
+- Task attempted: normalize Semgrep scanner signals into the static evidence
+  graph without treating Semgrep output as true-positive proof.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `crates/kuzushi-core/src/static_evidence.rs`
+  - `crates/kuzushi-core/src/scan.rs`
+  - `crates/kuzushi-core/src/modules.rs`
+  - `crates/kuzushi-core/src/lib.rs`
+  - `crates/kuzushi-tui/src/app.rs`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `git status --short --branch` in the clean isolated clone
+  - `sed -n '1,260p' RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+  - `sed -n '1,220p' RALPH_RUST_UX_PROGRESS.md`
+  - `sed -n '1,260p' progress/kuzushi-whitebox-static.progress.md`
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core semgrep_static_evidence`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core semgrep`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `pnpm eval:kuzushi-whitebox-static` with the primary checkout's
+    `node_modules` temporarily symlinked into the clean clone
+  - `cargo test -p kuzushi-core`
+- Result: implementation complete. `index_semgrep_findings_as_static_evidence`
+  now creates one `scanner_signal` node, one source-verified `code_span` node,
+  and one `derived_from` edge per Semgrep finding. The normalizer records
+  `truePositiveByDefault: false` and `staticProofState: signal_only`, and
+  whitebox SAST native scans index Semgrep evidence before findings persist.
+  Direct `semgrep:scan` also stamps `signal_only` and indexes evidence when
+  explicitly invoked with `mode=whitebox-static` or `whiteboxStatic=true`.
+  WB-007 is marked `passes: true` in the PRD after the story gate and fast
+  whitebox checks passed.
+- Remaining work: WB-008 through WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files. This iteration continued in the
+    clean isolated clone at `/tmp/kuzushi-ux2-clone.PJaRge`, which contains the
+    active pushed Stage 2 and WB-001 through WB-006 state.
+  - The isolated clone still does not have its own `node_modules`; the eval
+    used a temporary symlink to the primary checkout's installed dependencies,
+    then removed the symlink before commit.
 
 ### Iteration 34 - WB-006
 

@@ -3079,6 +3079,7 @@ impl ShellApp {
             severity: parse_scan_severity_filter(&input)?,
             tasks: parse_native_scan_tasks(&input)?,
             static_proof_state: None,
+            index_static_evidence: false,
         })
     }
 

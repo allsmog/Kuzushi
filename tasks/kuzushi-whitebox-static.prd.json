@@ -105,7 +105,7 @@
       "acceptance": ["Each Semgrep signal creates scanner_signal and code_span evidence nodes.", "Signal links to code span and is not a true positive by default."],
       "storyGate": "cargo test -p kuzushi-core semgrep_static_evidence",
       "forbidden": ["Semgrep signal as confirmed by default"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-008",
