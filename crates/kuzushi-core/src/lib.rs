@@ -18,6 +18,7 @@ pub mod scan;
 pub mod secret_scan;
 pub mod source_span;
 pub mod static_evidence;
+pub mod static_proof_validator;
 pub mod static_registry;
 pub mod systems_hunt;
 pub mod threat_model;
@@ -87,6 +88,11 @@ pub use static_evidence::{
     StaticEvidenceEdge, StaticEvidenceEdgeKind, StaticEvidenceIndexReport, StaticEvidenceNode,
     StaticEvidenceNodeKind, StaticEvidenceStore, STATIC_EVIDENCE_EDGE_KINDS,
     STATIC_EVIDENCE_NODE_KINDS,
+};
+pub use static_proof_validator::{
+    validate_static_proof_claim, verify_static_proof_citation, StaticProofAssessment,
+    StaticProofAssessmentStatus, StaticProofCitation, StaticProofClaim, StaticProofEvidence,
+    StaticProofValidation, VerifiedStaticProofCitation,
 };
 pub use static_registry::{
     default_static_registry, match_static_registry, static_registry_version, StaticRegistryEntry,
