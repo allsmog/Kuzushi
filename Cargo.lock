@@ -589,12 +589,14 @@ dependencies = [
  "anyhow",
  "async-trait",
  "dirs",
+ "kuzushi-sandbox",
  "libc",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
+ "tokio",
  "toml",
  "uuid",
 ]
@@ -661,6 +663,18 @@ dependencies = [
  "kuzushi-core",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "kuzushi-sandbox"
+version = "0.24.0-alpha.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

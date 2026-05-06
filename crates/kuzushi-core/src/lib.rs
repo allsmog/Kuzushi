@@ -17,6 +17,7 @@ pub mod secret_scan;
 pub mod systems_hunt;
 pub mod threat_model;
 pub mod variant_ndiff;
+pub mod verify;
 pub mod workspace;
 pub mod x_ray;
 
@@ -68,6 +69,7 @@ pub use systems_hunt::{execute_systems_hunt_tool, run_systems_hunt_report, Syste
 pub use threat_model::{
     execute_threat_model_tool, load_persistent_threat_model, save_persistent_threat_model,
 };
+pub use verify::{verify_finding, ProofVerdict, VerificationOutcome, VerifyOptions};
 pub use workspace::{
     export_workspace_findings, WorkspaceExportFormat, WorkspaceFindingsExport, WorkspaceTarget,
 };

@@ -400,6 +400,7 @@ impl ModuleRegistry {
             "sast:scan" => run_sast_scan(input, ctx, runtime),
             "triage:run" => run_triage(input, ctx, runtime),
             "verify:finding" => run_verify_finding(input, ctx, runtime),
+            "verify:exploit" => run_verify_exploit(input, ctx),
             "patch:finding" => run_patch_finding(input, ctx, runtime),
             "threat-model:build"
             | "threat-model:read"
@@ -5039,6 +5040,73 @@ fn run_verify_finding(
     }))
 }
 
+/// Empirical exploit-gated verify: scaffolds a sandboxed test harness from
+/// the finding's location and observes whether it crashes. Promotes to
+/// `proof_level=4` only on observed crash inside an isolating sandbox.
+/// Complementary to (not a replacement for) the LLM-driven `verify:finding`.
+fn run_verify_exploit(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let workspace = ctx.workspace.context(
+        "verify:exploit needs an active workspace. Pass --target <repo> or start the shell with --target.",
+    )?;
+    let store = ctx
+        .findings_store
+        .context("verify:exploit requires a findings store for the active workspace")?;
+
+    let fingerprint = match input.get("fingerprint") {
+        Some(Value::String(value)) if !value.trim().is_empty() => value.trim().to_string(),
+        Some(_) => anyhow::bail!("verify:exploit fingerprint must be a non-empty string"),
+        None => anyhow::bail!("verify:exploit requires a fingerprint"),
+    };
+    let trust_plain = input
+        .get("trustPlainBackend")
+        .or_else(|| input.get("trust_plain_backend"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let timeout_ms = input
+        .get("timeoutMs")
+        .or_else(|| input.get("timeout_ms"))
+        .and_then(Value::as_u64)
+        .unwrap_or(60_000);
+
+    let Some(finding) = store.get_finding_by_reference(&fingerprint)? else {
+        return Ok(json!({
+            "ok": false,
+            "output": format!("[-] No finding with fingerprint '{}'.", fingerprint),
+        }));
+    };
+
+    let outcome = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("verify:exploit could not start a tokio runtime")?
+        .block_on(crate::verify::verify_finding(
+            &finding,
+            crate::verify::VerifyOptions {
+                backend: None,
+                timeout_ms,
+                trust_plain_backend: trust_plain,
+            },
+        ))?;
+
+    let summary = format!(
+        "[+] verify:exploit  proof_level={}  verdict={}  backend={:?}  duration_ms={}",
+        outcome.proof_level,
+        outcome.proof_verdict.as_str(),
+        outcome.backend,
+        outcome.duration_ms
+    );
+    let payload = crate::verify::to_tool_json(&finding, &outcome);
+    let mut response = payload;
+    if let Some(obj) = response.as_object_mut() {
+        obj.insert("output".to_string(), Value::String(summary));
+        obj.insert("costUsd".to_string(), json!(outcome.cost_usd));
+    }
+    // Keep workspace var live; suppresses unused-binding warning when
+    // the binding is only used to validate ctx.workspace is set.
+    let _ = workspace;
+    Ok(response)
+}
+
 fn build_verify_prompt(
     finding: &Finding,
     triage: &TriageOutcome,
@@ -7386,11 +7454,18 @@ fn verify_module() -> BuiltinModule {
         "Verify",
         ModuleKind::Offense,
         "Exploitability verification through proof-of-concept construction and sandboxed execution.",
-        vec![tool_with_options(
-            "verify:finding",
-            "Verify whether a finding is exploitable.",
-            vec![fingerprint_option(), model_option()],
-        )],
+        vec![
+            tool_with_options(
+                "verify:finding",
+                "Verify whether a finding is exploitable (LLM-driven; consults runtime for PoC reasoning).",
+                vec![fingerprint_option(), model_option()],
+            ),
+            tool_with_options(
+                "verify:exploit",
+                "Empirical exploit-gated verify: scaffolds a sandboxed test harness from the finding's location and observes whether it crashes. Only Rust language is wired today; other languages return language_unsupported_yet.",
+                vec![fingerprint_option()],
+            ),
+        ],
         vec![dag("verify:finding", "verification", &["triage:run"])],
     )
 }
