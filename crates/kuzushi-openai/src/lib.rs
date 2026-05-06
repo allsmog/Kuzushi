@@ -6,9 +6,10 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
-    append_bootstrap_context, detect_refusal_in_text, AgentLoopStep, AgentQueryRequest,
-    AgentQueryResponse, AgentRuntime, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry,
-    RuntimeConfig, ToolCall, TriageOutcome, TriageRequest, TriageVerdict, V2Config,
+    append_bootstrap_context, detect_refusal_in_text, parse_refusal_report, AgentLoopStep,
+    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolLoopRequest, AgentToolPolicy,
+    LoopHistoryEntry, RefusalReport, RuntimeConfig, ToolCall, TriageOutcome, TriageRequest,
+    TriageVerdict, V2Config,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -135,6 +136,55 @@ impl AgentRuntime for PiAgentCoreRuntime {
         })
     }
 
+    /// Override the trait default to issue a real follow-up turn when the
+    /// rationale heuristic doesn't already flag a refusal. The follow-up
+    /// asks the same model whether it skipped or declined any portion of
+    /// the analysis and parses the response as a structured RefusalReport.
+    fn triage_finding_with_refusal_blocking(
+        &self,
+        request: TriageRequest,
+    ) -> Result<(TriageOutcome, RefusalReport)> {
+        let cwd = request.cwd.clone();
+        let model = request.model.clone();
+        let outcome = self.triage_finding_blocking(request)?;
+
+        // Cheap path first: if the rationale itself contains refusal-language,
+        // we don't need a second agent call.
+        let heuristic = detect_refusal_in_text(&outcome.rationale);
+        if heuristic.refused {
+            return Ok((outcome, heuristic));
+        }
+
+        let prompt = format!(
+            "Earlier you analyzed a SAST finding and returned verdict={:?} \
+             with confidence {:.2}. Looking back, did you decline to fully \
+             investigate any portion, refuse to look at certain content, or \
+             skip parts because they felt uncomfortable or out of scope?\n\n\
+             Return JSON only: \
+             {{\"refused\":<bool>,\"reason\":\"<brief reason or empty>\",\
+             \"skipped\":[\"<thing1>\",...]}}",
+            outcome.verdict.as_str(),
+            outcome.confidence
+        );
+        let response = match self.query_blocking(AgentQueryRequest::new(
+            model,
+            cwd,
+            REFUSAL_FOLLOWUP_SYSTEM_PROMPT.to_string(),
+            prompt,
+        )) {
+            Ok(response) => response,
+            Err(_) => return Ok((outcome, RefusalReport::default())),
+        };
+
+        let refusal = if let Some(structured) = response.structured.as_ref() {
+            serde_json::from_value::<RefusalReport>(structured.clone())
+                .unwrap_or_else(|_| parse_refusal_report(&response.text))
+        } else {
+            parse_refusal_report(&response.text)
+        };
+        Ok((outcome, refusal))
+    }
+
     fn supports_tools(&self) -> bool {
         true
     }
@@ -248,6 +298,11 @@ fn stringify_tool_output(value: &Value) -> String {
         other => serde_json::to_string(other).unwrap_or_else(|_| "<non-serialisable>".to_string()),
     }
 }
+
+const REFUSAL_FOLLOWUP_SYSTEM_PROMPT: &str = r#"You are auditing your own previous analysis for refusal-language.
+Return only JSON. Do not include the original analysis. The schema is:
+{"refused":<bool>,"reason":"<short>","skipped":["<thing>",...]}.
+If you analyzed everything fully, return {"refused":false}."#;
 
 const TRIAGE_SYSTEM_PROMPT: &str = r#"You are Kuzushi's security triage agent.
 Return only JSON matching:

@@ -826,6 +826,8 @@ mod tests {
             config,
             workspace: Some(workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         }
     }
 

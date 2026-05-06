@@ -316,6 +316,57 @@ impl<'a> LikelyVulnClassifier<'a> {
         }
     }
 
+    /// Record a gate decision (accepted or skipped) in the finding's
+    /// `analysis_history_json` audit trail. Production callers should invoke
+    /// this *after* `score(...)` regardless of whether the finding graduates
+    /// to the deep auditor — so the operator can see in `kuzushi metrics`
+    /// how often the gate is firing and what scores it is producing.
+    pub fn record_decision(
+        &self,
+        store: &crate::findings::FindingStore,
+        finding: &Finding,
+        score: Score,
+        accepted: bool,
+    ) -> anyhow::Result<()> {
+        let model = self
+            .runtime
+            .resolve_model(AgentRole::ClassifierGate, 0, None)
+            .unwrap_or_else(|| "(unconfigured)".to_string());
+        let entry = crate::findings::AnalysisEntry {
+            run_id: finding
+                .scan_id
+                .clone()
+                .unwrap_or_else(|| "classifier_gate".to_string()),
+            agent_type: if accepted {
+                "gate-accept".to_string()
+            } else {
+                "gate-skip".to_string()
+            },
+            model,
+            agent_session_id: None,
+            finding_count: 1,
+            num_turns: 1,
+            cost_usd: 0.0,
+            usage: crate::findings::AnalysisUsage::default(),
+            reinvestigate_marker: None,
+            refusal: crate::findings::RefusalReport::default(),
+            created_at: now_isoish(),
+        };
+        let mut entry = entry;
+        // Stash the score + threshold in the reason field of a stub refusal so
+        // downstream readers (metrics, finding deep page) can surface it
+        // without inventing a new column. The "refused" flag stays false; this
+        // is a metadata channel, not a refusal signal.
+        entry.refusal.refused = false;
+        entry.refusal.reason = format!(
+            "score={:.2} threshold={:.2}",
+            score,
+            self.current_threshold()
+        );
+        store.append_analysis_entry(&finding.fingerprint, &entry)?;
+        Ok(())
+    }
+
     pub fn current_threshold(&self) -> f32 {
         let q = self.quantile.lock().expect("quantile mutex poisoned");
         if q.count < self.cfg.cold_start_min_count {
@@ -328,6 +379,15 @@ impl<'a> LikelyVulnClassifier<'a> {
     pub fn samples_seen(&self) -> usize {
         self.quantile.lock().unwrap().count
     }
+}
+
+fn now_isoish() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    format!("{secs}")
 }
 
 fn render_prompt(f: &Finding) -> String {

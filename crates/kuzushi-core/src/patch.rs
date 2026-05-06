@@ -132,8 +132,22 @@ pub fn run_patch_finding(
     let mut final_status = PatchStatus::Unknown;
     let mut final_diff = None;
     let mut final_explanation = None;
+    let mut total_cost = 0.0f64;
 
     for attempt in 1..=input.max_iterations {
+        let spend_ticket = match ctx.spend {
+            Some(limiter) => match limiter.deposit(crate::spend::Operation::Patch, 0.05) {
+                Ok(ticket) => Some(ticket),
+                Err(error) => {
+                    eprintln!(
+                        "[warn] patch budget exceeded for {}: {error}",
+                        finding.fingerprint
+                    );
+                    break;
+                }
+            },
+            None => None,
+        };
         let synthesis = synthesize_patch(
             runtime,
             &model,
@@ -143,6 +157,13 @@ pub fn run_patch_finding(
             &triage,
             &history,
         )?;
+        if let Some(ticket) = spend_ticket {
+            let estimate = ticket.est_usd();
+            if let Some(limiter) = ctx.spend {
+                let _ = limiter.refund(ticket, estimate);
+            }
+            total_cost += estimate;
+        }
         let worktree = create_disposable_worktree(workspace.root())?;
         let validation = validate_patch(&worktree, &synthesis.diff, &plan);
         cleanup_worktree(workspace.root(), &worktree);
@@ -184,7 +205,7 @@ pub fn run_patch_finding(
         build_command: plan.build.clone(),
         test_command: plan.test.clone(),
         worktree_path: None,
-        cost_usd: Some(0.0),
+        cost_usd: Some(total_cost),
         validator_log: Some(validator_log.clone()),
         history,
         created_at: None,

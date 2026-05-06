@@ -372,6 +372,32 @@ pub(crate) enum FindingsVerb {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) enum AuthVerb {
+    Status,
+    Login(Option<String>),
+    Provider(Option<String>),
+    Backend(Option<String>),
+    Cost,
+    Model(Option<String>),
+    Config,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum PlanVerb {
+    Start(String),
+    Apply,
+    Discard,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum KbVerb {
+    Show(Option<String>),
+    Attach(String),
+    Detach(String),
+    Reparse(String),
+}
+
+#[derive(Debug, Clone)]
 pub struct RunListEntry {
     pub run_id: String,
     pub modified: Option<SystemTime>,
@@ -728,25 +754,13 @@ impl ShellApp {
             ShellCommand::Findings => self.show_findings(),
             ShellCommand::Open(id) => self.open_finding(&id),
             ShellCommand::Scan(target) => self.start_scan(target),
-            ShellCommand::Model(model) => self.handle_model_command(model),
-            ShellCommand::Auth => self.show_auth_status(),
-            ShellCommand::AuthLogin(provider) => self.handle_auth_login_command(provider),
-            ShellCommand::Provider(provider) => self.handle_provider_command(provider),
-            ShellCommand::Backend(backend) => self.handle_backend_command(backend),
-            ShellCommand::Cost => self.show_cost_status(),
-            ShellCommand::Config => {
-                self.shell_view = ShellView::Config;
-                self.sync_selected_model_index();
-                self.log(
-                    "config",
-                    format!(
-                        "runtime={} provider={} model={}",
-                        runtime_backend_label(&self.config),
-                        self.provider_label(),
-                        self.config.model.as_deref().unwrap_or("unconfigured")
-                    ),
-                );
-            }
+            ShellCommand::Model(model) => self.dispatch_auth(AuthVerb::Model(model)),
+            ShellCommand::Auth => self.dispatch_auth(AuthVerb::Status),
+            ShellCommand::AuthLogin(provider) => self.dispatch_auth(AuthVerb::Login(provider)),
+            ShellCommand::Provider(provider) => self.dispatch_auth(AuthVerb::Provider(provider)),
+            ShellCommand::Backend(backend) => self.dispatch_auth(AuthVerb::Backend(backend)),
+            ShellCommand::Cost => self.dispatch_auth(AuthVerb::Cost),
+            ShellCommand::Config => self.dispatch_auth(AuthVerb::Config),
             ShellCommand::Use(module) => {
                 if self
                     .registry
@@ -787,9 +801,9 @@ impl ShellApp {
             ShellCommand::Since(reference) => self.dispatch_findings(FindingsVerb::Since(reference)),
             ShellCommand::Replay(run_id) => self.dispatch_runs(RunsVerb::Replay(run_id)),
             ShellCommand::Trace(run_id) => self.dispatch_runs(RunsVerb::Trace(run_id)),
-            ShellCommand::Plan(goal) => self.start_planner(&goal),
-            ShellCommand::PlanApply => self.apply_pending_plan(),
-            ShellCommand::PlanDiscard => self.discard_pending_plan(),
+            ShellCommand::Plan(goal) => self.dispatch_plan(PlanVerb::Start(goal)),
+            ShellCommand::PlanApply => self.dispatch_plan(PlanVerb::Apply),
+            ShellCommand::PlanDiscard => self.dispatch_plan(PlanVerb::Discard),
             ShellCommand::Quickstart => self.show_quickstart(),
             ShellCommand::Target(path) => self.handle_target_command(path.as_deref()),
             ShellCommand::Ask(question) => self.ask_agent(&question),
@@ -804,10 +818,10 @@ impl ShellApp {
             ShellCommand::Task(command) => self.handle_sast_task_command(command),
             ShellCommand::Context(command) => self.handle_context_command(command),
             ShellCommand::Workspace(command) => self.handle_workspace_command(command),
-            ShellCommand::KnowledgeBase(module) => self.show_kb(module),
-            ShellCommand::Attach(source) => self.attach_kb_source(&source),
-            ShellCommand::Detach(id) => self.detach_kb_source(&id),
-            ShellCommand::Reparse(id) => self.reparse_kb_source(&id),
+            ShellCommand::KnowledgeBase(module) => self.dispatch_kb(KbVerb::Show(module)),
+            ShellCommand::Attach(source) => self.dispatch_kb(KbVerb::Attach(source)),
+            ShellCommand::Detach(id) => self.dispatch_kb(KbVerb::Detach(id)),
+            ShellCommand::Reparse(id) => self.dispatch_kb(KbVerb::Reparse(id)),
             ShellCommand::History => self.show_history(),
             ShellCommand::Clear => self.clear_conversation(),
             ShellCommand::Load(specifier) => self.handle_load_command(specifier),
@@ -2956,6 +2970,8 @@ impl ShellApp {
             config: &self.config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
         match self.registry.execute_tool("context:build", input, &ctx) {
             Ok(result) => {
@@ -3789,6 +3805,8 @@ impl ShellApp {
             config: &self.config,
             workspace: workspace.as_ref(),
             findings_store: store.as_ref(),
+            spend: None,
+            executor: None,
         };
         match self.registry.execute_tool_with_runtime(
             &tool_name,
@@ -4566,6 +4584,47 @@ impl ShellApp {
                 self.refresh_findings(false);
                 self.apply_since_scope(reference);
             }
+        }
+    }
+
+    fn dispatch_auth(&mut self, verb: AuthVerb) {
+        match verb {
+            AuthVerb::Status => self.show_auth_status(),
+            AuthVerb::Login(provider) => self.handle_auth_login_command(provider),
+            AuthVerb::Provider(provider) => self.handle_provider_command(provider),
+            AuthVerb::Backend(backend) => self.handle_backend_command(backend),
+            AuthVerb::Cost => self.show_cost_status(),
+            AuthVerb::Model(model) => self.handle_model_command(model),
+            AuthVerb::Config => {
+                self.shell_view = ShellView::Config;
+                self.sync_selected_model_index();
+                self.log(
+                    "config",
+                    format!(
+                        "runtime={} provider={} model={}",
+                        runtime_backend_label(&self.config),
+                        self.provider_label(),
+                        self.config.model.as_deref().unwrap_or("unconfigured")
+                    ),
+                );
+            }
+        }
+    }
+
+    fn dispatch_plan(&mut self, verb: PlanVerb) {
+        match verb {
+            PlanVerb::Start(goal) => self.start_planner(&goal),
+            PlanVerb::Apply => self.apply_pending_plan(),
+            PlanVerb::Discard => self.discard_pending_plan(),
+        }
+    }
+
+    fn dispatch_kb(&mut self, verb: KbVerb) {
+        match verb {
+            KbVerb::Show(module) => self.show_kb(module),
+            KbVerb::Attach(source) => self.attach_kb_source(&source),
+            KbVerb::Detach(id) => self.detach_kb_source(&id),
+            KbVerb::Reparse(id) => self.reparse_kb_source(&id),
         }
     }
 

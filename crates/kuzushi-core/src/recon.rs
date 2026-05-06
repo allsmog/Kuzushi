@@ -1512,6 +1512,8 @@ mod tests {
             config,
             workspace: Some(workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         }
     }
 
@@ -1761,6 +1763,8 @@ HTTP
             config: &config,
             workspace: None,
             findings_store: None,
+            spend: None,
+            executor: None,
         };
         let error = execute_recon_tool(
             "recon:http-fingerprint",

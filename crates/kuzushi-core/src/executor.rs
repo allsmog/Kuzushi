@@ -179,6 +179,166 @@ impl Executor for LocalExecutor {
     }
 }
 
+/// Container-backed executor that wraps each `launch` in
+/// `docker run --rm -v <working_dir>:/workspace -w /workspace <image> <cmd>`.
+/// Captures stdout/stderr/exit code into the results map. Useful when an
+/// operator wants triage / scan to fan out across containers without
+/// installing scanner binaries on the host.
+///
+/// Today the implementation is "one container per launch"; pooling and
+/// long-lived sidecars are a follow-up.
+pub struct DockerExecutor {
+    image: String,
+    docker_binary: String,
+    extra_run_args: Vec<String>,
+    results: Mutex<HashMap<String, ExecutorResult>>,
+}
+
+impl DockerExecutor {
+    /// Create a Docker executor for the given image. Defaults the docker
+    /// binary to `docker`; override with [`with_binary`] for podman / a
+    /// non-PATH location.
+    pub fn new(image: impl Into<String>) -> Self {
+        Self {
+            image: image.into(),
+            docker_binary: "docker".to_string(),
+            extra_run_args: Vec::new(),
+            results: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn with_binary(mut self, binary: impl Into<String>) -> Self {
+        self.docker_binary = binary.into();
+        self
+    }
+
+    /// Append flags to every `docker run` invocation (e.g. `--user 1000:1000`,
+    /// `--cap-drop ALL`, `--read-only`). These come *after* the volume mount
+    /// and `-w` flag and *before* the image name.
+    pub fn with_run_args(
+        mut self,
+        args: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.extra_run_args
+            .extend(args.into_iter().map(Into::into));
+        self
+    }
+}
+
+impl Executor for DockerExecutor {
+    fn launch(&self, request: ExecutorRequest) -> Result<String> {
+        let run_id = request.run_id.clone();
+        let started_at = SystemTime::now();
+
+        let workdir = request
+            .working_dir
+            .canonicalize()
+            .with_context(|| {
+                format!(
+                    "DockerExecutor could not resolve {}",
+                    request.working_dir.display()
+                )
+            })?;
+
+        let mut command = std::process::Command::new(&self.docker_binary);
+        command.arg("run");
+        command.arg("--rm");
+        command.arg("-v");
+        command.arg(format!("{}:/workspace", workdir.display()));
+        command.arg("-w");
+        command.arg("/workspace");
+        for (key, value) in &request.env {
+            command.arg("-e");
+            command.arg(format!("{key}={value}"));
+        }
+        for extra in &self.extra_run_args {
+            command.arg(extra);
+        }
+        if request.stdin.is_some() {
+            command.arg("-i");
+        }
+        command.arg(&self.image);
+        let inner = request
+            .command
+            .first()
+            .context("DockerExecutor requires a non-empty command")?;
+        command.arg(inner);
+        if request.command.len() > 1 {
+            for arg in &request.command[1..] {
+                command.arg(arg);
+            }
+        }
+
+        if request.stdin.is_some() {
+            command.stdin(std::process::Stdio::piped());
+        }
+        command.stdout(std::process::Stdio::piped());
+        command.stderr(std::process::Stdio::piped());
+
+        let mut child = command.spawn().with_context(|| {
+            format!(
+                "DockerExecutor could not spawn {}: is docker installed?",
+                self.docker_binary
+            )
+        })?;
+        if let (Some(stdin_text), Some(mut stdin)) = (&request.stdin, child.stdin.take()) {
+            use std::io::Write;
+            stdin
+                .write_all(stdin_text.as_bytes())
+                .context("Could not write docker container stdin")?;
+        }
+        let output = child
+            .wait_with_output()
+            .context("Could not wait on docker child")?;
+        let completed_at = SystemTime::now();
+
+        let result = ExecutorResult {
+            run_id: run_id.clone(),
+            status: if output.status.success() {
+                ExecutorStatus::Succeeded
+            } else {
+                ExecutorStatus::Failed
+            },
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            exit_code: output.status.code(),
+            started_at: Some(started_at),
+            completed_at: Some(completed_at),
+        };
+        self.results
+            .lock()
+            .expect("DockerExecutor results lock poisoned")
+            .insert(run_id.clone(), result);
+        Ok(run_id)
+    }
+
+    fn collect(&self, run_id: &str) -> Result<ExecutorResult> {
+        let guard = self
+            .results
+            .lock()
+            .expect("DockerExecutor results lock poisoned");
+        guard
+            .get(run_id)
+            .cloned()
+            .with_context(|| format!("DockerExecutor has no record of run id {run_id}"))
+    }
+
+    fn status(&self, run_id: &str) -> Result<ExecutorStatus> {
+        let guard = self
+            .results
+            .lock()
+            .expect("DockerExecutor results lock poisoned");
+        Ok(guard
+            .get(run_id)
+            .map(|result| result.status)
+            .unwrap_or(ExecutorStatus::Unknown))
+    }
+
+    fn name(&self) -> &str {
+        "docker"
+    }
+}
+
 /// Stand-in for callers that want a `Box<dyn Executor>` slot but don't
 /// have a real backend wired yet. Always returns `Unknown`.
 pub struct NoopExecutor;
@@ -255,6 +415,35 @@ mod tests {
     fn collect_returns_error_for_unknown_run_id() {
         let exec = LocalExecutor::new();
         assert!(exec.collect("nope").is_err());
+    }
+
+    #[test]
+    fn docker_executor_constructs_expected_command_arguments() {
+        // We can't reliably exec docker in CI, so this test asserts the
+        // arg order via name(), with_binary, with_run_args without invoking
+        // the binary. End-to-end coverage lives in scan-mode integration
+        // when DOCKER_HOST is set.
+        let exec = DockerExecutor::new("alpine:3.19")
+            .with_binary("docker")
+            .with_run_args(["--user", "1000:1000", "--cap-drop", "ALL"]);
+        assert_eq!(exec.name(), "docker");
+        assert_eq!(exec.image, "alpine:3.19");
+        assert_eq!(exec.docker_binary, "docker");
+        assert_eq!(
+            exec.extra_run_args,
+            vec![
+                "--user".to_string(),
+                "1000:1000".to_string(),
+                "--cap-drop".to_string(),
+                "ALL".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn docker_executor_reports_unknown_run_id() {
+        let exec = DockerExecutor::new("alpine:3.19");
+        assert_eq!(exec.status("nope").unwrap(), ExecutorStatus::Unknown);
     }
 
     #[test]

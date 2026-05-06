@@ -1757,6 +1757,8 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -1817,6 +1819,8 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let err = registry
@@ -1880,6 +1884,8 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -1943,6 +1949,8 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -1970,6 +1978,8 @@ mod tests {
             config: &config,
             workspace: None,
             findings_store: None,
+            spend: None,
+            executor: None,
         };
         let result = registry
             .execute_tool("threat-model:methodologies", json!({}), &ctx)
