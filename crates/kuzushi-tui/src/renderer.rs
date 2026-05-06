@@ -1124,40 +1124,77 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
 
     let active_stage = scan.map(|scan| scan.stage.as_str()).unwrap_or("idle");
+    let scan_running = scan.is_some_and(|s| s.running);
+    let scan_done =
+        scan.is_some() && !scan_running && scan.and_then(|s| s.error.as_ref()).is_none();
     lines.push(divider("SCAN PROGRESS", area.width));
-    lines.push(pipeline_row(
-        if active_stage.contains("context") {
-            "⏵"
-        } else {
-            "✓"
-        },
-        "context:build",
-        if active_stage.contains("context") {
-            "active"
-        } else {
-            "ready"
-        },
-    ));
-    lines.push(pipeline_row(
-        if scan.is_some_and(|scan| scan.running) {
-            "⏵"
-        } else if scan.is_some() {
-            "✓"
-        } else {
-            "○"
-        },
-        "sast:scan",
-        active_stage,
-    ));
-    lines.push(pipeline_row(
-        "○",
-        "triage:run",
-        if findings > 0 {
-            "queued after scan"
-        } else {
-            "waiting for findings"
-        },
-    ));
+
+    let sast_rows = app.sast_task_rows();
+    let show_per_task = sast_rows.iter().any(|r| r.selected)
+        && app.focused_module.as_deref() == Some("sast")
+        && (scan_running || scan_done);
+    if show_per_task {
+        for row in &sast_rows {
+            if !row.selected {
+                continue;
+            }
+            let (kind, done_count, total, status) = if scan_done {
+                (ProgressKind::Done, 1usize, 1usize, "done".to_string())
+            } else {
+                (ProgressKind::Active, 0usize, 1usize, "running…".to_string())
+            };
+            lines.push(progress_bar_line(row.id, done_count, total, &status, kind));
+        }
+        lines.push(progress_bar_line(
+            "triage",
+            if scan_done && findings > 0 { 0 } else { 0 },
+            findings.max(1),
+            if findings > 0 {
+                "queued after scan"
+            } else {
+                "waiting for findings"
+            },
+            if findings > 0 {
+                ProgressKind::Active
+            } else {
+                ProgressKind::Failing
+            },
+        ));
+    } else {
+        lines.push(pipeline_row(
+            if active_stage.contains("context") {
+                "⏵"
+            } else {
+                "✓"
+            },
+            "context:build",
+            if active_stage.contains("context") {
+                "active"
+            } else {
+                "ready"
+            },
+        ));
+        lines.push(pipeline_row(
+            if scan_running {
+                "⏵"
+            } else if scan.is_some() {
+                "✓"
+            } else {
+                "○"
+            },
+            "sast:scan",
+            active_stage,
+        ));
+        lines.push(pipeline_row(
+            "○",
+            "triage:run",
+            if findings > 0 {
+                "queued after scan"
+            } else {
+                "waiting for findings"
+            },
+        ));
+    }
 
     if let Some(error) = scan.and_then(|scan| scan.error.as_ref()) {
         lines.push(blank());
