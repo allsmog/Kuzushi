@@ -154,6 +154,7 @@ pub struct ScanPanelState {
     pub stage: String,
     pub findings_count: usize,
     pub running: bool,
+    pub abort_requested: bool,
     pub error: Option<String>,
 }
 
@@ -226,6 +227,7 @@ pub struct AgentChatView {
     pub question: String,
     pub answer: Option<String>,
     pub running: bool,
+    pub abort_requested: bool,
     pub error: Option<String>,
 }
 
@@ -399,8 +401,10 @@ pub struct ShellApp {
     pub advisory: AdvisoryState,
     pub pending_plan: Option<PlanProposal>,
     pub planner_running: bool,
+    pub plan_abort_requested: bool,
     pub pending_threat_patch: Option<ThreatPatch>,
     pub threat_worker_running: bool,
+    pub threat_abort_requested: bool,
     pub chains: Vec<ExploitChain>,
     pub story_return_view: Option<ShellView>,
     pub findings_cursor: usize,
@@ -450,8 +454,10 @@ impl ShellApp {
             advisory: AdvisoryState::default(),
             pending_plan: None,
             planner_running: false,
+            plan_abort_requested: false,
             pending_threat_patch: None,
             threat_worker_running: false,
+            threat_abort_requested: false,
             chains: Vec::new(),
             story_return_view: None,
             findings_cursor: 0,
@@ -1109,6 +1115,14 @@ impl ShellApp {
 
     fn apply_threat_patch_event(&mut self, event: ThreatPatchEvent) {
         self.threat_worker_running = false;
+        if self.threat_abort_requested {
+            self.threat_abort_requested = false;
+            self.log(
+                "threats",
+                "pi-agent-core response arrived after abort request; discarded",
+            );
+            return;
+        }
         match event {
             ThreatPatchEvent::Proposed(patch) => {
                 self.log(
@@ -1163,6 +1177,7 @@ impl ShellApp {
         let (tx, rx) = mpsc::channel();
         self.threat_rx = Some(rx);
         self.threat_worker_running = true;
+        self.threat_abort_requested = false;
         self.log("threats", "regenerating threat-model patch");
 
         thread::spawn(move || {
@@ -1206,6 +1221,7 @@ impl ShellApp {
         let (tx, rx) = mpsc::channel();
         self.threat_rx = Some(rx);
         self.threat_worker_running = true;
+        self.threat_abort_requested = false;
         self.log("threats", format!("asking: {question}"));
 
         thread::spawn(move || {
@@ -1256,6 +1272,14 @@ impl ShellApp {
 
     fn apply_plan_event(&mut self, event: PlanEvent) {
         self.planner_running = false;
+        if self.plan_abort_requested {
+            self.plan_abort_requested = false;
+            self.log(
+                "plan",
+                "pi-agent-core response arrived after abort request; discarded",
+            );
+            return;
+        }
         match event {
             PlanEvent::Proposed(plan) => {
                 self.log(
@@ -1319,6 +1343,7 @@ impl ShellApp {
         let (tx, rx) = mpsc::channel();
         self.plan_rx = Some(rx);
         self.planner_running = true;
+        self.plan_abort_requested = false;
         self.log("plan", format!("planning: {goal_owned}"));
 
         thread::spawn(move || planner_worker(config, model, thinking_level, cwd, goal_owned, tx));
@@ -1405,6 +1430,7 @@ impl ShellApp {
                 question: question.to_string(),
                 answer: None,
                 running: false,
+                abort_requested: false,
                 error: Some(
                     "ask requires an explicit model. Next: model, then choose a pi-agent-core provider/model".to_string(),
                 ),
@@ -1421,6 +1447,7 @@ impl ShellApp {
                 question: question.to_string(),
                 answer: None,
                 running: false,
+                abort_requested: false,
                 error: Some(message.clone()),
             });
             self.log("error", message);
@@ -1440,6 +1467,7 @@ impl ShellApp {
             question: question.clone(),
             answer: None,
             running: true,
+            abort_requested: false,
             error: None,
         });
         self.agent_rx = Some(rx);
@@ -3026,6 +3054,7 @@ impl ShellApp {
             stage: "queued".to_string(),
             findings_count: 0,
             running: true,
+            abort_requested: false,
             error: None,
         });
         self.scan_rx = Some(rx);
@@ -3518,6 +3547,7 @@ impl ShellApp {
                     scan.run_id = Some(run_id.clone());
                     scan.target = target;
                     scan.stage = "starting scan".to_string();
+                    scan.abort_requested = false;
                 }
                 self.log("scan", format!("run {}", short_fingerprint(&run_id)));
             }
@@ -3554,6 +3584,7 @@ impl ShellApp {
                     scan.stage = "completed".to_string();
                     scan.findings_count = findings_count;
                     scan.running = false;
+                    scan.abort_requested = false;
                     scan.error = None;
                 }
                 self.refresh_findings(false);
@@ -3570,6 +3601,7 @@ impl ShellApp {
                 if let Some(scan) = &mut self.scan {
                     scan.stage = "failed".to_string();
                     scan.running = false;
+                    scan.abort_requested = false;
                     scan.error = Some(error.clone());
                 }
                 self.log("error", error);
@@ -3579,6 +3611,7 @@ impl ShellApp {
                     scan.run_id = Some(run_id.clone());
                     scan.stage = "cancelled".to_string();
                     scan.running = false;
+                    scan.abort_requested = false;
                     scan.error = None;
                 }
                 self.log("scan", format!("cancelled {}", short_fingerprint(&run_id)));
@@ -3587,22 +3620,54 @@ impl ShellApp {
     }
 
     fn apply_agent_event(&mut self, event: AgentEvent) {
+        let abort_requested = self
+            .agent_chat
+            .as_ref()
+            .is_some_and(|agent| agent.abort_requested);
         match event {
             AgentEvent::Answered { text } => {
                 if let Some(agent) = &mut self.agent_chat {
                     agent.running = false;
-                    agent.answer = Some(text.clone());
-                    agent.error = None;
+                    agent.abort_requested = false;
+                    if abort_requested {
+                        agent.answer = None;
+                        agent.error =
+                            Some("response arrived after abort request; ignored".to_string());
+                    } else {
+                        agent.answer = Some(text.clone());
+                        agent.error = None;
+                    }
                 }
-                self.log("answer", text);
+                if abort_requested {
+                    self.log(
+                        "agent",
+                        "pi-agent-core response arrived after abort request; ignored",
+                    );
+                } else {
+                    self.log("answer", text);
+                }
             }
             AgentEvent::Failed { error } => {
                 if let Some(agent) = &mut self.agent_chat {
                     agent.running = false;
+                    agent.abort_requested = false;
                     agent.answer = None;
-                    agent.error = Some(error.clone());
+                    if abort_requested {
+                        agent.error = Some(format!(
+                            "request ended after abort request; last error: {error}"
+                        ));
+                    } else {
+                        agent.error = Some(error.clone());
+                    }
                 }
-                self.log("error", error);
+                if abort_requested {
+                    self.log(
+                        "agent",
+                        format!("pi-agent-core ended after abort request: {error}"),
+                    );
+                } else {
+                    self.log("error", error);
+                }
             }
         }
     }
@@ -3837,15 +3902,27 @@ impl ShellApp {
     }
 
     fn request_exit(&mut self) {
-        self.cancel_active_scan();
+        self.request_active_abort();
         if !self.should_quit {
             self.log("system", "exit requested; closing shell");
         }
         self.should_quit = true;
     }
 
-    fn cancel_active_scan(&mut self) -> bool {
+    fn request_active_abort(&mut self) -> bool {
+        let mut requested = false;
+        requested |= self.request_scan_abort();
+        requested |= self.request_agent_abort();
+        requested |= self.request_plan_abort();
+        requested |= self.request_threat_abort();
+        requested
+    }
+
+    fn request_scan_abort(&mut self) -> bool {
         if !self.scan.as_ref().is_some_and(|scan| scan.running) {
+            return false;
+        }
+        if self.scan.as_ref().is_some_and(|scan| scan.abort_requested) {
             return false;
         }
 
@@ -3853,14 +3930,57 @@ impl ShellApp {
             cancel.cancel();
         }
         if let Some(scan) = &mut self.scan {
-            scan.stage = "cancelling".to_string();
+            scan.stage = "abort requested".to_string();
+            scan.abort_requested = true;
         }
-        self.log("scan", "cancelling active scan");
+        self.log(
+            "scan",
+            "abort requested; waiting for scanner subprocess to stop (not claiming it was killed)",
+        );
+        true
+    }
+
+    fn request_agent_abort(&mut self) -> bool {
+        let Some(agent) = &mut self.agent_chat else {
+            return false;
+        };
+        if !agent.running || agent.abort_requested {
+            return false;
+        }
+        agent.abort_requested = true;
+        self.log(
+            "agent",
+            "abort requested; waiting for pi-agent-core to return (process kill not confirmed)",
+        );
+        true
+    }
+
+    fn request_plan_abort(&mut self) -> bool {
+        if !self.planner_running || self.plan_abort_requested {
+            return false;
+        }
+        self.plan_abort_requested = true;
+        self.log(
+            "plan",
+            "abort requested; waiting for pi-agent-core planner to return (process kill not confirmed)",
+        );
+        true
+    }
+
+    fn request_threat_abort(&mut self) -> bool {
+        if !self.threat_worker_running || self.threat_abort_requested {
+            return false;
+        }
+        self.threat_abort_requested = true;
+        self.log(
+            "threats",
+            "abort requested; waiting for pi-agent-core threat worker to return (process kill not confirmed)",
+        );
         true
     }
 
     fn handle_quit_chord(&mut self) {
-        if self.cancel_active_scan() {
+        if self.request_active_abort() {
             self.ctrl_c_armed_at = None;
             return;
         }
@@ -3960,11 +4080,11 @@ impl ShellApp {
 
     fn abort_for_budget(&mut self) {
         self.advisory.budget_halt = None;
-        let cancelled = self.cancel_active_scan();
+        let requested = self.request_active_abort();
         self.log(
             "budget",
             format!(
-                "aborting due to cost cap (scan cancelled: {cancelled}). Next: /cost or /scan",
+                "aborting due to cost cap (abort requested: {requested}). Next: /cost or /scan",
             ),
         );
     }
@@ -6067,6 +6187,7 @@ JSON
             stage: "completed".to_string(),
             findings_count: 1,
             running: false,
+            abort_requested: false,
             error: None,
         });
         app.kb_view.attachments = vec![AttachmentRecord {
@@ -7867,7 +7988,7 @@ JSON
     }
 
     #[test]
-    fn ctrl_c_cancels_active_scan_before_exit() {
+    fn ctrl_c_requests_active_scan_abort_before_exit() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.scan = Some(ScanPanelState {
             run_id: Some("run-1".to_string()),
@@ -7875,6 +7996,7 @@ JSON
             stage: "running semgrep".to_string(),
             findings_count: 0,
             running: true,
+            abort_requested: false,
             error: None,
         });
 
@@ -7883,8 +8005,14 @@ JSON
         assert!(!app.should_quit);
         assert_eq!(
             app.scan.as_ref().map(|scan| scan.stage.as_str()),
-            Some("cancelling")
+            Some("abort requested")
         );
+        assert!(app.scan.as_ref().is_some_and(|scan| scan.abort_requested));
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "scan"
+                && line.body.contains("abort requested")
+                && line.body.contains("not claiming")
+        }));
     }
 
     #[test]
@@ -8287,6 +8415,7 @@ JSON
             stage: "running".to_string(),
             findings_count: 0,
             running: true,
+            abort_requested: false,
             error: None,
         });
         app.handle_command(ShellCommand::Pause);
@@ -8310,6 +8439,7 @@ JSON
             stage: "paused".to_string(),
             findings_count: 0,
             running: true,
+            abort_requested: false,
             error: None,
         });
         app.handle_command(ShellCommand::Resume(None));
@@ -8331,6 +8461,7 @@ JSON
             stage: "running".to_string(),
             findings_count: 0,
             running: true,
+            abort_requested: false,
             error: None,
         });
         app.shell_view = ShellView::ModuleRun;
@@ -8498,7 +8629,7 @@ JSON
     }
 
     #[test]
-    fn ctrl_c_during_active_scan_cancels_without_arming() {
+    fn ctrl_c_during_active_scan_requests_abort_without_arming() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.scan = Some(ScanPanelState {
             run_id: Some("run-x".to_string()),
@@ -8506,10 +8637,107 @@ JSON
             stage: "running".to_string(),
             findings_count: 0,
             running: true,
+            abort_requested: false,
             error: None,
         });
         app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(!app.should_quit);
         assert!(!app.ctrl_c_armed(), "scan-cancel path must not arm exit");
+        assert!(app.scan.as_ref().is_some_and(|scan| scan.abort_requested));
+    }
+
+    #[test]
+    fn second_ctrl_c_after_scan_abort_request_arms_exit() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.scan = Some(ScanPanelState {
+            run_id: Some("run-x".to_string()),
+            target: PathBuf::from("."),
+            stage: "running".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+        assert!(!app.should_quit);
+        assert!(app.ctrl_c_armed());
+    }
+
+    #[test]
+    fn ctrl_c_during_agent_chat_requests_abort_without_claiming_kill() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::AgentChat;
+        app.agent_chat = Some(AgentChatView {
+            question: "what changed?".to_string(),
+            answer: None,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+        assert!(!app.should_quit);
+        assert!(!app.ctrl_c_armed());
+        assert!(app
+            .agent_chat
+            .as_ref()
+            .is_some_and(|agent| agent.abort_requested));
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "agent"
+                && line.body.contains("abort requested")
+                && line.body.contains("not confirmed")
+        }));
+    }
+
+    #[test]
+    fn agent_response_after_abort_request_is_ignored() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.agent_chat = Some(AgentChatView {
+            question: "what changed?".to_string(),
+            answer: None,
+            running: true,
+            abort_requested: true,
+            error: None,
+        });
+
+        app.apply_agent_event(AgentEvent::Answered {
+            text: "late answer".to_string(),
+        });
+
+        let agent = app.agent_chat.as_ref().unwrap();
+        assert!(!agent.running);
+        assert!(!agent.abort_requested);
+        assert!(agent.answer.is_none());
+        assert!(agent
+            .error
+            .as_ref()
+            .is_some_and(|error| error.contains("ignored")));
+        assert!(!app.log.iter().any(|line| line.body == "late answer"));
+    }
+
+    #[test]
+    fn ctrl_c_during_plan_and_threat_workers_requests_honest_abort() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.planner_running = true;
+        app.threat_worker_running = true;
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+        assert!(app.plan_abort_requested);
+        assert!(app.threat_abort_requested);
+        assert!(!app.should_quit);
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "plan"
+                && line.body.contains("abort requested")
+                && line.body.contains("not confirmed")
+        }));
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "threats"
+                && line.body.contains("abort requested")
+                && line.body.contains("not confirmed")
+        }));
     }
 }
