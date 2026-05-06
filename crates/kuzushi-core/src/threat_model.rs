@@ -111,12 +111,12 @@ fn build_threat_model(
     let input = parse_build_input(&input, ctx, flavor)?;
     let previous_model = load_persistent_threat_model(&input.target);
     let prompt = build_agent_prompt(&input, previous_model.as_ref())?;
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model: input.model.clone(),
-        cwd: input.target.clone(),
-        system_prompt: THREAT_MODEL_SYSTEM_PROMPT.to_string(),
+    let response = runtime.query_blocking(AgentQueryRequest::new(
+        input.model.clone(),
+        input.target.clone(),
+        THREAT_MODEL_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
 
     let raw = match response.structured {
         Some(value) => value,

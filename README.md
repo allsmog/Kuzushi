@@ -32,6 +32,9 @@ wrapper at a specific binary.
 # Start the Rust terminal shell.
 kuzushi
 
+# Check config, local state, scanners, and the pi-agent-core bridge.
+kuzushi doctor --target .
+
 # Run the default native scan path against a repo.
 kuzushi scan .
 
@@ -44,17 +47,20 @@ kuzushi --target . run secret-scan:scan --input '{}'
 
 Fresh native state is stored under `.kuzushi/v2/`; scan-run summaries and
 triage/verification JSONL remain under `.kuzushi/runs/<runId>/`.
-
-There is no Rust `kuzushi doctor` subcommand in this cutover. In a source
-checkout, `pnpm doctor` runs the read-only development environment diagnostic.
+`kuzushi doctor --target .` runs a Rust preflight over config, writable state,
+findings DB openability, optional scanner binaries, and the pi-agent-core
+bridge without printing credential values.
 
 ## Native CLI
 
 ```text
-kuzushi [--target <path>] [command]
+kuzushi [--target <path>] [--plain] [command]
 ```
 
 Bare `kuzushi` starts the shell.
+Use `--plain` or `KUZUSHI_PLAIN=1` to force line-oriented output with no ANSI
+escapes, animation, or box drawing. `KUZUSHI_SCREEN_READER=1` and
+`KUZUSHI_LOW_BANDWIDTH=1` are aliases for the same strict plain shell mode.
 
 | Command | Purpose |
 | --- | --- |
@@ -63,6 +69,7 @@ Bare `kuzushi` starts the shell.
 | `kuzushi findings --target <repo> [--severity high,critical] [--verdict true_positive] [--name text] [--file-path path] [--limit 50] [--json]` | List persisted findings. |
 | `kuzushi modules [--json]` | List visible native modules. |
 | `kuzushi tools [--json]` | List visible executable tool descriptors. |
+| `kuzushi doctor [--target <repo>] [--json]` | Check config, local state, findings DB openability, scanner binaries, bridge readiness, and model/auth setup. |
 | `kuzushi run <module:tool> --input '<json>'` | Execute one tool through the Rust registry. Use global `--target` for workspace-backed tools. |
 | `kuzushi config show` | Print effective config. |
 | `kuzushi config init [--force]` | Write the default global config. |
@@ -96,6 +103,8 @@ The shell routes slash commands and their bare equivalents through the Rust
 command parser. Help is grouped by workflow; `?` opens help, while `?text`,
 `ask <question>`, and `/ask <question>` are explicit agent-chat routes.
 Unknown prose does not silently dispatch to a model.
+Piped shell output automatically uses the same strict plain renderer as
+`--plain`.
 
 | Command | Purpose |
 | --- | --- |
@@ -233,7 +242,7 @@ Useful package scripts:
 | `pnpm test` | Run retained TypeScript unit/reference tests. |
 | `pnpm test:rust` | Run `cargo test --workspace`. |
 | `pnpm test:e2e` | Run the native smoke test. |
-| `pnpm doctor` | Run source-checkout diagnostics. |
+| `pnpm doctor` | Run source-checkout development diagnostics; use `kuzushi doctor` for Rust CLI preflight. |
 
 ## TypeScript Retention
 
@@ -243,6 +252,8 @@ The old TypeScript/Ink CLI is no longer the npm runtime path:
 - The `kuzushi-ts` npm bin is removed.
 - The `dev:ts` package script and `scripts/kuzushi-dev` source CLI helper are
   removed.
+- The source-only `src/cli.ts shell` route now exits with a Rust replacement
+  message instead of importing the retained TypeScript/Ink shell.
 - The old `dist/cli*` TypeScript CLI build outputs are excluded from the npm
   tarball.
 

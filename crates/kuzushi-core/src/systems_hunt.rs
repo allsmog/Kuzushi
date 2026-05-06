@@ -9,9 +9,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::findings::{Finding, Severity};
+use crate::findings::{Finding, Severity, StaticProofState};
 use crate::modules::ToolExecutionContext;
-use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime};
+use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolPolicy};
+use crate::whitebox_static::{
+    agent_tool_policy_for_input, mark_whitebox_static_findings, whitebox_static_profile_requested,
+};
 
 const SYSTEMS_INVARIANT_SYSTEM_PROMPT: &str = "Systems Hunt invariant extractor";
 const SYSTEMS_TRIGGER_SYSTEM_PROMPT: &str = "Systems Hunt trigger synthesizer";
@@ -336,25 +339,46 @@ pub fn run_systems_hunt_report(
         "systems-hunt requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
     )?;
     let model = resolve_model("systems-hunt", input, ctx, &options)?;
-    let invariants = query_systems_invariants(runtime, &model, &target, &context, &options)?;
-    let triggers =
-        query_systems_triggers(runtime, &model, &target, &context, &invariants, &options)?;
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model,
-        cwd: target.clone(),
-        system_prompt: SYSTEMS_HUNT_SYSTEM_PROMPT.to_string(),
-        prompt: build_systems_hunt_prompt(&target, &context, &invariants, &triggers, &options)?,
-    })?;
+    let agent_tool_policy = agent_tool_policy_for_input(input)?;
+    let invariants = query_systems_invariants(
+        runtime,
+        &model,
+        &target,
+        &context,
+        &options,
+        agent_tool_policy.clone(),
+    )?;
+    let triggers = query_systems_triggers(
+        runtime,
+        &model,
+        &target,
+        &context,
+        &invariants,
+        &options,
+        agent_tool_policy.clone(),
+    )?;
+    let response = runtime.query_blocking(
+        AgentQueryRequest::new(
+            model,
+            target.clone(),
+            SYSTEMS_HUNT_SYSTEM_PROMPT.to_string(),
+            build_systems_hunt_prompt(&target, &context, &invariants, &triggers, &options)?,
+        )
+        .with_tool_policy(agent_tool_policy),
+    )?;
     let raw = parse_agent_json(response)
         .context("systems-hunt expected pi-agent-core to return JSON with a findings array")?;
     let artifact_root = artifact_root(&target, &options.artifact_dir)?;
-    let (findings, artifacts) = normalize_systems_hunt_findings(
+    let (mut findings, artifacts) = normalize_systems_hunt_findings(
         raw,
         &target,
         &context,
         &artifact_root,
         options.max_findings,
     )?;
+    if whitebox_static_profile_requested(input)? {
+        mark_whitebox_static_findings(&mut findings, StaticProofState::CodeCited)?;
+    }
     let persisted = persist_systems_findings(&target, &findings, ctx)?;
 
     Ok(SystemsHuntReport {
@@ -391,7 +415,14 @@ fn run_systems_invariant_extract(
         ctx,
         &options,
     )?;
-    query_systems_invariants(runtime, &model, &target, &context, &options)
+    query_systems_invariants(
+        runtime,
+        &model,
+        &target,
+        &context,
+        &options,
+        agent_tool_policy_for_input(input)?,
+    )
 }
 
 fn run_systems_trigger_synth(
@@ -413,9 +444,17 @@ fn run_systems_trigger_synth(
         "systems-hunt:systems-trigger-synth requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
     )?;
     let model = resolve_model("systems-hunt:systems-trigger-synth", input, ctx, &options)?;
+    let agent_tool_policy = agent_tool_policy_for_input(input)?;
     let invariant_output = match invariants_from_input(input).transpose()? {
         Some(output) => output,
-        None => query_systems_invariants(runtime, &model, &target, &context, &options)?,
+        None => query_systems_invariants(
+            runtime,
+            &model,
+            &target,
+            &context,
+            &options,
+            agent_tool_policy.clone(),
+        )?,
     };
     query_systems_triggers(
         runtime,
@@ -424,6 +463,7 @@ fn run_systems_trigger_synth(
         &context,
         &invariant_output,
         &options,
+        agent_tool_policy,
     )
 }
 
@@ -444,15 +484,18 @@ fn run_deep_semantic_cwe_select(
         &options,
     )?;
     let inventory = collect_inventory(&target, 80, 2048)?;
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model,
-        cwd: target.clone(),
-        system_prompt: DEEP_SEMANTIC_CWE_SYSTEM_PROMPT.to_string(),
-        prompt: format!(
+    let response = runtime.query_blocking(
+        AgentQueryRequest::new(
+            model,
+            target.clone(),
+            DEEP_SEMANTIC_CWE_SYSTEM_PROMPT.to_string(),
+            format!(
             "Select relevant native-code CWE classes for this repository. Return JSON with cwes[].\n\n{}",
             format_inventory(&inventory)
         ),
-    })?;
+        )
+        .with_tool_policy(agent_tool_policy_for_input(input)?),
+    )?;
     let raw = parse_agent_json(response)
         .context("systems-hunt:deep-semantic-cwe-select expected JSON with a cwes array")?;
     Ok(DeepSemanticCweOutput {
@@ -496,11 +539,12 @@ fn run_deep_semantic_hunt_report(
     }
 
     let inventory = collect_inventory(&target, 80, 2048)?;
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model,
-        cwd: target.clone(),
-        system_prompt: DEEP_SEMANTIC_HUNT_SYSTEM_PROMPT.to_string(),
-        prompt: format!(
+    let response = runtime.query_blocking(
+        AgentQueryRequest::new(
+            model,
+            target.clone(),
+            DEEP_SEMANTIC_HUNT_SYSTEM_PROMPT.to_string(),
+            format!(
             "Find verified variants of these native-code CWE classes. Return JSON with findings[].\n\nCWEs:\n{}\n\n{}",
             cwes.iter()
                 .map(|cwe| format!("- {} {}: {}", cwe.id, cwe.name, cwe.reason))
@@ -508,12 +552,17 @@ fn run_deep_semantic_hunt_report(
                 .join("\n"),
             format_inventory(&inventory)
         ),
-    })?;
+        )
+        .with_tool_policy(agent_tool_policy_for_input(input)?),
+    )?;
     let raw = parse_agent_json(response)
         .context("systems-hunt:deep-semantic-hunt expected JSON with a findings array")?;
     let artifact_root = artifact_root(&target, &options.artifact_dir)?;
-    let (findings, artifacts) =
+    let (mut findings, artifacts) =
         normalize_deep_semantic_findings(raw, &target, &artifact_root, options.max_findings)?;
+    if whitebox_static_profile_requested(input)? {
+        mark_whitebox_static_findings(&mut findings, StaticProofState::CodeCited)?;
+    }
     let persisted = persist_systems_findings(&target, &findings, ctx)?;
 
     Ok(SystemsHuntReport {
@@ -600,16 +649,20 @@ fn query_systems_invariants(
     target: &Path,
     context: &SystemsContextOutput,
     _options: &SystemsHuntInput,
+    agent_tool_policy: AgentToolPolicy,
 ) -> Result<SystemsInvariantOutput> {
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model: model.to_string(),
-        cwd: target.to_path_buf(),
-        system_prompt: SYSTEMS_INVARIANT_SYSTEM_PROMPT.to_string(),
-        prompt: format!(
+    let response = runtime.query_blocking(
+        AgentQueryRequest::new(
+            model.to_string(),
+            target.to_path_buf(),
+            SYSTEMS_INVARIANT_SYSTEM_PROMPT.to_string(),
+            format!(
             "Extract safety invariants for these low-level surfaces. Return JSON with invariants[].\n\n{}",
             serde_json::to_string_pretty(context)?
         ),
-    })?;
+        )
+        .with_tool_policy(agent_tool_policy),
+    )?;
     let raw = parse_agent_json(response)
         .context("systems-hunt:systems-invariant-extract expected JSON with an invariants array")?;
     Ok(SystemsInvariantOutput {
@@ -624,18 +677,22 @@ fn query_systems_triggers(
     context: &SystemsContextOutput,
     invariants: &SystemsInvariantOutput,
     options: &SystemsHuntInput,
+    agent_tool_policy: AgentToolPolicy,
 ) -> Result<SystemsTriggerOutput> {
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model: model.to_string(),
-        cwd: target.to_path_buf(),
-        system_prompt: SYSTEMS_TRIGGER_SYSTEM_PROMPT.to_string(),
-        prompt: format!(
+    let response = runtime.query_blocking(
+        AgentQueryRequest::new(
+            model.to_string(),
+            target.to_path_buf(),
+            SYSTEMS_TRIGGER_SYSTEM_PROMPT.to_string(),
+            format!(
             "Synthesize at most {} attacker trigger hypotheses per surface. Return JSON with triggers[].\n\nContext:\n{}\n\nInvariants:\n{}",
             options.max_trigger_hypotheses_per_surface,
             serde_json::to_string_pretty(context)?,
             serde_json::to_string_pretty(invariants)?,
         ),
-    })?;
+        )
+        .with_tool_policy(agent_tool_policy),
+    )?;
     let raw = parse_agent_json(response)
         .context("systems-hunt:systems-trigger-synth expected JSON with a triggers array")?;
     Ok(SystemsTriggerOutput {

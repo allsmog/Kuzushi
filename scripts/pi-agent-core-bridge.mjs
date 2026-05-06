@@ -6,9 +6,12 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -145,6 +148,283 @@ function maybeParseJson(text) {
   }
 }
 
+const WHITEBOX_STATIC_TOOL_PROFILE = "whitebox-static";
+const WHITEBOX_STATIC_READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "LS"];
+const FORBIDDEN_WHITEBOX_TOOLS = new Set([
+  "bash",
+  "shell",
+  "sh",
+  "zsh",
+  "fish",
+  "powershell",
+  "cmd",
+  "write",
+  "edit",
+  "multiedit",
+  "patch",
+  "applypatch",
+  "apply_patch",
+  "notebookedit",
+]);
+
+function normalizeToolName(name) {
+  return String(name ?? "")
+    .replace(/[^a-zA-Z0-9_]/g, "")
+    .toLowerCase();
+}
+
+function isForbiddenWhiteboxTool(name) {
+  return FORBIDDEN_WHITEBOX_TOOLS.has(normalizeToolName(name));
+}
+
+function normalizeAgentToolPolicy(request) {
+  const raw =
+    request.toolPolicy && typeof request.toolPolicy === "object" ? request.toolPolicy : {};
+  const profile = String(raw.profile ?? "default");
+  const tools = Array.isArray(raw.tools) ? raw.tools.map((tool) => String(tool)) : [];
+  if (profile !== WHITEBOX_STATIC_TOOL_PROFILE) {
+    return { profile: "default", tools: [] };
+  }
+
+  const selectedTools = tools.length > 0 ? tools : WHITEBOX_STATIC_READ_ONLY_TOOLS;
+  for (const tool of selectedTools) {
+    if (isForbiddenWhiteboxTool(tool)) {
+      throw new Error(
+        `whitebox-static cannot enable execution or write tool ${JSON.stringify(tool)}`,
+      );
+    }
+    if (
+      !WHITEBOX_STATIC_READ_ONLY_TOOLS.some(
+        (allowed) => allowed.toLowerCase() === tool.toLowerCase(),
+      )
+    ) {
+      throw new Error(
+        `whitebox-static can only enable read-only repo tools, got ${JSON.stringify(tool)}`,
+      );
+    }
+  }
+  return { profile, tools: selectedTools };
+}
+
+function repoRoot(cwd) {
+  const root = realpathSync(path.resolve(cwd));
+  const stat = statSync(root);
+  if (!stat.isDirectory()) throw new Error(`cwd is not a directory: ${root}`);
+  return root;
+}
+
+function resolveRepoPath(root, rawPath = ".") {
+  const candidate = path.resolve(root, String(rawPath || "."));
+  const normalizedRoot = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+  if (candidate !== root && !candidate.startsWith(normalizedRoot)) {
+    throw new Error(`path escapes repository root: ${rawPath}`);
+  }
+  return candidate;
+}
+
+function relativeRepoPath(root, filePath) {
+  const relative = path.relative(root, filePath).replaceAll(path.sep, "/");
+  return relative || ".";
+}
+
+function isSkippedRepoEntry(name) {
+  return [
+    ".git",
+    ".hg",
+    ".kuzushi",
+    ".next",
+    ".turbo",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "target",
+    "vendor",
+  ].includes(name);
+}
+
+function isTextBuffer(buffer) {
+  return !buffer.subarray(0, 4096).includes(0);
+}
+
+function readRepoTextFile(root, rawPath, maxBytes = 32768) {
+  const filePath = resolveRepoPath(root, rawPath);
+  const stat = statSync(filePath);
+  if (!stat.isFile()) throw new Error(`not a file: ${rawPath}`);
+  const cap = Math.max(1, Math.min(Number(maxBytes) || 32768, 131072));
+  const buffer = readFileSync(filePath);
+  if (!isTextBuffer(buffer)) throw new Error(`binary file refused: ${rawPath}`);
+  const sliced = buffer.subarray(0, cap);
+  return {
+    text: sliced.toString("utf8"),
+    relativePath: relativeRepoPath(root, filePath),
+    bytes: buffer.length,
+    truncated: buffer.length > sliced.length,
+  };
+}
+
+function listRepoFiles(root, rawPath = ".", maxFiles = 200) {
+  const start = resolveRepoPath(root, rawPath);
+  const files = [];
+  function visit(current) {
+    if (files.length >= maxFiles) return;
+    const stat = statSync(current);
+    if (stat.isFile()) {
+      files.push(current);
+      return;
+    }
+    if (!stat.isDirectory()) return;
+    const entries = readdirSync(current, { withFileTypes: true }).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+    for (const entry of entries) {
+      if (isSkippedRepoEntry(entry.name)) continue;
+      visit(path.join(current, entry.name));
+      if (files.length >= maxFiles) return;
+    }
+  }
+  visit(start);
+  return files;
+}
+
+function globToRegExp(pattern) {
+  const escaped = String(pattern || "**/*")
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replaceAll("**", "\0")
+    .replaceAll("*", "[^/]*")
+    .replaceAll("\0", ".*");
+  return new RegExp(`^${escaped}$`);
+}
+
+function createWhiteboxReadOnlyTools(cwd) {
+  const root = repoRoot(cwd);
+  return {
+    Read: {
+      name: "Read",
+      label: "Read",
+      description: "Read a text file under the repository root.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Repository-relative file path." },
+          maxBytes: { type: "number", description: "Maximum bytes to return." },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+      executionMode: "sequential",
+      execute: async (_toolCallId, params) => {
+        const result = readRepoTextFile(root, params.path, params.maxBytes);
+        return {
+          content: [{ type: "text", text: result.text }],
+          details: result,
+        };
+      },
+    },
+    LS: {
+      name: "LS",
+      label: "List",
+      description: "List files and directories under the repository root.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Repository-relative directory path." },
+          maxEntries: { type: "number", description: "Maximum entries to return." },
+        },
+        additionalProperties: false,
+      },
+      execute: async (_toolCallId, params) => {
+        const dir = resolveRepoPath(root, params.path ?? ".");
+        const entries = readdirSync(dir, { withFileTypes: true })
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .slice(0, Math.max(1, Math.min(Number(params.maxEntries) || 100, 500)))
+          .map((entry) => `${entry.isDirectory() ? "dir " : "file"} ${entry.name}`);
+        return {
+          content: [{ type: "text", text: entries.join("\n") }],
+          details: { path: relativeRepoPath(root, dir), count: entries.length },
+        };
+      },
+    },
+    Glob: {
+      name: "Glob",
+      label: "Glob",
+      description: "Find repository files matching a glob pattern.",
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: { type: "string", description: "Glob pattern such as src/**/*.ts." },
+          path: { type: "string", description: "Optional repository-relative search root." },
+          maxResults: { type: "number", description: "Maximum matching files." },
+        },
+        required: ["pattern"],
+        additionalProperties: false,
+      },
+      execute: async (_toolCallId, params) => {
+        const maxResults = Math.max(1, Math.min(Number(params.maxResults) || 100, 500));
+        const matcher = globToRegExp(params.pattern);
+        const matches = listRepoFiles(root, params.path ?? ".", maxResults * 4)
+          .map((filePath) => relativeRepoPath(root, filePath))
+          .filter((relative) => matcher.test(relative))
+          .slice(0, maxResults);
+        return {
+          content: [{ type: "text", text: matches.join("\n") }],
+          details: { pattern: params.pattern, count: matches.length },
+        };
+      },
+    },
+    Grep: {
+      name: "Grep",
+      label: "Grep",
+      description: "Search text files under the repository root.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Literal text to search for." },
+          path: { type: "string", description: "Optional repository-relative search root." },
+          maxResults: { type: "number", description: "Maximum matching lines." },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+      execute: async (_toolCallId, params) => {
+        const maxResults = Math.max(1, Math.min(Number(params.maxResults) || 50, 200));
+        const query = String(params.query ?? "");
+        const matches = [];
+        for (const filePath of listRepoFiles(root, params.path ?? ".", 1000)) {
+          if (matches.length >= maxResults) break;
+          let read;
+          try {
+            read = readRepoTextFile(root, relativeRepoPath(root, filePath), 65536);
+          } catch {
+            continue;
+          }
+          read.text.split(/\r?\n/).forEach((line, index) => {
+            if (matches.length < maxResults && line.includes(query)) {
+              matches.push(`${read.relativePath}:${index + 1}: ${line}`);
+            }
+          });
+        }
+        return {
+          content: [{ type: "text", text: matches.join("\n") }],
+          details: { query, count: matches.length },
+        };
+      },
+    },
+  };
+}
+
+function buildAgentTools(request) {
+  const policy = normalizeAgentToolPolicy(request);
+  if (policy.profile !== WHITEBOX_STATIC_TOOL_PROFILE) return [];
+  const available = createWhiteboxReadOnlyTools(request.cwd);
+  return policy.tools.map((tool) => {
+    const canonicalName = WHITEBOX_STATIC_READ_ONLY_TOOLS.find(
+      (allowed) => allowed.toLowerCase() === tool.toLowerCase(),
+    );
+    return available[canonicalName];
+  });
+}
+
 function subscribeText(agent, onText) {
   if (typeof agent?.subscribe !== "function") return;
   agent.subscribe((event) => {
@@ -157,6 +437,8 @@ function subscribeText(agent, onText) {
 }
 
 async function runAgent(AgentCtor, model, request) {
+  const agentTools = buildAgentTools(request);
+  const allowedToolNames = new Set(agentTools.map((tool) => tool.name.toLowerCase()));
   const thinkingLevel =
     normalizeThinkingLevel(request.thinkingLevel) ??
     normalizeThinkingLevel(process.env.KUZUSHI_THINKING_LEVEL) ??
@@ -166,9 +448,19 @@ async function runAgent(AgentCtor, model, request) {
     initialState: {
       systemPrompt: request.systemPrompt,
       model,
-      tools: [],
+      tools: agentTools,
       messages: [],
       thinkingLevel,
+    },
+    beforeToolCall: async ({ toolCall }) => {
+      const name = toolCall?.name ?? "";
+      if (isForbiddenWhiteboxTool(name)) {
+        return { block: true, reason: `whitebox-static blocks execution/write tool ${name}` };
+      }
+      if (allowedToolNames.size > 0 && !allowedToolNames.has(String(name).toLowerCase())) {
+        return { block: true, reason: `whitebox-static only allows read-only repo tools` };
+      }
+      return undefined;
     },
     getApiKey: async (provider) =>
       (await getFreshOAuthAccessTokenForProvider(provider)) ??

@@ -1,5 +1,7 @@
+use std::fs;
+use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
@@ -24,31 +26,140 @@ fn stdout(output: std::process::Output) -> String {
     String::from_utf8(output.stdout).expect("stdout should be UTF-8")
 }
 
+fn assert_strict_plain(label: &str, output: &str) {
+    assert!(
+        !output.contains("\x1b["),
+        "{label} must not contain ANSI escapes:\n{output}"
+    );
+    for forbidden in ["┌", "┐", "└", "┘", "─", "│", "╭", "╮", "╰", "╯"] {
+        assert!(
+            !output.contains(forbidden),
+            "{label} must not contain box drawing {forbidden:?}:\n{output}"
+        );
+    }
+    for line in output.lines() {
+        assert!(
+            line.chars().count() <= 80,
+            "{label} must keep lines <= 80 columns; over-wide line:\n{line}"
+        );
+    }
+}
+
+fn plain_shell_script(script: &str) -> String {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut child = kuzushi()
+        .args(["--plain", "shell", "--target"])
+        .arg(tmp.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(script.as_bytes())
+        .unwrap();
+    stdout(child.wait_with_output().unwrap())
+}
+
 #[test]
 fn rust_cli_help_is_the_documented_primary_surface() {
     let out = stdout(kuzushi().arg("--help").output().unwrap());
 
     assert!(out.contains("Kuzushi security copilot"));
     assert!(out.contains("Usage: kuzushi"));
+    assert!(out.contains("--plain"));
     for command in [
-        "shell", "scan", "findings", "config", "modules", "tools", "run",
+        "shell", "scan", "findings", "config", "modules", "tools", "doctor", "run",
     ] {
         assert!(out.contains(command), "missing command {command} in help");
     }
-    for removed in [
-        "TypeScript",
-        "Ink",
-        "doctor",
-        "quickstart",
-        "preset",
-        "sarif",
-    ] {
+    for removed in ["TypeScript", "Ink", "quickstart", "preset", "sarif"] {
         assert!(
             !out.to_ascii_lowercase()
                 .contains(&removed.to_ascii_lowercase()),
             "help should not advertise removed/non-Rust surface {removed:?}:\n{out}"
         );
     }
+}
+
+#[test]
+fn plain_flag_forces_line_oriented_shell_output() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = stdout(
+        kuzushi()
+            .args(["--plain", "shell", "--target"])
+            .arg(tmp.path())
+            .output()
+            .unwrap(),
+    );
+
+    assert!(out.contains("kuzushi shell"));
+    assert!(out.contains("mode:shell"));
+    assert!(out.contains("First finding"));
+    assert_strict_plain("--plain shell", &out);
+}
+
+#[test]
+fn plain_env_aliases_are_line_oriented_for_screen_reader_mode() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = stdout(
+        kuzushi()
+            .env("KUZUSHI_SCREEN_READER", "1")
+            .args(["shell", "--target"])
+            .arg(tmp.path())
+            .output()
+            .unwrap(),
+    );
+
+    assert!(out.contains("kuzushi shell"));
+    assert!(out.contains("mode:shell"));
+    assert_strict_plain("KUZUSHI_SCREEN_READER shell", &out);
+}
+
+#[test]
+fn plain_scripted_shell_prints_unknown_command_feedback() {
+    let out = plain_shell_script("/nope\n");
+
+    assert!(out.contains("COMMAND RESULT"));
+    assert!(out.contains("command: /nope"));
+    assert!(out.contains("> /nope"));
+    assert!(out.contains("error: unknown command \"/nope\". Next: /help"));
+    assert_strict_plain("--plain shell /nope", &out);
+}
+
+#[test]
+fn plain_scripted_shell_prints_quit_acknowledgement() {
+    let out = plain_shell_script("/quit\n");
+
+    assert!(out.contains("command: /quit"));
+    assert!(out.contains("> /quit"));
+    assert!(out.contains("system: exit requested; closing shell"));
+    assert_strict_plain("--plain shell /quit", &out);
+}
+
+#[test]
+fn plain_scripted_shell_prints_help_then_quit_result_blocks() {
+    let out = plain_shell_script("/help\n/quit\n");
+
+    assert_eq!(out.matches("COMMAND RESULT").count(), 2);
+    assert!(out.contains("command: /help"));
+    assert!(out.contains("command: /quit"));
+    assert!(out.contains("HELP"));
+    assert!(out.contains("system: exit requested; closing shell"));
+    assert_strict_plain("--plain shell /help /quit", &out);
+}
+
+#[test]
+fn plain_scripted_shell_prints_result_for_unchanged_view_command() {
+    let out = plain_shell_script("/back\n");
+
+    assert!(out.contains("COMMAND RESULT"));
+    assert!(out.contains("command: /back"));
+    assert!(out.contains("> /back"));
+    assert!(out.contains("kuzushi shell"));
+    assert_strict_plain("--plain shell /back", &out);
 }
 
 #[test]
@@ -115,6 +226,56 @@ fn modules_and_tools_list_visible_executable_rust_surfaces() {
 }
 
 #[test]
+fn findings_empty_state_names_next_scan_command() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = stdout(
+        kuzushi()
+            .args(["findings", "--target"])
+            .arg(tmp.path())
+            .output()
+            .unwrap(),
+    );
+
+    assert!(out.contains("no findings found"));
+    assert!(out.contains("Next: kuzushi scan"));
+    assert!(out.contains(&tmp.path().display().to_string()));
+}
+
+#[test]
+fn scan_mode_whitebox_static_is_static_only_and_json_visible() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("package.json"),
+        r#"{"dependencies":{"lodash":"latest"}}"#,
+    )
+    .unwrap();
+    let raw = stdout(
+        kuzushi()
+            .args([
+                "scan",
+                "--mode",
+                "whitebox-static",
+                "--tasks",
+                "dep-hygiene",
+                "--json",
+            ])
+            .arg(tmp.path())
+            .output()
+            .unwrap(),
+    );
+    let report: Value = serde_json::from_str(&raw).unwrap();
+
+    assert_eq!(report["mode"], "whitebox-static");
+    assert_eq!(report["whiteboxStatic"]["enabled"], true);
+    assert_eq!(report["whiteboxStatic"]["verify"], false);
+    assert_eq!(report["whiteboxStatic"]["autoPatch"], false);
+    assert_eq!(report["whiteboxStatic"]["dynamicAnalysis"], false);
+    assert_eq!(report["whiteboxStatic"]["pocExecution"], false);
+    assert_eq!(report["whiteboxStatic"]["executionProofStates"], false);
+    assert_eq!(report["findingsCount"], 1);
+}
+
+#[test]
 fn npm_wrapper_help_reaches_the_rust_binary() {
     let output = Command::new("node")
         .current_dir(repo_root())
@@ -129,4 +290,172 @@ fn npm_wrapper_help_reaches_the_rust_binary() {
     assert!(out.contains("modules"));
     assert!(out.contains("tools"));
     assert!(!out.contains("TypeScript"));
+}
+
+#[test]
+fn npm_package_runtime_surface_is_rust_only() {
+    let package_raw = fs::read_to_string(repo_root().join("package.json")).unwrap();
+    let package: Value = serde_json::from_str(&package_raw).unwrap();
+    let bin = package.get("bin").and_then(Value::as_object).unwrap();
+
+    assert_eq!(bin.len(), 1, "package should expose only the Rust CLI bin");
+    assert_eq!(
+        bin.get("kuzushi").and_then(Value::as_str),
+        Some("./bin/kuzushi-rs.mjs")
+    );
+    assert!(!bin.contains_key("kuzushi-ts"));
+
+    let files = package
+        .get("files")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    assert!(files.contains(&"native"));
+    for removed in [
+        "!dist/cli",
+        "!dist/cli.d.ts",
+        "!dist/cli.js",
+        "!dist/cli.js.map",
+    ] {
+        assert!(
+            files.contains(&removed),
+            "package files should exclude old TS CLI artifact {removed}"
+        );
+    }
+
+    let dependencies = package
+        .get("dependencies")
+        .and_then(Value::as_object)
+        .unwrap();
+    for runtime_dep in ["ink", "react", "@types/react"] {
+        assert!(
+            !dependencies.contains_key(runtime_dep),
+            "{runtime_dep} must not be a production dependency of normal CLI execution"
+        );
+    }
+
+    let wrapper = fs::read_to_string(repo_root().join("bin/kuzushi-rs.mjs")).unwrap();
+    assert!(wrapper.contains("native"));
+    assert!(wrapper.contains("KUZUSHI_NATIVE_BIN"));
+    for removed in ["ink", "react", "src/cli.ts", "dist/cli.js"] {
+        assert!(
+            !wrapper.to_ascii_lowercase().contains(removed),
+            "wrapper must not reference legacy runtime surface {removed}"
+        );
+    }
+}
+
+#[test]
+fn legacy_ink_shell_is_reference_only_in_source_cli() {
+    let shell_source = fs::read_to_string(repo_root().join("src/cli/commands/shell.ts")).unwrap();
+
+    assert!(shell_source.contains("reference-only"));
+    for forbidden in [
+        "copilot/shell",
+        "startShell",
+        "configureAgentRuntime",
+        "loadConfig",
+        "from \"ink\"",
+        "from \"react\"",
+    ] {
+        assert!(
+            !shell_source.contains(forbidden),
+            "source CLI shell must not import legacy runtime surface {forbidden}"
+        );
+    }
+
+    let ui_readme = fs::read_to_string(repo_root().join("src/ui/README.md")).unwrap();
+    assert!(ui_readme.contains("TypeScript/Ink TUI has been removed"));
+    assert!(ui_readme.contains("crates/kuzushi-tui"));
+    assert!(ui_readme.contains("shared, non-visual TypeScript helpers"));
+
+    let migration_status =
+        fs::read_to_string(repo_root().join("docs/rust-migration-status.md")).unwrap();
+    assert!(migration_status.contains("src/cli.ts shell"));
+    assert!(migration_status.contains("fails with a Rust replacement message"));
+}
+
+#[test]
+fn doctor_checks_rust_preflight_without_printing_secrets() {
+    let tmp = tempfile::tempdir().unwrap();
+    let secret = "sk-kuzushi-doctor-secret-value";
+    let output = kuzushi()
+        .current_dir(repo_root())
+        .args(["doctor", "--target"])
+        .arg(tmp.path())
+        .env("KUZUSHI_MODEL", "openai:gpt-4.1")
+        .env("OPENAI_API_KEY", secret)
+        .output()
+        .unwrap();
+    let out = stdout(output);
+
+    for expected in [
+        "Kuzushi doctor",
+        "target",
+        "config",
+        "state",
+        "findings-db",
+        "semgrep",
+        "codeql",
+        "model",
+        "auth-env",
+        "pi-agent-core bridge",
+        "Summary:",
+    ] {
+        assert!(out.contains(expected), "missing {expected:?} in:\n{out}");
+    }
+    assert!(out.contains("OPENAI_API_KEY is set; value is hidden"));
+    assert!(
+        !out.contains(secret),
+        "doctor output must not print credential values:\n{out}"
+    );
+    assert!(
+        !tmp.path()
+            .join(".kuzushi/v2")
+            .join(format!(".doctor-write-test-{}", std::process::id()))
+            .exists(),
+        "doctor write probe should be removed"
+    );
+}
+
+#[test]
+fn doctor_json_reports_named_preflight_checks() {
+    let tmp = tempfile::tempdir().unwrap();
+    let raw = stdout(
+        kuzushi()
+            .current_dir(repo_root())
+            .args(["doctor", "--target"])
+            .arg(tmp.path())
+            .arg("--json")
+            .env("KUZUSHI_MODEL", "openai:gpt-4.1")
+            .env("OPENAI_API_KEY", "hidden-json-secret")
+            .output()
+            .unwrap(),
+    );
+    let report: Value = serde_json::from_str(&raw).unwrap();
+    let names = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|check| check["name"].as_str())
+        .collect::<Vec<_>>();
+
+    for expected in [
+        "config",
+        "state",
+        "findings-db",
+        "semgrep",
+        "codeql",
+        "model",
+        "auth-env",
+        "pi-agent-core bridge",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "missing {expected:?}; names={names:?}; raw={raw}"
+        );
+    }
+    assert!(!raw.contains("hidden-json-secret"));
 }

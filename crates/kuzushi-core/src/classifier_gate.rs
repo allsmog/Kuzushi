@@ -245,12 +245,12 @@ impl<'a> LikelyVulnClassifier<'a> {
                      set models.toml [roles.classifier_gate] or `setg MODEL_CLASSIFIER_GATE`"
                 )
             })?;
-        let request = AgentQueryRequest {
+        let request = AgentQueryRequest::new(
             model,
-            cwd: cwd.to_path_buf(),
-            system_prompt: CLASSIFIER_SYSTEM_PROMPT.to_string(),
-            prompt: render_prompt(finding),
-        };
+            cwd.to_path_buf(),
+            CLASSIFIER_SYSTEM_PROMPT.to_string(),
+            render_prompt(finding),
+        );
         let response = self
             .runtime
             .query_blocking(request)

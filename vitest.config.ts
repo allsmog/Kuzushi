@@ -3,7 +3,14 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     setupFiles: ["./tests/setup.ts"],
-    exclude: ["**/node_modules/**", "**/.claude/worktrees/**", "**/.worktrees/**", "benchmarks/**"],
+    exclude: [
+      "**/node_modules/**",
+      "**/.claude/worktrees/**",
+      "**/.worktrees/**",
+      ".codex-active/**",
+      ".ralph/**",
+      "benchmarks/**",
+    ],
     coverage: {
       provider: "v8",
       all: false,
@@ -30,23 +37,11 @@ export default defineConfig({
         "src/report-jsonl.ts",
         // Patch synthesis — git + child_process + LLM glue (matches bus/orchestrator pattern)
         "src/patch.ts",
-        // React/Ink rendering surfaces — tested UI logic files
-        // (state.ts, error-format.ts, format.ts, review.ts, setup.ts) stay in coverage.
-        "src/ui/App.tsx",
-        "src/ui/demo.tsx",
-        "src/ui/components/**",
-        "src/ui/primitives/**",
-        "src/ui/hooks/**",
-        "src/ui/hooks.ts",
-        "src/ui/hyperlink.ts",
+        // Non-visual UI support helpers.
         "src/ui/icons.ts",
-        "src/ui/markdown.ts",
-        "src/ui/monorepo-render.ts",
         "src/ui/notify.ts",
         "src/ui/output.ts",
         "src/ui/plain-renderer.ts",
-        "src/ui/render.ts",
-        "src/ui/repl.ts",
         "src/ui/summary-data.ts",
         "src/ui/theme.ts",
         "src/ui/tokens.ts",

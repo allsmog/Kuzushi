@@ -12,8 +12,10 @@ use crate::artifact_kb::{artifact_knowledge_prompt_context, ArtifactKnowledgePro
 use crate::carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hunt_report};
 use crate::config::V2Config;
 use crate::dep_hygiene::check_dependency_hygiene;
+use crate::diff_scope::build_whitebox_diff_scope_report;
 use crate::findings::{
-    Finding, FindingListFilter, FindingStore, Severity, TriageOutcome, TriageVerdict,
+    Finding, FindingListFilter, FindingStore, Severity, StaticProofState, TriageOutcome,
+    TriageVerdict,
 };
 use crate::iac_scan::{scan_iac, IacScanOptions};
 use crate::options::ToolOptionStore;
@@ -21,17 +23,30 @@ use crate::patch::run_patch_finding;
 use crate::recon::execute_recon_tool;
 use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageRequest};
 use crate::scan::{
-    run_scan_engines_with_options, scan_engines_for_tasks, CodeqlPersistedRun, CodeqlScanReport,
-    CodeqlScanner, ScanCancellation, ScanRunOptions, SemgrepPersistedRun, SemgrepScanReport,
-    SemgrepScanner,
+    index_codeql_sarif_as_static_evidence, run_scan_engines_with_options, scan_engines_for_tasks,
+    CodeqlPersistedRun, CodeqlScanReport, CodeqlScanner, ScanCancellation, ScanRunOptions,
+    SemgrepPersistedRun, SemgrepScanReport, SemgrepScanner,
 };
 use crate::secret_scan::{scan_for_secrets, SecretScanOptions};
+use crate::semgrep_rule_synthesis::synthesize_candidate_semgrep_rules;
+use crate::static_evidence::StaticEvidenceStore;
+use crate::static_narrative::build_static_narrative_report;
+use crate::static_proof_validator::{
+    static_proof_claim_from_whitebox_schema, validate_static_proof_claim, StaticProofValidation,
+};
+use crate::static_ranking::{rank_static_findings, StaticRankedFinding};
 use crate::systems_hunt::{execute_systems_hunt_tool, run_systems_hunt_report};
 use crate::threat_model::execute_threat_model_tool;
 use crate::variant_ndiff::{
-    run_ndiff_extract_fix_pattern, run_ndiff_fetch_cve, run_ndiff_hunt_variants, run_variant_hunt,
-    run_variant_lift_pattern,
+    hunt_whitebox_static_variants, run_ndiff_extract_fix_pattern, run_ndiff_fetch_cve,
+    run_ndiff_hunt_variants, run_variant_hunt, run_variant_lift_pattern,
 };
+use crate::whitebox_static::{
+    agent_tool_policy_for_input, apply_whitebox_static_sast_policy, mark_whitebox_static_findings,
+    whitebox_static_profile_requested, whitebox_static_proof_state_from_input,
+    whitebox_static_triage_prompt_block, whitebox_static_triage_system_prompt,
+};
+use crate::whitebox_suppressions::{evaluate_whitebox_suppressions, load_whitebox_suppressions};
 use crate::workspace::{export_workspace_findings, WorkspaceExportFormat, WorkspaceTarget};
 use crate::x_ray::execute_x_ray_tool;
 use uuid::Uuid;
@@ -286,7 +301,7 @@ impl ModuleRegistry {
     ) -> Result<Value> {
         let tool = self.resolve_tool(name);
         if tool.is_none() && !self.is_registered_dag_node(name) {
-            anyhow::bail!("unknown tool {name:?}");
+            anyhow::bail!("unknown tool {name:?}. Next: run catalog:tools or use the Rust shell `tools` command");
         }
         let input = if let Some(store) = option_store {
             store.effective_tool_input(name, input)?
@@ -329,8 +344,14 @@ impl ModuleRegistry {
             "semgrep:scan" => {
                 let target = resolve_tool_target(&input, ctx)?;
                 let scanner = SemgrepScanner::from_tool_input(&input)?;
-                let findings = scanner.scan_with_cancel(&target, &ScanCancellation::default())?;
-                let persisted = persist_semgrep_findings(&target, &findings, ctx)?;
+                let mut findings =
+                    scanner.scan_with_cancel(&target, &ScanCancellation::default())?;
+                let index_static_evidence = whitebox_static_profile_requested(&input)?;
+                if index_static_evidence {
+                    mark_whitebox_static_findings(&mut findings, StaticProofState::SignalOnly)?;
+                }
+                let persisted =
+                    persist_semgrep_findings(&target, &findings, ctx, index_static_evidence)?;
                 Ok(
                     SemgrepScanReport::new(target.display().to_string(), findings, persisted)
                         .to_tool_json(),
@@ -339,10 +360,24 @@ impl ModuleRegistry {
             "codeql:scan" => {
                 let target = resolve_tool_target(&input, ctx)?;
                 let scanner = CodeqlScanner::from_tool_input(&input)?;
-                let findings = scanner.scan_with_cancel(&target, &ScanCancellation::default())?;
-                let persisted = persist_codeql_findings(&target, &findings, ctx)?;
+                let mut output =
+                    scanner.scan_with_artifacts(&target, &ScanCancellation::default())?;
+                let index_static_evidence = whitebox_static_profile_requested(&input)?;
+                if index_static_evidence {
+                    mark_whitebox_static_findings(
+                        &mut output.findings,
+                        StaticProofState::SignalOnly,
+                    )?;
+                }
+                let persisted = persist_codeql_findings(
+                    &target,
+                    &output.findings,
+                    ctx,
+                    &output.codeql_sarif_documents,
+                    index_static_evidence,
+                )?;
                 Ok(
-                    CodeqlScanReport::new(target.display().to_string(), findings, persisted)
+                    CodeqlScanReport::new(target.display().to_string(), output.findings, persisted)
                         .to_tool_json(),
                 )
             }
@@ -502,12 +537,26 @@ fn persist_semgrep_findings(
     target: &Path,
     findings: &[crate::findings::Finding],
     ctx: &ToolExecutionContext<'_>,
+    index_static_evidence: bool,
 ) -> Result<Option<SemgrepPersistedRun>> {
     let (Some(workspace), Some(store)) = (ctx.workspace, ctx.findings_store) else {
         return Ok(None);
     };
 
     workspace.ensure_state_dir()?;
+    let static_evidence = if index_static_evidence {
+        let evidence_store = crate::static_evidence::StaticEvidenceStore::open(workspace)?;
+        Some(
+            crate::static_evidence::index_semgrep_findings_as_static_evidence(
+                &evidence_store,
+                workspace.root(),
+                findings,
+            )?,
+        )
+    } else {
+        None
+    };
+
     let run_id = Uuid::new_v4().to_string();
     store.insert_scan_run(&run_id, target, "running")?;
     for finding in findings {
@@ -518,6 +567,7 @@ fn persist_semgrep_findings(
     Ok(Some(SemgrepPersistedRun {
         run_id,
         findings_db: workspace.findings_db_path().display().to_string(),
+        static_evidence,
     }))
 }
 
@@ -525,12 +575,38 @@ fn persist_codeql_findings(
     target: &Path,
     findings: &[crate::findings::Finding],
     ctx: &ToolExecutionContext<'_>,
+    sarif_documents: &[String],
+    index_static_evidence: bool,
 ) -> Result<Option<CodeqlPersistedRun>> {
     let (Some(workspace), Some(store)) = (ctx.workspace, ctx.findings_store) else {
         return Ok(None);
     };
 
     workspace.ensure_state_dir()?;
+    let static_evidence = if index_static_evidence {
+        let evidence_store = crate::static_evidence::StaticEvidenceStore::open(workspace)?;
+        let mut combined = crate::static_evidence::StaticEvidenceIndexReport {
+            db_path: evidence_store.db_path().to_string(),
+            findings_indexed: 0,
+            nodes_indexed: 0,
+            edges_indexed: 0,
+            node_ids: Vec::new(),
+            edge_ids: Vec::new(),
+        };
+        for sarif in sarif_documents {
+            let report =
+                index_codeql_sarif_as_static_evidence(&evidence_store, workspace.root(), sarif)?;
+            combined.findings_indexed += report.findings_indexed;
+            combined.nodes_indexed += report.nodes_indexed;
+            combined.edges_indexed += report.edges_indexed;
+            combined.node_ids.extend(report.node_ids);
+            combined.edge_ids.extend(report.edge_ids);
+        }
+        Some(combined)
+    } else {
+        None
+    };
+
     let run_id = Uuid::new_v4().to_string();
     store.insert_scan_run(&run_id, target, "running")?;
     for finding in findings {
@@ -541,6 +617,7 @@ fn persist_codeql_findings(
     Ok(Some(CodeqlPersistedRun {
         run_id,
         findings_db: workspace.findings_db_path().display().to_string(),
+        static_evidence,
     }))
 }
 
@@ -572,6 +649,7 @@ fn run_sast_scan(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
+    let (input, whitebox_static) = apply_whitebox_static_sast_policy(input)?;
     let workspace = ctx
         .workspace
         .context("sast:scan requires a workspace target; pass --target <repo> or start the shell with --target <repo>")?;
@@ -615,6 +693,10 @@ fn run_sast_scan(
     let options = ScanRunOptions {
         severity: parse_sast_severity_filter(&input)?,
         tasks: None,
+        static_proof_state: whitebox_static
+            .as_ref()
+            .map(|_| StaticProofState::SignalOnly),
+        index_static_evidence: whitebox_static.is_some(),
     };
 
     let native_run = if scanners.is_empty() {
@@ -646,9 +728,15 @@ fn run_sast_scan(
         engine_ids.push("taint-iris-next");
         let mut next_input = input.clone();
         if let Value::Object(object) = &mut next_input {
-            object
-                .entry("mode".to_string())
-                .or_insert_with(|| json!("hunt"));
+            let should_use_hunt_mode = object
+                .get("mode")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .map(|mode| matches!(mode, "standard" | "whitebox-static"))
+                .unwrap_or(true);
+            if should_use_hunt_mode {
+                object.insert("mode".to_string(), json!("hunt"));
+            }
         }
         Some(run_taint_iris_next_report(&next_input, ctx, runtime)?)
     } else {
@@ -740,6 +828,54 @@ fn run_sast_scan(
             artifacts.dir.join("scan-input.json").display()
         )
     })?;
+    let static_ranking = if whitebox_static.is_some() {
+        Some(write_static_ranking_json(
+            workspace, store, &run_ids, &artifacts,
+        )?)
+    } else {
+        None
+    };
+    let static_narratives = if whitebox_static.is_some() {
+        Some(write_static_narratives_json(
+            store,
+            &run_ids,
+            &artifacts,
+            static_ranking.as_ref(),
+        )?)
+    } else {
+        None
+    };
+    let static_variants = if whitebox_static.is_some() {
+        Some(write_static_variants_json(
+            workspace, store, &run_ids, &artifacts,
+        )?)
+    } else {
+        None
+    };
+    let candidate_semgrep_rules = if whitebox_static.is_some() {
+        Some(write_candidate_semgrep_rules_json(
+            workspace, store, &run_ids, &artifacts,
+        )?)
+    } else {
+        None
+    };
+    let whitebox_suppressions = if whitebox_static.is_some() {
+        Some(write_whitebox_suppressions_json(
+            workspace, store, &run_ids, &artifacts,
+        )?)
+    } else {
+        None
+    };
+    let whitebox_diff = if whitebox_static.is_some() {
+        match string_input_any(&input, &["diffBase", "diff_base"]) {
+            Some(diff_base) => Some(write_whitebox_diff_scope_json(
+                workspace, store, &run_ids, &artifacts, &diff_base,
+            )?),
+            None => None,
+        }
+    } else {
+        None
+    };
 
     let triage = if triage_requested {
         let fingerprints = fingerprints_for_sast_runs(store, &run_ids)?;
@@ -786,6 +922,99 @@ fn run_sast_scan(
         findings_count,
         workspace.findings_db_path().display()
     )];
+    if whitebox_static.is_some() {
+        lines.push(
+            "  Mode: whitebox-static (static-only; verify, dynamic analysis, PoC, and patch disabled)"
+                .to_string(),
+        );
+        if let Some(top) = static_ranking
+            .as_ref()
+            .and_then(|ranking| ranking.pointer("/ranked/0"))
+        {
+            let score = top
+                .pointer("/impact/total")
+                .and_then(Value::as_i64)
+                .unwrap_or_default();
+            let title = top
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("top static-impact finding");
+            lines.push(format!("  Static ranking: top score {score} · {title}"));
+        }
+        if let Some(top) = static_narratives
+            .as_ref()
+            .and_then(|narratives| narratives.pointer("/narratives/0"))
+        {
+            let location = top
+                .get("location")
+                .and_then(Value::as_str)
+                .unwrap_or("top static finding");
+            lines.push(format!(
+                "  Static narrative: trigger path summarized for {location}"
+            ));
+        }
+        if let Some(count) = static_variants
+            .as_ref()
+            .and_then(|variants| variants.get("count"))
+            .and_then(Value::as_u64)
+            .filter(|count| *count > 0)
+        {
+            lines.push(format!(
+                "  Static variants: {count} code-cited candidate(s), none confirmed by inheritance"
+            ));
+        }
+        if let Some(count) = candidate_semgrep_rules
+            .as_ref()
+            .and_then(|rules| rules.get("count"))
+            .and_then(Value::as_u64)
+            .filter(|count| *count > 0)
+        {
+            let validated = candidate_semgrep_rules
+                .as_ref()
+                .and_then(|rules| rules.get("validationPassed"))
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            lines.push(format!(
+                "  Candidate Semgrep rules: {count} disabled candidate(s), {validated} fixture-validated"
+            ));
+        }
+        if let Some(suppression_report) = whitebox_suppressions.as_ref() {
+            let suppressed = suppression_report
+                .get("suppressedCount")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            let stale = suppression_report
+                .get("staleCount")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            if suppressed > 0 || stale > 0 {
+                lines.push(format!(
+                    "  False-positive memory: {suppressed} active suppression match(es), {stale} stale; findings remain visible in audit/report output"
+                ));
+            }
+        }
+        if let Some(diff_report) = whitebox_diff.as_ref() {
+            let changed_files = diff_report
+                .pointer("/summary/changedFiles")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            let new_findings = diff_report
+                .pointer("/summary/newFindings")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            let changed_context = diff_report
+                .pointer("/summary/changedContextFindings")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            let fixed = diff_report
+                .pointer("/summary/fixedFindings")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            lines.push(format!(
+                "  Diff scope: {changed_files} changed file(s), {new_findings} new, {changed_context} changed-context, {fixed} fixed"
+            ));
+        }
+    }
     lines.push(format!("  Engines: {}", engine_ids.join(", ")));
     if let Some(triage_output) = triage
         .as_ref()
@@ -801,6 +1030,41 @@ fn run_sast_scan(
             patch_results.len()
         ));
     }
+    let static_narratives_artifact = static_narratives.as_ref().map(|_| {
+        artifacts
+            .dir
+            .join("static-narratives.json")
+            .display()
+            .to_string()
+    });
+    let static_variants_artifact = static_variants.as_ref().map(|_| {
+        artifacts
+            .dir
+            .join("static-variants.json")
+            .display()
+            .to_string()
+    });
+    let candidate_semgrep_rules_artifact = candidate_semgrep_rules.as_ref().map(|_| {
+        artifacts
+            .dir
+            .join("candidate-semgrep-rules.json")
+            .display()
+            .to_string()
+    });
+    let whitebox_suppressions_artifact = whitebox_suppressions.as_ref().map(|_| {
+        artifacts
+            .dir
+            .join("whitebox-suppressions.json")
+            .display()
+            .to_string()
+    });
+    let whitebox_diff_artifact = whitebox_diff.as_ref().map(|_| {
+        artifacts
+            .dir
+            .join("whitebox-diff-scope.json")
+            .display()
+            .to_string()
+    });
 
     let result = json!({
         "ok": true,
@@ -816,6 +1080,10 @@ fn run_sast_scan(
                 "systemsHunt": run_ids.systems_hunt,
             },
             "target": workspace.root().display().to_string(),
+            "mode": whitebox_static
+                .as_ref()
+                .map_or("standard", |policy| policy.mode.as_str()),
+            "whiteboxStatic": whitebox_static.as_ref().map(|policy| policy.to_json()),
             "findingsCount": findings_count,
             "db": workspace.findings_db_path().display().to_string(),
             "engines": engine_ids,
@@ -824,6 +1092,12 @@ fn run_sast_scan(
             "taintIris": taint_iris_report.as_ref().map(|report| json!(report)),
             "taintIrisNext": taint_iris_next_report.as_ref().map(|report| json!(report)),
             "systemsHunt": systems_hunt_report.as_ref().map(|report| json!(report)),
+            "staticRanking": static_ranking,
+            "staticNarratives": static_narratives,
+            "staticVariants": static_variants,
+            "candidateSemgrepRules": candidate_semgrep_rules,
+            "whiteboxSuppressions": whitebox_suppressions,
+            "whiteboxDiff": whitebox_diff,
             "triage": triage.as_ref().and_then(|value| value.get("data")).cloned(),
             "verification": {
                 "verified": verification_results.len(),
@@ -842,6 +1116,11 @@ fn run_sast_scan(
             "artifacts": {
                 "dir": artifacts.dir.display().to_string(),
                 "summary": artifacts.summary.display().to_string(),
+                "staticNarratives": static_narratives_artifact,
+                "staticVariants": static_variants_artifact,
+                "candidateSemgrepRules": candidate_semgrep_rules_artifact,
+                "whiteboxSuppressions": whitebox_suppressions_artifact,
+                "whiteboxDiff": whitebox_diff_artifact,
                 "triageJsonl": artifacts.triage_jsonl.display().to_string(),
                 "verifyJsonl": artifacts.verify_jsonl.display().to_string(),
             },
@@ -929,6 +1208,208 @@ fn fingerprints_for_sast_runs(store: &FindingStore, run_ids: &SastRunIds) -> Res
         }
     }
     Ok(fingerprints)
+}
+
+fn findings_for_sast_runs(store: &FindingStore, run_ids: &SastRunIds) -> Result<Vec<Finding>> {
+    let mut findings = Vec::new();
+    let mut seen = BTreeSet::new();
+    for run_id in run_ids.all() {
+        for finding in store.list_findings_for_scan_id(run_id)? {
+            if seen.insert(finding.fingerprint.clone()) {
+                findings.push(finding);
+            }
+        }
+    }
+    Ok(findings)
+}
+
+fn write_static_ranking_json(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    run_ids: &SastRunIds,
+    artifacts: &SastRunArtifacts,
+) -> Result<Value> {
+    let findings = findings_for_sast_runs(store, run_ids)?;
+    let attack_surface = crate::attack_surface::build_attack_surface_map(workspace.root()).ok();
+    let evidence_store = StaticEvidenceStore::open(workspace).ok();
+    let ranked = rank_static_findings(&findings, attack_surface.as_ref(), evidence_store.as_ref())?;
+    let artifact_path = artifacts.dir.join("static-ranking.json");
+    let report = json!({
+        "count": ranked.len(),
+        "ranked": ranked,
+        "attackSurfaceAvailable": attack_surface.is_some(),
+        "evidenceDb": evidence_store
+            .as_ref()
+            .map(|store| store.db_path().to_string()),
+        "artifact": artifact_path.display().to_string(),
+        "deterministic": true,
+        "factors": [
+            "attackSurfaceReachability",
+            "sourceSinkClass",
+            "dataSensitivity",
+            "privilegeBoundary",
+            "sanitizerAbsence",
+            "frameworkContext",
+            "codeqlFlowQuality",
+            "confidence"
+        ],
+    });
+    fs::write(
+        &artifact_path,
+        format!("{}\n", serde_json::to_string_pretty(&report)?),
+    )
+    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    Ok(report)
+}
+
+fn write_static_narratives_json(
+    store: &FindingStore,
+    run_ids: &SastRunIds,
+    artifacts: &SastRunArtifacts,
+    static_ranking: Option<&Value>,
+) -> Result<Value> {
+    let findings = findings_for_sast_runs(store, run_ids)?;
+    let ranked = static_ranking
+        .and_then(|ranking| ranking.get("ranked").cloned())
+        .map(serde_json::from_value::<Vec<StaticRankedFinding>>)
+        .transpose()?
+        .unwrap_or_default();
+    let narrative_report = build_static_narrative_report(&findings, &ranked)?;
+    let artifact_path = artifacts.dir.join("static-narratives.json");
+    let report = json!({
+        "count": narrative_report.count,
+        "narratives": narrative_report.narratives,
+        "artifact": artifact_path.display().to_string(),
+        "deterministic": narrative_report.deterministic,
+    });
+    fs::write(
+        &artifact_path,
+        format!("{}\n", serde_json::to_string_pretty(&report)?),
+    )
+    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    Ok(report)
+}
+
+fn write_static_variants_json(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    run_ids: &SastRunIds,
+    artifacts: &SastRunArtifacts,
+) -> Result<Value> {
+    let findings = findings_for_sast_runs(store, run_ids)?;
+    let evidence_store = StaticEvidenceStore::open(workspace).ok();
+    let variant_report =
+        hunt_whitebox_static_variants(workspace.root(), &findings, evidence_store.as_ref(), 50)?;
+    let artifact_path = artifacts.dir.join("static-variants.json");
+    let report = json!({
+        "count": variant_report.count,
+        "patterns": variant_report.patterns,
+        "variants": variant_report.variants,
+        "artifact": artifact_path.display().to_string(),
+        "deterministic": variant_report.deterministic,
+        "policy": "whitebox-static variants are code-cited candidates only; no variant is statically_confirmed by inheritance",
+    });
+    fs::write(
+        &artifact_path,
+        format!("{}\n", serde_json::to_string_pretty(&report)?),
+    )
+    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    Ok(report)
+}
+
+fn write_candidate_semgrep_rules_json(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    run_ids: &SastRunIds,
+    artifacts: &SastRunArtifacts,
+) -> Result<Value> {
+    let findings = findings_for_sast_runs(store, run_ids)?;
+    let evidence_store = StaticEvidenceStore::open(workspace).ok();
+    let synthesis_report =
+        synthesize_candidate_semgrep_rules(&findings, evidence_store.as_ref(), &[])?;
+    let artifact_path = artifacts.dir.join("candidate-semgrep-rules.json");
+    let report = json!({
+        "count": synthesis_report.count,
+        "validationPassed": synthesis_report.validation_passed,
+        "candidates": synthesis_report.candidates,
+        "artifact": artifact_path.display().to_string(),
+        "deterministic": synthesis_report.deterministic,
+        "policy": "candidate Semgrep rules are generated only from statically_confirmed findings and remain disabled until fixture validation passes and an operator enables them",
+    });
+    fs::write(
+        &artifact_path,
+        format!("{}\n", serde_json::to_string_pretty(&report)?),
+    )
+    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    Ok(report)
+}
+
+fn write_whitebox_suppressions_json(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    run_ids: &SastRunIds,
+    artifacts: &SastRunArtifacts,
+) -> Result<Value> {
+    let findings = findings_for_sast_runs(store, run_ids)?;
+    let suppressions = load_whitebox_suppressions(workspace)?;
+    let suppression_report =
+        evaluate_whitebox_suppressions(workspace.root(), &findings, &suppressions, now_unix());
+    let artifact_path = artifacts.dir.join("whitebox-suppressions.json");
+    let report = json!({
+        "totalSuppressions": suppression_report.total_suppressions,
+        "activeSuppressions": suppression_report.active_suppressions,
+        "suppressedCount": suppression_report.suppressed_count,
+        "suppressedFindings": suppression_report.suppressed_findings,
+        "staleCount": suppression_report.stale_suppressions.len(),
+        "staleSuppressions": suppression_report.stale_suppressions,
+        "expiredCount": suppression_report.expired_suppressions.len(),
+        "expiredSuppressions": suppression_report.expired_suppressions,
+        "findingsRemainVisible": suppression_report.findings_remain_visible,
+        "auditNote": suppression_report.audit_note,
+        "artifact": artifact_path.display().to_string(),
+        "deterministic": true,
+        "policy": "whitebox-static false-positive memory annotates suppressions only; suppressed findings remain in audit/report output",
+    });
+    fs::write(
+        &artifact_path,
+        format!("{}\n", serde_json::to_string_pretty(&report)?),
+    )
+    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    Ok(report)
+}
+
+fn write_whitebox_diff_scope_json(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    run_ids: &SastRunIds,
+    artifacts: &SastRunArtifacts,
+    diff_base: &str,
+) -> Result<Value> {
+    let current_findings = findings_for_sast_runs(store, run_ids)?;
+    let previous_findings = store.list_findings(FindingListFilter::MAX_LIMIT)?;
+    let artifact_path = artifacts.dir.join("whitebox-diff-scope.json");
+    let mut report = serde_json::to_value(build_whitebox_diff_scope_report(
+        workspace.root(),
+        diff_base,
+        &current_findings,
+        &previous_findings,
+    )?)?;
+    if let Value::Object(object) = &mut report {
+        object.insert(
+            "artifact".to_string(),
+            json!(artifact_path.display().to_string()),
+        );
+        object.insert(
+            "policy".to_string(),
+            json!("whitebox-static PR mode uses only local git diff data; no remote git provider is required"),
+        );
+    }
+    fs::write(
+        &artifact_path,
+        format!("{}\n", serde_json::to_string_pretty(&report)?),
+    )
+    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    Ok(report)
 }
 
 fn true_positive_fingerprints_for_sast_runs(
@@ -1226,33 +1707,60 @@ fn run_agentic_sast_report(
         .context(
             "agentic-sast:scan requires an explicit model in config.toml, KUZUSHI_MODEL, or tool input; Kuzushi will not choose a fallback model",
         )?;
+    let whitebox_static = whitebox_static_profile_requested(input)?;
+    let system_prompt = if whitebox_static {
+        whitebox_static_triage_system_prompt().to_string()
+    } else {
+        AGENTIC_SAST_SYSTEM_PROMPT.to_string()
+    };
+    let agent_tool_policy = agent_tool_policy_for_input(input)?;
 
     let inventory = collect_agentic_repo_inventory(&target, 80, 2048)?;
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model: model.clone(),
-        cwd: target.clone(),
-        system_prompt: AGENTIC_SAST_SYSTEM_PROMPT.to_string(),
-        prompt: build_agentic_sast_prompt(&target, &options, &inventory, None),
-    })?;
+    let response = runtime.query_blocking(
+        AgentQueryRequest::new(
+            model.clone(),
+            target.clone(),
+            system_prompt.clone(),
+            build_agentic_sast_prompt(&target, &options, &inventory, None, whitebox_static),
+        )
+        .with_tool_policy(agent_tool_policy.clone()),
+    )?;
     let first_raw = parse_agentic_sast_response(response)?;
-    let mut findings = normalize_agentic_sast_findings(first_raw, &target, options.max_findings)?;
+    let mut findings =
+        normalize_agentic_sast_findings(first_raw, &target, options.max_findings, whitebox_static)?;
 
     if options.passes == 2 && !findings.is_empty() {
         let review_context = summarize_agentic_findings_for_review(&findings);
-        let review_response = runtime.query_blocking(AgentQueryRequest {
-            model: model.clone(),
-            cwd: target.clone(),
-            system_prompt: AGENTIC_SAST_SYSTEM_PROMPT.to_string(),
-            prompt: build_agentic_sast_prompt(&target, &options, &inventory, Some(&review_context)),
-        })?;
+        let review_response = runtime.query_blocking(
+            AgentQueryRequest::new(
+                model.clone(),
+                target.clone(),
+                system_prompt,
+                build_agentic_sast_prompt(
+                    &target,
+                    &options,
+                    &inventory,
+                    Some(&review_context),
+                    whitebox_static,
+                ),
+            )
+            .with_tool_policy(agent_tool_policy.clone()),
+        )?;
         let review_raw = parse_agentic_sast_response(review_response)?;
-        let review_findings =
-            normalize_agentic_sast_findings(review_raw, &target, options.max_findings)?;
+        let review_findings = normalize_agentic_sast_findings(
+            review_raw,
+            &target,
+            options.max_findings,
+            whitebox_static,
+        )?;
         let mut merged = BTreeMap::new();
         for finding in findings.into_iter().chain(review_findings) {
             merged.entry(finding.fingerprint.clone()).or_insert(finding);
         }
         findings = merged.into_values().take(options.max_findings).collect();
+    }
+    if whitebox_static {
+        mark_whitebox_static_findings(&mut findings, StaticProofState::CodeCited)?;
     }
 
     let persisted = persist_agentic_sast_findings(&target, &findings, ctx)?;
@@ -1372,6 +1880,7 @@ fn build_agentic_sast_prompt(
     options: &AgenticSastInput,
     inventory: &[(String, String)],
     review_context: Option<&str>,
+    whitebox_static: bool,
 ) -> String {
     let mut prompt = vec![
         "Scan this repository for concrete application-security vulnerabilities.".to_string(),
@@ -1389,6 +1898,10 @@ fn build_agentic_sast_prompt(
         String::new(),
         "Evidence requirements: name the attacker-controlled source, sink, missing guard, and exact file:line. Omit uncertain or hypothetical findings.".to_string(),
     ];
+    if whitebox_static {
+        prompt.push(String::new());
+        prompt.push(whitebox_static_triage_prompt_block().to_string());
+    }
     if let Some(review_context) = review_context {
         prompt.push(String::new());
         prompt.push(review_context.to_string());
@@ -1425,6 +1938,7 @@ fn normalize_agentic_sast_findings(
     raw: Value,
     target: &Path,
     max_findings: usize,
+    whitebox_static: bool,
 ) -> Result<Vec<Finding>> {
     let findings_value = match raw {
         Value::Object(object) => object
@@ -1445,17 +1959,19 @@ fn normalize_agentic_sast_findings(
         let Value::Object(object) = item else {
             continue;
         };
+        let raw_item = Value::Object(object.clone());
         let rule_id = read_object_string(&object, &["ruleId", "rule_id"])
             .unwrap_or_else(|| "agentic-sast/finding".to_string());
-        let file_path = normalize_agentic_file_path(
-            read_object_string(&object, &["filePath", "file_path"])
-                .unwrap_or_else(|| "unknown".to_string()),
-            target,
-        );
+        let file_path =
+            normalize_agentic_file_path(resolve_agentic_schema_file_path(&object), target);
         let start_line = read_object_u64(&object, &["startLine", "start_line"])
+            .or_else(|| read_nested_object_u64(&object, "source", &["startLine", "start_line"]))
+            .or_else(|| first_citation_u64(&object, &["startLine", "start_line"]))
             .filter(|value| *value > 0)
             .unwrap_or(1) as u32;
         let end_line = read_object_u64(&object, &["endLine", "end_line"])
+            .or_else(|| read_nested_object_u64(&object, "source", &["endLine", "end_line"]))
+            .or_else(|| first_citation_u64(&object, &["endLine", "end_line"]))
             .filter(|value| *value > 0)
             .map(|value| value as u32);
         let severity = agentic_severity(
@@ -1463,23 +1979,173 @@ fn normalize_agentic_sast_findings(
                 .as_deref()
                 .unwrap_or("WARNING"),
         );
-        let mut message =
-            read_object_string(&object, &["message"]).unwrap_or_else(|| rule_id.clone());
+        let mut message = read_object_string(&object, &["message"])
+            .or_else(|| read_object_string(&object, &["title"]))
+            .unwrap_or_else(|| rule_id.clone());
         if let Some(evidence) = read_object_string(&object, &["evidence"]) {
             if !evidence.trim().is_empty() {
                 message.push_str("\n\nEvidence: ");
                 message.push_str(evidence.trim());
             }
         }
+        append_agentic_schema_field(&mut message, &object, "verdict", "Verdict");
+        append_agentic_schema_field(
+            &mut message,
+            &object,
+            "staticProofState",
+            "Static proof state",
+        );
+        append_agentic_schema_object_summary(&mut message, &object, "source", "Source");
+        append_agentic_schema_object_summary(&mut message, &object, "sink", "Sink");
+        append_agentic_schema_object_summary(&mut message, &object, "path", "Path");
+        append_agentic_schema_object_summary(
+            &mut message,
+            &object,
+            "sanitizerAssessment",
+            "Sanitizer assessment",
+        );
+        append_agentic_schema_object_summary(
+            &mut message,
+            &object,
+            "guardAssessment",
+            "Guard assessment",
+        );
+        append_agentic_schema_field(
+            &mut message,
+            &object,
+            "triggerNarrative",
+            "Trigger narrative",
+        );
+        append_agentic_schema_field(&mut message, &object, "impactNarrative", "Impact narrative");
+        append_agentic_schema_field(&mut message, &object, "recommendedFix", "Recommended fix");
         if let Some(confidence) = read_object_string(&object, &["confidence"]) {
             message.push_str("\nConfidence: ");
             message.push_str(confidence.trim());
         }
-        findings.push(Finding::new_tool(
+        let mut finding = Finding::new_tool(
             "agentic", rule_id, file_path, start_line, end_line, severity, message,
-        ));
+        );
+        if whitebox_static {
+            let validation = validate_agentic_whitebox_static_claim(target, &raw_item)?;
+            apply_agentic_static_validation(&mut finding, &validation);
+        } else if let Some(state) = whitebox_static_proof_state_from_input(&raw_item)? {
+            finding.set_static_proof_state(state);
+        }
+        findings.push(finding);
     }
     Ok(findings)
+}
+
+fn validate_agentic_whitebox_static_claim(
+    target: &Path,
+    raw_item: &Value,
+) -> Result<StaticProofValidation> {
+    let claim = static_proof_claim_from_whitebox_schema(raw_item)?;
+    Ok(validate_static_proof_claim(target, &claim))
+}
+
+fn apply_agentic_static_validation(finding: &mut Finding, validation: &StaticProofValidation) {
+    finding.set_static_proof_state(validation.final_state);
+    if validation.accepted {
+        if !validation.verified_citations.is_empty() {
+            finding.message.push_str("\nVerified citations: ");
+            finding
+                .message
+                .push_str(&validation.verified_citations.len().to_string());
+        }
+        return;
+    }
+    finding
+        .message
+        .push_str("\nWhitebox citation validation: downgraded to needs_runtime_evidence.");
+    for issue in validation.issues.iter().take(6) {
+        finding.message.push_str("\n- ");
+        finding.message.push_str(issue);
+    }
+}
+
+fn resolve_agentic_schema_file_path(object: &Map<String, Value>) -> String {
+    read_object_string(object, &["filePath", "file_path"])
+        .or_else(|| read_nested_object_string(object, "source", &["filePath", "file_path"]))
+        .or_else(|| read_nested_object_string(object, "sink", &["filePath", "file_path"]))
+        .or_else(|| first_citation_string(object, &["filePath", "file_path"]))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn read_nested_object_string(
+    object: &Map<String, Value>,
+    nested_key: &str,
+    keys: &[&str],
+) -> Option<String> {
+    object
+        .get(nested_key)
+        .and_then(Value::as_object)
+        .and_then(|nested| read_object_string(nested, keys))
+}
+
+fn read_nested_object_u64(
+    object: &Map<String, Value>,
+    nested_key: &str,
+    keys: &[&str],
+) -> Option<u64> {
+    object
+        .get(nested_key)
+        .and_then(Value::as_object)
+        .and_then(|nested| read_object_u64(nested, keys))
+}
+
+fn first_citation_string(object: &Map<String, Value>, keys: &[&str]) -> Option<String> {
+    object
+        .get("citations")
+        .and_then(Value::as_array)
+        .and_then(|citations| citations.first())
+        .and_then(Value::as_object)
+        .and_then(|citation| read_object_string(citation, keys))
+}
+
+fn first_citation_u64(object: &Map<String, Value>, keys: &[&str]) -> Option<u64> {
+    object
+        .get("citations")
+        .and_then(Value::as_array)
+        .and_then(|citations| citations.first())
+        .and_then(Value::as_object)
+        .and_then(|citation| read_object_u64(citation, keys))
+}
+
+fn append_agentic_schema_field(
+    message: &mut String,
+    object: &Map<String, Value>,
+    key: &str,
+    label: &str,
+) {
+    if let Some(value) = read_object_string(object, &[key]) {
+        if !value.trim().is_empty() {
+            message.push('\n');
+            message.push_str(label);
+            message.push_str(": ");
+            message.push_str(value.trim());
+        }
+    }
+}
+
+fn append_agentic_schema_object_summary(
+    message: &mut String,
+    object: &Map<String, Value>,
+    key: &str,
+    label: &str,
+) {
+    let Some(value) = object.get(key).and_then(Value::as_object) else {
+        return;
+    };
+    let summary = read_object_string(value, &["description", "explanation", "status", "kind"])
+        .filter(|text| !text.trim().is_empty());
+    let Some(summary) = summary else {
+        return;
+    };
+    message.push('\n');
+    message.push_str(label);
+    message.push_str(": ");
+    message.push_str(summary.trim());
 }
 
 fn normalize_agentic_file_path(path: String, target: &Path) -> String {
@@ -1720,14 +2386,20 @@ fn run_taint_iris_report(
 
     let inventory = collect_agentic_repo_inventory(&target, 80, 2048)?;
     let codeql_db = resolve_taint_codeql_db_path(&target, ctx.workspace.map(WorkspaceTarget::root));
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model: model.clone(),
-        cwd: target.clone(),
-        system_prompt: TAINT_IRIS_SYSTEM_PROMPT.to_string(),
-        prompt: build_taint_iris_prompt(&target, &cwes, &inventory, codeql_db.as_deref(), &options),
-    })?;
+    let response = runtime.query_blocking(
+        AgentQueryRequest::new(
+            model.clone(),
+            target.clone(),
+            TAINT_IRIS_SYSTEM_PROMPT.to_string(),
+            build_taint_iris_prompt(&target, &cwes, &inventory, codeql_db.as_deref(), &options),
+        )
+        .with_tool_policy(agent_tool_policy_for_input(input)?),
+    )?;
     let raw = parse_taint_iris_response(response)?;
-    let findings = normalize_taint_iris_findings(raw, &target, options.max_findings)?;
+    let mut findings = normalize_taint_iris_findings(raw, &target, options.max_findings)?;
+    if whitebox_static_profile_requested(input)? {
+        mark_whitebox_static_findings(&mut findings, StaticProofState::SourceSinkLinked)?;
+    }
     let persisted = persist_taint_iris_findings(&target, &findings, ctx)?;
 
     Ok(TaintIrisReport {
@@ -1758,12 +2430,15 @@ fn run_taint_cwe_select_value(
         "pipeline:taint-cwe-select requires an explicit model in config.toml, KUZUSHI_MODEL, or tool input; Kuzushi will not choose a fallback model",
     )?;
     let inventory = collect_agentic_repo_inventory(target, 60, 1024)?;
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model: model.to_string(),
-        cwd: target.to_path_buf(),
-        system_prompt: TAINT_CWE_SELECT_SYSTEM_PROMPT.to_string(),
-        prompt: build_taint_cwe_select_prompt(target, &inventory),
-    })?;
+    let response = runtime.query_blocking(
+        AgentQueryRequest::new(
+            model.to_string(),
+            target.to_path_buf(),
+            TAINT_CWE_SELECT_SYSTEM_PROMPT.to_string(),
+            build_taint_cwe_select_prompt(target, &inventory),
+        )
+        .with_tool_policy(agent_tool_policy_for_input(input)?),
+    )?;
     parse_taint_cwe_select_response(response)
 }
 
@@ -2742,7 +3417,19 @@ fn run_taint_iris_next_report(
         .context(
             "taint-iris-next:hunt requires an explicit model in config.toml, KUZUSHI_MODEL, or tool input; Kuzushi will not choose a fallback model",
         )?;
-    let agent = run_taint_iris_next_agent(&plan, &evidence, &agent_prompt, runtime, &model)?;
+    let mut agent = run_taint_iris_next_agent(
+        &plan,
+        &evidence,
+        &agent_prompt,
+        runtime,
+        &model,
+        agent_tool_policy_for_input(input)?,
+    )?;
+    let mut findings = agent.findings.clone();
+    if whitebox_static_profile_requested(input)? {
+        mark_whitebox_static_findings(&mut findings, StaticProofState::SourceSinkLinked)?;
+        agent.findings = findings;
+    }
     let persisted = persist_taint_iris_next_findings(&target, &agent.findings, ctx)?;
     let output = render_taint_iris_next_output(&plan, &evidence, Some(&agent));
     let status = if agent.outcome == "agent-output-invalid" {
@@ -3788,23 +4475,30 @@ fn run_taint_iris_next_agent(
     agent_prompt: &str,
     runtime: &dyn AgentRuntime,
     model: &str,
+    agent_tool_policy: crate::runtime::AgentToolPolicy,
 ) -> Result<TaintIrisNextAgentResult> {
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model: model.to_string(),
-        cwd: plan.repo_root.clone(),
-        system_prompt: TAINT_IRIS_NEXT_SYSTEM_PROMPT.to_string(),
-        prompt: agent_prompt.to_string(),
-    })?;
+    let response = runtime.query_blocking(
+        AgentQueryRequest::new(
+            model.to_string(),
+            plan.repo_root.clone(),
+            TAINT_IRIS_NEXT_SYSTEM_PROMPT.to_string(),
+            agent_prompt.to_string(),
+        )
+        .with_tool_policy(agent_tool_policy.clone()),
+    )?;
     let mut retry_count = 0usize;
     let mut parsed = parse_taint_iris_next_agent_response(response);
     if parsed.is_err() {
         retry_count = 1;
-        let repair = runtime.query_blocking(AgentQueryRequest {
-            model: model.to_string(),
-            cwd: plan.repo_root.clone(),
-            system_prompt: TAINT_IRIS_NEXT_SYSTEM_PROMPT.to_string(),
-            prompt: build_taint_iris_next_repair_prompt(plan, evidence),
-        })?;
+        let repair = runtime.query_blocking(
+            AgentQueryRequest::new(
+                model.to_string(),
+                plan.repo_root.clone(),
+                TAINT_IRIS_NEXT_SYSTEM_PROMPT.to_string(),
+                build_taint_iris_next_repair_prompt(plan, evidence),
+            )
+            .with_tool_policy(agent_tool_policy),
+        )?;
         parsed = parse_taint_iris_next_agent_response(repair);
     }
 
@@ -5006,12 +5700,12 @@ fn run_verify_finding(
     )?;
 
     let prompt = build_verify_prompt(&finding, &triage, input.prompt_template.as_deref())?;
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: workspace.root().to_path_buf(),
-        system_prompt: VERIFY_SYSTEM_PROMPT.to_string(),
+        workspace.root().to_path_buf(),
+        VERIFY_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
     let raw = match response.structured {
         Some(value) => value,
         None => parse_json_object_from_agent_text(&response.text).with_context(|| {
@@ -5580,16 +6274,16 @@ fn vendor_assessment_assess(
             "vendor-assessment:assess with parsed documents requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
         )?;
         let model = resolve_tool_model("vendor-assessment:assess", &input, ctx)?;
-        let response = runtime.query_blocking(AgentQueryRequest {
+        let response = runtime.query_blocking(AgentQueryRequest::new(
             model,
-            cwd: root.clone(),
-            system_prompt: "You are Kuzushi's vendor security assessment agent. Return only JSON with overallRisk, confidence, summary, domains, mitigations, and documents.".to_string(),
-            prompt: prompts
+            root.clone(),
+            "You are Kuzushi's vendor security assessment agent. Return only JSON with overallRisk, confidence, summary, domains, mitigations, and documents.".to_string(),
+            prompts
                 .iter()
                 .map(|(_, content)| content.as_str())
                 .collect::<Vec<_>>()
                 .join("\n\n"),
-        })?;
+        ))?;
         let raw = response
             .structured
             .or_else(|| parse_json_object_from_agent_text(&response.text).ok());
@@ -6075,15 +6769,15 @@ fn run_plugin_finding_adapter(
             .unwrap_or(50)
             .min(200);
     let inventory = collect_agentic_repo_inventory(&target, 100, 4096)?;
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: target.clone(),
-        system_prompt: format!(
+        target.clone(),
+        format!(
             "You are Kuzushi's {} pi-agent-core adapter. Return only JSON matching {{\"findings\":[{{\"ruleId\":\"...\",\"filePath\":\"relative/path\",\"startLine\":1,\"severity\":\"critical|high|medium|low|info\",\"message\":\"evidence-backed finding\",\"evidence\":\"source-grounded proof\"}}]}}.",
             spec.tool_name
         ),
-        prompt: build_plugin_adapter_prompt(spec, &target, &plugin_root, &input, &inventory),
-    })?;
+        build_plugin_adapter_prompt(spec, &target, &plugin_root, &input, &inventory),
+    ))?;
     let raw = response.structured.unwrap_or_else(|| {
         parse_json_object_from_agent_text(&response.text).unwrap_or(json!({"findings": []}))
     });
@@ -6270,12 +6964,12 @@ fn run_shinsa_assessment(
     let output_dir = string_input_any(&input, &["outputDir", "output_dir"])
         .unwrap_or_else(|| "shinsa-output".to_string());
     let inventory = collect_agentic_repo_inventory(&target, 100, 4096)?;
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: target.clone(),
-        system_prompt: "You are Kuzushi's Shinsa compliance adapter. Return only JSON with summary, findings, controls, and maturity.".to_string(),
-        prompt: build_shinsa_prompt(mode, &output_dir, &plugin_root, &input, &inventory),
-    })?;
+        target.clone(),
+        "You are Kuzushi's Shinsa compliance adapter. Return only JSON with summary, findings, controls, and maturity.".to_string(),
+        build_shinsa_prompt(mode, &output_dir, &plugin_root, &input, &inventory),
+    ))?;
     let raw = response.structured.unwrap_or_else(|| {
         parse_json_object_from_agent_text(&response.text).unwrap_or(json!({"findings": []}))
     });
@@ -6441,12 +7135,12 @@ fn prompt_armor_runtime_tool(
     ))?;
     let model = resolve_tool_model(tool_name, &input, ctx)?;
     let inventory = collect_agentic_repo_inventory(&target, 100, 4096)?;
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: target.clone(),
-        system_prompt: "You are Kuzushi's PromptArmor adapter. Return only JSON with findings and summary. Ground findings in source snippets when doing static analyze.".to_string(),
-        prompt: build_prompt_armor_prompt(command, &plugin_root, &input, &inventory),
-    })?;
+        target.clone(),
+        "You are Kuzushi's PromptArmor adapter. Return only JSON with findings and summary. Ground findings in source snippets when doing static analyze.".to_string(),
+        build_prompt_armor_prompt(command, &plugin_root, &input, &inventory),
+    ))?;
     let raw = response.structured.unwrap_or_else(|| {
         parse_json_object_from_agent_text(&response.text).unwrap_or(json!({"findings": []}))
     });
@@ -6859,6 +7553,13 @@ fn unix_millis() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
+        .unwrap_or_default()
+}
+
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
         .unwrap_or_default()
 }
 
@@ -7770,6 +8471,9 @@ fn sast_module() -> BuiltinModule {
             "sast:scan",
             "Run the full SAST pipeline for the current target.",
             vec![
+                opt("mode", OptionType::Enum, "Analysis mode or preset.")
+                    .choices(&["standard", "whitebox-static"])
+                    .default(json!("standard")),
                 opt("taskMode", OptionType::Enum, "Task-selection mode.")
                     .choices(&["auto", "manual"])
                     .default(json!("auto")),
@@ -7788,6 +8492,12 @@ fn sast_module() -> BuiltinModule {
                     OptionType::StringList,
                     "Optional severity filter: critical, high, medium, low, or info.",
                 ),
+                opt(
+                    "diffBase",
+                    OptionType::String,
+                    "Git revision for whitebox-static PR diff scope.",
+                )
+                .advanced(),
                 opt(
                     "triage",
                     OptionType::Bool,
@@ -8773,6 +9483,22 @@ fn build_context_snapshot(input: Value, ctx: &ToolExecutionContext<'_>) -> Resul
     )?;
 
     let repo_context = infer_repo_context(workspace.root(), &files_sample)?;
+    let repository_inventory =
+        crate::repository_inventory::build_repository_inventory(workspace.root())?;
+    let attack_surface_map = crate::attack_surface::build_attack_surface_map_from_inventory(
+        workspace.root(),
+        &repository_inventory,
+    )?;
+    let app_model_routes = attack_surface_routes(&attack_surface_map);
+    let app_model_background_jobs = attack_surface_app_model_items(
+        &attack_surface_map,
+        crate::attack_surface::AttackSurfaceKind::BackgroundJob,
+    );
+    let app_model_data_stores = attack_surface_app_model_items(
+        &attack_surface_map,
+        crate::attack_surface::AttackSurfaceKind::DbQueryBoundary,
+    );
+    let app_model_service_boundaries = attack_surface_service_boundaries(&attack_surface_map);
     let file_tree = files_sample
         .iter()
         .map(|path| json!({ "path": path }))
@@ -8789,6 +9515,8 @@ fn build_context_snapshot(input: Value, ctx: &ToolExecutionContext<'_>) -> Resul
             "enrichment": enrichment,
         },
         "repoContext": repo_context,
+        "repositoryInventory": repository_inventory,
+        "attackSurfaceMap": attack_surface_map,
         "fileIndex": {
             "tree": file_tree,
             "totalFiles": files_indexed,
@@ -8796,11 +9524,11 @@ fn build_context_snapshot(input: Value, ctx: &ToolExecutionContext<'_>) -> Resul
             "patternMatches": {},
         },
         "appModel": {
-            "routes": [],
+            "routes": app_model_routes,
             "outboundClients": [],
-            "serviceBoundaries": [],
-            "dataStores": [],
-            "backgroundJobs": [],
+            "serviceBoundaries": app_model_service_boundaries,
+            "dataStores": app_model_data_stores,
+            "backgroundJobs": app_model_background_jobs,
         },
         "generatedSlices": generated_context_slices(scope, enrichment),
         "staleSlices": stale_context_slices(scope),
@@ -8828,6 +9556,72 @@ fn build_context_snapshot(input: Value, ctx: &ToolExecutionContext<'_>) -> Resul
             "snapshot": snapshot,
         },
     }))
+}
+
+fn attack_surface_routes(map: &crate::attack_surface::AttackSurfaceMap) -> Vec<Value> {
+    map.surfaces
+        .iter()
+        .filter(|surface| surface.kind == crate::attack_surface::AttackSurfaceKind::HttpRoute)
+        .map(|surface| {
+            json!({
+                "id": surface.id,
+                "path": surface.route,
+                "method": surface.method,
+                "source": surface.path,
+                "line": surface.line,
+                "framework": surface.framework,
+                "evidence": surface.evidence,
+            })
+        })
+        .collect()
+}
+
+fn attack_surface_app_model_items(
+    map: &crate::attack_surface::AttackSurfaceMap,
+    kind: crate::attack_surface::AttackSurfaceKind,
+) -> Vec<Value> {
+    map.surfaces
+        .iter()
+        .filter(|surface| surface.kind == kind)
+        .map(|surface| {
+            json!({
+                "id": surface.id,
+                "kind": surface.kind.as_str(),
+                "source": surface.path,
+                "line": surface.line,
+                "title": surface.title,
+                "evidence": surface.evidence,
+                "boundary": surface.boundary,
+            })
+        })
+        .collect()
+}
+
+fn attack_surface_service_boundaries(map: &crate::attack_surface::AttackSurfaceMap) -> Vec<Value> {
+    map.surfaces
+        .iter()
+        .filter(|surface| {
+            matches!(
+                surface.kind,
+                crate::attack_surface::AttackSurfaceKind::AuthBoundary
+                    | crate::attack_surface::AttackSurfaceKind::CommandExecutionBoundary
+                    | crate::attack_surface::AttackSurfaceKind::FileUploadParsePath
+                    | crate::attack_surface::AttackSurfaceKind::RpcHandler
+            )
+        })
+        .map(|surface| {
+            json!({
+                "id": surface.id,
+                "kind": surface.kind.as_str(),
+                "source": surface.path,
+                "line": surface.line,
+                "title": surface.title,
+                "route": surface.route,
+                "method": surface.method,
+                "boundary": surface.boundary,
+            })
+        })
+        .collect()
 }
 
 fn save_context_snapshot(root: &Path, snapshot: &Value) -> Result<PathBuf> {
@@ -9521,6 +10315,34 @@ if [ "$1" = "database" ] && [ "$2" = "analyze" ]; then
                 "artifactLocation": { "uri": "server.js" },
                 "region": { "startLine": 9 }
               }
+            }
+          ],
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "message": { "text": "request query parameter" },
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": { "uri": "server.js" },
+                          "region": { "startLine": 1 }
+                        }
+                      }
+                    },
+                    {
+                      "message": { "text": "query reaches db.query" },
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": { "uri": "server.js" },
+                          "region": { "startLine": 9 }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }
@@ -11000,6 +11822,308 @@ OUT
     }
 
     #[test]
+    fn whitebox_agent_tools_for_agentic_sast_are_read_only() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/db.ts"), "db.query(req.query.q)\n").unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "sast:scan",
+                json!({
+                    "mode": "whitebox-static",
+                    "taskMode": "manual",
+                    "tasks": ["agentic"],
+                    "maxFindings": 5
+                }),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(
+            result.pointer("/data/mode").and_then(Value::as_str),
+            Some("whitebox-static")
+        );
+        let query = runtime.queries().pop().unwrap();
+        assert_eq!(query.tool_policy.profile, "whitebox-static");
+        assert_eq!(
+            query.tool_policy.tools,
+            vec![
+                "Read".to_string(),
+                "Glob".to_string(),
+                "Grep".to_string(),
+                "LS".to_string()
+            ]
+        );
+        for forbidden in ["Bash", "shell", "Write", "Edit", "patch", "apply_patch"] {
+            assert!(
+                !query
+                    .tool_policy
+                    .tools
+                    .iter()
+                    .any(|tool| tool.eq_ignore_ascii_case(forbidden)),
+                "forbidden whitebox tool was enabled: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn whitebox_triage_prompt_for_agentic_sast_uses_static_schema() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/db.ts"), "db.query(req.query.q)\n").unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        registry
+            .execute_tool_with_runtime(
+                "sast:scan",
+                json!({
+                    "mode": "whitebox-static",
+                    "taskMode": "manual",
+                    "tasks": ["agentic"],
+                    "maxFindings": 5
+                }),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        let query = runtime.queries().pop().unwrap();
+        assert!(query.system_prompt.contains("whitebox-static mode"));
+        for field in [
+            "\"verdict\"",
+            "\"staticProofState\"",
+            "\"source\"",
+            "\"sink\"",
+            "\"path\"",
+            "\"sanitizerAssessment\"",
+            "\"guardAssessment\"",
+            "\"citations\"",
+            "\"assumptions\"",
+            "\"missingEvidence\"",
+            "\"triggerNarrative\"",
+            "\"impactNarrative\"",
+            "\"recommendedFix\"",
+        ] {
+            assert!(query.system_prompt.contains(field), "missing {field}");
+        }
+        for rule in [
+            "Do not include payloads",
+            "PoCs",
+            "exploit execution",
+            "runtime exploitability claims",
+            "no active exploitation",
+            "no HTTP replay",
+            "no fuzzing",
+            "no live target scanning",
+            "no PoC generation",
+            "no PoC execution",
+        ] {
+            assert!(
+                query.system_prompt.contains(rule) || query.prompt.contains(rule),
+                "whitebox prompt did not include rule {rule}"
+            );
+        }
+        assert!(query
+            .prompt
+            .contains("Every reported claim must cite repository source lines"));
+    }
+
+    #[test]
+    fn whitebox_triage_prompt_response_normalizes_static_schema_fields() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        let mut source = (1..=11)
+            .map(|line| format!("// filler {line}"))
+            .collect::<Vec<_>>();
+        source.push("const q = req.query.q;".to_string());
+        source.push("db.query(q);".to_string());
+        source.push("return q;".to_string());
+        fs::write(
+            temp.path().join("src/routes.ts"),
+            format!("{}\n", source.join("\n")),
+        )
+        .unwrap();
+        let raw = json!({
+            "findings": [{
+                "ruleId": "agentic/whitebox-sql",
+                "title": "Request input reaches SQL query",
+                "verdict": "needs_review",
+                "staticProofState": "sanitizer_checked",
+                "severity": "high",
+                "confidence": "medium",
+                "source": {
+                    "kind": "attacker_input",
+                    "filePath": "src/routes.ts",
+                    "startLine": 12,
+                    "endLine": 12,
+                    "description": "req.query.q is read by the route"
+                },
+                "sink": {
+                    "kind": "sql_query",
+                    "filePath": "src/routes.ts",
+                    "startLine": 13,
+                    "endLine": 13,
+                    "description": "db.query receives the interpolated value"
+                },
+                "path": {
+                    "kind": "direct",
+                    "explanation": "The local handler passes q into db.query."
+                },
+                "sanitizerAssessment": {
+                    "status": "unknown",
+                    "explanation": "No sanitizer appears in the cited snippet."
+                },
+                "guardAssessment": {
+                    "status": "present",
+                    "explanation": "requireAuth gates the route."
+                },
+                "citations": [{
+                    "filePath": "src/routes.ts",
+                    "startLine": 12,
+                    "endLine": 14,
+                    "snippet": "const q = req.query.q;\ndb.query(q);\nreturn q;"
+                }],
+                "assumptions": ["Express route wiring is static."],
+                "missingEvidence": ["Runtime reachability is not assessed."],
+                "triggerNarrative": "Static trigger path: GET /search reads q.",
+                "impactNarrative": "Potential SQL injection if q is unsanitized.",
+                "recommendedFix": "Use parameterized queries."
+            }]
+        });
+
+        let findings = normalize_agentic_sast_findings(raw, temp.path(), 5, true).unwrap();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule_id, "agentic/whitebox-sql");
+        assert_eq!(findings[0].file_path, "src/routes.ts");
+        assert_eq!(findings[0].start_line, 12);
+        assert_eq!(
+            findings[0].static_proof_state,
+            Some(StaticProofState::SanitizerChecked)
+        );
+        assert!(findings[0]
+            .message
+            .contains("Static proof state: sanitizer_checked"));
+        assert!(findings[0]
+            .message
+            .contains("Sanitizer assessment: No sanitizer appears"));
+        assert!(findings[0]
+            .message
+            .contains("Trigger narrative: Static trigger path"));
+        assert!(findings[0]
+            .message
+            .contains("Recommended fix: Use parameterized queries."));
+    }
+
+    #[test]
+    fn whitebox_citations_downgrade_statically_confirmed_before_persistence() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/routes.ts"),
+            "const q = req.query.q;\ndb.query(q);\n",
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+        let raw = json!({
+            "findings": [{
+                "ruleId": "agentic/whitebox-stale",
+                "title": "Request input reaches SQL query",
+                "verdict": "true_positive",
+                "staticProofState": "statically_confirmed",
+                "severity": "high",
+                "source": {
+                    "kind": "attacker_input",
+                    "filePath": "src/routes.ts",
+                    "startLine": 1,
+                    "endLine": 1,
+                    "description": "req.query.q is read"
+                },
+                "sink": {
+                    "kind": "sql_query",
+                    "filePath": "src/routes.ts",
+                    "startLine": 2,
+                    "endLine": 2,
+                    "description": "db.query receives q"
+                },
+                "path": {
+                    "kind": "direct",
+                    "explanation": "q is passed directly to db.query."
+                },
+                "sanitizerAssessment": {
+                    "status": "absent",
+                    "explanation": "No sanitizer appears between source and sink."
+                },
+                "guardAssessment": {
+                    "status": "not_applicable",
+                    "explanation": "The claim does not depend on an auth guard."
+                },
+                "citations": [{
+                    "filePath": "src/routes.ts",
+                    "startLine": 1,
+                    "endLine": 2,
+                    "snippet": "const q = req.query.q;\ndb.query(req.body.q);"
+                }],
+                "assumptions": ["Static route wiring is inferred from source."],
+                "missingEvidence": ["Runtime reachability is not assessed."]
+            }]
+        });
+
+        let findings = normalize_agentic_sast_findings(raw, temp.path(), 5, true).unwrap();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].static_proof_state,
+            Some(StaticProofState::NeedsRuntimeEvidence)
+        );
+        assert!(findings[0]
+            .message
+            .contains("Whitebox citation validation: downgraded"));
+        assert!(findings[0].message.contains("snippet text does not match"));
+
+        let persisted = persist_agentic_sast_findings(temp.path(), &findings, &ctx)
+            .unwrap()
+            .unwrap();
+        assert!(!persisted.run_id.is_empty());
+        let stored = store.list_findings(10).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(
+            stored[0].static_proof_state,
+            Some(StaticProofState::NeedsRuntimeEvidence)
+        );
+    }
+
+    #[test]
     fn agentic_sast_scan_requires_runtime_and_explicit_model() {
         let temp = tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
@@ -11849,6 +12973,218 @@ OUT
         assert_eq!(patch_results[0].status, PatchStatus::Sound);
     }
 
+    #[test]
+    fn whitebox_static_sast_mode_disables_execution_and_patch_paths() {
+        let temp = tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"lodash":"latest"}}"#,
+        )
+        .unwrap();
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "sast:scan",
+                json!({
+                    "mode": "whitebox-static",
+                    "taskMode": "manual",
+                    "tasks": ["dep-hygiene"],
+                    "verify": true,
+                    "autoPatch": true,
+                    "pocHarness": true,
+                    "pocExecution": true,
+                    "dynamicAnalysis": true,
+                    "cryptoBehavioralTesting": true,
+                    "proofState": "execution_confirmed"
+                }),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(
+            result.pointer("/data/mode").and_then(Value::as_str),
+            Some("whitebox-static")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/whiteboxStatic/enabled")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        for pointer in [
+            "/data/whiteboxStatic/verify",
+            "/data/whiteboxStatic/pocHarness",
+            "/data/whiteboxStatic/pocExecution",
+            "/data/whiteboxStatic/dynamicAnalysis",
+            "/data/whiteboxStatic/cryptoBehavioralTesting",
+            "/data/whiteboxStatic/patching",
+            "/data/whiteboxStatic/autoPatch",
+            "/data/whiteboxStatic/executionProofStates",
+            "/data/whiteboxStatic/runtimeExploitabilityClaims",
+        ] {
+            assert_eq!(
+                result.pointer(pointer).and_then(Value::as_bool),
+                Some(false)
+            );
+        }
+        assert_eq!(
+            result
+                .pointer("/data/verification/verified")
+                .and_then(Value::as_u64),
+            Some(0)
+        );
+        assert_eq!(
+            result
+                .pointer("/data/patch/patched")
+                .and_then(Value::as_u64),
+            Some(0)
+        );
+        assert!(runtime.requests().is_empty());
+        assert!(runtime.queries().is_empty());
+
+        let scan_input = fs::read_to_string(
+            result
+                .pointer("/data/artifacts/dir")
+                .and_then(Value::as_str)
+                .map(Path::new)
+                .unwrap()
+                .join("scan-input.json"),
+        )
+        .unwrap();
+        assert!(scan_input.contains("\"mode\": \"whitebox-static\""));
+        assert!(!scan_input.contains("execution_confirmed"));
+        assert!(scan_input.contains("needs_runtime_evidence"));
+        assert!(result
+            .get("output")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("Static narrative: trigger path summarized"));
+        assert!(result
+            .pointer("/data/staticNarratives/count")
+            .and_then(Value::as_u64)
+            .is_some_and(|count| count > 0));
+        let static_narratives = fs::read_to_string(
+            result
+                .pointer("/data/artifacts/staticNarratives")
+                .and_then(Value::as_str)
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(static_narratives.contains("Static trigger path"));
+        assert!(static_narratives.contains("Potential impact"));
+        assert!(static_narratives.contains("Evidence limits"));
+        assert!(!static_narratives
+            .to_ascii_lowercase()
+            .contains("confirmed exploit"));
+        assert!(!static_narratives
+            .to_ascii_lowercase()
+            .contains("poc payload"));
+
+        let stored = store.list_findings(10).unwrap();
+        assert!(!stored.is_empty());
+        assert!(stored
+            .iter()
+            .all(|finding| { finding.static_proof_state == Some(StaticProofState::SignalOnly) }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn whitebox_diff_sast_mode_writes_pr_scope_artifact() {
+        let temp = tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"lodash":"latest"}}"#,
+        )
+        .unwrap();
+        init_git_repo(temp.path());
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"lodash":"latest","express":"latest"}}"#,
+        )
+        .unwrap();
+        for args in [vec!["add", "."], vec!["commit", "-m", "pr"]] {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(temp.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool(
+                "sast:scan",
+                json!({
+                    "mode": "whitebox-static",
+                    "taskMode": "manual",
+                    "tasks": ["dep-hygiene"],
+                    "diffBase": "HEAD~1"
+                }),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(
+            result.pointer("/data/mode").and_then(Value::as_str),
+            Some("whitebox-static")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/whiteboxDiff/noRemoteProviderRequired")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            result
+                .pointer("/data/whiteboxDiff/summary/changedFiles")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert!(result
+            .pointer("/data/whiteboxDiff/findingTags")
+            .and_then(Value::as_array)
+            .is_some_and(|tags| !tags.is_empty()));
+        assert!(result
+            .get("output")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("Diff scope: 1 changed file"));
+        let artifact = result
+            .pointer("/data/artifacts/whiteboxDiff")
+            .and_then(Value::as_str)
+            .unwrap();
+        let artifact_body = fs::read_to_string(artifact).unwrap();
+        assert!(artifact_body.contains("\"changedFiles\""));
+        assert!(artifact_body.contains("\"noRemoteProviderRequired\": true"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn dispatches_semgrep_scan_and_persists_findings() {
@@ -11892,6 +13228,80 @@ OUT
         assert_eq!(store.list_findings(10).unwrap().len(), 1);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn semgrep_static_evidence_direct_tool_indexes_whitebox_signal_only() {
+        let temp = tempdir().unwrap();
+        fs::write(
+            temp.path().join("server.js"),
+            [
+                "const express = require('express');",
+                "const app = express();",
+                "app.get('/x', (req, res) => {",
+                "  const name = req.query.name;",
+                "  const prefix = '<h1>';",
+                "  const suffix = '</h1>';",
+                "  const body = prefix + name;",
+                "  const html = body + suffix;",
+                "  res.status(200);",
+                "  res.set('content-type', 'text/html');",
+                "  res.send(html);",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let binary = fake_semgrep_binary(temp.path());
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool(
+                "semgrep:scan",
+                json!({
+                    "binary": binary.display().to_string(),
+                    "mode": "whitebox-static"
+                }),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(
+            result
+                .pointer("/data/findings/0/staticProofState")
+                .and_then(Value::as_str),
+            Some("signal_only")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/persisted/staticEvidence/findingsIndexed")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+
+        let finding = store.list_findings(10).unwrap().pop().unwrap();
+        let evidence_store = crate::static_evidence::StaticEvidenceStore::open(&workspace).unwrap();
+        let nodes = evidence_store
+            .list_nodes_for_finding(&finding.fingerprint)
+            .unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert!(nodes.iter().any(|node| {
+            node.kind == crate::static_evidence::StaticEvidenceNodeKind::ScannerSignal
+                && node
+                    .metadata
+                    .pointer("/truePositiveByDefault")
+                    .and_then(Value::as_bool)
+                    == Some(false)
+        }));
+    }
+
     #[test]
     fn semgrep_missing_binary_failure_is_actionable() {
         let temp = tempdir().unwrap();
@@ -11916,6 +13326,7 @@ OUT
         assert!(err.contains("semgrep: could not find scanner binary"));
         assert!(err.contains("Install Semgrep"));
         assert!(err.contains(r#""binary":"/path/to/semgrep""#));
+        assert!(err.contains("Next: run semgrep:scan"));
     }
 
     #[cfg(unix)]
@@ -11962,6 +13373,82 @@ OUT
         assert_eq!(store.list_findings(10).unwrap().len(), 1);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn codeql_static_evidence_direct_tool_indexes_whitebox_code_flow() {
+        let temp = tempdir().unwrap();
+        fs::write(temp.path().join("package.json"), "{}\n").unwrap();
+        fs::write(
+            temp.path().join("server.js"),
+            [
+                "const q = req.query.q;",
+                "function load(db) {",
+                "  const prefix = 'select ';",
+                "  const table = 'users';",
+                "  const where = ' where name = ';",
+                "  const sql = prefix + '* from ' + table + where;",
+                "  const suffix = q;",
+                "  const built = sql + suffix;",
+                "  return db.query(built);",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let binary = fake_codeql_binary(temp.path());
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool(
+                "codeql:scan",
+                json!({
+                    "binary": binary.display().to_string(),
+                    "language": "javascript",
+                    "mode": "whitebox-static"
+                }),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(
+            result
+                .pointer("/data/findings/0/staticProofState")
+                .and_then(Value::as_str),
+            Some("signal_only")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/persisted/staticEvidence/findingsIndexed")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+
+        let finding = store.list_findings(10).unwrap().pop().unwrap();
+        let evidence_store = crate::static_evidence::StaticEvidenceStore::open(&workspace).unwrap();
+        let nodes = evidence_store
+            .list_nodes_for_finding(&finding.fingerprint)
+            .unwrap();
+        assert!(nodes.iter().any(|node| {
+            node.kind == crate::static_evidence::StaticEvidenceNodeKind::ScannerSignal
+                && node
+                    .metadata
+                    .pointer("/truePositiveByDefault")
+                    .and_then(Value::as_bool)
+                    == Some(false)
+        }));
+        assert!(nodes
+            .iter()
+            .any(|node| node.kind == crate::static_evidence::StaticEvidenceNodeKind::DataflowStep));
+    }
+
     #[test]
     fn codeql_missing_binary_failure_is_actionable() {
         let temp = tempdir().unwrap();
@@ -11989,6 +13476,7 @@ OUT
         assert!(err.contains("codeql: could not find CodeQL CLI"));
         assert!(err.contains("github/codeql-cli-binaries"));
         assert!(err.contains(r#""binary":"/path/to/codeql""#));
+        assert!(err.contains("Next: run codeql:scan"));
     }
 
     #[test]

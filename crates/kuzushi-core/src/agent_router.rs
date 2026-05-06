@@ -51,7 +51,7 @@ use crate::findings::TriageOutcome;
 use crate::options::{OptionScope, OptionTarget, ToolOptionStore};
 use crate::runtime::{
     AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolLoopRequest,
-    LoopHistoryEntry, TriageRequest,
+    AgentToolPolicy, LoopHistoryEntry, TriageRequest,
 };
 
 /// Logical role assigned to an agent call. Each role maps to one
@@ -635,6 +635,7 @@ primary = "x"
                     cwd: PathBuf::from("/tmp"),
                     system_prompt: "sys".to_string(),
                     prompt: "user".to_string(),
+                    tool_policy: AgentToolPolicy::default(),
                 },
             )
             .unwrap();
@@ -670,6 +671,7 @@ primary = "x"
                     cwd: PathBuf::from("/tmp"),
                     system_prompt: "sys".to_string(),
                     prompt: "user".to_string(),
+                    tool_policy: AgentToolPolicy::default(),
                 },
             )
             .unwrap();
@@ -696,6 +698,7 @@ primary = "x"
                     cwd: PathBuf::from("/tmp"),
                     system_prompt: "sys".to_string(),
                     prompt: "user".to_string(),
+                    tool_policy: AgentToolPolicy::default(),
                 },
             )
             .unwrap_err()
@@ -719,6 +722,7 @@ primary = "x"
                 cwd: PathBuf::from("/tmp"),
                 system_prompt: "sys".to_string(),
                 prompt: "user".to_string(),
+                tool_policy: AgentToolPolicy::default(),
             })
             .unwrap();
         assert_eq!(
@@ -760,6 +764,7 @@ primary = "x"
                     cwd: PathBuf::from("/tmp"),
                     system_prompt: "sys".to_string(),
                     prompt: "user".to_string(),
+                    tool_policy: AgentToolPolicy::default(),
                 },
             )
             .unwrap();
