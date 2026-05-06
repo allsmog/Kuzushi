@@ -130,6 +130,12 @@ pub struct Finding {
     pub tool: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actor_fingerprint: Option<String>,
+    #[serde(
+        rename = "staticProofState",
+        alias = "static_proof_state",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub static_proof_state: Option<StaticProofState>,
     pub triage: Option<TriageOutcome>,
     pub created_at: String,
     /// Discovery channel — populated automatically from `tool` if not
@@ -244,6 +250,7 @@ impl Finding {
             message,
             tool,
             actor_fingerprint: None,
+            static_proof_state: None,
             triage: None,
             created_at: now_isoish(),
             vuln_source,
@@ -276,6 +283,79 @@ impl Finding {
         Self::new_tool(
             "semgrep", rule_id, file_path, start_line, end_line, severity, message,
         )
+    }
+
+    pub fn with_static_proof_state(mut self, state: StaticProofState) -> Self {
+        self.static_proof_state = Some(state);
+        self
+    }
+
+    pub fn set_static_proof_state(&mut self, state: StaticProofState) {
+        self.static_proof_state = Some(state);
+    }
+
+    pub fn set_static_proof_state_from_str(&mut self, state: &str) -> Result<()> {
+        self.static_proof_state = Some(StaticProofState::try_from(state)?);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum StaticProofState {
+    SignalOnly,
+    CodeCited,
+    SourceSinkLinked,
+    SanitizerChecked,
+    StaticallyConfirmed,
+    StaticallyRejected,
+    NeedsRuntimeEvidence,
+}
+
+impl StaticProofState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SignalOnly => "signal_only",
+            Self::CodeCited => "code_cited",
+            Self::SourceSinkLinked => "source_sink_linked",
+            Self::SanitizerChecked => "sanitizer_checked",
+            Self::StaticallyConfirmed => "statically_confirmed",
+            Self::StaticallyRejected => "statically_rejected",
+            Self::NeedsRuntimeEvidence => "needs_runtime_evidence",
+        }
+    }
+
+    pub fn is_static_terminal_state(self) -> bool {
+        matches!(
+            self,
+            Self::StaticallyConfirmed | Self::StaticallyRejected | Self::NeedsRuntimeEvidence
+        )
+    }
+}
+
+impl TryFrom<&str> for StaticProofState {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self> {
+        match value.trim() {
+            "signal_only" | "signal-only" | "signal" => Ok(Self::SignalOnly),
+            "code_cited" | "code-cited" | "cited" => Ok(Self::CodeCited),
+            "source_sink_linked" | "source-sink-linked" | "linked" => Ok(Self::SourceSinkLinked),
+            "sanitizer_checked" | "sanitizer-checked" | "sanitizer" => Ok(Self::SanitizerChecked),
+            "statically_confirmed" | "statically-confirmed" => Ok(Self::StaticallyConfirmed),
+            "statically_rejected" | "statically-rejected" => Ok(Self::StaticallyRejected),
+            "needs_runtime_evidence" | "needs-runtime-evidence" | "needs_runtime" => {
+                Ok(Self::NeedsRuntimeEvidence)
+            }
+            "execution_confirmed"
+            | "runtime_confirmed"
+            | "dynamic_confirmed"
+            | "exploit_confirmed"
+            | "poc_confirmed" => {
+                anyhow::bail!("execution proof state {value:?} is not valid static proof")
+            }
+            other => anyhow::bail!("unknown static proof state {other:?}"),
+        }
     }
 }
 
@@ -594,13 +674,19 @@ impl FindingListReport {
             return "  (no findings match)".to_string();
         }
 
-        let id_width = self
-            .findings
+        let aliased = sorted_finding_aliases(&self.findings);
+        let alias_width = aliased
             .iter()
-            .map(|finding| short_id(&finding.fingerprint).len())
+            .map(|(alias, _)| alias.len())
             .max()
-            .unwrap_or(2)
-            .max(2);
+            .unwrap_or(5)
+            .max(5);
+        let fingerprint_width = aliased
+            .iter()
+            .map(|(_, finding)| short_id(&finding.fingerprint).len())
+            .max()
+            .unwrap_or(8)
+            .max(8);
         let severity_width = self
             .findings
             .iter()
@@ -629,28 +715,31 @@ impl FindingListReport {
 
         let mut lines = vec![
             format!(
-                "  {}  {}  {}  {}",
-                pad("Id", id_width),
+                "  {}  {}  {}  {}  {}",
+                pad("Alias", alias_width),
+                pad("Fingerprint", fingerprint_width),
                 pad("Sev", severity_width),
                 pad("Check", verdict_width),
                 pad("Name", name_width)
             ),
             format!(
-                "  {}  {}  {}  {}",
-                "-".repeat(id_width),
+                "  {}  {}  {}  {}  {}",
+                "-".repeat(alias_width),
+                "-".repeat(fingerprint_width),
                 "-".repeat(severity_width),
                 "-".repeat(verdict_width),
                 "-".repeat(name_width)
             ),
         ];
 
-        for finding in &self.findings {
+        for (alias, finding) in aliased {
             lines.push(format!(
-                "  {}  {}  {}  {}",
-                pad(&short_id(&finding.fingerprint), id_width),
+                "  {}  {}  {}  {}  {}",
+                pad(&alias, alias_width),
+                pad(&short_id(&finding.fingerprint), fingerprint_width),
                 pad(finding.severity.as_str(), severity_width),
                 pad(
-                    FindingVerdictFilter::from_finding(finding).as_legacy_str(),
+                    FindingVerdictFilter::from_finding(&finding).as_legacy_str(),
                     verdict_width
                 ),
                 finding.title
@@ -673,6 +762,51 @@ impl FindingListReport {
             "data": self,
         })
     }
+}
+
+pub fn format_finding_alias(index: usize) -> String {
+    format!("F-{:04}", index + 1)
+}
+
+pub fn parse_finding_alias(reference: &str) -> Option<usize> {
+    let reference = reference.trim();
+    let suffix = reference
+        .strip_prefix("F-")
+        .or_else(|| reference.strip_prefix("f-"))?;
+    let index = suffix.parse::<usize>().ok()?;
+    index.checked_sub(1)
+}
+
+pub fn sorted_finding_aliases(findings: &[Finding]) -> Vec<(String, Finding)> {
+    let mut indexed: Vec<&Finding> = findings.iter().collect();
+    indexed.sort_by(|a, b| {
+        let by_severity = severity_rank(a.severity).cmp(&severity_rank(b.severity));
+        if by_severity == std::cmp::Ordering::Equal {
+            a.fingerprint.cmp(&b.fingerprint)
+        } else {
+            by_severity
+        }
+    });
+    indexed
+        .into_iter()
+        .enumerate()
+        .map(|(index, finding)| (format_finding_alias(index), finding.clone()))
+        .collect()
+}
+
+pub fn stable_finding_alias(findings: &[Finding], fingerprint: &str) -> Option<String> {
+    sorted_finding_aliases(findings)
+        .into_iter()
+        .find(|(_, finding)| finding.fingerprint == fingerprint)
+        .map(|(alias, _)| alias)
+}
+
+pub fn resolve_finding_alias(findings: &[Finding], reference: &str) -> Option<Finding> {
+    let index = parse_finding_alias(reference)?;
+    sorted_finding_aliases(findings)
+        .into_iter()
+        .nth(index)
+        .map(|(_, finding)| finding)
 }
 
 pub struct FindingStore {
@@ -728,6 +862,7 @@ impl FindingStore {
               message text not null,
               tool text not null,
               actor_fingerprint text,
+              static_proof_state text,
               created_at text not null,
               unique(scan_id, fingerprint)
             );
@@ -782,6 +917,12 @@ impl FindingStore {
             "findings",
             "dedup_key",
             "alter table findings add column dedup_key text",
+        )?;
+        ensure_column(
+            &self.conn,
+            "findings",
+            "static_proof_state",
+            "alter table findings add column static_proof_state text",
         )?;
         self.conn.execute_batch(
             "create index if not exists idx_findings_dedup_key
@@ -862,16 +1003,17 @@ impl FindingStore {
             insert into findings(
               scan_id, fingerprint, rule_id, title, severity, file_path,
               start_line, end_line, message, tool, actor_fingerprint, created_at,
-              vuln_source, dedup_key
+              vuln_source, dedup_key, static_proof_state
             )
-            values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
             on conflict(scan_id, fingerprint) do update set
               title = excluded.title,
               severity = excluded.severity,
               message = excluded.message,
               actor_fingerprint = excluded.actor_fingerprint,
               vuln_source = coalesce(excluded.vuln_source, findings.vuln_source),
-              dedup_key = coalesce(excluded.dedup_key, findings.dedup_key)
+              dedup_key = coalesce(excluded.dedup_key, findings.dedup_key),
+              static_proof_state = coalesce(excluded.static_proof_state, findings.static_proof_state)
             "#,
             params![
                 scan_id,
@@ -888,6 +1030,7 @@ impl FindingStore {
                 finding.created_at,
                 finding.vuln_source.map(|s| s.as_str()),
                 finding.dedup_key,
+                finding.static_proof_state.map(StaticProofState::as_str),
             ],
         )?;
 
@@ -940,6 +1083,7 @@ impl FindingStore {
                 actor_fingerprint: None,
                 triage: None,
                 created_at: String::new(),
+                static_proof_state: None,
                 vuln_source,
                 dedup_key: Some(dedup_key.to_string()),
             }
@@ -1028,7 +1172,7 @@ impl FindingStore {
               f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
               f.created_at,
               t.verdict, t.confidence, t.rationale,
-              f.vuln_source, f.dedup_key
+              f.vuln_source, f.dedup_key, f.static_proof_state
             from findings f
             left join triage t on t.finding_id = f.id
             where f.scan_id = ?1
@@ -1048,7 +1192,7 @@ impl FindingStore {
               f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
               f.created_at,
               t.verdict, t.confidence, t.rationale,
-              f.vuln_source, f.dedup_key
+              f.vuln_source, f.dedup_key, f.static_proof_state
             from findings f
             left join triage t on t.finding_id = f.id
             order by
@@ -1089,7 +1233,8 @@ impl FindingStore {
                   f.id, f.scan_id, f.fingerprint, f.rule_id, f.title, f.severity,
                   f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
                   f.created_at,
-                  t.verdict, t.confidence, t.rationale
+                  t.verdict, t.confidence, t.rationale,
+                  f.vuln_source, f.dedup_key, f.static_proof_state
                 from findings f
                 left join triage t on t.finding_id = f.id
                 where f.fingerprint = ?1
@@ -1121,7 +1266,7 @@ impl FindingStore {
               f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
               f.created_at,
               t.verdict, t.confidence, t.rationale,
-              f.vuln_source, f.dedup_key
+              f.vuln_source, f.dedup_key, f.static_proof_state
             from findings f
             left join triage t on t.finding_id = f.id
             where f.fingerprint like ?1
@@ -1168,6 +1313,13 @@ fn row_to_patch_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<PatchResult>
 }
 
 fn row_to_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
+    // SELECT ordering, 0-based:
+    //   0..11  f.id .. f.actor_fingerprint
+    //   12     f.created_at
+    //   13..15 t.verdict, t.confidence, t.rationale (LEFT JOIN, may be NULL)
+    //   16     f.vuln_source
+    //   17     f.dedup_key
+    //   18     f.static_proof_state
     let severity: String = row.get(5)?;
     let verdict: Option<String> = row.get(13)?;
     let triage = match verdict {
@@ -1181,6 +1333,7 @@ fn row_to_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
 
     let vuln_source: Option<String> = row.get(16).ok();
     let dedup_key: Option<String> = row.get(17).ok();
+    let static_proof_state: Option<String> = row.get(18).ok();
     Ok(Finding {
         id: row.get(0)?,
         scan_id: row.get(1)?,
@@ -1196,6 +1349,11 @@ fn row_to_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
         actor_fingerprint: row.get(11)?,
         created_at: row.get(12)?,
         triage,
+        static_proof_state: static_proof_state
+            .as_deref()
+            .map(StaticProofState::try_from)
+            .transpose()
+            .map_err(to_sql_error)?,
         vuln_source: vuln_source.as_deref().and_then(VulnSource::parse),
         dedup_key,
     })
@@ -1308,6 +1466,17 @@ fn split_csv(value: String) -> impl Iterator<Item = String> {
 
 fn short_id(fingerprint: &str) -> String {
     fingerprint.chars().take(8).collect()
+}
+
+fn severity_rank(severity: Severity) -> u8 {
+    match severity {
+        Severity::Critical => 0,
+        Severity::High => 1,
+        Severity::Medium => 2,
+        Severity::Low => 3,
+        Severity::Info => 4,
+        Severity::Unknown => 5,
+    }
 }
 
 fn pad(value: &str, width: usize) -> String {
@@ -1432,7 +1601,7 @@ mod tests {
         let id1 = store.insert_finding(run, &semgrep).unwrap();
 
         // Higher-severity collision from full-mode-multi.
-        let mut chunked = Finding::new_tool(
+        let chunked = Finding::new_tool(
             "full-mode-multi",
             "full-mode-multi/cwe-78",
             "src/foo.c",
@@ -1533,6 +1702,75 @@ mod tests {
     }
 
     #[test]
+    fn static_proof_taxonomy_parses_and_serializes_expected_states() {
+        let states = [
+            ("signal_only", StaticProofState::SignalOnly),
+            ("code_cited", StaticProofState::CodeCited),
+            ("source_sink_linked", StaticProofState::SourceSinkLinked),
+            ("sanitizer_checked", StaticProofState::SanitizerChecked),
+            (
+                "statically_confirmed",
+                StaticProofState::StaticallyConfirmed,
+            ),
+            ("statically_rejected", StaticProofState::StaticallyRejected),
+            (
+                "needs_runtime_evidence",
+                StaticProofState::NeedsRuntimeEvidence,
+            ),
+        ];
+
+        for (raw, state) in states {
+            assert_eq!(StaticProofState::try_from(raw).unwrap(), state);
+            assert_eq!(state.as_str(), raw);
+        }
+
+        assert!(StaticProofState::StaticallyConfirmed.is_static_terminal_state());
+        assert!(!StaticProofState::SourceSinkLinked.is_static_terminal_state());
+    }
+
+    #[test]
+    fn static_proof_taxonomy_rejects_execution_confirmed_states() {
+        for raw in [
+            "execution_confirmed",
+            "runtime_confirmed",
+            "dynamic_confirmed",
+            "exploit_confirmed",
+            "poc_confirmed",
+        ] {
+            let error = StaticProofState::try_from(raw).unwrap_err().to_string();
+            assert!(error.contains("not valid static proof"));
+        }
+    }
+
+    #[test]
+    fn static_proof_state_round_trips_through_findings_store() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-static", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.static",
+            "src/app.ts",
+            9,
+            Some(10),
+            Severity::High,
+            "scanner signal",
+        )
+        .with_static_proof_state(StaticProofState::SignalOnly);
+
+        store.insert_finding("run-static", &finding).unwrap();
+        let stored = store.list_findings_for_scan_id("run-static").unwrap();
+
+        assert_eq!(stored.len(), 1);
+        assert_eq!(
+            stored[0].static_proof_state,
+            Some(StaticProofState::SignalOnly)
+        );
+        let serialized = serde_json::to_value(&stored[0]).unwrap();
+        assert_eq!(serialized["staticProofState"], json!("signal_only"));
+    }
+
+    #[test]
     fn resolves_finding_by_fingerprint_prefix() {
         let store = FindingStore::open_in_memory().unwrap();
         let run_id = "run-1";
@@ -1553,6 +1791,80 @@ mod tests {
         let resolved = store.get_finding_by_reference(prefix).unwrap().unwrap();
 
         assert_eq!(resolved.fingerprint, finding.fingerprint);
+    }
+
+    #[test]
+    fn stable_aliases_sort_by_severity_then_fingerprint() {
+        let mut high_late = Finding::new_semgrep(
+            "demo.high",
+            "src/b.ts",
+            2,
+            Some(2),
+            Severity::High,
+            "high z",
+        );
+        high_late.fingerprint = "zzzz1111".to_string();
+        let mut high_early = Finding::new_semgrep(
+            "demo.high",
+            "src/a.ts",
+            1,
+            Some(1),
+            Severity::High,
+            "high a",
+        );
+        high_early.fingerprint = "aaaa1111".to_string();
+        let mut critical = Finding::new_semgrep(
+            "demo.critical",
+            "src/c.ts",
+            3,
+            Some(3),
+            Severity::Critical,
+            "critical",
+        );
+        critical.fingerprint = "mmmm1111".to_string();
+
+        let input = vec![high_late.clone(), high_early.clone(), critical.clone()];
+        let aliases = sorted_finding_aliases(&input);
+
+        assert_eq!(aliases[0].0, "F-0001");
+        assert_eq!(aliases[0].1.fingerprint, critical.fingerprint);
+        assert_eq!(aliases[1].0, "F-0002");
+        assert_eq!(aliases[1].1.fingerprint, high_early.fingerprint);
+        assert_eq!(
+            stable_finding_alias(&input, &high_late.fingerprint).as_deref(),
+            Some("F-0003")
+        );
+        assert_eq!(
+            resolve_finding_alias(&input, "f-0002")
+                .as_ref()
+                .map(|finding| finding.fingerprint.as_str()),
+            Some(high_early.fingerprint.as_str())
+        );
+        assert!(parse_finding_alias("F-0000").is_none());
+    }
+
+    #[test]
+    fn finding_report_outputs_alias_with_secondary_fingerprint() {
+        let mut high_late =
+            Finding::new_semgrep("demo.b", "src/b.ts", 2, Some(2), Severity::High, "b");
+        high_late.fingerprint = "zzzz1111".to_string();
+        let mut high_early =
+            Finding::new_semgrep("demo.a", "src/a.ts", 1, Some(1), Severity::High, "a");
+        high_early.fingerprint = "aaaa1111".to_string();
+        let report = FindingListReport {
+            count: 2,
+            findings: vec![high_late, high_early],
+        };
+
+        let output = report.output();
+
+        assert!(output.contains("Alias"));
+        assert!(output.contains("Fingerprint"));
+        let first = output.find("F-0001").unwrap();
+        let second = output.find("F-0002").unwrap();
+        assert!(first < second);
+        assert!(output[first..].contains("aaaa1111"));
+        assert!(output[second..].contains("zzzz1111"));
     }
 
     #[test]

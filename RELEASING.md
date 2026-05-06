@@ -11,6 +11,11 @@
 - The `kuzushi-ts` npm binary, `pnpm dev:ts`, and `scripts/kuzushi-dev` source
   CLI helper are removed. TypeScript remains only for published library exports,
   migration reference code, and tests.
+- The source-only TypeScript `shell` command no longer has a TypeScript/Ink
+  implementation; it exits with Rust replacement commands.
+- The legacy TypeScript/Ink TUI, mock TUI harness, and React/Ink dev
+  dependencies are removed now that the Rust Ratatui shell covers the operator
+  surface.
 - The old `dist/cli*` TypeScript CLI outputs are excluded from the npm tarball.
 - Operator docs now describe only the Rust command surface:
   `shell`, `scan`, `findings`, `modules`, `tools`, `run`, and `config`.
@@ -24,6 +29,13 @@
 - Runtime-backed tools use pi-agent-core through the Rust bridge and still
   require an explicit configured model. Missing models, scanner binaries,
   bridge commands, or plugin roots fail explicitly.
+- `kuzushi doctor` is now the Rust preflight surface for config, `.kuzushi/v2`
+  state writability, findings DB openability, optional scanner binaries,
+  pi-agent-core bridge readiness, and model/auth setup. It reports credential
+  environment variable names only, never secret values.
+- `kuzushi --plain shell` plus `KUZUSHI_PLAIN=1`,
+  `KUZUSHI_SCREEN_READER=1`, or `KUZUSHI_LOW_BANDWIDTH=1` force strict
+  line-oriented shell output with no ANSI escapes, animation, or box drawing.
 
 ### v1.0.0 — Clean Code major refactor
 

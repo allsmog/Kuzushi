@@ -264,12 +264,12 @@ fn synthesize_patch(
     history: &[PatchAttempt],
 ) -> Result<PatchSynthesis> {
     let prompt = build_patch_prompt(repo_root, repo_name, finding, triage, history)?;
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model: model.to_string(),
-        cwd: repo_root.to_path_buf(),
-        system_prompt: PATCH_SYSTEM_PROMPT.to_string(),
+    let response = runtime.query_blocking(AgentQueryRequest::new(
+        model.to_string(),
+        repo_root.to_path_buf(),
+        PATCH_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
     let raw = match response.structured {
         Some(value) => value,
         None => parse_json_object_from_agent_text(&response.text)

@@ -400,12 +400,12 @@ pub fn run(
         };
 
         let prompt = render_chunk_prompt(&cfg.workspace_root, chunk)?;
-        let request = AgentQueryRequest {
-            model: model.clone(),
-            cwd: cfg.workspace_root.clone(),
-            system_prompt: system_prompt.clone(),
+        let request = AgentQueryRequest::new(
+            model.clone(),
+            cfg.workspace_root.clone(),
+            system_prompt.clone(),
             prompt,
-        };
+        );
 
         let result = runtime.query_blocking(request);
 

@@ -10,9 +10,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "declaration": true,
-    "sourceMap": true,
-    "jsx": "react-jsx",
-    "jsxImportSource": "react"
+    "sourceMap": true
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist", "tests", "src/migrations/_legacy"]

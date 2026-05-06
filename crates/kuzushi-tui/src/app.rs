@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 const CTRL_C_ARM_WINDOW: Duration = Duration::from_secs(2);
 const THROTTLE_STALE_AFTER: Duration = Duration::from_secs(30);
 const PASTE_GUARD_WINDOW: Duration = Duration::from_millis(5);
+const VIEWPORT_PAGE_LINES: usize = 10;
+const FINDINGS_PAGE_ROWS: usize = 10;
 
 #[derive(Debug, Clone, Default)]
 pub struct AdvisoryState {
@@ -124,11 +126,13 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
 use kuzushi_core::modules::{OptionSpec, OptionType, ToolDescriptor, ToolExecutionContext};
 use kuzushi_core::{
     attach_source, attachment_store_path, default_scan_engines, detach_source,
-    export_workspace_findings, is_supported_attachment_module, known_artifacts, list_attachments,
-    load_persistent_threat_model, reparse_source, save_persistent_threat_model, AgentQueryRequest,
-    AgentRuntime, AttachmentRecord, Finding, FindingListFilter, FindingStore, KnownArtifact,
-    ModuleRegistry, OptionScope, OptionTarget, RuntimeKind, ScanCancellation, ScanRunOptions,
-    Severity, ToolOptionStore, V2Config, WorkspaceTarget, SUPPORTED_ATTACHMENT_MODULES,
+    export_workspace_findings, format_finding_alias, is_supported_attachment_module,
+    known_artifacts, list_attachments, load_persistent_threat_model, parse_finding_alias,
+    reparse_source, resolve_finding_alias, save_persistent_threat_model, sorted_finding_aliases,
+    AgentQueryRequest, AgentRuntime, AttachmentRecord, Finding, FindingListFilter, FindingStore,
+    KnownArtifact, ModuleRegistry, OptionScope, OptionTarget, RuntimeKind, ScanCancellation,
+    ScanRunOptions, Severity, ToolOptionStore, V2Config, WorkspaceTarget,
+    SUPPORTED_ATTACHMENT_MODULES,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
 use ratatui::backend::CrosstermBackend;
@@ -136,10 +140,10 @@ use ratatui::Terminal;
 use uuid::Uuid;
 
 use crate::commands::{
-    parse_command, shell_command_specs, ContextCommand, SastTaskCommand, SastTaskModeCommand,
-    ShellCommand, WorkspaceCommand,
+    parse_command, shell_command_specs, shell_help_examples, ContextCommand, SastTaskCommand,
+    SastTaskModeCommand, ShellCommand, WorkspaceCommand,
 };
-use crate::renderer::{render_app, render_plain_app};
+use crate::renderer::{render_app, render_plain_app, render_plain_command_result};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogLine {
@@ -154,6 +158,7 @@ pub struct ScanPanelState {
     pub stage: String,
     pub findings_count: usize,
     pub running: bool,
+    pub abort_requested: bool,
     pub error: Option<String>,
 }
 
@@ -226,6 +231,7 @@ pub struct AgentChatView {
     pub question: String,
     pub answer: Option<String>,
     pub running: bool,
+    pub abort_requested: bool,
     pub error: Option<String>,
 }
 
@@ -370,6 +376,62 @@ pub enum ThreatView {
     Summary,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HotkeyTrigger {
+    Char(char),
+    Enter,
+    PageUp,
+    PageDown,
+}
+
+impl HotkeyTrigger {
+    fn matches(self, key: KeyEvent) -> bool {
+        if !key.modifiers.is_empty() {
+            return false;
+        }
+        match (self, key.code) {
+            (Self::Char(expected), KeyCode::Char(actual)) => expected == actual,
+            (Self::Enter, KeyCode::Enter) => true,
+            (Self::PageUp, KeyCode::PageUp) => true,
+            (Self::PageDown, KeyCode::PageDown) => true,
+            _ => false,
+        }
+    }
+
+    fn is_char(self) -> bool {
+        matches!(self, Self::Char(_))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ViewHotkeyAction {
+    FindingsNext,
+    FindingsPrevious,
+    FindingsFirst,
+    FindingsLast,
+    FindingsPageDown,
+    FindingsPageUp,
+    FindingsOpen,
+    ThreatView(ThreatView),
+    ActorDetail(usize),
+    PauseScan,
+    ResumeScan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ViewKeybinding {
+    pub trigger: HotkeyTrigger,
+    pub hint: &'static str,
+    pub label: &'static str,
+    pub action: ViewHotkeyAction,
+}
+
+impl ViewKeybinding {
+    fn matches(self, key: KeyEvent) -> bool {
+        self.trigger.matches(key)
+    }
+}
+
 #[derive(Debug)]
 pub struct ShellApp {
     pub input: String,
@@ -399,11 +461,18 @@ pub struct ShellApp {
     pub advisory: AdvisoryState,
     pub pending_plan: Option<PlanProposal>,
     pub planner_running: bool,
+    pub plan_abort_requested: bool,
     pub pending_threat_patch: Option<ThreatPatch>,
     pub threat_worker_running: bool,
+    pub threat_abort_requested: bool,
     pub chains: Vec<ExploitChain>,
     pub story_return_view: Option<ShellView>,
     pub findings_cursor: usize,
+    pub help_scroll: usize,
+    pub tools_scroll: usize,
+    pub modules_scroll: usize,
+    pub history_scroll: usize,
+    pub kb_scroll: usize,
     pub last_char_at: Option<Instant>,
     scan_rx: Option<Receiver<ScanEvent>>,
     scan_cancel: Option<ScanCancellation>,
@@ -450,11 +519,18 @@ impl ShellApp {
             advisory: AdvisoryState::default(),
             pending_plan: None,
             planner_running: false,
+            plan_abort_requested: false,
             pending_threat_patch: None,
             threat_worker_running: false,
+            threat_abort_requested: false,
             chains: Vec::new(),
             story_return_view: None,
             findings_cursor: 0,
+            help_scroll: 0,
+            tools_scroll: 0,
+            modules_scroll: 0,
+            history_scroll: 0,
+            kb_scroll: 0,
             last_char_at: None,
             scan_rx: None,
             scan_cancel: None,
@@ -463,6 +539,8 @@ impl ShellApp {
             threat_rx: None,
         };
         app.log("system", "kuzushi shell");
+        app.log("startup", app.startup_summary_line());
+        app.log("first-run", app.first_finding_hint());
         app.log(
             "help",
             "/scan, /run <tool>, /ask <question>, ?text, /workspace, /context build, /tasks, /options [tool], /auth login openai-codex|anthropic, /provider, /backend, /model, /cost, /kb, /history, /clear, /load <specifier>, /findings, /modules, /tools, /quit",
@@ -484,16 +562,46 @@ impl ShellApp {
         }
     }
 
+    pub fn first_finding_scan_command(&self) -> &'static str {
+        if self.target.is_some() {
+            "scan"
+        } else {
+            "scan ."
+        }
+    }
+
+    pub fn first_finding_hint(&self) -> String {
+        format!(
+            "First finding: run `{}`, then `findings`.",
+            self.first_finding_scan_command()
+        )
+    }
+
+    fn startup_summary_line(&self) -> String {
+        let target = self
+            .target
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "none".to_string());
+        format!(
+            "ready: {} module(s), {} tool(s), target {target}",
+            self.registry.modules().count(),
+            self.registry.tools().count()
+        )
+    }
+
     pub fn handle_command(&mut self, command: ShellCommand) {
         match command {
             ShellCommand::Help => {
                 self.shell_view = ShellView::Help;
+                self.help_scroll = 0;
                 self.log("help", compact_help_summary());
             }
             ShellCommand::Back => self.go_back(),
             ShellCommand::Modules => {
                 self.shell_view = ShellView::Catalog;
                 self.catalog_expanded = true;
+                self.modules_scroll = 0;
                 self.log(
                     "module",
                     format!("showing {} module(s)", self.registry.modules().count()),
@@ -501,6 +609,7 @@ impl ShellApp {
             }
             ShellCommand::Tools => {
                 self.shell_view = ShellView::Tools;
+                self.tools_scroll = 0;
                 self.log(
                     "tool",
                     format!("showing {} tool(s)", self.registry.tools().count()),
@@ -538,7 +647,7 @@ impl ShellApp {
                     self.shell_view = ShellView::Module;
                     self.log("use", module);
                 } else {
-                    self.log("error", format!("unknown module {module}"));
+                    self.log("error", self.unknown_module_message(&module));
                 }
             }
             ShellCommand::Tune => {
@@ -990,8 +1099,8 @@ impl ShellApp {
         }
 
         let mut values = Vec::new();
-        for (index, finding) in findings.iter().enumerate() {
-            values.push(format_finding_alias(index));
+        for (alias, finding) in sorted_finding_aliases(&findings) {
+            values.push(alias);
             values.push(short_fingerprint(&finding.fingerprint));
             values.push(finding.fingerprint.clone());
         }
@@ -1077,8 +1186,72 @@ impl ShellApp {
         }
     }
 
+    #[cfg(test)]
+    fn drain_next_agent_event_for_test(
+        &mut self,
+        timeout: Duration,
+    ) -> std::result::Result<(), String> {
+        let event = {
+            let Some(rx) = self.agent_rx.as_ref() else {
+                return Err(format!(
+                    "agent worker channel missing; {}",
+                    self.agent_chat_diagnostics_for_test()
+                ));
+            };
+            match rx.recv_timeout(timeout) {
+                Ok(event) => event,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    return Err(format!(
+                        "timed out after {timeout:?} waiting for agent worker event; {}",
+                        self.agent_chat_diagnostics_for_test()
+                    ));
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(format!(
+                        "agent worker channel disconnected before reporting completion; {}",
+                        self.agent_chat_diagnostics_for_test()
+                    ));
+                }
+            }
+        };
+
+        self.apply_agent_event(event);
+        if self.agent_chat.as_ref().is_some_and(|agent| !agent.running) {
+            self.agent_rx = None;
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn agent_chat_diagnostics_for_test(&self) -> String {
+        let agent_state = match &self.agent_chat {
+            Some(agent) => format!(
+                "AgentChat question={:?} running={} abort_requested={} answer={:?} error={:?}",
+                agent.question, agent.running, agent.abort_requested, agent.answer, agent.error
+            ),
+            None => "AgentChat missing".to_string(),
+        };
+        let log_tail = self
+            .log
+            .iter()
+            .rev()
+            .take(5)
+            .map(|line| format!("{}: {}", line.prefix, line.body))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        format!("{agent_state}; recent log: [{log_tail}]")
+    }
+
     fn apply_threat_patch_event(&mut self, event: ThreatPatchEvent) {
         self.threat_worker_running = false;
+        if self.threat_abort_requested {
+            self.threat_abort_requested = false;
+            self.log(
+                "threats",
+                "pi-agent-core response arrived after abort request; discarded",
+            );
+            return;
+        }
         match event {
             ThreatPatchEvent::Proposed(patch) => {
                 self.log(
@@ -1133,6 +1306,7 @@ impl ShellApp {
         let (tx, rx) = mpsc::channel();
         self.threat_rx = Some(rx);
         self.threat_worker_running = true;
+        self.threat_abort_requested = false;
         self.log("threats", "regenerating threat-model patch");
 
         thread::spawn(move || {
@@ -1176,6 +1350,7 @@ impl ShellApp {
         let (tx, rx) = mpsc::channel();
         self.threat_rx = Some(rx);
         self.threat_worker_running = true;
+        self.threat_abort_requested = false;
         self.log("threats", format!("asking: {question}"));
 
         thread::spawn(move || {
@@ -1226,6 +1401,14 @@ impl ShellApp {
 
     fn apply_plan_event(&mut self, event: PlanEvent) {
         self.planner_running = false;
+        if self.plan_abort_requested {
+            self.plan_abort_requested = false;
+            self.log(
+                "plan",
+                "pi-agent-core response arrived after abort request; discarded",
+            );
+            return;
+        }
         match event {
             PlanEvent::Proposed(plan) => {
                 self.log(
@@ -1289,6 +1472,7 @@ impl ShellApp {
         let (tx, rx) = mpsc::channel();
         self.plan_rx = Some(rx);
         self.planner_running = true;
+        self.plan_abort_requested = false;
         self.log("plan", format!("planning: {goal_owned}"));
 
         thread::spawn(move || planner_worker(config, model, thinking_level, cwd, goal_owned, tx));
@@ -1375,6 +1559,7 @@ impl ShellApp {
                 question: question.to_string(),
                 answer: None,
                 running: false,
+                abort_requested: false,
                 error: Some(
                     "ask requires an explicit model. Next: model, then choose a pi-agent-core provider/model".to_string(),
                 ),
@@ -1391,6 +1576,7 @@ impl ShellApp {
                 question: question.to_string(),
                 answer: None,
                 running: false,
+                abort_requested: false,
                 error: Some(message.clone()),
             });
             self.log("error", message);
@@ -1410,6 +1596,7 @@ impl ShellApp {
             question: question.clone(),
             answer: None,
             running: true,
+            abort_requested: false,
             error: None,
         });
         self.agent_rx = Some(rx);
@@ -1454,6 +1641,7 @@ impl ShellApp {
 
     fn show_history(&mut self) {
         self.shell_view = ShellView::History;
+        self.history_scroll = 0;
         self.log(
             "history",
             format!(
@@ -1548,6 +1736,145 @@ impl ShellApp {
             .as_ref()
             .map(|cancel| cancel.is_paused())
             .unwrap_or(false)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_scan_cancel_for_test(&mut self, cancel: ScanCancellation) {
+        self.scan_cancel = Some(cancel);
+    }
+
+    pub(crate) fn view_keybindings(&self) -> Vec<ViewKeybinding> {
+        match self.shell_view {
+            ShellView::Findings if !self.findings.is_empty() => vec![
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('j'),
+                    hint: "j/k/g/G",
+                    label: "move",
+                    action: ViewHotkeyAction::FindingsNext,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('k'),
+                    hint: "j/k/g/G",
+                    label: "move",
+                    action: ViewHotkeyAction::FindingsPrevious,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('g'),
+                    hint: "j/k/g/G",
+                    label: "move",
+                    action: ViewHotkeyAction::FindingsFirst,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('G'),
+                    hint: "j/k/g/G",
+                    label: "move",
+                    action: ViewHotkeyAction::FindingsLast,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::PageDown,
+                    hint: "PgUp/PgDn",
+                    label: "page",
+                    action: ViewHotkeyAction::FindingsPageDown,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::PageUp,
+                    hint: "PgUp/PgDn",
+                    label: "page",
+                    action: ViewHotkeyAction::FindingsPageUp,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Enter,
+                    hint: "Enter",
+                    label: "open",
+                    action: ViewHotkeyAction::FindingsOpen,
+                },
+            ],
+            ShellView::Threat(_) => vec![
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('1'),
+                    hint: "1..5",
+                    label: "switch threat view",
+                    action: ViewHotkeyAction::ThreatView(ThreatView::Dfd),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('2'),
+                    hint: "1..5",
+                    label: "switch threat view",
+                    action: ViewHotkeyAction::ThreatView(ThreatView::Stride),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('3'),
+                    hint: "1..5",
+                    label: "switch threat view",
+                    action: ViewHotkeyAction::ThreatView(ThreatView::Stories),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('4'),
+                    hint: "1..5",
+                    label: "switch threat view",
+                    action: ViewHotkeyAction::ThreatView(ThreatView::Scope),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('5'),
+                    hint: "1..5",
+                    label: "switch threat view",
+                    action: ViewHotkeyAction::ThreatView(ThreatView::Summary),
+                },
+            ],
+            ShellView::ModuleRun => {
+                let mut bindings = Vec::new();
+                for index in 1..=4 {
+                    bindings.push(ViewKeybinding {
+                        trigger: HotkeyTrigger::Char(char::from_digit(index as u32, 10).unwrap()),
+                        hint: "1..4",
+                        label: "actor",
+                        action: ViewHotkeyAction::ActorDetail(index),
+                    });
+                }
+                if self.can_pause_scan_hotkey() {
+                    bindings.push(ViewKeybinding {
+                        trigger: HotkeyTrigger::Char('p'),
+                        hint: "p",
+                        label: "pause",
+                        action: ViewHotkeyAction::PauseScan,
+                    });
+                    bindings.push(ViewKeybinding {
+                        trigger: HotkeyTrigger::Char('P'),
+                        hint: "p",
+                        label: "pause",
+                        action: ViewHotkeyAction::PauseScan,
+                    });
+                }
+                if self.can_resume_scan_hotkey() {
+                    bindings.push(ViewKeybinding {
+                        trigger: HotkeyTrigger::Char('r'),
+                        hint: "r",
+                        label: "resume",
+                        action: ViewHotkeyAction::ResumeScan,
+                    });
+                    bindings.push(ViewKeybinding {
+                        trigger: HotkeyTrigger::Char('R'),
+                        hint: "r",
+                        label: "resume",
+                        action: ViewHotkeyAction::ResumeScan,
+                    });
+                }
+                bindings
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn can_pause_scan_hotkey(&self) -> bool {
+        self.scan.as_ref().is_some_and(|scan| scan.running)
+            && self.scan_cancel.is_some()
+            && !self.is_scan_paused()
+    }
+
+    fn can_resume_scan_hotkey(&self) -> bool {
+        self.scan.as_ref().is_some_and(|scan| scan.running)
+            && self.scan_cancel.is_some()
+            && self.is_scan_paused()
     }
 
     fn handle_pause_command(&mut self) {
@@ -1919,19 +2246,27 @@ impl ShellApp {
 
     pub fn show_quickstart(&mut self) {
         self.shell_view = ShellView::Help;
+        let scan_command = self.first_finding_scan_command();
         let lines = [
             "Welcome to kuzushi! Quickstart:",
-            "  1. /target <path>           — point the shell at a repo",
-            "  2. /model openai:gpt-5.5    — pick a provider/model",
-            "  3. /scan ./repo             — run configured scanners",
-            "  4. /findings                — browse persisted findings",
-            "  5. /threats                 — review or regenerate the threat model",
-            "  6. /plan <english>          — Haiku-driven natural-language plans",
+            if self.target.is_some() {
+                "  1. scan                    - run configured scanners on the active target"
+            } else {
+                "  1. scan .                  - run configured scanners on this directory"
+            },
+            "  2. findings                - browse persisted findings",
+            "  3. context build           - write .kuzushi/context-snapshot.json",
+            "  4. model                   - choose an explicit provider/model for ask/triage",
+            "  5. ask <question>          - ask after a model is configured",
             "Press Ctrl+O to toggle the live event timeline.",
         ];
         for line in lines {
             self.log("quickstart", line);
         }
+        self.log(
+            "quickstart",
+            format!("Exact first-finding path: {scan_command} -> findings"),
+        );
     }
 
     pub fn handle_target_command(&mut self, raw: Option<&str>) {
@@ -2523,6 +2858,7 @@ impl ShellApp {
             Ok(()) => {
                 self.focused_module = Some(module_id.clone());
                 self.shell_view = ShellView::KnowledgeBase;
+                self.kb_scroll = 0;
                 self.log(
                     "kb",
                     format!(
@@ -2988,6 +3324,7 @@ impl ShellApp {
             stage: "queued".to_string(),
             findings_count: 0,
             running: true,
+            abort_requested: false,
             error: None,
         });
         self.scan_rx = Some(rx);
@@ -3009,6 +3346,8 @@ impl ShellApp {
         Ok(ScanRunOptions {
             severity: parse_scan_severity_filter(&input)?,
             tasks: parse_native_scan_tasks(&input)?,
+            static_proof_state: None,
+            index_static_evidence: false,
         })
     }
 
@@ -3145,7 +3484,10 @@ impl ShellApp {
             Some(raw) if !raw.trim().is_empty() => match serde_json::from_str(&raw) {
                 Ok(input) => input,
                 Err(error) => {
-                    self.log("error", format!("run input must be JSON: {error}"));
+                    self.log(
+                        "error",
+                        format!("run input must be JSON: {error}. Next: run <tool> {{}}"),
+                    );
                     return;
                 }
             },
@@ -3158,7 +3500,13 @@ impl ShellApp {
             {
                 Ok(input) => input,
                 Err(error) => {
-                    self.log("error", error.to_string());
+                    self.log(
+                        "error",
+                        with_next_step(
+                            error.to_string(),
+                            "tools, options <tool>, or run <tool> {}",
+                        ),
+                    );
                     return;
                 }
             };
@@ -3166,7 +3514,13 @@ impl ShellApp {
         let workspace = match self.current_workspace() {
             Ok(workspace) => Some(workspace),
             Err(error) => {
-                self.log("error", error.to_string());
+                self.log(
+                    "error",
+                    with_next_step(
+                        error.to_string(),
+                        "scan <target> or start kuzushi shell --target .",
+                    ),
+                );
                 return;
             }
         };
@@ -3206,7 +3560,10 @@ impl ShellApp {
             {
                 Ok(store) => store,
                 Err(error) => {
-                    self.log("error", error.to_string());
+                    self.log(
+                        "error",
+                        with_next_step(error.to_string(), "workspace status or scan <target>"),
+                    );
                     return;
                 }
             }
@@ -3258,7 +3615,10 @@ impl ShellApp {
             ) {
                 Ok(runtime) => Some(runtime.with_thinking_level(tool_thinking_level)),
                 Err(error) => {
-                    self.log("error", error.to_string());
+                    self.log(
+                        "error",
+                        with_next_step(error.to_string(), "model <n> or config"),
+                    );
                     return;
                 }
             }
@@ -3292,8 +3652,27 @@ impl ShellApp {
                     });
                 self.log("result", rendered);
             }
-            Err(error) => self.log("error", error.to_string()),
+            Err(error) => self.log(
+                "error",
+                with_next_step(error.to_string(), "tools, options <tool>, or model <n>"),
+            ),
         }
+    }
+
+    fn unknown_module_message(&self, module: &str) -> String {
+        let module_ids = self
+            .registry
+            .modules()
+            .map(|entry| entry.metadata().id.clone())
+            .collect::<Vec<_>>();
+        let module_refs = module_ids.iter().map(String::as_str).collect::<Vec<_>>();
+        let closest = closest_option_names(module, &module_refs);
+        let closest = if closest.is_empty() {
+            "none".to_string()
+        } else {
+            closest.join(", ")
+        };
+        format!("unknown module {module:?}. Closest: {closest}. Next: modules or use <module-id>")
     }
 
     fn default_tool_for_focused_module(&self) -> Option<String> {
@@ -3331,8 +3710,51 @@ impl ShellApp {
     fn show_findings(&mut self) {
         self.shell_view = ShellView::Findings;
         self.refresh_findings(true);
+        self.clamp_findings_cursor();
         if self.findings.is_empty() {
-            self.log("findings", "no findings yet");
+            self.log("findings", "no findings yet. Next: scan or scan <target>");
+        }
+    }
+
+    fn clamp_findings_cursor(&mut self) {
+        if self.findings.is_empty() {
+            self.findings_cursor = 0;
+        } else {
+            self.findings_cursor = self.findings_cursor.min(self.findings.len() - 1);
+        }
+    }
+
+    fn open_finding_at_cursor(&mut self) {
+        let aliases = sorted_finding_aliases(&self.findings);
+        if aliases.is_empty() {
+            return;
+        }
+        let cursor = self.findings_cursor.min(aliases.len() - 1);
+        let (alias, finding) = aliases[cursor].clone();
+        self.findings_cursor = cursor;
+        self.selected_finding = Some(finding.clone());
+        self.shell_view = ShellView::Finding;
+        self.log(
+            "open",
+            format!(
+                "{alias} {} {}:{} {}",
+                finding.severity.as_str(),
+                finding.file_path,
+                finding.start_line,
+                finding.fingerprint
+            ),
+        );
+        self.log("title", finding.title);
+        if let Some(triage) = &finding.triage {
+            self.log(
+                "triage",
+                format!(
+                    "{} {:.2} {}",
+                    triage.verdict.as_str(),
+                    triage.confidence,
+                    triage.rationale
+                ),
+            );
         }
     }
 
@@ -3362,7 +3784,7 @@ impl ShellApp {
 
         let reference = if let Some(index) = parse_finding_alias(reference) {
             self.refresh_findings(false);
-            let Some(finding) = self.findings.get(index) else {
+            let Some(finding) = resolve_finding_alias(&self.findings, reference) else {
                 self.log(
                     "error",
                     format!(
@@ -3412,8 +3834,14 @@ impl ShellApp {
                     );
                 }
             }
-            Ok(None) => self.log("error", format!("no finding matches {reference:?}")),
-            Err(error) => self.log("error", error.to_string()),
+            Ok(None) => self.log(
+                "error",
+                format!("no finding matches {reference:?}. Next: findings or scan"),
+            ),
+            Err(error) => self.log(
+                "error",
+                with_next_step(error.to_string(), "findings or scan <target>"),
+            ),
         }
     }
 
@@ -3422,7 +3850,10 @@ impl ShellApp {
             Ok(store) => store,
             Err(error) => {
                 if announce {
-                    self.log("error", error.to_string());
+                    self.log(
+                        "error",
+                        with_next_step(error.to_string(), "scan <target> or workspace status"),
+                    );
                 }
                 return;
             }
@@ -3438,6 +3869,7 @@ impl ShellApp {
                         .find(|finding| finding.fingerprint == selected.fingerprint)
                         .cloned();
                 }
+                self.clamp_findings_cursor();
                 if announce {
                     self.log(
                         "findings",
@@ -3447,7 +3879,10 @@ impl ShellApp {
             }
             Err(error) => {
                 if announce {
-                    self.log("error", error.to_string());
+                    self.log(
+                        "error",
+                        with_next_step(error.to_string(), "scan <target> or workspace status"),
+                    );
                 }
             }
         }
@@ -3480,6 +3915,7 @@ impl ShellApp {
                     scan.run_id = Some(run_id.clone());
                     scan.target = target;
                     scan.stage = "starting scan".to_string();
+                    scan.abort_requested = false;
                 }
                 self.log("scan", format!("run {}", short_fingerprint(&run_id)));
             }
@@ -3516,9 +3952,11 @@ impl ShellApp {
                     scan.stage = "completed".to_string();
                     scan.findings_count = findings_count;
                     scan.running = false;
+                    scan.abort_requested = false;
                     scan.error = None;
                 }
                 self.refresh_findings(false);
+                self.log_scan_alias_hint();
                 self.log(
                     "scan",
                     format!(
@@ -3529,18 +3967,24 @@ impl ShellApp {
                 );
             }
             ScanEvent::Failed { error } => {
+                let actionable = with_next_step(
+                    error,
+                    "tasks, task block semgrep, or run semgrep:scan {\"binary\":\"/path/to/semgrep\"}",
+                );
                 if let Some(scan) = &mut self.scan {
                     scan.stage = "failed".to_string();
                     scan.running = false;
-                    scan.error = Some(error.clone());
+                    scan.abort_requested = false;
+                    scan.error = Some(actionable.clone());
                 }
-                self.log("error", error);
+                self.log("error", actionable);
             }
             ScanEvent::Cancelled { run_id } => {
                 if let Some(scan) = &mut self.scan {
                     scan.run_id = Some(run_id.clone());
                     scan.stage = "cancelled".to_string();
                     scan.running = false;
+                    scan.abort_requested = false;
                     scan.error = None;
                 }
                 self.log("scan", format!("cancelled {}", short_fingerprint(&run_id)));
@@ -3548,23 +3992,68 @@ impl ShellApp {
         }
     }
 
+    fn log_scan_alias_hint(&mut self) {
+        if let Some((alias, finding)) = sorted_finding_aliases(&self.findings).into_iter().next() {
+            self.log(
+                "scan",
+                format!(
+                    "top alias {alias} -> {} ({})",
+                    short_fingerprint(&finding.fingerprint),
+                    truncate_ascii(&finding.title, 64)
+                ),
+            );
+        }
+    }
+
     fn apply_agent_event(&mut self, event: AgentEvent) {
+        let abort_requested = self
+            .agent_chat
+            .as_ref()
+            .is_some_and(|agent| agent.abort_requested);
         match event {
             AgentEvent::Answered { text } => {
                 if let Some(agent) = &mut self.agent_chat {
                     agent.running = false;
-                    agent.answer = Some(text.clone());
-                    agent.error = None;
+                    agent.abort_requested = false;
+                    if abort_requested {
+                        agent.answer = None;
+                        agent.error =
+                            Some("response arrived after abort request; ignored".to_string());
+                    } else {
+                        agent.answer = Some(text.clone());
+                        agent.error = None;
+                    }
                 }
-                self.log("answer", text);
+                if abort_requested {
+                    self.log(
+                        "agent",
+                        "pi-agent-core response arrived after abort request; ignored",
+                    );
+                } else {
+                    self.log("answer", text);
+                }
             }
             AgentEvent::Failed { error } => {
                 if let Some(agent) = &mut self.agent_chat {
                     agent.running = false;
+                    agent.abort_requested = false;
                     agent.answer = None;
-                    agent.error = Some(error.clone());
+                    if abort_requested {
+                        agent.error = Some(format!(
+                            "request ended after abort request; last error: {error}"
+                        ));
+                    } else {
+                        agent.error = Some(error.clone());
+                    }
                 }
-                self.log("error", error);
+                if abort_requested {
+                    self.log(
+                        "agent",
+                        format!("pi-agent-core ended after abort request: {error}"),
+                    );
+                } else {
+                    self.log("error", error);
+                }
             }
         }
     }
@@ -3640,13 +4129,9 @@ impl ShellApp {
             {
                 self.select_current_model_choice();
             }
-            KeyCode::Char(ch)
-                if self.input.is_empty()
-                    && key.modifiers.is_empty()
-                    && self.handle_view_hotkey(ch) =>
-            {
-                self.last_char_at = Some(Instant::now());
-            }
+            _ if self.input.is_empty()
+                && key.modifiers.is_empty()
+                && self.handle_view_hotkey(key) => {}
             KeyCode::Char(ch) => {
                 self.input.push(ch);
                 self.last_char_at = Some(Instant::now());
@@ -3655,30 +4140,11 @@ impl ShellApp {
                 self.input.pop();
             }
             KeyCode::Tab => self.apply_completion(),
-            KeyCode::PageDown
-                if self.input.is_empty()
-                    && key.modifiers.is_empty()
-                    && matches!(self.shell_view, ShellView::Findings) =>
-            {
-                self.findings_cursor =
-                    (self.findings_cursor + 10).min(self.findings.len().saturating_sub(1));
+            KeyCode::PageDown if self.input.is_empty() && key.modifiers.is_empty() => {
+                self.page_down_current_view();
             }
-            KeyCode::PageUp
-                if self.input.is_empty()
-                    && key.modifiers.is_empty()
-                    && matches!(self.shell_view, ShellView::Findings) =>
-            {
-                self.findings_cursor = self.findings_cursor.saturating_sub(10);
-            }
-            KeyCode::Enter
-                if self.input.is_empty()
-                    && key.modifiers.is_empty()
-                    && matches!(self.shell_view, ShellView::Findings)
-                    && !self.findings.is_empty() =>
-            {
-                let cursor = self.findings_cursor.min(self.findings.len() - 1);
-                let alias = format_finding_alias(cursor);
-                self.handle_command(ShellCommand::Open(alias));
+            KeyCode::PageUp if self.input.is_empty() && key.modifiers.is_empty() => {
+                self.page_up_current_view();
             }
             KeyCode::Enter => {
                 if let Some(last) = self.last_char_at {
@@ -3699,69 +4165,114 @@ impl ShellApp {
         }
     }
 
-    fn handle_view_hotkey(&mut self, ch: char) -> bool {
-        if matches!(self.shell_view, ShellView::Findings) && !self.findings.is_empty() {
-            let max = self.findings.len().saturating_sub(1);
-            match ch {
-                'j' => {
-                    self.findings_cursor = (self.findings_cursor + 1).min(max);
-                    return true;
-                }
-                'k' => {
-                    self.findings_cursor = self.findings_cursor.saturating_sub(1);
-                    return true;
-                }
-                'g' => {
-                    self.findings_cursor = 0;
-                    return true;
-                }
-                'G' => {
-                    self.findings_cursor = max;
-                    return true;
-                }
-                _ => {}
-            }
+    fn handle_view_hotkey(&mut self, key: KeyEvent) -> bool {
+        let Some(binding) = self
+            .view_keybindings()
+            .into_iter()
+            .find(|binding| binding.matches(key))
+        else {
+            return false;
+        };
+        let char_trigger = binding.trigger.is_char();
+        let handled = self.apply_view_hotkey(binding.action);
+        if handled && char_trigger {
+            self.last_char_at = Some(Instant::now());
         }
+        handled
+    }
 
-        if matches!(self.shell_view, ShellView::Threat(_)) {
-            let view = match ch {
-                '1' => Some(ThreatView::Dfd),
-                '2' => Some(ThreatView::Stride),
-                '3' => Some(ThreatView::Stories),
-                '4' => Some(ThreatView::Scope),
-                '5' => Some(ThreatView::Summary),
-                _ => None,
-            };
-            if let Some(view) = view {
+    fn apply_view_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
+        match action {
+            ViewHotkeyAction::FindingsNext => {
+                let max = self.findings.len().saturating_sub(1);
+                self.findings_cursor = (self.findings_cursor + 1).min(max);
+            }
+            ViewHotkeyAction::FindingsPrevious => {
+                self.findings_cursor = self.findings_cursor.saturating_sub(1);
+            }
+            ViewHotkeyAction::FindingsFirst => {
+                self.findings_cursor = 0;
+            }
+            ViewHotkeyAction::FindingsLast => {
+                self.findings_cursor = self.findings.len().saturating_sub(1);
+            }
+            ViewHotkeyAction::FindingsPageDown => {
+                self.page_down_current_view();
+            }
+            ViewHotkeyAction::FindingsPageUp => {
+                self.page_up_current_view();
+            }
+            ViewHotkeyAction::FindingsOpen => {
+                if self.findings.is_empty() {
+                    return false;
+                }
+                self.open_finding_at_cursor();
+            }
+            ViewHotkeyAction::ThreatView(view) => {
                 self.shell_view = ShellView::Threat(view);
-                return true;
+            }
+            ViewHotkeyAction::ActorDetail(index) => {
+                self.shell_view = ShellView::ActorDetail(index);
+            }
+            ViewHotkeyAction::PauseScan => {
+                self.handle_command(ShellCommand::Pause);
+            }
+            ViewHotkeyAction::ResumeScan => {
+                self.handle_command(ShellCommand::Resume(None));
             }
         }
+        true
+    }
 
-        if matches!(self.shell_view, ShellView::ModuleRun) {
-            if let Some(index) = ch.to_digit(10).filter(|index| (1..=4).contains(index)) {
-                self.shell_view = ShellView::ActorDetail(index as usize);
-                return true;
-            }
-            match ch {
-                'p' | 'P' => {
-                    if self.scan.as_ref().is_some_and(|scan| scan.running) && !self.is_scan_paused()
-                    {
-                        self.handle_command(ShellCommand::Pause);
-                        return true;
-                    }
+    fn page_down_current_view(&mut self) {
+        match self.shell_view {
+            ShellView::Findings => {
+                if !self.findings.is_empty() {
+                    self.findings_cursor = (self.findings_cursor + FINDINGS_PAGE_ROWS)
+                        .min(self.findings.len().saturating_sub(1));
                 }
-                'r' | 'R' => {
-                    if self.is_scan_paused() {
-                        self.handle_command(ShellCommand::Resume(None));
-                        return true;
-                    }
-                }
-                _ => {}
             }
+            ShellView::Help => {
+                self.help_scroll = self.help_scroll.saturating_add(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::Tools => {
+                self.tools_scroll = self.tools_scroll.saturating_add(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::Catalog if self.catalog_expanded => {
+                self.modules_scroll = self.modules_scroll.saturating_add(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::History => {
+                self.history_scroll = self.history_scroll.saturating_add(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::KnowledgeBase => {
+                self.kb_scroll = self.kb_scroll.saturating_add(VIEWPORT_PAGE_LINES)
+            }
+            _ => {}
         }
+    }
 
-        false
+    fn page_up_current_view(&mut self) {
+        match self.shell_view {
+            ShellView::Findings => {
+                self.findings_cursor = self.findings_cursor.saturating_sub(FINDINGS_PAGE_ROWS);
+            }
+            ShellView::Help => {
+                self.help_scroll = self.help_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::Tools => {
+                self.tools_scroll = self.tools_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::Catalog if self.catalog_expanded => {
+                self.modules_scroll = self.modules_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::History => {
+                self.history_scroll = self.history_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::KnowledgeBase => {
+                self.kb_scroll = self.kb_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
+            }
+            _ => {}
+        }
     }
 
     fn go_back(&mut self) {
@@ -3799,12 +4310,27 @@ impl ShellApp {
     }
 
     fn request_exit(&mut self) {
-        self.cancel_active_scan();
+        self.request_active_abort();
+        if !self.should_quit {
+            self.log("system", "exit requested; closing shell");
+        }
         self.should_quit = true;
     }
 
-    fn cancel_active_scan(&mut self) -> bool {
+    fn request_active_abort(&mut self) -> bool {
+        let mut requested = false;
+        requested |= self.request_scan_abort();
+        requested |= self.request_agent_abort();
+        requested |= self.request_plan_abort();
+        requested |= self.request_threat_abort();
+        requested
+    }
+
+    fn request_scan_abort(&mut self) -> bool {
         if !self.scan.as_ref().is_some_and(|scan| scan.running) {
+            return false;
+        }
+        if self.scan.as_ref().is_some_and(|scan| scan.abort_requested) {
             return false;
         }
 
@@ -3812,14 +4338,57 @@ impl ShellApp {
             cancel.cancel();
         }
         if let Some(scan) = &mut self.scan {
-            scan.stage = "cancelling".to_string();
+            scan.stage = "abort requested".to_string();
+            scan.abort_requested = true;
         }
-        self.log("scan", "cancelling active scan");
+        self.log(
+            "scan",
+            "abort requested; waiting for scanner subprocess to stop (not claiming it was killed)",
+        );
+        true
+    }
+
+    fn request_agent_abort(&mut self) -> bool {
+        let Some(agent) = &mut self.agent_chat else {
+            return false;
+        };
+        if !agent.running || agent.abort_requested {
+            return false;
+        }
+        agent.abort_requested = true;
+        self.log(
+            "agent",
+            "abort requested; waiting for pi-agent-core to return (process kill not confirmed)",
+        );
+        true
+    }
+
+    fn request_plan_abort(&mut self) -> bool {
+        if !self.planner_running || self.plan_abort_requested {
+            return false;
+        }
+        self.plan_abort_requested = true;
+        self.log(
+            "plan",
+            "abort requested; waiting for pi-agent-core planner to return (process kill not confirmed)",
+        );
+        true
+    }
+
+    fn request_threat_abort(&mut self) -> bool {
+        if !self.threat_worker_running || self.threat_abort_requested {
+            return false;
+        }
+        self.threat_abort_requested = true;
+        self.log(
+            "threats",
+            "abort requested; waiting for pi-agent-core threat worker to return (process kill not confirmed)",
+        );
         true
     }
 
     fn handle_quit_chord(&mut self) {
-        if self.cancel_active_scan() {
+        if self.request_active_abort() {
             self.ctrl_c_armed_at = None;
             return;
         }
@@ -3919,11 +4488,11 @@ impl ShellApp {
 
     fn abort_for_budget(&mut self) {
         self.advisory.budget_halt = None;
-        let cancelled = self.cancel_active_scan();
+        let requested = self.request_active_abort();
         self.log(
             "budget",
             format!(
-                "aborting due to cost cap (scan cancelled: {cancelled}). Next: /cost or /scan",
+                "aborting due to cost cap (abort requested: {requested}). Next: /cost or /scan",
             ),
         );
     }
@@ -3937,7 +4506,7 @@ fn parse_budget_env() -> Option<f64> {
 }
 
 fn compact_help_summary() -> String {
-    shell_command_specs()
+    let commands = shell_command_specs()
         .iter()
         .map(|spec| {
             if spec.command.starts_with('?') {
@@ -3947,7 +4516,13 @@ fn compact_help_summary() -> String {
             }
         })
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" ");
+    let examples = shell_help_examples();
+    if examples.is_empty() {
+        commands
+    } else {
+        format!("Examples: {}. Commands: {commands}", examples.join(", "))
+    }
 }
 
 fn command_completion_candidates(prefix: &str, slash: bool) -> Vec<String> {
@@ -4033,19 +4608,6 @@ fn config_completion_keys() -> &'static [&'static str] {
     ]
 }
 
-fn format_finding_alias(index: usize) -> String {
-    format!("F-{:04}", index + 1)
-}
-
-fn parse_finding_alias(reference: &str) -> Option<usize> {
-    let reference = reference.trim();
-    let suffix = reference
-        .strip_prefix("F-")
-        .or_else(|| reference.strip_prefix("f-"))?;
-    let index = suffix.parse::<usize>().ok()?;
-    index.checked_sub(1)
-}
-
 pub fn format_chain_alias(index: usize) -> String {
     format!("C-{:02}", index + 1)
 }
@@ -4074,34 +4636,6 @@ pub(crate) fn sorted_chain_aliases(chains: &[ExploitChain]) -> Vec<(String, Expl
         .enumerate()
         .map(|(index, chain)| (format_chain_alias(index), chain.clone()))
         .collect()
-}
-
-pub(crate) fn sorted_finding_aliases(findings: &[Finding]) -> Vec<(String, Finding)> {
-    let mut indexed: Vec<&Finding> = findings.iter().collect();
-    indexed.sort_by(|a, b| {
-        let by_severity = severity_rank(&a.severity).cmp(&severity_rank(&b.severity));
-        if by_severity == std::cmp::Ordering::Equal {
-            a.fingerprint.cmp(&b.fingerprint)
-        } else {
-            by_severity
-        }
-    });
-    indexed
-        .into_iter()
-        .enumerate()
-        .map(|(index, finding)| (format_finding_alias(index), finding.clone()))
-        .collect()
-}
-
-fn severity_rank(severity: &Severity) -> u8 {
-    match severity {
-        Severity::Critical => 0,
-        Severity::High => 1,
-        Severity::Medium => 2,
-        Severity::Low => 3,
-        Severity::Info => 4,
-        Severity::Unknown => 5,
-    }
 }
 
 pub fn format_alias_table(
@@ -4260,13 +4794,32 @@ fn thinking_level_from_input(input: &serde_json::Value) -> Option<String> {
 }
 
 fn unknown_command_message(raw: &str) -> String {
-    if raw.trim_start().starts_with('/') {
-        format!("unknown command {raw:?}. Next: help")
+    let trimmed = raw.trim();
+    let normalized = trimmed.strip_prefix('/').unwrap_or(trimmed);
+    let verb = normalized.split_whitespace().next().unwrap_or_default();
+
+    if verb == "ask" {
+        "ask needs a question. Next: /ask <question>".to_string()
+    } else if trimmed.starts_with('/') {
+        format!("unknown command {trimmed:?}. Next: /help")
     } else {
         format!(
-            "unknown command {raw:?}. Free-form chat is explicit only. Next: /ask <question> or help"
+            "unknown command {trimmed:?}. Free-form chat is explicit only. Next: /ask <question> or help"
         )
     }
+}
+
+fn with_next_step(message: impl Into<String>, next: &str) -> String {
+    let message = message.into();
+    if message.contains("Next:") {
+        return message;
+    }
+    let separator = if message.ends_with('.') || message.ends_with('!') || message.ends_with('?') {
+        " "
+    } else {
+        ". "
+    };
+    format!("{message}{separator}Next: {next}")
 }
 
 const ASK_SYSTEM_PROMPT: &str = r#"You are Kuzushi's Rust shell assistant.
@@ -4404,10 +4957,24 @@ fn json_string_array(value: Option<&serde_json::Value>) -> Vec<String> {
 }
 
 pub fn run_shell(config: V2Config, target: Option<&WorkspaceTarget>) -> Result<()> {
+    run_shell_with_plain(config, target, false)
+}
+
+pub fn run_shell_with_plain(
+    config: V2Config,
+    target: Option<&WorkspaceTarget>,
+    force_plain: bool,
+) -> Result<()> {
     let mut stdin = io::stdin();
     let stdin_is_terminal = stdin.is_terminal();
     let stdout_is_terminal = io::stdout().is_terminal();
-    if !stdin_is_terminal || !stdout_is_terminal || env::var_os("KUZUSHI_PLAIN").is_some() {
+    if force_plain
+        || !stdin_is_terminal
+        || !stdout_is_terminal
+        || env::var_os("KUZUSHI_PLAIN").is_some()
+        || env::var_os("KUZUSHI_SCREEN_READER").is_some()
+        || env::var_os("KUZUSHI_LOW_BANDWIDTH").is_some()
+    {
         return run_plain_shell(config, target, &mut stdin, stdin_is_terminal);
     }
 
@@ -4457,18 +5024,25 @@ fn run_plain_shell(
         return Ok(());
     }
 
+    print!("{}", render_plain_scripted_session(&mut app, &commands, 80));
+    Ok(())
+}
+
+fn render_plain_scripted_session(app: &mut ShellApp, commands: &[&str], width: usize) -> String {
+    let mut output = String::new();
     for (index, command) in commands.iter().enumerate() {
         if index > 0 {
-            println!();
+            output.push('\n');
         }
+        let log_start = app.log.len();
         app.submit_line(command);
         app.drain_background_events();
-        print!("{}", render_plain_app(&app, 80));
+        output.push_str(&render_plain_command_result(app, width, command, log_start));
         if app.should_quit {
             break;
         }
     }
-    Ok(())
+    output
 }
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
@@ -4557,12 +5131,12 @@ fn run_agent_worker(
 ) -> Result<String> {
     let runtime =
         PiAgentCoreRuntime::from_config(&config, &cwd)?.with_thinking_level(thinking_level);
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
         cwd,
-        system_prompt: ASK_SYSTEM_PROMPT.to_string(),
-        prompt: question,
-    })?;
+        ASK_SYSTEM_PROMPT.to_string(),
+        question,
+    ))?;
     let answer = response.text.trim();
     if answer.is_empty() {
         anyhow::bail!("agent returned no answer");
@@ -4614,12 +5188,12 @@ fn run_planner_worker(
 ) -> Result<PlanProposal> {
     let runtime =
         PiAgentCoreRuntime::from_config(&config, &cwd)?.with_thinking_level(thinking_level);
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
         cwd,
-        system_prompt: PLAN_SYSTEM_PROMPT.to_string(),
-        prompt: goal.to_string(),
-    })?;
+        PLAN_SYSTEM_PROMPT.to_string(),
+        goal.to_string(),
+    ))?;
     let body = response.text.trim();
     if body.is_empty() {
         anyhow::bail!("planner returned no content");
@@ -4774,12 +5348,12 @@ fn run_threat_regen_worker(
         THREAT_REGEN_PROMPT,
         serde_json::to_string_pretty(&existing).unwrap_or_else(|_| "null".to_string())
     );
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
         cwd,
-        system_prompt: THREAT_PATCH_SYSTEM_PROMPT.to_string(),
+        THREAT_PATCH_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
     let body = response.text.trim();
     if body.is_empty() {
         anyhow::bail!("threat regen returned no content");
@@ -4820,12 +5394,12 @@ fn run_threat_ask_worker(
         "OPERATOR QUESTION:\n{question}\n\nCURRENT THREAT MODEL JSON:\n{}",
         serde_json::to_string_pretty(&existing).unwrap_or_else(|_| "null".to_string())
     );
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
         cwd,
-        system_prompt: ASK_SYSTEM_PROMPT.to_string(),
+        ASK_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
     let answer = response.text.trim();
     if answer.is_empty() {
         anyhow::bail!("threat-ask returned no content");
@@ -6020,6 +6594,7 @@ JSON
             stage: "completed".to_string(),
             findings_count: 1,
             running: false,
+            abort_requested: false,
             error: None,
         });
         app.kb_view.attachments = vec![AttachmentRecord {
@@ -6068,6 +6643,18 @@ JSON
         assert!(app
             .completion_candidates("detach A-")
             .contains(&"detach A-123456789abc".to_string()));
+    }
+
+    #[test]
+    fn tab_key_applies_shell_and_argument_completion() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.input = "/con".to_string();
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+        assert_eq!(app.input, "/context");
+
+        app.input = "task block co".to_string();
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+        assert_eq!(app.input, "task block codeql");
     }
 
     #[test]
@@ -6139,6 +6726,69 @@ JSON
                 .as_ref()
                 .map(|finding| finding.fingerprint.as_str()),
             Some(finding.fingerprint.as_str())
+        );
+    }
+
+    #[test]
+    fn open_command_resolves_alias_from_stable_sorted_mapping() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .insert_scan_run("run-1", workspace.root(), "completed")
+            .unwrap();
+        let mut stable_first = make_finding(Severity::High, "aaaa1111", "stable first");
+        let stable_later = make_finding(Severity::High, "zzzz1111", "stored later");
+        stable_first.file_path = "src/a.rs".to_string();
+        store.insert_finding("run-1", &stable_first).unwrap();
+        store.insert_finding("run-1", &stable_later).unwrap();
+
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.handle_command(ShellCommand::Open("F-0001".to_string()));
+
+        assert_eq!(app.shell_view, ShellView::Finding);
+        assert_eq!(
+            app.selected_finding
+                .as_ref()
+                .map(|finding| finding.fingerprint.as_str()),
+            Some("aaaa1111")
+        );
+    }
+
+    #[test]
+    fn scan_completion_logs_same_stable_alias_used_by_findings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .insert_scan_run("run-1", workspace.root(), "completed")
+            .unwrap();
+        let stable_first = make_finding(Severity::High, "aaaa1111", "stable first");
+        let stored_later = make_finding(Severity::High, "zzzz1111", "stored later");
+        store.insert_finding("run-1", &stable_first).unwrap();
+        store.insert_finding("run-1", &stored_later).unwrap();
+
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.scan = Some(ScanPanelState {
+            run_id: None,
+            target: workspace.root().to_path_buf(),
+            stage: "running scan".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        app.apply_scan_event(ScanEvent::Finished {
+            run_id: "run-1".to_string(),
+            findings_count: 2,
+        });
+
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "scan" && line.body.contains("top alias F-0001 -> aaaa1111")
+        }));
+        assert_eq!(
+            kuzushi_core::stable_finding_alias(&app.findings, "aaaa1111").as_deref(),
+            Some("F-0001")
         );
     }
 
@@ -6542,6 +7192,103 @@ JSON
     }
 
     #[test]
+    fn ux_empty_and_error_states_name_next_real_commands() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        app.handle_command(ShellCommand::Findings);
+        assert!(app
+            .log
+            .iter()
+            .any(|line| { line.prefix == "findings" && line.body.contains("Next: scan") }));
+
+        let mut no_workspace_app = ShellApp::new(V2Config::default(), None);
+        no_workspace_app.handle_command(ShellCommand::Workspace(WorkspaceCommand::Status));
+        assert!(no_workspace_app.log.iter().any(|line| {
+            line.prefix == "workspace" && line.body.contains("Next: scan <target>")
+        }));
+
+        app.handle_command(ShellCommand::Use("sat".to_string()));
+        let unknown_module = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(unknown_module.contains("unknown module"));
+        assert!(unknown_module.contains("Closest: sast"));
+        assert!(unknown_module.contains("Next: modules or use <module-id>"));
+
+        app.handle_command(ShellCommand::RunTool {
+            tool: Some("missing:tool".to_string()),
+            input: None,
+        });
+        let unknown_tool = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(unknown_tool.contains("unknown tool"));
+        assert!(unknown_tool.contains("Next:"));
+        assert!(unknown_tool.contains("tools"));
+
+        let before = app.option_store.clone();
+        app.handle_command(ShellCommand::Task(SastTaskCommand::Allow(
+            "not-a-task".to_string(),
+        )));
+        assert_eq!(app.option_store, before);
+        let unknown_task = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(unknown_task.contains("Valid task IDs"));
+        assert!(unknown_task.contains("Next: /tasks"));
+
+        app.scan = Some(ScanPanelState {
+            run_id: Some("run-1".to_string()),
+            target: PathBuf::from("."),
+            stage: "running semgrep".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        app.apply_scan_event(ScanEvent::Failed {
+            error: "semgrep: could not find scanner binary \"semgrep\"".to_string(),
+        });
+        let missing_scanner = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(missing_scanner.contains("could not find scanner binary"));
+        assert!(missing_scanner.contains("Next:"));
+        assert!(missing_scanner.contains("task block semgrep"));
+
+        app.apply_scan_event(ScanEvent::Failed {
+            error: "internal shell-state error: selected finding disappeared".to_string(),
+        });
+        let internal = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(internal.contains("internal shell-state error"));
+        assert!(internal.contains("Next:"));
+    }
+
+    #[test]
     fn kb_attach_detach_and_reparse_store_under_v2() {
         let tmp = tempfile::tempdir().unwrap();
         fs::write(tmp.path().join("notes.md"), "first\n").unwrap();
@@ -6838,6 +7585,107 @@ JSON
     }
 
     #[test]
+    fn exit_and_unknown_command_feedback_is_actionable() {
+        for command in ["/exit", "exit", "/exitj"] {
+            let mut app = ShellApp::new(V2Config::default(), None);
+
+            app.submit_line(command);
+
+            assert!(app.should_quit, "{command} should request shutdown");
+            assert!(app.agent_chat.is_none());
+            assert!(app
+                .log
+                .iter()
+                .any(|line| line.prefix == ">" && line.body == command));
+            assert!(app.log.iter().any(|line| {
+                line.prefix == "system" && line.body.contains("exit requested; closing shell")
+            }));
+        }
+
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.submit_line("/definitely-not-real");
+        let slash_error = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(slash_error.contains("Next: /help"));
+        assert!(app.agent_chat.is_none());
+        assert!(!app.should_quit);
+
+        app.submit_line("ask");
+        let missing_ask_error = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(missing_ask_error.contains("Next: /ask <question>"));
+        assert!(app.agent_chat.is_none());
+        assert_eq!(app.shell_view, ShellView::Catalog);
+    }
+
+    #[test]
+    fn plain_scripted_unknown_command_prints_command_and_new_error_log() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let output = render_plain_scripted_session(&mut app, &["/nope"], 80);
+
+        assert!(output.contains("COMMAND RESULT"));
+        assert!(output.contains("command: /nope"));
+        assert!(output.contains("> /nope"));
+        assert!(output.contains("error: unknown command \"/nope\". Next: /help"));
+        assert_eq!(app.shell_view, ShellView::Catalog);
+        assert_plain_output_strict_80(&output);
+    }
+
+    #[test]
+    fn plain_scripted_quit_prints_exit_acknowledgement() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let output = render_plain_scripted_session(&mut app, &["/quit"], 80);
+
+        assert!(app.should_quit);
+        assert!(output.contains("command: /quit"));
+        assert!(output.contains("> /quit"));
+        assert!(output.contains("system: exit requested; closing shell"));
+        assert_plain_output_strict_80(&output);
+    }
+
+    #[test]
+    fn plain_scripted_help_then_quit_prints_one_result_block_per_command() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let output = render_plain_scripted_session(&mut app, &["/help", "/quit"], 80);
+
+        assert!(app.should_quit);
+        assert_eq!(output.matches("COMMAND RESULT").count(), 2);
+        assert!(output.contains("command: /help"));
+        assert!(output.contains("command: /quit"));
+        assert!(output.contains("HELP"));
+        assert!(output.contains("system: exit requested; closing shell"));
+        assert_plain_output_strict_80(&output);
+    }
+
+    #[test]
+    fn plain_scripted_unchanged_view_command_still_prints_result_block() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let before = app.shell_view.clone();
+
+        let output = render_plain_scripted_session(&mut app, &["/back"], 80);
+
+        assert_eq!(app.shell_view, before);
+        assert!(output.contains("COMMAND RESULT"));
+        assert!(output.contains("command: /back"));
+        assert!(output.contains("> /back"));
+        assert!(output.contains("kuzushi shell"));
+        assert_plain_output_strict_80(&output);
+    }
+
+    #[test]
     fn session_history_clear_load_resume_pause_and_story_are_explicit() {
         let mut app = ShellApp::new(V2Config::default(), None);
 
@@ -6916,20 +7764,35 @@ JSON
         app.handle_command(parse_command("?What should I run first?"));
 
         assert_eq!(app.shell_view, ShellView::AgentChat);
-        assert!(app.agent_chat.as_ref().is_some_and(|agent| agent.running));
-        for _ in 0..50 {
-            app.drain_background_events();
-            if app.agent_chat.as_ref().is_some_and(|agent| !agent.running) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        let running_agent = app.agent_chat.as_ref().unwrap();
+        assert_eq!(running_agent.question, "What should I run first?");
+        assert!(
+            running_agent.running,
+            "ask should enter AgentChat running state immediately; {}",
+            app.agent_chat_diagnostics_for_test()
+        );
+        assert_eq!(running_agent.answer, None);
+        assert_eq!(running_agent.error, None);
+
+        app.drain_next_agent_event_for_test(Duration::from_secs(5))
+            .unwrap_or_else(|message| panic!("{message}"));
 
         let agent = app.agent_chat.as_ref().unwrap();
-        assert!(!agent.running);
+        assert!(
+            !agent.running,
+            "ask worker completed but AgentChat remained running; {}",
+            app.agent_chat_diagnostics_for_test()
+        );
+        assert!(
+            agent.error.is_none(),
+            "ask worker failed instead of answering: {}",
+            app.agent_chat_diagnostics_for_test()
+        );
         assert_eq!(
             agent.answer.as_deref(),
-            Some("Run context build, then scan .")
+            Some("Run context build, then scan ."),
+            "ask worker completed with wrong UI state; {}",
+            app.agent_chat_diagnostics_for_test()
         );
         assert!(app
             .log
@@ -7789,7 +8652,7 @@ JSON
     }
 
     #[test]
-    fn ctrl_c_cancels_active_scan_before_exit() {
+    fn ctrl_c_requests_active_scan_abort_before_exit() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.scan = Some(ScanPanelState {
             run_id: Some("run-1".to_string()),
@@ -7797,6 +8660,7 @@ JSON
             stage: "running semgrep".to_string(),
             findings_count: 0,
             running: true,
+            abort_requested: false,
             error: None,
         });
 
@@ -7805,8 +8669,14 @@ JSON
         assert!(!app.should_quit);
         assert_eq!(
             app.scan.as_ref().map(|scan| scan.stage.as_str()),
-            Some("cancelling")
+            Some("abort requested")
         );
+        assert!(app.scan.as_ref().is_some_and(|scan| scan.abort_requested));
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "scan"
+                && line.body.contains("abort requested")
+                && line.body.contains("not claiming")
+        }));
     }
 
     #[test]
@@ -7910,11 +8780,51 @@ JSON
             message: String::new(),
             tool: "test".to_string(),
             actor_fingerprint: None,
+            static_proof_state: None,
             triage: None,
             created_at: String::new(),
             vuln_source: None,
             dedup_key: None,
         }
+    }
+
+    fn key_event_for_trigger(trigger: HotkeyTrigger) -> KeyEvent {
+        let code = match trigger {
+            HotkeyTrigger::Char(ch) => KeyCode::Char(ch),
+            HotkeyTrigger::Enter => KeyCode::Enter,
+            HotkeyTrigger::PageUp => KeyCode::PageUp,
+            HotkeyTrigger::PageDown => KeyCode::PageDown,
+        };
+        KeyEvent::new(code, KeyModifiers::empty())
+    }
+
+    fn app_with_findings(count: usize) -> ShellApp {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Findings;
+        app.findings = (0..count)
+            .map(|i| make_finding(Severity::High, &format!("fp-{i:04}"), "x"))
+            .collect();
+        app
+    }
+
+    fn app_with_module_run_scan(paused: bool) -> (ShellApp, ScanCancellation) {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let cancel = ScanCancellation::default();
+        if paused {
+            cancel.pause();
+        }
+        app.scan_cancel = Some(cancel.clone());
+        app.scan = Some(ScanPanelState {
+            run_id: Some("run-1".to_string()),
+            target: PathBuf::from("."),
+            stage: if paused { "paused" } else { "running" }.to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        app.shell_view = ShellView::ModuleRun;
+        (app, cancel)
     }
 
     #[test]
@@ -8030,7 +8940,38 @@ JSON
         assert!(app
             .log
             .iter()
-            .any(|line| line.prefix == "quickstart" && line.body.contains("/scan ./repo")));
+            .any(|line| line.prefix == "quickstart" && line.body.contains("scan .")));
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "quickstart" && line.body.contains("scan . -> findings")
+        }));
+    }
+
+    #[test]
+    fn startup_logs_first_finding_path_for_bare_shell() {
+        let app = ShellApp::new(V2Config::default(), None);
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.prefix == "startup" && line.body.contains("module(s)")));
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "first-run"
+                && line.body.contains("scan .")
+                && line.body.contains("findings")
+        }));
+    }
+
+    #[test]
+    fn startup_logs_active_target_first_finding_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        assert_eq!(app.first_finding_scan_command(), "scan");
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "first-run"
+                && line.body.contains("scan")
+                && !line.body.contains("scan .")
+                && line.body.contains("findings")
+        }));
     }
 
     #[test]
@@ -8102,6 +9043,87 @@ JSON
         assert_eq!(app.findings_cursor, 24);
         app.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::empty()));
         assert_eq!(app.findings_cursor, 14);
+    }
+
+    #[test]
+    fn viewport_enter_opens_cursor_finding_from_visible_list() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Findings;
+        app.findings = vec![
+            make_finding(Severity::High, "fp-0000", "first"),
+            make_finding(Severity::High, "fp-0001", "second"),
+        ];
+        app.findings_cursor = 1;
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert_eq!(app.shell_view, ShellView::Finding);
+        assert_eq!(
+            app.selected_finding
+                .as_ref()
+                .map(|finding| finding.title.as_str()),
+            Some("second")
+        );
+    }
+
+    #[test]
+    fn keybind_advertised_findings_hotkeys_drive_state_transitions() {
+        let app = app_with_findings(25);
+        let advertised = app.view_keybindings();
+        assert!(advertised
+            .iter()
+            .any(|binding| binding.hint.contains("j/k")));
+        assert!(advertised.iter().any(|binding| binding.hint == "PgUp/PgDn"));
+        assert!(advertised.iter().any(|binding| binding.hint == "Enter"));
+
+        for binding in advertised {
+            let mut app = app_with_findings(25);
+            match binding.action {
+                ViewHotkeyAction::FindingsNext => {
+                    app.findings_cursor = 0;
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.findings_cursor, 1);
+                }
+                ViewHotkeyAction::FindingsPrevious => {
+                    app.findings_cursor = 1;
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.findings_cursor, 0);
+                }
+                ViewHotkeyAction::FindingsFirst => {
+                    app.findings_cursor = 7;
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.findings_cursor, 0);
+                }
+                ViewHotkeyAction::FindingsLast => {
+                    app.findings_cursor = 7;
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.findings_cursor, 24);
+                }
+                ViewHotkeyAction::FindingsPageDown => {
+                    app.findings_cursor = 0;
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.findings_cursor, 10);
+                }
+                ViewHotkeyAction::FindingsPageUp => {
+                    app.findings_cursor = 10;
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.findings_cursor, 0);
+                }
+                ViewHotkeyAction::FindingsOpen => {
+                    app.findings_cursor = 2;
+                    let expected = app.findings[2].fingerprint.clone();
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.shell_view, ShellView::Finding);
+                    assert_eq!(
+                        app.selected_finding
+                            .as_ref()
+                            .map(|finding| finding.fingerprint.as_str()),
+                        Some(expected.as_str())
+                    );
+                }
+                other => panic!("unexpected findings hotkey action: {other:?}"),
+            }
+        }
     }
 
     #[test]
@@ -8180,6 +9202,7 @@ JSON
             stage: "running".to_string(),
             findings_count: 0,
             running: true,
+            abort_requested: false,
             error: None,
         });
         app.handle_command(ShellCommand::Pause);
@@ -8203,6 +9226,7 @@ JSON
             stage: "paused".to_string(),
             findings_count: 0,
             running: true,
+            abort_requested: false,
             error: None,
         });
         app.handle_command(ShellCommand::Resume(None));
@@ -8224,6 +9248,7 @@ JSON
             stage: "running".to_string(),
             findings_count: 0,
             running: true,
+            abort_requested: false,
             error: None,
         });
         app.shell_view = ShellView::ModuleRun;
@@ -8231,6 +9256,56 @@ JSON
         assert!(cancel.is_paused());
         app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::empty()));
         assert!(!cancel.is_paused());
+    }
+
+    #[test]
+    fn keybind_advertised_module_run_hotkeys_drive_state_transitions() {
+        let (app, _) = app_with_module_run_scan(false);
+        let advertised = app.view_keybindings();
+        assert!(advertised.iter().any(|binding| binding.hint == "1..4"));
+        assert!(advertised.iter().any(|binding| binding.hint == "p"));
+        assert!(!advertised.iter().any(|binding| binding.hint == "r"));
+
+        for binding in advertised {
+            match binding.action {
+                ViewHotkeyAction::ActorDetail(index) => {
+                    let (mut app, _) = app_with_module_run_scan(false);
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.shell_view, ShellView::ActorDetail(index));
+                }
+                ViewHotkeyAction::PauseScan => {
+                    let (mut app, cancel) = app_with_module_run_scan(false);
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert!(cancel.is_paused());
+                    assert_eq!(
+                        app.scan.as_ref().map(|scan| scan.stage.as_str()),
+                        Some("paused")
+                    );
+                }
+                other => panic!("unexpected active module-run hotkey action: {other:?}"),
+            }
+        }
+
+        let (paused_app, _) = app_with_module_run_scan(true);
+        let paused_advertised = paused_app.view_keybindings();
+        assert!(paused_advertised
+            .iter()
+            .any(|binding| binding.hint == "1..4"));
+        assert!(paused_advertised.iter().any(|binding| binding.hint == "r"));
+        assert!(!paused_advertised.iter().any(|binding| binding.hint == "p"));
+
+        for binding in paused_advertised
+            .into_iter()
+            .filter(|binding| matches!(binding.action, ViewHotkeyAction::ResumeScan))
+        {
+            let (mut app, cancel) = app_with_module_run_scan(true);
+            app.handle_key(key_event_for_trigger(binding.trigger));
+            assert!(!cancel.is_paused());
+            assert_eq!(
+                app.scan.as_ref().map(|scan| scan.stage.as_str()),
+                Some("running")
+            );
+        }
     }
 
     #[test]
@@ -8391,7 +9466,7 @@ JSON
     }
 
     #[test]
-    fn ctrl_c_during_active_scan_cancels_without_arming() {
+    fn ctrl_c_during_active_scan_requests_abort_without_arming() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.scan = Some(ScanPanelState {
             run_id: Some("run-x".to_string()),
@@ -8399,10 +9474,126 @@ JSON
             stage: "running".to_string(),
             findings_count: 0,
             running: true,
+            abort_requested: false,
             error: None,
         });
         app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(!app.should_quit);
         assert!(!app.ctrl_c_armed(), "scan-cancel path must not arm exit");
+        assert!(app.scan.as_ref().is_some_and(|scan| scan.abort_requested));
+    }
+
+    #[test]
+    fn second_ctrl_c_after_scan_abort_request_arms_exit() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.scan = Some(ScanPanelState {
+            run_id: Some("run-x".to_string()),
+            target: PathBuf::from("."),
+            stage: "running".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+        assert!(!app.should_quit);
+        assert!(app.ctrl_c_armed());
+    }
+
+    #[test]
+    fn ctrl_c_during_agent_chat_requests_abort_without_claiming_kill() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::AgentChat;
+        app.agent_chat = Some(AgentChatView {
+            question: "what changed?".to_string(),
+            answer: None,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+        assert!(!app.should_quit);
+        assert!(!app.ctrl_c_armed());
+        assert!(app
+            .agent_chat
+            .as_ref()
+            .is_some_and(|agent| agent.abort_requested));
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "agent"
+                && line.body.contains("abort requested")
+                && line.body.contains("not confirmed")
+        }));
+    }
+
+    #[test]
+    fn agent_response_after_abort_request_is_ignored() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.agent_chat = Some(AgentChatView {
+            question: "what changed?".to_string(),
+            answer: None,
+            running: true,
+            abort_requested: true,
+            error: None,
+        });
+
+        app.apply_agent_event(AgentEvent::Answered {
+            text: "late answer".to_string(),
+        });
+
+        let agent = app.agent_chat.as_ref().unwrap();
+        assert!(!agent.running);
+        assert!(!agent.abort_requested);
+        assert!(agent.answer.is_none());
+        assert!(agent
+            .error
+            .as_ref()
+            .is_some_and(|error| error.contains("ignored")));
+        assert!(!app.log.iter().any(|line| line.body == "late answer"));
+    }
+
+    #[test]
+    fn ctrl_c_during_plan_and_threat_workers_requests_honest_abort() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.planner_running = true;
+        app.threat_worker_running = true;
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+        assert!(app.plan_abort_requested);
+        assert!(app.threat_abort_requested);
+        assert!(!app.should_quit);
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "plan"
+                && line.body.contains("abort requested")
+                && line.body.contains("not confirmed")
+        }));
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "threats"
+                && line.body.contains("abort requested")
+                && line.body.contains("not confirmed")
+        }));
+    }
+
+    fn assert_plain_output_strict_80(output: &str) {
+        assert!(
+            !output.contains('\u{1b}'),
+            "plain output contained ANSI escape: {output:?}"
+        );
+        assert!(
+            !output
+                .chars()
+                .any(|ch| ('\u{2500}'..='\u{257f}').contains(&ch)),
+            "plain output contained box drawing: {output:?}"
+        );
+        for line in output.lines() {
+            assert!(
+                line.chars().count() <= 80,
+                "plain line exceeded 80 columns: {line:?}"
+            );
+        }
     }
 }

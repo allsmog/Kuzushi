@@ -22,6 +22,63 @@ pub struct AgentQueryRequest {
     pub cwd: PathBuf,
     pub system_prompt: String,
     pub prompt: String,
+    #[serde(default)]
+    pub tool_policy: AgentToolPolicy,
+}
+
+impl AgentQueryRequest {
+    pub fn new(
+        model: impl Into<String>,
+        cwd: impl Into<PathBuf>,
+        system_prompt: impl Into<String>,
+        prompt: impl Into<String>,
+    ) -> Self {
+        Self {
+            model: model.into(),
+            cwd: cwd.into(),
+            system_prompt: system_prompt.into(),
+            prompt: prompt.into(),
+            tool_policy: AgentToolPolicy::default(),
+        }
+    }
+
+    pub fn with_tool_policy(mut self, tool_policy: AgentToolPolicy) -> Self {
+        self.tool_policy = tool_policy;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentToolPolicy {
+    pub profile: String,
+    #[serde(default)]
+    pub tools: Vec<String>,
+}
+
+impl AgentToolPolicy {
+    pub fn new(
+        profile: impl Into<String>,
+        tools: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            profile: profile.into(),
+            tools: tools.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    pub fn is_default(&self) -> bool {
+        self.profile == "default" && self.tools.is_empty()
+    }
+}
+
+impl Default for AgentToolPolicy {
+    fn default() -> Self {
+        Self {
+            profile: "default".to_string(),
+            tools: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

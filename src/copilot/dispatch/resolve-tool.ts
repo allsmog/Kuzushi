@@ -4,8 +4,8 @@
  * Before this module existed, four layers each implemented their own
  * "user typed X, which tool does that mean?" logic with subtle divergences:
  *
- *   - `resolveToolName` in `copilot/shell.ts` (shell bare words / shorthand)
- *   - `resolveDirectToolDispatch` in `copilot/shell.ts` (dispatch routing)
+ *   - the legacy TypeScript shell resolver (shell bare words / shorthand)
+ *   - the legacy TypeScript direct dispatch path
  *   - `ModuleDispatcher.cmd_run` in `copilot/dispatcher/module-dispatcher.ts`
  *   - `executeRun` in `copilot/run.ts` (headless CLI, qualified only)
  *

@@ -1,0 +1,170 @@
+{
+  "mode": "whitebox-static",
+  "agentTools": ["read_file", "list_files", "search"],
+  "toolCalls": [],
+  "events": [
+    { "kind": "inventory", "status": "completed" },
+    { "kind": "scanner_evidence", "tool": "semgrep", "status": "normalized" },
+    { "kind": "scanner_evidence", "tool": "codeql", "status": "normalized" },
+    { "kind": "static_triage", "status": "completed" },
+    { "kind": "proof_validation", "status": "completed" },
+    { "kind": "prioritization", "status": "completed" },
+    { "kind": "report_sarif", "status": "completed" }
+  ],
+  "metrics": {
+    "costUsd": 0,
+    "latencyMs": 48
+  },
+  "findings": [
+    {
+      "ruleId": "demo/sql-injection",
+      "verdict": "true_positive",
+      "staticProofState": "statically_confirmed",
+      "rank": 1,
+      "source": {
+        "kind": "http_route",
+        "symbol": "GET /users"
+      },
+      "sink": {
+        "kind": "sql_query",
+        "symbol": "db.query"
+      },
+      "path": ["req.query.id", "String()", "template literal SQL", "db.query"],
+      "sanitizerAssessment": "No sanitizer or parameter binding is visible before the SQL template literal.",
+      "guardAssessment": "No route-local authorization guard is visible in the cited span.",
+      "citations": [
+        {
+          "file": "src/routes/users.ts",
+          "startLine": 5,
+          "endLine": 8,
+          "snippet": "router.get(\"/users\", async (req, res) => {\n  const id = String(req.query.id ?? \"\");\n  const rows = await db.query(`select * from users where id = ${id}`);\n  res.json(rows);"
+        }
+      ],
+      "assumptions": ["Express route registration reaches application routing."],
+      "missingEvidence": ["Runtime middleware order and deployed route exposure are not assessed."],
+      "triggerNarrative": "Static trigger path: GET /users reads req.query.id and builds SQL text in the same handler.",
+      "impactNarrative": "Potential impact: attacker-controlled query text can alter a user lookup if runtime routing exposes the handler. Evidence limits: no runtime request or database behavior was executed.",
+      "recommendedFix": "Use parameter binding and keep input parsing separate from SQL construction."
+    },
+    {
+      "ruleId": "demo/sibling-variant",
+      "verdict": "needs_review",
+      "staticProofState": "code_cited",
+      "rank": 2,
+      "source": {
+        "kind": "http_route",
+        "symbol": "GET /orders"
+      },
+      "sink": {
+        "kind": "sql_query",
+        "symbol": "db.query"
+      },
+      "path": ["req.query.sort", "String()", "template literal SQL", "db.query"],
+      "sanitizerAssessment": "The sibling route has the same source and sink shape, but this candidate requires independent validation.",
+      "guardAssessment": "No route-local guard is visible in the cited span.",
+      "citations": [
+        {
+          "file": "src/routes/orders.ts",
+          "startLine": 4,
+          "endLine": 7,
+          "snippet": "router.get(\"/orders\", async (req, res) => {\n  const sort = String(req.query.sort ?? \"created_at\");\n  const rows = await db.query(`select * from orders order by ${sort}`);\n  res.json(rows);"
+        }
+      ],
+      "assumptions": ["The route is a sibling candidate derived from the confirmed users route shape."],
+      "missingEvidence": ["No independent source/sink proof validation has confirmed the variant."],
+      "triggerNarrative": "Static trigger path: GET /orders reads req.query.sort and constructs SQL text in a sibling route.",
+      "impactNarrative": "Potential impact: order query construction may need the same fix pattern as GET /users. Evidence limits: variant candidates are code-cited only until independently validated.",
+      "recommendedFix": "Review and replace dynamic SQL ordering with an allowlisted column map."
+    },
+    {
+      "ruleId": "demo/authz-runtime",
+      "verdict": "needs_review",
+      "staticProofState": "needs_runtime_evidence",
+      "rank": 3,
+      "source": {
+        "kind": "http_route",
+        "symbol": "GET /admin/:id"
+      },
+      "sink": {
+        "kind": "record_read",
+        "symbol": "db.query"
+      },
+      "path": ["req.params.id", "parameterized query", "res.json"],
+      "sanitizerAssessment": "The route uses parameter binding for the record lookup.",
+      "guardAssessment": "No authorization middleware is visible in this file, but middleware may be mounted elsewhere.",
+      "citations": [
+        {
+          "file": "src/routes/users.ts",
+          "startLine": 17,
+          "endLine": 20,
+          "snippet": "router.get(\"/admin/:id\", async (req, res) => {\n  const record = await db.query(\"select * from users where id = ?\", [req.params.id]);\n  res.json(record);\n});"
+        }
+      ],
+      "assumptions": ["Router-level middleware may exist outside this file."],
+      "missingEvidence": ["Runtime middleware chain and authenticated principal checks are not available."],
+      "triggerNarrative": "Static trigger path: GET /admin/:id reads a URL parameter and returns a database record.",
+      "impactNarrative": "Potential impact: missing authorization could expose records if no outer middleware exists. Evidence limits: middleware wiring requires runtime or broader application evidence.",
+      "recommendedFix": "Verify auth middleware placement and add an explicit route-level authorization check if needed."
+    },
+    {
+      "ruleId": "demo/sanitized-sql",
+      "verdict": "false_positive",
+      "staticProofState": "statically_rejected",
+      "rank": 4,
+      "source": {
+        "kind": "http_route",
+        "symbol": "GET /safe"
+      },
+      "sink": {
+        "kind": "sql_query",
+        "symbol": "db.query"
+      },
+      "path": ["req.query.id", "Number.parseInt", "parameterized query"],
+      "sanitizerAssessment": "The route parses the input as an integer and uses a bound query parameter.",
+      "guardAssessment": "The query construction keeps user data out of SQL text.",
+      "citations": [
+        {
+          "file": "src/routes/users.ts",
+          "startLine": 11,
+          "endLine": 14,
+          "snippet": "router.get(\"/safe\", async (req, res) => {\n  const id = Number.parseInt(String(req.query.id ?? \"0\"), 10);\n  const rows = await db.query(\"select * from users where id = ?\", [id]);\n  res.json(rows);"
+        }
+      ],
+      "assumptions": ["The database adapter honors placeholder binding."],
+      "missingEvidence": ["Adapter-specific runtime behavior is not assessed."],
+      "triggerNarrative": "Static trigger path: GET /safe reaches db.query through integer parsing.",
+      "impactNarrative": "Potential impact: source review rejects SQL text injection because the cited query uses a placeholder. Evidence limits: no runtime database call was made.",
+      "recommendedFix": "No security fix is required from this static evidence."
+    },
+    {
+      "ruleId": "demo/scanner-noise",
+      "verdict": "needs_review",
+      "staticProofState": "signal_only",
+      "rank": 5,
+      "source": {
+        "kind": "scanner_signal",
+        "symbol": "demo.health-route-noise"
+      },
+      "sink": {
+        "kind": "unknown",
+        "symbol": "unknown"
+      },
+      "path": [],
+      "sanitizerAssessment": "No source/sink link was established.",
+      "guardAssessment": "No guard assessment is possible from this scanner signal alone.",
+      "citations": [
+        {
+          "file": "src/routes/users.ts",
+          "startLine": 22,
+          "endLine": 23,
+          "snippet": "router.get(\"/health\", (_req, res) => {\n  res.json({ ok: true });"
+        }
+      ],
+      "assumptions": ["The scanner rule is treated as a signal only."],
+      "missingEvidence": ["No source-to-sink path is present."],
+      "triggerNarrative": "Static trigger path: no source-grounded trigger path was established.",
+      "impactNarrative": "Potential impact: none is claimed from this signal. Evidence limits: scanner noise requires review before any claim.",
+      "recommendedFix": "Review only if additional source evidence appears."
+    }
+  ]
+}
