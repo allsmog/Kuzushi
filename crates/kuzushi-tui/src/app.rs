@@ -345,6 +345,32 @@ pub struct FindingsFilter {
     pub scope: Option<DiffScope>,
 }
 
+/// Domain enums for the sub-dispatchers below. Keeps `handle_command` lean
+/// and groups related arms into one place to read. The wider `ShellCommand`
+/// enum (parser-shaped) is unchanged so test signatures stay stable.
+#[derive(Debug, Clone)]
+pub(crate) enum ThreatVerb {
+    Tab(ThreatView),
+    Editor,
+    Regen,
+    Ask(String),
+    Apply,
+    Reject,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum RunsVerb {
+    List,
+    Replay(String),
+    Trace(String),
+    Aliases(Option<String>),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum FindingsVerb {
+    Since(String),
+}
+
 #[derive(Debug, Clone)]
 pub struct RunListEntry {
     pub run_id: String,
@@ -738,18 +764,12 @@ impl ShellApp {
                 self.shell_view = ShellView::Tune;
                 self.log("view", "tune");
             }
-            ShellCommand::Threat(view) => {
-                self.shell_view = ShellView::Threat(view);
-                self.log("view", format!("threats {}", threat_view_label(view)));
-            }
-            ShellCommand::ThreatRegen => self.start_threat_regen(),
-            ShellCommand::ThreatAsk(question) => self.start_threat_ask(&question),
-            ShellCommand::ThreatApply => self.apply_pending_threat_patch(),
-            ShellCommand::ThreatReject => self.discard_pending_threat_patch(),
-            ShellCommand::ThreatEditor => {
-                self.shell_view = ShellView::ThreatEditor;
-                self.log("view", "threats edit");
-            }
+            ShellCommand::Threat(view) => self.dispatch_threat(ThreatVerb::Tab(view)),
+            ShellCommand::ThreatRegen => self.dispatch_threat(ThreatVerb::Regen),
+            ShellCommand::ThreatAsk(question) => self.dispatch_threat(ThreatVerb::Ask(question)),
+            ShellCommand::ThreatApply => self.dispatch_threat(ThreatVerb::Apply),
+            ShellCommand::ThreatReject => self.dispatch_threat(ThreatVerb::Reject),
+            ShellCommand::ThreatEditor => self.dispatch_threat(ThreatVerb::Editor),
             ShellCommand::Prompts => {
                 self.shell_view = ShellView::PromptsEditor;
                 self.log("view", "prompts");
@@ -762,34 +782,11 @@ impl ShellApp {
                 self.shell_view = ShellView::ActorDetail(index);
                 self.log("actor", index.to_string());
             }
-            ShellCommand::ShowRuns => {
-                self.refresh_runs_list();
-                self.shell_view = ShellView::Runs;
-                let count = self.runs_list.len();
-                let active = if self.scan.is_some() { " (1 active)" } else { "" };
-                self.log(
-                    "runs",
-                    format!(
-                        "{count} on-disk run(s){active}; Enter=replay · Tab=trace"
-                    ),
-                );
-            }
-            ShellCommand::ShowAliases(prefix) => {
-                self.show_aliases(prefix.as_deref());
-            }
-            ShellCommand::Since(reference) => {
-                self.shell_view = ShellView::Findings;
-                self.refresh_findings(false);
-                self.apply_since_scope(reference);
-            }
-            ShellCommand::Replay(run_id) => {
-                self.shell_view = ShellView::Replay(run_id.clone());
-                self.log("replay", run_id);
-            }
-            ShellCommand::Trace(run_id) => {
-                self.shell_view = ShellView::Trace(run_id.clone());
-                self.log("trace", run_id);
-            }
+            ShellCommand::ShowRuns => self.dispatch_runs(RunsVerb::List),
+            ShellCommand::ShowAliases(prefix) => self.dispatch_runs(RunsVerb::Aliases(prefix)),
+            ShellCommand::Since(reference) => self.dispatch_findings(FindingsVerb::Since(reference)),
+            ShellCommand::Replay(run_id) => self.dispatch_runs(RunsVerb::Replay(run_id)),
+            ShellCommand::Trace(run_id) => self.dispatch_runs(RunsVerb::Trace(run_id)),
             ShellCommand::Plan(goal) => self.start_planner(&goal),
             ShellCommand::PlanApply => self.apply_pending_plan(),
             ShellCommand::PlanDiscard => self.discard_pending_plan(),
@@ -4510,6 +4507,59 @@ impl ShellApp {
             }
         }
         true
+    }
+
+    fn dispatch_threat(&mut self, verb: ThreatVerb) {
+        match verb {
+            ThreatVerb::Tab(view) => {
+                self.shell_view = ShellView::Threat(view);
+                self.log("view", format!("threats {}", threat_view_label(view)));
+            }
+            ThreatVerb::Editor => {
+                self.shell_view = ShellView::ThreatEditor;
+                self.log("view", "threats edit");
+            }
+            ThreatVerb::Regen => self.start_threat_regen(),
+            ThreatVerb::Ask(question) => self.start_threat_ask(&question),
+            ThreatVerb::Apply => self.apply_pending_threat_patch(),
+            ThreatVerb::Reject => self.discard_pending_threat_patch(),
+        }
+    }
+
+    fn dispatch_runs(&mut self, verb: RunsVerb) {
+        match verb {
+            RunsVerb::List => {
+                self.refresh_runs_list();
+                self.shell_view = ShellView::Runs;
+                let count = self.runs_list.len();
+                let active = if self.scan.is_some() { " (1 active)" } else { "" };
+                self.log(
+                    "runs",
+                    format!("{count} on-disk run(s){active}; Enter=replay · t=trace"),
+                );
+            }
+            RunsVerb::Replay(run_id) => {
+                self.shell_view = ShellView::Replay(run_id.clone());
+                self.log("replay", run_id);
+            }
+            RunsVerb::Trace(run_id) => {
+                self.shell_view = ShellView::Trace(run_id.clone());
+                self.log("trace", run_id);
+            }
+            RunsVerb::Aliases(prefix) => {
+                self.show_aliases(prefix.as_deref());
+            }
+        }
+    }
+
+    fn dispatch_findings(&mut self, verb: FindingsVerb) {
+        match verb {
+            FindingsVerb::Since(reference) => {
+                self.shell_view = ShellView::Findings;
+                self.refresh_findings(false);
+                self.apply_since_scope(reference);
+            }
+        }
     }
 
     fn refresh_runs_list(&mut self) {

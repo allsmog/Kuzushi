@@ -683,6 +683,7 @@ impl FindingStore {
               actor_fingerprint text,
               static_proof_state text,
               created_at text not null,
+              analysis_history_json text not null default '[]',
               unique(scan_id, fingerprint)
             );
 
@@ -730,6 +731,12 @@ impl FindingStore {
             "findings",
             "static_proof_state",
             "alter table findings add column static_proof_state text",
+        )?;
+        ensure_column(
+            &self.conn,
+            "findings",
+            "analysis_history_json",
+            "alter table findings add column analysis_history_json text not null default '[]'",
         )?;
         Ok(())
     }
@@ -954,6 +961,142 @@ impl FindingStore {
             .context("Could not load finding")
     }
 
+    pub fn latest_scan_run(&self) -> Result<Option<ScanRunRecord>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            select id, target, status, started_at, completed_at, findings_count
+            from scan_runs
+            order by started_at desc, id desc
+            limit 1
+            "#,
+        )?;
+        let mut rows = stmt.query_map([], row_to_scan_run_record)?;
+        match rows.next() {
+            None => Ok(None),
+            Some(row) => Ok(Some(row.context("Could not load latest scan_run")?)),
+        }
+    }
+
+    pub fn list_scan_runs(&self, limit: usize) -> Result<Vec<ScanRunRecord>> {
+        let limit = limit.max(1).min(500);
+        let mut stmt = self.conn.prepare(
+            r#"
+            select id, target, status, started_at, completed_at, findings_count
+            from scan_runs
+            order by started_at desc, id desc
+            limit ?1
+            "#,
+        )?;
+        let rows = stmt.query_map(params![limit as i64], row_to_scan_run_record)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not list scan_runs")
+    }
+
+    /// Append an [`AnalysisEntry`] to every row matching the given fingerprint.
+    /// Stored in the `analysis_history_json` column as a JSON array; existing
+    /// triage_outcome / verdict rows are not modified — this is purely additive.
+    /// Returns the number of rows updated.
+    pub fn append_analysis_entry(
+        &self,
+        fingerprint: &str,
+        entry: &AnalysisEntry,
+    ) -> Result<usize> {
+        let fingerprint = fingerprint.trim();
+        if fingerprint.is_empty() {
+            anyhow::bail!("fingerprint must not be empty");
+        }
+        let mut updated = 0usize;
+        let mut stmt = self
+            .conn
+            .prepare("select id, analysis_history_json from findings where fingerprint = ?1")?;
+        let rows = stmt
+            .query_map(params![fingerprint], |row| {
+                let id: i64 = row.get(0)?;
+                let raw: String = row.get(1)?;
+                Ok((id, raw))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for (id, raw) in rows {
+            let mut history: Vec<AnalysisEntry> = if raw.trim().is_empty() {
+                Vec::new()
+            } else {
+                serde_json::from_str(&raw).unwrap_or_default()
+            };
+            history.push(entry.clone());
+            let serialized =
+                serde_json::to_string(&history).context("Could not encode analysis history")?;
+            self.conn.execute(
+                "update findings set analysis_history_json = ?1 where id = ?2",
+                params![serialized, id],
+            )?;
+            updated += 1;
+        }
+        Ok(updated)
+    }
+
+    pub fn get_analysis_history(&self, fingerprint: &str) -> Result<Vec<AnalysisEntry>> {
+        let raw: Option<String> = self
+            .conn
+            .query_row(
+                "select analysis_history_json from findings where fingerprint = ?1 limit 1",
+                params![fingerprint],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("Could not load analysis history")?;
+        let Some(raw) = raw else {
+            return Ok(Vec::new());
+        };
+        if raw.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        serde_json::from_str::<Vec<AnalysisEntry>>(&raw)
+            .with_context(|| format!("Could not parse analysis_history_json for {fingerprint}"))
+    }
+
+    pub fn aggregate_severity_counts(&self) -> Result<Vec<(Severity, usize)>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            select severity, count(*)
+            from findings
+            group by severity
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let severity: String = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            Ok((severity, count as usize))
+        })?;
+        let mut out: Vec<(Severity, usize)> = Vec::new();
+        for row in rows {
+            let (severity_str, count) = row.context("Could not aggregate severity counts")?;
+            if let Ok(severity) = Severity::try_from(severity_str.as_str()) {
+                out.push((severity, count));
+            }
+        }
+        out.sort_by_key(|(severity, _)| severity_rank(*severity));
+        Ok(out)
+    }
+
+    pub fn aggregate_verdict_counts(&self) -> Result<Vec<(String, usize)>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            select coalesce(t.verdict, 'untriaged') as verdict, count(*)
+            from findings f
+            left join triage t on t.finding_id = f.id
+            group by coalesce(t.verdict, 'untriaged')
+            order by verdict
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let verdict: String = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            Ok((verdict, count as usize))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not aggregate verdict counts")
+    }
+
     pub fn get_finding_by_reference(&self, reference: &str) -> Result<Option<Finding>> {
         let reference = reference.trim();
         if reference.is_empty() {
@@ -991,6 +1134,208 @@ impl FindingStore {
             _ => anyhow::bail!("finding reference {reference:?} is ambiguous"),
         }
     }
+}
+
+/// One entry in a finding's append-only `analysis_history_json` array.
+/// Borrows deepsec's AnalysisEntry shape — captures every per-call event
+/// (model, agent_type, cost, tokens, refusal) so re-running scan with a
+/// different model is additive instead of overwriting prior verdicts.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisEntry {
+    pub run_id: String,
+    pub agent_type: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_session_id: Option<String>,
+    #[serde(default)]
+    pub finding_count: usize,
+    #[serde(default)]
+    pub num_turns: usize,
+    #[serde(default)]
+    pub cost_usd: f64,
+    #[serde(default, skip_serializing_if = "AnalysisUsage::is_empty")]
+    pub usage: AnalysisUsage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reinvestigate_marker: Option<String>,
+    #[serde(default, skip_serializing_if = "RefusalReport::is_empty")]
+    pub refusal: RefusalReport,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisUsage {
+    #[serde(default)]
+    pub input: u64,
+    #[serde(default)]
+    pub output: u64,
+    #[serde(default)]
+    pub cache_read: u64,
+    #[serde(default)]
+    pub cache_create: u64,
+}
+
+impl AnalysisUsage {
+    pub fn is_empty(&self) -> bool {
+        self.input == 0 && self.output == 0 && self.cache_read == 0 && self.cache_create == 0
+    }
+}
+
+/// Structured record of an agent declining to fully investigate something.
+/// Inspired by deepsec's parseRefusalReport — captures the cases where the
+/// model returns a verdict but explicitly states it skipped or refused
+/// portions of the analysis.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RefusalReport {
+    pub refused: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub raw: String,
+}
+
+impl RefusalReport {
+    pub fn is_empty(&self) -> bool {
+        !self.refused && self.reason.is_empty() && self.skipped.is_empty()
+    }
+}
+
+/// Parse a refusal-report JSON blob. Falls back to a heuristic scan over the
+/// raw text — useful when the model returns prose. Caller should treat the
+/// returned report as advisory; persistence is the operator's choice.
+pub fn parse_refusal_report(raw: &str) -> RefusalReport {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return RefusalReport::default();
+    }
+    if let Ok(report) = serde_json::from_str::<RefusalReport>(trimmed) {
+        let mut report = report;
+        if report.raw.is_empty() {
+            report.raw = trimmed.to_string();
+        }
+        return report;
+    }
+    detect_refusal_in_text(trimmed)
+}
+
+/// Heuristic — looks for refusal-language ("I cannot", "I won't", "I declined")
+/// at the start of any line. Used both as a stand-alone helper and as the
+/// fallback for `parse_refusal_report` when the model prose isn't JSON.
+pub fn detect_refusal_in_text(raw: &str) -> RefusalReport {
+    const MARKERS: &[&str] = &[
+        "i cannot",
+        "i can't",
+        "i won't",
+        "i will not",
+        "i declined",
+        "i decline to",
+        "i refuse",
+        "i'm not able",
+        "i am not able",
+        "skipped because",
+        "out of an abundance of caution",
+    ];
+    let lower = raw.to_ascii_lowercase();
+    let refused = MARKERS.iter().any(|marker| lower.contains(marker));
+    if refused {
+        let reason = raw
+            .lines()
+            .find(|line| {
+                let lower = line.to_ascii_lowercase();
+                MARKERS.iter().any(|marker| lower.contains(marker))
+            })
+            .map(|line| line.trim().to_string())
+            .unwrap_or_default();
+        RefusalReport {
+            refused: true,
+            reason,
+            skipped: Vec::new(),
+            raw: raw.to_string(),
+        }
+    } else {
+        RefusalReport::default()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScanRunRecord {
+    pub id: String,
+    pub target: String,
+    pub status: String,
+    pub started_at: String,
+    pub completed_at: Option<String>,
+    pub findings_count: usize,
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    use super::*;
+
+    #[test]
+    fn parses_structured_refusal_json() {
+        let raw = r#"{"refused":true,"reason":"too noisy","skipped":["src/secrets.rs"]}"#;
+        let report = parse_refusal_report(raw);
+        assert!(report.refused);
+        assert_eq!(report.reason, "too noisy");
+        assert_eq!(report.skipped, vec!["src/secrets.rs".to_string()]);
+        assert_eq!(report.raw, raw);
+    }
+
+    #[test]
+    fn parses_no_refusal_json() {
+        let report = parse_refusal_report(r#"{"refused":false}"#);
+        assert!(!report.refused);
+        assert!(report.is_empty());
+    }
+
+    #[test]
+    fn falls_back_to_heuristic_for_prose() {
+        let report =
+            parse_refusal_report("I cannot continue analyzing because of safety concerns.");
+        assert!(report.refused);
+        assert!(report.reason.starts_with("I cannot"));
+        assert!(report.skipped.is_empty());
+    }
+
+    #[test]
+    fn heuristic_finds_skipped_because() {
+        let report = parse_refusal_report("Skipped because the file looked sensitive.");
+        assert!(report.refused);
+        assert!(report.reason.contains("sensitive"));
+    }
+
+    #[test]
+    fn empty_input_is_no_refusal() {
+        let report = parse_refusal_report("   ");
+        assert!(!report.refused);
+        assert!(report.is_empty());
+    }
+
+    #[test]
+    fn neutral_prose_is_no_refusal() {
+        let report = parse_refusal_report("True positive: SQL injection in login handler.");
+        assert!(!report.refused);
+    }
+
+    #[test]
+    fn detect_in_text_handles_mixed_case() {
+        let report = detect_refusal_in_text("I'M Not Able to evaluate this safely.");
+        assert!(report.refused);
+    }
+}
+
+fn row_to_scan_run_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScanRunRecord> {
+    Ok(ScanRunRecord {
+        id: row.get(0)?,
+        target: row.get(1)?,
+        status: row.get(2)?,
+        started_at: row.get(3)?,
+        completed_at: row.get(4)?,
+        findings_count: row.get::<_, i64>(5)? as usize,
+    })
 }
 
 fn row_to_patch_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<PatchResult> {
@@ -1193,6 +1538,100 @@ mod tests {
             rows[0].triage.as_ref().unwrap().verdict,
             TriageVerdict::NeedsReview
         );
+    }
+
+    #[test]
+    fn append_analysis_entry_round_trips() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-1", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let mut finding = Finding::new_semgrep(
+            "demo.rule",
+            "src/app.ts",
+            12,
+            None,
+            Severity::High,
+            "demo",
+        );
+        finding.fingerprint = "fp-001".to_string();
+        store.insert_finding("run-1", &finding).unwrap();
+
+        let entry = AnalysisEntry {
+            run_id: "run-1".to_string(),
+            agent_type: "triage".to_string(),
+            model: "openai:gpt-4.1".to_string(),
+            agent_session_id: Some("sess-1".to_string()),
+            finding_count: 1,
+            num_turns: 3,
+            cost_usd: 0.0123,
+            usage: AnalysisUsage {
+                input: 1500,
+                output: 200,
+                cache_read: 0,
+                cache_create: 800,
+            },
+            reinvestigate_marker: None,
+            refusal: RefusalReport::default(),
+            created_at: "2026-05-06T00:00:00Z".to_string(),
+        };
+        assert_eq!(store.append_analysis_entry("fp-001", &entry).unwrap(), 1);
+        let history = store.get_analysis_history("fp-001").unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].run_id, "run-1");
+        assert_eq!(history[0].cost_usd, 0.0123);
+    }
+
+    #[test]
+    fn append_analysis_entry_is_additive_across_runs() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-1", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_scan_run("run-2", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let mut a = Finding::new_semgrep("rule", "file.ts", 1, None, Severity::High, "demo");
+        a.fingerprint = "fp-shared".to_string();
+        let mut b = a.clone();
+        store.insert_finding("run-1", &a).unwrap();
+        store.insert_finding("run-2", &b).unwrap();
+        b.fingerprint = "fp-shared".to_string();
+
+        for run_id in ["run-1", "run-2"] {
+            store
+                .append_analysis_entry(
+                    "fp-shared",
+                    &AnalysisEntry {
+                        run_id: run_id.to_string(),
+                        agent_type: "triage".to_string(),
+                        model: "openai:gpt-4.1".to_string(),
+                        created_at: format!("2026-05-06T00:00:0{}Z", run_id.chars().last().unwrap()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        }
+        let history = store.get_analysis_history("fp-shared").unwrap();
+        // Two scan_runs share the fingerprint; each row's history grows
+        // independently and `get_analysis_history` returns the first row.
+        assert_eq!(history.len(), 2);
+        let run_ids: Vec<_> = history.iter().map(|entry| entry.run_id.clone()).collect();
+        assert_eq!(run_ids, vec!["run-1", "run-2"]);
+    }
+
+    #[test]
+    fn analysis_history_returns_empty_when_no_entries() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-1", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let mut finding =
+            Finding::new_semgrep("rule", "file.ts", 1, None, Severity::High, "demo");
+        finding.fingerprint = "fp-empty".to_string();
+        store.insert_finding("run-1", &finding).unwrap();
+        let history = store.get_analysis_history("fp-empty").unwrap();
+        assert!(history.is_empty());
     }
 
     #[test]

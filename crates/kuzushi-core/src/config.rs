@@ -114,6 +114,7 @@ pub fn load_config(paths: ConfigPaths) -> Result<V2Config> {
     }
 
     apply_env_overrides(&mut config);
+    apply_gateway_shortcut(&mut config);
     validate_config(&config)?;
     Ok(config)
 }
@@ -197,6 +198,46 @@ fn apply_env_overrides(config: &mut V2Config) {
 
 fn first_env(names: &[&str]) -> Option<String> {
     names.iter().find_map(|name| env::var(name).ok())
+}
+
+/// Convenience for operators using the Vercel AI Gateway: setting
+/// `AI_GATEWAY_API_KEY` (or `KUZUSHI_GATEWAY_KEY`) avoids having to
+/// configure provider-specific keys + base URLs.
+///
+/// Behaviour:
+/// * If a gateway key is set and the operator hasn't already overridden
+///   `runtime.api_key_env` (still default `OPENAI_API_KEY`), point the
+///   runtime at `AI_GATEWAY_API_KEY` so the bridge reads the gateway key.
+/// * If no `runtime.base_url` is set, populate the published gateway URL.
+/// * Explicit per-provider config always wins — this is a default-only
+///   fallback.
+pub const VERCEL_AI_GATEWAY_BASE_URL: &str = "https://ai-gateway.vercel.sh/v1";
+
+fn apply_gateway_shortcut(config: &mut V2Config) {
+    let key = first_env(&["AI_GATEWAY_API_KEY", "KUZUSHI_GATEWAY_KEY"])
+        .filter(|value| !value.trim().is_empty());
+    apply_gateway_shortcut_with_key(config, key.as_deref());
+}
+
+fn apply_gateway_shortcut_with_key(config: &mut V2Config, key: Option<&str>) {
+    let Some(value) = key.filter(|value| !value.trim().is_empty()) else {
+        return;
+    };
+    let _ = value;
+    if config.runtime.api_key_env == "OPENAI_API_KEY" {
+        config.runtime.api_key_env = "AI_GATEWAY_API_KEY".to_string();
+    }
+    if config.runtime.base_url.is_none() {
+        config.runtime.base_url = Some(VERCEL_AI_GATEWAY_BASE_URL.to_string());
+    }
+}
+
+/// Lossless probe for "is the gateway shortcut going to fire?". Useful for
+/// printing a one-line operator banner without re-reading env vars.
+pub fn gateway_shortcut_active() -> bool {
+    first_env(&["AI_GATEWAY_API_KEY", "KUZUSHI_GATEWAY_KEY"])
+        .filter(|value| !value.trim().is_empty())
+        .is_some()
 }
 
 fn validate_config(config: &V2Config) -> Result<()> {
@@ -286,6 +327,41 @@ base_url = "https://api.example.test/v1"
             config.runtime.base_url.as_deref(),
             Some("https://api.example.test/v1")
         );
+    }
+
+    #[test]
+    fn gateway_shortcut_redirects_default_runtime() {
+        let mut config = V2Config::default();
+        apply_gateway_shortcut_with_key(&mut config, Some("vck_demo"));
+        assert_eq!(config.runtime.api_key_env, "AI_GATEWAY_API_KEY");
+        assert_eq!(
+            config.runtime.base_url.as_deref(),
+            Some(VERCEL_AI_GATEWAY_BASE_URL)
+        );
+    }
+
+    #[test]
+    fn gateway_shortcut_respects_explicit_runtime_overrides() {
+        let mut config = V2Config::default();
+        config.runtime.api_key_env = "KUZUSHI_OPENAI_KEY".to_string();
+        config.runtime.base_url = Some("https://api.example.test/v1".to_string());
+        apply_gateway_shortcut_with_key(&mut config, Some("vck_demo"));
+        assert_eq!(config.runtime.api_key_env, "KUZUSHI_OPENAI_KEY");
+        assert_eq!(
+            config.runtime.base_url.as_deref(),
+            Some("https://api.example.test/v1")
+        );
+    }
+
+    #[test]
+    fn gateway_shortcut_no_op_without_key() {
+        let mut config = V2Config::default();
+        apply_gateway_shortcut_with_key(&mut config, None);
+        assert_eq!(config.runtime.api_key_env, "OPENAI_API_KEY");
+        assert!(config.runtime.base_url.is_none());
+
+        apply_gateway_shortcut_with_key(&mut config, Some("   "));
+        assert_eq!(config.runtime.api_key_env, "OPENAI_API_KEY");
     }
 
     #[test]

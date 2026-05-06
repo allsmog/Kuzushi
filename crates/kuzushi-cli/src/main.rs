@@ -8,8 +8,9 @@ use clap::{Parser, Subcommand, ValueEnum};
 use kuzushi_core::config::write_default_config;
 use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::{
-    build_pr_comment, load_config_for_target, AgentRuntime, FindingListFilter, FindingStore,
-    ModuleRegistry, PrCommentInput, WorkspaceTarget,
+    build_pr_comment, gateway_shortcut_active, load_config_for_target, AgentRuntime,
+    FindingListFilter, FindingStore, ModuleRegistry, PrCommentInput, WorkspaceTarget,
+    VERCEL_AI_GATEWAY_BASE_URL,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
 use kuzushi_tui::run_shell_with_plain;
@@ -86,6 +87,22 @@ enum Command {
     Doctor {
         #[arg(long)]
         target: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Snapshot the latest pipeline run for the active target.
+    Status {
+        #[arg(long)]
+        target: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Cross-run aggregations: counts by severity, TP/FP ratio, total runs.
+    Metrics {
+        #[arg(long)]
+        target: Option<PathBuf>,
+        #[arg(long, default_value_t = 20)]
+        recent: usize,
         #[arg(long)]
         json: bool,
     },
@@ -203,6 +220,12 @@ async fn main() -> Result<()> {
         Command::Modules { json } => modules_command(json),
         Command::Tools { json } => tools_command(json),
         Command::Doctor { target, json } => doctor_command(target.or(cli.target), json),
+        Command::Status { target, json } => status_command(target.or(cli.target), json),
+        Command::Metrics {
+            target,
+            recent,
+            json,
+        } => metrics_command(target.or(cli.target), recent, json),
         Command::Init {
             target,
             force,
@@ -246,10 +269,16 @@ fn shell_startup_progress_messages(target: Option<&Path>) -> Vec<String> {
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "none".to_string());
     let scan_command = if target.is_some() { "scan" } else { "scan ." };
-    vec![
+    let mut messages = vec![
         "kuzushi: loading config and native registry...".to_string(),
         format!("kuzushi: target {target_label}; first finding: {scan_command}, then findings"),
-    ]
+    ];
+    if gateway_shortcut_active() {
+        messages.push(format!(
+            "kuzushi: AI_GATEWAY_API_KEY detected; routing through {VERCEL_AI_GATEWAY_BASE_URL}"
+        ));
+    }
+    messages
 }
 
 fn pr_comment_command(
@@ -840,6 +869,183 @@ fn init_command(target: Option<PathBuf>, force: bool, skip_doctor: bool) -> Resu
     println!();
     println!("Ready. Next: `kuzushi scan {}` (or run `kuzushi` to enter the shell).", target.display());
     Ok(())
+}
+
+fn status_command(target: Option<PathBuf>, json: bool) -> Result<()> {
+    let target = target.unwrap_or_else(|| PathBuf::from("."));
+    let workspace = WorkspaceTarget::new(&target)?;
+    let store = FindingStore::open(workspace.findings_db_path())?;
+    let latest = store.latest_scan_run()?;
+    let by_severity = store.aggregate_severity_counts()?;
+    let by_verdict = store.aggregate_verdict_counts()?;
+    let total_findings: usize = by_severity.iter().map(|(_, count)| count).sum();
+    let report_path = latest.as_ref().and_then(|run| {
+        let path = workspace
+            .root()
+            .join(".kuzushi")
+            .join("runs")
+            .join(&run.id)
+            .join("report.md");
+        path.exists().then_some(path)
+    });
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "target": workspace.root(),
+                "latestRun": latest,
+                "totalFindings": total_findings,
+                "bySeverity": by_severity
+                    .iter()
+                    .map(|(severity, count)| (severity.as_str().to_string(), *count))
+                    .collect::<std::collections::BTreeMap<String, usize>>(),
+                "byVerdict": by_verdict
+                    .iter()
+                    .cloned()
+                    .collect::<std::collections::BTreeMap<String, usize>>(),
+                "report": report_path,
+            }))?
+        );
+        return Ok(());
+    }
+
+    println!("Kuzushi status");
+    println!("Target:        {}", workspace.root().display());
+    match latest {
+        None => {
+            println!("Latest run:    (none)");
+            println!();
+            println!("No scans on disk yet. Next: kuzushi scan {}", target.display());
+        }
+        Some(run) => {
+            println!(
+                "Latest run:    {} · {} · started {}{}",
+                run.id,
+                run.status,
+                run.started_at,
+                run.completed_at
+                    .as_deref()
+                    .map(|completed| format!(" · completed {completed}"))
+                    .unwrap_or_default()
+            );
+            println!("Run findings:  {}", run.findings_count);
+            println!("Total findings (all runs): {total_findings}");
+            if !by_severity.is_empty() {
+                let line = by_severity
+                    .iter()
+                    .map(|(severity, count)| format!("{} {count}", severity.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+                println!("By severity:   {line}");
+            }
+            if !by_verdict.is_empty() {
+                let line = by_verdict
+                    .iter()
+                    .map(|(verdict, count)| format!("{verdict} {count}"))
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+                println!("By verdict:    {line}");
+            }
+            if let Some(path) = report_path {
+                println!("Report:        {}", path.display());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn metrics_command(target: Option<PathBuf>, recent: usize, json: bool) -> Result<()> {
+    let target = target.unwrap_or_else(|| PathBuf::from("."));
+    let workspace = WorkspaceTarget::new(&target)?;
+    let store = FindingStore::open(workspace.findings_db_path())?;
+    let runs = store.list_scan_runs(recent.max(1))?;
+    let by_severity = store.aggregate_severity_counts()?;
+    let by_verdict = store.aggregate_verdict_counts()?;
+    let total_findings: usize = by_severity.iter().map(|(_, count)| count).sum();
+    let total_runs = runs.len();
+
+    let tp = verdict_count(&by_verdict, "true_positive");
+    let fp = verdict_count(&by_verdict, "false_positive");
+    let triaged = tp + fp;
+    let tp_rate = if triaged > 0 {
+        Some((tp as f64) / (triaged as f64))
+    } else {
+        None
+    };
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "target": workspace.root(),
+                "recentRuns": runs,
+                "totalFindings": total_findings,
+                "bySeverity": by_severity
+                    .iter()
+                    .map(|(severity, count)| (severity.as_str().to_string(), *count))
+                    .collect::<std::collections::BTreeMap<String, usize>>(),
+                "byVerdict": by_verdict
+                    .iter()
+                    .cloned()
+                    .collect::<std::collections::BTreeMap<String, usize>>(),
+                "truePositive": tp,
+                "falsePositive": fp,
+                "tpRate": tp_rate,
+            }))?
+        );
+        return Ok(());
+    }
+
+    println!("Kuzushi metrics");
+    println!("Target:                 {}", workspace.root().display());
+    println!("Total runs (recent):    {total_runs}");
+    println!("Total findings (db):    {total_findings}");
+    if !by_severity.is_empty() {
+        let line = by_severity
+            .iter()
+            .map(|(severity, count)| format!("{:>9} {count}", severity.as_str()))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        println!("By severity:            {line}");
+    }
+    if !by_verdict.is_empty() {
+        let line = by_verdict
+            .iter()
+            .map(|(verdict, count)| format!("{verdict} {count}"))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        println!("By verdict:             {line}");
+    }
+    println!(
+        "TP: {tp} · FP: {fp} · TP rate: {}",
+        tp_rate
+            .map(|rate| format!("{:.1}%", rate * 100.0))
+            .unwrap_or_else(|| "n/a".to_string())
+    );
+    if !runs.is_empty() {
+        println!();
+        println!("Recent runs:");
+        println!("  {:<32} {:<10} {:>10}  {}", "id", "status", "findings", "started");
+        for run in &runs {
+            println!(
+                "  {:<32} {:<10} {:>10}  {}",
+                run.id,
+                run.status,
+                run.findings_count,
+                run.started_at
+            );
+        }
+    }
+    Ok(())
+}
+
+fn verdict_count(by_verdict: &[(String, usize)], target: &str) -> usize {
+    by_verdict
+        .iter()
+        .find(|(verdict, _)| verdict == target)
+        .map(|(_, count)| *count)
+        .unwrap_or(0)
 }
 
 fn doctor_command(target: Option<PathBuf>, json: bool) -> Result<()> {

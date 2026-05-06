@@ -6,8 +6,9 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
-    append_bootstrap_context, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolPolicy,
-    RuntimeConfig, TriageOutcome, TriageRequest, TriageVerdict, V2Config,
+    append_bootstrap_context, detect_refusal_in_text, AgentQueryRequest, AgentQueryResponse,
+    AgentRuntime, AgentToolPolicy, RuntimeConfig, TriageOutcome, TriageRequest, TriageVerdict,
+    V2Config,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -203,7 +204,22 @@ fn default_bridge_command(source_root: &Path) -> Vec<String> {
 
 fn clamp_outcome(mut outcome: TriageOutcome) -> TriageOutcome {
     outcome.confidence = outcome.confidence.clamp(0.0, 1.0);
+    annotate_refusal(&mut outcome);
     outcome
+}
+
+/// If the model's rationale contains refusal-language ("I cannot",
+/// "skipped because", …), prepend a ⚠ marker so it surfaces in every
+/// downstream channel (shell logs, report.md, JSON output) without any
+/// caller change. Idempotent — re-applying does not stack markers.
+fn annotate_refusal(outcome: &mut TriageOutcome) {
+    if outcome.rationale.starts_with("⚠ refusal") {
+        return;
+    }
+    let report = detect_refusal_in_text(&outcome.rationale);
+    if report.refused {
+        outcome.rationale = format!("⚠ refusal — {}", outcome.rationale.trim_start());
+    }
 }
 
 #[derive(Debug, Serialize)]

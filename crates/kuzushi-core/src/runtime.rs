@@ -101,4 +101,17 @@ pub trait AgentRuntime: Send + Sync {
     async fn triage_finding(&self, request: TriageRequest) -> Result<TriageOutcome> {
         self.triage_finding_blocking(request)
     }
+
+    /// Run triage and additionally classify the rationale for refusal-language
+    /// (e.g. "I cannot", "skipped because"). Default impl is heuristic-only:
+    /// it does not issue a follow-up agent call. Concrete runtimes that want
+    /// to invoke a structured follow-up turn override this method.
+    fn triage_finding_with_refusal_blocking(
+        &self,
+        request: TriageRequest,
+    ) -> Result<(TriageOutcome, crate::findings::RefusalReport)> {
+        let outcome = self.triage_finding_blocking(request)?;
+        let refusal = crate::findings::detect_refusal_in_text(&outcome.rationale);
+        Ok((outcome, refusal))
+    }
 }
