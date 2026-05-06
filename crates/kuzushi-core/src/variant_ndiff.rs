@@ -112,12 +112,12 @@ pub fn run_variant_lift_pattern(
     let runtime = require_runtime("variant:lift-pattern", runtime)?;
     let model = require_model("variant:lift-pattern", &input, ctx)?;
     let prompt = build_variant_lift_prompt(&finding);
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: workspace.root().to_path_buf(),
-        system_prompt: VARIANT_SIGNATURE_SYSTEM_PROMPT.to_string(),
+        workspace.root().to_path_buf(),
+        VARIANT_SIGNATURE_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
     let signature = parse_agent_response("variant:lift-pattern", response)?;
     let object = signature
         .as_object()
@@ -223,12 +223,12 @@ pub fn run_variant_hunt(
         .unwrap_or(true);
     let vendor_paths = vendor_paths_from_input(&input);
     let prompt = build_variant_hunt_prompt(&finding, include_vendored, &vendor_paths);
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: target.clone(),
-        system_prompt: VARIANT_HUNT_SYSTEM_PROMPT.to_string(),
+        target.clone(),
+        VARIANT_HUNT_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
     let raw = parse_agent_response("variant:hunt", response)?;
     let repo_name = repo_name(&target);
     let findings = normalize_variant_findings(raw, &target, &repo_name, &finding, max_findings)?;
@@ -383,12 +383,12 @@ pub fn run_ndiff_extract_fix_pattern(
     let target = resolve_tool_target(&input, ctx)
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let prompt = build_ndiff_fix_pattern_prompt(record.as_ref(), &patch_text);
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: target,
-        system_prompt: NDIFF_FIX_PATTERN_SYSTEM_PROMPT.to_string(),
+        target,
+        NDIFF_FIX_PATTERN_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
     let pattern = parse_agent_response("ndiff:extract-fix-pattern", response)?;
     let object = pattern
         .as_object()
@@ -477,12 +477,12 @@ pub fn run_ndiff_hunt_variants(
         .unwrap_or("unknown")
         .to_string();
     let prompt = build_ndiff_hunt_prompt(&pattern, &advisory_id, include_vendored);
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: target.clone(),
-        system_prompt: NDIFF_HUNT_SYSTEM_PROMPT.to_string(),
+        target.clone(),
+        NDIFF_HUNT_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
     let raw = parse_agent_response("ndiff:hunt-variants", response)?;
     let repo_name = repo_name(&target);
     let findings = normalize_ndiff_findings(raw, &repo_name, &advisory_id, &pattern, max_findings)?;

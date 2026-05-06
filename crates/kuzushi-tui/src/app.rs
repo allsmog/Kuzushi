@@ -4782,12 +4782,12 @@ fn run_agent_worker(
 ) -> Result<String> {
     let runtime =
         PiAgentCoreRuntime::from_config(&config, &cwd)?.with_thinking_level(thinking_level);
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
         cwd,
-        system_prompt: ASK_SYSTEM_PROMPT.to_string(),
-        prompt: question,
-    })?;
+        ASK_SYSTEM_PROMPT.to_string(),
+        question,
+    ))?;
     let answer = response.text.trim();
     if answer.is_empty() {
         anyhow::bail!("agent returned no answer");
@@ -4839,12 +4839,12 @@ fn run_planner_worker(
 ) -> Result<PlanProposal> {
     let runtime =
         PiAgentCoreRuntime::from_config(&config, &cwd)?.with_thinking_level(thinking_level);
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
         cwd,
-        system_prompt: PLAN_SYSTEM_PROMPT.to_string(),
-        prompt: goal.to_string(),
-    })?;
+        PLAN_SYSTEM_PROMPT.to_string(),
+        goal.to_string(),
+    ))?;
     let body = response.text.trim();
     if body.is_empty() {
         anyhow::bail!("planner returned no content");
@@ -4999,12 +4999,12 @@ fn run_threat_regen_worker(
         THREAT_REGEN_PROMPT,
         serde_json::to_string_pretty(&existing).unwrap_or_else(|_| "null".to_string())
     );
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
         cwd,
-        system_prompt: THREAT_PATCH_SYSTEM_PROMPT.to_string(),
+        THREAT_PATCH_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
     let body = response.text.trim();
     if body.is_empty() {
         anyhow::bail!("threat regen returned no content");
@@ -5045,12 +5045,12 @@ fn run_threat_ask_worker(
         "OPERATOR QUESTION:\n{question}\n\nCURRENT THREAT MODEL JSON:\n{}",
         serde_json::to_string_pretty(&existing).unwrap_or_else(|_| "null".to_string())
     );
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
         cwd,
-        system_prompt: ASK_SYSTEM_PROMPT.to_string(),
+        ASK_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
     let answer = response.text.trim();
     if answer.is_empty() {
         anyhow::bail!("threat-ask returned no content");

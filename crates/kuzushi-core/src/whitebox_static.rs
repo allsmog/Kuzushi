@@ -2,6 +2,27 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use crate::runtime::AgentToolPolicy;
+
+pub const WHITEBOX_STATIC_AGENT_TOOL_PROFILE: &str = "whitebox-static";
+pub const WHITEBOX_STATIC_READ_ONLY_AGENT_TOOLS: &[&str] = &["Read", "Glob", "Grep", "LS"];
+const WHITEBOX_STATIC_FORBIDDEN_AGENT_TOOLS: &[&str] = &[
+    "bash",
+    "shell",
+    "sh",
+    "zsh",
+    "fish",
+    "powershell",
+    "cmd",
+    "write",
+    "edit",
+    "multiedit",
+    "patch",
+    "applypatch",
+    "apply_patch",
+    "notebookedit",
+];
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum AnalysisMode {
@@ -81,6 +102,86 @@ pub fn analysis_mode_from_input(input: &Value) -> Result<AnalysisMode> {
 
 pub fn whitebox_static_enabled(input: &Value) -> Result<bool> {
     Ok(analysis_mode_from_input(input)? == AnalysisMode::WhiteboxStatic)
+}
+
+pub fn default_whitebox_static_agent_tool_policy() -> AgentToolPolicy {
+    AgentToolPolicy::new(
+        WHITEBOX_STATIC_AGENT_TOOL_PROFILE,
+        WHITEBOX_STATIC_READ_ONLY_AGENT_TOOLS.iter().copied(),
+    )
+}
+
+pub fn agent_tool_policy_for_input(input: &Value) -> Result<AgentToolPolicy> {
+    if input_requests_whitebox_static_agent_policy(input)? {
+        let policy = default_whitebox_static_agent_tool_policy();
+        validate_whitebox_static_agent_tool_policy(&policy)?;
+        Ok(policy)
+    } else {
+        Ok(AgentToolPolicy::default())
+    }
+}
+
+fn input_requests_whitebox_static_agent_policy(input: &Value) -> Result<bool> {
+    for key in ["whiteboxStatic", "whitebox_static"] {
+        if let Some(value) = input.get(key) {
+            if let Some(enabled) = value.get("enabled").and_then(Value::as_bool) {
+                return Ok(enabled);
+            }
+            return value
+                .as_bool()
+                .with_context(|| format!("{key} must be a boolean or policy object"));
+        }
+    }
+
+    let raw_mode = input
+        .get("mode")
+        .or_else(|| input.get("preset"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    Ok(raw_mode == AnalysisMode::WhiteboxStatic.as_str())
+}
+
+pub fn validate_whitebox_static_agent_tool_policy(policy: &AgentToolPolicy) -> Result<()> {
+    if policy.profile != WHITEBOX_STATIC_AGENT_TOOL_PROFILE {
+        anyhow::bail!(
+            "whitebox-static agent tool policy must use profile {WHITEBOX_STATIC_AGENT_TOOL_PROFILE:?}"
+        );
+    }
+    if policy.tools.is_empty() {
+        anyhow::bail!("whitebox-static agent tool policy must include read-only repo tools");
+    }
+
+    for tool in &policy.tools {
+        if is_forbidden_agent_tool(tool) {
+            anyhow::bail!(
+                "whitebox-static agent tool policy cannot include execution or write tool {tool:?}"
+            );
+        }
+        if !WHITEBOX_STATIC_READ_ONLY_AGENT_TOOLS
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(tool))
+        {
+            anyhow::bail!(
+                "whitebox-static agent tool policy can only include read-only repo tools; unsupported tool {tool:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn is_forbidden_agent_tool(tool: &str) -> bool {
+    let normalized = normalize_agent_tool_name(tool);
+    WHITEBOX_STATIC_FORBIDDEN_AGENT_TOOLS
+        .iter()
+        .any(|forbidden| *forbidden == normalized)
+}
+
+fn normalize_agent_tool_name(tool: &str) -> String {
+    tool.chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 pub fn apply_whitebox_static_sast_policy(
@@ -197,6 +298,9 @@ fn is_execution_proof_state(value: &str) -> bool {
 fn truthy_bool(input: &Value, keys: &[&str]) -> Result<bool> {
     for key in keys {
         if let Some(value) = input.get(*key) {
+            if let Some(enabled) = value.get("enabled").and_then(Value::as_bool) {
+                return Ok(enabled);
+            }
             return value
                 .as_bool()
                 .with_context(|| format!("{key} must be a boolean"));
@@ -252,5 +356,51 @@ mod tests {
 
         assert_eq!(sanitized, input);
         assert!(policy.is_none());
+    }
+
+    #[test]
+    fn whitebox_agent_tools_are_read_only_repo_tools() {
+        let policy = default_whitebox_static_agent_tool_policy();
+
+        assert_eq!(policy.profile, "whitebox-static");
+        assert_eq!(policy.tools, vec!["Read", "Glob", "Grep", "LS"]);
+        validate_whitebox_static_agent_tool_policy(&policy).unwrap();
+    }
+
+    #[test]
+    fn whitebox_agent_tools_reject_shell_write_and_patch_tools() {
+        for forbidden in ["Bash", "shell", "Write", "Edit", "patch", "apply_patch"] {
+            let policy = AgentToolPolicy::new("whitebox-static", ["Read", forbidden]);
+            let err = validate_whitebox_static_agent_tool_policy(&policy)
+                .unwrap_err()
+                .to_string();
+
+            assert!(err.contains("cannot include execution or write tool"));
+        }
+    }
+
+    #[test]
+    fn whitebox_agent_tools_reject_non_repo_read_only_tools() {
+        let policy = AgentToolPolicy::new("whitebox-static", ["Read", "Fetch"]);
+        let err = validate_whitebox_static_agent_tool_policy(&policy)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("can only include read-only repo tools"));
+    }
+
+    #[test]
+    fn standard_mode_gets_default_empty_agent_tool_policy() {
+        let policy = agent_tool_policy_for_input(&json!({"mode": "standard"})).unwrap();
+
+        assert!(policy.is_default());
+    }
+
+    #[test]
+    fn whitebox_mode_gets_read_only_agent_tool_policy() {
+        let policy = agent_tool_policy_for_input(&json!({"mode": "whitebox-static"})).unwrap();
+
+        assert_eq!(policy.profile, "whitebox-static");
+        assert_eq!(policy.tools, vec!["Read", "Glob", "Grep", "LS"]);
     }
 }

@@ -1,13 +1,13 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-002 - Remove Shell Execution From Default Whitebox Agent Tools
-Status: WB-001 complete; WB-002 pending after commit/push gate
+Active story: WB-003 - Scrub Scanner Subprocess Environments
+Status: WB-002 complete; WB-003 pending after commit/push gate
 
 ## Stage 3 Checklist
 
 - WB-001 Add explicit whitebox-static mode: complete in iteration 29.
-- WB-002 Remove shell execution from default whitebox agent tools: pending.
+- WB-002 Remove shell execution from default whitebox agent tools: complete in iteration 30.
 - WB-003 Scrub scanner subprocess environments: pending.
 - WB-004 Add static proof taxonomy: pending.
 - WB-005 Add static evidence graph: pending.
@@ -30,6 +30,57 @@ Status: WB-001 complete; WB-002 pending after commit/push gate
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 30 - WB-002
+
+- Task attempted: remove shell/write execution from default whitebox agent
+  tools by making the Rust agent query contract carry an explicit
+  `whitebox-static` tool policy and teaching the pi-agent-core bridge to build
+  only read-only repository tools for that profile.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `crates/kuzushi-core/src/runtime.rs`
+  - `crates/kuzushi-core/src/whitebox_static.rs`
+  - `crates/kuzushi-core/src/lib.rs`
+  - `crates/kuzushi-core/src/modules.rs`
+  - `crates/kuzushi-core/src/carlini_threat_hunt.rs`
+  - `crates/kuzushi-core/src/systems_hunt.rs`
+  - `crates/kuzushi-core/src/patch.rs`
+  - `crates/kuzushi-core/src/threat_model.rs`
+  - `crates/kuzushi-core/src/variant_ndiff.rs`
+  - `crates/kuzushi-core/src/x_ray.rs`
+  - `crates/kuzushi-openai/src/lib.rs`
+  - `crates/kuzushi-tui/src/app.rs`
+  - `scripts/pi-agent-core-bridge.mjs`
+- Tests/checks run:
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core whitebox_agent_tools`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-core`
+  - `cargo test -p kuzushi-openai`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `node --check scripts/pi-agent-core-bridge.mjs`
+  - `pnpm eval:kuzushi-whitebox-static` with the primary checkout's
+    `node_modules` temporarily symlinked into the clean clone
+- Result: complete. `AgentQueryRequest` now carries an `AgentToolPolicy`;
+  whitebox-static SAST agent requests use the read-only `Read`, `Glob`, `Grep`,
+  and `LS` policy, and validation rejects `Bash`, shell execution, `Write`,
+  edit, patch, and non-repo-read-only tools. The Node bridge constructs only
+  those read-only repo tools for the whitebox profile and blocks forbidden or
+  unexpected tool calls before execution. The full core suite also passes after
+  separating SAST `mode=standard|whitebox-static` from taint-next
+  `mode=plan|hunt`. WB-002 is marked `passes: true` in the PRD after the story
+  gate and focused checks passed.
+- Remaining work: commit and push WB-002, then start WB-003.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files. This iteration continued in the
+    clean isolated clone at `/tmp/kuzushi-ux2-clone.PJaRge`, which contains the
+    active pushed Stage 2 and WB-001 state.
+  - The isolated clone still does not have its own `node_modules`; the eval
+    used a temporary symlink to the primary checkout's installed dependencies,
+    then removed the symlink before commit.
 
 ### Iteration 29 - WB-001
 

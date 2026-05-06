@@ -54,7 +54,9 @@ pub use options::{OptionScope, OptionTarget, ToolOptionStore};
 pub use patch::run_patch_finding;
 pub use pr_comment::{build_pr_comment, PrCommentInput};
 pub use recon::{execute_recon_tool, ReconHost, ReconNote, ReconService, ReconWorkspaceStore};
-pub use runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageRequest};
+pub use runtime::{
+    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolPolicy, TriageRequest,
+};
 pub use scan::{
     default_scan_engines, normalize_codeql_sarif, normalize_semgrep_json, run_scan_engines,
     run_semgrep_scan, scan_engines_for_tasks, CodeqlScanner, ScanCancellation, ScanEngine, ScanRun,
@@ -69,8 +71,9 @@ pub use threat_model::{
     execute_threat_model_tool, load_persistent_threat_model, save_persistent_threat_model,
 };
 pub use whitebox_static::{
-    analysis_mode_from_input, apply_whitebox_static_sast_policy, whitebox_static_enabled,
-    AnalysisMode, WhiteboxStaticPolicy,
+    agent_tool_policy_for_input, analysis_mode_from_input, apply_whitebox_static_sast_policy,
+    default_whitebox_static_agent_tool_policy, validate_whitebox_static_agent_tool_policy,
+    whitebox_static_enabled, AnalysisMode, WhiteboxStaticPolicy,
 };
 pub use workspace::{
     export_workspace_findings, WorkspaceExportFormat, WorkspaceFindingsExport, WorkspaceTarget,

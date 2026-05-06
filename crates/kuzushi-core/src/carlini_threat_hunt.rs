@@ -11,6 +11,7 @@ use crate::artifact_kb::ArtifactKnowledgePromptContext;
 use crate::findings::{Finding, Severity};
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
+use crate::whitebox_static::agent_tool_policy_for_input;
 
 const MODULE_ID: &str = "carlini-threat-hunt";
 const SYSTEM_PROMPT: &str = r#"You are Kuzushi's Carlini Threat Hunt actor agent.
@@ -99,12 +100,15 @@ pub fn run_carlini_threat_hunt_report(
                 &inventory,
                 &actor_fingerprint,
             );
-            let response = runtime.query_blocking(AgentQueryRequest {
-                model: model.clone(),
-                cwd: target.clone(),
-                system_prompt: SYSTEM_PROMPT.to_string(),
-                prompt,
-            })?;
+            let response = runtime.query_blocking(
+                AgentQueryRequest::new(
+                    model.clone(),
+                    target.clone(),
+                    SYSTEM_PROMPT.to_string(),
+                    prompt,
+                )
+                .with_tool_policy(agent_tool_policy_for_input(input)?),
+            )?;
             let raw = response.structured.unwrap_or_else(|| {
                 parse_json_object_from_agent_text(&response.text)
                     .unwrap_or_else(|_| json!({"findings":[]}))
