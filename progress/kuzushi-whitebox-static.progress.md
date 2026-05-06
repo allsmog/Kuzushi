@@ -64,7 +64,8 @@ Status: WB-008 complete in iteration 36; WB-009 pending
   SARIF flow locations with `flows_to` edges. Scanner signal metadata records
   `truePositiveByDefault: false`; no runtime exploitability claim is added.
   WB-008 is marked `passes: true` in the PRD after the story gate and fast
-  whitebox checks passed.
+  whitebox checks passed. The implementation was committed and pushed to
+  `origin/main` as `6cd3355`.
 - Remaining work: WB-009 through WB-022.
 - Blockers or repo facts that contradicted this prompt:
   - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
@@ -73,8 +74,8 @@ Status: WB-008 complete in iteration 36; WB-009 pending
     `/Users/operator/VibeCode/open-sourced/kuzushi/.codex-active/kuzushi-stage3`
     because the `apply_patch` tool rejected direct edits to `/private/tmp`.
   - GitHub network resolution failed from the primary checkout earlier in this
-    iteration (`Could not resolve host: github.com`); the push gate was retried
-    after local verification.
+    iteration (`Could not resolve host: github.com`), but the final push from
+    the nested clean clone succeeded.
 
 ### Iteration 35 - WB-007
 
