@@ -1,7 +1,7 @@
 # Ralph Rust Bridge Gaps Progress
 
 Stage: 1 - Rust Bridge Gaps
-Active story: BG-016 - Final bridge gate commit/push
+Active story: BG-016 - Final bridge marker commit/push
 
 ## Current Rust Shell Command Surface
 
@@ -121,7 +121,7 @@ Legacy command classifications:
 - BG-013 History, clear, load, resume/pause, story: complete in iteration 13.
 - BG-014 Completion and help parity: complete in iteration 14.
 - BG-015 Plain/non-TTY bridge output: complete in iteration 15.
-- BG-016 Final bridge gate: verification complete in iteration 20; commit/push blocked.
+- BG-016 Final bridge gate: verification complete in iteration 37; marker commit/push blocked.
 
 ## Iteration Log
 
@@ -497,6 +497,8 @@ Legacy command classifications:
   - `pnpm build:native`
   - `pnpm test:e2e`
   - `pnpm verify:pack`
+  - `HUSKY=0 git add RALPH_RUST_BRIDGE_GAPS_PROGRESS.md && HUSKY=0 git commit -m "ralph: mark bridge gaps phase done" && git push origin incoming-changes`
+  - `git -c http.lowSpeedLimit=1 -c http.lowSpeedTime=8 ls-remote --heads origin incoming-changes`
 - Result: incomplete. The Rust gate now passes: `cargo test --workspace`, `cargo build --workspace`, `pnpm build:native`, and `pnpm test:e2e` all completed successfully. The bridge grep gate showed Rust docs/tests for the command families. The only code fix needed was aligning `threat-model:build` option metadata with the core threat-model contract: supported methodology choices are `pasta`, `stride`, and `dread`, not `randori`. The final Stage 1 marker was not recorded because the package-side gate cannot pass in this environment without installed JS dev tools.
 - Remaining work: BG-016 final bridge gate. Re-run the full gate after JS dev dependencies are available, then commit and push the Stage 1 bridge state and record `KUZUSHI_BRIDGE_GAPS_PHASE_DONE` only after those gates pass.
 - Blockers or repo facts that contradicted this prompt:
@@ -1070,3 +1072,104 @@ Legacy command classifications:
 - Blockers or repo facts that contradicted this prompt:
   - Remote reachability is still blocked in this sandbox: `git -c http.lowSpeedLimit=1 -c http.lowSpeedTime=8 ls-remote --heads origin incoming-changes` fails with `Could not resolve host: github.com`.
   - The direct push attempt also fails with `Could not resolve host: github.com`, so local commit `d52a57a` remains unpushed.
+
+### Iteration 37 - BG-016
+
+- Task attempted: verify the final Stage 1 bridge state after local/upstream convergence, record the bridge completion marker, and commit/push the marker.
+- Files changed:
+  - `RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short`
+  - `git status --short --branch --untracked-files=all`
+  - `git rev-parse HEAD`
+  - `git rev-parse @{u}`
+  - `git diff --stat @{u}..HEAD`
+  - `rg -n "show options|/options|/kb|/tasks|/task|/context|/auth|/cost|/history|/load" README.md crates tests`
+  - `cargo fmt --all --check`
+  - `cargo test --workspace`
+  - `cargo build --workspace`
+  - `pnpm check`
+  - `pnpm typecheck`
+  - `pnpm build`
+  - `pnpm build:native`
+  - `pnpm test:e2e`
+  - `pnpm verify:pack`
+- Result: incomplete. `HEAD` matched `origin/incoming-changes` before this marker update, proving the Stage 1 bridge implementation commit `48616bbb753e8a804a646a736a89c2b53b990934` was pushed. The bridge grep gate shows Rust README/docs/tests for all required command families. Rust formatting, workspace tests, workspace build, JS check/typecheck/build, native build, e2e smoke, and package verification all pass. `pnpm check` still emits the existing warning set but exits 0, which is the configured gate. The completion marker was not recorded because the marker-only commit/push failed.
+- Remaining work: commit and push this marker-only progress update, then record `KUZUSHI_BRIDGE_GAPS_PHASE_DONE` after the pushed marker commit exists. After that pushed marker exists, Stage 2 can begin in the next iteration.
+- Blockers or repo facts that contradicted this prompt:
+  - The Stage 1 implementation is already pushed, but this environment still cannot create `.git/index.lock` for the marker commit: `HUSKY=0 git add RALPH_RUST_BRIDGE_GAPS_PROGRESS.md && HUSKY=0 git commit -m "ralph: mark bridge gaps phase done" && git push origin incoming-changes` failed with `fatal: Unable to create .../.git/index.lock: Operation not permitted`.
+  - Remote reachability is also unavailable again, so a temporary-object direct push cannot be used in this iteration: `git -c http.lowSpeedLimit=1 -c http.lowSpeedTime=8 ls-remote --heads origin incoming-changes` failed with `Could not resolve host: github.com`.
+
+### Iteration 38 - BG-016
+
+- Task attempted: commit the staged Stage 1 bridge verification progress update and push the branch so the bridge completion marker can be recorded.
+- Files changed:
+  - `RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short`
+  - `sed -n '1,240p' RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+  - `git diff --cached -- RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+  - `git status --short --branch`
+  - `rg -n "KUZUSHI_BRIDGE_GAPS_PHASE_DONE|Iteration 37|Active story|BG-016" RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+  - `git rev-parse HEAD`
+  - `git rev-parse @{u}`
+  - `git diff --cached --stat`
+  - `HUSKY=0 git commit -m "ralph: verify bridge gaps pushed"`
+  - `git diff --cached --check`
+  - `git -c http.lowSpeedLimit=1 -c http.lowSpeedTime=8 ls-remote --heads origin incoming-changes`
+  - `cargo fmt --all --check`
+- Result: incomplete. `HEAD` and `origin/incoming-changes` still both resolve to `48616bbb753e8a804a646a736a89c2b53b990934`, so the Stage 1 bridge implementation remains pushed. The staged marker-progress diff is whitespace-clean and Rust formatting still passes. The marker-progress commit failed before creating a commit because Git cannot create `.git/index.lock`; GitHub DNS resolution is also unavailable, so a push cannot be completed from this sandbox.
+- Remaining work: commit and push the staged marker-progress update from an environment that can write `.git` metadata and resolve GitHub, then record `KUZUSHI_BRIDGE_GAPS_PHASE_DONE` in this progress file and commit/push that marker. Do not start Stage 2 until the pushed Stage 1 completion marker exists.
+- Blockers or repo facts that contradicted this prompt:
+  - `HUSKY=0 git commit -m "ralph: verify bridge gaps pushed"` fails with `fatal: Unable to create '/Users/operator/VibeCode/open-sourced/kuzushi/.git/index.lock': Operation not permitted`.
+  - `git -c http.lowSpeedLimit=1 -c http.lowSpeedTime=8 ls-remote --heads origin incoming-changes` fails with `Could not resolve host: github.com`.
+
+### Iteration 39 - BG-016
+
+- Task attempted: retry the Stage 1 marker-progress commit/push gate, verify lightweight bridge checks, and confirm whether the completion marker can be safely recorded.
+- Files changed:
+  - `RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short --branch`
+  - `git diff --cached --stat && git diff --stat`
+  - `rg -n "KUZUSHI_BRIDGE_GAPS_PHASE_DONE|Active story|Stage 1 Checklist|Iteration 38|Iteration 39" RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+  - `git rev-parse HEAD && git rev-parse @{u}`
+  - `git diff --cached -- RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+  - `cargo fmt --all --check`
+  - `rg -n "show options|/options|/kb|/tasks|/task|/context|/auth|/cost|/history|/load" README.md crates tests`
+  - `HUSKY=0 git commit --no-verify -m "ralph: verify bridge gaps pushed"`
+  - `ls -ldeO .git .git/index; test -e .git/index.lock`
+  - `touch .git/codex-write-probe-iteration-39`
+  - `git -c http.lowSpeedLimit=1 -c http.lowSpeedTime=8 ls-remote --heads origin incoming-changes`
+  - `git diff --cached --check`
+- Result: incomplete. `HEAD` and `origin/incoming-changes` still both resolve to `48616bbb753e8a804a646a736a89c2b53b990934`, so the Stage 1 bridge implementation remains pushed. The staged progress diff has no whitespace errors, `cargo fmt --all --check` passes, and the bridge command-family grep still finds Rust README/docs/tests. The `KUZUSHI_BRIDGE_GAPS_PHASE_DONE` marker was not recorded because the marker/progress commit cannot be created or pushed from this environment.
+- Remaining work: commit and push the staged marker-progress update from an environment that can write `.git` metadata and resolve GitHub, then record `KUZUSHI_BRIDGE_GAPS_PHASE_DONE` in this progress file and commit/push that marker. Do not start Stage 2 until the pushed Stage 1 completion marker exists.
+- Blockers or repo facts that contradicted this prompt:
+  - `HUSKY=0 git commit --no-verify -m "ralph: verify bridge gaps pushed"` fails with `fatal: Unable to create '/Users/operator/VibeCode/open-sourced/kuzushi/.git/index.lock': Operation not permitted`.
+  - `.git/index.lock` does not exist, but `touch .git/codex-write-probe-iteration-39` fails with `Operation not permitted`, confirming Git metadata writes remain blocked.
+  - `git -c http.lowSpeedLimit=1 -c http.lowSpeedTime=8 ls-remote --heads origin incoming-changes` fails with `Could not resolve host: github.com`, so push remains unavailable from this sandbox.
+
+### Iteration 40 - BG-016
+
+- Task attempted: retry the Stage 1 marker-progress commit/push gate from the current sandbox state and confirm whether the bridge completion marker can be safely recorded.
+- Files changed:
+  - `RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short`
+  - `sed -n '1,240p' RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+  - `git diff -- RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+  - `git status --short --branch`
+  - `git rev-parse HEAD && git rev-parse @{u}`
+  - `rg -n "KUZUSHI_BRIDGE_GAPS_PHASE_DONE|KUZUSHI_UX_PHASE_DONE|KUZUSHI_FINISH_FROM_BRIDGE_COMPLETE|Active story" RALPH_RUST_BRIDGE_GAPS_PROGRESS.md RALPH_RUST_UX_PROGRESS.md progress/kuzushi-whitebox-static.progress.md`
+  - `git diff --cached --stat && git diff --stat`
+  - `cargo fmt --all --check`
+  - `.git` metadata write probe with `touch .git/codex-write-probe-iteration-22`
+  - `git -c http.lowSpeedLimit=1 -c http.lowSpeedTime=8 ls-remote --heads origin incoming-changes`
+  - `HUSKY=0 git commit --no-verify -m "ralph: verify bridge gaps pushed"`
+- Result: incomplete. `HEAD` and `origin/incoming-changes` still both resolve to `48616bbb753e8a804a646a736a89c2b53b990934`, so the Stage 1 bridge implementation remains pushed. Rust formatting still passes. The Stage 1 completion marker was not recorded because this marker-progress commit cannot be created or pushed from the current sandbox.
+- Remaining work: commit and push the staged marker-progress update from an environment that can write `.git` metadata and resolve GitHub, then record `KUZUSHI_BRIDGE_GAPS_PHASE_DONE` in this progress file and commit/push that marker. Do not start Stage 2 until the pushed Stage 1 completion marker exists.
+- Blockers or repo facts that contradicted this prompt:
+  - `RALPH_RUST_UX_PROGRESS.md` and `progress/kuzushi-whitebox-static.progress.md` still do not exist, which is expected because Stage 1 has not reached a pushed completion-marker gate.
+  - `touch .git/codex-write-probe-iteration-22` fails with `Operation not permitted`, confirming Git metadata writes remain blocked.
+  - `HUSKY=0 git commit --no-verify -m "ralph: verify bridge gaps pushed"` fails with `fatal: Unable to create '/Users/operator/VibeCode/open-sourced/kuzushi/.git/index.lock': Operation not permitted`.
+  - `git -c http.lowSpeedLimit=1 -c http.lowSpeedTime=8 ls-remote --heads origin incoming-changes` fails with `Could not resolve host: github.com`, so push remains unavailable from this sandbox.
