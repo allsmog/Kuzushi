@@ -1,8 +1,8 @@
 # Ralph Rust UX Progress
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
-Active story: UX-012 - Stable Finding Aliases
-Status: UX-011 complete and pushed in iteration 24 as `5a741aa`; UX-012 pending next iteration
+Active story: UX-013 - Better Empty States And Errors
+Status: UX-012 complete in iteration 25; UX-013 pending next iteration
 
 ## Stage 2 Checklist
 
@@ -17,12 +17,48 @@ Status: UX-011 complete and pushed in iteration 24 as `5a741aa`; UX-012 pending 
 - UX-009 Slash command taxonomy and drift tests: complete in iteration 22.
 - UX-010 Tab completion for high-value arguments: complete in iteration 23.
 - UX-011 Findings row/card density: complete in iteration 24.
-- UX-012 Stable finding aliases: pending.
+- UX-012 Stable finding aliases: complete in iteration 25.
 - UX-013 Better empty states and errors: pending.
 - UX-014 Explicit plain / screen-reader / low-bandwidth mode: pending.
 - UX-015 Final Ink/React removal gate: pending.
 
 ## Iteration Log
+
+### Iteration 25 - UX-012
+
+- Task attempted: make finding aliases stable across Rust scan transcripts,
+  findings lists, `open`/detail views, replay/trace reference views, CLI
+  findings output, and PR-comment sections, with fingerprints retained as
+  secondary metadata.
+- Files changed:
+  - `crates/kuzushi-core/src/findings.rs`
+  - `crates/kuzushi-core/src/lib.rs`
+  - `crates/kuzushi-core/src/pr_comment.rs`
+  - `crates/kuzushi-tui/src/app.rs`
+  - `crates/kuzushi-tui/src/renderer.rs`
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `sed -n '1,120p' RALPH_RUST_UX_PROGRESS.md` in the clean isolated clone
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core findings -- --nocapture`
+  - `cargo test -p kuzushi-core pr_comment -- --nocapture`
+  - `cargo test -p kuzushi-tui alias -- --nocapture`
+  - `cargo test -p kuzushi-tui renderer::tests -- --nocapture`
+  - `cargo test -p kuzushi-tui app::tests -- --nocapture`
+  - `cargo test -p kuzushi-cli findings -- --nocapture`
+- Result: implementation complete. Stable `F-NNNN` alias assignment now lives
+  in `kuzushi-core` and sorts by severity then fingerprint. CLI findings output
+  uses the alias plus secondary fingerprint, PR-comment diff sections preserve
+  global aliases instead of renumbering subsets, TUI completion/list/open/detail
+  paths share the same alias resolver, scan completion logs the stable top
+  alias, and replay/trace views show the current alias reference table.
+- Remaining work: UX-013 through UX-015.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary workspace remains stale at `80d23a4` with earlier Stage 2 files
+    staged/modified, so this iteration continued in the clean isolated clone at
+    `/tmp/kuzushi-ux2-clone.PJaRge`.
 
 ### Iteration 24 - UX-011
 

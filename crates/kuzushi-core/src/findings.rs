@@ -413,13 +413,19 @@ impl FindingListReport {
             return "  (no findings match)".to_string();
         }
 
-        let id_width = self
-            .findings
+        let aliased = sorted_finding_aliases(&self.findings);
+        let alias_width = aliased
             .iter()
-            .map(|finding| short_id(&finding.fingerprint).len())
+            .map(|(alias, _)| alias.len())
             .max()
-            .unwrap_or(2)
-            .max(2);
+            .unwrap_or(5)
+            .max(5);
+        let fingerprint_width = aliased
+            .iter()
+            .map(|(_, finding)| short_id(&finding.fingerprint).len())
+            .max()
+            .unwrap_or(8)
+            .max(8);
         let severity_width = self
             .findings
             .iter()
@@ -448,28 +454,31 @@ impl FindingListReport {
 
         let mut lines = vec![
             format!(
-                "  {}  {}  {}  {}",
-                pad("Id", id_width),
+                "  {}  {}  {}  {}  {}",
+                pad("Alias", alias_width),
+                pad("Fingerprint", fingerprint_width),
                 pad("Sev", severity_width),
                 pad("Check", verdict_width),
                 pad("Name", name_width)
             ),
             format!(
-                "  {}  {}  {}  {}",
-                "-".repeat(id_width),
+                "  {}  {}  {}  {}  {}",
+                "-".repeat(alias_width),
+                "-".repeat(fingerprint_width),
                 "-".repeat(severity_width),
                 "-".repeat(verdict_width),
                 "-".repeat(name_width)
             ),
         ];
 
-        for finding in &self.findings {
+        for (alias, finding) in aliased {
             lines.push(format!(
-                "  {}  {}  {}  {}",
-                pad(&short_id(&finding.fingerprint), id_width),
+                "  {}  {}  {}  {}  {}",
+                pad(&alias, alias_width),
+                pad(&short_id(&finding.fingerprint), fingerprint_width),
                 pad(finding.severity.as_str(), severity_width),
                 pad(
-                    FindingVerdictFilter::from_finding(finding).as_legacy_str(),
+                    FindingVerdictFilter::from_finding(&finding).as_legacy_str(),
                     verdict_width
                 ),
                 finding.title
@@ -492,6 +501,51 @@ impl FindingListReport {
             "data": self,
         })
     }
+}
+
+pub fn format_finding_alias(index: usize) -> String {
+    format!("F-{:04}", index + 1)
+}
+
+pub fn parse_finding_alias(reference: &str) -> Option<usize> {
+    let reference = reference.trim();
+    let suffix = reference
+        .strip_prefix("F-")
+        .or_else(|| reference.strip_prefix("f-"))?;
+    let index = suffix.parse::<usize>().ok()?;
+    index.checked_sub(1)
+}
+
+pub fn sorted_finding_aliases(findings: &[Finding]) -> Vec<(String, Finding)> {
+    let mut indexed: Vec<&Finding> = findings.iter().collect();
+    indexed.sort_by(|a, b| {
+        let by_severity = severity_rank(a.severity).cmp(&severity_rank(b.severity));
+        if by_severity == std::cmp::Ordering::Equal {
+            a.fingerprint.cmp(&b.fingerprint)
+        } else {
+            by_severity
+        }
+    });
+    indexed
+        .into_iter()
+        .enumerate()
+        .map(|(index, finding)| (format_finding_alias(index), finding.clone()))
+        .collect()
+}
+
+pub fn stable_finding_alias(findings: &[Finding], fingerprint: &str) -> Option<String> {
+    sorted_finding_aliases(findings)
+        .into_iter()
+        .find(|(_, finding)| finding.fingerprint == fingerprint)
+        .map(|(alias, _)| alias)
+}
+
+pub fn resolve_finding_alias(findings: &[Finding], reference: &str) -> Option<Finding> {
+    let index = parse_finding_alias(reference)?;
+    sorted_finding_aliases(findings)
+        .into_iter()
+        .nth(index)
+        .map(|(_, finding)| finding)
 }
 
 pub struct FindingStore {
@@ -990,6 +1044,17 @@ fn short_id(fingerprint: &str) -> String {
     fingerprint.chars().take(8).collect()
 }
 
+fn severity_rank(severity: Severity) -> u8 {
+    match severity {
+        Severity::Critical => 0,
+        Severity::High => 1,
+        Severity::Medium => 2,
+        Severity::Low => 3,
+        Severity::Info => 4,
+        Severity::Unknown => 5,
+    }
+}
+
 fn pad(value: &str, width: usize) -> String {
     format!("{value:<width$}")
 }
@@ -1055,6 +1120,80 @@ mod tests {
         let resolved = store.get_finding_by_reference(prefix).unwrap().unwrap();
 
         assert_eq!(resolved.fingerprint, finding.fingerprint);
+    }
+
+    #[test]
+    fn stable_aliases_sort_by_severity_then_fingerprint() {
+        let mut high_late = Finding::new_semgrep(
+            "demo.high",
+            "src/b.ts",
+            2,
+            Some(2),
+            Severity::High,
+            "high z",
+        );
+        high_late.fingerprint = "zzzz1111".to_string();
+        let mut high_early = Finding::new_semgrep(
+            "demo.high",
+            "src/a.ts",
+            1,
+            Some(1),
+            Severity::High,
+            "high a",
+        );
+        high_early.fingerprint = "aaaa1111".to_string();
+        let mut critical = Finding::new_semgrep(
+            "demo.critical",
+            "src/c.ts",
+            3,
+            Some(3),
+            Severity::Critical,
+            "critical",
+        );
+        critical.fingerprint = "mmmm1111".to_string();
+
+        let input = vec![high_late.clone(), high_early.clone(), critical.clone()];
+        let aliases = sorted_finding_aliases(&input);
+
+        assert_eq!(aliases[0].0, "F-0001");
+        assert_eq!(aliases[0].1.fingerprint, critical.fingerprint);
+        assert_eq!(aliases[1].0, "F-0002");
+        assert_eq!(aliases[1].1.fingerprint, high_early.fingerprint);
+        assert_eq!(
+            stable_finding_alias(&input, &high_late.fingerprint).as_deref(),
+            Some("F-0003")
+        );
+        assert_eq!(
+            resolve_finding_alias(&input, "f-0002")
+                .as_ref()
+                .map(|finding| finding.fingerprint.as_str()),
+            Some(high_early.fingerprint.as_str())
+        );
+        assert!(parse_finding_alias("F-0000").is_none());
+    }
+
+    #[test]
+    fn finding_report_outputs_alias_with_secondary_fingerprint() {
+        let mut high_late =
+            Finding::new_semgrep("demo.b", "src/b.ts", 2, Some(2), Severity::High, "b");
+        high_late.fingerprint = "zzzz1111".to_string();
+        let mut high_early =
+            Finding::new_semgrep("demo.a", "src/a.ts", 1, Some(1), Severity::High, "a");
+        high_early.fingerprint = "aaaa1111".to_string();
+        let report = FindingListReport {
+            count: 2,
+            findings: vec![high_late, high_early],
+        };
+
+        let output = report.output();
+
+        assert!(output.contains("Alias"));
+        assert!(output.contains("Fingerprint"));
+        let first = output.find("F-0001").unwrap();
+        let second = output.find("F-0002").unwrap();
+        assert!(first < second);
+        assert!(output[first..].contains("aaaa1111"));
+        assert!(output[second..].contains("zzzz1111"));
     }
 
     #[test]

@@ -40,8 +40,10 @@ pub use dep_hygiene::{
     DepHygieneReport, DepHygieneScanner, DepHygieneSeverity, ManifestKind,
 };
 pub use findings::{
-    Finding, FindingListFilter, FindingListReport, FindingStore, FindingVerdictFilter,
-    PatchAttempt, PatchResult, PatchStatus, Severity, TriageOutcome, TriageVerdict,
+    format_finding_alias, parse_finding_alias, resolve_finding_alias, sorted_finding_aliases,
+    stable_finding_alias, Finding, FindingListFilter, FindingListReport, FindingStore,
+    FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus, Severity, TriageOutcome,
+    TriageVerdict,
 };
 pub use iac_scan::{
     scan_iac, IacScanFinding, IacScanKind, IacScanOptions, IacScanReport, IacScanScanner,
