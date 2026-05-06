@@ -1075,12 +1075,53 @@ fn module_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     lines.push(blank());
+    let activity_label = match module.metadata().id.as_str() {
+        "recon" => Some("RECENT RECON ACTIVITY"),
+        "carlini-threat-hunt" => Some("RECENT THREAT-HUNT ACTIVITY"),
+        "agentic-sast" => Some("RECENT AGENTIC-SAST ACTIVITY"),
+        _ => None,
+    };
+    if let Some(label) = activity_label {
+        let recent: Vec<(String, String)> = recent_module_log(app, module.metadata().id.as_str(), 8);
+        if !recent.is_empty() {
+            lines.push(section_header_line(label, area.width));
+            for (prefix, body) in &recent {
+                for body_line in body.lines() {
+                    lines.push(transcript_line(prefix, body_line, false));
+                }
+            }
+            lines.push(blank());
+        }
+    }
     lines.extend(module_playbook_lines(
         module.metadata().id.as_str(),
         area.width,
     ));
 
     lines
+}
+
+/// Pull the most recent N log lines that look like they came from the given
+/// module (by prefix or body match). Returns oldest-first.
+fn recent_module_log(app: &ShellApp, module_id: &str, take: usize) -> Vec<(String, String)> {
+    let module_id = module_id.to_string();
+    let mut matches: Vec<(String, String)> = app
+        .log
+        .iter()
+        .rev()
+        .filter(|line| {
+            line.prefix == module_id
+                || line.prefix.starts_with(&format!("{module_id}:"))
+                || line.body.contains(&format!("{module_id}:"))
+                || (module_id == "recon"
+                    && (line.prefix == "tool" || line.prefix == "result")
+                    && line.body.contains("recon"))
+        })
+        .take(take)
+        .map(|line| (line.prefix.clone(), line.body.clone()))
+        .collect();
+    matches.reverse();
+    matches
 }
 
 fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -4133,6 +4174,50 @@ mod tests {
         assert!(rendered.contains("sast"));
         assert!(!rendered.contains("dag"));
         assert!(!rendered.contains("DAG"));
+    }
+
+    #[test]
+    fn focused_recon_module_renders_recent_activity_section() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.log.clear();
+        app.log("recon:nmap", "discovered 5 hosts and 18 services for acme-checkout.com");
+        app.log("recon:subdomain", "discovered 7 subdomains");
+        app.log("recon", "persisted 3 findings");
+        app.handle_command(crate::commands::ShellCommand::Use("recon".to_string()));
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains("RECENT RECON ACTIVITY"),
+            "expected design section header for recon: {rendered}"
+        );
+        assert!(rendered.contains("discovered 5 hosts"));
+        assert!(rendered.contains("discovered 7 subdomains"));
+    }
+
+    #[test]
+    fn focused_carlini_module_renders_recent_threat_hunt_activity() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.log.clear();
+        app.log("carlini-threat-hunt", "actor 1/4 dispatched");
+        app.log("carlini-threat-hunt", "actor 2/4 found path-traversal sink");
+        app.handle_command(crate::commands::ShellCommand::Use(
+            "carlini-threat-hunt".to_string(),
+        ));
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains("RECENT THREAT-HUNT ACTIVITY"),
+            "expected design section header for carlini: {rendered}"
+        );
+        assert!(rendered.contains("actor 1/4 dispatched"));
     }
 
     #[test]
