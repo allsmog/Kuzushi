@@ -46,6 +46,14 @@ enum Command {
         /// once the runtime is wired through (Phase 4+). Set without value to clear all caps.
         #[arg(long)]
         budget: Option<String>,
+        /// Diff-scope the scan to files changed since `<ref>`. Engines that
+        /// support it (full-mode-multi today) narrow their walk; others are
+        /// unaffected. Pass `--include-worktree` to include uncommitted edits.
+        #[arg(long)]
+        since: Option<String>,
+        /// When `--since` is set, also include uncommitted (working-tree) changes.
+        #[arg(long, requires = "since")]
+        include_worktree: bool,
     },
     /// List persisted findings.
     Findings {
@@ -146,7 +154,9 @@ async fn main() -> Result<()> {
             json,
             ci,
             budget,
-        } => scan_command(target, tasks, triage, json, ci, budget).await,
+            since,
+            include_worktree,
+        } => scan_command(target, tasks, triage, json, ci, budget, since, include_worktree).await,
         Command::Findings {
             target,
             limit,
@@ -231,11 +241,36 @@ async fn scan_command(
     json: bool,
     ci: bool,
     budget: Option<String>,
+    since: Option<String>,
+    include_worktree: bool,
 ) -> Result<()> {
     let workspace = WorkspaceTarget::new(&target)?;
     let config = load_config_for_target(Some(workspace.root()))?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let registry = ModuleRegistry::with_v2_builtins();
+
+    // Resolve --since into a list of repo-relative paths and write to
+    // `<target>/.kuzushi/v2/since.txt` for engines that support it.
+    if let Some(since_ref) = since.as_deref() {
+        let scope = kuzushi_core::git_diff_files(workspace.root(), since_ref, include_worktree)
+            .with_context(|| format!("--since {since_ref:?} failed"))?;
+        let scope_file = workspace.findings_db_path().with_file_name("since.txt");
+        let body: String = scope
+            .files
+            .iter()
+            .map(|p| format!("{}\n", p.display()))
+            .collect();
+        std::fs::write(&scope_file, body)
+            .with_context(|| format!("could not write {}", scope_file.display()))?;
+        if !json && !ci {
+            eprintln!(
+                "scope: {} files since {} {}",
+                scope.files.len(),
+                since_ref,
+                if include_worktree { "(+worktree)" } else { "" }
+            );
+        }
+    }
 
     // Persist any --budget caps to the spend ledger before the scan starts.
     // The actual enforcement lives in RoutedRuntime once wired (Phase 4+);
