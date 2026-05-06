@@ -3099,6 +3099,108 @@ fn next_action_line(text: &str, width: usize) -> Line<'static> {
     ])
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProgressKind {
+    Done,
+    Active,
+    Failing,
+}
+
+impl ProgressKind {
+    fn fill_style(self) -> Style {
+        match self {
+            ProgressKind::Done => theme::success(),
+            ProgressKind::Active => theme::warn(),
+            ProgressKind::Failing => theme::danger(),
+        }
+    }
+
+    fn status_style(self) -> Style {
+        self.fill_style()
+    }
+}
+
+/// Render a progress bar matching `design/mockups/sast.jsx::bar()`:
+///
+/// ```text
+///    semgrep              [████████████████████░░░░]  612/612   done · 18 raw hits
+/// ```
+fn progress_bar_line(
+    label: &str,
+    done: usize,
+    total: usize,
+    status: &str,
+    kind: ProgressKind,
+) -> Line<'static> {
+    let bar_width: usize = 24;
+    let filled = if total == 0 {
+        0
+    } else {
+        let raw = (bar_width as f64 * done as f64 / total as f64).round() as usize;
+        raw.min(bar_width)
+    };
+    let empty = bar_width - filled;
+    let count = format!("{done}/{total}");
+    let count = format!("{:>7}", count);
+
+    Line::from(vec![
+        Span::raw("   "),
+        Span::styled(pad(label, 20), theme::primary()),
+        Span::styled(" [", theme::subtle()),
+        Span::styled("█".repeat(filled), kind.fill_style()),
+        Span::styled("░".repeat(empty), theme::subtle()),
+        Span::styled("] ", theme::subtle()),
+        Span::styled(count, theme::muted()),
+        Span::raw("  "),
+        Span::styled(status.to_string(), kind.status_style()),
+    ])
+}
+
+/// Section header matching `design/mockups/_shared.jsx::sectionHeader()`:
+/// uppercase bold heading on the left, subtle dash filler on the right.
+fn section_header_line(label: &str, width: u16) -> Line<'static> {
+    let text = label.to_uppercase();
+    let total = width as usize;
+    let used = text.chars().count() + 2;
+    let dashes = total.saturating_sub(used).max(2);
+    Line::from(vec![
+        Span::styled(format!("{text}  "), theme::heading()),
+        Span::styled("─".repeat(dashes), theme::subtle()),
+    ])
+}
+
+/// One-line finding row matching `design/mockups/sast.jsx::finding()`:
+///
+/// ```text
+///  F-0001  CRITICAL  sql injection via order_id concatenation       apps/api/orders.rs:142
+/// ```
+fn compact_finding_row(
+    alias: &str,
+    severity: Severity,
+    name: &str,
+    location: &str,
+    width: u16,
+) -> Line<'static> {
+    let alias_w = 8;
+    let sev_w = 9;
+    let used = 1 + alias_w + 2 + sev_w;
+    let total = (width as usize).saturating_sub(used);
+    let location_w = location.chars().count().min(total.saturating_sub(2)).max(8);
+    let name_w = total.saturating_sub(location_w + 2).max(12);
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(pad(alias, alias_w), theme::accent()),
+        Span::raw("  "),
+        Span::styled(
+            pad(&severity.as_str().to_uppercase(), sev_w),
+            theme::severity(severity),
+        ),
+        Span::styled(pad(&fit(name, name_w), name_w), theme::primary()),
+        Span::styled("  ", Style::default()),
+        Span::styled(fit(location, location_w), theme::muted()),
+    ])
+}
+
 fn catalog_module_row(
     id: &str,
     description: &str,
@@ -4792,5 +4894,64 @@ mod tests {
                 "plain line exceeded {width} columns: {line:?}"
             );
         }
+    }
+
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn progress_bar_line_matches_design_glyphs_and_count() {
+        let line = progress_bar_line("semgrep", 612, 612, "done · 18 raw hits", ProgressKind::Done);
+        let text = line_text(&line);
+        assert!(text.contains("semgrep"));
+        assert!(text.contains("[████████████████████████]"));
+        assert!(text.contains("612/612"));
+        assert!(text.contains("done · 18 raw hits"));
+    }
+
+    #[test]
+    fn progress_bar_line_partial_fills_proportionally() {
+        let line = progress_bar_line("agentic-sast", 87, 120, "tracing…", ProgressKind::Active);
+        let text = line_text(&line);
+        // 87/120 = 0.725; round(0.725 * 24) = 17 filled, 7 empty
+        let filled = text.matches('█').count();
+        let empty = text.matches('░').count();
+        assert_eq!(filled, 17, "expected 17 filled bars: {text:?}");
+        assert_eq!(empty, 7, "expected 7 empty bars: {text:?}");
+        assert!(text.contains("87/120"));
+    }
+
+    #[test]
+    fn progress_bar_line_zero_total_renders_empty() {
+        let line = progress_bar_line("idle", 0, 0, "queued", ProgressKind::Failing);
+        let text = line_text(&line);
+        assert_eq!(text.matches('█').count(), 0);
+        assert_eq!(text.matches('░').count(), 24);
+    }
+
+    #[test]
+    fn section_header_uppercases_and_pads_dashes() {
+        let line = section_header_line("findings · 11 triaged", 60);
+        let text = line_text(&line);
+        assert!(text.starts_with("FINDINGS · 11 TRIAGED"));
+        assert!(text.ends_with("─"));
+        assert_eq!(text.chars().count(), 60);
+    }
+
+    #[test]
+    fn compact_finding_row_renders_alias_severity_and_location() {
+        let line = compact_finding_row(
+            "F-0001",
+            Severity::Critical,
+            "sql injection via order_id concatenation",
+            "apps/api/orders.rs:142",
+            120,
+        );
+        let text = line_text(&line);
+        assert!(text.contains("F-0001"));
+        assert!(text.contains("CRITICAL"));
+        assert!(text.contains("sql injection via order_id"));
+        assert!(text.contains("apps/api/orders.rs:142"));
     }
 }
