@@ -1,8 +1,8 @@
 # Ralph Rust UX Progress
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
-Active story: UX-013 - Better Empty States And Errors
-Status: UX-012 complete and pushed in iteration 25 as `623f5ca`; UX-013 pending next iteration
+Active story: UX-014 - Explicit Plain / Screen-Reader / Low-Bandwidth Mode
+Status: UX-013 complete and ready to push in iteration 26; UX-014 pending next iteration
 
 ## Stage 2 Checklist
 
@@ -18,11 +18,56 @@ Status: UX-012 complete and pushed in iteration 25 as `623f5ca`; UX-013 pending 
 - UX-010 Tab completion for high-value arguments: complete in iteration 23.
 - UX-011 Findings row/card density: complete in iteration 24.
 - UX-012 Stable finding aliases: complete in iteration 25.
-- UX-013 Better empty states and errors: pending.
+- UX-013 Better empty states and errors: complete in iteration 26.
 - UX-014 Explicit plain / screen-reader / low-bandwidth mode: pending.
 - UX-015 Final Ink/React removal gate: pending.
 
 ## Iteration Log
+
+### Iteration 26 - UX-013
+
+- Task attempted: make empty states and error paths name a concrete next Rust
+  shell or CLI command for no findings, no workspace, unknown module/tool,
+  unknown task, missing scanner, and internal shell-state errors.
+- Files changed:
+  - `crates/kuzushi-cli/src/main.rs`
+  - `crates/kuzushi-cli/tests/cutover_cli.rs`
+  - `crates/kuzushi-core/src/modules.rs`
+  - `crates/kuzushi-core/src/scan.rs`
+  - `crates/kuzushi-tui/src/app.rs`
+  - `crates/kuzushi-tui/src/renderer.rs`
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `sed -n '1,260p' RALPH_RUST_UX_PROGRESS.md` in the clean isolated clone
+  - `cargo fmt --all`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-tui ux_empty_and_error_states_name_next_real_commands`
+  - `cargo test -p kuzushi-tui renderer::tests::renders_actionable_empty_states_at_80_columns`
+  - `cargo test -p kuzushi-cli --test cutover_cli findings_empty_state_names_next_scan_command`
+  - `cargo test -p kuzushi-core semgrep_missing_binary_failure_is_actionable`
+  - `cargo test -p kuzushi-core codeql_missing_binary_failure_is_actionable`
+  - `cargo test -p kuzushi-tui exit_and_unknown_command_feedback_is_actionable`
+  - `cargo test -p kuzushi-tui renderer::tests::renders_all_ink_parity_shell_surfaces`
+  - `cargo test -p kuzushi-tui`
+  - `cargo test -p kuzushi-cli --test cutover_cli`
+  - `cargo test -p kuzushi-core missing_binary_failure_is_actionable`
+  - `git diff --check`
+- Result: implementation complete. Rust TUI no-findings, no-workspace,
+  no-run, unknown module/tool/task, scanner-missing, and generic internal
+  shell-state error paths now include `Next:` guidance that points to routed
+  Rust shell commands such as `scan`, `tasks`, `task block semgrep`, `tools`,
+  `modules`, and `workspace status`. The CLI `findings` empty state now names
+  the corresponding `kuzushi scan <target>` command. Semgrep and CodeQL missing
+  binary errors carry direct run/task-block next steps.
+- Remaining work: UX-014 and UX-015.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary workspace remains stale at `80d23a4` with earlier Stage 2 files
+    staged/modified, so this iteration continued in the clean isolated clone at
+    `/tmp/kuzushi-ux2-clone.PJaRge`.
+  - One attempted combined Cargo test filter was invalid because Cargo accepts
+    only one test-name filter; the two core missing-binary tests were rerun
+    successfully with `cargo test -p kuzushi-core missing_binary_failure_is_actionable`.
 
 ### Iteration 25 - UX-012
 

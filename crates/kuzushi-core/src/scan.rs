@@ -257,7 +257,7 @@ impl SemgrepScanner {
         let mut child = command.spawn().map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
                 anyhow::anyhow!(
-                    "semgrep: could not find scanner binary {:?}. Install Semgrep (for example `pipx install semgrep` or `brew install semgrep`) or pass {{\"binary\":\"/path/to/semgrep\"}}.",
+                    "semgrep: could not find scanner binary {:?}. Install Semgrep (for example `pipx install semgrep` or `brew install semgrep`) or pass {{\"binary\":\"/path/to/semgrep\"}}. Next: run semgrep:scan {{\"binary\":\"/path/to/semgrep\"}} or task block semgrep.",
                     self.binary
                 )
             } else {
@@ -576,7 +576,7 @@ impl CodeqlScanner {
         let mut child = command.spawn().map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
                 anyhow::anyhow!(
-                    "codeql: could not find CodeQL CLI {:?}. Install it with `gh extension install github/gh-codeql && gh codeql install-stub`, download it from https://github.com/github/codeql-cli-binaries/releases, or pass {{\"binary\":\"/path/to/codeql\"}}.",
+                    "codeql: could not find CodeQL CLI {:?}. Install it with `gh extension install github/gh-codeql && gh codeql install-stub`, download it from https://github.com/github/codeql-cli-binaries/releases, or pass {{\"binary\":\"/path/to/codeql\"}}. Next: run codeql:scan {{\"binary\":\"/path/to/codeql\",\"language\":\"javascript\"}} or task block codeql.",
                     binary
                 )
             } else {

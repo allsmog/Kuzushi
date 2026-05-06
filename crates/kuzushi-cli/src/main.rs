@@ -408,8 +408,9 @@ fn findings_command(target: Option<PathBuf>, filter: FindingListFilter, json: bo
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else if report.findings.is_empty() {
         println!(
-            "no findings found at {}",
-            workspace.findings_db_path().display()
+            "no findings found at {}\nNext: kuzushi scan {}",
+            workspace.findings_db_path().display(),
+            workspace.root().display()
         );
     } else {
         println!("{}", report.output());

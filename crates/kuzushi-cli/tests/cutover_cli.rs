@@ -109,6 +109,22 @@ fn modules_and_tools_list_visible_executable_rust_surfaces() {
 }
 
 #[test]
+fn findings_empty_state_names_next_scan_command() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = stdout(
+        kuzushi()
+            .args(["findings", "--target"])
+            .arg(tmp.path())
+            .output()
+            .unwrap(),
+    );
+
+    assert!(out.contains("no findings found"));
+    assert!(out.contains("Next: kuzushi scan"));
+    assert!(out.contains(&tmp.path().display().to_string()));
+}
+
+#[test]
 fn npm_wrapper_help_reaches_the_rust_binary() {
     let output = Command::new("node")
         .current_dir(repo_root())

@@ -979,7 +979,7 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     if app.findings.is_empty() {
         lines.push(muted("No findings yet."));
         lines.push(muted(
-            "Run scan to populate the workspace findings database.",
+            "Next: scan, scan <target>, or context build before scanning.",
         ));
         return lines;
     }
@@ -1306,7 +1306,9 @@ fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             fit(&scan.target.display().to_string(), value_width(area, 34)),
         ]));
     } else {
-        lines.push(muted("No scan run is active in this shell session."));
+        lines.push(muted(
+            "No scan run is active in this shell session. Next: scan <target> or show runs.",
+        ));
     }
     lines
 }
@@ -3255,6 +3257,26 @@ mod tests {
             );
         }
         assert!(!rendered.contains("┌"));
+    }
+
+    #[test]
+    fn renders_actionable_empty_states_at_80_columns() {
+        for (view, expected) in [
+            (ShellView::Findings, "Next: scan"),
+            (ShellView::Runs, "Next: scan <target>"),
+            (ShellView::Workspace, "Next: scan <target>"),
+        ] {
+            let backend = TestBackend::new(80, 18);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let mut app = ShellApp::new(V2Config::default(), None);
+            app.shell_view = view;
+
+            terminal.draw(|frame| render_app(frame, &app)).unwrap();
+            let rendered = format!("{:?}", terminal.backend().buffer());
+
+            assert!(rendered.contains(expected), "missing {expected}");
+            assert!(!rendered.contains("┌"));
+        }
     }
 
     #[test]
