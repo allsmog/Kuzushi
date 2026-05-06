@@ -1,9 +1,12 @@
-use anyhow::{Context, Result};
+use std::path::Path;
+
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::findings::{Finding, StaticProofState, TriageOutcome, TriageVerdict};
 use crate::runtime::AgentToolPolicy;
+use crate::source_span::extract_source_span;
 
 pub const WHITEBOX_STATIC_AGENT_TOOL_PROFILE: &str = "whitebox-static";
 pub const WHITEBOX_STATIC_READ_ONLY_AGENT_TOOLS: &[&str] = &["Read", "Glob", "Grep", "LS"];
@@ -90,6 +93,8 @@ pub struct WhiteboxStaticTriageCitation {
     pub start_line: u32,
     pub end_line: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub snippet_hash: Option<String>,
 }
 
@@ -114,6 +119,23 @@ pub struct WhiteboxStaticTriageResponse {
     pub trigger_narrative: String,
     pub impact_narrative: String,
     pub recommended_fix: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifiedWhiteboxStaticCitation {
+    pub file_path: String,
+    pub start_line: u32,
+    pub end_line: u32,
+    pub content_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WhiteboxStaticCitationValidationReport {
+    pub complete: bool,
+    pub reasons: Vec<String>,
+    pub verified_citations: Vec<VerifiedWhiteboxStaticCitation>,
 }
 
 impl WhiteboxStaticPolicy {
@@ -352,6 +374,7 @@ pub fn whitebox_static_triage_schema() -> Value {
                     "filePath": {"type": "string"},
                     "startLine": {"type": "integer", "minimum": 1},
                     "endLine": {"type": "integer", "minimum": 1},
+                    "snippet": {"type": "string"},
                     "snippetHash": {"type": "string"}
                 }
             }
@@ -418,6 +441,110 @@ pub fn whitebox_static_triage_outcome(response: &WhiteboxStaticTriageResponse) -
             }
         ),
     }
+}
+
+pub fn validate_whitebox_static_triage_citations(
+    repo_root: impl AsRef<Path>,
+    response: &WhiteboxStaticTriageResponse,
+) -> Result<WhiteboxStaticCitationValidationReport> {
+    let repo_root = repo_root.as_ref();
+    let mut reasons = Vec::new();
+    let mut verified_citations = Vec::new();
+
+    if response.citations.is_empty() {
+        reasons.push("whitebox-static triage response did not include citations".to_string());
+    }
+
+    for citation in &response.citations {
+        match verify_whitebox_static_triage_citation(repo_root, citation) {
+            Ok(verified) => verified_citations.push(verified),
+            Err(error) => reasons.push(format!(
+                "citation {}:{}-{} is invalid: {error}",
+                citation.file_path, citation.start_line, citation.end_line
+            )),
+        }
+    }
+
+    Ok(WhiteboxStaticCitationValidationReport {
+        complete: reasons.is_empty(),
+        reasons,
+        verified_citations,
+    })
+}
+
+pub fn apply_whitebox_static_citation_validation(
+    response: &mut WhiteboxStaticTriageResponse,
+    report: &WhiteboxStaticCitationValidationReport,
+) {
+    if report.complete || response.static_proof_state != StaticProofState::StaticallyConfirmed {
+        return;
+    }
+
+    response.static_proof_state = StaticProofState::NeedsRuntimeEvidence;
+    if response.verdict == TriageVerdict::TruePositive {
+        response.verdict = TriageVerdict::NeedsReview;
+        response.confidence = response.confidence.min(0.5);
+    }
+
+    let reason = format!("Unverified source citations: {}", report.reasons.join("; "));
+    if !response
+        .missing_evidence
+        .iter()
+        .any(|existing| existing == &reason)
+    {
+        response.missing_evidence.push(reason);
+    }
+}
+
+fn verify_whitebox_static_triage_citation(
+    repo_root: &Path,
+    citation: &WhiteboxStaticTriageCitation,
+) -> Result<VerifiedWhiteboxStaticCitation> {
+    let has_snippet = citation
+        .snippet
+        .as_deref()
+        .is_some_and(|snippet| !snippet.trim().is_empty());
+    let has_hash = citation
+        .snippet_hash
+        .as_deref()
+        .is_some_and(|hash| !hash.trim().is_empty());
+    if !has_snippet && !has_hash {
+        bail!("citation must include snippet or snippetHash");
+    }
+
+    let span = extract_source_span(
+        repo_root,
+        citation.file_path.as_str(),
+        citation.start_line,
+        citation.end_line,
+    )?;
+    if let Some(snippet) = citation
+        .snippet
+        .as_deref()
+        .map(|snippet| snippet.trim_end_matches(|ch| ch == '\r' || ch == '\n'))
+        .filter(|snippet| !snippet.trim().is_empty())
+    {
+        if snippet != span.snippet {
+            bail!("snippet does not match current source");
+        }
+    }
+    if let Some(snippet_hash) = citation
+        .snippet_hash
+        .as_deref()
+        .map(str::trim)
+        .filter(|hash| !hash.is_empty())
+    {
+        if snippet_hash != span.content_hash {
+            bail!("snippetHash does not match current source");
+        }
+    }
+
+    Ok(VerifiedWhiteboxStaticCitation {
+        file_path: span.file_path,
+        start_line: span.start_line,
+        end_line: span.end_line,
+        content_hash: span.content_hash,
+    })
 }
 
 fn is_forbidden_agent_tool(tool: &str) -> bool {
@@ -777,6 +904,7 @@ mod tests {
                 "filePath": "src/routes.ts",
                 "startLine": 4,
                 "endLine": 4,
+                "snippet": "const id = req.query.id;",
                 "snippetHash": "sha256:demo"
             }],
             "assumptions": ["The route is reachable from Express."],
@@ -800,5 +928,169 @@ mod tests {
             .rationale
             .contains("staticProofState=statically_confirmed"));
         assert!(!outcome.rationale.contains("Use parameterized queries"));
+    }
+
+    #[test]
+    fn whitebox_citations_verify_current_source_snippet_and_hash() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(
+            temp.path().join("src/db.ts"),
+            "const q = req.query.q;\ndb.query(q);\n",
+        )
+        .unwrap();
+        let snippet = "db.query(q);";
+        let response = whitebox_response_with_citations(vec![WhiteboxStaticTriageCitation {
+            file_path: "src/db.ts".to_string(),
+            start_line: 2,
+            end_line: 2,
+            snippet: Some(snippet.to_string()),
+            snippet_hash: Some(crate::static_evidence::static_content_hash(snippet)),
+        }]);
+
+        let report = validate_whitebox_static_triage_citations(temp.path(), &response).unwrap();
+
+        assert!(report.complete, "{:?}", report.reasons);
+        assert_eq!(report.verified_citations.len(), 1);
+        assert_eq!(report.verified_citations[0].file_path, "src/db.ts");
+    }
+
+    #[test]
+    fn whitebox_citations_reject_out_of_repo_and_bad_lines() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/db.ts"), "db.query(q);\n").unwrap();
+
+        let out_of_repo = whitebox_response_with_citations(vec![WhiteboxStaticTriageCitation {
+            file_path: "../outside.ts".to_string(),
+            start_line: 1,
+            end_line: 1,
+            snippet: Some("db.query(q);".to_string()),
+            snippet_hash: None,
+        }]);
+        let bad_line = whitebox_response_with_citations(vec![WhiteboxStaticTriageCitation {
+            file_path: "src/db.ts".to_string(),
+            start_line: 9,
+            end_line: 9,
+            snippet: Some("db.query(q);".to_string()),
+            snippet_hash: None,
+        }]);
+
+        let out_report =
+            validate_whitebox_static_triage_citations(temp.path(), &out_of_repo).unwrap();
+        let line_report =
+            validate_whitebox_static_triage_citations(temp.path(), &bad_line).unwrap();
+
+        assert!(!out_report.complete);
+        assert!(out_report
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("parent traversal")));
+        assert!(!line_report.complete);
+        assert!(line_report
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("exceeds file line count")));
+    }
+
+    #[test]
+    fn whitebox_citations_reject_stale_snippet_or_hash() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/db.ts"), "db.query(q);\n").unwrap();
+
+        let stale_snippet = whitebox_response_with_citations(vec![WhiteboxStaticTriageCitation {
+            file_path: "src/db.ts".to_string(),
+            start_line: 1,
+            end_line: 1,
+            snippet: Some("db.query(req.body.q);".to_string()),
+            snippet_hash: None,
+        }]);
+        let stale_hash = whitebox_response_with_citations(vec![WhiteboxStaticTriageCitation {
+            file_path: "src/db.ts".to_string(),
+            start_line: 1,
+            end_line: 1,
+            snippet: None,
+            snippet_hash: Some("sha256:stale".to_string()),
+        }]);
+
+        let snippet_report =
+            validate_whitebox_static_triage_citations(temp.path(), &stale_snippet).unwrap();
+        let hash_report =
+            validate_whitebox_static_triage_citations(temp.path(), &stale_hash).unwrap();
+
+        assert!(!snippet_report.complete);
+        assert!(snippet_report
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("snippet does not match")));
+        assert!(!hash_report.complete);
+        assert!(hash_report
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("snippetHash does not match")));
+    }
+
+    #[test]
+    fn whitebox_citations_downgrade_statically_confirmed_when_unverified() {
+        let mut response = whitebox_response_with_citations(vec![WhiteboxStaticTriageCitation {
+            file_path: "src/db.ts".to_string(),
+            start_line: 1,
+            end_line: 1,
+            snippet: Some("stale".to_string()),
+            snippet_hash: None,
+        }]);
+        let report = WhiteboxStaticCitationValidationReport {
+            complete: false,
+            reasons: vec![
+                "citation src/db.ts:1-1 is invalid: snippet does not match current source"
+                    .to_string(),
+            ],
+            verified_citations: Vec::new(),
+        };
+
+        apply_whitebox_static_citation_validation(&mut response, &report);
+
+        assert_eq!(response.verdict, TriageVerdict::NeedsReview);
+        assert_eq!(
+            response.static_proof_state,
+            StaticProofState::NeedsRuntimeEvidence
+        );
+        assert_eq!(response.confidence, 0.5);
+        assert!(response
+            .missing_evidence
+            .iter()
+            .any(|item| item.contains("Unverified source citations")));
+    }
+
+    fn whitebox_response_with_citations(
+        citations: Vec<WhiteboxStaticTriageCitation>,
+    ) -> WhiteboxStaticTriageResponse {
+        WhiteboxStaticTriageResponse {
+            verdict: TriageVerdict::TruePositive,
+            confidence: 0.9,
+            static_proof_state: StaticProofState::StaticallyConfirmed,
+            source: WhiteboxStaticTriageEndpoint {
+                file_path: "src/db.ts".to_string(),
+                start_line: Some(1),
+                end_line: Some(1),
+                summary: "request source".to_string(),
+            },
+            sink: WhiteboxStaticTriageEndpoint {
+                file_path: "src/db.ts".to_string(),
+                start_line: Some(1),
+                end_line: Some(1),
+                summary: "database query sink".to_string(),
+            },
+            path: Vec::new(),
+            sanitizer_assessment: "No sanitizer is visible.".to_string(),
+            guard_assessment: "No guard is visible.".to_string(),
+            citations,
+            assumptions: vec!["Static source is current.".to_string()],
+            missing_evidence: vec!["Runtime behavior is not assessed.".to_string()],
+            trigger_narrative: "A request value reaches a static sink.".to_string(),
+            impact_narrative: "The sink is security-sensitive.".to_string(),
+            recommended_fix: "Use a safe API.".to_string(),
+        }
     }
 }

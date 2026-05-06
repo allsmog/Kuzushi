@@ -821,6 +821,18 @@ impl FindingStore {
         Ok(())
     }
 
+    pub fn save_static_proof_state(&self, finding_id: i64, state: StaticProofState) -> Result<()> {
+        self.conn.execute(
+            r#"
+            update findings
+            set static_proof_state = ?2
+            where id = ?1
+            "#,
+            params![finding_id, state.as_str()],
+        )?;
+        Ok(())
+    }
+
     pub fn insert_patch_result(&self, result: &PatchResult) -> Result<()> {
         let history_json =
             serde_json::to_string(&result.history).context("Could not serialize patch history")?;
@@ -1262,6 +1274,34 @@ mod tests {
         );
         let serialized = serde_json::to_value(&stored[0]).unwrap();
         assert_eq!(serialized["staticProofState"], json!("signal_only"));
+    }
+
+    #[test]
+    fn static_proof_state_can_be_updated_after_triage() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-static", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.static",
+            "src/app.ts",
+            9,
+            Some(10),
+            Severity::High,
+            "scanner signal",
+        )
+        .with_static_proof_state(StaticProofState::SignalOnly);
+        let finding_id = store.insert_finding("run-static", &finding).unwrap();
+
+        store
+            .save_static_proof_state(finding_id, StaticProofState::NeedsRuntimeEvidence)
+            .unwrap();
+        let stored = store.list_findings_for_scan_id("run-static").unwrap();
+
+        assert_eq!(
+            stored[0].static_proof_state,
+            Some(StaticProofState::NeedsRuntimeEvidence)
+        );
     }
 
     #[test]
