@@ -2,7 +2,7 @@
 
 Stage: 3 - Kuzushi whitebox-static mode
 Active story: WB-014 - Verify LLM citations before persistence
-Status: WB-013 implementation complete; commit/push gate pending
+Status: WB-013 complete and pushed to origin/kuzushi-whitebox-static as fd344d7
 
 ## Stage 3 Checklist
 
@@ -68,7 +68,7 @@ Status: WB-013 implementation complete; commit/push gate pending
   triage remains unchanged. `sast:scan mode=whitebox-static triage=true`
   forwards whitebox mode into triage. WB-013 is marked `passes: true` in the
   PRD after the story gate and fast whitebox checks passed.
-- Remaining work: commit and push WB-013, then continue WB-014 through WB-022.
+- Remaining work: WB-014 through WB-022.
 - Blockers or repo facts that contradicted this prompt:
   - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
     remains stale with staged Stage 2 files. This iteration continued in the
@@ -76,6 +76,9 @@ Status: WB-013 implementation complete; commit/push gate pending
   - The nested clone does not have its own `node_modules`; the eval used a
     temporary symlink to the primary checkout's installed dependencies and
     then removed it before commit.
+  - The implementation commit was pushed to `origin/kuzushi-whitebox-static`
+    as `fd344d7`; integration to `main` remains pending because this local
+    branch still tracks the older `origin/main` ref.
 
 ### Iteration 48 - WB-012
 
