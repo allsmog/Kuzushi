@@ -28,6 +28,7 @@ permissions:
 env:
   NODE_VERSION: "22"
   PYTHON_VERSION: "3.12"
+  RUST_VERSION: "1.88.0"
 
 jobs:
   # ── Shared install: warms the pnpm store cache for dependent jobs ─────────
@@ -94,6 +95,29 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check:types
+
+  # ── Rust CLI build + tests ───────────────────────────────────────────────
+  rust-cli:
+    name: rust-cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      - run: cargo build --workspace
+      - run: cargo build -p kuzushi-cli --release
+      - run: mkdir -p native/linux-x64 && cp target/release/kuzushi native/linux-x64/kuzushi && chmod +x native/linux-x64/kuzushi
+      - name: Upload native artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-linux-x64
+          path: native/
+          if-no-files-found: error
+          retention-days: 7
 
   # ── Tests with coverage inline (parallel after install) ──────────────────
   # `test:coverage` is a superset of `test` — we do not run both.
@@ -164,9 +188,9 @@ jobs:
           path: dist/
       - run: pnpm verify:pack
 
-  # ── E2E smoke against built dist artifact (not tsx) ──────────────────────
-  # Uses KUZUSHI_CMD env to point the smoke script at the built CLI instead
-  # of `pnpm dev` (tsx), so we catch TS-only bugs before release.
+  # ── E2E smoke against native artifact ────────────────────────────────────
+  # Uses KUZUSHI_CMD env to point the smoke script at the native wrapper, so
+  # the shipped npm path exercises the Rust binary instead of the legacy TS CLI.
   #
   # Still non-blocking (`continue-on-error: true`) so the historical flakes
   # have a chance to settle before we make the gate hard. Two of the three
@@ -189,7 +213,7 @@ jobs:
   # the closing remark on field-test issue #54.
   e2e:
     name: e2e
-    needs: build
+    needs: [build, rust-cli]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     continue-on-error: true
@@ -213,7 +237,12 @@ jobs:
         with:
           name: dist
           path: dist/
-      - name: Run smoke tests against built dist
+      - name: Download native artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-x64
+          path: native/
+      - name: Run smoke tests against native CLI
         env:
-          KUZUSHI_CMD: node dist/cli.js
+          KUZUSHI_CMD: node bin/kuzushi-rs.mjs
         run: pnpm test:e2e

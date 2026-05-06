@@ -2,6 +2,29 @@
 
 ## Changelog
 
+### v0.24.0-alpha.0 — Rust/pi-agent-core cutover
+
+**Breaking:**
+
+- The npm `kuzushi` binary now invokes the native Rust CLI through
+  `bin/kuzushi-rs.mjs`.
+- The `kuzushi-ts` npm binary, `pnpm dev:ts`, and `scripts/kuzushi-dev` source
+  CLI helper are removed. TypeScript remains only for published library exports,
+  migration reference code, and tests.
+- The old `dist/cli*` TypeScript CLI outputs are excluded from the npm tarball.
+- Operator docs now describe only the Rust command surface:
+  `shell`, `scan`, `findings`, `modules`, `tools`, `run`, and `config`.
+  Unsupported TypeScript-era scan flags such as `--preset`, `--sarif`, `--ci`,
+  and CLI `--model` are not advertised for the Rust path.
+
+**Additive:**
+
+- Native module/tool registry, npm-wrapper smoke coverage, and shell help tests
+  verify that docs and help point at executable Rust surfaces.
+- Runtime-backed tools use pi-agent-core through the Rust bridge and still
+  require an explicit configured model. Missing models, scanner binaries,
+  bridge commands, or plugin roots fail explicitly.
+
 ### v1.0.0 — Clean Code major refactor
 
 **Breaking:**

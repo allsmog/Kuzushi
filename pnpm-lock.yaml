@@ -26,6 +26,9 @@ importers:
       '@kuzushi/vuln-scout':
         specifier: github:allsmog/vuln-scout
         version: https://codeload.github.com/allsmog/vuln-scout/tar.gz/d0d537a528f82c438539d0ef3d6cdb75e8cb82cd
+      '@mariozechner/pi-agent-core':
+        specifier: 0.68.0
+        version: 0.68.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
       '@mariozechner/pi-ai':
         specifier: ^0.68.0
         version: 0.68.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
@@ -41,15 +44,9 @@ importers:
       commander:
         specifier: ^13.1.0
         version: 13.1.0
-      ink:
-        specifier: ^5
-        version: 5.2.1(@types/react@18.3.28)(react@18.3.1)
       promptarmor-plugin:
         specifier: github:allsmog/promptarmor-plugin
         version: https://codeload.github.com/allsmog/promptarmor-plugin/tar.gz/690d60a5b4d2136206ef7dedd516d3fcfddd4db9
-      react:
-        specifier: ^18
-        version: 18.3.1
       shinsa-plugin:
         specifier: github:allsmog/shinsa-plugin
         version: https://codeload.github.com/allsmog/shinsa-plugin/tar.gz/76cdc58acd4776044f55bb5069c7c3493f5cdd8f
@@ -93,12 +90,18 @@ importers:
       husky:
         specifier: ^9.1.7
         version: 9.1.7
+      ink:
+        specifier: ^5
+        version: 5.2.1(@types/react@18.3.28)(react@18.3.1)
       lint-staged:
         specifier: ^15.5.2
         version: 15.5.2
       madge:
         specifier: ^8.0.0
         version: 8.0.0(typescript@5.9.3)
+      react:
+        specifier: ^18
+        version: 18.3.1
       tsx:
         specifier: ^4.19.2
         version: 4.21.0
@@ -763,6 +766,10 @@ packages:
   '@kuzushi/vuln-scout@https://codeload.github.com/allsmog/vuln-scout/tar.gz/d0d537a528f82c438539d0ef3d6cdb75e8cb82cd':
     resolution: {tarball: https://codeload.github.com/allsmog/vuln-scout/tar.gz/d0d537a528f82c438539d0ef3d6cdb75e8cb82cd}
     version: 1.4.0
+
+  '@mariozechner/pi-agent-core@0.68.0':
+    resolution: {integrity: sha512-y9PAWvN1dxkByHc2lthHFe0MGV6H+FiR5IzFHFrEUZC9mA2J73JEPDFOdcNVCkadmRRipI3b3qiAzwlIQ1gioA==}
+    engines: {node: '>=20.0.0'}
 
   '@mariozechner/pi-ai@0.68.0':
     resolution: {integrity: sha512-/Th1hzj33FVTStpd0Cw8TWNXe5jcLvnzD/PzReBA6h+FsfvMSropxYovHvN9B3JH+EMKLaf3wf5IePnhMjN6vg==}
@@ -4019,6 +4026,18 @@ snapshots:
   '@kuzushi/tob-skills@https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2': {}
 
   '@kuzushi/vuln-scout@https://codeload.github.com/allsmog/vuln-scout/tar.gz/d0d537a528f82c438539d0ef3d6cdb75e8cb82cd': {}
+
+  '@mariozechner/pi-agent-core@0.68.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)':
+    dependencies:
+      '@mariozechner/pi-ai': 0.68.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
+    transitivePeerDependencies:
+      - '@modelcontextprotocol/sdk'
+      - aws-crt
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+      - ws
+      - zod
 
   '@mariozechner/pi-ai@0.68.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)':
     dependencies:

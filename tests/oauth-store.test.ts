@@ -11,9 +11,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const refreshMock = vi.hoisted(() => vi.fn());
+const refreshAnthropicMock = vi.hoisted(() => vi.fn());
+const refreshOpenAICodexMock = vi.hoisted(() => vi.fn());
 vi.mock("@mariozechner/pi-ai/oauth", () => ({
-  refreshAnthropicToken: refreshMock,
+  refreshAnthropicToken: refreshAnthropicMock,
+  refreshOpenAICodexToken: refreshOpenAICodexMock,
 }));
 
 const {
@@ -21,13 +23,16 @@ const {
   readOauthCredentials,
   writeOauthCredentials,
   getFreshAnthropicAccessToken,
+  getFreshOAuthAccessTokenForProvider,
+  getFreshOpenAICodexAccessToken,
 } = await import("../src/oauth-store.js");
 
 let tmpHome: string;
 
 beforeEach(() => {
   tmpHome = mkdtempSync(path.join(os.tmpdir(), "kuzushi-oauth-store-"));
-  refreshMock.mockReset();
+  refreshAnthropicMock.mockReset();
+  refreshOpenAICodexMock.mockReset();
   vi.spyOn(os, "homedir").mockReturnValue(tmpHome);
 });
 
@@ -53,6 +58,12 @@ describe("readOauthCredentials", () => {
     writeOauthCredentials(
       {
         anthropic: { refresh: "rt-1", access: "at-1", expires: 9_999_999_999_999 },
+        "openai-codex": {
+          refresh: "codex-rt-1",
+          access: "codex-at-1",
+          expires: 9_999_999_999_999,
+          accountId: "acct_1",
+        },
       },
       tmpHome,
     );
@@ -60,12 +71,16 @@ describe("readOauthCredentials", () => {
     expect(bag?.anthropic?.refresh).toBe("rt-1");
     expect(bag?.anthropic?.access).toBe("at-1");
     expect(bag?.anthropic?.expires).toBe(9_999_999_999_999);
+    expect(bag?.["openai-codex"]?.refresh).toBe("codex-rt-1");
+    expect(bag?.["openai-codex"]?.access).toBe("codex-at-1");
+    expect(bag?.["openai-codex"]?.accountId).toBe("acct_1");
   });
 
   it("rejects an entry that's missing required fields", () => {
     writeOauthCredentials(
-      // biome-ignore lint/suspicious/noExplicitAny: deliberately malformed input
-      { anthropic: { refresh: "rt-only" } as any },
+      { anthropic: { refresh: "rt-only" } } as unknown as Parameters<
+        typeof writeOauthCredentials
+      >[0],
       tmpHome,
     );
     expect(readOauthCredentials(tmpHome)?.anthropic).toBeUndefined();
@@ -100,7 +115,7 @@ describe("writeOauthCredentials", () => {
 describe("getFreshAnthropicAccessToken", () => {
   it("returns undefined when no creds are stored", async () => {
     expect(await getFreshAnthropicAccessToken()).toBeUndefined();
-    expect(refreshMock).not.toHaveBeenCalled();
+    expect(refreshAnthropicMock).not.toHaveBeenCalled();
   });
 
   it("returns the stored access token when not expired", async () => {
@@ -111,7 +126,7 @@ describe("getFreshAnthropicAccessToken", () => {
       tmpHome,
     );
     expect(await getFreshAnthropicAccessToken()).toBe("fresh-at");
-    expect(refreshMock).not.toHaveBeenCalled();
+    expect(refreshAnthropicMock).not.toHaveBeenCalled();
   });
 
   it("calls refresh + persists when the access token has expired", async () => {
@@ -121,7 +136,7 @@ describe("getFreshAnthropicAccessToken", () => {
       },
       tmpHome,
     );
-    refreshMock.mockResolvedValueOnce({
+    refreshAnthropicMock.mockResolvedValueOnce({
       refresh: "rt-new",
       access: "fresh-at",
       expires: Date.now() + 60_000,
@@ -129,7 +144,7 @@ describe("getFreshAnthropicAccessToken", () => {
 
     const token = await getFreshAnthropicAccessToken();
     expect(token).toBe("fresh-at");
-    expect(refreshMock).toHaveBeenCalledWith("rt-old");
+    expect(refreshAnthropicMock).toHaveBeenCalledWith("rt-old");
 
     // Persisted refresh token must roll forward.
     const bag = readOauthCredentials(tmpHome);
@@ -144,10 +159,78 @@ describe("getFreshAnthropicAccessToken", () => {
       },
       tmpHome,
     );
-    refreshMock.mockRejectedValueOnce(new Error("network down"));
+    refreshAnthropicMock.mockRejectedValueOnce(new Error("network down"));
 
     expect(await getFreshAnthropicAccessToken()).toBeUndefined();
     const bag = readOauthCredentials(tmpHome);
     expect(bag?.anthropic?.access).toBe("stale-at");
+  });
+});
+
+describe("getFreshOpenAICodexAccessToken", () => {
+  it("returns undefined when no Codex creds are stored", async () => {
+    expect(await getFreshOpenAICodexAccessToken()).toBeUndefined();
+    expect(refreshOpenAICodexMock).not.toHaveBeenCalled();
+  });
+
+  it("returns the stored Codex access token when not expired", async () => {
+    writeOauthCredentials(
+      {
+        "openai-codex": {
+          refresh: "codex-rt",
+          access: "codex-fresh-at",
+          expires: Date.now() + 60_000,
+        },
+      },
+      tmpHome,
+    );
+    expect(await getFreshOpenAICodexAccessToken()).toBe("codex-fresh-at");
+    expect(refreshOpenAICodexMock).not.toHaveBeenCalled();
+  });
+
+  it("calls Codex refresh + persists when the access token has expired", async () => {
+    writeOauthCredentials(
+      {
+        "openai-codex": {
+          refresh: "codex-rt-old",
+          access: "codex-stale-at",
+          expires: Date.now() - 1_000,
+        },
+      },
+      tmpHome,
+    );
+    refreshOpenAICodexMock.mockResolvedValueOnce({
+      refresh: "codex-rt-new",
+      access: "codex-fresh-at",
+      expires: Date.now() + 60_000,
+      accountId: "acct_new",
+    });
+
+    const token = await getFreshOpenAICodexAccessToken();
+    expect(token).toBe("codex-fresh-at");
+    expect(refreshOpenAICodexMock).toHaveBeenCalledWith("codex-rt-old");
+
+    const bag = readOauthCredentials(tmpHome);
+    expect(bag?.["openai-codex"]?.refresh).toBe("codex-rt-new");
+    expect(bag?.["openai-codex"]?.access).toBe("codex-fresh-at");
+    expect(bag?.["openai-codex"]?.accountId).toBe("acct_new");
+  });
+
+  it("resolves provider-specific stored OAuth tokens", async () => {
+    writeOauthCredentials(
+      {
+        anthropic: { refresh: "rt", access: "anthropic-at", expires: Date.now() + 60_000 },
+        "openai-codex": {
+          refresh: "codex-rt",
+          access: "codex-at",
+          expires: Date.now() + 60_000,
+        },
+      },
+      tmpHome,
+    );
+
+    expect(await getFreshOAuthAccessTokenForProvider("anthropic")).toBe("anthropic-at");
+    expect(await getFreshOAuthAccessTokenForProvider("openai-codex")).toBe("codex-at");
+    expect(await getFreshOAuthAccessTokenForProvider("openai")).toBeUndefined();
   });
 });

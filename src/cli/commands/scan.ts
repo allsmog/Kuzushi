@@ -209,6 +209,16 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
           const envKey = providerEnvVar(choice.providerId);
           if (envKey) process.env[envKey] = choice.apiKey;
         }
+      } else if (choice.kind === "oauth-anthropic") {
+        const { loginAnthropicAndPersist } = await import("../../oauth-flow.js");
+        const result = await loginAnthropicAndPersist();
+        config.agentRuntimeConfig = {
+          ...(config.agentRuntimeConfig ?? {}),
+          authToken: result.accessToken,
+        };
+      } else if (choice.kind === "oauth-openai-codex") {
+        const { loginOpenAICodexAndPersist } = await import("../../oauth-flow.js");
+        await loginOpenAICodexAndPersist();
       }
       // "inherited" — no changes needed, we rely on ambient env vars
     }

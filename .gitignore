@@ -1,5 +1,7 @@
 node_modules/
 dist/
+target/
+native/
 .env
 .env.*
 !.env.example
@@ -27,6 +29,8 @@ vendor/
 perf/results.json
 *.txt
 .kuzushi/credentials.json
+.ralph/
+ralph-*.md
 
 # Local Claude Design / scratch prompts — do not commit
 kuzushi-*-prompt.md

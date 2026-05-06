@@ -24,6 +24,7 @@ export interface ScreenFrameProps {
   subtitle?: string;
   tabs?: ReadonlyArray<ScreenTab>;
   footer?: React.ReactNode;
+  scrollback?: boolean;
   children: React.ReactNode;
 }
 
@@ -34,6 +35,7 @@ export function ScreenFrame({
   subtitle,
   tabs,
   footer,
+  scrollback = false,
   children,
 }: ScreenFrameProps): React.ReactElement {
   const { stdout } = useStdout();
@@ -53,8 +55,14 @@ export function ScreenFrame({
   const subtitleLine = subtitle ? padLine(tokens.hint(subtitle), frameLineWidth) : undefined;
 
   return (
-    <Box flexDirection="column" flexGrow={1} flexShrink={1} justifyContent="space-between">
-      <Box flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden">
+    <Box
+      flexDirection="column"
+      {...(scrollback ? {} : { flexGrow: 1, flexShrink: 1, justifyContent: "space-between" })}
+    >
+      <Box
+        flexDirection="column"
+        {...(scrollback ? {} : { flexGrow: 1, flexShrink: 1, overflow: "hidden" })}
+      >
         {/* flexShrink={0} so the chrome (title + breadcrumb + status + tabs)
         survives a tight outer flex layout. Without it, an ancestor with
         flexShrink={1} + overflow="hidden" can collapse the chrome rows even
@@ -69,10 +77,8 @@ export function ScreenFrame({
 
         <Box
           flexDirection="column"
-          flexGrow={1}
-          flexShrink={1}
-          overflow="hidden"
           marginTop={SPACING.sm}
+          {...(scrollback ? {} : { flexGrow: 1, flexShrink: 1, overflow: "hidden" })}
         >
           {children}
         </Box>

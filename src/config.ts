@@ -69,14 +69,37 @@ export function localCredentialsPath(cwd: string = process.cwd()): string {
   return path.join(cwd, ".kuzushi", LOCAL_CREDENTIALS_FILENAME);
 }
 
+export function findLocalCredentialsRoot(start: string = process.cwd()): string | undefined {
+  let current = path.resolve(start);
+  try {
+    const stat = lstatSync(current);
+    if (!stat.isDirectory()) current = path.dirname(current);
+  } catch {
+    current = path.dirname(current);
+  }
+
+  for (;;) {
+    if (existsSync(localCredentialsPath(current))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
 /**
- * Read the project-local credentials file at `<cwd>/.kuzushi/credentials.json`.
+ * Read the nearest project-local credentials file at
+ * `<cwd-or-ancestor>/.kuzushi/credentials.json`.
  *
- * Accepts the per-backend shape: `{ claude: {...}, piAi: {...}, codex: {...} }`.
+ * Accepts both the current flat shape (`{ apiKey, authToken, baseUrl }`) and
+ * the legacy per-backend shape (`{ claude: {...}, piAi: {...}, codex: {...} }`).
  */
 export function loadLocalCredentials(cwd: string = process.cwd()): AgentRuntimeConfig | undefined {
-  const filePath = localCredentialsPath(cwd);
-  if (!existsSync(filePath)) return undefined;
+  const root = findLocalCredentialsRoot(cwd);
+  if (!root) return undefined;
+  return readLocalCredentialsFile(localCredentialsPath(root));
+}
+
+function readLocalCredentialsFile(filePath: string): AgentRuntimeConfig | undefined {
   try {
     const raw = JSON.parse(readFileSync(filePath, "utf-8")) as unknown;
     const normalized = normalizeAgentRuntimeConfig(raw);
@@ -103,7 +126,7 @@ export function persistLocalCredentials(
     mkdirSync(targetDir, { recursive: true });
   }
 
-  const existing = loadLocalCredentials(cwd) ?? {};
+  const existing = readLocalCredentialsFile(filePath) ?? {};
   // Field-wise merge so writing one cred field doesn't blank others.
   const merged: AgentRuntimeConfig = { ...existing, ...creds };
   writeFileSync(filePath, `${JSON.stringify(merged, null, 2)}\n`, {
@@ -1419,7 +1442,23 @@ function normalizeAgentRuntimeCredentials(value: unknown): AgentRuntimeCredentia
 
 function normalizeAgentRuntimeConfig(value: unknown): AgentRuntimeConfig | undefined {
   if (!isRecord(value)) return undefined;
-  return normalizeAgentRuntimeCredentials(value);
+  const merged: AgentRuntimeCredentials = {};
+  let hasAny = false;
+
+  for (const slot of ["piAi", "claude", "codex"] as const) {
+    const slotCredentials = normalizeAgentRuntimeCredentials(value[slot]);
+    if (!slotCredentials) continue;
+    Object.assign(merged, slotCredentials);
+    hasAny = true;
+  }
+
+  const flatCredentials = normalizeAgentRuntimeCredentials(value);
+  if (flatCredentials) {
+    Object.assign(merged, flatCredentials);
+    hasAny = true;
+  }
+
+  return hasAny ? merged : undefined;
 }
 
 export function resolveActiveCredentials(

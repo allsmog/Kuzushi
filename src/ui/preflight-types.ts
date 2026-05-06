@@ -13,6 +13,7 @@ export interface ConfigConfirmData {
 export type ProviderId =
   | "anthropic"
   | "anthropic-oauth"
+  | "openai-codex-oauth"
   | "openai"
   | "google"
   | "mistral"
@@ -28,7 +29,8 @@ export type CredentialChoice =
   | { kind: "api-key"; providerId: ProviderId; value: string; baseUrl?: string; persist: boolean }
   | { kind: "base-url"; providerId: ProviderId; baseUrl: string; apiKey?: string; persist: boolean }
   | { kind: "inherited"; providerId?: ProviderId }
-  | { kind: "oauth-anthropic" };
+  | { kind: "oauth-anthropic" }
+  | { kind: "oauth-openai-codex" };
 
 export interface WizardResult {
   preset: string;
@@ -40,4 +42,10 @@ export interface WizardResult {
   pocHarness?: boolean;
   severity?: string[];
   saveLocation?: "project" | "global" | "none";
+}
+
+export interface ModelPickerData {
+  activeModel?: string;
+  availableModels?: string[];
+  credentialedProviders?: string[];
 }

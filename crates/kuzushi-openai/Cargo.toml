@@ -1,0 +1,16 @@
+[package]
+name = "kuzushi-openai"
+description = "Kuzushi agent runtime bridge backed by pi-agent-core and pi-ai."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+kuzushi-core = { path = "../kuzushi-core" }
+serde.workspace = true
+serde_json.workspace = true
