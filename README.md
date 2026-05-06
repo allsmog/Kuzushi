@@ -265,40 +265,117 @@ External dependencies for the backends:
 Run `kuzushi doctor` to see which backends are operational on the
 current host.
 
-## Multi-stage triage and verify:exploit
+## Multi-stage triage and verify cascade
 
-The agentic pipeline is exposed through three composable tools:
+The agentic pipeline is a composable cascade. Each stage's survivors
+feed the next stage; each stage has its own cost cap, model role, and
+opt-out. Operators wire only the tools they want.
 
-| Tool | Stages | Cost cap |
+| Stage | Tool | What runs | Default model role |
+| --- | --- | --- | --- |
+| 0 | `triage:run` (prefilter) | Deterministic severity + attacker-keyword + tool-quality scoring | n/a (no LLM) |
+| 1.5 | `triage:run` (`useClassifierGate`) | Cheap LLM scorer with adaptive P²-quantile threshold; persists across runs | `[roles.classifier_gate]` |
+| 2 | `triage:run` (Stage 2) | Concurrent per-finding triage on `Priority::Normal` permits | `[roles.triage]` |
+| 3 | `triage:deep` | Tool-augmented audit loop — model reads source via `code_nav` (`read_source`, `find_references`, `list_definitions`, `read_definition`) and returns `VulnAnalysis` + `EvidenceCitation`s | `[roles.deep_auditor]` |
+| 4 | `verify:exploit` | Sandboxed harness build + run (single-payload or libFuzzer + ASan/UBSan) | n/a (no LLM) |
+
+Surrounding tools:
+
+| Tool | Purpose |
+| --- | --- |
+| `verify:finding` | LLM-driven exploitability review at the configured tier (single-shot, no tool loop) |
+
+Inputs that span the cascade:
+
+| Input | Where | Purpose |
 | --- | --- | --- |
-| `triage:run` | deterministic prefilter → concurrent LLM triage (Stage 2) | `costCapUsd` (USD) |
-| `verify:finding` | LLM-driven exploitability review at the configured tier | n/a (single-shot) |
-| `verify:exploit` | sandboxed empirical harness build + run, optionally fuzzed | `timeoutMs`, `fuzzSeconds` |
+| `concurrency` | `triage:run` | Workers in the Stage 2 pool. Default 8, capped at 64. |
+| `prefilterThreshold` | `triage:run` | Drop findings below the deterministic Stage 0 score. Default 0 (no Stage 0 drop). |
+| `useClassifierGate` | `triage:run` | Opt into Stage 1.5. Default `false`. |
+| `stage2Tier` | `triage:run` | `cheap` (default), `mid`, or `deep`. Tier hint to providers that route across model classes. |
+| `costCapUsd` | `triage:run` | Per-op `Triage` cap on the spend ledger. |
+| `maxSteps` | `triage:deep` | Hard cap on tool-loop iterations. Default 24. |
+| `depositUsd` | `triage:deep` | Conservative `DeepAudit` deposit. Default $1.00. |
+| `fuzzSeconds` | `verify:exploit` | Drive the C/C++ harness with `libFuzzer + AddressSanitizer + UBSan` for N seconds. |
+| `timeoutMs` | `verify:exploit` | Compile + run timeout. |
 
-`triage:run` honours `concurrency` (default 8 workers, capped at 64),
-`prefilterThreshold` (default 0 — no prefiltering), `stage2Tier`
-(`cheap` | `mid` | `deep`), and `costCapUsd`. Findings dropped before
-dispatch land as `pendingAfterCap` in the response so callers can
-resume against a higher cap.
-
-`verify:exploit` accepts `fuzzSeconds`. When set the C/C++ harness
-swaps the deterministic single-payload driver for a libFuzzer driver
-compiled with `-fsanitize=fuzzer,address,undefined`. ASan or UBSan
-crashes propagate through the existing classifier and promote to
-`proof_level=4`.
+Examples:
 
 ```bash
-# Cost-capped, concurrent triage with cheap-tier fan-out.
+# Cost-capped, classifier-gated cascade.
 kuzushi --target . run triage:run \
-  --input '{"concurrency":8,"costCapUsd":1.50,"prefilterThreshold":5,"stage2Tier":"cheap"}'
+  --input '{"concurrency":8,"costCapUsd":1.50,"useClassifierGate":true,"prefilterThreshold":5,"stage2Tier":"cheap"}'
 
-# Empirical fuzz-driven verification of one finding.
+# Deep audit on one finding (model uses code_nav tools to ground its verdict).
+kuzushi --target . run triage:deep \
+  --input '{"fingerprint":"abc123","maxSteps":24,"depositUsd":1.0}'
+
+# libFuzzer-driven verification.
 kuzushi --target . run verify:exploit \
   --input '{"fingerprint":"abc123","fuzzSeconds":30,"timeoutMs":120000}'
 ```
 
-`KUZUSHI_COST_CAP_USD` provides the same cap globally without changing
-the tool input.
+### Spend control
+
+Every paid operation deposits and refunds against a SQLite spend
+ledger at `<workspace>/.kuzushi/v2/spend.sqlite3`. Caps:
+
+| Cap | What it bounds |
+| --- | --- |
+| `costCapUsd` (per-tool input) | The op's per-operation cap, e.g. `Triage` or `DeepAudit`. |
+| `KUZUSHI_COST_CAP_USD` (env) | Default value for `costCapUsd` when the input omits it. |
+| `KUZUSHI_MAX_USD_PER_RUN` (env) | Hard ceiling across **every** op for the whole process. Once tripped, no further deposits succeed. Existing tickets still refund — work-in-flight is never stranded. |
+
+Operations: `Triage`, `ClassifierGate`, `DeepAudit`, `FullModeMulti`,
+`Patch`. Each has its own cap row; set via `SpendLimiter::set_cap` or
+the per-tool input.
+
+### Per-role model routing
+
+Operators can pin a different model to each pipeline role via
+`~/.kuzushi/models.toml` (or `<target>/.kuzushi/models.toml` for
+project-local overrides):
+
+```toml
+default_model = "anthropic:claude-sonnet-4-6"
+
+[roles.classifier_gate]
+primary = "anthropic:claude-haiku-4-5"
+
+[roles.triage]
+primary = "anthropic:claude-haiku-4-5"
+
+[roles.deep_auditor]
+primary = "anthropic:claude-opus-4-7"
+
+[roles.patch]
+primary = "anthropic:claude-sonnet-4-6"
+
+# Per-model concurrency caps consumed by `ModelGate`.
+[concurrency]
+"anthropic:claude-haiku-4-5" = 80
+"anthropic:claude-opus-4-7"  = 60
+```
+
+Routing roles: `triage`, `classifier_gate`, `deep_auditor`,
+`full_mode_multi`, `systems_hunt`, `carlini`, `variant_ndiff`,
+`threat_model`, `x_ray`, `patch`. Tools dispatch through
+`AgentRuntime::model_for_role` — when no `models.toml` is present
+the operator's `model = ...` from `config.toml` (or `KUZUSHI_MODEL`)
+is used unchanged.
+
+`KUZUSHI_MODELS_FILE=/path/to/file.toml` overrides the home-dir
+location.
+
+### Concurrency and priority
+
+Triage workers acquire a per-model permit on `ModelGate` at
+`Priority::Normal` before each call. Default per-model caps come
+from `default_concurrency_for(model)` (Haiku/Sonnet=80, Opus=60,
+Gemini=600, OpenAI gpt-4.x=500); `models.toml [concurrency]`
+overrides apply automatically. Background `full_mode_multi` chunks
+run at `Priority::Lowest` so interactive triage wins permits when
+the gate is saturated.
 
 ## Artifacts And State
 

@@ -308,15 +308,23 @@ impl AgentRuntime for AnthropicOAuthRuntime {
     }
 
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
-        // Build a *current-thread* runtime so this call doesn't depend
-        // on being driven from inside an async context. Slightly more
-        // expensive than awaiting from an async caller — adapters that
-        // are already async should call `query` directly.
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .context("AnthropicOAuthRuntime: could not start a tokio runtime")?;
-        runtime.block_on(self.send_messages(request))
+        // Reuse the outer tokio runtime when one is already in scope
+        // (e.g. `kuzushi run` under `#[tokio::main]`); otherwise build
+        // a single-threaded runtime owned by this call. Building a
+        // fresh runtime *inside* an outer runtime panics with
+        // "Cannot start a runtime from within a runtime".
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                tokio::task::block_in_place(|| handle.block_on(self.send_messages(request)))
+            }
+            Err(_) => {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .context("AnthropicOAuthRuntime: could not start a tokio runtime")?;
+                runtime.block_on(self.send_messages(request))
+            }
+        }
     }
 
     async fn query(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
@@ -324,11 +332,18 @@ impl AgentRuntime for AnthropicOAuthRuntime {
     }
 
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .context("AnthropicOAuthRuntime: could not start a tokio runtime")?;
-        runtime.block_on(self.triage_finding(request))
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                tokio::task::block_in_place(|| handle.block_on(self.triage_finding(request)))
+            }
+            Err(_) => {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .context("AnthropicOAuthRuntime: could not start a tokio runtime")?;
+                runtime.block_on(self.triage_finding(request))
+            }
+        }
     }
 
     async fn triage_finding(&self, request: TriageRequest) -> Result<TriageOutcome> {
