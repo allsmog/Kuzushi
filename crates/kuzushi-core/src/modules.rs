@@ -31,6 +31,7 @@ use crate::scan::{
 };
 use crate::secret_scan::{scan_for_secrets, SecretScanOptions};
 use crate::semgrep_rule_synthesis::synthesize_candidate_semgrep_rules;
+use crate::spend::{Operation as SpendOp, SpendLimiter};
 use crate::static_evidence::StaticEvidenceStore;
 use crate::static_narrative::build_static_narrative_report;
 use crate::static_proof_validator::{
@@ -436,6 +437,7 @@ impl ModuleRegistry {
             "workspace:export-findings" => export_workspace_findings_tool(input, ctx),
             "sast:scan" => run_sast_scan(input, ctx, runtime),
             "triage:run" => run_triage(input, ctx, runtime),
+            "triage:deep" => run_triage_deep(input, ctx, runtime),
             "verify:finding" => run_verify_finding(input, ctx, runtime),
             "verify:exploit" => run_verify_exploit(input, ctx),
             "patch:finding" => run_patch_finding(input, ctx, runtime),
@@ -5646,16 +5648,32 @@ fn run_triage(
     // `triage_finding_blocking` on the borrowed `runtime` in parallel.
     // FindingStore wraps `rusqlite::Connection` (!Sync), so the
     // outcome channel is drained on the main thread which alone
-    // touches the store. The cost cap is enforced cooperatively:
-    // workers check a shared atomic `cap_hit` flag before each call
-    // and the main thread sets it when total_cost crosses the cap.
+    // touches the store.
+    //
+    // Cost control flows through the canonical `SpendLimiter`:
+    // workers `deposit(Triage, est_usd)` before dispatching and
+    // `refund(ticket, actual_usd)` after the call settles. The
+    // limiter enforces both the per-op cap (set from `cost_cap_usd`
+    // / `KUZUSHI_COST_CAP_USD`) and the global hard ceiling
+    // `KUZUSHI_MAX_USD_PER_RUN`. When deposit fails the finding
+    // lands in `pendingAfterCap`.
+    let spend_limiter = SpendLimiter::open(workspace.spend_db_path()).ok();
+    if let (Some(limiter), Some(cap)) = (spend_limiter.as_ref(), input.cost_cap_usd) {
+        // Set a per-op cap for this triage run. set_cap is idempotent;
+        // the most recent value wins. Caller can override the default
+        // `KUZUSHI_COST_CAP_USD` via `costCapUsd` on the tool input.
+        let _ = limiter.set_cap(SpendOp::Triage, cap);
+    }
+    // Conservative per-call estimate. Haiku tokens land at ~$0.001/k
+    // input + $0.005/k output. A typical triage call is ~1k input
+    // tokens + ~200 output → ~$0.002. We deposit a slightly
+    // pessimistic $0.005 so the cap fires before the actuals land.
+    const TRIAGE_DEPOSIT_USD: f64 = 0.005;
     {
-        use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::mpsc;
 
         let concurrency = input.concurrency.max(1);
-        let cap_hit_flag = AtomicBool::new(false);
-        let cost_cap = input.cost_cap_usd;
+        let limiter_ref = spend_limiter.as_ref();
 
         let (work_tx, work_rx) = mpsc::channel::<Finding>();
         let (done_tx, done_rx) = mpsc::channel::<(Finding, Result<TriageOutcome>)>();
@@ -5665,7 +5683,6 @@ fn run_triage(
             for _ in 0..concurrency {
                 let work_rx = &work_rx;
                 let done_tx = done_tx.clone();
-                let cap_hit_ref = &cap_hit_flag;
                 let cwd = cwd.clone();
                 let prompt_template = prompt_template.clone();
                 let stage2_model = stage2_model.clone();
@@ -5675,15 +5692,25 @@ fn run_triage(
                             Ok(f) => f,
                             Err(_) => break,
                         };
-                        if cap_hit_ref.load(Ordering::Relaxed) {
-                            // Drop without dispatching — main thread will
-                            // count it as `pendingAfterCap`.
-                            let _ = done_tx.send((
-                                finding,
-                                Err(anyhow::anyhow!("cost cap reached before dispatch")),
-                            ));
-                            continue;
-                        }
+                        // Deposit before dispatching. If the cap or
+                        // hard ceiling is exhausted, surface a
+                        // SpendError-flavoured message that the main
+                        // thread maps to `pendingAfterCap`.
+                        let ticket = match limiter_ref {
+                            Some(l) => match l.deposit(SpendOp::Triage, TRIAGE_DEPOSIT_USD) {
+                                Ok(ticket) => Some(ticket),
+                                Err(err) => {
+                                    let _ = done_tx.send((
+                                        finding,
+                                        Err(anyhow::anyhow!(
+                                            "spend cap reached before dispatch: {err}"
+                                        )),
+                                    ));
+                                    continue;
+                                }
+                            },
+                            None => None,
+                        };
                         let req = TriageRequest {
                             model: stage2_model.clone(),
                             cwd: cwd.clone(),
@@ -5691,6 +5718,16 @@ fn run_triage(
                             prompt_template: prompt_template.clone(),
                         };
                         let res = runtime.triage_finding_blocking(req);
+                        // Settle the ticket with the actual cost.
+                        // Refunds always succeed; we never strand a
+                        // ticket open.
+                        if let (Some(l), Some(t)) = (limiter_ref, ticket) {
+                            let actual = match &res {
+                                Ok(o) => o.cost_usd,
+                                Err(_) => 0.0,
+                            };
+                            let _ = l.refund(t, actual);
+                        }
                         if done_tx.send((finding, res)).is_err() {
                             break;
                         }
@@ -5705,9 +5742,6 @@ fn run_triage(
                 }
             }
             drop(work_tx);
-            // Workers also need to see the closed `done_tx` to know
-            // when to stop the main drain. Drop our reference; each
-            // worker keeps its own clone.
             drop(done_tx);
 
             while let Ok((finding, res)) = done_rx.recv() {
@@ -5715,8 +5749,9 @@ fn run_triage(
                     Ok(o) => o,
                     Err(err) => {
                         let msg = format!("{err}");
-                        if msg.contains("cost cap reached before dispatch") {
+                        if msg.contains("spend cap reached before dispatch") {
                             pending_after_cap += 1;
+                            cost_cap_hit = true;
                         } else {
                             results.push(json!({
                                 "fingerprint": finding.fingerprint,
@@ -5732,12 +5767,6 @@ fn run_triage(
                 };
 
                 total_cost += outcome.cost_usd;
-                if let Some(cap) = cost_cap {
-                    if total_cost >= cap && !cap_hit_flag.load(Ordering::Relaxed) {
-                        cap_hit_flag.store(true, Ordering::Relaxed);
-                        cost_cap_hit = true;
-                    }
-                }
 
                 let finding_id = match finding.id {
                     Some(id) => id,
@@ -5924,6 +5953,132 @@ impl VerifyFindingInput {
             prompt_template,
         })
     }
+}
+
+/// Deep tool-augmented triage on a single finding. Runs the
+/// `code_nav` tool loop (`read_source` / `read_definition` /
+/// `find_references` / `list_definitions`) so the model can ground
+/// its verdict in real source instead of just the finding's
+/// metadata. Output is a `DeepAuditOutcome` whose `triage` field is
+/// persisted via `save_triage` and whose evidence citations land in
+/// `findings_evidence`.
+///
+/// Cost is enforced through `SpendLimiter` against the
+/// `Operation::DeepAudit` cap (per-op cap settable via this tool's
+/// input plus the global `KUZUSHI_MAX_USD_PER_RUN` ceiling).
+fn run_triage_deep(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    let workspace = ctx.workspace.context(
+        "triage:deep needs an active workspace. Pass --target <repo> or start the shell with --target.",
+    )?;
+    let store = ctx
+        .findings_store
+        .context("triage:deep requires a findings store for the active workspace")?;
+
+    let fingerprint = match input.get("fingerprint") {
+        Some(Value::String(value)) if !value.trim().is_empty() => value.trim().to_string(),
+        Some(_) => anyhow::bail!("triage:deep fingerprint must be a non-empty string"),
+        None => anyhow::bail!("triage:deep requires a fingerprint"),
+    };
+
+    let runtime = runtime.context(
+        "triage:deep requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
+    )?;
+    if !runtime.supports_tools() {
+        anyhow::bail!(
+            "triage:deep needs a runtime that supports tool-augmented loops; the configured runtime does not"
+        );
+    }
+    let model = ctx.config.model.clone().context(
+        "triage:deep requires an explicit model in config.toml or KUZUSHI_MODEL; Kuzushi will not choose a fallback model",
+    )?;
+
+    let max_steps = input
+        .get("maxSteps")
+        .or_else(|| input.get("max_steps"))
+        .and_then(Value::as_u64)
+        .unwrap_or(crate::deep_auditor::DEFAULT_MAX_STEPS as u64) as u32;
+    let deposit_usd = input
+        .get("depositUsd")
+        .or_else(|| input.get("deposit_usd"))
+        .and_then(Value::as_f64)
+        .unwrap_or(crate::deep_auditor::DEFAULT_DEPOSIT_USD);
+
+    let Some(finding) = store.get_finding_by_reference(&fingerprint)? else {
+        return Ok(json!({
+            "ok": false,
+            "output": format!("[-] No finding with fingerprint '{}'.", fingerprint),
+        }));
+    };
+
+    let limiter = SpendLimiter::open(workspace.spend_db_path()).ok();
+    let cfg = crate::deep_auditor::DeepAuditConfig {
+        workspace_root: workspace.root().to_path_buf(),
+        max_steps,
+        deposit_usd,
+        system_prompt: None,
+    };
+
+    let outcome = crate::deep_auditor::run_deep_audit_with_runtime(
+        runtime,
+        limiter.as_ref(),
+        &cfg,
+        &finding,
+        model,
+    )?;
+
+    if let Some(finding_id) = finding.id {
+        if let Err(err) = store.save_triage(finding_id, &outcome.triage) {
+            eprintln!(
+                "[triage:deep] could not persist triage for finding {}: {err}",
+                finding.fingerprint
+            );
+        }
+        if !outcome.evidence.is_empty() {
+            if let Err(err) = crate::deep_auditor::save_evidence(
+                &workspace.findings_db_path(),
+                finding_id,
+                &outcome.evidence,
+            ) {
+                eprintln!(
+                    "[triage:deep] could not persist evidence for finding {}: {err}",
+                    finding.fingerprint
+                );
+            }
+        }
+    }
+
+    let summary = format!(
+        "[+] triage:deep verdict={} confidence={:.2} steps={} cost=${:.4}{}",
+        outcome.triage.verdict.as_str(),
+        outcome.triage.confidence,
+        outcome.steps_used,
+        outcome.cost_usd,
+        if outcome.truncated {
+            " (truncated at maxSteps)"
+        } else {
+            ""
+        }
+    );
+
+    Ok(json!({
+        "ok": true,
+        "output": summary,
+        "data": {
+            "fingerprint": finding.fingerprint,
+            "verdict": outcome.triage.verdict.as_str(),
+            "confidence": outcome.triage.confidence,
+            "rationale": outcome.triage.rationale,
+            "evidence": outcome.evidence,
+            "stepsUsed": outcome.steps_used,
+            "truncated": outcome.truncated,
+            "costUsd": outcome.cost_usd,
+        },
+        "costUsd": outcome.cost_usd,
+    }))
 }
 
 const VERIFY_SYSTEM_PROMPT: &str = r#"You are Kuzushi's exploitability verification agent.
@@ -8432,25 +8587,47 @@ fn triage_module() -> BuiltinModule {
         "Triage",
         ModuleKind::Defense,
         "LLM-driven triage of scanner findings with evidence-backed verdicts.",
-        vec![tool_with_options(
-            "triage:run",
-            "Triage findings with pi-agent-core.",
-            vec![
-                opt("scanId", OptionType::String, "Scan run id to triage."),
-                opt(
-                    "fingerprint",
-                    OptionType::String,
-                    "Single finding fingerprint to triage.",
-                ),
-                opt(
-                    "batchSize",
-                    OptionType::Int,
-                    "Maximum findings per runtime batch.",
-                )
-                .default(json!(20)),
-                model_option(),
-            ],
-        )],
+        vec![
+            tool_with_options(
+                "triage:run",
+                "Triage findings with pi-agent-core.",
+                vec![
+                    opt("scanId", OptionType::String, "Scan run id to triage."),
+                    opt(
+                        "fingerprint",
+                        OptionType::String,
+                        "Single finding fingerprint to triage.",
+                    ),
+                    opt(
+                        "batchSize",
+                        OptionType::Int,
+                        "Maximum findings per runtime batch.",
+                    )
+                    .default(json!(20)),
+                    model_option(),
+                ],
+            ),
+            tool_with_options(
+                "triage:deep",
+                "Tool-augmented deep audit on a single finding (code_nav loop, supports_tools runtime required).",
+                vec![
+                    fingerprint_option(),
+                    opt(
+                        "maxSteps",
+                        OptionType::Int,
+                        "Hard cap on tool-loop steps (default 24).",
+                    )
+                    .default(json!(24)),
+                    opt(
+                        "depositUsd",
+                        OptionType::Float,
+                        "Conservative cost estimate deposited up-front (default 1.0).",
+                    )
+                    .default(json!(1.0)),
+                    model_option(),
+                ],
+            ),
+        ],
         vec![dag("triage:run", "triage", &["semgrep:scan"])],
     )
 }
@@ -13498,6 +13675,83 @@ OUT
         assert_eq!(
             requests[0].prompt_template.as_deref(),
             Some("Use repository evidence only.")
+        );
+    }
+
+    #[test]
+    fn triage_deep_requires_tool_supporting_runtime() {
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .insert_scan_run("run-1", workspace.root(), "completed")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.sql",
+            "src/db.ts",
+            9,
+            Some(9),
+            Severity::High,
+            "SQL injection in search",
+        );
+        let fingerprint = finding.fingerprint.clone();
+        store.insert_finding("run-1", &finding).unwrap();
+
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("anthropic:claude-haiku-4-5-20251001".to_string());
+        // MockRuntime here doesn't override `supports_tools`, so the
+        // default `false` triggers the explicit error path. This
+        // verifies the tool refuses to dispatch into a tool-loop on a
+        // bridge that hasn't opted in to next-step.
+        let runtime = MockRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let err = registry
+            .execute_tool_with_runtime(
+                "triage:deep",
+                json!({"fingerprint": fingerprint}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("supports tool-augmented loops"),
+            "actual err: {err}"
+        );
+    }
+
+    #[test]
+    fn triage_deep_requires_fingerprint() {
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("anthropic:claude-haiku-4-5-20251001".to_string());
+        let runtime = MockRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let err = registry
+            .execute_tool_with_runtime("triage:deep", json!({}), &ctx, Some(&runtime))
+            .unwrap_err()
+            .to_string();
+        // The fingerprint option is marked required by the descriptor,
+        // so the validation layer rejects the call before our handler
+        // even sees it. Either error string is acceptable; we just
+        // want the operator to learn fingerprint is missing.
+        assert!(
+            err.contains("fingerprint"),
+            "expected error to mention fingerprint; actual: {err}"
         );
     }
 

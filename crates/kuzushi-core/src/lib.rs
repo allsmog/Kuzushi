@@ -70,8 +70,8 @@ pub use config::{
     ConfigPaths, RuntimeConfig, RuntimeKind, V2Config,
 };
 pub use deep_auditor::{
-    run_deep_auditor, save_evidence, DeepAuditConfig, DeepAuditOutcome, EvidenceCitation,
-    VulnAnalysis,
+    run_deep_audit_with_runtime, run_deep_auditor, save_evidence, DeepAuditConfig,
+    DeepAuditOutcome, EvidenceCitation, VulnAnalysis,
 };
 pub use dep_hygiene::{
     analyze_manifest as analyze_dep_hygiene_manifest, check_dependency_hygiene,

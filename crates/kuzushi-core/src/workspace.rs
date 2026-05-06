@@ -41,6 +41,10 @@ impl WorkspaceTarget {
         self.state_dir().join("findings.sqlite3")
     }
 
+    pub fn spend_db_path(&self) -> PathBuf {
+        self.state_dir().join("spend.sqlite3")
+    }
+
     pub fn ensure_state_dir(&self) -> Result<PathBuf> {
         let state_dir = self.state_dir();
         fs::create_dir_all(&state_dir)
