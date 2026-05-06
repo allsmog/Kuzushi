@@ -241,7 +241,13 @@ run_one_story() {
   if [[ -n "${AI_CMD_ARGS:-}" ]]; then
     read -r -a ai_args <<<"${AI_CMD_ARGS}"
   fi
-  "$AI_CMD_BIN" "${ai_args[@]}" <"$CURRENT_PROMPT"
+  if [[ "$(basename "$AI_CMD_BIN")" == "codex" ]]; then
+    case "${ai_args[0]:-}" in
+      exec | e | review) ;;
+      *) ai_args=(exec "${ai_args[@]}") ;;
+    esac
+  fi
+  (cd "$ROOT" && "$AI_CMD_BIN" "${ai_args[@]}" <"$CURRENT_PROMPT")
 
   if [[ "$requires_ai_changes" != "false" && -z "$(cd "$ROOT" && git status --porcelain --untracked-files=all)" ]]; then
     echo "AI command completed without changing any tracked or untracked story files" >&2
