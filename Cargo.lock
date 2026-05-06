@@ -569,6 +569,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kuzushi-codeindex"
+version = "0.24.0-alpha.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "kuzushi-mcp-common",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "kuzushi-core"
 version = "0.24.0-alpha.0"
 dependencies = [
@@ -583,6 +597,59 @@ dependencies = [
  "thiserror",
  "toml",
  "uuid",
+]
+
+[[package]]
+name = "kuzushi-mcp-clang"
+version = "0.24.0-alpha.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "kuzushi-mcp-common",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "kuzushi-mcp-common"
+version = "0.24.0-alpha.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "dirs",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "kuzushi-mcp-gtags"
+version = "0.24.0-alpha.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "kuzushi-mcp-common",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "kuzushi-mcp-joern"
+version = "0.24.0-alpha.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "kuzushi-mcp-common",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
