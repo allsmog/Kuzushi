@@ -55,7 +55,11 @@ pub use options::{OptionScope, OptionTarget, ToolOptionStore};
 pub use patch::run_patch_finding;
 pub use pr_comment::{build_pr_comment, PrCommentInput};
 pub use recon::{execute_recon_tool, ReconHost, ReconNote, ReconService, ReconWorkspaceStore};
-pub use runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageRequest};
+pub use runtime::{
+    run_tool_loop, AgentLoopOutcome, AgentLoopStep, AgentQueryRequest, AgentQueryResponse,
+    AgentRuntime, AgentTool, AgentToolLoopRequest, LoopHistoryEntry, ToolBox, ToolCall,
+    ToolCallHandler, ToolResult, TriageRequest,
+};
 pub use scan::{
     default_scan_engines, normalize_codeql_sarif, normalize_semgrep_json, run_scan_engines,
     run_semgrep_scan, scan_engines_for_tasks, CodeqlScanner, ScanCancellation, ScanEngine, ScanRun,
