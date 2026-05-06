@@ -2,7 +2,7 @@
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
 Active story: UX-015 - Final Ink/React Removal Gate
-Status: UX-014 complete in this iteration; commit/push gate pending
+Status: UX-014 complete and pushed in iteration 27 as `6a63d78`; UX-015 pending next iteration
 
 ## Stage 2 Checklist
 
@@ -19,7 +19,7 @@ Status: UX-014 complete in this iteration; commit/push gate pending
 - UX-011 Findings row/card density: complete in iteration 24.
 - UX-012 Stable finding aliases: complete in iteration 25.
 - UX-013 Better empty states and errors: complete in iteration 26.
-- UX-014 Explicit plain / screen-reader / low-bandwidth mode: complete in this iteration.
+- UX-014 Explicit plain / screen-reader / low-bandwidth mode: complete; pushed in iteration 27 as `6a63d78`.
 - UX-015 Final Ink/React removal gate: pending.
 
 ## Iteration Log
@@ -50,13 +50,14 @@ Status: UX-014 complete in this iteration; commit/push gate pending
   - `cargo test -p kuzushi-tui`
   - `cargo fmt --all --check`
   - `git diff --check`
-- Result: complete. `kuzushi --plain shell` now forces the shell through the
+- Result: complete and pushed to `origin/main` as
+  `6a63d78 ralph:ux add strict plain mode`. `kuzushi --plain shell` now forces the shell through the
   strict line-oriented renderer, and `KUZUSHI_PLAIN=1`,
   `KUZUSHI_SCREEN_READER=1`, and `KUZUSHI_LOW_BANDWIDTH=1` do the same. The
   plain CLI tests assert shell output has no ANSI escapes or box drawing.
   Startup progress is suppressed when plain mode is requested, so low-bandwidth
   output stays deterministic and line oriented.
-- Remaining work: commit and push UX-014, then complete UX-015.
+- Remaining work: UX-015.
 - Blockers or repo facts that contradicted this prompt:
   - The primary workspace remains stale at `80d23a4` with staged/modified
     earlier Stage 2 files. The active progress and pushed Stage 2 state are in
