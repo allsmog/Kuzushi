@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-006 - Add source span extractor
-Status: WB-005 complete in iteration 33; WB-006 pending
+Active story: WB-007 - Normalize Semgrep findings into static evidence
+Status: WB-006 complete in iteration 34; WB-007 pending
 
 ## Stage 3 Checklist
 
@@ -11,7 +11,7 @@ Status: WB-005 complete in iteration 33; WB-006 pending
 - WB-003 Scrub scanner subprocess environments: complete in iteration 31.
 - WB-004 Add static proof taxonomy: complete in iteration 32.
 - WB-005 Add static evidence graph: complete in iteration 33.
-- WB-006 Add source span extractor: pending.
+- WB-006 Add source span extractor: complete in iteration 34.
 - WB-007 Normalize Semgrep findings into static evidence: pending.
 - WB-008 Normalize CodeQL SARIF code flows into static evidence: pending.
 - WB-009 Build deterministic repository inventory: pending.
@@ -30,6 +30,36 @@ Status: WB-005 complete in iteration 33; WB-006 pending
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 34 - WB-006
+
+- Task attempted: add the whitebox-static source span extractor used for
+  source-grounded citations.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `crates/kuzushi-core/src/source_span.rs`
+  - `crates/kuzushi-core/src/lib.rs`
+- Tests/checks run:
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core source_span`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `pnpm eval:kuzushi-whitebox-static` with the primary checkout's
+    `node_modules` temporarily symlinked into the nested clean clone
+- Result: implementation complete. The new extractor resolves
+  repo-relative or in-repo absolute paths, rejects parent traversal and
+  out-of-repo resolutions, rejects missing/non-file/binary-ish/non-UTF-8
+  sources, validates 1-based inclusive line ranges, and returns a normalized
+  snippet plus the shared static content hash. WB-006 is marked `passes: true`
+  in the PRD after the story gate and fast whitebox checks passed.
+- Remaining work: WB-007 through WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files. This iteration continued in the
+    clean isolated clone at `/tmp/kuzushi-ux2-clone.PJaRge`, which contains the
+    active pushed Stage 2 and WB-001 through WB-005 state.
 
 ### Iteration 33 - WB-005
 
