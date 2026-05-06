@@ -2,6 +2,7 @@ pub mod agent_router;
 pub mod artifact_kb;
 pub mod attachments;
 pub mod carlini_threat_hunt;
+pub mod classifier_gate;
 pub mod code_nav;
 pub mod config;
 pub mod deep_auditor;
@@ -40,6 +41,9 @@ pub use carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hunt_r
 pub use code_nav::{
     code_nav_tool_specs, code_nav_toolbox, find_references_tool, list_definitions_tool,
     read_definition_tool, read_source_tool, CodeNavConfig, CodeNavTool,
+};
+pub use classifier_gate::{
+    ClassifierConfig, LikelyVulnClassifier, QuantileEstimator, Score,
 };
 pub use deep_auditor::{
     run_deep_auditor, save_evidence, DeepAuditConfig, DeepAuditOutcome, EvidenceCitation,
