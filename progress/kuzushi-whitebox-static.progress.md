@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-021 - Add deterministic eval harness
-Status: WB-020 pushed in iteration 51; WB-021 pending
+Active story: WB-022 - Add whitebox demo fixture
+Status: WB-021 complete in this workspace; commit/push pending
 
 ## Stage 3 Checklist
 
@@ -26,10 +26,49 @@ Status: WB-020 pushed in iteration 51; WB-021 pending
 - WB-018 Add candidate Semgrep rule synthesis: complete in iteration 46.
 - WB-019 Add whitebox false-positive memory: complete and pushed in iteration 49.
 - WB-020 Add diff-aware whitebox PR mode: complete in iteration 51.
-- WB-021 Add deterministic eval harness: pending.
+- WB-021 Add deterministic eval harness: complete in iteration 53.
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 53 - WB-021
+
+- Task attempted: add a deterministic, fixture-driven whitebox-static eval
+  harness with local passing and expected-hard-failure fixtures.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `evals/kuzushi-whitebox-static/run.ts`
+  - `evals/kuzushi-whitebox-static/fixtures/harness-cases.json`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `git status --short --branch` in the clean nested clone
+  - `sed -n '1,260p' progress/kuzushi-whitebox-static.progress.md`
+  - `sed -n '1,260p' tasks/kuzushi-whitebox-static.prd.json`
+  - `pnpm eval:kuzushi-whitebox-static`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `git diff --check`
+- Result: implementation complete. `evals/kuzushi-whitebox-static/run.ts`
+  now loads local JSON fixtures, computes deterministic scores for detection,
+  groundedness, proof completeness, false-positive rejection, prioritization,
+  narrative quality, cost, and latency, and exits nonzero if a passing fixture
+  contains shell execution, network calls, PoC generation, fabricated
+  citations, uncited confirmed claims, or runtime exploitability claims. The
+  fixture set also includes expected-bad cases for each hard failure so the
+  detectors are exercised. WB-021 is marked `passes: true` in the PRD after
+  the story gate and fast whitebox checks passed.
+- Remaining work: WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files, while the clean nested clone at
+    `/Users/operator/VibeCode/open-sourced/kuzushi/.codex-active/kuzushi-stage3`
+    contains the active pushed Stage 3 state. This iteration continued in the
+    nested clone to avoid resetting or overwriting the primary worktree.
+  - The nested clone does not have its own `node_modules`; the eval used a
+    temporary symlink to the primary checkout's installed dependencies, then
+    removed the symlink before committing.
 
 ### Iteration 51 - WB-020
 

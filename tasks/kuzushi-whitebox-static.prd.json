@@ -259,7 +259,7 @@
       "acceptance": ["pnpm eval:kuzushi-whitebox-static runs local fixtures.", "Hard fail on shell execution, network call, PoC generation, fabricated citation, uncited claim, or runtime exploitability claim."],
       "storyGate": "pnpm eval:kuzushi-whitebox-static",
       "forbidden": ["shell_tool_call", "network_call", "poc_generation", "fabricated_citation", "uncited_claim", "runtime_exploitability_claim"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-022",
