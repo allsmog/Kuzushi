@@ -140,7 +140,7 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "use <module>",
-        aliases: &["/use <module>"],
+        aliases: &["use semgrep", "/use <module>"],
         category: ShellCommandCategory::Navigation,
         description: "focus a module",
     },
@@ -152,13 +152,13 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "scan [target]",
-        aliases: &["/scan [target]"],
+        aliases: &["scan .", "/scan [target]"],
         category: ShellCommandCategory::RunScan,
         description: "run configured scanners",
     },
     ShellCommandSpec {
         command: "run <tool> [json]",
-        aliases: &["/run <tool> [json]", "run . [json]"],
+        aliases: &["run .", "/run <tool> [json]", "run . [json]"],
         category: ShellCommandCategory::RunScan,
         description: "dispatch a tool; run . uses focused module or sast:scan",
     },
@@ -224,7 +224,7 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "task block <id>",
-        aliases: &["/task block <id>", "task deny <id>"],
+        aliases: &["task deny <id>", "/task block <id>"],
         category: ShellCommandCategory::OptionsTasks,
         description: "block a SAST task",
     },
@@ -278,7 +278,7 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "kb [module]",
-        aliases: &["/kb [module]", "attachments"],
+        aliases: &["attachments", "/kb [module]"],
         category: ShellCommandCategory::ContextKb,
         description: "show local KB attachments",
     },
@@ -317,13 +317,13 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "findings",
-        aliases: &["/findings", "/f", "f"],
+        aliases: &["findings", "/f", "f", "/findings"],
         category: ShellCommandCategory::FindingsEvidence,
         description: "open persisted findings",
     },
     ShellCommandSpec {
         command: "open <id>",
-        aliases: &["/open <id>"],
+        aliases: &["open F-0001", "/open <id>"],
         category: ShellCommandCategory::FindingsEvidence,
         description: "open a finding alias or fingerprint",
     },
@@ -384,7 +384,7 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "auth login <provider>",
-        aliases: &["/auth login <provider>", "auth codex", "auth anthropic"],
+        aliases: &["auth codex", "auth anthropic", "/auth login <provider>"],
         category: ShellCommandCategory::AuthConfigModel,
         description: "start supported OAuth login",
     },
@@ -402,7 +402,7 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "model [choice]",
-        aliases: &["/model [choice]"],
+        aliases: &["model 1", "/model [choice]"],
         category: ShellCommandCategory::AuthConfigModel,
         description: "select explicit provider:model",
     },
@@ -534,14 +534,35 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "quit",
-        aliases: &["/quit", "exit", "/exit", "q", "/q", "exitj", "/exitj"],
+        aliases: &["q", "/q", "exit", "/quit", "/exit", "exitj", "/exitj"],
         category: ShellCommandCategory::Session,
         description: "exit the shell",
     },
 ];
 
+const FEATURED_HELP_EXAMPLES: &[&str] = &[
+    "scan .",
+    "use semgrep",
+    "run .",
+    "findings",
+    "open F-0001",
+    "model 1",
+];
+
 pub fn shell_command_specs() -> &'static [ShellCommandSpec] {
     SHELL_COMMAND_SPECS
+}
+
+pub fn shell_help_examples() -> Vec<&'static str> {
+    FEATURED_HELP_EXAMPLES
+        .iter()
+        .copied()
+        .filter(|example| {
+            SHELL_COMMAND_SPECS
+                .iter()
+                .any(|spec| spec.aliases.contains(example))
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1367,6 +1388,35 @@ mod tests {
         ]);
 
         assert_eq!(routed, expected);
+    }
+
+    #[test]
+    fn featured_help_examples_are_alias_backed_and_routed() {
+        let examples = shell_help_examples();
+        assert_eq!(
+            examples,
+            vec![
+                "scan .",
+                "use semgrep",
+                "run .",
+                "findings",
+                "open F-0001",
+                "model 1"
+            ]
+        );
+
+        for example in examples {
+            assert!(
+                shell_command_specs()
+                    .iter()
+                    .any(|spec| spec.aliases.contains(&example)),
+                "featured help example {example:?} is not backed by ShellCommandSpec.aliases"
+            );
+            assert!(
+                !matches!(parse_command(example), ShellCommand::Unknown(_)),
+                "featured help example {example:?} did not route"
+            );
+        }
     }
 
     fn route_kind(command: &ShellCommand) -> &'static str {

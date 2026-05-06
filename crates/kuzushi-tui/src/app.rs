@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 const CTRL_C_ARM_WINDOW: Duration = Duration::from_secs(2);
 const THROTTLE_STALE_AFTER: Duration = Duration::from_secs(30);
 const PASTE_GUARD_WINDOW: Duration = Duration::from_millis(5);
+const VIEWPORT_PAGE_LINES: usize = 10;
+const FINDINGS_PAGE_ROWS: usize = 10;
 
 #[derive(Debug, Clone, Default)]
 pub struct AdvisoryState {
@@ -138,10 +140,10 @@ use ratatui::Terminal;
 use uuid::Uuid;
 
 use crate::commands::{
-    parse_command, shell_command_specs, ContextCommand, SastTaskCommand, SastTaskModeCommand,
-    ShellCommand, WorkspaceCommand,
+    parse_command, shell_command_specs, shell_help_examples, ContextCommand, SastTaskCommand,
+    SastTaskModeCommand, ShellCommand, WorkspaceCommand,
 };
-use crate::renderer::{render_app, render_plain_app};
+use crate::renderer::{render_app, render_plain_app, render_plain_command_result};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogLine {
@@ -374,6 +376,62 @@ pub enum ThreatView {
     Summary,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HotkeyTrigger {
+    Char(char),
+    Enter,
+    PageUp,
+    PageDown,
+}
+
+impl HotkeyTrigger {
+    fn matches(self, key: KeyEvent) -> bool {
+        if !key.modifiers.is_empty() {
+            return false;
+        }
+        match (self, key.code) {
+            (Self::Char(expected), KeyCode::Char(actual)) => expected == actual,
+            (Self::Enter, KeyCode::Enter) => true,
+            (Self::PageUp, KeyCode::PageUp) => true,
+            (Self::PageDown, KeyCode::PageDown) => true,
+            _ => false,
+        }
+    }
+
+    fn is_char(self) -> bool {
+        matches!(self, Self::Char(_))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ViewHotkeyAction {
+    FindingsNext,
+    FindingsPrevious,
+    FindingsFirst,
+    FindingsLast,
+    FindingsPageDown,
+    FindingsPageUp,
+    FindingsOpen,
+    ThreatView(ThreatView),
+    ActorDetail(usize),
+    PauseScan,
+    ResumeScan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ViewKeybinding {
+    pub trigger: HotkeyTrigger,
+    pub hint: &'static str,
+    pub label: &'static str,
+    pub action: ViewHotkeyAction,
+}
+
+impl ViewKeybinding {
+    fn matches(self, key: KeyEvent) -> bool {
+        self.trigger.matches(key)
+    }
+}
+
 #[derive(Debug)]
 pub struct ShellApp {
     pub input: String,
@@ -410,6 +468,11 @@ pub struct ShellApp {
     pub chains: Vec<ExploitChain>,
     pub story_return_view: Option<ShellView>,
     pub findings_cursor: usize,
+    pub help_scroll: usize,
+    pub tools_scroll: usize,
+    pub modules_scroll: usize,
+    pub history_scroll: usize,
+    pub kb_scroll: usize,
     pub last_char_at: Option<Instant>,
     scan_rx: Option<Receiver<ScanEvent>>,
     scan_cancel: Option<ScanCancellation>,
@@ -463,6 +526,11 @@ impl ShellApp {
             chains: Vec::new(),
             story_return_view: None,
             findings_cursor: 0,
+            help_scroll: 0,
+            tools_scroll: 0,
+            modules_scroll: 0,
+            history_scroll: 0,
+            kb_scroll: 0,
             last_char_at: None,
             scan_rx: None,
             scan_cancel: None,
@@ -526,12 +594,14 @@ impl ShellApp {
         match command {
             ShellCommand::Help => {
                 self.shell_view = ShellView::Help;
+                self.help_scroll = 0;
                 self.log("help", compact_help_summary());
             }
             ShellCommand::Back => self.go_back(),
             ShellCommand::Modules => {
                 self.shell_view = ShellView::Catalog;
                 self.catalog_expanded = true;
+                self.modules_scroll = 0;
                 self.log(
                     "module",
                     format!("showing {} module(s)", self.registry.modules().count()),
@@ -539,6 +609,7 @@ impl ShellApp {
             }
             ShellCommand::Tools => {
                 self.shell_view = ShellView::Tools;
+                self.tools_scroll = 0;
                 self.log(
                     "tool",
                     format!("showing {} tool(s)", self.registry.tools().count()),
@@ -1115,6 +1186,62 @@ impl ShellApp {
         }
     }
 
+    #[cfg(test)]
+    fn drain_next_agent_event_for_test(
+        &mut self,
+        timeout: Duration,
+    ) -> std::result::Result<(), String> {
+        let event = {
+            let Some(rx) = self.agent_rx.as_ref() else {
+                return Err(format!(
+                    "agent worker channel missing; {}",
+                    self.agent_chat_diagnostics_for_test()
+                ));
+            };
+            match rx.recv_timeout(timeout) {
+                Ok(event) => event,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    return Err(format!(
+                        "timed out after {timeout:?} waiting for agent worker event; {}",
+                        self.agent_chat_diagnostics_for_test()
+                    ));
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(format!(
+                        "agent worker channel disconnected before reporting completion; {}",
+                        self.agent_chat_diagnostics_for_test()
+                    ));
+                }
+            }
+        };
+
+        self.apply_agent_event(event);
+        if self.agent_chat.as_ref().is_some_and(|agent| !agent.running) {
+            self.agent_rx = None;
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn agent_chat_diagnostics_for_test(&self) -> String {
+        let agent_state = match &self.agent_chat {
+            Some(agent) => format!(
+                "AgentChat question={:?} running={} abort_requested={} answer={:?} error={:?}",
+                agent.question, agent.running, agent.abort_requested, agent.answer, agent.error
+            ),
+            None => "AgentChat missing".to_string(),
+        };
+        let log_tail = self
+            .log
+            .iter()
+            .rev()
+            .take(5)
+            .map(|line| format!("{}: {}", line.prefix, line.body))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        format!("{agent_state}; recent log: [{log_tail}]")
+    }
+
     fn apply_threat_patch_event(&mut self, event: ThreatPatchEvent) {
         self.threat_worker_running = false;
         if self.threat_abort_requested {
@@ -1514,6 +1641,7 @@ impl ShellApp {
 
     fn show_history(&mut self) {
         self.shell_view = ShellView::History;
+        self.history_scroll = 0;
         self.log(
             "history",
             format!(
@@ -1608,6 +1736,145 @@ impl ShellApp {
             .as_ref()
             .map(|cancel| cancel.is_paused())
             .unwrap_or(false)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_scan_cancel_for_test(&mut self, cancel: ScanCancellation) {
+        self.scan_cancel = Some(cancel);
+    }
+
+    pub(crate) fn view_keybindings(&self) -> Vec<ViewKeybinding> {
+        match self.shell_view {
+            ShellView::Findings if !self.findings.is_empty() => vec![
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('j'),
+                    hint: "j/k/g/G",
+                    label: "move",
+                    action: ViewHotkeyAction::FindingsNext,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('k'),
+                    hint: "j/k/g/G",
+                    label: "move",
+                    action: ViewHotkeyAction::FindingsPrevious,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('g'),
+                    hint: "j/k/g/G",
+                    label: "move",
+                    action: ViewHotkeyAction::FindingsFirst,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('G'),
+                    hint: "j/k/g/G",
+                    label: "move",
+                    action: ViewHotkeyAction::FindingsLast,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::PageDown,
+                    hint: "PgUp/PgDn",
+                    label: "page",
+                    action: ViewHotkeyAction::FindingsPageDown,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::PageUp,
+                    hint: "PgUp/PgDn",
+                    label: "page",
+                    action: ViewHotkeyAction::FindingsPageUp,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Enter,
+                    hint: "Enter",
+                    label: "open",
+                    action: ViewHotkeyAction::FindingsOpen,
+                },
+            ],
+            ShellView::Threat(_) => vec![
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('1'),
+                    hint: "1..5",
+                    label: "switch threat view",
+                    action: ViewHotkeyAction::ThreatView(ThreatView::Dfd),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('2'),
+                    hint: "1..5",
+                    label: "switch threat view",
+                    action: ViewHotkeyAction::ThreatView(ThreatView::Stride),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('3'),
+                    hint: "1..5",
+                    label: "switch threat view",
+                    action: ViewHotkeyAction::ThreatView(ThreatView::Stories),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('4'),
+                    hint: "1..5",
+                    label: "switch threat view",
+                    action: ViewHotkeyAction::ThreatView(ThreatView::Scope),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('5'),
+                    hint: "1..5",
+                    label: "switch threat view",
+                    action: ViewHotkeyAction::ThreatView(ThreatView::Summary),
+                },
+            ],
+            ShellView::ModuleRun => {
+                let mut bindings = Vec::new();
+                for index in 1..=4 {
+                    bindings.push(ViewKeybinding {
+                        trigger: HotkeyTrigger::Char(char::from_digit(index as u32, 10).unwrap()),
+                        hint: "1..4",
+                        label: "actor",
+                        action: ViewHotkeyAction::ActorDetail(index),
+                    });
+                }
+                if self.can_pause_scan_hotkey() {
+                    bindings.push(ViewKeybinding {
+                        trigger: HotkeyTrigger::Char('p'),
+                        hint: "p",
+                        label: "pause",
+                        action: ViewHotkeyAction::PauseScan,
+                    });
+                    bindings.push(ViewKeybinding {
+                        trigger: HotkeyTrigger::Char('P'),
+                        hint: "p",
+                        label: "pause",
+                        action: ViewHotkeyAction::PauseScan,
+                    });
+                }
+                if self.can_resume_scan_hotkey() {
+                    bindings.push(ViewKeybinding {
+                        trigger: HotkeyTrigger::Char('r'),
+                        hint: "r",
+                        label: "resume",
+                        action: ViewHotkeyAction::ResumeScan,
+                    });
+                    bindings.push(ViewKeybinding {
+                        trigger: HotkeyTrigger::Char('R'),
+                        hint: "r",
+                        label: "resume",
+                        action: ViewHotkeyAction::ResumeScan,
+                    });
+                }
+                bindings
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn can_pause_scan_hotkey(&self) -> bool {
+        self.scan.as_ref().is_some_and(|scan| scan.running)
+            && self.scan_cancel.is_some()
+            && !self.is_scan_paused()
+    }
+
+    fn can_resume_scan_hotkey(&self) -> bool {
+        self.scan.as_ref().is_some_and(|scan| scan.running)
+            && self.scan_cancel.is_some()
+            && self.is_scan_paused()
     }
 
     fn handle_pause_command(&mut self) {
@@ -2591,6 +2858,7 @@ impl ShellApp {
             Ok(()) => {
                 self.focused_module = Some(module_id.clone());
                 self.shell_view = ShellView::KnowledgeBase;
+                self.kb_scroll = 0;
                 self.log(
                     "kb",
                     format!(
@@ -3442,8 +3710,51 @@ impl ShellApp {
     fn show_findings(&mut self) {
         self.shell_view = ShellView::Findings;
         self.refresh_findings(true);
+        self.clamp_findings_cursor();
         if self.findings.is_empty() {
             self.log("findings", "no findings yet. Next: scan or scan <target>");
+        }
+    }
+
+    fn clamp_findings_cursor(&mut self) {
+        if self.findings.is_empty() {
+            self.findings_cursor = 0;
+        } else {
+            self.findings_cursor = self.findings_cursor.min(self.findings.len() - 1);
+        }
+    }
+
+    fn open_finding_at_cursor(&mut self) {
+        let aliases = sorted_finding_aliases(&self.findings);
+        if aliases.is_empty() {
+            return;
+        }
+        let cursor = self.findings_cursor.min(aliases.len() - 1);
+        let (alias, finding) = aliases[cursor].clone();
+        self.findings_cursor = cursor;
+        self.selected_finding = Some(finding.clone());
+        self.shell_view = ShellView::Finding;
+        self.log(
+            "open",
+            format!(
+                "{alias} {} {}:{} {}",
+                finding.severity.as_str(),
+                finding.file_path,
+                finding.start_line,
+                finding.fingerprint
+            ),
+        );
+        self.log("title", finding.title);
+        if let Some(triage) = &finding.triage {
+            self.log(
+                "triage",
+                format!(
+                    "{} {:.2} {}",
+                    triage.verdict.as_str(),
+                    triage.confidence,
+                    triage.rationale
+                ),
+            );
         }
     }
 
@@ -3558,6 +3869,7 @@ impl ShellApp {
                         .find(|finding| finding.fingerprint == selected.fingerprint)
                         .cloned();
                 }
+                self.clamp_findings_cursor();
                 if announce {
                     self.log(
                         "findings",
@@ -3817,13 +4129,9 @@ impl ShellApp {
             {
                 self.select_current_model_choice();
             }
-            KeyCode::Char(ch)
-                if self.input.is_empty()
-                    && key.modifiers.is_empty()
-                    && self.handle_view_hotkey(ch) =>
-            {
-                self.last_char_at = Some(Instant::now());
-            }
+            _ if self.input.is_empty()
+                && key.modifiers.is_empty()
+                && self.handle_view_hotkey(key) => {}
             KeyCode::Char(ch) => {
                 self.input.push(ch);
                 self.last_char_at = Some(Instant::now());
@@ -3832,30 +4140,11 @@ impl ShellApp {
                 self.input.pop();
             }
             KeyCode::Tab => self.apply_completion(),
-            KeyCode::PageDown
-                if self.input.is_empty()
-                    && key.modifiers.is_empty()
-                    && matches!(self.shell_view, ShellView::Findings) =>
-            {
-                self.findings_cursor =
-                    (self.findings_cursor + 10).min(self.findings.len().saturating_sub(1));
+            KeyCode::PageDown if self.input.is_empty() && key.modifiers.is_empty() => {
+                self.page_down_current_view();
             }
-            KeyCode::PageUp
-                if self.input.is_empty()
-                    && key.modifiers.is_empty()
-                    && matches!(self.shell_view, ShellView::Findings) =>
-            {
-                self.findings_cursor = self.findings_cursor.saturating_sub(10);
-            }
-            KeyCode::Enter
-                if self.input.is_empty()
-                    && key.modifiers.is_empty()
-                    && matches!(self.shell_view, ShellView::Findings)
-                    && !self.findings.is_empty() =>
-            {
-                let cursor = self.findings_cursor.min(self.findings.len() - 1);
-                let alias = format_finding_alias(cursor);
-                self.handle_command(ShellCommand::Open(alias));
+            KeyCode::PageUp if self.input.is_empty() && key.modifiers.is_empty() => {
+                self.page_up_current_view();
             }
             KeyCode::Enter => {
                 if let Some(last) = self.last_char_at {
@@ -3876,69 +4165,114 @@ impl ShellApp {
         }
     }
 
-    fn handle_view_hotkey(&mut self, ch: char) -> bool {
-        if matches!(self.shell_view, ShellView::Findings) && !self.findings.is_empty() {
-            let max = self.findings.len().saturating_sub(1);
-            match ch {
-                'j' => {
-                    self.findings_cursor = (self.findings_cursor + 1).min(max);
-                    return true;
-                }
-                'k' => {
-                    self.findings_cursor = self.findings_cursor.saturating_sub(1);
-                    return true;
-                }
-                'g' => {
-                    self.findings_cursor = 0;
-                    return true;
-                }
-                'G' => {
-                    self.findings_cursor = max;
-                    return true;
-                }
-                _ => {}
-            }
+    fn handle_view_hotkey(&mut self, key: KeyEvent) -> bool {
+        let Some(binding) = self
+            .view_keybindings()
+            .into_iter()
+            .find(|binding| binding.matches(key))
+        else {
+            return false;
+        };
+        let char_trigger = binding.trigger.is_char();
+        let handled = self.apply_view_hotkey(binding.action);
+        if handled && char_trigger {
+            self.last_char_at = Some(Instant::now());
         }
+        handled
+    }
 
-        if matches!(self.shell_view, ShellView::Threat(_)) {
-            let view = match ch {
-                '1' => Some(ThreatView::Dfd),
-                '2' => Some(ThreatView::Stride),
-                '3' => Some(ThreatView::Stories),
-                '4' => Some(ThreatView::Scope),
-                '5' => Some(ThreatView::Summary),
-                _ => None,
-            };
-            if let Some(view) = view {
+    fn apply_view_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
+        match action {
+            ViewHotkeyAction::FindingsNext => {
+                let max = self.findings.len().saturating_sub(1);
+                self.findings_cursor = (self.findings_cursor + 1).min(max);
+            }
+            ViewHotkeyAction::FindingsPrevious => {
+                self.findings_cursor = self.findings_cursor.saturating_sub(1);
+            }
+            ViewHotkeyAction::FindingsFirst => {
+                self.findings_cursor = 0;
+            }
+            ViewHotkeyAction::FindingsLast => {
+                self.findings_cursor = self.findings.len().saturating_sub(1);
+            }
+            ViewHotkeyAction::FindingsPageDown => {
+                self.page_down_current_view();
+            }
+            ViewHotkeyAction::FindingsPageUp => {
+                self.page_up_current_view();
+            }
+            ViewHotkeyAction::FindingsOpen => {
+                if self.findings.is_empty() {
+                    return false;
+                }
+                self.open_finding_at_cursor();
+            }
+            ViewHotkeyAction::ThreatView(view) => {
                 self.shell_view = ShellView::Threat(view);
-                return true;
+            }
+            ViewHotkeyAction::ActorDetail(index) => {
+                self.shell_view = ShellView::ActorDetail(index);
+            }
+            ViewHotkeyAction::PauseScan => {
+                self.handle_command(ShellCommand::Pause);
+            }
+            ViewHotkeyAction::ResumeScan => {
+                self.handle_command(ShellCommand::Resume(None));
             }
         }
+        true
+    }
 
-        if matches!(self.shell_view, ShellView::ModuleRun) {
-            if let Some(index) = ch.to_digit(10).filter(|index| (1..=4).contains(index)) {
-                self.shell_view = ShellView::ActorDetail(index as usize);
-                return true;
-            }
-            match ch {
-                'p' | 'P' => {
-                    if self.scan.as_ref().is_some_and(|scan| scan.running) && !self.is_scan_paused()
-                    {
-                        self.handle_command(ShellCommand::Pause);
-                        return true;
-                    }
+    fn page_down_current_view(&mut self) {
+        match self.shell_view {
+            ShellView::Findings => {
+                if !self.findings.is_empty() {
+                    self.findings_cursor = (self.findings_cursor + FINDINGS_PAGE_ROWS)
+                        .min(self.findings.len().saturating_sub(1));
                 }
-                'r' | 'R' => {
-                    if self.is_scan_paused() {
-                        self.handle_command(ShellCommand::Resume(None));
-                        return true;
-                    }
-                }
-                _ => {}
             }
+            ShellView::Help => {
+                self.help_scroll = self.help_scroll.saturating_add(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::Tools => {
+                self.tools_scroll = self.tools_scroll.saturating_add(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::Catalog if self.catalog_expanded => {
+                self.modules_scroll = self.modules_scroll.saturating_add(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::History => {
+                self.history_scroll = self.history_scroll.saturating_add(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::KnowledgeBase => {
+                self.kb_scroll = self.kb_scroll.saturating_add(VIEWPORT_PAGE_LINES)
+            }
+            _ => {}
         }
+    }
 
-        false
+    fn page_up_current_view(&mut self) {
+        match self.shell_view {
+            ShellView::Findings => {
+                self.findings_cursor = self.findings_cursor.saturating_sub(FINDINGS_PAGE_ROWS);
+            }
+            ShellView::Help => {
+                self.help_scroll = self.help_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::Tools => {
+                self.tools_scroll = self.tools_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::Catalog if self.catalog_expanded => {
+                self.modules_scroll = self.modules_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::History => {
+                self.history_scroll = self.history_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
+            }
+            ShellView::KnowledgeBase => {
+                self.kb_scroll = self.kb_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
+            }
+            _ => {}
+        }
     }
 
     fn go_back(&mut self) {
@@ -4172,7 +4506,7 @@ fn parse_budget_env() -> Option<f64> {
 }
 
 fn compact_help_summary() -> String {
-    shell_command_specs()
+    let commands = shell_command_specs()
         .iter()
         .map(|spec| {
             if spec.command.starts_with('?') {
@@ -4182,7 +4516,13 @@ fn compact_help_summary() -> String {
             }
         })
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" ");
+    let examples = shell_help_examples();
+    if examples.is_empty() {
+        commands
+    } else {
+        format!("Examples: {}. Commands: {commands}", examples.join(", "))
+    }
 }
 
 fn command_completion_candidates(prefix: &str, slash: bool) -> Vec<String> {
@@ -4684,18 +5024,25 @@ fn run_plain_shell(
         return Ok(());
     }
 
+    print!("{}", render_plain_scripted_session(&mut app, &commands, 80));
+    Ok(())
+}
+
+fn render_plain_scripted_session(app: &mut ShellApp, commands: &[&str], width: usize) -> String {
+    let mut output = String::new();
     for (index, command) in commands.iter().enumerate() {
         if index > 0 {
-            println!();
+            output.push('\n');
         }
+        let log_start = app.log.len();
         app.submit_line(command);
         app.drain_background_events();
-        print!("{}", render_plain_app(&app, 80));
+        output.push_str(&render_plain_command_result(app, width, command, log_start));
         if app.should_quit {
             break;
         }
     }
-    Ok(())
+    output
 }
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
@@ -7282,6 +7629,63 @@ JSON
     }
 
     #[test]
+    fn plain_scripted_unknown_command_prints_command_and_new_error_log() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let output = render_plain_scripted_session(&mut app, &["/nope"], 80);
+
+        assert!(output.contains("COMMAND RESULT"));
+        assert!(output.contains("command: /nope"));
+        assert!(output.contains("> /nope"));
+        assert!(output.contains("error: unknown command \"/nope\". Next: /help"));
+        assert_eq!(app.shell_view, ShellView::Catalog);
+        assert_plain_output_strict_80(&output);
+    }
+
+    #[test]
+    fn plain_scripted_quit_prints_exit_acknowledgement() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let output = render_plain_scripted_session(&mut app, &["/quit"], 80);
+
+        assert!(app.should_quit);
+        assert!(output.contains("command: /quit"));
+        assert!(output.contains("> /quit"));
+        assert!(output.contains("system: exit requested; closing shell"));
+        assert_plain_output_strict_80(&output);
+    }
+
+    #[test]
+    fn plain_scripted_help_then_quit_prints_one_result_block_per_command() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let output = render_plain_scripted_session(&mut app, &["/help", "/quit"], 80);
+
+        assert!(app.should_quit);
+        assert_eq!(output.matches("COMMAND RESULT").count(), 2);
+        assert!(output.contains("command: /help"));
+        assert!(output.contains("command: /quit"));
+        assert!(output.contains("HELP"));
+        assert!(output.contains("system: exit requested; closing shell"));
+        assert_plain_output_strict_80(&output);
+    }
+
+    #[test]
+    fn plain_scripted_unchanged_view_command_still_prints_result_block() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let before = app.shell_view.clone();
+
+        let output = render_plain_scripted_session(&mut app, &["/back"], 80);
+
+        assert_eq!(app.shell_view, before);
+        assert!(output.contains("COMMAND RESULT"));
+        assert!(output.contains("command: /back"));
+        assert!(output.contains("> /back"));
+        assert!(output.contains("kuzushi shell"));
+        assert_plain_output_strict_80(&output);
+    }
+
+    #[test]
     fn session_history_clear_load_resume_pause_and_story_are_explicit() {
         let mut app = ShellApp::new(V2Config::default(), None);
 
@@ -7359,20 +7763,35 @@ JSON
         app.handle_command(parse_command("?What should I run first?"));
 
         assert_eq!(app.shell_view, ShellView::AgentChat);
-        assert!(app.agent_chat.as_ref().is_some_and(|agent| agent.running));
-        for _ in 0..50 {
-            app.drain_background_events();
-            if app.agent_chat.as_ref().is_some_and(|agent| !agent.running) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        let running_agent = app.agent_chat.as_ref().unwrap();
+        assert_eq!(running_agent.question, "What should I run first?");
+        assert!(
+            running_agent.running,
+            "ask should enter AgentChat running state immediately; {}",
+            app.agent_chat_diagnostics_for_test()
+        );
+        assert_eq!(running_agent.answer, None);
+        assert_eq!(running_agent.error, None);
+
+        app.drain_next_agent_event_for_test(Duration::from_secs(5))
+            .unwrap_or_else(|message| panic!("{message}"));
 
         let agent = app.agent_chat.as_ref().unwrap();
-        assert!(!agent.running);
+        assert!(
+            !agent.running,
+            "ask worker completed but AgentChat remained running; {}",
+            app.agent_chat_diagnostics_for_test()
+        );
+        assert!(
+            agent.error.is_none(),
+            "ask worker failed instead of answering: {}",
+            app.agent_chat_diagnostics_for_test()
+        );
         assert_eq!(
             agent.answer.as_deref(),
-            Some("Run context build, then scan .")
+            Some("Run context build, then scan ."),
+            "ask worker completed with wrong UI state; {}",
+            app.agent_chat_diagnostics_for_test()
         );
         assert!(app
             .log
@@ -8354,6 +8773,45 @@ JSON
         }
     }
 
+    fn key_event_for_trigger(trigger: HotkeyTrigger) -> KeyEvent {
+        let code = match trigger {
+            HotkeyTrigger::Char(ch) => KeyCode::Char(ch),
+            HotkeyTrigger::Enter => KeyCode::Enter,
+            HotkeyTrigger::PageUp => KeyCode::PageUp,
+            HotkeyTrigger::PageDown => KeyCode::PageDown,
+        };
+        KeyEvent::new(code, KeyModifiers::empty())
+    }
+
+    fn app_with_findings(count: usize) -> ShellApp {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Findings;
+        app.findings = (0..count)
+            .map(|i| make_finding(Severity::High, &format!("fp-{i:04}"), "x"))
+            .collect();
+        app
+    }
+
+    fn app_with_module_run_scan(paused: bool) -> (ShellApp, ScanCancellation) {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let cancel = ScanCancellation::default();
+        if paused {
+            cancel.pause();
+        }
+        app.scan_cancel = Some(cancel.clone());
+        app.scan = Some(ScanPanelState {
+            run_id: Some("run-1".to_string()),
+            target: PathBuf::from("."),
+            stage: if paused { "paused" } else { "running" }.to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        app.shell_view = ShellView::ModuleRun;
+        (app, cancel)
+    }
+
     #[test]
     fn chain_alias_format_is_two_digit_zero_padded() {
         assert_eq!(format_chain_alias(0), "C-01");
@@ -8573,6 +9031,87 @@ JSON
     }
 
     #[test]
+    fn viewport_enter_opens_cursor_finding_from_visible_list() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Findings;
+        app.findings = vec![
+            make_finding(Severity::High, "fp-0000", "first"),
+            make_finding(Severity::High, "fp-0001", "second"),
+        ];
+        app.findings_cursor = 1;
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+        assert_eq!(app.shell_view, ShellView::Finding);
+        assert_eq!(
+            app.selected_finding
+                .as_ref()
+                .map(|finding| finding.title.as_str()),
+            Some("second")
+        );
+    }
+
+    #[test]
+    fn keybind_advertised_findings_hotkeys_drive_state_transitions() {
+        let app = app_with_findings(25);
+        let advertised = app.view_keybindings();
+        assert!(advertised
+            .iter()
+            .any(|binding| binding.hint.contains("j/k")));
+        assert!(advertised.iter().any(|binding| binding.hint == "PgUp/PgDn"));
+        assert!(advertised.iter().any(|binding| binding.hint == "Enter"));
+
+        for binding in advertised {
+            let mut app = app_with_findings(25);
+            match binding.action {
+                ViewHotkeyAction::FindingsNext => {
+                    app.findings_cursor = 0;
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.findings_cursor, 1);
+                }
+                ViewHotkeyAction::FindingsPrevious => {
+                    app.findings_cursor = 1;
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.findings_cursor, 0);
+                }
+                ViewHotkeyAction::FindingsFirst => {
+                    app.findings_cursor = 7;
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.findings_cursor, 0);
+                }
+                ViewHotkeyAction::FindingsLast => {
+                    app.findings_cursor = 7;
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.findings_cursor, 24);
+                }
+                ViewHotkeyAction::FindingsPageDown => {
+                    app.findings_cursor = 0;
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.findings_cursor, 10);
+                }
+                ViewHotkeyAction::FindingsPageUp => {
+                    app.findings_cursor = 10;
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.findings_cursor, 0);
+                }
+                ViewHotkeyAction::FindingsOpen => {
+                    app.findings_cursor = 2;
+                    let expected = app.findings[2].fingerprint.clone();
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.shell_view, ShellView::Finding);
+                    assert_eq!(
+                        app.selected_finding
+                            .as_ref()
+                            .map(|finding| finding.fingerprint.as_str()),
+                        Some(expected.as_str())
+                    );
+                }
+                other => panic!("unexpected findings hotkey action: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn prompt_set_writes_override_file_and_reset_removes_it() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
@@ -8702,6 +9241,56 @@ JSON
         assert!(cancel.is_paused());
         app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::empty()));
         assert!(!cancel.is_paused());
+    }
+
+    #[test]
+    fn keybind_advertised_module_run_hotkeys_drive_state_transitions() {
+        let (app, _) = app_with_module_run_scan(false);
+        let advertised = app.view_keybindings();
+        assert!(advertised.iter().any(|binding| binding.hint == "1..4"));
+        assert!(advertised.iter().any(|binding| binding.hint == "p"));
+        assert!(!advertised.iter().any(|binding| binding.hint == "r"));
+
+        for binding in advertised {
+            match binding.action {
+                ViewHotkeyAction::ActorDetail(index) => {
+                    let (mut app, _) = app_with_module_run_scan(false);
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.shell_view, ShellView::ActorDetail(index));
+                }
+                ViewHotkeyAction::PauseScan => {
+                    let (mut app, cancel) = app_with_module_run_scan(false);
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert!(cancel.is_paused());
+                    assert_eq!(
+                        app.scan.as_ref().map(|scan| scan.stage.as_str()),
+                        Some("paused")
+                    );
+                }
+                other => panic!("unexpected active module-run hotkey action: {other:?}"),
+            }
+        }
+
+        let (paused_app, _) = app_with_module_run_scan(true);
+        let paused_advertised = paused_app.view_keybindings();
+        assert!(paused_advertised
+            .iter()
+            .any(|binding| binding.hint == "1..4"));
+        assert!(paused_advertised.iter().any(|binding| binding.hint == "r"));
+        assert!(!paused_advertised.iter().any(|binding| binding.hint == "p"));
+
+        for binding in paused_advertised
+            .into_iter()
+            .filter(|binding| matches!(binding.action, ViewHotkeyAction::ResumeScan))
+        {
+            let (mut app, cancel) = app_with_module_run_scan(true);
+            app.handle_key(key_event_for_trigger(binding.trigger));
+            assert!(!cancel.is_paused());
+            assert_eq!(
+                app.scan.as_ref().map(|scan| scan.stage.as_str()),
+                Some("running")
+            );
+        }
     }
 
     #[test]
@@ -8972,5 +9561,24 @@ JSON
                 && line.body.contains("abort requested")
                 && line.body.contains("not confirmed")
         }));
+    }
+
+    fn assert_plain_output_strict_80(output: &str) {
+        assert!(
+            !output.contains('\u{1b}'),
+            "plain output contained ANSI escape: {output:?}"
+        );
+        assert!(
+            !output
+                .chars()
+                .any(|ch| ('\u{2500}'..='\u{257f}').contains(&ch)),
+            "plain output contained box drawing: {output:?}"
+        );
+        for line in output.lines() {
+            assert!(
+                line.chars().count() <= 80,
+                "plain line exceeded 80 columns: {line:?}"
+            );
+        }
     }
 }
