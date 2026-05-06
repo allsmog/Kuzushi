@@ -835,6 +835,23 @@ impl ShellApp {
         }
     }
 
+    /// True when any background worker is currently in flight. Used by the
+    /// compact-status footer (and reserved for the spinner) to decide whether
+    /// to show "running · Ctrl-C abort" instead of the resting hint.
+    pub fn has_running_work(&self) -> bool {
+        self.scan.as_ref().is_some_and(|scan| scan.running)
+            || self.agent_chat.as_ref().is_some_and(|agent| agent.running)
+            || self.planner_running
+            || self.threat_worker_running
+    }
+
+    /// Static spinner glyph for now — when the animated spinner cherry-pick
+    /// (d78526b) is integrated against main's structure this will rotate
+    /// through a braille frame set keyed off `spinner_phase`.
+    pub fn spinner_glyph(&self) -> &'static str {
+        "⠋"
+    }
+
     pub fn first_finding_scan_command(&self) -> &'static str {
         if self.target.is_some() {
             "scan"
@@ -1153,6 +1170,31 @@ impl ShellApp {
         if let Some(candidate) = self.completion_candidates(&self.input).into_iter().next() {
             self.set_input(candidate);
         }
+    }
+
+    /// Inline ghost-text suggestion shown after the cursor when the cursor sits
+    /// at the end of the line. Returns the *tail* — the chars the operator would
+    /// gain by pressing Tab — or `None` if there is no completion or the cursor
+    /// is mid-line. Empty inputs return `None` so the cold-start prompt isn't
+    /// noisy.
+    pub fn completion_preview(&self) -> Option<String> {
+        if self.input.is_empty() {
+            return None;
+        }
+        if self.cursor != self.input.chars().count() {
+            return None;
+        }
+        let candidate = self
+            .completion_candidates(&self.input)
+            .into_iter()
+            .next()?;
+        if candidate == self.input {
+            return None;
+        }
+        candidate
+            .strip_prefix(&self.input)
+            .filter(|tail| !tail.is_empty())
+            .map(str::to_string)
     }
 
     fn module_completion_values(&self) -> Vec<String> {
@@ -9473,6 +9515,27 @@ JSON
             app.help_scroll < after_one + (after_one - baseline),
             "PageUp should retreat"
         );
+    }
+
+    #[test]
+    fn completion_preview_shows_only_when_cursor_at_end() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_input("/he");
+        // Cursor at end → preview returns the tail "lp".
+        let preview = app.completion_preview();
+        assert_eq!(preview.as_deref(), Some("lp"));
+
+        // Move cursor mid-line → preview suppressed (would render in the wrong place).
+        app.cursor = 1;
+        assert!(app.completion_preview().is_none());
+
+        // Empty input → no preview (cold-start prompt should stay clean).
+        app.clear_input();
+        assert!(app.completion_preview().is_none());
+
+        // Already a complete word with no further suffix → no preview.
+        app.set_input("/help");
+        assert!(app.completion_preview().is_none());
     }
 
     #[test]
