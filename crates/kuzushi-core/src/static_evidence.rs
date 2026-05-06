@@ -6,8 +6,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
+use crate::findings::{Finding, StaticProofState};
+use crate::source_span::{extract_source_span, SourceSpan};
 use crate::workspace::WorkspaceTarget;
 
 const STATIC_EVIDENCE_DB_NAME: &str = "static-evidence.sqlite3";
@@ -273,6 +275,30 @@ pub struct StaticEvidenceStore {
     db_path: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StaticEvidenceIndexReport {
+    pub db_path: String,
+    pub findings_indexed: usize,
+    pub nodes_indexed: usize,
+    pub edges_indexed: usize,
+    pub node_ids: Vec<String>,
+    pub edge_ids: Vec<String>,
+}
+
+impl StaticEvidenceIndexReport {
+    fn new(db_path: impl Into<String>) -> Self {
+        Self {
+            db_path: db_path.into(),
+            findings_indexed: 0,
+            nodes_indexed: 0,
+            edges_indexed: 0,
+            node_ids: Vec::new(),
+            edge_ids: Vec::new(),
+        }
+    }
+}
+
 impl StaticEvidenceStore {
     pub fn open(workspace: &WorkspaceTarget) -> Result<Self> {
         workspace.ensure_state_dir()?;
@@ -487,6 +513,105 @@ impl StaticEvidenceStore {
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .context("Could not list static evidence edges")
     }
+}
+
+pub fn index_semgrep_findings_as_static_evidence(
+    store: &StaticEvidenceStore,
+    repo_root: impl AsRef<Path>,
+    findings: &[Finding],
+) -> Result<StaticEvidenceIndexReport> {
+    let mut report = StaticEvidenceIndexReport::new(store.db_path());
+    let repo_root = repo_root.as_ref();
+
+    for finding in findings.iter().filter(|finding| finding.tool == "semgrep") {
+        let end_line = finding.end_line.unwrap_or(finding.start_line);
+        let span = extract_source_span(repo_root, &finding.file_path, finding.start_line, end_line)
+            .with_context(|| {
+                format!(
+                    "Could not index Semgrep static evidence for {} at {}:{}-{}",
+                    finding.rule_id, finding.file_path, finding.start_line, end_line
+                )
+            })?;
+        let (code_span, scanner_signal, edge) = semgrep_static_evidence_nodes(finding, &span);
+
+        store.upsert_node(&code_span)?;
+        store.upsert_node(&scanner_signal)?;
+        store.upsert_edge(&edge)?;
+
+        report.findings_indexed += 1;
+        report.nodes_indexed += 2;
+        report.edges_indexed += 1;
+        report.node_ids.push(code_span.id);
+        report.node_ids.push(scanner_signal.id);
+        report.edge_ids.push(edge.id);
+    }
+
+    Ok(report)
+}
+
+fn semgrep_static_evidence_nodes(
+    finding: &Finding,
+    span: &SourceSpan,
+) -> (StaticEvidenceNode, StaticEvidenceNode, StaticEvidenceEdge) {
+    let finding_fingerprint = finding.fingerprint.clone();
+    let location = format!("{}:{}-{}", span.file_path, span.start_line, span.end_line);
+    let static_proof_state = finding
+        .static_proof_state
+        .unwrap_or(StaticProofState::SignalOnly)
+        .as_str();
+
+    let code_span = StaticEvidenceNode::new(
+        StaticEvidenceNodeKind::CodeSpan,
+        format!("Semgrep code span {} at {location}", finding.rule_id),
+        span.snippet.clone(),
+    )
+    .with_finding_fingerprint(finding_fingerprint.clone())
+    .with_source_span(span.file_path.clone(), span.start_line, Some(span.end_line))
+    .with_metadata(json!({
+        "normalizer": "semgrep",
+        "tool": "semgrep",
+        "ruleId": finding.rule_id.as_str(),
+        "severity": finding.severity.as_str(),
+        "sourceContentHash": span.content_hash.as_str(),
+    }));
+
+    let scanner_signal = StaticEvidenceNode::new(
+        StaticEvidenceNodeKind::ScannerSignal,
+        format!("Semgrep signal {} at {location}", finding.rule_id),
+        format!(
+            "Semgrep rule {} reported {} with severity {}.\n\n{}",
+            finding.rule_id,
+            location,
+            finding.severity.as_str(),
+            finding.message.as_str()
+        ),
+    )
+    .with_finding_fingerprint(finding_fingerprint.clone())
+    .with_source_span(span.file_path.clone(), span.start_line, Some(span.end_line))
+    .with_metadata(json!({
+        "normalizer": "semgrep",
+        "tool": "semgrep",
+        "ruleId": finding.rule_id.as_str(),
+        "severity": finding.severity.as_str(),
+        "staticProofState": static_proof_state,
+        "truePositiveByDefault": false,
+        "defaultVerdict": "untriaged_signal",
+        "sourceContentHash": span.content_hash.as_str(),
+    }));
+
+    let edge = StaticEvidenceEdge::new(
+        StaticEvidenceEdgeKind::DerivedFrom,
+        scanner_signal.id.clone(),
+        code_span.id.clone(),
+    )
+    .with_finding_fingerprint(finding_fingerprint)
+    .with_metadata(json!({
+        "normalizer": "semgrep",
+        "relationship": "scanner_signal_to_code_span",
+        "truePositiveByDefault": false,
+    }));
+
+    (code_span, scanner_signal, edge)
 }
 
 fn validate_node(node: &StaticEvidenceNode) -> Result<()> {
@@ -831,5 +956,75 @@ mod tests {
         let error = store.upsert_node(&node).unwrap_err().to_string();
 
         assert!(error.contains("content hash does not match body hash"));
+    }
+
+    #[test]
+    fn semgrep_static_evidence_indexes_signal_and_code_span_without_true_positive_default() {
+        let temp = tempfile::tempdir().unwrap();
+        let src = temp.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(
+            src.join("routes.ts"),
+            "import express from 'express';\nres.send(req.query.name);\n",
+        )
+        .unwrap();
+        let finding = Finding::new_semgrep(
+            "javascript.express.security.audit.xss",
+            "src/routes.ts",
+            2,
+            Some(2),
+            crate::findings::Severity::High,
+            "Detected unescaped user input",
+        );
+        let fingerprint = finding.fingerprint.clone();
+        let store = StaticEvidenceStore::open_in_memory().unwrap();
+
+        let report =
+            index_semgrep_findings_as_static_evidence(&store, temp.path(), &[finding]).unwrap();
+
+        assert_eq!(report.findings_indexed, 1);
+        assert_eq!(report.nodes_indexed, 2);
+        assert_eq!(report.edges_indexed, 1);
+
+        let nodes = store.list_nodes_for_finding(&fingerprint).unwrap();
+        assert_eq!(nodes.len(), 2);
+        let code_span = nodes
+            .iter()
+            .find(|node| node.kind == StaticEvidenceNodeKind::CodeSpan)
+            .unwrap();
+        let signal = nodes
+            .iter()
+            .find(|node| node.kind == StaticEvidenceNodeKind::ScannerSignal)
+            .unwrap();
+
+        assert_eq!(code_span.source_path.as_deref(), Some("src/routes.ts"));
+        assert_eq!(code_span.body, "res.send(req.query.name);");
+        assert_eq!(
+            signal
+                .metadata
+                .pointer("/staticProofState")
+                .and_then(Value::as_str),
+            Some("signal_only")
+        );
+        assert_eq!(
+            signal
+                .metadata
+                .pointer("/truePositiveByDefault")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+
+        let edges = store.edges_for_node(&code_span.id).unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].kind, StaticEvidenceEdgeKind::DerivedFrom);
+        assert_eq!(edges[0].from_node_id, signal.id);
+        assert_eq!(edges[0].to_node_id, code_span.id);
+        assert_eq!(
+            edges[0]
+                .metadata
+                .pointer("/truePositiveByDefault")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
     }
 }

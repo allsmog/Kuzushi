@@ -20,6 +20,9 @@ use crate::dep_hygiene::DepHygieneScanner;
 use crate::findings::{Finding, FindingStore, Severity, StaticProofState};
 use crate::iac_scan::IacScanScanner;
 use crate::secret_scan::SecretScanScanner;
+use crate::static_evidence::{
+    index_semgrep_findings_as_static_evidence, StaticEvidenceIndexReport, StaticEvidenceStore,
+};
 use crate::workspace::WorkspaceTarget;
 
 pub trait ScanEngine: Send + Sync {
@@ -805,6 +808,8 @@ impl SemgrepScanReport {
 pub struct SemgrepPersistedRun {
     pub run_id: String,
     pub findings_db: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub static_evidence: Option<StaticEvidenceIndexReport>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -1012,6 +1017,7 @@ pub struct ScanRunOptions {
     pub severity: Option<Vec<Severity>>,
     pub tasks: Option<Vec<String>>,
     pub static_proof_state: Option<StaticProofState>,
+    pub index_static_evidence: bool,
 }
 
 pub fn run_scan_engines_with_options(
@@ -1038,6 +1044,10 @@ pub fn run_scan_engines_with_options(
         for finding in &mut findings {
             finding.set_static_proof_state(static_proof_state);
         }
+    }
+    if options.index_static_evidence {
+        let evidence_store = StaticEvidenceStore::open(workspace)?;
+        index_semgrep_findings_as_static_evidence(&evidence_store, workspace.root(), &findings)?;
     }
 
     for finding in &findings {
@@ -1883,6 +1893,7 @@ fn shell_join(args: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::static_evidence::StaticEvidenceNodeKind;
     use std::fs;
     use std::sync::Mutex;
 
@@ -1982,6 +1993,75 @@ mod tests {
         assert_eq!(findings.len(), 2);
         assert!(findings.iter().any(|finding| finding.tool == "static"));
         assert!(findings.iter().any(|finding| finding.tool == "dep-hygiene"));
+    }
+
+    #[test]
+    fn semgrep_static_evidence_scan_runner_indexes_whitebox_signals() {
+        struct StaticSemgrepScanner;
+
+        impl ScanEngine for StaticSemgrepScanner {
+            fn id(&self) -> &'static str {
+                "semgrep"
+            }
+
+            fn scan(
+                &self,
+                _target: &Path,
+                _cancellation: &ScanCancellation,
+            ) -> Result<Vec<Finding>> {
+                Ok(vec![Finding::new_semgrep(
+                    "javascript.express.security.audit.xss",
+                    "src/routes.ts",
+                    2,
+                    Some(2),
+                    Severity::High,
+                    "Detected unescaped user input",
+                )])
+            }
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir(tmp.path().join("src")).unwrap();
+        fs::write(
+            tmp.path().join("src/routes.ts"),
+            "import express from 'express';\nres.send(req.query.name);\n",
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(StaticSemgrepScanner)];
+        let options = ScanRunOptions {
+            severity: None,
+            tasks: None,
+            static_proof_state: Some(StaticProofState::SignalOnly),
+            index_static_evidence: true,
+        };
+
+        let run = run_scan_engines_with_options(&workspace, &store, &scanners, &options).unwrap();
+        let finding = store.list_findings(10).unwrap().pop().unwrap();
+        let evidence_store = StaticEvidenceStore::open(&workspace).unwrap();
+        let nodes = evidence_store
+            .list_nodes_for_finding(&finding.fingerprint)
+            .unwrap();
+
+        assert_eq!(run.findings_count, 1);
+        assert_eq!(
+            finding.static_proof_state,
+            Some(StaticProofState::SignalOnly)
+        );
+        assert_eq!(nodes.len(), 2);
+        assert!(nodes
+            .iter()
+            .any(|node| node.kind == StaticEvidenceNodeKind::ScannerSignal
+                && node
+                    .metadata
+                    .pointer("/truePositiveByDefault")
+                    .and_then(Value::as_bool)
+                    == Some(false)));
+        assert!(nodes
+            .iter()
+            .any(|node| node.kind == StaticEvidenceNodeKind::CodeSpan
+                && node.body == "res.send(req.query.name);"));
     }
 
     #[test]

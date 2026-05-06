@@ -70,8 +70,9 @@ pub use secret_scan::{
 };
 pub use source_span::{extract_source_span, SourceSpan};
 pub use static_evidence::{
-    static_content_hash, static_evidence_path, StaticEvidenceEdge, StaticEvidenceEdgeKind,
-    StaticEvidenceNode, StaticEvidenceNodeKind, StaticEvidenceStore, STATIC_EVIDENCE_EDGE_KINDS,
+    index_semgrep_findings_as_static_evidence, static_content_hash, static_evidence_path,
+    StaticEvidenceEdge, StaticEvidenceEdgeKind, StaticEvidenceIndexReport, StaticEvidenceNode,
+    StaticEvidenceNodeKind, StaticEvidenceStore, STATIC_EVIDENCE_EDGE_KINDS,
     STATIC_EVIDENCE_NODE_KINDS,
 };
 pub use systems_hunt::{execute_systems_hunt_tool, run_systems_hunt_report, SystemsHuntReport};

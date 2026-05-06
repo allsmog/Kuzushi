@@ -329,8 +329,14 @@ impl ModuleRegistry {
             "semgrep:scan" => {
                 let target = resolve_tool_target(&input, ctx)?;
                 let scanner = SemgrepScanner::from_tool_input(&input)?;
-                let findings = scanner.scan_with_cancel(&target, &ScanCancellation::default())?;
-                let persisted = persist_semgrep_findings(&target, &findings, ctx)?;
+                let mut findings =
+                    scanner.scan_with_cancel(&target, &ScanCancellation::default())?;
+                let index_static_evidence = whitebox_static_profile_requested(&input)?;
+                if index_static_evidence {
+                    mark_whitebox_static_findings(&mut findings, StaticProofState::SignalOnly)?;
+                }
+                let persisted =
+                    persist_semgrep_findings(&target, &findings, ctx, index_static_evidence)?;
                 Ok(
                     SemgrepScanReport::new(target.display().to_string(), findings, persisted)
                         .to_tool_json(),
@@ -497,12 +503,26 @@ fn persist_semgrep_findings(
     target: &Path,
     findings: &[crate::findings::Finding],
     ctx: &ToolExecutionContext<'_>,
+    index_static_evidence: bool,
 ) -> Result<Option<SemgrepPersistedRun>> {
     let (Some(workspace), Some(store)) = (ctx.workspace, ctx.findings_store) else {
         return Ok(None);
     };
 
     workspace.ensure_state_dir()?;
+    let static_evidence = if index_static_evidence {
+        let evidence_store = crate::static_evidence::StaticEvidenceStore::open(workspace)?;
+        Some(
+            crate::static_evidence::index_semgrep_findings_as_static_evidence(
+                &evidence_store,
+                workspace.root(),
+                findings,
+            )?,
+        )
+    } else {
+        None
+    };
+
     let run_id = Uuid::new_v4().to_string();
     store.insert_scan_run(&run_id, target, "running")?;
     for finding in findings {
@@ -513,6 +533,7 @@ fn persist_semgrep_findings(
     Ok(Some(SemgrepPersistedRun {
         run_id,
         findings_db: workspace.findings_db_path().display().to_string(),
+        static_evidence,
     }))
 }
 
@@ -614,6 +635,7 @@ fn run_sast_scan(
         static_proof_state: whitebox_static
             .as_ref()
             .map(|_| StaticProofState::SignalOnly),
+        index_static_evidence: whitebox_static.is_some(),
     };
 
     let native_run = if scanners.is_empty() {
@@ -11478,6 +11500,80 @@ OUT
             .and_then(Value::as_str)
             .is_some());
         assert_eq!(store.list_findings(10).unwrap().len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn semgrep_static_evidence_direct_tool_indexes_whitebox_signal_only() {
+        let temp = tempdir().unwrap();
+        fs::write(
+            temp.path().join("server.js"),
+            [
+                "const express = require('express');",
+                "const app = express();",
+                "app.get('/x', (req, res) => {",
+                "  const name = req.query.name;",
+                "  const prefix = '<h1>';",
+                "  const suffix = '</h1>';",
+                "  const body = prefix + name;",
+                "  const html = body + suffix;",
+                "  res.status(200);",
+                "  res.set('content-type', 'text/html');",
+                "  res.send(html);",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let binary = fake_semgrep_binary(temp.path());
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool(
+                "semgrep:scan",
+                json!({
+                    "binary": binary.display().to_string(),
+                    "mode": "whitebox-static"
+                }),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(
+            result
+                .pointer("/data/findings/0/staticProofState")
+                .and_then(Value::as_str),
+            Some("signal_only")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/persisted/staticEvidence/findingsIndexed")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+
+        let finding = store.list_findings(10).unwrap().pop().unwrap();
+        let evidence_store = crate::static_evidence::StaticEvidenceStore::open(&workspace).unwrap();
+        let nodes = evidence_store
+            .list_nodes_for_finding(&finding.fingerprint)
+            .unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert!(nodes.iter().any(|node| {
+            node.kind == crate::static_evidence::StaticEvidenceNodeKind::ScannerSignal
+                && node
+                    .metadata
+                    .pointer("/truePositiveByDefault")
+                    .and_then(Value::as_bool)
+                    == Some(false)
+        }));
     }
 
     #[test]
