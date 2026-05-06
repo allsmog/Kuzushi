@@ -2,7 +2,7 @@
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
 Active story: UX-005 - Visible Startup Progress And First-Run Path
-Status: UX-004 complete and pushed in iteration 17 as `f3305a1`; UX-005 pending next iteration
+Status: UX-005 implementation complete in iteration 18; push blocked by DNS in this environment
 
 ## Stage 2 Checklist
 
@@ -10,7 +10,7 @@ Status: UX-004 complete and pushed in iteration 17 as `f3305a1`; UX-005 pending 
 - UX-002 Delete or isolate legacy Ink UI code: complete; pushed in iteration 12 as `5e73f6f`.
 - UX-003 Fix shell redraw and prompt overlap: complete; pushed in iteration 13 as `bba14f9`.
 - UX-004 Improve exit and unknown command handling: complete; pushed in iteration 17 as `f3305a1`.
-- UX-005 Visible startup progress and first-run path: pending.
+- UX-005 Visible startup progress and first-run path: implementation complete; push blocked in iteration 18.
 - UX-006 Rust doctor / preflight: pending.
 - UX-007 Input mode clarity: pending.
 - UX-008 Honest abort state: pending.
@@ -23,6 +23,42 @@ Status: UX-004 complete and pushed in iteration 17 as `f3305a1`; UX-005 pending 
 - UX-015 Final Ink/React removal gate: pending.
 
 ## Iteration Log
+
+### Iteration 18 - UX-005
+
+- Task attempted: make Rust shell startup and first-run states visible and
+  actionable for bare `kuzushi` and `kuzushi shell --target .`, with concrete
+  commands for getting the first finding.
+- Files changed:
+  - `crates/kuzushi-cli/src/main.rs`
+  - `crates/kuzushi-tui/src/app.rs`
+  - `crates/kuzushi-tui/src/renderer.rs`
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short`
+  - `sed -n '1,240p' RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+  - `sed -n '1,260p' RALPH_RUST_UX_PROGRESS.md`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-tui renderer::tests::catalog_first_run_state_names_real_first_finding_commands`
+  - `cargo test -p kuzushi-cli shell_startup_progress_names_real_first_finding_commands`
+  - `cargo test -p kuzushi-tui startup_logs`
+  - `cargo test -p kuzushi-tui quickstart_emits_guided_help_lines`
+  - `git ls-remote --heads origin main`
+- Result: implementation complete. Interactive Rust shell startup now emits
+  non-ANSI progress to stderr before config/native-registry initialization,
+  the shell transcript records startup readiness, and both catalog and
+  quickstart first-run surfaces name real Rust commands: `scan .` then
+  `findings` for a bare shell, or `scan` then `findings` when a target is
+  already active.
+- Remaining work: push UX-005, then UX-006 through UX-015.
+- Blockers or repo facts that contradicted this prompt:
+  - `git ls-remote --heads origin main` failed with `Could not resolve host:
+    github.com`, so the required push is not currently possible from this
+    environment.
+  - The primary workspace local `main` ref remains stale at `80d23a4`, and
+    earlier iterations documented that direct writes under `.git` are blocked.
+    This iteration therefore cannot rely on the primary worktree for the final
+    commit/push gate.
 
 ### Iteration 17 - UX-004 Push Gate
 

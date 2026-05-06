@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::io::{self, IsTerminal};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -122,6 +123,11 @@ async fn main() -> Result<()> {
     match command {
         Command::Shell { target } => {
             let target = target.or(cli.target);
+            if should_emit_shell_startup_progress() {
+                for line in shell_startup_progress_messages(target.as_deref()) {
+                    eprintln!("{line}");
+                }
+            }
             let workspace = target
                 .as_deref()
                 .map(WorkspaceTarget::new)
@@ -174,6 +180,24 @@ async fn main() -> Result<()> {
             git_sha,
         ),
     }
+}
+
+fn should_emit_shell_startup_progress() -> bool {
+    io::stdin().is_terminal()
+        && io::stdout().is_terminal()
+        && io::stderr().is_terminal()
+        && std::env::var_os("KUZUSHI_PLAIN").is_none()
+}
+
+fn shell_startup_progress_messages(target: Option<&Path>) -> Vec<String> {
+    let target_label = target
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "none".to_string());
+    let scan_command = if target.is_some() { "scan" } else { "scan ." };
+    vec![
+        "kuzushi: loading config and native registry...".to_string(),
+        format!("kuzushi: target {target_label}; first finding: {scan_command}, then findings"),
+    ]
 }
 
 fn pr_comment_command(
@@ -616,6 +640,19 @@ mod tests {
             format_duration(std::time::Duration::from_secs(3600)),
             "60m 0s"
         );
+    }
+
+    #[test]
+    fn shell_startup_progress_names_real_first_finding_commands() {
+        let bare = shell_startup_progress_messages(None).join("\n");
+        assert!(bare.contains("loading config"));
+        assert!(bare.contains("native registry"));
+        assert!(bare.contains("first finding: scan ., then findings"));
+
+        let targeted = shell_startup_progress_messages(Some(Path::new("."))).join("\n");
+        assert!(targeted.contains("target ."));
+        assert!(targeted.contains("first finding: scan, then findings"));
+        assert!(!targeted.contains("scan ."));
     }
 }
 

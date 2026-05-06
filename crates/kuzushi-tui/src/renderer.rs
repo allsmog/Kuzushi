@@ -705,10 +705,23 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     if !app.catalog_expanded {
         if app.target.is_none() {
             lines.push(styled(
-                "[!] no app context built yet - run scan after selecting a target",
+                "[!] no target selected; `scan .` uses the current directory",
+                theme::warn(),
+            ));
+        } else if app.findings.is_empty() {
+            lines.push(styled(
+                "[!] active target has no persisted findings yet",
                 theme::warn(),
             ));
         }
+        lines.push(styled(
+            &fit(&app.first_finding_hint(), area.width as usize),
+            theme::primary(),
+        ));
+        lines.push(muted(&fit(
+            "Quickstart: quickstart | Context: context build | Runtime: model",
+            area.width as usize,
+        )));
         lines.push(muted(
             "Type help, modules, use <module>, scan, or run <tool> [json].",
         ));
@@ -2784,6 +2797,23 @@ mod tests {
         assert!(!rendered.contains("command log"));
         assert!(!rendered.contains("┌"));
         assert!(!rendered.contains("v2"));
+    }
+
+    #[test]
+    fn catalog_first_run_state_names_real_first_finding_commands() {
+        let backend = TestBackend::new(80, 16);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = ShellApp::new(V2Config::default(), None);
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("First finding"));
+        assert!(rendered.contains("scan ."));
+        assert!(rendered.contains("findings"));
+        assert!(rendered.contains("quickstart"));
+        assert!(!rendered.contains("./repo"));
+        assert!(!rendered.contains("┌"));
     }
 
     #[test]
