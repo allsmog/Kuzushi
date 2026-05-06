@@ -637,9 +637,10 @@ fn plain_context_strip(app: &ShellApp, width: usize) -> Vec<String> {
     };
     vec![fit(
         &format!(
-            "{target} | {module} | {} modules | {}",
-            app.registry.modules().count(),
-            findings_count_summary(&app.findings)
+            "{} | {target} | {module} | {} | {} mods",
+            routing_mode_segment(app),
+            findings_count_summary(&app.findings),
+            app.registry.modules().count()
         ),
         width,
     )]
@@ -681,6 +682,44 @@ fn sanitize_plain_line(value: &str) -> String {
         .collect()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RoutingMode {
+    Shell,
+    Module,
+    Agent,
+    Plan,
+    Run,
+}
+
+fn routing_mode(app: &ShellApp) -> RoutingMode {
+    if app.scan.as_ref().is_some_and(|scan| scan.running)
+        || matches!(app.shell_view, ShellView::ModuleRun)
+    {
+        RoutingMode::Run
+    } else if matches!(app.shell_view, ShellView::AgentChat)
+        || app.agent_chat.as_ref().is_some_and(|agent| agent.running)
+    {
+        RoutingMode::Agent
+    } else if app.planner_running || app.pending_plan.is_some() {
+        RoutingMode::Plan
+    } else if app.focused_module.is_some() {
+        RoutingMode::Module
+    } else {
+        RoutingMode::Shell
+    }
+}
+
+fn routing_mode_segment(app: &ShellApp) -> String {
+    match routing_mode(app) {
+        RoutingMode::Shell => "mode:shell",
+        RoutingMode::Module => "mode:module",
+        RoutingMode::Agent => "mode:agent",
+        RoutingMode::Plan => "mode:plan",
+        RoutingMode::Run => "mode:run",
+    }
+    .to_string()
+}
+
 fn trim_plain_lines(mut lines: Vec<String>) -> Vec<String> {
     while lines.first().is_some_and(|line| line.trim().is_empty()) {
         lines.remove(0);
@@ -693,6 +732,8 @@ fn trim_plain_lines(mut lines: Vec<String>) -> Vec<String> {
 
 fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
+    lines.push(blank());
+    lines.push(styled("kuzushi shell", theme::label()));
     lines.push(blank());
 
     let modules = app.registry.modules().collect::<Vec<_>>();
@@ -1238,6 +1279,10 @@ fn help_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("HELP", area.width));
+    lines.push(muted(&fit(
+        "Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.",
+        area.width as usize,
+    )));
     for category in ShellCommandCategory::ORDER {
         lines.push(blank());
         lines.push(Line::styled(category.label(), theme::subtle()));
@@ -1987,6 +2032,7 @@ fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
 
     let left = if app.scan.as_ref().is_some_and(|scan| scan.running) {
         join_segments(&[
+            routing_mode_segment(app),
             app.config
                 .model
                 .clone()
@@ -1998,6 +2044,7 @@ fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         ])
     } else if app.agent_chat.as_ref().is_some_and(|agent| agent.running) {
         join_segments(&[
+            routing_mode_segment(app),
             app.config
                 .model
                 .clone()
@@ -2006,6 +2053,7 @@ fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         ])
     } else {
         join_segments(&[
+            routing_mode_segment(app),
             app.target
                 .as_ref()
                 .map(|path| compact_target_path(&path.display().to_string()))
@@ -2067,12 +2115,16 @@ fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         return;
     }
 
-    let prompt = if matches!(app.shell_view, ShellView::AgentChat) {
-        "kuzushi/agent> ".to_string()
-    } else if let Some(module) = &app.focused_module {
-        format!("kuzushi/{module}> ")
-    } else {
-        "kuzushi> ".to_string()
+    let prompt = match routing_mode(app) {
+        RoutingMode::Run => "kuzushi/run> ".to_string(),
+        RoutingMode::Agent => "kuzushi/agent> ".to_string(),
+        RoutingMode::Plan => "kuzushi/plan> ".to_string(),
+        RoutingMode::Module => app
+            .focused_module
+            .as_ref()
+            .map(|module| format!("kuzushi/{module}> "))
+            .unwrap_or_else(|| "kuzushi/module> ".to_string()),
+        RoutingMode::Shell => "kuzushi> ".to_string(),
     };
     let segments = prompt_segments(&prompt, &app.input, area.width as usize, " ");
     let line = Line::from(vec![
@@ -2106,7 +2158,13 @@ fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let findings = findings_count_summary(&app.findings);
 
     vec![status_line(
-        &[target, module, format!("{module_count} modules"), findings],
+        &[
+            routing_mode_segment(app),
+            target,
+            module,
+            findings,
+            format!("{module_count} mods"),
+        ],
         area.width,
     )]
 }
@@ -3262,6 +3320,10 @@ mod tests {
         assert!(rendered.contains("task toggle"));
         assert!(rendered.contains("kb [module]"));
         assert!(rendered.contains("auth login"));
+        assert!(rendered.contains("? opens help"));
+        assert!(rendered.contains("?text"));
+        assert!(rendered.contains("/ask <question>"));
+        assert!(rendered.contains("ask <question>"));
         assert!(!rendered.contains("┌"));
     }
 
@@ -3289,9 +3351,60 @@ mod tests {
 
         assert!(rendered.contains("AGENT"));
         assert!(rendered.contains("running"));
+        assert!(rendered.contains("mode:agent"));
         assert!(rendered.contains("agent: active"));
         assert!(rendered.contains("kuzushi/agent>"));
         assert!(!rendered.contains("┌"));
+    }
+
+    #[test]
+    fn renders_shell_module_plan_and_run_routing_modes() {
+        let cases = [
+            {
+                let app = ShellApp::new(V2Config::default(), None);
+                (app, "mode:shell", "kuzushi>")
+            },
+            {
+                let mut app = ShellApp::new(V2Config::default(), None);
+                app.focused_module = Some("sast".to_string());
+                app.shell_view = ShellView::Module;
+                (app, "mode:module", "kuzushi/sast>")
+            },
+            {
+                let mut app = ShellApp::new(V2Config::default(), None);
+                app.set_pending_plan(crate::app::PlanProposal {
+                    goal: "tighten SAST options".to_string(),
+                    summary: "set scanner controls".to_string(),
+                    changes: Vec::new(),
+                    unsupported: Vec::new(),
+                });
+                (app, "mode:plan", "kuzushi/plan>")
+            },
+            {
+                let mut app = ShellApp::new(V2Config::default(), None);
+                app.scan = Some(crate::app::ScanPanelState {
+                    run_id: Some("run-1".to_string()),
+                    target: std::path::PathBuf::from("."),
+                    stage: "running semgrep".to_string(),
+                    findings_count: 0,
+                    running: true,
+                    error: None,
+                });
+                app.shell_view = ShellView::ModuleRun;
+                (app, "mode:run", "kuzushi/run>")
+            },
+        ];
+
+        for (app, mode, prompt) in cases {
+            let backend = TestBackend::new(96, 24);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|frame| render_app(frame, &app)).unwrap();
+            let rendered = format!("{:?}", terminal.backend().buffer());
+
+            assert!(rendered.contains(mode), "missing {mode} in {rendered}");
+            assert!(rendered.contains(prompt), "missing {prompt} in {rendered}");
+            assert!(!rendered.contains("┌"));
+        }
     }
 
     #[test]

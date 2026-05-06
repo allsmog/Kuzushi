@@ -1,8 +1,8 @@
 # Ralph Rust UX Progress
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
-Active story: UX-007 - Input Mode Clarity
-Status: UX-006 complete and pushed in iteration 19 as `69f2e2a`; UX-007 pending next iteration
+Active story: UX-008 - Honest Abort State
+Status: UX-007 implementation complete in iteration 20; commit/push gate in progress
 
 ## Stage 2 Checklist
 
@@ -12,7 +12,7 @@ Status: UX-006 complete and pushed in iteration 19 as `69f2e2a`; UX-007 pending 
 - UX-004 Improve exit and unknown command handling: complete; pushed in iteration 17 as `f3305a1`.
 - UX-005 Visible startup progress and first-run path: complete; pushed in iteration 18 as `d26407a`.
 - UX-006 Rust doctor / preflight: complete; pushed in iteration 19 as `69f2e2a`.
-- UX-007 Input mode clarity: pending.
+- UX-007 Input mode clarity: complete; commit/push gate in progress.
 - UX-008 Honest abort state: pending.
 - UX-009 Slash command taxonomy and drift tests: pending.
 - UX-010 Tab completion for high-value arguments: pending.
@@ -23,6 +23,33 @@ Status: UX-006 complete and pushed in iteration 19 as `69f2e2a`; UX-007 pending 
 - UX-015 Final Ink/React removal gate: pending.
 
 ## Iteration Log
+
+### Iteration 20 - UX-007
+
+- Task attempted: make Rust TUI input routing mode explicit for shell, focused
+  module, agent chat, planner, and run/scan states while keeping the explicit
+  ask contract visible in help.
+- Files changed:
+  - `crates/kuzushi-tui/src/renderer.rs`
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short`
+  - `sed -n '1,240p' RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+  - `sed -n '1,240p' RALPH_RUST_UX_PROGRESS.md`
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-tui renderer::tests::renders_shell_module_plan_and_run_routing_modes`
+  - `cargo test -p kuzushi-tui renderer::tests::renders_help_grouped_by_operator_workflow`
+  - `cargo test -p kuzushi-tui renderer::tests::renders_agent_chat_mode_while_question_is_active`
+  - `cargo test -p kuzushi-tui renderer::tests`
+  - `cargo test -p kuzushi-tui commands::tests`
+  - `cargo test -p kuzushi-tui app::tests::ask_requires_explicit_model_and_unknown_prose_stays_deterministic`
+  - `cargo fmt --all --check`
+- Result: implementation complete; commit/push gate pending in this iteration.
+- Remaining work: UX-008 through UX-015.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary workspace remains stale at `80d23a4` with earlier Stage 2 files
+    staged/modified, so this iteration continued in the clean isolated clone at
+    `/tmp/kuzushi-ux2-clone.PJaRge`.
 
 ### Iteration 19 - UX-006
 
