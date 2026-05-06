@@ -46,13 +46,20 @@ pub fn list_definitions(
         .with_context(|| format!("list_definitions: could not read {}", input.file))?;
 
     let language = detect_language(&input.file);
-    let definitions = match language.as_str() {
-        "c" | "cpp" => scan_c_like(&body),
-        "rust" => scan_rust(&body),
-        "go" => scan_go(&body),
-        "python" => scan_python(&body),
-        "java" => scan_java(&body),
-        _ => Vec::new(),
+    // Try tree-sitter first; fall back to the regex `scan_*` helpers
+    // when tree-sitter doesn't recognise the language, parse fails, or
+    // a brittle grammar panics. The fallback path mirrors the original
+    // Phase 5a behaviour exactly.
+    let definitions = match super::treesitter::parse_defs_treesitter(&language, &body) {
+        Some(defs) if !defs.is_empty() => defs,
+        _ => match language.as_str() {
+            "c" | "cpp" => scan_c_like(&body),
+            "rust" => scan_rust(&body),
+            "go" => scan_go(&body),
+            "python" => scan_python(&body),
+            "java" => scan_java(&body),
+            _ => Vec::new(),
+        },
     };
 
     Ok(ListDefinitionsOutput {
