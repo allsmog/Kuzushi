@@ -400,6 +400,78 @@ async function promptManualCode() {
 }
 
 /**
+ * `ping` envelope handler. Minimum-viable Anthropic Messages API call
+ * — 1 token round-trip with no tools, no system prompt, no streaming.
+ * Surfaces wall latency + token counts so an operator can confirm
+ * credentials and connectivity in <1 s. Used by `kuzushi auth ping`.
+ */
+async function handlePing(request) {
+  const [provider, modelId] = parseModelSpec(request.model);
+  if (provider !== "anthropic") {
+    throw new Error(
+      `auth ping currently only supports anthropic (got ${provider}). ` +
+        "OpenAI / Gemini support is a follow-up.",
+    );
+  }
+  const oauthToken = await getFreshOAuthAccessTokenForProvider("anthropic");
+  const envOauth = providerAuthToken("anthropic");
+  const apiKey = configuredProviderApiKey("anthropic", request) ?? process.env.ANTHROPIC_API_KEY;
+  if (!oauthToken && !envOauth && !apiKey) {
+    throw new Error(
+      "auth ping: no Anthropic credentials. Run `kuzushi auth login anthropic` " +
+        "or set ANTHROPIC_OAUTH_TOKEN / ANTHROPIC_API_KEY.",
+    );
+  }
+  const headers = {
+    "content-type": "application/json",
+    "anthropic-version": "2023-06-01",
+  };
+  let authMode;
+  if (oauthToken || envOauth) {
+    headers.authorization = `Bearer ${oauthToken ?? envOauth}`;
+    headers["anthropic-beta"] = "oauth-2025-04-20";
+    authMode = oauthToken ? "oauth-file" : "oauth-env";
+  } else {
+    headers["x-api-key"] = apiKey;
+    authMode = "api-key";
+  }
+  const body = {
+    model: modelId,
+    max_tokens: 1,
+    messages: [{ role: "user", content: "ok" }],
+  };
+  const t0 = Date.now();
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  const latency_ms = Date.now() - t0;
+  if (!response.ok) {
+    throw new Error(
+      `auth ping: Anthropic API ${response.status} ${response.statusText}: ${text.slice(0, 300)}`,
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`auth ping: Anthropic returned non-JSON body: ${text.slice(0, 200)}`);
+  }
+  const usage = parsed.usage ?? {};
+  return {
+    ok: true,
+    auth_mode: authMode,
+    model: modelId,
+    latency_ms,
+    input_tokens: usage.input_tokens ?? 0,
+    output_tokens: usage.output_tokens ?? 0,
+    cost_usd: approximateCostUsd(modelId, usage),
+  };
+}
+
+/**
  * `next-step` envelope handler. Single-round-trip request to Anthropic's
  * Messages API with tool definitions; returns either a tool_call or a
  * final answer for the Rust-side run_tool_loop driver.
@@ -551,6 +623,11 @@ async function main() {
   // Route on envelope type. Default = legacy single-shot via pi-agent-core.
   if (request.type === "next-step") {
     const result = await handleNextStep(request);
+    process.stdout.write(JSON.stringify(result));
+    return;
+  }
+  if (request.type === "ping") {
+    const result = await handlePing(request);
     process.stdout.write(JSON.stringify(result));
     return;
   }

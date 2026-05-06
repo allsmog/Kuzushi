@@ -75,6 +75,28 @@ for name in linux postgres redis mariadb; do
 done
 
 echo
+echo "[bridge round-trip]"
+if [[ -x "$KUZ" ]]; then
+  if "$KUZ" auth ping anthropic >/dev/null 2>&1; then
+    ok "kuzushi auth ping anthropic — credentials + bridge live"
+  else
+    note "kuzushi auth ping anthropic — failed (run \`$KUZ auth ping anthropic\` for details)"
+  fi
+else
+  note "skipping bridge ping; release binary not built"
+fi
+
+if [[ "${1:-}" == "--deep" && -x "$KUZ" ]]; then
+  echo
+  echo "[deep verification — drives a 2-step tool loop, costs ~\$0.001]"
+  if "$KUZ" --target "$REPO_ROOT" run smoke:next-step --input '{"phrase":"kuzushi-ok"}' >/dev/null 2>&1; then
+    ok "kuzushi run smoke:next-step — tool-loop pathway live"
+  else
+    bad "kuzushi run smoke:next-step — tool-loop failed"
+  fi
+fi
+
+echo
 if [[ $fail -eq 0 ]]; then
   echo "verify-tooling: OK"
 else

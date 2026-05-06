@@ -187,6 +187,7 @@ impl ModuleRegistry {
         registry.register(full_mode_module());
         registry.register(classifier_gate_module());
         registry.register(deep_audit_module());
+        registry.register(smoke_module());
         registry.register(workspace_module());
         registry.register(context_module());
         registry.register(context_lite_module());
@@ -395,6 +396,7 @@ impl ModuleRegistry {
             "full-mode:hunt" => run_full_mode_hunt_tool(input, ctx, runtime),
             "classifier-gate:score" => run_classifier_score_tool(input, ctx, runtime),
             "deep-audit:run" => run_deep_audit_tool(input, ctx, runtime),
+            "smoke:next-step" => run_smoke_next_step_tool(input, ctx, runtime),
             "workspace:status" => Ok(json!({
                 "ok": ctx.workspace.is_some(),
                 "output": workspace_status_output(ctx),
@@ -7470,6 +7472,108 @@ fn router_module() -> BuiltinModule {
         )],
         vec![],
     )
+}
+
+fn smoke_module() -> BuiltinModule {
+    builtin_module(
+        "smoke",
+        "Smoke tests",
+        ModuleKind::Governance,
+        "Diagnostic flows that exercise the bridge end-to-end without paying for a real scan.",
+        vec![tool_with_options(
+            "smoke:next-step",
+            "Drive a 2-step tool-loop with an `echo` tool to verify next_step_blocking + run_tool_loop.",
+            vec![opt(
+                "phrase",
+                OptionType::String,
+                "Phrase the model is asked to echo back. Default: 'kuzushi-ok'.",
+            )
+            .default(serde_json::json!("kuzushi-ok"))],
+        )],
+        vec![],
+    )
+}
+
+fn run_smoke_next_step_tool(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    use crate::runtime::{
+        run_tool_loop, AgentTool, AgentToolLoopRequest, ToolBox, ToolResult,
+    };
+
+    let runtime = runtime.ok_or_else(|| {
+        anyhow::anyhow!("smoke:next-step requires an agent runtime; none configured")
+    })?;
+    if !runtime.supports_tools() {
+        anyhow::bail!(
+            "smoke:next-step: configured runtime does not support tools \
+             (PiAgentCoreRuntime should — check the bridge configuration)"
+        );
+    }
+    let phrase = input
+        .get("phrase")
+        .and_then(Value::as_str)
+        .unwrap_or("kuzushi-ok")
+        .to_string();
+    let model = ctx
+        .config
+        .model
+        .clone()
+        .unwrap_or_else(|| "anthropic:claude-haiku-4-5".to_string());
+
+    let request = AgentToolLoopRequest {
+        model,
+        cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+        system_prompt: "You are participating in a Kuzushi smoke test. \
+                        Call the `echo` tool exactly once with input {{ \"x\": <phrase> }}, \
+                        then return the echoed text as your final answer."
+            .to_string(),
+        prompt: format!(
+            "Phrase to echo: {phrase}\n\nUse the echo tool, then reply with the result."
+        ),
+        tools: vec![AgentTool {
+            name: "echo".to_string(),
+            description: "Returns its input under the key `out` verbatim.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "x": { "type": "string" } },
+                "required": ["x"]
+            }),
+        }],
+        max_steps: 4,
+    };
+
+    let mut toolbox = ToolBox::new();
+    toolbox.register("echo", |call| {
+        let x = call
+            .input
+            .get("x")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        Ok(ToolResult {
+            call_id: call.call_id.clone(),
+            output: json!({ "out": x }),
+            is_error: false,
+        })
+    });
+
+    let outcome = run_tool_loop(runtime, &request, &mut toolbox)?;
+    let echoed = outcome.text.contains(&phrase);
+
+    Ok(json!({
+        "ok": true,
+        "data": {
+            "echoedPhrase": echoed,
+            "stepsUsed": outcome.steps_used,
+            "truncated": outcome.truncated,
+            "costUsd": outcome.cost_usd,
+            "transcript": outcome.transcript,
+            "finalText": outcome.text,
+        },
+    }))
 }
 
 fn full_mode_module() -> BuiltinModule {
