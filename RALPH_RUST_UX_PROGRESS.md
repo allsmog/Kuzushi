@@ -300,3 +300,40 @@ Status: UX-002 checks still pass; push remains blocked by DNS/network sandboxing
   - The isolated clone remains ahead of its local `origin/main` with the
     UX-002 commits, while this primary workspace still cannot commit normally
     because Git metadata writes under `.git` are blocked.
+
+### Iteration 10 - UX-002 Push Gate
+
+- Task attempted: continue the required UX-002 push gate, verify the completed
+  legacy Ink isolation slice, retry remote reachability, and avoid starting
+  UX-003 until UX-002 is pushed.
+- Files changed:
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short --branch`
+  - `git log --oneline -8 --decorate`
+  - `git -C /tmp/kuzushi-ux2-clone.PJaRge status --short --branch`
+  - `git -C /tmp/kuzushi-ux2-clone.PJaRge log --oneline -6 --decorate`
+  - `git remote -v`
+  - `git -C /tmp/kuzushi-ux2-clone.PJaRge remote -v`
+  - `git diff --cached --check`
+  - `git diff --cached --stat`
+  - `git ls-remote --heads origin main`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-cli --test cutover_cli`
+  - `pnpm exec vitest run tests/cli/legacy-shell-isolation.test.ts`
+  - `pnpm typecheck`
+  - `pnpm exec biome check src/cli/commands/shell.ts tests/cli/legacy-shell-isolation.test.ts src/ui/README.md README.md RELEASING.md docs/rust-migration-status.md`
+  - `git -C /tmp/kuzushi-ux2-clone.PJaRge push origin HEAD:main`
+- Result: UX-002 verification still passes. The isolated clone remains the
+  only commit-capable path in this sandbox; it now has a progress retry commit
+  for iteration 10. The required remote push did not complete because DNS still
+  cannot resolve `github.com`. UX-003 was not started.
+- Remaining work: push UX-002 before starting UX-003.
+- Blockers or repo facts that contradicted this prompt:
+  - `git ls-remote --heads origin main` failed with `Could not resolve host:
+    github.com`.
+  - `git -C /tmp/kuzushi-ux2-clone.PJaRge push origin HEAD:main` failed with
+    `Could not resolve host: github.com`.
+  - The primary workspace still has the UX-002 slice staged and local `main`
+    remains at `80d23a4` because Git metadata writes under `.git` remain
+    blocked in this environment.
