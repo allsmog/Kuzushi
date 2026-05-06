@@ -160,6 +160,12 @@ pub struct ScanPanelState {
     pub running: bool,
     pub abort_requested: bool,
     pub error: Option<String>,
+    /// Cumulative classifier-gate counters from the live triage pass.
+    /// Populated by the shell's log-line classifier when it sees lines
+    /// emitted from `LikelyVulnClassifier::record_decision`.
+    pub gate_accepted: usize,
+    pub gate_skipped: usize,
+    pub refusal_followups: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3502,6 +3508,9 @@ impl ShellApp {
             running: true,
             abort_requested: false,
             error: None,
+            gate_accepted: 0,
+            gate_skipped: 0,
+            refusal_followups: 0,
         });
         self.scan_rx = Some(rx);
         self.scan_cancel = Some(cancel.clone());
@@ -3821,6 +3830,12 @@ impl ShellApp {
                 if matches!(tool_name.as_str(), "context:build" | "context-lite:index") {
                     let _ = self.refresh_context_view();
                 }
+                // When triage runs, scrape the structured per-finding
+                // results so module-run can show gate accept/skip rates
+                // and refusal followups without a separate event channel.
+                if tool_name == "triage:run" {
+                    self.absorb_triage_telemetry(&result);
+                }
                 let rendered = result
                     .get("output")
                     .and_then(serde_json::Value::as_str)
@@ -3834,6 +3849,44 @@ impl ShellApp {
                 "error",
                 with_next_step(error.to_string(), "tools, options <tool>, or model <n>"),
             ),
+        }
+    }
+
+    /// Read counters out of a `triage:run` tool result and bump the
+    /// matching fields on the active scan panel. Best-effort: missing
+    /// fields just don't update.
+    fn absorb_triage_telemetry(&mut self, result: &serde_json::Value) {
+        let Some(scan) = self.scan.as_mut() else {
+            return;
+        };
+        let data = match result.get("data") {
+            Some(value) => value,
+            None => return,
+        };
+        if let Some(gated) = data.get("gated").and_then(serde_json::Value::as_u64) {
+            scan.gate_skipped = scan.gate_skipped.saturating_add(gated as usize);
+        }
+        if let Some(triaged) = data.get("triaged").and_then(serde_json::Value::as_u64) {
+            // gate-accept = triaged - gated (the gated count is a subset of
+            // triaged in run_triage's output shape).
+            let gated = data
+                .get("gated")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            let accepted = (triaged as usize).saturating_sub(gated as usize);
+            scan.gate_accepted = scan.gate_accepted.saturating_add(accepted);
+        }
+        if let Some(results) = data.get("results").and_then(serde_json::Value::as_array) {
+            let followups = results
+                .iter()
+                .filter(|entry| {
+                    entry
+                        .get("refusalSourceFollowup")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                })
+                .count();
+            scan.refusal_followups = scan.refusal_followups.saturating_add(followups);
         }
     }
 
@@ -7011,6 +7064,9 @@ JSON
             running: false,
             abort_requested: false,
             error: None,
+            gate_accepted: 0,
+            gate_skipped: 0,
+            refusal_followups: 0,
         });
         app.kb_view.attachments = vec![AttachmentRecord {
             id: "A-123456789abc".to_string(),
@@ -7192,6 +7248,9 @@ JSON
             running: true,
             abort_requested: false,
             error: None,
+            gate_accepted: 0,
+            gate_skipped: 0,
+            refusal_followups: 0,
         });
         app.apply_scan_event(ScanEvent::Finished {
             run_id: "run-1".to_string(),
@@ -7674,6 +7733,9 @@ JSON
             running: true,
             abort_requested: false,
             error: None,
+            gate_accepted: 0,
+            gate_skipped: 0,
+            refusal_followups: 0,
         });
         app.apply_scan_event(ScanEvent::Failed {
             error: "semgrep: could not find scanner binary \"semgrep\"".to_string(),
@@ -9064,6 +9126,9 @@ JSON
             running: true,
             abort_requested: false,
             error: None,
+            gate_accepted: 0,
+            gate_skipped: 0,
+            refusal_followups: 0,
         });
 
         app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
@@ -9222,6 +9287,9 @@ JSON
             running: true,
             abort_requested: false,
             error: None,
+            gate_accepted: 0,
+            gate_skipped: 0,
+            refusal_followups: 0,
         });
         app.shell_view = ShellView::ModuleRun;
         (app, cancel)
@@ -9614,6 +9682,9 @@ JSON
             running: true,
             abort_requested: false,
             error: None,
+            gate_accepted: 0,
+            gate_skipped: 0,
+            refusal_followups: 0,
         });
         app.handle_command(ShellCommand::Pause);
         assert!(cancel.is_paused());
@@ -9638,6 +9709,9 @@ JSON
             running: true,
             abort_requested: false,
             error: None,
+            gate_accepted: 0,
+            gate_skipped: 0,
+            refusal_followups: 0,
         });
         app.handle_command(ShellCommand::Resume(None));
         assert!(!cancel.is_paused());
@@ -9660,6 +9734,9 @@ JSON
             running: true,
             abort_requested: false,
             error: None,
+            gate_accepted: 0,
+            gate_skipped: 0,
+            refusal_followups: 0,
         });
         app.shell_view = ShellView::ModuleRun;
         app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()));
@@ -9886,6 +9963,9 @@ JSON
             running: true,
             abort_requested: false,
             error: None,
+            gate_accepted: 0,
+            gate_skipped: 0,
+            refusal_followups: 0,
         });
         app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(!app.should_quit);
@@ -9904,6 +9984,9 @@ JSON
             running: true,
             abort_requested: false,
             error: None,
+            gate_accepted: 0,
+            gate_skipped: 0,
+            refusal_followups: 0,
         });
         app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
         app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));

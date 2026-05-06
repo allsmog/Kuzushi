@@ -362,8 +362,18 @@ impl ModuleRegistry {
             "codeql:scan" => {
                 let target = resolve_tool_target(&input, ctx)?;
                 let scanner = CodeqlScanner::from_tool_input(&input)?;
-                let mut output =
-                    scanner.scan_with_artifacts(&target, &ScanCancellation::default())?;
+                // Mirror the semgrep:scan executor path. SARIF artifacts
+                // are not produced via the executor route today (the
+                // analyze command writes only stdout-as-SARIF, no
+                // separate artifact files), so the artifact list comes
+                // back empty; the local-subprocess path still produces
+                // them.
+                let mut output = if let Some(executor) = ctx.executor {
+                    let findings = scanner.scan_via_executor(&target, executor)?;
+                    crate::scan::ScanEngineOutput::from_findings(findings)
+                } else {
+                    scanner.scan_with_artifacts(&target, &ScanCancellation::default())?
+                };
                 let index_static_evidence = whitebox_static_profile_requested(&input)?;
                 if index_static_evidence {
                     mark_whitebox_static_findings(
