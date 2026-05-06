@@ -36,8 +36,8 @@ use crate::static_ranking::{rank_static_findings, StaticRankedFinding};
 use crate::systems_hunt::{execute_systems_hunt_tool, run_systems_hunt_report};
 use crate::threat_model::execute_threat_model_tool;
 use crate::variant_ndiff::{
-    run_ndiff_extract_fix_pattern, run_ndiff_fetch_cve, run_ndiff_hunt_variants, run_variant_hunt,
-    run_variant_lift_pattern,
+    hunt_whitebox_static_variants, run_ndiff_extract_fix_pattern, run_ndiff_fetch_cve,
+    run_ndiff_hunt_variants, run_variant_hunt, run_variant_lift_pattern,
 };
 use crate::whitebox_static::{
     agent_tool_policy_for_input, apply_whitebox_static_sast_policy, mark_whitebox_static_findings,
@@ -832,6 +832,13 @@ fn run_sast_scan(
     } else {
         None
     };
+    let static_variants = if whitebox_static.is_some() {
+        Some(write_static_variants_json(
+            workspace, store, &run_ids, &artifacts,
+        )?)
+    } else {
+        None
+    };
 
     let triage = if triage_requested {
         let fingerprints = fingerprints_for_sast_runs(store, &run_ids)?;
@@ -909,6 +916,16 @@ fn run_sast_scan(
                 "  Static narrative: trigger path summarized for {location}"
             ));
         }
+        if let Some(count) = static_variants
+            .as_ref()
+            .and_then(|variants| variants.get("count"))
+            .and_then(Value::as_u64)
+            .filter(|count| *count > 0)
+        {
+            lines.push(format!(
+                "  Static variants: {count} code-cited candidate(s), none confirmed by inheritance"
+            ));
+        }
     }
     lines.push(format!("  Engines: {}", engine_ids.join(", ")));
     if let Some(triage_output) = triage
@@ -929,6 +946,13 @@ fn run_sast_scan(
         artifacts
             .dir
             .join("static-narratives.json")
+            .display()
+            .to_string()
+    });
+    let static_variants_artifact = static_variants.as_ref().map(|_| {
+        artifacts
+            .dir
+            .join("static-variants.json")
             .display()
             .to_string()
     });
@@ -961,6 +985,7 @@ fn run_sast_scan(
             "systemsHunt": systems_hunt_report.as_ref().map(|report| json!(report)),
             "staticRanking": static_ranking,
             "staticNarratives": static_narratives,
+            "staticVariants": static_variants,
             "triage": triage.as_ref().and_then(|value| value.get("data")).cloned(),
             "verification": {
                 "verified": verification_results.len(),
@@ -980,6 +1005,7 @@ fn run_sast_scan(
                 "dir": artifacts.dir.display().to_string(),
                 "summary": artifacts.summary.display().to_string(),
                 "staticNarratives": static_narratives_artifact,
+                "staticVariants": static_variants_artifact,
                 "triageJsonl": artifacts.triage_jsonl.display().to_string(),
                 "verifyJsonl": artifacts.verify_jsonl.display().to_string(),
             },
@@ -1140,6 +1166,33 @@ fn write_static_narratives_json(
         "narratives": narrative_report.narratives,
         "artifact": artifact_path.display().to_string(),
         "deterministic": narrative_report.deterministic,
+    });
+    fs::write(
+        &artifact_path,
+        format!("{}\n", serde_json::to_string_pretty(&report)?),
+    )
+    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    Ok(report)
+}
+
+fn write_static_variants_json(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    run_ids: &SastRunIds,
+    artifacts: &SastRunArtifacts,
+) -> Result<Value> {
+    let findings = findings_for_sast_runs(store, run_ids)?;
+    let evidence_store = StaticEvidenceStore::open(workspace).ok();
+    let variant_report =
+        hunt_whitebox_static_variants(workspace.root(), &findings, evidence_store.as_ref(), 50)?;
+    let artifact_path = artifacts.dir.join("static-variants.json");
+    let report = json!({
+        "count": variant_report.count,
+        "patterns": variant_report.patterns,
+        "variants": variant_report.variants,
+        "artifact": artifact_path.display().to_string(),
+        "deterministic": variant_report.deterministic,
+        "policy": "whitebox-static variants are code-cited candidates only; no variant is statically_confirmed by inheritance",
     });
     fs::write(
         &artifact_path,
