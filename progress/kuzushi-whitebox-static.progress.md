@@ -2,7 +2,7 @@
 
 Stage: 3 - Kuzushi whitebox-static mode
 Active story: WB-004 - Add static proof taxonomy
-Status: WB-003 complete in this workspace; commit/push pending
+Status: WB-003 complete and pushed as `4f97b8d`; WB-004 pending
 
 ## Stage 3 Checklist
 
@@ -58,7 +58,7 @@ Status: WB-003 complete in this workspace; commit/push pending
   deterministic/offline and does not spawn dependency prefetch subprocesses.
   WB-003 is marked `passes: true` in the PRD after the story gate and focused
   checks passed.
-- Remaining work: commit and push WB-003, then start WB-004.
+- Remaining work: WB-004 through WB-022.
 - Blockers or repo facts that contradicted this prompt:
   - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
     remains stale with staged Stage 2 files. This iteration continued in the
