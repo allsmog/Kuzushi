@@ -2,7 +2,7 @@
 
 Stage: 3 - Kuzushi whitebox-static mode (complete)
 Active story: Final acceptance checks
-Status: WB-022 complete in iteration 54; no whitebox-static story work remains
+Status: all whitebox-static story work complete; final full checks passed in iteration 54
 
 ## Stage 3 Checklist
 
@@ -30,6 +30,41 @@ Status: WB-022 complete in iteration 54; no whitebox-static story work remains
 - WB-022 Add whitebox demo fixture: complete in iteration 54.
 
 ## Iteration Log
+
+### Iteration 54 - Final Verification
+
+- Task attempted: run the final required full check suite after all Stage 1,
+  Stage 2, and Stage 3 story work was complete and pushed.
+- Files changed:
+  - `progress/kuzushi-whitebox-static.progress.md`
+- Tests/checks run:
+  - `cargo fmt --all`
+  - `cargo test --workspace`
+  - `cargo build --workspace`
+  - `pnpm check`
+  - `pnpm typecheck`
+  - `pnpm build`
+  - `pnpm test:e2e`
+  - `pnpm build:native`
+  - `pnpm verify:pack`
+  - `pnpm eval:kuzushi-whitebox-static`
+- Result: complete. The full requested suite passed. `pnpm check` still emits
+  existing warnings while exiting successfully. `pnpm verify:pack` rebuilt the
+  Rust release binary, staged `native/darwin-arm64/kuzushi`, and dry-ran the
+  npm tarball with `bin/kuzushi-rs.mjs` and the native binary included. The
+  final whitebox eval scored 1.0 across detection, groundedness, proof
+  completeness, false-positive rejection, prioritization, narrative quality,
+  cost, and latency.
+- Remaining work: none.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files; final verification ran in the
+    active nested clone at
+    `/Users/operator/VibeCode/open-sourced/kuzushi/.codex-active/kuzushi-stage3`.
+  - The nested clone does not have its own `node_modules`; final TypeScript and
+    packaging checks used a temporary symlink to the primary checkout's
+    installed dependencies, then removed the symlink before this progress
+    update.
 
 ### Iteration 54 - WB-022
 
