@@ -4,6 +4,7 @@ pub mod attack_surface;
 pub mod carlini_threat_hunt;
 pub mod config;
 pub mod dep_hygiene;
+pub mod diff_scope;
 pub mod events;
 pub mod findings;
 pub mod iac_scan;
@@ -53,6 +54,11 @@ pub use config::{
 pub use dep_hygiene::{
     analyze_manifest as analyze_dep_hygiene_manifest, check_dependency_hygiene, DepHygieneFinding,
     DepHygieneReport, DepHygieneScanner, DepHygieneSeverity, ManifestKind,
+};
+pub use diff_scope::{
+    build_whitebox_diff_scope_report, ChangedFile, ChangedLineRange, DiffContext, DiffContextKind,
+    DiffFileStatus, DiffFindingStatus, DiffFindingTag, DiffRangeKind, DiffScopeSummary,
+    WhiteboxDiffScopeReport,
 };
 pub use findings::{
     format_finding_alias, parse_finding_alias, resolve_finding_alias, sorted_finding_aliases,
