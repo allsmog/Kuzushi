@@ -13,7 +13,8 @@ use crate::carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hun
 use crate::config::V2Config;
 use crate::dep_hygiene::check_dependency_hygiene;
 use crate::findings::{
-    Finding, FindingListFilter, FindingStore, Severity, TriageOutcome, TriageVerdict,
+    Finding, FindingListFilter, FindingStore, Severity, StaticProofState, TriageOutcome,
+    TriageVerdict,
 };
 use crate::iac_scan::{scan_iac, IacScanOptions};
 use crate::options::ToolOptionStore;
@@ -32,7 +33,10 @@ use crate::variant_ndiff::{
     run_ndiff_extract_fix_pattern, run_ndiff_fetch_cve, run_ndiff_hunt_variants, run_variant_hunt,
     run_variant_lift_pattern,
 };
-use crate::whitebox_static::{agent_tool_policy_for_input, apply_whitebox_static_sast_policy};
+use crate::whitebox_static::{
+    agent_tool_policy_for_input, apply_whitebox_static_sast_policy, mark_whitebox_static_findings,
+    whitebox_static_profile_requested,
+};
 use crate::workspace::{export_workspace_findings, WorkspaceExportFormat, WorkspaceTarget};
 use crate::x_ray::execute_x_ray_tool;
 use uuid::Uuid;
@@ -607,6 +611,9 @@ fn run_sast_scan(
     let options = ScanRunOptions {
         severity: parse_sast_severity_filter(&input)?,
         tasks: None,
+        static_proof_state: whitebox_static
+            .as_ref()
+            .map(|_| StaticProofState::SignalOnly),
     };
 
     let native_run = if scanners.is_empty() {
@@ -1269,6 +1276,9 @@ fn run_agentic_sast_report(
         }
         findings = merged.into_values().take(options.max_findings).collect();
     }
+    if whitebox_static_profile_requested(input)? {
+        mark_whitebox_static_findings(&mut findings, StaticProofState::CodeCited)?;
+    }
 
     let persisted = persist_agentic_sast_findings(&target, &findings, ctx)?;
     Ok(AgenticSastReport {
@@ -1745,7 +1755,10 @@ fn run_taint_iris_report(
         .with_tool_policy(agent_tool_policy_for_input(input)?),
     )?;
     let raw = parse_taint_iris_response(response)?;
-    let findings = normalize_taint_iris_findings(raw, &target, options.max_findings)?;
+    let mut findings = normalize_taint_iris_findings(raw, &target, options.max_findings)?;
+    if whitebox_static_profile_requested(input)? {
+        mark_whitebox_static_findings(&mut findings, StaticProofState::SourceSinkLinked)?;
+    }
     let persisted = persist_taint_iris_findings(&target, &findings, ctx)?;
 
     Ok(TaintIrisReport {
@@ -2763,7 +2776,7 @@ fn run_taint_iris_next_report(
         .context(
             "taint-iris-next:hunt requires an explicit model in config.toml, KUZUSHI_MODEL, or tool input; Kuzushi will not choose a fallback model",
         )?;
-    let agent = run_taint_iris_next_agent(
+    let mut agent = run_taint_iris_next_agent(
         &plan,
         &evidence,
         &agent_prompt,
@@ -2771,6 +2784,11 @@ fn run_taint_iris_next_report(
         &model,
         agent_tool_policy_for_input(input)?,
     )?;
+    let mut findings = agent.findings.clone();
+    if whitebox_static_profile_requested(input)? {
+        mark_whitebox_static_findings(&mut findings, StaticProofState::SourceSinkLinked)?;
+        agent.findings = findings;
+    }
     let persisted = persist_taint_iris_next_findings(&target, &agent.findings, ctx)?;
     let output = render_taint_iris_next_output(&plan, &evidence, Some(&agent));
     let status = if agent.outcome == "agent-output-invalid" {
@@ -11411,6 +11429,12 @@ OUT
         assert!(scan_input.contains("\"mode\": \"whitebox-static\""));
         assert!(!scan_input.contains("execution_confirmed"));
         assert!(scan_input.contains("needs_runtime_evidence"));
+
+        let stored = store.list_findings(10).unwrap();
+        assert!(!stored.is_empty());
+        assert!(stored
+            .iter()
+            .all(|finding| { finding.static_proof_state == Some(StaticProofState::SignalOnly) }));
     }
 
     #[cfg(unix)]

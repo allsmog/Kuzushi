@@ -3078,6 +3078,7 @@ impl ShellApp {
         Ok(ScanRunOptions {
             severity: parse_scan_severity_filter(&input)?,
             tasks: parse_native_scan_tasks(&input)?,
+            static_proof_state: None,
         })
     }
 
@@ -8346,6 +8347,7 @@ JSON
             message: String::new(),
             tool: "test".to_string(),
             actor_fingerprint: None,
+            static_proof_state: None,
             triage: None,
             created_at: String::new(),
         }

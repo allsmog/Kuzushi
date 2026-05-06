@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::dep_hygiene::DepHygieneScanner;
-use crate::findings::{Finding, FindingStore, Severity};
+use crate::findings::{Finding, FindingStore, Severity, StaticProofState};
 use crate::iac_scan::IacScanScanner;
 use crate::secret_scan::SecretScanScanner;
 use crate::workspace::WorkspaceTarget;
@@ -1011,6 +1011,7 @@ pub fn run_scan_engines(
 pub struct ScanRunOptions {
     pub severity: Option<Vec<Severity>>,
     pub tasks: Option<Vec<String>>,
+    pub static_proof_state: Option<StaticProofState>,
 }
 
 pub fn run_scan_engines_with_options(
@@ -1032,6 +1033,11 @@ pub fn run_scan_engines_with_options(
     }
     if let Some(allowed) = &options.severity {
         findings.retain(|finding| allowed.contains(&finding.severity));
+    }
+    if let Some(static_proof_state) = options.static_proof_state {
+        for finding in &mut findings {
+            finding.set_static_proof_state(static_proof_state);
+        }
     }
 
     for finding in &findings {

@@ -265,6 +265,7 @@ mod tests {
             message: String::new(),
             tool: "test".to_string(),
             actor_fingerprint: None,
+            static_proof_state: None,
             triage: None,
             created_at: String::new(),
         }

@@ -9,10 +9,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::findings::{Finding, Severity};
+use crate::findings::{Finding, Severity, StaticProofState};
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolPolicy};
-use crate::whitebox_static::agent_tool_policy_for_input;
+use crate::whitebox_static::{
+    agent_tool_policy_for_input, mark_whitebox_static_findings, whitebox_static_profile_requested,
+};
 
 const SYSTEMS_INVARIANT_SYSTEM_PROMPT: &str = "Systems Hunt invariant extractor";
 const SYSTEMS_TRIGGER_SYSTEM_PROMPT: &str = "Systems Hunt trigger synthesizer";
@@ -367,13 +369,16 @@ pub fn run_systems_hunt_report(
     let raw = parse_agent_json(response)
         .context("systems-hunt expected pi-agent-core to return JSON with a findings array")?;
     let artifact_root = artifact_root(&target, &options.artifact_dir)?;
-    let (findings, artifacts) = normalize_systems_hunt_findings(
+    let (mut findings, artifacts) = normalize_systems_hunt_findings(
         raw,
         &target,
         &context,
         &artifact_root,
         options.max_findings,
     )?;
+    if whitebox_static_profile_requested(input)? {
+        mark_whitebox_static_findings(&mut findings, StaticProofState::CodeCited)?;
+    }
     let persisted = persist_systems_findings(&target, &findings, ctx)?;
 
     Ok(SystemsHuntReport {
@@ -553,8 +558,11 @@ fn run_deep_semantic_hunt_report(
     let raw = parse_agent_json(response)
         .context("systems-hunt:deep-semantic-hunt expected JSON with a findings array")?;
     let artifact_root = artifact_root(&target, &options.artifact_dir)?;
-    let (findings, artifacts) =
+    let (mut findings, artifacts) =
         normalize_deep_semantic_findings(raw, &target, &artifact_root, options.max_findings)?;
+    if whitebox_static_profile_requested(input)? {
+        mark_whitebox_static_findings(&mut findings, StaticProofState::CodeCited)?;
+    }
     let persisted = persist_systems_findings(&target, &findings, ctx)?;
 
     Ok(SystemsHuntReport {

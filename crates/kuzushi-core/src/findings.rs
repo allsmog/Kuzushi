@@ -72,6 +72,12 @@ pub struct Finding {
     pub tool: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actor_fingerprint: Option<String>,
+    #[serde(
+        rename = "staticProofState",
+        alias = "static_proof_state",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub static_proof_state: Option<StaticProofState>,
     pub triage: Option<TriageOutcome>,
     pub created_at: String,
 }
@@ -111,6 +117,7 @@ impl Finding {
             message,
             tool,
             actor_fingerprint: None,
+            static_proof_state: None,
             triage: None,
             created_at: now_isoish(),
         }
@@ -127,6 +134,79 @@ impl Finding {
         Self::new_tool(
             "semgrep", rule_id, file_path, start_line, end_line, severity, message,
         )
+    }
+
+    pub fn with_static_proof_state(mut self, state: StaticProofState) -> Self {
+        self.static_proof_state = Some(state);
+        self
+    }
+
+    pub fn set_static_proof_state(&mut self, state: StaticProofState) {
+        self.static_proof_state = Some(state);
+    }
+
+    pub fn set_static_proof_state_from_str(&mut self, state: &str) -> Result<()> {
+        self.static_proof_state = Some(StaticProofState::try_from(state)?);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum StaticProofState {
+    SignalOnly,
+    CodeCited,
+    SourceSinkLinked,
+    SanitizerChecked,
+    StaticallyConfirmed,
+    StaticallyRejected,
+    NeedsRuntimeEvidence,
+}
+
+impl StaticProofState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SignalOnly => "signal_only",
+            Self::CodeCited => "code_cited",
+            Self::SourceSinkLinked => "source_sink_linked",
+            Self::SanitizerChecked => "sanitizer_checked",
+            Self::StaticallyConfirmed => "statically_confirmed",
+            Self::StaticallyRejected => "statically_rejected",
+            Self::NeedsRuntimeEvidence => "needs_runtime_evidence",
+        }
+    }
+
+    pub fn is_static_terminal_state(self) -> bool {
+        matches!(
+            self,
+            Self::StaticallyConfirmed | Self::StaticallyRejected | Self::NeedsRuntimeEvidence
+        )
+    }
+}
+
+impl TryFrom<&str> for StaticProofState {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self> {
+        match value.trim() {
+            "signal_only" | "signal-only" | "signal" => Ok(Self::SignalOnly),
+            "code_cited" | "code-cited" | "cited" => Ok(Self::CodeCited),
+            "source_sink_linked" | "source-sink-linked" | "linked" => Ok(Self::SourceSinkLinked),
+            "sanitizer_checked" | "sanitizer-checked" | "sanitizer" => Ok(Self::SanitizerChecked),
+            "statically_confirmed" | "statically-confirmed" => Ok(Self::StaticallyConfirmed),
+            "statically_rejected" | "statically-rejected" => Ok(Self::StaticallyRejected),
+            "needs_runtime_evidence" | "needs-runtime-evidence" | "needs_runtime" => {
+                Ok(Self::NeedsRuntimeEvidence)
+            }
+            "execution_confirmed"
+            | "runtime_confirmed"
+            | "dynamic_confirmed"
+            | "exploit_confirmed"
+            | "poc_confirmed" => {
+                anyhow::bail!("execution proof state {value:?} is not valid static proof")
+            }
+            other => anyhow::bail!("unknown static proof state {other:?}"),
+        }
     }
 }
 
@@ -601,6 +681,7 @@ impl FindingStore {
               message text not null,
               tool text not null,
               actor_fingerprint text,
+              static_proof_state text,
               created_at text not null,
               unique(scan_id, fingerprint)
             );
@@ -644,6 +725,12 @@ impl FindingStore {
             "actor_fingerprint",
             "alter table findings add column actor_fingerprint text",
         )?;
+        ensure_column(
+            &self.conn,
+            "findings",
+            "static_proof_state",
+            "alter table findings add column static_proof_state text",
+        )?;
         Ok(())
     }
 
@@ -676,14 +763,16 @@ impl FindingStore {
             r#"
             insert into findings(
               scan_id, fingerprint, rule_id, title, severity, file_path,
-              start_line, end_line, message, tool, actor_fingerprint, created_at
+              start_line, end_line, message, tool, actor_fingerprint,
+              static_proof_state, created_at
             )
-            values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
             on conflict(scan_id, fingerprint) do update set
               title = excluded.title,
               severity = excluded.severity,
               message = excluded.message,
-              actor_fingerprint = excluded.actor_fingerprint
+              actor_fingerprint = excluded.actor_fingerprint,
+              static_proof_state = excluded.static_proof_state
             "#,
             params![
                 scan_id,
@@ -697,6 +786,7 @@ impl FindingStore {
                 finding.message,
                 finding.tool,
                 finding.actor_fingerprint,
+                finding.static_proof_state.map(StaticProofState::as_str),
                 finding.created_at,
             ],
         )?;
@@ -789,7 +879,7 @@ impl FindingStore {
             select
               f.id, f.scan_id, f.fingerprint, f.rule_id, f.title, f.severity,
               f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
-              f.created_at,
+              f.static_proof_state, f.created_at,
               t.verdict, t.confidence, t.rationale
             from findings f
             left join triage t on t.finding_id = f.id
@@ -808,7 +898,7 @@ impl FindingStore {
             select
               f.id, f.scan_id, f.fingerprint, f.rule_id, f.title, f.severity,
               f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
-              f.created_at,
+              f.static_proof_state, f.created_at,
               t.verdict, t.confidence, t.rationale
             from findings f
             left join triage t on t.finding_id = f.id
@@ -849,7 +939,7 @@ impl FindingStore {
                 select
                   f.id, f.scan_id, f.fingerprint, f.rule_id, f.title, f.severity,
                   f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
-                  f.created_at,
+                  f.static_proof_state, f.created_at,
                   t.verdict, t.confidence, t.rationale
                 from findings f
                 left join triage t on t.finding_id = f.id
@@ -880,7 +970,7 @@ impl FindingStore {
             select
               f.id, f.scan_id, f.fingerprint, f.rule_id, f.title, f.severity,
               f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
-              f.created_at,
+              f.static_proof_state, f.created_at,
               t.verdict, t.confidence, t.rationale
             from findings f
             left join triage t on t.finding_id = f.id
@@ -929,12 +1019,13 @@ fn row_to_patch_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<PatchResult>
 
 fn row_to_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
     let severity: String = row.get(5)?;
-    let verdict: Option<String> = row.get(13)?;
+    let static_proof_state: Option<String> = row.get(12)?;
+    let verdict: Option<String> = row.get(14)?;
     let triage = match verdict {
         Some(verdict) => Some(TriageOutcome {
             verdict: TriageVerdict::try_from(verdict.as_str()).map_err(to_sql_error)?,
-            confidence: row.get::<_, f32>(14)?,
-            rationale: row.get(15)?,
+            confidence: row.get::<_, f32>(15)?,
+            rationale: row.get(16)?,
         }),
         None => None,
     };
@@ -952,7 +1043,12 @@ fn row_to_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
         message: row.get(9)?,
         tool: row.get(10)?,
         actor_fingerprint: row.get(11)?,
-        created_at: row.get(12)?,
+        static_proof_state: static_proof_state
+            .as_deref()
+            .map(StaticProofState::try_from)
+            .transpose()
+            .map_err(to_sql_error)?,
+        created_at: row.get(13)?,
         triage,
     })
 }
@@ -1097,6 +1193,75 @@ mod tests {
             rows[0].triage.as_ref().unwrap().verdict,
             TriageVerdict::NeedsReview
         );
+    }
+
+    #[test]
+    fn static_proof_taxonomy_parses_and_serializes_expected_states() {
+        let states = [
+            ("signal_only", StaticProofState::SignalOnly),
+            ("code_cited", StaticProofState::CodeCited),
+            ("source_sink_linked", StaticProofState::SourceSinkLinked),
+            ("sanitizer_checked", StaticProofState::SanitizerChecked),
+            (
+                "statically_confirmed",
+                StaticProofState::StaticallyConfirmed,
+            ),
+            ("statically_rejected", StaticProofState::StaticallyRejected),
+            (
+                "needs_runtime_evidence",
+                StaticProofState::NeedsRuntimeEvidence,
+            ),
+        ];
+
+        for (raw, state) in states {
+            assert_eq!(StaticProofState::try_from(raw).unwrap(), state);
+            assert_eq!(state.as_str(), raw);
+        }
+
+        assert!(StaticProofState::StaticallyConfirmed.is_static_terminal_state());
+        assert!(!StaticProofState::SourceSinkLinked.is_static_terminal_state());
+    }
+
+    #[test]
+    fn static_proof_taxonomy_rejects_execution_confirmed_states() {
+        for raw in [
+            "execution_confirmed",
+            "runtime_confirmed",
+            "dynamic_confirmed",
+            "exploit_confirmed",
+            "poc_confirmed",
+        ] {
+            let error = StaticProofState::try_from(raw).unwrap_err().to_string();
+            assert!(error.contains("not valid static proof"));
+        }
+    }
+
+    #[test]
+    fn static_proof_state_round_trips_through_findings_store() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-static", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.static",
+            "src/app.ts",
+            9,
+            Some(10),
+            Severity::High,
+            "scanner signal",
+        )
+        .with_static_proof_state(StaticProofState::SignalOnly);
+
+        store.insert_finding("run-static", &finding).unwrap();
+        let stored = store.list_findings_for_scan_id("run-static").unwrap();
+
+        assert_eq!(stored.len(), 1);
+        assert_eq!(
+            stored[0].static_proof_state,
+            Some(StaticProofState::SignalOnly)
+        );
+        let serialized = serde_json::to_value(&stored[0]).unwrap();
+        assert_eq!(serialized["staticProofState"], json!("signal_only"));
     }
 
     #[test]

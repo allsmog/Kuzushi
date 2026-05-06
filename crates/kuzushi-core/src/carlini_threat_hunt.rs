@@ -8,10 +8,12 @@ use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::artifact_kb::ArtifactKnowledgePromptContext;
-use crate::findings::{Finding, Severity};
+use crate::findings::{Finding, Severity, StaticProofState};
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
-use crate::whitebox_static::agent_tool_policy_for_input;
+use crate::whitebox_static::{
+    agent_tool_policy_for_input, mark_whitebox_static_findings, whitebox_static_profile_requested,
+};
 
 const MODULE_ID: &str = "carlini-threat-hunt";
 const SYSTEM_PROMPT: &str = r#"You are Kuzushi's Carlini Threat Hunt actor agent.
@@ -129,6 +131,9 @@ pub fn run_carlini_threat_hunt_report(
     }
 
     findings.truncate(options.max_findings);
+    if whitebox_static_profile_requested(input)? {
+        mark_whitebox_static_findings(&mut findings, StaticProofState::CodeCited)?;
+    }
     let persisted = persist_findings(&target, &findings, ctx)?;
     Ok(CarliniThreatHuntReport {
         target: target.display().to_string(),
