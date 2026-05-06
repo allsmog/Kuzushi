@@ -6239,6 +6239,18 @@ JSON
     }
 
     #[test]
+    fn tab_key_applies_shell_and_argument_completion() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.input = "/con".to_string();
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+        assert_eq!(app.input, "/context");
+
+        app.input = "task block co".to_string();
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+        assert_eq!(app.input, "task block codeql");
+    }
+
+    #[test]
     fn command_reducer_updates_model_without_terminal() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.handle_command(ShellCommand::Model(Some("openai:gpt-4.1".to_string())));

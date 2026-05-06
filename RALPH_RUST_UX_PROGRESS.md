@@ -2,7 +2,7 @@
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
 Active story: UX-010 - Tab Completion For High-Value Arguments
-Status: UX-009 complete and pushed in iteration 22 as `ce2efb0`; UX-010 pending next iteration
+Status: UX-010 implementation complete in iteration 23; commit/push gate pending in this iteration
 
 ## Stage 2 Checklist
 
@@ -15,7 +15,7 @@ Status: UX-009 complete and pushed in iteration 22 as `ce2efb0`; UX-010 pending 
 - UX-007 Input mode clarity: complete; pushed in iteration 20 as `d1a5e7f`.
 - UX-008 Honest abort state: complete; pushed in iteration 21 as `93ae872`.
 - UX-009 Slash command taxonomy and drift tests: complete in iteration 22.
-- UX-010 Tab completion for high-value arguments: pending.
+- UX-010 Tab completion for high-value arguments: complete in iteration 23.
 - UX-011 Findings row/card density: pending.
 - UX-012 Stable finding aliases: pending.
 - UX-013 Better empty states and errors: pending.
@@ -23,6 +23,34 @@ Status: UX-009 complete and pushed in iteration 22 as `ce2efb0`; UX-010 pending 
 - UX-015 Final Ink/React removal gate: pending.
 
 ## Iteration Log
+
+### Iteration 23 - UX-010
+
+- Task attempted: finish Rust TUI Tab completion affordances for slash commands
+  and high-value arguments, keeping completion deterministic and visible in the
+  idle footer.
+- Files changed:
+  - `crates/kuzushi-tui/src/app.rs`
+  - `crates/kuzushi-tui/src/renderer.rs`
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `sed -n '1,260p' RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+  - `sed -n '1,220p' RALPH_RUST_UX_PROGRESS.md` in the clean isolated clone
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-tui completion_covers_commands_stateful_arguments_and_config_keys`
+  - `cargo test -p kuzushi-tui tab_key_applies_shell_and_argument_completion`
+  - `cargo test -p kuzushi-tui renderer::tests::renders_ink_style_shell_without_box_dashboard`
+- Result: implementation complete. The Rust TUI already completed slash command
+  prefixes plus module IDs, tool IDs, option names, task IDs, finding aliases,
+  run IDs, attachment IDs, model selectors, and config keys. This iteration
+  locked actual `Tab` key application for command and task-ID completion and
+  made the idle footer advertise `[Tab] complete`.
+- Remaining work: push UX-010, then UX-011 through UX-015.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary workspace remains stale at `80d23a4` with earlier Stage 2 files
+    staged/modified, so this iteration continued in the clean isolated clone at
+    `/tmp/kuzushi-ux2-clone.PJaRge`.
 
 ### Iteration 22 - UX-009
 
