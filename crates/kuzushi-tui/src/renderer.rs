@@ -917,7 +917,11 @@ fn trim_plain_lines(mut lines: Vec<String>) -> Vec<String> {
 fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
-    lines.push(styled("kuzushi shell", theme::label()));
+    lines.push(Line::from(vec![
+        Span::styled("KUZUSHI · CATALOG", theme::heading()),
+        Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
+        Span::styled("kuzushi shell", theme::muted()),
+    ]));
     lines.push(blank());
 
     let modules = app.registry.modules().collect::<Vec<_>>();
@@ -954,12 +958,12 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
                 theme::accent(),
             ));
         }
-        lines.push(styled(
-            &fit(&app.first_finding_hint(), area.width as usize),
-            theme::primary(),
+        lines.push(next_action_line(
+            &app.first_finding_hint(),
+            area.width as usize,
         ));
         lines.push(muted(&fit(
-            "Quickstart: quickstart | Context: context build | Runtime: model",
+            "Quickstart: quickstart · Context: context build · Runtime: model",
             area.width as usize,
         )));
         lines.push(muted(
@@ -970,22 +974,30 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     if let Some(module) = modules
         .iter()
-        .find(|module| module.metadata().id == "semgrep")
+        .find(|module| module.metadata().id == "sast")
+        .or_else(|| {
+            modules
+                .iter()
+                .find(|module| module.metadata().id == "semgrep")
+        })
         .or_else(|| modules.first())
     {
         let hint = format!(
-            "Recommended first: use {} - {}",
+            "Run {} against the active target — {}",
             module.metadata().id,
             short_sentence(&module.metadata().description, 88)
         );
-        lines.push(styled(&fit(&hint, area.width as usize), theme::primary()));
+        lines.push(next_action_line(&hint, area.width as usize));
         lines.push(blank());
     }
 
     let mut grouped: BTreeMap<&'static str, Vec<_>> = BTreeMap::new();
     for module in modules {
         grouped
-            .entry(module_category(module.metadata().kind).0)
+            .entry(catalog_module_category(
+                &module.metadata().id,
+                module.metadata().kind,
+            ))
             .or_default()
             .push(module);
     }
@@ -1001,15 +1013,12 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             muted(&fit(blurb, area.width.saturating_sub(2) as usize)),
             2,
         ));
-        lines.push(table_header(&["id", "description", "dag"], &widths));
+        lines.push(table_header(&["id", "description"], &widths));
         for module in rows {
-            let dag = if module.dag_nodes().is_empty() {
-                "-"
-            } else {
-                "yes"
-            };
-            lines.push(table_row(
-                &[&module.metadata().id, &module.metadata().description, dag],
+            lines.push(catalog_module_row(
+                &module.metadata().id,
+                &module.metadata().description,
+                app.focused_module.as_deref() == Some(module.metadata().id.as_str()),
                 &widths,
             ));
         }
@@ -1033,49 +1042,64 @@ fn module_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     let mut lines = context_strip(app, area);
     lines.push(blank());
+    lines.push(transcript_line(
+        ">",
+        &format!("/use {}", module.metadata().id),
+        false,
+    ));
+    let primary_tool = module
+        .tools()
+        .first()
+        .map(|tool| tool.name.as_str())
+        .unwrap_or("no-tool");
+    lines.push(transcript_line(
+        "use",
+        &format!(
+            "focused module {} · primary tool {}",
+            module.metadata().id,
+            primary_tool
+        ),
+        false,
+    ));
     lines.push(Line::from(vec![
         Span::styled(module.metadata().id.clone(), theme::heading()),
         Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
         Span::styled(module.metadata().name.clone(), theme::muted()),
     ]));
-    lines.push(muted(&short_sentence(
-        &module.metadata().description,
-        area.width as usize,
-    )));
+    lines.push(indent(
+        muted(&short_sentence(
+            &module.metadata().description,
+            area.width.saturating_sub(2) as usize,
+        )),
+        2,
+    ));
     lines.push(blank());
 
     if module.tools().is_empty() {
         lines.push(muted("No shell tools are exposed by this module."));
     } else {
         lines.push(divider("TOOLS", area.width));
-        lines.push(header(&["tool", "headless", "description"]));
         for tool in module.tools() {
-            lines.push(row(&[
-                fit(&tool.name, 24),
-                tool.headless.to_string(),
-                fit(&tool.description, value_width(area, 42)),
-            ]));
+            lines.push(tool_console_row(
+                &tool.name,
+                &tool.description,
+                tool.headless,
+                area.width,
+            ));
         }
     }
 
-    if !module.dag_nodes().is_empty() {
-        lines.push(blank());
-        lines.push(divider("DAG", area.width));
-        lines.push(header(&["node", "output", "depends on"]));
-        for node in module.dag_nodes() {
-            lines.push(row(&[
-                fit(&node.id, 24),
-                fit(&node.output_kind, 12),
-                fit(&node.depends_on.join(", "), value_width(area, 42)),
-            ]));
-        }
-    }
+    lines.push(blank());
+    lines.extend(module_playbook_lines(
+        module.metadata().id.as_str(),
+        area.width,
+    ));
 
     lines
 }
 
 fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
+    let mut lines = context_strip(app, area);
     let scan = app.scan.as_ref();
     let target = scan
         .map(|scan| compact_target_path(&scan.target.display().to_string()))
@@ -1100,8 +1124,10 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             }
         });
 
+    lines.push(blank());
     lines.push(Line::from(vec![
-        Span::styled("● ", theme::accent()),
+        Span::styled(run_state_glyph(scan), run_state_style(scan)),
+        Span::raw(" "),
         Span::styled(target, theme::label()),
         Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
         Span::raw(stage),
@@ -1113,13 +1139,14 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
 
     let active_stage = scan.map(|scan| scan.stage.as_str()).unwrap_or("idle");
+    lines.push(divider("SCAN PROGRESS", area.width));
     lines.push(pipeline_row(
         if active_stage.contains("context") {
-            "→"
+            "⏵"
         } else {
             "✓"
         },
-        "context-lite:index",
+        "context:build",
         if active_stage.contains("context") {
             "active"
         } else {
@@ -1128,18 +1155,20 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     ));
     lines.push(pipeline_row(
         if scan.is_some_and(|scan| scan.running) {
-            "→"
-        } else {
+            "⏵"
+        } else if scan.is_some() {
             "✓"
+        } else {
+            "○"
         },
-        "semgrep:scan",
+        "sast:scan",
         active_stage,
     ));
     lines.push(pipeline_row(
         "○",
         "triage:run",
         if findings > 0 {
-            "queued"
+            "queued after scan"
         } else {
             "waiting for findings"
         },
@@ -1147,10 +1176,7 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     if let Some(error) = scan.and_then(|scan| scan.error.as_ref()) {
         lines.push(blank());
-        lines.push(Line::from(vec![
-            Span::styled("error ", theme::danger()),
-            Span::raw(fit(error, area.width.saturating_sub(6) as usize)),
-        ]));
+        lines.push(transcript_line("error", error, false));
     }
 
     lines.push(blank());
@@ -1854,7 +1880,7 @@ fn actor_detail_lines(app: &ShellApp, area: Rect, index: usize) -> Vec<Line<'sta
     let start = entries.len().saturating_sub(body_height);
     for line in &entries[start..] {
         let kind = classify_transcript(&line.prefix);
-        let (glyph, style) = transcript_glyph(kind);
+        let (glyph, style) = actor_transcript_glyph(kind);
         let body_width = area.width.saturating_sub(6) as usize;
         lines.push(Line::from(vec![
             Span::styled(format!("{glyph}  "), style),
@@ -1948,7 +1974,7 @@ fn classify_transcript(prefix: &str) -> TranscriptKind {
     TranscriptKind::Other
 }
 
-fn transcript_glyph(kind: TranscriptKind) -> (&'static str, Style) {
+fn actor_transcript_glyph(kind: TranscriptKind) -> (&'static str, Style) {
     match kind {
         TranscriptKind::Tool => ("●", theme::accent()),
         TranscriptKind::Result => ("⎿", theme::muted()),
@@ -3160,13 +3186,8 @@ fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let target = app
         .target
         .as_ref()
-        .map(|path| {
-            format!(
-                "target:{}",
-                compact_target_path(&path.display().to_string())
-            )
-        })
-        .unwrap_or_else(|| "target:none".to_string());
+        .map(|path| compact_target_path(&path.display().to_string()))
+        .unwrap_or_else(|| "none".to_string());
     let module = if matches!(app.shell_view, ShellView::AgentChat) {
         "agent".to_string()
     } else {
@@ -3174,35 +3195,92 @@ fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             .clone()
             .unwrap_or_else(|| "catalog".to_string())
     };
-    let module_count = app.registry.modules().count();
-    let findings = findings_count_summary(&app.findings);
-
-    vec![status_line(
-        &[
+    let ctx = if app.context_view.exists {
+        "✓ present"
+    } else {
+        "missing"
+    };
+    let model = app.config.model.as_deref().unwrap_or("unconfigured");
+    let cost = format!("${:.4}", app.session_cost_usd);
+    let rest = fit(
+        &join_segments(&[
             routing_mode_segment(app),
-            target,
-            module,
-            findings,
-            format!("{module_count} mods"),
-        ],
-        area.width,
-    )]
+            format!("target {target}"),
+            findings_count_summary(&app.findings),
+            format!("ctx {ctx}"),
+            format!("module {module}"),
+            format!("model {model}"),
+            format!("cost {cost}"),
+        ]),
+        area.width.saturating_sub(9) as usize,
+    );
+
+    vec![Line::from(vec![
+        Span::styled("KUZUSHI", theme::heading()),
+        Span::raw("  "),
+        Span::styled(rest, theme::primary()),
+    ])]
 }
 
 fn transcript_lines(app: &ShellApp, visible: usize) -> Vec<Line<'static>> {
     if visible == 0 {
         return Vec::new();
     }
-    let start = app.log.len().saturating_sub(visible);
-    app.log[start..]
-        .iter()
-        .map(|line| {
-            Line::from(vec![
-                Span::styled(format!("{:>8} ", line.prefix), theme::subtle()),
-                Span::raw(line.body.clone()),
-            ])
-        })
-        .collect()
+    let mut rows = Vec::new();
+    for line in &app.log {
+        let body_lines = if line.body.is_empty() {
+            vec![""]
+        } else {
+            line.body.lines().collect::<Vec<_>>()
+        };
+        for (index, body) in body_lines.into_iter().enumerate() {
+            rows.push(transcript_line(&line.prefix, body, index > 0));
+        }
+    }
+    let start = rows.len().saturating_sub(visible);
+    rows.into_iter().skip(start).collect()
+}
+
+fn transcript_line(prefix: &str, body: &str, continuation: bool) -> Line<'static> {
+    let (glyph, style, show_label) = transcript_glyph(prefix, continuation);
+    let mut spans = vec![Span::styled(format!(" {glyph} "), style)];
+    if show_label {
+        spans.push(Span::styled(prefix.to_string(), theme::subtle()));
+        spans.push(Span::raw(" "));
+    }
+    spans.push(Span::styled(
+        body.to_string(),
+        transcript_body_style(prefix),
+    ));
+    Line::from(spans)
+}
+
+fn transcript_glyph(prefix: &str, continuation: bool) -> (&'static str, Style, bool) {
+    if continuation {
+        return ("…", theme::muted(), false);
+    }
+    match prefix {
+        ">" => ("●", theme::accent(), false),
+        "tool" | "scan" | "run" | "resume" | "pause" => ("⏵", theme::accent(), true),
+        "result" | "answer" | "agent" | "plan" | "threats" => ("◆", theme::accent(), true),
+        "finding" | "open" | "title" | "triage" | "aliases" => ("▸", theme::warn(), true),
+        "error" => ("✗", theme::danger(), true),
+        "system" | "startup" | "first-run" | "help" | "view" | "module" | "prompt" | "tune"
+        | "target" | "workspace" | "context" | "history" | "quickstart" | "auth" | "model"
+        | "provider" | "backend" | "cost" | "load" | "runs" | "replay" | "trace" => {
+            ("·", theme::muted(), true)
+        }
+        _ => ("·", theme::subtle(), true),
+    }
+}
+
+fn transcript_body_style(prefix: &str) -> Style {
+    match prefix {
+        "error" => theme::danger(),
+        "finding" | "open" => theme::warn(),
+        "result" | "answer" | "agent" => theme::primary(),
+        _ => Style::default(),
+    }
 }
 
 fn keybindings_text(app: &ShellApp, width: usize) -> String {
@@ -3444,10 +3522,6 @@ fn render_lines(frame: &mut Frame<'_>, area: Rect, lines: Vec<Line<'static>>) {
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-fn status_line(items: &[String], width: u16) -> Line<'static> {
-    Line::styled(fit(&join_segments(items), width as usize), theme::primary())
-}
-
 fn detail(key: &str, value: &str) -> Line<'static> {
     Line::from(vec![
         Span::styled(format!("{key} "), theme::label()),
@@ -3479,10 +3553,9 @@ fn divider(title: &str, width: u16) -> Line<'static> {
 fn module_table_widths(width: u16) -> Vec<usize> {
     let total = width as usize;
     let id = if total < 72 { 14 } else { 22 };
-    let dag = 3;
-    let gaps = 4;
-    let description = total.saturating_sub(id + dag + gaps).max(16);
-    vec![id, description, dag]
+    let gaps = 2;
+    let description = total.saturating_sub(id + gaps).max(16);
+    vec![id, description]
 }
 
 fn table_header(values: &[&str], widths: &[usize]) -> Line<'static> {
@@ -3546,7 +3619,7 @@ fn row(values: &[String]) -> Line<'static> {
 fn pipeline_row(symbol: &str, label: &str, detail: &str) -> Line<'static> {
     let style = match symbol {
         "✓" => theme::success(),
-        "→" => theme::accent(),
+        "→" | "⏵" => theme::accent(),
         _ => theme::subtle(),
     };
     Line::from(vec![
@@ -3597,6 +3670,123 @@ fn indent(line: Line<'static>, spaces: usize) -> Line<'static> {
     Line::from(spans)
 }
 
+fn next_action_line(text: &str, width: usize) -> Line<'static> {
+    let available = width.saturating_sub(8);
+    Line::from(vec![
+        Span::styled("▸ NEXT ", theme::warn()),
+        Span::styled(fit(text, available), theme::primary()),
+    ])
+}
+
+fn catalog_module_row(
+    id: &str,
+    description: &str,
+    focused: bool,
+    widths: &[usize],
+) -> Line<'static> {
+    let id_width = widths.first().copied().unwrap_or(16);
+    let description_width = widths.get(1).copied().unwrap_or(24);
+    if focused {
+        return Line::from(vec![
+            Span::styled("▌ ", theme::accent()),
+            Span::styled(
+                format!(
+                    "{}  {}",
+                    pad(id, id_width),
+                    pad(description, description_width)
+                ),
+                theme::selection(),
+            ),
+        ]);
+    }
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled(pad(id, id_width), theme::primary()),
+        Span::raw("  "),
+        Span::styled(pad(description, description_width), theme::muted()),
+    ])
+}
+
+fn tool_console_row(name: &str, description: &str, headless: bool, width: u16) -> Line<'static> {
+    let status = if headless { "headless" } else { "interactive" };
+    let name_width = if width < 80 { 22 } else { 30 };
+    let used = 4 + name_width + status.len() + 6;
+    Line::from(vec![
+        Span::styled(" ⏵ ", theme::subtle()),
+        Span::styled(pad(name, name_width), theme::accent()),
+        Span::styled(format!(" {status} "), theme::muted()),
+        Span::styled(
+            fit(description, (width as usize).saturating_sub(used).max(12)),
+            theme::primary(),
+        ),
+    ])
+}
+
+fn module_playbook_lines(module_id: &str, width: u16) -> Vec<Line<'static>> {
+    let mut lines = vec![divider("NEXT", width)];
+    let (run, inspect) = match module_id {
+        "context" => (
+            "run build to write .kuzushi/context-snapshot.json",
+            "context status · context regen repo",
+        ),
+        "recon" => (
+            "run nmap, subdomain, or http-fingerprint with a target",
+            "workspace · findings · use threat-model",
+        ),
+        "threat-model" => (
+            "run build to refresh STRIDE / DFD artifacts",
+            "threats summary · threats edit · threats regen",
+        ),
+        "sast" => (
+            "run . or scan to launch the umbrella scanner",
+            "tasks · findings · use triage",
+        ),
+        "carlini-threat-hunt" => (
+            "run . after threat-model:build to start adversarial actor hunts",
+            "show trace · findings · use verify",
+        ),
+        "agentic-sast" => (
+            "run scan to start dataflow and variant hunting agents",
+            "findings · show trace · use verify",
+        ),
+        _ => (
+            "run . to dispatch the primary tool for this module",
+            "options . · prompts · tune · back",
+        ),
+    };
+    lines.push(transcript_line("tool", &fit(run, width as usize), false));
+    lines.push(transcript_line(
+        "help",
+        &fit(inspect, width as usize),
+        false,
+    ));
+    lines
+}
+
+fn catalog_module_category(id: &str, kind: ModuleKind) -> &'static str {
+    match id {
+        "semgrep"
+        | "sast"
+        | "codeql"
+        | "agentic-sast"
+        | "carlini-threat-hunt"
+        | "secret-scan"
+        | "iac-scan"
+        | "dep-hygiene"
+        | "taint-iris"
+        | "taint-iris-next"
+        | "systems-hunt"
+        | "chrome-rce"
+        | "prompt-armor"
+        | "vuln-scout"
+        | "tob" => "OFFENSE",
+        "context" | "context-lite" | "recon" | "threat-model" | "randori" | "x-ray" | "ndiff"
+        | "workspace" => "INTEL",
+        "triage" | "verify" | "patch" | "findings" => "DEFENSE",
+        _ => module_category(kind).0,
+    }
+}
+
 fn module_category(kind: ModuleKind) -> (&'static str, &'static str) {
     match kind {
         ModuleKind::Offense | ModuleKind::Scan => {
@@ -3618,13 +3808,16 @@ fn module_category(kind: ModuleKind) -> (&'static str, &'static str) {
 
 fn module_category_blurb(category: &str) -> (&'static str, &'static str) {
     match category {
-        "OFFENSE" => ("OFFENSE", "hunt vulnerabilities and prove exploitability"),
+        "OFFENSE" => (
+            "OFFENSE",
+            "find vulnerabilities by scanning code, dependencies, and runtime surface",
+        ),
         "INTEL" => (
             "INTEL",
-            "research targets, map attack surface, gather context",
+            "build context, recon, and threat model the operator reads first",
         ),
-        "GOVERNANCE" => ("GOVERNANCE", "policy, config, and audit-ready evidence"),
-        "DEFENSE" => ("DEFENSE", "detect, prioritize, and remediate findings"),
+        "GOVERNANCE" => ("GOVERNANCE", "configuration, allowlists, and audit trails"),
+        "DEFENSE" => ("DEFENSE", "triage, verify, and patch emitted findings"),
         _ => ("OTHER", "loaded module surfaces"),
     }
 }
@@ -3636,6 +3829,26 @@ fn scan_status(scan: &ScanPanelState) -> String {
         format!("running: {}", scan.stage)
     } else {
         scan.stage.clone()
+    }
+}
+
+fn run_state_glyph(scan: Option<&ScanPanelState>) -> &'static str {
+    match scan {
+        Some(scan) if scan.running && scan.abort_requested => "✗",
+        Some(scan) if scan.running => "⠿",
+        Some(scan) if scan.error.is_some() => "✗",
+        Some(_) => "✓",
+        None => "●",
+    }
+}
+
+fn run_state_style(scan: Option<&ScanPanelState>) -> Style {
+    match scan {
+        Some(scan) if scan.running && scan.abort_requested => theme::warn(),
+        Some(scan) if scan.running => theme::warn(),
+        Some(scan) if scan.error.is_some() => theme::danger(),
+        Some(_) => theme::success(),
+        None => theme::accent(),
     }
 }
 
@@ -4355,6 +4568,56 @@ mod tests {
         assert!(rendered.contains("description"));
         assert!(!rendered.contains("module context-lite"));
         assert!(!rendered.contains("command log"));
+    }
+
+    #[test]
+    fn expanded_catalog_uses_design_sections_without_dag_column() {
+        let backend = TestBackend::new(120, 36);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.handle_command(crate::commands::ShellCommand::Modules);
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("KUZUSHI · CATALOG"));
+        assert!(rendered.contains("▸ NEXT"));
+        assert!(rendered.contains("OFFENSE"));
+        assert!(rendered.contains("sast"));
+        assert!(!rendered.contains("dag"));
+        assert!(!rendered.contains("DAG"));
+    }
+
+    #[test]
+    fn module_run_transcript_uses_growing_console_glyphs() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.log.clear();
+        app.log(">", "/scan");
+        app.log("scan", "starting ./demo");
+        app.log("finding", "abc123 high dangerous sink");
+        app.log("error", "scanner failed");
+        app.scan = Some(crate::app::ScanPanelState {
+            run_id: Some("run-123456".to_string()),
+            target: std::path::PathBuf::from("./demo"),
+            stage: "agentic-sast tracing".to_string(),
+            findings_count: 1,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        app.shell_view = ShellView::ModuleRun;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("SCAN PROGRESS"));
+        assert!(rendered.contains("⠿"));
+        assert!(rendered.contains("● /scan"));
+        assert!(rendered.contains("⏵ scan starting ./demo"));
+        assert!(rendered.contains("▸ finding abc123 high dangerous sink"));
+        assert!(rendered.contains("✗ error scanner failed"));
     }
 
     #[test]
