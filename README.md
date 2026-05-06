@@ -54,10 +54,13 @@ bridge without printing credential values.
 ## Native CLI
 
 ```text
-kuzushi [--target <path>] [command]
+kuzushi [--target <path>] [--plain] [command]
 ```
 
 Bare `kuzushi` starts the shell.
+Use `--plain` or `KUZUSHI_PLAIN=1` to force line-oriented output with no ANSI
+escapes, animation, or box drawing. `KUZUSHI_SCREEN_READER=1` and
+`KUZUSHI_LOW_BANDWIDTH=1` are aliases for the same strict plain shell mode.
 
 | Command | Purpose |
 | --- | --- |
@@ -100,6 +103,8 @@ The shell routes slash commands and their bare equivalents through the Rust
 command parser. Help is grouped by workflow; `?` opens help, while `?text`,
 `ask <question>`, and `/ask <question>` are explicit agent-chat routes.
 Unknown prose does not silently dispatch to a model.
+Piped shell output automatically uses the same strict plain renderer as
+`--plain`.
 
 | Command | Purpose |
 | --- | --- |
