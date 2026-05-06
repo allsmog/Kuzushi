@@ -199,6 +199,107 @@ Plugin-backed wrappers also require explicit plugin roots:
 Missing subprocesses, models, bridges, or plugin roots fail explicitly. They do
 not silently succeed and they do not substitute a different model.
 
+## Local MCP Servers
+
+Kuzushi ships three local Model Context Protocol servers that expose
+the same code-index facade Kuzushi itself uses (joern CPG queries,
+clang AST queries, and gtags symbol lookups) over stdio JSON-RPC 2.0.
+External MCP-aware clients — Claude Desktop, Cursor, Claude Code, and
+any other MCP client — can connect to them and gain the same query
+surface without re-implementing the index plumbing.
+
+```bash
+# Probe whether each backend's external dependency is installed.
+kuzushi mcp health gtags
+kuzushi mcp health clang
+kuzushi mcp health joern
+
+# Run a server in the foreground (it speaks JSON-RPC 2.0 over stdio
+# and is intended to be spawned by an MCP-aware client, not used
+# interactively).
+kuzushi mcp serve gtags
+```
+
+Backends fail soft when their underlying tool is missing: `health`
+returns a JSON document with `available: false` and a hint, and
+`serve` advertises a degraded capability list rather than crashing.
+
+### Claude Desktop / Claude Code
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`
+(or the Claude Code equivalent):
+
+```json
+{
+  "mcpServers": {
+    "kuzushi-gtags": { "command": "kuzushi", "args": ["mcp", "serve", "gtags"] },
+    "kuzushi-clang": { "command": "kuzushi", "args": ["mcp", "serve", "clang"] },
+    "kuzushi-joern": { "command": "kuzushi", "args": ["mcp", "serve", "joern"] }
+  }
+}
+```
+
+### Cursor
+
+`~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "kuzushi-joern": {
+      "command": "kuzushi",
+      "args": ["mcp", "serve", "joern"]
+    }
+  }
+}
+```
+
+External dependencies for the backends:
+
+| Backend | Required binary | Notes |
+| --- | --- | --- |
+| `gtags` | GNU Global (`gtags`, `global`) | Symbol indexing across C/C++/Java/etc. |
+| `clang` | `clang`, optional `compile_commands.json` | AST queries; works without compile DB but better with one. |
+| `joern` | `joern-parse` + `joern` (or a running joern HTTP server) | Property-graph queries for taint-style analysis. |
+
+Run `kuzushi doctor` to see which backends are operational on the
+current host.
+
+## Multi-stage triage and verify:exploit
+
+The agentic pipeline is exposed through three composable tools:
+
+| Tool | Stages | Cost cap |
+| --- | --- | --- |
+| `triage:run` | deterministic prefilter → concurrent LLM triage (Stage 2) | `costCapUsd` (USD) |
+| `verify:finding` | LLM-driven exploitability review at the configured tier | n/a (single-shot) |
+| `verify:exploit` | sandboxed empirical harness build + run, optionally fuzzed | `timeoutMs`, `fuzzSeconds` |
+
+`triage:run` honours `concurrency` (default 8 workers, capped at 64),
+`prefilterThreshold` (default 0 — no prefiltering), `stage2Tier`
+(`cheap` | `mid` | `deep`), and `costCapUsd`. Findings dropped before
+dispatch land as `pendingAfterCap` in the response so callers can
+resume against a higher cap.
+
+`verify:exploit` accepts `fuzzSeconds`. When set the C/C++ harness
+swaps the deterministic single-payload driver for a libFuzzer driver
+compiled with `-fsanitize=fuzzer,address,undefined`. ASan or UBSan
+crashes propagate through the existing classifier and promote to
+`proof_level=4`.
+
+```bash
+# Cost-capped, concurrent triage with cheap-tier fan-out.
+kuzushi --target . run triage:run \
+  --input '{"concurrency":8,"costCapUsd":1.50,"prefilterThreshold":5,"stage2Tier":"cheap"}'
+
+# Empirical fuzz-driven verification of one finding.
+kuzushi --target . run verify:exploit \
+  --input '{"fingerprint":"abc123","fuzzSeconds":30,"timeoutMs":120000}'
+```
+
+`KUZUSHI_COST_CAP_USD` provides the same cap globally without changing
+the tool input.
+
 ## Artifacts And State
 
 | Path | Produced by |
