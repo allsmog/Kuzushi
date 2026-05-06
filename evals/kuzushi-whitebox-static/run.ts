@@ -10,6 +10,14 @@ const fixturePath = path.join(
   repoRoot,
   "evals/kuzushi-whitebox-static/fixtures/harness-cases.json",
 );
+const demoRepoRoot = path.join(
+  repoRoot,
+  "evals/kuzushi-whitebox-static/fixtures/demo-repo",
+);
+const demoArtifactRoot = path.join(
+  repoRoot,
+  "evals/kuzushi-whitebox-static/fixtures/demo-artifacts",
+);
 
 const hardFailures = [
   "shell_tool_call",
@@ -67,6 +75,7 @@ type Fixture = {
     detections?: string[];
     rejections?: string[];
     needsRuntimeEvidence?: string[];
+    variants?: string[];
     priority?: string[];
     maxCostUsd?: number;
     maxLatencyMs?: number;
@@ -80,6 +89,35 @@ type HardFailureFixture = Fixture & {
 type FixtureFile = {
   fixtures: Fixture[];
   hardFailureFixtures: HardFailureFixture[];
+};
+
+type SemgrepReport = {
+  results: Array<{
+    check_id?: string;
+    path?: string;
+    start?: { line?: number };
+    end?: { line?: number };
+    extra?: {
+      severity?: string;
+      message?: string;
+    };
+  }>;
+};
+
+type DemoInventory = {
+  languages: string[];
+  manifests: string[];
+  frameworks: string[];
+  routes: Array<{ method: string; path: string; file: string; line: number }>;
+};
+
+type DemoEvidence = {
+  semgrepSignals: number;
+  codeqlSignals: number;
+  codeqlFlowEdges: number;
+  nodeKinds: Set<string>;
+  edgeKinds: Set<string>;
+  defaultStates: Set<string>;
 };
 
 type EvalResult = {
@@ -107,6 +145,10 @@ function read(relativePath: string): string {
 
 function readJson<T>(absolutePath: string): T {
   return JSON.parse(fs.readFileSync(absolutePath, "utf8")) as T;
+}
+
+function readJsonRelative<T>(relativePath: string): T {
+  return readJson<T>(path.join(repoRoot, relativePath));
 }
 
 function pass(name: string, detail: string): EvalResult {
@@ -274,6 +316,16 @@ function checkNeedsRuntimeEvidence(fixture: Fixture): boolean {
   });
 }
 
+function checkSiblingVariants(fixture: Fixture): boolean {
+  return (fixture.expected?.variants ?? []).every((ruleId) => {
+    const finding = findingByRule(fixture.report, ruleId);
+    return (
+      finding?.staticProofState === "code_cited" ||
+      finding?.staticProofState === "signal_only"
+    );
+  });
+}
+
 function checkPrioritization(fixture: Fixture): boolean {
   const expectedPriority = fixture.expected?.priority ?? [];
   const ranked =
@@ -378,6 +430,312 @@ function score(values: boolean[]): number {
   );
 }
 
+function walkDemoFiles(dir: string, base = dir): string[] {
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .flatMap((entry) => {
+      const absolutePath = path.join(dir, entry.name);
+      if (entry.isDirectory()) return walkDemoFiles(absolutePath, base);
+      if (!entry.isFile()) return [];
+      return path.relative(base, absolutePath).replaceAll(path.sep, "/");
+    })
+    .sort();
+}
+
+function readDemoSourceFiles(): Record<string, string> {
+  return Object.fromEntries(
+    walkDemoFiles(demoRepoRoot).map((relativePath) => [
+      relativePath,
+      fs.readFileSync(path.join(demoRepoRoot, relativePath), "utf8"),
+    ]),
+  );
+}
+
+function buildDemoInventory(sourceFiles: Record<string, string>): DemoInventory {
+  const languages = new Set<string>();
+  const manifests: string[] = [];
+  const frameworks = new Set<string>();
+  const routes: DemoInventory["routes"] = [];
+
+  for (const [file, body] of Object.entries(sourceFiles)) {
+    if (file.endsWith(".ts")) languages.add("TypeScript");
+    if (file.endsWith(".json")) languages.add("JSON");
+    if (file === "package.json") {
+      manifests.push(file);
+      if (body.includes('"express"')) frameworks.add("Express");
+    }
+    if (body.includes('from "express"')) frameworks.add("Express");
+
+    body.split("\n").forEach((line, index) => {
+      const route = line.match(/\.get\("([^"]+)"/);
+      if (route) {
+        routes.push({
+          method: "GET",
+          path: route[1],
+          file,
+          line: index + 1,
+        });
+      }
+    });
+  }
+
+  return {
+    languages: [...languages].sort(),
+    manifests: manifests.sort(),
+    frameworks: [...frameworks].sort(),
+    routes: routes.sort((left, right) =>
+      `${left.file}:${left.line}`.localeCompare(`${right.file}:${right.line}`),
+    ),
+  };
+}
+
+function citationSnippet(
+  sourceFiles: Record<string, string>,
+  file: string,
+  startLine: number,
+  endLine: number,
+): string {
+  const source = sourceFiles[file];
+  if (!source || startLine < 1 || endLine < startLine) return "";
+  return linesFor(source)
+    .slice(startLine - 1, endLine)
+    .join("\n");
+}
+
+function normalizeDemoScannerEvidence(
+  semgrep: SemgrepReport,
+  codeqlSarif: Record<string, unknown>,
+  sourceFiles: Record<string, string>,
+): DemoEvidence {
+  const nodeKinds = new Set<string>();
+  const edgeKinds = new Set<string>();
+  const defaultStates = new Set<string>();
+  let semgrepSignals = 0;
+  let codeqlSignals = 0;
+  let codeqlFlowEdges = 0;
+
+  for (const result of semgrep.results ?? []) {
+    const file = result.path ?? "";
+    const startLine = result.start?.line ?? 0;
+    const endLine = result.end?.line ?? startLine;
+    const snippet = citationSnippet(sourceFiles, file, startLine, endLine);
+    if (verifyCitation({ file, startLine, endLine, snippet }, sourceFiles)) {
+      semgrepSignals += 1;
+      nodeKinds.add("scanner_signal");
+      nodeKinds.add("code_span");
+      edgeKinds.add("derived_from");
+      defaultStates.add("signal_only");
+    }
+  }
+
+  const runs = Array.isArray(codeqlSarif.runs) ? codeqlSarif.runs : [];
+  for (const run of runs) {
+    const results = Array.isArray((run as { results?: unknown }).results)
+      ? (run as { results: unknown[] }).results
+      : [];
+    for (const result of results) {
+      codeqlSignals += 1;
+      nodeKinds.add("scanner_signal");
+      nodeKinds.add("code_span");
+      defaultStates.add("signal_only");
+      const flows = Array.isArray((result as { codeFlows?: unknown }).codeFlows)
+        ? (result as { codeFlows: unknown[] }).codeFlows
+        : [];
+      for (const flow of flows) {
+        const threadFlows = Array.isArray(
+          (flow as { threadFlows?: unknown }).threadFlows,
+        )
+          ? (flow as { threadFlows: unknown[] }).threadFlows
+          : [];
+        for (const threadFlow of threadFlows) {
+          const locations = Array.isArray(
+            (threadFlow as { locations?: unknown }).locations,
+          )
+            ? (threadFlow as { locations: unknown[] }).locations
+            : [];
+          if (locations.length > 0) nodeKinds.add("dataflow_step");
+          if (locations.length > 1) {
+            edgeKinds.add("flows_to");
+            codeqlFlowEdges += locations.length - 1;
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    semgrepSignals,
+    codeqlSignals,
+    codeqlFlowEdges,
+    nodeKinds,
+    edgeKinds,
+    defaultStates,
+  };
+}
+
+function detectForbiddenText(value: unknown): boolean {
+  return /\b(poc|proof of concept|exploit payload|payload:|runtime exploitable|confirmed exploit|exploited|network_call|http_request|fetch|curl)\b/i.test(
+    flattenText(value),
+  );
+}
+
+function validateDemoSarif(sarif: Record<string, unknown>, report: Report): boolean {
+  const runs = Array.isArray(sarif.runs) ? sarif.runs : [];
+  const results = runs.flatMap((run) =>
+    Array.isArray((run as { results?: unknown }).results)
+      ? (run as { results: unknown[] }).results
+      : [],
+  );
+  const statesByRule = new Map(
+    (report.findings ?? []).map((finding) => [
+      finding.ruleId,
+      finding.staticProofState,
+    ]),
+  );
+  return (
+    results.length === (report.findings ?? []).length &&
+    results.every((result) => {
+      const item = result as {
+        ruleId?: string;
+        properties?: { staticProofState?: string; mode?: string };
+      };
+      return (
+        item.properties?.mode === "whitebox-static" &&
+        item.properties?.staticProofState === statesByRule.get(item.ruleId ?? "")
+      );
+    }) &&
+    !detectForbiddenText(sarif)
+  );
+}
+
+function runDemoFixture(scoreBuckets: ScoreBucket): EvalResult[] {
+  const sourceFiles = readDemoSourceFiles();
+  const semgrep = readJsonRelative<SemgrepReport>(
+    "evals/kuzushi-whitebox-static/fixtures/demo-artifacts/semgrep.json",
+  );
+  const codeqlSarif = readJsonRelative<Record<string, unknown>>(
+    "evals/kuzushi-whitebox-static/fixtures/demo-artifacts/codeql.sarif.json",
+  );
+  const sarifReport = readJsonRelative<Record<string, unknown>>(
+    "evals/kuzushi-whitebox-static/fixtures/demo-artifacts/report.sarif.json",
+  );
+  const report = readJsonRelative<Report>(
+    "evals/kuzushi-whitebox-static/fixtures/demo-artifacts/report.json",
+  );
+  const fixture: Fixture = {
+    name: "whitebox_demo_fixture",
+    sourceFiles,
+    report,
+    expected: {
+      detections: ["demo/sql-injection"],
+      rejections: ["demo/sanitized-sql"],
+      needsRuntimeEvidence: ["demo/authz-runtime"],
+      variants: ["demo/sibling-variant"],
+      priority: [
+        "demo/sql-injection",
+        "demo/sibling-variant",
+        "demo/authz-runtime",
+        "demo/sanitized-sql",
+        "demo/scanner-noise",
+      ],
+      maxCostUsd: 0,
+      maxLatencyMs: 250,
+    },
+  };
+  const inventory = buildDemoInventory(sourceFiles);
+  const evidence = normalizeDemoScannerEvidence(semgrep, codeqlSarif, sourceFiles);
+  const hardFailureHits = detectHardFailures(fixture);
+  const requiredEvents = new Set([
+    "inventory",
+    "scanner_evidence",
+    "static_triage",
+    "proof_validation",
+    "prioritization",
+    "report_sarif",
+  ]);
+  const observedEvents = new Set(
+    (report.events ?? []).map((event) => String(event.kind ?? "")),
+  );
+  const demoResults: EvalResult[] = [
+    inventory.languages.includes("TypeScript") &&
+    inventory.manifests.includes("package.json") &&
+    inventory.frameworks.includes("Express") &&
+    ["/users", "/safe", "/admin/:id", "/health", "/orders"].every((route) =>
+      inventory.routes.some((item) => item.path === route),
+    )
+      ? pass(
+          "whitebox_demo_fixture:inventory",
+          "inventory found Express, TypeScript, manifest, and route surfaces",
+        )
+      : fail(
+          "whitebox_demo_fixture:inventory",
+          ["uncited_claim"],
+          "inventory missed expected static repo facts",
+        ),
+    evidence.semgrepSignals >= 4 &&
+    evidence.codeqlSignals >= 1 &&
+    evidence.codeqlFlowEdges >= 2 &&
+    evidence.nodeKinds.has("scanner_signal") &&
+    evidence.nodeKinds.has("code_span") &&
+    evidence.nodeKinds.has("dataflow_step") &&
+    evidence.edgeKinds.has("derived_from") &&
+    evidence.edgeKinds.has("flows_to") &&
+    evidence.defaultStates.has("signal_only")
+      ? pass(
+          "whitebox_demo_fixture:scanner_evidence",
+          "Semgrep and CodeQL evidence normalized as signal-only static evidence",
+        )
+      : fail(
+          "whitebox_demo_fixture:scanner_evidence",
+          ["uncited_claim"],
+          "scanner evidence normalization did not cover signals, spans, and flows",
+        ),
+    [...requiredEvents].every((event) => observedEvents.has(event))
+      ? pass(
+          "whitebox_demo_fixture:e2e_events",
+          "fixture records inventory, scanner evidence, triage, proof validation, ranking, and SARIF",
+        )
+      : fail(
+          "whitebox_demo_fixture:e2e_events",
+          ["uncited_claim"],
+          "fixture report missed an expected E2E stage",
+        ),
+    checkSiblingVariants(fixture)
+      ? pass(
+          "whitebox_demo_fixture:sibling_variant",
+          "sibling variant is code-cited and not confirmed by inheritance",
+        )
+      : fail(
+          "whitebox_demo_fixture:sibling_variant",
+          ["uncited_claim"],
+          "sibling variant was not present as a non-confirmed candidate",
+        ),
+    validateDemoSarif(sarifReport, report)
+      ? pass(
+          "whitebox_demo_fixture:sarif",
+          "SARIF mirrors static proof states without forbidden active-analysis claims",
+        )
+      : fail(
+          "whitebox_demo_fixture:sarif",
+          ["poc_generation", "runtime_exploitability_claim"],
+          "SARIF did not mirror static proof state or contained forbidden language",
+        ),
+    hardFailureHits.length === 0
+      ? pass(
+          "whitebox_demo_fixture:hard_failures",
+          "demo fixture has no shell, network, PoC, fabricated citation, uncited confirmed claim, or runtime claim",
+        )
+      : fail(
+          "whitebox_demo_fixture:hard_failures",
+          hardFailureHits,
+          `unexpected hard failures: ${hardFailureHits.join(", ")}`,
+        ),
+  ];
+
+  demoResults.push(...pushScore(scoreBuckets, fixture));
+  return demoResults;
+}
+
 const prd = JSON.parse(read("tasks/kuzushi-whitebox-static.prd.json"));
 const docs = read("docs/kuzushi-whitebox-static.md");
 const cli = read("crates/kuzushi-cli/src/main.rs");
@@ -472,6 +830,8 @@ for (const fixture of fixtures.fixtures) {
   );
   results.push(...pushScore(scoreBuckets, fixture));
 }
+
+results.push(...runDemoFixture(scoreBuckets));
 
 for (const fixture of fixtures.hardFailureFixtures) {
   const detected = detectHardFailures(fixture);

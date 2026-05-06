@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
-Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-022 - Add whitebox demo fixture
-Status: WB-021 pushed in iteration 53; WB-022 pending
+Stage: 3 - Kuzushi whitebox-static mode (complete)
+Active story: Final acceptance checks
+Status: WB-022 complete in iteration 54; no whitebox-static story work remains
 
 ## Stage 3 Checklist
 
@@ -27,9 +27,65 @@ Status: WB-021 pushed in iteration 53; WB-022 pending
 - WB-019 Add whitebox false-positive memory: complete and pushed in iteration 49.
 - WB-020 Add diff-aware whitebox PR mode: complete in iteration 51.
 - WB-021 Add deterministic eval harness: complete in iteration 53.
-- WB-022 Add whitebox demo fixture: pending.
+- WB-022 Add whitebox demo fixture: complete in iteration 54.
 
 ## Iteration Log
+
+### Iteration 54 - WB-022
+
+- Task attempted: add the deterministic whitebox-static demo fixture and wire
+  the eval harness to exercise inventory, scanner evidence normalization,
+  static triage/proof validation, prioritization, and SARIF output without
+  network calls, shell execution, PoC generation, replay, or active
+  verification.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `docs/kuzushi-whitebox-static.md`
+  - `evals/kuzushi-whitebox-static/run.ts`
+  - `evals/kuzushi-whitebox-static/fixtures/demo-repo/package.json`
+  - `evals/kuzushi-whitebox-static/fixtures/demo-repo/src/app.ts`
+  - `evals/kuzushi-whitebox-static/fixtures/demo-repo/src/db.ts`
+  - `evals/kuzushi-whitebox-static/fixtures/demo-repo/src/routes/users.ts`
+  - `evals/kuzushi-whitebox-static/fixtures/demo-repo/src/routes/orders.ts`
+  - `evals/kuzushi-whitebox-static/fixtures/demo-artifacts/semgrep.json`
+  - `evals/kuzushi-whitebox-static/fixtures/demo-artifacts/codeql.sarif.json`
+  - `evals/kuzushi-whitebox-static/fixtures/demo-artifacts/report.json`
+  - `evals/kuzushi-whitebox-static/fixtures/demo-artifacts/report.sarif.json`
+  - `scripts/pi-agent-core-bridge.mjs`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `git status --short --branch` in the clean nested clone
+  - `sed -n '1,220p' progress/kuzushi-whitebox-static.progress.md`
+  - `rg -n 'WB-022|demo fixture|whitebox' tasks/kuzushi-whitebox-static.prd.json progress/kuzushi-whitebox-static.progress.md docs/kuzushi-whitebox-static.md evals/kuzushi-whitebox-static/run.ts package.json`
+  - `pnpm eval:kuzushi-whitebox-static`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `pnpm check` (first exposed an existing Biome formatting error in
+    `scripts/pi-agent-core-bridge.mjs`)
+  - `pnpm exec biome format --write scripts/pi-agent-core-bridge.mjs evals/kuzushi-whitebox-static/run.ts evals/kuzushi-whitebox-static/fixtures/demo-artifacts/report.json evals/kuzushi-whitebox-static/fixtures/demo-artifacts/report.sarif.json evals/kuzushi-whitebox-static/fixtures/demo-artifacts/semgrep.json evals/kuzushi-whitebox-static/fixtures/demo-artifacts/codeql.sarif.json evals/kuzushi-whitebox-static/fixtures/demo-repo/package.json`
+  - `pnpm check`
+- Result: implementation complete. The demo repo now contains one statically
+  confirmed SQL source-to-sink issue, one statically rejected parameterized
+  query false positive, one authorization case marked `needs_runtime_evidence`,
+  one sibling variant kept at `code_cited`, and one misleading scanner signal
+  kept at `signal_only`. The eval harness reads the demo repo and fixture
+  artifacts, builds deterministic inventory facts, normalizes Semgrep and
+  CodeQL evidence as signal-only scanner evidence, checks triage/proof states
+  and source citations, verifies ranking, and validates a SARIF report. WB-022
+  is marked `passes: true` in the PRD after the story gate passed.
+- Remaining work: no whitebox-static story work remains. Final acceptance still
+  requires the full check suite, commit, push, and final promise only if those
+  checks pass.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files, while the clean nested clone at
+    `/Users/operator/VibeCode/open-sourced/kuzushi/.codex-active/kuzushi-stage3`
+    contains the active pushed Stage 3 state.
+  - The nested clone does not have its own `node_modules`; the eval/check run
+    used a temporary symlink to the primary checkout's installed dependencies,
+    then removed the symlink before commit.
 
 ### Iteration 53 - WB-021
 

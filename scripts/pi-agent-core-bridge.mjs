@@ -123,7 +123,8 @@ function isForbiddenWhiteboxTool(name) {
 }
 
 function normalizeAgentToolPolicy(request) {
-  const raw = request.toolPolicy && typeof request.toolPolicy === "object" ? request.toolPolicy : {};
+  const raw =
+    request.toolPolicy && typeof request.toolPolicy === "object" ? request.toolPolicy : {};
   const profile = String(raw.profile ?? "default");
   const tools = Array.isArray(raw.tools) ? raw.tools.map((tool) => String(tool)) : [];
   if (profile !== WHITEBOX_STATIC_TOOL_PROFILE) {
@@ -133,10 +134,18 @@ function normalizeAgentToolPolicy(request) {
   const selectedTools = tools.length > 0 ? tools : WHITEBOX_STATIC_READ_ONLY_TOOLS;
   for (const tool of selectedTools) {
     if (isForbiddenWhiteboxTool(tool)) {
-      throw new Error(`whitebox-static cannot enable execution or write tool ${JSON.stringify(tool)}`);
+      throw new Error(
+        `whitebox-static cannot enable execution or write tool ${JSON.stringify(tool)}`,
+      );
     }
-    if (!WHITEBOX_STATIC_READ_ONLY_TOOLS.some((allowed) => allowed.toLowerCase() === tool.toLowerCase())) {
-      throw new Error(`whitebox-static can only enable read-only repo tools, got ${JSON.stringify(tool)}`);
+    if (
+      !WHITEBOX_STATIC_READ_ONLY_TOOLS.some(
+        (allowed) => allowed.toLowerCase() === tool.toLowerCase(),
+      )
+    ) {
+      throw new Error(
+        `whitebox-static can only enable read-only repo tools, got ${JSON.stringify(tool)}`,
+      );
     }
   }
   return { profile, tools: selectedTools };
