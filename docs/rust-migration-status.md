@@ -48,7 +48,7 @@ tests for the relevant dispatch modes.
 | `vuln-scout:audit`, `tob:audit`, `tob:skills`, `shinsa:*`, `prompt-armor:*` | `src/modules/vuln-scout/vuln-scout.ts`; `src/modules/tob/tob.ts`; `src/modules/shinsa/shinsa.ts`; `src/modules/prompt-armor/prompt-armor.ts`; resolver helpers in `src/agents/tasks/*/resolve-*.ts`. | TS wrapped Claude Code plugin packages for whitebox pentest, ToB security skills, Shinsa compliance, and PromptArmor red-team workflows; tools resolved local plugin roots lazily and returned graceful missing-plugin errors. PromptArmor network-capable commands required explicit authorization. | Generic plugin/pi-agent-core adapters in `crates/kuzushi-core/src/modules.rs` (`run_plugin_finding_adapter`, `run_shinsa_assessment`, `execute_prompt_armor_tool`); CLI/shell runtime gating in `crates/kuzushi-cli/src/main.rs` and `crates/kuzushi-tui/src/app.rs`. | Rust requires an explicit plugin root via tool input or module-specific environment variable, requires explicit model/runtime for agentic plugin adapters, sends bounded repo snippets through pi-agent-core, normalizes returned findings, persists findings when a store is available, writes Shinsa artifacts, lists ToB/Shinsa plugin metadata, and keeps PromptArmor scan/attack authorization gates. PromptArmor config/diff/report have deterministic Rust file executors. | Preserves public `target`, `model`, `maxFindings`, `skills`, Shinsa `controls`/`family`/`severity`/`outputDir`, and PromptArmor command-specific fields. Outputs preserve tool envelopes, findings arrays, artifact paths, plugin root metadata, and cost field. | Persists plugin findings to `.kuzushi/v2/findings.sqlite3`; Shinsa writes `<target>/shinsa-output/shinsa-state.json` and `compliance-report.md`; PromptArmor writes `.prompt-armor/` config/report artifacts. | Agentic plugin adapters require explicit model plus `PiAgentCoreRuntime`; no fallback model is selected. Missing plugin roots fail with install/configure guidance. | DAG descriptors remain registered for applicable tools; direct scan DAG node dispatch reaches the same registry executor. These plugin-backed tools are opt-in rather than default SAST engines. | Supported through Ratatui shell focused-module `/run`; runtime-backed tools initialize pi-agent-core through shell gating. | Supported through `kuzushi --target <repo> run <tool>`; runtime-backed tools initialize pi-agent-core through run-mode gating. | Rust runtime/persistence/failure coverage: `crates/kuzushi-core/src/modules.rs` tests `dispatches_plugin_backed_adapters_through_runtime_and_persists`, `plugin_adapters_missing_dependency_fail_actionably`, and `prompt_armor_network_tools_require_authorization`. | Module-specific plugin roots via `pluginRoot`/`pluginPath` or env vars (`KUZUSHI_VULN_SCOUT_PLUGIN`, `KUZUSHI_TOB_SKILLS_DIR`, `KUZUSHI_SHINSA_PLUGIN`, `KUZUSHI_PROMPT_ARMOR_PLUGIN`); pi-agent-core bridge plus provider credentials for agentic execution. | complete |
 | hidden `pipeline:task-selector`, `pipeline:approval-before-verification`, `pipeline:taint-cwe-select` | `src/modules/pipeline/pipeline.ts`; TS task implementations in `src/agents/tasks/task-selector.ts`, `approval-gate.ts`, and taint selector files. | TS hosted hidden orchestrator DAG nodes for task selection, approval gates, and taint CWE selection so every pipeline participant had a module owner. | `run_pipeline_task_selector`, `run_pipeline_approval_gate`, and `run_taint_cwe_select` in `crates/kuzushi-core/src/modules.rs`. | Rust keeps `pipeline` hidden from visible module lists, dispatches deterministic task selection and approval gate nodes, and preserves the pi-agent-core-backed taint CWE selector. | Preserves task list/disabled-task behavior and approval boolean semantics for internal DAG dispatch. | No user-facing artifacts. | Task selection and approval use no provider. Taint CWE selection requires explicit model/runtime when no explicit CWEs are supplied. | Hidden DAG descriptors are registered and dispatchable through `ModuleRegistry::execute_tool_with_runtime`. | Hidden by design; not surfaced in shell module lists. | Hidden by design; direct dispatch is tested for internal use. | Rust visibility/dispatch coverage: `crates/kuzushi-core/src/modules.rs` tests `hidden_pipeline_nodes_dispatch_without_visibility` and `dispatches_hidden_taint_cwe_selector_through_runtime_without_listing_it_as_visible_tool`. | pi-agent-core bridge only for taint CWE selection when needed. | complete |
 
-## Final Cutover Docs, Help, And TypeScript/Ink Retention Audit
+## Final Cutover Docs, Help, And TypeScript/Ink Deletion Audit
 
 ### Package and help truth
 
@@ -58,6 +58,8 @@ tests for the relevant dispatch modes.
   The removed TypeScript runtime aliases are recorded below.
 - `pnpm dev` runs `cargo run -p kuzushi-cli --`; `pnpm build:native` builds
   and stages the Rust binary for npm packaging.
+- React/Ink dev dependencies and TypeScript JSX compiler settings are removed;
+  the Rust TUI crate is the only interactive shell renderer.
 - `README.md` documents only the Rust CLI commands that exist today:
   `shell`, `scan`, `findings`, `modules`, `tools`, `run`, and `config`.
   Unsupported TypeScript-era scan flags are no longer advertised as current
@@ -76,23 +78,30 @@ tests for the relevant dispatch modes.
 | `scripts.dev:ts` in `package.json` | It encouraged source execution through `src/cli.ts` instead of the Rust CLI. | `pnpm dev -- <args>`. |
 | `scripts/kuzushi-dev` | It was a source helper that executed `src/cli.ts` through `tsx`. | `cargo run -p kuzushi-cli -- <args>` or `node bin/kuzushi-rs.mjs <args>`. |
 | `src/cli.ts shell` -> `src/copilot/shell.ts` import path | It let the source-only TypeScript CLI still launch the retained Ink shell after the Rust CLI became primary. | `src/cli.ts shell` now fails with a Rust replacement message; use `pnpm dev -- shell`, `cargo run -p kuzushi-cli -- shell`, or `node bin/kuzushi-rs.mjs shell`. |
+| `src/copilot/shell.ts` | The Rust Ratatui shell now covers the interactive shell command surface and tests assert the Rust help routes. Keeping the TS shell would preserve a second TUI implementation. | `crates/kuzushi-tui/src/app.rs` and `crates/kuzushi-tui/src/renderer.rs`. |
+| `src/ui/App.tsx`, `src/ui/components/**`, `src/ui/primitives/**`, `src/ui/render.ts`, `src/ui/setup.ts`, `src/ui/review.ts`, `src/ui/monorepo-render.ts`, React hooks, and related TS TUI helpers | These were the TypeScript/Ink render tree, modals, review UI, mock playback support, and live progress surfaces. Rust equivalents exist for the operator-facing shell and plain mode. | Rust shell/plain rendering in `crates/kuzushi-tui`; retained TS `src/ui/state.ts`, `plain-renderer.ts`, and `ci-stream.ts` for non-visual migration/reference paths. |
+| `scripts/mock-tui.ts` and `src/copilot/mock-tui/**` | Test-only fixture harness for the deleted Ink render tree. | Rust shell renderer tests in `crates/kuzushi-tui`. |
+| Ink/React Vitest component snapshots and shell/keybind tests | They asserted deleted TypeScript TUI behavior and required React/Ink dev dependencies. | `cargo test -p kuzushi-tui` covers the Rust TUI command reducer and renderer. |
+| React/Ink dev dependencies and TypeScript JSX settings | No source files compile JSX or import React/Ink after the deletion. | Native Rust UI dependencies in Cargo. |
 | `dist/cli*` in the npm tarball | These were old TypeScript CLI build artifacts and offered an unadvertised alternate runtime entrypoint. | Excluded through `package.json` `files` negation; native `bin/kuzushi-rs.mjs` is the only packaged CLI entrypoint. |
 | `docs/current-architecture.svg`, `docs/current-architecture.png` | Rendered diagrams were generated from the pre-cutover TypeScript/Ink architecture and had become misleading. | `docs/current-architecture.mmd` now describes the Rust architecture; regenerated images can be added from that source later. |
 
-### Retained TypeScript/Ink classifications
+### Retained TypeScript classifications
 
 | Retained area | Classification | Why it remains |
 | --- | --- | --- |
 | `src/modules/`, `src/agents/`, scanner/report helpers | Reference-only during cutover plus published library source where exported. | These files preserve behavior, schemas, prompts, and parity fixtures while the Rust module rows remain traceable. They are not invoked by `bin.kuzushi`. |
-| `src/ui/`, `src/copilot/`, and Ink/React component tests | Test/reference-only terminal behavior history. | Rust Ratatui is the primary shell. The retained Ink code backs legacy Vitest coverage and mock scenarios, not the npm CLI runtime. |
+| `src/ui/state.ts`, `src/ui/plain-renderer.ts`, `src/ui/ci-stream.ts`, `src/ui/output.ts`, and related formatting/notification helpers | Non-visual support code. | TypeScript scan/reference paths and report workers still use the `UIStore` contract and line-oriented output helpers. They do not import React/Ink or render an interactive TUI. |
+| `src/copilot/` non-shell helpers | Reference/library support. | Prompt editing, replay formatting, dispatcher helpers, options, and run helpers still serve tests or non-TUI TypeScript surfaces. The interactive shell file is gone. |
 | `dist/`, `kuzushi/modules`, `kuzushi/testing` exports | Non-CLI library/API surface. | Third-party module authors and tests still consume these APIs during the cutover. |
-| `scripts/mock-tui.ts` and `src/copilot/mock-tui/**` | Test-only fixture harness. | Used by mock UI tests and scenario fixtures; it is not wired to the package `kuzushi` binary. |
 
 ### Cutover verification coverage
 
 - Rust CLI help/modules/tools and npm wrapper help are covered by
   `crates/kuzushi-cli/tests/cutover_cli.rs`.
 - Shell `/help` routing is covered by `crates/kuzushi-tui/src/app.rs`.
+- Rust TUI parity and rendering are covered by `cargo test -p kuzushi-tui`.
+- TypeScript still typechecks without React/Ink through `pnpm typecheck`.
 - Native smoke coverage in `tests/e2e/run-smoke.sh` exercises
   `node bin/kuzushi-rs.mjs --help` before the scan smoke when a local Rust
   binary is available or can be built.

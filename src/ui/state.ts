@@ -2,7 +2,7 @@
  * Observable UI state store.
  *
  * The report-worker writes state updates via `store.update()`.
- * The Ink app subscribes via `store.subscribe()` and re-renders reactively.
+ * Line-oriented sinks subscribe via `store.subscribe()` and render reactively.
  */
 
 import type { ThreatModelDocument } from "../agents/tasks/threat-modeling/types.js";
@@ -594,10 +594,9 @@ export interface ContextSnapshot {
 /**
  * Which sub-surface the shell is showing right now.
  *
- * Introduced by the Ink UI v2 "modules calmed" redesign so the shell can
- * carry a catalog / module home / findings / finding / tune screen without
- * needing a separate UIMode. `mode === "shell"` && `shellView` together
- * drive the dispatcher in App.tsx.
+ * Shell sub-surface identifier retained for line-oriented TypeScript output
+ * and persisted shell state compatibility. The interactive dispatcher now
+ * lives in the Rust Ratatui shell.
  */
 export type ShellView =
   | "catalog"

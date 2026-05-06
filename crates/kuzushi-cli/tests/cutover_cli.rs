@@ -1,6 +1,7 @@
 use std::fs;
+use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
@@ -36,6 +37,30 @@ fn assert_strict_plain(label: &str, output: &str) {
             "{label} must not contain box drawing {forbidden:?}:\n{output}"
         );
     }
+    for line in output.lines() {
+        assert!(
+            line.chars().count() <= 80,
+            "{label} must keep lines <= 80 columns; over-wide line:\n{line}"
+        );
+    }
+}
+
+fn plain_shell_script(script: &str) -> String {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut child = kuzushi()
+        .args(["--plain", "shell", "--target"])
+        .arg(tmp.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(script.as_bytes())
+        .unwrap();
+    stdout(child.wait_with_output().unwrap())
 }
 
 #[test]
@@ -91,6 +116,50 @@ fn plain_env_aliases_are_line_oriented_for_screen_reader_mode() {
     assert!(out.contains("kuzushi shell"));
     assert!(out.contains("mode:shell"));
     assert_strict_plain("KUZUSHI_SCREEN_READER shell", &out);
+}
+
+#[test]
+fn plain_scripted_shell_prints_unknown_command_feedback() {
+    let out = plain_shell_script("/nope\n");
+
+    assert!(out.contains("COMMAND RESULT"));
+    assert!(out.contains("command: /nope"));
+    assert!(out.contains("> /nope"));
+    assert!(out.contains("error: unknown command \"/nope\". Next: /help"));
+    assert_strict_plain("--plain shell /nope", &out);
+}
+
+#[test]
+fn plain_scripted_shell_prints_quit_acknowledgement() {
+    let out = plain_shell_script("/quit\n");
+
+    assert!(out.contains("command: /quit"));
+    assert!(out.contains("> /quit"));
+    assert!(out.contains("system: exit requested; closing shell"));
+    assert_strict_plain("--plain shell /quit", &out);
+}
+
+#[test]
+fn plain_scripted_shell_prints_help_then_quit_result_blocks() {
+    let out = plain_shell_script("/help\n/quit\n");
+
+    assert_eq!(out.matches("COMMAND RESULT").count(), 2);
+    assert!(out.contains("command: /help"));
+    assert!(out.contains("command: /quit"));
+    assert!(out.contains("HELP"));
+    assert!(out.contains("system: exit requested; closing shell"));
+    assert_strict_plain("--plain shell /help /quit", &out);
+}
+
+#[test]
+fn plain_scripted_shell_prints_result_for_unchanged_view_command() {
+    let out = plain_shell_script("/back\n");
+
+    assert!(out.contains("COMMAND RESULT"));
+    assert!(out.contains("command: /back"));
+    assert!(out.contains("> /back"));
+    assert!(out.contains("kuzushi shell"));
+    assert_strict_plain("--plain shell /back", &out);
 }
 
 #[test]
@@ -298,9 +367,9 @@ fn legacy_ink_shell_is_reference_only_in_source_cli() {
     }
 
     let ui_readme = fs::read_to_string(repo_root().join("src/ui/README.md")).unwrap();
-    assert!(ui_readme.contains("reference-only"));
+    assert!(ui_readme.contains("TypeScript/Ink TUI has been removed"));
     assert!(ui_readme.contains("crates/kuzushi-tui"));
-    assert!(ui_readme.contains("bin/kuzushi-rs.mjs"));
+    assert!(ui_readme.contains("shared, non-visual TypeScript helpers"));
 
     let migration_status =
         fs::read_to_string(repo_root().join("docs/rust-migration-status.md")).unwrap();

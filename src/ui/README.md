@@ -1,13 +1,11 @@
-# Legacy TypeScript/Ink UI
+# Shared TypeScript UI Helpers
 
-This directory is retained for reference-only and test-only coverage while the
-Rust Ratatui shell in `crates/kuzushi-tui` is the operator-facing CLI/TUI path.
+The TypeScript/Ink TUI has been removed. The operator-facing CLI/TUI path is
+the Rust Ratatui shell in `crates/kuzushi-tui`.
 
-Do not add new runtime CLI behavior here. The packaged `kuzushi` binary must
-continue to enter through `bin/kuzushi-rs.mjs` and the native Rust binary, not
-through these Ink/React components.
+This directory now contains only shared, non-visual TypeScript helpers still
+used by migration/reference code: `UIStore` state, CI/plain-text renderers,
+formatting helpers, notifications, and summary builders.
 
-The remaining Ink/React dependencies are dev-only because Vitest snapshots,
-mock TUI scenarios, and migration parity tests still compile this directory.
-Delete those tests and components in one scoped removal when the Rust snapshots
-fully replace them.
+Do not add new terminal UI behavior here. New operator-facing shell work belongs
+in `crates/kuzushi-tui`.

@@ -11,8 +11,11 @@
 - The `kuzushi-ts` npm binary, `pnpm dev:ts`, and `scripts/kuzushi-dev` source
   CLI helper are removed. TypeScript remains only for published library exports,
   migration reference code, and tests.
-- The source-only TypeScript `shell` command no longer imports the retained
-  Ink shell; it exits with Rust replacement commands.
+- The source-only TypeScript `shell` command no longer has a TypeScript/Ink
+  implementation; it exits with Rust replacement commands.
+- The legacy TypeScript/Ink TUI, mock TUI harness, and React/Ink dev
+  dependencies are removed now that the Rust Ratatui shell covers the operator
+  surface.
 - The old `dist/cli*` TypeScript CLI outputs are excluded from the npm tarball.
 - Operator docs now describe only the Rust command surface:
   `shell`, `scan`, `findings`, `modules`, `tools`, `run`, and `config`.
