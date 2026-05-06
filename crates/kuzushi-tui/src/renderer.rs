@@ -1023,8 +1023,23 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             theme::subtle(),
         ),
     ]));
+    // Lazy windowing: each finding occupies three rendered rows, so we only
+    // need enough findings to cover the scrolled-into viewport plus a small
+    // buffer for partial rows on either edge. Without this cap a workspace
+    // with 10k findings would format ~30k Lines per frame even though only
+    // ~24 rows are visible. We always also keep the cursor row and the
+    // selected finding visible so navigation across the whole list still
+    // feels seamless.
+    let scroll = app.scroll_offset as usize;
+    let visible_rows = area.height.max(1) as usize;
+    let row_budget = scroll + visible_rows + 6;
+    let mut max_findings = row_budget.div_ceil(3) + 2;
+    if app.findings_cursor >= max_findings.saturating_sub(1) {
+        max_findings = app.findings_cursor + 2;
+    }
     for (index, (alias, finding)) in sorted_finding_aliases(&app.findings)
         .into_iter()
+        .take(max_findings)
         .enumerate()
     {
         let selected = app
@@ -3327,6 +3342,34 @@ mod tests {
         assert!(rendered.contains("alias"));
         assert!(rendered.contains("F-0001"));
         assert!(rendered.contains("fingerprint"));
+    }
+
+    #[test]
+    fn findings_lines_window_caps_at_visible_budget() {
+        // 1000 findings, 24-row pane: only emit ~visible-window-worth instead
+        // of formatting all 1000 (~3000 lines) per frame. Without the cap the
+        // produced Vec<Line> would balloon proportionally to findings count.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Findings;
+        for i in 0..1000 {
+            app.findings.push(Finding::new_semgrep(
+                "rule",
+                "src/x.ts",
+                i + 1,
+                None,
+                Severity::High,
+                "title",
+            ));
+        }
+        let area = Rect::new(0, 0, 80, 24);
+        let lines = findings_lines(&app, area);
+        // Header (context strip + filters strip + table header) is roughly 5
+        // lines; allow a generous upper bound. The point is "not all 3000".
+        assert!(
+            lines.len() < 200,
+            "expected lazy windowing to cap output, got {} lines",
+            lines.len()
+        );
     }
 
     #[test]
