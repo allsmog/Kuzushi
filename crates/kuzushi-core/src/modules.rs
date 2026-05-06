@@ -6035,6 +6035,11 @@ fn run_verify_exploit(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Va
         .or_else(|| input.get("timeout_ms"))
         .and_then(Value::as_u64)
         .unwrap_or(60_000);
+    let fuzz_seconds = input
+        .get("fuzzSeconds")
+        .or_else(|| input.get("fuzz_seconds"))
+        .and_then(Value::as_u64)
+        .map(|v| v.min(u64::from(u32::MAX)) as u32);
 
     let Some(finding) = store.get_finding_by_reference(&fingerprint)? else {
         return Ok(json!({
@@ -6053,6 +6058,7 @@ fn run_verify_exploit(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Va
                 backend: None,
                 timeout_ms,
                 trust_plain_backend: trust_plain,
+                fuzz_seconds,
             },
         ))?;
 
