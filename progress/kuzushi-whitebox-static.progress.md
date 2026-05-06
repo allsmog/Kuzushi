@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-019 - Add whitebox false-positive memory
-Status: WB-018 complete in iteration 46; WB-019 pending
+Active story: WB-019 - Add whitebox false-positive memory push gate
+Status: WB-019 implementation complete and locally committed in iteration 47; push pending because this sandbox cannot resolve github.com
 
 ## Stage 3 Checklist
 
@@ -24,12 +24,57 @@ Status: WB-018 complete in iteration 46; WB-019 pending
 - WB-016 Add static trigger/impact narratives: complete in iteration 44.
 - WB-017 Add variant search from statically confirmed findings: complete in iteration 45.
 - WB-018 Add candidate Semgrep rule synthesis: complete in iteration 46.
-- WB-019 Add whitebox false-positive memory: pending.
+- WB-019 Add whitebox false-positive memory: complete locally in iteration 47; push pending.
 - WB-020 Add diff-aware whitebox PR mode: pending.
 - WB-021 Add deterministic eval harness: pending.
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 47 - WB-019
+
+- Task attempted: add whitebox-static false-positive memory with explicit
+  evidence, scope, author, reason, creation/expiration timestamps, snippet-hash
+  invalidation, and audit/report visibility.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `evals/kuzushi-whitebox-static/run.ts`
+  - `docs/kuzushi-whitebox-static.md`
+  - `crates/kuzushi-core/src/whitebox_suppressions.rs`
+  - `crates/kuzushi-core/src/modules.rs`
+  - `crates/kuzushi-core/src/lib.rs`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `git status --short --branch` in the clean nested clone
+  - `sed -n '1,180p' progress/kuzushi-whitebox-static.progress.md`
+  - `rg -n "suppression|suppress|false.?positive|fingerprint|snippetHash|snippet_hash|staticProofState|StaticProofState|whitebox" crates/kuzushi-core/src crates/kuzushi-cli/src tests evals docs tasks -g '!target'`
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core whitebox_suppressions`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `pnpm eval:kuzushi-whitebox-static`
+  - `git diff --check`
+- Result: implementation complete and locally committed. `whitebox_suppressions.rs` now stores
+  suppression records under `.kuzushi/v2/whitebox-suppressions.json`, requires
+  non-empty evidence/scope/reason/author and a future expiration, builds records
+  from verified source spans, and evaluates active, stale, and expired
+  suppressions without filtering findings out of audit/report visibility.
+  Whitebox `sast:scan` now writes a `whitebox-suppressions.json` run artifact
+  with active matches, stale hash-invalidated records, expired records, and an
+  explicit note that suppressed findings remain visible. WB-019 is marked
+  `passes: true` in the PRD after the story gate passed.
+- Remaining work: push the local WB-019 commit, then continue with WB-020
+  through WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files, while the clean nested clone at
+    `/Users/operator/VibeCode/open-sourced/kuzushi/.codex-active/kuzushi-stage3`
+    contains the active pushed Stage 3 state. This iteration continued in the
+    nested clone to avoid resetting or overwriting the primary worktree.
+  - `git push origin HEAD:main` failed with `Could not resolve host:
+    github.com`, so the required push has not completed from this sandbox.
 
 ### Iteration 46 - WB-018
 

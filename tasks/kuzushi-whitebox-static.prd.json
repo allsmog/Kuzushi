@@ -237,7 +237,7 @@
       "acceptance": ["Suppression records evidence, scope, reason, author, timestamp, and expiration.", "Snippet hash changes invalidate suppression; audit/report mode still shows suppressed findings."],
       "storyGate": "cargo test -p kuzushi-core whitebox_suppressions",
       "forbidden": ["silent permanent suppression"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-020",

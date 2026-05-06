@@ -27,6 +27,7 @@ pub mod systems_hunt;
 pub mod threat_model;
 pub mod variant_ndiff;
 pub mod whitebox_static;
+pub mod whitebox_suppressions;
 pub mod workspace;
 pub mod x_ray;
 
@@ -129,6 +130,14 @@ pub use whitebox_static::{
     validate_whitebox_static_agent_tool_policy, whitebox_static_enabled,
     whitebox_static_profile_requested, whitebox_static_proof_state_from_input,
     whitebox_static_proof_state_from_str, AnalysisMode, WhiteboxStaticPolicy,
+};
+pub use whitebox_suppressions::{
+    build_whitebox_suppression_for_finding, build_whitebox_suppression_for_finding_at,
+    evaluate_whitebox_suppressions, findings_visible_with_whitebox_suppressions,
+    load_whitebox_suppressions, save_whitebox_suppressions, upsert_whitebox_suppression,
+    validate_whitebox_suppression, whitebox_suppression_store_path, WhiteboxExpiredSuppression,
+    WhiteboxStaleSuppression, WhiteboxSuppressionEvidence, WhiteboxSuppressionMatch,
+    WhiteboxSuppressionRecord, WhiteboxSuppressionReport, WhiteboxSuppressionScope,
 };
 pub use workspace::{
     export_workspace_findings, WorkspaceExportFormat, WorkspaceFindingsExport, WorkspaceTarget,

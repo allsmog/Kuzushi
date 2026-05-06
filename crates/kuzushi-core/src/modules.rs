@@ -45,6 +45,7 @@ use crate::whitebox_static::{
     whitebox_static_profile_requested, whitebox_static_proof_state_from_input,
     whitebox_static_triage_prompt_block, whitebox_static_triage_system_prompt,
 };
+use crate::whitebox_suppressions::{evaluate_whitebox_suppressions, load_whitebox_suppressions};
 use crate::workspace::{export_workspace_findings, WorkspaceExportFormat, WorkspaceTarget};
 use crate::x_ray::execute_x_ray_tool;
 use uuid::Uuid;
@@ -847,6 +848,13 @@ fn run_sast_scan(
     } else {
         None
     };
+    let whitebox_suppressions = if whitebox_static.is_some() {
+        Some(write_whitebox_suppressions_json(
+            workspace, store, &run_ids, &artifacts,
+        )?)
+    } else {
+        None
+    };
 
     let triage = if triage_requested {
         let fingerprints = fingerprints_for_sast_runs(store, &run_ids)?;
@@ -949,6 +957,21 @@ fn run_sast_scan(
                 "  Candidate Semgrep rules: {count} disabled candidate(s), {validated} fixture-validated"
             ));
         }
+        if let Some(suppression_report) = whitebox_suppressions.as_ref() {
+            let suppressed = suppression_report
+                .get("suppressedCount")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            let stale = suppression_report
+                .get("staleCount")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            if suppressed > 0 || stale > 0 {
+                lines.push(format!(
+                    "  False-positive memory: {suppressed} active suppression match(es), {stale} stale; findings remain visible in audit/report output"
+                ));
+            }
+        }
     }
     lines.push(format!("  Engines: {}", engine_ids.join(", ")));
     if let Some(triage_output) = triage
@@ -986,6 +1009,13 @@ fn run_sast_scan(
             .display()
             .to_string()
     });
+    let whitebox_suppressions_artifact = whitebox_suppressions.as_ref().map(|_| {
+        artifacts
+            .dir
+            .join("whitebox-suppressions.json")
+            .display()
+            .to_string()
+    });
 
     let result = json!({
         "ok": true,
@@ -1017,6 +1047,7 @@ fn run_sast_scan(
             "staticNarratives": static_narratives,
             "staticVariants": static_variants,
             "candidateSemgrepRules": candidate_semgrep_rules,
+            "whiteboxSuppressions": whitebox_suppressions,
             "triage": triage.as_ref().and_then(|value| value.get("data")).cloned(),
             "verification": {
                 "verified": verification_results.len(),
@@ -1038,6 +1069,7 @@ fn run_sast_scan(
                 "staticNarratives": static_narratives_artifact,
                 "staticVariants": static_variants_artifact,
                 "candidateSemgrepRules": candidate_semgrep_rules_artifact,
+                "whiteboxSuppressions": whitebox_suppressions_artifact,
                 "triageJsonl": artifacts.triage_jsonl.display().to_string(),
                 "verifyJsonl": artifacts.verify_jsonl.display().to_string(),
             },
@@ -1252,6 +1284,40 @@ fn write_candidate_semgrep_rules_json(
         "artifact": artifact_path.display().to_string(),
         "deterministic": synthesis_report.deterministic,
         "policy": "candidate Semgrep rules are generated only from statically_confirmed findings and remain disabled until fixture validation passes and an operator enables them",
+    });
+    fs::write(
+        &artifact_path,
+        format!("{}\n", serde_json::to_string_pretty(&report)?),
+    )
+    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    Ok(report)
+}
+
+fn write_whitebox_suppressions_json(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    run_ids: &SastRunIds,
+    artifacts: &SastRunArtifacts,
+) -> Result<Value> {
+    let findings = findings_for_sast_runs(store, run_ids)?;
+    let suppressions = load_whitebox_suppressions(workspace)?;
+    let suppression_report =
+        evaluate_whitebox_suppressions(workspace.root(), &findings, &suppressions, now_unix());
+    let artifact_path = artifacts.dir.join("whitebox-suppressions.json");
+    let report = json!({
+        "totalSuppressions": suppression_report.total_suppressions,
+        "activeSuppressions": suppression_report.active_suppressions,
+        "suppressedCount": suppression_report.suppressed_count,
+        "suppressedFindings": suppression_report.suppressed_findings,
+        "staleCount": suppression_report.stale_suppressions.len(),
+        "staleSuppressions": suppression_report.stale_suppressions,
+        "expiredCount": suppression_report.expired_suppressions.len(),
+        "expiredSuppressions": suppression_report.expired_suppressions,
+        "findingsRemainVisible": suppression_report.findings_remain_visible,
+        "auditNote": suppression_report.audit_note,
+        "artifact": artifact_path.display().to_string(),
+        "deterministic": true,
+        "policy": "whitebox-static false-positive memory annotates suppressions only; suppressed findings remain in audit/report output",
     });
     fs::write(
         &artifact_path,
@@ -7402,6 +7468,13 @@ fn unix_millis() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
+        .unwrap_or_default()
+}
+
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
         .unwrap_or_default()
 }
 

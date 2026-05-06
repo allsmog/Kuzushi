@@ -71,6 +71,19 @@ Whitebox-static can also synthesize candidate Semgrep rules from
 positive and negative source fixtures and are written disabled by default; a
 passing fixture check only marks them ready for operator review, not enabled.
 
+## False-Positive Memory
+
+Whitebox-static suppression memory lives under
+`.kuzushi/v2/whitebox-suppressions.json`. Each suppression records scope,
+source evidence, reason, author, creation time, and expiration. Suppression
+matching is snippet-hash guarded: when the cited source span changes, the
+suppression becomes stale and no longer applies.
+
+Suppressions are audit annotations, not deletion rules. Suppressed findings
+remain visible in run artifacts and report/audit output, with
+`whitebox-suppressions.json` listing active matches, stale suppressions, and
+expired suppressions.
+
 ## Evidence Limits
 
 Whitebox-static cannot prove that an issue is reachable in a deployed runtime,
