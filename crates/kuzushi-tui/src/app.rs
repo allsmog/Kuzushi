@@ -490,6 +490,8 @@ pub struct ShellApp {
     pub session_budget_usd: Option<f64>,
     pub advisory: AdvisoryState,
     pub pending_plan: Option<PlanProposal>,
+    pub plan_cursor: usize,
+    pub plan_skipped: BTreeSet<usize>,
     pub planner_running: bool,
     pub plan_abort_requested: bool,
     pub pending_threat_patch: Option<ThreatPatch>,
@@ -552,6 +554,8 @@ impl ShellApp {
             session_budget_usd: parse_budget_env(),
             advisory: AdvisoryState::default(),
             pending_plan: None,
+            plan_cursor: 0,
+            plan_skipped: BTreeSet::new(),
             planner_running: false,
             plan_abort_requested: false,
             pending_threat_patch: None,
@@ -1747,7 +1751,52 @@ impl ShellApp {
 
     pub fn set_pending_plan(&mut self, plan: PlanProposal) {
         self.planner_running = false;
+        self.plan_cursor = 0;
+        self.plan_skipped.clear();
         self.pending_plan = Some(plan);
+    }
+
+    pub fn plan_change_count(&self) -> usize {
+        self.pending_plan
+            .as_ref()
+            .map(|plan| plan.changes.len())
+            .unwrap_or(0)
+    }
+
+    pub fn plan_cursor_clamped(&self) -> usize {
+        let total = self.plan_change_count();
+        if total == 0 {
+            0
+        } else {
+            self.plan_cursor.min(total - 1)
+        }
+    }
+
+    pub fn plan_change_skipped(&self, idx: usize) -> bool {
+        self.plan_skipped.contains(&idx)
+    }
+
+    pub fn move_plan_cursor(&mut self, delta: i32) {
+        let total = self.plan_change_count();
+        if total == 0 {
+            self.plan_cursor = 0;
+            return;
+        }
+        let cur = self.plan_cursor.min(total - 1) as i32;
+        let next = (cur + delta).clamp(0, total as i32 - 1) as usize;
+        self.plan_cursor = next;
+    }
+
+    pub fn toggle_plan_change_skip(&mut self) {
+        if self.plan_change_count() == 0 {
+            return;
+        }
+        let idx = self.plan_cursor_clamped();
+        if self.plan_skipped.contains(&idx) {
+            self.plan_skipped.remove(&idx);
+        } else {
+            self.plan_skipped.insert(idx);
+        }
     }
 
     pub fn start_planner(&mut self, goal: &str) {
@@ -1801,9 +1850,17 @@ impl ShellApp {
         let Some(plan) = self.pending_plan.take() else {
             return;
         };
+        let skipped = std::mem::take(&mut self.plan_skipped);
+        self.plan_cursor = 0;
         let total = plan.changes.len();
         let mut applied = 0usize;
-        for change in plan.changes {
+        let mut skipped_count = 0usize;
+        for (idx, change) in plan.changes.into_iter().enumerate() {
+            if skipped.contains(&idx) {
+                skipped_count += 1;
+                self.log("plan-skip", format!("skipped: {}", change.label()));
+                continue;
+            }
             match change {
                 PlanChange::SetOption {
                     global,
@@ -1834,7 +1891,14 @@ impl ShellApp {
                 }
             }
         }
-        self.log("plan", format!("applied {applied}/{total} change(s)"));
+        if skipped_count > 0 {
+            self.log(
+                "plan",
+                format!("applied {applied}/{total} change(s); skipped {skipped_count}"),
+            );
+        } else {
+            self.log("plan", format!("applied {applied}/{total} change(s)"));
+        }
         for line in plan.unsupported {
             self.log("plan-skip", line);
         }
@@ -1844,6 +1908,8 @@ impl ShellApp {
         if self.pending_plan.take().is_some() {
             self.log("plan", "discarded pending plan");
         }
+        self.plan_cursor = 0;
+        self.plan_skipped.clear();
     }
 
     pub fn show_aliases(&mut self, prefix: Option<&str>) {
@@ -4441,6 +4507,29 @@ impl ShellApp {
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                     self.discard_pending_plan();
+                    return;
+                }
+                KeyCode::Char(' ') => {
+                    self.toggle_plan_change_skip();
+                    return;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.move_plan_cursor(1);
+                    return;
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.move_plan_cursor(-1);
+                    return;
+                }
+                KeyCode::Char('g') => {
+                    self.plan_cursor = 0;
+                    return;
+                }
+                KeyCode::Char('G') => {
+                    let total = self.plan_change_count();
+                    if total > 0 {
+                        self.plan_cursor = total - 1;
+                    }
                     return;
                 }
                 _ => {}
@@ -9592,6 +9681,52 @@ JSON
             app.help_scroll < after_one + (after_one - baseline),
             "PageUp should retreat"
         );
+    }
+
+    #[test]
+    fn plan_cursor_navigation_and_skip_toggle() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_pending_plan(PlanProposal {
+            goal: "test".to_string(),
+            summary: "summary".to_string(),
+            changes: vec![
+                PlanChange::Note { text: "first".to_string() },
+                PlanChange::Note { text: "second".to_string() },
+                PlanChange::Note { text: "third".to_string() },
+            ],
+            unsupported: Vec::new(),
+        });
+        // Cursor starts at 0 with no skips.
+        assert_eq!(app.plan_cursor, 0);
+        assert_eq!(app.plan_skipped.len(), 0);
+        // j/Down moves the cursor down through the plan changes.
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        assert_eq!(app.plan_cursor, 1);
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+        assert_eq!(app.plan_cursor, 2);
+        // Past the end — clamp.
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        assert_eq!(app.plan_cursor, 2);
+        // Space toggles the cursor row in the skip set.
+        app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::empty()));
+        assert!(app.plan_change_skipped(2));
+        app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::empty()));
+        assert!(!app.plan_change_skipped(2));
+        // k/Up walks back up.
+        app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()));
+        assert_eq!(app.plan_cursor, 1);
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
+        assert_eq!(app.plan_cursor, 0);
+        // g/G snap to top/bottom.
+        app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
+        assert_eq!(app.plan_cursor, 2);
+        app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
+        assert_eq!(app.plan_cursor, 0);
+        // Discard clears all plan state.
+        app.discard_pending_plan();
+        assert!(app.pending_plan.is_none());
+        assert_eq!(app.plan_cursor, 0);
+        assert_eq!(app.plan_skipped.len(), 0);
     }
 
     #[test]

@@ -2456,9 +2456,19 @@ fn render_plan_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         return;
     };
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let active = plan
+        .changes
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| !app.plan_change_skipped(*idx))
+        .count();
+    let total = plan.changes.len();
     lines.push(Line::styled(
         fit(
-            &format!("◆ PLAN · goal: {}", plan.goal),
+            &format!(
+                "◆ PLAN · goal: {} · {}/{} active",
+                plan.goal, active, total
+            ),
             area.width as usize,
         ),
         theme::accent(),
@@ -2467,10 +2477,28 @@ fn render_plan_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         fit(&format!("  summary: {}", plan.summary), area.width as usize),
         theme::primary(),
     ));
-    for change in &plan.changes {
+    let cursor = app.plan_cursor_clamped();
+    for (idx, change) in plan.changes.iter().enumerate() {
+        let skipped = app.plan_change_skipped(idx);
+        let marker = if idx == cursor {
+            "›"
+        } else {
+            " "
+        };
+        let toggle = if skipped { "[ ]" } else { "[x]" };
+        let style = if skipped {
+            theme::muted().add_modifier(Modifier::DIM)
+        } else if idx == cursor {
+            theme::success().add_modifier(Modifier::BOLD)
+        } else {
+            theme::success()
+        };
         lines.push(Line::styled(
-            fit(&format!("  + {}", change.label()), area.width as usize),
-            theme::success(),
+            fit(
+                &format!("{marker} {toggle} {}", change.label()),
+                area.width as usize,
+            ),
+            style,
         ));
     }
     for note in &plan.unsupported {
@@ -2480,7 +2508,10 @@ fn render_plan_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         ));
     }
     lines.push(Line::styled(
-        fit("[y] apply   [n] discard   /yes   /no", area.width as usize),
+        fit(
+            "[j/k] move · [Space] toggle · [y] apply · [n] discard",
+            area.width as usize,
+        ),
         theme::label(),
     ));
     render_lines(frame, area, lines);
