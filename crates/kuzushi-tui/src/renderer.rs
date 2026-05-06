@@ -1514,15 +1514,25 @@ fn threat_lines(app: &ShellApp, area: Rect, view: ThreatView) -> Vec<Line<'stati
 
     match view {
         ThreatView::Dfd => {
-            lines.push(divider("DFD", area.width));
-            lines.push(detail(
-                "external",
-                "browser, API clients, package registries",
-            ));
-            lines.push(detail("application", "source tree, handlers, jobs, CLIs"));
-            lines.push(detail("datastore", "SQLite state, config, run artifacts"));
-            lines.push(blank());
-            lines.push(Line::raw("external -> application -> datastore"));
+            lines.push(section_header_line("DFD · acme-checkout", area.width));
+            lines.extend(dfd_canonical_lines());
+            if let Some(doc) = current_threat_model_doc(app) {
+                if let Some(nodes) = dfd_nodes_from_doc(&doc) {
+                    lines.push(blank());
+                    lines.push(section_header_line(
+                        &format!("NODES FROM threat-model.json · {}", nodes.len()),
+                        area.width,
+                    ));
+                    for (id, node_type, zone) in nodes.into_iter().take(8) {
+                        lines.push(Line::from(vec![
+                            Span::raw("   "),
+                            Span::styled(pad(&id, 24), theme::accent()),
+                            Span::styled(pad(&node_type, 16), theme::muted()),
+                            Span::styled(zone, theme::subtle()),
+                        ]));
+                    }
+                }
+            }
         }
         ThreatView::Stride => {
             let doc = current_threat_model_doc(app);
@@ -3406,6 +3416,119 @@ fn stride_rollup_rows() -> Vec<(&'static str, Severity, &'static str, usize, Str
     ]
 }
 
+/// Canonical 10-row ASCII DFD matching `design/mockups/threat-model.jsx`.
+/// 5 boxed nodes + 2 annotated edges (jwt, plaintext PII).
+fn dfd_canonical_lines() -> Vec<Line<'static>> {
+    let sub = theme::subtle();
+    let acc = theme::accent();
+    let mut_ = theme::muted();
+    let warn = theme::warn();
+    vec![
+        Line::from(vec![
+            Span::raw("     "),
+            Span::styled(
+                "┌────────────┐         ┌─────────────┐         ┌──────────────┐",
+                sub,
+            ),
+        ]),
+        Line::from(vec![
+            Span::raw("     "),
+            Span::styled("│ ", sub),
+            Span::styled("  user    ", acc),
+            Span::styled("│  https  │ ", sub),
+            Span::styled(" api edge  ", acc),
+            Span::styled("│   sql   │ ", sub),
+            Span::styled("  postgres   ", acc),
+            Span::styled("│", sub),
+        ]),
+        Line::from(vec![
+            Span::raw("     "),
+            Span::styled("│ ", sub),
+            Span::styled("  browser ", mut_),
+            Span::styled("│ ──────► │ ", sub),
+            Span::styled("  nginx    ", mut_),
+            Span::styled("│ ──────► │ ", sub),
+            Span::styled("  primary db ", mut_),
+            Span::styled("│", sub),
+        ]),
+        Line::from(vec![
+            Span::raw("     "),
+            Span::styled(
+                "└────────────┘         └──────┬──────┘         └──────┬───────┘",
+                sub,
+            ),
+        ]),
+        Line::from(vec![
+            Span::raw("                                       "),
+            Span::styled("│ ", sub),
+            Span::styled("jwt", mut_),
+            Span::raw("                    "),
+            Span::styled("│ ", sub),
+            Span::styled("plaintext PII", warn),
+        ]),
+        Line::from(vec![
+            Span::raw("                                       "),
+            Span::styled("▼", sub),
+            Span::raw("                       "),
+            Span::styled("▼", sub),
+        ]),
+        Line::from(vec![
+            Span::raw("                              "),
+            Span::styled("┌──────────────┐         ┌──────────────┐", sub),
+        ]),
+        Line::from(vec![
+            Span::raw("                              "),
+            Span::styled("│ ", sub),
+            Span::styled(" worker pool  ", acc),
+            Span::styled("│  amqp   │ ", sub),
+            Span::styled(" s3 (us-east) ", acc),
+            Span::styled("│", sub),
+        ]),
+        Line::from(vec![
+            Span::raw("                              "),
+            Span::styled("│ ", sub),
+            Span::styled(" rabbitmq cli ", mut_),
+            Span::styled("│ ──────► │ ", sub),
+            Span::styled(" invoices/    ", mut_),
+            Span::styled("│", sub),
+        ]),
+        Line::from(vec![
+            Span::raw("                              "),
+            Span::styled("└──────────────┘         └──────────────┘", sub),
+        ]),
+    ]
+}
+
+/// Extract `(id, node_type, trust_zone)` triples from `dfd.nodes` if present.
+fn dfd_nodes_from_doc(doc: &serde_json::Value) -> Option<Vec<(String, String, String)>> {
+    let nodes = doc.get("dfd")?.get("nodes")?.as_array()?;
+    if nodes.is_empty() {
+        return None;
+    }
+    let rows = nodes
+        .iter()
+        .filter_map(|n| {
+            let id = n.get("id").and_then(|v| v.as_str())?.to_string();
+            let node_type = n
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("node")
+                .to_string();
+            let zone = n
+                .get("trustZone")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            Some((id, node_type, zone))
+        })
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        None
+    } else {
+        Some(rows)
+    }
+}
+
 /// Try to load the persisted threat model for the active workspace target.
 /// Returns `None` if the file doesn't exist or is empty/null.
 fn current_threat_model_doc(app: &ShellApp) -> Option<serde_json::Value> {
@@ -4210,13 +4333,18 @@ mod tests {
             let backend = TestBackend::new(80, 18);
             let mut terminal = Terminal::new(backend).unwrap();
             let mut app = ShellApp::new(V2Config::default(), None);
+            let is_dfd = matches!(view, ShellView::Threat(ThreatView::Dfd));
             app.shell_view = view;
 
             terminal.draw(|frame| render_app(frame, &app)).unwrap();
             let rendered = format!("{:?}", terminal.backend().buffer());
 
             assert!(rendered.contains(expected), "missing {expected}");
-            assert!(!rendered.contains("┌"));
+            // Box-drawing is reserved for the DFD diagram; every other view
+            // must remain free of nested boxes (no Ink-style boxed dashboard).
+            if !is_dfd {
+                assert!(!rendered.contains("┌"), "{expected} drew a box");
+            }
         }
     }
 
@@ -4443,6 +4571,77 @@ mod tests {
                 "unexpected streaming cursor while idle: {text:?}"
             );
         }
+    }
+
+    #[test]
+    fn dfd_canonical_lines_render_design_diagram() {
+        let lines = dfd_canonical_lines();
+        assert_eq!(lines.len(), 10, "expected 10 rows in canonical DFD");
+        let texts: Vec<String> = lines
+            .iter()
+            .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+        assert!(texts[1].contains("user"));
+        assert!(texts[1].contains("api edge"));
+        assert!(texts[1].contains("postgres"));
+        assert!(texts[4].contains("jwt"));
+        assert!(texts[4].contains("plaintext PII"));
+        assert!(texts[7].contains("worker pool"));
+        assert!(texts[7].contains("s3 (us-east)"));
+        // top + bottom borders are pure box-drawing
+        assert!(texts[0].contains("┌────"));
+        assert!(texts[3].contains("└────"));
+    }
+
+    #[test]
+    fn dfd_nodes_from_doc_returns_id_type_zone_triples() {
+        let doc = serde_json::json!({
+            "dfd": {
+                "nodes": [
+                    {"id": "actor-user", "type": "external-entity", "name": "User",
+                     "description": "End user", "trustZone": "external"},
+                    {"id": "web", "type": "process", "name": "Web app",
+                     "description": "Server", "trustZone": "internal"}
+                ]
+            }
+        });
+        let nodes = dfd_nodes_from_doc(&doc).expect("expected non-empty nodes");
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].0, "actor-user");
+        assert_eq!(nodes[0].1, "external-entity");
+        assert_eq!(nodes[0].2, "external");
+        assert_eq!(nodes[1].0, "web");
+        assert_eq!(nodes[1].2, "internal");
+    }
+
+    #[test]
+    fn dfd_nodes_from_doc_returns_none_when_missing() {
+        assert!(dfd_nodes_from_doc(&serde_json::json!({})).is_none());
+        assert!(dfd_nodes_from_doc(&serde_json::json!({"dfd": {}})).is_none());
+        assert!(dfd_nodes_from_doc(&serde_json::json!({"dfd": {"nodes": []}})).is_none());
+    }
+
+    #[test]
+    fn threats_dfd_view_renders_canonical_diagram_header() {
+        let backend = TestBackend::new(120, 28);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Threat(ThreatView::Dfd);
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains("DFD · ACME-CHECKOUT"),
+            "expected DFD section header in: {rendered}"
+        );
+        assert!(rendered.contains("user"));
+        assert!(rendered.contains("api edge"));
+        assert!(rendered.contains("postgres"));
+        assert!(rendered.contains("worker pool"));
+        // Old placeholder content must be gone.
+        assert!(!rendered.contains("browser, API clients, package registries"));
+        assert!(!rendered.contains("source tree, handlers, jobs, CLIs"));
     }
 
     #[test]
@@ -5390,13 +5589,18 @@ mod tests {
             let mut terminal = Terminal::new(backend).unwrap();
             let mut app = ShellApp::new(V2Config::default(), None);
             app.focused_module = Some("semgrep".to_string());
+            let is_dfd = matches!(view, ShellView::Threat(ThreatView::Dfd));
             app.shell_view = view;
 
             terminal.draw(|frame| render_app(frame, &app)).unwrap();
             let rendered = format!("{:?}", terminal.backend().buffer());
 
             assert!(rendered.contains(expected), "missing {expected}");
-            assert!(!rendered.contains("┌"));
+            // DFD diagram intentionally uses box-drawing; suppress the
+            // no-Ink-dashboard guard for that one view.
+            if !is_dfd {
+                assert!(!rendered.contains("┌"), "{expected} drew a box");
+            }
         }
     }
 

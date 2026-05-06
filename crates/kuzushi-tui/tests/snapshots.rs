@@ -35,6 +35,18 @@ fn catalog_view_default() {
 }
 
 #[test]
+fn threat_dfd_view_canonical_diagram() {
+    let mut app = fresh_app();
+    app.shell_view = ShellView::Threat(ThreatView::Dfd);
+    insta::with_settings!({
+        prepend_module_to_snapshot => false,
+        omit_expression => true,
+    }, {
+        insta::assert_snapshot!("threat_dfd_canonical", render_at_120(&app));
+    });
+}
+
+#[test]
 fn threat_stride_view_with_canonical_fixture() {
     let mut app = fresh_app();
     app.shell_view = ShellView::Threat(ThreatView::Stride);
