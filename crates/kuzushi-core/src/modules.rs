@@ -5088,6 +5088,20 @@ fn run_verify_exploit(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Va
             },
         ))?;
 
+    // Persist the outcome so downstream tools (`/findings`, patch:finding,
+    // PR comments) can see the empirical proof level without re-running.
+    let mut persisted_id: Option<i64> = None;
+    if let Some(finding_db_id) = finding.id {
+        let record = outcome.to_persisted();
+        match store.save_verification(finding_db_id, &record) {
+            Ok(id) => persisted_id = Some(id),
+            Err(err) => eprintln!(
+                "[verify:exploit] could not persist verification for finding {}: {err}",
+                finding.fingerprint
+            ),
+        }
+    }
+
     let summary = format!(
         "[+] verify:exploit  proof_level={}  verdict={}  backend={:?}  duration_ms={}",
         outcome.proof_level,
@@ -5100,6 +5114,9 @@ fn run_verify_exploit(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Va
     if let Some(obj) = response.as_object_mut() {
         obj.insert("output".to_string(), Value::String(summary));
         obj.insert("costUsd".to_string(), json!(outcome.cost_usd));
+        if let Some(id) = persisted_id {
+            obj.insert("verificationRowId".to_string(), json!(id));
+        }
     }
     // Keep workspace var live; suppresses unused-binding warning when
     // the binding is only used to validate ctx.workspace is set.

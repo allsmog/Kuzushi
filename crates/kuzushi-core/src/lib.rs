@@ -43,7 +43,8 @@ pub use dep_hygiene::{
 };
 pub use findings::{
     Finding, FindingListFilter, FindingListReport, FindingStore, FindingVerdictFilter,
-    PatchAttempt, PatchResult, PatchStatus, Severity, TriageOutcome, TriageVerdict,
+    PatchAttempt, PatchResult, PatchStatus, PersistedProofVerdict, PersistedSandboxBackend,
+    PersistedVerification, Severity, TriageOutcome, TriageVerdict,
 };
 pub use iac_scan::{
     scan_iac, IacScanFinding, IacScanKind, IacScanOptions, IacScanReport, IacScanScanner,
