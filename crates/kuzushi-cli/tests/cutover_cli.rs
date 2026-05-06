@@ -32,18 +32,11 @@ fn rust_cli_help_is_the_documented_primary_surface() {
     assert!(out.contains("Kuzushi security copilot"));
     assert!(out.contains("Usage: kuzushi"));
     for command in [
-        "shell", "scan", "findings", "config", "modules", "tools", "run",
+        "shell", "scan", "findings", "config", "modules", "tools", "doctor", "run",
     ] {
         assert!(out.contains(command), "missing command {command} in help");
     }
-    for removed in [
-        "TypeScript",
-        "Ink",
-        "doctor",
-        "quickstart",
-        "preset",
-        "sarif",
-    ] {
+    for removed in ["TypeScript", "Ink", "quickstart", "preset", "sarif"] {
         assert!(
             !out.to_ascii_lowercase()
                 .contains(&removed.to_ascii_lowercase()),
@@ -215,4 +208,87 @@ fn legacy_ink_shell_is_reference_only_in_source_cli() {
         fs::read_to_string(repo_root().join("docs/rust-migration-status.md")).unwrap();
     assert!(migration_status.contains("src/cli.ts shell"));
     assert!(migration_status.contains("fails with a Rust replacement message"));
+}
+
+#[test]
+fn doctor_checks_rust_preflight_without_printing_secrets() {
+    let tmp = tempfile::tempdir().unwrap();
+    let secret = "sk-kuzushi-doctor-secret-value";
+    let output = kuzushi()
+        .current_dir(repo_root())
+        .args(["doctor", "--target"])
+        .arg(tmp.path())
+        .env("KUZUSHI_MODEL", "openai:gpt-4.1")
+        .env("OPENAI_API_KEY", secret)
+        .output()
+        .unwrap();
+    let out = stdout(output);
+
+    for expected in [
+        "Kuzushi doctor",
+        "target",
+        "config",
+        "state",
+        "findings-db",
+        "semgrep",
+        "codeql",
+        "model",
+        "auth-env",
+        "pi-agent-core bridge",
+        "Summary:",
+    ] {
+        assert!(out.contains(expected), "missing {expected:?} in:\n{out}");
+    }
+    assert!(out.contains("OPENAI_API_KEY is set; value is hidden"));
+    assert!(
+        !out.contains(secret),
+        "doctor output must not print credential values:\n{out}"
+    );
+    assert!(
+        !tmp.path()
+            .join(".kuzushi/v2")
+            .join(format!(".doctor-write-test-{}", std::process::id()))
+            .exists(),
+        "doctor write probe should be removed"
+    );
+}
+
+#[test]
+fn doctor_json_reports_named_preflight_checks() {
+    let tmp = tempfile::tempdir().unwrap();
+    let raw = stdout(
+        kuzushi()
+            .current_dir(repo_root())
+            .args(["doctor", "--target"])
+            .arg(tmp.path())
+            .arg("--json")
+            .env("KUZUSHI_MODEL", "openai:gpt-4.1")
+            .env("OPENAI_API_KEY", "hidden-json-secret")
+            .output()
+            .unwrap(),
+    );
+    let report: Value = serde_json::from_str(&raw).unwrap();
+    let names = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|check| check["name"].as_str())
+        .collect::<Vec<_>>();
+
+    for expected in [
+        "config",
+        "state",
+        "findings-db",
+        "semgrep",
+        "codeql",
+        "model",
+        "auth-env",
+        "pi-agent-core bridge",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "missing {expected:?}; names={names:?}; raw={raw}"
+        );
+    }
+    assert!(!raw.contains("hidden-json-secret"));
 }
