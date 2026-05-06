@@ -7,6 +7,7 @@ pub mod config;
 pub mod dep_hygiene;
 pub mod diff_scope;
 pub mod events;
+pub mod executor;
 pub mod findings;
 pub mod iac_scan;
 pub mod modules;
@@ -51,7 +52,11 @@ pub use attack_surface::{
 pub use bootstrap::{append_bootstrap_context, load_bootstrap_context};
 pub use carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hunt_report};
 pub use config::{
-    load_config, load_config_for_target, ConfigPaths, RuntimeConfig, RuntimeKind, V2Config,
+    gateway_shortcut_active, load_config, load_config_for_target, ConfigPaths, RuntimeConfig,
+    RuntimeKind, V2Config, VERCEL_AI_GATEWAY_BASE_URL,
+};
+pub use executor::{
+    Executor, ExecutorRequest, ExecutorResult, ExecutorStatus, LocalExecutor, NoopExecutor,
 };
 pub use dep_hygiene::{
     analyze_manifest as analyze_dep_hygiene_manifest, check_dependency_hygiene, DepHygieneFinding,
@@ -63,10 +68,11 @@ pub use diff_scope::{
     WhiteboxDiffScopeReport,
 };
 pub use findings::{
-    format_finding_alias, parse_finding_alias, resolve_finding_alias, sorted_finding_aliases,
-    stable_finding_alias, Finding, FindingListFilter, FindingListReport, FindingStore,
-    FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus, Severity, StaticProofState,
-    TriageOutcome, TriageVerdict,
+    detect_refusal_in_text, format_finding_alias, parse_finding_alias, parse_refusal_report,
+    resolve_finding_alias, sorted_finding_aliases, stable_finding_alias, AnalysisEntry,
+    AnalysisUsage, Finding, FindingListFilter, FindingListReport, FindingStore,
+    FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus, RefusalReport, ScanRunRecord,
+    Severity, StaticProofState, TriageOutcome, TriageVerdict,
 };
 pub use iac_scan::{
     scan_iac, IacScanFinding, IacScanKind, IacScanOptions, IacScanReport, IacScanScanner,

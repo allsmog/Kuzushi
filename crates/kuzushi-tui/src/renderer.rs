@@ -3363,11 +3363,63 @@ fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
             ("options <tool>", "options"),
             ("back", "home"),
         ],
-        _ => vec![
-            ("Enter", "run command"),
-            ("back", "home"),
-            ("help", "help"),
+        ShellView::Runs => {
+            let mut bindings = Vec::new();
+            push_view_keybindings(&mut bindings, app);
+            bindings.extend([
+                ("scan", "rescan"),
+                ("back", "home"),
+                ("Ctrl+C", "exit"),
+            ]);
+            bindings
+        }
+        ShellView::Replay(_) => vec![
+            ("runs", "list"),
+            ("trace <id>", "stream"),
+            ("findings", "list"),
+            ("back", "runs"),
+        ],
+        ShellView::Trace(_) => vec![
+            ("runs", "list"),
+            ("replay <id>", "summary"),
+            ("findings", "list"),
+            ("back", "runs"),
+        ],
+        ShellView::ActorDetail(_) => vec![
+            ("back", "module-run"),
+            ("findings", "list"),
+            ("scan", "rescan"),
             ("Ctrl+C", "exit"),
+        ],
+        ShellView::Module => vec![
+            ("tune", "options"),
+            ("prompts", "edit prompts"),
+            ("scan", "scan target"),
+            ("back", "catalog"),
+        ],
+        ShellView::Tune => vec![
+            ("set <key> <value>", "session"),
+            ("setg <key> <value>", "global"),
+            ("show missing", "required"),
+            ("back", "module"),
+        ],
+        ShellView::ThreatEditor => vec![
+            ("threats regen", "rebuild"),
+            ("threats ask <q>", "edit"),
+            ("threats apply", "apply"),
+            ("back", "threats"),
+        ],
+        ShellView::Config => vec![
+            ("model", "choose runtime"),
+            ("auth login <provider>", "auth"),
+            ("provider", "switch"),
+            ("back", "home"),
+        ],
+        ShellView::SastTasks => vec![
+            ("task block <id>", "block"),
+            ("task allow <id>", "allow"),
+            ("task mode auto|manual", "mode"),
+            ("back", "module"),
         ],
     };
     bindings.insert(0, ("Tab", "complete"));
