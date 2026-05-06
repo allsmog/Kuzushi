@@ -125,6 +125,7 @@ impl AgentRuntime for PiAgentCoreRuntime {
                 verdict: TriageVerdict::NeedsReview,
                 confidence: 0.25,
                 rationale: response.text,
+                ..Default::default()
             });
         }
 
@@ -132,6 +133,7 @@ impl AgentRuntime for PiAgentCoreRuntime {
             verdict: TriageVerdict::NeedsReview,
             confidence: 0.0,
             rationale: "pi-agent-core bridge returned no triage content".to_string(),
+            ..Default::default()
         })
     }
 }

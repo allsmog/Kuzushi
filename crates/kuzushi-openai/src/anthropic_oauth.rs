@@ -342,20 +342,25 @@ impl AgentRuntime for AnthropicOAuthRuntime {
             })
             .await?;
 
+        let call_cost = response.cost_usd;
+
         if let Some(structured) = response.structured.as_ref() {
-            if let Ok(outcome) = serde_json::from_value::<TriageOutcome>(structured.clone()) {
+            if let Ok(mut outcome) = serde_json::from_value::<TriageOutcome>(structured.clone()) {
+                outcome.cost_usd = call_cost;
                 return Ok(clamp_outcome(outcome));
             }
         }
 
         if !response.text.is_empty() {
-            if let Ok(outcome) = serde_json::from_str::<TriageOutcome>(&response.text) {
+            if let Ok(mut outcome) = serde_json::from_str::<TriageOutcome>(&response.text) {
+                outcome.cost_usd = call_cost;
                 return Ok(clamp_outcome(outcome));
             }
             return Ok(TriageOutcome {
                 verdict: TriageVerdict::NeedsReview,
                 confidence: 0.25,
                 rationale: response.text,
+                cost_usd: call_cost,
             });
         }
 
@@ -363,6 +368,7 @@ impl AgentRuntime for AnthropicOAuthRuntime {
             verdict: TriageVerdict::NeedsReview,
             confidence: 0.0,
             rationale: "AnthropicOAuthRuntime returned no triage content".to_string(),
+            cost_usd: call_cost,
         })
     }
 }
@@ -485,6 +491,7 @@ mod tests {
             verdict: TriageVerdict::TruePositive,
             confidence: 1.5,
             rationale: "x".to_string(),
+            ..Default::default()
         };
         outcome = clamp_outcome(outcome);
         assert_eq!(outcome.confidence, 1.0);

@@ -789,6 +789,7 @@ mod tests {
                 verdict: TriageVerdict::NeedsReview,
                 confidence: 0.0,
                 rationale: "unused".to_string(),
+                ..Default::default()
             })
         }
     }

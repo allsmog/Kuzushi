@@ -137,11 +137,18 @@ impl Finding {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct TriageOutcome {
     pub verdict: TriageVerdict,
     pub confidence: f32,
     pub rationale: String,
+    /// USD cost of the LLM call that produced this verdict. Populated
+    /// by providers that surface usage (e.g. `AnthropicOAuthRuntime`
+    /// reads `usage.input_tokens` / `usage.output_tokens` and applies
+    /// the per-model rate). Defaults to `0.0`. Drives `triage:run`'s
+    /// in-process cost cap.
+    #[serde(default)]
+    pub cost_usd: f64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -217,11 +224,14 @@ pub struct PatchResult {
     pub updated_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TriageVerdict {
     TruePositive,
     FalsePositive,
+    /// Default — used when no verdict has been assigned yet (or when
+    /// a provider failed to produce one). Conservative by design.
+    #[default]
     NeedsReview,
     ByDesign,
 }
@@ -702,6 +712,12 @@ impl FindingStore {
             "actor_fingerprint",
             "alter table findings add column actor_fingerprint text",
         )?;
+        ensure_column(
+            &self.conn,
+            "triage",
+            "cost_usd",
+            "alter table triage add column cost_usd real not null default 0.0",
+        )?;
         Ok(())
     }
 
@@ -770,13 +786,14 @@ impl FindingStore {
     pub fn save_triage(&self, finding_id: i64, triage: &TriageOutcome) -> Result<()> {
         self.conn.execute(
             r#"
-            insert into triage(finding_id, verdict, confidence, rationale, created_at)
-            values (?1, ?2, ?3, ?4, ?5)
+            insert into triage(finding_id, verdict, confidence, rationale, created_at, cost_usd)
+            values (?1, ?2, ?3, ?4, ?5, ?6)
             on conflict(finding_id) do update set
               verdict = excluded.verdict,
               confidence = excluded.confidence,
               rationale = excluded.rationale,
-              created_at = excluded.created_at
+              created_at = excluded.created_at,
+              cost_usd = excluded.cost_usd
             "#,
             params![
                 finding_id,
@@ -784,6 +801,7 @@ impl FindingStore {
                 triage.confidence,
                 triage.rationale,
                 now_isoish(),
+                triage.cost_usd,
             ],
         )?;
         Ok(())
@@ -1081,6 +1099,7 @@ fn row_to_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
             verdict: TriageVerdict::try_from(verdict.as_str()).map_err(to_sql_error)?,
             confidence: row.get::<_, f32>(14)?,
             rationale: row.get(15)?,
+            ..Default::default()
         }),
         None => None,
     };
@@ -1226,6 +1245,7 @@ mod tests {
                     verdict: TriageVerdict::NeedsReview,
                     confidence: 0.42,
                     rationale: "needs dataflow confirmation".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -1353,6 +1373,7 @@ mod tests {
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "confirmed".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -1363,6 +1384,7 @@ mod tests {
                     verdict: TriageVerdict::FalsePositive,
                     confidence: 0.8,
                     rationale: "safe".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
