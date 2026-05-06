@@ -3,6 +3,7 @@ members = [
   "crates/kuzushi-cli",
   "crates/kuzushi-codeindex",
   "crates/kuzushi-core",
+  "crates/kuzushi-eval",
   "crates/kuzushi-mcp-clang",
   "crates/kuzushi-mcp-common",
   "crates/kuzushi-mcp-gtags",

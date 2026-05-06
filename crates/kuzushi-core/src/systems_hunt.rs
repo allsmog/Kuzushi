@@ -663,17 +663,26 @@ fn gather_systems_context(
     });
 
     // Block-on the async index augmentation. Failures (no joern,
-    // network error, …) leave surfaces unchanged.
+    // network error, …) leave surfaces unchanged. We cannot
+    // unconditionally spin up a new runtime here because callers may
+    // already be inside one (`#[tokio::main]` flows from `kuzushi
+    // run`). Detect the existing runtime via `Handle::try_current`
+    // and use `block_in_place`; otherwise build a single-threaded
+    // runtime as before.
     let augment_count = surfaces.len().min(options.max_surfaces.saturating_mul(2));
-    let to_augment = surfaces
+    let to_augment: Vec<RankedSystemsSurface> = surfaces
         .drain(..augment_count.min(surfaces.len()))
         .collect();
-    let augmented = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(rt) => rt.block_on(score_with_index(to_augment)),
-        Err(_) => Vec::new(),
+    let augmented = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| handle.block_on(score_with_index(to_augment)))
+    } else {
+        match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt.block_on(score_with_index(to_augment)),
+            Err(_) => Vec::new(),
+        }
     };
     let mut surfaces: Vec<RankedSystemsSurface> = augmented.into_iter().chain(surfaces).collect();
     // Re-sort after augmentation: index bumps may have re-ordered the

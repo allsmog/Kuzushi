@@ -8474,8 +8474,12 @@ JSON
 
         let mut app = ShellApp::new(config, Some(&workspace));
         app.handle_command(ShellCommand::Use("verify".to_string()));
+        // The verify module now exposes both `finding` and `exploit`
+        // tools; `exploit` would sort first alphabetically and become
+        // the focused-default. This test specifically exercises the
+        // LLM-driven `verify:finding` path, so name it explicitly.
         app.handle_command(ShellCommand::RunTool {
-            tool: None,
+            tool: Some("finding".to_string()),
             input: Some(format!(r#"{{"fingerprint":"{}"}}"#, finding.fingerprint)),
         });
 
