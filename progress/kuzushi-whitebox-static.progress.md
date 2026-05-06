@@ -2,7 +2,7 @@
 
 Stage: 3 - Kuzushi whitebox-static mode
 Active story: WB-003 - Scrub Scanner Subprocess Environments
-Status: WB-002 complete; WB-003 pending after commit/push gate
+Status: WB-002 complete and pushed as `ac4bd30`; WB-003 pending
 
 ## Stage 3 Checklist
 
@@ -71,8 +71,9 @@ Status: WB-002 complete; WB-003 pending after commit/push gate
   unexpected tool calls before execution. The full core suite also passes after
   separating SAST `mode=standard|whitebox-static` from taint-next
   `mode=plan|hunt`. WB-002 is marked `passes: true` in the PRD after the story
-  gate and focused checks passed.
-- Remaining work: commit and push WB-002, then start WB-003.
+  gate and focused checks passed. The implementation commit was pushed to
+  `origin/main` as `ac4bd30`.
+- Remaining work: WB-003 through WB-022.
 - Blockers or repo facts that contradicted this prompt:
   - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
     remains stale with staged Stage 2 files. This iteration continued in the
