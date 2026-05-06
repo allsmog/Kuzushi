@@ -1,0 +1,24 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+assertion_line: 89
+---
+KUZUSHI  mode:module | target none | 0 findings | ctx missing | module recon | model unconfigured | cost $0.0000.0000
+
+ ● /use recon
+ | use focused module recon | primary tool recon:nmap
+recon | Recon
+  Network and web reconnaissance tools
+
+-------------------------------------------------------- TOOLS ---------------------------------------------------------
+ ⏵ recon:nmap                     headless Run nmap reconnaissance.
+ ⏵ recon:subdomain                headless Run subdomain reconnaissance.
+ ⏵ recon:http-fingerprint         headless Fingerprint HTTP services and technology stacks.
+
+RECENT RECON ACTIVITY  -------------------------------------------------------------------------------------------------
+ | recon:nmap discovered 5 hosts and 18 services for acme-checkout.com
+ | recon:subdomain discovered 7 subdomains
+ | recon persisted 3 findings
+
+--------------------------------------------------------- NEXT ---------------------------------------------------------
+ ⏵ tool run nmap, subdomain, or http-fingerprint with a target
+ | help workspace | findings | use threat-model

@@ -1,0 +1,12 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+assertion_line: 33
+---
+KUZUSHI  mode:shell | target none | 0 findings | ctx missing | module catalog | model unconfigured | cost $0.0000
+
+KUZUSHI | CATALOG | kuzushi shell
+
+[!] no target selected; `scan .` uses the current directory
+▸ NEXT First finding: run `scan .`, then `findings`.
+Quickstart: quickstart | Context: context build | Runtime: model
+Type help, modules, use <module>, scan, or run <tool> [json].
