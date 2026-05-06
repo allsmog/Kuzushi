@@ -1076,18 +1076,22 @@ async fn verify_c_like(
     let cc = cc.unwrap();
 
     let binary_path = project.path.join("trigger");
-    let mut compile_cmd = SandboxExecOptions::new(vec![
+    let mut argv: Vec<String> = vec![
         cc.to_string(),
         "-O0".to_string(),
         "-g".to_string(),
-        "-fsanitize=address,undefined".to_string(),
-        "-fno-sanitize-recover=all".to_string(),
         "-Werror=implicit-function-declaration".to_string(),
+    ];
+    for flag in c_sanitizer_flags(&cc) {
+        argv.push(flag.to_string());
+    }
+    argv.extend([
         "-o".to_string(),
         binary_path.display().to_string(),
         project.path.join("trigger.c").display().to_string(),
         project.path.join("target.c").display().to_string(),
     ]);
+    let mut compile_cmd = SandboxExecOptions::new(argv);
     compile_cmd.timeout_ms = opts.timeout_ms;
     compile_cmd.workdir = Some(project.path.clone());
     compile_cmd.read_write_mounts = vec![MountSpec {
@@ -1137,13 +1141,76 @@ async fn verify_c_like(
 }
 
 fn pick_c_compiler(compiler: CCompiler) -> Option<String> {
-    if kuzushi_sandbox::which(compiler.binary()).is_some() {
-        return Some(compiler.binary().to_string());
+    // Prefer whichever toolchain has its AddressSanitizer runtime
+    // actually installed. clang's runtime ships in a separate
+    // `libclang-rt-dev` package on most distros and is often missing;
+    // gcc's libasan is bundled with the gcc package itself.
+    let clang_has_asan = clang_asan_runtime_present();
+    let gcc_has_asan = gcc_asan_runtime_present();
+
+    let prefer = compiler.binary();
+    let fallback = compiler.fallback();
+
+    let clang_present = kuzushi_sandbox::which(prefer).is_some();
+    let gcc_present = kuzushi_sandbox::which(fallback).is_some();
+
+    if clang_present && clang_has_asan {
+        return Some(prefer.to_string());
     }
-    if kuzushi_sandbox::which(compiler.fallback()).is_some() {
-        return Some(compiler.fallback().to_string());
+    if gcc_present && gcc_has_asan {
+        return Some(fallback.to_string());
+    }
+    // No ASan runtime — pick whichever compiler is present and let the
+    // caller drop sanitizer flags via `c_sanitizer_flags`.
+    if clang_present {
+        return Some(prefer.to_string());
+    }
+    if gcc_present {
+        return Some(fallback.to_string());
     }
     None
+}
+
+fn clang_asan_runtime_present() -> bool {
+    let candidates = [
+        "/usr/lib/llvm-18/lib/clang/18/lib/linux/libclang_rt.asan-x86_64.a",
+        "/usr/lib/llvm-17/lib/clang/17/lib/linux/libclang_rt.asan-x86_64.a",
+        "/usr/lib/llvm-16/lib/clang/16/lib/linux/libclang_rt.asan-x86_64.a",
+        "/usr/lib/clang/18/lib/linux/libclang_rt.asan-x86_64.a",
+        "/usr/local/lib/clang/18/lib/linux/libclang_rt.asan-x86_64.a",
+    ];
+    candidates.iter().any(|p| std::path::Path::new(p).exists())
+}
+
+fn gcc_asan_runtime_present() -> bool {
+    let candidates = [
+        "/usr/lib/gcc/x86_64-linux-gnu/13/libasan.a",
+        "/usr/lib/gcc/x86_64-linux-gnu/13/libasan.so",
+        "/usr/lib/gcc/x86_64-linux-gnu/14/libasan.a",
+        "/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so",
+        "/usr/lib/gcc/x86_64-linux-gnu/12/libasan.a",
+        "/usr/lib/x86_64-linux-gnu/libasan.so.8",
+        "/usr/lib/x86_64-linux-gnu/libasan.so.6",
+    ];
+    candidates.iter().any(|p| std::path::Path::new(p).exists())
+}
+
+/// Pick sanitizer flags conditional on toolchain availability. Returns
+/// an empty vec when no ASan runtime is present so the harness still
+/// builds and runs (weaker detection but the pipeline keeps working).
+fn c_sanitizer_flags(compiler: &str) -> Vec<&'static str> {
+    let runtime_present = if compiler.starts_with("clang") {
+        clang_asan_runtime_present()
+    } else if compiler.starts_with("gcc") || compiler.starts_with("g++") {
+        gcc_asan_runtime_present()
+    } else {
+        false
+    };
+    if runtime_present {
+        vec!["-fsanitize=address,undefined", "-fno-sanitize-recover=all"]
+    } else {
+        Vec::new()
+    }
 }
 
 async fn scaffold_c_project(finding: &Finding, _compiler: CCompiler) -> Result<ScaffoldedProject> {
