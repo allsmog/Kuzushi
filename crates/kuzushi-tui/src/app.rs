@@ -8411,8 +8411,12 @@ JSON
 
         let mut app = ShellApp::new(config, Some(&workspace));
         app.handle_command(ShellCommand::Use("triage".to_string()));
+        // The triage module now exposes `run` and `deep` tools;
+        // `deep` would sort first alphabetically and become the
+        // focused-default. This test exercises the multi-stage
+        // `triage:run` path, so name it explicitly.
         app.handle_command(ShellCommand::RunTool {
-            tool: None,
+            tool: Some("run".to_string()),
             input: Some(format!(r#"{{"fingerprint":"{}"}}"#, finding.fingerprint)),
         });
 
