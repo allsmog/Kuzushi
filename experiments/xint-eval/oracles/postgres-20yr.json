@@ -1,0 +1,20 @@
+{
+  "cve": "PG-XINT-2026-001",
+  "slice": "postgres",
+  "name": "Postgres 20-year data-exfil + RCE",
+  "commit": "",
+  "commit_note": "Pre-patch SHA TBD. Theori's research paper at https://go.xint.io/xint_oss_research_paper_gate has the detail; populate after download.",
+  "ground_truth": [
+    {
+      "file": "src/backend/utils/adt/",
+      "function": "",
+      "line_start": 1,
+      "line_end": 9999,
+      "cwe": ["CWE-94", "CWE-200"],
+      "kind": "code_injection",
+      "notes": "Directory-level placeholder. Public detail too sparse for line-level oracle. Permissive file_only match only."
+    }
+  ],
+  "expected_min_recall": 0.0,
+  "notes": "Best-effort oracle. Update once Theori's research paper is on hand."
+}

@@ -2,6 +2,7 @@
 members = [
   "crates/kuzushi-cli",
   "crates/kuzushi-core",
+  "crates/kuzushi-eval",
   "crates/kuzushi-openai",
   "crates/kuzushi-tui",
 ]

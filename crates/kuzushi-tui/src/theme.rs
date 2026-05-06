@@ -48,43 +48,51 @@ fn fg(color: Color) -> Style {
 }
 
 pub fn primary() -> Style {
-    fg(Color::LightBlue)
+    fg(Color::Rgb(207, 214, 224))
 }
 
 pub fn muted() -> Style {
-    fg(Color::Cyan)
+    fg(Color::Rgb(125, 135, 148))
 }
 
 pub fn subtle() -> Style {
-    fg(Color::Blue)
+    fg(Color::Rgb(61, 70, 84))
 }
 
 pub fn label() -> Style {
     if palette() == PALETTE_NONE {
         Style::default().add_modifier(Modifier::BOLD)
     } else {
-        primary().add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Rgb(166, 205, 255))
+            .add_modifier(Modifier::BOLD)
     }
 }
 
 pub fn heading() -> Style {
-    label()
+    if palette() == PALETTE_NONE {
+        Style::default().add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
+    }
 }
 
 pub fn accent() -> Style {
-    fg(Color::LightBlue)
+    fg(Color::Rgb(127, 184, 255))
 }
 
 pub fn success() -> Style {
-    fg(Color::Green)
+    fg(Color::Rgb(87, 196, 121))
 }
 
 pub fn warn() -> Style {
-    fg(Color::Yellow)
+    fg(Color::Rgb(226, 193, 74))
 }
 
 pub fn danger() -> Style {
-    fg(Color::Red)
+    fg(Color::Rgb(226, 92, 92))
 }
 
 pub fn selection() -> Style {
@@ -93,7 +101,7 @@ pub fn selection() -> Style {
     } else {
         Style::default()
             .fg(Color::Black)
-            .bg(Color::LightBlue)
+            .bg(Color::Rgb(166, 205, 255))
             .add_modifier(Modifier::BOLD)
     }
 }
@@ -107,7 +115,7 @@ pub fn severity(severity: Severity) -> Style {
     }
     match severity {
         Severity::Critical => danger().add_modifier(Modifier::BOLD),
-        Severity::High => Style::default().fg(Color::LightRed),
+        Severity::High => fg(Color::Rgb(255, 138, 109)),
         Severity::Medium => warn(),
         Severity::Low | Severity::Info => accent(),
         Severity::Unknown => muted(),
