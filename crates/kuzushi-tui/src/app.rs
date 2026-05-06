@@ -4263,11 +4263,17 @@ fn thinking_level_from_input(input: &serde_json::Value) -> Option<String> {
 }
 
 fn unknown_command_message(raw: &str) -> String {
-    if raw.trim_start().starts_with('/') {
-        format!("unknown command {raw:?}. Next: help")
+    let trimmed = raw.trim();
+    let normalized = trimmed.strip_prefix('/').unwrap_or(trimmed);
+    let verb = normalized.split_whitespace().next().unwrap_or_default();
+
+    if verb == "ask" {
+        "ask needs a question. Next: /ask <question>".to_string()
+    } else if trimmed.starts_with('/') {
+        format!("unknown command {trimmed:?}. Next: /help")
     } else {
         format!(
-            "unknown command {raw:?}. Free-form chat is explicit only. Next: /ask <question> or help"
+            "unknown command {trimmed:?}. Free-form chat is explicit only. Next: /ask <question> or help"
         )
     }
 }
@@ -6838,6 +6844,50 @@ JSON
             .error
             .as_deref()
             .is_some_and(|error| error.contains("explicit model")));
+    }
+
+    #[test]
+    fn exit_and_unknown_command_feedback_is_actionable() {
+        for command in ["/exit", "exit", "/exitj"] {
+            let mut app = ShellApp::new(V2Config::default(), None);
+
+            app.submit_line(command);
+
+            assert!(app.should_quit, "{command} should request shutdown");
+            assert!(app.agent_chat.is_none());
+            assert!(app
+                .log
+                .iter()
+                .any(|line| line.prefix == ">" && line.body == command));
+            assert!(app.log.iter().any(|line| {
+                line.prefix == "system" && line.body.contains("exit requested; closing shell")
+            }));
+        }
+
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.submit_line("/definitely-not-real");
+        let slash_error = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(slash_error.contains("Next: /help"));
+        assert!(app.agent_chat.is_none());
+        assert!(!app.should_quit);
+
+        app.submit_line("ask");
+        let missing_ask_error = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(missing_ask_error.contains("Next: /ask <question>"));
+        assert!(app.agent_chat.is_none());
+        assert_eq!(app.shell_view, ShellView::Catalog);
     }
 
     #[test]
