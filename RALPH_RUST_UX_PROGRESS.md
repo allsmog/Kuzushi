@@ -2,7 +2,7 @@
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
 Active story: UX-014 - Explicit Plain / Screen-Reader / Low-Bandwidth Mode
-Status: UX-013 complete and ready to push in iteration 26; UX-014 pending next iteration
+Status: UX-013 complete and pushed in iteration 26 as `7564f7c`; UX-014 pending next iteration
 
 ## Stage 2 Checklist
 
@@ -53,7 +53,8 @@ Status: UX-013 complete and ready to push in iteration 26; UX-014 pending next i
   - `cargo test -p kuzushi-cli --test cutover_cli`
   - `cargo test -p kuzushi-core missing_binary_failure_is_actionable`
   - `git diff --check`
-- Result: implementation complete. Rust TUI no-findings, no-workspace,
+- Result: complete and pushed to `origin/main` as
+  `7564f7c ralph:ux improve empty state guidance`. Rust TUI no-findings, no-workspace,
   no-run, unknown module/tool/task, scanner-missing, and generic internal
   shell-state error paths now include `Next:` guidance that points to routed
   Rust shell commands such as `scan`, `tasks`, `task block semgrep`, `tools`,
