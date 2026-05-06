@@ -859,6 +859,7 @@ dependencies = [
  "kuzushi-mcp-common",
  "kuzushi-openai",
  "kuzushi-tui",
+ "rusqlite",
  "serde_json",
  "tempfile",
  "tokio",

@@ -245,49 +245,14 @@ impl<'a> LikelyVulnClassifier<'a> {
                      set models.toml [roles.classifier_gate] or `setg MODEL_CLASSIFIER_GATE`"
                 )
             })?;
-        let request = AgentQueryRequest::new(
-            model,
-            cwd.to_path_buf(),
-            CLASSIFIER_SYSTEM_PROMPT,
-            render_prompt(finding),
-        );
-        let response = self
-            .runtime
-            .query_blocking(request)
-            .context("classifier gate query failed")?;
-
-        // Parse score from structured field, or extract from text.
-        let parsed = response
-            .structured
-            .as_ref()
-            .and_then(|v| serde_json::from_value::<ClassifierResponse>(v.clone()).ok())
-            .or_else(|| try_loose_parse(&response.text));
-        let raw = parsed
-            .map(|p| {
-                let s = if p.score > 0.0 {
-                    p.score
-                } else if p.likely {
-                    0.85
-                } else {
-                    0.15
-                };
-                s.clamp(0.0, 1.0)
-            })
-            .unwrap_or_else(|| {
-                // Conservative fallback: if we can't parse, score in the
-                // middle so the gate doesn't reject a real bug just because
-                // the model burped.
-                0.5
-            });
-
-        // Update quantile and persist if configured.
-        let mut q = self.quantile.lock().expect("quantile mutex poisoned");
-        q.observe(raw);
-        if let Some(ref db) = self.cfg.state_db {
-            // Best-effort: a persistence failure must not block the scan.
-            let _ = save_quantile(db, &q);
-        }
-        Ok(raw)
+        score_with_dyn_runtime(
+            self.runtime as &dyn AgentRuntime,
+            &model,
+            finding,
+            cwd,
+            &self.quantile,
+            self.cfg.state_db.as_deref(),
+        )
     }
 
     /// Whether a score graduates to the deep auditor.
@@ -329,6 +294,95 @@ impl<'a> LikelyVulnClassifier<'a> {
     pub fn samples_seen(&self) -> usize {
         self.quantile.lock().unwrap().count
     }
+}
+
+/// Routing-free scorer used by callers that hold `&dyn AgentRuntime`
+/// rather than `&RoutedRuntime`. The classifier itself does no
+/// routing — it just needs a model name and a runtime. Tools dispatch
+/// via [`AgentRuntime::model_for_role`] to pick the model bound to
+/// `[roles.classifier_gate]`, then call this helper. The quantile
+/// state is shared with the typed [`LikelyVulnClassifier`] when the
+/// caller passes the same `state_db`.
+pub fn score_one_with_runtime(
+    runtime: &dyn AgentRuntime,
+    model: &str,
+    finding: &Finding,
+    cwd: &Path,
+    cfg: &ClassifierConfig,
+) -> Result<Score> {
+    let quantile = match cfg.state_db.as_deref() {
+        Some(db) => Mutex::new(load_quantile(db, cfg.target_percentile)?),
+        None => Mutex::new(QuantileEstimator::new(cfg.target_percentile)),
+    };
+    score_with_dyn_runtime(
+        runtime,
+        model,
+        finding,
+        cwd,
+        &quantile,
+        cfg.state_db.as_deref(),
+    )
+}
+
+/// Whether a [0,1] score graduates past the adaptive quantile gate.
+/// Used by callers that consult [`score_one_with_runtime`] outside
+/// the typed classifier (e.g. `triage:run` Stage 1.5). Stateless;
+/// reads the persisted quantile each call.
+pub fn should_graduate(cfg: &ClassifierConfig, score: Score) -> Result<bool> {
+    let quantile = match cfg.state_db.as_deref() {
+        Some(db) => load_quantile(db, cfg.target_percentile)?,
+        None => QuantileEstimator::new(cfg.target_percentile),
+    };
+    let threshold = if quantile.count < cfg.cold_start_min_count {
+        cfg.cold_start_floor
+    } else {
+        quantile.estimate()
+    };
+    Ok(score >= threshold)
+}
+
+fn score_with_dyn_runtime(
+    runtime: &dyn AgentRuntime,
+    model: &str,
+    finding: &Finding,
+    cwd: &Path,
+    quantile: &Mutex<QuantileEstimator>,
+    state_db: Option<&Path>,
+) -> Result<Score> {
+    let request = AgentQueryRequest::new(
+        model.to_string(),
+        cwd.to_path_buf(),
+        CLASSIFIER_SYSTEM_PROMPT,
+        render_prompt(finding),
+    );
+    let response = runtime
+        .query_blocking(request)
+        .context("classifier gate query failed")?;
+
+    let parsed = response
+        .structured
+        .as_ref()
+        .and_then(|v| serde_json::from_value::<ClassifierResponse>(v.clone()).ok())
+        .or_else(|| try_loose_parse(&response.text));
+    let raw = parsed
+        .map(|p| {
+            let s = if p.score > 0.0 {
+                p.score
+            } else if p.likely {
+                0.85
+            } else {
+                0.15
+            };
+            s.clamp(0.0, 1.0)
+        })
+        .unwrap_or(0.5);
+
+    let mut q = quantile.lock().expect("quantile mutex poisoned");
+    q.observe(raw);
+    if let Some(db) = state_db {
+        let _ = save_quantile(db, &q);
+    }
+    Ok(raw)
 }
 
 fn render_prompt(f: &Finding) -> String {
