@@ -236,6 +236,148 @@ fn run_recall_test(slice_name: &str) {
 }
 
 #[test]
+#[cfg(unix)]
+fn auth_ping_succeeds_when_bridge_returns_ok() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+    let body = r#"
+model = "anthropic:claude-haiku-4-5"
+
+[runtime]
+api_key_env = "ANTHROPIC_API_KEY"
+agent_bridge_command = ["sh", "-c", "cat > /dev/null && printf '%s' '{\"ok\":true,\"auth_mode\":\"oauth-file\",\"model\":\"claude-haiku-4-5\",\"latency_ms\":42,\"input_tokens\":1,\"output_tokens\":8,\"cost_usd\":0.0001}'"]
+"#;
+    fs::write(home.join(".kuzushi/v2/config.toml"), body).unwrap();
+
+    let kuzushi = env!("CARGO_BIN_EXE_kuzushi");
+    let output = Command::new(kuzushi)
+        .env("HOME", &home)
+        .args(["auth", "ping", "anthropic"])
+        .output()
+        .expect("kuzushi auth ping");
+    assert!(
+        output.status.success(),
+        "auth ping should succeed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("auth ping: OK"), "missing OK line: {stderr}");
+    assert!(stderr.contains("round-trip ok"), "missing round-trip line: {stderr}");
+}
+
+#[test]
+#[cfg(unix)]
+fn auth_ping_fails_loudly_on_bridge_error_payload() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+    let body = r#"
+model = "anthropic:claude-haiku-4-5"
+
+[runtime]
+api_key_env = "ANTHROPIC_API_KEY"
+agent_bridge_command = ["sh", "-c", "cat > /dev/null && printf '%s' '{\"ok\":false,\"error\":\"401 unauthorized\"}'; exit 1"]
+"#;
+    fs::write(home.join(".kuzushi/v2/config.toml"), body).unwrap();
+    let kuzushi = env!("CARGO_BIN_EXE_kuzushi");
+    let output = Command::new(kuzushi)
+        .env("HOME", &home)
+        .args(["auth", "ping", "anthropic"])
+        .output()
+        .expect("kuzushi auth ping");
+    assert!(!output.status.success(), "auth ping should fail on 401");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("401 unauthorized"), "expected error in stderr: {stderr}");
+}
+
+#[test]
+#[cfg(unix)]
+fn smoke_next_step_drives_tool_loop_through_real_dispatcher() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let target = tmp.path().join("target");
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join("placeholder.c"), "void p(){}\n").unwrap();
+    fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+
+    // The bridge sees two next-step envelopes:
+    //   1. Returns a tool_call asking echo({x: "kuzushi-ok"}).
+    //   2. Returns a final containing the phrase.
+    let counter = tmp.path().join("counter");
+    fs::write(&counter, "0").unwrap();
+    let bridge_script = format!(
+        r#"#!/usr/bin/env node
+import {{ readFileSync, writeFileSync }} from "node:fs";
+import process from "node:process";
+const counter = "{counter}";
+const n = Number(readFileSync(counter, "utf8"));
+writeFileSync(counter, String(n + 1));
+process.stdin.resume();
+process.stdin.on("data", () => {{}});
+process.stdin.on("end", () => {{
+  if (n === 0) {{
+    process.stdout.write(JSON.stringify({{
+      ok: true, step: "tool_call",
+      call: {{ name: "echo", input: {{ x: "kuzushi-ok" }}, callId: "c1" }},
+      cost_usd: 0.001
+    }}));
+  }} else {{
+    process.stdout.write(JSON.stringify({{
+      ok: true, step: "final",
+      text: "Echoed: kuzushi-ok",
+      cost_usd: 0.001
+    }}));
+  }}
+  process.exit(0);
+}});
+"#,
+        counter = counter.display()
+    );
+    let bridge = tmp.path().join("bridge.mjs");
+    fs::write(&bridge, bridge_script).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&bridge, fs::Permissions::from_mode(0o755)).unwrap();
+    let cfg = format!(
+        r#"
+model = "anthropic:claude-haiku-4-5"
+
+[runtime]
+api_key_env = "ANTHROPIC_API_KEY"
+agent_bridge_command = ["node", "{bridge}"]
+"#,
+        bridge = bridge.display()
+    );
+    fs::write(home.join(".kuzushi/v2/config.toml"), cfg).unwrap();
+
+    let kuzushi = env!("CARGO_BIN_EXE_kuzushi");
+    let output = Command::new(kuzushi)
+        .env("HOME", &home)
+        .args([
+            "--target",
+            target.to_str().unwrap(),
+            "run",
+            "smoke:next-step",
+            "--input",
+            r#"{"phrase":"kuzushi-ok"}"#,
+        ])
+        .output()
+        .expect("kuzushi run smoke:next-step");
+    assert!(
+        output.status.success(),
+        "smoke:next-step failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["ok"], serde_json::json!(true));
+    assert_eq!(parsed["data"]["echoedPhrase"], serde_json::json!(true));
+    assert_eq!(parsed["data"]["stepsUsed"], serde_json::json!(2));
+    assert!(parsed["data"]["finalText"].as_str().unwrap().contains("kuzushi-ok"));
+}
+
+#[test]
 fn full_mode_dry_run_returns_plan_without_calling_model() {
     // Synthetic mini-target with a few C files. Dry-run produces a chunk
     // plan + cost band without any LLM call.

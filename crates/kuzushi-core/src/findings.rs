@@ -1445,7 +1445,6 @@ mod tests {
         assert_eq!(semgrep.dedup_key, chunked.dedup_key);
         // …but different fingerprints (rule_id differs).
         assert_ne!(semgrep.fingerprint, chunked.fingerprint);
-        chunked = chunked; // no-op for clarity
 
         let id2 = store.insert_finding(run, &chunked).unwrap();
 
