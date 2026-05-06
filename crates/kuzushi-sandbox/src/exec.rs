@@ -131,9 +131,14 @@ pub async fn sandbox_exec(
         if let Some(wd) = &opts.workdir {
             command.current_dir(wd);
         }
-        command.env_clear();
-        for (k, v) in &opts.env {
-            command.env(k, v);
+        // Only clear the env when the caller explicitly supplied
+        // overrides. Clearing unconditionally strips PATH and breaks
+        // compiler/linker invocations (e.g. clang failing to find `ld`).
+        if !opts.env.is_empty() {
+            command.env_clear();
+            for (k, v) in &opts.env {
+                command.env(k, v);
+            }
         }
     }
 
