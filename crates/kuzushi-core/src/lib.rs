@@ -103,13 +103,15 @@ pub use threat_model::{
     execute_threat_model_tool, load_persistent_threat_model, save_persistent_threat_model,
 };
 pub use whitebox_static::{
-    agent_tool_policy_for_input, analysis_mode_from_input, apply_whitebox_static_sast_policy,
+    agent_tool_policy_for_input, analysis_mode_from_input,
+    apply_whitebox_static_citation_validation, apply_whitebox_static_sast_policy,
     build_whitebox_static_triage_prompt, default_whitebox_static_agent_tool_policy,
     mark_whitebox_static_findings, parse_whitebox_static_triage_response,
-    validate_whitebox_static_agent_tool_policy, whitebox_static_enabled,
-    whitebox_static_profile_requested, whitebox_static_proof_state_from_input,
-    whitebox_static_proof_state_from_str, whitebox_static_triage_outcome,
-    whitebox_static_triage_schema, AnalysisMode, WhiteboxStaticPolicy,
+    validate_whitebox_static_agent_tool_policy, validate_whitebox_static_triage_citations,
+    whitebox_static_enabled, whitebox_static_profile_requested,
+    whitebox_static_proof_state_from_input, whitebox_static_proof_state_from_str,
+    whitebox_static_triage_outcome, whitebox_static_triage_schema, AnalysisMode,
+    VerifiedWhiteboxStaticCitation, WhiteboxStaticCitationValidationReport, WhiteboxStaticPolicy,
     WhiteboxStaticTriageCitation, WhiteboxStaticTriageEndpoint, WhiteboxStaticTriagePathStep,
     WhiteboxStaticTriageResponse, WHITEBOX_STATIC_TRIAGE_SYSTEM_PROMPT,
 };
