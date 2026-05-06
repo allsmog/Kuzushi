@@ -193,7 +193,7 @@
       "acceptance": ["Ranking considers attack-surface reachability, source/sink class, data sensitivity, privilege boundary, sanitizer absence, framework context, CodeQL flow quality, and confidence.", "High-impact static flow outranks generic scanner noise."],
       "storyGate": "cargo test -p kuzushi-core static_ranking",
       "forbidden": ["non-deterministic ranking"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-016",
