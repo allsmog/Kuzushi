@@ -1525,18 +1525,22 @@ fn threat_lines(app: &ShellApp, area: Rect, view: ThreatView) -> Vec<Line<'stati
             lines.push(Line::raw("external -> application -> datastore"));
         }
         ThreatView::Stride => {
-            let rollup = stride_rollup_rows();
+            let doc = current_threat_model_doc(app);
+            let rollup = doc
+                .as_ref()
+                .and_then(stride_rollup_from_doc)
+                .unwrap_or_else(stride_rollup_rows);
             let total_issues: usize = rollup.iter().map(|r| r.3).sum();
             lines.push(section_header_line(
                 &format!("STRIDE ROLLUP · {total_issues} issues"),
                 area.width,
             ));
-            for (letter, sev, category, count, description) in rollup {
+            for (letter, sev, category, count, description) in &rollup {
                 lines.push(stride_row(
                     letter,
-                    sev,
+                    *sev,
                     category,
-                    count,
+                    *count,
                     description,
                     area.width,
                 ));
@@ -1573,18 +1577,22 @@ fn threat_lines(app: &ShellApp, area: Rect, view: ThreatView) -> Vec<Line<'stati
             ));
         }
         ThreatView::Summary => {
-            let rollup = stride_rollup_rows();
+            let doc = current_threat_model_doc(app);
+            let rollup = doc
+                .as_ref()
+                .and_then(stride_rollup_from_doc)
+                .unwrap_or_else(stride_rollup_rows);
             let total_issues: usize = rollup.iter().map(|r| r.3).sum();
             lines.push(section_header_line(
                 &format!("THREAT MODEL · {total_issues} issues"),
                 area.width,
             ));
-            for (letter, sev, category, count, description) in rollup {
+            for (letter, sev, category, count, description) in &rollup {
                 lines.push(stride_row(
                     letter,
-                    sev,
+                    *sev,
                     category,
-                    count,
+                    *count,
                     description,
                     area.width,
                 ));
@@ -3356,47 +3364,137 @@ fn stride_row(
 }
 
 /// Returns the canonical 6-row STRIDE rollup matching the design fixture.
-/// TODO: source from `load_persistent_threat_model` once threat-model state
-/// is cached on `ShellApp`.
-fn stride_rollup_rows() -> Vec<(&'static str, Severity, &'static str, usize, &'static str)> {
+/// Used as a fallback when no `.kuzushi/threat-model.json` is present.
+fn stride_rollup_rows() -> Vec<(&'static str, Severity, &'static str, usize, String)> {
     vec![
         (
             "S",
             Severity::High,
             "Spoofing",
             2,
-            "jwt without aud-claim, mailgun cname dangling",
+            "jwt without aud-claim, mailgun cname dangling".to_string(),
         ),
         (
             "T",
             Severity::Medium,
             "Tampering",
             1,
-            "worker pool reads unsigned amqp messages",
+            "worker pool reads unsigned amqp messages".to_string(),
         ),
-        ("R", Severity::Low, "Repudiation", 0, ""),
+        ("R", Severity::Low, "Repudiation", 0, String::new()),
         (
             "I",
             Severity::Critical,
             "Info-disclosure",
             3,
-            "plaintext PII at db→s3 boundary, debug logs",
+            "plaintext PII at db→s3 boundary, debug logs".to_string(),
         ),
         (
             "D",
             Severity::Medium,
             "DoS",
             1,
-            "no rate-limit on /checkout/confirm",
+            "no rate-limit on /checkout/confirm".to_string(),
         ),
         (
             "E",
             Severity::High,
             "Elev-of-priv",
             1,
-            "admin subdomain shares jwt secret with api",
+            "admin subdomain shares jwt secret with api".to_string(),
         ),
     ]
+}
+
+/// Try to load the persisted threat model for the active workspace target.
+/// Returns `None` if the file doesn't exist or is empty/null.
+fn current_threat_model_doc(app: &ShellApp) -> Option<serde_json::Value> {
+    let cwd = app
+        .target
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let doc = kuzushi_core::load_persistent_threat_model(&cwd)?;
+    if doc.is_null() {
+        return None;
+    }
+    Some(doc)
+}
+
+/// Compute the STRIDE rollup from a persisted threat model document.
+/// Returns `None` if the document has no `threats` array or it's empty.
+fn stride_rollup_from_doc(
+    doc: &serde_json::Value,
+) -> Option<Vec<(&'static str, Severity, &'static str, usize, String)>> {
+    let threats = doc.get("threats")?.as_array()?;
+    if threats.is_empty() {
+        return None;
+    }
+    let cats: [(&'static str, &'static str, &'static str); 6] = [
+        ("S", "spoofing", "Spoofing"),
+        ("T", "tampering", "Tampering"),
+        ("R", "repudiation", "Repudiation"),
+        ("I", "information-disclosure", "Info-disclosure"),
+        ("D", "denial-of-service", "DoS"),
+        ("E", "elevation-of-privilege", "Elev-of-priv"),
+    ];
+    let mut rows = Vec::with_capacity(6);
+    for (letter, key, label) in cats {
+        let matching: Vec<&serde_json::Value> = threats
+            .iter()
+            .filter(|t| {
+                t.get("category")
+                    .and_then(|c| c.as_str())
+                    .map(|c| c.to_lowercase().replace('_', "-"))
+                    .as_deref()
+                    == Some(key)
+            })
+            .collect();
+        let count = matching.len();
+        let severity = matching
+            .iter()
+            .map(|t| {
+                t.get("impact")
+                    .and_then(|s| s.as_str())
+                    .map(impact_to_severity)
+                    .unwrap_or(Severity::Medium)
+            })
+            .max_by_key(|s| severity_rank(*s))
+            .unwrap_or(Severity::Low);
+        let description = matching
+            .iter()
+            .filter_map(|t| {
+                t.get("title")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.to_string())
+            })
+            .take(2)
+            .collect::<Vec<_>>()
+            .join(", ");
+        rows.push((letter, severity, label, count, description));
+    }
+    Some(rows)
+}
+
+fn impact_to_severity(value: &str) -> Severity {
+    match value.to_lowercase().as_str() {
+        "critical" => Severity::Critical,
+        "high" => Severity::High,
+        "low" => Severity::Low,
+        "info" => Severity::Info,
+        _ => Severity::Medium,
+    }
+}
+
+fn severity_rank(severity: Severity) -> u8 {
+    match severity {
+        Severity::Critical => 5,
+        Severity::High => 4,
+        Severity::Medium => 3,
+        Severity::Low => 2,
+        Severity::Info => 1,
+        Severity::Unknown => 0,
+    }
 }
 
 /// One-line finding row matching `design/mockups/sast.jsx::finding()`:
@@ -4345,6 +4443,75 @@ mod tests {
                 "unexpected streaming cursor while idle: {text:?}"
             );
         }
+    }
+
+    #[test]
+    fn stride_rollup_from_doc_parses_real_threats() {
+        let doc = serde_json::json!({
+            "threats": [
+                {"id": "T-001", "category": "spoofing",          "title": "spoofed login",    "impact": "high"},
+                {"id": "T-002", "category": "spoofing",          "title": "stolen token",     "impact": "medium"},
+                {"id": "T-003", "category": "tampering",         "title": "config tamper",    "impact": "critical"},
+                {"id": "T-004", "category": "information-disclosure", "title": "log leak",    "impact": "low"},
+            ]
+        });
+        let rollup = stride_rollup_from_doc(&doc).expect("expected rollup from non-empty threats");
+        assert_eq!(rollup.len(), 6);
+
+        let total: usize = rollup.iter().map(|r| r.3).sum();
+        assert_eq!(total, 4);
+
+        // Spoofing: 2 threats, max impact = high
+        let spoof = &rollup[0];
+        assert_eq!(spoof.0, "S");
+        assert_eq!(spoof.2, "Spoofing");
+        assert_eq!(spoof.3, 2);
+        assert_eq!(spoof.1, Severity::High);
+        assert!(spoof.4.contains("spoofed login"));
+        assert!(spoof.4.contains("stolen token"));
+
+        // Tampering: 1 threat, impact = critical
+        let tamper = &rollup[1];
+        assert_eq!(tamper.3, 1);
+        assert_eq!(tamper.1, Severity::Critical);
+        assert_eq!(tamper.4, "config tamper");
+
+        // Repudiation: 0 threats, default Low severity, empty description
+        let repud = &rollup[2];
+        assert_eq!(repud.3, 0);
+        assert_eq!(repud.1, Severity::Low);
+        assert!(repud.4.is_empty());
+
+        // Info-disclosure: 1 threat, impact = low
+        let info = &rollup[3];
+        assert_eq!(info.3, 1);
+        assert_eq!(info.1, Severity::Low);
+        assert_eq!(info.4, "log leak");
+    }
+
+    #[test]
+    fn stride_rollup_from_doc_returns_none_on_empty_or_missing_threats() {
+        assert!(stride_rollup_from_doc(&serde_json::json!({})).is_none());
+        assert!(stride_rollup_from_doc(&serde_json::json!({"threats": []})).is_none());
+        assert!(stride_rollup_from_doc(&serde_json::json!({"threats": null})).is_none());
+    }
+
+    #[test]
+    fn stride_rollup_from_doc_normalizes_underscored_categories() {
+        let doc = serde_json::json!({
+            "threats": [
+                {"category": "denial_of_service",        "title": "ddos",  "impact": "medium"},
+                {"category": "elevation_of_privilege",   "title": "sudo bypass", "impact": "critical"},
+            ]
+        });
+        let rollup = stride_rollup_from_doc(&doc).expect("rollup should accept underscored");
+        let dos = &rollup[4];
+        assert_eq!(dos.0, "D");
+        assert_eq!(dos.3, 1);
+        let elev = &rollup[5];
+        assert_eq!(elev.0, "E");
+        assert_eq!(elev.3, 1);
+        assert_eq!(elev.1, Severity::Critical);
     }
 
     #[test]
