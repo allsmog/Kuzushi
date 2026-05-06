@@ -5431,6 +5431,12 @@ struct TriageRunInput {
     /// Defaults to `Cheap` so multi-stage triage routes through the
     /// fastest model when available.
     stage2_tier: ModelTier,
+    /// Opt-in adaptive classifier gate (Stage 1.5). When `true`, every
+    /// prefilter survivor is scored by a cheap-classifier LLM call;
+    /// findings whose score is below the running 80th-percentile are
+    /// dropped before reaching the Stage 2 triage. Disabled by
+    /// default to keep the legacy two-stage flow free.
+    use_classifier_gate: bool,
 }
 
 impl TriageRunInput {
@@ -5520,6 +5526,12 @@ impl TriageRunInput {
             }
         };
 
+        let use_classifier_gate = input
+            .get("useClassifierGate")
+            .or_else(|| input.get("use_classifier_gate"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
         Ok(Self {
             fingerprints: if fingerprints.is_empty() {
                 None
@@ -5533,6 +5545,7 @@ impl TriageRunInput {
             cost_cap_usd,
             prefilter_threshold,
             stage2_tier,
+            use_classifier_gate,
         })
     }
 }
@@ -5627,24 +5640,88 @@ fn run_triage(
     let total = findings.len();
 
     // ----- Stage 1: deterministic prefilter --------------------------
-    let (kept, dropped_prefilter): (Vec<Finding>, Vec<Finding>) = findings
+    let (mut kept, dropped_prefilter): (Vec<Finding>, Vec<Finding>) = findings
         .into_iter()
         .partition(|f| prefilter_score(f) >= input.prefilter_threshold);
     let stage1_kept = kept.len();
     let stage1_dropped = dropped_prefilter.len();
+
+    // ----- Stage 1.5: adaptive classifier gate (opt-in) --------------
+    //
+    // When `useClassifierGate=true`, every prefilter survivor runs
+    // through `score_one_with_runtime` against the cheap-classifier
+    // model (`models.toml [roles.classifier_gate]` or the configured
+    // model otherwise). Findings whose score is below the running
+    // 80th-percentile threshold land in the gate-rejected bucket and
+    // are dropped before reaching the much more expensive Stage 2
+    // triage. State persists at `<workspace>/.kuzushi/v2/spend.sqlite3`
+    // so the quantile threshold sharpens across scan runs.
+    let mut classifier_kept = stage1_kept;
+    let mut classifier_dropped = 0usize;
+    let mut classifier_skipped: Vec<(Finding, f32)> = Vec::new();
+    if input.use_classifier_gate {
+        let classifier_model = runtime.model_for_role("classifier_gate", &model_configured);
+        let cfg = crate::classifier_gate::ClassifierConfig {
+            state_db: Some(workspace.spend_db_path()),
+            ..Default::default()
+        };
+        let cwd = workspace.root().to_path_buf();
+        let mut survivors: Vec<Finding> = Vec::with_capacity(kept.len());
+        for finding in kept.drain(..) {
+            match crate::classifier_gate::score_one_with_runtime(
+                runtime,
+                &classifier_model,
+                &finding,
+                &cwd,
+                &cfg,
+            ) {
+                Ok(score) => match crate::classifier_gate::should_graduate(&cfg, score) {
+                    Ok(true) => survivors.push(finding),
+                    Ok(false) => classifier_skipped.push((finding, score)),
+                    // If the persisted quantile fails to load, fall
+                    // open: keep the finding rather than silently
+                    // drop it. The score itself is still recorded.
+                    Err(_) => survivors.push(finding),
+                },
+                Err(err) => {
+                    eprintln!(
+                        "[triage:run] classifier gate failed on {}: {err}; keeping finding",
+                        finding.fingerprint
+                    );
+                    survivors.push(finding);
+                }
+            }
+        }
+        classifier_kept = survivors.len();
+        classifier_dropped = classifier_skipped.len();
+        kept = survivors;
+
+        // Persist a `NeedsReview` triage outcome for the rejected
+        // findings so they're not invisible — operators can see why
+        // they were skipped via the rationale.
+        for (finding, score) in &classifier_skipped {
+            if let Some(finding_id) = finding.id {
+                let outcome = TriageOutcome {
+                    verdict: TriageVerdict::NeedsReview,
+                    confidence: score.clamp(0.0, 1.0),
+                    rationale: format!(
+                        "classifier-gate score={score:.2} below adaptive threshold; not triaged at stage 2",
+                    ),
+                    cost_usd: 0.0,
+                };
+                let _ = store.save_triage(finding_id, &outcome);
+            }
+        }
+    }
 
     // ----- Stage 2: concurrent LLM triage ----------------------------
     let mut tp = 0usize;
     let mut fp = 0usize;
     let mut needs_review = 0usize;
     let mut by_design = 0usize;
-    // Cost accumulator: every TriageOutcome now carries `cost_usd`
-    // which providers populate when they surface usage (the
-    // AnthropicOAuthRuntime path does so today). The cap test below
-    // fires for real once the first call returns non-zero cost.
     let mut total_cost: f64 = 0.0;
     let mut cost_cap_hit = false;
-    let mut results: Vec<Value> = Vec::with_capacity(stage1_kept);
+    let mut results: Vec<Value> = Vec::with_capacity(kept.len());
     let mut pending_after_cap = 0usize;
 
     let cwd = workspace.root().to_path_buf();
@@ -5676,6 +5753,34 @@ fn run_triage(
     // tokens + ~200 output → ~$0.002. We deposit a slightly
     // pessimistic $0.005 so the cap fires before the actuals land.
     const TRIAGE_DEPOSIT_USD: f64 = 0.005;
+
+    // Per-model concurrency gate. Workers acquire a permit at
+    // `Priority::Normal` before dispatching their triage call, so
+    // interactive triage wins permits over background
+    // `full_mode_multi` chunks (which run at `Priority::Lowest`).
+    // The gate is async; we hand workers a tokio Handle so they can
+    // `block_on` `acquire`. Reuse the outer `#[tokio::main]` runtime
+    // when one exists (`kuzushi run` / shell paths) — otherwise
+    // build a single-threaded runtime owned by this scope. Building
+    // a fresh runtime *inside* an outer runtime panics on drop, so
+    // the `try_current` check is load-bearing.
+    let gate = std::sync::Arc::new(crate::concurrency::ModelGate::new());
+    gate.set_cap(
+        &stage2_model,
+        crate::concurrency::default_concurrency_for(&stage2_model),
+    );
+    let owned_gate_runtime = match tokio::runtime::Handle::try_current() {
+        Ok(_) => None,
+        Err(_) => tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok(),
+    };
+    let gate_handle = match (&owned_gate_runtime, tokio::runtime::Handle::try_current()) {
+        (Some(rt), _) => Some(rt.handle().clone()),
+        (None, Ok(handle)) => Some(handle),
+        (None, Err(_)) => None,
+    };
     {
         use std::sync::mpsc;
 
@@ -5693,6 +5798,8 @@ fn run_triage(
                 let cwd = cwd.clone();
                 let prompt_template = prompt_template.clone();
                 let stage2_model = stage2_model.clone();
+                let gate = gate.clone();
+                let gate_handle = gate_handle.clone();
                 scope.spawn(move || {
                     loop {
                         let finding = match work_rx.lock().unwrap().recv() {
@@ -5724,7 +5831,25 @@ fn run_triage(
                             finding: finding.clone(),
                             prompt_template: prompt_template.clone(),
                         };
+
+                        // Acquire a permit on the per-model gate at
+                        // `Priority::Normal` before dispatching. The
+                        // permit is dropped when the call returns, so
+                        // the gate enforces the per-model concurrency
+                        // cap automatically. Workers waiting on a
+                        // saturated semaphore yield to higher-priority
+                        // calls (e.g. interactive `verify:finding`).
+                        let _permit = gate_handle.as_ref().map(|h| {
+                            h.block_on(
+                                gate.acquire(&stage2_model, crate::concurrency::Priority::Normal),
+                            )
+                        });
                         let res = runtime.triage_finding_blocking(req);
+                        // Drop the permit before handing the result
+                        // back so a queued worker can pick up the
+                        // slack while the main thread accumulates.
+                        drop(_permit);
+
                         // Settle the ticket with the actual cost.
                         // Refunds always succeed; we never strand a
                         // ticket open.
@@ -5822,28 +5947,38 @@ fn run_triage(
         })
         .count();
 
-    let stages = json!([
-        {
-            "stage": "prefilter",
-            "kept": stage1_kept,
-            "dropped": stage1_dropped,
-            "rule": format!("prefilter_score >= {}", input.prefilter_threshold),
-        },
-        {
-            "stage": "haiku",
-            "model": stage2_model,
-            "concurrency": input.concurrency,
-            "triaged": triaged,
-            "tp": tp,
-            "fp": fp,
-            "needsReview": needs_review,
-            "byDesign": by_design,
-            "highConfidenceFalsePositivesDropped": dropped_high_conf_fp,
-            "costUsd": total_cost,
-            "costCapHit": cost_cap_hit,
-            "pendingAfterCap": pending_after_cap,
-        }
-    ]);
+    let mut stages_vec: Vec<Value> = vec![json!({
+        "stage": "prefilter",
+        "kept": stage1_kept,
+        "dropped": stage1_dropped,
+        "rule": format!("prefilter_score >= {}", input.prefilter_threshold),
+    })];
+    if input.use_classifier_gate {
+        stages_vec.push(json!({
+            "stage": "classifier_gate",
+            "kept": classifier_kept,
+            "dropped": classifier_dropped,
+            "skipped_findings": classifier_skipped
+                .iter()
+                .map(|(f, s)| json!({"fingerprint": f.fingerprint, "score": s}))
+                .collect::<Vec<_>>(),
+        }));
+    }
+    stages_vec.push(json!({
+        "stage": "haiku",
+        "model": stage2_model,
+        "concurrency": input.concurrency,
+        "triaged": triaged,
+        "tp": tp,
+        "fp": fp,
+        "needsReview": needs_review,
+        "byDesign": by_design,
+        "highConfidenceFalsePositivesDropped": dropped_high_conf_fp,
+        "costUsd": total_cost,
+        "costCapHit": cost_cap_hit,
+        "pendingAfterCap": pending_after_cap,
+    }));
+    let stages = Value::Array(stages_vec);
 
     let mut summary = format!(
         "[+] Triaged {triaged} of {total} findings (stage1 dropped {stage1_dropped})\n      tp={tp}  fp={fp}  needs_review={needs_review}"
@@ -8616,6 +8751,12 @@ fn triage_module() -> BuiltinModule {
                         "Maximum findings per runtime batch.",
                     )
                     .default(json!(20)),
+                    opt(
+                        "useClassifierGate",
+                        OptionType::Bool,
+                        "Run an opt-in adaptive classifier (Stage 1.5) between the deterministic prefilter and the Haiku triage; drops survivors below the running 80th-percentile score before paying full triage cost.",
+                    )
+                    .default(json!(false)),
                     model_option(),
                 ],
             ),
@@ -13688,6 +13829,97 @@ OUT
             requests[0].prompt_template.as_deref(),
             Some("Use repository evidence only.")
         );
+    }
+
+    #[test]
+    fn triage_run_classifier_gate_is_opt_in() {
+        // The Stage 1.5 classifier runs only when `useClassifierGate=true`.
+        // The default flow (false) must produce exactly two stages
+        // (`prefilter` + `haiku`) so existing callers see no regression.
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .insert_scan_run("run-1", workspace.root(), "completed")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "rule.x",
+            "src/x.rs",
+            1,
+            Some(1),
+            Severity::High,
+            "attacker controls input",
+        );
+        store.insert_finding("run-1", &finding).unwrap();
+
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("anthropic:claude-haiku-4-5-20251001".to_string());
+        let runtime = MockRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime("triage:run", json!({}), &ctx, Some(&runtime))
+            .unwrap();
+        let stages = result.pointer("/data/stages").unwrap().as_array().unwrap();
+        let stage_names: Vec<&str> = stages
+            .iter()
+            .map(|s| s.get("stage").and_then(Value::as_str).unwrap_or(""))
+            .collect();
+        assert_eq!(stage_names, vec!["prefilter", "haiku"]);
+    }
+
+    #[test]
+    fn triage_run_classifier_gate_emits_stage_when_enabled() {
+        // With `useClassifierGate=true` the response should include a
+        // `classifier_gate` stage entry between `prefilter` and
+        // `haiku`. We don't assert verdicts here (MockRuntime drives
+        // both classifier and triage from the same entrypoint); we
+        // just want the new stage in the response shape.
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .insert_scan_run("run-1", workspace.root(), "completed")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "rule.x",
+            "src/x.rs",
+            1,
+            Some(1),
+            Severity::High,
+            "attacker controls input",
+        );
+        store.insert_finding("run-1", &finding).unwrap();
+
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("anthropic:claude-haiku-4-5-20251001".to_string());
+        let runtime = MockRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "triage:run",
+                json!({"useClassifierGate": true}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+        let stages = result.pointer("/data/stages").unwrap().as_array().unwrap();
+        let stage_names: Vec<&str> = stages
+            .iter()
+            .map(|s| s.get("stage").and_then(Value::as_str).unwrap_or(""))
+            .collect();
+        assert_eq!(stage_names, vec!["prefilter", "classifier_gate", "haiku"]);
     }
 
     #[test]

@@ -57,7 +57,11 @@ pub use attack_surface::{
     AttackSurfaceKind, AttackSurfaceMap, AttackSurfaceSummary,
 };
 pub use carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hunt_report};
-pub use classifier_gate::{ClassifierConfig, LikelyVulnClassifier, QuantileEstimator, Score};
+pub use classifier_gate::{
+    score_one_with_runtime as classifier_score_one_with_runtime,
+    should_graduate as classifier_should_graduate, ClassifierConfig, LikelyVulnClassifier,
+    QuantileEstimator, Score,
+};
 pub use code_nav::{
     code_nav_tool_specs, code_nav_toolbox, find_references_tool, list_definitions_tool,
     read_definition_tool, read_source_tool, CodeNavConfig, CodeNavTool,
