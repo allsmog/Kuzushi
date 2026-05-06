@@ -148,6 +148,7 @@ pub use variant_ndiff::{
     derive_whitebox_variant_patterns, hunt_whitebox_static_variants, WhiteboxVariantPattern,
     WhiteboxVariantSearchReport,
 };
+pub use verify::{verify_finding, ProofVerdict, VerificationOutcome, VerifyOptions};
 pub use whitebox_static::{
     agent_tool_policy_for_input, analysis_mode_from_input, apply_whitebox_static_sast_policy,
     default_whitebox_static_agent_tool_policy, mark_whitebox_static_findings,
@@ -163,7 +164,6 @@ pub use whitebox_suppressions::{
     WhiteboxStaleSuppression, WhiteboxSuppressionEvidence, WhiteboxSuppressionMatch,
     WhiteboxSuppressionRecord, WhiteboxSuppressionReport, WhiteboxSuppressionScope,
 };
-pub use verify::{verify_finding, ProofVerdict, VerificationOutcome, VerifyOptions};
 pub use workspace::{
     export_workspace_findings, WorkspaceExportFormat, WorkspaceFindingsExport, WorkspaceTarget,
 };

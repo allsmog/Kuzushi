@@ -1285,7 +1285,6 @@ fn build_c_trigger(finding: &Finding) -> CTriggerSource {
 
     match (&suspect_source, &call_plan) {
         (Some(src), Some(plan)) if c_source_appears_self_contained(src) => {
-            // Real trampoline: include the suspect file and forward.
             let target_c = format!(
                 "// kuzushi-verify generated trampoline for `{name}`.\n\
                  // Call kind: {kind}.\n\
@@ -1304,6 +1303,42 @@ fn build_c_trigger(finding: &Finding) -> CTriggerSource {
                 trigger_c,
                 target_c,
                 suspect_source: Some(src.clone()),
+            }
+        }
+        (Some(_), Some(plan)) => {
+            // Suspect source has project-relative #includes. Run `clang -E`
+            // to flatten the translation unit and inline the result
+            // directly into target.c (no separate suspect_source.c).
+            // Inlining sidesteps the double-include hazard that arises
+            // when both target.c's own headers and the preprocessed body
+            // declare the same system types.
+            match try_preprocess_c_source(suspect_path) {
+                Some(pre) => {
+                    let target_c = format!(
+                        "// kuzushi-verify generated trampoline for `{name}` (preprocessed via {compiler} -E).\n\
+                         // Call kind: {kind}.\n\
+                         {pre}\n\
+                         \n\
+                         void kuzushi_verify_call_target(const uint8_t *data, size_t len) {{\n\
+                         {call}\
+                         }}\n",
+                        name = plan.fn_name,
+                        kind = plan.call_kind,
+                        compiler = pre.compiler,
+                        pre = pre.text,
+                        call = plan.call_expression,
+                    );
+                    CTriggerSource {
+                        trigger_c,
+                        target_c,
+                        suspect_source: None,
+                    }
+                }
+                None => CTriggerSource {
+                    trigger_c,
+                    target_c: C_TARGET_STUB.to_string(),
+                    suspect_source: None,
+                },
             }
         }
         _ => CTriggerSource {
@@ -2569,6 +2604,99 @@ mod tests {
     fn c_self_contained_accepts_no_includes() {
         let src = "void foo(void) { return; }\n";
         assert!(c_source_appears_self_contained(src));
+    }
+
+    // ----- preprocess fallback for multi-file C --------------------
+
+    #[test]
+    fn preprocess_returns_none_when_compiler_missing() {
+        // We can't easily strip clang/gcc from PATH inside this test,
+        // so this test only verifies that the function is callable and
+        // returns *something* (Some on a CI runner with clang, None
+        // otherwise). What matters is that it doesn't panic.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("foo.c");
+        std::fs::write(&path, "int foo(int x) { return x + 1; }\n").unwrap();
+        let _ = try_preprocess_c_source(&path);
+    }
+
+    #[test]
+    fn preprocess_flattens_project_includes_when_clang_available() {
+        if kuzushi_sandbox::which("clang").is_none() && kuzushi_sandbox::which("gcc").is_none() {
+            eprintln!("skipping: no clang or gcc on PATH");
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let header = tmp.path().join("private.h");
+        std::fs::write(
+            &header,
+            "#ifndef PRIVATE_H\n#define PRIVATE_H\nint kuzushi_pre_helper(int x);\n#endif\n",
+        )
+        .unwrap();
+        let source = tmp.path().join("foo.c");
+        std::fs::write(
+            &source,
+            "#include \"private.h\"\nint foo(int x) { return kuzushi_pre_helper(x); }\n",
+        )
+        .unwrap();
+
+        let pre = try_preprocess_c_source(&source).expect("preprocess should succeed");
+        assert!(
+            pre.text.contains("kuzushi_pre_helper"),
+            "expected the helper declaration in flattened text"
+        );
+        assert!(
+            !pre.text.contains("#include \"private.h\""),
+            "preprocessor should have eaten the include"
+        );
+        assert!(pre.compiler == "clang" || pre.compiler == "gcc");
+    }
+
+    #[test]
+    fn build_c_trigger_uses_preprocess_when_source_has_project_includes() {
+        if kuzushi_sandbox::which("clang").is_none() && kuzushi_sandbox::which("gcc").is_none() {
+            eprintln!("skipping: no clang or gcc on PATH");
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let header = tmp.path().join("util.h");
+        std::fs::write(
+            &header,
+            "#ifndef UTIL_H\n#define UTIL_H\n#include <stddef.h>\n#include <stdint.h>\nvoid sink(const uint8_t *p, size_t n);\n#endif\n",
+        )
+        .unwrap();
+        let source = tmp.path().join("vuln.c");
+        std::fs::write(
+            &source,
+            "#include \"util.h\"\nvoid vulnerable(const uint8_t *data, size_t len) {\n    char buf[8];\n    for (size_t i = 0; i < len; i++) buf[i] = data[i];\n}\n",
+        )
+        .unwrap();
+
+        let finding = Finding::new_semgrep(
+            "test/oob",
+            source.to_str().unwrap(),
+            3,
+            Some(3),
+            Severity::High,
+            "out-of-bounds write",
+        );
+        let trigger = build_c_trigger(&finding);
+        assert!(
+            trigger.target_c.contains("kuzushi_verify_call_target"),
+            "target.c should declare the trampoline"
+        );
+        assert!(
+            trigger.target_c.contains("vulnerable"),
+            "preprocessed body should still contain the suspect function"
+        );
+        assert!(
+            trigger.target_c.contains("preprocessed via"),
+            "preprocess branch should mark target.c with a comment"
+        );
+        assert!(
+            trigger.suspect_source.is_none(),
+            "preprocess branch inlines the body — no separate suspect_source.c"
+        );
     }
 
     // ----- end-to-end harness shape --------------------------------
