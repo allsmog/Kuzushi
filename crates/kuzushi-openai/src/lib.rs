@@ -12,6 +12,9 @@ use kuzushi_core::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod oauth;
+pub use oauth::{OauthReadiness, probe as probe_anthropic_oauth};
+
 #[derive(Debug, Clone)]
 pub struct PiAgentCoreRuntime {
     command: Vec<String>,
@@ -238,6 +241,7 @@ mod tests {
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec!["node".to_string(), "bridge.mjs".to_string()]),
+            anthropic_oauth: None,
         };
 
         let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -259,6 +263,7 @@ mod tests {
                 "printf '%s' '{\"ok\":false,\"error\":\"install @mariozechner/pi-agent-core\"}'; exit 1"
                     .to_string(),
             ]),
+            anthropic_oauth: None,
         };
         let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
         let err = bridge

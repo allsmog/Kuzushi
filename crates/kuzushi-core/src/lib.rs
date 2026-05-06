@@ -33,7 +33,8 @@ pub use attachments::{
 };
 pub use carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hunt_report};
 pub use config::{
-    load_config, load_config_for_target, ConfigPaths, RuntimeConfig, RuntimeKind, V2Config,
+    load_config, load_config_for_target, AnthropicOauthConfig, ConfigPaths, RuntimeConfig,
+    RuntimeKind, V2Config,
 };
 pub use dep_hygiene::{
     analyze_manifest as analyze_dep_hygiene_manifest, check_dependency_hygiene, DepHygieneFinding,

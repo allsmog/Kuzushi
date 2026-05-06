@@ -1,9 +1,70 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+
+/**
+ * Cross-process exclusive lock around an OAuth credentials read-modify-write.
+ *
+ * Multiple bridge processes (e.g. four tmux panes from run-all.sh) can race
+ * on token refresh: each reads the bag, calls the OAuth refresh endpoint,
+ * and writes the bag back. Without locking, only one writer's refresh-token
+ * survives and the others are silently invalidated by Anthropic on the next
+ * call. We use an atomic O_EXCL create on a sibling `.lock` file as a
+ * cross-process mutex; the file is unlinked on release.
+ */
+async function withCredentialsLock(filePath, fn, { timeoutMs = 30_000, pollMs = 80 } = {}) {
+  const lockPath = `${filePath}.lock`;
+  mkdirSync(path.dirname(lockPath), { recursive: true });
+  const start = Date.now();
+  let fd;
+  while (true) {
+    try {
+      fd = openSync(lockPath, "wx", 0o600);
+      break;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      if (Date.now() - start > timeoutMs) {
+        // Stale lock recovery: if the lock file is older than the timeout
+        // assume the holder crashed and steal it. Worst case is one extra
+        // refresh, not a security issue.
+        try {
+          rmSync(lockPath, { force: true });
+        } catch {
+          /* ignore */
+        }
+        continue;
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+      /* ignore */
+    }
+    try {
+      rmSync(lockPath, { force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 async function readStdin() {
   let data = "";
@@ -166,11 +227,27 @@ function readOauthCredentials(home = os.homedir()) {
 
 function writeOauthCredentials(bag, home = os.homedir()) {
   const filePath = oauthCredentialsPath(home);
-  mkdirSync(path.dirname(filePath), { recursive: true });
-  writeFileSync(filePath, `${JSON.stringify(bag, null, 2)}\n`, {
+  const dir = path.dirname(filePath);
+  mkdirSync(dir, { recursive: true });
+  // Harden the parent directory in case it was created earlier with a permissive umask.
+  try {
+    chmodSync(dir, 0o700);
+  } catch {
+    /* ignore — best-effort */
+  }
+  // Atomic-ish write: tmp + rename, so a crashed writer can't leave a partial file.
+  const tmpPath = `${filePath}.tmp.${process.pid}`;
+  writeFileSync(tmpPath, `${JSON.stringify(bag, null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600,
   });
+  try {
+    chmodSync(tmpPath, 0o600);
+  } catch {
+    /* ignore */
+  }
+  // renameSync is atomic on the same filesystem.
+  renameSync(tmpPath, filePath);
   try {
     chmodSync(filePath, 0o600);
   } catch {
@@ -212,23 +289,37 @@ async function loadOAuthModule() {
 
 async function getFreshOAuthAccessTokenForProvider(provider) {
   if (provider !== "anthropic" && provider !== "openai-codex") return undefined;
-  const bag = readOauthCredentials();
-  const creds = bag[provider];
-  if (!isProviderCreds(creds)) return undefined;
-  if (Date.now() < creds.expires) return creds.access;
+  // Fast path: token still fresh — no lock needed, no I/O race.
+  const bagInitial = readOauthCredentials();
+  const credsInitial = bagInitial[provider];
+  if (!isProviderCreds(credsInitial)) return undefined;
+  if (Date.now() < credsInitial.expires) return credsInitial.access;
 
-  try {
-    const oauth = await loadOAuthModule();
-    const refresh =
-      provider === "anthropic" ? oauth.refreshAnthropicToken : oauth.refreshOpenAICodexToken;
-    if (typeof refresh !== "function") return undefined;
-    const next = await refresh(creds.refresh);
-    if (!isProviderCreds(next)) return undefined;
-    writeOauthCredentials({ ...bag, [provider]: next });
-    return next.access;
-  } catch {
-    return undefined;
-  }
+  // Refresh path: serialise across processes with a sibling lockfile so
+  // concurrent bridge invocations (multiple tmux panes) don't each refresh
+  // and overwrite each other's refresh token.
+  return withCredentialsLock(oauthCredentialsPath(), async () => {
+    // Re-read under lock — another holder may have just refreshed for us.
+    const bag = readOauthCredentials();
+    const creds = bag[provider];
+    if (!isProviderCreds(creds)) return undefined;
+    if (Date.now() < creds.expires) return creds.access;
+
+    try {
+      const oauth = await loadOAuthModule();
+      const refresh =
+        provider === "anthropic" ? oauth.refreshAnthropicToken : oauth.refreshOpenAICodexToken;
+      if (typeof refresh !== "function") return undefined;
+      const next = await refresh(creds.refresh);
+      if (!isProviderCreds(next)) return undefined;
+      writeOauthCredentials({ ...bag, [provider]: next });
+      return next.access;
+    } catch {
+      // Never surface refresh-error details — they may include redirect URLs
+      // or other artefacts that contain authorisation codes.
+      return undefined;
+    }
+  });
 }
 
 function providerAuthToken(provider) {
@@ -271,8 +362,10 @@ async function runOAuthLogin(rawProvider) {
   if (!persistable.refresh || !persistable.access) {
     throw new Error(`${provider} OAuth flow returned no usable credentials`);
   }
-  const bag = readOauthCredentials();
-  const filePath = writeOauthCredentials({ ...bag, [provider]: persistable });
+  const filePath = await withCredentialsLock(oauthCredentialsPath(), async () => {
+    const bag = readOauthCredentials();
+    return writeOauthCredentials({ ...bag, [provider]: persistable });
+  });
   process.stdout.write(`${provider} OAuth credentials saved to ${filePath}\n`);
 }
 
