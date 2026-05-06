@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use crate::runtime::SubagentRole;
+
 use crate::findings::{Finding, Severity};
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime};
@@ -601,7 +603,12 @@ fn query_systems_invariants(
     context: &SystemsContextOutput,
     _options: &SystemsHuntInput,
 ) -> Result<SystemsInvariantOutput> {
-    let response = runtime.query_blocking(AgentQueryRequest {
+    // Pick a sub-agent role appropriate for the dominant surface kind.
+    // When at least one Rust unsafe-region surface is present, the
+    // UnsafeBlockReasoner preamble keeps the agent on-task. Otherwise
+    // fall through to Generic — same behavior as before.
+    let role = pick_role_for_invariants(context);
+    let request = AgentQueryRequest {
         model: model.to_string(),
         cwd: target.to_path_buf(),
         system_prompt: SYSTEMS_INVARIANT_SYSTEM_PROMPT.to_string(),
@@ -609,12 +616,94 @@ fn query_systems_invariants(
             "Extract safety invariants for these low-level surfaces. Return JSON with invariants[].\n\n{}",
             serde_json::to_string_pretty(context)?
         ),
-    })?;
+    };
+    let response = if role == SubagentRole::Generic {
+        runtime.query_blocking(request)?
+    } else {
+        runtime.spawn_subagent_blocking(role, request)?
+    };
     let raw = parse_agent_json(response)
         .context("systems-hunt:systems-invariant-extract expected JSON with an invariants array")?;
     Ok(SystemsInvariantOutput {
         invariants: parse_invariants(&raw),
     })
+}
+
+/// Pick a sub-agent role for the invariant-extraction step based on the
+/// surface mix in `context`. The first matching rule wins:
+/// - Any Rust unsafe-region surface → UnsafeBlockReasoner
+/// - Any FFI-boundary surface → FfiBoundaryReasoner
+/// - Any resource-provenance surface in `.rs` → LifetimeAliasingReasoner
+/// - Otherwise → Generic (no preamble change)
+pub(crate) fn pick_role_for_invariants(context: &SystemsContextOutput) -> SubagentRole {
+    let has_rust_unsafe = context
+        .surfaces
+        .iter()
+        .any(|s| s.kind == "unsafe-region" && s.file_path.to_ascii_lowercase().ends_with(".rs"));
+    if has_rust_unsafe {
+        return SubagentRole::UnsafeBlockReasoner;
+    }
+    let has_ffi = context
+        .surfaces
+        .iter()
+        .any(|s| s.kind == "ffi-boundary" || s.domains.iter().any(|d| d == "ffi"));
+    if has_ffi {
+        return SubagentRole::FfiBoundaryReasoner;
+    }
+    let has_rust_provenance = context.surfaces.iter().any(|s| {
+        s.kind == "resource-provenance" && s.file_path.to_ascii_lowercase().ends_with(".rs")
+    });
+    if has_rust_provenance {
+        return SubagentRole::LifetimeAliasingReasoner;
+    }
+    SubagentRole::Generic
+}
+
+/// Augment surfaces with structural data from the code-index facade
+/// when one is available. When no index backend is live (joern absent),
+/// returns the surfaces unchanged. Fails soft on any backend error.
+///
+/// Use this from agentic flows that want signal beyond the
+/// text-walking `gather_systems_context` produces. The legacy DAG
+/// pipeline does not call this function — opt-in only.
+pub async fn try_augment_with_index(
+    surfaces: Vec<RankedSystemsSurface>,
+) -> Vec<RankedSystemsSurface> {
+    use kuzushi_codeindex::IndexFacade;
+
+    let mut facade = IndexFacade::with_available_backends().await;
+    if !facade
+        .live_backends()
+        .iter()
+        .any(|b| matches!(b, kuzushi_codeindex::Backend::Joern))
+    {
+        // No joern backend live — nothing to augment with.
+        return surfaces;
+    }
+
+    let mut out = Vec::with_capacity(surfaces.len());
+    for mut surface in surfaces {
+        let is_rust = surface.file_path.to_ascii_lowercase().ends_with(".rs");
+        if is_rust && surface.kind == "unsafe-region" {
+            match facade.unsafe_blocks(Some(&surface.file_path)).await {
+                Ok(value) => {
+                    if let Some(arr) = value.get("blocks").and_then(Value::as_array) {
+                        if !arr.is_empty() {
+                            surface
+                                .reasons
+                                .insert(0, format!("codeindex: {} unsafe block(s)", arr.len()));
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Best-effort augmentation — never let a backend
+                    // failure derail the surface list.
+                }
+            }
+        }
+        out.push(surface);
+    }
+    out
 }
 
 fn query_systems_triggers(
@@ -1811,5 +1900,125 @@ mod tests {
 
         assert!(err.contains("requires an explicit model"));
         assert!(err.contains("will not choose a fallback model"));
+    }
+
+    // ----- pick_role_for_invariants --------------------------------
+
+    fn surface(file: &str, kind: &str) -> RankedSystemsSurface {
+        RankedSystemsSurface {
+            id: "test".to_string(),
+            file_path: file.to_string(),
+            start_line: 1,
+            display_name: "test".to_string(),
+            kind: kind.to_string(),
+            score: 0,
+            domains: Vec::new(),
+            reasons: Vec::new(),
+            attacker_controlled_fields: Vec::new(),
+            hardening_signals: Vec::new(),
+            evidence: Vec::new(),
+        }
+    }
+
+    fn ctx_with(surfaces: Vec<RankedSystemsSurface>) -> SystemsContextOutput {
+        SystemsContextOutput {
+            surfaces,
+            surface_packs: Vec::new(),
+            metadata: SystemsContextMetadata {
+                codeql_available: false,
+                codeql_db_path: None,
+                bash_probing_used: false,
+            },
+        }
+    }
+
+    #[test]
+    fn role_unsafe_block_for_rust_unsafe_region() {
+        let ctx = ctx_with(vec![surface("crates/foo/src/lib.rs", "unsafe-region")]);
+        assert_eq!(
+            pick_role_for_invariants(&ctx),
+            SubagentRole::UnsafeBlockReasoner
+        );
+    }
+
+    #[test]
+    fn role_ffi_for_ffi_boundary_kind() {
+        let ctx = ctx_with(vec![surface("src/foo.c", "ffi-boundary")]);
+        assert_eq!(
+            pick_role_for_invariants(&ctx),
+            SubagentRole::FfiBoundaryReasoner
+        );
+    }
+
+    #[test]
+    fn role_ffi_for_ffi_domain_label() {
+        let mut s = surface("src/foo.c", "other-kind");
+        s.domains.push("ffi".to_string());
+        let ctx = ctx_with(vec![s]);
+        assert_eq!(
+            pick_role_for_invariants(&ctx),
+            SubagentRole::FfiBoundaryReasoner
+        );
+    }
+
+    #[test]
+    fn role_lifetime_for_rust_resource_provenance() {
+        let ctx = ctx_with(vec![surface(
+            "crates/foo/src/lib.rs",
+            "resource-provenance",
+        )]);
+        assert_eq!(
+            pick_role_for_invariants(&ctx),
+            SubagentRole::LifetimeAliasingReasoner
+        );
+    }
+
+    #[test]
+    fn role_generic_for_c_unsafe_region() {
+        // C "unsafe" regions don't get the Rust UnsafeBlockReasoner —
+        // they're a generic surface from the role-routing perspective.
+        let ctx = ctx_with(vec![surface("src/parser.c", "unsafe-region")]);
+        assert_eq!(pick_role_for_invariants(&ctx), SubagentRole::Generic);
+    }
+
+    #[test]
+    fn role_generic_for_empty_context() {
+        let ctx = ctx_with(Vec::new());
+        assert_eq!(pick_role_for_invariants(&ctx), SubagentRole::Generic);
+    }
+
+    #[test]
+    fn role_unsafe_takes_priority_over_ffi() {
+        // When both kinds appear, Rust unsafe-region wins because it's
+        // checked first in the cascade.
+        let mut ffi = surface("src/foo.c", "ffi-boundary");
+        ffi.domains.push("ffi".to_string());
+        let ctx = ctx_with(vec![surface("crates/x/src/lib.rs", "unsafe-region"), ffi]);
+        assert_eq!(
+            pick_role_for_invariants(&ctx),
+            SubagentRole::UnsafeBlockReasoner
+        );
+    }
+
+    // ----- try_augment_with_index ----------------------------------
+
+    #[tokio::test]
+    async fn augment_with_index_returns_input_unchanged_when_no_backend_live() {
+        // Sandbox has no joern; the augmenter must short-circuit.
+        let surfaces = vec![surface("crates/foo/src/lib.rs", "unsafe-region")];
+        let augmented = try_augment_with_index(surfaces.clone()).await;
+        assert_eq!(augmented.len(), 1);
+        assert_eq!(augmented[0].file_path, surfaces[0].file_path);
+        // No new "codeindex:" reason should have been added.
+        assert!(!augmented[0]
+            .reasons
+            .iter()
+            .any(|r| r.starts_with("codeindex:")));
+    }
+
+    #[tokio::test]
+    async fn augment_with_index_handles_empty_surface_list() {
+        let augmented = try_augment_with_index(Vec::new()).await;
+        assert!(augmented.is_empty());
     }
 }
