@@ -20,6 +20,9 @@ use std::process::Stdio;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
+// `Stdio` is still used by `parse_repo` below — `joern-parse` is a
+// real subprocess (the JVM tool we're wrapping). Only the HTTP query
+// path moved to native Rust.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -82,45 +85,36 @@ fn read_head_commit(repo: &Path) -> Option<String> {
     }
 }
 
-/// Run a Scala query against a running `joern --server` instance. Returns
-/// the parsed `stdout` payload from joern (a JSON string of the CPG result).
+/// Run a Scala query against a running `joern --server` instance via a
+/// native Rust HTTP client (`reqwest` over `rustls`). Returns the raw
+/// stdout payload from joern (a JSON string of the CPG result).
 pub async fn run_query(scala: &str) -> Result<String> {
     let url =
         std::env::var("JOERN_SERVER_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
 
-    // We don't take a `reqwest` dependency for this skeleton — instead we
-    // shell out to `curl` (universal) when available, which is fine for
-    // local-loopback POSTs. A future iteration can swap in a typed HTTP
-    // client if we want streaming or structured errors.
-    if kuzushi_mcp_common::doctor::which("curl").is_none() {
-        anyhow::bail!(
-            "BackendUnavailable: curl not on PATH; the joern MCP server uses curl as a transport in this preview"
-        );
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .context("could not build joern HTTP client")?;
+
+    let response = client
+        .post(format!("{url}/query-sync"))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({ "query": scala }))
+        .send()
+        .await
+        .with_context(|| format!("joern --server unreachable at {url} (is it running?)"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("joern --server query failed: HTTP {status}: {body}");
     }
 
-    let body = serde_json::json!({ "query": scala }).to_string();
-    let output = Command::new("curl")
-        .arg("-fsS")
-        .arg("-X")
-        .arg("POST")
-        .arg("-H")
-        .arg("Content-Type: application/json")
-        .arg("-d")
-        .arg(&body)
-        .arg(format!("{url}/query-sync"))
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
+    response
+        .text()
         .await
-        .context("could not spawn curl for joern query")?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "joern --server query failed (is it running on {}?): {}",
-            url,
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        .context("could not read joern response body")
 }
 
 #[cfg(test)]
