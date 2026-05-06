@@ -236,6 +236,239 @@ fn run_recall_test(slice_name: &str) {
 }
 
 #[test]
+fn full_mode_dry_run_returns_plan_without_calling_model() {
+    // Synthetic mini-target with a few C files. Dry-run produces a chunk
+    // plan + cost band without any LLM call.
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(tmp.path().join("src/a.c"), "void a(){}\n").unwrap();
+    fs::write(tmp.path().join("src/b.c"), "void b(){}\n").unwrap();
+
+    let kuzushi = env!("CARGO_BIN_EXE_kuzushi");
+    let input = format!(
+        r#"{{"target":"{}","dryRun":true}}"#,
+        tmp.path().display()
+    );
+    let output = Command::new(kuzushi)
+        .args([
+            "--target",
+            tmp.path().to_str().unwrap(),
+            "run",
+            "full-mode:hunt",
+            "--input",
+            &input,
+        ])
+        .output()
+        .expect("kuzushi run full-mode:hunt");
+    assert!(
+        output.status.success(),
+        "full-mode:hunt failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["ok"], serde_json::json!(true));
+    assert_eq!(parsed["summary"]["dryRun"], serde_json::json!(true));
+    assert!(parsed["summary"]["files"].as_u64().unwrap() >= 2);
+    assert!(parsed["summary"]["totalTokens"].as_u64().unwrap() > 0);
+    let _ = tmp;
+}
+
+/// Build a fake bridge shell-script that returns canned single-shot
+/// (legacy `query` envelope) responses. Used by the classifier-gate and
+/// deep-auditor smoke tests to drive the bridge without LLM credits.
+#[cfg(unix)]
+fn fake_bridge_query(dir: &Path, payloads: &[&str]) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let counter = dir.join("bridge.counter");
+    fs::write(&counter, "0").unwrap();
+    let payloads_json = serde_json::to_string(payloads).unwrap();
+    let array_path = dir.join("bridge.payloads.json");
+    fs::write(&array_path, payloads_json).unwrap();
+    let script = format!(
+        r#"#!/usr/bin/env node
+import {{ readFileSync, writeFileSync }} from "node:fs";
+import process from "node:process";
+const counter = "{counter}";
+const payloads = JSON.parse(readFileSync("{array_path}", "utf8"));
+const n = Number(readFileSync(counter, "utf8"));
+writeFileSync(counter, String(n + 1));
+process.stdin.resume(); // drain stdin
+process.stdin.on("data", () => {{}});
+process.stdin.on("end", () => {{
+  process.stdout.write(payloads[Math.min(n, payloads.length - 1)]);
+  process.exit(0);
+}});
+"#,
+        counter = counter.display(),
+        array_path = array_path.display(),
+    );
+    let bridge = dir.join("fake-bridge.mjs");
+    fs::write(&bridge, script).unwrap();
+    fs::set_permissions(&bridge, fs::Permissions::from_mode(0o755)).unwrap();
+    bridge
+}
+
+#[cfg(unix)]
+fn build_runtime_config_with_fake_bridge(home: &Path, bridge: &Path) {
+    let v2 = home.join(".kuzushi/v2");
+    fs::create_dir_all(&v2).unwrap();
+    let body = format!(
+        r#"
+model = "anthropic:claude-sonnet-4-6"
+
+[runtime]
+api_key_env = "ANTHROPIC_API_KEY"
+agent_bridge_command = ["node", "{bridge}"]
+"#,
+        bridge = bridge.display()
+    );
+    fs::write(v2.join("config.toml"), body).unwrap();
+}
+
+#[test]
+#[cfg(unix)]
+fn classifier_gate_score_persists_skip_outcome_when_below_threshold() {
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("target");
+    let home = tmp.path().join("home");
+    fs::create_dir_all(target.join("src")).unwrap();
+    fs::write(target.join("src/foo.c"), "void foo(){}\n").unwrap();
+    let workspace = WorkspaceTarget::new(&target).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    store
+        .insert_scan_run("seed", workspace.root(), "running")
+        .unwrap();
+    let finding = Finding::new_tool(
+        "semgrep",
+        "rule",
+        "src/foo.c",
+        1,
+        Some(1),
+        Severity::Medium,
+        "boring candidate",
+    );
+    let fp = finding.fingerprint.clone();
+    store.insert_finding("seed", &finding).unwrap();
+    store.complete_scan_run("seed", "completed", 1).unwrap();
+
+    let bridge = fake_bridge_query(
+        tmp.path(),
+        &[r#"{"ok":true,"text":"{\"likely\":false,\"score\":0.15,\"reason\":\"boring\"}"}"#],
+    );
+    build_runtime_config_with_fake_bridge(&home, &bridge);
+
+    let kuzushi = env!("CARGO_BIN_EXE_kuzushi");
+    let input = format!(r#"{{"findingFingerprint":"{fp}"}}"#);
+    let output = Command::new(kuzushi)
+        .env("HOME", &home)
+        .args([
+            "--target",
+            target.to_str().unwrap(),
+            "run",
+            "classifier-gate:score",
+            "--input",
+            &input,
+        ])
+        .output()
+        .expect("kuzushi run classifier-gate:score");
+    assert!(
+        output.status.success(),
+        "classifier-gate failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["ok"], serde_json::json!(true));
+    let score = parsed["data"]["score"].as_f64().unwrap();
+    assert!(score < 0.5, "expected low score, got {score}");
+    assert_eq!(
+        parsed["data"]["shouldDeepAudit"],
+        serde_json::json!(false),
+        "low score should NOT graduate"
+    );
+
+    // The skip outcome should have been persisted.
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    let finding = store.get_finding_by_reference(&fp).unwrap().unwrap();
+    let triage = finding.triage.expect("classifier wrote a triage row");
+    assert!(
+        triage.rationale.contains("threshold"),
+        "skip outcome rationale missing threshold: {}",
+        triage.rationale
+    );
+    let _ = tmp;
+}
+
+#[test]
+#[cfg(unix)]
+fn deep_audit_run_persists_triage_outcome_with_evidence() {
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("target");
+    let home = tmp.path().join("home");
+    fs::create_dir_all(target.join("src")).unwrap();
+    fs::write(
+        target.join("src/foo.c"),
+        "void foo(char *p, int n){ char b[64]; memcpy(b,p,n); }\n",
+    )
+    .unwrap();
+    let workspace = WorkspaceTarget::new(&target).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    store
+        .insert_scan_run("seed", workspace.root(), "running")
+        .unwrap();
+    let finding = Finding::new_tool(
+        "semgrep",
+        "rule",
+        "src/foo.c",
+        1,
+        Some(1),
+        Severity::High,
+        "OOB write CWE-787 in foo",
+    );
+    let fp = finding.fingerprint.clone();
+    store.insert_finding("seed", &finding).unwrap();
+    store.complete_scan_run("seed", "completed", 1).unwrap();
+
+    // The bridge sees one `next-step` envelope and returns a structured
+    // final verdict immediately (zero tool calls).
+    let bridge = fake_bridge_query(
+        tmp.path(),
+        &[r#"{"ok":true,"step":"final","text":"","structured":{"triggerable":false,"rationale":"length is checked upstream","confidence":0.9,"evidence":[{"file":"src/foo.c","start_line":1,"end_line":1,"note":"trivially safe","kind":"context"}]},"costUsd":0.001}"#],
+    );
+    build_runtime_config_with_fake_bridge(&home, &bridge);
+
+    let kuzushi = env!("CARGO_BIN_EXE_kuzushi");
+    let input = format!(r#"{{"findingFingerprint":"{fp}"}}"#);
+    let output = Command::new(kuzushi)
+        .env("HOME", &home)
+        .args([
+            "--target",
+            target.to_str().unwrap(),
+            "run",
+            "deep-audit:run",
+            "--input",
+            &input,
+        ])
+        .output()
+        .expect("kuzushi run deep-audit:run");
+    assert!(
+        output.status.success(),
+        "deep-audit failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["ok"], serde_json::json!(true));
+    assert_eq!(parsed["data"]["verdict"], serde_json::json!("false_positive"));
+    assert!(parsed["data"]["evidence"].as_array().unwrap().len() >= 1);
+
+    // Triage row + evidence row should both be persisted.
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    let finding = store.get_finding_by_reference(&fp).unwrap().unwrap();
+    let triage = finding.triage.expect("deep-audit wrote a triage row");
+    assert!(triage.confidence >= 0.5);
+    let _ = tmp;
+}
+
+#[test]
 fn recall_smoke_linux_copy_fail() {
     run_recall_test("linux");
 }
