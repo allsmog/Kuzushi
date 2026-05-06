@@ -66,7 +66,10 @@ pub use secret_scan::{
     scan_for_secrets, SecretScanFinding, SecretScanOptions, SecretScanReport, SecretScanScanner,
     SecretSeverity,
 };
-pub use systems_hunt::{execute_systems_hunt_tool, run_systems_hunt_report, SystemsHuntReport};
+pub use systems_hunt::{
+    execute_systems_hunt_tool, gather_surfaces, run_systems_hunt_report, RankedSystemsSurface,
+    SystemsContextMetadata, SystemsContextOutput, SystemsHuntReport,
+};
 pub use threat_model::{
     execute_threat_model_tool, load_persistent_threat_model, save_persistent_threat_model,
 };
