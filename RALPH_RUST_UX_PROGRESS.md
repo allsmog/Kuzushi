@@ -1,8 +1,8 @@
 # Ralph Rust UX Progress
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
-Active story: UX-005 - Visible Startup Progress And First-Run Path
-Status: UX-005 implementation complete in iteration 18; push blocked by DNS in this environment
+Active story: UX-006 - Rust Doctor / Preflight
+Status: UX-005 complete and pushed in iteration 18 as `d26407a`; UX-006 pending next iteration
 
 ## Stage 2 Checklist
 
@@ -10,7 +10,7 @@ Status: UX-005 implementation complete in iteration 18; push blocked by DNS in t
 - UX-002 Delete or isolate legacy Ink UI code: complete; pushed in iteration 12 as `5e73f6f`.
 - UX-003 Fix shell redraw and prompt overlap: complete; pushed in iteration 13 as `bba14f9`.
 - UX-004 Improve exit and unknown command handling: complete; pushed in iteration 17 as `f3305a1`.
-- UX-005 Visible startup progress and first-run path: implementation complete; push blocked in iteration 18.
+- UX-005 Visible startup progress and first-run path: complete; pushed in iteration 18 as `d26407a`.
 - UX-006 Rust doctor / preflight: pending.
 - UX-007 Input mode clarity: pending.
 - UX-008 Honest abort state: pending.
@@ -50,11 +50,11 @@ Status: UX-005 implementation complete in iteration 18; push blocked by DNS in t
   quickstart first-run surfaces name real Rust commands: `scan .` then
   `findings` for a bare shell, or `scan` then `findings` when a target is
   already active.
-- Remaining work: push UX-005, then UX-006 through UX-015.
+- Remaining work: UX-006 through UX-015.
 - Blockers or repo facts that contradicted this prompt:
-  - `git ls-remote --heads origin main` failed with `Could not resolve host:
-    github.com`, so the required push is not currently possible from this
-    environment.
+  - `git ls-remote --heads origin main` initially failed with `Could not
+    resolve host: github.com`, but the subsequent `git push origin HEAD:main`
+    from the isolated clone succeeded.
   - The primary workspace local `main` ref remains stale at `80d23a4`, and
     earlier iterations documented that direct writes under `.git` are blocked.
     This iteration therefore cannot rely on the primary worktree for the final
