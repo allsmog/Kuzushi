@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 const CTRL_C_ARM_WINDOW: Duration = Duration::from_secs(2);
 const THROTTLE_STALE_AFTER: Duration = Duration::from_secs(30);
 const PASTE_GUARD_WINDOW: Duration = Duration::from_millis(5);
+const SPINNER_FRAME: Duration = Duration::from_millis(80);
 const VIEWPORT_PAGE_LINES: usize = 10;
 const FINDINGS_PAGE_ROWS: usize = 10;
 
@@ -412,6 +413,12 @@ pub(crate) enum ViewHotkeyAction {
     FindingsPageDown,
     FindingsPageUp,
     FindingsOpen,
+    ScrollDown,
+    ScrollUp,
+    ScrollTop,
+    ScrollBottom,
+    ScrollPageDown,
+    ScrollPageUp,
     ThreatView(ThreatView),
     ActorDetail(usize),
     PauseScan,
@@ -474,6 +481,8 @@ pub struct ShellApp {
     pub history_scroll: usize,
     pub kb_scroll: usize,
     pub last_char_at: Option<Instant>,
+    pub spinner_phase: u8,
+    pub last_spinner_advance: Option<Instant>,
     scan_rx: Option<Receiver<ScanEvent>>,
     scan_cancel: Option<ScanCancellation>,
     agent_rx: Option<Receiver<AgentEvent>>,
@@ -532,6 +541,8 @@ impl ShellApp {
             history_scroll: 0,
             kb_scroll: 0,
             last_char_at: None,
+            spinner_phase: 0,
+            last_spinner_advance: None,
             scan_rx: None,
             scan_cancel: None,
             agent_rx: None,
@@ -882,6 +893,20 @@ impl ShellApp {
         }
     }
 
+    pub fn completion_preview(&self) -> Option<String> {
+        if self.input.is_empty() {
+            return None;
+        }
+        let candidate = self.completion_candidates(&self.input).into_iter().next()?;
+        if candidate == self.input {
+            return None;
+        }
+        candidate
+            .strip_prefix(&self.input)
+            .filter(|tail| !tail.is_empty())
+            .map(str::to_string)
+    }
+
     fn module_completion_values(&self) -> Vec<String> {
         self.registry
             .modules()
@@ -1127,13 +1152,14 @@ impl ShellApp {
         values
     }
 
-    pub fn drain_background_events(&mut self) {
+    pub fn drain_background_events(&mut self) -> bool {
         let mut events = Vec::new();
         if let Some(rx) = &self.scan_rx {
             while let Ok(event) = rx.try_recv() {
                 events.push(event);
             }
         }
+        let changed = !events.is_empty();
 
         for event in events {
             self.apply_scan_event(event);
@@ -1150,6 +1176,7 @@ impl ShellApp {
                 agent_events.push(event);
             }
         }
+        let changed = changed || !agent_events.is_empty();
 
         for event in agent_events {
             self.apply_agent_event(event);
@@ -1165,6 +1192,7 @@ impl ShellApp {
                 plan_events.push(event);
             }
         }
+        let changed = changed || !plan_events.is_empty();
         for event in plan_events {
             self.apply_plan_event(event);
         }
@@ -1178,12 +1206,14 @@ impl ShellApp {
                 threat_events.push(event);
             }
         }
+        let changed = changed || !threat_events.is_empty();
         for event in threat_events {
             self.apply_threat_patch_event(event);
         }
         if !self.threat_worker_running {
             self.threat_rx = None;
         }
+        changed
     }
 
     #[cfg(test)]
@@ -1861,8 +1891,57 @@ impl ShellApp {
                 }
                 bindings
             }
+            _ if self.has_scrollable_view() => self.scroll_view_keybindings(),
             _ => Vec::new(),
         }
+    }
+
+    fn scroll_view_keybindings(&self) -> Vec<ViewKeybinding> {
+        vec![
+            ViewKeybinding {
+                trigger: HotkeyTrigger::Char('j'),
+                hint: "j/k/g/G",
+                label: "scroll",
+                action: ViewHotkeyAction::ScrollDown,
+            },
+            ViewKeybinding {
+                trigger: HotkeyTrigger::Char('k'),
+                hint: "j/k/g/G",
+                label: "scroll",
+                action: ViewHotkeyAction::ScrollUp,
+            },
+            ViewKeybinding {
+                trigger: HotkeyTrigger::Char('g'),
+                hint: "j/k/g/G",
+                label: "scroll",
+                action: ViewHotkeyAction::ScrollTop,
+            },
+            ViewKeybinding {
+                trigger: HotkeyTrigger::Char('G'),
+                hint: "j/k/g/G",
+                label: "scroll",
+                action: ViewHotkeyAction::ScrollBottom,
+            },
+            ViewKeybinding {
+                trigger: HotkeyTrigger::PageDown,
+                hint: "PgUp/PgDn",
+                label: "scroll",
+                action: ViewHotkeyAction::ScrollPageDown,
+            },
+            ViewKeybinding {
+                trigger: HotkeyTrigger::PageUp,
+                hint: "PgUp/PgDn",
+                label: "scroll",
+                action: ViewHotkeyAction::ScrollPageUp,
+            },
+        ]
+    }
+
+    fn has_scrollable_view(&self) -> bool {
+        matches!(
+            self.shell_view,
+            ShellView::Help | ShellView::Tools | ShellView::History | ShellView::KnowledgeBase
+        ) || matches!(self.shell_view, ShellView::Catalog) && self.catalog_expanded
     }
 
     fn can_pause_scan_hotkey(&self) -> bool {
@@ -4208,6 +4287,24 @@ impl ShellApp {
                 }
                 self.open_finding_at_cursor();
             }
+            ViewHotkeyAction::ScrollDown => {
+                self.scroll_down_current_view(1);
+            }
+            ViewHotkeyAction::ScrollUp => {
+                self.scroll_up_current_view(1);
+            }
+            ViewHotkeyAction::ScrollTop => {
+                self.scroll_to_top_current_view();
+            }
+            ViewHotkeyAction::ScrollBottom => {
+                self.scroll_to_bottom_current_view();
+            }
+            ViewHotkeyAction::ScrollPageDown => {
+                self.scroll_down_current_view(VIEWPORT_PAGE_LINES);
+            }
+            ViewHotkeyAction::ScrollPageUp => {
+                self.scroll_up_current_view(VIEWPORT_PAGE_LINES);
+            }
             ViewHotkeyAction::ThreatView(view) => {
                 self.shell_view = ShellView::Threat(view);
             }
@@ -4233,19 +4330,19 @@ impl ShellApp {
                 }
             }
             ShellView::Help => {
-                self.help_scroll = self.help_scroll.saturating_add(VIEWPORT_PAGE_LINES)
+                self.scroll_down_current_view(VIEWPORT_PAGE_LINES);
             }
             ShellView::Tools => {
-                self.tools_scroll = self.tools_scroll.saturating_add(VIEWPORT_PAGE_LINES)
+                self.scroll_down_current_view(VIEWPORT_PAGE_LINES);
             }
             ShellView::Catalog if self.catalog_expanded => {
-                self.modules_scroll = self.modules_scroll.saturating_add(VIEWPORT_PAGE_LINES)
+                self.scroll_down_current_view(VIEWPORT_PAGE_LINES);
             }
             ShellView::History => {
-                self.history_scroll = self.history_scroll.saturating_add(VIEWPORT_PAGE_LINES)
+                self.scroll_down_current_view(VIEWPORT_PAGE_LINES);
             }
             ShellView::KnowledgeBase => {
-                self.kb_scroll = self.kb_scroll.saturating_add(VIEWPORT_PAGE_LINES)
+                self.scroll_down_current_view(VIEWPORT_PAGE_LINES);
             }
             _ => {}
         }
@@ -4257,20 +4354,76 @@ impl ShellApp {
                 self.findings_cursor = self.findings_cursor.saturating_sub(FINDINGS_PAGE_ROWS);
             }
             ShellView::Help => {
-                self.help_scroll = self.help_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
+                self.scroll_up_current_view(VIEWPORT_PAGE_LINES);
             }
             ShellView::Tools => {
-                self.tools_scroll = self.tools_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
+                self.scroll_up_current_view(VIEWPORT_PAGE_LINES);
             }
             ShellView::Catalog if self.catalog_expanded => {
-                self.modules_scroll = self.modules_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
+                self.scroll_up_current_view(VIEWPORT_PAGE_LINES);
             }
             ShellView::History => {
-                self.history_scroll = self.history_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
+                self.scroll_up_current_view(VIEWPORT_PAGE_LINES);
             }
             ShellView::KnowledgeBase => {
-                self.kb_scroll = self.kb_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
+                self.scroll_up_current_view(VIEWPORT_PAGE_LINES);
             }
+            _ => {}
+        }
+    }
+
+    fn scroll_down_current_view(&mut self, amount: usize) {
+        match self.shell_view {
+            ShellView::Help => self.help_scroll = self.help_scroll.saturating_add(amount),
+            ShellView::Tools => self.tools_scroll = self.tools_scroll.saturating_add(amount),
+            ShellView::Catalog if self.catalog_expanded => {
+                self.modules_scroll = self.modules_scroll.saturating_add(amount);
+            }
+            ShellView::History => {
+                self.history_scroll = self.history_scroll.saturating_add(amount);
+            }
+            ShellView::KnowledgeBase => {
+                self.kb_scroll = self.kb_scroll.saturating_add(amount);
+            }
+            _ => {}
+        }
+    }
+
+    fn scroll_up_current_view(&mut self, amount: usize) {
+        match self.shell_view {
+            ShellView::Help => self.help_scroll = self.help_scroll.saturating_sub(amount),
+            ShellView::Tools => self.tools_scroll = self.tools_scroll.saturating_sub(amount),
+            ShellView::Catalog if self.catalog_expanded => {
+                self.modules_scroll = self.modules_scroll.saturating_sub(amount);
+            }
+            ShellView::History => {
+                self.history_scroll = self.history_scroll.saturating_sub(amount);
+            }
+            ShellView::KnowledgeBase => {
+                self.kb_scroll = self.kb_scroll.saturating_sub(amount);
+            }
+            _ => {}
+        }
+    }
+
+    fn scroll_to_top_current_view(&mut self) {
+        match self.shell_view {
+            ShellView::Help => self.help_scroll = 0,
+            ShellView::Tools => self.tools_scroll = 0,
+            ShellView::Catalog if self.catalog_expanded => self.modules_scroll = 0,
+            ShellView::History => self.history_scroll = 0,
+            ShellView::KnowledgeBase => self.kb_scroll = 0,
+            _ => {}
+        }
+    }
+
+    fn scroll_to_bottom_current_view(&mut self) {
+        match self.shell_view {
+            ShellView::Help => self.help_scroll = usize::MAX,
+            ShellView::Tools => self.tools_scroll = usize::MAX,
+            ShellView::Catalog if self.catalog_expanded => self.modules_scroll = usize::MAX,
+            ShellView::History => self.history_scroll = usize::MAX,
+            ShellView::KnowledgeBase => self.kb_scroll = usize::MAX,
             _ => {}
         }
     }
@@ -4406,17 +4559,47 @@ impl ShellApp {
         );
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self) -> bool {
+        let mut changed = false;
         if let Some(armed_at) = self.ctrl_c_armed_at {
             if Instant::now().duration_since(armed_at) > CTRL_C_ARM_WINDOW {
                 self.ctrl_c_armed_at = None;
+                changed = true;
             }
         }
         if let Some(throttle) = &self.advisory.throttle {
             if Instant::now().duration_since(throttle.since) > THROTTLE_STALE_AFTER {
                 self.advisory.throttle = None;
+                changed = true;
             }
         }
+        if self.has_running_work() {
+            let now = Instant::now();
+            let due = self
+                .last_spinner_advance
+                .map(|previous| now.duration_since(previous) >= SPINNER_FRAME)
+                .unwrap_or(true);
+            if due {
+                self.spinner_phase = self.spinner_phase.wrapping_add(1);
+                self.last_spinner_advance = Some(now);
+                changed = true;
+            }
+        } else {
+            self.last_spinner_advance = None;
+        }
+        changed
+    }
+
+    pub fn has_running_work(&self) -> bool {
+        self.scan.as_ref().is_some_and(|scan| scan.running)
+            || self.agent_chat.as_ref().is_some_and(|agent| agent.running)
+            || self.planner_running
+            || self.threat_worker_running
+    }
+
+    pub fn spinner_glyph(&self) -> &'static str {
+        const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        FRAMES[(self.spinner_phase as usize) % FRAMES.len()]
     }
 
     pub fn ctrl_c_armed(&self) -> bool {
@@ -4981,22 +5164,43 @@ pub fn run_shell_with_plain(
     let mut terminal = setup_terminal()?;
     let mut app = ShellApp::new(config, target);
 
-    loop {
-        app.tick();
-        app.drain_background_events();
-        terminal.draw(|frame| render_app(frame, &app))?;
-        if app.should_quit {
-            break;
-        }
+    let result = (|| -> Result<()> {
+        let mut needs_redraw = true;
+        loop {
+            if app.tick() || app.drain_background_events() {
+                needs_redraw = true;
+            }
+            if needs_redraw {
+                terminal.draw(|frame| render_app(frame, &app))?;
+                needs_redraw = false;
+            }
+            if app.should_quit {
+                break;
+            }
 
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                app.handle_key(key);
+            let timeout = if app.has_running_work() {
+                SPINNER_FRAME
+            } else {
+                Duration::from_millis(250)
+            };
+            if event::poll(timeout)? {
+                match event::read()? {
+                    Event::Key(key) => {
+                        app.handle_key(key);
+                        needs_redraw = true;
+                    }
+                    Event::Resize(_, _) => {
+                        needs_redraw = true;
+                    }
+                    _ => {}
+                }
             }
         }
-    }
+        Ok(())
+    })();
 
-    restore_terminal(&mut terminal)
+    let _ = restore_terminal(&mut terminal);
+    result
 }
 
 fn run_plain_shell(
@@ -6655,6 +6859,19 @@ JSON
         app.input = "task block co".to_string();
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
         assert_eq!(app.input, "task block codeql");
+    }
+
+    #[test]
+    fn completion_preview_returns_inline_tail_for_current_input() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.input = "/con".to_string();
+        assert_eq!(app.completion_preview().as_deref(), Some("text"));
+
+        app.input = "/context".to_string();
+        assert!(app.completion_preview().is_none());
+
+        app.input.clear();
+        assert!(app.completion_preview().is_none());
     }
 
     #[test]
@@ -8743,6 +8960,30 @@ JSON
     }
 
     #[test]
+    fn tick_advances_spinner_only_while_work_is_running() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let initial_phase = app.spinner_phase;
+        assert!(!app.tick());
+        assert_eq!(app.spinner_phase, initial_phase);
+
+        app.scan = Some(ScanPanelState {
+            run_id: None,
+            target: PathBuf::from("."),
+            stage: "running".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        app.last_spinner_advance =
+            Some(Instant::now() - (SPINNER_FRAME + Duration::from_millis(1)));
+
+        assert!(app.tick());
+        assert_eq!(app.spinner_phase, initial_phase.wrapping_add(1));
+        assert!(!app.spinner_glyph().is_empty());
+    }
+
+    #[test]
     fn budget_halt_triggers_when_cost_exceeds_cap() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.session_budget_usd = Some(0.10);
@@ -9011,6 +9252,25 @@ JSON
         assert_eq!(app.findings_cursor, 0);
         app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
         assert_eq!(app.findings_cursor, 2);
+    }
+
+    #[test]
+    fn vi_keys_scroll_scrollable_views() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Help;
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        assert_eq!(app.help_scroll, 2);
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()));
+        assert_eq!(app.help_scroll, 1);
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
+        assert_eq!(app.help_scroll, usize::MAX);
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
+        assert_eq!(app.help_scroll, 0);
     }
 
     #[test]
