@@ -15,8 +15,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, ModelTier, TriageOutcome, TriageRequest,
-    TriageVerdict,
+    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolPolicy, ModelTier, TriageOutcome,
+    TriageRequest, TriageVerdict,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -339,6 +339,7 @@ impl AgentRuntime for AnthropicOAuthRuntime {
                 cwd: request.cwd,
                 system_prompt: TRIAGE_SYSTEM_PROMPT.to_string(),
                 prompt,
+                tool_policy: AgentToolPolicy::default(),
             })
             .await?;
 

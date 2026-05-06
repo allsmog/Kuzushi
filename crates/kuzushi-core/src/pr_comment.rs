@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use crate::findings::{Finding, Severity};
+use crate::findings::{sorted_finding_aliases, Finding, Severity};
 
 #[derive(Debug, Clone, Default)]
 pub struct PrCommentInput {
@@ -25,24 +25,21 @@ pub fn build_pr_comment(input: &PrCommentInput) -> String {
         .unwrap_or_else(|| "(unknown repo)".to_string());
     let top_n = input.top_n.unwrap_or(10);
 
-    let mut sorted = input.findings.clone();
-    sorted.sort_by(|a, b| {
-        let by_severity = severity_rank(a.severity).cmp(&severity_rank(b.severity));
-        if by_severity == std::cmp::Ordering::Equal {
-            a.fingerprint.cmp(&b.fingerprint)
-        } else {
-            by_severity
-        }
-    });
+    let aliased = sorted_finding_aliases(&input.findings);
+    let sorted = aliased
+        .iter()
+        .map(|(_, finding)| finding.clone())
+        .collect::<Vec<_>>();
 
     let changed = changed_set(&input.changed_files);
-    let new_in_pr: Vec<&Finding> = sorted
+    let new_in_pr: Vec<(String, Finding)> = aliased
         .iter()
-        .filter(|f| {
+        .filter(|(_, finding)| {
             changed
                 .as_ref()
-                .is_some_and(|set| in_changed(&f.file_path, set))
+                .is_some_and(|set| in_changed(&finding.file_path, set))
         })
+        .cloned()
         .collect();
 
     let header_suffix = input
@@ -61,7 +58,7 @@ pub fn build_pr_comment(input: &PrCommentInput) -> String {
             sections.push(String::new());
             sections.push(render_findings_block(
                 "New in this PR",
-                &new_in_pr.iter().map(|f| (*f).clone()).collect::<Vec<_>>(),
+                &new_in_pr,
                 input.run_url.as_deref(),
                 new_in_pr.len(),
                 None,
@@ -70,7 +67,7 @@ pub fn build_pr_comment(input: &PrCommentInput) -> String {
     }
 
     let total = sorted.len();
-    let truncated = sorted.iter().take(top_n).cloned().collect::<Vec<_>>();
+    let truncated = aliased.iter().take(top_n).cloned().collect::<Vec<_>>();
     sections.push(String::new());
     sections.push(render_findings_block(
         &format!("Top findings ({} of {total})", truncated.len().min(top_n)),
@@ -84,17 +81,6 @@ pub fn build_pr_comment(input: &PrCommentInput) -> String {
     sections.push(render_footer(input, top_n, total));
     sections.push(String::new());
     sections.join("\n")
-}
-
-fn severity_rank(severity: Severity) -> u8 {
-    match severity {
-        Severity::Critical => 0,
-        Severity::High => 1,
-        Severity::Medium => 2,
-        Severity::Low => 3,
-        Severity::Info => 4,
-        Severity::Unknown => 5,
-    }
 }
 
 fn changed_set(files: &[String]) -> Option<HashSet<String>> {
@@ -156,7 +142,7 @@ fn render_cost_line(input: &PrCommentInput) -> String {
 
 fn render_findings_block(
     heading: &str,
-    rows: &[Finding],
+    rows: &[(String, Finding)],
     run_url: Option<&str>,
     total: usize,
     top_n: Option<usize>,
@@ -170,11 +156,10 @@ fn render_findings_block(
         "| ID | Severity | Title | Location |".to_string(),
         "|----|----------|-------|----------|".to_string(),
     ];
-    for (index, f) in rows.iter().enumerate() {
-        let alias = format!("F-{:04}", index + 1);
+    for (alias, f) in rows {
         let id_cell = match run_url {
             Some(url) => format!("[{alias}]({url}#{alias})"),
-            None => alias,
+            None => alias.clone(),
         };
         let severity = severity_badge(f.severity);
         let title = escape_md(&f.title);
@@ -280,6 +265,7 @@ mod tests {
             message: String::new(),
             tool: "test".to_string(),
             actor_fingerprint: None,
+            static_proof_state: None,
             triage: None,
             verification: None,
             created_at: String::new(),
@@ -329,6 +315,30 @@ mod tests {
         let crit_row_start = body[crit_pos..].find("|").unwrap() + crit_pos;
         let crit_row_end = body[crit_row_start..].find('\n').unwrap() + crit_row_start;
         assert!(body[crit_row_start..crit_row_end].contains("sqli"));
+    }
+
+    #[test]
+    fn diff_section_preserves_global_stable_aliases() {
+        let mut critical = make_finding(Severity::Critical, "fcrit", "global critical");
+        critical.file_path = "src/old.rs".to_string();
+        let input = PrCommentInput {
+            findings: vec![
+                critical,
+                make_finding(Severity::High, "fhigh", "changed high"),
+            ],
+            changed_files: vec!["src/x.rs".to_string()],
+            ..PrCommentInput::default()
+        };
+        let body = build_pr_comment(&input);
+
+        let new_section = body
+            .split("#### New in this PR")
+            .nth(1)
+            .and_then(|section| section.split("#### Top findings").next())
+            .unwrap_or("");
+
+        assert!(new_section.contains("F-0002"));
+        assert!(!new_section.contains("F-0001"));
     }
 
     #[test]

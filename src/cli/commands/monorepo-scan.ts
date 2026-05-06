@@ -60,7 +60,6 @@ import {
   type StoredFindingRecord,
 } from "../../store.js";
 import type { KuzushiConfig, ScanOpts } from "../../types.js";
-import type { MonorepoUIHandle } from "../../ui/monorepo-render.js";
 import { configureTerminalOutput, resetTerminalOutput } from "../../ui/output.js";
 import { CliUsageError } from "../errors.js";
 import type { ScanCommandOptions } from "../scan-config.js";
@@ -73,6 +72,32 @@ import {
 } from "./scan-pipeline.js";
 
 const DEFAULT_MONOREPO_CONCURRENCY = 5;
+
+type ModuleStatus =
+  | "pending"
+  | "scanning"
+  | "triaging"
+  | "verifying"
+  | "complete"
+  | "error"
+  | "skipped";
+
+interface MonorepoModuleState {
+  status: ModuleStatus;
+  detail?: string;
+  activityDetail?: string;
+  tp?: number;
+  fp?: number;
+  needsReview?: number;
+  costUsd?: number;
+  elapsedMs?: number;
+  startedAt?: number;
+}
+
+interface MonorepoUIHandle {
+  updateModule(path: string, update: Partial<MonorepoModuleState>): void;
+  cleanup(): void;
+}
 
 interface ModuleExecutionResult extends MonorepoModuleResult {
   plan: ModuleScanPlan;
@@ -329,17 +354,9 @@ export async function runMonorepoScan(repoPath: string, opts: ScanCommandOptions
 
     console.log(`\n[Phase 2] Scanning ${scanPlans.length} modules in parallel...`);
 
-    // Create monorepo UI renderer for live module progress
+    // The Rust CLI owns live TUI progress. The retained TypeScript monorepo
+    // path keeps console progress only.
     let monorepoUI: MonorepoUIHandle | undefined;
-    try {
-      const { createMonorepoRenderer } = await import("../../ui/monorepo-render.js");
-      monorepoUI = await createMonorepoRenderer(
-        scanPlans.map((p) => ({ name: p.module.name, path: p.module.path, tasks: p.tasks })),
-        "Scanning",
-      );
-    } catch {
-      // UI not available — fallback to console.log (handled in runPlansInParallel)
-    }
 
     const results = await runPlansInParallel({
       plans: scanPlans,

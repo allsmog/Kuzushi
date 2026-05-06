@@ -140,7 +140,7 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "use <module>",
-        aliases: &["/use <module>"],
+        aliases: &["use semgrep", "/use <module>"],
         category: ShellCommandCategory::Navigation,
         description: "focus a module",
     },
@@ -152,13 +152,13 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "scan [target]",
-        aliases: &["/scan [target]"],
+        aliases: &["scan .", "/scan [target]"],
         category: ShellCommandCategory::RunScan,
         description: "run configured scanners",
     },
     ShellCommandSpec {
         command: "run <tool> [json]",
-        aliases: &["/run <tool> [json]", "run . [json]"],
+        aliases: &["run .", "/run <tool> [json]", "run . [json]"],
         category: ShellCommandCategory::RunScan,
         description: "dispatch a tool; run . uses focused module or sast:scan",
     },
@@ -224,7 +224,7 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "task block <id>",
-        aliases: &["/task block <id>", "task deny <id>"],
+        aliases: &["task deny <id>", "/task block <id>"],
         category: ShellCommandCategory::OptionsTasks,
         description: "block a SAST task",
     },
@@ -278,7 +278,7 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "kb [module]",
-        aliases: &["/kb [module]", "attachments"],
+        aliases: &["attachments", "/kb [module]"],
         category: ShellCommandCategory::ContextKb,
         description: "show local KB attachments",
     },
@@ -317,13 +317,13 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "findings",
-        aliases: &["/findings", "/f", "f"],
+        aliases: &["findings", "/f", "f", "/findings"],
         category: ShellCommandCategory::FindingsEvidence,
         description: "open persisted findings",
     },
     ShellCommandSpec {
         command: "open <id>",
-        aliases: &["/open <id>"],
+        aliases: &["open F-0001", "/open <id>"],
         category: ShellCommandCategory::FindingsEvidence,
         description: "open a finding alias or fingerprint",
     },
@@ -361,6 +361,7 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
         command: "threats [1-5]",
         aliases: &[
             "/threats [1-5]",
+            "threats summary",
             "threats dfd",
             "threats stride",
             "threats stories",
@@ -370,6 +371,12 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
         description: "threat model views",
     },
     ShellCommandSpec {
+        command: "threats edit",
+        aliases: &["/threats edit"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "open the editable threat model view",
+    },
+    ShellCommandSpec {
         command: "auth",
         aliases: &["/auth", "auth status"],
         category: ShellCommandCategory::AuthConfigModel,
@@ -377,7 +384,7 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "auth login <provider>",
-        aliases: &["/auth login <provider>", "auth codex", "auth anthropic"],
+        aliases: &["auth codex", "auth anthropic", "/auth login <provider>"],
         category: ShellCommandCategory::AuthConfigModel,
         description: "start supported OAuth login",
     },
@@ -395,7 +402,7 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "model [choice]",
-        aliases: &["/model [choice]"],
+        aliases: &["model 1", "/model [choice]"],
         category: ShellCommandCategory::AuthConfigModel,
         description: "select explicit provider:model",
     },
@@ -527,14 +534,35 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "quit",
-        aliases: &["/quit", "exit", "/exit", "q", "/q", "exitj", "/exitj"],
+        aliases: &["q", "/q", "exit", "/quit", "/exit", "exitj", "/exitj"],
         category: ShellCommandCategory::Session,
         description: "exit the shell",
     },
 ];
 
+const FEATURED_HELP_EXAMPLES: &[&str] = &[
+    "scan .",
+    "use semgrep",
+    "run .",
+    "findings",
+    "open F-0001",
+    "model 1",
+];
+
 pub fn shell_command_specs() -> &'static [ShellCommandSpec] {
     SHELL_COMMAND_SPECS
+}
+
+pub fn shell_help_examples() -> Vec<&'static str> {
+    FEATURED_HELP_EXAMPLES
+        .iter()
+        .copied()
+        .filter(|example| {
+            SHELL_COMMAND_SPECS
+                .iter()
+                .any(|spec| spec.aliases.contains(example))
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1287,6 +1315,169 @@ mod tests {
                     "catalog form {form:?} materialized as {sample:?} did not route"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn command_catalog_covers_every_public_route_kind() {
+        let mut routed = std::collections::BTreeSet::new();
+        for spec in shell_command_specs() {
+            let mut forms = vec![spec.command];
+            forms.extend(spec.aliases.iter().copied());
+            for form in forms {
+                routed.insert(route_kind(&parse_command(&sample_help_form(form))));
+            }
+        }
+
+        let expected = std::collections::BTreeSet::from([
+            "actor",
+            "attach",
+            "ask",
+            "auth",
+            "auth-login",
+            "back",
+            "backend",
+            "clear",
+            "config",
+            "context",
+            "cost",
+            "detach",
+            "findings",
+            "help",
+            "history",
+            "kb",
+            "load",
+            "model",
+            "modules",
+            "open",
+            "options",
+            "pause",
+            "plan",
+            "plan-apply",
+            "plan-discard",
+            "prompts",
+            "prompt",
+            "provider",
+            "quickstart",
+            "quit",
+            "reparse",
+            "replay",
+            "resume",
+            "run-tool",
+            "scan",
+            "set-option",
+            "show-aliases",
+            "show-runs",
+            "since",
+            "story",
+            "target",
+            "task",
+            "tasks",
+            "threat",
+            "threat-ask",
+            "threat-apply",
+            "threat-editor",
+            "threat-regen",
+            "threat-reject",
+            "tools",
+            "trace",
+            "tune",
+            "unset-option",
+            "use",
+            "workspace",
+        ]);
+
+        assert_eq!(routed, expected);
+    }
+
+    #[test]
+    fn featured_help_examples_are_alias_backed_and_routed() {
+        let examples = shell_help_examples();
+        assert_eq!(
+            examples,
+            vec![
+                "scan .",
+                "use semgrep",
+                "run .",
+                "findings",
+                "open F-0001",
+                "model 1"
+            ]
+        );
+
+        for example in examples {
+            assert!(
+                shell_command_specs()
+                    .iter()
+                    .any(|spec| spec.aliases.contains(&example)),
+                "featured help example {example:?} is not backed by ShellCommandSpec.aliases"
+            );
+            assert!(
+                !matches!(parse_command(example), ShellCommand::Unknown(_)),
+                "featured help example {example:?} did not route"
+            );
+        }
+    }
+
+    fn route_kind(command: &ShellCommand) -> &'static str {
+        match command {
+            ShellCommand::Help => "help",
+            ShellCommand::Back => "back",
+            ShellCommand::Modules => "modules",
+            ShellCommand::Tools => "tools",
+            ShellCommand::Findings => "findings",
+            ShellCommand::Open(_) => "open",
+            ShellCommand::Scan(_) => "scan",
+            ShellCommand::Model(_) => "model",
+            ShellCommand::Auth => "auth",
+            ShellCommand::AuthLogin(_) => "auth-login",
+            ShellCommand::Provider(_) => "provider",
+            ShellCommand::Backend(_) => "backend",
+            ShellCommand::Cost => "cost",
+            ShellCommand::Config => "config",
+            ShellCommand::Use(_) => "use",
+            ShellCommand::Tune => "tune",
+            ShellCommand::Threat(_) => "threat",
+            ShellCommand::ThreatEditor => "threat-editor",
+            ShellCommand::ThreatRegen => "threat-regen",
+            ShellCommand::ThreatAsk(_) => "threat-ask",
+            ShellCommand::ThreatApply => "threat-apply",
+            ShellCommand::ThreatReject => "threat-reject",
+            ShellCommand::Prompts => "prompts",
+            ShellCommand::Prompt(_) => "prompt",
+            ShellCommand::Actor(_) => "actor",
+            ShellCommand::ShowRuns => "show-runs",
+            ShellCommand::ShowAliases(_) => "show-aliases",
+            ShellCommand::Since(_) => "since",
+            ShellCommand::Replay(_) => "replay",
+            ShellCommand::Trace(_) => "trace",
+            ShellCommand::Plan(_) => "plan",
+            ShellCommand::PlanApply => "plan-apply",
+            ShellCommand::PlanDiscard => "plan-discard",
+            ShellCommand::Quickstart => "quickstart",
+            ShellCommand::Target(_) => "target",
+            ShellCommand::Ask(_) => "ask",
+            ShellCommand::Options { .. } => "options",
+            ShellCommand::SetOption { .. } => "set-option",
+            ShellCommand::UnsetOption { .. } => "unset-option",
+            ShellCommand::Tasks => "tasks",
+            ShellCommand::Task(_) => "task",
+            ShellCommand::Context(_) => "context",
+            ShellCommand::Workspace(_) => "workspace",
+            ShellCommand::KnowledgeBase(_) => "kb",
+            ShellCommand::Attach(_) => "attach",
+            ShellCommand::Detach(_) => "detach",
+            ShellCommand::Reparse(_) => "reparse",
+            ShellCommand::History => "history",
+            ShellCommand::Clear => "clear",
+            ShellCommand::Load(_) => "load",
+            ShellCommand::Resume(_) => "resume",
+            ShellCommand::Pause => "pause",
+            ShellCommand::Story => "story",
+            ShellCommand::RunTool { .. } => "run-tool",
+            ShellCommand::Quit => "quit",
+            ShellCommand::Empty => "empty",
+            ShellCommand::Unknown(_) => "unknown",
         }
     }
 
