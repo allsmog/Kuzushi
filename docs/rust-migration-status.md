@@ -75,6 +75,7 @@ tests for the relevant dispatch modes.
 | `bin.kuzushi-ts` in `package.json` | It exposed the old TypeScript CLI as a package runtime command after the native Rust CLI became the product path. | `bin.kuzushi` via `bin/kuzushi-rs.mjs`. |
 | `scripts.dev:ts` in `package.json` | It encouraged source execution through `src/cli.ts` instead of the Rust CLI. | `pnpm dev -- <args>`. |
 | `scripts/kuzushi-dev` | It was a source helper that executed `src/cli.ts` through `tsx`. | `cargo run -p kuzushi-cli -- <args>` or `node bin/kuzushi-rs.mjs <args>`. |
+| `src/cli.ts shell` -> `src/copilot/shell.ts` import path | It let the source-only TypeScript CLI still launch the retained Ink shell after the Rust CLI became primary. | `src/cli.ts shell` now fails with a Rust replacement message; use `pnpm dev -- shell`, `cargo run -p kuzushi-cli -- shell`, or `node bin/kuzushi-rs.mjs shell`. |
 | `dist/cli*` in the npm tarball | These were old TypeScript CLI build artifacts and offered an unadvertised alternate runtime entrypoint. | Excluded through `package.json` `files` negation; native `bin/kuzushi-rs.mjs` is the only packaged CLI entrypoint. |
 | `docs/current-architecture.svg`, `docs/current-architecture.png` | Rendered diagrams were generated from the pre-cutover TypeScript/Ink architecture and had become misleading. | `docs/current-architecture.mmd` now describes the Rust architecture; regenerated images can be added from that source later. |
 

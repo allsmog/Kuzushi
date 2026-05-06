@@ -186,3 +186,33 @@ fn npm_package_runtime_surface_is_rust_only() {
         );
     }
 }
+
+#[test]
+fn legacy_ink_shell_is_reference_only_in_source_cli() {
+    let shell_source = fs::read_to_string(repo_root().join("src/cli/commands/shell.ts")).unwrap();
+
+    assert!(shell_source.contains("reference-only"));
+    for forbidden in [
+        "copilot/shell",
+        "startShell",
+        "configureAgentRuntime",
+        "loadConfig",
+        "from \"ink\"",
+        "from \"react\"",
+    ] {
+        assert!(
+            !shell_source.contains(forbidden),
+            "source CLI shell must not import legacy runtime surface {forbidden}"
+        );
+    }
+
+    let ui_readme = fs::read_to_string(repo_root().join("src/ui/README.md")).unwrap();
+    assert!(ui_readme.contains("reference-only"));
+    assert!(ui_readme.contains("crates/kuzushi-tui"));
+    assert!(ui_readme.contains("bin/kuzushi-rs.mjs"));
+
+    let migration_status =
+        fs::read_to_string(repo_root().join("docs/rust-migration-status.md")).unwrap();
+    assert!(migration_status.contains("src/cli.ts shell"));
+    assert!(migration_status.contains("fails with a Rust replacement message"));
+}

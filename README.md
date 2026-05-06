@@ -243,6 +243,8 @@ The old TypeScript/Ink CLI is no longer the npm runtime path:
 - The `kuzushi-ts` npm bin is removed.
 - The `dev:ts` package script and `scripts/kuzushi-dev` source CLI helper are
   removed.
+- The source-only `src/cli.ts shell` route now exits with a Rust replacement
+  message instead of importing the retained TypeScript/Ink shell.
 - The old `dist/cli*` TypeScript CLI build outputs are excluded from the npm
   tarball.
 
