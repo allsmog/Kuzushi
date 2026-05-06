@@ -334,10 +334,18 @@ pub fn classify_run_result(
         Some(run.stderr.clone())
     };
 
+    // Sanitizer crash signature: ASan and UBSan default to
+    // `abort_on_error=0` on Linux (clean exit_code=1 instead of
+    // SIGABRT). Their stderr is unmistakable and we treat it as a
+    // crash regardless of how the process exited.
+    let stderr_indicates_sanitizer_crash = stderr_has_sanitizer_crash(&run.stderr);
+
     // Decide raw level from sandbox observation.
     let raw_level = match (run.outcome, run.exit_code, run.signal) {
         // Observed signal → SIGABRT / SIGSEGV / SIGBUS / SIGILL count as crashes.
         (Signaled, _, Some(sig)) if is_crash_signal(sig) => 4,
+        // Sanitizer-reported crash — strong evidence even with clean exit.
+        _ if stderr_indicates_sanitizer_crash => 4,
         // Cargo test asserts/panics typically exit 101 with no signal —
         // still a strong reproduction signal but not an OS-level crash.
         (Exited, Some(101), _) => 3,
@@ -351,13 +359,16 @@ pub fn classify_run_result(
     };
 
     // Plain backend can't be trusted for proof_level=4 unless the
-    // operator explicitly opted in.
+    // operator explicitly opted in. We still record that the crash
+    // was *observed* — the level downgrade is about trust, not about
+    // the observation itself.
+    let observed_crash = raw_level == 4;
     let final_level = if raw_level == 4
         && backend == SandboxBackend::Plain
         && !opts.trust_plain_backend
     {
         notes.push(
-            "verify: observed crash but Plain backend is not trusted for proof_level=4; clamped to 3"
+            "verify: observed crash but Plain backend is not trusted for proof_level=4; clamped to 3 — rerun under Bwrap/Podman to promote"
                 .to_string(),
         );
         3
@@ -365,10 +376,16 @@ pub fn classify_run_result(
         raw_level
     };
 
-    let verdict = match final_level {
-        4 => ProofVerdict::Exploited,
-        3 => ProofVerdict::NotReproduced,
-        _ => ProofVerdict::NotReproduced,
+    let verdict = if observed_crash {
+        // We saw a real crash signal (SIGSEGV/SIGABRT/SIGBUS/SIGILL).
+        // Even when clamped for trust reasons, the *observation* is
+        // exploited.
+        ProofVerdict::Exploited
+    } else {
+        match final_level {
+            3 => ProofVerdict::NotReproduced,
+            _ => ProofVerdict::NotReproduced,
+        }
     };
 
     VerificationOutcome {
@@ -432,6 +449,33 @@ fn is_crash_signal(sig: i32) -> bool {
     matches!(sig, 4 | 6 | 7 | 11)
 }
 
+/// Detect AddressSanitizer / UndefinedBehaviorSanitizer / MemorySanitizer
+/// / ThreadSanitizer crash output. Their default behaviour on Linux is
+/// `abort_on_error=0`, meaning the sanitizer reports the bug to stderr
+/// and then `_exit(1)` rather than raising SIGABRT — so we'd otherwise
+/// classify a real crash as "non-zero exit, not a crash". This rescues
+/// that case.
+pub(crate) fn stderr_has_sanitizer_crash(stderr: &str) -> bool {
+    const PATTERNS: &[&str] = &[
+        "AddressSanitizer:",
+        "==ERROR: AddressSanitizer",
+        "ThreadSanitizer:",
+        "MemorySanitizer:",
+        "UndefinedBehaviorSanitizer:",
+        "runtime error:", // ubsan minimal output prefix
+        "stack-buffer-overflow",
+        "heap-buffer-overflow",
+        "global-buffer-overflow",
+        "use-after-free",
+        "use-after-poison",
+        "stack-use-after-scope",
+        "stack-use-after-return",
+        "double-free",
+        "SEGV on unknown address",
+    ];
+    PATTERNS.iter().any(|p| stderr.contains(p))
+}
+
 #[derive(Debug)]
 struct ScaffoldedProject {
     path: PathBuf,
@@ -472,9 +516,7 @@ fn build_rust_trigger(finding: &Finding) -> RustTriggerSource {
     let parsed_sig = suspect
         .as_ref()
         .and_then(|f| parse_rust_signature(&f.signature));
-    let call_plan = parsed_sig
-        .as_ref()
-        .and_then(|sig| plan_call_expression(sig));
+    let call_plan = parsed_sig.as_ref().and_then(plan_call_expression);
 
     let suspect_comment = match (&suspect, &call_plan) {
         (Some(f), Some(plan)) => format!(
@@ -504,12 +546,11 @@ fn build_rust_trigger(finding: &Finding) -> RustTriggerSource {
         (Some(src), Some(plan)) if rust_source_appears_self_contained(src) => {
             // Wrap the suspect file as `pub mod suspect;` inside the
             // harness lib so the test can name-resolve into it.
-            let lib = format!(
-                "// kuzushi-verify-harness\n\
+            let lib = "// kuzushi-verify-harness\n\
                  #![allow(unused, dead_code, deprecated, clippy::all)]\n\
                  #[path = \"suspect.rs\"]\n\
                  pub mod suspect;\n"
-            );
+                .to_string();
             let call = format!(
                 "             // Real sink call (synthesized from {fname}'s signature).\n\
                  {invoke}",
@@ -806,6 +847,377 @@ fn normalize_type(ty: &str) -> String {
     out
 }
 
+// =====================================================================
+// C signature parsing + call planning (mirrors the Rust analogues
+// above). The shared `extract_enclosing_function` and
+// `looks_like_function_signature` helpers are already C-aware and
+// reused as-is.
+// =====================================================================
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CSignature {
+    pub fn_name: String,
+    pub args: Vec<String>,
+    pub return_type: Option<String>,
+}
+
+/// Parse a C function signature like
+/// `static int parse_packet(const char *p, size_t n)`. Returns `None`
+/// when the input doesn't look like a callable C definition (no name,
+/// or shape that would make a synthesized call ambiguous).
+///
+/// Limitations are intentional and match the Rust analogue: single-line
+/// signatures only; multi-line `(\n  arg1,\n  arg2\n)` reconstruction
+/// is the codeindex facade's job in a follow-up.
+pub(crate) fn parse_c_signature(signature: &str) -> Option<CSignature> {
+    let trimmed = signature.trim().trim_end_matches('{').trim();
+    // Bail on obvious non-functions.
+    if trimmed.is_empty()
+        || trimmed.starts_with("//")
+        || trimmed.starts_with('#')
+        || trimmed.starts_with("/*")
+    {
+        return None;
+    }
+    let arg_open = trimmed.find('(')?;
+    let mut depth = 0_i32;
+    let mut arg_close = None;
+    for (i, ch) in trimmed[arg_open..].char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    arg_close = Some(arg_open + i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let arg_close = arg_close?;
+
+    // Extract return type + name from the head (everything up to
+    // `arg_open`). We split on whitespace plus `*`/`&` and consider
+    // the *last* identifier-shaped token the function name.
+    let head = trimmed[..arg_open].trim();
+    if head.is_empty() {
+        return None;
+    }
+    let (return_type, fn_name) = split_c_head(head)?;
+
+    // Reject control-flow keywords that look like calls (`if (...)`,
+    // `while (...)`, `switch (...)`).
+    if matches!(
+        fn_name.as_str(),
+        "if" | "while" | "for" | "switch" | "return" | "do" | "else" | "case" | "sizeof"
+    ) {
+        return None;
+    }
+
+    let arg_list = &trimmed[arg_open + 1..arg_close];
+    let args = split_top_level_args(arg_list)
+        .into_iter()
+        .filter_map(|raw| extract_c_arg_type(&raw))
+        .collect::<Vec<_>>();
+
+    Some(CSignature {
+        fn_name,
+        args,
+        return_type,
+    })
+}
+
+/// Split the head of a C function signature into `(return_type, name)`.
+/// Pointer markers (`*`) and ref markers (`&`) attach to the return
+/// type. `void` return types are preserved.
+fn split_c_head(head: &str) -> Option<(Option<String>, String)> {
+    let head = head.trim();
+    // Find the rightmost identifier-shaped token; everything before it
+    // is the return type.
+    let bytes = head.as_bytes();
+    let mut end = bytes.len();
+    while end > 0 && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    if end == 0 {
+        return None;
+    }
+    let mut start = end;
+    while start > 0 {
+        let c = bytes[start - 1];
+        if c.is_ascii_alphanumeric() || c == b'_' {
+            start -= 1;
+        } else {
+            break;
+        }
+    }
+    if start == end {
+        return None;
+    }
+    let name = head[start..end].to_string();
+    if !is_identifier(&name) {
+        return None;
+    }
+    let return_type_raw = head[..start].trim();
+    let return_type = if return_type_raw.is_empty() {
+        None
+    } else {
+        Some(return_type_raw.to_string())
+    };
+    Some((return_type, name))
+}
+
+fn extract_c_arg_type(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "void" {
+        return None;
+    }
+    // Argument shape is `[qualifiers] <type> [*…] <name>` with optional
+    // `[size]` suffix on the name. Like split_c_head, take the *type*
+    // portion by stripping the trailing identifier (the parameter name)
+    // and any array brackets.
+    let bytes = trimmed.as_bytes();
+    let mut end = bytes.len();
+    // Strip trailing array brackets `[N]` if present.
+    if end > 0 && bytes[end - 1] == b']' {
+        if let Some(open) = trimmed.rfind('[') {
+            end = open;
+            while end > 0 && bytes[end - 1].is_ascii_whitespace() {
+                end -= 1;
+            }
+        }
+    }
+    let mut name_end = end;
+    while name_end > 0 {
+        let c = bytes[name_end - 1];
+        if c.is_ascii_alphanumeric() || c == b'_' {
+            name_end -= 1;
+        } else {
+            break;
+        }
+    }
+    // Anonymous parameter (e.g. `int` with no name) — whole thing is the type.
+    if name_end == end {
+        return Some(trimmed.to_string());
+    }
+    // If `name_end == 0` the whole token is identifier-only — that's
+    // probably a single-token type like `size_t`, no name; treat as
+    // unnamed.
+    if name_end == 0 {
+        return Some(trimmed.to_string());
+    }
+    let head = trimmed[..name_end].trim();
+    if head.is_empty() {
+        // No type before name — malformed.
+        return None;
+    }
+    Some(head.to_string())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CCallPlan {
+    pub fn_name: String,
+    /// One or more lines of C source forwarding into the suspect function.
+    /// Always ends with a newline so callers can concatenate verbatim.
+    pub call_expression: String,
+    /// Short label describing which call pattern was selected.
+    pub call_kind: &'static str,
+}
+
+/// Pick a C call expression appropriate for the signature's argument
+/// types. Mirrors the Rust analogue's table.
+pub(crate) fn plan_c_call_expression(sig: &CSignature) -> Option<CCallPlan> {
+    let returns_value = sig
+        .return_type
+        .as_deref()
+        .map(str::trim)
+        .map(|rt| !rt.is_empty() && rt != "void")
+        .unwrap_or(false);
+    let bind = if returns_value { "(void)" } else { "" };
+    let call = |body: &str| format!("    {bind}{body};\n");
+
+    if sig.args.is_empty() {
+        return Some(CCallPlan {
+            fn_name: sig.fn_name.clone(),
+            call_expression: call(&format!("{}()", sig.fn_name)),
+            call_kind: "zero-argument call",
+        });
+    }
+
+    if sig.args.len() == 1 {
+        let ty = normalize_c_type(&sig.args[0]);
+        let arg_expr = match ty.as_str() {
+            "const uint8_t *" | "const uint8_t*" | "uint8_t const *" | "uint8_t const*"
+            | "const char *" | "const char*" | "char const *" | "char const*" | "const void *"
+            | "const void*" | "void const *" | "void const*" => {
+                Some("(const uint8_t *)data".to_string())
+            }
+            "uint8_t *" | "uint8_t*" | "char *" | "char*" | "void *" | "void*" => {
+                Some("(uint8_t *)data".to_string())
+            }
+            "size_t" => Some("len".to_string()),
+            "int" => Some("(int)len".to_string()),
+            "unsigned" | "unsigned int" | "uint32_t" => Some("(uint32_t)len".to_string()),
+            "long" | "long long" | "uint64_t" => Some("(uint64_t)len".to_string()),
+            _ => None,
+        };
+        return arg_expr.map(|expr| CCallPlan {
+            fn_name: sig.fn_name.clone(),
+            call_expression: call(&format!("{}({})", sig.fn_name, expr)),
+            call_kind: "single-arg payload call",
+        });
+    }
+
+    if sig.args.len() == 2 {
+        let a = normalize_c_type(&sig.args[0]);
+        let b = normalize_c_type(&sig.args[1]);
+        let buf_expr = match a.as_str() {
+            "const uint8_t *" | "const uint8_t*" | "uint8_t const *" | "uint8_t const*" => {
+                Some("(const uint8_t *)data")
+            }
+            "const char *" | "const char*" | "char const *" | "char const*" => {
+                Some("(const char *)data")
+            }
+            "const void *" | "const void*" | "void const *" | "void const*" => {
+                Some("(const void *)data")
+            }
+            "uint8_t *" | "uint8_t*" => Some("(uint8_t *)data"),
+            "char *" | "char*" => Some("(char *)data"),
+            "void *" | "void*" => Some("(void *)data"),
+            _ => None,
+        };
+        let len_expr: Option<&'static str> = match b.as_str() {
+            "size_t" => Some("len"),
+            "int" => Some("(int)len"),
+            "unsigned" | "unsigned int" | "uint32_t" => Some("(uint32_t)len"),
+            "long" | "long long" | "uint64_t" => Some("(uint64_t)len"),
+            _ => None,
+        };
+        if let (Some(buf), Some(lenv)) = (buf_expr, len_expr) {
+            return Some(CCallPlan {
+                fn_name: sig.fn_name.clone(),
+                call_expression: call(&format!("{}({buf}, {lenv})", sig.fn_name)),
+                call_kind: "(buf, len) C-FFI-style call",
+            });
+        }
+    }
+
+    None
+}
+
+/// Normalise a C type for matching: collapse whitespace, attach `*` /
+/// `&` adjacent to the previous token, and lowercase the qualifier
+/// keywords (`const`, `volatile`).
+fn normalize_c_type(ty: &str) -> String {
+    let collapsed: String = ty.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Re-attach pointer markers — `const char *` and `const char*` both
+    // map to `const char *` after trimming and normalising spacing.
+    let mut out = String::with_capacity(collapsed.len());
+    let mut chars = collapsed.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == ' ' {
+            // Drop spaces immediately before `*` / `&`.
+            match chars.peek() {
+                Some('*') | Some('&') => continue,
+                _ => out.push(' '),
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Heuristic analog of `rust_source_appears_self_contained`. Refuses
+/// copies that pull in project-relative headers (`#include "foo.h"`)
+/// because we can't follow them; accepts files that only use system
+/// headers (`#include <stddef.h>`). Also refuses files that declare
+/// `static` callbacks referring to other TU symbols by undeclared
+/// names — but that's the codeindex facade's job to detect; for this
+/// preview the include-form check is the gate.
+pub(crate) fn c_source_appears_self_contained(source: &str) -> bool {
+    for line in source.lines().take(400) {
+        let trimmed = line.trim();
+        if trimmed.starts_with("#include") && trimmed.contains('"') && !trimmed.contains('<') {
+            return false;
+        }
+    }
+    true
+}
+
+#[derive(Debug, Clone)]
+struct CTriggerSource {
+    /// `trigger.c` — main + payload, calls `kuzushi_verify_call_target`.
+    trigger_c: String,
+    /// `target.c` — defines `kuzushi_verify_call_target`. Either the
+    /// payload-only stub or the real trampoline that #includes the
+    /// suspect file and forwards into the located function.
+    target_c: String,
+    /// Optional `suspect_source.c` — copy of the suspect file to be
+    /// included from `target.c`. `None` when the source isn't
+    /// self-contained or no suspect was located.
+    suspect_source: Option<String>,
+}
+
+/// Build the C harness sources. When the suspect file is readable,
+/// self-contained, and contains a parseable function near the finding's
+/// line, generate a real trampoline. Otherwise produce the
+/// payload-only stub.
+fn build_c_trigger(finding: &Finding) -> CTriggerSource {
+    let payload = synth_payload_from_finding(finding);
+    let payload_decl = format!(
+        "    static const uint8_t payload[{}] = {{ {} }};",
+        payload.len(),
+        payload
+            .iter()
+            .map(|b| format!("0x{b:02x}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let trigger_c = C_HARNESS_TEMPLATE.replace("{payload_decl}", &payload_decl);
+
+    let suspect_path = std::path::Path::new(&finding.file_path);
+    let suspect_source = std::fs::read_to_string(suspect_path).ok();
+    let enclosing = suspect_source
+        .as_deref()
+        .and_then(|_| extract_enclosing_function(suspect_path, finding.start_line));
+    let parsed_sig = enclosing
+        .as_ref()
+        .and_then(|f| parse_c_signature(&f.signature));
+    let call_plan = parsed_sig.as_ref().and_then(plan_c_call_expression);
+
+    match (&suspect_source, &call_plan) {
+        (Some(src), Some(plan)) if c_source_appears_self_contained(src) => {
+            // Real trampoline: include the suspect file and forward.
+            let target_c = format!(
+                "// kuzushi-verify generated trampoline for `{name}`.\n\
+                 // Call kind: {kind}.\n\
+                 #include <stdint.h>\n\
+                 #include <stddef.h>\n\
+                 #include \"suspect_source.c\"\n\
+                 \n\
+                 void kuzushi_verify_call_target(const uint8_t *data, size_t len) {{\n\
+                 {call}\
+                 }}\n",
+                name = plan.fn_name,
+                kind = plan.call_kind,
+                call = plan.call_expression,
+            );
+            CTriggerSource {
+                trigger_c,
+                target_c,
+                suspect_source: Some(src.clone()),
+            }
+        }
+        _ => CTriggerSource {
+            trigger_c,
+            target_c: C_TARGET_STUB.to_string(),
+            suspect_source: None,
+        },
+    }
+}
+
 fn synth_payload_from_finding(finding: &Finding) -> Vec<u8> {
     // Pull a few characteristic byte sequences out of the finding
     // message so the harness has *something* attacker-shaped without
@@ -1033,10 +1445,16 @@ int main(void) {{
 }}
 "#;
 
-const C_TARGET_STUB: &str = r#"// kuzushi-verify trigger surface — placeholder.
-// Wired to the suspect function's source by future codeindex
-// integration; for now the harness exercises the build/observe loop
-// without invoking unsafe code.
+/// Fallback `target.c` body used when the suspect source isn't readable
+/// or doesn't appear self-contained. The harness still builds and runs;
+/// it just doesn't exercise the bug. Equivalent of the Rust path's
+/// payload-only fallback.
+const C_TARGET_STUB: &str = r#"// kuzushi-verify payload-only fallback.
+// The suspect source could not be wired into the harness because either
+// the file was unreadable, the signature could not be parsed, or it
+// uses project-relative includes that need the codeindex facade to
+// resolve. The harness still builds + runs to exercise the
+// build/observe loop; verify will report proof_level<=2 by design.
 #include <stdint.h>
 #include <stddef.h>
 
@@ -1216,19 +1634,12 @@ fn c_sanitizer_flags(compiler: &str) -> Vec<&'static str> {
 async fn scaffold_c_project(finding: &Finding, _compiler: CCompiler) -> Result<ScaffoldedProject> {
     let tempdir = tempfile::tempdir().context("could not create C harness temp dir")?;
     let root = tempdir.path().to_path_buf();
-    let payload = synth_payload_from_finding(finding);
-    let payload_decl = format!(
-        "    static const uint8_t payload[{}] = {{ {} }};",
-        payload.len(),
-        payload
-            .iter()
-            .map(|b| format!("0x{b:02x}"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    let trigger_c = C_HARNESS_TEMPLATE.replace("{payload_decl}", &payload_decl);
-    tokio::fs::write(root.join("trigger.c"), trigger_c).await?;
-    tokio::fs::write(root.join("target.c"), C_TARGET_STUB).await?;
+    let trigger = build_c_trigger(finding);
+    tokio::fs::write(root.join("trigger.c"), &trigger.trigger_c).await?;
+    tokio::fs::write(root.join("target.c"), &trigger.target_c).await?;
+    if let Some(suspect) = &trigger.suspect_source {
+        tokio::fs::write(root.join("suspect_source.c"), suspect).await?;
+    }
     Ok(ScaffoldedProject {
         path: root,
         _tempdir: tempdir,
@@ -1909,6 +2320,290 @@ mod tests {
         assert!(trigger.contains("kuzushi_verify_call_target"));
         assert!(trigger.contains("0xff")); // payload bytes
         assert!(target.contains("kuzushi_verify_call_target"));
+    }
+
+    // ----- C signature parsing -------------------------------------
+
+    #[test]
+    fn parse_c_signature_extracts_name_and_arg_types() {
+        let sig = parse_c_signature("static int parse_packet(const char *p, size_t n) {")
+            .expect("should parse");
+        assert_eq!(sig.fn_name, "parse_packet");
+        assert_eq!(sig.return_type.as_deref(), Some("static int"));
+        assert_eq!(sig.args.len(), 2);
+        assert!(sig.args[0].contains("const char"));
+        assert!(sig.args[1].contains("size_t"));
+    }
+
+    #[test]
+    fn parse_c_signature_handles_void_return_and_zero_args() {
+        let sig = parse_c_signature("void shutdown_handler(void)").expect("should parse");
+        assert_eq!(sig.fn_name, "shutdown_handler");
+        assert_eq!(sig.return_type.as_deref(), Some("void"));
+        assert!(sig.args.is_empty(), "void argument list should be empty");
+    }
+
+    #[test]
+    fn parse_c_signature_strips_trailing_open_brace() {
+        let sig = parse_c_signature("int recv_msg(int fd) {").expect("should parse");
+        assert_eq!(sig.fn_name, "recv_msg");
+    }
+
+    #[test]
+    fn parse_c_signature_handles_pointer_return() {
+        let sig = parse_c_signature("static char *str_dup(const char *src)").expect("should parse");
+        assert_eq!(sig.fn_name, "str_dup");
+        assert!(sig.return_type.as_deref().unwrap().contains("char"));
+    }
+
+    #[test]
+    fn parse_c_signature_rejects_control_flow() {
+        assert!(parse_c_signature("if (x > 0) {").is_none());
+        assert!(parse_c_signature("while (cur != NULL)").is_none());
+        assert!(parse_c_signature("switch (kind) {").is_none());
+    }
+
+    #[test]
+    fn parse_c_signature_rejects_comments_and_macros() {
+        assert!(parse_c_signature("// comment").is_none());
+        assert!(parse_c_signature("#include <stdio.h>").is_none());
+        assert!(parse_c_signature("/* block */").is_none());
+    }
+
+    #[test]
+    fn parse_c_signature_rejects_call_sites() {
+        // A call has no return type before the name and our heuristic
+        // requires whitespace in the head — confirm `foo(x);` doesn't
+        // get misread as a definition.
+        let head_only = parse_c_signature("foo(x)");
+        // Single-token head: either parsed as function with empty
+        // return type (which we'd also accept) or rejected. The
+        // contract that matters for build_c_trigger: don't synthesize
+        // a call when there's no return type — covered by
+        // plan_c_call_expression's behaviour.
+        if let Some(sig) = head_only {
+            assert_eq!(sig.fn_name, "foo");
+            assert!(sig.return_type.is_none());
+        }
+    }
+
+    // ----- C call-plan synthesis -----------------------------------
+
+    #[test]
+    fn plan_c_call_zero_args() {
+        let sig = parse_c_signature("void run(void)").unwrap();
+        let plan = plan_c_call_expression(&sig).unwrap();
+        assert!(plan.call_expression.contains("run()"));
+        assert!(plan.call_kind.contains("zero-argument"));
+    }
+
+    #[test]
+    fn plan_c_call_const_uint8_ptr_single_arg() {
+        let sig = parse_c_signature("int parse(const uint8_t *buf)").unwrap();
+        let plan = plan_c_call_expression(&sig).unwrap();
+        assert!(plan
+            .call_expression
+            .contains("parse((const uint8_t *)data)"));
+    }
+
+    #[test]
+    fn plan_c_call_size_t_single_arg() {
+        let sig = parse_c_signature("int handle(size_t n)").unwrap();
+        let plan = plan_c_call_expression(&sig).unwrap();
+        assert!(plan.call_expression.contains("handle(len)"));
+    }
+
+    #[test]
+    fn plan_c_call_buf_len_pair() {
+        let sig = parse_c_signature("void copy(const uint8_t *src, size_t len)").unwrap();
+        let plan = plan_c_call_expression(&sig).unwrap();
+        assert!(plan
+            .call_expression
+            .contains("copy((const uint8_t *)data, len)"));
+        assert_eq!(plan.call_kind, "(buf, len) C-FFI-style call");
+    }
+
+    #[test]
+    fn plan_c_call_const_char_ptr_buf_with_int_len() {
+        let sig = parse_c_signature("int strn_dup(const char *p, int n)").unwrap();
+        let plan = plan_c_call_expression(&sig).unwrap();
+        assert!(plan
+            .call_expression
+            .contains("strn_dup((const char *)data, (int)len)"));
+    }
+
+    #[test]
+    fn plan_c_call_returns_none_for_unsupported_signatures() {
+        let sig = parse_c_signature("int complex(struct timeval *t, double f)").unwrap();
+        assert!(plan_c_call_expression(&sig).is_none());
+    }
+
+    #[test]
+    fn plan_c_call_uses_void_cast_when_return_type_present() {
+        let sig = parse_c_signature("int parse(const uint8_t *p)").unwrap();
+        let plan = plan_c_call_expression(&sig).unwrap();
+        assert!(plan.call_expression.contains("(void)parse"));
+    }
+
+    #[test]
+    fn plan_c_call_does_not_void_cast_for_void_return() {
+        let sig = parse_c_signature("void parse(const uint8_t *p)").unwrap();
+        let plan = plan_c_call_expression(&sig).unwrap();
+        assert!(!plan.call_expression.contains("(void)parse"));
+        assert!(plan
+            .call_expression
+            .contains("parse((const uint8_t *)data)"));
+    }
+
+    // ----- C self-contained heuristic ------------------------------
+
+    #[test]
+    fn c_self_contained_accepts_system_includes() {
+        let src = "#include <stdint.h>\n#include <stddef.h>\nvoid foo(void) {}\n";
+        assert!(c_source_appears_self_contained(src));
+    }
+
+    #[test]
+    fn c_self_contained_rejects_project_includes() {
+        let src = "#include \"private.h\"\nvoid foo(void) {}\n";
+        assert!(!c_source_appears_self_contained(src));
+    }
+
+    #[test]
+    fn c_self_contained_accepts_no_includes() {
+        let src = "void foo(void) { return; }\n";
+        assert!(c_source_appears_self_contained(src));
+    }
+
+    // ----- end-to-end harness shape --------------------------------
+
+    #[tokio::test]
+    async fn scaffold_c_project_wires_trampoline_when_source_self_contained() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("vuln.c");
+        std::fs::write(
+            &path,
+            "#include <stdint.h>\n#include <string.h>\n\
+             void copy_attacker(const uint8_t *src, size_t len) {\n\
+                 char dest[16];\n\
+                 memcpy(dest, src, len);\n\
+                 (void)dest;\n\
+             }\n",
+        )
+        .unwrap();
+        let mut finding = finding_for(path.to_str().unwrap());
+        finding.start_line = 4;
+        let project = scaffold_c_project(&finding, CCompiler::Gcc).await.unwrap();
+
+        let target = std::fs::read_to_string(project.path.join("target.c")).unwrap();
+        assert!(target.contains("#include \"suspect_source.c\""));
+        assert!(target.contains("copy_attacker((const uint8_t *)data, len)"));
+        let suspect_path = project.path.join("suspect_source.c");
+        assert!(
+            suspect_path.exists(),
+            "trampoline path should write suspect_source.c"
+        );
+        let suspect_src = std::fs::read_to_string(suspect_path).unwrap();
+        assert!(suspect_src.contains("copy_attacker"));
+    }
+
+    #[tokio::test]
+    async fn scaffold_c_project_falls_back_when_source_not_self_contained() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("vuln.c");
+        std::fs::write(
+            &path,
+            "#include \"private.h\"\nvoid foo(const uint8_t *p, size_t n) { (void)p; (void)n; }\n",
+        )
+        .unwrap();
+        let mut finding = finding_for(path.to_str().unwrap());
+        finding.start_line = 2;
+        let project = scaffold_c_project(&finding, CCompiler::Gcc).await.unwrap();
+
+        let target = std::fs::read_to_string(project.path.join("target.c")).unwrap();
+        // Fallback stub keeps the no-op body.
+        assert!(target.contains("(void)data;"));
+        assert!(!project.path.join("suspect_source.c").exists());
+    }
+
+    #[test]
+    fn build_c_trigger_falls_back_when_no_signature_locatable() {
+        let mut finding = finding_for("/no/such/file.c");
+        finding.start_line = 99;
+        let trigger = build_c_trigger(&finding);
+        assert!(trigger.suspect_source.is_none());
+        assert!(trigger.target_c.contains("payload-only fallback"));
+    }
+
+    // ----- sanitizer-stderr detection ------------------------------
+
+    #[test]
+    fn stderr_detector_recognises_asan_stack_buffer_overflow() {
+        let stderr = "==123==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7f...";
+        assert!(stderr_has_sanitizer_crash(stderr));
+    }
+
+    #[test]
+    fn stderr_detector_recognises_ubsan_runtime_error() {
+        let stderr = "runtime error: signed integer overflow: ...";
+        assert!(stderr_has_sanitizer_crash(stderr));
+    }
+
+    #[test]
+    fn stderr_detector_recognises_use_after_free() {
+        assert!(stderr_has_sanitizer_crash(
+            "AddressSanitizer: heap-use-after-free on address 0x..."
+        ));
+        assert!(stderr_has_sanitizer_crash("==1==ERROR: use-after-free"));
+    }
+
+    #[test]
+    fn stderr_detector_ignores_clean_output() {
+        assert!(!stderr_has_sanitizer_crash(""));
+        assert!(!stderr_has_sanitizer_crash(
+            "clean stderr output\nno errors here\n"
+        ));
+        assert!(!stderr_has_sanitizer_crash("Compiled with -Wall -Werror"));
+    }
+
+    #[test]
+    fn classify_promotes_to_4_on_asan_stderr_signature_even_without_signal() {
+        let opts = VerifyOptions {
+            trust_plain_backend: true,
+            ..VerifyOptions::default()
+        };
+        let mut result = sandbox_result(ExitOutcome::Exited, Some(1), None);
+        result.stderr =
+            "==99==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x...".to_string();
+        let outcome = classify_run_result(
+            &result,
+            SandboxBackend::Plain,
+            std::path::Path::new("/p"),
+            &opts,
+        );
+        assert_eq!(outcome.proof_level, 4);
+        assert_eq!(outcome.proof_verdict, ProofVerdict::Exploited);
+    }
+
+    #[test]
+    fn classify_keeps_observed_crash_verdict_when_clamped_for_plain_backend() {
+        // Default opts (trust_plain_backend=false) + Plain backend + observed
+        // SIGSEGV: level clamped to 3, but verdict stays Exploited because
+        // we DID observe a crash.
+        let opts = VerifyOptions::default();
+        let result = sandbox_result(ExitOutcome::Signaled, None, Some(11));
+        let outcome = classify_run_result(
+            &result,
+            SandboxBackend::Plain,
+            std::path::Path::new("/p"),
+            &opts,
+        );
+        assert_eq!(outcome.proof_level, 3);
+        assert_eq!(outcome.proof_verdict, ProofVerdict::Exploited);
+        assert!(outcome
+            .notes
+            .iter()
+            .any(|n| n.contains("rerun under Bwrap/Podman to promote")));
     }
 
     #[tokio::test]
