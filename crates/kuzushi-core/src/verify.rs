@@ -158,6 +158,12 @@ pub struct VerifyOptions {
     /// `proof_level <= 3` even if a crash is observed. Set to `true`
     /// only in throw-away local testing.
     pub trust_plain_backend: bool,
+    /// When `Some(n)`, replace the single-payload C harness with a
+    /// libFuzzer driver that fuzzes `kuzushi_verify_call_target` for
+    /// `n` seconds before reporting back. `None` keeps the existing
+    /// deterministic single-shot path. Only honoured for C/C++
+    /// findings; other languages ignore it.
+    pub fuzz_seconds: Option<u32>,
 }
 
 impl Default for VerifyOptions {
@@ -166,6 +172,7 @@ impl Default for VerifyOptions {
             backend: None,
             timeout_ms: 60_000,
             trust_plain_backend: false,
+            fuzz_seconds: None,
         }
     }
 }
@@ -1576,6 +1583,28 @@ int main(void) {{
 }}
 "#;
 
+/// libFuzzer driver. Replaces `trigger.c` when
+/// `VerifyOptions::fuzz_seconds` is set. Compiled with
+/// `-fsanitize=fuzzer,address,undefined` so libFuzzer drives input
+/// generation while ASan + UBSan observe corruption. The fuzzer hands
+/// each input to `kuzushi_verify_call_target` (the same trampoline the
+/// single-shot harness exercises). When the fuzzer finds a crashing
+/// input, it writes `crash-<sha1>` next to the harness and exits with
+/// libFuzzer's standard non-zero status — which the existing
+/// `classify_run_result` recognises via the `AddressSanitizer:` /
+/// `runtime error:` markers.
+const C_FUZZ_HARNESS_TEMPLATE: &str = r#"// kuzushi-verify libFuzzer driver
+#include <stdint.h>
+#include <stddef.h>
+
+extern void kuzushi_verify_call_target(const uint8_t *data, size_t len);
+
+int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+    kuzushi_verify_call_target(data, size);
+    return 0;
+}
+"#;
+
 /// Fallback `target.c` body used when the suspect source isn't readable
 /// or doesn't appear self-contained. The harness still builds and runs;
 /// it just doesn't exercise the bug. Equivalent of the Rust path's
@@ -1624,6 +1653,21 @@ async fn verify_c_like(
     }
     let cc = cc.unwrap();
 
+    let fuzz_seconds = opts.fuzz_seconds;
+    let driver_filename = if fuzz_seconds.is_some() {
+        "fuzz.c"
+    } else {
+        "trigger.c"
+    };
+    if let Some(_n) = fuzz_seconds {
+        // Overwrite trigger.c with the libFuzzer driver. Done outside
+        // scaffold_c_project so the existing single-shot path is
+        // unchanged when fuzz_seconds is None.
+        tokio::fs::write(project.path.join("fuzz.c"), C_FUZZ_HARNESS_TEMPLATE)
+            .await
+            .with_context(|| "could not write libFuzzer driver fuzz.c")?;
+    }
+
     let binary_path = project.path.join("trigger");
     let mut argv: Vec<String> = vec![
         cc.to_string(),
@@ -1631,13 +1675,18 @@ async fn verify_c_like(
         "-g".to_string(),
         "-Werror=implicit-function-declaration".to_string(),
     ];
-    for flag in c_sanitizer_flags(&cc) {
-        argv.push(flag.to_string());
+    if fuzz_seconds.is_some() {
+        argv.push("-fsanitize=fuzzer,address,undefined".to_string());
+        argv.push("-fno-sanitize-recover=all".to_string());
+    } else {
+        for flag in c_sanitizer_flags(&cc) {
+            argv.push(flag.to_string());
+        }
     }
     argv.extend([
         "-o".to_string(),
         binary_path.display().to_string(),
-        project.path.join("trigger.c").display().to_string(),
+        project.path.join(driver_filename).display().to_string(),
         project.path.join("target.c").display().to_string(),
     ]);
     let mut compile_cmd = SandboxExecOptions::new(argv);
@@ -1667,8 +1716,23 @@ async fn verify_c_like(
         ));
     }
 
-    let mut run_cmd = SandboxExecOptions::new(vec![binary_path.display().to_string()]);
-    run_cmd.timeout_ms = opts.timeout_ms;
+    let mut run_argv = vec![binary_path.display().to_string()];
+    if let Some(n) = fuzz_seconds {
+        run_argv.push(format!("-max_total_time={n}"));
+        // Cap memory at 2 GiB and silence the "you're not running with
+        // a corpus" warning. -print_final_stats lets ASan reports land
+        // in stderr even when the fuzzer exits cleanly.
+        run_argv.push("-rss_limit_mb=2048".to_string());
+        run_argv.push("-print_final_stats=1".to_string());
+    }
+    let mut run_cmd = SandboxExecOptions::new(run_argv);
+    // Give the fuzzer's own timer some slack on top of the user's
+    // timeout; libFuzzer needs a few hundred ms after -max_total_time
+    // to finalise and write any crash artifact.
+    run_cmd.timeout_ms = match fuzz_seconds {
+        Some(n) => opts.timeout_ms.max(u64::from(n) * 1000 + 5_000),
+        None => opts.timeout_ms,
+    };
     run_cmd.workdir = Some(project.path.clone());
     run_cmd.read_write_mounts = vec![MountSpec {
         host_path: project.path.clone(),
@@ -2697,6 +2761,18 @@ mod tests {
             trigger.suspect_source.is_none(),
             "preprocess branch inlines the body — no separate suspect_source.c"
         );
+    }
+
+    // ----- libFuzzer driver template ------------------------------
+
+    #[test]
+    fn fuzz_harness_template_declares_llvm_fuzzer_one_input() {
+        // The driver must call `kuzushi_verify_call_target` on the
+        // libFuzzer-supplied buffer; otherwise the fuzzer just exercises
+        // a no-op trampoline. Lock the contract in a unit test so a
+        // refactor doesn't silently break the path.
+        assert!(C_FUZZ_HARNESS_TEMPLATE.contains("LLVMFuzzerTestOneInput"));
+        assert!(C_FUZZ_HARNESS_TEMPLATE.contains("kuzushi_verify_call_target(data, size)"));
     }
 
     // ----- end-to-end harness shape --------------------------------
