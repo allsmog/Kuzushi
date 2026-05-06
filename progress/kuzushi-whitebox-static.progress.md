@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-009 - Build deterministic repository inventory
-Status: WB-008 complete in iteration 36; WB-009 pending
+Active story: WB-010 - Build source/sink/sanitizer/guard registry
+Status: WB-009 complete in iteration 37; WB-010 pending
 
 ## Stage 3 Checklist
 
@@ -14,7 +14,7 @@ Status: WB-008 complete in iteration 36; WB-009 pending
 - WB-006 Add source span extractor: complete in iteration 34.
 - WB-007 Normalize Semgrep findings into static evidence: complete in iteration 35.
 - WB-008 Normalize CodeQL SARIF code flows into static evidence: complete in iteration 36.
-- WB-009 Build deterministic repository inventory: pending.
+- WB-009 Build deterministic repository inventory: complete in iteration 37.
 - WB-010 Build source/sink/sanitizer/guard registry: pending.
 - WB-011 Add attack-surface map from source: pending.
 - WB-012 Add static proof validator: pending.
@@ -30,6 +30,50 @@ Status: WB-008 complete in iteration 36; WB-009 pending
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 37 - WB-009
+
+- Task attempted: build a deterministic repository inventory for
+  whitebox-static mode without LLM, network, package-manager, or shell
+  execution.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `crates/kuzushi-core/src/repository_inventory.rs`
+  - `crates/kuzushi-core/src/lib.rs`
+  - `crates/kuzushi-core/src/modules.rs`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `git status --short --branch` in the clean nested clone
+  - `sed -n '1,220p' progress/kuzushi-whitebox-static.progress.md`
+  - `rg -n '"id": "WB-|passes' tasks/kuzushi-whitebox-static.prd.json`
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core repository_inventory`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core dispatches_context_build_snapshot`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `pnpm eval:kuzushi-whitebox-static` with the primary checkout's
+    `node_modules` temporarily symlinked into the clean nested clone
+- Result: implementation complete. `build_repository_inventory` now walks the
+  repository deterministically and records languages, source files, manifests,
+  dependency manifests, config files, likely frameworks, entrypoints,
+  routes/controllers, and generated/vendor paths without invoking any LLM,
+  package manager, shell, or network path. Native `context:build` now embeds
+  the inventory and maps detected static routes into `appModel.routes` for
+  later whitebox stages. WB-009 is marked `passes: true` in the PRD after the
+  story gate and fast whitebox checks passed.
+- Remaining work: WB-010 through WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files, while the clean nested clone at
+    `/Users/operator/VibeCode/open-sourced/kuzushi/.codex-active/kuzushi-stage3`
+    contains the active pushed Stage 2 and WB-001 through WB-008 state. This
+    iteration continued in the clean nested clone to avoid resetting or
+    overwriting the primary worktree.
+  - The nested clone does not have its own `node_modules`; the eval used a
+    temporary symlink to the primary checkout's installed dependencies and then
+    removed it before commit.
 
 ### Iteration 36 - WB-008
 

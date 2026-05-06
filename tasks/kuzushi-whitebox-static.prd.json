@@ -127,7 +127,7 @@
       "acceptance": ["Inventory detects languages, manifests, frameworks, entrypoints, routes/controllers, dependency manifests, config files, and generated/vendor paths.", "Tests cover Node, Python, Go, Rust, and mixed fixtures."],
       "storyGate": "cargo test -p kuzushi-core repository_inventory",
       "forbidden": ["LLM execution", "package manager execution"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-010",

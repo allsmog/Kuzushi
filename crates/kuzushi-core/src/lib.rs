@@ -11,6 +11,7 @@ pub mod options;
 pub mod patch;
 pub mod pr_comment;
 pub mod recon;
+pub mod repository_inventory;
 pub mod runtime;
 pub mod scan;
 pub mod secret_scan;
@@ -56,6 +57,11 @@ pub use options::{OptionScope, OptionTarget, ToolOptionStore};
 pub use patch::run_patch_finding;
 pub use pr_comment::{build_pr_comment, PrCommentInput};
 pub use recon::{execute_recon_tool, ReconHost, ReconNote, ReconService, ReconWorkspaceStore};
+pub use repository_inventory::{
+    build_repository_inventory, InventoryEntrypoint, InventoryFile, InventoryFramework,
+    InventoryLanguage, InventoryPathClassification, InventoryRouteController, InventorySourceFile,
+    RepositoryInventory,
+};
 pub use runtime::{
     AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolPolicy, TriageRequest,
 };
