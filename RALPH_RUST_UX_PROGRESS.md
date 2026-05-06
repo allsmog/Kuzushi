@@ -1,8 +1,8 @@
 # Ralph Rust UX Progress
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
-Active story: UX-006 - Rust Doctor / Preflight
-Status: UX-006 implementation complete in iteration 19; commit/push gate pending
+Active story: UX-007 - Input Mode Clarity
+Status: UX-006 complete and pushed in iteration 19 as `69f2e2a`; UX-007 pending next iteration
 
 ## Stage 2 Checklist
 
@@ -11,7 +11,7 @@ Status: UX-006 implementation complete in iteration 19; commit/push gate pending
 - UX-003 Fix shell redraw and prompt overlap: complete; pushed in iteration 13 as `bba14f9`.
 - UX-004 Improve exit and unknown command handling: complete; pushed in iteration 17 as `f3305a1`.
 - UX-005 Visible startup progress and first-run path: complete; pushed in iteration 18 as `d26407a`.
-- UX-006 Rust doctor / preflight: implementation complete; push pending.
+- UX-006 Rust doctor / preflight: complete; pushed in iteration 19 as `69f2e2a`.
 - UX-007 Input mode clarity: pending.
 - UX-008 Honest abort state: pending.
 - UX-009 Slash command taxonomy and drift tests: pending.
@@ -46,18 +46,19 @@ Status: UX-006 implementation complete in iteration 19; commit/push gate pending
   - `cargo fmt --all --check`
   - `./target/debug/kuzushi doctor --target .`
   - `git diff --check && git diff --cached --check`
-- Result: implementation complete. The Rust CLI now routes `doctor` with
+- Result: complete and pushed to `origin/main` as
+  `69f2e2a ralph:ux add rust doctor preflight`. The Rust CLI now routes `doctor` with
   optional `--target` and `--json`; plain output is dense and actionable, JSON
   includes named checks and summary counts, scanner absence is a warning, and
   invalid target/config/bridge/state/DB checks fail with next steps. The doctor
   checks credential environment variable names and set/unset state only; tests
   assert secret values are not printed.
-- Remaining work: commit and push UX-006, then start UX-007.
+- Remaining work: UX-007 through UX-015.
 - Blockers or repo facts that contradicted this prompt:
   - The primary workspace local `main` ref remains stale at `80d23a4` with
     earlier Stage 2 changes staged, while the isolated clone at
-    `/tmp/kuzushi-ux2-clone.PJaRge` is clean at `88a960f`. The commit/push gate
-    should use the isolated clone to avoid mixing stale staged files.
+    `/tmp/kuzushi-ux2-clone.PJaRge` completed the clean commit/push gate. This
+    iteration used the isolated clone to avoid mixing stale staged files.
 
 ### Iteration 18 - UX-005
 
