@@ -576,7 +576,7 @@ impl ShellApp {
                     self.shell_view = ShellView::Module;
                     self.log("use", module);
                 } else {
-                    self.log("error", format!("unknown module {module}"));
+                    self.log("error", self.unknown_module_message(&module));
                 }
             }
             ShellCommand::Tune => {
@@ -3214,7 +3214,10 @@ impl ShellApp {
             Some(raw) if !raw.trim().is_empty() => match serde_json::from_str(&raw) {
                 Ok(input) => input,
                 Err(error) => {
-                    self.log("error", format!("run input must be JSON: {error}"));
+                    self.log(
+                        "error",
+                        format!("run input must be JSON: {error}. Next: run <tool> {{}}"),
+                    );
                     return;
                 }
             },
@@ -3227,7 +3230,13 @@ impl ShellApp {
             {
                 Ok(input) => input,
                 Err(error) => {
-                    self.log("error", error.to_string());
+                    self.log(
+                        "error",
+                        with_next_step(
+                            error.to_string(),
+                            "tools, options <tool>, or run <tool> {}",
+                        ),
+                    );
                     return;
                 }
             };
@@ -3235,7 +3244,13 @@ impl ShellApp {
         let workspace = match self.current_workspace() {
             Ok(workspace) => Some(workspace),
             Err(error) => {
-                self.log("error", error.to_string());
+                self.log(
+                    "error",
+                    with_next_step(
+                        error.to_string(),
+                        "scan <target> or start kuzushi shell --target .",
+                    ),
+                );
                 return;
             }
         };
@@ -3275,7 +3290,10 @@ impl ShellApp {
             {
                 Ok(store) => store,
                 Err(error) => {
-                    self.log("error", error.to_string());
+                    self.log(
+                        "error",
+                        with_next_step(error.to_string(), "workspace status or scan <target>"),
+                    );
                     return;
                 }
             }
@@ -3327,7 +3345,10 @@ impl ShellApp {
             ) {
                 Ok(runtime) => Some(runtime.with_thinking_level(tool_thinking_level)),
                 Err(error) => {
-                    self.log("error", error.to_string());
+                    self.log(
+                        "error",
+                        with_next_step(error.to_string(), "model <n> or config"),
+                    );
                     return;
                 }
             }
@@ -3361,8 +3382,27 @@ impl ShellApp {
                     });
                 self.log("result", rendered);
             }
-            Err(error) => self.log("error", error.to_string()),
+            Err(error) => self.log(
+                "error",
+                with_next_step(error.to_string(), "tools, options <tool>, or model <n>"),
+            ),
         }
+    }
+
+    fn unknown_module_message(&self, module: &str) -> String {
+        let module_ids = self
+            .registry
+            .modules()
+            .map(|entry| entry.metadata().id.clone())
+            .collect::<Vec<_>>();
+        let module_refs = module_ids.iter().map(String::as_str).collect::<Vec<_>>();
+        let closest = closest_option_names(module, &module_refs);
+        let closest = if closest.is_empty() {
+            "none".to_string()
+        } else {
+            closest.join(", ")
+        };
+        format!("unknown module {module:?}. Closest: {closest}. Next: modules or use <module-id>")
     }
 
     fn default_tool_for_focused_module(&self) -> Option<String> {
@@ -3401,7 +3441,7 @@ impl ShellApp {
         self.shell_view = ShellView::Findings;
         self.refresh_findings(true);
         if self.findings.is_empty() {
-            self.log("findings", "no findings yet");
+            self.log("findings", "no findings yet. Next: scan or scan <target>");
         }
     }
 
@@ -3481,8 +3521,14 @@ impl ShellApp {
                     );
                 }
             }
-            Ok(None) => self.log("error", format!("no finding matches {reference:?}")),
-            Err(error) => self.log("error", error.to_string()),
+            Ok(None) => self.log(
+                "error",
+                format!("no finding matches {reference:?}. Next: findings or scan"),
+            ),
+            Err(error) => self.log(
+                "error",
+                with_next_step(error.to_string(), "findings or scan <target>"),
+            ),
         }
     }
 
@@ -3491,7 +3537,10 @@ impl ShellApp {
             Ok(store) => store,
             Err(error) => {
                 if announce {
-                    self.log("error", error.to_string());
+                    self.log(
+                        "error",
+                        with_next_step(error.to_string(), "scan <target> or workspace status"),
+                    );
                 }
                 return;
             }
@@ -3516,7 +3565,10 @@ impl ShellApp {
             }
             Err(error) => {
                 if announce {
-                    self.log("error", error.to_string());
+                    self.log(
+                        "error",
+                        with_next_step(error.to_string(), "scan <target> or workspace status"),
+                    );
                 }
             }
         }
@@ -3601,13 +3653,17 @@ impl ShellApp {
                 );
             }
             ScanEvent::Failed { error } => {
+                let actionable = with_next_step(
+                    error,
+                    "tasks, task block semgrep, or run semgrep:scan {\"binary\":\"/path/to/semgrep\"}",
+                );
                 if let Some(scan) = &mut self.scan {
                     scan.stage = "failed".to_string();
                     scan.running = false;
                     scan.abort_requested = false;
-                    scan.error = Some(error.clone());
+                    scan.error = Some(actionable.clone());
                 }
-                self.log("error", error);
+                self.log("error", actionable);
             }
             ScanEvent::Cancelled { run_id } => {
                 if let Some(scan) = &mut self.scan {
@@ -4409,6 +4465,19 @@ fn unknown_command_message(raw: &str) -> String {
             "unknown command {trimmed:?}. Free-form chat is explicit only. Next: /ask <question> or help"
         )
     }
+}
+
+fn with_next_step(message: impl Into<String>, next: &str) -> String {
+    let message = message.into();
+    if message.contains("Next:") {
+        return message;
+    }
+    let separator = if message.ends_with('.') || message.ends_with('!') || message.ends_with('?') {
+        " "
+    } else {
+        ". "
+    };
+    format!("{message}{separator}Next: {next}")
 }
 
 const ASK_SYSTEM_PROMPT: &str = r#"You are Kuzushi's Rust shell assistant.
@@ -6757,6 +6826,103 @@ JSON
         assert!(error.contains("semgrep"));
         assert!(error.contains("codeql"));
         assert!(error.contains("Next: /tasks"));
+    }
+
+    #[test]
+    fn ux_empty_and_error_states_name_next_real_commands() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        app.handle_command(ShellCommand::Findings);
+        assert!(app
+            .log
+            .iter()
+            .any(|line| { line.prefix == "findings" && line.body.contains("Next: scan") }));
+
+        let mut no_workspace_app = ShellApp::new(V2Config::default(), None);
+        no_workspace_app.handle_command(ShellCommand::Workspace(WorkspaceCommand::Status));
+        assert!(no_workspace_app.log.iter().any(|line| {
+            line.prefix == "workspace" && line.body.contains("Next: scan <target>")
+        }));
+
+        app.handle_command(ShellCommand::Use("sat".to_string()));
+        let unknown_module = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(unknown_module.contains("unknown module"));
+        assert!(unknown_module.contains("Closest: sast"));
+        assert!(unknown_module.contains("Next: modules or use <module-id>"));
+
+        app.handle_command(ShellCommand::RunTool {
+            tool: Some("missing:tool".to_string()),
+            input: None,
+        });
+        let unknown_tool = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(unknown_tool.contains("unknown tool"));
+        assert!(unknown_tool.contains("Next:"));
+        assert!(unknown_tool.contains("tools"));
+
+        let before = app.option_store.clone();
+        app.handle_command(ShellCommand::Task(SastTaskCommand::Allow(
+            "not-a-task".to_string(),
+        )));
+        assert_eq!(app.option_store, before);
+        let unknown_task = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(unknown_task.contains("Valid task IDs"));
+        assert!(unknown_task.contains("Next: /tasks"));
+
+        app.scan = Some(ScanPanelState {
+            run_id: Some("run-1".to_string()),
+            target: PathBuf::from("."),
+            stage: "running semgrep".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        app.apply_scan_event(ScanEvent::Failed {
+            error: "semgrep: could not find scanner binary \"semgrep\"".to_string(),
+        });
+        let missing_scanner = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(missing_scanner.contains("could not find scanner binary"));
+        assert!(missing_scanner.contains("Next:"));
+        assert!(missing_scanner.contains("task block semgrep"));
+
+        app.apply_scan_event(ScanEvent::Failed {
+            error: "internal shell-state error: selected finding disappeared".to_string(),
+        });
+        let internal = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(internal.contains("internal shell-state error"));
+        assert!(internal.contains("Next:"));
     }
 
     #[test]

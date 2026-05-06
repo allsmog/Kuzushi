@@ -281,7 +281,7 @@ impl ModuleRegistry {
     ) -> Result<Value> {
         let tool = self.resolve_tool(name);
         if tool.is_none() && !self.is_registered_dag_node(name) {
-            anyhow::bail!("unknown tool {name:?}");
+            anyhow::bail!("unknown tool {name:?}. Next: run catalog:tools or use the Rust shell `tools` command");
         }
         let input = if let Some(store) = option_store {
             store.effective_tool_input(name, input)?
@@ -11278,6 +11278,7 @@ OUT
         assert!(err.contains("semgrep: could not find scanner binary"));
         assert!(err.contains("Install Semgrep"));
         assert!(err.contains(r#""binary":"/path/to/semgrep""#));
+        assert!(err.contains("Next: run semgrep:scan"));
     }
 
     #[cfg(unix)]
@@ -11351,6 +11352,7 @@ OUT
         assert!(err.contains("codeql: could not find CodeQL CLI"));
         assert!(err.contains("github/codeql-cli-binaries"));
         assert!(err.contains(r#""binary":"/path/to/codeql""#));
+        assert!(err.contains("Next: run codeql:scan"));
     }
 
     #[test]
