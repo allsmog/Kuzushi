@@ -1573,11 +1573,38 @@ fn threat_lines(app: &ShellApp, area: Rect, view: ThreatView) -> Vec<Line<'stati
             ));
         }
         ThreatView::Summary => {
-            lines.push(divider("SUMMARY", area.width));
-            lines.push(detail("elements", "4"));
-            lines.push(detail("stories", "3"));
-            lines.push(detail("highest risk", "scanners -> subprocess boundary"));
-            lines.push(detail("artifact", ".kuzushi/threat-model.json"));
+            let rollup = stride_rollup_rows();
+            let total_issues: usize = rollup.iter().map(|r| r.3).sum();
+            lines.push(section_header_line(
+                &format!("THREAT MODEL · {total_issues} issues"),
+                area.width,
+            ));
+            for (letter, sev, category, count, description) in rollup {
+                lines.push(stride_row(
+                    letter,
+                    sev,
+                    category,
+                    count,
+                    description,
+                    area.width,
+                ));
+            }
+            lines.push(blank());
+            lines.push(transcript_line(
+                "agent",
+                "biggest delta from last model: admin.acme-checkout.com shares the jwt secret.",
+                false,
+            ));
+            lines.push(transcript_line(
+                "flow",
+                "recommend split signing keys + audience claim",
+                false,
+            ));
+            lines.push(transcript_line(
+                "log",
+                "artifact .kuzushi/threat-model.json (proposed v4 · +12 −3)",
+                false,
+            ));
         }
     }
 
@@ -4318,6 +4345,25 @@ mod tests {
                 "unexpected streaming cursor while idle: {text:?}"
             );
         }
+    }
+
+    #[test]
+    fn threats_summary_view_combines_stride_rollup_and_observations() {
+        let backend = TestBackend::new(120, 32);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Threat(ThreatView::Summary);
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains("THREAT MODEL · 8 ISSUES"),
+            "expected design summary header in: {rendered}"
+        );
+        assert!(rendered.contains("Spoofing"));
+        assert!(rendered.contains("admin.acme-checkout.com"));
+        assert!(rendered.contains("threat-model.json"));
     }
 
     #[test]
