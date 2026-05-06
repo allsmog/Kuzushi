@@ -84,6 +84,15 @@ remain visible in run artifacts and report/audit output, with
 `whitebox-suppressions.json` listing active matches, stale suppressions, and
 expired suppressions.
 
+## Diff-Aware PR Mode
+
+Passing `diffBase` to `sast:scan` in `whitebox-static` mode enables local
+PR-scoped analysis. Kuzushi computes changed files and line ranges from local
+`git diff`, expands static context to nearby callers, callees, and routes, and
+writes `whitebox-diff-scope.json` in the run artifact directory. Findings are
+tagged `new`, `existing`, `fixed`, or `changed-context`. This mode does not
+need a remote git provider.
+
 ## Evidence Limits
 
 Whitebox-static cannot prove that an issue is reachable in a deployed runtime,

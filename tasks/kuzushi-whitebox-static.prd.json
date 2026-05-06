@@ -248,7 +248,7 @@
       "acceptance": ["Compute changed files and ranges from diffBase and expand context to relevant callers/callees/routes.", "Tag findings new, existing, fixed, or changed-context without remote git provider."],
       "storyGate": "cargo test -p kuzushi-core whitebox_diff",
       "forbidden": ["remote provider requirement"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-021",

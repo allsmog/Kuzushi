@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-020 - Add diff-aware whitebox PR mode
-Status: WB-019 pushed in iteration 49; WB-020 pending
+Active story: WB-021 - Add deterministic eval harness
+Status: WB-020 complete in iteration 51; commit/push pending
 
 ## Stage 3 Checklist
 
@@ -25,11 +25,57 @@ Status: WB-019 pushed in iteration 49; WB-020 pending
 - WB-017 Add variant search from statically confirmed findings: complete in iteration 45.
 - WB-018 Add candidate Semgrep rule synthesis: complete in iteration 46.
 - WB-019 Add whitebox false-positive memory: complete and pushed in iteration 49.
-- WB-020 Add diff-aware whitebox PR mode: pending.
+- WB-020 Add diff-aware whitebox PR mode: complete in iteration 51.
 - WB-021 Add deterministic eval harness: pending.
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 51 - WB-020
+
+- Task attempted: add diff-aware whitebox PR mode that uses local git diff
+  data from `diffBase`, expands nearby static context, tags current and fixed
+  findings, and writes a run artifact without requiring a remote git provider.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `docs/kuzushi-whitebox-static.md`
+  - `evals/kuzushi-whitebox-static/run.ts`
+  - `crates/kuzushi-core/src/diff_scope.rs`
+  - `crates/kuzushi-core/src/lib.rs`
+  - `crates/kuzushi-core/src/modules.rs`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `git status --short --branch` in the clean nested clone
+  - `sed -n '1,280p' progress/kuzushi-whitebox-static.progress.md`
+  - `sed -n '1,260p' tasks/kuzushi-whitebox-static.prd.json`
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core whitebox_diff`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `pnpm eval:kuzushi-whitebox-static`
+- Result: implementation complete. `diff_scope.rs` now computes changed files,
+  added/modified/deleted line ranges from local `git diff`, expands context to
+  nearby routes, callers, and callees, and tags findings as `new`, `existing`,
+  `fixed`, or `changed-context`. Whitebox `sast:scan` accepts `diffBase` and
+  writes `.kuzushi/runs/<runId>/whitebox-diff-scope.json`, includes the report
+  in tool JSON as `whiteboxDiff`, and states that no remote provider is
+  required. WB-020 is marked `passes: true` in the PRD after the story gate and
+  fast whitebox checks passed.
+- Remaining work: commit and push WB-020, then continue with WB-021 through
+  WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files, while the clean nested clone at
+    `/Users/operator/VibeCode/open-sourced/kuzushi/.codex-active/kuzushi-stage3`
+    contains the active pushed Stage 3 state. This iteration continued in the
+    nested clone to avoid resetting or overwriting the primary worktree.
+  - The nested clone does not have its own `node_modules`; the eval used a
+    temporary symlink to the primary checkout's installed dependencies. The
+    first eval wrapper used zsh's read-only `status` variable after the eval
+    itself passed; the eval was rerun with a safe wrapper and passed, then the
+    symlink was removed before commit.
 
 ### Iteration 49 - WB-019 Push Gate
 

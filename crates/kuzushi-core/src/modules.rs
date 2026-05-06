@@ -12,6 +12,7 @@ use crate::artifact_kb::{artifact_knowledge_prompt_context, ArtifactKnowledgePro
 use crate::carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hunt_report};
 use crate::config::V2Config;
 use crate::dep_hygiene::check_dependency_hygiene;
+use crate::diff_scope::build_whitebox_diff_scope_report;
 use crate::findings::{
     Finding, FindingListFilter, FindingStore, Severity, StaticProofState, TriageOutcome,
     TriageVerdict,
@@ -855,6 +856,16 @@ fn run_sast_scan(
     } else {
         None
     };
+    let whitebox_diff = if whitebox_static.is_some() {
+        match string_input_any(&input, &["diffBase", "diff_base"]) {
+            Some(diff_base) => Some(write_whitebox_diff_scope_json(
+                workspace, store, &run_ids, &artifacts, &diff_base,
+            )?),
+            None => None,
+        }
+    } else {
+        None
+    };
 
     let triage = if triage_requested {
         let fingerprints = fingerprints_for_sast_runs(store, &run_ids)?;
@@ -972,6 +983,27 @@ fn run_sast_scan(
                 ));
             }
         }
+        if let Some(diff_report) = whitebox_diff.as_ref() {
+            let changed_files = diff_report
+                .pointer("/summary/changedFiles")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            let new_findings = diff_report
+                .pointer("/summary/newFindings")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            let changed_context = diff_report
+                .pointer("/summary/changedContextFindings")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            let fixed = diff_report
+                .pointer("/summary/fixedFindings")
+                .and_then(Value::as_u64)
+                .unwrap_or_default();
+            lines.push(format!(
+                "  Diff scope: {changed_files} changed file(s), {new_findings} new, {changed_context} changed-context, {fixed} fixed"
+            ));
+        }
     }
     lines.push(format!("  Engines: {}", engine_ids.join(", ")));
     if let Some(triage_output) = triage
@@ -1016,6 +1048,13 @@ fn run_sast_scan(
             .display()
             .to_string()
     });
+    let whitebox_diff_artifact = whitebox_diff.as_ref().map(|_| {
+        artifacts
+            .dir
+            .join("whitebox-diff-scope.json")
+            .display()
+            .to_string()
+    });
 
     let result = json!({
         "ok": true,
@@ -1048,6 +1087,7 @@ fn run_sast_scan(
             "staticVariants": static_variants,
             "candidateSemgrepRules": candidate_semgrep_rules,
             "whiteboxSuppressions": whitebox_suppressions,
+            "whiteboxDiff": whitebox_diff,
             "triage": triage.as_ref().and_then(|value| value.get("data")).cloned(),
             "verification": {
                 "verified": verification_results.len(),
@@ -1070,6 +1110,7 @@ fn run_sast_scan(
                 "staticVariants": static_variants_artifact,
                 "candidateSemgrepRules": candidate_semgrep_rules_artifact,
                 "whiteboxSuppressions": whitebox_suppressions_artifact,
+                "whiteboxDiff": whitebox_diff_artifact,
                 "triageJsonl": artifacts.triage_jsonl.display().to_string(),
                 "verifyJsonl": artifacts.verify_jsonl.display().to_string(),
             },
@@ -1319,6 +1360,40 @@ fn write_whitebox_suppressions_json(
         "deterministic": true,
         "policy": "whitebox-static false-positive memory annotates suppressions only; suppressed findings remain in audit/report output",
     });
+    fs::write(
+        &artifact_path,
+        format!("{}\n", serde_json::to_string_pretty(&report)?),
+    )
+    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    Ok(report)
+}
+
+fn write_whitebox_diff_scope_json(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    run_ids: &SastRunIds,
+    artifacts: &SastRunArtifacts,
+    diff_base: &str,
+) -> Result<Value> {
+    let current_findings = findings_for_sast_runs(store, run_ids)?;
+    let previous_findings = store.list_findings(FindingListFilter::MAX_LIMIT)?;
+    let artifact_path = artifacts.dir.join("whitebox-diff-scope.json");
+    let mut report = serde_json::to_value(build_whitebox_diff_scope_report(
+        workspace.root(),
+        diff_base,
+        &current_findings,
+        &previous_findings,
+    )?)?;
+    if let Value::Object(object) = &mut report {
+        object.insert(
+            "artifact".to_string(),
+            json!(artifact_path.display().to_string()),
+        );
+        object.insert(
+            "policy".to_string(),
+            json!("whitebox-static PR mode uses only local git diff data; no remote git provider is required"),
+        );
+    }
     fs::write(
         &artifact_path,
         format!("{}\n", serde_json::to_string_pretty(&report)?),
@@ -7780,6 +7855,12 @@ fn sast_module() -> BuiltinModule {
                     "Optional severity filter: critical, high, medium, low, or info.",
                 ),
                 opt(
+                    "diffBase",
+                    OptionType::String,
+                    "Git revision for whitebox-static PR diff scope.",
+                )
+                .advanced(),
+                opt(
                     "triage",
                     OptionType::Bool,
                     "Run model-backed triage after static scanners.",
@@ -12379,6 +12460,91 @@ OUT
         assert!(stored
             .iter()
             .all(|finding| { finding.static_proof_state == Some(StaticProofState::SignalOnly) }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn whitebox_diff_sast_mode_writes_pr_scope_artifact() {
+        let temp = tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"lodash":"latest"}}"#,
+        )
+        .unwrap();
+        init_git_repo(temp.path());
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"lodash":"latest","express":"latest"}}"#,
+        )
+        .unwrap();
+        for args in [vec!["add", "."], vec!["commit", "-m", "pr"]] {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(temp.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool(
+                "sast:scan",
+                json!({
+                    "mode": "whitebox-static",
+                    "taskMode": "manual",
+                    "tasks": ["dep-hygiene"],
+                    "diffBase": "HEAD~1"
+                }),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(
+            result.pointer("/data/mode").and_then(Value::as_str),
+            Some("whitebox-static")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/whiteboxDiff/noRemoteProviderRequired")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            result
+                .pointer("/data/whiteboxDiff/summary/changedFiles")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert!(result
+            .pointer("/data/whiteboxDiff/findingTags")
+            .and_then(Value::as_array)
+            .is_some_and(|tags| !tags.is_empty()));
+        assert!(result
+            .get("output")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("Diff scope: 1 changed file"));
+        let artifact = result
+            .pointer("/data/artifacts/whiteboxDiff")
+            .and_then(Value::as_str)
+            .unwrap();
+        let artifact_body = fs::read_to_string(artifact).unwrap();
+        assert!(artifact_body.contains("\"changedFiles\""));
+        assert!(artifact_body.contains("\"noRemoteProviderRequired\": true"));
     }
 
     #[cfg(unix)]

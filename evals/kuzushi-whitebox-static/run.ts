@@ -48,6 +48,7 @@ const staticNarrative = read("crates/kuzushi-core/src/static_narrative.rs");
 const variants = read("crates/kuzushi-core/src/variant_ndiff.rs");
 const semgrepRuleSynthesis = read("crates/kuzushi-core/src/semgrep_rule_synthesis.rs");
 const whiteboxSuppressions = read("crates/kuzushi-core/src/whitebox_suppressions.rs");
+const diffScope = read("crates/kuzushi-core/src/diff_scope.rs");
 
 const results: EvalResult[] = [
   prd.branchName === "kuzushi-whitebox-static" && prd.stories?.length === 22
@@ -94,6 +95,13 @@ const results: EvalResult[] = [
     "suppressed source snippet hash changed",
     "findings_remain_visible",
     "whitebox-suppressions.json",
+  ]),
+  requireContains("whitebox_diff_pr_mode", diffScope, [
+    "build_whitebox_diff_scope_report",
+    "diffBase",
+    "changed-context",
+    "Fixed",
+    "no_remote_provider_required",
   ]),
 ];
 
