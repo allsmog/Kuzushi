@@ -16,6 +16,7 @@ pub mod repository_inventory;
 pub mod runtime;
 pub mod scan;
 pub mod secret_scan;
+pub mod semgrep_rule_synthesis;
 pub mod source_span;
 pub mod static_evidence;
 pub mod static_narrative;
@@ -83,6 +84,10 @@ pub use scan::{
 pub use secret_scan::{
     scan_for_secrets, SecretScanFinding, SecretScanOptions, SecretScanReport, SecretScanScanner,
     SecretSeverity,
+};
+pub use semgrep_rule_synthesis::{
+    synthesize_candidate_semgrep_rules, SemgrepCandidateRule, SemgrepRuleFixture,
+    SemgrepRuleSynthesisReport, SemgrepRuleValidation,
 };
 pub use source_span::{extract_source_span, SourceSpan};
 pub use static_evidence::{

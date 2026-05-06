@@ -64,6 +64,13 @@ source/sink/missing-guard pattern and scan sibling source files for similar
 code shapes. These are review candidates only: generated variants begin as
 `code_cited` or `signal_only`, never `statically confirmed` by inheritance.
 
+## Candidate Semgrep Rules
+
+Whitebox-static can also synthesize candidate Semgrep rules from
+`statically confirmed` findings. The candidate rules are validated against
+positive and negative source fixtures and are written disabled by default; a
+passing fixture check only marks them ready for operator review, not enabled.
+
 ## Evidence Limits
 
 Whitebox-static cannot prove that an issue is reachable in a deployed runtime,

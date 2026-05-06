@@ -46,6 +46,7 @@ const cli = read("crates/kuzushi-cli/src/main.rs");
 const core = read("crates/kuzushi-core/src/whitebox_static.rs");
 const staticNarrative = read("crates/kuzushi-core/src/static_narrative.rs");
 const variants = read("crates/kuzushi-core/src/variant_ndiff.rs");
+const semgrepRuleSynthesis = read("crates/kuzushi-core/src/semgrep_rule_synthesis.rs");
 
 const results: EvalResult[] = [
   prd.branchName === "kuzushi-whitebox-static" && prd.stories?.length === 22
@@ -78,6 +79,13 @@ const results: EvalResult[] = [
     "StaticallyConfirmed",
     "CodeCited",
     "requires independent validation",
+  ]),
+  requireContains("candidate_semgrep_rules", semgrepRuleSynthesis, [
+    "synthesize_candidate_semgrep_rules",
+    "StaticallyConfirmed",
+    "SemgrepRuleFixture",
+    "enabled: false",
+    "validationPassed",
   ]),
 ];
 

@@ -226,7 +226,7 @@
       "acceptance": ["Generate candidate rule only from statically confirmed findings.", "Validate against positive and negative fixtures; candidates remain disabled until tests pass."],
       "storyGate": "cargo test -p kuzushi-core semgrep_rule_synthesis",
       "forbidden": ["enabled unvalidated rule"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-019",
