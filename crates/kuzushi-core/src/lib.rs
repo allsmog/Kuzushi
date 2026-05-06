@@ -77,7 +77,8 @@ pub use deep_auditor::{
     VulnAnalysis,
 };
 pub use executor::{
-    Executor, ExecutorRequest, ExecutorResult, ExecutorStatus, LocalExecutor, NoopExecutor,
+    DockerExecutor, Executor, ExecutorRequest, ExecutorResult, ExecutorStatus, LocalExecutor,
+    NoopExecutor,
 };
 pub use dep_hygiene::{
     analyze_manifest as analyze_dep_hygiene_manifest, check_dependency_hygiene, DepHygieneFinding,

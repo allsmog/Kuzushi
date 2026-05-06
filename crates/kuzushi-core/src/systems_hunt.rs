@@ -1830,6 +1830,8 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
         let runtime = FakeRuntime::new();
 
@@ -1859,6 +1861,8 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
         let runtime = FakeRuntime::new();
 

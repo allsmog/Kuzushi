@@ -348,6 +348,8 @@ async fn scan_command(
         config: &config,
         workspace: Some(&workspace),
         findings_store: Some(&store),
+        spend: None,
+        executor: None,
     };
 
     let started = std::time::Instant::now();
@@ -1609,6 +1611,8 @@ fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Res
         config: &config,
         workspace: workspace.as_ref(),
         findings_store: store.as_ref(),
+        spend: None,
+        executor: None,
     };
     let output = registry.execute_tool_with_runtime(
         &tool,

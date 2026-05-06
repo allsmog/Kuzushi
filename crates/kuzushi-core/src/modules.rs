@@ -5521,12 +5521,28 @@ fn run_triage(
     let mut by_design = 0usize;
     let mut results = Vec::new();
 
+    let mut total_cost = 0.0f64;
     for finding in findings {
         let finding_id = finding
             .id
             .context("triage:run loaded a finding without a SQLite id")?;
         let fingerprint = finding.fingerprint.clone();
         let scan_id = finding.scan_id.clone();
+        // Open a spend ticket if a limiter is wired through the context.
+        // Best-effort: if `deposit` fails (cap exceeded), skip this finding
+        // with an actionable error rather than poisoning the rest of the run.
+        let spend_ticket = match ctx.spend {
+            Some(limiter) => match limiter.deposit(crate::spend::Operation::Triage, 0.01) {
+                Ok(ticket) => Some(ticket),
+                Err(error) => {
+                    eprintln!(
+                        "[warn] triage budget exceeded for {fingerprint}: {error}"
+                    );
+                    continue;
+                }
+            },
+            None => None,
+        };
         let outcome = runtime.triage_finding_blocking(TriageRequest {
             model: model.clone(),
             cwd: workspace.root().to_path_buf(),
@@ -5541,6 +5557,20 @@ fn run_triage(
             TriageVerdict::ByDesign => by_design += 1,
         }
 
+        // Settle the spend ticket. The runtime returns no per-call cost
+        // today, so we settle at the deposited estimate; once a runtime
+        // exposes structured token counts this should refund the actual.
+        let settled_cost = if let Some(ticket) = spend_ticket {
+            let estimate = ticket.est_usd();
+            if let Some(limiter) = ctx.spend {
+                let _ = limiter.refund(ticket, estimate);
+            }
+            estimate
+        } else {
+            0.0
+        };
+        total_cost += settled_cost;
+
         store.save_triage(finding_id, &outcome)?;
         let refusal = crate::findings::detect_refusal_in_text(&outcome.rationale);
         let history_run_id = input
@@ -5553,7 +5583,7 @@ fn run_triage(
             history_run_id,
             "triage",
             &model,
-            0.0,
+            settled_cost,
             &refusal,
         ) {
             // Non-fatal: emit-hook failure should not poison a triage that
@@ -5569,6 +5599,7 @@ fn run_triage(
             "confidence": outcome.confidence,
             "rationale": outcome.rationale,
             "refused": refusal.refused,
+            "costUsd": settled_cost,
         }));
     }
 
@@ -5579,7 +5610,7 @@ fn run_triage(
     if by_design > 0 {
         summary.push_str(&format!("  by_design={by_design}"));
     }
-    summary.push_str("\n      cost=$0.0000");
+    summary.push_str(&format!("\n      cost=${total_cost:.4}"));
     if !missing_fingerprints.is_empty() {
         summary.push_str(&format!(
             "\n[!] {} requested finding(s) were not found",
@@ -5597,12 +5628,12 @@ fn run_triage(
             "fp": fp,
             "needsReview": needs_review,
             "byDesign": by_design,
-            "costUsd": 0.0,
+            "costUsd": total_cost,
             "missingFingerprints": missing_fingerprints,
             "batchSize": input.batch_size,
             "results": results,
         },
-        "costUsd": 0.0,
+        "costUsd": total_cost,
     }))
 }
 
@@ -5713,12 +5744,34 @@ fn run_verify_finding(
     )?;
 
     let prompt = build_verify_prompt(&finding, &triage, input.prompt_template.as_deref())?;
+    let spend_ticket = match ctx.spend {
+        Some(limiter) => Some(
+            limiter
+                .deposit(crate::spend::Operation::Triage, 0.02)
+                .with_context(|| {
+                    format!(
+                        "verify:finding could not deposit spend for {}",
+                        finding.fingerprint
+                    )
+                })?,
+        ),
+        None => None,
+    };
     let response = runtime.query_blocking(AgentQueryRequest::new(
         model.clone(),
         workspace.root().to_path_buf(),
         VERIFY_SYSTEM_PROMPT.to_string(),
         prompt,
     ))?;
+    let settled_cost = if let Some(ticket) = spend_ticket {
+        let estimate = ticket.est_usd();
+        if let Some(limiter) = ctx.spend {
+            let _ = limiter.refund(ticket, estimate);
+        }
+        estimate
+    } else {
+        0.0
+    };
     let raw = match response.structured {
         Some(value) => value,
         None => parse_json_object_from_agent_text(&response.text).with_context(|| {
@@ -5746,7 +5799,7 @@ fn run_verify_finding(
     {
         lines.push(format!("      vector: {vector}"));
     }
-    lines.push("      cost=$0.0000".to_string());
+    lines.push(format!("      cost=${settled_cost:.4}"));
 
     let refusal = crate::findings::detect_refusal_in_text(&response.text);
     let history_run_id = finding.scan_id.as_deref().unwrap_or("verify");
@@ -5755,7 +5808,7 @@ fn run_verify_finding(
         history_run_id,
         "verify",
         &model,
-        0.0,
+        settled_cost,
         &refusal,
     ) {
         eprintln!(
@@ -5768,7 +5821,7 @@ fn run_verify_finding(
         "ok": true,
         "output": lines.join("\n"),
         "data": result,
-        "costUsd": 0.0,
+        "costUsd": settled_cost,
         "refused": refusal.refused,
     }))
 }
@@ -7728,6 +7781,46 @@ pub struct ToolExecutionContext<'a> {
     pub config: &'a V2Config,
     pub workspace: Option<&'a WorkspaceTarget>,
     pub findings_store: Option<&'a FindingStore>,
+    /// Optional ledger for per-call cost accounting. Populate via
+    /// [`with_spend`] when triage / verify / patch / classifier-gate
+    /// callers want their `AnalysisEntry.cost_usd` to reflect real spend.
+    pub spend: Option<&'a crate::spend::SpendLimiter>,
+    /// Optional execution backend. Today only [`crate::executor::LocalExecutor`]
+    /// has a real impl; remote backends (Docker, microVM, batch) hook
+    /// through this slot. Populate via [`with_executor`].
+    pub executor: Option<&'a dyn crate::executor::Executor>,
+}
+
+impl<'a> ToolExecutionContext<'a> {
+    pub fn new(config: &'a V2Config) -> Self {
+        Self {
+            config,
+            workspace: None,
+            findings_store: None,
+            spend: None,
+            executor: None,
+        }
+    }
+
+    pub fn with_workspace(mut self, workspace: &'a WorkspaceTarget) -> Self {
+        self.workspace = Some(workspace);
+        self
+    }
+
+    pub fn with_findings_store(mut self, store: &'a FindingStore) -> Self {
+        self.findings_store = Some(store);
+        self
+    }
+
+    pub fn with_spend(mut self, spend: &'a crate::spend::SpendLimiter) -> Self {
+        self.spend = Some(spend);
+        self
+    }
+
+    pub fn with_executor(mut self, executor: &'a dyn crate::executor::Executor) -> Self {
+        self.executor = Some(executor);
+        self
+    }
 }
 
 impl<'a> ToolExecutionContext<'a> {
@@ -10099,6 +10192,8 @@ OUT
             config: &V2Config::default(),
             workspace: None,
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let tools = registry
@@ -10259,6 +10354,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
         let runtime = MockRuntime::new();
 
@@ -10328,6 +10425,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -10376,6 +10475,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -10419,6 +10520,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
         let runtime = MockRuntime::new();
 
@@ -10468,6 +10571,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
         let runtime = MockRuntime::new();
 
@@ -10490,6 +10595,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -10513,6 +10620,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         assert!(!registry
@@ -10551,6 +10660,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -10593,6 +10704,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -10635,6 +10748,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -10663,6 +10778,8 @@ OUT
             config: &config,
             workspace: None,
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let error = registry
@@ -10705,6 +10822,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let status = registry
@@ -10743,6 +10862,8 @@ OUT
             config: &config,
             workspace: None,
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -10780,6 +10901,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -10839,6 +10962,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         assert!(registry.resolve_tool("context-lite:index").is_none());
@@ -10865,6 +10990,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let err = registry
@@ -10892,6 +11019,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -10924,6 +11053,8 @@ OUT
             config: &config,
             workspace: None,
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let err = registry
@@ -10960,6 +11091,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -10988,6 +11121,8 @@ OUT
             config: &config,
             workspace: None,
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let err = registry
@@ -11019,6 +11154,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -11052,6 +11189,8 @@ OUT
             config: &config,
             workspace: None,
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let err = registry
@@ -11094,6 +11233,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -11145,6 +11286,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -11190,6 +11333,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -11238,6 +11383,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -11296,6 +11443,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         registry
@@ -11456,6 +11605,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
         let raw = json!({
             "findings": [{
@@ -11536,6 +11687,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let err = registry
@@ -11568,6 +11721,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -11627,6 +11782,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let err = registry
@@ -11666,6 +11823,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -11718,6 +11877,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -11785,6 +11946,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let err = registry
@@ -11828,6 +11991,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -11862,6 +12027,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -11918,6 +12085,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let err = registry
@@ -11957,6 +12126,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -12010,6 +12181,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -12061,6 +12234,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -12118,6 +12293,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -12171,6 +12348,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -12211,6 +12390,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let err = registry
@@ -12247,6 +12428,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -12305,6 +12488,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -12394,6 +12579,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -12538,6 +12725,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -12602,6 +12791,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -12662,6 +12853,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -12714,6 +12907,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let err = registry
@@ -12747,6 +12942,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -12806,6 +13003,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -12861,6 +13060,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let err = registry
@@ -12924,6 +13125,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
         let result = registry
             .execute_tool(
@@ -12985,6 +13188,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -13051,6 +13256,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let err = registry
@@ -13081,6 +13288,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -13142,6 +13351,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -13211,6 +13422,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -13305,6 +13518,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -13374,6 +13589,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            spend: None,
+            executor: None,
         };
 
         let result = registry
@@ -13456,6 +13673,8 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            spend: None,
+            executor: None,
         };
 
         let result = registry

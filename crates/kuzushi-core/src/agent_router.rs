@@ -427,6 +427,13 @@ impl AgentRuntime for RoutedRuntime {
         self.inner.triage_finding_blocking(request)
     }
 
+    fn triage_finding_with_refusal_blocking(
+        &self,
+        request: TriageRequest,
+    ) -> Result<(TriageOutcome, crate::findings::RefusalReport)> {
+        self.inner.triage_finding_with_refusal_blocking(request)
+    }
+
     fn supports_tools(&self) -> bool {
         self.inner.supports_tools()
     }
