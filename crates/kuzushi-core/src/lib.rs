@@ -43,8 +43,8 @@ pub use dep_hygiene::{
 pub use findings::{
     format_finding_alias, parse_finding_alias, resolve_finding_alias, sorted_finding_aliases,
     stable_finding_alias, Finding, FindingListFilter, FindingListReport, FindingStore,
-    FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus, Severity, TriageOutcome,
-    TriageVerdict,
+    FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus, Severity, StaticProofState,
+    TriageOutcome, TriageVerdict,
 };
 pub use iac_scan::{
     scan_iac, IacScanFinding, IacScanKind, IacScanOptions, IacScanReport, IacScanScanner,
@@ -72,8 +72,10 @@ pub use threat_model::{
 };
 pub use whitebox_static::{
     agent_tool_policy_for_input, analysis_mode_from_input, apply_whitebox_static_sast_policy,
-    default_whitebox_static_agent_tool_policy, validate_whitebox_static_agent_tool_policy,
-    whitebox_static_enabled, AnalysisMode, WhiteboxStaticPolicy,
+    default_whitebox_static_agent_tool_policy, mark_whitebox_static_findings,
+    validate_whitebox_static_agent_tool_policy, whitebox_static_enabled,
+    whitebox_static_profile_requested, whitebox_static_proof_state_from_input,
+    whitebox_static_proof_state_from_str, AnalysisMode, WhiteboxStaticPolicy,
 };
 pub use workspace::{
     export_workspace_findings, WorkspaceExportFormat, WorkspaceFindingsExport, WorkspaceTarget,

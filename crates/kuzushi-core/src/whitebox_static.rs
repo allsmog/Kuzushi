@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use crate::findings::{Finding, StaticProofState};
 use crate::runtime::AgentToolPolicy;
 
 pub const WHITEBOX_STATIC_AGENT_TOOL_PROFILE: &str = "whitebox-static";
@@ -112,7 +113,7 @@ pub fn default_whitebox_static_agent_tool_policy() -> AgentToolPolicy {
 }
 
 pub fn agent_tool_policy_for_input(input: &Value) -> Result<AgentToolPolicy> {
-    if input_requests_whitebox_static_agent_policy(input)? {
+    if whitebox_static_profile_requested(input)? {
         let policy = default_whitebox_static_agent_tool_policy();
         validate_whitebox_static_agent_tool_policy(&policy)?;
         Ok(policy)
@@ -121,7 +122,7 @@ pub fn agent_tool_policy_for_input(input: &Value) -> Result<AgentToolPolicy> {
     }
 }
 
-fn input_requests_whitebox_static_agent_policy(input: &Value) -> Result<bool> {
+pub fn whitebox_static_profile_requested(input: &Value) -> Result<bool> {
     for key in ["whiteboxStatic", "whitebox_static"] {
         if let Some(value) = input.get(key) {
             if let Some(enabled) = value.get("enabled").and_then(Value::as_bool) {
@@ -166,6 +167,42 @@ pub fn validate_whitebox_static_agent_tool_policy(policy: &AgentToolPolicy) -> R
                 "whitebox-static agent tool policy can only include read-only repo tools; unsupported tool {tool:?}"
             );
         }
+    }
+    Ok(())
+}
+
+pub fn whitebox_static_proof_state_from_str(value: &str) -> Result<StaticProofState> {
+    if is_execution_proof_state(value) {
+        return Ok(StaticProofState::NeedsRuntimeEvidence);
+    }
+    StaticProofState::try_from(value)
+}
+
+pub fn whitebox_static_proof_state_from_input(input: &Value) -> Result<Option<StaticProofState>> {
+    for key in [
+        "staticProofState",
+        "static_proof_state",
+        "proofState",
+        "proof_state",
+    ] {
+        let Some(value) = input.get(key) else {
+            continue;
+        };
+        let Some(raw) = value.as_str() else {
+            anyhow::bail!("whitebox-static {key} must be a string");
+        };
+        return Ok(Some(whitebox_static_proof_state_from_str(raw)?));
+    }
+    Ok(None)
+}
+
+pub fn mark_whitebox_static_findings(
+    findings: &mut [Finding],
+    default_state: StaticProofState,
+) -> Result<()> {
+    for finding in findings {
+        let state = finding.static_proof_state.unwrap_or(default_state);
+        finding.set_static_proof_state(state);
     }
     Ok(())
 }
@@ -402,5 +439,49 @@ mod tests {
 
         assert_eq!(policy.profile, "whitebox-static");
         assert_eq!(policy.tools, vec!["Read", "Glob", "Grep", "LS"]);
+    }
+
+    #[test]
+    fn static_proof_state_from_whitebox_input_downgrades_execution_confirmation() {
+        let state = whitebox_static_proof_state_from_input(&json!({
+            "staticProofState": "execution_confirmed"
+        }))
+        .unwrap();
+
+        assert_eq!(state, Some(StaticProofState::NeedsRuntimeEvidence));
+    }
+
+    #[test]
+    fn static_proof_marking_sets_default_without_execution_states() {
+        let mut findings = vec![
+            Finding::new_semgrep(
+                "demo.signal",
+                "src/app.ts",
+                1,
+                Some(1),
+                crate::findings::Severity::High,
+                "scanner signal",
+            ),
+            Finding::new_semgrep(
+                "demo.linked",
+                "src/db.ts",
+                5,
+                Some(5),
+                crate::findings::Severity::High,
+                "source reaches sink",
+            )
+            .with_static_proof_state(StaticProofState::SourceSinkLinked),
+        ];
+
+        mark_whitebox_static_findings(&mut findings, StaticProofState::SignalOnly).unwrap();
+
+        assert_eq!(
+            findings[0].static_proof_state,
+            Some(StaticProofState::SignalOnly)
+        );
+        assert_eq!(
+            findings[1].static_proof_state,
+            Some(StaticProofState::SourceSinkLinked)
+        );
     }
 }

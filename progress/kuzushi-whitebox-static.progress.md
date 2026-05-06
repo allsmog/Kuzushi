@@ -1,15 +1,15 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-004 - Add static proof taxonomy
-Status: WB-003 complete and pushed as `4f97b8d`; WB-004 pending
+Active story: WB-005 - Add static evidence graph
+Status: WB-004 complete in iteration 32; WB-005 pending
 
 ## Stage 3 Checklist
 
 - WB-001 Add explicit whitebox-static mode: complete in iteration 29.
 - WB-002 Remove shell execution from default whitebox agent tools: complete in iteration 30.
 - WB-003 Scrub scanner subprocess environments: complete in iteration 31.
-- WB-004 Add static proof taxonomy: pending.
+- WB-004 Add static proof taxonomy: complete in iteration 32.
 - WB-005 Add static evidence graph: pending.
 - WB-006 Add source span extractor: pending.
 - WB-007 Normalize Semgrep findings into static evidence: pending.
@@ -30,6 +30,55 @@ Status: WB-003 complete and pushed as `4f97b8d`; WB-004 pending
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 32 - WB-004
+
+- Task attempted: add the Rust static proof taxonomy and prevent whitebox-static
+  findings from carrying execution-confirmed proof states.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `crates/kuzushi-core/src/findings.rs`
+  - `crates/kuzushi-core/src/whitebox_static.rs`
+  - `crates/kuzushi-core/src/lib.rs`
+  - `crates/kuzushi-core/src/scan.rs`
+  - `crates/kuzushi-core/src/modules.rs`
+  - `crates/kuzushi-core/src/carlini_threat_hunt.rs`
+  - `crates/kuzushi-core/src/systems_hunt.rs`
+  - `crates/kuzushi-core/src/pr_comment.rs`
+  - `crates/kuzushi-tui/src/app.rs`
+- Tests/checks run:
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core static_proof`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-core scanner_env`
+  - `cargo test -p kuzushi-core semgrep`
+  - `cargo test -p kuzushi-core`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `cargo test -p kuzushi-tui app::tests::chain_alias_format_is_two_digit_zero_padded`
+  - `cargo fmt --all --check`
+  - `pnpm eval:kuzushi-whitebox-static` with the primary checkout's
+    `node_modules` temporarily symlinked into the clean clone
+- Result: implementation complete. `Finding` now has an optional
+  `staticProofState` backed by a nullable `.kuzushi/v2/findings.sqlite3`
+  `static_proof_state` column. The taxonomy includes `signal_only`,
+  `code_cited`, `source_sink_linked`, `sanitizer_checked`,
+  `statically_confirmed`, `statically_rejected`, and
+  `needs_runtime_evidence`; execution proof states are rejected by the
+  taxonomy and downgraded to `needs_runtime_evidence` when they arrive through
+  whitebox-static proof-state input. Native whitebox-static scanner findings
+  are stored as `signal_only`, and whitebox agentic findings are stamped with
+  static proof states without changing non-whitebox module modes such as
+  `taint-iris-next` `hunt`.
+- Remaining work: WB-005 through WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files. This iteration continued in the
+    clean isolated clone at `/tmp/kuzushi-ux2-clone.PJaRge`, which contains the
+    active pushed Stage 2 and WB-001 through WB-003 state.
+  - The isolated clone still does not have its own `node_modules`; the eval
+    used a temporary symlink to the primary checkout's installed dependencies,
+    then removed the symlink before commit.
 
 ### Iteration 31 - WB-003
 

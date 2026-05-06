@@ -72,7 +72,7 @@
       "acceptance": ["Add signal_only, code_cited, source_sink_linked, sanitizer_checked, statically_confirmed, statically_rejected, and needs_runtime_evidence.", "Whitebox findings cannot be execution-confirmed."],
       "storyGate": "cargo test -p kuzushi-core static_proof",
       "forbidden": ["execution_confirmed in whitebox-static"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-005",
