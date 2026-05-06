@@ -1232,3 +1232,27 @@ Legacy command classifications:
 - Blockers or repo facts that contradicted this prompt:
   - Sandbox lacks `gtags`/`global`/`clangd`/`joern` — verified via `which`. All tests therefore use mocked subprocess output and graceful-degradation paths; live integration must run on a host with the binaries installed.
   - `tokio` workspace dep needed `io-std` feature added; pre-existing crates (`kuzushi-core`, `kuzushi-tui`) keep working with the augmented feature set.
+
+### Iteration 44 - Sandbox + empirical verify (`verify:exploit`)
+
+- Task attempted: add an exploit-gated empirical verify path that complements the existing LLM-driven `verify:finding`. Promotes a finding's `proof_level` only when an *observed* crash triggers inside an isolating sandbox — never on judgment alone.
+- Files changed:
+  - `Cargo.toml` (workspace) — added `kuzushi-sandbox` to `members`.
+  - `crates/kuzushi-sandbox/` (new crate) — `SandboxBackend` (`Bwrap` / `Podman` / `Plain`); `detect_backend(preference)` with PATH probing; `sandbox_exec(backend, opts)` using `tokio::process::Command` + wallclock `tokio::time::timeout`; 1 MiB stdout/stderr cap with truncation marker; `MountSpec` for read-only and read-write bindings; bwrap argv composer (`--unshare-all`, `--cap-drop ALL`, `--die-with-parent`, `--new-session`, RO-binds for `/usr` `/lib` `/lib64` `/bin` `/etc/alternatives`, tmpfs for `/tmp` `/work`, optional `--share-net`); podman argv composer (`--rm`, `--read-only`, `--cap-drop=ALL`, `--security-opt no-new-privileges`, `--network=none` by default, optional `--memory`).
+  - `crates/kuzushi-core/Cargo.toml` — depend on `kuzushi-sandbox`; promote `tempfile` from dev-dep to runtime dep (used by harness scaffolder).
+  - `crates/kuzushi-core/src/verify.rs` (new) — `ProofVerdict` enum (`Exploited` / `NotReproduced` / `HarnessFailedToBuild` / `InfrastructureError` / `LanguageUnsupportedYet` / `InsufficientFindingDetail`); `VerificationOutcome` (proof_level 1-4, backend, harness_path, crash_evidence, duration_ms, cost_usd, notes); `VerifyOptions` (timeout, trust_plain_backend opt-in); `verify_finding(finding, opts)` async entry point with language branching; `verify_rust` synthesises a tiny cargo project, runs `cargo test --no-run --offline` (compile gate) then `cargo test --offline --nocapture` inside the sandbox, observes signal+exit_code, classifies via `classify_run_result`. SIGABRT/SIGSEGV/SIGBUS/SIGILL → proof_level=4 only when backend is isolating; Plain backend clamped to proof_level <= 3 unless `trust_plain_backend=true`. Panic exit 101 → level 3. Timeout → level 2.
+  - `crates/kuzushi-core/src/lib.rs` — added `pub mod verify;` and re-exported `verify_finding`, `ProofVerdict`, `VerificationOutcome`, `VerifyOptions`.
+  - `crates/kuzushi-core/src/modules.rs` — added `verify:exploit` to the dispatcher (parallel to existing LLM-driven `verify:finding`); registered descriptor under `verify_module()` so the catalog lists both.
+- Tests/checks run:
+  - `cargo fmt --all`
+  - `cargo build --workspace` — clean.
+  - `cargo build --release --workspace` — clean.
+  - `cargo test -p kuzushi-sandbox` — 18 pass (backend detection, isolating-check, all argv composers, output cap, timeout kill, stdin pipe, end-to-end Plain echo, exit-code propagation, missing-backend error).
+  - `cargo test -p kuzushi-core --lib verify::tests` — 15 pass (proof-level classification across SIGSEGV/SIGABRT/panic 101/zero-exit/timeout/non-crash signals; Plain-backend clamp; trust-plain opt-in promotion; unsupported language paths for Python/Makefile; payload synthesis includes 0xff marker and message bytes; cargo project layout written; constructor invariants; `to_tool_json` envelope).
+  - `cargo clippy -p kuzushi-core -p kuzushi-sandbox --tests` — zero warnings in `verify.rs` or any sandbox source.
+  - End-to-end smoke: `kuzushi tools | grep verify` lists both `verify:finding` (LLM-driven) and `verify:exploit` (empirical) with the correct descriptions.
+- Result: complete. The empirical verify path is callable from the CLI as `kuzushi run verify:exploit --input '{"fingerprint":"..."}'` and from the shell. Plain-backend clamp is the safety story: even if a SIGSEGV is observed without isolation, we refuse to call it `Exploited` unless the operator opts in.
+- Remaining work: a real Rust trigger payload (the current scaffolder writes a minimal placeholder harness that doesn't yet invoke the suspect function); language adapters for C/C++ (gcc/clang harness + sanitizers), Python (pytest under sandbox), JS (node under sandbox); persistence of `VerificationOutcome` into the findings DB next to the existing `triage` field; wiring the codeindex facade so harnesses can extract the suspect function body.
+- Blockers or repo facts that contradicted this prompt:
+  - Same pre-existing environmental `modules::tests::sast_scan_runs_verify_patch_and_writes_run_artifacts` failure (git signing-config namespace warning); reproduces on clean `origin/main` worktree.
+  - Sandbox lacks `bwrap` and `podman` — verified via `which`. The Plain-backend tests therefore exercise the live process spawn + wait + timeout + stdin paths end-to-end; bwrap/podman argv composers are exercised only by unit tests on the composed argv vectors.

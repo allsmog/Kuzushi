@@ -8,6 +8,7 @@ members = [
   "crates/kuzushi-mcp-gtags",
   "crates/kuzushi-mcp-joern",
   "crates/kuzushi-openai",
+  "crates/kuzushi-sandbox",
   "crates/kuzushi-tui",
 ]
 resolver = "2"
