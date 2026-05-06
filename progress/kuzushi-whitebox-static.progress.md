@@ -2,7 +2,7 @@
 
 Stage: 3 - Kuzushi whitebox-static mode
 Active story: WB-021 - Add deterministic eval harness
-Status: WB-020 complete in iteration 51; commit/push pending
+Status: WB-020 pushed in iteration 51; WB-021 pending
 
 ## Stage 3 Checklist
 
@@ -55,16 +55,16 @@ Status: WB-020 complete in iteration 51; commit/push pending
   - `cargo test -p kuzushi-core whitebox`
   - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
   - `pnpm eval:kuzushi-whitebox-static`
-- Result: implementation complete. `diff_scope.rs` now computes changed files,
-  added/modified/deleted line ranges from local `git diff`, expands context to
-  nearby routes, callers, and callees, and tags findings as `new`, `existing`,
-  `fixed`, or `changed-context`. Whitebox `sast:scan` accepts `diffBase` and
-  writes `.kuzushi/runs/<runId>/whitebox-diff-scope.json`, includes the report
-  in tool JSON as `whiteboxDiff`, and states that no remote provider is
-  required. WB-020 is marked `passes: true` in the PRD after the story gate and
-  fast whitebox checks passed.
-- Remaining work: commit and push WB-020, then continue with WB-021 through
-  WB-022.
+- Result: implementation complete and pushed to `origin/main` as `5b596c6`.
+  `diff_scope.rs` now computes changed files, added/modified/deleted line
+  ranges from local `git diff`, expands context to nearby routes, callers, and
+  callees, and tags findings as `new`, `existing`, `fixed`, or
+  `changed-context`. Whitebox `sast:scan` accepts `diffBase` and writes
+  `.kuzushi/runs/<runId>/whitebox-diff-scope.json`, includes the report in tool
+  JSON as `whiteboxDiff`, and states that no remote provider is required.
+  WB-020 is marked `passes: true` in the PRD after the story gate and fast
+  whitebox checks passed.
+- Remaining work: WB-021 through WB-022.
 - Blockers or repo facts that contradicted this prompt:
   - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
     remains stale with staged Stage 2 files, while the clean nested clone at
