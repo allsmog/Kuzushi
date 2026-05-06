@@ -5,8 +5,8 @@ use clap::{Parser, Subcommand};
 use kuzushi_core::config::write_default_config;
 use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::{
-    load_config_for_target, AgentRuntime, FindingListFilter, FindingStore, ModuleRegistry,
-    WorkspaceTarget,
+    build_pr_comment, load_config_for_target, AgentRuntime, FindingListFilter, FindingStore,
+    ModuleRegistry, PrCommentInput, WorkspaceTarget,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
 use kuzushi_tui::run_shell;
@@ -38,6 +38,9 @@ enum Command {
         triage: bool,
         #[arg(long)]
         json: bool,
+        /// Emit one line per pipeline event in a deterministic, grep-friendly format.
+        #[arg(long, conflicts_with = "json")]
+        ci: bool,
     },
     /// List persisted findings.
     Findings {
@@ -77,6 +80,25 @@ enum Command {
         #[arg(long, default_value = "{}")]
         input: String,
     },
+    /// Render a markdown PR comment summarising persisted findings.
+    PrComment {
+        #[arg(long)]
+        target: Option<PathBuf>,
+        #[arg(long)]
+        repo: Option<String>,
+        #[arg(long)]
+        run_url: Option<String>,
+        #[arg(long, default_value_t = 10)]
+        top_n: usize,
+        #[arg(long, value_delimiter = ',')]
+        changed_files: Vec<String>,
+        #[arg(long)]
+        run_id: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        git_sha: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -113,7 +135,8 @@ async fn main() -> Result<()> {
             tasks,
             triage,
             json,
-        } => scan_command(target, tasks, triage, json).await,
+            ci,
+        } => scan_command(target, tasks, triage, json, ci).await,
         Command::Findings {
             target,
             limit,
@@ -131,10 +154,72 @@ async fn main() -> Result<()> {
         Command::Modules { json } => modules_command(json),
         Command::Tools { json } => tools_command(json),
         Command::Run { tool, input } => run_tool_command(tool, input, cli.target),
+        Command::PrComment {
+            target,
+            repo,
+            run_url,
+            top_n,
+            changed_files,
+            run_id,
+            model,
+            git_sha,
+        } => pr_comment_command(
+            target.or(cli.target),
+            repo,
+            run_url,
+            top_n,
+            changed_files,
+            run_id,
+            model,
+            git_sha,
+        ),
     }
 }
 
-async fn scan_command(target: PathBuf, tasks: Vec<String>, triage: bool, json: bool) -> Result<()> {
+fn pr_comment_command(
+    target: Option<PathBuf>,
+    repo: Option<String>,
+    run_url: Option<String>,
+    top_n: usize,
+    changed_files: Vec<String>,
+    run_id: Option<String>,
+    model: Option<String>,
+    git_sha: Option<String>,
+) -> Result<()> {
+    let target = target.unwrap_or_else(|| PathBuf::from("."));
+    let workspace = WorkspaceTarget::new(target)?;
+    let store = FindingStore::open(workspace.findings_db_path())?;
+    let report = store.list_findings_filtered(&FindingListFilter::default())?;
+    let input = PrCommentInput {
+        repo_name: repo.or_else(|| {
+            workspace
+                .root()
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        }),
+        findings: report.findings,
+        cost_usd: 0.0,
+        elapsed: None,
+        run_url,
+        top_n: Some(top_n),
+        kuzushi_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        model,
+        git_sha,
+        run_id,
+        changed_files,
+    };
+    println!("{}", build_pr_comment(&input));
+    Ok(())
+}
+
+async fn scan_command(
+    target: PathBuf,
+    tasks: Vec<String>,
+    triage: bool,
+    json: bool,
+    ci: bool,
+) -> Result<()> {
     let workspace = WorkspaceTarget::new(&target)?;
     let config = load_config_for_target(Some(workspace.root()))?;
     let store = FindingStore::open(workspace.findings_db_path())?;
@@ -157,16 +242,91 @@ async fn scan_command(target: PathBuf, tasks: Vec<String>, triage: bool, json: b
         workspace: Some(&workspace),
         findings_store: Some(&store),
     };
+
+    let started = std::time::Instant::now();
+    if ci {
+        println!(
+            "{}",
+            ci_line(
+                started,
+                "scan",
+                &format!(
+                    "{} started [model={} tasks={}]",
+                    target.display(),
+                    config.model.as_deref().unwrap_or("unconfigured"),
+                    if tasks.is_empty() {
+                        "auto".to_string()
+                    } else {
+                        tasks.join(",")
+                    },
+                ),
+            )
+        );
+        println!("{}", ci_line(started, "phase", "(init) → scanning"));
+    }
+
     let result = registry.execute_tool_with_runtime(
         "sast:scan",
         input,
         &ctx,
         runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
-    )?;
+    );
+    let elapsed = started.elapsed();
+
+    let result = match result {
+        Ok(value) => value,
+        Err(error) => {
+            if ci {
+                println!(
+                    "{}",
+                    ci_line(
+                        started,
+                        "phase",
+                        &format!("scanning → failed ({})", format_duration(elapsed))
+                    )
+                );
+                println!("{}", ci_line(started, "error", &error.to_string()));
+                println!("{}", ci_line(started, "exit", "1"));
+            }
+            return Err(error);
+        }
+    };
     let data = result
         .get("data")
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
+    let count = data
+        .get("findingsCount")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let cost = result
+        .get("costUsd")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0);
+
+    if ci {
+        println!(
+            "{}",
+            ci_line(
+                started,
+                "phase",
+                &format!("scanning → done ({})", format_duration(elapsed))
+            )
+        );
+        println!(
+            "{}",
+            ci_line(
+                started,
+                "summary",
+                &format!(
+                    "{count} finding(s) · ${cost:.4} · {}",
+                    format_duration(elapsed)
+                )
+            )
+        );
+        println!("{}", ci_line(started, "exit", "0"));
+        return Ok(());
+    }
 
     if json {
         println!(
@@ -186,6 +346,22 @@ async fn scan_command(target: PathBuf, tasks: Vec<String>, triage: bool, json: b
     }
 
     Ok(())
+}
+
+fn ci_line(started: std::time::Instant, prefix: &str, body: &str) -> String {
+    let elapsed = started.elapsed();
+    format!("[+{:.1}s] {prefix}: {body}", elapsed.as_secs_f64())
+}
+
+fn format_duration(elapsed: std::time::Duration) -> String {
+    let secs = elapsed.as_secs();
+    if secs >= 60 {
+        let minutes = secs / 60;
+        let rem = secs % 60;
+        format!("{minutes}m {rem}s")
+    } else {
+        format!("{:.1}s", elapsed.as_secs_f64())
+    }
 }
 
 fn findings_command(target: Option<PathBuf>, filter: FindingListFilter, json: bool) -> Result<()> {
@@ -407,6 +583,40 @@ fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Res
     )?;
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ci_line_uses_relative_timestamp_and_prefix() {
+        let started = std::time::Instant::now();
+        let line = ci_line(started, "scan", "demo started");
+        assert!(line.starts_with("[+"), "got: {line}");
+        assert!(line.ends_with("scan: demo started"));
+    }
+
+    #[test]
+    fn format_duration_below_one_minute_is_decimal_seconds() {
+        assert_eq!(
+            format_duration(std::time::Duration::from_millis(500)),
+            "0.5s"
+        );
+        assert_eq!(format_duration(std::time::Duration::from_secs(12)), "12.0s");
+    }
+
+    #[test]
+    fn format_duration_above_one_minute_is_compound() {
+        assert_eq!(
+            format_duration(std::time::Duration::from_secs(78)),
+            "1m 18s"
+        );
+        assert_eq!(
+            format_duration(std::time::Duration::from_secs(3600)),
+            "60m 0s"
+        );
+    }
 }
 
 fn wants_sast_runtime(input: &serde_json::Value) -> bool {

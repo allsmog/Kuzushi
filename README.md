@@ -93,29 +93,29 @@ fails with an actionable error.
 ## Rust Shell
 
 The shell routes slash commands and their bare equivalents through the Rust
-command parser. Useful commands:
+command parser. Help is grouped by workflow; `?` opens help, while `?text`,
+`ask <question>`, and `/ask <question>` are explicit agent-chat routes.
+Unknown prose does not silently dispatch to a model.
 
 | Command | Purpose |
 | --- | --- |
-| `/help` | Show shell help. |
-| `/modules` | Browse visible native modules. |
-| `/tools` | Show executable tool descriptors. |
-| `/use <module>` | Focus a module. |
-| `/run [tool] [json]` | Run a tool; focused modules can omit the prefix when unambiguous. |
-| `/scan [target]` | Start a native scan in the shell. |
-| `/findings` | Load persisted findings. |
-| `/open <fingerprint-or-prefix>` | Open a finding. |
-| `/model [provider:model]` | Show or set the in-memory shell model. |
-| `/config` | Show runtime/model config in the shell. |
-| `/threats [dfd|stride|stories|scope|summary|1..5]` | Switch threat-model views. |
-| `/prompts`, `/prompt <verb>` | Inspect prompt override surfaces. |
-| `/show runs`, `/replay <runId>`, `/trace <runId>` | Inspect scan-run artifacts. |
-| `/since <git-ref>` | Switch to a diff-scoped findings view. |
-| `/back` | Step up one view. |
-| `/quit` | Exit. |
-
-`?` is currently an alias for help in the Rust shell; agent chat is not
-advertised as a shell route in this cutover.
+| `/help` | Show grouped shell help. |
+| `/modules`, `/tools`, `/use <module>`, `/back` | Browse modules/tools, focus a module, and step back. |
+| `/run <tool> [json]`, `run . [json]`, `/scan [target]` | Dispatch a tool or start the native scan path. |
+| `/ask <question>`, `ask <question>`, `?text` | Ask an explicit agent question with the configured model. |
+| `/options [tool]`, `show options [tool]`, `show advanced`, `show missing` | Inspect typed Rust tool options and missing required values. |
+| `/set <key> <value>`, `setg <key> <value>`, `/unset <key>`, `unsetg <key>` | Set or clear session/global option values for subsequent runs and scans. |
+| `/tasks`, `/task block <id>`, `/task allow <id>`, `/task toggle [id]`, `/task mode auto\|manual\|toggle`, `/task reset` | Configure SAST task selection for `sast:scan` and shell scans. |
+| `/context`, `/context build`, `/context status`, `/context regen <slice>` | View or rebuild the local context snapshot. |
+| `/kb [module]`, `attachments`, `attach <path-or-url>`, `detach <id>`, `reparse <id>` | Manage local `.kuzushi/v2/` KB attachments; URL attachments are metadata-only. |
+| `/workspace`, `workspace export findings <path>`, `findings export <path>` | Show workspace state and export findings as JSON or JSONL. |
+| `/findings`, `/open <alias-or-fingerprint>`, `/show aliases [prefix]` | Load findings and open deterministic aliases such as `F-0001`. |
+| `/show runs`, `/replay <runId>`, `/trace <runId>`, `/since <git-ref>` | Inspect scan-run artifacts and diff-scoped findings. |
+| `/threats [dfd\|stride\|stories\|scope\|summary\|1..5]`, `/threats regen`, `/threats ask <question>` | Switch threat-model views or request a reviewable threat-model patch. |
+| `/auth`, `/auth login <provider>`, `/provider`, `/backend`, `/model [choice]`, `/cost`, `/config` | Show credential status without secrets, select explicit models, and report known cost/config state. |
+| `/history`, `/clear`, `/load <specifier>`, `/pause`, `/resume [runId]`, `/story` | Session utilities and precise replacement messages for unsupported legacy live-control paths. |
+| `/prompts`, `/prompt <verb>`, `/tune`, `/actor <n>`, `/plan <english>` | Prompt, tuning, transcript, and planner surfaces. |
+| `/quit`, `exit`, `/exit`, `/exitj` | Exit. |
 
 ## Built-In Modules
 
@@ -153,7 +153,7 @@ current built-ins are:
 | `iac-scan` | `iac-scan:scan` |
 | `catalog` | `catalog:modules`, `catalog:tools` |
 | `config` | `config:show` |
-| `workspace` | `workspace:status` |
+| `workspace` | `workspace:status`, `workspace:export-findings` |
 
 Internal DAG modules such as `context-lite`, `pipeline`, and `systems-hunt`
 stay hidden from `kuzushi modules`.
@@ -197,6 +197,8 @@ not silently succeed and they do not substitute a different model.
 | `~/.kuzushi/v2/config.toml` | `kuzushi config init` |
 | `.kuzushi/v2/config.toml` | Optional project override |
 | `.kuzushi/v2/findings.sqlite3` | scan, shell, and run-mode tool persistence |
+| `.kuzushi/v2/attachments.json` | Rust shell KB attachments |
+| `.kuzushi/v2/artifact-kb.sqlite3` | Local artifact knowledge search index |
 | `.kuzushi/context-snapshot.json` | `context:build` |
 | `.kuzushi/threat-model.json` | `threat-model:*`, `randori:*`, and threat-model readers |
 | `.kuzushi/runs/<runId>/summary.json` | `sast:scan` |

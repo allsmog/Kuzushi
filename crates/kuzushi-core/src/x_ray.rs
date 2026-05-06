@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::artifact_kb::ArtifactKnowledgePromptContext;
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
 
@@ -83,6 +84,7 @@ struct XRayRunInput {
     model: String,
     effort: Option<String>,
     max_budget_usd: Option<f64>,
+    kb_context: ArtifactKnowledgePromptContext,
 }
 
 #[derive(Debug, Clone)]
@@ -123,10 +125,12 @@ fn run_x_ray(
 
     let data =
         read_x_ray_report_artifacts(&input.target, Some(&input.repo_name), "pi-agent-core", 0.0)?;
+    let mut data_json = json!(data);
+    data_json["kbContext"] = json!(&input.kb_context);
     Ok(json!({
         "ok": true,
         "output": render_x_ray_run_summary(&data),
-        "data": data,
+        "data": data_json,
         "costUsd": 0.0,
     }))
 }
@@ -217,6 +221,11 @@ fn parse_run_input(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<XRay
         .or_else(|| input.get("max_budget_usd"))
         .and_then(Value::as_f64)
         .filter(|value| value.is_finite() && *value >= 0.0);
+    let kb_context = ctx.artifact_knowledge_context(
+        &target,
+        "x-ray architecture entry points invariants attack surface threat model context",
+        5,
+    );
 
     Ok(XRayRunInput {
         target,
@@ -224,6 +233,7 @@ fn parse_run_input(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<XRay
         model,
         effort,
         max_budget_usd,
+        kb_context,
     })
 }
 
@@ -283,9 +293,11 @@ fn build_x_ray_prompt(input: &XRayRunInput) -> String {
          - entryPointsMarkdown: Markdown for x-ray/entry-points.md, including a summary line with total, permissionless, role-gated, and admin-only counts when possible.\n\
          - invariantsMarkdown: Markdown for x-ray/invariants.md, using IDs such as G-1, I-1, X-1, and E-1 when applicable.\n\
          - architectureSvg: A complete SVG document for x-ray/architecture.svg.\n\n\
+         {kb_block}\n\n\
          Read the repository contents conceptually through the pi-agent-core runtime context and keep the output grounded in concrete files and entry points.",
         repo_name = input.repo_name,
-        repo_path = input.target.display()
+        repo_path = input.target.display(),
+        kb_block = input.kb_context.render_prompt_block()
     )
 }
 
@@ -741,6 +753,7 @@ fn repo_name(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::artifact_kb::{ArtifactKnowledgeRecord, ArtifactKnowledgeStore};
     use crate::config::V2Config;
     use crate::runtime::{AgentQueryResponse, TriageRequest};
     use crate::{TriageOutcome, TriageVerdict, WorkspaceTarget};
@@ -865,6 +878,58 @@ mod tests {
             .contains("x-ray:run complete"));
         assert_eq!(runtime.queries().len(), 1);
         assert_eq!(runtime.queries()[0].model, "openai:gpt-4.1");
+        assert!(runtime.queries()[0]
+            .prompt
+            .contains("missing local artifact KB"));
+    }
+
+    #[test]
+    fn run_includes_matching_artifact_kb_snippets() {
+        let tmp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = ArtifactKnowledgeStore::open(&workspace).unwrap();
+        store
+            .upsert_record(&ArtifactKnowledgeRecord::from_body(
+                "manual://x-ray-note",
+                "context",
+                None,
+                "context snapshot",
+                "The repository has a permissionless payment entry point and a ledger invariant.",
+                vec!["src/routes.ts:7".to_string()],
+                json!({"sourceKind": "manual-test"}),
+            ))
+            .unwrap();
+        let config = V2Config {
+            model: Some("openai:gpt-4.1".to_string()),
+            ..V2Config::default()
+        };
+        let runtime = MockRuntime::new(AgentQueryResponse {
+            text: String::new(),
+            structured: Some(json!({
+                "xRayMarkdown": "# X-Ray\n\n## X-Ray Verdict\nWATCH\nReview invariants before launch.\n",
+                "entryPointsMarkdown": "# Entry Points\n\n> App | 1 entry point | 1 permissionless | 0 role-gated | 0 admin-only\n",
+                "invariantsMarkdown": "# Invariants\n\n### G-1 Ledger conservation\n",
+                "architectureSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" />\n",
+            })),
+        });
+
+        let output = execute_x_ray_tool(
+            "x-ray:run",
+            json!({}),
+            &context(&config, &workspace),
+            Some(&runtime),
+        )
+        .unwrap();
+
+        let query = runtime.queries().pop().unwrap();
+        assert!(query.prompt.contains("Local artifact KB context"));
+        assert!(query.prompt.contains("permissionless payment entry point"));
+        assert_eq!(
+            output
+                .pointer("/data/kbContext/snippets/0/moduleId")
+                .and_then(Value::as_str),
+            Some("context")
+        );
     }
 
     #[test]

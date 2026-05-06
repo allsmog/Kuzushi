@@ -7,6 +7,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
+use crate::artifact_kb::ArtifactKnowledgePromptContext;
 use crate::findings::{Finding, Severity};
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
@@ -47,6 +48,11 @@ pub fn run_carlini_threat_hunt_report(
             actor_runs: 0,
             findings: Vec::new(),
             persisted: persist_findings(&target, &[], ctx)?,
+            kb_context: Some(ctx.artifact_knowledge_context(
+                &target,
+                "carlini threat hunt actor flows threat model x-ray context",
+                5,
+            )),
             cost_usd: 0.0,
         });
     }
@@ -127,6 +133,7 @@ pub fn run_carlini_threat_hunt_report(
         actor_runs: total_runs,
         findings,
         persisted,
+        kb_context: Some(options.kb_context),
         cost_usd: 0.0,
     })
 }
@@ -141,6 +148,8 @@ pub struct CarliniThreatHuntReport {
     pub findings: Vec<Finding>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub persisted: Option<CarliniThreatHuntPersistedRun>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kb_context: Option<ArtifactKnowledgePromptContext>,
     pub cost_usd: f64,
 }
 
@@ -207,6 +216,7 @@ struct CarliniInput {
     debug_inline_threats: bool,
     prompt_override: Option<String>,
     attachments_block: Option<String>,
+    kb_context: ArtifactKnowledgePromptContext,
 }
 
 impl CarliniInput {
@@ -218,6 +228,11 @@ impl CarliniInput {
         let prompt_override = optional_string(input, &["CARLINI_THREAT_HUNT_PROMPT"])?
             .map(|value| resolve_prompt_override(&value, target))
             .transpose()?;
+        let kb_context = ctx.artifact_knowledge_context(
+            target,
+            "carlini threat hunt actor flows threat model x-ray context",
+            5,
+        );
         Ok(Self {
             model: optional_string(input, &["model"])?.or_else(|| ctx.config.model.clone()),
             max_findings: read_usize(input, &["maxFindings", "max_findings"], 50, 1).min(500),
@@ -235,6 +250,7 @@ impl CarliniInput {
             ),
             prompt_override,
             attachments_block: render_attachments(target)?,
+            kb_context,
         })
     }
 }
@@ -582,6 +598,8 @@ fn build_actor_prompt(
         lines.push(block.to_string());
         lines.push(String::new());
     }
+    lines.push(options.kb_context.render_prompt_block());
+    lines.push(String::new());
     lines.extend([
         format!(
             "You are performing an authorized CTF-style security assessment. You are simulating: {}",
@@ -1213,6 +1231,10 @@ fn is_context_file(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::artifact_kb::{ArtifactKnowledgeRecord, ArtifactKnowledgeStore};
+    use crate::config::V2Config;
+    use crate::modules::ToolExecutionContext;
+    use crate::workspace::WorkspaceTarget;
 
     #[test]
     fn prioritizes_high_impact_external_actors_and_flows() {
@@ -1262,5 +1284,51 @@ mod tests {
             Some("carlini-threat-hunt:User:0")
         );
         assert!(findings[0].message.contains("Evidence: source to sink"));
+    }
+
+    #[test]
+    fn actor_prompt_includes_matching_artifact_kb_snippets() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = ArtifactKnowledgeStore::open(&workspace).unwrap();
+        store
+            .upsert_record(&ArtifactKnowledgeRecord::from_body(
+                "x-ray/entry-points.md",
+                "x-ray",
+                None,
+                "entry points",
+                "Authenticated user actor flow reaches the HTML response entry point.",
+                vec!["x-ray/entry-points.md:4".to_string()],
+                json!({"sourceKind": "manual-test"}),
+            ))
+            .unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+        };
+        let options = CarliniInput::from_tool_input(&json!({}), &ctx, workspace.root()).unwrap();
+        let prompt = build_actor_prompt(
+            workspace.root(),
+            &ActorHunt {
+                actor: DfdNode {
+                    id: "actor-user".to_string(),
+                    node_type: "external-entity".to_string(),
+                    name: "Authenticated User".to_string(),
+                    description: "Logged-in user".to_string(),
+                    trust_zone: "external".to_string(),
+                },
+                threats: Vec::new(),
+                flows: Vec::new(),
+            },
+            &options,
+            &[],
+            "carlini-threat-hunt:Authenticated_User:0",
+        );
+
+        assert!(prompt.contains("Local artifact KB context"));
+        assert!(prompt.contains("Authenticated user actor flow"));
+        assert_eq!(options.kb_context.snippets[0].module_id, "x-ray");
     }
 }
