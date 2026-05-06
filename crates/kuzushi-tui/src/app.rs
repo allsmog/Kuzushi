@@ -438,6 +438,10 @@ pub(crate) enum ViewHotkeyAction {
     ActorDetail(usize),
     PauseScan,
     ResumeScan,
+    ViewScrollUp,
+    ViewScrollDown,
+    ViewScrollTop,
+    ViewScrollBottom,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2176,6 +2180,45 @@ impl ShellApp {
                 }
                 bindings
             }
+            // Universal vi-style scroll hotkeys for any text-heavy view that
+            // the operator can land on without an active list-cursor (i.e. not
+            // Findings, which already has its own j/k/g/G bindings above). j/k
+            // move one row, g/G jump to top/bottom — matches less, vim, and
+            // Ink's old shell.
+            ShellView::Help
+            | ShellView::Tools
+            | ShellView::History
+            | ShellView::KnowledgeBase
+            | ShellView::Catalog
+            | ShellView::Story
+            | ShellView::Replay(_)
+            | ShellView::Trace(_)
+            | ShellView::Runs => vec![
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('j'),
+                    hint: "j/k/g/G",
+                    label: "scroll",
+                    action: ViewHotkeyAction::ViewScrollDown,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('k'),
+                    hint: "j/k/g/G",
+                    label: "scroll",
+                    action: ViewHotkeyAction::ViewScrollUp,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('g'),
+                    hint: "j/k/g/G",
+                    label: "scroll",
+                    action: ViewHotkeyAction::ViewScrollTop,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('G'),
+                    hint: "j/k/g/G",
+                    label: "scroll",
+                    action: ViewHotkeyAction::ViewScrollBottom,
+                },
+            ],
             _ => Vec::new(),
         }
     }
@@ -4609,8 +4652,42 @@ impl ShellApp {
             ViewHotkeyAction::ResumeScan => {
                 self.handle_command(ShellCommand::Resume(None));
             }
+            ViewHotkeyAction::ViewScrollUp => self.scroll_view_up(1),
+            ViewHotkeyAction::ViewScrollDown => self.scroll_view_down(1),
+            ViewHotkeyAction::ViewScrollTop => self.scroll_view_to_top(),
+            ViewHotkeyAction::ViewScrollBottom => self.scroll_view_to_bottom(),
         }
         true
+    }
+
+    /// Reset the scroll for the focused view back to the top.
+    pub fn scroll_view_to_top(&mut self) {
+        match self.shell_view {
+            ShellView::Findings => self.findings_cursor = 0,
+            ShellView::Help => self.help_scroll = 0,
+            ShellView::Tools => self.tools_scroll = 0,
+            ShellView::Catalog if self.catalog_expanded => self.modules_scroll = 0,
+            ShellView::History => self.history_scroll = 0,
+            ShellView::KnowledgeBase => self.kb_scroll = 0,
+            _ => {}
+        }
+    }
+
+    /// Push the scroll for the focused view far enough that the bottom of
+    /// the content is visible. Uses usize::MAX which the renderer's
+    /// viewport_lines clamps to the real maximum.
+    pub fn scroll_view_to_bottom(&mut self) {
+        match self.shell_view {
+            ShellView::Findings => {
+                self.findings_cursor = self.findings.len().saturating_sub(1)
+            }
+            ShellView::Help => self.help_scroll = usize::MAX,
+            ShellView::Tools => self.tools_scroll = usize::MAX,
+            ShellView::Catalog if self.catalog_expanded => self.modules_scroll = usize::MAX,
+            ShellView::History => self.history_scroll = usize::MAX,
+            ShellView::KnowledgeBase => self.kb_scroll = usize::MAX,
+            _ => {}
+        }
     }
 
     fn page_down_current_view(&mut self) {
