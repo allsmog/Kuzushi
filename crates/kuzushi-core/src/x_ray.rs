@@ -105,12 +105,12 @@ fn run_x_ray(
     )?;
     let input = parse_run_input(&input, ctx)?;
     let prompt = build_x_ray_prompt(&input);
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model: input.model.clone(),
-        cwd: input.target.clone(),
-        system_prompt: X_RAY_SYSTEM_PROMPT.to_string(),
+    let response = runtime.query_blocking(AgentQueryRequest::new(
+        input.model.clone(),
+        input.target.clone(),
+        X_RAY_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
 
     match parse_artifact_content_response(&response.structured, &response.text) {
         Ok(content) => write_x_ray_artifacts(&input.target, content)?,

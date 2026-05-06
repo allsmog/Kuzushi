@@ -523,31 +523,12 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
       params.opts.reviewFindings === true &&
       !params.inline
     ) {
-      try {
-        const { runInteractiveReview } = await import("../../ui/review.js");
-        const reviewResult = await runInteractiveReview(
-          db,
-          repoName,
-          params.uiStore,
-          params.returnModeOnComplete ?? "summary",
-        );
-        if (reviewResult && reviewResult.reviewed > 0) {
-          if (params.uiStore) {
-            params.uiStore.addNotice({
-              level: "success",
-              message: "Review complete",
-              detail: `${reviewResult.tp} tp · ${reviewResult.fp} fp · ${reviewResult.byDesign} by_design · ${reviewResult.skipped} skipped`,
-              source: "review",
-            });
-            params.uiStore.setMode(params.returnModeOnComplete ?? "summary");
-          } else {
-            console.log(
-              `\n  Review complete: ${reviewResult.tp} tp, ${reviewResult.fp} fp, ${reviewResult.byDesign} by_design, ${reviewResult.skipped} skipped`,
-            );
-          }
-        }
-      } catch {
-        /* best-effort */
+      const message =
+        "Interactive finding review was removed with the TypeScript/Ink TUI. Use the Rust shell or `kuzushi findings` for review.";
+      if (params.uiStore) {
+        params.uiStore.addNotice({ level: "info", message, source: "review" });
+      } else {
+        console.log(`\n  ${message}`);
       }
     }
 

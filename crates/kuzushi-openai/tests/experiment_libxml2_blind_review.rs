@@ -21,7 +21,7 @@
 //!     cargo test -p kuzushi-openai \
 //!       --test experiment_libxml2_blind_review -- --nocapture --ignored
 
-use kuzushi_core::{AgentQueryRequest, AgentRuntime};
+use kuzushi_core::{AgentQueryRequest, AgentRuntime, AgentToolPolicy};
 use kuzushi_openai::{AnthropicOAuthRuntime, AnthropicOAuthRuntimeOptions};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -125,6 +125,7 @@ async fn libxml2_blind_review_for_unguarded_strcat() {
             system_prompt: "You are a careful security code reviewer. Output only JSON."
                 .to_string(),
             prompt: tight_prompt,
+            tool_policy: AgentToolPolicy::default(),
         })
         .await
         .expect("tight pass should not error");
@@ -151,6 +152,7 @@ async fn libxml2_blind_review_for_unguarded_strcat() {
             system_prompt: "You are a careful security code reviewer. Output only JSON."
                 .to_string(),
             prompt: wide_prompt,
+            tool_policy: AgentToolPolicy::default(),
         })
         .await
         .expect("wide pass should not error");

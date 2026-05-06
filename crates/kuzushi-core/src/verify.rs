@@ -1132,10 +1132,11 @@ fn normalize_c_type(ty: &str) -> String {
 /// Heuristic analog of `rust_source_appears_self_contained`. Refuses
 /// copies that pull in project-relative headers (`#include "foo.h"`)
 /// because we can't follow them; accepts files that only use system
-/// headers (`#include <stddef.h>`). Also refuses files that declare
-/// `static` callbacks referring to other TU symbols by undeclared
-/// names — but that's the codeindex facade's job to detect; for this
-/// preview the include-form check is the gate.
+/// headers (`#include <stddef.h>`).
+///
+/// Used as a *fallback* gate: when `try_preprocess_c_source` succeeds
+/// we use the preprocessed output (which is self-contained by
+/// construction) regardless of this check.
 pub(crate) fn c_source_appears_self_contained(source: &str) -> bool {
     for line in source.lines().take(400) {
         let trimmed = line.trim();
@@ -1144,6 +1145,101 @@ pub(crate) fn c_source_appears_self_contained(source: &str) -> bool {
         }
     }
     true
+}
+
+/// Hard cap on preprocessor output size. Real-world C sources can
+/// expand to megabytes after `#include` expansion (libxml2's
+/// `valid.c` preprocesses to ~3 MB). Anything larger probably won't
+/// compile fast enough to be useful in a verify timebox.
+const MAX_PREPROCESSED_BYTES: usize = 8 * 1024 * 1024;
+
+/// Run `clang -E` (or `gcc -E`) on the suspect source to flatten all
+/// `#include`s into a single self-contained translation unit. Returns
+/// `Some(text)` when preprocessing succeeded and the result is under
+/// [`MAX_PREPROCESSED_BYTES`]; `None` otherwise (caller falls back to
+/// the raw-source path).
+///
+/// Discovers include search paths heuristically:
+/// 1. The directory containing the suspect file
+/// 2. `<dir>/include`, `<dir>/../include`
+/// 3. Walks up to 5 ancestor directories looking for an `include/`
+///    sibling (typical libxml2 / OpenSSL layout)
+///
+/// No `compile_commands.json` lookup yet — that's the next iteration
+/// when the codeindex facade can resolve it.
+pub(crate) fn try_preprocess_c_source(
+    suspect_path: &std::path::Path,
+) -> Option<PreprocessedSource> {
+    let cc = if kuzushi_sandbox::which("clang").is_some() {
+        "clang"
+    } else if kuzushi_sandbox::which("gcc").is_some() {
+        "gcc"
+    } else {
+        return None;
+    };
+
+    let include_paths = discover_include_paths(suspect_path);
+    let mut argv: Vec<String> = vec![cc.to_string(), "-E".to_string()];
+    for inc in &include_paths {
+        argv.push(format!("-I{}", inc.display()));
+    }
+    argv.push(suspect_path.display().to_string());
+
+    let output = std::process::Command::new(&argv[0])
+        .args(&argv[1..])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    if output.stdout.len() > MAX_PREPROCESSED_BYTES {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    Some(PreprocessedSource {
+        text,
+        include_paths,
+        compiler: cc.to_string(),
+    })
+}
+
+/// Output of [`try_preprocess_c_source`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PreprocessedSource {
+    /// Fully-expanded translation unit. No remaining `#include`
+    /// directives.
+    pub text: String,
+    /// Include paths the preprocessor used, for diagnostics.
+    pub include_paths: Vec<std::path::PathBuf>,
+    /// Compiler binary that was used (`"clang"` or `"gcc"`).
+    pub compiler: String,
+}
+
+fn discover_include_paths(suspect_path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    if let Some(dir) = suspect_path.parent() {
+        out.push(dir.to_path_buf());
+        out.push(dir.join("include"));
+        if let Some(parent) = dir.parent() {
+            out.push(parent.join("include"));
+        }
+        // Walk up to 5 ancestors looking for `include/`.
+        let mut cursor = dir.to_path_buf();
+        for _ in 0..5 {
+            if let Some(p) = cursor.parent() {
+                let inc = p.join("include");
+                if inc.is_dir() && !out.iter().any(|x| x == &inc) {
+                    out.push(inc);
+                }
+                cursor = p.to_path_buf();
+            } else {
+                break;
+            }
+        }
+    }
+    out.into_iter().filter(|p| p.is_dir()).collect()
 }
 
 #[derive(Debug, Clone)]

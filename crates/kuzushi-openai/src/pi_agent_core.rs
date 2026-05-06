@@ -6,8 +6,8 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, RuntimeConfig, TriageOutcome,
-    TriageRequest, TriageVerdict, V2Config,
+    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolPolicy, RuntimeConfig,
+    TriageOutcome, TriageRequest, TriageVerdict, V2Config,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -109,6 +109,7 @@ impl AgentRuntime for PiAgentCoreRuntime {
             cwd: request.cwd,
             system_prompt: TRIAGE_SYSTEM_PROMPT.to_string(),
             prompt,
+            tool_policy: AgentToolPolicy::default(),
         })?;
 
         if let Some(structured) = response.structured {

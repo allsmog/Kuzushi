@@ -13,6 +13,7 @@ can act on, push back on, or shelve.
 | [`new-modules.md`](./new-modules.md)                   | Proposed built-in modules sized to one PR each                |
 | [`output-reporting.md`](./output-reporting.md)         | Finding/chain shape, PR-comment, CI-stream weakness           |
 | [`replay-trace-audit.md`](./replay-trace-audit.md)     | What's persisted, queryable, reproducible from `.kuzushi/runs`|
+| [`rust-tui-ux-audit.md`](./rust-tui-ux-audit.md)       | Rust Ratatui shell UX, plain mode, help/keybind drift         |
 | [`ux-dx-gaps.md`](./ux-dx-gaps.md)                     | Shell TUI friction, `/help` drift, missing back-paths         |
 
 ### Status

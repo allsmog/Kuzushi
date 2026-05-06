@@ -1,13 +1,18 @@
 use std::collections::BTreeMap;
 
 use kuzushi_core::modules::{ModuleKind, OptionSpec, OptionType};
-use kuzushi_core::{AttachmentKind, Finding, Severity, SUPPORTED_ATTACHMENT_MODULES};
+use kuzushi_core::{
+    sorted_finding_aliases, stable_finding_alias, AttachmentKind, Finding, Severity,
+    SUPPORTED_ATTACHMENT_MODULES,
+};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span, Style};
 use ratatui::widgets::Paragraph;
 
-use crate::app::{ScanPanelState, ShellApp, ShellView, ThreatView};
-use crate::commands::{shell_command_specs, ShellCommandCategory};
+use crate::app::{LogLine, ScanPanelState, ShellApp, ShellView, ThreatView};
+use crate::commands::{
+    shell_command_specs, shell_help_examples, ShellCommandCategory, ShellCommandSpec,
+};
 use crate::theme;
 
 pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
@@ -16,7 +21,6 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         return;
     }
 
-    let view_lines = shell_view_lines(app, area);
     let prompt_height = 1;
     let transcript_height = if matches!(app.shell_view, ShellView::ModuleRun) {
         0
@@ -48,9 +52,14 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         + plan_height
         + threat_patch_height;
     let max_view_height = area.height.saturating_sub(fixed_height).max(1);
+    let view_area = Rect {
+        height: max_view_height,
+        ..area
+    };
+    let view_lines = shell_view_lines(app, view_area);
     let view_height = (view_lines.len() as u16).clamp(1, max_view_height);
 
-    let mut constraints = vec![Constraint::Length(view_height)];
+    let mut constraints = vec![Constraint::Length(view_height), Constraint::Min(0)];
     if throttle_height > 0 {
         constraints.push(Constraint::Length(throttle_height));
     }
@@ -59,9 +68,6 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     }
     if keybind_height > 0 {
         constraints.push(Constraint::Length(keybind_height));
-    }
-    if transcript_height > 0 {
-        constraints.push(Constraint::Length(transcript_height));
     }
     if budget_height > 0 {
         constraints.push(Constraint::Length(budget_height));
@@ -72,8 +78,10 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     if threat_patch_height > 0 {
         constraints.push(Constraint::Length(threat_patch_height));
     }
+    if transcript_height > 0 {
+        constraints.push(Constraint::Length(transcript_height));
+    }
     constraints.push(Constraint::Length(prompt_height));
-    constraints.push(Constraint::Min(0));
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -82,6 +90,7 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
 
     let mut index = 0;
     render_lines(frame, chunks[index], view_lines);
+    index += 1;
     index += 1;
 
     if throttle_height > 0 {
@@ -96,10 +105,6 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         render_keybind_footer(frame, chunks[index], app);
         index += 1;
     }
-    if transcript_height > 0 {
-        render_transcript(frame, chunks[index], app);
-        index += 1;
-    }
     if budget_height > 0 {
         render_cost_cap_halt(frame, chunks[index], app);
         index += 1;
@@ -110,6 +115,10 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     }
     if threat_patch_height > 0 {
         render_threat_patch_card(frame, chunks[index], app);
+        index += 1;
+    }
+    if transcript_height > 0 {
+        render_transcript(frame, chunks[index], app);
         index += 1;
     }
     render_prompt(frame, chunks[index], app);
@@ -194,8 +203,25 @@ pub fn render_plain_app(app: &ShellApp, width: usize) -> String {
     }
 }
 
+pub fn render_plain_command_result(
+    app: &ShellApp,
+    width: usize,
+    command: &str,
+    log_start: usize,
+) -> String {
+    let lines = render_plain_command_result_lines(app, width, command, log_start);
+    if lines.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", lines.join("\n"))
+    }
+}
+
 fn shell_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     match &app.shell_view {
+        ShellView::Catalog if app.catalog_expanded => {
+            viewport_lines(catalog_lines(app, area), area.height, app.modules_scroll)
+        }
         ShellView::Catalog => catalog_lines(app, area),
         ShellView::Module => module_lines(app, area),
         ShellView::ModuleRun => module_run_lines(app, area),
@@ -209,18 +235,47 @@ fn shell_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ShellView::Runs => runs_lines(app, area),
         ShellView::Replay(run_id) => replay_lines(app, area, run_id),
         ShellView::Trace(run_id) => trace_lines(app, area, run_id),
-        ShellView::Help => help_lines(app, area),
+        ShellView::Help => viewport_lines(help_lines(app, area), area.height, app.help_scroll),
         ShellView::Config => config_lines(app, area),
-        ShellView::Tools => tools_lines(app, area),
+        ShellView::Tools => viewport_lines(tools_lines(app, area), area.height, app.tools_scroll),
         ShellView::Options(view) => options_lines(app, area, view),
         ShellView::SastTasks => sast_tasks_lines(app, area),
         ShellView::Context => context_lines(app, area),
         ShellView::Workspace => workspace_lines(app, area),
-        ShellView::KnowledgeBase => knowledge_base_lines(app, area),
+        ShellView::KnowledgeBase => {
+            viewport_lines(knowledge_base_lines(app, area), area.height, app.kb_scroll)
+        }
         ShellView::AgentChat => agent_chat_lines(app, area),
-        ShellView::History => history_lines(app, area),
+        ShellView::History => {
+            viewport_lines(history_lines(app, area), area.height, app.history_scroll)
+        }
         ShellView::Story => story_lines(app, area),
     }
+}
+
+fn viewport_lines(
+    lines: Vec<Line<'static>>,
+    visible_height: u16,
+    scroll: usize,
+) -> Vec<Line<'static>> {
+    let visible = visible_height as usize;
+    if visible == 0 {
+        return Vec::new();
+    }
+    if lines.len() <= visible {
+        return lines;
+    }
+    let start = scroll.min(lines.len().saturating_sub(visible));
+    lines.into_iter().skip(start).take(visible).collect()
+}
+
+fn viewport_start_for_cursor(total_rows: usize, visible_rows: usize, cursor: usize) -> usize {
+    if total_rows <= visible_rows || visible_rows == 0 {
+        return 0;
+    }
+    let max_start = total_rows.saturating_sub(visible_rows);
+    let margin = visible_rows.saturating_sub(1) / 2;
+    cursor.saturating_sub(margin).min(max_start)
 }
 
 fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
@@ -232,6 +287,7 @@ fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
         ShellView::Workspace => plain_workspace_lines(app, width),
         ShellView::KnowledgeBase => plain_knowledge_base_lines(app, width),
         ShellView::Config => plain_config_lines(app, width),
+        ShellView::Help => plain_help_lines(app, width),
         _ => {
             let area = Rect::new(0, 0, width.min(u16::MAX as usize) as u16, u16::MAX);
             shell_view_lines(app, area)
@@ -241,10 +297,55 @@ fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
         }
     };
 
-    for line in &mut lines {
-        *line = sanitize_plain_line(&fit(line, width));
-    }
+    lines = finalize_plain_lines(lines, width);
     trim_plain_lines(lines)
+}
+
+fn render_plain_command_result_lines(
+    app: &ShellApp,
+    width: usize,
+    command: &str,
+    log_start: usize,
+) -> Vec<String> {
+    let width = width.max(40);
+    let mut lines = vec![
+        plain_divider("COMMAND RESULT", width),
+        format!("command: {command}"),
+        "logs:".to_string(),
+    ];
+    let log_start = log_start.min(app.log.len());
+    for line in &app.log[log_start..] {
+        lines.extend(plain_log_lines(line));
+    }
+    lines.push(String::new());
+    lines.push(plain_divider("VIEW", width));
+    lines.extend(render_plain_lines(app, width));
+
+    let lines = finalize_plain_lines(lines, width);
+    trim_plain_lines(lines)
+}
+
+fn plain_log_lines(line: &LogLine) -> Vec<String> {
+    let mut lines = Vec::new();
+    let body_lines = if line.body.is_empty() {
+        vec![""]
+    } else {
+        line.body.lines().collect::<Vec<_>>()
+    };
+    for (index, body) in body_lines.into_iter().enumerate() {
+        if line.prefix == ">" {
+            if index == 0 {
+                lines.push(format!("> {body}"));
+            } else {
+                lines.push(format!("  {body}"));
+            }
+        } else if index == 0 {
+            lines.push(format!("{}: {body}", line.prefix));
+        } else {
+            lines.push(format!("  {body}"));
+        }
+    }
+    lines
 }
 
 fn plain_options_lines(
@@ -321,10 +422,9 @@ fn plain_options_lines(
         ));
     }
     lines.push(String::new());
-    lines.push(fit(
-        "Next: set <key> <value>, setg <key> <value>, show advanced, show missing",
-        width,
-    ));
+    lines.push(
+        "Next: set <key> <value>, setg <key> <value>, show advanced, show missing".to_string(),
+    );
     lines
 }
 
@@ -368,11 +468,58 @@ fn plain_sast_tasks_lines(app: &ShellApp, width: usize) -> Vec<String> {
         ));
     }
     lines.push(String::new());
-    lines.push(fit(
-        "Next: task block <id>, task allow <id>, task toggle [id], task mode auto|manual|toggle",
-        width,
-    ));
+    lines.push(
+        "Next: task block <id>, task allow <id>, task toggle [id], task mode auto|manual|toggle"
+            .to_string(),
+    );
     lines
+}
+
+fn plain_help_lines(app: &ShellApp, width: usize) -> Vec<String> {
+    let mut lines = plain_context_strip(app, width);
+    lines.push(String::new());
+    lines.push(plain_divider("HELP", width));
+    lines.push(
+        "Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode."
+            .to_string(),
+    );
+    let examples = shell_help_examples();
+    if !examples.is_empty() {
+        lines.push(format!("Examples: {}", examples.join(" | ")));
+    }
+
+    for category in ShellCommandCategory::ORDER {
+        lines.push(String::new());
+        lines.push(category.label().to_string());
+        lines.push("command | aliases / examples | description".to_string());
+        for spec in shell_command_specs()
+            .iter()
+            .filter(|spec| spec.category == category)
+        {
+            lines.push(format!("{} - {}", spec.command, spec.description));
+            let aliases = plain_help_alias_text(spec);
+            if aliases != "-" {
+                lines.push(format!("  aliases / examples: {aliases}"));
+            }
+        }
+    }
+
+    lines
+}
+
+fn plain_help_alias_text(spec: &ShellCommandSpec) -> String {
+    let mut aliases = Vec::new();
+    for alias in spec.aliases {
+        if *alias == spec.command || aliases.contains(alias) {
+            continue;
+        }
+        aliases.push(*alias);
+    }
+    if aliases.is_empty() {
+        "-".to_string()
+    } else {
+        aliases.join(", ")
+    }
 }
 
 fn plain_context_lines(app: &ShellApp, width: usize) -> Vec<String> {
@@ -637,9 +784,10 @@ fn plain_context_strip(app: &ShellApp, width: usize) -> Vec<String> {
     };
     vec![fit(
         &format!(
-            "{target} | {module} | {} modules | {}",
-            app.registry.modules().count(),
-            findings_count_summary(&app.findings)
+            "{} | {target} | {module} | {} | {} mods",
+            routing_mode_segment(app),
+            findings_count_summary(&app.findings),
+            app.registry.modules().count()
         ),
         width,
     )]
@@ -670,6 +818,43 @@ fn line_to_plain_text(line: Line<'static>) -> String {
         .collect::<String>()
 }
 
+fn finalize_plain_lines(lines: Vec<String>, width: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in lines {
+        let line = sanitize_plain_line(&line);
+        if line.chars().count() <= width {
+            out.push(line);
+        } else if should_truncate_plain_line(&line) {
+            out.push(sanitize_plain_line(&fit(&line, width)));
+        } else {
+            out.extend(
+                wrap_text(&line, width)
+                    .into_iter()
+                    .map(|line| sanitize_plain_line(&line)),
+            );
+        }
+    }
+    out
+}
+
+fn should_truncate_plain_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if line.starts_with("mode:") {
+        return true;
+    }
+    if trimmed.chars().all(|ch| {
+        ch == '-' || ch == ' ' || ch == '/' || ch.is_ascii_uppercase() || ch.is_ascii_digit()
+    }) {
+        return true;
+    }
+
+    let padded_column_gaps = line.matches("  ").count();
+    padded_column_gaps >= 3
+}
+
 fn sanitize_plain_line(value: &str) -> String {
     value
         .chars()
@@ -679,6 +864,44 @@ fn sanitize_plain_line(value: &str) -> String {
             _ => ch,
         })
         .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RoutingMode {
+    Shell,
+    Module,
+    Agent,
+    Plan,
+    Run,
+}
+
+fn routing_mode(app: &ShellApp) -> RoutingMode {
+    if app.scan.as_ref().is_some_and(|scan| scan.running)
+        || matches!(app.shell_view, ShellView::ModuleRun)
+    {
+        RoutingMode::Run
+    } else if matches!(app.shell_view, ShellView::AgentChat)
+        || app.agent_chat.as_ref().is_some_and(|agent| agent.running)
+    {
+        RoutingMode::Agent
+    } else if app.planner_running || app.pending_plan.is_some() {
+        RoutingMode::Plan
+    } else if app.focused_module.is_some() {
+        RoutingMode::Module
+    } else {
+        RoutingMode::Shell
+    }
+}
+
+fn routing_mode_segment(app: &ShellApp) -> String {
+    match routing_mode(app) {
+        RoutingMode::Shell => "mode:shell",
+        RoutingMode::Module => "mode:module",
+        RoutingMode::Agent => "mode:agent",
+        RoutingMode::Plan => "mode:plan",
+        RoutingMode::Run => "mode:run",
+    }
+    .to_string()
 }
 
 fn trim_plain_lines(mut lines: Vec<String>) -> Vec<String> {
@@ -694,6 +917,8 @@ fn trim_plain_lines(mut lines: Vec<String>) -> Vec<String> {
 fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
+    lines.push(styled("kuzushi shell", theme::label()));
+    lines.push(blank());
 
     let modules = app.registry.modules().collect::<Vec<_>>();
     if modules.is_empty() {
@@ -705,10 +930,23 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     if !app.catalog_expanded {
         if app.target.is_none() {
             lines.push(styled(
-                "[!] no app context built yet - run scan after selecting a target",
+                "[!] no target selected; `scan .` uses the current directory",
+                theme::warn(),
+            ));
+        } else if app.findings.is_empty() {
+            lines.push(styled(
+                "[!] active target has no persisted findings yet",
                 theme::warn(),
             ));
         }
+        lines.push(styled(
+            &fit(&app.first_finding_hint(), area.width as usize),
+            theme::primary(),
+        ));
+        lines.push(muted(&fit(
+            "Quickstart: quickstart | Context: context build | Runtime: model",
+            area.width as usize,
+        )));
         lines.push(muted(
             "Type help, modules, use <module>, scan, or run <tool> [json].",
         ));
@@ -922,45 +1160,119 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     if app.findings.is_empty() {
         lines.push(muted("No findings yet."));
         lines.push(muted(
-            "Run scan to populate the workspace findings database.",
+            "Next: scan, scan <target>, or context build before scanning.",
         ));
         return lines;
     }
 
-    lines.push(header(&["alias", "severity", "location", "title"]));
-    for (index, finding) in app.findings.iter().enumerate() {
-        let alias = format!("F-{number:04}", number = index + 1);
+    let widths = finding_summary_widths(area.width.saturating_sub(2));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            table_text(
+                &[
+                    "alias",
+                    "severity",
+                    "verdict",
+                    "conf",
+                    "proof/static",
+                    "cwe",
+                    "source",
+                ],
+                &widths,
+            ),
+            theme::subtle(),
+        ),
+    ]));
+    let aliases = sorted_finding_aliases(&app.findings);
+    let cursor = app.findings_cursor.min(aliases.len().saturating_sub(1));
+    let mut body = Vec::new();
+    for (index, (alias, finding)) in aliases.into_iter().enumerate() {
         let selected = app
             .selected_finding
             .as_ref()
-            .is_some_and(|selected| selected.fingerprint == finding.fingerprint);
+            .is_some_and(|selected| selected.fingerprint.as_str() == finding.fingerprint.as_str());
         let cursor_row = app.findings_cursor == index;
-        let marker = if selected {
+        let marker = if cursor_row {
             ">"
-        } else if cursor_row {
-            "›"
+        } else if selected {
+            "*"
         } else {
             " "
         };
-        lines.push(Line::from(vec![
+        body.push(Line::from(vec![
             Span::styled(marker, theme::subtle()),
             Span::raw(" "),
-            Span::styled(pad(&alias, 9), theme::accent()),
             Span::styled(
-                pad(finding.severity.as_str(), 10),
-                theme::severity(finding.severity),
+                pad(&alias, widths.first().copied().unwrap_or(8)),
+                theme::accent(),
             ),
+            Span::raw("  "),
             Span::styled(
                 pad(
-                    &fit(&format!("{}:{}", finding.file_path, finding.start_line), 30),
-                    32,
+                    finding.severity.as_str(),
+                    widths.get(1).copied().unwrap_or(8),
                 ),
-                theme::muted(),
+                theme::severity(finding.severity),
             ),
-            Span::raw(fit(&finding.title, value_width(area, 55))),
+            Span::raw("  "),
+            Span::raw(pad(
+                &finding_verdict_label(&finding),
+                widths.get(2).copied().unwrap_or(9),
+            )),
+            Span::raw("  "),
+            Span::raw(pad(
+                &finding_confidence_label(&finding),
+                widths.get(3).copied().unwrap_or(5),
+            )),
+            Span::raw("  "),
+            Span::raw(pad(
+                &finding_proof_state_label(&finding),
+                widths.get(4).copied().unwrap_or(12),
+            )),
+            Span::raw("  "),
+            Span::raw(pad(
+                &finding_cwe_label(&finding),
+                widths.get(5).copied().unwrap_or(8),
+            )),
+            Span::raw("  "),
+            Span::raw(fit(
+                &finding_source_label(&finding),
+                widths.get(6).copied().unwrap_or(12),
+            )),
         ]));
+        body.push(indent(
+            muted(&fit(
+                &format!("loc {} | {}", finding_location(&finding), finding.title),
+                area.width.saturating_sub(2) as usize,
+            )),
+            2,
+        ));
+        body.push(indent(
+            muted(&fit(
+                &format!(
+                    "evidence: {} | next: open {}",
+                    finding_evidence_preview(&finding),
+                    alias
+                ),
+                area.width.saturating_sub(2) as usize,
+            )),
+            2,
+        ));
     }
 
+    let body_height = area.height.saturating_sub(lines.len() as u16) as usize;
+    if body_height == 0 {
+        return lines;
+    }
+    let row_height = 3;
+    let visible_rows = (body_height / row_height).max(1);
+    let start_row = viewport_start_for_cursor(app.findings.len(), visible_rows, cursor);
+    lines.extend(
+        body.into_iter()
+            .skip(start_row * row_height)
+            .take(body_height),
+    );
     lines
 }
 
@@ -977,6 +1289,9 @@ fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         Span::styled(finding.title.clone(), theme::heading()),
     ]));
     lines.push(blank());
+    if let Some(alias) = stable_finding_alias(&app.findings, &finding.fingerprint) {
+        lines.push(detail("alias", &alias));
+    }
     lines.push(detail(
         "location",
         &format!("{}:{}", finding.file_path, finding.start_line),
@@ -1184,7 +1499,9 @@ fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             fit(&scan.target.display().to_string(), value_width(area, 34)),
         ]));
     } else {
-        lines.push(muted("No scan run is active in this shell session."));
+        lines.push(muted(
+            "No scan run is active in this shell session. Next: scan <target> or show runs.",
+        ));
     }
     lines
 }
@@ -1202,6 +1519,7 @@ fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> 
         "triage",
         &format!(".kuzushi/runs/{run_id}/triage.jsonl"),
     ));
+    lines.extend(alias_reference_lines(app, area));
     lines
 }
 
@@ -1218,6 +1536,25 @@ fn trace_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> {
         "verify",
         &format!(".kuzushi/runs/{run_id}/verify.jsonl"),
     ));
+    lines.extend(alias_reference_lines(app, area));
+    lines
+}
+
+fn alias_reference_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let aliases = sorted_finding_aliases(&app.findings);
+    lines.push(blank());
+    if aliases.is_empty() {
+        lines.push(muted("aliases: load findings first with findings"));
+        return lines;
+    }
+    lines.push(divider("ALIASES", area.width));
+    for (alias, finding) in aliases.into_iter().take(3) {
+        lines.push(detail(
+            &alias,
+            &format!("{} {}", short(&finding.fingerprint), finding.title),
+        ));
+    }
     lines
 }
 
@@ -1225,20 +1562,73 @@ fn help_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("HELP", area.width));
+    lines.push(muted(&fit(
+        "Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.",
+        area.width as usize,
+    )));
+    let examples = shell_help_examples();
+    if !examples.is_empty() {
+        lines.push(muted(&fit(
+            &format!("Examples: {}", examples.join(" | ")),
+            area.width as usize,
+        )));
+    }
+    let widths = help_table_widths(area.width);
     for category in ShellCommandCategory::ORDER {
         lines.push(blank());
         lines.push(Line::styled(category.label(), theme::subtle()));
+        if widths.len() == 2 {
+            lines.push(table_header(&["command", "aliases / examples"], &widths));
+        } else {
+            lines.push(table_header(
+                &["command", "aliases / examples", "description"],
+                &widths,
+            ));
+        }
         for spec in shell_command_specs()
             .iter()
             .filter(|spec| spec.category == category)
         {
-            lines.push(row(&[
-                pad(spec.command, 30),
-                fit(spec.description, value_width(area, 34)),
-            ]));
+            let command = fit(spec.command, widths.first().copied().unwrap_or(18));
+            let aliases = help_alias_text(spec, widths.get(1).copied().unwrap_or(18));
+            if widths.len() == 2 {
+                lines.push(table_row(&[&command, &aliases], &widths));
+            } else {
+                let description = fit(spec.description, widths.get(2).copied().unwrap_or(20));
+                lines.push(table_row(&[&command, &aliases, &description], &widths));
+            }
         }
     }
     lines
+}
+
+fn help_table_widths(width: u16) -> Vec<usize> {
+    let total = width as usize;
+    if total < 72 {
+        let command = total.min(if total < 48 { 14 } else { 18 });
+        let aliases = total.saturating_sub(command + 2);
+        return vec![command, aliases];
+    }
+
+    let command = if total < 96 { 22 } else { 28 };
+    let aliases = if total < 96 { 24 } else { 32 };
+    let description = total.saturating_sub(command + aliases + 4);
+    vec![command, aliases, description]
+}
+
+fn help_alias_text(spec: &ShellCommandSpec, max_chars: usize) -> String {
+    let mut aliases = Vec::new();
+    for alias in spec.aliases {
+        if *alias == spec.command || aliases.contains(alias) {
+            continue;
+        }
+        aliases.push(*alias);
+    }
+    if aliases.is_empty() {
+        "-".to_string()
+    } else {
+        fit(&aliases.join(", "), max_chars)
+    }
 }
 
 fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -1738,7 +2128,9 @@ fn agent_chat_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         return lines;
     };
 
-    let status = if agent.running {
+    let status = if agent.abort_requested {
+        "abort requested"
+    } else if agent.running {
         "running"
     } else if agent.error.is_some() {
         "failed"
@@ -1773,6 +2165,10 @@ fn agent_chat_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         {
             lines.push(indent(muted(&line), 2));
         }
+    } else if agent.abort_requested {
+        lines.push(muted(
+            "Abort requested; waiting for pi-agent-core to return. Process kill is not confirmed.",
+        ));
     } else {
         lines.push(muted("Waiting for pi-agent-core response..."));
     }
@@ -1823,7 +2219,9 @@ fn story_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(divider("SESSION STORY · live event timeline", area.width));
     if let Some(scan) = &app.scan {
         let label = if scan.running {
-            if app.is_scan_paused() {
+            if scan.abort_requested {
+                "abort requested"
+            } else if app.is_scan_paused() {
                 "paused"
             } else {
                 "running"
@@ -1888,6 +2286,125 @@ fn kb_attachment_widths(width: u16) -> Vec<usize> {
     let gaps = 6;
     let status = total.saturating_sub(id + kind + source + gaps).max(16);
     vec![id, kind, source, status]
+}
+
+fn finding_summary_widths(width: u16) -> Vec<usize> {
+    let total = width as usize;
+    let alias = 8;
+    let severity = 8;
+    let verdict = 9;
+    let confidence = 5;
+    let proof = 12;
+    let cwe = 8;
+    let gaps = 12;
+    let source = total
+        .saturating_sub(alias + severity + verdict + confidence + proof + cwe + gaps)
+        .max(10);
+    vec![alias, severity, verdict, confidence, proof, cwe, source]
+}
+
+fn finding_location(finding: &Finding) -> String {
+    match finding.end_line {
+        Some(end_line) if end_line > finding.start_line => {
+            format!("{}:{}-{}", finding.file_path, finding.start_line, end_line)
+        }
+        _ => format!("{}:{}", finding.file_path, finding.start_line),
+    }
+}
+
+fn finding_verdict_label(finding: &Finding) -> String {
+    match finding
+        .triage
+        .as_ref()
+        .map(|triage| triage.verdict.as_str())
+    {
+        Some("true_positive") => "tp",
+        Some("false_positive") => "fp",
+        Some("needs_review") => "review",
+        Some("by_design") => "by-design",
+        Some(other) => other,
+        None => "untriaged",
+    }
+    .to_string()
+}
+
+fn finding_confidence_label(finding: &Finding) -> String {
+    finding
+        .triage
+        .as_ref()
+        .map(|triage| format!("{:.0}%", (triage.confidence.clamp(0.0, 1.0) * 100.0)))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn finding_proof_state_label(finding: &Finding) -> String {
+    match finding
+        .triage
+        .as_ref()
+        .map(|triage| triage.verdict.as_str())
+    {
+        Some("true_positive") => "triaged-tp",
+        Some("false_positive") => "triaged-fp",
+        Some("needs_review") => "needs-review",
+        Some("by_design") => "by-design",
+        Some(_) | None => "static-sig",
+    }
+    .to_string()
+}
+
+fn finding_cwe_label(finding: &Finding) -> String {
+    extract_cwe(&finding.message)
+        .or_else(|| extract_cwe(&finding.rule_id))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn extract_cwe(value: &str) -> Option<String> {
+    let upper = value.to_ascii_uppercase();
+    for (index, _) in upper.match_indices("CWE") {
+        let mut rest = upper[index + 3..].chars();
+        while matches!(rest.clone().next(), Some('-' | '_' | ' ' | ':')) {
+            rest.next();
+        }
+        let digits = rest
+            .take_while(|ch| ch.is_ascii_digit())
+            .collect::<String>();
+        if !digits.is_empty() {
+            return Some(format!("CWE-{digits}"));
+        }
+    }
+    None
+}
+
+fn finding_source_label(finding: &Finding) -> String {
+    if finding.rule_id.is_empty() || finding.rule_id.starts_with(&finding.tool) {
+        finding.tool.clone()
+    } else {
+        format!("{}:{}", finding.tool, finding.rule_id)
+    }
+}
+
+fn finding_evidence_preview(finding: &Finding) -> String {
+    let lines = finding
+        .message
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+
+    if let Some(evidence) = lines.iter().find_map(|line| {
+        line.strip_prefix("Evidence:")
+            .or_else(|| line.strip_prefix("evidence:"))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }) {
+        return evidence.to_string();
+    }
+
+    lines
+        .iter()
+        .copied()
+        .find(|line| *line != finding.title)
+        .unwrap_or_else(|| lines.first().copied().unwrap_or(&finding.title))
+        .to_string()
 }
 
 fn render_throttle_banner(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
@@ -1974,6 +2491,7 @@ fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
 
     let left = if app.scan.as_ref().is_some_and(|scan| scan.running) {
         join_segments(&[
+            routing_mode_segment(app),
             app.config
                 .model
                 .clone()
@@ -1985,14 +2503,50 @@ fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         ])
     } else if app.agent_chat.as_ref().is_some_and(|agent| agent.running) {
         join_segments(&[
+            routing_mode_segment(app),
             app.config
                 .model
                 .clone()
                 .unwrap_or_else(|| "unconfigured".to_string()),
-            "agent: active".to_string(),
+            if app
+                .agent_chat
+                .as_ref()
+                .is_some_and(|agent| agent.abort_requested)
+            {
+                "agent: abort requested".to_string()
+            } else {
+                "agent: active".to_string()
+            },
+        ])
+    } else if app.planner_running {
+        join_segments(&[
+            routing_mode_segment(app),
+            app.config
+                .model
+                .clone()
+                .unwrap_or_else(|| "unconfigured".to_string()),
+            if app.plan_abort_requested {
+                "plan: abort requested".to_string()
+            } else {
+                "plan: active".to_string()
+            },
+        ])
+    } else if app.threat_worker_running {
+        join_segments(&[
+            routing_mode_segment(app),
+            app.config
+                .model
+                .clone()
+                .unwrap_or_else(|| "unconfigured".to_string()),
+            if app.threat_abort_requested {
+                "threats: abort requested".to_string()
+            } else {
+                "threats: active".to_string()
+            },
         ])
     } else {
         join_segments(&[
+            routing_mode_segment(app),
             app.target
                 .as_ref()
                 .map(|path| compact_target_path(&path.display().to_string()))
@@ -2054,12 +2608,16 @@ fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         return;
     }
 
-    let prompt = if matches!(app.shell_view, ShellView::AgentChat) {
-        "kuzushi/agent> ".to_string()
-    } else if let Some(module) = &app.focused_module {
-        format!("kuzushi/{module}> ")
-    } else {
-        "kuzushi> ".to_string()
+    let prompt = match routing_mode(app) {
+        RoutingMode::Run => "kuzushi/run> ".to_string(),
+        RoutingMode::Agent => "kuzushi/agent> ".to_string(),
+        RoutingMode::Plan => "kuzushi/plan> ".to_string(),
+        RoutingMode::Module => app
+            .focused_module
+            .as_ref()
+            .map(|module| format!("kuzushi/{module}> "))
+            .unwrap_or_else(|| "kuzushi/module> ".to_string()),
+        RoutingMode::Shell => "kuzushi> ".to_string(),
     };
     let segments = prompt_segments(&prompt, &app.input, area.width as usize, " ");
     let line = Line::from(vec![
@@ -2093,7 +2651,13 @@ fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let findings = findings_count_summary(&app.findings);
 
     vec![status_line(
-        &[target, module, format!("{module_count} modules"), findings],
+        &[
+            routing_mode_segment(app),
+            target,
+            module,
+            findings,
+            format!("{module_count} mods"),
+        ],
         area.width,
     )]
 }
@@ -2135,15 +2699,44 @@ fn keybindings_text(app: &ShellApp, width: usize) -> String {
 
 fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
     if app.scan.as_ref().is_some_and(|scan| scan.running) {
+        let mut bindings = vec![(
+            "Ctrl+C",
+            if app.scan.as_ref().is_some_and(|scan| scan.abort_requested) {
+                "arm exit"
+            } else {
+                "request abort"
+            },
+        )];
+        push_view_keybindings(&mut bindings, app);
+        bindings.extend([("findings", "list"), ("back", "home")]);
+        return bindings;
+    }
+    if app.agent_chat.as_ref().is_some_and(|agent| agent.running)
+        || app.planner_running
+        || app.threat_worker_running
+    {
+        let abort_requested = app
+            .agent_chat
+            .as_ref()
+            .is_some_and(|agent| agent.abort_requested)
+            || app.plan_abort_requested
+            || app.threat_abort_requested;
         return vec![
-            ("Ctrl+C", "abort scan"),
-            ("actor 1", "actor detail"),
-            ("findings", "findings"),
+            (
+                "Ctrl+C",
+                if abort_requested {
+                    "arm exit"
+                } else {
+                    "request abort"
+                },
+            ),
             ("back", "home"),
+            ("history", "events"),
+            ("model", "runtime"),
         ];
     }
 
-    match app.shell_view {
+    let mut bindings = match app.shell_view {
         ShellView::Catalog if !app.catalog_expanded => vec![
             ("modules", "browse"),
             ("use <id>", "focus module"),
@@ -2151,29 +2744,39 @@ fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
             ("Ctrl+C", "exit"),
         ],
         ShellView::Catalog => vec![
+            ("PgUp/PgDn", "scroll"),
             ("use <id>", "focus module"),
             ("findings", "findings"),
             ("help", "help"),
-            ("Ctrl+C", "exit"),
         ],
-        ShellView::Findings => vec![
-            ("open <id>", "open finding"),
-            ("scan", "rescan"),
-            ("back", "home"),
-            ("Ctrl+C", "exit"),
-        ],
+        ShellView::Findings => {
+            let mut bindings = Vec::new();
+            push_view_keybindings(&mut bindings, app);
+            bindings.extend([("scan", "rescan"), ("back", "home"), ("Ctrl+C", "exit")]);
+            bindings
+        }
         ShellView::Finding => vec![
             ("back", "findings"),
             ("findings", "list"),
             ("scan", "rescan"),
             ("Ctrl+C", "exit"),
         ],
-        ShellView::Threat(_) => vec![
-            ("1..5", "switch threat view"),
-            ("threats edit", "edit"),
-            ("back", "home"),
-            ("Ctrl+C", "exit"),
-        ],
+        ShellView::Threat(_) => {
+            let mut bindings = Vec::new();
+            push_view_keybindings(&mut bindings, app);
+            bindings.extend([
+                ("threats edit", "edit"),
+                ("back", "home"),
+                ("Ctrl+C", "exit"),
+            ]);
+            bindings
+        }
+        ShellView::ModuleRun => {
+            let mut bindings = Vec::new();
+            push_view_keybindings(&mut bindings, app);
+            bindings.extend([("findings", "list"), ("back", "home"), ("Ctrl+C", "exit")]);
+            bindings
+        }
         ShellView::PromptsEditor => vec![
             ("prompt edit", "edit"),
             ("prompt show", "show"),
@@ -2199,10 +2802,10 @@ fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
             ("back", "module"),
         ],
         ShellView::KnowledgeBase => vec![
+            ("PgUp/PgDn", "scroll"),
             ("attach <path>", "attach"),
             ("detach <id>", "detach"),
             ("reparse <id>", "reparse"),
-            ("back", "module"),
         ],
         ShellView::AgentChat => vec![
             ("ask <q>", "new question"),
@@ -2211,15 +2814,26 @@ fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
             ("back", "home"),
         ],
         ShellView::History => vec![
+            ("PgUp/PgDn", "scroll"),
             ("clear", "clear log"),
             ("show runs", "runs"),
             ("story", "story"),
-            ("back", "home"),
         ],
         ShellView::Story => vec![
             ("history", "commands"),
             ("show runs", "runs"),
             ("replay <id>", "replay"),
+            ("back", "home"),
+        ],
+        ShellView::Help => vec![
+            ("PgUp/PgDn", "scroll"),
+            ("back", "home"),
+            ("Ctrl+C", "exit"),
+        ],
+        ShellView::Tools => vec![
+            ("PgUp/PgDn", "scroll"),
+            ("use <id>", "focus module"),
+            ("options <tool>", "options"),
             ("back", "home"),
         ],
         _ => vec![
@@ -2228,6 +2842,19 @@ fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
             ("help", "help"),
             ("Ctrl+C", "exit"),
         ],
+    };
+    bindings.insert(0, ("Tab", "complete"));
+    bindings
+}
+
+fn push_view_keybindings(bindings: &mut Vec<(&'static str, &'static str)>, app: &ShellApp) {
+    for binding in app.view_keybindings() {
+        if !bindings
+            .iter()
+            .any(|(hint, label)| *hint == binding.hint && *label == binding.label)
+        {
+            bindings.push((binding.hint, binding.label));
+        }
     }
 }
 
@@ -2424,7 +3051,9 @@ fn module_category_blurb(category: &str) -> (&'static str, &'static str) {
 }
 
 fn scan_status(scan: &ScanPanelState) -> String {
-    if scan.running {
+    if scan.running && scan.abort_requested {
+        "abort requested: waiting for subprocess".to_string()
+    } else if scan.running {
         format!("running: {}", scan.stage)
     } else {
         scan.stage.clone()
@@ -2539,16 +3168,26 @@ fn wrap_text(value: &str, width: usize) -> Vec<String> {
     for raw_line in value.lines() {
         let mut current = String::new();
         for word in raw_line.split_whitespace() {
-            let word_len = word.chars().count();
-            let current_len = current.chars().count();
-            if current_len == 0 {
-                current = fit(word, width);
-            } else if current_len + 1 + word_len <= width {
-                current.push(' ');
-                current.push_str(word);
-            } else {
-                lines.push(current);
-                current = fit(word, width);
+            let mut pending = word.to_string();
+            while !pending.is_empty() {
+                let pending_len = pending.chars().count();
+                let current_len = current.chars().count();
+                if current_len == 0 {
+                    if pending_len <= width {
+                        current = pending;
+                        break;
+                    }
+                    let (head, tail) = split_at_char_count(&pending, width);
+                    lines.push(head);
+                    pending = tail;
+                } else if current_len + 1 + pending_len <= width {
+                    current.push(' ');
+                    current.push_str(&pending);
+                    break;
+                } else {
+                    lines.push(current);
+                    current = String::new();
+                }
             }
         }
         if !current.is_empty() {
@@ -2562,6 +3201,21 @@ fn wrap_text(value: &str, width: usize) -> Vec<String> {
         lines.push(String::new());
     }
     lines
+}
+
+fn split_at_char_count(value: &str, count: usize) -> (String, String) {
+    if count == 0 {
+        return (String::new(), value.to_string());
+    }
+    let split_index = value
+        .char_indices()
+        .nth(count)
+        .map(|(index, _)| index)
+        .unwrap_or(value.len());
+    (
+        value[..split_index].to_string(),
+        value[split_index..].to_string(),
+    )
 }
 
 fn pad(value: &str, width: usize) -> String {
@@ -2762,8 +3416,12 @@ impl SeverityCounts {
 
 #[cfg(test)]
 mod tests {
-    use kuzushi_core::{Finding, OptionScope, OptionTarget, Severity, V2Config};
+    use kuzushi_core::{
+        Finding, OptionScope, OptionTarget, ScanCancellation, Severity, TriageOutcome,
+        TriageVerdict, V2Config,
+    };
     use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
     use ratatui::Terminal;
 
     use super::*;
@@ -2779,10 +3437,28 @@ mod tests {
 
         assert!(rendered.contains("kuzushi shell"));
         assert!(rendered.contains("kuzushi>"));
+        assert!(rendered.contains("[Tab] complete"));
         assert!(rendered.contains("[modules]"));
         assert!(!rendered.contains("command log"));
         assert!(!rendered.contains("┌"));
         assert!(!rendered.contains("v2"));
+    }
+
+    #[test]
+    fn catalog_first_run_state_names_real_first_finding_commands() {
+        let backend = TestBackend::new(80, 16);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = ShellApp::new(V2Config::default(), None);
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("First finding"));
+        assert!(rendered.contains("scan ."));
+        assert!(rendered.contains("findings"));
+        assert!(rendered.contains("quickstart"));
+        assert!(!rendered.contains("./repo"));
+        assert!(!rendered.contains("┌"));
     }
 
     #[test]
@@ -2806,7 +3482,100 @@ mod tests {
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains("dangerous sink"));
+        assert!(rendered.contains("alias"));
+        assert!(rendered.contains("F-0001"));
         assert!(rendered.contains("fingerprint"));
+    }
+
+    #[test]
+    fn renders_dense_findings_rows_at_80_columns() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let mut confirmed = Finding::new_semgrep(
+            "typescript.express.sql-injection",
+            "src/controllers/admin_search.ts",
+            117,
+            Some(119),
+            Severity::High,
+            "SQL injection in admin search\nEvidence: req.query.q flows into db.query without a guard\nCWE: CWE-89",
+        );
+        confirmed.triage = Some(TriageOutcome {
+            verdict: TriageVerdict::TruePositive,
+            confidence: 0.91,
+            rationale: "source and sink are linked in the same handler".to_string(),
+            cost_usd: 0.0,
+        });
+        let untriaged = Finding::new_tool(
+            "codeql",
+            "js/path-injection",
+            "src/files.ts",
+            22,
+            None,
+            Severity::Medium,
+            "Path traversal candidate\nEvidence: filename reaches fs.readFile",
+        );
+        app.findings = vec![confirmed, untriaged];
+        app.shell_view = ShellView::Findings;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{:?}", buffer);
+
+        for expected in [
+            "alias",
+            "severity",
+            "verdict",
+            "conf",
+            "proof/static",
+            "cwe",
+            "source",
+            "F-0001",
+            "high",
+            "tp",
+            "91%",
+            "triaged-tp",
+            "CWE-89",
+            "semgrep",
+            "loc src/controllers/admin_search.ts:117-119",
+            "SQL injection in admin search",
+            "req.query.q flows into db.query",
+            "next: open F-0001",
+            "F-0002",
+            "untriaged",
+            "static-sig",
+            "codeql",
+        ] {
+            assert!(rendered.contains(expected), "missing {expected}");
+        }
+        for y in 0..24 {
+            let row = buffer_row_text(buffer, 80, y);
+            assert!(
+                row.chars().count() <= 80,
+                "row exceeded 80 columns: {row:?}"
+            );
+        }
+        assert!(!rendered.contains("┌"));
+    }
+
+    #[test]
+    fn renders_actionable_empty_states_at_80_columns() {
+        for (view, expected) in [
+            (ShellView::Findings, "Next: scan"),
+            (ShellView::Runs, "Next: scan <target>"),
+            (ShellView::Workspace, "Next: scan <target>"),
+        ] {
+            let backend = TestBackend::new(80, 18);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let mut app = ShellApp::new(V2Config::default(), None);
+            app.shell_view = view;
+
+            terminal.draw(|frame| render_app(frame, &app)).unwrap();
+            let rendered = format!("{:?}", terminal.backend().buffer());
+
+            assert!(rendered.contains(expected), "missing {expected}");
+            assert!(!rendered.contains("┌"));
+        }
     }
 
     #[test]
@@ -2821,6 +3590,83 @@ mod tests {
 
         assert!(rendered.contains("kuzushi>"));
         assert!(!rendered.contains("prompt"));
+    }
+
+    #[test]
+    fn keeps_command_log_directly_above_bottom_prompt_at_80_columns() {
+        let backend = TestBackend::new(80, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.log(
+            "error",
+            "scanner failed while reading src/really/long/path/that/must/not_overlap.rs",
+        );
+        app.log(
+            "result",
+            "next action: inspect configuration and rerun scan with a narrower target",
+        );
+        app.input = "run sast:scan {\"severity\":[\"high\"],\"triage\":true}".to_string();
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let prompt_row = buffer_row_text(buffer, 80, 11);
+        let log_row = buffer_row_text(buffer, 80, 10);
+
+        assert!(prompt_row.trim_start().starts_with("kuzushi>"));
+        assert!(prompt_row.contains("triage"));
+        assert!(!prompt_row.contains("result"));
+        assert!(log_row.contains("result"));
+        assert!(!log_row.contains("kuzushi>"));
+        assert!(!format!("{:?}", buffer).contains("┌"));
+    }
+
+    #[test]
+    fn renders_exit_commands_before_closing() {
+        for command in ["/exit", "exit", "/exitj"] {
+            let backend = TestBackend::new(80, 12);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let mut app = ShellApp::new(V2Config::default(), None);
+
+            app.submit_line(command);
+            assert!(app.should_quit, "{command} should request shell shutdown");
+
+            terminal.draw(|frame| render_app(frame, &app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let command_row = buffer_row_text(buffer, 80, 9);
+            let exit_row = buffer_row_text(buffer, 80, 10);
+            let prompt_row = buffer_row_text(buffer, 80, 11);
+
+            assert!(
+                command_row.contains(command),
+                "{command} should remain visible in the transcript"
+            );
+            assert!(exit_row.contains("exit requested; closing shell"));
+            assert!(prompt_row.trim_start().starts_with("kuzushi>"));
+        }
+    }
+
+    #[test]
+    fn replay_and_trace_surfaces_reuse_current_finding_aliases() {
+        for view in [
+            ShellView::Replay("run-1".to_string()),
+            ShellView::Trace("run-1".to_string()),
+        ] {
+            let backend = TestBackend::new(80, 18);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let mut app = ShellApp::new(V2Config::default(), None);
+            let mut finding =
+                Finding::new_semgrep("demo.rule", "src/app.ts", 8, None, Severity::High, "sink");
+            finding.fingerprint = "aaaa1111".to_string();
+            app.findings = vec![finding];
+            app.shell_view = view;
+
+            terminal.draw(|frame| render_app(frame, &app)).unwrap();
+            let rendered = format!("{:?}", terminal.backend().buffer());
+
+            assert!(rendered.contains("ALIASES"));
+            assert!(rendered.contains("F-0001"));
+            assert!(rendered.contains("aaaa1111"));
+        }
     }
 
     #[test]
@@ -3130,6 +3976,61 @@ mod tests {
     }
 
     #[test]
+    fn plain_context_guidance_wraps_without_truncating_next_steps() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Context;
+
+        let rendered = render_plain_app(&app, 56);
+
+        assert!(rendered.contains("No context snapshot exists yet."));
+        assert!(rendered.contains(".kuzushi/context-snapshot.json"));
+        assert!(rendered.contains("context build"));
+        assert!(rendered.contains("context regen repo"));
+        assert!(!rendered.contains("context-s..."));
+        assert_strict_plain_width(&rendered, 56);
+    }
+
+    #[test]
+    fn plain_workspace_guidance_wraps_without_truncating_export_command() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.workspace_view = crate::app::WorkspaceView {
+            root: Some(std::path::PathBuf::from("/tmp/kuzushi-demo")),
+            state_dir: Some(std::path::PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v2")),
+            findings_db: Some(std::path::PathBuf::from(
+                "/tmp/kuzushi-demo/.kuzushi/v2/findings.sqlite3",
+            )),
+            findings_count: Some(2),
+            last_export: None,
+            status: "workspace ready; 2 finding(s). Next: workspace export findings findings.json"
+                .to_string(),
+        };
+        app.shell_view = ShellView::Workspace;
+
+        let rendered = render_plain_app(&app, 52);
+
+        assert!(rendered.contains("workspace ready; 2 finding(s)."));
+        assert!(rendered.contains("workspace export findings findings.json"));
+        assert!(!rendered.contains("workspace export findings..."));
+        assert_strict_plain_width(&rendered, 52);
+    }
+
+    #[test]
+    fn plain_help_guidance_wraps_without_truncating_command_shapes() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Help;
+
+        let rendered = render_plain_app(&app, 64);
+
+        assert!(rendered.contains("HELP"));
+        assert!(rendered.contains("ask <question>"));
+        assert!(rendered.contains("enter agent mode"));
+        assert!(rendered.contains("workspace export findings <path>"));
+        assert!(rendered.contains("/workspace export findings <path>"));
+        assert!(!rendered.contains("workspace export findings <..."));
+        assert_strict_plain_width(&rendered, 64);
+    }
+
+    #[test]
     fn renders_config_onboarding_without_silent_model_selection() {
         let backend = TestBackend::new(100, 28);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -3155,7 +4056,7 @@ mod tests {
 
     #[test]
     fn renders_help_grouped_by_operator_workflow() {
-        let backend = TestBackend::new(110, 90);
+        let backend = TestBackend::new(110, 130);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
         app.shell_view = ShellView::Help;
@@ -3178,7 +4079,247 @@ mod tests {
         assert!(rendered.contains("task toggle"));
         assert!(rendered.contains("kb [module]"));
         assert!(rendered.contains("auth login"));
+        assert!(rendered.contains("? opens help"));
+        assert!(rendered.contains("?text"));
+        assert!(rendered.contains("/ask <question>"));
+        assert!(rendered.contains("ask <question>"));
         assert!(!rendered.contains("┌"));
+    }
+
+    #[test]
+    fn renders_help_aliases_and_examples_from_command_specs() {
+        let backend = TestBackend::new(120, 130);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Help;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        for example in shell_help_examples() {
+            assert!(
+                rendered.contains(example),
+                "missing featured help example {example}"
+            );
+        }
+
+        for (category, alias) in [
+            (ShellCommandCategory::Navigation, "/h"),
+            (ShellCommandCategory::RunScan, "run ."),
+            (ShellCommandCategory::OptionsTasks, "task deny <id>"),
+            (ShellCommandCategory::ContextKb, "attachments"),
+            (ShellCommandCategory::FindingsEvidence, "open F-0001"),
+            (ShellCommandCategory::AuthConfigModel, "model 1"),
+            (ShellCommandCategory::Session, "q"),
+        ] {
+            assert!(
+                shell_command_specs()
+                    .iter()
+                    .any(|spec| spec.category == category && spec.aliases.contains(&alias)),
+                "sample alias {alias:?} is not registered for {category:?}"
+            );
+            assert!(
+                rendered.contains(alias),
+                "missing help alias sample {alias:?} for {category:?}"
+            );
+        }
+
+        assert!(rendered.contains("aliases / examples"));
+        assert!(!rendered.contains("TypeScript"));
+        assert!(!rendered.contains("Ink"));
+    }
+
+    #[test]
+    fn plain_help_aliases_and_examples_are_width_safe() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Help;
+
+        let rendered = render_plain_app(&app, 80);
+
+        assert!(rendered.contains("HELP"));
+        assert!(rendered.contains("aliases / examples"));
+        for example in shell_help_examples() {
+            assert!(
+                rendered.contains(example),
+                "missing plain help example {example}"
+            );
+        }
+        for alias in [
+            "/h",
+            "run .",
+            "task deny <id>",
+            "attachments",
+            "open F-0001",
+            "model 1",
+            "q",
+        ] {
+            assert!(rendered.contains(alias), "missing plain help alias {alias}");
+        }
+        assert!(!rendered.contains("TypeScript"));
+        assert!(!rendered.contains("Ink"));
+        assert_strict_plain_80(&rendered);
+    }
+
+    #[test]
+    fn viewport_help_remains_navigable_at_24_rows() {
+        let backend = TestBackend::new(110, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Help;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let first_page = format!("{:?}", terminal.backend().buffer());
+        assert!(first_page.contains("HELP"));
+        assert!(first_page.contains("NAVIGATION"));
+
+        app.help_scroll = usize::MAX;
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let last_page = format!("{:?}", terminal.backend().buffer());
+        assert!(last_page.contains("SESSION"));
+        assert!(last_page.contains("[PgUp/PgDn] scroll"), "{last_page}");
+        assert!(!last_page.contains("┌"));
+    }
+
+    #[test]
+    fn viewport_tools_remain_navigable_at_24_rows() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let last_tool = app.registry.tools().last().unwrap().name.clone();
+        app.shell_view = ShellView::Tools;
+        app.tools_scroll = usize::MAX;
+
+        let backend = TestBackend::new(110, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains(&last_tool),
+            "missing last tool {last_tool}"
+        );
+        assert!(rendered.contains("[PgUp/PgDn] scroll"));
+        assert!(!rendered.contains("┌"));
+    }
+
+    #[test]
+    fn viewport_expanded_modules_remain_navigable_at_24_rows() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let last_defense_module = app
+            .registry
+            .modules()
+            .filter(|module| module_category(module.metadata().kind).0 == "DEFENSE")
+            .last()
+            .unwrap()
+            .metadata()
+            .id
+            .clone();
+        app.shell_view = ShellView::Catalog;
+        app.catalog_expanded = true;
+        app.modules_scroll = usize::MAX;
+
+        let backend = TestBackend::new(110, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains(&last_defense_module),
+            "missing last module {last_defense_module}"
+        );
+        assert!(rendered.contains("[PgUp/PgDn] scroll"));
+        assert!(!rendered.contains("┌"));
+    }
+
+    #[test]
+    fn viewport_findings_keeps_cursor_visible_at_24_rows() {
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Findings;
+        app.findings_cursor = 29;
+        app.findings = (0..30)
+            .map(|index| {
+                let mut finding = Finding::new_semgrep(
+                    format!("demo.rule.{index:04}"),
+                    "src/app.rs",
+                    index + 1,
+                    None,
+                    Severity::High,
+                    format!("title-{index:02}\nEvidence: proof-{index:02}"),
+                );
+                finding.fingerprint = format!("fp-{index:04}");
+                finding
+            })
+            .collect();
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("F-0030"));
+        assert!(rendered.contains("title-29"));
+        assert!(!rendered.contains("F-0001"));
+        assert!(rendered.contains("[j/k/g/G] move"));
+        assert!(rendered.contains("[PgUp/PgDn] page"));
+        assert!(rendered.contains("[Enter] open"));
+        assert!(!rendered.contains("┌"));
+    }
+
+    #[test]
+    fn keybind_footer_advertises_findings_navigation_keys_at_80_columns() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Findings;
+        app.findings = vec![Finding::new_semgrep(
+            "demo.rule",
+            "src/app.rs",
+            1,
+            None,
+            Severity::High,
+            "title\nEvidence: proof",
+        )];
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("[j/k/g/G] move"));
+        assert!(rendered.contains("[PgUp/PgDn] page"));
+        assert!(rendered.contains("[Enter] open"));
+        assert!(!rendered.contains("[open <id>]"));
+    }
+
+    #[test]
+    fn keybind_footer_advertises_module_run_actor_and_pause_resume_keys() {
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let cancel = ScanCancellation::default();
+        app.set_scan_cancel_for_test(cancel.clone());
+        app.scan = Some(crate::app::ScanPanelState {
+            run_id: Some("run-1".to_string()),
+            target: std::path::PathBuf::from("."),
+            stage: "running".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        app.shell_view = ShellView::ModuleRun;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let running = format!("{:?}", terminal.backend().buffer());
+        assert!(running.contains("[1..4] actor"));
+        assert!(running.contains("[p] pause"));
+        assert!(!running.contains("[actor 1]"));
+
+        cancel.pause();
+        if let Some(scan) = &mut app.scan {
+            scan.stage = "paused".to_string();
+        }
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let paused = format!("{:?}", terminal.backend().buffer());
+        assert!(paused.contains("[1..4] actor"));
+        assert!(paused.contains("[r] resume"));
+        assert!(!paused.contains("[p] pause"));
     }
 
     #[test]
@@ -3196,6 +4337,7 @@ mod tests {
             question: "What should I run first?".to_string(),
             answer: None,
             running: true,
+            abort_requested: false,
             error: None,
         });
         app.shell_view = ShellView::AgentChat;
@@ -3205,9 +4347,108 @@ mod tests {
 
         assert!(rendered.contains("AGENT"));
         assert!(rendered.contains("running"));
+        assert!(rendered.contains("mode:agent"));
         assert!(rendered.contains("agent: active"));
         assert!(rendered.contains("kuzushi/agent>"));
         assert!(!rendered.contains("┌"));
+    }
+
+    #[test]
+    fn renders_honest_abort_requested_states() {
+        let backend = TestBackend::new(96, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(
+            V2Config {
+                model: Some("openai:gpt-4.1".to_string()),
+                ..V2Config::default()
+            },
+            None,
+        );
+        app.shell_view = ShellView::AgentChat;
+        app.agent_chat = Some(crate::app::AgentChatView {
+            question: "What changed?".to_string(),
+            answer: None,
+            running: true,
+            abort_requested: true,
+            error: None,
+        });
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let agent_rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(agent_rendered.contains("abort requested"));
+        assert!(agent_rendered.contains("Process kill is not confirmed"));
+        assert!(!agent_rendered.contains("killed"));
+
+        let backend = TestBackend::new(96, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        app.shell_view = ShellView::ModuleRun;
+        app.agent_chat = None;
+        app.scan = Some(crate::app::ScanPanelState {
+            run_id: Some("run-1".to_string()),
+            target: std::path::PathBuf::from("."),
+            stage: "abort requested".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: true,
+            error: None,
+        });
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let scan_rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(scan_rendered.contains("abort requested"));
+        assert!(scan_rendered.contains("waiting for subprocess"));
+        assert!(!scan_rendered.contains("killed"));
+    }
+
+    #[test]
+    fn renders_shell_module_plan_and_run_routing_modes() {
+        let cases = [
+            {
+                let app = ShellApp::new(V2Config::default(), None);
+                (app, "mode:shell", "kuzushi>")
+            },
+            {
+                let mut app = ShellApp::new(V2Config::default(), None);
+                app.focused_module = Some("sast".to_string());
+                app.shell_view = ShellView::Module;
+                (app, "mode:module", "kuzushi/sast>")
+            },
+            {
+                let mut app = ShellApp::new(V2Config::default(), None);
+                app.set_pending_plan(crate::app::PlanProposal {
+                    goal: "tighten SAST options".to_string(),
+                    summary: "set scanner controls".to_string(),
+                    changes: Vec::new(),
+                    unsupported: Vec::new(),
+                });
+                (app, "mode:plan", "kuzushi/plan>")
+            },
+            {
+                let mut app = ShellApp::new(V2Config::default(), None);
+                app.scan = Some(crate::app::ScanPanelState {
+                    run_id: Some("run-1".to_string()),
+                    target: std::path::PathBuf::from("."),
+                    stage: "running semgrep".to_string(),
+                    findings_count: 0,
+                    running: true,
+                    abort_requested: false,
+                    error: None,
+                });
+                app.shell_view = ShellView::ModuleRun;
+                (app, "mode:run", "kuzushi/run>")
+            },
+        ];
+
+        for (app, mode, prompt) in cases {
+            let backend = TestBackend::new(96, 24);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|frame| render_app(frame, &app)).unwrap();
+            let rendered = format!("{:?}", terminal.backend().buffer());
+
+            assert!(rendered.contains(mode), "missing {mode} in {rendered}");
+            assert!(rendered.contains(prompt), "missing {prompt} in {rendered}");
+            assert!(!rendered.contains("┌"));
+        }
     }
 
     #[test]
@@ -3260,7 +4501,19 @@ mod tests {
         }
     }
 
+    fn buffer_row_text(buffer: &Buffer, width: u16, y: u16) -> String {
+        let mut text = String::new();
+        for x in 0..width {
+            text.push_str(buffer[(x, y)].symbol());
+        }
+        text
+    }
+
     fn assert_strict_plain_80(rendered: &str) {
+        assert_strict_plain_width(rendered, 80);
+    }
+
+    fn assert_strict_plain_width(rendered: &str, width: usize) {
         assert!(
             !rendered.contains('\u{1b}'),
             "plain output contained ANSI escape: {rendered:?}"
@@ -3273,8 +4526,8 @@ mod tests {
         );
         for line in rendered.lines() {
             assert!(
-                line.chars().count() <= 80,
-                "plain line exceeded 80 columns: {line:?}"
+                line.chars().count() <= width,
+                "plain line exceeded {width} columns: {line:?}"
             );
         }
     }

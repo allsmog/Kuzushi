@@ -991,7 +991,7 @@ export function registerReportWorker(
     const detail = `${event.payload.totalCostUsd.toFixed(4)} spent against ${event.payload.budgetUsd.toFixed(4)}`;
     if (store) {
       // O7: flip the cost-cap halt state so the CostCapHalt card actually
-      // renders. The UI card, key bindings (c/a in App.tsx), and store
+      // renders. The UI card, key bindings (c/a in the shell), and store
       // field already exist; the missing piece was a subscriber to
       // `budget:exceeded` that toggled `costCapHalted = true`.
       store.batch(() => {

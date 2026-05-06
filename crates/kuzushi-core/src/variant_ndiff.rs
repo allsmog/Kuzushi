@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -8,9 +8,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
-use crate::findings::{Finding, Severity, TriageVerdict};
+use crate::findings::{Finding, Severity, StaticProofState, TriageVerdict};
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime};
+use crate::static_evidence::{StaticEvidenceNode, StaticEvidenceStore};
 
 const DEFAULT_VENDOR_PATHS: &[&str] = &[
     "node_modules",
@@ -79,6 +80,125 @@ struct PersistedRun {
     findings_db: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WhiteboxVariantSearchReport {
+    pub count: usize,
+    pub patterns: Vec<WhiteboxVariantPattern>,
+    pub variants: Vec<Finding>,
+    pub deterministic: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WhiteboxVariantPattern {
+    pub original_fingerprint: String,
+    pub rule_id: String,
+    pub file_path: String,
+    pub start_line: u32,
+    pub source_tokens: Vec<String>,
+    pub sink_tokens: Vec<String>,
+    pub missing_guard_tokens: Vec<String>,
+    pub keywords: Vec<String>,
+    pub description: String,
+}
+
+pub fn hunt_whitebox_static_variants(
+    repo_root: impl AsRef<Path>,
+    findings: &[Finding],
+    evidence_store: Option<&StaticEvidenceStore>,
+    max_variants: usize,
+) -> Result<WhiteboxVariantSearchReport> {
+    let repo_root = repo_root.as_ref();
+    let patterns = derive_whitebox_variant_patterns(findings, evidence_store)?;
+    let mut variants_by_key = BTreeMap::new();
+    if max_variants == 0 {
+        return Ok(WhiteboxVariantSearchReport {
+            count: 0,
+            patterns,
+            variants: Vec::new(),
+            deterministic: true,
+        });
+    }
+
+    let source_files = collect_variant_source_files(repo_root)?;
+    for pattern in &patterns {
+        for source_file in &source_files {
+            let Some(relative_path) = repo_relative_path(repo_root, source_file) else {
+                continue;
+            };
+            let text = match fs::read_to_string(source_file) {
+                Ok(text) => text,
+                Err(_) => continue,
+            };
+            for (line_index, line) in text.lines().enumerate() {
+                let line_no = u32::try_from(line_index + 1).unwrap_or(u32::MAX);
+                if relative_path == pattern.file_path && line_no == pattern.start_line {
+                    continue;
+                }
+                let window = line_window(&text, line_index, 2);
+                let Some(candidate) = variant_candidate_from_window(
+                    repo_root,
+                    pattern,
+                    &relative_path,
+                    line_no,
+                    &window,
+                    line,
+                ) else {
+                    continue;
+                };
+                variants_by_key
+                    .entry(candidate.fingerprint.clone())
+                    .or_insert(candidate);
+                if variants_by_key.len() >= max_variants {
+                    break;
+                }
+            }
+            if variants_by_key.len() >= max_variants {
+                break;
+            }
+        }
+        if variants_by_key.len() >= max_variants {
+            break;
+        }
+    }
+
+    let variants = variants_by_key.into_values().collect::<Vec<_>>();
+    Ok(WhiteboxVariantSearchReport {
+        count: variants.len(),
+        patterns,
+        variants,
+        deterministic: true,
+    })
+}
+
+pub fn derive_whitebox_variant_patterns(
+    findings: &[Finding],
+    evidence_store: Option<&StaticEvidenceStore>,
+) -> Result<Vec<WhiteboxVariantPattern>> {
+    let mut patterns = Vec::new();
+    for finding in findings
+        .iter()
+        .filter(|finding| finding.static_proof_state == Some(StaticProofState::StaticallyConfirmed))
+    {
+        let evidence_nodes = match evidence_store {
+            Some(store) => store.list_nodes_for_finding(&finding.fingerprint)?,
+            None => Vec::new(),
+        };
+        if let Some(pattern) = derive_whitebox_variant_pattern(finding, &evidence_nodes) {
+            patterns.push(pattern);
+        }
+    }
+    patterns.sort_by(|left, right| {
+        left.file_path
+            .cmp(&right.file_path)
+            .then_with(|| left.start_line.cmp(&right.start_line))
+            .then_with(|| left.rule_id.cmp(&right.rule_id))
+            .then_with(|| left.original_fingerprint.cmp(&right.original_fingerprint))
+    });
+    Ok(patterns)
+}
+
 pub fn run_variant_lift_pattern(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
@@ -112,12 +232,12 @@ pub fn run_variant_lift_pattern(
     let runtime = require_runtime("variant:lift-pattern", runtime)?;
     let model = require_model("variant:lift-pattern", &input, ctx)?;
     let prompt = build_variant_lift_prompt(&finding);
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: workspace.root().to_path_buf(),
-        system_prompt: VARIANT_SIGNATURE_SYSTEM_PROMPT.to_string(),
+        workspace.root().to_path_buf(),
+        VARIANT_SIGNATURE_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
     let signature = parse_agent_response("variant:lift-pattern", response)?;
     let object = signature
         .as_object()
@@ -223,12 +343,12 @@ pub fn run_variant_hunt(
         .unwrap_or(true);
     let vendor_paths = vendor_paths_from_input(&input);
     let prompt = build_variant_hunt_prompt(&finding, include_vendored, &vendor_paths);
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: target.clone(),
-        system_prompt: VARIANT_HUNT_SYSTEM_PROMPT.to_string(),
+        target.clone(),
+        VARIANT_HUNT_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
     let raw = parse_agent_response("variant:hunt", response)?;
     let repo_name = repo_name(&target);
     let findings = normalize_variant_findings(raw, &target, &repo_name, &finding, max_findings)?;
@@ -383,12 +503,12 @@ pub fn run_ndiff_extract_fix_pattern(
     let target = resolve_tool_target(&input, ctx)
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let prompt = build_ndiff_fix_pattern_prompt(record.as_ref(), &patch_text);
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: target,
-        system_prompt: NDIFF_FIX_PATTERN_SYSTEM_PROMPT.to_string(),
+        target,
+        NDIFF_FIX_PATTERN_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
     let pattern = parse_agent_response("ndiff:extract-fix-pattern", response)?;
     let object = pattern
         .as_object()
@@ -477,12 +597,12 @@ pub fn run_ndiff_hunt_variants(
         .unwrap_or("unknown")
         .to_string();
     let prompt = build_ndiff_hunt_prompt(&pattern, &advisory_id, include_vendored);
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: target.clone(),
-        system_prompt: NDIFF_HUNT_SYSTEM_PROMPT.to_string(),
+        target.clone(),
+        NDIFF_HUNT_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
     let raw = parse_agent_response("ndiff:hunt-variants", response)?;
     let repo_name = repo_name(&target);
     let findings = normalize_ndiff_findings(raw, &repo_name, &advisory_id, &pattern, max_findings)?;
@@ -801,6 +921,235 @@ fn normalize_ndiff_findings(
         }
     }
     Ok(findings)
+}
+
+fn derive_whitebox_variant_pattern(
+    finding: &Finding,
+    evidence_nodes: &[StaticEvidenceNode],
+) -> Option<WhiteboxVariantPattern> {
+    let corpus = variant_pattern_corpus(finding, evidence_nodes);
+    let source_tokens = matching_tokens(&corpus, WHITEBOX_SOURCE_TOKENS);
+    let sink_tokens = matching_tokens(&corpus, WHITEBOX_SINK_TOKENS);
+    if source_tokens.is_empty() || sink_tokens.is_empty() {
+        return None;
+    }
+
+    let mut keywords = BTreeSet::new();
+    keywords.extend(source_tokens.iter().cloned());
+    keywords.extend(sink_tokens.iter().cloned());
+    for token in finding
+        .rule_id
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .map(str::trim)
+        .filter(|token| token.len() >= 4)
+        .take(4)
+    {
+        keywords.insert(token.to_ascii_lowercase());
+    }
+
+    Some(WhiteboxVariantPattern {
+        original_fingerprint: finding.fingerprint.clone(),
+        rule_id: finding.rule_id.clone(),
+        file_path: finding.file_path.clone(),
+        start_line: finding.start_line,
+        source_tokens: source_tokens.clone(),
+        sink_tokens: sink_tokens.clone(),
+        missing_guard_tokens: WHITEBOX_GUARD_TOKENS
+            .iter()
+            .map(|token| (*token).to_string())
+            .collect(),
+        keywords: keywords.into_iter().collect(),
+        description: format!(
+            "Find sibling code where {} reaches {} without an obvious sanitizer or guard.",
+            source_tokens.join(" or "),
+            sink_tokens.join(" or ")
+        ),
+    })
+}
+
+fn variant_candidate_from_window(
+    repo_root: &Path,
+    pattern: &WhiteboxVariantPattern,
+    relative_path: &str,
+    line_no: u32,
+    window: &str,
+    line: &str,
+) -> Option<Finding> {
+    let lower = window.to_ascii_lowercase();
+    let matched_sources = tokens_present(&lower, &pattern.source_tokens);
+    let matched_sinks = tokens_present(&lower, &pattern.sink_tokens);
+    if matched_sources.is_empty() || matched_sinks.is_empty() {
+        return None;
+    }
+    let line_lower = line.to_ascii_lowercase();
+    if tokens_present(&line_lower, &pattern.sink_tokens).is_empty() {
+        return None;
+    }
+    let matched_guards = tokens_present(&lower, &pattern.missing_guard_tokens);
+    if !matched_guards.is_empty() {
+        return None;
+    }
+
+    let repo = repo_name(repo_root);
+    let mut finding = Finding::new_tool(
+        "whitebox-variant-search",
+        format!("whitebox-variant/{}", pattern.rule_id),
+        relative_path.to_string(),
+        line_no,
+        Some(line_no),
+        Severity::Medium,
+        format!(
+            "Static variant candidate of {}. Matched source token(s) {} and sink token(s) {} without obvious guard token(s). Proof starts as code_cited and requires independent validation.\nEvidence: {}",
+            pattern.rule_id,
+            matched_sources.join(", "),
+            matched_sinks.join(", "),
+            line.trim()
+        ),
+    )
+    .with_static_proof_state(StaticProofState::CodeCited);
+    finding.fingerprint = stable_fingerprint(&[
+        &repo,
+        "whitebox-variant-search",
+        &pattern.original_fingerprint,
+        relative_path,
+        &line_no.to_string(),
+    ]);
+    Some(finding)
+}
+
+fn variant_pattern_corpus(finding: &Finding, evidence_nodes: &[StaticEvidenceNode]) -> String {
+    let mut parts = vec![
+        finding.rule_id.as_str(),
+        finding.title.as_str(),
+        finding.message.as_str(),
+        finding.file_path.as_str(),
+    ];
+    let metadata = evidence_nodes
+        .iter()
+        .map(|node| node.metadata.to_string())
+        .collect::<Vec<_>>();
+    for node in evidence_nodes {
+        parts.push(node.title.as_str());
+        parts.push(node.body.as_str());
+        if let Some(source_path) = node.source_path.as_deref() {
+            parts.push(source_path);
+        }
+    }
+    for item in &metadata {
+        parts.push(item.as_str());
+    }
+    parts.join("\n").to_ascii_lowercase()
+}
+
+fn matching_tokens(corpus: &str, candidates: &[&str]) -> Vec<String> {
+    candidates
+        .iter()
+        .filter(|token| corpus.contains(&token.to_ascii_lowercase()))
+        .map(|token| (*token).to_string())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn tokens_present(corpus: &str, tokens: &[String]) -> Vec<String> {
+    tokens
+        .iter()
+        .filter(|token| corpus.contains(&token.to_ascii_lowercase()))
+        .cloned()
+        .collect()
+}
+
+fn collect_variant_source_files(repo_root: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    collect_variant_source_files_inner(repo_root, repo_root, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn collect_variant_source_files_inner(
+    repo_root: &Path,
+    dir: &Path,
+    files: &mut Vec<PathBuf>,
+) -> Result<()> {
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        return Ok(());
+    };
+    let mut entries = read_dir.filter_map(|entry| entry.ok()).collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.path());
+    for entry in entries {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let name = entry.file_name().to_string_lossy().to_string();
+        if file_type.is_dir() {
+            if ignored_variant_dir(&name) {
+                continue;
+            }
+            collect_variant_source_files_inner(repo_root, &path, files)?;
+            continue;
+        }
+        if file_type.is_file()
+            && is_variant_source_file(&path)
+            && repo_relative_path(repo_root, &path).is_some()
+        {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn repo_relative_path(repo_root: &Path, path: &Path) -> Option<String> {
+    path.strip_prefix(repo_root).ok().map(|relative| {
+        relative
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/")
+    })
+}
+
+fn is_variant_source_file(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some(
+            "js" | "jsx"
+                | "ts"
+                | "tsx"
+                | "mjs"
+                | "cjs"
+                | "py"
+                | "go"
+                | "rs"
+                | "java"
+                | "kt"
+                | "rb"
+                | "php"
+                | "c"
+                | "cc"
+                | "cpp"
+                | "h"
+                | "hpp"
+        )
+    )
+}
+
+fn ignored_variant_dir(name: &str) -> bool {
+    name.starts_with('.')
+        || DEFAULT_VENDOR_PATHS
+            .iter()
+            .any(|ignored| ignored.eq_ignore_ascii_case(name))
+        || matches!(
+            name,
+            "target" | "dist" | "build" | "coverage" | "__pycache__"
+        )
+}
+
+fn line_window(text: &str, center_line_index: usize, radius: usize) -> String {
+    let lines = text.lines().collect::<Vec<_>>();
+    let start = center_line_index.saturating_sub(radius);
+    let end = (center_line_index + radius + 1).min(lines.len());
+    lines[start..end].join("\n")
 }
 
 fn variants_array(raw: Value) -> Vec<Value> {
@@ -1428,6 +1777,50 @@ fn shell_escape_url(value: &str) -> String {
     value.trim().replace(' ', "%20")
 }
 
+const WHITEBOX_SOURCE_TOKENS: &[&str] = &[
+    "req.query",
+    "req.body",
+    "req.params",
+    "req.headers",
+    "request.args",
+    "request.form",
+    "request.json",
+    "process.argv",
+    "argv",
+    "urlsearchparams",
+    "input",
+];
+
+const WHITEBOX_SINK_TOKENS: &[&str] = &[
+    "db.query",
+    ".query(",
+    "execute(",
+    "exec(",
+    "spawn(",
+    "eval(",
+    "res.send",
+    "innerhtml",
+    "deserialize",
+    "render(",
+];
+
+const WHITEBOX_GUARD_TOKENS: &[&str] = &[
+    "sanitize",
+    "sanitise",
+    "escape",
+    "validate",
+    "validator",
+    "allowlist",
+    "allow_list",
+    "parameterized",
+    "parametrize",
+    "prepare(",
+    "preparedstatement",
+    "dompurify",
+    "zod",
+    "joi",
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1568,6 +1961,109 @@ mod tests {
             .unwrap();
         store.complete_scan_run(run_id, "completed", 1).unwrap();
         (temp, workspace, store, fingerprint)
+    }
+
+    #[test]
+    fn whitebox_variants_derive_pattern_from_confirmed_evidence_and_find_siblings() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/users.ts"),
+            "app.get('/users', (req, res) => {\n  const q = req.query.q;\n  return db.query(`select * from users where name = ${q}`);\n});\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/admin.ts"),
+            "app.get('/admin', (req, res) => {\n  const q = req.query.q;\n  return db.query(`select * from admins where name = ${q}`);\n});\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/safe.ts"),
+            "app.get('/safe', (req, res) => {\n  const q = sanitize(req.query.q);\n  return db.query(`select * from safe where name = ${q}`);\n});\n",
+        )
+        .unwrap();
+        let finding = Finding::new_tool(
+            "agentic-sast",
+            "js/sql-injection",
+            "src/users.ts",
+            3,
+            Some(3),
+            Severity::High,
+            "req.query reaches db.query without sanitizer",
+        )
+        .with_static_proof_state(StaticProofState::StaticallyConfirmed);
+        let store = StaticEvidenceStore::open_in_memory().unwrap();
+        let evidence = StaticEvidenceNode::new(
+            crate::static_evidence::StaticEvidenceNodeKind::CodeSpan,
+            "confirmed SQL flow",
+            "const q = req.query.q;\nreturn db.query(`select * from users where name = ${q}`);",
+        )
+        .with_finding_fingerprint(finding.fingerprint.clone())
+        .with_source_span("src/users.ts", 2, Some(3));
+        store.upsert_node(&evidence).unwrap();
+
+        let report =
+            hunt_whitebox_static_variants(temp.path(), &[finding], Some(&store), 10).unwrap();
+
+        assert_eq!(report.patterns.len(), 1);
+        assert_eq!(report.patterns[0].source_tokens, vec!["req.query"]);
+        assert!(report.patterns[0]
+            .sink_tokens
+            .contains(&"db.query".to_string()));
+        assert_eq!(report.count, 1);
+        let variant = &report.variants[0];
+        assert_eq!(variant.tool, "whitebox-variant-search");
+        assert_eq!(variant.file_path, "src/admin.ts");
+        assert_eq!(
+            variant.static_proof_state,
+            Some(StaticProofState::CodeCited)
+        );
+        assert_ne!(
+            variant.static_proof_state,
+            Some(StaticProofState::StaticallyConfirmed)
+        );
+        assert!(variant.message.contains("requires independent validation"));
+    }
+
+    #[test]
+    fn whitebox_variants_ignore_non_confirmed_and_guarded_candidates() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/source.ts"),
+            "const q = req.query.q;\nreturn db.query(q);\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/sibling.ts"),
+            "const q = validate(req.query.q);\nreturn db.query(q);\n",
+        )
+        .unwrap();
+        let unconfirmed = Finding::new_tool(
+            "semgrep",
+            "js/sql-injection",
+            "src/source.ts",
+            2,
+            Some(2),
+            Severity::High,
+            "req.query reaches db.query",
+        )
+        .with_static_proof_state(StaticProofState::SourceSinkLinked);
+        let confirmed = unconfirmed
+            .clone()
+            .with_static_proof_state(StaticProofState::StaticallyConfirmed);
+
+        let no_patterns =
+            derive_whitebox_variant_patterns(&[unconfirmed], None).expect("pattern derivation");
+        assert!(no_patterns.is_empty());
+
+        let report = hunt_whitebox_static_variants(temp.path(), &[confirmed], None, 10).unwrap();
+
+        assert_eq!(report.count, 0);
+        assert!(report
+            .patterns
+            .iter()
+            .all(|pattern| pattern.original_fingerprint != ""));
     }
 
     #[test]

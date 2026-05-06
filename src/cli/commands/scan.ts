@@ -3,7 +3,10 @@ import { loadConfig } from "../../config.js";
 import { looksLikeMonorepo } from "../../discovery/repo-discovery.js";
 import { getGlobalLogLevel } from "../../logger.js";
 import type { KuzushiConfig } from "../../types.js";
+import { attachCiStream } from "../../ui/ci-stream.js";
 import { configureTerminalOutput, resetTerminalOutput } from "../../ui/output.js";
+import { registerPlainTextRenderer } from "../../ui/plain-renderer.js";
+import { createUIStore } from "../../ui/state.js";
 import { CliUsageError } from "../errors.js";
 import { applyScanCommandConfigOverrides, type ScanCommandOptions } from "../scan-config.js";
 import { resolveRepo } from "../shared.js";
@@ -32,11 +35,10 @@ export interface MonorepoExecutionDecision {
 }
 
 export async function runScanCommand(repoPath: string, opts: ScanCommandOptions): Promise<void> {
-  // Initialize the renderer before preflight so one session owns the entire run.
-  // `--ci` swaps the Ink app for the machine-readable stream formatter.
-  const { createUIRenderer } = await import("../../ui/render.js");
-  const renderer = await createUIRenderer({ ci: Boolean(opts.ci) });
-  const { store: uiStore, cleanup: cleanupUI } = renderer;
+  // The Rust CLI owns the interactive TUI. The retained TypeScript scan path
+  // keeps only a line-oriented UIStore sink for migration/reference commands.
+  const uiStore = createUIStore();
+  const cleanupUI = opts.ci ? attachCiStream(uiStore) : registerPlainTextRenderer(uiStore);
   configureTerminalOutput({
     store: uiStore,
     verbose: getGlobalLogLevel() === "debug",
@@ -54,86 +56,13 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
     console.log(`Scope: ${repoRoot} (git repo: ${gitRoot})`);
   }
 
-  // Interactive setup flow (skip for --resume)
-  if (!opts.resume && process.stdout.isTTY) {
-    const { isFirstRun, runSetupWizard, runConfigConfirmation } = await import("../../ui/setup.js");
-
-    if (isFirstRun(repoRoot)) {
-      // First-time user: show setup wizard
-      const outcome = await runSetupWizard(uiStore, repoName, repoRoot);
-      if (outcome.action === "cancel") {
-        resetTerminalOutput();
-        cleanupUI();
-        return;
-      }
-      // Apply wizard selections as CLI overrides
-      if (outcome.preset && !opts.preset) {
-        opts.preset = outcome.preset;
-      }
-      if (outcome.model && !opts.model) {
-        opts.model = outcome.model;
-      }
-    } else if (opts.confirmConfig === true) {
-      // Returning user: only show config confirmation when explicitly requested.
-      const resolvedConfig = loadConfig(repoRoot, {
-        trustProjectConfig: opts.trustRepoConfig === true,
-      });
-      const outcome = await runConfigConfirmation(
-        uiStore,
-        {
-          model: resolvedConfig.model,
-          tasks: resolvedConfig.tasks,
-          severity: resolvedConfig.severity,
-          concurrency: resolvedConfig.triageConcurrency,
-          verify: resolvedConfig.verify,
-          pocHarness: resolvedConfig.pocHarness,
-          budget: resolvedConfig.costBudgetUsd,
-        },
-        repoName,
-        repoRoot,
-      );
-      if (outcome.action === "cancel") {
-        resetTerminalOutput();
-        cleanupUI();
-        return;
-      }
-    }
-  }
-
-  // Operator context intake is opt-in so the default TTY scan path gets to value quickly.
   if (
     !opts.resume &&
-    process.stdout.isTTY &&
-    (opts.reviewContext === true || opts.reviewThreatModel === true)
+    (opts.confirmConfig === true || opts.reviewContext === true || opts.reviewThreatModel === true)
   ) {
-    const { loadOperatorScanContext } = await import("../../operator-context.js");
-    const { loadPersistentThreatModel } = await import("../../threat-model-renderer.js");
-    const { runContextIntake, runThreatModelEditor } = await import("../../ui/setup.js");
-
-    const existingContext = loadOperatorScanContext(repoRoot);
-    if (opts.reviewContext === true && existingContext) {
-      const intakeOutcome = await runContextIntake(uiStore, existingContext, repoName, repoRoot);
-      if (intakeOutcome.action === "cancel") {
-        resetTerminalOutput();
-        cleanupUI();
-        return;
-      }
-    }
-
-    const existingThreatModel = loadPersistentThreatModel(repoRoot);
-    if (opts.reviewThreatModel === true && existingThreatModel) {
-      const tmOutcome = await runThreatModelEditor(
-        uiStore,
-        existingThreatModel,
-        repoName,
-        repoRoot,
-      );
-      if (tmOutcome.action === "cancel") {
-        resetTerminalOutput();
-        cleanupUI();
-        return;
-      }
-    }
+    console.warn(
+      "TypeScript interactive scan preflight was removed with the Ink TUI. Use the Rust shell for config, context, and threat-model review.",
+    );
   }
 
   const modeConfig = applyScanCommandConfigOverrides(
@@ -167,62 +96,6 @@ export async function runScanCommand(repoPath: string, opts: ScanCommandOptions)
 
   const { config, scanOpts } = prepareScanExecution(repoRoot, opts);
   ensureCodeExecutionOptIn(config, opts);
-
-  // Interactive credential prompt when no credentials are detected for the
-  // default provider. pi-ai resolves creds from env vars, so setting the
-  // right env var per provider is sufficient for the scan run.
-  if (!opts.resume && process.stdout.isTTY) {
-    const { hasAnyProviderCredentials, runCredentialPrompt } = await import("../../ui/setup.js");
-    if (!hasAnyProviderCredentials()) {
-      const { providerEnvVar, providerBaseUrlEnvVar } = await import("../../config.js");
-      const credOutcome = await runCredentialPrompt(uiStore);
-      if (credOutcome.action === "cancel") {
-        resetTerminalOutput();
-        cleanupUI();
-        return;
-      }
-
-      const choice = credOutcome.choice;
-
-      if (choice.kind === "api-key") {
-        config.agentRuntimeConfig = {
-          ...(config.agentRuntimeConfig ?? {}),
-          apiKey: choice.value,
-          ...(choice.baseUrl ? { baseUrl: choice.baseUrl } : {}),
-        };
-        const envKey = providerEnvVar(choice.providerId);
-        if (envKey) process.env[envKey] = choice.value;
-        if (choice.baseUrl) {
-          const envUrl = providerBaseUrlEnvVar(choice.providerId);
-          if (envUrl) process.env[envUrl] = choice.baseUrl;
-        }
-      } else if (choice.kind === "base-url") {
-        // Local/proxy providers (Ollama, OpenRouter, etc.)
-        config.agentRuntimeConfig = {
-          ...(config.agentRuntimeConfig ?? {}),
-          baseUrl: choice.baseUrl,
-          ...(choice.apiKey ? { apiKey: choice.apiKey } : {}),
-        };
-        const envUrl = providerBaseUrlEnvVar(choice.providerId);
-        if (envUrl) process.env[envUrl] = choice.baseUrl;
-        if (choice.apiKey) {
-          const envKey = providerEnvVar(choice.providerId);
-          if (envKey) process.env[envKey] = choice.apiKey;
-        }
-      } else if (choice.kind === "oauth-anthropic") {
-        const { loginAnthropicAndPersist } = await import("../../oauth-flow.js");
-        const result = await loginAnthropicAndPersist();
-        config.agentRuntimeConfig = {
-          ...(config.agentRuntimeConfig ?? {}),
-          authToken: result.accessToken,
-        };
-      } else if (choice.kind === "oauth-openai-codex") {
-        const { loginOpenAICodexAndPersist } = await import("../../oauth-flow.js");
-        await loginOpenAICodexAndPersist();
-      }
-      // "inherited" — no changes needed, we rely on ambient env vars
-    }
-  }
 
   if (opts.dryRun || opts.showPlan) {
     const { taskIds, taskSummary, dynamicSelectionActive } = getScanPlanSummary(config, scanOpts);
