@@ -121,19 +121,18 @@ fn seed_finding_matching_oracle(slice: &Path, oracle: &Value) {
     let raw_file = entry["file"].as_str().unwrap();
     // For directory-level oracles, drop the finding into the
     // placeholder file we created.
-    let (file, line) = if raw_file.ends_with('/')
-        || (!raw_file.contains('.') && !raw_file.is_empty())
-    {
-        (
-            format!("{}/placeholder.c", raw_file.trim_end_matches('/')),
-            1u32,
-        )
-    } else {
-        (
-            raw_file.to_string(),
-            entry["line_start"].as_u64().unwrap_or(1) as u32,
-        )
-    };
+    let (file, line) =
+        if raw_file.ends_with('/') || (!raw_file.contains('.') && !raw_file.is_empty()) {
+            (
+                format!("{}/placeholder.c", raw_file.trim_end_matches('/')),
+                1u32,
+            )
+        } else {
+            (
+                raw_file.to_string(),
+                entry["line_start"].as_u64().unwrap_or(1) as u32,
+            )
+        };
     let oracle_cwes: Vec<String> = entry["cwe"]
         .as_array()
         .map(|arr| {

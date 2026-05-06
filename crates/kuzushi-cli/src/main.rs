@@ -49,6 +49,19 @@ enum Command {
         /// Emit one line per pipeline event in a deterministic, grep-friendly format.
         #[arg(long, conflicts_with = "json")]
         ci: bool,
+        /// Per-operation USD budget caps, e.g. `triage=50,deep-audit=200,full-mode-multi=300`.
+        /// Caps are persisted to the spend ledger and enforced before each LLM call
+        /// once the runtime is wired through (Phase 4+). Set without value to clear all caps.
+        #[arg(long)]
+        budget: Option<String>,
+        /// Diff-scope the scan to files changed since `<ref>`. Engines that
+        /// support it (full-mode-multi today) narrow their walk; others are
+        /// unaffected. Pass `--include-worktree` to include uncommitted edits.
+        #[arg(long)]
+        since: Option<String>,
+        /// When `--since` is set, also include uncommitted (working-tree) changes.
+        #[arg(long, requires = "since")]
+        include_worktree: bool,
     },
     /// List persisted findings.
     Findings {
@@ -64,6 +77,10 @@ enum Command {
         name: Option<String>,
         #[arg(long = "file-path")]
         file_path: Option<String>,
+        /// Filter by discovery channel: sarif, ainalysis, ainalysis-multi,
+        /// diff-analyzer, infer, fuzzing. Comma- or repeat-separated.
+        #[arg(long = "vuln-source", value_delimiter = ',')]
+        vuln_source: Vec<String>,
         #[arg(long)]
         json: bool,
     },
@@ -71,6 +88,11 @@ enum Command {
     Config {
         #[command(subcommand)]
         command: ConfigCommand,
+    },
+    /// Diagnostic + credential subcommands.
+    Auth {
+        #[command(subcommand)]
+        command: AuthCommand,
     },
     /// List native modules.
     Modules {
@@ -94,6 +116,11 @@ enum Command {
         tool: String,
         #[arg(long, default_value = "{}")]
         input: String,
+    },
+    /// Run a local MCP server (joern, clang, or gtags) over stdio.
+    Mcp {
+        #[command(subcommand)]
+        command: McpCommand,
     },
     /// Render a markdown PR comment summarising persisted findings.
     PrComment {
@@ -132,6 +159,38 @@ impl ScanModeArg {
 }
 
 #[derive(Debug, Subcommand)]
+enum McpCommand {
+    /// Run an MCP server over stdio. Speaks JSON-RPC 2.0 newline-delimited.
+    Serve {
+        /// Which backend to serve.
+        #[arg(value_enum)]
+        backend: McpBackend,
+    },
+    /// Print a JSON health summary for the chosen backend (no MCP loop).
+    Health {
+        #[arg(value_enum)]
+        backend: McpBackend,
+    },
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum McpBackend {
+    Gtags,
+    Clang,
+    Joern,
+}
+
+impl McpBackend {
+    fn binary(self) -> &'static str {
+        match self {
+            Self::Gtags => "kuzushi-mcp-gtags",
+            Self::Clang => "kuzushi-mcp-clang",
+            Self::Joern => "kuzushi-mcp-joern",
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
 enum ConfigCommand {
     /// Print the effective config.
     Show,
@@ -142,6 +201,19 @@ enum ConfigCommand {
     },
     /// Print the global config path.
     Path,
+}
+
+#[derive(Debug, Subcommand)]
+enum AuthCommand {
+    /// Round-trip a 1-token request to verify credentials, network, and bridge.
+    Ping {
+        /// Provider to ping. Default: anthropic.
+        #[arg(default_value = "anthropic")]
+        provider: String,
+        /// Model spec to use for the ping. Default: ctx.config.model or anthropic:claude-haiku-4-5.
+        #[arg(long)]
+        model: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -173,7 +245,23 @@ async fn main() -> Result<()> {
             triage,
             json,
             ci,
-        } => scan_command(target, mode, tasks, triage, json, ci).await,
+            budget,
+            since,
+            include_worktree,
+        } => {
+            scan_command(
+                target,
+                mode,
+                tasks,
+                triage,
+                json,
+                ci,
+                budget,
+                since,
+                include_worktree,
+            )
+            .await
+        }
         Command::Findings {
             target,
             limit,
@@ -181,17 +269,27 @@ async fn main() -> Result<()> {
             verdict,
             name,
             file_path,
+            vuln_source,
             json,
         } => findings_command(
             target.or(cli.target),
-            FindingListFilter::from_parts(severity, verdict, name, file_path, limit)?,
+            FindingListFilter::from_parts_full(
+                severity,
+                verdict,
+                name,
+                file_path,
+                vuln_source,
+                limit,
+            )?,
             json,
         ),
         Command::Config { command } => config_command(command, cli.target),
+        Command::Auth { command } => auth_command(command, cli.target),
         Command::Modules { json } => modules_command(json),
         Command::Tools { json } => tools_command(json),
         Command::Doctor { target, json } => doctor_command(target.or(cli.target), json),
         Command::Run { tool, input } => run_tool_command(tool, input, cli.target),
+        Command::Mcp { command } => mcp_command(command).await,
         Command::PrComment {
             target,
             repo,
@@ -233,6 +331,41 @@ fn shell_startup_progress_messages(target: Option<&Path>) -> Vec<String> {
         "kuzushi: loading config and native registry...".to_string(),
         format!("kuzushi: target {target_label}; first finding: {scan_command}, then findings"),
     ]
+}
+
+async fn mcp_command(command: McpCommand) -> Result<()> {
+    match command {
+        McpCommand::Serve { backend } => {
+            // Exec into the per-backend server binary so its stdio loop
+            // is the one talking to the MCP client. We use `exec` semantics
+            // via std::process so signals flow through cleanly.
+            let binary = backend.binary();
+            let err = std::process::Command::new(binary)
+                .args::<[&str; 0], _>([])
+                .status();
+            match err {
+                Ok(status) => std::process::exit(status.code().unwrap_or(0)),
+                Err(e) => anyhow::bail!(
+                    "could not spawn `{binary}`: {e}. Build the workspace and add the target dir to PATH (e.g. `cargo build && export PATH=$PWD/target/debug:$PATH`)"
+                ),
+            }
+        }
+        McpCommand::Health { backend } => {
+            let binary = backend.binary();
+            let output = std::process::Command::new(binary)
+                .arg("--health")
+                .output()
+                .with_context(|| {
+                    format!(
+                        "could not spawn `{binary} --health`. Build the workspace and add the target dir to PATH."
+                    )
+                })?;
+            // Print whatever the binary produced; --health emits JSON.
+            std::io::Write::write_all(&mut std::io::stdout(), &output.stdout).ok();
+            std::io::Write::write_all(&mut std::io::stderr(), &output.stderr).ok();
+            std::process::exit(output.status.code().unwrap_or(0));
+        }
+    }
 }
 
 fn pr_comment_command(
@@ -279,11 +412,57 @@ async fn scan_command(
     triage: bool,
     json: bool,
     ci: bool,
+    budget: Option<String>,
+    since: Option<String>,
+    include_worktree: bool,
 ) -> Result<()> {
     let workspace = WorkspaceTarget::new(&target)?;
     let config = load_config_for_target(Some(workspace.root()))?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let registry = ModuleRegistry::with_v2_builtins();
+
+    // Resolve --since into a list of repo-relative paths and write to
+    // `<target>/.kuzushi/v2/since.txt` for engines that support it.
+    if let Some(since_ref) = since.as_deref() {
+        let scope = kuzushi_core::git_diff_files(workspace.root(), since_ref, include_worktree)
+            .with_context(|| format!("--since {since_ref:?} failed"))?;
+        let scope_file = workspace.findings_db_path().with_file_name("since.txt");
+        let body: String = scope
+            .files
+            .iter()
+            .map(|p| format!("{}\n", p.display()))
+            .collect();
+        std::fs::write(&scope_file, body)
+            .with_context(|| format!("could not write {}", scope_file.display()))?;
+        if !json && !ci {
+            eprintln!(
+                "scope: {} files since {} {}",
+                scope.files.len(),
+                since_ref,
+                if include_worktree { "(+worktree)" } else { "" }
+            );
+        }
+    }
+
+    // Persist any --budget caps to the spend ledger before the scan starts.
+    // The actual enforcement lives in RoutedRuntime once wired (Phase 4+);
+    // here we make sure the operator's intent is recorded.
+    if let Some(spec) = budget.as_deref() {
+        let pairs = kuzushi_core::parse_budget_flag(spec)
+            .with_context(|| format!("invalid --budget spec {spec:?}"))?;
+        let limiter = kuzushi_core::SpendLimiter::open(workspace.findings_db_path())
+            .context("could not open spend ledger")?;
+        for (op, cap) in &pairs {
+            limiter
+                .set_cap(*op, *cap)
+                .with_context(|| format!("could not set cap for {}", op.as_db_str()))?;
+        }
+        if !json && !ci {
+            for (op, cap) in &pairs {
+                eprintln!("budget: {} = ${:.2}", op.as_db_str(), cap);
+            }
+        }
+    }
     let input = serde_json::json!({
         "mode": mode.as_input_value(),
         "taskMode": if tasks.is_empty() { "auto" } else { "manual" },
@@ -472,6 +651,192 @@ fn config_command(command: ConfigCommand, target: Option<PathBuf>) -> Result<()>
         }
     }
     Ok(())
+}
+
+fn auth_command(command: AuthCommand, target: Option<PathBuf>) -> Result<()> {
+    match command {
+        AuthCommand::Ping { provider, model } => auth_ping(&provider, model, target),
+    }
+}
+
+fn auth_ping(
+    provider: &str,
+    model_override: Option<String>,
+    target: Option<PathBuf>,
+) -> Result<()> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    // Step 1: config + credential probe (read-only, no network).
+    let workspace = target.as_deref().map(WorkspaceTarget::new).transpose()?;
+    let config = load_config_for_target(workspace.as_ref().map(WorkspaceTarget::root))?;
+
+    let mut all_ok = true;
+    let mut log = |ok: bool, msg: String| {
+        if ok {
+            eprintln!("  \x1b[32m✓\x1b[0m {msg}");
+        } else {
+            eprintln!("  \x1b[31m✗\x1b[0m {msg}");
+            all_ok = false;
+        }
+    };
+
+    eprintln!("[auth ping] provider = {provider}");
+
+    // OAuth + API-key checks.
+    if provider == "anthropic" {
+        if let Some(oauth_cfg) = &config.runtime.anthropic_oauth {
+            match kuzushi_openai::probe_anthropic_oauth(oauth_cfg)? {
+                kuzushi_openai::OauthReadiness::Ready { expires_at_ms } => log(
+                    true,
+                    format!(
+                        "oauth credentials ready (expires {})",
+                        format_unix_ms(expires_at_ms)
+                    ),
+                ),
+                kuzushi_openai::OauthReadiness::Expired { expires_at_ms } => log(
+                    true,
+                    format!(
+                        "oauth credentials present but expired ({}); will refresh on next call",
+                        format_unix_ms(expires_at_ms)
+                    ),
+                ),
+                kuzushi_openai::OauthReadiness::Missing { searched } => log(
+                    false,
+                    format!("oauth credentials missing at {}", searched.display()),
+                ),
+                kuzushi_openai::OauthReadiness::Invalid { searched, reason } => log(
+                    false,
+                    format!(
+                        "oauth credentials invalid at {}: {reason}",
+                        searched.display()
+                    ),
+                ),
+            }
+        } else {
+            log(
+                true,
+                "oauth not configured; will check env / api key".to_string(),
+            );
+        }
+        if std::env::var("ANTHROPIC_OAUTH_TOKEN").is_ok()
+            || std::env::var("ANTHROPIC_AUTH_TOKEN").is_ok()
+        {
+            log(
+                true,
+                "ANTHROPIC_OAUTH_TOKEN/AUTH_TOKEN env present".to_string(),
+            );
+        }
+        if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+            log(true, "ANTHROPIC_API_KEY env present".to_string());
+        }
+    }
+
+    // Step 2: bridge ping envelope.
+    let model = model_override
+        .or_else(|| config.model.clone())
+        .unwrap_or_else(|| "anthropic:claude-haiku-4-5".to_string());
+    log(true, format!("ping model = {model}"));
+
+    let bridge_command = config
+        .runtime
+        .agent_bridge_command
+        .clone()
+        .unwrap_or_else(|| {
+            vec![
+                "node".to_string(),
+                "scripts/pi-agent-core-bridge.mjs".to_string(),
+            ]
+        });
+    if bridge_command.is_empty() {
+        log(false, "bridge command is empty".to_string());
+        std::process::exit(1);
+    }
+
+    let envelope = serde_json::json!({
+        "type": "ping",
+        "model": model,
+        "apiKeyEnv": config.runtime.api_key_env,
+        "apiKey": std::env::var(&config.runtime.api_key_env).ok(),
+    });
+    let mut child = Command::new(&bridge_command[0])
+        .args(&bridge_command[1..])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("could not start bridge {}", bridge_command[0]))?;
+    {
+        let stdin = child
+            .stdin
+            .as_mut()
+            .context("could not open bridge stdin")?;
+        stdin.write_all(serde_json::to_vec(&envelope)?.as_slice())?;
+    }
+    let output = child
+        .wait_with_output()
+        .context("could not read bridge output")?;
+    let parsed: serde_json::Value = match serde_json::from_slice(&output.stdout) {
+        Ok(v) => v,
+        Err(e) => {
+            log(false, format!("bridge returned non-JSON output: {e}"));
+            eprintln!("    stdout: {}", String::from_utf8_lossy(&output.stdout));
+            eprintln!("    stderr: {}", String::from_utf8_lossy(&output.stderr));
+            std::process::exit(1);
+        }
+    };
+    if parsed.get("ok").and_then(serde_json::Value::as_bool) != Some(true) {
+        let err = parsed
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("(no error message)");
+        log(false, format!("bridge ping failed: {err}"));
+        std::process::exit(1);
+    }
+
+    let auth_mode = parsed
+        .get("auth_mode")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("?");
+    let latency_ms = parsed
+        .get("latency_ms")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let in_tok = parsed
+        .get("input_tokens")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let out_tok = parsed
+        .get("output_tokens")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let cost = parsed
+        .get("cost_usd")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0);
+    log(
+        true,
+        format!(
+            "round-trip ok via {auth_mode} ({latency_ms}ms, {in_tok}/{out_tok} tokens, ~${cost:.5})"
+        ),
+    );
+
+    if !all_ok {
+        std::process::exit(1);
+    }
+    eprintln!("\x1b[32mauth ping: OK\x1b[0m");
+    Ok(())
+}
+
+fn format_unix_ms(ms: u64) -> String {
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    let when = UNIX_EPOCH + Duration::from_millis(ms);
+    let now = SystemTime::now();
+    let delta = match when.duration_since(now) {
+        Ok(d) => format!("in {}s", d.as_secs()),
+        Err(e) => format!("{}s ago", e.duration().as_secs()),
+    };
+    format!("{ms}ms unix; {delta}")
 }
 
 fn modules_command(json: bool) -> Result<()> {
@@ -985,8 +1350,12 @@ fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Res
             || tool == "taint-iris-next:hunt"
             || tool == "triage:run"
             || tool == "verify:finding"
+            || tool == "verify:exploit"
             || tool == "patch:finding"
             || tool == "context-lite:index"
+            || tool == "full-mode:hunt"
+            || tool == "classifier-gate:score"
+            || tool == "deep-audit:run"
             || matches!(
                 tool.as_str(),
                 "sast:scan" | "semgrep:scan" | "codeql:scan" | "iac-scan:scan"
@@ -1003,6 +1372,7 @@ fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Res
             tool.starts_with("findings:")
                 || tool == "triage:run"
                 || tool == "verify:finding"
+                || tool == "verify:exploit"
                 || tool == "patch:finding"
                 || tool == "agentic-sast:scan"
                 || tool == "carlini-threat-hunt:run"
@@ -1061,6 +1431,10 @@ fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Res
             | "systems-hunt:deep-semantic-hunt"
             | "taint-iris:hunt"
             | "taint-iris-next:hunt"
+            | "full-mode:hunt"
+            | "classifier-gate:score"
+            | "deep-audit:run"
+            | "smoke:next-step"
     ) {
         Some(PiAgentCoreRuntime::from_config(
             &config,

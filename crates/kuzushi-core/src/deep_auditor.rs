@@ -344,6 +344,7 @@ fn build_triage_outcome(analysis: &VulnAnalysis, outcome: &AgentLoopOutcome) -> 
         verdict,
         confidence: analysis.confidence,
         rationale,
+        cost_usd: outcome.cost_usd,
     }
 }
 

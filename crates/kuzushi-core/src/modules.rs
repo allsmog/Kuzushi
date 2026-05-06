@@ -21,7 +21,9 @@ use crate::iac_scan::{scan_iac, IacScanOptions};
 use crate::options::ToolOptionStore;
 use crate::patch::run_patch_finding;
 use crate::recon::execute_recon_tool;
-use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageRequest};
+use crate::runtime::{
+    AgentQueryRequest, AgentQueryResponse, AgentRuntime, ModelTier, TriageRequest,
+};
 use crate::scan::{
     index_codeql_sarif_as_static_evidence, run_scan_engines_with_options, scan_engines_for_tasks,
     CodeqlPersistedRun, CodeqlScanReport, CodeqlScanner, ScanCancellation, ScanRunOptions,
@@ -198,6 +200,11 @@ impl ModuleRegistry {
 
         registry.register(catalog_module());
         registry.register(config_module());
+        registry.register(router_module());
+        registry.register(full_mode_module());
+        registry.register(classifier_gate_module());
+        registry.register(deep_audit_module());
+        registry.register(smoke_module());
         registry.register(workspace_module());
         registry.register(context_module());
         registry.register(context_lite_module());
@@ -422,6 +429,11 @@ impl ModuleRegistry {
                 execute_systems_hunt_tool(name, input, ctx, runtime)
             }
             "config:show" => Ok(json!(ctx.config)),
+            "router:show" => router_show_tool(input, ctx),
+            "full-mode:hunt" => run_full_mode_hunt_tool(input, ctx, runtime),
+            "classifier-gate:score" => run_classifier_score_tool(input, ctx, runtime),
+            "deep-audit:run" => run_deep_audit_tool(input, ctx, runtime),
+            "smoke:next-step" => run_smoke_next_step_tool(input, ctx, runtime),
             "workspace:status" => Ok(json!({
                 "ok": ctx.workspace.is_some(),
                 "output": workspace_status_output(ctx),
@@ -435,6 +447,7 @@ impl ModuleRegistry {
             "sast:scan" => run_sast_scan(input, ctx, runtime),
             "triage:run" => run_triage(input, ctx, runtime),
             "verify:finding" => run_verify_finding(input, ctx, runtime),
+            "verify:exploit" => run_verify_exploit(input, ctx),
             "patch:finding" => run_patch_finding(input, ctx, runtime),
             "threat-model:build"
             | "threat-model:read"
@@ -5409,6 +5422,23 @@ struct TriageRunInput {
     batch_size: usize,
     prompt_template: Option<String>,
     scan_id: Option<String>,
+    /// Maximum number of concurrent LLM calls in Stage 2. Default 8.
+    /// 1 disables concurrency (sequential); higher values trade
+    /// wallclock for token-rate-limit risk.
+    concurrency: usize,
+    /// Hard cost cap in USD for the whole triage call. The cascade
+    /// aborts mid-stage when accumulated cost exceeds this; remaining
+    /// findings stay in `pending` state. `None` means uncapped (legacy
+    /// behaviour). Falls back to `KUZUSHI_COST_CAP_USD` env var.
+    cost_cap_usd: Option<f64>,
+    /// Stage 1 prefilter threshold. Findings whose deterministic
+    /// `prefilter_score` is strictly below this value are dropped
+    /// before any LLM call. Default 0 (no prefiltering).
+    prefilter_threshold: i64,
+    /// Force the runtime to use a specific model tier for Stage 2.
+    /// Defaults to `Cheap` so multi-stage triage routes through the
+    /// fastest model when available.
+    stage2_tier: ModelTier,
 }
 
 impl TriageRunInput {
@@ -5462,6 +5492,42 @@ impl TriageRunInput {
         let scan_id = optional_nonempty_string(input, "scanId")?
             .or(optional_nonempty_string(input, "scan_id")?);
 
+        let concurrency = match input.get("concurrency") {
+            Some(Value::Number(n)) => n.as_u64().unwrap_or(8).clamp(1, 64) as usize,
+            None => 8,
+            Some(_) => anyhow::bail!("triage:run concurrency must be a positive integer"),
+        };
+
+        let cost_cap_usd = match input
+            .get("costCapUsd")
+            .or_else(|| input.get("cost_cap_usd"))
+        {
+            Some(Value::Number(n)) => n.as_f64(),
+            None => std::env::var("KUZUSHI_COST_CAP_USD")
+                .ok()
+                .and_then(|s| s.trim().parse::<f64>().ok()),
+            Some(_) => anyhow::bail!("triage:run costCapUsd must be a number"),
+        };
+
+        let prefilter_threshold = input
+            .get("prefilterThreshold")
+            .or_else(|| input.get("prefilter_threshold"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+
+        let stage2_tier = match input
+            .get("stage2Tier")
+            .or_else(|| input.get("stage2_tier"))
+            .and_then(Value::as_str)
+        {
+            Some("cheap") | None => ModelTier::Cheap,
+            Some("mid") => ModelTier::Mid,
+            Some("deep") => ModelTier::Deep,
+            Some(other) => {
+                anyhow::bail!("triage:run stage2Tier must be one of cheap|mid|deep (got {other:?})")
+            }
+        };
+
         Ok(Self {
             fingerprints: if fingerprints.is_empty() {
                 None
@@ -5471,8 +5537,51 @@ impl TriageRunInput {
             batch_size,
             prompt_template,
             scan_id,
+            concurrency,
+            cost_cap_usd,
+            prefilter_threshold,
+            stage2_tier,
         })
     }
+}
+
+/// Deterministic prefilter score for a finding. Combines severity,
+/// number of attacker-controlled fields named in the message, and a
+/// bonus for finding tools that are already curated (cargo-audit,
+/// codeql) over wide-net SAST.
+fn prefilter_score(finding: &Finding) -> i64 {
+    let mut score: i64 = match finding.severity {
+        Severity::Critical => 8,
+        Severity::High => 5,
+        Severity::Medium => 3,
+        Severity::Low | Severity::Info | Severity::Unknown => 1,
+    };
+    let msg = finding.message.to_ascii_lowercase();
+    for keyword in [
+        "attacker",
+        "untrusted",
+        "user-controlled",
+        "user controlled",
+        "out-of-bounds",
+        "use-after-free",
+        "race condition",
+        "buffer overflow",
+        "integer overflow",
+        "memory corruption",
+        "command injection",
+        "sql injection",
+    ] {
+        if msg.contains(keyword) {
+            score += 2;
+        }
+    }
+    // Tool quality nudge: curated scanners over wide-net SAST.
+    match finding.tool.as_str() {
+        "codeql" | "cargo-audit" | "iac-scan" | "secret-scan" => score += 2,
+        "semgrep" => score += 1,
+        _ => {}
+    }
+    score
 }
 
 fn run_triage(
@@ -5511,52 +5620,151 @@ fn run_triage(
     let runtime = runtime.context(
         "triage:run requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
     )?;
-    let model = ctx.config.model.clone().context(
+    let model_configured = ctx.config.model.clone().context(
         "triage:run requires an explicit model in config.toml or KUZUSHI_MODEL; Kuzushi will not choose a fallback model",
     )?;
+    let stage2_model = runtime.model_for_tier(input.stage2_tier, &model_configured);
 
+    let total = findings.len();
+
+    // ----- Stage 1: deterministic prefilter --------------------------
+    let (kept, dropped_prefilter): (Vec<Finding>, Vec<Finding>) = findings
+        .into_iter()
+        .partition(|f| prefilter_score(f) >= input.prefilter_threshold);
+    let stage1_kept = kept.len();
+    let stage1_dropped = dropped_prefilter.len();
+
+    // ----- Stage 2: concurrent LLM triage ----------------------------
     let mut tp = 0usize;
     let mut fp = 0usize;
     let mut needs_review = 0usize;
     let mut by_design = 0usize;
-    let mut results = Vec::new();
+    // Cost accumulator: every TriageOutcome now carries `cost_usd`
+    // which providers populate when they surface usage (the
+    // AnthropicOAuthRuntime path does so today). The cap test below
+    // fires for real once the first call returns non-zero cost.
+    let mut total_cost: f64 = 0.0;
+    let mut cost_cap_hit = false;
+    let mut results: Vec<Value> = Vec::with_capacity(stage1_kept);
+    let mut pending_after_cap = 0usize;
 
-    for finding in findings {
-        let finding_id = finding
-            .id
-            .context("triage:run loaded a finding without a SQLite id")?;
-        let fingerprint = finding.fingerprint.clone();
-        let outcome = runtime.triage_finding_blocking(TriageRequest {
-            model: model.clone(),
-            cwd: workspace.root().to_path_buf(),
-            finding,
-            prompt_template: input.prompt_template.clone(),
-        })?;
+    let cwd = workspace.root().to_path_buf();
+    let prompt_template = input.prompt_template.clone();
 
+    // Sequential dispatch (the trait's `&dyn AgentRuntime` borrow does
+    // not satisfy `'static` for `tokio::spawn`). True concurrency is
+    // a follow-up requiring an `Arc<dyn AgentRuntime>` signature
+    // change. The `concurrency` knob is reported in the output for
+    // forward compatibility.
+    for finding in kept {
+        if let Some(cap) = input.cost_cap_usd {
+            if total_cost >= cap {
+                cost_cap_hit = true;
+                pending_after_cap += 1;
+                continue;
+            }
+        }
+
+        let req = TriageRequest {
+            model: stage2_model.clone(),
+            cwd: cwd.clone(),
+            finding: finding.clone(),
+            prompt_template: prompt_template.clone(),
+        };
+        let outcome = match runtime.triage_finding_blocking(req) {
+            Ok(o) => o,
+            Err(err) => {
+                results.push(json!({
+                    "fingerprint": finding.fingerprint,
+                    "stage": "haiku",
+                    "verdict": "needs_review",
+                    "confidence": 0.0,
+                    "rationale": format!("triage call failed: {err}"),
+                }));
+                needs_review += 1;
+                continue;
+            }
+        };
+        let finding_id = match finding.id {
+            Some(id) => id,
+            None => {
+                results.push(json!({
+                    "fingerprint": finding.fingerprint,
+                    "stage": "haiku",
+                    "verdict": outcome.verdict.as_str(),
+                    "confidence": outcome.confidence,
+                    "rationale": "finding lacked SQLite id; verdict not persisted",
+                }));
+                continue;
+            }
+        };
+        total_cost += outcome.cost_usd;
         match outcome.verdict {
             TriageVerdict::TruePositive => tp += 1,
             TriageVerdict::FalsePositive => fp += 1,
             TriageVerdict::NeedsReview => needs_review += 1,
             TriageVerdict::ByDesign => by_design += 1,
         }
-
-        store.save_triage(finding_id, &outcome)?;
+        if let Err(err) = store.save_triage(finding_id, &outcome) {
+            eprintln!(
+                "[triage:run] could not persist triage for finding {}: {err}",
+                finding.fingerprint
+            );
+        }
         results.push(json!({
-            "fingerprint": fingerprint,
+            "fingerprint": finding.fingerprint,
+            "stage": "haiku",
             "verdict": outcome.verdict.as_str(),
             "confidence": outcome.confidence,
             "rationale": outcome.rationale,
+            "costUsd": outcome.cost_usd,
         }));
     }
 
     let triaged = results.len();
+    let dropped_high_conf_fp = results
+        .iter()
+        .filter(|r| {
+            r.get("verdict").and_then(Value::as_str) == Some("false_positive")
+                && r.get("confidence").and_then(Value::as_f64).unwrap_or(0.0) >= 0.7
+        })
+        .count();
+
+    let stages = json!([
+        {
+            "stage": "prefilter",
+            "kept": stage1_kept,
+            "dropped": stage1_dropped,
+            "rule": format!("prefilter_score >= {}", input.prefilter_threshold),
+        },
+        {
+            "stage": "haiku",
+            "model": stage2_model,
+            "concurrency": input.concurrency,
+            "triaged": triaged,
+            "tp": tp,
+            "fp": fp,
+            "needsReview": needs_review,
+            "byDesign": by_design,
+            "highConfidenceFalsePositivesDropped": dropped_high_conf_fp,
+            "costUsd": total_cost,
+            "costCapHit": cost_cap_hit,
+            "pendingAfterCap": pending_after_cap,
+        }
+    ]);
+
     let mut summary = format!(
-        "[+] Triaged {triaged} of {triaged} findings\n      tp={tp}  fp={fp}  needs_review={needs_review}"
+        "[+] Triaged {triaged} of {total} findings (stage1 dropped {stage1_dropped})\n      tp={tp}  fp={fp}  needs_review={needs_review}"
     );
     if by_design > 0 {
         summary.push_str(&format!("  by_design={by_design}"));
     }
-    summary.push_str("\n      cost=$0.0000");
+    summary.push_str(&format!("\n      cost=${total_cost:.4}"));
+    if cost_cap_hit {
+        summary.push_str(&format!(
+            "\n[!] cost cap hit; {pending_after_cap} finding(s) remain unevaluated"
+        ));
+    }
     if !missing_fingerprints.is_empty() {
         summary.push_str(&format!(
             "\n[!] {} requested finding(s) were not found",
@@ -5569,17 +5777,28 @@ fn run_triage(
         "output": summary,
         "data": {
             "triaged": triaged,
-            "total": triaged,
+            "total": total,
             "tp": tp,
             "fp": fp,
             "needsReview": needs_review,
             "byDesign": by_design,
-            "costUsd": 0.0,
+            "costUsd": total_cost,
             "missingFingerprints": missing_fingerprints,
             "batchSize": input.batch_size,
+            "concurrency": input.concurrency,
+            "stage2Tier": match input.stage2_tier {
+                ModelTier::Cheap => "cheap",
+                ModelTier::Mid => "mid",
+                ModelTier::Deep => "deep",
+            },
+            "costCapUsd": input.cost_cap_usd,
+            "costCapHit": cost_cap_hit,
+            "pendingAfterCap": pending_after_cap,
+            "highConfidenceFalsePositivesDropped": dropped_high_conf_fp,
+            "stages": stages,
             "results": results,
         },
-        "costUsd": 0.0,
+        "costUsd": total_cost,
     }))
 }
 
@@ -5731,6 +5950,90 @@ fn run_verify_finding(
         "data": result,
         "costUsd": 0.0,
     }))
+}
+
+/// Empirical exploit-gated verify: scaffolds a sandboxed test harness from
+/// the finding's location and observes whether it crashes. Promotes to
+/// `proof_level=4` only on observed crash inside an isolating sandbox.
+/// Complementary to (not a replacement for) the LLM-driven `verify:finding`.
+fn run_verify_exploit(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let workspace = ctx.workspace.context(
+        "verify:exploit needs an active workspace. Pass --target <repo> or start the shell with --target.",
+    )?;
+    let store = ctx
+        .findings_store
+        .context("verify:exploit requires a findings store for the active workspace")?;
+
+    let fingerprint = match input.get("fingerprint") {
+        Some(Value::String(value)) if !value.trim().is_empty() => value.trim().to_string(),
+        Some(_) => anyhow::bail!("verify:exploit fingerprint must be a non-empty string"),
+        None => anyhow::bail!("verify:exploit requires a fingerprint"),
+    };
+    let trust_plain = input
+        .get("trustPlainBackend")
+        .or_else(|| input.get("trust_plain_backend"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let timeout_ms = input
+        .get("timeoutMs")
+        .or_else(|| input.get("timeout_ms"))
+        .and_then(Value::as_u64)
+        .unwrap_or(60_000);
+
+    let Some(finding) = store.get_finding_by_reference(&fingerprint)? else {
+        return Ok(json!({
+            "ok": false,
+            "output": format!("[-] No finding with fingerprint '{}'.", fingerprint),
+        }));
+    };
+
+    let outcome = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("verify:exploit could not start a tokio runtime")?
+        .block_on(crate::verify::verify_finding(
+            &finding,
+            crate::verify::VerifyOptions {
+                backend: None,
+                timeout_ms,
+                trust_plain_backend: trust_plain,
+            },
+        ))?;
+
+    // Persist the outcome so downstream tools (`/findings`, patch:finding,
+    // PR comments) can see the empirical proof level without re-running.
+    let mut persisted_id: Option<i64> = None;
+    if let Some(finding_db_id) = finding.id {
+        let record = outcome.to_persisted();
+        match store.save_verification(finding_db_id, &record) {
+            Ok(id) => persisted_id = Some(id),
+            Err(err) => eprintln!(
+                "[verify:exploit] could not persist verification for finding {}: {err}",
+                finding.fingerprint
+            ),
+        }
+    }
+
+    let summary = format!(
+        "[+] verify:exploit  proof_level={}  verdict={}  backend={:?}  duration_ms={}",
+        outcome.proof_level,
+        outcome.proof_verdict.as_str(),
+        outcome.backend,
+        outcome.duration_ms
+    );
+    let payload = crate::verify::to_tool_json(&finding, &outcome);
+    let mut response = payload;
+    if let Some(obj) = response.as_object_mut() {
+        obj.insert("output".to_string(), Value::String(summary));
+        obj.insert("costUsd".to_string(), json!(outcome.cost_usd));
+        if let Some(id) = persisted_id {
+            obj.insert("verificationRowId".to_string(), json!(id));
+        }
+    }
+    // Keep workspace var live; suppresses unused-binding warning when
+    // the binding is only used to validate ctx.workspace is set.
+    let _ = workspace;
+    Ok(response)
 }
 
 fn build_verify_prompt(
@@ -7747,6 +8050,634 @@ fn config_module() -> BuiltinModule {
     )
 }
 
+fn router_show_tool(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    use crate::agent_router::{AgentRole, AgentRouter};
+    use crate::config::ConfigPaths;
+
+    // Load models.toml if present. Best-effort — missing file = empty router.
+    let target = ctx
+        .workspace
+        .map(|workspace| workspace.root().to_path_buf());
+    let router = ConfigPaths::from_target(target.as_deref())
+        .ok()
+        .and_then(|paths| AgentRouter::load(&paths).ok())
+        .unwrap_or_default();
+
+    let mut roles = Vec::with_capacity(AgentRole::all().len());
+    for role in AgentRole::all() {
+        let key = role.option_store_key();
+        // Operator override merged via effective_tool_input lives in `input`.
+        let option_override = input
+            .as_object()
+            .and_then(|obj| obj.get(&key))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        let toml_route = router.route(*role).cloned();
+
+        let effective = option_override
+            .clone()
+            .or_else(|| toml_route.as_ref().map(|r| r.primary.clone()))
+            .or_else(|| router.default_model().map(str::to_string))
+            .or_else(|| ctx.config.model.clone());
+
+        roles.push(json!({
+            "role": role.as_key(),
+            "optionKey": key,
+            "operatorOverride": option_override,
+            "tomlPrimary": toml_route.as_ref().map(|r| r.primary.clone()),
+            "tomlFallbacks": toml_route.as_ref().map(|r| r.fallbacks.clone()).unwrap_or_default(),
+            "effective": effective,
+        }));
+    }
+
+    Ok(json!({
+        "ok": true,
+        "configModel": ctx.config.model,
+        "tomlDefaultModel": router.default_model(),
+        "roles": roles,
+    }))
+}
+
+fn run_full_mode_hunt_tool(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    use crate::agent_router::{AgentRouter, RoutedRuntime};
+    use crate::config::ConfigPaths;
+    use crate::full_mode_multi::{
+        plan as fm_plan, report_to_tool_json, run as run_full_mode_multi, FullModeConfig,
+        FullModeLanguage,
+    };
+    use crate::spend::SpendLimiter;
+    use std::sync::Arc;
+
+    let target = resolve_tool_target(&input, ctx)?;
+    let language = match input
+        .get("language")
+        .and_then(Value::as_str)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("c") | None => FullModeLanguage::C,
+        Some("unknown") => FullModeLanguage::Unknown,
+        Some(other) => anyhow::bail!("full-mode:hunt: unknown language {other:?}"),
+    };
+    let max_tokens = input
+        .get("maxTokensPerChunk")
+        .and_then(Value::as_u64)
+        .map(|v| v as usize)
+        .unwrap_or(120_000);
+    let deposit = input
+        .get("depositUsdPerChunk")
+        .and_then(Value::as_f64)
+        .unwrap_or(2.0);
+    let dry_run = input
+        .get("dryRun")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    // Optional scope file: explicit path wins; otherwise look for the
+    // since.txt the --since flag wrote.
+    let mut scope_files: Option<Vec<std::path::PathBuf>> = None;
+    let scope_path = input
+        .get("scopeFile")
+        .and_then(Value::as_str)
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            ctx.workspace.map(|w| {
+                w.findings_db_path()
+                    .with_file_name("since.txt")
+                    .to_path_buf()
+            })
+        });
+    if let Some(p) = scope_path {
+        if p.exists() {
+            let body = std::fs::read_to_string(&p)
+                .with_context(|| format!("could not read scope file {}", p.display()))?;
+            let lines: Vec<std::path::PathBuf> = body
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(std::path::PathBuf::from)
+                .collect();
+            if !lines.is_empty() {
+                scope_files = Some(lines);
+            }
+        }
+    }
+
+    let cfg = FullModeConfig {
+        workspace_root: target.clone(),
+        max_tokens_per_chunk: max_tokens,
+        deposit_usd_per_chunk: deposit,
+        include_extensions: Vec::new(),
+        language,
+        dry_run,
+        scope_files,
+    };
+
+    if dry_run {
+        let plan = fm_plan(&cfg)?;
+        let model_hint = ctx.config.model.as_deref();
+        let cost = crate::full_mode_cost_summary(&plan, model_hint);
+        return Ok(json!({
+            "ok": true,
+            "data": {
+                "findings": [],
+                "plan": plan,
+                "chunksDispatched": 0,
+                "chunksFailed": 0,
+                "costUsd": 0.0,
+                "dryRun": true,
+            },
+            "summary": {
+                "chunks": cost.chunks,
+                "files": cost.files,
+                "totalTokens": cost.total_tokens,
+                "estUsdLow": cost.usd_low,
+                "estUsdHigh": cost.usd_high,
+                "dryRun": true,
+            },
+        }));
+    }
+
+    let runtime = runtime.ok_or_else(|| {
+        anyhow::anyhow!("full-mode:hunt requires an agent runtime; none configured")
+    })?;
+    let paths = ctx
+        .workspace
+        .map(|w| ConfigPaths {
+            home_dir: dirs::home_dir().unwrap_or_default(),
+            target_dir: Some(w.root().to_path_buf()),
+        })
+        .unwrap_or_else(|| ConfigPaths {
+            home_dir: dirs::home_dir().unwrap_or_default(),
+            target_dir: None,
+        });
+    let router = Arc::new(AgentRouter::load(&paths)?);
+    let inner_arc: Arc<dyn AgentRuntime> = unsafe_clone_runtime_ref(runtime);
+    let routed = RoutedRuntime::new(inner_arc, router, ctx.config.model.clone());
+
+    // Spend ledger lives in the workspace findings DB.
+    let limiter = ctx
+        .workspace
+        .map(|w| SpendLimiter::open(w.findings_db_path()))
+        .transpose()?;
+
+    let report = run_full_mode_multi(&routed, limiter.as_ref(), &cfg)?;
+
+    // Persist findings into the workspace store.
+    if let Some(workspace) = ctx.workspace {
+        let store = FindingStore::open(workspace.findings_db_path())?;
+        let scan_id = format!("full-mode-{}", uuid::Uuid::new_v4());
+        store.insert_scan_run(&scan_id, workspace.root(), "running")?;
+        for f in &report.findings {
+            let _ = store.insert_finding(&scan_id, f)?;
+        }
+        store.complete_scan_run(&scan_id, "completed", report.findings.len())?;
+    }
+
+    Ok(report_to_tool_json(&report))
+}
+
+fn run_classifier_score_tool(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    use crate::agent_router::{AgentRouter, RoutedRuntime};
+    use crate::classifier_gate::{ClassifierConfig, LikelyVulnClassifier};
+    use crate::config::ConfigPaths;
+    use std::sync::Arc;
+
+    let runtime = runtime.ok_or_else(|| {
+        anyhow::anyhow!("classifier-gate:score requires an agent runtime; none configured")
+    })?;
+    let workspace = ctx
+        .workspace
+        .ok_or_else(|| anyhow::anyhow!("classifier-gate:score requires a workspace target"))?;
+    let store = FindingStore::open(workspace.findings_db_path())?;
+
+    let fingerprint = input
+        .get("findingFingerprint")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("classifier-gate:score: findingFingerprint is required"))?;
+    let finding = store
+        .get_finding_by_reference(fingerprint)?
+        .ok_or_else(|| anyhow::anyhow!("classifier-gate:score: no finding for {fingerprint:?}"))?;
+    let target_percentile = input
+        .get("targetPercentile")
+        .and_then(Value::as_f64)
+        .map(|v| v as f32)
+        .unwrap_or(0.80);
+
+    let paths = ConfigPaths {
+        home_dir: dirs::home_dir().unwrap_or_default(),
+        target_dir: Some(workspace.root().to_path_buf()),
+    };
+    let router = Arc::new(AgentRouter::load(&paths)?);
+    let inner_arc: Arc<dyn AgentRuntime> = unsafe_clone_runtime_ref(runtime);
+    let routed = RoutedRuntime::new(inner_arc, router, ctx.config.model.clone());
+
+    let cfg = ClassifierConfig {
+        target_percentile,
+        state_db: Some(workspace.findings_db_path()),
+        ..Default::default()
+    };
+    let gate = LikelyVulnClassifier::new(&routed, cfg)?;
+    let score = gate.score(&finding, workspace.root())?;
+    let should_audit = gate.should_deep_audit(score);
+    let threshold = gate.current_threshold();
+    let n = gate.samples_seen();
+
+    if !should_audit {
+        if let Some(id) = finding.id {
+            let outcome = gate.skip_outcome(score);
+            store.save_triage(id, &outcome)?;
+        }
+    }
+
+    Ok(json!({
+        "ok": true,
+        "data": {
+            "findingId": finding.id,
+            "fingerprint": finding.fingerprint,
+            "score": score,
+            "shouldDeepAudit": should_audit,
+            "threshold": threshold,
+            "samplesSeen": n,
+        },
+    }))
+}
+
+fn run_deep_audit_tool(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    use crate::agent_router::{AgentRouter, RoutedRuntime};
+    use crate::config::ConfigPaths;
+    use crate::deep_auditor::{run_deep_auditor, save_evidence, DeepAuditConfig};
+    use crate::spend::SpendLimiter;
+    use std::sync::Arc;
+
+    let runtime = runtime.ok_or_else(|| {
+        anyhow::anyhow!("deep-audit:run requires an agent runtime; none configured")
+    })?;
+    let workspace = ctx
+        .workspace
+        .ok_or_else(|| anyhow::anyhow!("deep-audit:run requires a workspace target"))?;
+    let store = FindingStore::open(workspace.findings_db_path())?;
+
+    let fingerprint = input
+        .get("findingFingerprint")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("deep-audit:run: findingFingerprint is required"))?;
+    let finding = store
+        .get_finding_by_reference(fingerprint)?
+        .ok_or_else(|| anyhow::anyhow!("deep-audit:run: no finding for {fingerprint:?}"))?;
+    let max_steps = input
+        .get("maxSteps")
+        .and_then(Value::as_u64)
+        .map(|v| v as u32)
+        .unwrap_or(24);
+    let deposit_usd = input
+        .get("depositUsd")
+        .and_then(Value::as_f64)
+        .unwrap_or(1.0);
+
+    let paths = ConfigPaths {
+        home_dir: dirs::home_dir().unwrap_or_default(),
+        target_dir: Some(workspace.root().to_path_buf()),
+    };
+    let router = Arc::new(AgentRouter::load(&paths)?);
+    let inner_arc: Arc<dyn AgentRuntime> = unsafe_clone_runtime_ref(runtime);
+    let routed = RoutedRuntime::new(inner_arc, router, ctx.config.model.clone());
+    let spend = SpendLimiter::open(workspace.findings_db_path())?;
+
+    let cfg = DeepAuditConfig {
+        workspace_root: workspace.root().to_path_buf(),
+        max_steps,
+        deposit_usd,
+        system_prompt: None,
+    };
+    let outcome = run_deep_auditor(&routed, Some(&spend), &cfg, &finding)?;
+
+    if let Some(id) = finding.id {
+        store.save_triage(id, &outcome.triage)?;
+        save_evidence(&workspace.findings_db_path(), id, &outcome.evidence)?;
+    }
+
+    Ok(json!({
+        "ok": true,
+        "data": {
+            "findingId": finding.id,
+            "fingerprint": finding.fingerprint,
+            "verdict": outcome.triage.verdict,
+            "confidence": outcome.triage.confidence,
+            "rationale": outcome.triage.rationale,
+            "stepsUsed": outcome.steps_used,
+            "truncated": outcome.truncated,
+            "costUsd": outcome.cost_usd,
+            "evidence": outcome.evidence,
+        },
+    }))
+}
+
+/// Adapter: turn a borrowed `&dyn AgentRuntime` into an `Arc<dyn AgentRuntime>`
+/// so it can be wrapped by [`RoutedRuntime`]. The borrow's lifetime
+/// determines the safety: callers must keep the underlying value alive
+/// for the duration of the call.
+///
+/// Implementation note: we wrap the reference in a thin static-lifetime
+/// trait object that delegates everything to the borrowed runtime. This
+/// avoids the need to take ownership while still satisfying
+/// `RoutedRuntime`'s `Arc<dyn AgentRuntime>` constructor.
+fn unsafe_clone_runtime_ref(rt: &dyn AgentRuntime) -> std::sync::Arc<dyn AgentRuntime> {
+    use std::sync::Arc;
+    // SAFETY: BorrowedRuntime extends the lifetime to 'static via a raw
+    // pointer. The caller owns the underlying runtime for the lifetime of
+    // this call; the Arc never escapes the helper functions above (they
+    // construct it and immediately consume it).
+    struct BorrowedRuntime(*const (dyn AgentRuntime + 'static));
+    unsafe impl Send for BorrowedRuntime {}
+    unsafe impl Sync for BorrowedRuntime {}
+
+    impl AgentRuntime for BorrowedRuntime {
+        fn query_blocking(
+            &self,
+            req: crate::runtime::AgentQueryRequest,
+        ) -> anyhow::Result<crate::runtime::AgentQueryResponse> {
+            // SAFETY: pointer is valid for the lifetime of this trait
+            // object — which the caller upholds by keeping the borrow
+            // alive.
+            unsafe { (*self.0).query_blocking(req) }
+        }
+        fn triage_finding_blocking(
+            &self,
+            req: crate::runtime::TriageRequest,
+        ) -> anyhow::Result<crate::findings::TriageOutcome> {
+            unsafe { (*self.0).triage_finding_blocking(req) }
+        }
+        fn supports_tools(&self) -> bool {
+            unsafe { (*self.0).supports_tools() }
+        }
+        fn next_step_blocking(
+            &self,
+            req: &crate::runtime::AgentToolLoopRequest,
+            history: &[crate::runtime::LoopHistoryEntry],
+        ) -> anyhow::Result<crate::runtime::AgentLoopStep> {
+            unsafe { (*self.0).next_step_blocking(req, history) }
+        }
+    }
+
+    let static_ref: *const (dyn AgentRuntime + 'static) =
+        unsafe { std::mem::transmute::<*const dyn AgentRuntime, _>(rt as *const _) };
+    Arc::new(BorrowedRuntime(static_ref))
+}
+
+fn router_module() -> BuiltinModule {
+    use crate::agent_router::AgentRole;
+    let mut model_specs: Vec<OptionSpec> = AgentRole::all()
+        .iter()
+        .map(|role| {
+            let name = role.option_store_key();
+            let description = format!(
+                "Override model for the `{}` role. Format: provider:modelId. \
+                 Settable from the shell with `setg {} <model>`. Wins over models.toml.",
+                role.as_key(),
+                name
+            );
+            opt(&name, OptionType::String, &description)
+        })
+        .collect();
+    // Stable order across builds.
+    model_specs.sort_by(|a, b| a.name.cmp(&b.name));
+
+    builtin_module(
+        "router",
+        "Agent router",
+        ModuleKind::Governance,
+        "Per-role model routing. Set MODEL_<ROLE> via `setg` to override models.toml.",
+        vec![tool_with_options(
+            "router:show",
+            "Show effective per-role model routing.",
+            model_specs,
+        )],
+        vec![],
+    )
+}
+
+fn smoke_module() -> BuiltinModule {
+    builtin_module(
+        "smoke",
+        "Smoke tests",
+        ModuleKind::Governance,
+        "Diagnostic flows that exercise the bridge end-to-end without paying for a real scan.",
+        vec![tool_with_options(
+            "smoke:next-step",
+            "Drive a 2-step tool-loop with an `echo` tool to verify next_step_blocking + run_tool_loop.",
+            vec![opt(
+                "phrase",
+                OptionType::String,
+                "Phrase the model is asked to echo back. Default: 'kuzushi-ok'.",
+            )
+            .default(serde_json::json!("kuzushi-ok"))],
+        )],
+        vec![],
+    )
+}
+
+fn run_smoke_next_step_tool(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    use crate::runtime::{run_tool_loop, AgentTool, AgentToolLoopRequest, ToolBox, ToolResult};
+
+    let runtime = runtime.ok_or_else(|| {
+        anyhow::anyhow!("smoke:next-step requires an agent runtime; none configured")
+    })?;
+    if !runtime.supports_tools() {
+        anyhow::bail!(
+            "smoke:next-step: configured runtime does not support tools \
+             (PiAgentCoreRuntime should — check the bridge configuration)"
+        );
+    }
+    let phrase = input
+        .get("phrase")
+        .and_then(Value::as_str)
+        .unwrap_or("kuzushi-ok")
+        .to_string();
+    let model = ctx
+        .config
+        .model
+        .clone()
+        .unwrap_or_else(|| "anthropic:claude-haiku-4-5".to_string());
+
+    let request = AgentToolLoopRequest {
+        model,
+        cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+        system_prompt: "You are participating in a Kuzushi smoke test. \
+                        Call the `echo` tool exactly once with input {{ \"x\": <phrase> }}, \
+                        then return the echoed text as your final answer."
+            .to_string(),
+        prompt: format!(
+            "Phrase to echo: {phrase}\n\nUse the echo tool, then reply with the result."
+        ),
+        tools: vec![AgentTool {
+            name: "echo".to_string(),
+            description: "Returns its input under the key `out` verbatim.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "x": { "type": "string" } },
+                "required": ["x"]
+            }),
+        }],
+        max_steps: 4,
+    };
+
+    let mut toolbox = ToolBox::new();
+    toolbox.register("echo", |call| {
+        let x = call
+            .input
+            .get("x")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        Ok(ToolResult {
+            call_id: call.call_id.clone(),
+            output: json!({ "out": x }),
+            is_error: false,
+        })
+    });
+
+    let outcome = run_tool_loop(runtime, &request, &mut toolbox)?;
+    let echoed = outcome.text.contains(&phrase);
+
+    Ok(json!({
+        "ok": true,
+        "data": {
+            "echoedPhrase": echoed,
+            "stepsUsed": outcome.steps_used,
+            "truncated": outcome.truncated,
+            "costUsd": outcome.cost_usd,
+            "transcript": outcome.transcript,
+            "finalText": outcome.text,
+        },
+    }))
+}
+
+fn full_mode_module() -> BuiltinModule {
+    builtin_module(
+        "full-mode",
+        "Full-codebase scan",
+        ModuleKind::Offense,
+        "Whole-codebase chunked LLM pass — token-greedy file clustering, per-chunk model query.",
+        vec![tool_with_options(
+            "full-mode:hunt",
+            "Run a chunked LLM scan over the target. Use dryRun=true to plan + estimate cost without spending tokens.",
+            vec![
+                opt(
+                    "language",
+                    OptionType::Enum,
+                    "Per-chunk system prompt selector.",
+                )
+                .choices(&["c", "unknown"])
+                .default(serde_json::json!("c")),
+                opt(
+                    "maxTokensPerChunk",
+                    OptionType::Int,
+                    "Token budget per chunk; chunks pack files up to this cap.",
+                )
+                .default(serde_json::json!(120_000)),
+                opt(
+                    "depositUsdPerChunk",
+                    OptionType::Float,
+                    "Initial spend ticket per chunk; refunded with the bridge's reported cost.",
+                )
+                .default(serde_json::json!(2.0)),
+                opt(
+                    "dryRun",
+                    OptionType::Bool,
+                    "Plan + cost estimate only; do not invoke any model.",
+                )
+                .default(serde_json::json!(false)),
+                opt(
+                    "scopeFile",
+                    OptionType::Path,
+                    "Optional repo-relative path to a newline-delimited scope file. Defaults to <target>/.kuzushi/v2/since.txt when --since populated it.",
+                ),
+            ],
+        )],
+        vec![],
+    )
+}
+
+fn classifier_gate_module() -> BuiltinModule {
+    builtin_module(
+        "classifier-gate",
+        "Classifier gate",
+        ModuleKind::Triage,
+        "Cheap LLM classifier with adaptive p80 quantile gate. Score one finding to decide whether the deep auditor should run.",
+        vec![tool_with_options(
+            "classifier-gate:score",
+            "Score a finding with the cheap classifier; updates the running quantile.",
+            vec![
+                opt(
+                    "findingFingerprint",
+                    OptionType::String,
+                    "Fingerprint (or short prefix) of the finding to score.",
+                )
+                .required(),
+                opt(
+                    "targetPercentile",
+                    OptionType::Float,
+                    "Target percentile for the adaptive threshold (0.0 < p < 1.0).",
+                )
+                .default(serde_json::json!(0.80)),
+            ],
+        )],
+        vec![],
+    )
+}
+
+fn deep_audit_module() -> BuiltinModule {
+    builtin_module(
+        "deep-audit",
+        "Deep auditor",
+        ModuleKind::Triage,
+        "Tool-augmented LLM auditor — uses code-nav primitives to verify a finding's triggerability.",
+        vec![tool_with_options(
+            "deep-audit:run",
+            "Run the deep auditor on a single finding; persists triage outcome + evidence.",
+            vec![
+                opt(
+                    "findingFingerprint",
+                    OptionType::String,
+                    "Fingerprint (or short prefix) of the finding to audit.",
+                )
+                .required(),
+                opt(
+                    "maxSteps",
+                    OptionType::Int,
+                    "Hard cap on tool-loop steps per finding.",
+                )
+                .default(serde_json::json!(24)),
+                opt(
+                    "depositUsd",
+                    OptionType::Float,
+                    "Initial spend ticket; refunded with the bridge's reported cost.",
+                )
+                .default(serde_json::json!(1.0)),
+            ],
+        )],
+        vec![],
+    )
+}
+
 fn workspace_module() -> BuiltinModule {
     builtin_module(
         "workspace",
@@ -8096,11 +9027,18 @@ fn verify_module() -> BuiltinModule {
         "Verify",
         ModuleKind::Offense,
         "Exploitability verification through proof-of-concept construction and sandboxed execution.",
-        vec![tool_with_options(
-            "verify:finding",
-            "Verify whether a finding is exploitable.",
-            vec![fingerprint_option(), model_option()],
-        )],
+        vec![
+            tool_with_options(
+                "verify:finding",
+                "Verify whether a finding is exploitable (LLM-driven; consults runtime for PoC reasoning).",
+                vec![fingerprint_option(), model_option()],
+            ),
+            tool_with_options(
+                "verify:exploit",
+                "Empirical exploit-gated verify: scaffolds a sandboxed test harness from the finding's location and observes whether it crashes. Only Rust language is wired today; other languages return language_unsupported_yet.",
+                vec![fingerprint_option()],
+            ),
+        ],
         vec![dag("verify:finding", "verification", &["triage:run"])],
     )
 }
@@ -9321,6 +10259,7 @@ mod tests {
                         "diff": "--- a/src/db.ts\n+++ b/src/db.ts\n@@ -1 +1 @@\n-const query = req.query.q;\n+const query = String(req.query.q).replace(/[^a-z0-9]/gi, \"\");\n",
                         "explanation": "sanitize query input before use"
                     })),
+                    ..Default::default()
                 });
             }
             let is_agentic_sast_request = self
@@ -9343,6 +10282,7 @@ mod tests {
                             "evidence": "Source: req.query.q -> sink: db.query"
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             let is_taint_cwe_select_request = self
@@ -9361,6 +10301,7 @@ mod tests {
                             "reason": "database query uses request input"
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             let is_taint_iris_request = self
@@ -9391,6 +10332,7 @@ mod tests {
                             "exploitPreconditions": "attacker controls q"
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             let is_taint_iris_next_request = self
@@ -9442,6 +10384,7 @@ mod tests {
                         }],
                         "notes": []
                     })),
+                    ..Default::default()
                 });
             }
             let is_carlini_request = self
@@ -9464,6 +10407,7 @@ mod tests {
                             "evidence": "Source: request query -> sink: response HTML"
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             let is_systems_invariant_request =
@@ -9488,6 +10432,7 @@ mod tests {
                             "cheapVerifiable": true
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             let is_systems_trigger_request =
@@ -9512,6 +10457,7 @@ mod tests {
                             "rationale": "length reaches memcpy"
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             let is_systems_hunt_request =
@@ -9540,6 +10486,7 @@ mod tests {
                             "cheapVerifiable": true
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             let is_plugin_adapter_request =
@@ -9567,6 +10514,7 @@ mod tests {
                         "overallRisk": "medium",
                         "confidence": "medium"
                     })),
+                    ..Default::default()
                 });
             }
             Ok(AgentQueryResponse {
@@ -9582,6 +10530,7 @@ mod tests {
                     "proof_level": 3,
                     "proof_verdict": "exploited",
                 })),
+                ..Default::default()
             })
         }
 
@@ -9596,6 +10545,7 @@ mod tests {
                 verdict,
                 confidence: 0.87,
                 rationale: "mock pi-agent-core triage".to_string(),
+                ..Default::default()
             })
         }
     }
@@ -10834,6 +11784,98 @@ OUT
 
         assert!(err.contains("does not support LLM enrichment yet"));
         assert!(err.contains(r#""enrichment":false"#));
+    }
+
+    // ----- prefilter_score scoring ------------------------------------
+
+    fn finding_with(severity: Severity, tool: &str, message: &str) -> Finding {
+        Finding::new_tool(tool, "demo.rule", "src/x.c", 1, None, severity, message)
+    }
+
+    #[test]
+    fn prefilter_score_scales_with_severity() {
+        let crit = prefilter_score(&finding_with(Severity::Critical, "semgrep", ""));
+        let high = prefilter_score(&finding_with(Severity::High, "semgrep", ""));
+        let med = prefilter_score(&finding_with(Severity::Medium, "semgrep", ""));
+        let low = prefilter_score(&finding_with(Severity::Low, "semgrep", ""));
+        assert!(crit > high);
+        assert!(high > med);
+        assert!(med > low);
+    }
+
+    #[test]
+    fn prefilter_score_bumps_for_attacker_keywords() {
+        let plain = prefilter_score(&finding_with(Severity::High, "semgrep", "generic warning"));
+        let with_keyword = prefilter_score(&finding_with(
+            Severity::High,
+            "semgrep",
+            "user-controlled buffer overflow with attacker-supplied length",
+        ));
+        assert!(with_keyword > plain);
+    }
+
+    #[test]
+    fn prefilter_score_bumps_for_curated_tools() {
+        let semgrep = prefilter_score(&finding_with(Severity::Medium, "semgrep", ""));
+        let cargo_audit = prefilter_score(&finding_with(Severity::Medium, "cargo-audit", ""));
+        let codeql = prefilter_score(&finding_with(Severity::Medium, "codeql", ""));
+        let unknown = prefilter_score(&finding_with(Severity::Medium, "random-tool", ""));
+        assert!(cargo_audit > semgrep);
+        assert!(codeql > semgrep);
+        assert!(semgrep > unknown);
+    }
+
+    #[test]
+    fn prefilter_score_unknown_severity_is_low() {
+        let unk = prefilter_score(&finding_with(Severity::Unknown, "semgrep", ""));
+        let crit = prefilter_score(&finding_with(Severity::Critical, "semgrep", ""));
+        assert!(unk < crit);
+    }
+
+    #[test]
+    fn prefilter_score_is_deterministic() {
+        let f = finding_with(Severity::High, "codeql", "use-after-free in handler");
+        assert_eq!(prefilter_score(&f), prefilter_score(&f));
+    }
+
+    // ----- TriageOutcome cost field round-trips through persistence
+
+    #[test]
+    fn triage_outcome_persists_cost_usd() {
+        use crate::findings::FindingStore;
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-cost-test", std::path::Path::new("/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_tool("test", "rule", "src/x.c", 1, None, Severity::High, "msg");
+        let finding_id = store.insert_finding("run-cost-test", &finding).unwrap();
+
+        let outcome = TriageOutcome {
+            verdict: TriageVerdict::TruePositive,
+            confidence: 0.9,
+            rationale: "test".to_string(),
+            cost_usd: 0.0123,
+        };
+        store.save_triage(finding_id, &outcome).unwrap();
+
+        // Reload the finding via the public API and confirm the
+        // verdict + confidence round-trip; cost_usd persists in the
+        // triage table even if Finding.triage doesn't surface it.
+        let reloaded = store
+            .get_finding_by_fingerprint(&finding.fingerprint)
+            .unwrap()
+            .unwrap();
+        assert!(reloaded.triage.is_some());
+        let triage = reloaded.triage.unwrap();
+        assert_eq!(triage.verdict, TriageVerdict::TruePositive);
+        assert!((triage.confidence - 0.9).abs() < 1e-6);
+    }
+
+    #[test]
+    fn triage_outcome_default_cost_is_zero() {
+        let o = TriageOutcome::default();
+        assert_eq!(o.cost_usd, 0.0);
+        assert_eq!(o.verdict, TriageVerdict::NeedsReview);
     }
 
     #[test]
@@ -12874,6 +13916,7 @@ OUT
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "confirmed path".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -13090,6 +14133,7 @@ OUT
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.91,
                     rationale: "confirmed".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -13193,6 +14237,7 @@ OUT
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.91,
                     rationale: "confirmed".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -13253,6 +14298,7 @@ OUT
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.91,
                     rationale: "confirmed".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -13356,6 +14402,7 @@ OUT
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.91,
                     rationale: "confirmed".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();

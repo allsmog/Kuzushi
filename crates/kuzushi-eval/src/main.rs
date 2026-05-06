@@ -20,7 +20,10 @@ const PM_LINES_PRIMARY: i64 = 10;
 const PM_LINES_FUNCTION_FALLBACK: i64 = 50;
 
 #[derive(Debug, Parser)]
-#[command(name = "kuzushi-eval", about = "Score Kuzushi findings against an oracle")]
+#[command(
+    name = "kuzushi-eval",
+    about = "Score Kuzushi findings against an oracle"
+)]
 struct Cli {
     /// Oracle JSON file (e.g. experiments/xint-eval/oracles/linux-cve-2026-31431.json).
     #[arg(long)]
@@ -398,7 +401,9 @@ fn cwes_match(finding_cwes: &[String], oracle_cwes: &[String]) -> bool {
     if finding_cwes.is_empty() {
         return false; // oracle wants a CWE; finding has none
     }
-    finding_cwes.iter().any(|f| oracle_cwes.iter().any(|o| eq_ignore_case(f, o)))
+    finding_cwes
+        .iter()
+        .any(|f| oracle_cwes.iter().any(|o| eq_ignore_case(f, o)))
 }
 
 fn cwe_match_or_no_oracle_cwe(finding_cwes: &[String], oracle_cwes: &[String]) -> bool {

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 const CTRL_C_ARM_WINDOW: Duration = Duration::from_secs(2);
 const THROTTLE_STALE_AFTER: Duration = Duration::from_secs(30);
-const PASTE_GUARD_WINDOW: Duration = Duration::from_millis(5);
+const SPINNER_FRAME: Duration = Duration::from_millis(80);
 const VIEWPORT_PAGE_LINES: usize = 10;
 const FINDINGS_PAGE_ROWS: usize = 10;
 
@@ -120,7 +120,10 @@ pub struct ThreatPatch {
 
 use anyhow::{Context, Result};
 use crossterm::cursor::MoveTo;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
 use kuzushi_core::modules::{OptionSpec, OptionType, ToolDescriptor, ToolExecutionContext};
@@ -339,6 +342,17 @@ fn preferred_model_choice_index(config: &V2Config) -> usize {
     0
 }
 
+fn char_index_to_byte(s: &str, char_idx: usize) -> usize {
+    s.char_indices()
+        .nth(char_idx)
+        .map(|(b, _)| b)
+        .unwrap_or(s.len())
+}
+
+fn is_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellView {
     Catalog,
@@ -435,10 +449,14 @@ impl ViewKeybinding {
 #[derive(Debug)]
 pub struct ShellApp {
     pub input: String,
+    pub cursor: usize,
+    pub history_index: Option<usize>,
+    pub history_draft: String,
     pub log: Vec<LogLine>,
     pub target: Option<PathBuf>,
     pub focused_module: Option<String>,
     pub shell_view: ShellView,
+    pub prev_shell_view: Option<ShellView>,
     pub catalog_expanded: bool,
     pub config: V2Config,
     pub registry: ModuleRegistry,
@@ -474,6 +492,9 @@ pub struct ShellApp {
     pub history_scroll: usize,
     pub kb_scroll: usize,
     pub last_char_at: Option<Instant>,
+    pub scroll_offset: u16,
+    pub spinner_phase: u8,
+    pub last_spinner_advance: Option<Instant>,
     scan_rx: Option<Receiver<ScanEvent>>,
     scan_cancel: Option<ScanCancellation>,
     agent_rx: Option<Receiver<AgentEvent>>,
@@ -486,10 +507,14 @@ impl ShellApp {
         let selected_model_index = preferred_model_choice_index(&config);
         let mut app = Self {
             input: String::new(),
+            cursor: 0,
+            history_index: None,
+            history_draft: String::new(),
             log: Vec::new(),
             target: target.map(|target| target.root().to_path_buf()),
             focused_module: None,
             shell_view: ShellView::Catalog,
+            prev_shell_view: None,
             catalog_expanded: false,
             config,
             registry: ModuleRegistry::with_v2_builtins(),
@@ -532,6 +557,9 @@ impl ShellApp {
             history_scroll: 0,
             kb_scroll: 0,
             last_char_at: None,
+            scroll_offset: 0,
+            spinner_phase: 0,
+            last_spinner_advance: None,
             scan_rx: None,
             scan_cancel: None,
             agent_rx: None,
@@ -559,6 +587,221 @@ impl ShellApp {
         if self.log.len() > 500 {
             let overflow = self.log.len() - 500;
             self.log.drain(0..overflow);
+        }
+    }
+
+    pub fn set_input(&mut self, value: impl Into<String>) {
+        self.input = value.into();
+        self.cursor = self.input.chars().count();
+        self.history_index = None;
+    }
+
+    pub fn clear_input(&mut self) {
+        self.input.clear();
+        self.cursor = 0;
+        self.history_index = None;
+    }
+
+    pub fn take_input(&mut self) -> String {
+        self.cursor = 0;
+        self.history_index = None;
+        std::mem::take(&mut self.input)
+    }
+
+    fn char_count(&self) -> usize {
+        self.input.chars().count()
+    }
+
+    fn cursor_byte(&self) -> usize {
+        char_index_to_byte(&self.input, self.cursor)
+    }
+
+    pub fn insert_str_at_cursor(&mut self, s: &str) {
+        if s.is_empty() {
+            return;
+        }
+        let byte = self.cursor_byte();
+        self.input.insert_str(byte, s);
+        self.cursor += s.chars().count();
+        self.history_index = None;
+    }
+
+    pub fn insert_char_at_cursor(&mut self, ch: char) {
+        let byte = self.cursor_byte();
+        self.input.insert(byte, ch);
+        self.cursor += 1;
+        self.history_index = None;
+    }
+
+    pub fn backspace(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let count = self.char_count();
+        if self.cursor > count {
+            self.cursor = count;
+        }
+        let new_cursor = self.cursor - 1;
+        let start = char_index_to_byte(&self.input, new_cursor);
+        let end = char_index_to_byte(&self.input, self.cursor);
+        self.input.drain(start..end);
+        self.cursor = new_cursor;
+        self.history_index = None;
+    }
+
+    pub fn delete_forward(&mut self) {
+        let count = self.char_count();
+        if self.cursor >= count {
+            return;
+        }
+        let start = char_index_to_byte(&self.input, self.cursor);
+        let end = char_index_to_byte(&self.input, self.cursor + 1);
+        self.input.drain(start..end);
+        self.history_index = None;
+    }
+
+    pub fn move_cursor_left(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+        }
+    }
+
+    pub fn move_cursor_right(&mut self) {
+        let count = self.char_count();
+        if self.cursor < count {
+            self.cursor += 1;
+        }
+    }
+
+    pub fn move_cursor_home(&mut self) {
+        self.cursor = 0;
+    }
+
+    pub fn move_cursor_end(&mut self) {
+        self.cursor = self.char_count();
+    }
+
+    fn word_boundary_left(&self) -> usize {
+        // "Word" = run of alphanumeric chars (incl. underscore). Treat punctuation and
+        // whitespace as separators so Ctrl+W on "./path/to/foo" stops at each '/'. Skip
+        // separators directly before the cursor first, then the run of word chars.
+        let chars: Vec<char> = self.input.chars().collect();
+        let mut idx = self.cursor.min(chars.len());
+        while idx > 0 && !is_word_char(chars[idx - 1]) {
+            idx -= 1;
+        }
+        while idx > 0 && is_word_char(chars[idx - 1]) {
+            idx -= 1;
+        }
+        idx
+    }
+
+    fn word_boundary_right(&self) -> usize {
+        let chars: Vec<char> = self.input.chars().collect();
+        let mut idx = self.cursor.min(chars.len());
+        let len = chars.len();
+        while idx < len && is_word_char(chars[idx]) {
+            idx += 1;
+        }
+        while idx < len && !is_word_char(chars[idx]) {
+            idx += 1;
+        }
+        idx
+    }
+
+    pub fn delete_word_left(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let target = self.word_boundary_left();
+        let start = char_index_to_byte(&self.input, target);
+        let end = char_index_to_byte(&self.input, self.cursor);
+        self.input.drain(start..end);
+        self.cursor = target;
+        self.history_index = None;
+    }
+
+    pub fn move_cursor_word_left(&mut self) {
+        self.cursor = self.word_boundary_left();
+    }
+
+    pub fn move_cursor_word_right(&mut self) {
+        self.cursor = self.word_boundary_right();
+    }
+
+    pub fn kill_to_start(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let end = char_index_to_byte(&self.input, self.cursor);
+        self.input.drain(..end);
+        self.cursor = 0;
+        self.history_index = None;
+    }
+
+    pub fn kill_to_end(&mut self) {
+        let start = char_index_to_byte(&self.input, self.cursor);
+        self.input.truncate(start);
+        self.history_index = None;
+    }
+
+    pub fn history_prev(&mut self) {
+        if self.command_history.is_empty() {
+            return;
+        }
+        let next = match self.history_index {
+            None => {
+                self.history_draft = self.input.clone();
+                self.command_history.len() - 1
+            }
+            Some(0) => 0,
+            Some(idx) => idx - 1,
+        };
+        self.history_index = Some(next);
+        self.input = self.command_history[next].clone();
+        self.cursor = self.char_count();
+    }
+
+    pub fn history_next(&mut self) {
+        let Some(idx) = self.history_index else {
+            return;
+        };
+        if idx + 1 < self.command_history.len() {
+            let next = idx + 1;
+            self.history_index = Some(next);
+            self.input = self.command_history[next].clone();
+            self.cursor = self.char_count();
+        } else {
+            self.history_index = None;
+            self.input = std::mem::take(&mut self.history_draft);
+            self.cursor = self.char_count();
+        }
+    }
+
+    pub fn scroll_up(&mut self, amount: u16) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(amount);
+    }
+
+    pub fn scroll_down(&mut self, amount: u16) {
+        self.scroll_offset = self.scroll_offset.saturating_add(amount);
+    }
+
+    pub fn scroll_to_top(&mut self) {
+        self.scroll_offset = 0;
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.scroll_offset = u16::MAX;
+    }
+
+    fn sync_view_change(&mut self) -> bool {
+        let current = Some(self.shell_view.clone());
+        if self.prev_shell_view != current {
+            self.scroll_offset = 0;
+            self.prev_shell_view = current;
+            true
+        } else {
+            false
         }
     }
 
@@ -878,8 +1121,30 @@ impl ShellApp {
 
     fn apply_completion(&mut self) {
         if let Some(candidate) = self.completion_candidates(&self.input).into_iter().next() {
-            self.input = candidate;
+            self.set_input(candidate);
         }
+    }
+
+    /// Inline ghost-text suggestion shown after the cursor when the cursor sits
+    /// at the end of the line. Returns the *tail* — the chars the operator would
+    /// gain by pressing Tab — or `None` if there is no completion or the cursor
+    /// is mid-line. Empty inputs return `None` so the cold-start prompt isn't
+    /// noisy.
+    pub fn completion_preview(&self) -> Option<String> {
+        if self.input.is_empty() {
+            return None;
+        }
+        if self.cursor != self.input.chars().count() {
+            return None;
+        }
+        let candidate = self.completion_candidates(&self.input).into_iter().next()?;
+        if candidate == self.input {
+            return None;
+        }
+        candidate
+            .strip_prefix(&self.input)
+            .filter(|tail| !tail.is_empty())
+            .map(str::to_string)
     }
 
     fn module_completion_values(&self) -> Vec<String> {
@@ -1127,7 +1392,8 @@ impl ShellApp {
         values
     }
 
-    pub fn drain_background_events(&mut self) {
+    pub fn drain_background_events(&mut self) -> bool {
+        let mut changed = false;
         let mut events = Vec::new();
         if let Some(rx) = &self.scan_rx {
             while let Ok(event) = rx.try_recv() {
@@ -1135,6 +1401,9 @@ impl ShellApp {
             }
         }
 
+        if !events.is_empty() {
+            changed = true;
+        }
         for event in events {
             self.apply_scan_event(event);
         }
@@ -1151,6 +1420,9 @@ impl ShellApp {
             }
         }
 
+        if !agent_events.is_empty() {
+            changed = true;
+        }
         for event in agent_events {
             self.apply_agent_event(event);
         }
@@ -1165,6 +1437,9 @@ impl ShellApp {
                 plan_events.push(event);
             }
         }
+        if !plan_events.is_empty() {
+            changed = true;
+        }
         for event in plan_events {
             self.apply_plan_event(event);
         }
@@ -1178,12 +1453,16 @@ impl ShellApp {
                 threat_events.push(event);
             }
         }
+        if !threat_events.is_empty() {
+            changed = true;
+        }
         for event in threat_events {
             self.apply_threat_patch_event(event);
         }
         if !self.threat_worker_running {
             self.threat_rx = None;
         }
+        changed
     }
 
     #[cfg(test)]
@@ -3531,6 +3810,7 @@ impl ShellApp {
                 tool_name.as_str(),
                 "triage:run"
                     | "verify:finding"
+                    | "verify:exploit"
                     | "patch:finding"
                     | "agentic-sast:scan"
                     | "carlini-threat-hunt:run"
@@ -3677,6 +3957,9 @@ impl ShellApp {
 
     fn default_tool_for_focused_module(&self) -> Option<String> {
         let module = self.focused_module.as_ref()?;
+        if module == "verify" && self.registry.resolve_tool("verify:finding").is_some() {
+            return Some("verify:finding".to_string());
+        }
         let prefix = format!("{module}:");
         self.registry
             .tools()
@@ -4102,29 +4385,72 @@ impl ShellApp {
             return;
         }
 
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let plain_modifiers = !ctrl && !alt;
+
         match key.code {
-            KeyCode::Char('c') | KeyCode::Char('d')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
+            KeyCode::Char('c') | KeyCode::Char('d') if ctrl => {
                 self.handle_quit_chord();
             }
+            // Cursor / line-edit chords (always available, regardless of input state)
+            KeyCode::Char('a') if ctrl => self.move_cursor_home(),
+            KeyCode::Char('e') if ctrl => self.move_cursor_end(),
+            KeyCode::Char('b') if ctrl => self.move_cursor_left(),
+            KeyCode::Char('f') if ctrl => self.move_cursor_right(),
+            KeyCode::Char('w') if ctrl => self.delete_word_left(),
+            KeyCode::Char('u') if ctrl => self.kill_to_start(),
+            KeyCode::Char('k') if ctrl => self.kill_to_end(),
+            KeyCode::Char('h') if ctrl => self.backspace(),
+            KeyCode::Char('p') if ctrl => self.history_prev(),
+            KeyCode::Char('n') if ctrl => self.history_next(),
+            KeyCode::Left if ctrl || alt => self.move_cursor_word_left(),
+            KeyCode::Right if ctrl || alt => self.move_cursor_word_right(),
+            KeyCode::Backspace if ctrl || alt => self.delete_word_left(),
+            KeyCode::Left if plain_modifiers => self.move_cursor_left(),
+            KeyCode::Right if plain_modifiers => self.move_cursor_right(),
+            KeyCode::Home => self.move_cursor_home(),
+            KeyCode::End => self.move_cursor_end(),
+            KeyCode::Delete => self.delete_forward(),
+            // View-specific Up/Down (Config model picker keeps priority when input is empty)
             KeyCode::Up
                 if self.input.is_empty()
-                    && key.modifiers.is_empty()
+                    && plain_modifiers
                     && matches!(self.shell_view, ShellView::Config) =>
             {
                 self.move_model_selection(-1);
             }
             KeyCode::Down
                 if self.input.is_empty()
-                    && key.modifiers.is_empty()
+                    && plain_modifiers
                     && matches!(self.shell_view, ShellView::Config) =>
             {
                 self.move_model_selection(1);
             }
+            // Findings cursor — j/k while input empty; arrows always navigate the list when
+            // input is empty and we're on the Findings view.
+            KeyCode::Up
+                if self.input.is_empty()
+                    && plain_modifiers
+                    && matches!(self.shell_view, ShellView::Findings) =>
+            {
+                self.findings_cursor = self.findings_cursor.saturating_sub(1);
+            }
+            KeyCode::Down
+                if self.input.is_empty()
+                    && plain_modifiers
+                    && matches!(self.shell_view, ShellView::Findings) =>
+            {
+                self.findings_cursor =
+                    (self.findings_cursor + 1).min(self.findings.len().saturating_sub(1));
+            }
+            // History recall when input is empty (otherwise Up/Down move the editing cursor
+            // through multi-line content; we keep things simple and always recall history).
+            KeyCode::Up if plain_modifiers => self.history_prev(),
+            KeyCode::Down if plain_modifiers => self.history_next(),
             KeyCode::Enter
                 if self.input.is_empty()
-                    && key.modifiers.is_empty()
+                    && plain_modifiers
                     && matches!(self.shell_view, ShellView::Config) =>
             {
                 self.select_current_model_choice();
@@ -4133,12 +4459,10 @@ impl ShellApp {
                 && key.modifiers.is_empty()
                 && self.handle_view_hotkey(key) => {}
             KeyCode::Char(ch) => {
-                self.input.push(ch);
+                self.insert_char_at_cursor(ch);
                 self.last_char_at = Some(Instant::now());
             }
-            KeyCode::Backspace => {
-                self.input.pop();
-            }
+            KeyCode::Backspace => self.backspace(),
             KeyCode::Tab => self.apply_completion(),
             KeyCode::PageDown if self.input.is_empty() && key.modifiers.is_empty() => {
                 self.page_down_current_view();
@@ -4147,19 +4471,47 @@ impl ShellApp {
                 self.page_up_current_view();
             }
             KeyCode::Enter => {
-                if let Some(last) = self.last_char_at {
-                    if Instant::now().duration_since(last) <= PASTE_GUARD_WINDOW {
-                        // Likely paste-trailing newline; swallow.
-                        self.last_char_at = None;
-                        return;
-                    }
-                }
-                let raw = std::mem::take(&mut self.input);
+                let raw = self.take_input();
                 self.submit_line(&raw);
-                self.last_char_at = None;
             }
             KeyCode::Esc => {
-                self.input.clear();
+                self.clear_input();
+            }
+            _ => {}
+        }
+    }
+
+    pub fn handle_paste(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        // Bracketed paste: insert verbatim at cursor. Embedded newlines stay in the
+        // editor as literal '\n'; the operator must press Enter explicitly to submit.
+        // Replace CR/CRLF with single \n for portability.
+        let normalised: String = text
+            .replace("\r\n", "\n")
+            .chars()
+            .filter(|ch| *ch != '\r')
+            .collect();
+        self.insert_str_at_cursor(&normalised);
+    }
+
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) {
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                if matches!(self.shell_view, ShellView::Findings) && !self.findings.is_empty() {
+                    self.findings_cursor = self.findings_cursor.saturating_sub(3);
+                } else {
+                    self.scroll_up(3);
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if matches!(self.shell_view, ShellView::Findings) && !self.findings.is_empty() {
+                    self.findings_cursor =
+                        (self.findings_cursor + 3).min(self.findings.len().saturating_sub(1));
+                } else {
+                    self.scroll_down(3);
+                }
             }
             _ => {}
         }
@@ -4171,7 +4523,7 @@ impl ShellApp {
             .into_iter()
             .find(|binding| binding.matches(key))
         else {
-            return false;
+            return self.handle_generic_scroll_hotkey(key);
         };
         let char_trigger = binding.trigger.is_char();
         let handled = self.apply_view_hotkey(binding.action);
@@ -4224,6 +4576,20 @@ impl ShellApp {
         true
     }
 
+    fn handle_generic_scroll_hotkey(&mut self, key: KeyEvent) -> bool {
+        if !self.is_scrollable_view() {
+            return false;
+        }
+        match key.code {
+            KeyCode::Char('j') => self.scroll_down(1),
+            KeyCode::Char('k') => self.scroll_up(1),
+            KeyCode::Char('g') => self.scroll_to_top(),
+            KeyCode::Char('G') => self.scroll_to_bottom(),
+            _ => return false,
+        }
+        true
+    }
+
     fn page_down_current_view(&mut self) {
         match self.shell_view {
             ShellView::Findings => {
@@ -4232,21 +4598,7 @@ impl ShellApp {
                         .min(self.findings.len().saturating_sub(1));
                 }
             }
-            ShellView::Help => {
-                self.help_scroll = self.help_scroll.saturating_add(VIEWPORT_PAGE_LINES)
-            }
-            ShellView::Tools => {
-                self.tools_scroll = self.tools_scroll.saturating_add(VIEWPORT_PAGE_LINES)
-            }
-            ShellView::Catalog if self.catalog_expanded => {
-                self.modules_scroll = self.modules_scroll.saturating_add(VIEWPORT_PAGE_LINES)
-            }
-            ShellView::History => {
-                self.history_scroll = self.history_scroll.saturating_add(VIEWPORT_PAGE_LINES)
-            }
-            ShellView::KnowledgeBase => {
-                self.kb_scroll = self.kb_scroll.saturating_add(VIEWPORT_PAGE_LINES)
-            }
+            _ if self.is_scrollable_view() => self.scroll_down(VIEWPORT_PAGE_LINES as u16),
             _ => {}
         }
     }
@@ -4256,23 +4608,35 @@ impl ShellApp {
             ShellView::Findings => {
                 self.findings_cursor = self.findings_cursor.saturating_sub(FINDINGS_PAGE_ROWS);
             }
-            ShellView::Help => {
-                self.help_scroll = self.help_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
-            }
-            ShellView::Tools => {
-                self.tools_scroll = self.tools_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
-            }
-            ShellView::Catalog if self.catalog_expanded => {
-                self.modules_scroll = self.modules_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
-            }
-            ShellView::History => {
-                self.history_scroll = self.history_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
-            }
-            ShellView::KnowledgeBase => {
-                self.kb_scroll = self.kb_scroll.saturating_sub(VIEWPORT_PAGE_LINES)
-            }
+            _ if self.is_scrollable_view() => self.scroll_up(VIEWPORT_PAGE_LINES as u16),
             _ => {}
         }
+    }
+
+    fn is_scrollable_view(&self) -> bool {
+        matches!(
+            self.shell_view,
+            ShellView::Help
+                | ShellView::Tools
+                | ShellView::Options(_)
+                | ShellView::Runs
+                | ShellView::Replay(_)
+                | ShellView::Trace(_)
+                | ShellView::SastTasks
+                | ShellView::Context
+                | ShellView::Workspace
+                | ShellView::KnowledgeBase
+                | ShellView::AgentChat
+                | ShellView::History
+                | ShellView::Story
+                | ShellView::Threat(_)
+                | ShellView::ThreatEditor
+                | ShellView::PromptsEditor
+                | ShellView::Tune
+                | ShellView::ActorDetail(_)
+                | ShellView::ModuleRun
+                | ShellView::Finding
+        )
     }
 
     fn go_back(&mut self) {
@@ -4406,17 +4770,46 @@ impl ShellApp {
         );
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self) -> bool {
+        let mut changed = false;
         if let Some(armed_at) = self.ctrl_c_armed_at {
             if Instant::now().duration_since(armed_at) > CTRL_C_ARM_WINDOW {
                 self.ctrl_c_armed_at = None;
+                changed = true;
             }
         }
         if let Some(throttle) = &self.advisory.throttle {
             if Instant::now().duration_since(throttle.since) > THROTTLE_STALE_AFTER {
                 self.advisory.throttle = None;
+                changed = true;
             }
         }
+        if self.has_running_work() {
+            let now = Instant::now();
+            let due = self
+                .last_spinner_advance
+                .map(|prev| now.duration_since(prev) >= SPINNER_FRAME)
+                .unwrap_or(true);
+            if due {
+                self.spinner_phase = self.spinner_phase.wrapping_add(1);
+                self.last_spinner_advance = Some(now);
+                changed = true;
+            }
+        } else {
+            self.last_spinner_advance = None;
+        }
+        changed
+    }
+
+    pub fn has_running_work(&self) -> bool {
+        let scan_running = self.scan.as_ref().is_some_and(|scan| scan.running);
+        let agent_running = self.agent_chat.as_ref().is_some_and(|agent| agent.running);
+        scan_running || agent_running || self.planner_running || self.threat_worker_running
+    }
+
+    pub fn spinner_glyph(&self) -> &'static str {
+        const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        FRAMES[(self.spinner_phase as usize) % FRAMES.len()]
     }
 
     pub fn ctrl_c_armed(&self) -> bool {
@@ -4981,22 +5374,54 @@ pub fn run_shell_with_plain(
     let mut terminal = setup_terminal()?;
     let mut app = ShellApp::new(config, target);
 
-    loop {
-        app.tick();
-        app.drain_background_events();
-        terminal.draw(|frame| render_app(frame, &app))?;
-        if app.should_quit {
-            break;
-        }
+    let result = (|| -> Result<()> {
+        let mut needs_redraw = true;
+        loop {
+            let tick_changed = app.tick();
+            let drain_changed = app.drain_background_events();
+            let view_changed = app.sync_view_change();
+            if tick_changed || drain_changed || view_changed {
+                needs_redraw = true;
+            }
+            if needs_redraw {
+                terminal.draw(|frame| render_app(frame, &app))?;
+                needs_redraw = false;
+            }
+            if app.should_quit {
+                break;
+            }
 
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                app.handle_key(key);
+            // Use a short poll while running so the spinner animates; idle when
+            // nothing is in flight so we don't burn CPU on a quiescent shell.
+            let timeout = if app.has_running_work() {
+                SPINNER_FRAME
+            } else {
+                Duration::from_millis(250)
+            };
+            if event::poll(timeout)? {
+                match event::read()? {
+                    Event::Key(key) => {
+                        app.handle_key(key);
+                        needs_redraw = true;
+                    }
+                    Event::Paste(text) => {
+                        app.handle_paste(&text);
+                        needs_redraw = true;
+                    }
+                    Event::Mouse(mouse) => {
+                        app.handle_mouse(mouse);
+                        needs_redraw = true;
+                    }
+                    Event::Resize(_, _) => needs_redraw = true,
+                    _ => {}
+                }
             }
         }
-    }
+        Ok(())
+    })();
 
-    restore_terminal(&mut terminal)
+    let _ = restore_terminal(&mut terminal);
+    result
 }
 
 fn run_plain_shell(
@@ -5048,13 +5473,24 @@ fn render_plain_scripted_session(app: &mut ShellApp, commands: &[&str], width: u
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode().context("Could not enable raw mode")?;
     let mut stdout = io::stdout();
-    execute!(stdout, Clear(ClearType::All), MoveTo(0, 0))
-        .context("Could not reset terminal viewport")?;
+    execute!(
+        stdout,
+        Clear(ClearType::All),
+        MoveTo(0, 0),
+        EnableBracketedPaste,
+        EnableMouseCapture
+    )
+    .context("Could not reset terminal viewport")?;
     let backend = CrosstermBackend::new(stdout);
     Terminal::new(backend).context("Could not initialize terminal")
 }
 
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
+    let _ = execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        DisableBracketedPaste
+    );
     disable_raw_mode().context("Could not disable raw mode")?;
     terminal
         .show_cursor()
@@ -6262,6 +6698,7 @@ esac
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.92,
                     rationale: "request body reaches exec".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -6648,11 +7085,11 @@ JSON
     #[test]
     fn tab_key_applies_shell_and_argument_completion() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.input = "/con".to_string();
+        app.set_input("/con");
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
         assert_eq!(app.input, "/context");
 
-        app.input = "task block co".to_string();
+        app.set_input("task block co");
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
         assert_eq!(app.input, "task block codeql");
     }
@@ -7757,6 +8194,7 @@ JSON
             api_key_env: "KUZUSHI_TEST_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
         let mut app = ShellApp::new(config, None);
 
@@ -8064,6 +8502,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8101,6 +8540,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8139,6 +8579,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8178,6 +8619,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8222,6 +8664,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8266,6 +8709,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8304,6 +8748,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8347,6 +8792,7 @@ JSON
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "confirmed".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -8391,6 +8837,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8442,6 +8889,7 @@ JSON
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "confirmed".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -8453,6 +8901,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8502,6 +8951,7 @@ JSON
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "confirmed".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -8513,6 +8963,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8557,6 +9008,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8591,6 +9043,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8769,7 +9222,10 @@ JSON
             actor_fingerprint: None,
             static_proof_state: None,
             triage: None,
+            verification: None,
             created_at: String::new(),
+            vuln_source: None,
+            dedup_key: None,
         }
     }
 
@@ -8976,15 +9432,16 @@ JSON
     }
 
     #[test]
-    fn paste_guard_swallows_enter_immediately_after_char() {
+    fn bracketed_paste_inserts_text_without_submit() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::empty()));
         app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::empty()));
-        // Enter arrives within the paste-guard window; should NOT submit.
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
-        assert_eq!(app.input, "hi", "input should not be drained");
-        // After advancing past the guard window, Enter submits.
-        app.last_char_at = Some(Instant::now() - (PASTE_GUARD_WINDOW + Duration::from_millis(20)));
+        // A pasted blob (with embedded newline) is inserted verbatim — Enter is NOT
+        // synthesized, so the line stays in the buffer until the operator submits.
+        app.handle_paste(" world\nmore");
+        assert_eq!(app.input, "hi world\nmore");
+        assert_eq!(app.cursor, app.input.chars().count());
+        // Pressing Enter after a paste submits the line normally.
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         assert!(app.input.is_empty());
     }
@@ -9011,6 +9468,162 @@ JSON
         assert_eq!(app.findings_cursor, 0);
         app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
         assert_eq!(app.findings_cursor, 2);
+    }
+
+    #[test]
+    fn arrow_keys_move_cursor_within_input() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        for ch in "hello".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty()));
+        }
+        assert_eq!(app.input, "hello");
+        assert_eq!(app.cursor, 5);
+
+        app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::empty()));
+        app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::empty()));
+        assert_eq!(app.cursor, 3);
+
+        // Insert a char in the middle.
+        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::empty()));
+        assert_eq!(app.input, "helXlo");
+        assert_eq!(app.cursor, 4);
+
+        app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::empty()));
+        assert_eq!(app.cursor, 0);
+        app.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::empty()));
+        assert_eq!(app.cursor, app.input.chars().count());
+    }
+
+    #[test]
+    fn ctrl_w_deletes_word_left() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_input("scan ./path/to/foo");
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert_eq!(app.input, "scan ./path/to/");
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert_eq!(app.input, "scan ./path/");
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        assert_eq!(app.input, "");
+        assert_eq!(app.cursor, 0);
+    }
+
+    #[test]
+    fn ctrl_a_e_b_f_navigate_input() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_input("abcd");
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+        assert_eq!(app.cursor, 0);
+        app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+        assert_eq!(app.cursor, 1);
+        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL));
+        assert_eq!(app.cursor, 4);
+        app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+        assert_eq!(app.cursor, 3);
+    }
+
+    #[test]
+    fn up_arrow_recalls_command_history() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.submit_line("/findings");
+        app.submit_line("/modules");
+        assert!(app.input.is_empty());
+
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
+        assert_eq!(app.input, "/modules");
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
+        assert_eq!(app.input, "/findings");
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+        assert_eq!(app.input, "/modules");
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+        assert_eq!(app.input, "");
+    }
+
+    #[test]
+    fn page_keys_scroll_view_offset() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Help;
+        app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
+        assert_eq!(app.scroll_offset, 10);
+        app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
+        assert_eq!(app.scroll_offset, 20);
+        app.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::empty()));
+        assert_eq!(app.scroll_offset, 10);
+    }
+
+    #[test]
+    fn changing_view_resets_scroll_offset() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Help;
+        app.scroll_offset = 25;
+        app.sync_view_change();
+        // First sync after construction: prev_shell_view starts None, so scroll resets.
+        assert_eq!(app.scroll_offset, 0);
+        // Move scroll, switch view, sync again — scroll resets again.
+        app.scroll_offset = 12;
+        app.shell_view = ShellView::Tools;
+        app.sync_view_change();
+        assert_eq!(app.scroll_offset, 0);
+    }
+
+    #[test]
+    fn completion_preview_shows_only_when_cursor_at_end() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_input("/he");
+        // Cursor at end → preview returns the tail "lp".
+        let preview = app.completion_preview();
+        assert_eq!(preview.as_deref(), Some("lp"));
+
+        // Move cursor mid-line → preview suppressed (would render in the wrong place).
+        app.cursor = 1;
+        assert!(app.completion_preview().is_none());
+
+        // Empty input → no preview (cold-start prompt should stay clean).
+        app.clear_input();
+        assert!(app.completion_preview().is_none());
+
+        // Already a complete word with no further suffix → no preview.
+        app.set_input("/help");
+        assert!(app.completion_preview().is_none());
+    }
+
+    #[test]
+    fn vi_keys_scroll_help_view() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Help;
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        assert_eq!(app.scroll_offset, 2);
+        app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()));
+        assert_eq!(app.scroll_offset, 1);
+        app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
+        assert_eq!(app.scroll_offset, u16::MAX);
+        app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
+        assert_eq!(app.scroll_offset, 0);
+    }
+
+    #[test]
+    fn tick_advances_spinner_only_when_running() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let initial_phase = app.spinner_phase;
+        // Idle: tick() returns false and does not advance the spinner.
+        let changed = app.tick();
+        assert!(!changed);
+        assert_eq!(app.spinner_phase, initial_phase);
+        // Mark a scan as running and tick — the spinner advances and tick reports change.
+        app.scan = Some(crate::app::ScanPanelState {
+            run_id: None,
+            target: PathBuf::from("."),
+            stage: "running".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        // Force the spinner to advance even though no real time has passed.
+        app.last_spinner_advance = Some(Instant::now() - Duration::from_millis(200));
+        let changed = app.tick();
+        assert!(changed);
+        assert_eq!(app.spinner_phase, initial_phase.wrapping_add(1));
     }
 
     #[test]

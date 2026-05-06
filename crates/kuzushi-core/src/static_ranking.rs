@@ -652,6 +652,7 @@ mod tests {
             verdict: TriageVerdict::NeedsReview,
             confidence: 0.78,
             rationale: "static source-to-sink evidence".to_string(),
+            ..Default::default()
         });
         let generic_noise = Finding::new_semgrep(
             "generic.best-practice.no-console",

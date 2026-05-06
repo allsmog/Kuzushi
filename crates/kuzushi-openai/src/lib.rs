@@ -1,3 +1,17 @@
+//! Kuzushi `AgentRuntime` implementations.
+//!
+//! Despite the historical crate name (`kuzushi-openai`), this crate
+//! hosts every concrete `AgentRuntime` impl:
+//!
+//! - [`PiAgentCoreRuntime`] — bridges to `scripts/pi-agent-core-bridge.mjs`,
+//!   the existing TypeScript-side OAuth-aware client. Used for the
+//!   OpenAI Codex flow and the legacy Anthropic refresh-token bridge.
+//! - [`AnthropicOAuthRuntime`] — native Rust runtime that talks
+//!   directly to `api.anthropic.com` over `reqwest`/`rustls` with an
+//!   OAuth bearer token. No Node.js or pi-ai dependency. Suitable for
+//!   environments where only a long-lived OAuth access token is
+//!   available (e.g. a host-managed Claude Code token).
+
 use std::env;
 use std::io::Write;
 use std::path::Path;
@@ -13,7 +27,10 @@ use kuzushi_core::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod anthropic_oauth;
 pub mod oauth;
+
+pub use anthropic_oauth::{AnthropicOAuthRuntime, AnthropicOAuthRuntimeOptions};
 pub use oauth::{probe as probe_anthropic_oauth, OauthReadiness};
 
 #[derive(Debug, Clone)]
@@ -98,6 +115,7 @@ impl AgentRuntime for PiAgentCoreRuntime {
         Ok(AgentQueryResponse {
             text: response.text.unwrap_or_default(),
             structured: response.structured,
+            ..Default::default()
         })
     }
 
@@ -124,6 +142,7 @@ impl AgentRuntime for PiAgentCoreRuntime {
                 verdict: TriageVerdict::NeedsReview,
                 confidence: 0.25,
                 rationale: response.text,
+                ..Default::default()
             });
         }
 
@@ -131,10 +150,14 @@ impl AgentRuntime for PiAgentCoreRuntime {
             verdict: TriageVerdict::NeedsReview,
             confidence: 0.0,
             rationale: "pi-agent-core bridge returned no triage content".to_string(),
+            ..Default::default()
         })
     }
 
     fn supports_tools(&self) -> bool {
+        // Anthropic-only in this version (bridge enforces). Routed
+        // queries with non-Anthropic models will surface a clear error
+        // from the bridge itself.
         true
     }
 
@@ -143,19 +166,20 @@ impl AgentRuntime for PiAgentCoreRuntime {
         request: &AgentToolLoopRequest,
         history: &[LoopHistoryEntry],
     ) -> Result<AgentLoopStep> {
+        let messages = build_messages_for_anthropic(&request.prompt, history);
         let bridge_request = NextStepBridgeRequest {
             envelope_type: "next-step",
             model: request.model.clone(),
             cwd: request.cwd.display().to_string(),
             system_prompt: request.system_prompt.clone(),
-            messages: build_messages_for_anthropic(&request.prompt, history),
+            messages,
             tools: request
                 .tools
                 .iter()
-                .map(|tool| BridgeTool {
-                    name: tool.name.clone(),
-                    description: tool.description.clone(),
-                    input_schema: tool.input_schema.clone(),
+                .map(|t| BridgeTool {
+                    name: t.name.clone(),
+                    description: t.description.clone(),
+                    input_schema: t.input_schema.clone(),
                 })
                 .collect(),
             max_tokens: 4096,
@@ -173,7 +197,6 @@ impl AgentRuntime for PiAgentCoreRuntime {
                     .unwrap_or_else(|| "unknown error".to_string())
             );
         }
-
         match response.step.as_deref() {
             Some("tool_call") => {
                 let call = response
@@ -200,6 +223,9 @@ impl AgentRuntime for PiAgentCoreRuntime {
     }
 }
 
+/// Translate the loop driver's [`LoopHistoryEntry`] sequence into Anthropic's
+/// Messages API shape. The first message is always the user's initial
+/// prompt; subsequent messages alternate assistant/user as the loop ran.
 fn build_messages_for_anthropic(initial_prompt: &str, history: &[LoopHistoryEntry]) -> Vec<Value> {
     let mut messages = Vec::with_capacity(history.len() + 1);
     messages.push(serde_json::json!({
@@ -243,9 +269,103 @@ fn build_messages_for_anthropic(initial_prompt: &str, history: &[LoopHistoryEntr
 
 fn stringify_tool_output(value: &Value) -> String {
     match value {
-        Value::String(text) => text.clone(),
+        Value::String(s) => s.clone(),
         other => serde_json::to_string(other).unwrap_or_else(|_| "<non-serialisable>".to_string()),
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NextStepBridgeRequest {
+    #[serde(rename = "type")]
+    envelope_type: &'static str,
+    model: String,
+    cwd: String,
+    system_prompt: String,
+    messages: Vec<Value>,
+    tools: Vec<BridgeTool>,
+    max_tokens: u32,
+    api_key_env: String,
+    api_key: Option<String>,
+    base_url: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BridgeTool {
+    name: String,
+    description: String,
+    input_schema: Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NextStepBridgeResponse {
+    ok: bool,
+    #[serde(default)]
+    step: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    structured: Option<Value>,
+    #[serde(default)]
+    cost_usd: Option<f64>,
+    #[serde(default)]
+    call: Option<NextStepBridgeCall>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NextStepBridgeCall {
+    name: String,
+    #[serde(default)]
+    input: Value,
+    #[serde(rename = "callId")]
+    call_id: String,
+}
+
+fn run_next_step_bridge(
+    command: &[String],
+    request: &NextStepBridgeRequest,
+) -> Result<NextStepBridgeResponse> {
+    let mut child = Command::new(&command[0])
+        .args(&command[1..])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("could not start next-step bridge {}", command[0]))?;
+    {
+        let stdin = child
+            .stdin
+            .as_mut()
+            .context("could not open next-step bridge stdin")?;
+        let body = serde_json::to_vec(request).context("could not encode next-step request")?;
+        stdin.write_all(&body)?;
+    }
+    let output = child
+        .wait_with_output()
+        .context("could not read next-step bridge output")?;
+    if !output.status.success() {
+        if !output.stdout.is_empty() {
+            if let Ok(parsed) = serde_json::from_slice::<NextStepBridgeResponse>(&output.stdout) {
+                return Ok(parsed);
+            }
+        }
+        anyhow::bail!(
+            "next-step bridge exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    serde_json::from_slice(&output.stdout).with_context(|| {
+        format!(
+            "could not parse next-step bridge JSON: {}",
+            String::from_utf8_lossy(&output.stdout)
+        )
+    })
 }
 
 const TRIAGE_SYSTEM_PROMPT: &str = r#"You are Kuzushi's security triage agent.
@@ -345,108 +465,6 @@ struct BridgeResponse {
     error: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NextStepBridgeRequest {
-    #[serde(rename = "type")]
-    envelope_type: &'static str,
-    model: String,
-    cwd: String,
-    system_prompt: String,
-    messages: Vec<Value>,
-    tools: Vec<BridgeTool>,
-    max_tokens: u32,
-    api_key_env: String,
-    api_key: Option<String>,
-    base_url: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BridgeTool {
-    name: String,
-    description: String,
-    input_schema: Value,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NextStepBridgeResponse {
-    ok: bool,
-    #[serde(default)]
-    step: Option<String>,
-    #[serde(default)]
-    text: Option<String>,
-    #[serde(default)]
-    structured: Option<Value>,
-    #[serde(default)]
-    cost_usd: Option<f64>,
-    #[serde(default)]
-    call: Option<NextStepBridgeCall>,
-    #[serde(default)]
-    error: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NextStepBridgeCall {
-    name: String,
-    #[serde(default)]
-    input: Value,
-    #[serde(rename = "callId")]
-    call_id: String,
-}
-
-fn run_next_step_bridge(
-    command: &[String],
-    request: &NextStepBridgeRequest,
-) -> Result<NextStepBridgeResponse> {
-    let mut child = Command::new(&command[0])
-        .args(&command[1..])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| {
-            format!(
-                "Could not start pi-agent-core next-step bridge {}",
-                command[0]
-            )
-        })?;
-
-    {
-        let stdin = child
-            .stdin
-            .as_mut()
-            .context("Could not open pi-agent-core next-step bridge stdin")?;
-        let body = serde_json::to_vec(request).context("Could not encode next-step request")?;
-        stdin.write_all(&body)?;
-    }
-
-    let output = child
-        .wait_with_output()
-        .context("Could not read pi-agent-core next-step bridge output")?;
-    if !output.status.success() {
-        if !output.stdout.is_empty() {
-            if let Ok(response) = serde_json::from_slice::<NextStepBridgeResponse>(&output.stdout) {
-                return Ok(response);
-            }
-        }
-        anyhow::bail!(
-            "pi-agent-core next-step bridge exited with {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    serde_json::from_slice::<NextStepBridgeResponse>(&output.stdout).with_context(|| {
-        format!(
-            "Could not parse next-step bridge JSON: {}",
-            String::from_utf8_lossy(&output.stdout)
-        )
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,6 +477,7 @@ mod tests {
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec!["node".to_string(), "bridge.mjs".to_string()]),
+            anthropic_oauth: None,
         };
 
         let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -466,6 +485,126 @@ mod tests {
             bridge.command(),
             &["node".to_string(), "bridge.mjs".to_string()]
         );
+    }
+
+    #[test]
+    fn next_step_bridge_round_trips_tool_call_then_final() {
+        use kuzushi_core::{AgentTool, AgentToolLoopRequest, ToolCall, ToolResult};
+        // A fake bridge that returns a tool_call on first stdin, then a
+        // final on the second. We persist a counter file between calls
+        // so a single bridge command can serve both invocations.
+        let tmp = tempfile::tempdir().unwrap();
+        let counter = tmp.path().join("counter");
+        std::fs::write(&counter, "0").unwrap();
+        let script = format!(
+            r#"#!/bin/sh
+N=$(cat {counter})
+echo $((N+1)) > {counter}
+if [ "$N" = "0" ]; then
+  printf '%s' '{{"ok":true,"step":"tool_call","call":{{"name":"read_source","input":{{"file":"a.c"}},"callId":"c1"}},"costUsd":0.01}}'
+else
+  printf '%s' '{{"ok":true,"step":"final","text":"done","costUsd":0.02}}'
+fi
+"#,
+            counter = counter.display()
+        );
+        let bridge = tmp.path().join("bridge.sh");
+        std::fs::write(&bridge, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bridge, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let runtime = RuntimeConfig {
+            kind: RuntimeKind::PiAgentCore,
+            api_key_env: "ANTHROPIC_API_KEY".to_string(),
+            base_url: None,
+            agent_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
+            anthropic_oauth: None,
+        };
+        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+        assert!(bridge.supports_tools());
+
+        let req = AgentToolLoopRequest {
+            model: "anthropic:claude-sonnet-4-6".to_string(),
+            cwd: ".".into(),
+            system_prompt: "sys".to_string(),
+            prompt: "scan it".to_string(),
+            tools: vec![AgentTool {
+                name: "read_source".to_string(),
+                description: "read a file".to_string(),
+                input_schema: serde_json::json!({"type":"object"}),
+            }],
+            max_steps: 4,
+        };
+
+        let step1 = bridge.next_step_blocking(&req, &[]).unwrap();
+        match step1 {
+            kuzushi_core::AgentLoopStep::ToolCall { call } => {
+                assert_eq!(call.name, "read_source");
+                assert_eq!(call.call_id, "c1");
+                assert_eq!(call.input["file"], "a.c");
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+
+        let history = vec![
+            kuzushi_core::LoopHistoryEntry::AssistantToolCall(ToolCall {
+                name: "read_source".to_string(),
+                input: serde_json::json!({"file":"a.c"}),
+                call_id: "c1".to_string(),
+            }),
+            kuzushi_core::LoopHistoryEntry::ToolResult(ToolResult {
+                call_id: "c1".to_string(),
+                output: serde_json::json!({"contents":"void a(){}"}),
+                is_error: false,
+            }),
+        ];
+        let step2 = bridge.next_step_blocking(&req, &history).unwrap();
+        match step2 {
+            kuzushi_core::AgentLoopStep::Final { text, cost_usd, .. } => {
+                assert_eq!(text, "done");
+                assert!((cost_usd.unwrap() - 0.02).abs() < 1e-9);
+            }
+            other => panic!("expected Final, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn next_step_bridge_surfaces_error_payload() {
+        use kuzushi_core::{AgentTool, AgentToolLoopRequest};
+        let runtime = RuntimeConfig {
+            kind: RuntimeKind::PiAgentCore,
+            api_key_env: "ANTHROPIC_API_KEY".to_string(),
+            base_url: None,
+            agent_bridge_command: Some(vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                "printf '%s' '{\"ok\":false,\"error\":\"no Anthropic credentials\"}'; exit 1"
+                    .to_string(),
+            ]),
+            anthropic_oauth: None,
+        };
+        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let req = AgentToolLoopRequest {
+            model: "anthropic:claude-sonnet-4-6".to_string(),
+            cwd: ".".into(),
+            system_prompt: "sys".to_string(),
+            prompt: "p".to_string(),
+            tools: vec![AgentTool {
+                name: "x".to_string(),
+                description: "".to_string(),
+                input_schema: serde_json::json!({"type":"object"}),
+            }],
+            max_steps: 1,
+        };
+        let err = bridge
+            .next_step_blocking(&req, &[])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("next-step"));
+        assert!(err.contains("no Anthropic credentials"));
     }
 
     #[test]
@@ -480,6 +619,7 @@ mod tests {
                 "printf '%s' '{\"ok\":false,\"error\":\"install @mariozechner/pi-agent-core\"}'; exit 1"
                     .to_string(),
             ]),
+            anthropic_oauth: None,
         };
         let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
         let err = bridge
@@ -502,123 +642,5 @@ mod tests {
 
         assert!(err.contains("pi-agent-core bridge failed"));
         assert!(err.contains("install @mariozechner/pi-agent-core"));
-    }
-
-    #[test]
-    fn next_step_bridge_round_trips_tool_call_then_final() {
-        use kuzushi_core::{AgentTool, AgentToolLoopRequest, ToolResult};
-
-        let tmp = tempfile::tempdir().unwrap();
-        let counter = tmp.path().join("counter");
-        std::fs::write(&counter, "0").unwrap();
-        let script = format!(
-            r#"#!/bin/sh
-N=$(cat {counter})
-echo $((N+1)) > {counter}
-if [ "$N" = "0" ]; then
-  printf '%s' '{{"ok":true,"step":"tool_call","call":{{"name":"read_source","input":{{"file":"a.c"}},"callId":"c1"}},"costUsd":0.01}}'
-else
-  printf '%s' '{{"ok":true,"step":"final","text":"done","costUsd":0.02}}'
-fi
-"#,
-            counter = counter.display()
-        );
-        let bridge_script = tmp.path().join("bridge.sh");
-        std::fs::write(&bridge_script, script).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&bridge_script, std::fs::Permissions::from_mode(0o755))
-                .unwrap();
-        }
-
-        let runtime = RuntimeConfig {
-            kind: RuntimeKind::PiAgentCore,
-            api_key_env: "ANTHROPIC_API_KEY".to_string(),
-            base_url: None,
-            agent_bridge_command: Some(vec![bridge_script.to_string_lossy().into_owned()]),
-        };
-        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
-        assert!(bridge.supports_tools());
-
-        let request = AgentToolLoopRequest {
-            model: "anthropic:claude-sonnet-4-6".to_string(),
-            cwd: ".".into(),
-            system_prompt: "sys".to_string(),
-            prompt: "scan it".to_string(),
-            tools: vec![AgentTool {
-                name: "read_source".to_string(),
-                description: "read a file".to_string(),
-                input_schema: serde_json::json!({"type":"object"}),
-            }],
-            max_steps: 4,
-        };
-
-        let step1 = bridge.next_step_blocking(&request, &[]).unwrap();
-        match step1 {
-            AgentLoopStep::ToolCall { call } => {
-                assert_eq!(call.name, "read_source");
-                assert_eq!(call.call_id, "c1");
-                assert_eq!(call.input["file"], "a.c");
-            }
-            other => panic!("expected ToolCall, got {other:?}"),
-        }
-
-        let history = vec![
-            LoopHistoryEntry::AssistantToolCall(ToolCall {
-                name: "read_source".to_string(),
-                input: serde_json::json!({"file":"a.c"}),
-                call_id: "c1".to_string(),
-            }),
-            LoopHistoryEntry::ToolResult(ToolResult {
-                call_id: "c1".to_string(),
-                output: serde_json::json!({"contents":"void a(){}"}),
-                is_error: false,
-            }),
-        ];
-        let step2 = bridge.next_step_blocking(&request, &history).unwrap();
-        match step2 {
-            AgentLoopStep::Final { text, cost_usd, .. } => {
-                assert_eq!(text, "done");
-                assert!((cost_usd.unwrap() - 0.02).abs() < 1e-9);
-            }
-            other => panic!("expected Final, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn next_step_bridge_surfaces_error_payload() {
-        use kuzushi_core::{AgentTool, AgentToolLoopRequest};
-
-        let runtime = RuntimeConfig {
-            kind: RuntimeKind::PiAgentCore,
-            api_key_env: "ANTHROPIC_API_KEY".to_string(),
-            base_url: None,
-            agent_bridge_command: Some(vec![
-                "sh".to_string(),
-                "-c".to_string(),
-                "printf '%s' '{\"ok\":false,\"error\":\"no Anthropic credentials\"}'; exit 1"
-                    .to_string(),
-            ]),
-        };
-        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
-        let request = AgentToolLoopRequest {
-            model: "anthropic:claude-sonnet-4-6".to_string(),
-            cwd: ".".into(),
-            system_prompt: "sys".to_string(),
-            prompt: "p".to_string(),
-            tools: vec![AgentTool {
-                name: "x".to_string(),
-                description: String::new(),
-                input_schema: serde_json::json!({"type":"object"}),
-            }],
-            max_steps: 1,
-        };
-        let err = bridge
-            .next_step_blocking(&request, &[])
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("next-step"), "{err}");
-        assert!(err.contains("no Anthropic credentials"), "{err}");
     }
 }
