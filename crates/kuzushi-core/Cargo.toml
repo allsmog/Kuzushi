@@ -12,6 +12,8 @@ repository.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 dirs.workspace = true
+kuzushi-codeindex = { path = "../kuzushi-codeindex" }
+kuzushi-mcp-common = { path = "../kuzushi-mcp-common" }
 kuzushi-sandbox = { path = "../kuzushi-sandbox" }
 libc.workspace = true
 rusqlite.workspace = true

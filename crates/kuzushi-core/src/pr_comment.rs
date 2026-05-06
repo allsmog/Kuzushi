@@ -281,6 +281,7 @@ mod tests {
             tool: "test".to_string(),
             actor_fingerprint: None,
             triage: None,
+            verification: None,
             created_at: String::new(),
         }
     }

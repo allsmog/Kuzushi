@@ -958,13 +958,35 @@ async fn verify_node(
     opts: &VerifyOptions,
     extension: &str,
 ) -> Result<VerificationOutcome> {
-    if kuzushi_sandbox::which("node").is_none() {
+    // Pick a runner. For .ts/.tsx prefer `tsx` → `ts-node` → fall back
+    // to plain `node` (which only works if the input is already JS).
+    let want_typescript = matches!(extension, "ts" | "tsx" | "mts" | "cts");
+    let runner: Vec<String> = if want_typescript {
+        if let Some(_path) = kuzushi_sandbox::which("tsx") {
+            vec!["tsx".to_string()]
+        } else if let Some(_path) = kuzushi_sandbox::which("ts-node") {
+            vec!["ts-node".to_string()]
+        } else if kuzushi_sandbox::which("node").is_some() {
+            // Last-ditch: run `node --import tsx` if @kuzushi happens
+            // to bundle it via npx. Otherwise fall through to node and
+            // hope the snippet is JS-compatible.
+            vec!["node".to_string()]
+        } else {
+            return Ok(infrastructure_error(
+                backend,
+                None,
+                "no JS/TS runner on PATH; install Node.js (`apt install nodejs` / `brew install node`) and optionally `tsx` for native TypeScript".to_string(),
+            ));
+        }
+    } else if kuzushi_sandbox::which("node").is_some() {
+        vec!["node".to_string()]
+    } else {
         return Ok(infrastructure_error(
             backend,
             None,
-            "node not on PATH; install Node.js to verify .js / .ts findings".to_string(),
+            "node not on PATH; install Node.js to verify .js findings".to_string(),
         ));
-    }
+    };
 
     let project = match scaffold_node_project(finding, extension).await {
         Ok(p) => p,
@@ -977,13 +999,17 @@ async fn verify_node(
         }
     };
 
-    // We only run JS today; TS findings get the same JS harness because
-    // the trigger doesn't yet import the suspect file. Future work:
-    // shell out to `tsx` or `ts-node` when available.
-    let mut run_cmd = SandboxExecOptions::new(vec![
-        "node".to_string(),
-        project.path.join("trigger.js").display().to_string(),
-    ]);
+    // The trigger file extension matches the input's: `.js` for JS,
+    // `.ts` for TS. tsx/ts-node will run the .ts directly; plain node
+    // gets the .js fallback.
+    let trigger_name = if want_typescript {
+        "trigger.ts"
+    } else {
+        "trigger.js"
+    };
+    let mut argv = runner;
+    argv.push(project.path.join(trigger_name).display().to_string());
+    let mut run_cmd = SandboxExecOptions::new(argv);
     run_cmd.timeout_ms = opts.timeout_ms;
     run_cmd.workdir = Some(project.path.clone());
     run_cmd.read_write_mounts = vec![MountSpec {
@@ -1005,7 +1031,7 @@ async fn verify_node(
     Ok(classify_run_result(&run, backend, &project.path, opts))
 }
 
-async fn scaffold_node_project(finding: &Finding, _extension: &str) -> Result<ScaffoldedProject> {
+async fn scaffold_node_project(finding: &Finding, extension: &str) -> Result<ScaffoldedProject> {
     let tempdir = tempfile::tempdir().context("could not create node harness temp dir")?;
     let root = tempdir.path().to_path_buf();
     let payload = synth_payload_from_finding(finding);
@@ -1015,7 +1041,17 @@ async fn scaffold_node_project(finding: &Finding, _extension: &str) -> Result<Sc
         .collect::<Vec<_>>()
         .join(", ");
     let body = JS_HARNESS_TEMPLATE.replace("{payload_csv}", &payload_csv);
-    tokio::fs::write(root.join("trigger.js"), body).await?;
+    let want_typescript = matches!(extension, "ts" | "tsx" | "mts" | "cts");
+    if want_typescript {
+        // `tsx` and `ts-node` both happily run a script whose contents
+        // is plain JS. Writing it as `.ts` lets us pick up the TS
+        // toolchain; if the runner is plain node it would refuse the
+        // extension, but verify_node forces a JS-only fallback in
+        // that case.
+        tokio::fs::write(root.join("trigger.ts"), body).await?;
+    } else {
+        tokio::fs::write(root.join("trigger.js"), body).await?;
+    }
     Ok(ScaffoldedProject {
         path: root,
         _tempdir: tempdir,
