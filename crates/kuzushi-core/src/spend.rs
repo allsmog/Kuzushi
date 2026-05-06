@@ -38,6 +38,10 @@ pub enum Operation {
     DeepAudit,
     FullModeMulti,
     Patch,
+    /// One-turn follow-up that asks the model "did you decline anything?"
+    /// after a triage call. Separated from [`Operation::Triage`] so
+    /// `kuzushi metrics` can show how much the safety check actually costs.
+    RefusalFollowup,
 }
 
 impl Operation {
@@ -48,6 +52,7 @@ impl Operation {
             Self::DeepAudit => "deep_audit",
             Self::FullModeMulti => "full_mode_multi",
             Self::Patch => "patch",
+            Self::RefusalFollowup => "refusal_followup",
         }
     }
 
@@ -58,6 +63,7 @@ impl Operation {
             "deep_audit" => Some(Self::DeepAudit),
             "full_mode_multi" => Some(Self::FullModeMulti),
             "patch" => Some(Self::Patch),
+            "refusal_followup" => Some(Self::RefusalFollowup),
             _ => None,
         }
     }
@@ -69,6 +75,7 @@ impl Operation {
             Self::DeepAudit,
             Self::FullModeMulti,
             Self::Patch,
+            Self::RefusalFollowup,
         ]
     }
 }

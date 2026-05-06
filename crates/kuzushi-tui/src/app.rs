@@ -6904,8 +6904,9 @@ JSON
             vec!["init"],
             vec!["config", "user.email", "kuzushi@example.test"],
             vec!["config", "user.name", "Kuzushi Test"],
+            vec!["config", "commit.gpgsign", "false"],
             vec!["add", "."],
-            vec!["commit", "-m", "fixture"],
+            vec!["commit", "--no-gpg-sign", "-m", "fixture"],
         ] {
             let output = std::process::Command::new("git")
                 .args(args)

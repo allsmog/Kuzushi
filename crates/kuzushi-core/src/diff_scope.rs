@@ -760,8 +760,9 @@ mod tests {
             vec!["init"],
             vec!["config", "user.email", "kuzushi@example.test"],
             vec!["config", "user.name", "Kuzushi Test"],
+            vec!["config", "commit.gpgsign", "false"],
             vec!["add", "."],
-            vec!["commit", "-m", "base"],
+            vec!["commit", "--no-gpg-sign", "-m", "base"],
         ] {
             let output = Command::new("git")
                 .args(args)

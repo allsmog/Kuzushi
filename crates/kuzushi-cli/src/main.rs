@@ -50,6 +50,12 @@ enum Command {
         /// Emit one line per pipeline event in a deterministic, grep-friendly format.
         #[arg(long, conflicts_with = "json")]
         ci: bool,
+        /// Run scanners through an executor backend. `local` (default) spawns
+        /// scanners as subprocesses. `docker:<image>` routes each scanner
+        /// invocation through `docker run --rm -v <target>:/workspace -w
+        /// /workspace <image>`. `noop` errors on any execution.
+        #[arg(long)]
+        executor: Option<String>,
     },
     /// List persisted findings.
     Findings {
@@ -94,6 +100,21 @@ enum Command {
     Status {
         #[arg(long)]
         target: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run the tool-augmented deep auditor on a single finding. Persists
+    /// EvidenceCitations to the findings_evidence table and appends an
+    /// `agent_type=deep_audit` AnalysisEntry to the finding's history.
+    Audit {
+        /// Finding fingerprint (full or unambiguous prefix) or alias (F-NNNN).
+        fingerprint: String,
+        #[arg(long)]
+        target: Option<PathBuf>,
+        #[arg(long, default_value_t = 8)]
+        max_steps: u32,
+        #[arg(long, default_value_t = 0.50)]
+        deposit_usd: f64,
         #[arg(long)]
         json: bool,
     },
@@ -202,7 +223,8 @@ async fn main() -> Result<()> {
             triage,
             json,
             ci,
-        } => scan_command(target, mode, tasks, triage, json, ci).await,
+            executor,
+        } => scan_command(target, mode, tasks, triage, json, ci, executor).await,
         Command::Findings {
             target,
             limit,
@@ -221,6 +243,19 @@ async fn main() -> Result<()> {
         Command::Tools { json } => tools_command(json),
         Command::Doctor { target, json } => doctor_command(target.or(cli.target), json),
         Command::Status { target, json } => status_command(target.or(cli.target), json),
+        Command::Audit {
+            fingerprint,
+            target,
+            max_steps,
+            deposit_usd,
+            json,
+        } => audit_command(
+            fingerprint,
+            target.or(cli.target),
+            max_steps,
+            deposit_usd,
+            json,
+        ),
         Command::Metrics {
             target,
             recent,
@@ -325,6 +360,7 @@ async fn scan_command(
     triage: bool,
     json: bool,
     ci: bool,
+    executor_spec: Option<String>,
 ) -> Result<()> {
     let workspace = WorkspaceTarget::new(&target)?;
     let config = load_config_for_target(Some(workspace.root()))?;
@@ -344,12 +380,44 @@ async fn scan_command(
     } else {
         None
     };
-    let ctx = ToolExecutionContext {
-        config: &config,
-        workspace: Some(&workspace),
-        findings_store: Some(&store),
-        spend: None,
-        executor: None,
+    let executor: Option<Box<dyn kuzushi_core::Executor>> = match executor_spec.as_deref() {
+        None | Some("local") => None,
+        Some("noop") => Some(Box::new(kuzushi_core::NoopExecutor)),
+        Some(other) if other.starts_with("docker:") => {
+            let image = other.trim_start_matches("docker:").trim();
+            anyhow::ensure!(!image.is_empty(), "executor=docker requires an image, e.g. docker:alpine:3.19");
+            Some(Box::new(kuzushi_core::DockerExecutor::new(image)))
+        }
+        Some(other) if other.starts_with("sandbox:") => {
+            let endpoint = other.trim_start_matches("sandbox:").trim();
+            anyhow::ensure!(
+                !endpoint.is_empty(),
+                "executor=sandbox requires an endpoint, e.g. sandbox:https://api.example.com/v1"
+            );
+            let mut sandbox = kuzushi_core::SandboxExecutor::new(endpoint);
+            if let Ok(key) = std::env::var("KUZUSHI_SANDBOX_API_KEY") {
+                if !key.trim().is_empty() {
+                    sandbox = sandbox.with_api_key(key);
+                }
+            }
+            Some(Box::new(sandbox))
+        }
+        Some(other) => {
+            anyhow::bail!(
+                "unknown executor {other:?}. Try `local`, `docker:<image>`, `sandbox:<url>`, or `noop`."
+            );
+        }
+    };
+    let executor_ref: Option<&dyn kuzushi_core::Executor> = executor.as_deref();
+    let ctx = if let Some(exec) = executor_ref {
+        ToolExecutionContext::new(&config)
+            .with_workspace(&workspace)
+            .with_findings_store(&store)
+            .with_executor(exec)
+    } else {
+        ToolExecutionContext::new(&config)
+            .with_workspace(&workspace)
+            .with_findings_store(&store)
     };
 
     let started = std::time::Instant::now();
@@ -870,6 +938,143 @@ fn init_command(target: Option<PathBuf>, force: bool, skip_doctor: bool) -> Resu
 
     println!();
     println!("Ready. Next: `kuzushi scan {}` (or run `kuzushi` to enter the shell).", target.display());
+    Ok(())
+}
+
+fn audit_command(
+    fingerprint: String,
+    target: Option<PathBuf>,
+    max_steps: u32,
+    deposit_usd: f64,
+    json: bool,
+) -> Result<()> {
+    use kuzushi_core::{
+        agent_router::{AgentRouter, RoutedRuntime},
+        deep_auditor::{run_deep_auditor, save_evidence, DeepAuditConfig},
+        spend::SpendLimiter,
+    };
+    use std::sync::Arc;
+
+    let target = target.unwrap_or_else(|| PathBuf::from("."));
+    let workspace = WorkspaceTarget::new(&target)?;
+    let config = load_config_for_target(Some(workspace.root()))?;
+    let store = FindingStore::open(workspace.findings_db_path())?;
+
+    let finding = store
+        .get_finding_by_reference(fingerprint.trim())?
+        .with_context(|| format!("no finding matches {fingerprint:?}"))?;
+    let finding_id = finding
+        .id
+        .context("audit: loaded finding has no SQLite id")?;
+    let finding_fingerprint = finding.fingerprint.clone();
+
+    let bridge = kuzushi_openai::PiAgentCoreRuntime::from_config(&config, std::env::current_dir()?)
+        .context("audit: pi-agent-core runtime")?;
+    let router = AgentRouter::default();
+    let routed = RoutedRuntime::new(
+        Arc::new(bridge),
+        Arc::new(router),
+        config.model.clone(),
+    );
+
+    let spend_path = workspace
+        .root()
+        .join(".kuzushi")
+        .join("v2")
+        .join("spend.sqlite3");
+    let limiter = SpendLimiter::open(&spend_path).ok();
+
+    let cfg = DeepAuditConfig {
+        workspace_root: workspace.root().to_path_buf(),
+        max_steps,
+        deposit_usd,
+        system_prompt: None,
+    };
+
+    let outcome = run_deep_auditor(&routed, limiter.as_ref(), &cfg, &finding)
+        .context("deep auditor failed")?;
+
+    if let Err(error) = save_evidence(
+        &workspace.findings_db_path(),
+        finding_id,
+        &outcome.evidence,
+    ) {
+        eprintln!("[warn] could not persist evidence rows: {error}");
+    }
+
+    let model = config.model.clone().unwrap_or_else(|| "(unknown)".to_string());
+    if let Err(error) = store.record_analysis(
+        &finding_fingerprint,
+        finding.scan_id.as_deref().unwrap_or("audit"),
+        "deep_audit",
+        &model,
+        outcome.cost_usd,
+        &kuzushi_core::RefusalReport::default(),
+    ) {
+        eprintln!("[warn] could not record audit history: {error}");
+    }
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "fingerprint": finding_fingerprint,
+                "verdict": outcome.triage.verdict.as_str(),
+                "confidence": outcome.triage.confidence,
+                "rationale": outcome.triage.rationale,
+                "evidence": outcome.evidence,
+                "costUsd": outcome.cost_usd,
+                "stepsUsed": outcome.steps_used,
+                "truncated": outcome.truncated,
+            }))?
+        );
+        return Ok(());
+    }
+
+    println!("Kuzushi audit");
+    println!("Finding:       {finding_fingerprint}");
+    println!(
+        "Verdict:       {} ({:.2})",
+        outcome.triage.verdict.as_str(),
+        outcome.triage.confidence
+    );
+    println!("Cost:          ${:.4}", outcome.cost_usd);
+    println!(
+        "Steps:         {}{}",
+        outcome.steps_used,
+        if outcome.truncated { " (truncated)" } else { "" }
+    );
+    if !outcome.evidence.is_empty() {
+        println!();
+        println!("Evidence ({}):", outcome.evidence.len());
+        for citation in &outcome.evidence {
+            let kind = if citation.kind.is_empty() {
+                "".to_string()
+            } else {
+                format!(" [{}]", citation.kind)
+            };
+            println!(
+                "  {}:{}-{}{}{}",
+                citation.file,
+                citation.start_line,
+                citation.end_line,
+                kind,
+                if citation.note.is_empty() {
+                    String::new()
+                } else {
+                    format!(" — {}", citation.note)
+                }
+            );
+        }
+    }
+    if !outcome.triage.rationale.is_empty() {
+        println!();
+        println!("Rationale:");
+        for line in outcome.triage.rationale.lines() {
+            println!("  {line}");
+        }
+    }
+
     Ok(())
 }
 

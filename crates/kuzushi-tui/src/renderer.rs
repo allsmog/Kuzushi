@@ -1417,7 +1417,48 @@ fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     if !history.is_empty() {
         lines.push(blank());
         lines.push(divider("ANALYSIS HISTORY", area.width));
-        lines.push(detail("entries", &history.len().to_string()));
+
+        // Roll-up: total cost, count by agent_type, refusal count, followup
+        // count. Surfaced above the per-entry list so the operator sees the
+        // shape of the audit trail at a glance.
+        let total_cost: f64 = history.iter().map(|entry| entry.cost_usd).sum();
+        let refused = history.iter().filter(|entry| entry.refusal.refused).count();
+        let followups = history
+            .iter()
+            .filter(|entry| entry.refusal.source_followup)
+            .count();
+        let mut by_agent: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        for entry in &history {
+            *by_agent.entry(entry.agent_type.clone()).or_default() += 1;
+        }
+        lines.push(detail(
+            "entries",
+            &format!(
+                "{} · cost ${:.4}{}{}",
+                history.len(),
+                total_cost,
+                if refused > 0 {
+                    format!(" · {refused} ⚠")
+                } else {
+                    String::new()
+                },
+                if followups > 0 {
+                    format!(" · {followups} followup")
+                } else {
+                    String::new()
+                }
+            ),
+        ));
+        if by_agent.len() > 1 {
+            let breakdown = by_agent
+                .iter()
+                .map(|(agent, count)| format!("{agent} {count}"))
+                .collect::<Vec<_>>()
+                .join(" · ");
+            lines.push(detail("by agent", &breakdown));
+        }
+
         let visible_rows = (area.height.saturating_sub(lines.len() as u16) as usize).min(8);
         let start = history.len().saturating_sub(visible_rows);
         for entry in &history[start..] {
@@ -1427,14 +1468,19 @@ fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
                 String::new()
             };
             let refused = if entry.refusal.refused { " · ⚠" } else { "" };
+            let followup = if entry.refusal.source_followup {
+                " · followup"
+            } else {
+                ""
+            };
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("{:>9} ", entry.agent_type),
+                    format!("{:>11} ", entry.agent_type),
                     theme::label(),
                 ),
                 Span::raw(entry.model.clone()),
                 Span::styled(
-                    format!("{cost}{refused}"),
+                    format!("{cost}{refused}{followup}"),
                     if entry.refusal.refused {
                         theme::warn()
                     } else {

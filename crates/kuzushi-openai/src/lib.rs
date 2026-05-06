@@ -176,12 +176,13 @@ impl AgentRuntime for PiAgentCoreRuntime {
             Err(_) => return Ok((outcome, RefusalReport::default())),
         };
 
-        let refusal = if let Some(structured) = response.structured.as_ref() {
+        let mut refusal = if let Some(structured) = response.structured.as_ref() {
             serde_json::from_value::<RefusalReport>(structured.clone())
                 .unwrap_or_else(|_| parse_refusal_report(&response.text))
         } else {
             parse_refusal_report(&response.text)
         };
+        refusal.source_followup = true;
         Ok((outcome, refusal))
     }
 

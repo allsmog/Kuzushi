@@ -327,6 +327,49 @@ impl SemgrepScanner {
         normalize_semgrep_json(&stdout)
     }
 
+    /// Run the scanner via an [`Executor`] backend instead of spawning a
+    /// local subprocess. Useful when the operator wants the scanner to
+    /// run inside a container (`DockerExecutor`) or remotely. Trade-off
+    /// versus [`scan_with_cancel`]: no cancellation token plumbing — the
+    /// executor's lifetime is opaque, so this path is best suited to
+    /// short batch scans.
+    pub fn scan_via_executor(
+        &self,
+        target: &Path,
+        executor: &dyn crate::executor::Executor,
+    ) -> Result<Vec<Finding>> {
+        let mut command = vec![self.binary.clone(), "--json".to_string()];
+        for config in &self.config {
+            command.push("--config".to_string());
+            command.push(config.clone());
+        }
+        command.push(".".to_string());
+
+        let run_id = format!("semgrep-{}", uuid::Uuid::new_v4());
+        let request = crate::executor::ExecutorRequest {
+            run_id: run_id.clone(),
+            command,
+            working_dir: target.to_path_buf(),
+            env: std::collections::HashMap::new(),
+            stdin: None,
+        };
+        executor
+            .launch(request)
+            .with_context(|| format!("semgrep launch via {} executor", executor.name()))?;
+        let result = executor
+            .collect(&run_id)
+            .with_context(|| format!("semgrep collect via {} executor", executor.name()))?;
+        if !matches!(result.status, crate::executor::ExecutorStatus::Succeeded) {
+            anyhow::bail!(
+                "semgrep via {} executor exited with {:?}: {}",
+                executor.name(),
+                result.exit_code,
+                result.stderr.trim()
+            );
+        }
+        normalize_semgrep_json(&result.stdout)
+    }
+
     fn run_semgrep_process(
         &self,
         target: &Path,
@@ -1007,12 +1050,27 @@ pub fn run_semgrep_scan(
     store: &FindingStore,
     scanner: &SemgrepScanner,
 ) -> Result<ScanRun> {
+    run_semgrep_scan_with_executor(workspace, store, scanner, None)
+}
+
+/// Variant of [`run_semgrep_scan`] that, when given an executor, routes
+/// the scan through it instead of spawning a local subprocess. Pass
+/// `None` for the local path. Useful for `kuzushi scan --executor docker`.
+pub fn run_semgrep_scan_with_executor(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    scanner: &SemgrepScanner,
+    executor: Option<&dyn crate::executor::Executor>,
+) -> Result<ScanRun> {
     workspace.ensure_state_dir()?;
 
     let run_id = Uuid::new_v4().to_string();
     store.insert_scan_run(&run_id, workspace.root(), "running")?;
 
-    let findings = scanner.scan(workspace.root())?;
+    let findings = match executor {
+        Some(executor) => scanner.scan_via_executor(workspace.root(), executor)?,
+        None => scanner.scan(workspace.root())?,
+    };
     for finding in &findings {
         store.insert_finding(&run_id, finding)?;
     }

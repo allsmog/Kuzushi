@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent_router::{AgentRole, RoutedRuntime};
 use crate::findings::{Finding, TriageOutcome, TriageVerdict};
-use crate::runtime::{AgentQueryRequest, AgentRuntime};
+use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime};
 
 pub const DEFAULT_TARGET_PERCENTILE: f32 = 0.80;
 pub const DEFAULT_COLD_START_FLOOR: f32 = 0.6;
@@ -216,13 +216,61 @@ struct ClassifierResponse {
 }
 
 pub struct LikelyVulnClassifier<'a> {
-    runtime: &'a RoutedRuntime,
+    runtime: ClassifierRuntime<'a>,
     cfg: ClassifierConfig,
     quantile: Mutex<QuantileEstimator>,
 }
 
+/// Adapter so the gate works whether the operator wired a RoutedRuntime
+/// (with role-based model selection) or a plain runtime + a single model
+/// string. Production code prefers Routed; tests / one-off scans use Plain.
+enum ClassifierRuntime<'a> {
+    Routed(&'a RoutedRuntime),
+    Plain {
+        runtime: &'a dyn AgentRuntime,
+        model: String,
+    },
+}
+
+impl<'a> ClassifierRuntime<'a> {
+    fn resolve_model(&self) -> Option<String> {
+        match self {
+            Self::Routed(r) => r.resolve_model(AgentRole::ClassifierGate, 0, None),
+            Self::Plain { model, .. } => Some(model.clone()),
+        }
+    }
+
+    fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+        match self {
+            Self::Routed(r) => r.query_blocking(request),
+            Self::Plain { runtime, .. } => runtime.query_blocking(request),
+        }
+    }
+}
+
 impl<'a> LikelyVulnClassifier<'a> {
     pub fn new(runtime: &'a RoutedRuntime, cfg: ClassifierConfig) -> Result<Self> {
+        Self::with_runtime(ClassifierRuntime::Routed(runtime), cfg)
+    }
+
+    /// Construct a classifier gate that uses an arbitrary [`AgentRuntime`]
+    /// + an explicit model string. Use this from call sites that haven't
+    /// been wrapped in [`RoutedRuntime`] yet (e.g. `run_triage` today).
+    pub fn with_plain_runtime(
+        runtime: &'a dyn AgentRuntime,
+        model: impl Into<String>,
+        cfg: ClassifierConfig,
+    ) -> Result<Self> {
+        Self::with_runtime(
+            ClassifierRuntime::Plain {
+                runtime,
+                model: model.into(),
+            },
+            cfg,
+        )
+    }
+
+    fn with_runtime(runtime: ClassifierRuntime<'a>, cfg: ClassifierConfig) -> Result<Self> {
         let quantile = match cfg.state_db.as_deref() {
             Some(db) => load_quantile(db, cfg.target_percentile)?,
             None => QuantileEstimator::new(cfg.target_percentile),
@@ -236,15 +284,12 @@ impl<'a> LikelyVulnClassifier<'a> {
 
     /// Score a finding via the cheap classifier model.
     pub fn score(&self, finding: &Finding, cwd: &Path) -> Result<Score> {
-        let model = self
-            .runtime
-            .resolve_model(AgentRole::ClassifierGate, 0, None)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "no model configured for classifier_gate role: \
-                     set models.toml [roles.classifier_gate] or `setg MODEL_CLASSIFIER_GATE`"
-                )
-            })?;
+        let model = self.runtime.resolve_model().ok_or_else(|| {
+            anyhow::anyhow!(
+                "no model configured for classifier_gate role: \
+                 set models.toml [roles.classifier_gate] or `setg MODEL_CLASSIFIER_GATE`"
+            )
+        })?;
         let request = AgentQueryRequest::new(
             model,
             cwd.to_path_buf(),
@@ -330,7 +375,7 @@ impl<'a> LikelyVulnClassifier<'a> {
     ) -> anyhow::Result<()> {
         let model = self
             .runtime
-            .resolve_model(AgentRole::ClassifierGate, 0, None)
+            .resolve_model()
             .unwrap_or_else(|| "(unconfigured)".to_string());
         let entry = crate::findings::AnalysisEntry {
             run_id: finding
