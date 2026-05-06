@@ -2,7 +2,7 @@
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
 Active story: UX-008 - Honest Abort State
-Status: UX-007 implementation complete in iteration 20; commit/push gate in progress
+Status: UX-007 complete and pushed in iteration 20 as `d1a5e7f`; UX-008 pending next iteration
 
 ## Stage 2 Checklist
 
@@ -12,7 +12,7 @@ Status: UX-007 implementation complete in iteration 20; commit/push gate in prog
 - UX-004 Improve exit and unknown command handling: complete; pushed in iteration 17 as `f3305a1`.
 - UX-005 Visible startup progress and first-run path: complete; pushed in iteration 18 as `d26407a`.
 - UX-006 Rust doctor / preflight: complete; pushed in iteration 19 as `69f2e2a`.
-- UX-007 Input mode clarity: complete; commit/push gate in progress.
+- UX-007 Input mode clarity: complete; pushed in iteration 20 as `d1a5e7f`.
 - UX-008 Honest abort state: pending.
 - UX-009 Slash command taxonomy and drift tests: pending.
 - UX-010 Tab completion for high-value arguments: pending.
@@ -44,7 +44,7 @@ Status: UX-007 implementation complete in iteration 20; commit/push gate in prog
   - `cargo test -p kuzushi-tui commands::tests`
   - `cargo test -p kuzushi-tui app::tests::ask_requires_explicit_model_and_unknown_prose_stays_deterministic`
   - `cargo fmt --all --check`
-- Result: implementation complete; commit/push gate pending in this iteration.
+- Result: complete and pushed to `origin/main` as `d1a5e7f ralph:ux clarify rust input modes`. The TUI now shows `mode:shell`, `mode:module`, `mode:agent`, `mode:plan`, or `mode:run` in the context/status strip, switches prompts for agent/plan/run routing, and help explicitly documents `?`, `?text`, `/ask <question>`, and `ask <question>`.
 - Remaining work: UX-008 through UX-015.
 - Blockers or repo facts that contradicted this prompt:
   - The primary workspace remains stale at `80d23a4` with earlier Stage 2 files
