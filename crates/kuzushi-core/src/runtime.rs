@@ -330,6 +330,19 @@ pub trait AgentRuntime: Send + Sync {
         configured.to_string()
     }
 
+    /// Resolve a role key (`triage`, `deep_auditor`, `classifier_gate`,
+    /// `full_mode_multi`, etc.) to a concrete model name. Default
+    /// pass-through: the configured operator model wins. The
+    /// `RoutedRuntime` wrapper overrides this so callers honour
+    /// `~/.kuzushi/models.toml [roles.<key>]` without requiring every
+    /// tool dispatch site to thread an `Arc<dyn AgentRuntime>`. Pass
+    /// the role key as a `&str` rather than the typed `AgentRole`
+    /// enum so this trait stays free of the `agent_router` dep cycle;
+    /// providers parse the key locally if they care.
+    fn model_for_role(&self, _role_key: &str, configured: &str) -> String {
+        configured.to_string()
+    }
+
     /// Spawn a role-scoped sub-agent. The default implementation prepends
     /// the role's system-prompt preamble and forwards to `query_blocking`,
     /// so any provider that implements `query_blocking` automatically gains
