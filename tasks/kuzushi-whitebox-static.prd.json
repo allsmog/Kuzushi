@@ -94,7 +94,7 @@
       "acceptance": ["Extract snippets and hashes from valid repo-relative spans.", "Reject traversal, missing files, binary-ish files, bad ranges, and out-of-repo paths."],
       "storyGate": "cargo test -p kuzushi-core source_span",
       "forbidden": ["out-of-repo citation"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-007",
