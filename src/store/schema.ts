@@ -96,6 +96,13 @@ function openWithPragmas(dbPath: string): Database.Database {
   db.pragma("busy_timeout = 5000");
   db.pragma("synchronous = NORMAL");
   db.pragma("foreign_keys = ON");
+  // Performance knobs — safe under WAL, do not change durability.
+  // cache_size negative = KiB; ~64 MB holds the hot findings working set.
+  // mmap_size enables read-only mmap on platforms that support it; SQLite
+  // falls back to pread elsewhere.
+  db.pragma("temp_store = MEMORY");
+  db.pragma("cache_size = -65536");
+  db.pragma("mmap_size = 268435456");
   for (const target of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
     try {
       fs.chmodSync(target, 0o600);
