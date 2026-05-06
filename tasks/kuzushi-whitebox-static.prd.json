@@ -83,7 +83,7 @@
       "acceptance": ["Node kinds and edge kinds match the whitebox specification.", "Tests cover insert, fetch, link, and hash stability."],
       "storyGate": "cargo test -p kuzushi-core static_evidence",
       "forbidden": ["unhashed source evidence"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-006",

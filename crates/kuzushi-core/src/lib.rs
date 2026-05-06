@@ -14,6 +14,7 @@ pub mod recon;
 pub mod runtime;
 pub mod scan;
 pub mod secret_scan;
+pub mod static_evidence;
 pub mod systems_hunt;
 pub mod threat_model;
 pub mod variant_ndiff;
@@ -65,6 +66,11 @@ pub use scan::{
 pub use secret_scan::{
     scan_for_secrets, SecretScanFinding, SecretScanOptions, SecretScanReport, SecretScanScanner,
     SecretSeverity,
+};
+pub use static_evidence::{
+    static_content_hash, static_evidence_path, StaticEvidenceEdge, StaticEvidenceEdgeKind,
+    StaticEvidenceNode, StaticEvidenceNodeKind, StaticEvidenceStore, STATIC_EVIDENCE_EDGE_KINDS,
+    STATIC_EVIDENCE_NODE_KINDS,
 };
 pub use systems_hunt::{execute_systems_hunt_tool, run_systems_hunt_report, SystemsHuntReport};
 pub use threat_model::{

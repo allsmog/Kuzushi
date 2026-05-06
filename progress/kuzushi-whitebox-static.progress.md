@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-005 - Add static evidence graph
-Status: WB-004 complete in iteration 32; WB-005 pending
+Active story: WB-006 - Add source span extractor
+Status: WB-005 complete in iteration 33; WB-006 pending
 
 ## Stage 3 Checklist
 
@@ -10,7 +10,7 @@ Status: WB-004 complete in iteration 32; WB-005 pending
 - WB-002 Remove shell execution from default whitebox agent tools: complete in iteration 30.
 - WB-003 Scrub scanner subprocess environments: complete in iteration 31.
 - WB-004 Add static proof taxonomy: complete in iteration 32.
-- WB-005 Add static evidence graph: pending.
+- WB-005 Add static evidence graph: complete in iteration 33.
 - WB-006 Add source span extractor: pending.
 - WB-007 Normalize Semgrep findings into static evidence: pending.
 - WB-008 Normalize CodeQL SARIF code flows into static evidence: pending.
@@ -30,6 +30,40 @@ Status: WB-004 complete in iteration 32; WB-005 pending
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 33 - WB-005
+
+- Task attempted: add the durable static evidence graph primitive for
+  whitebox-static proof nodes and relationships.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `crates/kuzushi-core/src/static_evidence.rs`
+  - `crates/kuzushi-core/src/lib.rs`
+- Tests/checks run:
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core static_evidence`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `pnpm eval:kuzushi-whitebox-static` with the primary checkout's
+    `node_modules` temporarily symlinked into the clean clone
+- Result: implementation complete. `StaticEvidenceStore` now writes
+  `.kuzushi/v2/static-evidence.sqlite3` with hash-stable evidence nodes and
+  edges. Node kinds match the whitebox specification (`code_span`,
+  `scanner_signal`, `source`, `sink`, `dataflow_step`, `sanitizer`, `guard`,
+  `attack_surface`, `triage_claim`, `report_claim`) and edge kinds match
+  (`supports`, `derived_from`, `flows_to`, `guarded_by`, `sanitized_by`,
+  `contradicts`, `reported_as`). Tests cover insert, fetch, link, workspace
+  path, hash stability, and rejection of mutated/unhashed evidence bodies.
+  WB-005 is marked `passes: true` in the PRD after the story gate and fast
+  whitebox checks passed.
+- Remaining work: WB-006 through WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files. This iteration continued in the
+    clean isolated clone at `/tmp/kuzushi-ux2-clone.PJaRge`, which contains the
+    active pushed Stage 2 and WB-001 through WB-004 state.
 
 ### Iteration 32 - WB-004
 
