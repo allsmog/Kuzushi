@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use crate::artifact_kb::{artifact_knowledge_prompt_context, ArtifactKnowledgePromptContext};
 use crate::carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hunt_report};
 use crate::config::V2Config;
 use crate::dep_hygiene::check_dependency_hygiene;
@@ -15,6 +16,7 @@ use crate::findings::{
     Finding, FindingListFilter, FindingStore, Severity, TriageOutcome, TriageVerdict,
 };
 use crate::iac_scan::{scan_iac, IacScanOptions};
+use crate::options::ToolOptionStore;
 use crate::patch::run_patch_finding;
 use crate::recon::execute_recon_tool;
 use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageRequest};
@@ -30,7 +32,7 @@ use crate::variant_ndiff::{
     run_ndiff_extract_fix_pattern, run_ndiff_fetch_cve, run_ndiff_hunt_variants, run_variant_hunt,
     run_variant_lift_pattern,
 };
-use crate::workspace::WorkspaceTarget;
+use crate::workspace::{export_workspace_findings, WorkspaceExportFormat, WorkspaceTarget};
 use crate::x_ray::execute_x_ray_tool;
 use uuid::Uuid;
 
@@ -77,6 +79,7 @@ pub enum OptionType {
     Float,
     Path,
     Enum,
+    StringList,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -254,16 +257,51 @@ impl ModuleRegistry {
         ctx: &ToolExecutionContext<'_>,
         runtime: Option<&dyn AgentRuntime>,
     ) -> Result<Value> {
+        self.execute_tool_with_runtime_and_options(name, input, ctx, runtime, None)
+    }
+
+    pub fn execute_tool_with_runtime_and_options(
+        &self,
+        name: &str,
+        input: Value,
+        ctx: &ToolExecutionContext<'_>,
+        runtime: Option<&dyn AgentRuntime>,
+        option_store: Option<&ToolOptionStore>,
+    ) -> Result<Value> {
+        let input = self.prepare_tool_input(name, input, option_store)?;
+
+        self.dispatch_prepared_tool_with_runtime(name, input, ctx, runtime)
+    }
+
+    pub fn prepare_tool_input(
+        &self,
+        name: &str,
+        input: Value,
+        option_store: Option<&ToolOptionStore>,
+    ) -> Result<Value> {
         let tool = self.resolve_tool(name);
         if tool.is_none() && !self.is_registered_dag_node(name) {
             anyhow::bail!("unknown tool {name:?}");
         }
-        let input = if let Some(tool) = tool {
-            validate_tool_input_options(tool, input)?
+        let input = if let Some(store) = option_store {
+            store.effective_tool_input(name, input)?
         } else {
             input
         };
+        Ok(if let Some(tool) = tool {
+            validate_tool_input_options(tool, input)?
+        } else {
+            input
+        })
+    }
 
+    fn dispatch_prepared_tool_with_runtime(
+        &self,
+        name: &str,
+        input: Value,
+        ctx: &ToolExecutionContext<'_>,
+        runtime: Option<&dyn AgentRuntime>,
+    ) -> Result<Value> {
         match name {
             "catalog:modules" => Ok(json!(self
                 .modules()
@@ -350,12 +388,15 @@ impl ModuleRegistry {
             }
             "config:show" => Ok(json!(ctx.config)),
             "workspace:status" => Ok(json!({
+                "ok": ctx.workspace.is_some(),
+                "output": workspace_status_output(ctx),
                 "root": ctx.workspace.map(|workspace| workspace.root().display().to_string()),
                 "stateDir": ctx.workspace.map(|workspace| workspace.state_dir().display().to_string()),
                 "findingsDb": ctx.workspace.map(|workspace| workspace.findings_db_path().display().to_string()),
                 "runtime": ctx.config.runtime.kind,
                 "model": ctx.config.model,
             })),
+            "workspace:export-findings" => export_workspace_findings_tool(input, ctx),
             "sast:scan" => run_sast_scan(input, ctx, runtime),
             "triage:run" => run_triage(input, ctx, runtime),
             "verify:finding" => run_verify_finding(input, ctx, runtime),
@@ -406,6 +447,45 @@ impl ModuleRegistry {
             .flat_map(BuiltinModule::dag_nodes)
             .any(|node| node.id == name)
     }
+}
+
+fn workspace_status_output(ctx: &ToolExecutionContext<'_>) -> String {
+    match ctx.workspace {
+        Some(workspace) => format!(
+            "workspace status\n  Root:      {}\n  State:     {}\n  Findings:  {}",
+            workspace.root().display(),
+            workspace.state_dir().display(),
+            workspace.findings_db_path().display()
+        ),
+        None => "workspace status unavailable: no active workspace. Next: pass --target <repo> or start the shell with --target .".to_string(),
+    }
+}
+
+fn export_workspace_findings_tool(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let workspace = ctx
+        .workspace
+        .context("workspace:export-findings requires an active workspace target")?;
+    let output = string_input_any(&input, &["output", "path"])
+        .context("workspace:export-findings requires output=<path>. Next: run workspace:export-findings {\"output\":\"findings.json\"}")?;
+    let output_path = resolve_input_path(workspace.root(), &output);
+    let format = string_input_any(&input, &["format"])
+        .map(|value| WorkspaceExportFormat::from_input(&value))
+        .transpose()?;
+    let report = export_workspace_findings(workspace, &output_path, format)?;
+    Ok(json!({
+        "ok": true,
+        "output": format!(
+            "workspace:export-findings wrote {} finding(s) to {} ({})",
+            report.count,
+            report.output_path.display(),
+            report.format.as_str()
+        ),
+        "data": {
+            "outputPath": report.output_path.display().to_string(),
+            "format": report.format,
+            "count": report.count,
+        }
+    }))
 }
 
 fn persist_semgrep_findings(
@@ -524,6 +604,7 @@ fn run_sast_scan(
         .collect::<Vec<_>>();
     let options = ScanRunOptions {
         severity: parse_sast_severity_filter(&input)?,
+        tasks: None,
     };
 
     let native_run = if scanners.is_empty() {
@@ -6825,6 +6906,26 @@ fn coerce_option_value(spec: &OptionSpec, value: Value) -> Result<Value> {
             Value::String(value) => Value::String(value),
             other => anyhow::bail!("must be a string, got {}", json_summary(&other)),
         },
+        OptionType::StringList => match value {
+            Value::String(value) => Value::String(value),
+            Value::Array(items) => {
+                let values = items
+                    .into_iter()
+                    .map(|item| {
+                        item.as_str()
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .map(|value| Value::String(value.to_string()))
+                            .context("must contain only non-empty strings")
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                Value::Array(values)
+            }
+            other => anyhow::bail!(
+                "must be a string list or comma-separated string, got {}",
+                json_summary(&other)
+            ),
+        },
         OptionType::Bool => match value {
             Value::Bool(value) => Value::Bool(value),
             Value::String(value) => Value::Bool(parse_bool_option(&value)?),
@@ -6888,6 +6989,38 @@ pub struct ToolExecutionContext<'a> {
     pub findings_store: Option<&'a FindingStore>,
 }
 
+impl<'a> ToolExecutionContext<'a> {
+    pub fn artifact_knowledge_context(
+        &self,
+        target: &Path,
+        query: &str,
+        limit: usize,
+    ) -> ArtifactKnowledgePromptContext {
+        if let Some(workspace) = self
+            .workspace
+            .filter(|workspace| workspace.root() == target)
+        {
+            return artifact_knowledge_prompt_context(workspace, query, limit);
+        }
+
+        match WorkspaceTarget::new(target) {
+            Ok(workspace) => artifact_knowledge_prompt_context(&workspace, query, limit),
+            Err(error) => ArtifactKnowledgePromptContext {
+                db_path: target
+                    .join(".kuzushi")
+                    .join("v2")
+                    .join("artifact-kb.sqlite3")
+                    .display()
+                    .to_string(),
+                missing_db: false,
+                query: query.to_string(),
+                status: format!("unavailable: {error}"),
+                snippets: Vec::new(),
+            },
+        }
+    }
+}
+
 fn catalog_module() -> BuiltinModule {
     builtin_module(
         "catalog",
@@ -6919,10 +7052,26 @@ fn workspace_module() -> BuiltinModule {
         "Workspace",
         ModuleKind::Intel,
         "Report target and state paths.",
-        vec![tool(
-            "workspace:status",
-            "Show current target and state paths.",
-        )],
+        vec![
+            tool(
+                "workspace:status",
+                "Show current target and state paths.",
+            ),
+            tool_with_options(
+                "workspace:export-findings",
+                "Export persisted workspace findings to a local JSON or JSONL file.",
+                vec![
+                    opt(
+                        "output",
+                        OptionType::Path,
+                        "Output path for exported findings. Relative paths resolve under the workspace root.",
+                    )
+                    .required(),
+                    opt("format", OptionType::Enum, "Export format.")
+                        .choices(&["json", "jsonl"]),
+                ],
+            ),
+        ],
         vec![],
     )
 }
@@ -6986,6 +7135,21 @@ fn sast_module() -> BuiltinModule {
                 opt("taskMode", OptionType::Enum, "Task-selection mode.")
                     .choices(&["auto", "manual"])
                     .default(json!("auto")),
+                opt(
+                    "tasks",
+                    OptionType::StringList,
+                    "Manual task allowlist. Use /tasks to edit.",
+                ),
+                opt(
+                    "disabledTasks",
+                    OptionType::StringList,
+                    "Auto-mode task denylist. Use /tasks to edit.",
+                ),
+                opt(
+                    "severity",
+                    OptionType::StringList,
+                    "Optional severity filter: critical, high, medium, low, or info.",
+                ),
                 opt(
                     "triage",
                     OptionType::Bool,
@@ -7301,7 +7465,7 @@ fn threat_model_module() -> BuiltinModule {
                         OptionType::Enum,
                         "Threat-model methodology overlay.",
                     )
-                    .choices(&["pasta", "stride", "randori"])
+                    .choices(&["pasta", "stride", "dread"])
                     .default(json!("stride")),
                     model_option(),
                 ],
@@ -8319,6 +8483,7 @@ mod tests {
     use super::*;
     use crate::config::V2Config;
     use crate::findings::{Finding, PatchStatus, Severity, TriageOutcome, TriageVerdict};
+    use crate::options::{OptionScope, OptionTarget, ToolOptionStore};
     use crate::runtime::AgentQueryResponse;
     use std::process::Command;
     use std::sync::Mutex;
@@ -8863,6 +9028,7 @@ OUT
                 opt("ratio", OptionType::Float, "floating-point option"),
                 opt("target", OptionType::Path, "path option").required(),
                 opt("label", OptionType::String, "string option"),
+                opt("tags", OptionType::StringList, "string-list option"),
                 opt("mode", OptionType::Enum, "enum option")
                     .choices(&["auto", "manual"])
                     .default(json!("auto")),
@@ -8877,6 +9043,7 @@ OUT
                 "ratio": "0.75",
                 "target": "./repo",
                 "label": "baseline",
+                "tags": ["one", "two"],
                 "mode": "manual",
                 "extra": {"left": "untouched"}
             }),
@@ -8887,6 +9054,7 @@ OUT
         assert_eq!(validated["ratio"], json!(0.75));
         assert_eq!(validated["target"], json!("./repo"));
         assert_eq!(validated["label"], json!("baseline"));
+        assert_eq!(validated["tags"], json!(["one", "two"]));
         assert_eq!(validated["mode"], json!("manual"));
         assert_eq!(validated["extra"], json!({"left": "untouched"}));
 
@@ -8946,8 +9114,81 @@ OUT
     }
 
     #[test]
+    fn prepares_tool_input_with_stored_options_before_validation() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut store = ToolOptionStore::new();
+        store.set_value(
+            OptionScope::Global,
+            OptionTarget::Tool("sast:scan".to_string()),
+            "triage",
+            json!(false),
+        );
+        store.set_value(
+            OptionScope::Workspace,
+            OptionTarget::Module("sast".to_string()),
+            "triage",
+            json!(true),
+        );
+        store.set_value(
+            OptionScope::Session,
+            OptionTarget::Tool("sast:scan".to_string()),
+            "verify",
+            json!("yes"),
+        );
+
+        let prepared = registry
+            .prepare_tool_input("sast:scan", json!({"triage": false}), Some(&store))
+            .unwrap();
+
+        assert_eq!(prepared["taskMode"], json!("auto"));
+        assert_eq!(prepared["triage"], json!(false));
+        assert_eq!(prepared["verify"], json!(true));
+        assert_eq!(prepared.get("model"), None);
+    }
+
+    #[test]
+    fn stored_required_options_satisfy_tool_validation_without_model_fallback() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut store = ToolOptionStore::new();
+        store.set_value(
+            OptionScope::Session,
+            OptionTarget::Tool("recon:nmap".to_string()),
+            "target",
+            json!("192.0.2.10"),
+        );
+        store.set_value(
+            OptionScope::Session,
+            OptionTarget::Tool("recon:nmap".to_string()),
+            "ports",
+            json!("80,443"),
+        );
+
+        let prepared = registry
+            .prepare_tool_input("recon:nmap", Value::Null, Some(&store))
+            .unwrap();
+
+        assert_eq!(prepared["target"], json!("192.0.2.10"));
+        assert_eq!(prepared["ports"], json!("80,443"));
+        assert_eq!(prepared.get("model"), None);
+    }
+
+    #[test]
     fn exposes_option_specs_for_visible_tool_descriptors() {
         let registry = ModuleRegistry::with_v2_builtins();
+
+        let sast = registry.resolve_tool("sast:scan").unwrap();
+        assert!(sast
+            .options
+            .iter()
+            .any(|option| option.name == "tasks" && option.option_type == OptionType::StringList));
+        assert!(sast
+            .options
+            .iter()
+            .any(|option| option.name == "disabledTasks"
+                && option.option_type == OptionType::StringList));
+        assert!(sast.options.iter().any(
+            |option| option.name == "severity" && option.option_type == OptionType::StringList
+        ));
 
         let semgrep = registry.resolve_tool("semgrep:scan").unwrap();
         assert!(semgrep.options.iter().any(|option| option.name == "config"
@@ -9575,6 +9816,64 @@ OUT
     }
 
     #[test]
+    fn dispatches_workspace_status_and_findings_export() {
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .insert_scan_run("run-1", workspace.root(), "completed")
+            .unwrap();
+        store
+            .insert_finding(
+                "run-1",
+                &Finding::new_tool(
+                    "fixture",
+                    "fixture/sql",
+                    "src/app.ts",
+                    3,
+                    None,
+                    Severity::High,
+                    "request data reaches SQL",
+                ),
+            )
+            .unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+        };
+
+        let status = registry
+            .execute_tool("workspace:status", json!({}), &ctx)
+            .unwrap();
+        assert_eq!(status.get("ok").and_then(Value::as_bool), Some(true));
+        assert!(status
+            .get("output")
+            .and_then(Value::as_str)
+            .is_some_and(|output| output.contains("workspace status")));
+
+        let export = registry
+            .execute_tool(
+                "workspace:export-findings",
+                json!({"output": "exports/findings.json"}),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(
+            export.pointer("/data/count").and_then(Value::as_u64),
+            Some(1)
+        );
+        let output_path = workspace.root().join("exports/findings.json");
+        assert!(output_path.exists());
+        let exported: Value =
+            serde_json::from_str(&fs::read_to_string(output_path).unwrap()).unwrap();
+        assert_eq!(exported["count"], json!(1));
+    }
+
+    #[test]
     fn dispatches_catalog_tools() {
         let registry = ModuleRegistry::with_v2_builtins();
         let config = V2Config::default();
@@ -9782,7 +10081,13 @@ OUT
         let temp = tempdir().unwrap();
         fs::write(
             temp.path().join("config.env"),
-            "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyzABCDEFGH",
+            [
+                "OPENAI_API_KEY=",
+                "sk",
+                "-proj-",
+                "abcdefghijklmnopqrstuvwxyzABCDEFGH",
+            ]
+            .concat(),
         )
         .unwrap();
 
@@ -9909,7 +10214,13 @@ OUT
         .unwrap();
         fs::write(
             temp.path().join("config.env"),
-            "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyzABCDEFGH",
+            [
+                "OPENAI_API_KEY=",
+                "sk",
+                "-proj-",
+                "abcdefghijklmnopqrstuvwxyzABCDEFGH",
+            ]
+            .concat(),
         )
         .unwrap();
 

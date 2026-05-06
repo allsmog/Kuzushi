@@ -18,6 +18,7 @@ pub struct PiAgentCoreRuntime {
     api_key_env: String,
     api_key: Option<String>,
     base_url: Option<String>,
+    thinking_level: Option<String>,
 }
 
 impl PiAgentCoreRuntime {
@@ -46,11 +47,22 @@ impl PiAgentCoreRuntime {
             api_key_env: runtime.api_key_env.clone(),
             api_key,
             base_url: runtime.base_url.clone(),
+            thinking_level: env::var("KUZUSHI_THINKING_LEVEL")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
         })
     }
 
     pub fn command(&self) -> &[String] {
         &self.command
+    }
+
+    pub fn with_thinking_level(mut self, thinking_level: Option<String>) -> Self {
+        self.thinking_level = thinking_level
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        self
     }
 }
 
@@ -65,6 +77,7 @@ impl AgentRuntime for PiAgentCoreRuntime {
             api_key_env: self.api_key_env.clone(),
             api_key: self.api_key.clone(),
             base_url: self.base_url.clone(),
+            thinking_level: self.thinking_level.clone(),
         };
 
         let response = run_bridge(&self.command, &bridge_request)?;
@@ -201,6 +214,7 @@ struct BridgeRequest {
     api_key_env: String,
     api_key: Option<String>,
     base_url: Option<String>,
+    thinking_level: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

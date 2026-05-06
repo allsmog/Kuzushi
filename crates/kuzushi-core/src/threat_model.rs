@@ -1164,13 +1164,13 @@ fn parse_json_from_agent_text(text: &str) -> Result<Value> {
     }
 }
 
-fn load_persistent_threat_model(root: &Path) -> Option<Value> {
+pub fn load_persistent_threat_model(root: &Path) -> Option<Value> {
     let path = root.join(".kuzushi").join("threat-model.json");
     let raw = fs::read_to_string(path).ok()?;
     serde_json::from_str(&raw).ok()
 }
 
-fn save_persistent_threat_model(root: &Path, document: &Value, force: bool) -> Result<bool> {
+pub fn save_persistent_threat_model(root: &Path, document: &Value, force: bool) -> Result<bool> {
     let path = root.join(".kuzushi").join("threat-model.json");
     if !force && path.exists() {
         if let Some(existing) = read_json_optional(&path) {

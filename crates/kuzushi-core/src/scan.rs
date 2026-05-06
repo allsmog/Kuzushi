@@ -30,6 +30,7 @@ pub trait ScanEngine: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct ScanCancellation {
     cancelled: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
     next_child_id: Arc<AtomicU64>,
     children: Arc<Mutex<HashMap<u64, ManagedChild>>>,
 }
@@ -38,6 +39,7 @@ impl Default for ScanCancellation {
     fn default() -> Self {
         Self {
             cancelled: Arc::new(AtomicBool::new(false)),
+            paused: Arc::new(AtomicBool::new(false)),
             next_child_id: Arc::new(AtomicU64::new(1)),
             children: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -47,6 +49,8 @@ impl Default for ScanCancellation {
 impl ScanCancellation {
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
+        // Cancel implies resume so any wait_if_paused() loops can see the cancel flag.
+        self.paused.store(false, Ordering::SeqCst);
         if let Ok(mut children) = self.children.lock() {
             for child in children.values_mut() {
                 kill_managed_child(child);
@@ -56,6 +60,28 @@ impl ScanCancellation {
 
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
+    }
+
+    pub fn pause(&self) {
+        if !self.cancelled.load(Ordering::SeqCst) {
+            self.paused.store(true, Ordering::SeqCst);
+        }
+    }
+
+    pub fn resume(&self) {
+        self.paused.store(false, Ordering::SeqCst);
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::SeqCst)
+    }
+
+    /// Block the current thread until either resume() or cancel() is called.
+    /// Returns immediately if not paused.
+    pub fn wait_if_paused(&self) {
+        while self.paused.load(Ordering::SeqCst) && !self.cancelled.load(Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
     }
 
     fn register_child(
@@ -909,6 +935,7 @@ pub fn run_scan_engines(
 #[derive(Debug, Default, Clone)]
 pub struct ScanRunOptions {
     pub severity: Option<Vec<Severity>>,
+    pub tasks: Option<Vec<String>>,
 }
 
 pub fn run_scan_engines_with_options(
