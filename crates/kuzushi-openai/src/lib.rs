@@ -13,7 +13,9 @@
 //!   available (e.g. a host-managed Claude Code token).
 
 mod anthropic_oauth;
+pub mod oauth;
 mod pi_agent_core;
 
 pub use anthropic_oauth::{AnthropicOAuthRuntime, AnthropicOAuthRuntimeOptions};
+pub use oauth::{probe as probe_anthropic_oauth, OauthReadiness};
 pub use pi_agent_core::PiAgentCoreRuntime;

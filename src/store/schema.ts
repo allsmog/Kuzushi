@@ -96,6 +96,11 @@ function openWithPragmas(dbPath: string): Database.Database {
   db.pragma("busy_timeout = 5000");
   db.pragma("synchronous = NORMAL");
   db.pragma("foreign_keys = ON");
+  // Per-connection performance knobs. These do not change schema or migration
+  // state, and WAL + synchronous=NORMAL still controls durability.
+  db.pragma("temp_store = MEMORY");
+  db.pragma("cache_size = -65536");
+  db.pragma("mmap_size = 268435456");
   for (const target of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
     try {
       fs.chmodSync(target, 0o600);

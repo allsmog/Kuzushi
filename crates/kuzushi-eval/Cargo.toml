@@ -1,0 +1,20 @@
+[package]
+name = "kuzushi-eval"
+description = "Recall scorer for the xint-eval harness."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "kuzushi-eval"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+regex = "1.10"

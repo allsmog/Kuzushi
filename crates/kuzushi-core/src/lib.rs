@@ -1,12 +1,18 @@
+pub mod agent_router;
 pub mod artifact_kb;
 pub mod attachments;
 pub mod attack_surface;
 pub mod carlini_threat_hunt;
+pub mod classifier_gate;
+pub mod code_nav;
+pub mod concurrency;
 pub mod config;
+pub mod deep_auditor;
 pub mod dep_hygiene;
 pub mod diff_scope;
 pub mod events;
 pub mod findings;
+pub mod full_mode_multi;
 pub mod iac_scan;
 pub mod modules;
 pub mod options;
@@ -19,6 +25,7 @@ pub mod scan;
 pub mod secret_scan;
 pub mod semgrep_rule_synthesis;
 pub mod source_span;
+pub mod spend;
 pub mod static_evidence;
 pub mod static_narrative;
 pub mod static_proof_validator;
@@ -33,6 +40,7 @@ pub mod whitebox_suppressions;
 pub mod workspace;
 pub mod x_ray;
 
+pub use agent_router::{AgentRole, AgentRouter, ModelRoute, RoutedRuntime};
 pub use artifact_kb::{
     artifact_kb_path, artifact_knowledge_prompt_context, index_workspace_artifacts,
     search_artifact_knowledge, ArtifactIndexReport, ArtifactKnowledgePromptContext,
@@ -49,8 +57,21 @@ pub use attack_surface::{
     AttackSurfaceKind, AttackSurfaceMap, AttackSurfaceSummary,
 };
 pub use carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hunt_report};
+pub use classifier_gate::{ClassifierConfig, LikelyVulnClassifier, QuantileEstimator, Score};
+pub use code_nav::{
+    code_nav_tool_specs, code_nav_toolbox, find_references_tool, list_definitions_tool,
+    read_definition_tool, read_source_tool, CodeNavConfig, CodeNavTool,
+};
+pub use concurrency::{
+    current_priority, default_concurrency_for, with_priority, ModelGate, Priority, PriorityPermit,
+};
 pub use config::{
-    load_config, load_config_for_target, ConfigPaths, RuntimeConfig, RuntimeKind, V2Config,
+    load_anthropic_oauth_config, load_config, load_config_for_target, AnthropicOauthConfig,
+    ConfigPaths, RuntimeConfig, RuntimeKind, V2Config,
+};
+pub use deep_auditor::{
+    run_deep_auditor, save_evidence, DeepAuditConfig, DeepAuditOutcome, EvidenceCitation,
+    VulnAnalysis,
 };
 pub use dep_hygiene::{
     analyze_manifest as analyze_dep_hygiene_manifest, check_dependency_hygiene,
@@ -58,9 +79,9 @@ pub use dep_hygiene::{
     DepHygieneScanner, DepHygieneSeverity, ManifestKind,
 };
 pub use diff_scope::{
-    build_whitebox_diff_scope_report, ChangedFile, ChangedLineRange, DiffContext, DiffContextKind,
-    DiffFileStatus, DiffFindingStatus, DiffFindingTag, DiffRangeKind, DiffScopeSummary,
-    WhiteboxDiffScopeReport,
+    build_whitebox_diff_scope_report, git_diff_files, ChangedFile, ChangedLineRange, DiffContext,
+    DiffContextKind, DiffFileStatus, DiffFindingStatus, DiffFindingTag, DiffRangeKind, DiffScope,
+    DiffScopeSummary, WhiteboxDiffScopeReport,
 };
 pub use findings::{
     format_finding_alias, parse_finding_alias, resolve_finding_alias, sorted_finding_aliases,
@@ -68,6 +89,11 @@ pub use findings::{
     FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus, PersistedProofVerdict,
     PersistedSandboxBackend, PersistedVerification, Severity, StaticProofState, TriageOutcome,
     TriageVerdict,
+};
+pub use full_mode_multi::{
+    cost_summary as full_mode_cost_summary, plan as full_mode_plan, report_to_tool_json,
+    run as run_full_mode_multi, ChunkPlan, CostSummary, FileBucket, FullModeConfig,
+    FullModeLanguage, FullModePlan, FullModeReport,
 };
 pub use iac_scan::{
     scan_iac, IacScanFinding, IacScanKind, IacScanOptions, IacScanReport, IacScanScanner,
@@ -83,8 +109,9 @@ pub use repository_inventory::{
     RepositoryInventory,
 };
 pub use runtime::{
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolPolicy, ModelTier, SubagentRole,
-    TriageRequest,
+    run_tool_loop, AgentLoopOutcome, AgentLoopStep, AgentQueryRequest, AgentQueryResponse,
+    AgentRuntime, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry, ModelTier,
+    SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult, TriageRequest,
 };
 pub use scan::{
     default_scan_engines, index_codeql_sarif_as_static_evidence, normalize_codeql_sarif,
@@ -119,6 +146,9 @@ pub use semgrep_rule_synthesis::{
     SemgrepRuleSynthesisReport, SemgrepRuleValidation,
 };
 pub use source_span::{extract_source_span, SourceSpan};
+pub use spend::{
+    parse_budget_flag, Operation as SpendOperation, SpendError, SpendLimiter, SpendTicket,
+};
 pub use static_evidence::{
     index_semgrep_findings_as_static_evidence, static_content_hash, static_evidence_path,
     StaticEvidenceEdge, StaticEvidenceEdgeKind, StaticEvidenceIndexReport, StaticEvidenceNode,

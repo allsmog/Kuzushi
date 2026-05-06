@@ -1,13 +1,86 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::attack_surface::{build_attack_surface_map, AttackSurfaceMap};
 use crate::findings::Finding;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffScope {
+    pub files: Vec<PathBuf>,
+    pub since_ref: String,
+    pub include_worktree: bool,
+}
+
+impl DiffScope {
+    pub fn contains_path(&self, candidate: &Path) -> bool {
+        self.files.iter().any(|path| path == candidate)
+    }
+
+    pub fn contains_prefix(&self, prefix: &Path) -> bool {
+        self.files.iter().any(|path| path.starts_with(prefix))
+    }
+}
+
+pub fn git_diff_files(target: &Path, since_ref: &str, include_worktree: bool) -> Result<DiffScope> {
+    let trimmed = since_ref.trim();
+    anyhow::ensure!(
+        !trimmed.is_empty(),
+        "diff_scope: since_ref must be non-empty"
+    );
+    anyhow::ensure!(
+        !trimmed
+            .chars()
+            .any(|c| matches!(c, '\n' | '\0' | ';' | '|' | '`')),
+        "diff_scope: since_ref contains forbidden characters"
+    );
+
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(target).arg("diff").arg("--name-only");
+    if include_worktree {
+        cmd.arg(trimmed);
+    } else {
+        cmd.arg(format!("{trimmed}...HEAD"));
+    }
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    let output = cmd
+        .output()
+        .with_context(|| format!("diff_scope: could not invoke git in {}", target.display()))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "diff_scope: git diff failed (exit {}): {}",
+            output
+                .status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "<signal>".to_string()),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+
+    let stdout =
+        String::from_utf8(output.stdout).context("diff_scope: git output was not valid UTF-8")?;
+    let mut files = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    files.sort();
+    files.dedup();
+
+    Ok(DiffScope {
+        files,
+        since_ref: since_ref.to_string(),
+        include_worktree,
+    })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -714,6 +787,55 @@ mod tests {
                 "git failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_diff_files_returns_committed_changes() {
+        let temp = tempdir().unwrap();
+        fs::write(temp.path().join("a.c"), "void a(){}\n").unwrap();
+        init_git_repo(temp.path());
+        let base = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        assert!(base.status.success());
+        let base = String::from_utf8(base.stdout).unwrap().trim().to_string();
+
+        fs::write(temp.path().join("a.c"), "void a2(){}\n").unwrap();
+        fs::write(temp.path().join("b.c"), "void b(){}\n").unwrap();
+        let output = Command::new("git")
+            .args(["add", "."])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let output = Command::new("git")
+            .args(["commit", "-m", "change"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+
+        let scope = git_diff_files(temp.path(), &base, false).unwrap();
+        assert_eq!(
+            scope.files,
+            vec![PathBuf::from("a.c"), PathBuf::from("b.c")]
+        );
+        assert!(scope.contains_path(Path::new("a.c")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_diff_files_rejects_ref_injection_chars() {
+        let temp = tempdir().unwrap();
+        for value in ["abc; rm -rf /", "abc | cat", "abc`whoami`"] {
+            let err = git_diff_files(temp.path(), value, false)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("forbidden characters"), "{err}");
         }
     }
 
