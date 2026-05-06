@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { describeEmptyState } from "../../src/ui/error-format.js";
 import { registerPlainTextRenderer } from "../../src/ui/plain-renderer.js";
 import {
-  createUIStore,
   type ActionableFinding,
+  createUIStore,
   type ShellPlan,
   type ShellState,
   type SummaryData,
