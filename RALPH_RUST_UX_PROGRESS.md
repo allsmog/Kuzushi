@@ -337,3 +337,36 @@ Status: UX-002 checks still pass; push remains blocked by DNS/network sandboxing
   - The primary workspace still has the UX-002 slice staged and local `main`
     remains at `80d23a4` because Git metadata writes under `.git` remain
     blocked in this environment.
+
+### Iteration 11 - UX-002 Push Gate
+
+- Task attempted: continue the required UX-002 push gate, rerun focused
+  verification for the completed legacy Ink isolation slice, check remote
+  reachability, and avoid starting UX-003 until UX-002 is pushed.
+- Files changed:
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short --branch`
+  - `git diff --cached --check`
+  - `git -C /tmp/kuzushi-ux2-clone.PJaRge status --short --branch`
+  - `git -C /tmp/kuzushi-ux2-clone.PJaRge log --oneline -8 --decorate`
+  - `git ls-remote --heads origin main`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-cli --test cutover_cli`
+  - `pnpm exec vitest run tests/cli/legacy-shell-isolation.test.ts`
+  - `pnpm typecheck`
+  - `pnpm exec biome check src/cli/commands/shell.ts tests/cli/legacy-shell-isolation.test.ts src/ui/README.md README.md RELEASING.md docs/rust-migration-status.md`
+  - `git -C /tmp/kuzushi-ux2-clone.PJaRge push origin HEAD:main`
+- Result: UX-002 verification still passes. The isolated clone still contains
+  the UX-002 implementation commit `a440e57 ralph:ux isolate legacy ink shell`
+  plus progress retry commits, but the required remote push did not complete.
+  UX-003 was not started.
+- Remaining work: push UX-002 before starting UX-003.
+- Blockers or repo facts that contradicted this prompt:
+  - `git ls-remote --heads origin main` failed with `Could not resolve host:
+    github.com`.
+  - `git -C /tmp/kuzushi-ux2-clone.PJaRge push origin HEAD:main` failed with
+    `Could not resolve host: github.com`.
+  - The primary workspace still has the UX-002 slice staged and local `main`
+    remains at `80d23a4` because Git metadata writes under `.git` remain
+    blocked in this environment.
