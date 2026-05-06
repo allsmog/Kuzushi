@@ -270,7 +270,7 @@
       "acceptance": ["Fixture includes a true static source-to-sink bug, sanitized false positive, needs-runtime-evidence authz case, sibling variant, and misleading scanner noise.", "E2E test runs inventory, scanner evidence, triage, proof validation, prioritization, and report/SARIF without network, shell execution, PoC, replay, or active verification."],
       "storyGate": "pnpm eval:kuzushi-whitebox-static",
       "forbidden": ["network", "shell execution", "PoC", "HTTP replay", "active verification"],
-      "passes": false
+      "passes": true
     }
   ]
 }
