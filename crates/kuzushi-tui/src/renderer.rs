@@ -1510,18 +1510,21 @@ fn threat_lines(app: &ShellApp, area: Rect, view: ThreatView) -> Vec<Line<'stati
             lines.push(Line::raw("external -> application -> datastore"));
         }
         ThreatView::Stride => {
-            lines.push(divider("STRIDE", area.width));
-            lines.push(header(&["element", "S", "T", "R", "I", "D", "E"]));
-            for element in ["entrypoints", "auth", "storage", "scanners"] {
-                lines.push(row(&[
-                    pad(element, 16),
-                    "med".to_string(),
-                    "high".to_string(),
-                    "low".to_string(),
-                    "med".to_string(),
-                    "low".to_string(),
-                    "med".to_string(),
-                ]));
+            let rollup = stride_rollup_rows();
+            let total_issues: usize = rollup.iter().map(|r| r.3).sum();
+            lines.push(section_header_line(
+                &format!("STRIDE ROLLUP · {total_issues} issues"),
+                area.width,
+            ));
+            for (letter, sev, category, count, description) in rollup {
+                lines.push(stride_row(
+                    letter,
+                    sev,
+                    category,
+                    count,
+                    description,
+                    area.width,
+                ));
             }
         }
         ThreatView::Stories => {
@@ -3278,6 +3281,82 @@ fn section_header_line(label: &str, width: u16) -> Line<'static> {
     ])
 }
 
+/// STRIDE rollup row matching `design/mockups/threat-model.jsx`:
+///
+/// ```text
+///    [ S ] Spoofing         2 issues  · jwt without aud-claim, mailgun cname dangling
+/// ```
+fn stride_row(
+    letter: &str,
+    severity: Severity,
+    category: &str,
+    count: usize,
+    description: &str,
+    width: u16,
+) -> Line<'static> {
+    let total = width as usize;
+    let used = 3 + 3 + 1 + 16 + 4 + 10;
+    let desc_w = total.saturating_sub(used).max(8);
+    let issues_label = if count == 1 { "issue" } else { "issues" };
+    let mut spans = vec![
+        Span::raw("   "),
+        Span::styled(format!(" {letter} "), theme::severity(severity)),
+        Span::raw(" "),
+        Span::styled(pad(category, 16), theme::muted()),
+        Span::styled(format!("{count} "), theme::primary()),
+        Span::styled(format!("{issues_label}"), theme::muted()),
+    ];
+    if !description.is_empty() {
+        spans.push(Span::styled("  · ", theme::muted()));
+        spans.push(Span::styled(fit(description, desc_w), theme::muted()));
+    }
+    Line::from(spans)
+}
+
+/// Returns the canonical 6-row STRIDE rollup matching the design fixture.
+/// TODO: source from `load_persistent_threat_model` once threat-model state
+/// is cached on `ShellApp`.
+fn stride_rollup_rows() -> Vec<(&'static str, Severity, &'static str, usize, &'static str)> {
+    vec![
+        (
+            "S",
+            Severity::High,
+            "Spoofing",
+            2,
+            "jwt without aud-claim, mailgun cname dangling",
+        ),
+        (
+            "T",
+            Severity::Medium,
+            "Tampering",
+            1,
+            "worker pool reads unsigned amqp messages",
+        ),
+        ("R", Severity::Low, "Repudiation", 0, ""),
+        (
+            "I",
+            Severity::Critical,
+            "Info-disclosure",
+            3,
+            "plaintext PII at db→s3 boundary, debug logs",
+        ),
+        (
+            "D",
+            Severity::Medium,
+            "DoS",
+            1,
+            "no rate-limit on /checkout/confirm",
+        ),
+        (
+            "E",
+            Severity::High,
+            "Elev-of-priv",
+            1,
+            "admin subdomain shares jwt secret with api",
+        ),
+    ]
+}
+
 /// One-line finding row matching `design/mockups/sast.jsx::finding()`:
 ///
 /// ```text
@@ -4094,7 +4173,7 @@ mod tests {
 
     #[test]
     fn renders_threat_view_navigation() {
-        let backend = TestBackend::new(100, 24);
+        let backend = TestBackend::new(120, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
         app.shell_view = ShellView::Threat(ThreatView::Stride);
@@ -4103,7 +4182,7 @@ mod tests {
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains("STRIDE"));
-        assert!(rendered.contains("entrypoints"));
+        assert!(rendered.contains("Spoofing"));
     }
 
     #[test]
@@ -4174,6 +4253,31 @@ mod tests {
         assert!(rendered.contains("sast"));
         assert!(!rendered.contains("dag"));
         assert!(!rendered.contains("DAG"));
+    }
+
+    #[test]
+    fn threats_stride_view_renders_design_rollup() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Threat(ThreatView::Stride);
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains("STRIDE ROLLUP"),
+            "expected STRIDE ROLLUP header in: {rendered}"
+        );
+        assert!(rendered.contains("Spoofing"));
+        assert!(rendered.contains("Tampering"));
+        assert!(rendered.contains("Repudiation"));
+        assert!(rendered.contains("Info-disclosure"));
+        assert!(rendered.contains("DoS"));
+        assert!(rendered.contains("Elev-of-priv"));
+        // Old hardcoded content must be gone.
+        assert!(!rendered.contains("entrypoints"));
+        assert!(!rendered.contains("scanners"));
     }
 
     #[test]
