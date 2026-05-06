@@ -36,8 +36,9 @@ pub use config::{
     load_config, load_config_for_target, ConfigPaths, RuntimeConfig, RuntimeKind, V2Config,
 };
 pub use dep_hygiene::{
-    analyze_manifest as analyze_dep_hygiene_manifest, check_dependency_hygiene, DepHygieneFinding,
-    DepHygieneReport, DepHygieneScanner, DepHygieneSeverity, ManifestKind,
+    analyze_manifest as analyze_dep_hygiene_manifest, check_dependency_hygiene,
+    parse_cargo_audit_output, CargoAuditScanner, DepHygieneFinding, DepHygieneReport,
+    DepHygieneScanner, DepHygieneSeverity, ManifestKind,
 };
 pub use findings::{
     Finding, FindingListFilter, FindingListReport, FindingStore, FindingVerdictFilter,
@@ -51,7 +52,9 @@ pub use options::{OptionScope, OptionTarget, ToolOptionStore};
 pub use patch::run_patch_finding;
 pub use pr_comment::{build_pr_comment, PrCommentInput};
 pub use recon::{execute_recon_tool, ReconHost, ReconNote, ReconService, ReconWorkspaceStore};
-pub use runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageRequest};
+pub use runtime::{
+    AgentQueryRequest, AgentQueryResponse, AgentRuntime, SubagentRole, TriageRequest,
+};
 pub use scan::{
     default_scan_engines, normalize_codeql_sarif, normalize_semgrep_json, run_scan_engines,
     run_semgrep_scan, scan_engines_for_tasks, CodeqlScanner, ScanCancellation, ScanEngine, ScanRun,
