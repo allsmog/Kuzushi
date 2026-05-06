@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 const CTRL_C_ARM_WINDOW: Duration = Duration::from_secs(2);
 const THROTTLE_STALE_AFTER: Duration = Duration::from_secs(30);
+const SPINNER_FRAME: Duration = Duration::from_millis(80);
 
 #[derive(Debug, Clone, Default)]
 pub struct AdvisoryState {
@@ -437,6 +438,8 @@ pub struct ShellApp {
     pub story_return_view: Option<ShellView>,
     pub findings_cursor: usize,
     pub scroll_offset: u16,
+    pub spinner_phase: u8,
+    pub last_spinner_advance: Option<Instant>,
     scan_rx: Option<Receiver<ScanEvent>>,
     scan_cancel: Option<ScanCancellation>,
     agent_rx: Option<Receiver<AgentEvent>>,
@@ -494,6 +497,8 @@ impl ShellApp {
             story_return_view: None,
             findings_cursor: 0,
             scroll_offset: 0,
+            spinner_phase: 0,
+            last_spinner_advance: None,
             scan_rx: None,
             scan_cancel: None,
             agent_rx: None,
@@ -728,11 +733,14 @@ impl ShellApp {
         self.scroll_offset = u16::MAX;
     }
 
-    fn sync_view_change(&mut self) {
+    fn sync_view_change(&mut self) -> bool {
         let current = Some(self.shell_view.clone());
         if self.prev_shell_view != current {
             self.scroll_offset = 0;
             self.prev_shell_view = current;
+            true
+        } else {
+            false
         }
     }
 
@@ -1298,7 +1306,8 @@ impl ShellApp {
         values
     }
 
-    pub fn drain_background_events(&mut self) {
+    pub fn drain_background_events(&mut self) -> bool {
+        let mut changed = false;
         let mut events = Vec::new();
         if let Some(rx) = &self.scan_rx {
             while let Ok(event) = rx.try_recv() {
@@ -1306,6 +1315,9 @@ impl ShellApp {
             }
         }
 
+        if !events.is_empty() {
+            changed = true;
+        }
         for event in events {
             self.apply_scan_event(event);
         }
@@ -1322,6 +1334,9 @@ impl ShellApp {
             }
         }
 
+        if !agent_events.is_empty() {
+            changed = true;
+        }
         for event in agent_events {
             self.apply_agent_event(event);
         }
@@ -1336,6 +1351,9 @@ impl ShellApp {
                 plan_events.push(event);
             }
         }
+        if !plan_events.is_empty() {
+            changed = true;
+        }
         for event in plan_events {
             self.apply_plan_event(event);
         }
@@ -1349,12 +1367,16 @@ impl ShellApp {
                 threat_events.push(event);
             }
         }
+        if !threat_events.is_empty() {
+            changed = true;
+        }
         for event in threat_events {
             self.apply_threat_patch_event(event);
         }
         if !self.threat_worker_running {
             self.threat_rx = None;
         }
+        changed
     }
 
     fn apply_threat_patch_event(&mut self, event: ThreatPatchEvent) {
@@ -4255,7 +4277,58 @@ impl ShellApp {
             }
         }
 
+        // Universal vi-style scroll on any non-Findings list/text view. Stays
+        // inert on Catalog/Module/Config so the hotkeys there still take
+        // priority for their own bindings.
+        if self.is_scrollable_view() {
+            match ch {
+                'j' => {
+                    self.scroll_down(1);
+                    return true;
+                }
+                'k' => {
+                    self.scroll_up(1);
+                    return true;
+                }
+                'g' => {
+                    self.scroll_to_top();
+                    return true;
+                }
+                'G' => {
+                    self.scroll_to_bottom();
+                    return true;
+                }
+                _ => {}
+            }
+        }
+
         false
+    }
+
+    fn is_scrollable_view(&self) -> bool {
+        matches!(
+            self.shell_view,
+            ShellView::Help
+                | ShellView::Tools
+                | ShellView::Options(_)
+                | ShellView::Runs
+                | ShellView::Replay(_)
+                | ShellView::Trace(_)
+                | ShellView::SastTasks
+                | ShellView::Context
+                | ShellView::Workspace
+                | ShellView::KnowledgeBase
+                | ShellView::AgentChat
+                | ShellView::History
+                | ShellView::Story
+                | ShellView::Threat(_)
+                | ShellView::ThreatEditor
+                | ShellView::PromptsEditor
+                | ShellView::Tune
+                | ShellView::ActorDetail(_)
+                | ShellView::ModuleRun
+                | ShellView::Finding
+        )
     }
 
     fn go_back(&mut self) {
@@ -4389,17 +4462,51 @@ impl ShellApp {
         );
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self) -> bool {
+        let mut changed = false;
         if let Some(armed_at) = self.ctrl_c_armed_at {
             if Instant::now().duration_since(armed_at) > CTRL_C_ARM_WINDOW {
                 self.ctrl_c_armed_at = None;
+                changed = true;
             }
         }
         if let Some(throttle) = &self.advisory.throttle {
             if Instant::now().duration_since(throttle.since) > THROTTLE_STALE_AFTER {
                 self.advisory.throttle = None;
+                changed = true;
             }
         }
+        if self.has_running_work() {
+            let now = Instant::now();
+            let due = self
+                .last_spinner_advance
+                .map(|prev| now.duration_since(prev) >= SPINNER_FRAME)
+                .unwrap_or(true);
+            if due {
+                self.spinner_phase = self.spinner_phase.wrapping_add(1);
+                self.last_spinner_advance = Some(now);
+                changed = true;
+            }
+        } else {
+            self.last_spinner_advance = None;
+        }
+        changed
+    }
+
+    pub fn has_running_work(&self) -> bool {
+        let scan_running = self.scan.as_ref().is_some_and(|scan| scan.running);
+        let agent_running = self
+            .agent_chat
+            .as_ref()
+            .is_some_and(|agent| agent.running);
+        scan_running || agent_running || self.planner_running || self.threat_worker_running
+    }
+
+    pub fn spinner_glyph(&self) -> &'static str {
+        const FRAMES: [&str; 10] = [
+            "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
+        ];
+        FRAMES[(self.spinner_phase as usize) % FRAMES.len()]
     }
 
     pub fn ctrl_c_armed(&self) -> bool {
@@ -4959,21 +5066,44 @@ pub fn run_shell_with_plain(
     let mut app = ShellApp::new(config, target);
 
     let result = (|| -> Result<()> {
+        let mut needs_redraw = true;
         loop {
-            app.tick();
-            app.drain_background_events();
-            app.sync_view_change();
-            terminal.draw(|frame| render_app(frame, &app))?;
+            let tick_changed = app.tick();
+            let drain_changed = app.drain_background_events();
+            let view_changed = app.sync_view_change();
+            if tick_changed || drain_changed || view_changed {
+                needs_redraw = true;
+            }
+            if needs_redraw {
+                terminal.draw(|frame| render_app(frame, &app))?;
+                needs_redraw = false;
+            }
             if app.should_quit {
                 break;
             }
 
-            if event::poll(Duration::from_millis(100))? {
+            // Use a short poll while running so the spinner animates; idle when
+            // nothing is in flight so we don't burn CPU on a quiescent shell.
+            let timeout = if app.has_running_work() {
+                SPINNER_FRAME
+            } else {
+                Duration::from_millis(250)
+            };
+            if event::poll(timeout)? {
                 match event::read()? {
-                    Event::Key(key) => app.handle_key(key),
-                    Event::Paste(text) => app.handle_paste(&text),
-                    Event::Mouse(mouse) => app.handle_mouse(mouse),
-                    Event::Resize(_, _) => {}
+                    Event::Key(key) => {
+                        app.handle_key(key);
+                        needs_redraw = true;
+                    }
+                    Event::Paste(text) => {
+                        app.handle_paste(&text);
+                        needs_redraw = true;
+                    }
+                    Event::Mouse(mouse) => {
+                        app.handle_mouse(mouse);
+                        needs_redraw = true;
+                    }
+                    Event::Resize(_, _) => needs_redraw = true,
                     _ => {}
                 }
             }
@@ -8986,6 +9116,46 @@ JSON
         app.shell_view = ShellView::Tools;
         app.sync_view_change();
         assert_eq!(app.scroll_offset, 0);
+    }
+
+    #[test]
+    fn vi_keys_scroll_help_view() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Help;
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        assert_eq!(app.scroll_offset, 2);
+        app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()));
+        assert_eq!(app.scroll_offset, 1);
+        app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
+        assert_eq!(app.scroll_offset, u16::MAX);
+        app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
+        assert_eq!(app.scroll_offset, 0);
+    }
+
+    #[test]
+    fn tick_advances_spinner_only_when_running() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let initial_phase = app.spinner_phase;
+        // Idle: tick() returns false and does not advance the spinner.
+        let changed = app.tick();
+        assert!(!changed);
+        assert_eq!(app.spinner_phase, initial_phase);
+        // Mark a scan as running and tick — the spinner advances and tick reports change.
+        app.scan = Some(crate::app::ScanPanelState {
+            run_id: None,
+            target: PathBuf::from("."),
+            stage: "running".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        // Force the spinner to advance even though no real time has passed.
+        app.last_spinner_advance = Some(Instant::now() - Duration::from_millis(200));
+        let changed = app.tick();
+        assert!(changed);
+        assert_eq!(app.spinner_phase, initial_phase.wrapping_add(1));
     }
 
     #[test]
