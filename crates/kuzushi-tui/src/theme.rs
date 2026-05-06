@@ -56,3 +56,14 @@ pub fn severity(severity: Severity) -> Style {
         Severity::Unknown => muted(),
     }
 }
+
+pub fn severity_glyph(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Critical => "█",
+        Severity::High => "▆",
+        Severity::Medium => "▄",
+        Severity::Low => "▂",
+        Severity::Info => "▁",
+        Severity::Unknown => "·",
+    }
+}

@@ -89,6 +89,18 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Scaffold .kuzushi/ for a project: writes a CONTEXT.md template, prints
+    /// an agent prompt operators can paste into Claude/Codex to fill it in,
+    /// and runs doctor. Idempotent.
+    Init {
+        target: Option<PathBuf>,
+        /// Overwrite an existing .kuzushi/CONTEXT.md.
+        #[arg(long)]
+        force: bool,
+        /// Skip the doctor preflight at the end.
+        #[arg(long)]
+        skip_doctor: bool,
+    },
     /// Execute a native tool descriptor-backed command.
     Run {
         tool: String,
@@ -191,6 +203,11 @@ async fn main() -> Result<()> {
         Command::Modules { json } => modules_command(json),
         Command::Tools { json } => tools_command(json),
         Command::Doctor { target, json } => doctor_command(target.or(cli.target), json),
+        Command::Init {
+            target,
+            force,
+            skip_doctor,
+        } => init_command(target.or(cli.target), force, skip_doctor),
         Command::Run { tool, input } => run_tool_command(tool, input, cli.target),
         Command::PrComment {
             target,
@@ -365,6 +382,26 @@ async fn scan_command(
         .and_then(serde_json::Value::as_f64)
         .unwrap_or(0.0);
 
+    let run_id = data
+        .get("runId")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string);
+
+    let report_path = match write_scan_report(
+        &workspace,
+        run_id.as_deref(),
+        count,
+        cost,
+        elapsed,
+        &config,
+    ) {
+        Ok(path) => Some(path),
+        Err(error) => {
+            eprintln!("warn: could not write run report: {error}");
+            None
+        }
+    };
+
     if ci {
         println!(
             "{}",
@@ -385,6 +422,12 @@ async fn scan_command(
                 )
             )
         );
+        if let Some(report_path) = &report_path {
+            println!(
+                "{}",
+                ci_line(started, "report", &report_path.display().to_string())
+            );
+        }
         println!("{}", ci_line(started, "exit", "0"));
         return Ok(());
     }
@@ -400,15 +443,100 @@ async fn scan_command(
                 "mode": data.get("mode").cloned(),
                 "whiteboxStatic": data.get("whiteboxStatic").cloned(),
                 "triage": data.get("triage").cloned(),
+                "report": report_path.as_ref().map(|path| path.display().to_string()),
             })
         );
     } else {
         if let Some(output) = result.get("output").and_then(serde_json::Value::as_str) {
             println!("{output}");
         }
+        let counts = severity_counts_from_store(&workspace);
+        println!();
+        println!(
+            "Scan complete: {count} finding(s){}{} · ${cost:.4} · {}",
+            counts
+                .as_ref()
+                .map(|c| format!(" ({} crit, {} high, {} med, {} low)", c.0, c.1, c.2, c.3))
+                .unwrap_or_default(),
+            if counts.is_none() { " (severity breakdown unavailable)" } else { "" },
+            format_duration(elapsed)
+        );
+        if let Some(report_path) = &report_path {
+            println!("Report:  {}", report_path.display());
+        }
+        println!("Browse:  kuzushi findings --target {}", target.display());
+        println!("Or open the shell with: kuzushi --target {}", target.display());
     }
 
     Ok(())
+}
+
+fn severity_counts_from_store(workspace: &WorkspaceTarget) -> Option<(usize, usize, usize, usize)> {
+    use kuzushi_core::Severity;
+    let store = FindingStore::open(workspace.findings_db_path()).ok()?;
+    let report = store
+        .list_findings_filtered(&FindingListFilter::default())
+        .ok()?;
+    let mut critical = 0usize;
+    let mut high = 0usize;
+    let mut medium = 0usize;
+    let mut low = 0usize;
+    for finding in &report.findings {
+        match finding.severity {
+            Severity::Critical => critical += 1,
+            Severity::High => high += 1,
+            Severity::Medium => medium += 1,
+            Severity::Low | Severity::Info => low += 1,
+            Severity::Unknown => {}
+        }
+    }
+    Some((critical, high, medium, low))
+}
+
+fn write_scan_report(
+    workspace: &WorkspaceTarget,
+    run_id: Option<&str>,
+    count: u64,
+    cost: f64,
+    elapsed: std::time::Duration,
+    config: &kuzushi_core::config::V2Config,
+) -> Result<PathBuf> {
+    let run_id = run_id.unwrap_or("latest");
+    let dir = workspace
+        .root()
+        .join(".kuzushi")
+        .join("runs")
+        .join(run_id);
+    fs::create_dir_all(&dir)
+        .with_context(|| format!("Could not create {}", dir.display()))?;
+    let path = dir.join("report.md");
+    let store = FindingStore::open(workspace.findings_db_path())?;
+    let report = store.list_findings_filtered(&FindingListFilter::default())?;
+    let input = PrCommentInput {
+        repo_name: workspace
+            .root()
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string),
+        findings: report.findings,
+        cost_usd: cost,
+        elapsed: Some(elapsed),
+        run_url: None,
+        top_n: Some(20),
+        kuzushi_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        model: config.model.clone(),
+        git_sha: None,
+        run_id: Some(run_id.to_string()),
+        changed_files: Vec::new(),
+    };
+    let body = format!(
+        "# Kuzushi scan report\n\nrun: `{run_id}` · findings: {count} · cost: ${cost:.4} · elapsed: {}\n\n{}\n",
+        format_duration(elapsed),
+        build_pr_comment(&input)
+    );
+    fs::write(&path, body)
+        .with_context(|| format!("Could not write {}", path.display()))?;
+    Ok(path)
 }
 
 fn ci_line(started: std::time::Instant, prefix: &str, body: &str) -> String {
@@ -596,6 +724,122 @@ impl DoctorReport {
     fn has_failures(&self) -> bool {
         self.failures() > 0
     }
+}
+
+const CONTEXT_TEMPLATE: &str = r#"# Project context for kuzushi
+
+This file is read by every agentic tool kuzushi runs (triage, verify,
+threat modelling). 50–100 lines focused on *this* repository pays for
+itself many times over: it cuts false-positive rate, sharpens triage,
+and tells the model what to ignore.
+
+Replace each section below with project-specific facts. Delete sections
+that don't apply.
+
+## What this code does
+
+One paragraph. The product, the surface, the audience.
+
+## Trust boundaries
+
+Where untrusted input enters. Where privileged operations happen. What
+runs as which user / in which container.
+
+## Authentication & authorization
+
+How identity is established. Where authorization is checked. Known
+gaps you've already accepted.
+
+## Known false-positive sources
+
+Patterns the scanner will flag that are intentional in this codebase
+(e.g. "sandboxed eval in worker isolates is fine — see X.ts").
+
+## Dangerous sinks worth re-reading
+
+If we touch these files, slow down: payments, key derivation, raw
+SQL, deserialization, child-process spawn.
+
+## Out-of-scope
+
+Vendored code, generated artifacts, abandoned modules.
+
+## Conventions
+
+How errors are handled. How config is loaded. Where the audit log
+lives. What "secure-by-default" looks like in this repo.
+"#;
+
+const INIT_AGENT_PROMPT: &str = r#"You are filling in `.kuzushi/CONTEXT.md` for this repository.
+
+Your job: read the codebase enough to replace each section of the
+template with concrete, project-specific facts a security auditor
+would want before triaging findings here. Aim for 50–100 lines total.
+
+Concretely:
+1. Read the repo's README, package.json/Cargo.toml/pyproject.toml, and the
+   top of `src/`/`app/`/`lib/` to understand what this code does.
+2. Search for HTTP route declarations, middleware, auth checks, raw SQL,
+   child-process spawns, deserialization, eval/exec, key derivation.
+3. Identify trust boundaries: where untrusted input enters, where privileged
+   operations happen, what runs in what context.
+4. Capture known false-positive sources (intentional patterns the scanner
+   will flag) and dangerous sinks worth a second look.
+5. Write the result to `.kuzushi/CONTEXT.md`, replacing the template
+   sections in place. Keep it terse — fact density beats prose.
+6. Commit the file when you're done.
+
+When CONTEXT.md is good, run `kuzushi scan .` and `kuzushi findings` to
+see kuzushi flow through it.
+"#;
+
+fn init_command(target: Option<PathBuf>, force: bool, skip_doctor: bool) -> Result<()> {
+    let target = target.unwrap_or_else(|| PathBuf::from("."));
+    let target = target
+        .canonicalize()
+        .with_context(|| format!("Could not resolve {}", target.display()))?;
+    let kuzushi_dir = target.join(".kuzushi");
+    fs::create_dir_all(&kuzushi_dir)
+        .with_context(|| format!("Could not create {}", kuzushi_dir.display()))?;
+    let context_path = kuzushi_dir.join("CONTEXT.md");
+    let context_status = if context_path.exists() && !force {
+        "kept (exists)"
+    } else {
+        fs::write(&context_path, CONTEXT_TEMPLATE)
+            .with_context(|| format!("Could not write {}", context_path.display()))?;
+        if force {
+            "overwritten (--force)"
+        } else {
+            "wrote template"
+        }
+    };
+
+    println!("Kuzushi init");
+    println!("Target:        {}", target.display());
+    println!("State dir:     {}", kuzushi_dir.display());
+    println!("CONTEXT.md:    {context_status}");
+    println!();
+    println!("Paste this into Claude Code or Codex to fill in CONTEXT.md:");
+    println!();
+    for line in INIT_AGENT_PROMPT.lines() {
+        println!("  {line}");
+    }
+    println!();
+
+    if !skip_doctor {
+        let report = build_doctor_report(target.clone());
+        print_doctor_plain(&report);
+        if report.has_failures() {
+            anyhow::bail!(
+                "init wrote CONTEXT.md, but doctor found {} failing check(s). Fix the listed next steps and rerun `kuzushi doctor`.",
+                report.failures()
+            );
+        }
+    }
+
+    println!();
+    println!("Ready. Next: `kuzushi scan {}` (or run `kuzushi` to enter the shell).", target.display());
+    Ok(())
 }
 
 fn doctor_command(target: Option<PathBuf>, json: bool) -> Result<()> {
