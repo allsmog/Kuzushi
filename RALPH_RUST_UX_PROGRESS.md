@@ -258,12 +258,17 @@ Status: UX-002 checks still pass; push remains blocked by DNS/network sandboxing
   - `pnpm exec vitest run tests/cli/legacy-shell-isolation.test.ts`
   - `pnpm typecheck`
   - `pnpm exec biome check src/cli/commands/shell.ts tests/cli/legacy-shell-isolation.test.ts src/ui/README.md README.md RELEASING.md docs/rust-migration-status.md`
-- Result: UX-002 verification still passes. Remote DNS is still unavailable, so
-  the required push gate did not complete and UX-003 was not started.
+  - `git -C /tmp/kuzushi-ux2-clone.PJaRge push origin HEAD:main`
+- Result: UX-002 verification still passes. An isolated progress-record retry
+  commit was created as `99622b7 ralph:ux record legacy ink push gate retry`,
+  but remote DNS is still unavailable, so the required push gate did not
+  complete and UX-003 was not started.
 - Remaining work: push UX-002 before starting UX-003.
 - Blockers or repo facts that contradicted this prompt:
   - `git ls-remote --heads origin main` failed with `Could not resolve host:
     github.com`, confirming the current sandbox still cannot reach the GitHub
     remote.
+  - `git -C /tmp/kuzushi-ux2-clone.PJaRge push origin HEAD:main` failed with
+    `Could not resolve host: github.com`.
   - The primary workspace still has the UX-002 slice staged because local Git
     metadata writes remain blocked in this environment.
