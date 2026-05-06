@@ -1061,6 +1061,31 @@ impl ShellApp {
         }
     }
 
+    /// Inline ghost-text suggestion shown after the cursor when the cursor sits
+    /// at the end of the line. Returns the *tail* — the chars the operator would
+    /// gain by pressing Tab — or `None` if there is no completion or the cursor
+    /// is mid-line. Empty inputs return `None` so the cold-start prompt isn't
+    /// noisy.
+    pub fn completion_preview(&self) -> Option<String> {
+        if self.input.is_empty() {
+            return None;
+        }
+        if self.cursor != self.input.chars().count() {
+            return None;
+        }
+        let candidate = self
+            .completion_candidates(&self.input)
+            .into_iter()
+            .next()?;
+        if candidate == self.input {
+            return None;
+        }
+        candidate
+            .strip_prefix(&self.input)
+            .filter(|tail| !tail.is_empty())
+            .map(str::to_string)
+    }
+
     fn module_completion_values(&self) -> Vec<String> {
         self.registry
             .modules()
@@ -9116,6 +9141,27 @@ JSON
         app.shell_view = ShellView::Tools;
         app.sync_view_change();
         assert_eq!(app.scroll_offset, 0);
+    }
+
+    #[test]
+    fn completion_preview_shows_only_when_cursor_at_end() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_input("/he");
+        // Cursor at end → preview returns the tail "lp".
+        let preview = app.completion_preview();
+        assert_eq!(preview.as_deref(), Some("lp"));
+
+        // Move cursor mid-line → preview suppressed (would render in the wrong place).
+        app.cursor = 1;
+        assert!(app.completion_preview().is_none());
+
+        // Empty input → no preview (cold-start prompt should stay clean).
+        app.clear_input();
+        assert!(app.completion_preview().is_none());
+
+        // Already a complete word with no further suffix → no preview.
+        app.set_input("/help");
+        assert!(app.completion_preview().is_none());
     }
 
     #[test]
