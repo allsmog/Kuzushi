@@ -160,7 +160,7 @@
       "acceptance": ["statically_confirmed requires source or entrypoint evidence, sink evidence, path/local reason, sanitizer and guard assessment, citations, assumptions, and missing evidence.", "Invalid true-positive claims are downgraded."],
       "storyGate": "cargo test -p kuzushi-core static_proof_validator",
       "forbidden": ["uncited confirmed finding"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-013",
