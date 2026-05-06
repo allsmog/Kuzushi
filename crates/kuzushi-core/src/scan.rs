@@ -1617,24 +1617,22 @@ fn index_codeql_result_as_static_evidence(
 }
 
 fn extract_codeql_location(result: &CodeqlSarifResult) -> Option<(String, u32)> {
-    for location in &result.locations {
-        let physical = location.physical_location.as_ref()?;
-        let uri = physical
-            .artifact_location
-            .as_ref()?
-            .uri
-            .as_deref()
-            .and_then(non_empty_string)?;
-        let file_path = normalize_artifact_uri(uri);
-        let start_line = physical
-            .region
-            .as_ref()
-            .and_then(|region| region.start_line)
-            .filter(|line| *line > 0)
-            .unwrap_or(1);
-        return Some((file_path, start_line));
-    }
-    None
+    let location = result.locations.first()?;
+    let physical = location.physical_location.as_ref()?;
+    let uri = physical
+        .artifact_location
+        .as_ref()?
+        .uri
+        .as_deref()
+        .and_then(non_empty_string)?;
+    let file_path = normalize_artifact_uri(uri);
+    let start_line = physical
+        .region
+        .as_ref()
+        .and_then(|region| region.start_line)
+        .filter(|line| *line > 0)
+        .unwrap_or(1);
+    Some((file_path, start_line))
 }
 
 fn render_codeql_flow_evidence(result: &CodeqlSarifResult) -> Option<String> {

@@ -683,12 +683,26 @@ mod tests {
 
     #[cfg(unix)]
     fn init_git_repo(dir: &Path) {
+        // Disable GPG signing on the throwaway fixture commit so this
+        // test runs cleanly under sandboxed git wrappers that route
+        // commits through a signing server.
         for args in [
             vec!["init"],
             vec!["config", "user.email", "kuzushi@example.test"],
             vec!["config", "user.name", "Kuzushi Test"],
+            vec!["config", "commit.gpgsign", "false"],
+            vec!["config", "tag.gpgsign", "false"],
             vec!["add", "."],
-            vec!["commit", "-m", "base"],
+            vec![
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "tag.gpgsign=false",
+                "commit",
+                "--no-gpg-sign",
+                "-m",
+                "base",
+            ],
         ] {
             let output = Command::new("git")
                 .args(args)
@@ -748,7 +762,16 @@ mod tests {
             .unwrap();
         assert!(output.status.success());
         let output = Command::new("git")
-            .args(["commit", "-m", "pr"])
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "tag.gpgsign=false",
+                "commit",
+                "--no-gpg-sign",
+                "-m",
+                "pr",
+            ])
             .current_dir(temp.path())
             .output()
             .unwrap();

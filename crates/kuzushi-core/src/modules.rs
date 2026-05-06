@@ -10203,12 +10203,28 @@ OUT
 
     #[cfg(unix)]
     fn init_git_repo(dir: &Path) {
+        // The fixture commit is throwaway state inside a tempdir. We
+        // explicitly disable GPG signing on it so test runs don't
+        // depend on the host's git signing configuration (e.g. claude
+        // sandbox runners that intercept `git commit` and route every
+        // commit through a signing server).
         for args in [
             vec!["init"],
             vec!["config", "user.email", "kuzushi@example.test"],
             vec!["config", "user.name", "Kuzushi Test"],
+            vec!["config", "commit.gpgsign", "false"],
+            vec!["config", "tag.gpgsign", "false"],
             vec!["add", "."],
-            vec!["commit", "-m", "fixture"],
+            vec![
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "tag.gpgsign=false",
+                "commit",
+                "--no-gpg-sign",
+                "-m",
+                "fixture",
+            ],
         ] {
             let output = Command::new("git")
                 .args(args)
@@ -10707,7 +10723,16 @@ OUT
             .unwrap();
         assert!(output.status.success());
         let output = Command::new("git")
-            .args(["commit", "-m", "hot path"])
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "tag.gpgsign=false",
+                "commit",
+                "--no-gpg-sign",
+                "-m",
+                "hot path",
+            ])
             .current_dir(temp.path())
             .output()
             .unwrap();
@@ -12953,7 +12978,19 @@ OUT
             r#"{"dependencies":{"lodash":"latest","express":"latest"}}"#,
         )
         .unwrap();
-        for args in [vec!["add", "."], vec!["commit", "-m", "pr"]] {
+        for args in [
+            vec!["add", "."],
+            vec![
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "tag.gpgsign=false",
+                "commit",
+                "--no-gpg-sign",
+                "-m",
+                "pr",
+            ],
+        ] {
             let output = Command::new("git")
                 .args(args)
                 .current_dir(temp.path())
