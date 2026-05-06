@@ -1208,3 +1208,27 @@ Legacy command classifications:
 - Remaining work: Tier 1 (`kuzushi-index` tree-sitter crate), Tier 2 (`kuzushi-sandbox` + `verify` module with cargo-test exploit gate), full Tier 3 (`systems_hunt.rs` specialist branching using the new trait method).
 - Blockers or repo facts that contradicted this prompt:
   - Same three pre-existing environmental `modules::tests` failures as Iteration 41; reproduced on a clean `origin/main` worktree at `c77e414`.
+
+### Iteration 43 - Xint code-index MCP servers (joern + clang + gtags)
+
+- Task attempted: deliver a clean factoring of Xint's pre-indexed code DB by shipping three local MCP servers (joern, clang AST, gtags) with a unified facade so other Kuzushi modules — and external MCP clients — can call into them. Replaces the Tier 1 tree-sitter crate from the previous plan; that direction is now superseded.
+- Files changed:
+  - `Cargo.toml` (workspace) — added five new members; added `io-std` to tokio's feature set so the stdio MCP servers can use `tokio::io::{stdin, stdout}`.
+  - `crates/kuzushi-mcp-common/` (new crate, ~1200 LoC) — JSON-RPC 2.0 over stdio (newline-delimited JSON), `ToolRegistry` with async `ToolHandler` trait, shared schemas (`Position`, `Range`, `Symbol`, `SymbolKind`, `Method`, `Path`, `EdgeKind`, `FileSpan`), per-repo cache layout under `~/.kuzushi/index/` keyed by hand-rolled SHA-256 of canonical path + git remote, doctor binary-probe helpers (`which`, `probe`, `probe_all` returning a `HealthSummary`).
+  - `crates/kuzushi-mcp-gtags/` (new crate, full implementation) — 7 tools (`gtags.{health,index,definitions,references,symbols_in_file,files_matching,completion}`), parser for `global -x` output with embedded-whitespace snippet handling, lockfile-gated graceful degradation when `global`/`gtags` are missing.
+  - `crates/kuzushi-mcp-clang/` (new crate, skeleton + 4 live tools) — clangd LSP bridge over `Content-Length`-framed JSON-RPC, `compile_commands.json` resolution (pre-existing / cmake / bear / intercept-build), live tools: `clang.{health,compile_commands,definition,references,type_at,ast}`; stubbed: `clang.{callers,callees,macro_expand,semantic_tokens,diagnostics}` returning structured `NotYetImplemented`.
+  - `crates/kuzushi-mcp-joern/` (new crate, skeleton + 5 live tools) — `joern-parse` shell-out with cache layout, Scala query templates with quote-injection-safe escaping, `joern --server` HTTP client via curl (loopback-only), live tools: `joern.{health,parse,query,callers_of,callees_of,cpg_size}`; stubbed: `joern.{reaching_def,taint_paths,unsafe_blocks,ffi_boundaries,method_at}`.
+  - `crates/kuzushi-codeindex/` (new crate) — `IndexFacade` that auto-spawns each MCP server it finds on PATH; `RoutingTable` encoding the per-query backend preference (`Definitions` → clang → gtags → joern; `TaintPaths` → joern only; etc.); `McpClient` that speaks JSON-RPC client to a child server with structured error reporting and graceful `BackendUnavailable` errors.
+  - `crates/kuzushi-cli/src/main.rs` — added `kuzushi mcp serve <gtags|clang|joern>` subcommand (execs into the per-backend server binary, stdio passthrough) and `kuzushi mcp health <backend>` (shells out to `<binary> --health` and forwards the JSON summary).
+- Tests/checks run:
+  - `cargo fmt --all`
+  - `cargo build --workspace` — clean.
+  - `cargo test -p kuzushi-mcp-common -p kuzushi-mcp-gtags -p kuzushi-mcp-clang -p kuzushi-mcp-joern -p kuzushi-codeindex` — **62 tests pass** (29 + 7 + 9 + 10 + 7).
+  - `cargo clippy -p kuzushi-mcp-common -p kuzushi-mcp-gtags -p kuzushi-mcp-clang -p kuzushi-mcp-joern -p kuzushi-codeindex --tests` — clean.
+  - End-to-end smoke: `printf '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n' | kuzushi-mcp-gtags` returns valid `initialize` + `tools/list` JSON-RPC responses with all 7 tools listed.
+  - `kuzushi mcp health gtags|clang|joern` produces structured `{ ready, probes[], missing[] }` JSON for each backend (gtags + clangd + joern reported missing in this sandbox; clang and java reported with versions).
+- Result: complete. All three backends are independently runnable as MCP servers from Claude Desktop / Cursor / Claude Code via `kuzushi mcp serve <backend>` (or by invoking the binary directly), and from inside Kuzushi via `kuzushi-codeindex::IndexFacade` for a future systems_hunt rewrite.
+- Remaining work: live-backend integration tests (require `gtags`/`clangd`/`joern` installed on a CI runner; deferred), wiring `IndexFacade` into `systems_hunt.rs` (separate iteration), filling out the `NotYetImplemented` stubs in clang and joern (10 tools total), `kuzushi-codeindex` re-export from `kuzushi-core/src/lib.rs` once a consumer module wants it.
+- Blockers or repo facts that contradicted this prompt:
+  - Sandbox lacks `gtags`/`global`/`clangd`/`joern` — verified via `which`. All tests therefore use mocked subprocess output and graceful-degradation paths; live integration must run on a host with the binaries installed.
+  - `tokio` workspace dep needed `io-std` feature added; pre-existing crates (`kuzushi-core`, `kuzushi-tui`) keep working with the augmented feature set.

@@ -80,6 +80,11 @@ enum Command {
         #[arg(long, default_value = "{}")]
         input: String,
     },
+    /// Run a local MCP server (joern, clang, or gtags) over stdio.
+    Mcp {
+        #[command(subcommand)]
+        command: McpCommand,
+    },
     /// Render a markdown PR comment summarising persisted findings.
     PrComment {
         #[arg(long)]
@@ -99,6 +104,38 @@ enum Command {
         #[arg(long)]
         git_sha: Option<String>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum McpCommand {
+    /// Run an MCP server over stdio. Speaks JSON-RPC 2.0 newline-delimited.
+    Serve {
+        /// Which backend to serve.
+        #[arg(value_enum)]
+        backend: McpBackend,
+    },
+    /// Print a JSON health summary for the chosen backend (no MCP loop).
+    Health {
+        #[arg(value_enum)]
+        backend: McpBackend,
+    },
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum McpBackend {
+    Gtags,
+    Clang,
+    Joern,
+}
+
+impl McpBackend {
+    fn binary(self) -> &'static str {
+        match self {
+            Self::Gtags => "kuzushi-mcp-gtags",
+            Self::Clang => "kuzushi-mcp-clang",
+            Self::Joern => "kuzushi-mcp-joern",
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -154,6 +191,7 @@ async fn main() -> Result<()> {
         Command::Modules { json } => modules_command(json),
         Command::Tools { json } => tools_command(json),
         Command::Run { tool, input } => run_tool_command(tool, input, cli.target),
+        Command::Mcp { command } => mcp_command(command).await,
         Command::PrComment {
             target,
             repo,
@@ -173,6 +211,41 @@ async fn main() -> Result<()> {
             model,
             git_sha,
         ),
+    }
+}
+
+async fn mcp_command(command: McpCommand) -> Result<()> {
+    match command {
+        McpCommand::Serve { backend } => {
+            // Exec into the per-backend server binary so its stdio loop
+            // is the one talking to the MCP client. We use `exec` semantics
+            // via std::process so signals flow through cleanly.
+            let binary = backend.binary();
+            let err = std::process::Command::new(binary)
+                .args::<[&str; 0], _>([])
+                .status();
+            match err {
+                Ok(status) => std::process::exit(status.code().unwrap_or(0)),
+                Err(e) => anyhow::bail!(
+                    "could not spawn `{binary}`: {e}. Build the workspace and add the target dir to PATH (e.g. `cargo build && export PATH=$PWD/target/debug:$PATH`)"
+                ),
+            }
+        }
+        McpCommand::Health { backend } => {
+            let binary = backend.binary();
+            let output = std::process::Command::new(binary)
+                .arg("--health")
+                .output()
+                .with_context(|| {
+                    format!(
+                        "could not spawn `{binary} --health`. Build the workspace and add the target dir to PATH."
+                    )
+                })?;
+            // Print whatever the binary produced; --health emits JSON.
+            std::io::Write::write_all(&mut std::io::stdout(), &output.stdout).ok();
+            std::io::Write::write_all(&mut std::io::stderr(), &output.stderr).ok();
+            std::process::exit(output.status.code().unwrap_or(0));
+        }
     }
 }
 
