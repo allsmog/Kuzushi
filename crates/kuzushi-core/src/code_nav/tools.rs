@@ -11,7 +11,9 @@ use crate::runtime::{AgentTool, ToolBox, ToolCall, ToolResult};
 
 use super::file_io::{read_source, ReadSourceInput};
 use super::ripgrep::{find_references, FindReferencesInput};
-use super::symbol_index::{list_definitions, read_definition, ListDefinitionsInput, ReadDefinitionInput};
+use super::symbol_index::{
+    list_definitions, read_definition, ListDefinitionsInput, ReadDefinitionInput,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CodeNavTool {
@@ -329,7 +331,12 @@ mod tests {
         let names: Vec<_> = specs.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(
             names,
-            ["read_source", "find_references", "list_definitions", "read_definition"]
+            [
+                "read_source",
+                "find_references",
+                "list_definitions",
+                "read_definition"
+            ]
         );
     }
 }

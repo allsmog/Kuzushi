@@ -262,10 +262,14 @@ fn walk_files(cfg: &FullModeConfig) -> Result<Vec<FileBucket>> {
             .collect::<Vec<_>>()
     };
     let mut out = Vec::new();
-    walk_recursive(&cfg.workspace_root, &cfg.workspace_root, &extensions, &mut out)?;
+    walk_recursive(
+        &cfg.workspace_root,
+        &cfg.workspace_root,
+        &extensions,
+        &mut out,
+    )?;
     if let Some(scope) = &cfg.scope_files {
-        let allowed: std::collections::HashSet<&Path> =
-            scope.iter().map(|p| p.as_path()).collect();
+        let allowed: std::collections::HashSet<&Path> = scope.iter().map(|p| p.as_path()).collect();
         out.retain(|fb| allowed.contains(Path::new(&fb.path)));
     }
     Ok(out)
@@ -633,18 +637,18 @@ mod tests {
         assert!(plan.chunks.len() >= 2, "expected multiple chunks");
         assert_eq!(plan.total_files, 3);
         // Files sorted by path → chunks are directory-affine.
-        let chunk0_paths: Vec<&str> = plan.chunks[0].files.iter().map(|f| f.path.as_str()).collect();
+        let chunk0_paths: Vec<&str> = plan.chunks[0]
+            .files
+            .iter()
+            .map(|f| f.path.as_str())
+            .collect();
         assert!(chunk0_paths.iter().any(|p| p.starts_with("src/")));
     }
 
     #[test]
     fn scope_files_filter_narrows_the_plan_to_diff_set() {
         let big = "// padding\n".repeat(1_500);
-        let tmp = make_workspace(&[
-            ("src/a.c", &big),
-            ("src/b.c", &big),
-            ("src/c.c", &big),
-        ]);
+        let tmp = make_workspace(&[("src/a.c", &big), ("src/b.c", &big), ("src/c.c", &big)]);
         let cfg = FullModeConfig {
             workspace_root: tmp.path().to_path_buf(),
             scope_files: Some(vec![PathBuf::from("src/b.c")]),
@@ -720,11 +724,7 @@ mod tests {
     #[test]
     fn dispatches_each_chunk_and_aggregates_findings() {
         let big = "// padding\n".repeat(2_000); // each ~3k tokens
-        let tmp = make_workspace(&[
-            ("src/a.c", &big),
-            ("src/b.c", &big),
-            ("src/c.c", &big),
-        ]);
+        let tmp = make_workspace(&[("src/a.c", &big), ("src/b.c", &big), ("src/c.c", &big)]);
         let runtime_inner = ScriptedRuntime::new(vec![
             r#"[{"file":"src/a.c","line":42,"function":"foo","severity":"high","cwe":["CWE-787"],"title":"OOB write","rationale":"unbounded copy"}]"#.to_string(),
             r#"[]"#.to_string(),
@@ -809,9 +809,7 @@ mod tests {
     fn malformed_responses_yield_no_findings_not_panic() {
         let body = "// padding\n".repeat(2_000);
         let tmp = make_workspace(&[("src/a.c", &body)]);
-        let runtime_inner = ScriptedRuntime::new(vec![
-            "I don't know what to say".to_string(),
-        ]);
+        let runtime_inner = ScriptedRuntime::new(vec!["I don't know what to say".to_string()]);
         let runtime = RoutedRuntime::new(
             runtime_inner as Arc<dyn AgentRuntime>,
             Arc::new(router_with_full_mode_role("anthropic:claude-haiku-4-5")),

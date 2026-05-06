@@ -1,11 +1,9 @@
 //! Per-role model routing.
 //!
-//! The router maps a logical agent role (e.g. "deep auditor") to an ordered
-//! list of concrete `provider:model` strings: the first is the default; the
-//! rest are retry fallbacks rotated through on transport-level failures
-//! (rate limit, transient 5xx, context-window overflow). This mirrors the
-//! "best frontier model per task" pattern from Theori's open-source CRS:
-//! a tiny cheap model classifies, a heavy reasoner audits, etc.
+//! The router maps a logical agent role (e.g. "deep auditor") to one concrete
+//! `provider:model` string. It deliberately does not rotate to alternate
+//! providers or models on failure; Kuzushi's runtime policy requires explicit
+//! operator consent for any model change.
 //!
 //! Routing is loaded from `~/.kuzushi/models.toml` (and an optional
 //! `<target>/.kuzushi/models.toml` for project-local overrides). The
@@ -16,12 +14,10 @@
 //! default_model = "anthropic:claude-sonnet-4-6"
 //!
 //! [roles.classifier_gate]
-//! primary   = "anthropic:claude-haiku-4-5"
-//! fallbacks = ["openai:gpt-4.1-mini"]
+//! primary = "anthropic:claude-haiku-4-5"
 //!
 //! [roles.deep_auditor]
-//! primary   = "anthropic:claude-opus-4-7"
-//! fallbacks = ["openai:o3", "anthropic:claude-sonnet-4-6"]
+//! primary = "anthropic:claude-opus-4-7"
 //!
 //! [concurrency]                # consumed in a later phase; loaded eagerly
 //! "anthropic:claude-haiku-4-5" = 80
@@ -51,7 +47,7 @@ use crate::findings::TriageOutcome;
 use crate::options::{OptionScope, OptionTarget, ToolOptionStore};
 use crate::runtime::{
     AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolLoopRequest,
-    AgentToolPolicy, LoopHistoryEntry, TriageRequest,
+    LoopHistoryEntry, TriageRequest,
 };
 
 /// Logical role assigned to an agent call. Each role maps to one
@@ -145,16 +141,12 @@ impl AgentRole {
 #[serde(deny_unknown_fields)]
 pub struct ModelRoute {
     pub primary: String,
+    /// Reserved for future explicit-consent fallback support.
+    ///
+    /// Loading rejects non-empty values today so a stale config cannot
+    /// silently route a Claude task to Codex/OpenAI or vice versa.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fallbacks: Vec<String>,
-    /// Default 3 if not set in TOML. Higher values let the router walk
-    /// further into `fallbacks` on retryable failures.
-    #[serde(default = "default_max_attempts")]
-    pub max_attempts: u32,
-}
-
-fn default_max_attempts() -> u32 {
-    3
 }
 
 impl ModelRoute {
@@ -162,26 +154,19 @@ impl ModelRoute {
         Self {
             primary: primary.into(),
             fallbacks: Vec::new(),
-            max_attempts: default_max_attempts(),
         }
     }
 
-    pub fn with_fallbacks(mut self, fallbacks: Vec<String>) -> Self {
-        self.fallbacks = fallbacks;
-        self
-    }
-
-    /// Walk through `[primary, fallbacks...]` by attempt index.
-    /// Capped at `max_attempts`.
+    /// Return the configured primary on the first attempt only.
+    ///
+    /// Non-zero attempts return `None` to uphold the no-silent-model-fallback
+    /// policy. Same-model transport retries live inside concrete runtime
+    /// adapters and reuse the exact same model string.
     pub fn pick(&self, attempt: u32) -> Option<&str> {
-        if attempt >= self.max_attempts {
-            return None;
-        }
         if attempt == 0 {
             return Some(self.primary.as_str());
         }
-        let idx = (attempt - 1) as usize;
-        self.fallbacks.get(idx).map(String::as_str)
+        None
     }
 }
 
@@ -206,9 +191,7 @@ impl AgentRouter {
     }
 
     pub fn pick(&self, role: AgentRole, attempt: u32) -> Option<&str> {
-        self.routes
-            .get(&role)
-            .and_then(|route| route.pick(attempt))
+        self.routes.get(&role).and_then(|route| route.pick(attempt))
     }
 
     pub fn default_model(&self) -> Option<&str> {
@@ -249,8 +232,8 @@ impl AgentRouter {
     fn merge_file(&mut self, path: &Path) -> Result<()> {
         let raw = fs::read_to_string(path)
             .with_context(|| format!("could not read {}", path.display()))?;
-        let parsed: ModelsTomlFile = toml::from_str(&raw)
-            .with_context(|| format!("could not parse {}", path.display()))?;
+        let parsed: ModelsTomlFile =
+            toml::from_str(&raw).with_context(|| format!("could not parse {}", path.display()))?;
 
         if let Some(default) = parsed.default_model {
             self.default_model = Some(default);
@@ -264,6 +247,14 @@ impl AgentRouter {
                     path.display()
                 );
             };
+            if !route.fallbacks.is_empty() {
+                anyhow::bail!(
+                    "role {key:?} in {} declares model fallbacks, but Kuzushi \
+                     requires explicit operator consent for model changes; keep \
+                     only `primary` or run separate explicit attempts",
+                    path.display()
+                );
+            }
             self.routes.insert(role, route);
         }
         for (model, cap) in parsed.concurrency {
@@ -362,8 +353,7 @@ impl RoutedRuntime {
                 return Some(trimmed.to_string());
             }
         }
-        // 2. Operator-set option override (only for attempt=0; on retry we
-        //    walk through models.toml fallbacks).
+        // 2. Operator-set option override.
         if attempt == 0 {
             if let Some(override_) = self.option_overrides.get(&role) {
                 return Some(override_.clone());
@@ -380,13 +370,13 @@ impl RoutedRuntime {
                 return Some(trimmed.to_string());
             }
         }
-        // 5. Router fallback.
+        // 5. Router-wide default from models.toml.
         self.router.default_model().map(str::to_string)
     }
 
-    /// Single-attempt query routed by role. Retry-on-failure rotation
-    /// through fallbacks is added in Phase 8 alongside per-model
-    /// concurrency semaphores.
+    /// Single-attempt query routed by role. The router never changes models
+    /// after a failure; callers that want another model must issue an explicit
+    /// request with that model.
     pub fn query_for_role(
         &self,
         role: AgentRole,
@@ -516,8 +506,15 @@ mod tests {
     #[test]
     fn empty_router_returns_none_for_all_roles() {
         let r = AgentRouter::empty();
-        for role in [AgentRole::Triage, AgentRole::DeepAuditor, AgentRole::FullModeMulti] {
-            assert!(r.pick(role, 0).is_none(), "role {role:?} unexpectedly mapped");
+        for role in [
+            AgentRole::Triage,
+            AgentRole::DeepAuditor,
+            AgentRole::FullModeMulti,
+        ] {
+            assert!(
+                r.pick(role, 0).is_none(),
+                "role {role:?} unexpectedly mapped"
+            );
         }
         assert!(r.default_model().is_none());
     }
@@ -532,13 +529,10 @@ mod tests {
 default_model = "anthropic:claude-sonnet-4-6"
 
 [roles.classifier_gate]
-primary   = "anthropic:claude-haiku-4-5"
-fallbacks = ["openai:gpt-4.1-mini"]
+primary = "anthropic:claude-haiku-4-5"
 
 [roles.deep_auditor]
-primary   = "anthropic:claude-opus-4-7"
-fallbacks = ["openai:o3"]
-max_attempts = 5
+primary = "anthropic:claude-opus-4-7"
 
 [concurrency]
 "anthropic:claude-haiku-4-5" = 80
@@ -552,14 +546,17 @@ max_attempts = 5
         .unwrap();
 
         assert_eq!(r.default_model(), Some("anthropic:claude-sonnet-4-6"));
-        assert_eq!(r.pick(AgentRole::ClassifierGate, 0), Some("anthropic:claude-haiku-4-5"));
-        assert_eq!(r.pick(AgentRole::ClassifierGate, 1), Some("openai:gpt-4.1-mini"));
-        // No 3rd fallback — pick() returns None.
-        assert_eq!(r.pick(AgentRole::ClassifierGate, 2), None);
+        assert_eq!(
+            r.pick(AgentRole::ClassifierGate, 0),
+            Some("anthropic:claude-haiku-4-5")
+        );
+        assert_eq!(r.pick(AgentRole::ClassifierGate, 1), None);
 
-        assert_eq!(r.pick(AgentRole::DeepAuditor, 0), Some("anthropic:claude-opus-4-7"));
-        assert_eq!(r.pick(AgentRole::DeepAuditor, 1), Some("openai:o3"));
-        assert_eq!(r.pick(AgentRole::DeepAuditor, 4), None); // max_attempts=5 covers 0..5
+        assert_eq!(
+            r.pick(AgentRole::DeepAuditor, 0),
+            Some("anthropic:claude-opus-4-7")
+        );
+        assert_eq!(r.pick(AgentRole::DeepAuditor, 1), None);
 
         assert_eq!(r.concurrency_cap("anthropic:claude-haiku-4-5"), Some(80));
         assert_eq!(r.concurrency_cap("anthropic:claude-opus-4-7"), Some(60));
@@ -612,6 +609,27 @@ primary = "x"
     }
 
     #[test]
+    fn rejects_model_fallbacks_without_explicit_consent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        write_models_toml(
+            &home,
+            r#"
+[roles.deep_auditor]
+primary = "anthropic:claude-opus-4-7"
+fallbacks = ["openai:o3"]
+"#,
+        );
+        let err = AgentRouter::load(&ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("model fallbacks"), "{err}");
+    }
+
+    #[test]
     fn routed_runtime_substitutes_model_for_role() {
         let inner = RecorderRuntime::new();
         let mut router = AgentRouter::empty();
@@ -630,13 +648,12 @@ primary = "x"
         let response = routed
             .query_for_role(
                 AgentRole::DeepAuditor,
-                AgentQueryRequest {
-                    model: "anthropic:claude-sonnet-4-6".to_string(),
-                    cwd: PathBuf::from("/tmp"),
-                    system_prompt: "sys".to_string(),
-                    prompt: "user".to_string(),
-                    tool_policy: AgentToolPolicy::default(),
-                },
+                AgentQueryRequest::new(
+                    "anthropic:claude-sonnet-4-6",
+                    PathBuf::from("/tmp"),
+                    "sys",
+                    "user",
+                ),
             )
             .unwrap();
         assert_eq!(response.text, "ok");
@@ -651,10 +668,9 @@ primary = "x"
     fn explicit_non_default_model_wins_over_role_map() {
         let inner = RecorderRuntime::new();
         let mut router = AgentRouter::empty();
-        router.routes.insert(
-            AgentRole::DeepAuditor,
-            ModelRoute::new("role-model"),
-        );
+        router
+            .routes
+            .insert(AgentRole::DeepAuditor, ModelRoute::new("role-model"));
         let routed = RoutedRuntime::new(
             inner.clone(),
             Arc::new(router),
@@ -666,13 +682,7 @@ primary = "x"
         routed
             .query_for_role(
                 AgentRole::DeepAuditor,
-                AgentQueryRequest {
-                    model: "per-task-override".to_string(),
-                    cwd: PathBuf::from("/tmp"),
-                    system_prompt: "sys".to_string(),
-                    prompt: "user".to_string(),
-                    tool_policy: AgentToolPolicy::default(),
-                },
+                AgentQueryRequest::new("per-task-override", PathBuf::from("/tmp"), "sys", "user"),
             )
             .unwrap();
         assert_eq!(
@@ -693,13 +703,7 @@ primary = "x"
         let err = routed
             .query_for_role(
                 AgentRole::DeepAuditor,
-                AgentQueryRequest {
-                    model: "".to_string(),
-                    cwd: PathBuf::from("/tmp"),
-                    system_prompt: "sys".to_string(),
-                    prompt: "user".to_string(),
-                    tool_policy: AgentToolPolicy::default(),
-                },
+                AgentQueryRequest::new("", PathBuf::from("/tmp"), "sys", "user"),
             )
             .unwrap_err()
             .to_string();
@@ -717,13 +721,12 @@ primary = "x"
         );
         // No role — calls the AgentRuntime trait method directly.
         routed
-            .query_blocking(AgentQueryRequest {
-                model: "explicit-legacy".to_string(),
-                cwd: PathBuf::from("/tmp"),
-                system_prompt: "sys".to_string(),
-                prompt: "user".to_string(),
-                tool_policy: AgentToolPolicy::default(),
-            })
+            .query_blocking(AgentQueryRequest::new(
+                "explicit-legacy",
+                PathBuf::from("/tmp"),
+                "sys",
+                "user",
+            ))
             .unwrap();
         assert_eq!(
             inner.last_query_model.lock().unwrap().as_deref(),
@@ -736,10 +739,9 @@ primary = "x"
     fn option_store_override_takes_precedence_over_role_map() {
         let inner = RecorderRuntime::new();
         let mut router = AgentRouter::empty();
-        router.routes.insert(
-            AgentRole::DeepAuditor,
-            ModelRoute::new("toml-model"),
-        );
+        router
+            .routes
+            .insert(AgentRole::DeepAuditor, ModelRoute::new("toml-model"));
 
         let mut store = ToolOptionStore::new();
         store.set_value(
@@ -759,13 +761,7 @@ primary = "x"
         routed
             .query_for_role(
                 AgentRole::DeepAuditor,
-                AgentQueryRequest {
-                    model: "operator-default".to_string(),
-                    cwd: PathBuf::from("/tmp"),
-                    system_prompt: "sys".to_string(),
-                    prompt: "user".to_string(),
-                    tool_policy: AgentToolPolicy::default(),
-                },
+                AgentQueryRequest::new("operator-default", PathBuf::from("/tmp"), "sys", "user"),
             )
             .unwrap();
         assert_eq!(
@@ -777,8 +773,14 @@ primary = "x"
 
     #[test]
     fn option_store_keys_are_uppercased_role_keys() {
-        assert_eq!(AgentRole::DeepAuditor.option_store_key(), "MODEL_DEEP_AUDITOR");
-        assert_eq!(AgentRole::ClassifierGate.option_store_key(), "MODEL_CLASSIFIER_GATE");
+        assert_eq!(
+            AgentRole::DeepAuditor.option_store_key(),
+            "MODEL_DEEP_AUDITOR"
+        );
+        assert_eq!(
+            AgentRole::ClassifierGate.option_store_key(),
+            "MODEL_CLASSIFIER_GATE"
+        );
         assert_eq!(AgentRole::Triage.option_store_key(), "MODEL_TRIAGE");
     }
 

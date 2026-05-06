@@ -83,7 +83,8 @@ impl QuantileEstimator {
         if self.count <= 5 {
             self.q[self.count - 1] = x;
             if self.count == 5 {
-                self.q.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                self.q
+                    .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             }
             return self.estimate();
         }
@@ -136,10 +137,9 @@ impl QuantileEstimator {
     fn parabolic(&self, i: usize, d: f64) -> f64 {
         let n = self.n;
         let q = self.q;
-        q[i]
-            + d / (n[i + 1] - n[i - 1])
-                * ((n[i] - n[i - 1] + d) * (q[i + 1] - q[i]) / (n[i + 1] - n[i])
-                    + (n[i + 1] - n[i] - d) * (q[i] - q[i - 1]) / (n[i] - n[i - 1]))
+        q[i] + d / (n[i + 1] - n[i - 1])
+            * ((n[i] - n[i - 1] + d) * (q[i + 1] - q[i]) / (n[i + 1] - n[i])
+                + (n[i + 1] - n[i] - d) * (q[i] - q[i - 1]) / (n[i] - n[i - 1]))
     }
 
     fn linear(&self, i: usize, d: f64) -> f64 {
@@ -248,7 +248,7 @@ impl<'a> LikelyVulnClassifier<'a> {
         let request = AgentQueryRequest::new(
             model,
             cwd.to_path_buf(),
-            CLASSIFIER_SYSTEM_PROMPT.to_string(),
+            CLASSIFIER_SYSTEM_PROMPT,
             render_prompt(finding),
         );
         let response = self
@@ -264,7 +264,13 @@ impl<'a> LikelyVulnClassifier<'a> {
             .or_else(|| try_loose_parse(&response.text));
         let raw = parsed
             .map(|p| {
-                let s = if p.score > 0.0 { p.score } else if p.likely { 0.85 } else { 0.15 };
+                let s = if p.score > 0.0 {
+                    p.score
+                } else if p.likely {
+                    0.85
+                } else {
+                    0.15
+                };
                 s.clamp(0.0, 1.0)
             })
             .unwrap_or_else(|| {
@@ -492,10 +498,7 @@ mod tests {
             q.observe((i as f32) / 999.0);
         }
         let est = q.estimate();
-        assert!(
-            (est - 0.8).abs() < 0.05,
-            "expected ~0.8, got {est}"
-        );
+        assert!((est - 0.8).abs() < 0.05, "expected ~0.8, got {est}");
     }
 
     #[test]

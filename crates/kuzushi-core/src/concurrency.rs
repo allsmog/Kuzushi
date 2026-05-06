@@ -216,7 +216,11 @@ impl ModelGate {
         let cap = self.cap_for(model);
         let slot = ModelSlot {
             sem: Arc::new(Semaphore::new(cap)),
-            queues: Arc::new(Mutex::new([VecDeque::new(), VecDeque::new(), VecDeque::new()])),
+            queues: Arc::new(Mutex::new([
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+            ])),
             permit_released: Arc::new(Notify::new()),
         };
         let cloned = slot.clone();
@@ -271,7 +275,6 @@ fn queue_head(queues: &[VecDeque<Arc<Notify>>; 3]) -> Option<Arc<Notify>> {
     }
     None
 }
-
 
 #[cfg(test)]
 mod tests {

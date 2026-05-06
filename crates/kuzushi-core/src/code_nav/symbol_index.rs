@@ -36,7 +36,10 @@ pub struct ListDefinitionsOutput {
     pub definitions: Vec<DefinitionEntry>,
 }
 
-pub fn list_definitions(root: &Path, input: &ListDefinitionsInput) -> Result<ListDefinitionsOutput> {
+pub fn list_definitions(
+    root: &Path,
+    input: &ListDefinitionsInput,
+) -> Result<ListDefinitionsOutput> {
     let canonical = canonicalise_within(root, &input.file)
         .with_context(|| format!("list_definitions: path {:?}", input.file))?;
     let body = fs::read_to_string(&canonical)
@@ -189,7 +192,11 @@ fn scan_go(body: &str) -> Vec<DefinitionEntry> {
                 after_recv.split('(').next().unwrap_or("").trim()
             };
             if !token.is_empty() {
-                let kind = if t.starts_with("func (") { "method" } else { "function" };
+                let kind = if t.starts_with("func (") {
+                    "method"
+                } else {
+                    "function"
+                };
                 out.push(DefinitionEntry {
                     name: token.to_string(),
                     kind: kind.to_string(),
@@ -270,8 +277,7 @@ fn scan_java(body: &str) -> Vec<DefinitionEntry> {
 
 fn is_ident(s: &str) -> bool {
     !s.is_empty()
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         && !s.chars().next().is_some_and(|c| c.is_ascii_digit())
 }
 
@@ -308,7 +314,10 @@ pub struct ReadDefinitionOutput {
 /// or `:`), then read a window around it.
 pub fn read_definition(root: &Path, input: &ReadDefinitionInput) -> Result<ReadDefinitionOutput> {
     let symbol = input.name.trim();
-    anyhow::ensure!(!symbol.is_empty(), "read_definition: name must be non-empty");
+    anyhow::ensure!(
+        !symbol.is_empty(),
+        "read_definition: name must be non-empty"
+    );
 
     let refs = find_references(
         root,
@@ -322,12 +331,16 @@ pub fn read_definition(root: &Path, input: &ReadDefinitionInput) -> Result<ReadD
     let mut candidates: Vec<DefinitionEntry> = refs
         .hits
         .into_iter()
-        .filter_map(|hit| classify_hit(&hit.snippet, symbol).map(|kind| DefinitionEntry {
-            name: symbol.to_string(),
-            kind,
-            line: hit.line,
-            signature: hit.snippet.clone(),
-        }).map(|entry| (hit.file, entry)))
+        .filter_map(|hit| {
+            classify_hit(&hit.snippet, symbol)
+                .map(|kind| DefinitionEntry {
+                    name: symbol.to_string(),
+                    kind,
+                    line: hit.line,
+                    signature: hit.snippet.clone(),
+                })
+                .map(|entry| (hit.file, entry))
+        })
         .map(|(file, mut entry)| {
             entry.signature = format!("{}:{}\t{}", file, entry.line, entry.signature);
             (file, entry)
@@ -382,7 +395,11 @@ fn classify_hit(snippet: &str, symbol: &str) -> Option<String> {
         }
         return None;
     }
-    if t.starts_with("fn ") || t.starts_with("pub fn ") || t.starts_with("async fn ") || t.starts_with("pub async fn ") {
+    if t.starts_with("fn ")
+        || t.starts_with("pub fn ")
+        || t.starts_with("async fn ")
+        || t.starts_with("pub async fn ")
+    {
         return Some("function".to_string());
     }
     if t.starts_with("def ") || t.starts_with("async def ") {

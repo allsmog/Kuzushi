@@ -148,16 +148,13 @@ fn current_unix_ms() -> u64 {
 /// Whether an env-var fallback token is set. The bridge's auth chain prefers
 /// OAuth, so if both are present the OAuth file wins.
 pub fn has_env_token() -> bool {
-    [
-        "ANTHROPIC_OAUTH_TOKEN",
-        "ANTHROPIC_AUTH_TOKEN",
-    ]
-    .iter()
-    .any(|name| {
-        std::env::var(name)
-            .map(|v| !v.trim().is_empty())
-            .unwrap_or(false)
-    })
+    ["ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"]
+        .iter()
+        .any(|name| {
+            std::env::var(name)
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false)
+        })
 }
 
 #[cfg(test)]

@@ -18,16 +18,6 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-/**
- * Cross-process exclusive lock around an OAuth credentials read-modify-write.
- *
- * Multiple bridge processes (e.g. four tmux panes from run-all.sh) can race
- * on token refresh: each reads the bag, calls the OAuth refresh endpoint,
- * and writes the bag back. Without locking, only one writer's refresh-token
- * survives and the others are silently invalidated by Anthropic on the next
- * call. We use an atomic O_EXCL create on a sibling `.lock` file as a
- * cross-process mutex; the file is unlinked on release.
- */
 async function withCredentialsLock(filePath, fn, { timeoutMs = 30_000, pollMs = 80 } = {}) {
   const lockPath = `${filePath}.lock`;
   mkdirSync(path.dirname(lockPath), { recursive: true });
@@ -40,13 +30,10 @@ async function withCredentialsLock(filePath, fn, { timeoutMs = 30_000, pollMs = 
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
       if (Date.now() - start > timeoutMs) {
-        // Stale lock recovery: if the lock file is older than the timeout
-        // assume the holder crashed and steal it. Worst case is one extra
-        // refresh, not a security issue.
         try {
           rmSync(lockPath, { force: true });
         } catch {
-          /* ignore */
+          /* ignore stale-lock cleanup failures */
         }
         continue;
       }
@@ -521,13 +508,11 @@ function writeOauthCredentials(bag, home = os.homedir()) {
   const filePath = oauthCredentialsPath(home);
   const dir = path.dirname(filePath);
   mkdirSync(dir, { recursive: true });
-  // Harden the parent directory in case it was created earlier with a permissive umask.
   try {
     chmodSync(dir, 0o700);
   } catch {
-    /* ignore — best-effort */
+    /* best effort */
   }
-  // Atomic-ish write: tmp + rename, so a crashed writer can't leave a partial file.
   const tmpPath = `${filePath}.tmp.${process.pid}`;
   writeFileSync(tmpPath, `${JSON.stringify(bag, null, 2)}\n`, {
     encoding: "utf8",
@@ -536,9 +521,8 @@ function writeOauthCredentials(bag, home = os.homedir()) {
   try {
     chmodSync(tmpPath, 0o600);
   } catch {
-    /* ignore */
+    /* best effort */
   }
-  // renameSync is atomic on the same filesystem.
   renameSync(tmpPath, filePath);
   try {
     chmodSync(filePath, 0o600);
@@ -581,17 +565,12 @@ async function loadOAuthModule() {
 
 async function getFreshOAuthAccessTokenForProvider(provider) {
   if (provider !== "anthropic" && provider !== "openai-codex") return undefined;
-  // Fast path: token still fresh — no lock needed, no I/O race.
   const bagInitial = readOauthCredentials();
   const credsInitial = bagInitial[provider];
   if (!isProviderCreds(credsInitial)) return undefined;
   if (Date.now() < credsInitial.expires) return credsInitial.access;
 
-  // Refresh path: serialise across processes with a sibling lockfile so
-  // concurrent bridge invocations (multiple tmux panes) don't each refresh
-  // and overwrite each other's refresh token.
   return withCredentialsLock(oauthCredentialsPath(), async () => {
-    // Re-read under lock — another holder may have just refreshed for us.
     const bag = readOauthCredentials();
     const creds = bag[provider];
     if (!isProviderCreds(creds)) return undefined;
@@ -607,8 +586,6 @@ async function getFreshOAuthAccessTokenForProvider(provider) {
       writeOauthCredentials({ ...bag, [provider]: next });
       return next.access;
     } catch {
-      // Never surface refresh-error details — they may include redirect URLs
-      // or other artefacts that contain authorisation codes.
       return undefined;
     }
   });
@@ -691,29 +668,21 @@ async function promptManualCode() {
   }
 }
 
-/**
- * `ping` envelope handler. Minimum-viable Anthropic Messages API call
- * — 1 token round-trip with no tools, no system prompt, no streaming.
- * Surfaces wall latency + token counts so an operator can confirm
- * credentials and connectivity in <1 s. Used by `kuzushi auth ping`.
- */
 async function handlePing(request) {
   const [provider, modelId] = parseModelSpec(request.model);
   if (provider !== "anthropic") {
-    throw new Error(
-      `auth ping currently only supports anthropic (got ${provider}). ` +
-        "OpenAI / Gemini support is a follow-up.",
-    );
+    throw new Error(`auth ping currently only supports anthropic models (got ${provider})`);
   }
+
   const oauthToken = await getFreshOAuthAccessTokenForProvider("anthropic");
   const envOauth = providerAuthToken("anthropic");
   const apiKey = configuredProviderApiKey("anthropic", request) ?? process.env.ANTHROPIC_API_KEY;
   if (!oauthToken && !envOauth && !apiKey) {
     throw new Error(
-      "auth ping: no Anthropic credentials. Run `kuzushi auth login anthropic` " +
-        "or set ANTHROPIC_OAUTH_TOKEN / ANTHROPIC_API_KEY.",
+      "auth ping: no Anthropic credentials. Run OAuth login or set ANTHROPIC_OAUTH_TOKEN / ANTHROPIC_API_KEY.",
     );
   }
+
   const headers = {
     "content-type": "application/json",
     "anthropic-version": "2023-06-01",
@@ -727,16 +696,16 @@ async function handlePing(request) {
     headers["x-api-key"] = apiKey;
     authMode = "api-key";
   }
-  const body = {
-    model: modelId,
-    max_tokens: 1,
-    messages: [{ role: "user", content: "ok" }],
-  };
+
   const t0 = Date.now();
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers,
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      model: modelId,
+      max_tokens: 1,
+      messages: [{ role: "user", content: "ok" }],
+    }),
   });
   const text = await response.text();
   const latency_ms = Date.now() - t0;
@@ -763,35 +732,20 @@ async function handlePing(request) {
   };
 }
 
-/**
- * `next-step` envelope handler. Single-round-trip request to Anthropic's
- * Messages API with tool definitions; returns either a tool_call or a
- * final answer for the Rust-side run_tool_loop driver.
- *
- * Auth precedence: OAuth file → ANTHROPIC_OAUTH_TOKEN env → API key.
- *
- * Cost: derived from `response.usage` × per-model rate band. Rates are
- * approximate (input + output, ignoring prompt cache). Use the spend
- * ledger as the source of truth for budget enforcement, not these
- * numbers.
- */
 async function handleNextStep(request) {
   const [provider, modelId] = parseModelSpec(request.model);
   if (provider !== "anthropic") {
     throw new Error(
-      `next-step bridge only supports anthropic models in this version (got ${provider}). ` +
-        "Open a follow-up phase to add openai/gemini.",
+      `next-step bridge only supports anthropic models in this version (got ${provider})`,
     );
   }
 
-  // Resolve auth header.
   const oauthToken = await getFreshOAuthAccessTokenForProvider("anthropic");
   const envOauth = providerAuthToken("anthropic");
   const apiKey = configuredProviderApiKey("anthropic", request) ?? process.env.ANTHROPIC_API_KEY;
   if (!oauthToken && !envOauth && !apiKey) {
     throw new Error(
-      "next-step: no Anthropic credentials. Set up `kuzushi auth login anthropic`, " +
-        "ANTHROPIC_OAUTH_TOKEN, or ANTHROPIC_API_KEY.",
+      "next-step: no Anthropic credentials. Set up OAuth or ANTHROPIC_OAUTH_TOKEN / ANTHROPIC_API_KEY.",
     );
   }
 
@@ -801,28 +755,25 @@ async function handleNextStep(request) {
   };
   if (oauthToken || envOauth) {
     headers.authorization = `Bearer ${oauthToken ?? envOauth}`;
-    // Claude Code OAuth tokens require this beta tag on the Messages API.
     headers["anthropic-beta"] = "oauth-2025-04-20";
   } else {
     headers["x-api-key"] = apiKey;
   }
 
-  const body = {
-    model: modelId,
-    system: request.systemPrompt ?? request.system_prompt ?? "",
-    messages: request.messages ?? [],
-    tools: (request.tools ?? []).map((t) => ({
-      name: t.name,
-      description: t.description,
-      input_schema: t.input_schema ?? t.inputSchema,
-    })),
-    max_tokens: request.max_tokens ?? request.maxTokens ?? 4096,
-  };
-
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers,
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      model: modelId,
+      system: request.systemPrompt ?? request.system_prompt ?? "",
+      messages: request.messages ?? [],
+      tools: (request.tools ?? []).map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        input_schema: tool.input_schema ?? tool.inputSchema,
+      })),
+      max_tokens: request.max_tokens ?? request.maxTokens ?? 4096,
+    }),
   });
 
   const text = await response.text();
@@ -839,12 +790,7 @@ async function handleNextStep(request) {
     throw new Error(`next-step: Anthropic returned non-JSON body: ${text.slice(0, 200)}`);
   }
 
-  const usage = parsed.usage ?? {};
-  const cost_usd = approximateCostUsd(modelId, usage);
-
-  // Walk content blocks. Per Anthropic's API, multiple blocks can appear
-  // (e.g. text + tool_use). We surface the first tool_use as a ToolCall;
-  // if there's none, the message is a Final.
+  const cost_usd = approximateCostUsd(modelId, parsed.usage ?? {});
   const blocks = Array.isArray(parsed.content) ? parsed.content : [];
   for (const block of blocks) {
     if (block?.type === "tool_use") {
@@ -861,10 +807,9 @@ async function handleNextStep(request) {
     }
   }
 
-  // No tool_use → final.
   const finalText = blocks
-    .filter((b) => b?.type === "text" && typeof b.text === "string")
-    .map((b) => b.text)
+    .filter((block) => block?.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
     .join("");
   return {
     ok: true,
@@ -875,15 +820,8 @@ async function handleNextStep(request) {
   };
 }
 
-/**
- * Approximate USD cost from Anthropic's `usage` block. Numbers are
- * rough — production should swap in a per-model rate card. The spend
- * ledger is the authoritative budget enforcer regardless of accuracy
- * here.
- */
 function approximateCostUsd(modelId, usage) {
-  const id = (modelId ?? "").toLowerCase();
-  // ($/1k input tokens, $/1k output tokens).
+  const id = String(modelId ?? "").toLowerCase();
   let inRate;
   let outRate;
   if (id.includes("haiku")) {
@@ -892,9 +830,6 @@ function approximateCostUsd(modelId, usage) {
   } else if (id.includes("opus")) {
     inRate = 0.015;
     outRate = 0.075;
-  } else if (id.includes("sonnet")) {
-    inRate = 0.003;
-    outRate = 0.015;
   } else {
     inRate = 0.003;
     outRate = 0.015;
@@ -911,8 +846,6 @@ async function main() {
   }
 
   const request = JSON.parse(await readStdin());
-
-  // Route on envelope type. Default = legacy single-shot via pi-agent-core.
   if (request.type === "next-step") {
     const result = await handleNextStep(request);
     process.stdout.write(JSON.stringify(result));
