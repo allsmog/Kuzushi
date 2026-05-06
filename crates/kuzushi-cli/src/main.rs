@@ -542,6 +542,9 @@ fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Res
             || tool == "verify:finding"
             || tool == "patch:finding"
             || tool == "context-lite:index"
+            || tool == "full-mode:hunt"
+            || tool == "classifier-gate:score"
+            || tool == "deep-audit:run"
             || matches!(
                 tool.as_str(),
                 "sast:scan" | "semgrep:scan" | "codeql:scan" | "iac-scan:scan"
@@ -616,6 +619,9 @@ fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Res
             | "systems-hunt:deep-semantic-hunt"
             | "taint-iris:hunt"
             | "taint-iris-next:hunt"
+            | "full-mode:hunt"
+            | "classifier-gate:score"
+            | "deep-audit:run"
     ) {
         Some(PiAgentCoreRuntime::from_config(
             &config,

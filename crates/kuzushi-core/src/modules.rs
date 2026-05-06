@@ -184,6 +184,9 @@ impl ModuleRegistry {
         registry.register(catalog_module());
         registry.register(config_module());
         registry.register(router_module());
+        registry.register(full_mode_module());
+        registry.register(classifier_gate_module());
+        registry.register(deep_audit_module());
         registry.register(workspace_module());
         registry.register(context_module());
         registry.register(context_lite_module());
@@ -389,6 +392,9 @@ impl ModuleRegistry {
             }
             "config:show" => Ok(json!(ctx.config)),
             "router:show" => router_show_tool(input, ctx),
+            "full-mode:hunt" => run_full_mode_hunt_tool(input, ctx, runtime),
+            "classifier-gate:score" => run_classifier_score_tool(input, ctx, runtime),
+            "deep-audit:run" => run_deep_audit_tool(input, ctx, runtime),
             "workspace:status" => Ok(json!({
                 "ok": ctx.workspace.is_some(),
                 "output": workspace_status_output(ctx),
@@ -7095,6 +7101,345 @@ fn router_show_tool(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Valu
     }))
 }
 
+fn run_full_mode_hunt_tool(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    use crate::agent_router::{AgentRouter, RoutedRuntime};
+    use crate::config::ConfigPaths;
+    use crate::full_mode_multi::{
+        plan as fm_plan, report_to_tool_json, run as run_full_mode_multi, FullModeConfig,
+        FullModeLanguage,
+    };
+    use crate::spend::SpendLimiter;
+    use std::sync::Arc;
+
+    let target = resolve_tool_target(&input, ctx)?;
+    let language = match input
+        .get("language")
+        .and_then(Value::as_str)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("c") | None => FullModeLanguage::C,
+        Some("unknown") => FullModeLanguage::Unknown,
+        Some(other) => anyhow::bail!("full-mode:hunt: unknown language {other:?}"),
+    };
+    let max_tokens = input
+        .get("maxTokensPerChunk")
+        .and_then(Value::as_u64)
+        .map(|v| v as usize)
+        .unwrap_or(120_000);
+    let deposit = input
+        .get("depositUsdPerChunk")
+        .and_then(Value::as_f64)
+        .unwrap_or(2.0);
+    let dry_run = input
+        .get("dryRun")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    // Optional scope file: explicit path wins; otherwise look for the
+    // since.txt the --since flag wrote.
+    let mut scope_files: Option<Vec<std::path::PathBuf>> = None;
+    let scope_path = input
+        .get("scopeFile")
+        .and_then(Value::as_str)
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            ctx.workspace.map(|w| {
+                w.findings_db_path()
+                    .with_file_name("since.txt")
+                    .to_path_buf()
+            })
+        });
+    if let Some(p) = scope_path {
+        if p.exists() {
+            let body = std::fs::read_to_string(&p)
+                .with_context(|| format!("could not read scope file {}", p.display()))?;
+            let lines: Vec<std::path::PathBuf> = body
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(std::path::PathBuf::from)
+                .collect();
+            if !lines.is_empty() {
+                scope_files = Some(lines);
+            }
+        }
+    }
+
+    let cfg = FullModeConfig {
+        workspace_root: target.clone(),
+        max_tokens_per_chunk: max_tokens,
+        deposit_usd_per_chunk: deposit,
+        include_extensions: Vec::new(),
+        language,
+        dry_run,
+        scope_files,
+    };
+
+    if dry_run {
+        let plan = fm_plan(&cfg)?;
+        let model_hint = ctx.config.model.as_deref();
+        let cost = crate::full_mode_cost_summary(&plan, model_hint);
+        return Ok(json!({
+            "ok": true,
+            "data": {
+                "findings": [],
+                "plan": plan,
+                "chunksDispatched": 0,
+                "chunksFailed": 0,
+                "costUsd": 0.0,
+                "dryRun": true,
+            },
+            "summary": {
+                "chunks": cost.chunks,
+                "files": cost.files,
+                "totalTokens": cost.total_tokens,
+                "estUsdLow": cost.usd_low,
+                "estUsdHigh": cost.usd_high,
+                "dryRun": true,
+            },
+        }));
+    }
+
+    let runtime = runtime.ok_or_else(|| {
+        anyhow::anyhow!("full-mode:hunt requires an agent runtime; none configured")
+    })?;
+    let paths = ctx
+        .workspace
+        .map(|w| ConfigPaths {
+            home_dir: dirs::home_dir().unwrap_or_default(),
+            target_dir: Some(w.root().to_path_buf()),
+        })
+        .unwrap_or_else(|| ConfigPaths {
+            home_dir: dirs::home_dir().unwrap_or_default(),
+            target_dir: None,
+        });
+    let router = Arc::new(AgentRouter::load(&paths)?);
+    let inner_arc: Arc<dyn AgentRuntime> = unsafe_clone_runtime_ref(runtime);
+    let routed = RoutedRuntime::new(inner_arc, router, ctx.config.model.clone());
+
+    // Spend ledger lives in the workspace findings DB.
+    let limiter = ctx
+        .workspace
+        .map(|w| SpendLimiter::open(w.findings_db_path()))
+        .transpose()?;
+
+    let report = run_full_mode_multi(&routed, limiter.as_ref(), &cfg)?;
+
+    // Persist findings into the workspace store.
+    if let Some(workspace) = ctx.workspace {
+        let store = FindingStore::open(workspace.findings_db_path())?;
+        let scan_id = format!("full-mode-{}", uuid::Uuid::new_v4());
+        store.insert_scan_run(&scan_id, workspace.root(), "running")?;
+        for f in &report.findings {
+            let _ = store.insert_finding(&scan_id, f)?;
+        }
+        store.complete_scan_run(&scan_id, "completed", report.findings.len())?;
+    }
+
+    Ok(report_to_tool_json(&report))
+}
+
+fn run_classifier_score_tool(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    use crate::agent_router::{AgentRouter, RoutedRuntime};
+    use crate::classifier_gate::{ClassifierConfig, LikelyVulnClassifier};
+    use crate::config::ConfigPaths;
+    use std::sync::Arc;
+
+    let runtime = runtime.ok_or_else(|| {
+        anyhow::anyhow!("classifier-gate:score requires an agent runtime; none configured")
+    })?;
+    let workspace = ctx
+        .workspace
+        .ok_or_else(|| anyhow::anyhow!("classifier-gate:score requires a workspace target"))?;
+    let store = FindingStore::open(workspace.findings_db_path())?;
+
+    let fingerprint = input
+        .get("findingFingerprint")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("classifier-gate:score: findingFingerprint is required"))?;
+    let finding = store
+        .get_finding_by_reference(fingerprint)?
+        .ok_or_else(|| anyhow::anyhow!("classifier-gate:score: no finding for {fingerprint:?}"))?;
+    let target_percentile = input
+        .get("targetPercentile")
+        .and_then(Value::as_f64)
+        .map(|v| v as f32)
+        .unwrap_or(0.80);
+
+    let paths = ConfigPaths {
+        home_dir: dirs::home_dir().unwrap_or_default(),
+        target_dir: Some(workspace.root().to_path_buf()),
+    };
+    let router = Arc::new(AgentRouter::load(&paths)?);
+    let inner_arc: Arc<dyn AgentRuntime> = unsafe_clone_runtime_ref(runtime);
+    let routed = RoutedRuntime::new(inner_arc, router, ctx.config.model.clone());
+
+    let cfg = ClassifierConfig {
+        target_percentile,
+        state_db: Some(workspace.findings_db_path()),
+        ..Default::default()
+    };
+    let gate = LikelyVulnClassifier::new(&routed, cfg)?;
+    let score = gate.score(&finding, workspace.root())?;
+    let should_audit = gate.should_deep_audit(score);
+    let threshold = gate.current_threshold();
+    let n = gate.samples_seen();
+
+    if !should_audit {
+        if let Some(id) = finding.id {
+            let outcome = gate.skip_outcome(score);
+            store.save_triage(id, &outcome)?;
+        }
+    }
+
+    Ok(json!({
+        "ok": true,
+        "data": {
+            "findingId": finding.id,
+            "fingerprint": finding.fingerprint,
+            "score": score,
+            "shouldDeepAudit": should_audit,
+            "threshold": threshold,
+            "samplesSeen": n,
+        },
+    }))
+}
+
+fn run_deep_audit_tool(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    use crate::agent_router::{AgentRouter, RoutedRuntime};
+    use crate::config::ConfigPaths;
+    use crate::deep_auditor::{run_deep_auditor, save_evidence, DeepAuditConfig};
+    use crate::spend::SpendLimiter;
+    use std::sync::Arc;
+
+    let runtime = runtime.ok_or_else(|| {
+        anyhow::anyhow!("deep-audit:run requires an agent runtime; none configured")
+    })?;
+    let workspace = ctx
+        .workspace
+        .ok_or_else(|| anyhow::anyhow!("deep-audit:run requires a workspace target"))?;
+    let store = FindingStore::open(workspace.findings_db_path())?;
+
+    let fingerprint = input
+        .get("findingFingerprint")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("deep-audit:run: findingFingerprint is required"))?;
+    let finding = store
+        .get_finding_by_reference(fingerprint)?
+        .ok_or_else(|| anyhow::anyhow!("deep-audit:run: no finding for {fingerprint:?}"))?;
+    let max_steps = input
+        .get("maxSteps")
+        .and_then(Value::as_u64)
+        .map(|v| v as u32)
+        .unwrap_or(24);
+    let deposit_usd = input
+        .get("depositUsd")
+        .and_then(Value::as_f64)
+        .unwrap_or(1.0);
+
+    let paths = ConfigPaths {
+        home_dir: dirs::home_dir().unwrap_or_default(),
+        target_dir: Some(workspace.root().to_path_buf()),
+    };
+    let router = Arc::new(AgentRouter::load(&paths)?);
+    let inner_arc: Arc<dyn AgentRuntime> = unsafe_clone_runtime_ref(runtime);
+    let routed = RoutedRuntime::new(inner_arc, router, ctx.config.model.clone());
+    let spend = SpendLimiter::open(workspace.findings_db_path())?;
+
+    let cfg = DeepAuditConfig {
+        workspace_root: workspace.root().to_path_buf(),
+        max_steps,
+        deposit_usd,
+        system_prompt: None,
+    };
+    let outcome = run_deep_auditor(&routed, Some(&spend), &cfg, &finding)?;
+
+    if let Some(id) = finding.id {
+        store.save_triage(id, &outcome.triage)?;
+        save_evidence(&workspace.findings_db_path(), id, &outcome.evidence)?;
+    }
+
+    Ok(json!({
+        "ok": true,
+        "data": {
+            "findingId": finding.id,
+            "fingerprint": finding.fingerprint,
+            "verdict": outcome.triage.verdict,
+            "confidence": outcome.triage.confidence,
+            "rationale": outcome.triage.rationale,
+            "stepsUsed": outcome.steps_used,
+            "truncated": outcome.truncated,
+            "costUsd": outcome.cost_usd,
+            "evidence": outcome.evidence,
+        },
+    }))
+}
+
+/// Adapter: turn a borrowed `&dyn AgentRuntime` into an `Arc<dyn AgentRuntime>`
+/// so it can be wrapped by [`RoutedRuntime`]. The borrow's lifetime
+/// determines the safety: callers must keep the underlying value alive
+/// for the duration of the call.
+///
+/// Implementation note: we wrap the reference in a thin static-lifetime
+/// trait object that delegates everything to the borrowed runtime. This
+/// avoids the need to take ownership while still satisfying
+/// `RoutedRuntime`'s `Arc<dyn AgentRuntime>` constructor.
+fn unsafe_clone_runtime_ref(rt: &dyn AgentRuntime) -> std::sync::Arc<dyn AgentRuntime> {
+    use std::sync::Arc;
+    // SAFETY: BorrowedRuntime extends the lifetime to 'static via a raw
+    // pointer. The caller owns the underlying runtime for the lifetime of
+    // this call; the Arc never escapes the helper functions above (they
+    // construct it and immediately consume it).
+    struct BorrowedRuntime(*const (dyn AgentRuntime + 'static));
+    unsafe impl Send for BorrowedRuntime {}
+    unsafe impl Sync for BorrowedRuntime {}
+
+    impl AgentRuntime for BorrowedRuntime {
+        fn query_blocking(
+            &self,
+            req: crate::runtime::AgentQueryRequest,
+        ) -> anyhow::Result<crate::runtime::AgentQueryResponse> {
+            // SAFETY: pointer is valid for the lifetime of this trait
+            // object — which the caller upholds by keeping the borrow
+            // alive.
+            unsafe { (*self.0).query_blocking(req) }
+        }
+        fn triage_finding_blocking(
+            &self,
+            req: crate::runtime::TriageRequest,
+        ) -> anyhow::Result<crate::findings::TriageOutcome> {
+            unsafe { (*self.0).triage_finding_blocking(req) }
+        }
+        fn supports_tools(&self) -> bool {
+            unsafe { (*self.0).supports_tools() }
+        }
+        fn next_step_blocking(
+            &self,
+            req: &crate::runtime::AgentToolLoopRequest,
+            history: &[crate::runtime::LoopHistoryEntry],
+        ) -> anyhow::Result<crate::runtime::AgentLoopStep> {
+            unsafe { (*self.0).next_step_blocking(req, history) }
+        }
+    }
+
+    let static_ref: *const (dyn AgentRuntime + 'static) =
+        unsafe { std::mem::transmute::<*const dyn AgentRuntime, _>(rt as *const _) };
+    Arc::new(BorrowedRuntime(static_ref))
+}
+
 fn router_module() -> BuiltinModule {
     use crate::agent_router::AgentRole;
     let mut model_specs: Vec<OptionSpec> = AgentRole::all()
@@ -7122,6 +7467,114 @@ fn router_module() -> BuiltinModule {
             "router:show",
             "Show effective per-role model routing.",
             model_specs,
+        )],
+        vec![],
+    )
+}
+
+fn full_mode_module() -> BuiltinModule {
+    builtin_module(
+        "full-mode",
+        "Full-codebase scan",
+        ModuleKind::Offense,
+        "Whole-codebase chunked LLM pass — token-greedy file clustering, per-chunk model query.",
+        vec![tool_with_options(
+            "full-mode:hunt",
+            "Run a chunked LLM scan over the target. Use dryRun=true to plan + estimate cost without spending tokens.",
+            vec![
+                opt(
+                    "language",
+                    OptionType::Enum,
+                    "Per-chunk system prompt selector.",
+                )
+                .choices(&["c", "unknown"])
+                .default(serde_json::json!("c")),
+                opt(
+                    "maxTokensPerChunk",
+                    OptionType::Int,
+                    "Token budget per chunk; chunks pack files up to this cap.",
+                )
+                .default(serde_json::json!(120_000)),
+                opt(
+                    "depositUsdPerChunk",
+                    OptionType::Float,
+                    "Initial spend ticket per chunk; refunded with the bridge's reported cost.",
+                )
+                .default(serde_json::json!(2.0)),
+                opt(
+                    "dryRun",
+                    OptionType::Bool,
+                    "Plan + cost estimate only; do not invoke any model.",
+                )
+                .default(serde_json::json!(false)),
+                opt(
+                    "scopeFile",
+                    OptionType::Path,
+                    "Optional repo-relative path to a newline-delimited scope file. Defaults to <target>/.kuzushi/v2/since.txt when --since populated it.",
+                ),
+            ],
+        )],
+        vec![],
+    )
+}
+
+fn classifier_gate_module() -> BuiltinModule {
+    builtin_module(
+        "classifier-gate",
+        "Classifier gate",
+        ModuleKind::Triage,
+        "Cheap LLM classifier with adaptive p80 quantile gate. Score one finding to decide whether the deep auditor should run.",
+        vec![tool_with_options(
+            "classifier-gate:score",
+            "Score a finding with the cheap classifier; updates the running quantile.",
+            vec![
+                opt(
+                    "findingFingerprint",
+                    OptionType::String,
+                    "Fingerprint (or short prefix) of the finding to score.",
+                )
+                .required(),
+                opt(
+                    "targetPercentile",
+                    OptionType::Float,
+                    "Target percentile for the adaptive threshold (0.0 < p < 1.0).",
+                )
+                .default(serde_json::json!(0.80)),
+            ],
+        )],
+        vec![],
+    )
+}
+
+fn deep_audit_module() -> BuiltinModule {
+    builtin_module(
+        "deep-audit",
+        "Deep auditor",
+        ModuleKind::Triage,
+        "Tool-augmented LLM auditor — uses code-nav primitives to verify a finding's triggerability.",
+        vec![tool_with_options(
+            "deep-audit:run",
+            "Run the deep auditor on a single finding; persists triage outcome + evidence.",
+            vec![
+                opt(
+                    "findingFingerprint",
+                    OptionType::String,
+                    "Fingerprint (or short prefix) of the finding to audit.",
+                )
+                .required(),
+                opt(
+                    "maxSteps",
+                    OptionType::Int,
+                    "Hard cap on tool-loop steps per finding.",
+                )
+                .default(serde_json::json!(24)),
+                opt(
+                    "depositUsd",
+                    OptionType::Float,
+                    "Initial spend ticket; refunded with the bridge's reported cost.",
+                )
+                .default(serde_json::json!(1.0)),
+            ],
         )],
         vec![],
     )
