@@ -25,6 +25,7 @@ iris.pdf
 cc-repo/
 vendor/
 .codex
+.codex-active
 .worktrees
 perf/results.json
 *.txt
