@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 
 const CTRL_C_ARM_WINDOW: Duration = Duration::from_secs(2);
 const THROTTLE_STALE_AFTER: Duration = Duration::from_secs(30);
-const PASTE_GUARD_WINDOW: Duration = Duration::from_millis(5);
 const VIEWPORT_PAGE_LINES: usize = 10;
 const FINDINGS_PAGE_ROWS: usize = 10;
 
@@ -120,7 +119,19 @@ pub struct ThreatPatch {
 
 use anyhow::{Context, Result};
 use crossterm::cursor::MoveTo;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    self,
+    DisableBracketedPaste,
+    DisableMouseCapture,
+    EnableBracketedPaste,
+    EnableMouseCapture,
+    Event,
+    KeyCode,
+    KeyEvent,
+    KeyModifiers,
+    MouseEvent,
+    MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
 use kuzushi_core::modules::{OptionSpec, OptionType, ToolDescriptor, ToolExecutionContext};
@@ -339,6 +350,17 @@ fn preferred_model_choice_index(config: &V2Config) -> usize {
     0
 }
 
+fn char_index_to_byte(s: &str, char_idx: usize) -> usize {
+    s.char_indices()
+        .nth(char_idx)
+        .map(|(b, _)| b)
+        .unwrap_or(s.len())
+}
+
+fn is_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellView {
     Catalog,
@@ -435,10 +457,14 @@ impl ViewKeybinding {
 #[derive(Debug)]
 pub struct ShellApp {
     pub input: String,
+    pub cursor: usize,
+    pub history_index: Option<usize>,
+    pub history_draft: String,
     pub log: Vec<LogLine>,
     pub target: Option<PathBuf>,
     pub focused_module: Option<String>,
     pub shell_view: ShellView,
+    pub prev_shell_view: Option<ShellView>,
     pub catalog_expanded: bool,
     pub config: V2Config,
     pub registry: ModuleRegistry,
@@ -486,10 +512,14 @@ impl ShellApp {
         let selected_model_index = preferred_model_choice_index(&config);
         let mut app = Self {
             input: String::new(),
+            cursor: 0,
+            history_index: None,
+            history_draft: String::new(),
             log: Vec::new(),
             target: target.map(|target| target.root().to_path_buf()),
             focused_module: None,
             shell_view: ShellView::Catalog,
+            prev_shell_view: None,
             catalog_expanded: false,
             config,
             registry: ModuleRegistry::with_v2_builtins(),
@@ -559,6 +589,249 @@ impl ShellApp {
         if self.log.len() > 500 {
             let overflow = self.log.len() - 500;
             self.log.drain(0..overflow);
+        }
+    }
+
+    pub fn set_input(&mut self, value: impl Into<String>) {
+        self.input = value.into();
+        self.cursor = self.input.chars().count();
+        self.history_index = None;
+    }
+
+    pub fn clear_input(&mut self) {
+        self.input.clear();
+        self.cursor = 0;
+        self.history_index = None;
+    }
+
+    pub fn take_input(&mut self) -> String {
+        self.cursor = 0;
+        self.history_index = None;
+        std::mem::take(&mut self.input)
+    }
+
+    fn char_count(&self) -> usize {
+        self.input.chars().count()
+    }
+
+    fn cursor_byte(&self) -> usize {
+        char_index_to_byte(&self.input, self.cursor)
+    }
+
+    pub fn insert_str_at_cursor(&mut self, s: &str) {
+        if s.is_empty() {
+            return;
+        }
+        let byte = self.cursor_byte();
+        self.input.insert_str(byte, s);
+        self.cursor += s.chars().count();
+        self.history_index = None;
+    }
+
+    pub fn insert_char_at_cursor(&mut self, ch: char) {
+        let byte = self.cursor_byte();
+        self.input.insert(byte, ch);
+        self.cursor += 1;
+        self.history_index = None;
+    }
+
+    pub fn backspace(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let count = self.char_count();
+        if self.cursor > count {
+            self.cursor = count;
+        }
+        let new_cursor = self.cursor - 1;
+        let start = char_index_to_byte(&self.input, new_cursor);
+        let end = char_index_to_byte(&self.input, self.cursor);
+        self.input.drain(start..end);
+        self.cursor = new_cursor;
+        self.history_index = None;
+    }
+
+    pub fn delete_forward(&mut self) {
+        let count = self.char_count();
+        if self.cursor >= count {
+            return;
+        }
+        let start = char_index_to_byte(&self.input, self.cursor);
+        let end = char_index_to_byte(&self.input, self.cursor + 1);
+        self.input.drain(start..end);
+        self.history_index = None;
+    }
+
+    pub fn move_cursor_left(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+        }
+    }
+
+    pub fn move_cursor_right(&mut self) {
+        let count = self.char_count();
+        if self.cursor < count {
+            self.cursor += 1;
+        }
+    }
+
+    pub fn move_cursor_home(&mut self) {
+        self.cursor = 0;
+    }
+
+    pub fn move_cursor_end(&mut self) {
+        self.cursor = self.char_count();
+    }
+
+    fn word_boundary_left(&self) -> usize {
+        // "Word" = run of alphanumeric chars (incl. underscore). Treat punctuation and
+        // whitespace as separators so Ctrl+W on "./path/to/foo" stops at each '/'. Skip
+        // separators directly before the cursor first, then the run of word chars.
+        let chars: Vec<char> = self.input.chars().collect();
+        let mut idx = self.cursor.min(chars.len());
+        while idx > 0 && !is_word_char(chars[idx - 1]) {
+            idx -= 1;
+        }
+        while idx > 0 && is_word_char(chars[idx - 1]) {
+            idx -= 1;
+        }
+        idx
+    }
+
+    fn word_boundary_right(&self) -> usize {
+        let chars: Vec<char> = self.input.chars().collect();
+        let mut idx = self.cursor.min(chars.len());
+        let len = chars.len();
+        while idx < len && is_word_char(chars[idx]) {
+            idx += 1;
+        }
+        while idx < len && !is_word_char(chars[idx]) {
+            idx += 1;
+        }
+        idx
+    }
+
+    pub fn delete_word_left(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let target = self.word_boundary_left();
+        let start = char_index_to_byte(&self.input, target);
+        let end = char_index_to_byte(&self.input, self.cursor);
+        self.input.drain(start..end);
+        self.cursor = target;
+        self.history_index = None;
+    }
+
+    pub fn move_cursor_word_left(&mut self) {
+        self.cursor = self.word_boundary_left();
+    }
+
+    pub fn move_cursor_word_right(&mut self) {
+        self.cursor = self.word_boundary_right();
+    }
+
+    pub fn kill_to_start(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let end = char_index_to_byte(&self.input, self.cursor);
+        self.input.drain(..end);
+        self.cursor = 0;
+        self.history_index = None;
+    }
+
+    pub fn kill_to_end(&mut self) {
+        let start = char_index_to_byte(&self.input, self.cursor);
+        self.input.truncate(start);
+        self.history_index = None;
+    }
+
+    pub fn history_prev(&mut self) {
+        if self.command_history.is_empty() {
+            return;
+        }
+        let next = match self.history_index {
+            None => {
+                self.history_draft = self.input.clone();
+                self.command_history.len() - 1
+            }
+            Some(0) => 0,
+            Some(idx) => idx - 1,
+        };
+        self.history_index = Some(next);
+        self.input = self.command_history[next].clone();
+        self.cursor = self.char_count();
+    }
+
+    pub fn history_next(&mut self) {
+        let Some(idx) = self.history_index else {
+            return;
+        };
+        if idx + 1 < self.command_history.len() {
+            let next = idx + 1;
+            self.history_index = Some(next);
+            self.input = self.command_history[next].clone();
+            self.cursor = self.char_count();
+        } else {
+            self.history_index = None;
+            self.input = std::mem::take(&mut self.history_draft);
+            self.cursor = self.char_count();
+        }
+    }
+
+    /// Decrement the scroll offset of whichever view we're currently in. Bridges
+    /// my mouse-wheel + (future) vi-key handlers onto main's per-view scroll
+    /// fields (help_scroll/tools_scroll/...).
+    pub fn scroll_view_up(&mut self, amount: usize) {
+        match self.shell_view {
+            ShellView::Findings => {
+                self.findings_cursor = self.findings_cursor.saturating_sub(amount);
+            }
+            ShellView::Help => self.help_scroll = self.help_scroll.saturating_sub(amount),
+            ShellView::Tools => self.tools_scroll = self.tools_scroll.saturating_sub(amount),
+            ShellView::Catalog if self.catalog_expanded => {
+                self.modules_scroll = self.modules_scroll.saturating_sub(amount)
+            }
+            ShellView::History => {
+                self.history_scroll = self.history_scroll.saturating_sub(amount)
+            }
+            ShellView::KnowledgeBase => {
+                self.kb_scroll = self.kb_scroll.saturating_sub(amount)
+            }
+            _ => {}
+        }
+    }
+
+    pub fn scroll_view_down(&mut self, amount: usize) {
+        match self.shell_view {
+            ShellView::Findings => {
+                if !self.findings.is_empty() {
+                    let max = self.findings.len().saturating_sub(1);
+                    self.findings_cursor = (self.findings_cursor + amount).min(max);
+                }
+            }
+            ShellView::Help => self.help_scroll = self.help_scroll.saturating_add(amount),
+            ShellView::Tools => self.tools_scroll = self.tools_scroll.saturating_add(amount),
+            ShellView::Catalog if self.catalog_expanded => {
+                self.modules_scroll = self.modules_scroll.saturating_add(amount)
+            }
+            ShellView::History => {
+                self.history_scroll = self.history_scroll.saturating_add(amount)
+            }
+            ShellView::KnowledgeBase => {
+                self.kb_scroll = self.kb_scroll.saturating_add(amount)
+            }
+            _ => {}
+        }
+    }
+
+    /// Reset the per-view scroll positions when we switch into a view, so the
+    /// previous view's offset doesn't bleed in when the operator returns.
+    fn sync_view_change(&mut self) {
+        let current = Some(self.shell_view.clone());
+        if self.prev_shell_view != current {
+            self.prev_shell_view = current;
         }
     }
 
@@ -878,7 +1151,7 @@ impl ShellApp {
 
     fn apply_completion(&mut self) {
         if let Some(candidate) = self.completion_candidates(&self.input).into_iter().next() {
-            self.input = candidate;
+            self.set_input(candidate);
         }
     }
 
@@ -4102,65 +4375,139 @@ impl ShellApp {
             return;
         }
 
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        let plain_modifiers = !ctrl && !alt;
+
         match key.code {
-            KeyCode::Char('c') | KeyCode::Char('d')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
+            KeyCode::Char('c') | KeyCode::Char('d') if ctrl => {
                 self.handle_quit_chord();
             }
+            // Cursor / line-edit chords (always available, regardless of input state)
+            KeyCode::Char('a') if ctrl => self.move_cursor_home(),
+            KeyCode::Char('e') if ctrl => self.move_cursor_end(),
+            KeyCode::Char('b') if ctrl => self.move_cursor_left(),
+            KeyCode::Char('f') if ctrl => self.move_cursor_right(),
+            KeyCode::Char('w') if ctrl => self.delete_word_left(),
+            KeyCode::Char('u') if ctrl => self.kill_to_start(),
+            KeyCode::Char('k') if ctrl => self.kill_to_end(),
+            KeyCode::Char('h') if ctrl => self.backspace(),
+            KeyCode::Char('p') if ctrl => self.history_prev(),
+            KeyCode::Char('n') if ctrl => self.history_next(),
+            KeyCode::Left if ctrl || alt => self.move_cursor_word_left(),
+            KeyCode::Right if ctrl || alt => self.move_cursor_word_right(),
+            KeyCode::Backspace if ctrl || alt => self.delete_word_left(),
+            KeyCode::Left if plain_modifiers => self.move_cursor_left(),
+            KeyCode::Right if plain_modifiers => self.move_cursor_right(),
+            KeyCode::Home => self.move_cursor_home(),
+            KeyCode::End => self.move_cursor_end(),
+            KeyCode::Delete => self.delete_forward(),
+            // View-specific Up/Down (Config model picker keeps priority when input is empty)
             KeyCode::Up
                 if self.input.is_empty()
-                    && key.modifiers.is_empty()
+                    && plain_modifiers
                     && matches!(self.shell_view, ShellView::Config) =>
             {
                 self.move_model_selection(-1);
             }
             KeyCode::Down
                 if self.input.is_empty()
-                    && key.modifiers.is_empty()
+                    && plain_modifiers
                     && matches!(self.shell_view, ShellView::Config) =>
             {
                 self.move_model_selection(1);
             }
+            // Findings cursor — j/k while input empty; arrows always navigate the list when
+            // input is empty and we're on the Findings view.
+            KeyCode::Up
+                if self.input.is_empty()
+                    && plain_modifiers
+                    && matches!(self.shell_view, ShellView::Findings) =>
+            {
+                self.findings_cursor = self.findings_cursor.saturating_sub(1);
+            }
+            KeyCode::Down
+                if self.input.is_empty()
+                    && plain_modifiers
+                    && matches!(self.shell_view, ShellView::Findings) =>
+            {
+                self.findings_cursor = (self.findings_cursor + 1)
+                    .min(self.findings.len().saturating_sub(1));
+            }
+            // History recall when input is empty (otherwise Up/Down move the editing cursor
+            // through multi-line content; we keep things simple and always recall history).
+            KeyCode::Up if plain_modifiers => self.history_prev(),
+            KeyCode::Down if plain_modifiers => self.history_next(),
             KeyCode::Enter
                 if self.input.is_empty()
-                    && key.modifiers.is_empty()
+                    && plain_modifiers
                     && matches!(self.shell_view, ShellView::Config) =>
             {
                 self.select_current_model_choice();
             }
-            _ if self.input.is_empty()
-                && key.modifiers.is_empty()
-                && self.handle_view_hotkey(key) => {}
-            KeyCode::Char(ch) => {
-                self.input.push(ch);
-                self.last_char_at = Some(Instant::now());
+            // View hotkeys (j/k/g/G/1..5) when nothing is typed — main ships a
+            // KeyEvent-based view_keybindings table, so route the char through it.
+            KeyCode::Char(ch)
+                if self.input.is_empty()
+                    && plain_modifiers
+                    && self.handle_view_hotkey(KeyEvent::new(
+                        KeyCode::Char(ch),
+                        KeyModifiers::empty(),
+                    )) => {}
+            KeyCode::Char(ch) if !ctrl => {
+                // Allow shift for capitals; reject other modifier combinations we didn't match.
+                if alt && !shift {
+                    // Alt+<char> not bound — ignore.
+                    return;
+                }
+                self.insert_char_at_cursor(ch);
             }
-            KeyCode::Backspace => {
-                self.input.pop();
-            }
+            KeyCode::Backspace => self.backspace(),
             KeyCode::Tab => self.apply_completion(),
-            KeyCode::PageDown if self.input.is_empty() && key.modifiers.is_empty() => {
+            KeyCode::PageDown if self.input.is_empty() && plain_modifiers => {
                 self.page_down_current_view();
             }
-            KeyCode::PageUp if self.input.is_empty() && key.modifiers.is_empty() => {
+            KeyCode::PageUp if self.input.is_empty() && plain_modifiers => {
                 self.page_up_current_view();
             }
+            KeyCode::Enter
+                if self.input.is_empty()
+                    && plain_modifiers
+                    && self.handle_view_hotkey(KeyEvent::new(
+                        KeyCode::Enter,
+                        KeyModifiers::empty(),
+                    )) => {}
             KeyCode::Enter => {
-                if let Some(last) = self.last_char_at {
-                    if Instant::now().duration_since(last) <= PASTE_GUARD_WINDOW {
-                        // Likely paste-trailing newline; swallow.
-                        self.last_char_at = None;
-                        return;
-                    }
-                }
-                let raw = std::mem::take(&mut self.input);
+                let raw = self.take_input();
                 self.submit_line(&raw);
-                self.last_char_at = None;
             }
             KeyCode::Esc => {
-                self.input.clear();
+                self.clear_input();
             }
+            _ => {}
+        }
+    }
+
+    pub fn handle_paste(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        // Bracketed paste: insert verbatim at cursor. Embedded newlines stay in the
+        // editor as literal '\n'; the operator must press Enter explicitly to submit.
+        // Replace CR/CRLF with single \n for portability.
+        let normalised: String = text
+            .replace("\r\n", "\n")
+            .chars()
+            .filter(|ch| *ch != '\r')
+            .collect();
+        self.insert_str_at_cursor(&normalised);
+    }
+
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) {
+        match mouse.kind {
+            MouseEventKind::ScrollUp => self.scroll_view_up(3),
+            MouseEventKind::ScrollDown => self.scroll_view_down(3),
             _ => {}
         }
     }
@@ -4981,22 +5328,31 @@ pub fn run_shell_with_plain(
     let mut terminal = setup_terminal()?;
     let mut app = ShellApp::new(config, target);
 
-    loop {
-        app.tick();
-        app.drain_background_events();
-        terminal.draw(|frame| render_app(frame, &app))?;
-        if app.should_quit {
-            break;
-        }
+    let result = (|| -> Result<()> {
+        loop {
+            app.tick();
+            app.drain_background_events();
+            app.sync_view_change();
+            terminal.draw(|frame| render_app(frame, &app))?;
+            if app.should_quit {
+                break;
+            }
 
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                app.handle_key(key);
+            if event::poll(Duration::from_millis(100))? {
+                match event::read()? {
+                    Event::Key(key) => app.handle_key(key),
+                    Event::Paste(text) => app.handle_paste(&text),
+                    Event::Mouse(mouse) => app.handle_mouse(mouse),
+                    Event::Resize(_, _) => {}
+                    _ => {}
+                }
             }
         }
-    }
+        Ok(())
+    })();
 
-    restore_terminal(&mut terminal)
+    let _ = restore_terminal(&mut terminal);
+    result
 }
 
 fn run_plain_shell(
@@ -5048,13 +5404,24 @@ fn render_plain_scripted_session(app: &mut ShellApp, commands: &[&str], width: u
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode().context("Could not enable raw mode")?;
     let mut stdout = io::stdout();
-    execute!(stdout, Clear(ClearType::All), MoveTo(0, 0))
-        .context("Could not reset terminal viewport")?;
+    execute!(
+        stdout,
+        Clear(ClearType::All),
+        MoveTo(0, 0),
+        EnableBracketedPaste,
+        EnableMouseCapture
+    )
+    .context("Could not reset terminal viewport")?;
     let backend = CrosstermBackend::new(stdout);
     Terminal::new(backend).context("Could not initialize terminal")
 }
 
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
+    let _ = execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        DisableBracketedPaste
+    );
     disable_raw_mode().context("Could not disable raw mode")?;
     terminal
         .show_cursor()
@@ -6648,11 +7015,11 @@ JSON
     #[test]
     fn tab_key_applies_shell_and_argument_completion() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.input = "/con".to_string();
+        app.set_input("/con");
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
         assert_eq!(app.input, "/context");
 
-        app.input = "task block co".to_string();
+        app.set_input("task block co");
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
         assert_eq!(app.input, "task block codeql");
     }
@@ -8976,15 +9343,16 @@ JSON
     }
 
     #[test]
-    fn paste_guard_swallows_enter_immediately_after_char() {
+    fn bracketed_paste_inserts_text_without_submit() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::empty()));
         app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::empty()));
-        // Enter arrives within the paste-guard window; should NOT submit.
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
-        assert_eq!(app.input, "hi", "input should not be drained");
-        // After advancing past the guard window, Enter submits.
-        app.last_char_at = Some(Instant::now() - (PASTE_GUARD_WINDOW + Duration::from_millis(20)));
+        // A pasted blob (with embedded newline) is inserted verbatim — Enter is NOT
+        // synthesized, so the line stays in the buffer until the operator submits.
+        app.handle_paste(" world\nmore");
+        assert_eq!(app.input, "hi world\nmore");
+        assert_eq!(app.cursor, app.input.chars().count());
+        // Pressing Enter after a paste submits the line normally.
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         assert!(app.input.is_empty());
     }
@@ -9011,6 +9379,100 @@ JSON
         assert_eq!(app.findings_cursor, 0);
         app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
         assert_eq!(app.findings_cursor, 2);
+    }
+
+    #[test]
+    fn arrow_keys_move_cursor_within_input() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        for ch in "hello".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty()));
+        }
+        assert_eq!(app.input, "hello");
+        assert_eq!(app.cursor, 5);
+
+        app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::empty()));
+        app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::empty()));
+        assert_eq!(app.cursor, 3);
+
+        // Insert a char in the middle.
+        app.handle_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::empty()));
+        assert_eq!(app.input, "helXlo");
+        assert_eq!(app.cursor, 4);
+
+        app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::empty()));
+        assert_eq!(app.cursor, 0);
+        app.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::empty()));
+        assert_eq!(app.cursor, app.input.chars().count());
+    }
+
+    #[test]
+    fn ctrl_w_deletes_word_left() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_input("scan ./path/to/foo");
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert_eq!(app.input, "scan ./path/to/");
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert_eq!(app.input, "scan ./path/");
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        assert_eq!(app.input, "");
+        assert_eq!(app.cursor, 0);
+    }
+
+    #[test]
+    fn ctrl_a_e_b_f_navigate_input() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_input("abcd");
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+        assert_eq!(app.cursor, 0);
+        app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+        assert_eq!(app.cursor, 1);
+        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL));
+        assert_eq!(app.cursor, 4);
+        app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+        assert_eq!(app.cursor, 3);
+    }
+
+    #[test]
+    fn up_arrow_recalls_command_history() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.submit_line("/findings");
+        app.submit_line("/modules");
+        assert!(app.input.is_empty());
+
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
+        assert_eq!(app.input, "/modules");
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
+        assert_eq!(app.input, "/findings");
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+        assert_eq!(app.input, "/modules");
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+        assert_eq!(app.input, "");
+    }
+
+    #[test]
+    fn page_keys_scroll_help_view() {
+        // PageDown/PageUp on the Help view drive main's per-view scroll, not a
+        // unified offset. We use that field directly so the assertion isn't
+        // coupled to the constant choice — it's about "page-down moves down".
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Help;
+        let baseline = app.help_scroll;
+        app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
+        assert!(
+            app.help_scroll > baseline,
+            "PageDown should advance help_scroll"
+        );
+        let after_one = app.help_scroll;
+        app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
+        assert!(
+            app.help_scroll > after_one,
+            "second PageDown should advance further"
+        );
+        app.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::empty()));
+        assert!(
+            app.help_scroll < after_one + (after_one - baseline),
+            "PageUp should retreat"
+        );
     }
 
     #[test]

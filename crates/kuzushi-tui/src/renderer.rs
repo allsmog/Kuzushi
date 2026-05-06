@@ -2619,7 +2619,13 @@ fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
             .unwrap_or_else(|| "kuzushi/module> ".to_string()),
         RoutingMode::Shell => "kuzushi> ".to_string(),
     };
-    let segments = prompt_segments(&prompt, &app.input, area.width as usize, " ");
+    let segments = prompt_segments(
+        &prompt,
+        &app.input,
+        app.cursor,
+        area.width as usize,
+        " ",
+    );
     let line = Line::from(vec![
         Span::styled(segments.prompt, theme::label()),
         Span::raw(segments.before_cursor),
@@ -3318,6 +3324,7 @@ struct PromptSegments {
 fn prompt_segments(
     prompt: &str,
     input: &str,
+    cursor: usize,
     columns: usize,
     cursor_glyph: &str,
 ) -> PromptSegments {
@@ -3327,7 +3334,7 @@ fn prompt_segments(
     let editor_width = width.saturating_sub(fitted_prompt.chars().count()).max(1);
 
     let input_chars = input.chars().collect::<Vec<_>>();
-    let cursor = input_chars.len();
+    let cursor = cursor.min(input_chars.len());
     let mut visual_chars = input_chars.clone();
     let cursor_text = if cursor < visual_chars.len() {
         visual_chars[cursor].to_string()
@@ -3582,7 +3589,7 @@ mod tests {
         let backend = TestBackend::new(40, 12);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.input = "scan ./a/very/long/path/that/should/not/wrap".to_string();
+        app.set_input("scan ./a/very/long/path/that/should/not/wrap");
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3604,7 +3611,7 @@ mod tests {
             "result",
             "next action: inspect configuration and rerun scan with a narrower target",
         );
-        app.input = "run sast:scan {\"severity\":[\"high\"],\"triage\":true}".to_string();
+        app.set_input("run sast:scan {\"severity\":[\"high\"],\"triage\":true}");
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let buffer = terminal.backend().buffer();
