@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -185,6 +186,169 @@ impl ScanEngine for DepHygieneScanner {
             .map(|finding| finding.to_core_finding(Path::new(&report.target)))
             .collect())
     }
+}
+
+/// Ground-truth Rust supply-chain scanner backed by `cargo audit --json`.
+///
+/// Mirrors the Xint Code design instinct of preferring deterministic scanner
+/// output over LLM-rediscovered manifest patterns. Runs only when the target
+/// has a `Cargo.lock` and the `cargo-audit` binary is on PATH; otherwise
+/// returns no findings (the legacy text-parse path in `DepHygieneScanner`
+/// remains the fallback).
+#[derive(Debug, Clone, Default)]
+pub struct CargoAuditScanner;
+
+impl CargoAuditScanner {
+    /// Probe whether `cargo audit` is callable in the current environment.
+    /// Returns `false` on any spawn or non-success exit, including when
+    /// `cargo` itself is missing.
+    pub fn binary_available() -> bool {
+        Command::new("cargo")
+            .args(["audit", "--version"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+}
+
+impl ScanEngine for CargoAuditScanner {
+    fn id(&self) -> &'static str {
+        "cargo-audit"
+    }
+
+    fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {
+        if cancellation.is_cancelled() {
+            anyhow::bail!("cargo-audit scan cancelled");
+        }
+
+        let lockfile = target.join("Cargo.lock");
+        if !lockfile.exists() {
+            return Ok(Vec::new());
+        }
+        if !Self::binary_available() {
+            return Ok(Vec::new());
+        }
+
+        let output = Command::new("cargo")
+            .args(["audit", "--json"])
+            .arg("--file")
+            .arg(&lockfile)
+            .current_dir(target)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .with_context(|| "cargo-audit: failed to invoke `cargo audit`")?;
+
+        // cargo-audit exits non-zero when vulnerabilities are found; that's
+        // expected. Any output that fails to parse is treated as no findings.
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(parse_cargo_audit_output(&stdout))
+    }
+}
+
+/// Parse a `cargo audit --json` document into core `Finding`s.
+///
+/// Public for testing and for any future direct-pipe callers (e.g. CI feeding
+/// pre-captured advisories into the findings store without re-running cargo).
+pub fn parse_cargo_audit_output(json: &str) -> Vec<Finding> {
+    let value: Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut findings = Vec::new();
+    let list = value
+        .get("vulnerabilities")
+        .and_then(|v| v.get("list"))
+        .and_then(Value::as_array);
+    let Some(list) = list else {
+        return findings;
+    };
+
+    for entry in list {
+        let advisory = match entry.get("advisory") {
+            Some(a) => a,
+            None => continue,
+        };
+        let id = advisory
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("RUSTSEC-UNKNOWN")
+            .to_string();
+        let title = advisory
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("(no title)")
+            .to_string();
+        let package = entry
+            .get("package")
+            .and_then(|p| p.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or("?");
+        let version = entry
+            .get("package")
+            .and_then(|p| p.get("version"))
+            .and_then(Value::as_str)
+            .unwrap_or("?");
+        let cvss = advisory.get("cvss").and_then(Value::as_str);
+        let severity = severity_from_cvss(cvss);
+        let message = format!("{id}: {package}@{version} — {title}");
+
+        findings.push(Finding::new_tool(
+            "cargo-audit",
+            id,
+            "Cargo.lock",
+            1,
+            None,
+            severity,
+            message,
+        ));
+    }
+
+    findings
+}
+
+fn severity_from_cvss(cvss: Option<&str>) -> Severity {
+    let Some(s) = cvss else {
+        return Severity::Medium;
+    };
+    let trimmed = s.trim();
+    if let Ok(score) = trimmed.parse::<f64>() {
+        return match score {
+            x if x >= 9.0 => Severity::Critical,
+            x if x >= 7.0 => Severity::High,
+            x if x >= 4.0 => Severity::Medium,
+            x if x > 0.0 => Severity::Low,
+            _ => Severity::Unknown,
+        };
+    }
+    let upper = trimmed.to_ascii_uppercase();
+    if upper.contains("CRITICAL") {
+        return Severity::Critical;
+    }
+    // CVSS v3 vector form encodes impact metrics as /C:H/I:H/A:H. Any
+    // high-impact letter on confidentiality, integrity, or availability is
+    // a High signal — close enough for triage without a full CVSS parser.
+    if upper.contains("HIGH")
+        || upper.contains("C:H")
+        || upper.contains("I:H")
+        || upper.contains("A:H")
+    {
+        return Severity::High;
+    }
+    if upper.contains("MEDIUM") {
+        return Severity::Medium;
+    }
+    if upper.contains("LOW")
+        || upper.contains("C:L")
+        || upper.contains("I:L")
+        || upper.contains("A:L")
+    {
+        return Severity::Low;
+    }
+    Severity::Medium
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -736,5 +900,108 @@ mod tests {
             .iter()
             .map(|finding| (finding.package_name.clone(), finding.clone()))
             .collect()
+    }
+
+    /// Captured shape of a real `cargo audit --json` document, narrowed to
+    /// the fields the parser reads. Two advisories with different CVSS
+    /// inputs to exercise score parsing and the textual fallback.
+    const CARGO_AUDIT_FIXTURE: &str = r#"{
+      "database": { "advisory_count": 0 },
+      "lockfile": { "dependency_count": 1 },
+      "settings": {},
+      "vulnerabilities": {
+        "found": true,
+        "count": 2,
+        "list": [
+          {
+            "advisory": {
+              "id": "RUSTSEC-2020-0071",
+              "package": "time",
+              "title": "Potential segfault in localtime_r invocations",
+              "cvss": "6.2"
+            },
+            "versions": { "patched": [">=0.2.23"], "unaffected": [] },
+            "affected": null,
+            "package": {
+              "name": "time",
+              "version": "0.1.40",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          },
+          {
+            "advisory": {
+              "id": "RUSTSEC-2099-0001",
+              "package": "fakecrate",
+              "title": "Hypothetical critical RCE",
+              "cvss": "CRITICAL/AV:N/AC:L/PR:N"
+            },
+            "package": {
+              "name": "fakecrate",
+              "version": "1.0.0",
+              "source": "registry+https://github.com/rust-lang/crates.io-index"
+            }
+          }
+        ]
+      },
+      "warnings": {}
+    }"#;
+
+    #[test]
+    fn parse_cargo_audit_emits_finding_per_advisory() {
+        let findings = parse_cargo_audit_output(CARGO_AUDIT_FIXTURE);
+        assert_eq!(findings.len(), 2);
+        let by_rule: std::collections::BTreeMap<_, _> = findings
+            .iter()
+            .map(|f| (f.rule_id.clone(), f.clone()))
+            .collect();
+
+        let time_finding = &by_rule["RUSTSEC-2020-0071"];
+        assert_eq!(time_finding.tool, "cargo-audit");
+        assert_eq!(time_finding.severity, Severity::Medium);
+        assert_eq!(time_finding.file_path, "Cargo.lock");
+        assert!(time_finding.message.contains("time@0.1.40"));
+        assert!(time_finding.message.contains("Potential segfault"));
+
+        let fake_finding = &by_rule["RUSTSEC-2099-0001"];
+        assert_eq!(fake_finding.severity, Severity::Critical);
+        assert!(fake_finding.message.contains("fakecrate@1.0.0"));
+    }
+
+    #[test]
+    fn parse_cargo_audit_returns_empty_for_invalid_json() {
+        assert!(parse_cargo_audit_output("{ this is not json").is_empty());
+    }
+
+    #[test]
+    fn parse_cargo_audit_returns_empty_when_no_vulnerabilities_key() {
+        assert!(parse_cargo_audit_output(r#"{"vulnerabilities":{"found":false}}"#).is_empty());
+    }
+
+    #[test]
+    fn cargo_audit_severity_buckets_match_cvss_score() {
+        assert_eq!(severity_from_cvss(Some("9.8")), Severity::Critical);
+        assert_eq!(severity_from_cvss(Some("7.5")), Severity::High);
+        assert_eq!(severity_from_cvss(Some("5.0")), Severity::Medium);
+        assert_eq!(severity_from_cvss(Some("2.1")), Severity::Low);
+        assert_eq!(severity_from_cvss(Some("0.0")), Severity::Unknown);
+        assert_eq!(severity_from_cvss(None), Severity::Medium);
+        // Vector-style CVSS strings fall back to keyword detection.
+        assert_eq!(
+            severity_from_cvss(Some("CVSS:3.1/AV:N/AC:L/PR:N/C:H/I:H/A:H")),
+            Severity::High
+        );
+    }
+
+    #[test]
+    fn cargo_audit_scanner_no_lockfile_returns_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        // No Cargo.lock written. The scanner must short-circuit cleanly,
+        // even when cargo-audit is missing from PATH (binary_available
+        // is never reached because the lockfile gate fires first).
+        let scanner = CargoAuditScanner;
+        let findings = scanner
+            .scan(tmp.path(), &ScanCancellation::default())
+            .unwrap();
+        assert!(findings.is_empty());
     }
 }

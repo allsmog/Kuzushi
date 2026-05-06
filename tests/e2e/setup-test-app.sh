@@ -216,9 +216,14 @@ cat > "$TARGET_DIR/.kuzushi/config.json" << 'CONFIG'
 CONFIG
 
 # ─── Initialize git repo (needed for diff-review and regression tests) ─
+# Use repo-local user.name/user.email so the smoke test runs on hosts that
+# don't have a global git identity (e.g. fresh GitHub Actions runners). The
+# values are scoped to this throwaway test repo only.
 (
   cd "$TARGET_DIR"
   git init -q
+  git config user.email "kuzushi-e2e@example.com"
+  git config user.name "Kuzushi E2E"
   git add -A
   git commit -q -m "initial: vulnerable test app"
 )

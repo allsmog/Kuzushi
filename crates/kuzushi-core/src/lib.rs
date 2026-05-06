@@ -34,6 +34,7 @@ pub mod static_registry;
 pub mod systems_hunt;
 pub mod threat_model;
 pub mod variant_ndiff;
+pub mod verify;
 pub mod whitebox_static;
 pub mod whitebox_suppressions;
 pub mod workspace;
@@ -73,8 +74,9 @@ pub use deep_auditor::{
     VulnAnalysis,
 };
 pub use dep_hygiene::{
-    analyze_manifest as analyze_dep_hygiene_manifest, check_dependency_hygiene, DepHygieneFinding,
-    DepHygieneReport, DepHygieneScanner, DepHygieneSeverity, ManifestKind,
+    analyze_manifest as analyze_dep_hygiene_manifest, check_dependency_hygiene,
+    parse_cargo_audit_output, CargoAuditScanner, DepHygieneFinding, DepHygieneReport,
+    DepHygieneScanner, DepHygieneSeverity, ManifestKind,
 };
 pub use diff_scope::{
     build_whitebox_diff_scope_report, git_diff_files, ChangedFile, ChangedLineRange, DiffContext,
@@ -82,10 +84,11 @@ pub use diff_scope::{
     DiffScopeSummary, WhiteboxDiffScopeReport,
 };
 pub use findings::{
-    format_finding_alias, parse_finding_alias, resolve_finding_alias, sorted_finding_aliases,
-    stable_finding_alias, Finding, FindingListFilter, FindingListReport, FindingStore,
-    FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus, Severity, StaticProofState,
-    TriageOutcome, TriageVerdict,
+    compute_dedup_key, extract_cwe, format_finding_alias, normalize_cwe, parse_finding_alias,
+    resolve_finding_alias, sorted_finding_aliases, stable_finding_alias, Finding,
+    FindingListFilter, FindingListReport, FindingStore, FindingVerdictFilter, PatchAttempt,
+    PatchResult, PatchStatus, PersistedProofVerdict, PersistedSandboxBackend,
+    PersistedVerification, Severity, StaticProofState, TriageOutcome, TriageVerdict, VulnSource,
 };
 pub use full_mode_multi::{
     cost_summary as full_mode_cost_summary, plan as full_mode_plan, report_to_tool_json,
@@ -107,8 +110,8 @@ pub use repository_inventory::{
 };
 pub use runtime::{
     run_tool_loop, AgentLoopOutcome, AgentLoopStep, AgentQueryRequest, AgentQueryResponse,
-    AgentRuntime, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry, ToolBox,
-    ToolCall, ToolCallHandler, ToolResult, TriageRequest,
+    AgentRuntime, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry, ModelTier,
+    SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult, TriageRequest,
 };
 pub use scan::{
     default_scan_engines, index_codeql_sarif_as_static_evidence, normalize_codeql_sarif,
@@ -153,7 +156,10 @@ pub use static_registry::{
     StaticRegistryKind, StaticRegistryMatch, StaticRegistryPatternKind, StaticRegistryQuery,
     STATIC_REGISTRY_VERSION,
 };
-pub use systems_hunt::{execute_systems_hunt_tool, run_systems_hunt_report, SystemsHuntReport};
+pub use systems_hunt::{
+    execute_systems_hunt_tool, gather_surfaces, run_systems_hunt_report, RankedSystemsSurface,
+    SystemsContextMetadata, SystemsContextOutput, SystemsHuntReport,
+};
 pub use threat_model::{
     execute_threat_model_tool, load_persistent_threat_model, save_persistent_threat_model,
 };
@@ -161,6 +167,7 @@ pub use variant_ndiff::{
     derive_whitebox_variant_patterns, hunt_whitebox_static_variants, WhiteboxVariantPattern,
     WhiteboxVariantSearchReport,
 };
+pub use verify::{verify_finding, ProofVerdict, VerificationOutcome, VerifyOptions};
 pub use whitebox_static::{
     agent_tool_policy_for_input, analysis_mode_from_input, apply_whitebox_static_sast_policy,
     default_whitebox_static_agent_tool_policy, mark_whitebox_static_findings,
@@ -176,6 +183,17 @@ pub use whitebox_suppressions::{
     WhiteboxStaleSuppression, WhiteboxSuppressionEvidence, WhiteboxSuppressionMatch,
     WhiteboxSuppressionRecord, WhiteboxSuppressionReport, WhiteboxSuppressionScope,
 };
+
+/// Code-index facade and routing primitives, re-exported so other
+/// modules don't need to take a separate dep on `kuzushi-codeindex`.
+pub mod code_index {
+    pub use kuzushi_codeindex::{
+        Backend, BackendCapability, FilePosition, IndexFacade, McpClient, Query, RoutingTable,
+    };
+    pub use kuzushi_mcp_common::schema::{
+        EdgeKind, FileSpan, Method, Position, Range, Symbol, SymbolKind,
+    };
+}
 pub use workspace::{
     export_workspace_findings, WorkspaceExportFormat, WorkspaceFindingsExport, WorkspaceTarget,
 };

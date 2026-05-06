@@ -1859,6 +1859,7 @@ mod tests {
                         "keywords": ["exec", "child_process"],
                         "description": "Untrusted input reaches shell execution."
                     })),
+                    ..Default::default()
                 });
             }
             if system.contains("variant analysis") {
@@ -1882,6 +1883,7 @@ mod tests {
                             "rationale": "unclear"
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             if system.contains("fix-pattern extractor") {
@@ -1897,6 +1899,7 @@ mod tests {
                         "description": "Search copies guarded by no length cap.",
                         "confidence": "HIGH"
                     })),
+                    ..Default::default()
                 });
             }
             if system.contains("N-day variant hunter") {
@@ -1913,6 +1916,7 @@ mod tests {
                             "cwe": ["CWE-787"]
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             anyhow::bail!("unexpected query")
@@ -1951,6 +1955,7 @@ mod tests {
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.91,
                     rationale: "user input reaches exec".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -2136,6 +2141,7 @@ mod tests {
                     verdict: TriageVerdict::NeedsReview,
                     confidence: 0.4,
                     rationale: "not confirmed".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();

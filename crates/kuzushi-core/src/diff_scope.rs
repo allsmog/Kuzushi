@@ -950,3 +950,118 @@ mod tests {
         assert_eq!(report.fixed_findings[0].status, DiffFindingStatus::Fixed);
     }
 }
+
+#[cfg(test)]
+mod since_scope_tests {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+    use tempfile::tempdir;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(["-c", "user.email=test@example.com", "-c", "user.name=test"])
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git binary required for these tests");
+        assert!(status.success(), "git {args:?} in {} failed", dir.display());
+    }
+
+    fn git_capture(dir: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .expect("git binary required");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    fn make_repo() -> (tempfile::TempDir, String) {
+        let tmp = tempdir().unwrap();
+        git(tmp.path(), &["init", "-q", "-b", "main"]);
+        fs::write(tmp.path().join("a.c"), "void a(){}\n").unwrap();
+        fs::write(tmp.path().join("b.c"), "void b(){}\n").unwrap();
+        git(tmp.path(), &["add", "."]);
+        git(
+            tmp.path(),
+            &["commit", "-q", "-m", "first", "--no-gpg-sign"],
+        );
+        let head = git_capture(tmp.path(), &["rev-parse", "HEAD"])
+            .trim()
+            .to_string();
+        (tmp, head)
+    }
+
+    #[test]
+    fn git_diff_files_returns_changed_files_against_committed_base() {
+        let (tmp, base) = make_repo();
+        fs::write(tmp.path().join("a.c"), "void a_v2(){}\n").unwrap();
+        fs::write(tmp.path().join("c.c"), "void c(){}\n").unwrap();
+        git(tmp.path(), &["add", "."]);
+        git(
+            tmp.path(),
+            &["commit", "-q", "-m", "second", "--no-gpg-sign"],
+        );
+
+        let scope = git_diff_files(tmp.path(), &base, false).unwrap();
+        let names = scope
+            .files
+            .iter()
+            .map(|path| path.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["a.c", "c.c"]);
+    }
+
+    #[test]
+    fn git_diff_files_include_worktree_picks_up_uncommitted_changes() {
+        let (tmp, base) = make_repo();
+        fs::write(
+            tmp.path().join("b.c"),
+            "// edited but not committed\nvoid b(){}\n",
+        )
+        .unwrap();
+        let committed_only = git_diff_files(tmp.path(), &base, false).unwrap();
+        assert!(committed_only.files.is_empty());
+        let with_worktree = git_diff_files(tmp.path(), &base, true).unwrap();
+        let names = with_worktree
+            .files
+            .iter()
+            .map(|path| path.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["b.c"]);
+    }
+
+    #[test]
+    fn git_diff_files_rejects_injection_chars_in_ref() {
+        let tmp = tempdir().unwrap();
+        for value in ["abc; rm -rf /", "abc | cat", "abc`whoami`"] {
+            let err = git_diff_files(tmp.path(), value, false)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("forbidden characters"), "{err}");
+        }
+    }
+
+    #[test]
+    fn diff_scope_contains_path_and_prefix() {
+        let scope = DiffScope {
+            files: vec![PathBuf::from("src/foo.c"), PathBuf::from("src/bar.c")],
+            since_ref: "main".to_string(),
+            include_worktree: false,
+        };
+        assert!(scope.contains_path(Path::new("src/foo.c")));
+        assert!(!scope.contains_path(Path::new("src/baz.c")));
+        assert!(scope.contains_prefix(Path::new("src")));
+        assert!(!scope.contains_prefix(Path::new("tests")));
+    }
+}

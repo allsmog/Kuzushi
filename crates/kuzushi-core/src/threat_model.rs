@@ -1664,6 +1664,7 @@ mod tests {
             Ok(AgentQueryResponse {
                 text: String::new(),
                 structured: Some(self.response.clone()),
+                ..Default::default()
             })
         }
 
@@ -1672,6 +1673,7 @@ mod tests {
                 verdict: TriageVerdict::NeedsReview,
                 confidence: 0.0,
                 rationale: "unused".to_string(),
+                ..Default::default()
             })
         }
     }

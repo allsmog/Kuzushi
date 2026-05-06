@@ -31,6 +31,8 @@ pub struct RuntimeConfig {
     pub base_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_bridge_command: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anthropic_oauth: Option<AnthropicOauthConfig>,
 }
 
 impl Default for RuntimeConfig {
@@ -40,17 +42,37 @@ impl Default for RuntimeConfig {
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: None,
+            anthropic_oauth: None,
         }
     }
 }
 
+/// Declarative hint that the operator expects Anthropic OAuth as the
+/// credential source for `anthropic:*` models.
+///
+/// The bridge (`scripts/pi-agent-core-bridge.mjs`) is the actual refresh
+/// authority — it loads `oauth-credentials.json`, refreshes via
+/// `@mariozechner/pi-ai/oauth`, and forwards the access token. This Rust
+/// struct exists so:
+///
+/// * `validate_config` can fail fast at startup if the operator declared
+///   OAuth but the credentials file is missing or unreadable, instead of
+///   waiting for the first LLM call.
+/// * The TUI / CLI can describe the configured auth source without
+///   round-tripping the bridge.
+///
+/// **No secret data is ever stored in this struct.** It only carries a
+/// path and toggle flags. Tokens live in the file and the bridge process.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct AnthropicOauthConfig {
-    /// Path to the OAuth credentials bag. Relative paths resolve under HOME.
+    /// Path to the OAuth credentials bag (default: `~/.kuzushi/oauth-credentials.json`).
+    /// Resolved relative to the home directory if not absolute.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credentials_path: Option<PathBuf>,
-    /// Allow ANTHROPIC_AUTH_TOKEN / ANTHROPIC_OAUTH_TOKEN when the bag is absent.
+    /// If true, allow `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_OAUTH_TOKEN` env vars
+    /// as a fallback when the credentials file is absent. Default false —
+    /// operators who declare OAuth expect the bag.
     #[serde(default)]
     pub allow_env_token: bool,
 }
@@ -131,21 +153,7 @@ pub fn load_config(paths: ConfigPaths) -> Result<V2Config> {
 }
 
 pub fn load_anthropic_oauth_config(paths: &ConfigPaths) -> Result<Option<AnthropicOauthConfig>> {
-    let mut oauth = None;
-
-    let global_path = paths.global_config_path();
-    if global_path.exists() {
-        merge_oauth_file(&mut oauth, &global_path)?;
-    }
-
-    if let Some(project_path) = paths.project_config_path() {
-        if project_path.exists() {
-            merge_oauth_file(&mut oauth, &project_path)?;
-        }
-    }
-
-    apply_oauth_env_overrides(&mut oauth);
-    Ok(oauth)
+    Ok(load_config(paths.clone())?.runtime.anthropic_oauth)
 }
 
 pub fn write_default_config(path: &Path) -> Result<()> {
@@ -189,20 +197,10 @@ fn merge_config(config: &mut V2Config, patch: PartialConfig) {
         if let Some(agent_bridge_command) = runtime.agent_bridge_command {
             config.runtime.agent_bridge_command = agent_bridge_command;
         }
-    }
-}
-
-fn merge_oauth_file(oauth: &mut Option<AnthropicOauthConfig>, path: &Path) -> Result<()> {
-    let raw =
-        fs::read_to_string(path).with_context(|| format!("Could not read {}", path.display()))?;
-    let patch: PartialConfig =
-        toml::from_str(&raw).with_context(|| format!("Could not parse {}", path.display()))?;
-    if let Some(runtime) = patch.runtime {
         if let Some(anthropic_oauth) = runtime.anthropic_oauth {
-            *oauth = anthropic_oauth;
+            config.runtime.anthropic_oauth = anthropic_oauth;
         }
     }
-    Ok(())
 }
 
 fn apply_env_overrides(config: &mut V2Config) {
@@ -236,21 +234,24 @@ fn apply_env_overrides(config: &mut V2Config) {
             config.runtime.agent_bridge_command = Some(parts);
         }
     }
-}
 
-fn apply_oauth_env_overrides(oauth: &mut Option<AnthropicOauthConfig>) {
-    let oauth_enabled = first_env(&["KUZUSHI_ANTHROPIC_OAUTH"])
+    // KUZUSHI_ANTHROPIC_OAUTH=1 enables the OAuth declaration with defaults.
+    // KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS=<path> sets the credentials file.
+    let env_enable = first_env(&["KUZUSHI_ANTHROPIC_OAUTH"])
         .map(|value| matches!(value.trim(), "1" | "true" | "yes"))
         .unwrap_or(false);
-    let oauth_path = first_env(&["KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS"])
+    let env_path = first_env(&["KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS"])
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
 
-    if oauth_enabled || oauth_path.is_some() {
-        let oauth = oauth.get_or_insert_with(AnthropicOauthConfig::default);
-        if let Some(path) = oauth_path {
-            oauth.credentials_path = Some(path);
+    if env_enable || env_path.is_some() {
+        let cfg = config
+            .runtime
+            .anthropic_oauth
+            .get_or_insert_with(AnthropicOauthConfig::default);
+        if let Some(path) = env_path {
+            cfg.credentials_path = Some(path);
         }
     }
 }
@@ -368,50 +369,61 @@ allow_env_token = true
         )
         .unwrap();
 
-        let paths = ConfigPaths {
+        let config = load_config(ConfigPaths {
             home_dir: home,
             target_dir: None,
-        };
-        load_config(paths.clone()).unwrap();
-        let oauth = load_anthropic_oauth_config(&paths)
-            .unwrap()
-            .expect("oauth block parsed");
+        })
+        .unwrap();
 
+        let oauth = config
+            .runtime
+            .anthropic_oauth
+            .as_ref()
+            .expect("oauth block parsed");
         assert!(oauth.allow_env_token);
         assert_eq!(
-            oauth.credentials_path.as_deref().and_then(Path::to_str),
-            Some(".kuzushi/oauth-credentials.json")
+            oauth
+                .credentials_path
+                .as_deref()
+                .map(|p| p.to_str().unwrap()),
+            Some(".kuzushi/oauth-credentials.json"),
         );
     }
 
     #[test]
     fn env_var_enables_anthropic_oauth_with_defaults() {
+        // We use a temp HOME so the env override has somewhere to anchor.
         let tmp = tempfile::tempdir().unwrap();
+        // Save previous env values so we restore them; tests share the process env.
         let prev_enable = env::var("KUZUSHI_ANTHROPIC_OAUTH").ok();
         let prev_creds = env::var("KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS").ok();
         unsafe {
             env::set_var("KUZUSHI_ANTHROPIC_OAUTH", "1");
-            env::remove_var("KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS");
         }
 
-        let paths = ConfigPaths {
+        let config = load_config(ConfigPaths {
             home_dir: tmp.path().join("home"),
             target_dir: None,
-        };
-        let oauth = load_anthropic_oauth_config(&paths);
+        })
+        .unwrap();
 
-        unsafe {
-            match prev_enable {
-                Some(value) => env::set_var("KUZUSHI_ANTHROPIC_OAUTH", value),
+        // Restore env regardless of assertion outcome.
+        let restore = || unsafe {
+            match prev_enable.clone() {
+                Some(v) => env::set_var("KUZUSHI_ANTHROPIC_OAUTH", v),
                 None => env::remove_var("KUZUSHI_ANTHROPIC_OAUTH"),
             }
-            match prev_creds {
-                Some(value) => env::set_var("KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS", value),
+            match prev_creds.clone() {
+                Some(v) => env::set_var("KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS", v),
                 None => env::remove_var("KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS"),
             }
-        }
+        };
 
-        assert!(oauth.unwrap().is_some());
+        assert!(
+            config.runtime.anthropic_oauth.is_some(),
+            "expected env override to enable anthropic_oauth"
+        );
+        restore();
     }
 
     #[test]

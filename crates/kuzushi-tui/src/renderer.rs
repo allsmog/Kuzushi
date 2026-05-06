@@ -3717,6 +3717,7 @@ mod tests {
             verdict: TriageVerdict::TruePositive,
             confidence: 0.91,
             rationale: "source and sink are linked in the same handler".to_string(),
+            cost_usd: 0.0,
         });
         let untriaged = Finding::new_tool(
             "codeql",
