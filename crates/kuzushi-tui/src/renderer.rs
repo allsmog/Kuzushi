@@ -1796,7 +1796,9 @@ fn agent_chat_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         return lines;
     };
 
-    let status = if agent.running {
+    let status = if agent.abort_requested {
+        "abort requested"
+    } else if agent.running {
         "running"
     } else if agent.error.is_some() {
         "failed"
@@ -1831,6 +1833,10 @@ fn agent_chat_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         {
             lines.push(indent(muted(&line), 2));
         }
+    } else if agent.abort_requested {
+        lines.push(muted(
+            "Abort requested; waiting for pi-agent-core to return. Process kill is not confirmed.",
+        ));
     } else {
         lines.push(muted("Waiting for pi-agent-core response..."));
     }
@@ -1881,7 +1887,9 @@ fn story_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(divider("SESSION STORY · live event timeline", area.width));
     if let Some(scan) = &app.scan {
         let label = if scan.running {
-            if app.is_scan_paused() {
+            if scan.abort_requested {
+                "abort requested"
+            } else if app.is_scan_paused() {
                 "paused"
             } else {
                 "running"
@@ -2049,7 +2057,41 @@ fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
                 .model
                 .clone()
                 .unwrap_or_else(|| "unconfigured".to_string()),
-            "agent: active".to_string(),
+            if app
+                .agent_chat
+                .as_ref()
+                .is_some_and(|agent| agent.abort_requested)
+            {
+                "agent: abort requested".to_string()
+            } else {
+                "agent: active".to_string()
+            },
+        ])
+    } else if app.planner_running {
+        join_segments(&[
+            routing_mode_segment(app),
+            app.config
+                .model
+                .clone()
+                .unwrap_or_else(|| "unconfigured".to_string()),
+            if app.plan_abort_requested {
+                "plan: abort requested".to_string()
+            } else {
+                "plan: active".to_string()
+            },
+        ])
+    } else if app.threat_worker_running {
+        join_segments(&[
+            routing_mode_segment(app),
+            app.config
+                .model
+                .clone()
+                .unwrap_or_else(|| "unconfigured".to_string()),
+            if app.threat_abort_requested {
+                "threats: abort requested".to_string()
+            } else {
+                "threats: active".to_string()
+            },
         ])
     } else {
         join_segments(&[
@@ -2207,10 +2249,41 @@ fn keybindings_text(app: &ShellApp, width: usize) -> String {
 fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
     if app.scan.as_ref().is_some_and(|scan| scan.running) {
         return vec![
-            ("Ctrl+C", "abort scan"),
+            (
+                "Ctrl+C",
+                if app.scan.as_ref().is_some_and(|scan| scan.abort_requested) {
+                    "arm exit"
+                } else {
+                    "request abort"
+                },
+            ),
             ("actor 1", "actor detail"),
             ("findings", "findings"),
             ("back", "home"),
+        ];
+    }
+    if app.agent_chat.as_ref().is_some_and(|agent| agent.running)
+        || app.planner_running
+        || app.threat_worker_running
+    {
+        let abort_requested = app
+            .agent_chat
+            .as_ref()
+            .is_some_and(|agent| agent.abort_requested)
+            || app.plan_abort_requested
+            || app.threat_abort_requested;
+        return vec![
+            (
+                "Ctrl+C",
+                if abort_requested {
+                    "arm exit"
+                } else {
+                    "request abort"
+                },
+            ),
+            ("back", "home"),
+            ("history", "events"),
+            ("model", "runtime"),
         ];
     }
 
@@ -2495,7 +2568,9 @@ fn module_category_blurb(category: &str) -> (&'static str, &'static str) {
 }
 
 fn scan_status(scan: &ScanPanelState) -> String {
-    if scan.running {
+    if scan.running && scan.abort_requested {
+        "abort requested: waiting for subprocess".to_string()
+    } else if scan.running {
         format!("running: {}", scan.stage)
     } else {
         scan.stage.clone()
@@ -3342,6 +3417,7 @@ mod tests {
             question: "What should I run first?".to_string(),
             answer: None,
             running: true,
+            abort_requested: false,
             error: None,
         });
         app.shell_view = ShellView::AgentChat;
@@ -3355,6 +3431,53 @@ mod tests {
         assert!(rendered.contains("agent: active"));
         assert!(rendered.contains("kuzushi/agent>"));
         assert!(!rendered.contains("┌"));
+    }
+
+    #[test]
+    fn renders_honest_abort_requested_states() {
+        let backend = TestBackend::new(96, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(
+            V2Config {
+                model: Some("openai:gpt-4.1".to_string()),
+                ..V2Config::default()
+            },
+            None,
+        );
+        app.shell_view = ShellView::AgentChat;
+        app.agent_chat = Some(crate::app::AgentChatView {
+            question: "What changed?".to_string(),
+            answer: None,
+            running: true,
+            abort_requested: true,
+            error: None,
+        });
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let agent_rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(agent_rendered.contains("abort requested"));
+        assert!(agent_rendered.contains("Process kill is not confirmed"));
+        assert!(!agent_rendered.contains("killed"));
+
+        let backend = TestBackend::new(96, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        app.shell_view = ShellView::ModuleRun;
+        app.agent_chat = None;
+        app.scan = Some(crate::app::ScanPanelState {
+            run_id: Some("run-1".to_string()),
+            target: std::path::PathBuf::from("."),
+            stage: "abort requested".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: true,
+            error: None,
+        });
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let scan_rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(scan_rendered.contains("abort requested"));
+        assert!(scan_rendered.contains("waiting for subprocess"));
+        assert!(!scan_rendered.contains("killed"));
     }
 
     #[test]
@@ -3388,6 +3511,7 @@ mod tests {
                     stage: "running semgrep".to_string(),
                     findings_count: 0,
                     running: true,
+                    abort_requested: false,
                     error: None,
                 });
                 app.shell_view = ShellView::ModuleRun;

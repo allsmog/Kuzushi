@@ -1,8 +1,8 @@
 # Ralph Rust UX Progress
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
-Active story: UX-008 - Honest Abort State
-Status: UX-007 complete and pushed in iteration 20 as `d1a5e7f`; UX-008 pending next iteration
+Active story: UX-009 - Slash Command Taxonomy And Drift Tests
+Status: UX-008 implementation complete in iteration 21; push/record gate in progress
 
 ## Stage 2 Checklist
 
@@ -13,7 +13,7 @@ Status: UX-007 complete and pushed in iteration 20 as `d1a5e7f`; UX-008 pending 
 - UX-005 Visible startup progress and first-run path: complete; pushed in iteration 18 as `d26407a`.
 - UX-006 Rust doctor / preflight: complete; pushed in iteration 19 as `69f2e2a`.
 - UX-007 Input mode clarity: complete; pushed in iteration 20 as `d1a5e7f`.
-- UX-008 Honest abort state: pending.
+- UX-008 Honest abort state: complete in iteration 21.
 - UX-009 Slash command taxonomy and drift tests: pending.
 - UX-010 Tab completion for high-value arguments: pending.
 - UX-011 Findings row/card density: pending.
@@ -23,6 +23,37 @@ Status: UX-007 complete and pushed in iteration 20 as `d1a5e7f`; UX-008 pending 
 - UX-015 Final Ink/React removal gate: pending.
 
 ## Iteration Log
+
+### Iteration 21 - UX-008
+
+- Task attempted: make Ctrl+C/abort handling honest for active scanner
+  subprocesses and pi-agent-core-backed background work without claiming a
+  process was killed before that is known.
+- Files changed:
+  - `crates/kuzushi-tui/src/app.rs`
+  - `crates/kuzushi-tui/src/renderer.rs`
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short`
+  - `sed -n '1,240p' RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+  - `sed -n '1,240p' RALPH_RUST_UX_PROGRESS.md`
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-tui ctrl_c -- --nocapture`
+  - `cargo test -p kuzushi-tui honest_abort -- --nocapture`
+  - `cargo test -p kuzushi-tui`
+  - `cargo fmt --all --check`
+  - `git diff --check`
+- Result: implementation complete; commit and push are the remaining gate for
+  this iteration. The TUI now records scan and agent abort-request state
+  separately from completion, logs that scanner/pi-agent-core aborts are
+  requested without asserting a kill, renders abort-request status in the
+  module-run, agent, story, status, and keybinding surfaces, and ignores stale
+  pi-agent-core responses that arrive after an abort request.
+- Remaining work: push UX-008, then UX-009 through UX-015.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary workspace remains stale at `80d23a4` with earlier Stage 2
+    files staged/modified, so this iteration continued in the clean isolated
+    clone at `/tmp/kuzushi-ux2-clone.PJaRge`.
 
 ### Iteration 20 - UX-007
 
