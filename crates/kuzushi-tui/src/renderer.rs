@@ -939,6 +939,21 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
                 theme::warn(),
             ));
         }
+        let needs_init = app
+            .target
+            .as_ref()
+            .map(|root| !root.join(".kuzushi/CONTEXT.md").exists())
+            .unwrap_or(true);
+        if needs_init {
+            lines.push(blank());
+            lines.push(styled(
+                &fit(
+                    "[i] new project? run `kuzushi init` to scaffold .kuzushi/CONTEXT.md",
+                    area.width as usize,
+                ),
+                theme::accent(),
+            ));
+        }
         lines.push(styled(
             &fit(&app.first_finding_hint(), area.width as usize),
             theme::primary(),
@@ -1150,11 +1165,22 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
-    lines.push(Line::from(vec![
-        Span::styled("filters ", theme::label()),
-        Span::styled("[all] ", theme::selection()),
-        Span::styled("[critical] [high] [medium] [low]", theme::muted()),
-    ]));
+    lines.push(filter_chip_line(app));
+    if let Some(scope) = &app.findings_filter.scope {
+        lines.push(Line::from(vec![
+            Span::styled("scope   ", theme::label()),
+            Span::styled(
+                format!(
+                    "since {} · {} changed file(s)",
+                    scope.reference,
+                    scope.paths.len()
+                ),
+                theme::accent(),
+            ),
+            Span::raw("  "),
+            Span::styled("(/since clears)", theme::muted()),
+        ]));
+    }
     lines.push(blank());
 
     if app.findings.is_empty() {
@@ -1165,9 +1191,26 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         return lines;
     }
 
+    let visible = app.filtered_findings();
+    lines.push(Line::from(vec![
+        Span::styled("count   ", theme::label()),
+        Span::styled(
+            format!("{} of {} finding(s) visible", visible.len(), app.findings.len()),
+            theme::muted(),
+        ),
+    ]));
+    lines.push(blank());
+
+    if visible.is_empty() {
+        lines.push(muted(
+            "No findings match the current filter. Press 1 to clear severity, /since to clear scope.",
+        ));
+        return lines;
+    }
+
     let widths = finding_summary_widths(area.width.saturating_sub(2));
     lines.push(Line::from(vec![
-        Span::raw("  "),
+        Span::raw("    "),
         Span::styled(
             table_text(
                 &[
@@ -1184,10 +1227,9 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             theme::subtle(),
         ),
     ]));
-    let aliases = sorted_finding_aliases(&app.findings);
-    let cursor = app.findings_cursor.min(aliases.len().saturating_sub(1));
+    let cursor = app.findings_cursor.min(visible.len().saturating_sub(1));
     let mut body = Vec::new();
-    for (index, (alias, finding)) in aliases.into_iter().enumerate() {
+    for (index, (alias, finding)) in visible.iter().cloned().enumerate() {
         let selected = app
             .selected_finding
             .as_ref()
@@ -1202,6 +1244,11 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         };
         body.push(Line::from(vec![
             Span::styled(marker, theme::subtle()),
+            Span::raw(" "),
+            Span::styled(
+                theme::severity_glyph(finding.severity),
+                theme::severity(finding.severity),
+            ),
             Span::raw(" "),
             Span::styled(
                 pad(&alias, widths.first().copied().unwrap_or(8)),
@@ -1267,13 +1314,33 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
     let row_height = 3;
     let visible_rows = (body_height / row_height).max(1);
-    let start_row = viewport_start_for_cursor(app.findings.len(), visible_rows, cursor);
+    let start_row = viewport_start_for_cursor(visible.len(), visible_rows, cursor);
     lines.extend(
         body.into_iter()
             .skip(start_row * row_height)
             .take(body_height),
     );
     lines
+}
+
+fn filter_chip_line(app: &ShellApp) -> Line<'static> {
+    let chips: [(&'static str, Option<Severity>); 5] = [
+        ("[1 all]", None),
+        ("[2 critical]", Some(Severity::Critical)),
+        ("[3 high]", Some(Severity::High)),
+        ("[4 medium]", Some(Severity::Medium)),
+        ("[5 low]", Some(Severity::Low)),
+    ];
+    let mut spans = vec![Span::styled("filters ", theme::label())];
+    for (idx, (label, severity)) in chips.iter().enumerate() {
+        let active = app.findings_filter.severity == *severity;
+        let style = if active { theme::selection() } else { theme::muted() };
+        spans.push(Span::styled(label.to_string(), style));
+        if idx < chips.len() - 1 {
+            spans.push(Span::raw(" "));
+        }
+    }
+    Line::from(spans)
 }
 
 fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -1362,73 +1429,348 @@ fn threat_lines(app: &ShellApp, area: Rect, view: ThreatView) -> Vec<Line<'stati
     lines.push(threat_nav(view));
     lines.push(blank());
 
-    match view {
-        ThreatView::Dfd => {
-            lines.push(divider("DFD", area.width));
-            lines.push(detail(
-                "external",
-                "browser, API clients, package registries",
-            ));
-            lines.push(detail("application", "source tree, handlers, jobs, CLIs"));
-            lines.push(detail("datastore", "SQLite state, config, run artifacts"));
+    let model = app
+        .target
+        .as_ref()
+        .and_then(|root| kuzushi_core::load_persistent_threat_model(root));
+
+    let Some(model) = model else {
+        lines.push(divider(threat_view_divider_label(view), area.width));
+        lines.push(muted(
+            "No threat model yet for this target.",
+        ));
+        lines.push(muted(
+            "Next: /threats regen to build one, /threats edit to author manually.",
+        ));
+        if app.target.is_none() {
             lines.push(blank());
-            lines.push(Line::raw("external -> application -> datastore"));
-        }
-        ThreatView::Stride => {
-            lines.push(divider("STRIDE", area.width));
-            lines.push(header(&["element", "S", "T", "R", "I", "D", "E"]));
-            for element in ["entrypoints", "auth", "storage", "scanners"] {
-                lines.push(row(&[
-                    pad(element, 16),
-                    "med".to_string(),
-                    "high".to_string(),
-                    "low".to_string(),
-                    "med".to_string(),
-                    "low".to_string(),
-                    "med".to_string(),
-                ]));
-            }
-        }
-        ThreatView::Stories => {
-            lines.push(divider("STORIES", area.width));
-            lines.push(detail(
-                "A1",
-                "malicious input reaches a sink through an unvalidated handler",
-            ));
-            lines.push(detail(
-                "A2",
-                "dependency behavior changes scanner or runtime assumptions",
-            ));
-            lines.push(detail(
-                "A3",
-                "local secrets leak through logs, artifacts, or prompt context",
+            lines.push(muted(
+                "(no target set — pass --target <repo> or run /target <path>)",
             ));
         }
-        ThreatView::Scope => {
-            lines.push(divider("SCOPE", area.width));
-            lines.push(detail(
-                "critical",
-                "auth, request parsing, code execution paths",
-            ));
-            lines.push(detail(
-                "high",
-                "persistence, background jobs, external tools",
-            ));
-            lines.push(detail(
-                "out of scope",
-                "generated caches, vendored fixtures",
-            ));
-        }
-        ThreatView::Summary => {
-            lines.push(divider("SUMMARY", area.width));
-            lines.push(detail("elements", "4"));
-            lines.push(detail("stories", "3"));
-            lines.push(detail("highest risk", "scanners -> subprocess boundary"));
-            lines.push(detail("artifact", ".kuzushi/threat-model.json"));
-        }
+        return lines;
+    };
+
+    match view {
+        ThreatView::Dfd => render_threat_dfd(&mut lines, &model, area),
+        ThreatView::Stride => render_threat_stride(&mut lines, &model, area),
+        ThreatView::Stories => render_threat_stories(&mut lines, &model, area),
+        ThreatView::Scope => render_threat_scope(&mut lines, &model, area),
+        ThreatView::Summary => render_threat_summary(&mut lines, &model, area),
     }
 
     lines
+}
+
+fn threat_view_divider_label(view: ThreatView) -> &'static str {
+    match view {
+        ThreatView::Dfd => "DFD",
+        ThreatView::Stride => "STRIDE",
+        ThreatView::Stories => "STORIES",
+        ThreatView::Scope => "SCOPE",
+        ThreatView::Summary => "SUMMARY",
+    }
+}
+
+fn render_threat_dfd(
+    lines: &mut Vec<Line<'static>>,
+    model: &serde_json::Value,
+    area: Rect,
+) {
+    lines.push(divider("DFD", area.width));
+    let nodes = model
+        .pointer("/dfd/nodes")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if nodes.is_empty() {
+        lines.push(muted(
+            "DFD has no nodes yet. Next: /threats regen to populate.",
+        ));
+        return;
+    }
+    for node in &nodes {
+        let id = node
+            .get("id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("?");
+        let name = node
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or(id);
+        let zone = node
+            .get("trustZone")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let kind = node
+            .get("type")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let descriptor = if zone.is_empty() {
+            kind.to_string()
+        } else if kind.is_empty() {
+            zone.to_string()
+        } else {
+            format!("{kind} · {zone}")
+        };
+        lines.push(detail(name, &descriptor));
+    }
+
+    let flows = model
+        .pointer("/dfd/flows")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if !flows.is_empty() {
+        lines.push(blank());
+        lines.push(divider("FLOWS", area.width));
+        for flow in flows.iter().take(8) {
+            let source = flow
+                .get("sourceId")
+                .and_then(|value| value.as_str())
+                .unwrap_or("?");
+            let target = flow
+                .get("targetId")
+                .and_then(|value| value.as_str())
+                .unwrap_or("?");
+            let description = flow
+                .get("description")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            lines.push(detail(
+                &format!("{source} -> {target}"),
+                description,
+            ));
+        }
+        if flows.len() > 8 {
+            lines.push(muted(&format!("(+{} more flows)", flows.len() - 8)));
+        }
+    }
+}
+
+fn render_threat_stride(
+    lines: &mut Vec<Line<'static>>,
+    model: &serde_json::Value,
+    area: Rect,
+) {
+    lines.push(divider("STRIDE", area.width));
+    let threats = model
+        .pointer("/threats")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if threats.is_empty() {
+        lines.push(muted(
+            "No threats catalogued yet. Next: /threats regen to populate.",
+        ));
+        return;
+    }
+    use std::collections::BTreeMap;
+    let mut matrix: BTreeMap<String, [u32; 6]> = BTreeMap::new();
+    for threat in &threats {
+        let category = threat
+            .get("category")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let column = stride_column(category);
+        let elements = threat
+            .get("targetElementIds")
+            .and_then(|value| value.as_array())
+            .cloned()
+            .unwrap_or_default();
+        if elements.is_empty() {
+            let entry = matrix.entry("(unscoped)".to_string()).or_default();
+            if let Some(col) = column {
+                entry[col] += 1;
+            }
+        } else {
+            for element in elements {
+                if let Some(id) = element.as_str() {
+                    let entry = matrix.entry(id.to_string()).or_default();
+                    if let Some(col) = column {
+                        entry[col] += 1;
+                    }
+                }
+            }
+        }
+    }
+    if matrix.is_empty() {
+        lines.push(muted(
+            "Threats present but no element targets — re-run /threats regen.",
+        ));
+        return;
+    }
+    lines.push(header(&["element", "S", "T", "R", "I", "D", "E"]));
+    for (element, counts) in matrix.iter().take(20) {
+        lines.push(row(&[
+            pad(element, 16),
+            count_cell(counts[0]),
+            count_cell(counts[1]),
+            count_cell(counts[2]),
+            count_cell(counts[3]),
+            count_cell(counts[4]),
+            count_cell(counts[5]),
+        ]));
+    }
+    if matrix.len() > 20 {
+        lines.push(muted(&format!("(+{} more elements)", matrix.len() - 20)));
+    }
+}
+
+fn stride_column(category: &str) -> Option<usize> {
+    match category.trim().to_ascii_lowercase().as_str() {
+        "spoofing" | "s" => Some(0),
+        "tampering" | "t" => Some(1),
+        "repudiation" | "r" => Some(2),
+        "information_disclosure" | "informationdisclosure" | "info-disclosure" | "i" => Some(3),
+        "denial_of_service" | "denialofservice" | "dos" | "d" => Some(4),
+        "elevation_of_privilege" | "elevationofprivilege" | "eop" | "e" => Some(5),
+        _ => None,
+    }
+}
+
+fn count_cell(count: u32) -> String {
+    if count == 0 {
+        "·".to_string()
+    } else {
+        count.to_string()
+    }
+}
+
+fn render_threat_stories(
+    lines: &mut Vec<Line<'static>>,
+    model: &serde_json::Value,
+    area: Rect,
+) {
+    lines.push(divider("STORIES", area.width));
+    let threats = model
+        .pointer("/threats")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if threats.is_empty() {
+        lines.push(muted(
+            "No attacker stories yet. Next: /threats regen to populate.",
+        ));
+        return;
+    }
+    for (index, threat) in threats.iter().enumerate().take(8) {
+        let id = threat
+            .get("id")
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string)
+            .unwrap_or_else(|| format!("A{}", index + 1));
+        let title = threat
+            .get("title")
+            .and_then(|value| value.as_str())
+            .unwrap_or("(no title)");
+        lines.push(detail(&id, title));
+        if let Some(vector) = threat.get("attackVector").and_then(|value| value.as_str()) {
+            lines.push(indent(
+                muted(&fit(
+                    &format!("vector: {vector}"),
+                    area.width.saturating_sub(4) as usize,
+                )),
+                4,
+            ));
+        }
+        let impact = threat
+            .get("impact")
+            .and_then(|value| value.as_str())
+            .unwrap_or("?");
+        let likelihood = threat
+            .get("likelihood")
+            .and_then(|value| value.as_str())
+            .unwrap_or("?");
+        lines.push(indent(
+            muted(&format!("impact: {impact} · likelihood: {likelihood}")),
+            4,
+        ));
+    }
+    if threats.len() > 8 {
+        lines.push(muted(&format!("(+{} more stories)", threats.len() - 8)));
+    }
+}
+
+fn render_threat_scope(
+    lines: &mut Vec<Line<'static>>,
+    model: &serde_json::Value,
+    area: Rect,
+) {
+    lines.push(divider("SCOPE", area.width));
+    let nodes = model
+        .pointer("/dfd/nodes")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if nodes.is_empty() {
+        lines.push(muted(
+            "No scope yet. Next: /threats regen to enumerate elements.",
+        ));
+        return;
+    }
+    use std::collections::BTreeMap;
+    let mut by_zone: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for node in &nodes {
+        let name = node
+            .get("name")
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string)
+            .unwrap_or_else(|| {
+                node.get("id")
+                    .and_then(|value| value.as_str())
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "(unnamed)".to_string())
+            });
+        let zone = node
+            .get("trustZone")
+            .and_then(|value| value.as_str())
+            .unwrap_or("(no zone)")
+            .to_string();
+        by_zone.entry(zone).or_default().push(name);
+    }
+    for (zone, names) in by_zone.iter() {
+        lines.push(detail(zone, &names.join(", ")));
+    }
+}
+
+fn render_threat_summary(
+    lines: &mut Vec<Line<'static>>,
+    model: &serde_json::Value,
+    area: Rect,
+) {
+    lines.push(divider("SUMMARY", area.width));
+    let nodes = model
+        .pointer("/dfd/nodes")
+        .and_then(|value| value.as_array())
+        .map(Vec::len)
+        .unwrap_or(0);
+    let flows = model
+        .pointer("/dfd/flows")
+        .and_then(|value| value.as_array())
+        .map(Vec::len)
+        .unwrap_or(0);
+    let threats = model
+        .pointer("/threats")
+        .and_then(|value| value.as_array())
+        .map(Vec::len)
+        .unwrap_or(0);
+    let total = model
+        .pointer("/summary/total")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(threats as u64);
+    let user_edited = model
+        .get("userEdited")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    lines.push(detail("elements", &nodes.to_string()));
+    lines.push(detail("flows", &flows.to_string()));
+    lines.push(detail("threats", &threats.to_string()));
+    lines.push(detail("total (summary.total)", &total.to_string()));
+    if user_edited {
+        lines.push(detail("user-edited", "yes (regen will preserve unless --force)"));
+    }
+    lines.push(detail("artifact", ".kuzushi/threat-model.json"));
 }
 
 fn threat_editor_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -3679,7 +4021,51 @@ mod tests {
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains("STRIDE"));
-        assert!(rendered.contains("entrypoints"));
+        // No threat-model.json present -> render the empty-state, not mock data.
+        assert!(rendered.contains("No threat model"));
+        assert!(rendered.contains("/threats regen"));
+    }
+
+    #[test]
+    fn renders_threat_view_with_real_model() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".kuzushi")).unwrap();
+        let mut file =
+            std::fs::File::create(dir.path().join(".kuzushi/threat-model.json")).unwrap();
+        file.write_all(
+            br#"{
+              "version": "2.0",
+              "dfd": {
+                "nodes": [
+                  {"id": "browser", "type": "external", "name": "Browser", "trustZone": "external"},
+                  {"id": "api", "type": "service", "name": "API", "trustZone": "internal"}
+                ],
+                "flows": [{"sourceId": "browser", "targetId": "api", "description": "HTTPS"}]
+              },
+              "threats": [
+                {"id": "T1", "title": "SQL injection in login", "category": "tampering",
+                 "targetElementIds": ["api"], "attackVector": "crafted query string",
+                 "impact": "high", "likelihood": "medium"}
+              ]
+            }"#,
+        )
+        .unwrap();
+        drop(file);
+
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.target = Some(dir.path().to_path_buf());
+        app.shell_view = ShellView::Threat(ThreatView::Stories);
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("STORIES"));
+        assert!(rendered.contains("T1"));
+        assert!(rendered.contains("SQL injection"));
+        assert!(!rendered.contains("malicious input reaches a sink"));
     }
 
     #[test]

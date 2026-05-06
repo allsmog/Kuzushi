@@ -339,6 +339,38 @@ fn preferred_model_choice_index(config: &V2Config) -> usize {
     0
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct FindingsFilter {
+    pub severity: Option<Severity>,
+    pub scope: Option<DiffScope>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiffScope {
+    pub reference: String,
+    pub paths: BTreeSet<String>,
+}
+
+impl FindingsFilter {
+    pub fn is_active(&self) -> bool {
+        self.severity.is_some() || self.scope.is_some()
+    }
+
+    pub fn matches(&self, finding: &Finding) -> bool {
+        if let Some(severity) = self.severity {
+            if finding.severity != severity {
+                return false;
+            }
+        }
+        if let Some(scope) = &self.scope {
+            if !scope.paths.contains(&finding.file_path) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellView {
     Catalog,
@@ -412,6 +444,7 @@ pub(crate) enum ViewHotkeyAction {
     FindingsPageDown,
     FindingsPageUp,
     FindingsOpen,
+    FindingsFilter(Option<Severity>),
     ThreatView(ThreatView),
     ActorDetail(usize),
     PauseScan,
@@ -473,6 +506,7 @@ pub struct ShellApp {
     pub modules_scroll: usize,
     pub history_scroll: usize,
     pub kb_scroll: usize,
+    pub findings_filter: FindingsFilter,
     pub last_char_at: Option<Instant>,
     scan_rx: Option<Receiver<ScanEvent>>,
     scan_cancel: Option<ScanCancellation>,
@@ -531,6 +565,7 @@ impl ShellApp {
             modules_scroll: 0,
             history_scroll: 0,
             kb_scroll: 0,
+            findings_filter: FindingsFilter::default(),
             last_char_at: None,
             scan_rx: None,
             scan_cancel: None,
@@ -687,7 +722,8 @@ impl ShellApp {
             }
             ShellCommand::Since(reference) => {
                 self.shell_view = ShellView::Findings;
-                self.log("since", reference);
+                self.refresh_findings(false);
+                self.apply_since_scope(reference);
             }
             ShellCommand::Replay(run_id) => {
                 self.shell_view = ShellView::Replay(run_id.clone());
@@ -1745,50 +1781,88 @@ impl ShellApp {
 
     pub(crate) fn view_keybindings(&self) -> Vec<ViewKeybinding> {
         match self.shell_view {
-            ShellView::Findings if !self.findings.is_empty() => vec![
-                ViewKeybinding {
-                    trigger: HotkeyTrigger::Char('j'),
-                    hint: "j/k/g/G",
-                    label: "move",
-                    action: ViewHotkeyAction::FindingsNext,
-                },
-                ViewKeybinding {
-                    trigger: HotkeyTrigger::Char('k'),
-                    hint: "j/k/g/G",
-                    label: "move",
-                    action: ViewHotkeyAction::FindingsPrevious,
-                },
-                ViewKeybinding {
-                    trigger: HotkeyTrigger::Char('g'),
-                    hint: "j/k/g/G",
-                    label: "move",
-                    action: ViewHotkeyAction::FindingsFirst,
-                },
-                ViewKeybinding {
-                    trigger: HotkeyTrigger::Char('G'),
-                    hint: "j/k/g/G",
-                    label: "move",
-                    action: ViewHotkeyAction::FindingsLast,
-                },
-                ViewKeybinding {
-                    trigger: HotkeyTrigger::PageDown,
-                    hint: "PgUp/PgDn",
-                    label: "page",
-                    action: ViewHotkeyAction::FindingsPageDown,
-                },
-                ViewKeybinding {
-                    trigger: HotkeyTrigger::PageUp,
-                    hint: "PgUp/PgDn",
-                    label: "page",
-                    action: ViewHotkeyAction::FindingsPageUp,
-                },
-                ViewKeybinding {
-                    trigger: HotkeyTrigger::Enter,
-                    hint: "Enter",
-                    label: "open",
-                    action: ViewHotkeyAction::FindingsOpen,
-                },
-            ],
+            ShellView::Findings => {
+                let mut bindings = Vec::new();
+                if !self.filtered_findings().is_empty() {
+                    bindings.extend(vec![
+                        ViewKeybinding {
+                            trigger: HotkeyTrigger::Char('j'),
+                            hint: "j/k/g/G",
+                            label: "move",
+                            action: ViewHotkeyAction::FindingsNext,
+                        },
+                        ViewKeybinding {
+                            trigger: HotkeyTrigger::Char('k'),
+                            hint: "j/k/g/G",
+                            label: "move",
+                            action: ViewHotkeyAction::FindingsPrevious,
+                        },
+                        ViewKeybinding {
+                            trigger: HotkeyTrigger::Char('g'),
+                            hint: "j/k/g/G",
+                            label: "move",
+                            action: ViewHotkeyAction::FindingsFirst,
+                        },
+                        ViewKeybinding {
+                            trigger: HotkeyTrigger::Char('G'),
+                            hint: "j/k/g/G",
+                            label: "move",
+                            action: ViewHotkeyAction::FindingsLast,
+                        },
+                        ViewKeybinding {
+                            trigger: HotkeyTrigger::PageDown,
+                            hint: "PgUp/PgDn",
+                            label: "page",
+                            action: ViewHotkeyAction::FindingsPageDown,
+                        },
+                        ViewKeybinding {
+                            trigger: HotkeyTrigger::PageUp,
+                            hint: "PgUp/PgDn",
+                            label: "page",
+                            action: ViewHotkeyAction::FindingsPageUp,
+                        },
+                        ViewKeybinding {
+                            trigger: HotkeyTrigger::Enter,
+                            hint: "Enter",
+                            label: "open",
+                            action: ViewHotkeyAction::FindingsOpen,
+                        },
+                    ]);
+                }
+                bindings.extend(vec![
+                    ViewKeybinding {
+                        trigger: HotkeyTrigger::Char('1'),
+                        hint: "1..5",
+                        label: "filter",
+                        action: ViewHotkeyAction::FindingsFilter(None),
+                    },
+                    ViewKeybinding {
+                        trigger: HotkeyTrigger::Char('2'),
+                        hint: "1..5",
+                        label: "filter",
+                        action: ViewHotkeyAction::FindingsFilter(Some(Severity::Critical)),
+                    },
+                    ViewKeybinding {
+                        trigger: HotkeyTrigger::Char('3'),
+                        hint: "1..5",
+                        label: "filter",
+                        action: ViewHotkeyAction::FindingsFilter(Some(Severity::High)),
+                    },
+                    ViewKeybinding {
+                        trigger: HotkeyTrigger::Char('4'),
+                        hint: "1..5",
+                        label: "filter",
+                        action: ViewHotkeyAction::FindingsFilter(Some(Severity::Medium)),
+                    },
+                    ViewKeybinding {
+                        trigger: HotkeyTrigger::Char('5'),
+                        hint: "1..5",
+                        label: "filter",
+                        action: ViewHotkeyAction::FindingsFilter(Some(Severity::Low)),
+                    },
+                ]);
+                bindings
+            }
             ShellView::Threat(_) => vec![
                 ViewKeybinding {
                     trigger: HotkeyTrigger::Char('1'),
@@ -3716,21 +3790,29 @@ impl ShellApp {
         }
     }
 
+    pub fn filtered_findings(&self) -> Vec<(String, Finding)> {
+        sorted_finding_aliases(&self.findings)
+            .into_iter()
+            .filter(|(_, finding)| self.findings_filter.matches(finding))
+            .collect()
+    }
+
     fn clamp_findings_cursor(&mut self) {
-        if self.findings.is_empty() {
+        let visible = self.filtered_findings().len();
+        if visible == 0 {
             self.findings_cursor = 0;
         } else {
-            self.findings_cursor = self.findings_cursor.min(self.findings.len() - 1);
+            self.findings_cursor = self.findings_cursor.min(visible - 1);
         }
     }
 
     fn open_finding_at_cursor(&mut self) {
-        let aliases = sorted_finding_aliases(&self.findings);
-        if aliases.is_empty() {
+        let visible = self.filtered_findings();
+        if visible.is_empty() {
             return;
         }
-        let cursor = self.findings_cursor.min(aliases.len() - 1);
-        let (alias, finding) = aliases[cursor].clone();
+        let cursor = self.findings_cursor.min(visible.len() - 1);
+        let (alias, finding) = visible[cursor].clone();
         self.findings_cursor = cursor;
         self.selected_finding = Some(finding.clone());
         self.shell_view = ShellView::Finding;
@@ -3755,6 +3837,97 @@ impl ShellApp {
                     triage.rationale
                 ),
             );
+        }
+    }
+
+    fn set_severity_filter(&mut self, severity: Option<Severity>) {
+        if self.findings_filter.severity == severity {
+            return;
+        }
+        self.findings_filter.severity = severity;
+        self.findings_cursor = 0;
+        let label = match severity {
+            None => "all".to_string(),
+            Some(Severity::Critical) => "critical".to_string(),
+            Some(Severity::High) => "high".to_string(),
+            Some(Severity::Medium) => "medium".to_string(),
+            Some(Severity::Low) => "low".to_string(),
+            Some(other) => other.as_str().to_string(),
+        };
+        let visible = self.filtered_findings().len();
+        let total = self.findings.len();
+        self.log("filter", format!("severity={label} · {visible}/{total} visible"));
+    }
+
+    fn apply_since_scope(&mut self, reference: String) {
+        if reference.trim().is_empty() {
+            if self.findings_filter.scope.is_some() {
+                self.findings_filter.scope = None;
+                self.findings_cursor = 0;
+                self.log("scope", "cleared diff scope");
+            } else {
+                self.log(
+                    "since",
+                    "usage: since <ref> (e.g. since main, since HEAD~5)",
+                );
+            }
+            return;
+        }
+        let cwd = self
+            .target
+            .clone()
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let spec = format!("{}...HEAD", reference.trim());
+        let output = ProcessCommand::new("git")
+            .arg("diff")
+            .arg("--name-only")
+            .arg(&spec)
+            .current_dir(&cwd)
+            .output();
+        match output {
+            Ok(out) if out.status.success() => {
+                let paths: BTreeSet<String> = String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(ToString::to_string)
+                    .collect();
+                let count = paths.len();
+                self.findings_filter.scope = Some(DiffScope {
+                    reference: reference.trim().to_string(),
+                    paths,
+                });
+                self.findings_cursor = 0;
+                let visible = self.filtered_findings().len();
+                let total = self.findings.len();
+                self.log(
+                    "scope",
+                    format!(
+                        "since {} · {count} changed file(s) · {visible}/{total} finding(s) in scope",
+                        reference.trim()
+                    ),
+                );
+            }
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                self.log(
+                    "error",
+                    with_next_step(
+                        format!("git diff failed: {}", stderr.trim()),
+                        "verify the ref exists",
+                    ),
+                );
+            }
+            Err(error) => {
+                self.log(
+                    "error",
+                    with_next_step(
+                        format!("could not run git: {error}"),
+                        "ensure git is on PATH",
+                    ),
+                );
+            }
         }
     }
 
@@ -4184,7 +4357,7 @@ impl ShellApp {
     fn apply_view_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
         match action {
             ViewHotkeyAction::FindingsNext => {
-                let max = self.findings.len().saturating_sub(1);
+                let max = self.filtered_findings().len().saturating_sub(1);
                 self.findings_cursor = (self.findings_cursor + 1).min(max);
             }
             ViewHotkeyAction::FindingsPrevious => {
@@ -4194,7 +4367,7 @@ impl ShellApp {
                 self.findings_cursor = 0;
             }
             ViewHotkeyAction::FindingsLast => {
-                self.findings_cursor = self.findings.len().saturating_sub(1);
+                self.findings_cursor = self.filtered_findings().len().saturating_sub(1);
             }
             ViewHotkeyAction::FindingsPageDown => {
                 self.page_down_current_view();
@@ -4203,10 +4376,13 @@ impl ShellApp {
                 self.page_up_current_view();
             }
             ViewHotkeyAction::FindingsOpen => {
-                if self.findings.is_empty() {
+                if self.filtered_findings().is_empty() {
                     return false;
                 }
                 self.open_finding_at_cursor();
+            }
+            ViewHotkeyAction::FindingsFilter(severity) => {
+                self.set_severity_filter(severity);
             }
             ViewHotkeyAction::ThreatView(view) => {
                 self.shell_view = ShellView::Threat(view);
@@ -4227,9 +4403,10 @@ impl ShellApp {
     fn page_down_current_view(&mut self) {
         match self.shell_view {
             ShellView::Findings => {
-                if !self.findings.is_empty() {
+                let visible = self.filtered_findings().len();
+                if visible > 0 {
                     self.findings_cursor = (self.findings_cursor + FINDINGS_PAGE_ROWS)
-                        .min(self.findings.len().saturating_sub(1));
+                        .min(visible.saturating_sub(1));
                 }
             }
             ShellView::Help => {
@@ -9105,6 +9282,16 @@ JSON
                             .map(|finding| finding.fingerprint.as_str()),
                         Some(expected.as_str())
                     );
+                }
+                ViewHotkeyAction::FindingsFilter(severity) => {
+                    app.findings_cursor = 5;
+                    app.handle_key(key_event_for_trigger(binding.trigger));
+                    assert_eq!(app.findings_filter.severity, severity);
+                    if severity == Some(Severity::High) || severity.is_none() {
+                        assert_eq!(app.filtered_findings().len(), 25);
+                    } else {
+                        assert!(app.filtered_findings().is_empty());
+                    }
                 }
                 other => panic!("unexpected findings hotkey action: {other:?}"),
             }

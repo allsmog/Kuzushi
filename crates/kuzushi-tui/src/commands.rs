@@ -721,10 +721,7 @@ pub fn parse_command(input: &str) -> ShellCommand {
             Some(other) => ShellCommand::Unknown(format!("/show {other}")),
             None => ShellCommand::Unknown(trimmed.to_string()),
         },
-        "since" => parts
-            .next()
-            .map(|reference| ShellCommand::Since(reference.to_string()))
-            .unwrap_or_else(|| ShellCommand::Unknown(trimmed.to_string())),
+        "since" => ShellCommand::Since(parts.next().unwrap_or("").to_string()),
         "replay" => parts
             .next()
             .map(|run_id| ShellCommand::Replay(run_id.to_string()))
