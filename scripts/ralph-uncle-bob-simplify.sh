@@ -242,10 +242,18 @@ run_one_story() {
     read -r -a ai_args <<<"${AI_CMD_ARGS}"
   fi
   if [[ "$(basename "$AI_CMD_BIN")" == "codex" ]]; then
-    case "${ai_args[0]:-}" in
-      exec | e | review) ;;
-      *) ai_args=(exec "${ai_args[@]}") ;;
-    esac
+    local has_codex_subcommand=false
+    for arg in "${ai_args[@]}"; do
+      case "$arg" in
+        exec | e | review)
+          has_codex_subcommand=true
+          break
+          ;;
+      esac
+    done
+    if [[ "$has_codex_subcommand" == "false" ]]; then
+      ai_args=("${ai_args[@]}" exec)
+    fi
   fi
   (cd "$ROOT" && "$AI_CMD_BIN" "${ai_args[@]}" <"$CURRENT_PROMPT")
 
