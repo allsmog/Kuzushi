@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -160,6 +160,80 @@ pub fn build_whitebox_diff_scope_report(
         summary,
         deterministic: true,
         no_remote_provider_required: true,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffScope {
+    /// Files that differ between `since_ref` and HEAD or the working tree.
+    /// Paths are relative to the repository root.
+    pub files: Vec<PathBuf>,
+    pub since_ref: String,
+    pub include_worktree: bool,
+}
+
+impl DiffScope {
+    pub fn contains_path(&self, candidate: &Path) -> bool {
+        self.files.iter().any(|path| path == candidate)
+    }
+
+    pub fn contains_prefix(&self, prefix: &Path) -> bool {
+        self.files.iter().any(|path| path.starts_with(prefix))
+    }
+}
+
+pub fn git_diff_files(target: &Path, since_ref: &str, include_worktree: bool) -> Result<DiffScope> {
+    let trimmed = since_ref.trim();
+    anyhow::ensure!(
+        !trimmed.is_empty(),
+        "diff_scope: since_ref must be non-empty"
+    );
+    anyhow::ensure!(
+        !trimmed.contains(['\n', '\0', ';', '|', '`']),
+        "diff_scope: since_ref contains forbidden characters"
+    );
+
+    let mut command = Command::new("git");
+    command.arg("-C").arg(target);
+    command.arg("diff").arg("--name-only");
+    if include_worktree {
+        command.arg(trimmed);
+    } else {
+        command.arg(format!("{trimmed}...HEAD"));
+    }
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    let output = command
+        .output()
+        .with_context(|| format!("diff_scope: could not invoke git in {}", target.display()))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!(
+            "diff_scope: git diff failed (exit {}): {}",
+            output
+                .status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "<signal>".to_string()),
+            stderr.trim()
+        );
+    }
+
+    let stdout =
+        String::from_utf8(output.stdout).context("diff_scope: git output was not valid UTF-8")?;
+    let mut files = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    files.sort();
+    files.dedup();
+
+    Ok(DiffScope {
+        files,
+        since_ref: since_ref.to_string(),
+        include_worktree,
     })
 }
 
@@ -826,5 +900,120 @@ mod tests {
         );
         assert_eq!(report.fixed_findings.len(), 1);
         assert_eq!(report.fixed_findings[0].status, DiffFindingStatus::Fixed);
+    }
+}
+
+#[cfg(test)]
+mod since_scope_tests {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+    use tempfile::tempdir;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(["-c", "user.email=test@example.com", "-c", "user.name=test"])
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git binary required for these tests");
+        assert!(status.success(), "git {args:?} in {} failed", dir.display());
+    }
+
+    fn git_capture(dir: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .expect("git binary required");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    fn make_repo() -> (tempfile::TempDir, String) {
+        let tmp = tempdir().unwrap();
+        git(tmp.path(), &["init", "-q", "-b", "main"]);
+        fs::write(tmp.path().join("a.c"), "void a(){}\n").unwrap();
+        fs::write(tmp.path().join("b.c"), "void b(){}\n").unwrap();
+        git(tmp.path(), &["add", "."]);
+        git(
+            tmp.path(),
+            &["commit", "-q", "-m", "first", "--no-gpg-sign"],
+        );
+        let head = git_capture(tmp.path(), &["rev-parse", "HEAD"])
+            .trim()
+            .to_string();
+        (tmp, head)
+    }
+
+    #[test]
+    fn git_diff_files_returns_changed_files_against_committed_base() {
+        let (tmp, base) = make_repo();
+        fs::write(tmp.path().join("a.c"), "void a_v2(){}\n").unwrap();
+        fs::write(tmp.path().join("c.c"), "void c(){}\n").unwrap();
+        git(tmp.path(), &["add", "."]);
+        git(
+            tmp.path(),
+            &["commit", "-q", "-m", "second", "--no-gpg-sign"],
+        );
+
+        let scope = git_diff_files(tmp.path(), &base, false).unwrap();
+        let names = scope
+            .files
+            .iter()
+            .map(|path| path.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["a.c", "c.c"]);
+    }
+
+    #[test]
+    fn git_diff_files_include_worktree_picks_up_uncommitted_changes() {
+        let (tmp, base) = make_repo();
+        fs::write(
+            tmp.path().join("b.c"),
+            "// edited but not committed\nvoid b(){}\n",
+        )
+        .unwrap();
+        let committed_only = git_diff_files(tmp.path(), &base, false).unwrap();
+        assert!(committed_only.files.is_empty());
+        let with_worktree = git_diff_files(tmp.path(), &base, true).unwrap();
+        let names = with_worktree
+            .files
+            .iter()
+            .map(|path| path.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["b.c"]);
+    }
+
+    #[test]
+    fn git_diff_files_rejects_injection_chars_in_ref() {
+        let tmp = tempdir().unwrap();
+        for value in ["abc; rm -rf /", "abc | cat", "abc`whoami`"] {
+            let err = git_diff_files(tmp.path(), value, false)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("forbidden characters"), "{err}");
+        }
+    }
+
+    #[test]
+    fn diff_scope_contains_path_and_prefix() {
+        let scope = DiffScope {
+            files: vec![PathBuf::from("src/foo.c"), PathBuf::from("src/bar.c")],
+            since_ref: "main".to_string(),
+            include_worktree: false,
+        };
+        assert!(scope.contains_path(Path::new("src/foo.c")));
+        assert!(!scope.contains_path(Path::new("src/baz.c")));
+        assert!(scope.contains_prefix(Path::new("src")));
+        assert!(!scope.contains_prefix(Path::new("tests")));
     }
 }

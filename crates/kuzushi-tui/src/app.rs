@@ -8189,6 +8189,7 @@ JSON
             api_key_env: "KUZUSHI_TEST_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
         let mut app = ShellApp::new(config, None);
 
@@ -8496,6 +8497,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8533,6 +8535,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8571,6 +8574,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8610,6 +8614,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8654,6 +8659,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8698,6 +8704,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8736,6 +8743,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8823,6 +8831,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8885,6 +8894,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8945,6 +8955,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -8989,6 +9000,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -9023,6 +9035,7 @@ JSON
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: Some(vec![bridge.display().to_string()]),
+            anthropic_oauth: None,
         };
 
         let mut app = ShellApp::new(config, Some(&workspace));
@@ -9202,6 +9215,8 @@ JSON
             static_proof_state: None,
             triage: None,
             created_at: String::new(),
+            vuln_source: None,
+            dedup_key: None,
         }
     }
 
