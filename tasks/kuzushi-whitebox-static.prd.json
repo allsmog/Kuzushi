@@ -116,7 +116,7 @@
       "acceptance": ["CodeQL SARIF creates scanner_signal, code_span, and dataflow_step nodes.", "Adjacent flow locations link with flows_to edges."],
       "storyGate": "cargo test -p kuzushi-core codeql_static_evidence",
       "forbidden": ["exploitability claim"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-009",

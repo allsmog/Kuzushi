@@ -21,13 +21,39 @@ use crate::findings::{Finding, FindingStore, Severity, StaticProofState};
 use crate::iac_scan::IacScanScanner;
 use crate::secret_scan::SecretScanScanner;
 use crate::static_evidence::{
-    index_semgrep_findings_as_static_evidence, StaticEvidenceIndexReport, StaticEvidenceStore,
+    index_semgrep_findings_as_static_evidence, StaticEvidenceEdge, StaticEvidenceEdgeKind,
+    StaticEvidenceIndexReport, StaticEvidenceNode, StaticEvidenceNodeKind, StaticEvidenceStore,
 };
 use crate::workspace::WorkspaceTarget;
 
 pub trait ScanEngine: Send + Sync {
     fn id(&self) -> &'static str;
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>>;
+
+    fn scan_artifacts(
+        &self,
+        target: &Path,
+        cancellation: &ScanCancellation,
+    ) -> Result<ScanEngineOutput> {
+        Ok(ScanEngineOutput::from_findings(
+            self.scan(target, cancellation)?,
+        ))
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ScanEngineOutput {
+    pub findings: Vec<Finding>,
+    pub codeql_sarif_documents: Vec<String>,
+}
+
+impl ScanEngineOutput {
+    pub fn from_findings(findings: Vec<Finding>) -> Self {
+        Self {
+            findings,
+            codeql_sarif_documents: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -446,6 +472,14 @@ impl CodeqlScanner {
         target: &Path,
         cancel: &ScanCancellation,
     ) -> Result<Vec<Finding>> {
+        Ok(self.scan_with_artifacts(target, cancel)?.findings)
+    }
+
+    pub fn scan_with_artifacts(
+        &self,
+        target: &Path,
+        cancel: &ScanCancellation,
+    ) -> Result<ScanEngineOutput> {
         if cancel.is_cancelled() {
             anyhow::bail!("codeql scan cancelled");
         }
@@ -462,42 +496,51 @@ impl CodeqlScanner {
 
         if self.multi_language && self.language.is_none() {
             let languages = detect_all_codeql_languages(target, &binary, cancel)?;
-            let mut findings = Vec::new();
+            let mut output = ScanEngineOutput::default();
             let mut errors = Vec::new();
             for language in languages {
                 let mut scanner = self.clone();
                 scanner.language = Some(language.clone());
                 scanner.multi_language = false;
-                match scanner.scan_single_language(target, &binary, &repo_name, cancel) {
-                    Ok(mut language_findings) => findings.append(&mut language_findings),
+                match scanner.scan_single_language_artifacts(target, &binary, &repo_name, cancel) {
+                    Ok(mut language_output) => {
+                        output.findings.append(&mut language_output.findings);
+                        output
+                            .codeql_sarif_documents
+                            .append(&mut language_output.codeql_sarif_documents);
+                    }
                     Err(error) if cancel.is_cancelled() => return Err(error),
                     Err(error) => errors.push(format!("{language}: {error}")),
                 }
             }
 
-            if findings.is_empty() && !errors.is_empty() {
+            if output.findings.is_empty() && !errors.is_empty() {
                 anyhow::bail!(
                     "codeql: all language analyses failed: {}",
                     errors.join("; ")
                 );
             }
-            return Ok(findings);
+            return Ok(output);
         }
 
-        self.scan_single_language(target, &binary, &repo_name, cancel)
+        self.scan_single_language_artifacts(target, &binary, &repo_name, cancel)
     }
 
-    fn scan_single_language(
+    fn scan_single_language_artifacts(
         &self,
         target: &Path,
         binary: &str,
         repo_name: &str,
         cancel: &ScanCancellation,
-    ) -> Result<Vec<Finding>> {
+    ) -> Result<ScanEngineOutput> {
         let database = self.ensure_database(target, binary, cancel)?;
         let suite = resolve_codeql_suite(self.suite.as_deref(), &database.language)?;
         let sarif = self.run_codeql_analysis(binary, &database.db_path, &suite, cancel)?;
-        normalize_codeql_sarif(&sarif, repo_name)
+        let findings = normalize_codeql_sarif(&sarif, repo_name)?;
+        Ok(ScanEngineOutput {
+            findings,
+            codeql_sarif_documents: vec![sarif],
+        })
     }
 
     fn ensure_database(
@@ -727,6 +770,14 @@ impl ScanEngine for CodeqlScanner {
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {
         self.scan_with_cancel(target, cancellation)
     }
+
+    fn scan_artifacts(
+        &self,
+        target: &Path,
+        cancellation: &ScanCancellation,
+    ) -> Result<ScanEngineOutput> {
+        self.scan_with_artifacts(target, cancellation)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -885,6 +936,8 @@ impl CodeqlScanReport {
 pub struct CodeqlPersistedRun {
     pub run_id: String,
     pub findings_db: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub static_evidence: Option<StaticEvidenceIndexReport>,
 }
 
 fn parse_semgrep_config_input(input: &Value) -> Result<Option<Vec<String>>> {
@@ -1033,9 +1086,11 @@ pub fn run_scan_engines_with_options(
 
     let cancellation = ScanCancellation::default();
     let mut findings = Vec::new();
+    let mut codeql_sarif_documents = Vec::new();
     for scanner in scanners {
-        let mut scanner_findings = scanner.scan(workspace.root(), &cancellation)?;
-        findings.append(&mut scanner_findings);
+        let mut scanner_output = scanner.scan_artifacts(workspace.root(), &cancellation)?;
+        findings.append(&mut scanner_output.findings);
+        codeql_sarif_documents.append(&mut scanner_output.codeql_sarif_documents);
     }
     if let Some(allowed) = &options.severity {
         findings.retain(|finding| allowed.contains(&finding.severity));
@@ -1048,6 +1103,9 @@ pub fn run_scan_engines_with_options(
     if options.index_static_evidence {
         let evidence_store = StaticEvidenceStore::open(workspace)?;
         index_semgrep_findings_as_static_evidence(&evidence_store, workspace.root(), &findings)?;
+        for sarif in &codeql_sarif_documents {
+            index_codeql_sarif_as_static_evidence(&evidence_store, workspace.root(), sarif)?;
+        }
     }
 
     for finding in &findings {
@@ -1132,45 +1190,10 @@ pub fn normalize_codeql_sarif(raw: &str, repo_name: &str) -> Result<Vec<Finding>
             .unwrap_or_default();
 
         for result in run.results {
-            let rule_id = result
-                .rule_id
-                .as_deref()
-                .and_then(non_empty_string)
-                .unwrap_or("codeql.unknown")
-                .to_string();
-            let rule = rules_by_id.get(&rule_id);
-            let Some((file_path, start_line)) = extract_codeql_location(&result) else {
+            let Some(finding) = normalize_codeql_result_to_finding(&result, &rules_by_id) else {
                 continue;
             };
-            let message = result
-                .message
-                .as_ref()
-                .and_then(|message| message.text.as_deref().and_then(non_empty_string))
-                .or_else(|| {
-                    rule.and_then(|rule| {
-                        rule.short_description
-                            .as_ref()
-                            .and_then(|description| description.text.as_deref())
-                            .and_then(non_empty_string)
-                    })
-                })
-                .unwrap_or(&rule_id)
-                .to_string();
-            let severity = map_codeql_severity(
-                rule.and_then(|rule| rule.properties.as_ref())
-                    .and_then(|properties| properties.problem.as_ref())
-                    .and_then(|problem| problem.severity.as_deref()),
-                result.level.as_deref(),
-            );
-
-            let message = match render_codeql_flow_evidence(&result) {
-                Some(evidence) => format!("{message}\n\n{evidence}"),
-                None => message,
-            };
-
-            findings.push(Finding::new_tool(
-                "codeql", rule_id, file_path, start_line, None, severity, message,
-            ));
+            findings.push(finding);
         }
     }
 
@@ -1183,6 +1206,105 @@ pub fn normalize_codeql_sarif(raw: &str, repo_name: &str) -> Result<Vec<Finding>
     });
     let _ = repo_name;
     Ok(findings)
+}
+
+pub fn index_codeql_sarif_as_static_evidence(
+    store: &StaticEvidenceStore,
+    repo_root: impl AsRef<Path>,
+    raw: &str,
+) -> Result<StaticEvidenceIndexReport> {
+    let report: CodeqlSarifOutput =
+        serde_json::from_str(raw).context("Could not parse CodeQL SARIF output")?;
+    let mut index_report = StaticEvidenceIndexReport {
+        db_path: store.db_path().to_string(),
+        findings_indexed: 0,
+        nodes_indexed: 0,
+        edges_indexed: 0,
+        node_ids: Vec::new(),
+        edge_ids: Vec::new(),
+    };
+    let repo_root = repo_root.as_ref();
+
+    for run in report.runs {
+        let rules_by_id = run
+            .tool
+            .and_then(|tool| tool.driver)
+            .map(|driver| {
+                driver
+                    .rules
+                    .into_iter()
+                    .filter_map(|rule| rule.id.clone().map(|id| (id, rule)))
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+
+        for result in run.results {
+            let Some(mut finding) = normalize_codeql_result_to_finding(&result, &rules_by_id)
+            else {
+                continue;
+            };
+            finding.set_static_proof_state(StaticProofState::SignalOnly);
+            let indexed =
+                index_codeql_result_as_static_evidence(store, repo_root, &finding, &result)
+                    .with_context(|| {
+                        format!(
+                            "Could not index CodeQL static evidence for {} at {}:{}",
+                            finding.rule_id, finding.file_path, finding.start_line
+                        )
+                    })?;
+
+            index_report.findings_indexed += 1;
+            index_report.nodes_indexed += indexed.nodes_indexed;
+            index_report.edges_indexed += indexed.edges_indexed;
+            index_report.node_ids.extend(indexed.node_ids);
+            index_report.edge_ids.extend(indexed.edge_ids);
+        }
+    }
+
+    Ok(index_report)
+}
+
+fn normalize_codeql_result_to_finding(
+    result: &CodeqlSarifResult,
+    rules_by_id: &HashMap<String, CodeqlSarifRule>,
+) -> Option<Finding> {
+    let rule_id = result
+        .rule_id
+        .as_deref()
+        .and_then(non_empty_string)
+        .unwrap_or("codeql.unknown")
+        .to_string();
+    let rule = rules_by_id.get(&rule_id);
+    let (file_path, start_line) = extract_codeql_location(result)?;
+    let message = result
+        .message
+        .as_ref()
+        .and_then(|message| message.text.as_deref().and_then(non_empty_string))
+        .or_else(|| {
+            rule.and_then(|rule| {
+                rule.short_description
+                    .as_ref()
+                    .and_then(|description| description.text.as_deref())
+                    .and_then(non_empty_string)
+            })
+        })
+        .unwrap_or(&rule_id)
+        .to_string();
+    let severity = map_codeql_severity(
+        rule.and_then(|rule| rule.properties.as_ref())
+            .and_then(|properties| properties.problem.as_ref())
+            .and_then(|problem| problem.severity.as_deref()),
+        result.level.as_deref(),
+    );
+
+    let message = match render_codeql_flow_evidence(result) {
+        Some(evidence) => format!("{message}\n\n{evidence}"),
+        None => message,
+    };
+
+    Some(Finding::new_tool(
+        "codeql", rule_id, file_path, start_line, None, severity, message,
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1317,6 +1439,181 @@ struct CodeqlFlowStep {
     snippet: Option<String>,
 }
 
+#[derive(Debug, Default)]
+struct CodeqlStaticEvidenceIndex {
+    nodes_indexed: usize,
+    edges_indexed: usize,
+    node_ids: Vec<String>,
+    edge_ids: Vec<String>,
+}
+
+fn index_codeql_result_as_static_evidence(
+    store: &StaticEvidenceStore,
+    repo_root: &Path,
+    finding: &Finding,
+    result: &CodeqlSarifResult,
+) -> Result<CodeqlStaticEvidenceIndex> {
+    let mut indexed = CodeqlStaticEvidenceIndex::default();
+    let finding_fingerprint = finding.fingerprint.clone();
+    let end_line = finding.end_line.unwrap_or(finding.start_line);
+    let primary_span = crate::source_span::extract_source_span(
+        repo_root,
+        &finding.file_path,
+        finding.start_line,
+        end_line,
+    )?;
+    let location = format!(
+        "{}:{}-{}",
+        primary_span.file_path, primary_span.start_line, primary_span.end_line
+    );
+    let flow_steps = extract_codeql_flow_steps(result);
+    let static_proof_state = finding
+        .static_proof_state
+        .unwrap_or(StaticProofState::SignalOnly)
+        .as_str();
+
+    let code_span = StaticEvidenceNode::new(
+        StaticEvidenceNodeKind::CodeSpan,
+        format!("CodeQL code span {} at {location}", finding.rule_id),
+        primary_span.snippet.clone(),
+    )
+    .with_finding_fingerprint(finding_fingerprint.clone())
+    .with_source_span(
+        primary_span.file_path.clone(),
+        primary_span.start_line,
+        Some(primary_span.end_line),
+    )
+    .with_metadata(json!({
+        "normalizer": "codeql",
+        "tool": "codeql",
+        "ruleId": finding.rule_id.as_str(),
+        "severity": finding.severity.as_str(),
+        "sourceContentHash": primary_span.content_hash.as_str(),
+    }));
+
+    let scanner_signal = StaticEvidenceNode::new(
+        StaticEvidenceNodeKind::ScannerSignal,
+        format!("CodeQL signal {} at {location}", finding.rule_id),
+        format!(
+            "CodeQL rule {} reported {} with severity {}.\n\n{}",
+            finding.rule_id,
+            location,
+            finding.severity.as_str(),
+            finding.message.as_str()
+        ),
+    )
+    .with_finding_fingerprint(finding_fingerprint.clone())
+    .with_source_span(
+        primary_span.file_path.clone(),
+        primary_span.start_line,
+        Some(primary_span.end_line),
+    )
+    .with_metadata(json!({
+        "normalizer": "codeql",
+        "tool": "codeql",
+        "ruleId": finding.rule_id.as_str(),
+        "severity": finding.severity.as_str(),
+        "staticProofState": static_proof_state,
+        "truePositiveByDefault": false,
+        "defaultVerdict": "untriaged_signal",
+        "codeFlowStepCount": flow_steps.len(),
+        "sourceContentHash": primary_span.content_hash.as_str(),
+    }));
+
+    let signal_to_span = StaticEvidenceEdge::new(
+        StaticEvidenceEdgeKind::DerivedFrom,
+        scanner_signal.id.clone(),
+        code_span.id.clone(),
+    )
+    .with_finding_fingerprint(finding_fingerprint.clone())
+    .with_metadata(json!({
+        "normalizer": "codeql",
+        "relationship": "scanner_signal_to_primary_code_span",
+        "truePositiveByDefault": false,
+    }));
+
+    store.upsert_node(&code_span)?;
+    indexed.nodes_indexed += 1;
+    indexed.node_ids.push(code_span.id.clone());
+    store.upsert_node(&scanner_signal)?;
+    indexed.nodes_indexed += 1;
+    indexed.node_ids.push(scanner_signal.id.clone());
+    store.upsert_edge(&signal_to_span)?;
+    indexed.edges_indexed += 1;
+    indexed.edge_ids.push(signal_to_span.id);
+
+    let mut previous_step_id: Option<String> = None;
+    for (sequence, step) in flow_steps.iter().enumerate() {
+        let span = crate::source_span::extract_source_span(
+            repo_root,
+            &step.file_path,
+            step.line,
+            step.line,
+        )?;
+        let step_node = StaticEvidenceNode::new(
+            StaticEvidenceNodeKind::DataflowStep,
+            format!(
+                "CodeQL dataflow step {} for {} at {}:{}",
+                sequence + 1,
+                finding.rule_id,
+                span.file_path,
+                span.start_line
+            ),
+            span.snippet.clone(),
+        )
+        .with_finding_fingerprint(finding_fingerprint.clone())
+        .with_source_span(span.file_path.clone(), span.start_line, Some(span.end_line))
+        .with_metadata(json!({
+            "normalizer": "codeql",
+            "tool": "codeql",
+            "ruleId": finding.rule_id.as_str(),
+            "sequence": sequence + 1,
+            "message": step.message.as_deref(),
+            "sarifSnippet": step.snippet.as_deref(),
+            "sourceContentHash": span.content_hash.as_str(),
+        }));
+
+        store.upsert_node(&step_node)?;
+        indexed.nodes_indexed += 1;
+        indexed.node_ids.push(step_node.id.clone());
+
+        let signal_to_step = StaticEvidenceEdge::new(
+            StaticEvidenceEdgeKind::DerivedFrom,
+            scanner_signal.id.clone(),
+            step_node.id.clone(),
+        )
+        .with_finding_fingerprint(finding_fingerprint.clone())
+        .with_metadata(json!({
+            "normalizer": "codeql",
+            "relationship": "scanner_signal_to_dataflow_step",
+            "sequence": sequence + 1,
+        }));
+        store.upsert_edge(&signal_to_step)?;
+        indexed.edges_indexed += 1;
+        indexed.edge_ids.push(signal_to_step.id);
+
+        if let Some(previous_step_id) = previous_step_id {
+            let flow_edge = StaticEvidenceEdge::new(
+                StaticEvidenceEdgeKind::FlowsTo,
+                previous_step_id,
+                step_node.id.clone(),
+            )
+            .with_finding_fingerprint(finding_fingerprint.clone())
+            .with_metadata(json!({
+                "normalizer": "codeql",
+                "relationship": "adjacent_codeql_flow_location",
+                "toSequence": sequence + 1,
+            }));
+            store.upsert_edge(&flow_edge)?;
+            indexed.edges_indexed += 1;
+            indexed.edge_ids.push(flow_edge.id);
+        }
+        previous_step_id = Some(step_node.id);
+    }
+
+    Ok(indexed)
+}
+
 fn extract_codeql_location(result: &CodeqlSarifResult) -> Option<(String, u32)> {
     for location in &result.locations {
         let physical = location.physical_location.as_ref()?;
@@ -1339,6 +1636,26 @@ fn extract_codeql_location(result: &CodeqlSarifResult) -> Option<(String, u32)> 
 }
 
 fn render_codeql_flow_evidence(result: &CodeqlSarifResult) -> Option<String> {
+    let steps = extract_codeql_flow_steps(result);
+    if steps.is_empty() {
+        return None;
+    }
+
+    let mut segments = steps
+        .iter()
+        .take(16)
+        .map(|step| match &step.message {
+            Some(message) => format!("{}:{} ({message})", step.file_path, step.line),
+            None => format!("{}:{}", step.file_path, step.line),
+        })
+        .collect::<Vec<_>>();
+    if steps.len() > 16 {
+        segments.push(format!("... {} more step(s)", steps.len() - 16));
+    }
+    Some(format!("Code flow: {}", segments.join(" -> ")))
+}
+
+fn extract_codeql_flow_steps(result: &CodeqlSarifResult) -> Vec<CodeqlFlowStep> {
     let mut steps: Vec<CodeqlFlowStep> = Vec::new();
     for code_flow in &result.code_flows {
         for thread_flow in &code_flow.thread_flows {
@@ -1394,23 +1711,7 @@ fn render_codeql_flow_evidence(result: &CodeqlSarifResult) -> Option<String> {
             }
         }
     }
-
-    if steps.is_empty() {
-        return None;
-    }
-
-    let mut segments = steps
-        .iter()
-        .take(16)
-        .map(|step| match &step.message {
-            Some(message) => format!("{}:{} ({message})", step.file_path, step.line),
-            None => format!("{}:{}", step.file_path, step.line),
-        })
-        .collect::<Vec<_>>();
-    if steps.len() > 16 {
-        segments.push(format!("... {} more step(s)", steps.len() - 16));
-    }
-    Some(format!("Code flow: {}", segments.join(" -> ")))
+    steps
 }
 
 fn map_codeql_severity(problem_severity: Option<&str>, result_level: Option<&str>) -> Severity {
@@ -1893,7 +2194,7 @@ fn shell_join(args: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::static_evidence::StaticEvidenceNodeKind;
+    use crate::static_evidence::{StaticEvidenceEdgeKind, StaticEvidenceNodeKind};
     use std::fs;
     use std::sync::Mutex;
 
@@ -2243,6 +2544,146 @@ printf '{"results":[]}'
         assert!(findings[0].message.contains("Code flow: src/routes.ts:5"));
     }
 
+    #[test]
+    fn codeql_static_evidence_indexes_signal_code_span_and_flow_steps() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/routes.ts"),
+            [
+                "export function route(req, db) {",
+                "  const q = req.query.q;",
+                "  return loadUser(db, q);",
+                "}",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/db.ts"),
+            [
+                "export function loadUser(db, q) {",
+                "  return db.query(`select * from users where name = ${q}`);",
+                "}",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let raw = r#"
+        {
+          "runs": [
+            {
+              "tool": {
+                "driver": {
+                  "rules": [
+                    {
+                      "id": "js/sql-injection",
+                      "properties": { "problem": { "severity": "error" } }
+                    }
+                  ]
+                }
+              },
+              "results": [
+                {
+                  "ruleId": "js/sql-injection",
+                  "message": { "text": "User input reaches SQL sink" },
+                  "locations": [
+                    {
+                      "physicalLocation": {
+                        "artifactLocation": { "uri": "src/db.ts" },
+                        "region": { "startLine": 2 }
+                      }
+                    }
+                  ],
+                  "codeFlows": [
+                    {
+                      "threadFlows": [
+                        {
+                          "locations": [
+                            {
+                              "message": { "text": "user input enters handler" },
+                              "location": {
+                                "physicalLocation": {
+                                  "artifactLocation": { "uri": "src/routes.ts" },
+                                  "region": {
+                                    "startLine": 2,
+                                    "snippet": { "text": "const q = req.query.q;" }
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "message": { "text": "query reaches db.query" },
+                              "location": {
+                                "physicalLocation": {
+                                  "artifactLocation": { "uri": "src/db.ts" },
+                                  "region": {
+                                    "startLine": 2,
+                                    "snippet": { "text": "return db.query(...);" }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+        "#;
+
+        let findings = normalize_codeql_sarif(raw, "repo").unwrap();
+        let store = StaticEvidenceStore::open_in_memory().unwrap();
+        let report = index_codeql_sarif_as_static_evidence(&store, temp.path(), raw).unwrap();
+        let nodes = store
+            .list_nodes_for_finding(&findings[0].fingerprint)
+            .unwrap();
+        let scanner_signal = nodes
+            .iter()
+            .find(|node| node.kind == StaticEvidenceNodeKind::ScannerSignal)
+            .unwrap();
+        let dataflow_steps = nodes
+            .iter()
+            .filter(|node| node.kind == StaticEvidenceNodeKind::DataflowStep)
+            .collect::<Vec<_>>();
+        let first_step = dataflow_steps
+            .iter()
+            .find(|node| node.source_path.as_deref() == Some("src/routes.ts"))
+            .unwrap();
+
+        assert_eq!(report.findings_indexed, 1);
+        assert_eq!(nodes.len(), 4);
+        assert!(nodes
+            .iter()
+            .any(|node| node.kind == StaticEvidenceNodeKind::CodeSpan
+                && node.source_path.as_deref() == Some("src/db.ts")
+                && node.body.contains("db.query")));
+        assert_eq!(
+            scanner_signal
+                .metadata
+                .pointer("/truePositiveByDefault")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            scanner_signal
+                .metadata
+                .pointer("/staticProofState")
+                .and_then(Value::as_str),
+            Some("signal_only")
+        );
+        assert_eq!(dataflow_steps.len(), 2);
+        assert!(store
+            .edges_for_node(&first_step.id)
+            .unwrap()
+            .iter()
+            .any(|edge| edge.kind == StaticEvidenceEdgeKind::FlowsTo));
+    }
+
     #[cfg(unix)]
     fn fake_codeql_binary(dir: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
@@ -2370,6 +2811,130 @@ exit 2
         assert_eq!(run.findings_count, 2);
         assert!(findings.iter().any(|finding| finding.tool == "codeql"));
         assert!(findings.iter().any(|finding| finding.tool == "dep-hygiene"));
+    }
+
+    #[test]
+    fn codeql_static_evidence_scan_runner_indexes_whitebox_code_flows() {
+        struct StaticCodeqlScanner {
+            raw: String,
+            findings: Vec<Finding>,
+        }
+
+        impl ScanEngine for StaticCodeqlScanner {
+            fn id(&self) -> &'static str {
+                "codeql"
+            }
+
+            fn scan(
+                &self,
+                _target: &Path,
+                _cancellation: &ScanCancellation,
+            ) -> Result<Vec<Finding>> {
+                Ok(self.findings.clone())
+            }
+
+            fn scan_artifacts(
+                &self,
+                _target: &Path,
+                _cancellation: &ScanCancellation,
+            ) -> Result<ScanEngineOutput> {
+                Ok(ScanEngineOutput {
+                    findings: self.findings.clone(),
+                    codeql_sarif_documents: vec![self.raw.clone()],
+                })
+            }
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir(tmp.path().join("src")).unwrap();
+        fs::write(
+            tmp.path().join("src/routes.ts"),
+            "export function route(req, db) {\n  return db.query(req.query.q);\n}\n",
+        )
+        .unwrap();
+        let raw = r#"
+        {
+          "runs": [
+            {
+              "tool": { "driver": { "rules": [{ "id": "js/sql-injection" }] } },
+              "results": [
+                {
+                  "ruleId": "js/sql-injection",
+                  "message": { "text": "User input reaches SQL sink" },
+                  "locations": [
+                    {
+                      "physicalLocation": {
+                        "artifactLocation": { "uri": "src/routes.ts" },
+                        "region": { "startLine": 2 }
+                      }
+                    }
+                  ],
+                  "codeFlows": [
+                    {
+                      "threadFlows": [
+                        {
+                          "locations": [
+                            {
+                              "message": { "text": "source" },
+                              "location": {
+                                "physicalLocation": {
+                                  "artifactLocation": { "uri": "src/routes.ts" },
+                                  "region": { "startLine": 1 }
+                                }
+                              }
+                            },
+                            {
+                              "message": { "text": "sink" },
+                              "location": {
+                                "physicalLocation": {
+                                  "artifactLocation": { "uri": "src/routes.ts" },
+                                  "region": { "startLine": 2 }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+        "#;
+        let findings = normalize_codeql_sarif(raw, "repo").unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(StaticCodeqlScanner {
+            raw: raw.to_string(),
+            findings,
+        })];
+        let options = ScanRunOptions {
+            severity: None,
+            tasks: None,
+            static_proof_state: Some(StaticProofState::SignalOnly),
+            index_static_evidence: true,
+        };
+
+        let run = run_scan_engines_with_options(&workspace, &store, &scanners, &options).unwrap();
+        let finding = store.list_findings(10).unwrap().pop().unwrap();
+        let evidence_store = StaticEvidenceStore::open(&workspace).unwrap();
+        let nodes = evidence_store
+            .list_nodes_for_finding(&finding.fingerprint)
+            .unwrap();
+
+        assert_eq!(run.findings_count, 1);
+        assert_eq!(
+            finding.static_proof_state,
+            Some(StaticProofState::SignalOnly)
+        );
+        assert!(nodes
+            .iter()
+            .any(|node| node.kind == StaticEvidenceNodeKind::ScannerSignal));
+        assert!(nodes
+            .iter()
+            .any(|node| node.kind == StaticEvidenceNodeKind::DataflowStep));
     }
 
     #[cfg(unix)]

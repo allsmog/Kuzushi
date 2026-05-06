@@ -22,9 +22,9 @@ use crate::patch::run_patch_finding;
 use crate::recon::execute_recon_tool;
 use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageRequest};
 use crate::scan::{
-    run_scan_engines_with_options, scan_engines_for_tasks, CodeqlPersistedRun, CodeqlScanReport,
-    CodeqlScanner, ScanCancellation, ScanRunOptions, SemgrepPersistedRun, SemgrepScanReport,
-    SemgrepScanner,
+    index_codeql_sarif_as_static_evidence, run_scan_engines_with_options, scan_engines_for_tasks,
+    CodeqlPersistedRun, CodeqlScanReport, CodeqlScanner, ScanCancellation, ScanRunOptions,
+    SemgrepPersistedRun, SemgrepScanReport, SemgrepScanner,
 };
 use crate::secret_scan::{scan_for_secrets, SecretScanOptions};
 use crate::systems_hunt::{execute_systems_hunt_tool, run_systems_hunt_report};
@@ -345,10 +345,24 @@ impl ModuleRegistry {
             "codeql:scan" => {
                 let target = resolve_tool_target(&input, ctx)?;
                 let scanner = CodeqlScanner::from_tool_input(&input)?;
-                let findings = scanner.scan_with_cancel(&target, &ScanCancellation::default())?;
-                let persisted = persist_codeql_findings(&target, &findings, ctx)?;
+                let mut output =
+                    scanner.scan_with_artifacts(&target, &ScanCancellation::default())?;
+                let index_static_evidence = whitebox_static_profile_requested(&input)?;
+                if index_static_evidence {
+                    mark_whitebox_static_findings(
+                        &mut output.findings,
+                        StaticProofState::SignalOnly,
+                    )?;
+                }
+                let persisted = persist_codeql_findings(
+                    &target,
+                    &output.findings,
+                    ctx,
+                    &output.codeql_sarif_documents,
+                    index_static_evidence,
+                )?;
                 Ok(
-                    CodeqlScanReport::new(target.display().to_string(), findings, persisted)
+                    CodeqlScanReport::new(target.display().to_string(), output.findings, persisted)
                         .to_tool_json(),
                 )
             }
@@ -541,12 +555,38 @@ fn persist_codeql_findings(
     target: &Path,
     findings: &[crate::findings::Finding],
     ctx: &ToolExecutionContext<'_>,
+    sarif_documents: &[String],
+    index_static_evidence: bool,
 ) -> Result<Option<CodeqlPersistedRun>> {
     let (Some(workspace), Some(store)) = (ctx.workspace, ctx.findings_store) else {
         return Ok(None);
     };
 
     workspace.ensure_state_dir()?;
+    let static_evidence = if index_static_evidence {
+        let evidence_store = crate::static_evidence::StaticEvidenceStore::open(workspace)?;
+        let mut combined = crate::static_evidence::StaticEvidenceIndexReport {
+            db_path: evidence_store.db_path().to_string(),
+            findings_indexed: 0,
+            nodes_indexed: 0,
+            edges_indexed: 0,
+            node_ids: Vec::new(),
+            edge_ids: Vec::new(),
+        };
+        for sarif in sarif_documents {
+            let report =
+                index_codeql_sarif_as_static_evidence(&evidence_store, workspace.root(), sarif)?;
+            combined.findings_indexed += report.findings_indexed;
+            combined.nodes_indexed += report.nodes_indexed;
+            combined.edges_indexed += report.edges_indexed;
+            combined.node_ids.extend(report.node_ids);
+            combined.edge_ids.extend(report.edge_ids);
+        }
+        Some(combined)
+    } else {
+        None
+    };
+
     let run_id = Uuid::new_v4().to_string();
     store.insert_scan_run(&run_id, target, "running")?;
     for finding in findings {
@@ -557,6 +597,7 @@ fn persist_codeql_findings(
     Ok(Some(CodeqlPersistedRun {
         run_id,
         findings_db: workspace.findings_db_path().display().to_string(),
+        static_evidence,
     }))
 }
 
@@ -8972,6 +9013,34 @@ if [ "$1" = "database" ] && [ "$2" = "analyze" ]; then
                 "region": { "startLine": 9 }
               }
             }
+          ],
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "message": { "text": "request query parameter" },
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": { "uri": "server.js" },
+                          "region": { "startLine": 1 }
+                        }
+                      }
+                    },
+                    {
+                      "message": { "text": "query reaches db.query" },
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": { "uri": "server.js" },
+                          "region": { "startLine": 9 }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
           ]
         }
       ]
@@ -11645,6 +11714,82 @@ OUT
             .and_then(Value::as_str)
             .is_some());
         assert_eq!(store.list_findings(10).unwrap().len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codeql_static_evidence_direct_tool_indexes_whitebox_code_flow() {
+        let temp = tempdir().unwrap();
+        fs::write(temp.path().join("package.json"), "{}\n").unwrap();
+        fs::write(
+            temp.path().join("server.js"),
+            [
+                "const q = req.query.q;",
+                "function load(db) {",
+                "  const prefix = 'select ';",
+                "  const table = 'users';",
+                "  const where = ' where name = ';",
+                "  const sql = prefix + '* from ' + table + where;",
+                "  const suffix = q;",
+                "  const built = sql + suffix;",
+                "  return db.query(built);",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let binary = fake_codeql_binary(temp.path());
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool(
+                "codeql:scan",
+                json!({
+                    "binary": binary.display().to_string(),
+                    "language": "javascript",
+                    "mode": "whitebox-static"
+                }),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(
+            result
+                .pointer("/data/findings/0/staticProofState")
+                .and_then(Value::as_str),
+            Some("signal_only")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/persisted/staticEvidence/findingsIndexed")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+
+        let finding = store.list_findings(10).unwrap().pop().unwrap();
+        let evidence_store = crate::static_evidence::StaticEvidenceStore::open(&workspace).unwrap();
+        let nodes = evidence_store
+            .list_nodes_for_finding(&finding.fingerprint)
+            .unwrap();
+        assert!(nodes.iter().any(|node| {
+            node.kind == crate::static_evidence::StaticEvidenceNodeKind::ScannerSignal
+                && node
+                    .metadata
+                    .pointer("/truePositiveByDefault")
+                    .and_then(Value::as_bool)
+                    == Some(false)
+        }));
+        assert!(nodes
+            .iter()
+            .any(|node| node.kind == crate::static_evidence::StaticEvidenceNodeKind::DataflowStep));
     }
 
     #[test]
