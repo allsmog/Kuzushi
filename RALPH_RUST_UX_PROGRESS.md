@@ -2,12 +2,12 @@
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
 Active story: UX-002 - Delete Or Isolate Legacy Ink UI Code
-Status: UX-002 checks still pass; push remains blocked by DNS/network sandboxing
+Status: UX-002 complete and pushed; UX-003 pending
 
 ## Stage 2 Checklist
 
 - UX-001 Remove Ink/React from runtime CLI packaging: complete; pushed in iteration 5.
-- UX-002 Delete or isolate legacy Ink UI code: implementation complete; push pending.
+- UX-002 Delete or isolate legacy Ink UI code: complete; pushed in iteration 12 as `5e73f6f`.
 - UX-003 Fix shell redraw and prompt overlap: pending.
 - UX-004 Improve exit and unknown command handling: pending.
 - UX-005 Visible startup progress and first-run path: pending.
@@ -337,6 +337,42 @@ Status: UX-002 checks still pass; push remains blocked by DNS/network sandboxing
   - The primary workspace still has the UX-002 slice staged and local `main`
     remains at `80d23a4` because Git metadata writes under `.git` remain
     blocked in this environment.
+
+### Iteration 12 - UX-002 Push Complete
+
+- Task attempted: rebase the isolated UX-002 stack over the newly pushed
+  UX-001 remote commits, rerun focused checks, push the fast-forwarded stack,
+  and record the Stage 2 ordering gate result.
+- Files changed:
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `git fetch origin main`
+  - `git log --oneline --decorate --graph --left-right --cherry-pick origin/main...HEAD`
+  - `git rebase origin/main`
+  - `rg -n "<<<<<<<|=======|>>>>>>>" RALPH_RUST_UX_PROGRESS.md crates/kuzushi-cli/tests/cutover_cli.rs`
+  - `git diff --check`
+  - `git rebase --continue`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-cli --test cutover_cli`
+  - `pnpm exec vitest run tests/cli/legacy-shell-isolation.test.ts`
+  - `pnpm typecheck`
+  - `pnpm exec biome check src/cli/commands/shell.ts tests/cli/legacy-shell-isolation.test.ts src/ui/README.md README.md RELEASING.md docs/rust-migration-status.md`
+  - `cmp -s` checks confirming the primary workspace and rebased isolated clone
+    match for the UX-002 source, test, and docs files
+  - `git push origin HEAD:main`
+- Result: UX-002 is complete and pushed to `origin/main` as
+  `5e73f6f ralph:ux record legacy ink push gate iteration 12`. The next
+  iteration may start UX-003.
+- Remaining work: UX-003 through UX-015.
+- Blockers or repo facts that contradicted this prompt:
+  - The first push attempt reached GitHub but was rejected because remote
+    `main` had advanced with UX-001 commits (`71a45e6`, `795a88f`). Rebasing
+    the isolated UX-002 stack over `origin/main` resolved that.
+  - The isolated clone has no `node_modules`, so the TypeScript checks were run
+    in the primary workspace where the checked UX-002 files matched the rebased
+    clone byte-for-byte. The rebased clone itself passed the Rust checks.
+  - The primary workspace's local `main` ref remains stale at `80d23a4` because
+    direct Git metadata writes under `.git` remain blocked in this environment.
 
 ### Iteration 12 - UX-002 Push Gate
 
