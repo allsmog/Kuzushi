@@ -981,7 +981,25 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         return lines;
     }
 
-    lines.push(header(&["alias", "severity", "location", "title"]));
+    let widths = finding_summary_widths(area.width.saturating_sub(2));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            table_text(
+                &[
+                    "alias",
+                    "severity",
+                    "verdict",
+                    "conf",
+                    "proof/static",
+                    "cwe",
+                    "source",
+                ],
+                &widths,
+            ),
+            theme::subtle(),
+        ),
+    ]));
     for (index, finding) in app.findings.iter().enumerate() {
         let alias = format!("F-{number:04}", number = index + 1);
         let selected = app
@@ -999,20 +1017,62 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         lines.push(Line::from(vec![
             Span::styled(marker, theme::subtle()),
             Span::raw(" "),
-            Span::styled(pad(&alias, 9), theme::accent()),
             Span::styled(
-                pad(finding.severity.as_str(), 10),
-                theme::severity(finding.severity),
+                pad(&alias, widths.first().copied().unwrap_or(8)),
+                theme::accent(),
             ),
+            Span::raw("  "),
             Span::styled(
                 pad(
-                    &fit(&format!("{}:{}", finding.file_path, finding.start_line), 30),
-                    32,
+                    finding.severity.as_str(),
+                    widths.get(1).copied().unwrap_or(8),
                 ),
-                theme::muted(),
+                theme::severity(finding.severity),
             ),
-            Span::raw(fit(&finding.title, value_width(area, 55))),
+            Span::raw("  "),
+            Span::raw(pad(
+                &finding_verdict_label(finding),
+                widths.get(2).copied().unwrap_or(9),
+            )),
+            Span::raw("  "),
+            Span::raw(pad(
+                &finding_confidence_label(finding),
+                widths.get(3).copied().unwrap_or(5),
+            )),
+            Span::raw("  "),
+            Span::raw(pad(
+                &finding_proof_state_label(finding),
+                widths.get(4).copied().unwrap_or(12),
+            )),
+            Span::raw("  "),
+            Span::raw(pad(
+                &finding_cwe_label(finding),
+                widths.get(5).copied().unwrap_or(8),
+            )),
+            Span::raw("  "),
+            Span::raw(fit(
+                &finding_source_label(finding),
+                widths.get(6).copied().unwrap_or(12),
+            )),
         ]));
+        lines.push(indent(
+            muted(&fit(
+                &format!("loc {} | {}", finding_location(finding), finding.title),
+                area.width.saturating_sub(2) as usize,
+            )),
+            2,
+        ));
+        lines.push(indent(
+            muted(&fit(
+                &format!(
+                    "evidence: {} | next: open {}",
+                    finding_evidence_preview(finding),
+                    alias
+                ),
+                area.width.saturating_sub(2) as usize,
+            )),
+            2,
+        ));
     }
 
     lines
@@ -1954,6 +2014,125 @@ fn kb_attachment_widths(width: u16) -> Vec<usize> {
     let gaps = 6;
     let status = total.saturating_sub(id + kind + source + gaps).max(16);
     vec![id, kind, source, status]
+}
+
+fn finding_summary_widths(width: u16) -> Vec<usize> {
+    let total = width as usize;
+    let alias = 8;
+    let severity = 8;
+    let verdict = 9;
+    let confidence = 5;
+    let proof = 12;
+    let cwe = 8;
+    let gaps = 12;
+    let source = total
+        .saturating_sub(alias + severity + verdict + confidence + proof + cwe + gaps)
+        .max(10);
+    vec![alias, severity, verdict, confidence, proof, cwe, source]
+}
+
+fn finding_location(finding: &Finding) -> String {
+    match finding.end_line {
+        Some(end_line) if end_line > finding.start_line => {
+            format!("{}:{}-{}", finding.file_path, finding.start_line, end_line)
+        }
+        _ => format!("{}:{}", finding.file_path, finding.start_line),
+    }
+}
+
+fn finding_verdict_label(finding: &Finding) -> String {
+    match finding
+        .triage
+        .as_ref()
+        .map(|triage| triage.verdict.as_str())
+    {
+        Some("true_positive") => "tp",
+        Some("false_positive") => "fp",
+        Some("needs_review") => "review",
+        Some("by_design") => "by-design",
+        Some(other) => other,
+        None => "untriaged",
+    }
+    .to_string()
+}
+
+fn finding_confidence_label(finding: &Finding) -> String {
+    finding
+        .triage
+        .as_ref()
+        .map(|triage| format!("{:.0}%", (triage.confidence.clamp(0.0, 1.0) * 100.0)))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn finding_proof_state_label(finding: &Finding) -> String {
+    match finding
+        .triage
+        .as_ref()
+        .map(|triage| triage.verdict.as_str())
+    {
+        Some("true_positive") => "triaged-tp",
+        Some("false_positive") => "triaged-fp",
+        Some("needs_review") => "needs-review",
+        Some("by_design") => "by-design",
+        Some(_) | None => "static-sig",
+    }
+    .to_string()
+}
+
+fn finding_cwe_label(finding: &Finding) -> String {
+    extract_cwe(&finding.message)
+        .or_else(|| extract_cwe(&finding.rule_id))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn extract_cwe(value: &str) -> Option<String> {
+    let upper = value.to_ascii_uppercase();
+    for (index, _) in upper.match_indices("CWE") {
+        let mut rest = upper[index + 3..].chars();
+        while matches!(rest.clone().next(), Some('-' | '_' | ' ' | ':')) {
+            rest.next();
+        }
+        let digits = rest
+            .take_while(|ch| ch.is_ascii_digit())
+            .collect::<String>();
+        if !digits.is_empty() {
+            return Some(format!("CWE-{digits}"));
+        }
+    }
+    None
+}
+
+fn finding_source_label(finding: &Finding) -> String {
+    if finding.rule_id.is_empty() || finding.rule_id.starts_with(&finding.tool) {
+        finding.tool.clone()
+    } else {
+        format!("{}:{}", finding.tool, finding.rule_id)
+    }
+}
+
+fn finding_evidence_preview(finding: &Finding) -> String {
+    let lines = finding
+        .message
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+
+    if let Some(evidence) = lines.iter().find_map(|line| {
+        line.strip_prefix("Evidence:")
+            .or_else(|| line.strip_prefix("evidence:"))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }) {
+        return evidence.to_string();
+    }
+
+    lines
+        .iter()
+        .copied()
+        .find(|line| *line != finding.title)
+        .unwrap_or_else(|| lines.first().copied().unwrap_or(&finding.title))
+        .to_string()
 }
 
 fn render_throttle_banner(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
@@ -2910,7 +3089,9 @@ impl SeverityCounts {
 
 #[cfg(test)]
 mod tests {
-    use kuzushi_core::{Finding, OptionScope, OptionTarget, Severity, V2Config};
+    use kuzushi_core::{
+        Finding, OptionScope, OptionTarget, Severity, TriageOutcome, TriageVerdict, V2Config,
+    };
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::Terminal;
@@ -2974,6 +3155,76 @@ mod tests {
 
         assert!(rendered.contains("dangerous sink"));
         assert!(rendered.contains("fingerprint"));
+    }
+
+    #[test]
+    fn renders_dense_findings_rows_at_80_columns() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let mut confirmed = Finding::new_semgrep(
+            "typescript.express.sql-injection",
+            "src/controllers/admin_search.ts",
+            117,
+            Some(119),
+            Severity::High,
+            "SQL injection in admin search\nEvidence: req.query.q flows into db.query without a guard\nCWE: CWE-89",
+        );
+        confirmed.triage = Some(TriageOutcome {
+            verdict: TriageVerdict::TruePositive,
+            confidence: 0.91,
+            rationale: "source and sink are linked in the same handler".to_string(),
+        });
+        let untriaged = Finding::new_tool(
+            "codeql",
+            "js/path-injection",
+            "src/files.ts",
+            22,
+            None,
+            Severity::Medium,
+            "Path traversal candidate\nEvidence: filename reaches fs.readFile",
+        );
+        app.findings = vec![confirmed, untriaged];
+        app.shell_view = ShellView::Findings;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{:?}", buffer);
+
+        for expected in [
+            "alias",
+            "severity",
+            "verdict",
+            "conf",
+            "proof/static",
+            "cwe",
+            "source",
+            "F-0001",
+            "high",
+            "tp",
+            "91%",
+            "triaged-tp",
+            "CWE-89",
+            "semgrep",
+            "loc src/controllers/admin_search.ts:117-119",
+            "SQL injection in admin search",
+            "req.query.q flows into db.query",
+            "next: open F-0001",
+            "F-0002",
+            "untriaged",
+            "static-sig",
+            "codeql",
+        ] {
+            assert!(rendered.contains(expected), "missing {expected}");
+        }
+        for y in 0..24 {
+            let row = buffer_row_text(buffer, 80, y);
+            assert!(
+                row.chars().count() <= 80,
+                "row exceeded 80 columns: {row:?}"
+            );
+        }
+        assert!(!rendered.contains("┌"));
     }
 
     #[test]
