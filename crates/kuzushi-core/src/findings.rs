@@ -583,6 +583,93 @@ impl FindingListReport {
     }
 }
 
+/// Persisted form of a `VerificationOutcome`. Lives here rather than in
+/// `crate::verify` to keep the findings store independent of verifier internals.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedVerification {
+    pub proof_level: u8,
+    pub proof_verdict: PersistedProofVerdict,
+    pub backend: PersistedSandboxBackend,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub harness_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crash_evidence: Option<String>,
+    pub duration_ms: u64,
+    pub cost_usd: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PersistedProofVerdict {
+    Exploited,
+    NotReproduced,
+    HarnessFailedToBuild,
+    InfrastructureError,
+    LanguageUnsupportedYet,
+    InsufficientFindingDetail,
+}
+
+impl PersistedProofVerdict {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Exploited => "exploited",
+            Self::NotReproduced => "not_reproduced",
+            Self::HarnessFailedToBuild => "harness_failed_to_build",
+            Self::InfrastructureError => "infrastructure_error",
+            Self::LanguageUnsupportedYet => "language_unsupported_yet",
+            Self::InsufficientFindingDetail => "insufficient_finding_detail",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(value: &str) -> Option<Self> {
+        Some(match value {
+            "exploited" => Self::Exploited,
+            "not_reproduced" => Self::NotReproduced,
+            "harness_failed_to_build" => Self::HarnessFailedToBuild,
+            "infrastructure_error" => Self::InfrastructureError,
+            "language_unsupported_yet" => Self::LanguageUnsupportedYet,
+            "insufficient_finding_detail" => Self::InsufficientFindingDetail,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PersistedSandboxBackend {
+    Bwrap,
+    Podman,
+    Plain,
+}
+
+impl PersistedSandboxBackend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bwrap => "bwrap",
+            Self::Podman => "podman",
+            Self::Plain => "plain",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(value: &str) -> Option<Self> {
+        Some(match value {
+            "bwrap" => Self::Bwrap,
+            "podman" => Self::Podman,
+            "plain" => Self::Plain,
+            _ => return None,
+        })
+    }
+}
+
 pub fn format_finding_alias(index: usize) -> String {
     format!("F-{:04}", index + 1)
 }
@@ -717,6 +804,23 @@ impl FindingStore {
               on patch_results(fingerprint, created_at desc);
             create index if not exists idx_patch_results_repo_status
               on patch_results(repo, status);
+
+            create table if not exists verifications (
+              id integer primary key autoincrement,
+              finding_id integer not null references findings(id) on delete cascade,
+              proof_level integer not null,
+              proof_verdict text not null,
+              backend text not null,
+              language text,
+              harness_path text,
+              crash_evidence text,
+              duration_ms integer not null default 0,
+              cost_usd real not null default 0.0,
+              notes_json text,
+              created_at text not null
+            );
+            create index if not exists idx_verifications_finding
+              on verifications(finding_id, created_at desc);
             "#,
         )?;
         ensure_column(
@@ -819,6 +923,83 @@ impl FindingStore {
             ],
         )?;
         Ok(())
+    }
+
+    /// Persist an empirical verification outcome alongside its finding.
+    /// Calls append rows so improved harnesses can supersede old observations.
+    pub fn save_verification(
+        &self,
+        finding_id: i64,
+        record: &PersistedVerification,
+    ) -> Result<i64> {
+        let notes_json = serde_json::to_string(&record.notes)
+            .context("Could not serialize verification notes")?;
+        self.conn.execute(
+            r#"
+            insert into verifications(
+              finding_id, proof_level, proof_verdict, backend, language,
+              harness_path, crash_evidence, duration_ms, cost_usd,
+              notes_json, created_at
+            )
+            values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            "#,
+            params![
+                finding_id,
+                record.proof_level as i64,
+                record.proof_verdict.as_str(),
+                record.backend.as_str(),
+                record.language.as_deref(),
+                record.harness_path.as_deref(),
+                record.crash_evidence.as_deref(),
+                record.duration_ms as i64,
+                record.cost_usd,
+                notes_json,
+                now_isoish(),
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn get_latest_verification(
+        &self,
+        finding_id: i64,
+    ) -> Result<Option<PersistedVerification>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            select proof_level, proof_verdict, backend, language,
+                   harness_path, crash_evidence, duration_ms, cost_usd,
+                   notes_json, created_at
+            from verifications
+            where finding_id = ?1
+            order by created_at desc, id desc
+            limit 1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![finding_id])?;
+        if let Some(row) = rows.next()? {
+            let notes_json: Option<String> = row.get(8)?;
+            let notes: Vec<String> = notes_json
+                .as_deref()
+                .and_then(|value| serde_json::from_str(value).ok())
+                .unwrap_or_default();
+            let proof_verdict: String = row.get(1)?;
+            let backend: String = row.get(2)?;
+            return Ok(Some(PersistedVerification {
+                proof_level: row.get::<_, i64>(0)? as u8,
+                proof_verdict: PersistedProofVerdict::from_str(&proof_verdict)
+                    .unwrap_or(PersistedProofVerdict::NotReproduced),
+                backend: PersistedSandboxBackend::from_str(&backend)
+                    .unwrap_or(PersistedSandboxBackend::Plain),
+                language: row.get(3)?,
+                harness_path: row.get(4)?,
+                crash_evidence: row.get(5)?,
+                duration_ms: row.get::<_, i64>(6)? as u64,
+                cost_usd: row.get(7)?,
+                notes,
+                created_at: row.get(9)?,
+            }));
+        }
+        Ok(None)
     }
 
     pub fn insert_patch_result(&self, result: &PatchResult) -> Result<()> {

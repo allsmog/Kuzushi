@@ -27,6 +27,7 @@ pub mod static_registry;
 pub mod systems_hunt;
 pub mod threat_model;
 pub mod variant_ndiff;
+pub mod verify;
 pub mod whitebox_static;
 pub mod whitebox_suppressions;
 pub mod workspace;
@@ -130,6 +131,7 @@ pub use variant_ndiff::{
     derive_whitebox_variant_patterns, hunt_whitebox_static_variants, WhiteboxVariantPattern,
     WhiteboxVariantSearchReport,
 };
+pub use verify::{verify_finding, ProofVerdict, VerificationOutcome, VerifyOptions};
 pub use whitebox_static::{
     agent_tool_policy_for_input, analysis_mode_from_input, apply_whitebox_static_sast_policy,
     default_whitebox_static_agent_tool_policy, mark_whitebox_static_findings,
@@ -145,6 +147,16 @@ pub use whitebox_suppressions::{
     WhiteboxStaleSuppression, WhiteboxSuppressionEvidence, WhiteboxSuppressionMatch,
     WhiteboxSuppressionRecord, WhiteboxSuppressionReport, WhiteboxSuppressionScope,
 };
+/// Code-index facade and routing primitives, re-exported so core callers
+/// do not need direct dependencies on the local MCP helper crates.
+pub mod code_index {
+    pub use kuzushi_codeindex::{
+        Backend, BackendCapability, FilePosition, IndexFacade, McpClient, Query, RoutingTable,
+    };
+    pub use kuzushi_mcp_common::schema::{
+        EdgeKind, FileSpan, Method, Position, Range, Symbol, SymbolKind,
+    };
+}
 pub use workspace::{
     export_workspace_findings, WorkspaceExportFormat, WorkspaceFindingsExport, WorkspaceTarget,
 };

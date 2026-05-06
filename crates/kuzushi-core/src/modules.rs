@@ -435,6 +435,7 @@ impl ModuleRegistry {
             "sast:scan" => run_sast_scan(input, ctx, runtime),
             "triage:run" => run_triage(input, ctx, runtime),
             "verify:finding" => run_verify_finding(input, ctx, runtime),
+            "verify:exploit" => run_verify_exploit(input, ctx),
             "patch:finding" => run_patch_finding(input, ctx, runtime),
             "threat-model:build"
             | "threat-model:read"
@@ -5733,6 +5734,84 @@ fn run_verify_finding(
     }))
 }
 
+/// Empirical exploit-gated verify: scaffold a sandboxed harness from the
+/// finding location and persist the observed proof level.
+fn run_verify_exploit(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let workspace = ctx.workspace.context(
+        "verify:exploit needs an active workspace. Pass --target <repo> or start the shell with --target.",
+    )?;
+    let store = ctx
+        .findings_store
+        .context("verify:exploit requires a findings store for the active workspace")?;
+
+    let fingerprint = match input.get("fingerprint") {
+        Some(Value::String(value)) if !value.trim().is_empty() => value.trim().to_string(),
+        Some(_) => anyhow::bail!("verify:exploit fingerprint must be a non-empty string"),
+        None => anyhow::bail!("verify:exploit requires a fingerprint"),
+    };
+    let trust_plain_backend = input
+        .get("trustPlainBackend")
+        .or_else(|| input.get("trust_plain_backend"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let timeout_ms = input
+        .get("timeoutMs")
+        .or_else(|| input.get("timeout_ms"))
+        .and_then(Value::as_u64)
+        .unwrap_or(60_000);
+
+    let Some(finding) = store.get_finding_by_reference(&fingerprint)? else {
+        return Ok(json!({
+            "ok": false,
+            "output": format!("[-] No finding with fingerprint '{}'.", fingerprint),
+        }));
+    };
+
+    let outcome = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("verify:exploit could not start a tokio runtime")?
+        .block_on(crate::verify::verify_finding(
+            &finding,
+            crate::verify::VerifyOptions {
+                backend: None,
+                timeout_ms,
+                trust_plain_backend,
+            },
+        ))?;
+
+    let mut persisted_id = None;
+    if let Some(finding_id) = finding.id {
+        let record = outcome.to_persisted();
+        match store.save_verification(finding_id, &record) {
+            Ok(id) => persisted_id = Some(id),
+            Err(error) => eprintln!(
+                "[verify:exploit] could not persist verification for finding {}: {error}",
+                finding.fingerprint
+            ),
+        }
+    }
+
+    let summary = format!(
+        "[+] verify:exploit  proof_level={}  verdict={}  backend={:?}  duration_ms={}",
+        outcome.proof_level,
+        outcome.proof_verdict.as_str(),
+        outcome.backend,
+        outcome.duration_ms
+    );
+    let mut response = crate::verify::to_tool_json(&finding, &outcome);
+    if let Some(obj) = response.as_object_mut() {
+        obj.insert("output".to_string(), Value::String(summary));
+        obj.insert("costUsd".to_string(), json!(outcome.cost_usd));
+        if let Some(id) = persisted_id {
+            obj.insert("verificationRowId".to_string(), json!(id));
+        }
+    }
+
+    let _ = workspace;
+    Ok(response)
+}
+
 fn build_verify_prompt(
     finding: &Finding,
     triage: &TriageOutcome,
@@ -8096,11 +8175,33 @@ fn verify_module() -> BuiltinModule {
         "Verify",
         ModuleKind::Offense,
         "Exploitability verification through proof-of-concept construction and sandboxed execution.",
-        vec![tool_with_options(
-            "verify:finding",
-            "Verify whether a finding is exploitable.",
-            vec![fingerprint_option(), model_option()],
-        )],
+        vec![
+            tool_with_options(
+                "verify:finding",
+                "Verify whether a finding is exploitable.",
+                vec![fingerprint_option(), model_option()],
+            ),
+            tool_with_options(
+                "verify:exploit",
+                "Empirically verify a finding by running a sandboxed harness and recording the observed proof level.",
+                vec![
+                    fingerprint_option(),
+                    opt(
+                        "timeoutMs",
+                        OptionType::Int,
+                        "Sandbox execution timeout in milliseconds.",
+                    )
+                    .default(json!(60000)),
+                    opt(
+                        "trustPlainBackend",
+                        OptionType::Bool,
+                        "Allow the non-isolating plain backend to promote proof level 4.",
+                    )
+                    .advanced()
+                    .default(json!(false)),
+                ],
+            ),
+        ],
         vec![dag("verify:finding", "verification", &["triage:run"])],
     )
 }
