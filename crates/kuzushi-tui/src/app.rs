@@ -3800,6 +3800,9 @@ impl ShellApp {
 
     fn request_exit(&mut self) {
         self.cancel_active_scan();
+        if !self.should_quit {
+            self.log("system", "exit requested; closing shell");
+        }
         self.should_quit = true;
     }
 

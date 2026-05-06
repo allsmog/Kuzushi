@@ -50,7 +50,7 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     let max_view_height = area.height.saturating_sub(fixed_height).max(1);
     let view_height = (view_lines.len() as u16).clamp(1, max_view_height);
 
-    let mut constraints = vec![Constraint::Length(view_height)];
+    let mut constraints = vec![Constraint::Length(view_height), Constraint::Min(0)];
     if throttle_height > 0 {
         constraints.push(Constraint::Length(throttle_height));
     }
@@ -59,9 +59,6 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     }
     if keybind_height > 0 {
         constraints.push(Constraint::Length(keybind_height));
-    }
-    if transcript_height > 0 {
-        constraints.push(Constraint::Length(transcript_height));
     }
     if budget_height > 0 {
         constraints.push(Constraint::Length(budget_height));
@@ -72,8 +69,10 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     if threat_patch_height > 0 {
         constraints.push(Constraint::Length(threat_patch_height));
     }
+    if transcript_height > 0 {
+        constraints.push(Constraint::Length(transcript_height));
+    }
     constraints.push(Constraint::Length(prompt_height));
-    constraints.push(Constraint::Min(0));
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -82,6 +81,7 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
 
     let mut index = 0;
     render_lines(frame, chunks[index], view_lines);
+    index += 1;
     index += 1;
 
     if throttle_height > 0 {
@@ -96,10 +96,6 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         render_keybind_footer(frame, chunks[index], app);
         index += 1;
     }
-    if transcript_height > 0 {
-        render_transcript(frame, chunks[index], app);
-        index += 1;
-    }
     if budget_height > 0 {
         render_cost_cap_halt(frame, chunks[index], app);
         index += 1;
@@ -110,6 +106,10 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     }
     if threat_patch_height > 0 {
         render_threat_patch_card(frame, chunks[index], app);
+        index += 1;
+    }
+    if transcript_height > 0 {
+        render_transcript(frame, chunks[index], app);
         index += 1;
     }
     render_prompt(frame, chunks[index], app);
@@ -2764,6 +2764,7 @@ impl SeverityCounts {
 mod tests {
     use kuzushi_core::{Finding, OptionScope, OptionTarget, Severity, V2Config};
     use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
     use ratatui::Terminal;
 
     use super::*;
@@ -2821,6 +2822,59 @@ mod tests {
 
         assert!(rendered.contains("kuzushi>"));
         assert!(!rendered.contains("prompt"));
+    }
+
+    #[test]
+    fn keeps_command_log_directly_above_bottom_prompt_at_80_columns() {
+        let backend = TestBackend::new(80, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.log(
+            "error",
+            "scanner failed while reading src/really/long/path/that/must/not_overlap.rs",
+        );
+        app.log(
+            "result",
+            "next action: inspect configuration and rerun scan with a narrower target",
+        );
+        app.input = "run sast:scan {\"severity\":[\"high\"],\"triage\":true}".to_string();
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let prompt_row = buffer_row_text(buffer, 80, 11);
+        let log_row = buffer_row_text(buffer, 80, 10);
+
+        assert!(prompt_row.trim_start().starts_with("kuzushi>"));
+        assert!(prompt_row.contains("triage"));
+        assert!(!prompt_row.contains("result"));
+        assert!(log_row.contains("result"));
+        assert!(!log_row.contains("kuzushi>"));
+        assert!(!format!("{:?}", buffer).contains("┌"));
+    }
+
+    #[test]
+    fn renders_exit_commands_before_closing() {
+        for command in ["/exit", "exit", "/exitj"] {
+            let backend = TestBackend::new(80, 12);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let mut app = ShellApp::new(V2Config::default(), None);
+
+            app.submit_line(command);
+            assert!(app.should_quit, "{command} should request shell shutdown");
+
+            terminal.draw(|frame| render_app(frame, &app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let command_row = buffer_row_text(buffer, 80, 9);
+            let exit_row = buffer_row_text(buffer, 80, 10);
+            let prompt_row = buffer_row_text(buffer, 80, 11);
+
+            assert!(
+                command_row.contains(command),
+                "{command} should remain visible in the transcript"
+            );
+            assert!(exit_row.contains("exit requested; closing shell"));
+            assert!(prompt_row.trim_start().starts_with("kuzushi>"));
+        }
     }
 
     #[test]
@@ -3258,6 +3312,14 @@ mod tests {
             assert!(rendered.contains(expected), "missing {expected}");
             assert!(!rendered.contains("┌"));
         }
+    }
+
+    fn buffer_row_text(buffer: &Buffer, width: u16, y: u16) -> String {
+        let mut text = String::new();
+        for x in 0..width {
+            text.push_str(buffer[(x, y)].symbol());
+        }
+        text
     }
 
     fn assert_strict_plain_80(rendered: &str) {

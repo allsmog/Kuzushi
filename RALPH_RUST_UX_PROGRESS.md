@@ -1,14 +1,14 @@
 # Ralph Rust UX Progress
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
-Active story: UX-002 - Delete Or Isolate Legacy Ink UI Code
-Status: UX-002 complete and pushed; UX-003 pending
+Active story: UX-003 - Fix Shell Redraw And Prompt Overlap
+Status: UX-003 implementation complete; commit/push pending
 
 ## Stage 2 Checklist
 
 - UX-001 Remove Ink/React from runtime CLI packaging: complete; pushed in iteration 5.
 - UX-002 Delete or isolate legacy Ink UI code: complete; pushed in iteration 12 as `5e73f6f`.
-- UX-003 Fix shell redraw and prompt overlap: pending.
+- UX-003 Fix shell redraw and prompt overlap: implementation complete; commit/push pending.
 - UX-004 Improve exit and unknown command handling: pending.
 - UX-005 Visible startup progress and first-run path: pending.
 - UX-006 Rust doctor / preflight: pending.
@@ -337,6 +337,37 @@ Status: UX-002 complete and pushed; UX-003 pending
   - The primary workspace still has the UX-002 slice staged and local `main`
     remains at `80d23a4` because Git metadata writes under `.git` remain
     blocked in this environment.
+
+### Iteration 13 - UX-003
+
+- Task attempted: anchor the Rust Ratatui shell prompt at the bottom, keep the
+  command transcript directly above it, prevent long input/output rows from
+  sharing a row, and make `/exit`, `exit`, and `/exitj` visibly render before
+  shutdown.
+- Files changed:
+  - `crates/kuzushi-tui/src/renderer.rs`
+  - `crates/kuzushi-tui/src/app.rs`
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-tui renderer::tests::keeps_command_log_directly_above_bottom_prompt_at_80_columns renderer::tests::renders_exit_commands_before_closing renderer::tests::renders_long_prompt_on_single_row` (invalid Cargo invocation; Cargo accepts one test-name filter)
+  - `cargo test -p kuzushi-tui renderer::tests`
+  - `cargo test -p kuzushi-tui exit`
+  - `cargo test -p kuzushi-tui`
+  - `cargo fmt --all --check`
+  - `git diff --check`
+- Result: implementation complete. The renderer now places the flexible spacer
+  between the main view and the lower chrome instead of after the prompt, and
+  renders the transcript after status/keybind/cards so the latest command log
+  remains immediately above the prompt. Exit commands now add a visible
+  `system` transcript line before `should_quit` is set. Focused Ratatui tests
+  cover 80-column prompt/log placement, long input separation, and visible
+  `/exit`, `exit`, and `/exitj` rendering.
+- Remaining work: commit and push UX-003, then start UX-004.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary workspace still has the previously pushed UX-002 slice staged
+    because local Git metadata writes under `.git` remain blocked in this
+    environment and local `main` remains stale at `80d23a4`.
 
 ### Iteration 12 - UX-002 Push Complete
 
