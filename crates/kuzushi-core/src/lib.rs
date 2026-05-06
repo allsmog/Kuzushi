@@ -96,8 +96,8 @@ pub use findings::{
 };
 pub use full_mode_multi::{
     cost_summary as full_mode_cost_summary, plan as full_mode_plan, report_to_tool_json,
-    run as run_full_mode_multi, ChunkPlan, CostSummary, FileBucket, FullModeConfig,
-    FullModeLanguage, FullModePlan, FullModeReport,
+    run as run_full_mode_multi, run_with_runtime as run_full_mode_multi_with_runtime, ChunkPlan,
+    CostSummary, FileBucket, FullModeConfig, FullModeLanguage, FullModePlan, FullModeReport,
 };
 pub use iac_scan::{
     scan_iac, IacScanFinding, IacScanKind, IacScanOptions, IacScanReport, IacScanScanner,

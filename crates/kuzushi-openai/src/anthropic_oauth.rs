@@ -15,8 +15,9 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolPolicy, ModelTier, TriageOutcome,
-    TriageRequest, TriageVerdict,
+    AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolLoopRequest,
+    AgentToolPolicy, LoopHistoryEntry, ModelTier, ToolCall, TriageOutcome, TriageRequest,
+    TriageVerdict,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -285,6 +286,16 @@ enum ApiContentBlock {
     Text {
         text: String,
     },
+    /// `tool_use` content block emitted by the model when it wants
+    /// to invoke one of the tools the request supplied. Mirrors
+    /// `kuzushi_core::ToolCall`. The id is opaque to us — we echo
+    /// it back in the matching `tool_result` block.
+    ToolUse {
+        id: String,
+        name: String,
+        #[serde(default)]
+        input: Value,
+    },
     #[serde(other)]
     Other,
 }
@@ -387,6 +398,197 @@ impl AgentRuntime for AnthropicOAuthRuntime {
             cost_usd: call_cost,
         })
     }
+
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
+    fn next_step_blocking(
+        &self,
+        request: &AgentToolLoopRequest,
+        history: &[LoopHistoryEntry],
+    ) -> Result<AgentLoopStep> {
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                tokio::task::block_in_place(|| handle.block_on(self.next_step(request, history)))
+            }
+            Err(_) => {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .context("AnthropicOAuthRuntime: could not start a tokio runtime")?;
+                runtime.block_on(self.next_step(request, history))
+            }
+        }
+    }
+}
+
+impl AnthropicOAuthRuntime {
+    /// One step of the Anthropic tool-use loop. The model receives
+    /// the running `history` as `messages`, the supplied `tools`,
+    /// and either:
+    ///
+    /// - emits a `tool_use` content block (`stop_reason="tool_use"`)
+    ///   → returned as [`AgentLoopStep::ToolCall`]; the caller runs
+    ///   the tool and feeds the result back via the next iteration;
+    /// - emits one or more `text` blocks (`stop_reason="end_turn"`)
+    ///   → returned as [`AgentLoopStep::Final`] with parsed JSON
+    ///   payload (when present) and per-step cost.
+    ///
+    /// This is the native equivalent of the pi-agent-core bridge's
+    /// `next-step` envelope. Operators on an OAuth-only host can now
+    /// drive `triage:deep` and other tool-augmented loops without
+    /// installing Node.js.
+    async fn next_step(
+        &self,
+        request: &AgentToolLoopRequest,
+        history: &[LoopHistoryEntry],
+    ) -> Result<AgentLoopStep> {
+        let model = strip_provider_prefix(&request.model);
+        let messages = build_messages_for_anthropic(&request.prompt, history);
+        let tools_spec: Vec<Value> = request
+            .tools
+            .iter()
+            .map(|t| {
+                json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": t.input_schema,
+                })
+            })
+            .collect();
+
+        let body = json!({
+            "model": model,
+            "max_tokens": self.max_tokens,
+            "system": request.system_prompt,
+            "messages": messages,
+            "tools": tools_spec,
+        });
+
+        let resp = self
+            .client
+            .post(format!("{}/v1/messages", self.base_url))
+            .header("authorization", format!("Bearer {}", self.token))
+            .header("anthropic-version", &self.anthropic_version)
+            .header("anthropic-beta", &self.anthropic_beta)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .context("Anthropic OAuth: could not send /v1/messages (next-step)")?;
+
+        let status = resp.status();
+        let raw = resp
+            .text()
+            .await
+            .context("Anthropic OAuth: could not read next-step response body")?;
+        if !status.is_success() {
+            anyhow::bail!("Anthropic OAuth next-step: HTTP {status}: {raw}");
+        }
+        let parsed: ApiResponse = serde_json::from_str(&raw).with_context(|| {
+            format!("Anthropic OAuth: could not parse next-step response: {raw}")
+        })?;
+
+        let cost_usd = parsed
+            .usage
+            .as_ref()
+            .map(|u| estimate_cost_usd(&model, u.input_tokens, u.output_tokens))
+            .unwrap_or(0.0);
+
+        // The model may emit *both* text and a tool_use block in the
+        // same turn (e.g. brief narration before a tool call). We
+        // honour `stop_reason` as the disambiguator: when it's
+        // `tool_use` we return the first tool_use block as the next
+        // step; otherwise we treat the response as terminal.
+        let stop_reason = parsed.stop_reason.as_deref().unwrap_or("end_turn");
+        if stop_reason == "tool_use" {
+            // Pick the first tool_use block. If there are several
+            // we'd need parallel tool calls — Anthropic's
+            // documentation supports them but our `AgentLoopStep`
+            // shape currently only carries one. Multi-call support
+            // is a follow-up on the trait.
+            let call = parsed.content.iter().find_map(|block| match block {
+                ApiContentBlock::ToolUse { id, name, input } => Some(ToolCall {
+                    name: name.clone(),
+                    input: input.clone(),
+                    call_id: id.clone(),
+                }),
+                _ => None,
+            });
+            match call {
+                Some(call) => Ok(AgentLoopStep::ToolCall { call }),
+                None => anyhow::bail!(
+                    "Anthropic OAuth next-step: stop_reason=tool_use but no tool_use block: {raw}"
+                ),
+            }
+        } else {
+            let text = parsed
+                .content
+                .iter()
+                .filter_map(|block| match block {
+                    ApiContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("");
+            let structured = maybe_parse_json(&text);
+            Ok(AgentLoopStep::Final {
+                text,
+                structured,
+                cost_usd: Some(cost_usd),
+            })
+        }
+    }
+}
+
+/// Render a tool-loop transcript (history + initial prompt) as the
+/// `messages` array Anthropic's API expects. Mirrors the bridge's
+/// equivalent in `pi_agent_core::build_messages_for_anthropic`.
+fn build_messages_for_anthropic(initial_prompt: &str, history: &[LoopHistoryEntry]) -> Vec<Value> {
+    let mut messages = Vec::with_capacity(history.len() + 1);
+    messages.push(json!({
+        "role": "user",
+        "content": initial_prompt,
+    }));
+    for entry in history {
+        match entry {
+            LoopHistoryEntry::AssistantToolCall(call) => {
+                messages.push(json!({
+                    "role": "assistant",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": call.call_id,
+                        "name": call.name,
+                        "input": call.input,
+                    }],
+                }));
+            }
+            LoopHistoryEntry::ToolResult(result) => {
+                let content_str = match &result.output {
+                    Value::String(s) => s.clone(),
+                    other => serde_json::to_string(other)
+                        .unwrap_or_else(|_| "<non-serialisable>".to_string()),
+                };
+                messages.push(json!({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": result.call_id,
+                        "content": content_str,
+                        "is_error": result.is_error,
+                    }],
+                }));
+            }
+            LoopHistoryEntry::AssistantText(text) => {
+                messages.push(json!({
+                    "role": "assistant",
+                    "content": text,
+                }));
+            }
+        }
+    }
+    messages
 }
 
 fn build_triage_prompt(request: &TriageRequest) -> Result<String> {
@@ -580,5 +782,73 @@ mod tests {
         // Ask for Cheap on an Opus-configured model — should down-shift.
         let model = runtime.model_for_tier(ModelTier::Cheap, "anthropic:claude-opus-4-7");
         assert!(model.contains("haiku"));
+    }
+
+    #[test]
+    fn supports_tools_returns_true_for_anthropic_oauth_runtime() {
+        // OAuth-only operators should be able to drive `triage:deep`
+        // without the pi-agent-core bridge installed.
+        let runtime = AnthropicOAuthRuntime::new(AnthropicOAuthRuntimeOptions::from_token(
+            "sk-ant-oat01-XYZ",
+        ))
+        .unwrap();
+        assert!(runtime.supports_tools());
+    }
+
+    #[test]
+    fn build_messages_emits_tool_use_and_tool_result_blocks_for_history() {
+        // Verifies the message-array shape Anthropic expects when a
+        // tool-use turn round-trips through the loop:
+        //   user prompt → assistant tool_use → user tool_result.
+        use kuzushi_core::ToolResult;
+        let history = vec![
+            LoopHistoryEntry::AssistantToolCall(ToolCall {
+                name: "read_source".to_string(),
+                input: json!({"file": "src/x.c", "start_line": 1, "end_line": 20}),
+                call_id: "tool-1".to_string(),
+            }),
+            LoopHistoryEntry::ToolResult(ToolResult {
+                call_id: "tool-1".to_string(),
+                output: json!({"text": "// ...\n"}),
+                is_error: false,
+            }),
+        ];
+        let msgs = build_messages_for_anthropic("audit this finding", &history);
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[0]["role"], "user");
+        assert_eq!(msgs[0]["content"], "audit this finding");
+
+        assert_eq!(msgs[1]["role"], "assistant");
+        let assistant_blocks = msgs[1]["content"].as_array().unwrap();
+        assert_eq!(assistant_blocks.len(), 1);
+        assert_eq!(assistant_blocks[0]["type"], "tool_use");
+        assert_eq!(assistant_blocks[0]["id"], "tool-1");
+        assert_eq!(assistant_blocks[0]["name"], "read_source");
+
+        assert_eq!(msgs[2]["role"], "user");
+        let user_blocks = msgs[2]["content"].as_array().unwrap();
+        assert_eq!(user_blocks[0]["type"], "tool_result");
+        assert_eq!(user_blocks[0]["tool_use_id"], "tool-1");
+        assert_eq!(user_blocks[0]["is_error"], false);
+        // Non-string outputs serialise to JSON inside the `content`
+        // string — the API accepts a string here.
+        let content_str = user_blocks[0]["content"].as_str().unwrap();
+        assert!(
+            content_str.contains("// ...") || content_str.contains("\"text\""),
+            "expected tool result content to be JSON-stringified; got: {content_str}"
+        );
+    }
+
+    #[test]
+    fn build_messages_falls_through_to_text_only_history() {
+        // No tool calls — just a user prompt and an assistant text
+        // reply. Verify the simple round-trip.
+        let history = vec![LoopHistoryEntry::AssistantText(
+            "partial answer".to_string(),
+        )];
+        let msgs = build_messages_for_anthropic("what next?", &history);
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[1]["role"], "assistant");
+        assert_eq!(msgs[1]["content"], "partial answer");
     }
 }

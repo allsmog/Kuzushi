@@ -361,6 +361,27 @@ pub fn run(
     spend: Option<&SpendLimiter>,
     cfg: &FullModeConfig,
 ) -> Result<FullModeReport> {
+    let model = runtime
+        .resolve_model(AgentRole::FullModeMulti, 0, None)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no model configured for full_mode_multi role: \
+                 set models.toml [roles.full_mode_multi] or `setg MODEL_FULL_MODE_MULTI`"
+            )
+        })?;
+    run_with_runtime(runtime as &dyn AgentRuntime, spend, cfg, model)
+}
+
+/// Routing-free entrypoint for callers that hold `&dyn AgentRuntime`
+/// (e.g. the `audit:full-mode` tool). Behaves identically to
+/// [`run`] except the model is supplied directly instead of resolved
+/// through `AgentRouter`.
+pub fn run_with_runtime(
+    runtime: &dyn AgentRuntime,
+    spend: Option<&SpendLimiter>,
+    cfg: &FullModeConfig,
+    model: String,
+) -> Result<FullModeReport> {
     let plan = plan(cfg).context("full_mode_multi: planning failed")?;
 
     if cfg.dry_run {
@@ -373,15 +394,6 @@ pub fn run(
             dry_run: true,
         });
     }
-
-    let model = runtime
-        .resolve_model(AgentRole::FullModeMulti, 0, None)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "no model configured for full_mode_multi role: \
-                 set models.toml [roles.full_mode_multi] or `setg MODEL_FULL_MODE_MULTI`"
-            )
-        })?;
     let system_prompt = match cfg.language {
         FullModeLanguage::C => SYSTEM_PROMPT_C,
         FullModeLanguage::Unknown => SYSTEM_PROMPT_UNKNOWN,

@@ -1129,7 +1129,110 @@ pub(crate) fn plan_c_call_expression(sig: &CSignature) -> Option<CCallPlan> {
         }
     }
 
+    // 3+ args: try the (buf, size_t, T) style first, then fall back to
+    // a per-arg default. The fallback fills pointer args with NULL and
+    // scalar args with 0; the data buffer flows into the first
+    // pointer-to-byte argument and `len` into the first integer arg
+    // when one is available. This covers most "writes-into-buf" sinks
+    // (e.g. xmlSnprintfElements: `void(char *buf, int size,
+    // xmlNodePtr node, int glob)` planned as `(local_buf, sizeof_buf,
+    // NULL, 0)` so the harness compiles even though the call returns
+    // early on a NULL node — better than the previous empty stub.
+    if (3..=6).contains(&sig.args.len()) {
+        let normalized: Vec<String> = sig.args.iter().map(|a| normalize_c_type(a)).collect();
+
+        // Specific pattern: leading (writeable_buf, int|size_t) means
+        // the suspect writes into a caller-provided buffer with a
+        // size cap. Allocate a small stack buffer in the trampoline
+        // and pass its size; remaining args take per-type defaults.
+        let leading_buf_size = matches!(
+            normalized[0].as_str(),
+            "char *" | "char*" | "uint8_t *" | "uint8_t*" | "void *" | "void*"
+        ) && matches!(
+            normalized[1].as_str(),
+            "size_t"
+                | "int"
+                | "unsigned"
+                | "unsigned int"
+                | "uint32_t"
+                | "long"
+                | "long long"
+                | "uint64_t"
+        );
+        if leading_buf_size {
+            let mut argv: Vec<String> =
+                vec!["kuzushi_trampoline_buf".to_string(), "(int)len".to_string()];
+            for ty in normalized.iter().skip(2) {
+                argv.push(default_c_arg_for(ty));
+            }
+            // The buffer declaration is prepended to the call line so
+            // the trampoline gets a real allocation. `len` in the
+            // outer harness already feeds in attacker-controlled
+            // length; the destination is undersized (8 bytes) so any
+            // unbounded write crosses into ASan-instrumented redzone.
+            let body = format!(
+                "    char kuzushi_trampoline_buf[8] = {{0}};\n    {bind}{name}({args});\n",
+                bind = bind,
+                name = sig.fn_name,
+                args = argv.join(", "),
+            );
+            return Some(CCallPlan {
+                fn_name: sig.fn_name.clone(),
+                call_expression: body,
+                call_kind: "(buf, size, …) writeable-buffer call with stack trampoline",
+            });
+        }
+
+        // Generic fallback: per-type defaults. Always succeeds because
+        // every C type maps to a pointer-NULL or zero literal.
+        let argv: Vec<String> = normalized.iter().map(|ty| default_c_arg_for(ty)).collect();
+        return Some(CCallPlan {
+            fn_name: sig.fn_name.clone(),
+            call_expression: call(&format!("{}({})", sig.fn_name, argv.join(", "))),
+            call_kind: "n-arg call with per-type defaults",
+        });
+    }
+
     None
+}
+
+/// Conservative per-type default for the n-arg call planner. Pointer
+/// types resolve to a typed cast of NULL so the call compiles even
+/// when the suspect's header isn't in scope; scalar types resolve to
+/// `0` or `(T)len` when the type is integral. The caller-supplied
+/// `data` pointer is funneled in via specific patterns, not this
+/// fallback — so this helper deliberately does not return `data`.
+fn default_c_arg_for(normalized_ty: &str) -> String {
+    // Detect typedef-flavoured pointers like `xmlNodePtr`,
+    // `xmlDocPtr`, `FILE` (struct via pointer typedef), `pthread_t`
+    // — anything matching the `Ptr` suffix or `Handle` convention
+    // that libxml2/glib/win32 use. Also mark explicit `*` pointers.
+    let is_ptr_like = normalized_ty.contains('*')
+        || normalized_ty.ends_with("Ptr")
+        || normalized_ty.ends_with("ptr")
+        || normalized_ty.ends_with("Handle")
+        || normalized_ty.ends_with("handle");
+    if is_ptr_like {
+        return format!("({normalized_ty})NULL");
+    }
+    match normalized_ty {
+        // Integral types — zero. `len` is reserved for the
+        // explicit (buf, len) plumbing.
+        "size_t" | "ssize_t" | "ptrdiff_t" => "(size_t)0".to_string(),
+        "int" | "signed" | "signed int" => "0".to_string(),
+        "unsigned" | "unsigned int" | "uint32_t" => "0u".to_string(),
+        "uint8_t" | "int8_t" | "char" | "signed char" | "unsigned char" => "0".to_string(),
+        "uint16_t" | "int16_t" | "short" | "unsigned short" => "0".to_string(),
+        "uint64_t" | "int64_t" | "long" | "long long" | "unsigned long" | "unsigned long long" => {
+            "0L".to_string()
+        }
+        "float" | "double" => "0.0".to_string(),
+        "_Bool" | "bool" => "0".to_string(),
+        // Unknown type — best-effort cast of 0 and let the compiler
+        // tell us if we got it wrong (the caller can fall back to
+        // the empty-stub harness on build failure).
+        other => format!("({}){}", other, "0"),
+    }
 }
 
 /// Normalise a C type for matching: collapse whitespace, attach `*` /
@@ -2669,6 +2772,90 @@ mod tests {
     fn plan_c_call_returns_none_for_unsupported_signatures() {
         let sig = parse_c_signature("int complex(struct timeval *t, double f)").unwrap();
         assert!(plan_c_call_expression(&sig).is_none());
+    }
+
+    #[test]
+    fn plan_c_call_handles_xml_snprintf_elements_4arg_signature() {
+        // The libxml2 patch line lives in:
+        //   void xmlSnprintfElements(char *buf, int size, xmlNodePtr node, int glob)
+        // The 4-arg planner allocates a stack-local trampoline buffer
+        // and passes (buf, sizeof(buf), NULL, 0). The function returns
+        // early on a NULL node — that's not a crash, but the harness
+        // compiles + runs which is a precondition for any subsequent
+        // codeindex-driven trigger work.
+        let sig = parse_c_signature(
+            "void xmlSnprintfElements(char *buf, int size, xmlNodePtr node, int glob)",
+        )
+        .unwrap();
+        let plan = plan_c_call_expression(&sig).unwrap();
+        assert!(plan.call_expression.contains("kuzushi_trampoline_buf"));
+        assert!(plan
+            .call_expression
+            .contains("xmlSnprintfElements(kuzushi_trampoline_buf, (int)len"));
+        assert!(
+            plan.call_expression.contains("(xmlNodePtr)NULL"),
+            "expected NULL cast for opaque pointer arg; got: {}",
+            plan.call_expression
+        );
+        assert_eq!(
+            plan.call_kind,
+            "(buf, size, …) writeable-buffer call with stack trampoline"
+        );
+    }
+
+    #[test]
+    fn plan_c_call_handles_3_arg_buf_size_pointer_signature() {
+        // 3-arg variant of the buf+size+pointer pattern. The
+        // normalizer collapses spaces around `*`, so we assert on
+        // the un-spaced cast form.
+        let sig =
+            parse_c_signature("int format_into(uint8_t *out, size_t outlen, const char *fmt)")
+                .unwrap();
+        let plan = plan_c_call_expression(&sig).unwrap();
+        assert!(plan.call_expression.contains("kuzushi_trampoline_buf"));
+        assert!(
+            plan.call_expression.contains("(const char*)NULL"),
+            "expected NULL cast for const char * arg; got: {}",
+            plan.call_expression
+        );
+        assert!(plan.call_expression.contains("(void)format_into"));
+    }
+
+    #[test]
+    fn plan_c_call_falls_back_to_per_type_defaults_for_5_arg_call() {
+        // No leading buf+size pattern → generic n-arg fallback. All
+        // pointers become NULL casts, integers become 0. The
+        // normalizer collapses spaces, so casts come out un-spaced.
+        let sig = parse_c_signature(
+            "int decode(const uint8_t *src, size_t srclen, uint8_t *dst, int *out_len, unsigned flags)",
+        )
+        .unwrap();
+        let plan = plan_c_call_expression(&sig).unwrap();
+        assert_eq!(plan.call_kind, "n-arg call with per-type defaults");
+        assert!(plan.call_expression.contains("(const uint8_t*)NULL"));
+        assert!(plan.call_expression.contains("(uint8_t*)NULL"));
+        assert!(plan.call_expression.contains("(int*)NULL"));
+        assert!(plan.call_expression.contains("(size_t)0"));
+        assert!(plan.call_expression.contains("0u"));
+    }
+
+    #[test]
+    fn plan_c_call_default_arg_helper_handles_typed_pointers_and_scalars() {
+        // Direct unit cover of the per-arg default helper so future
+        // refactors of the n-arg fallback don't silently regress
+        // pointer/scalar handling.
+        // `default_c_arg_for` operates on the already-normalized type
+        // string, which has spaces around `*` collapsed.
+        assert_eq!(default_c_arg_for("xmlNodePtr"), "(xmlNodePtr)NULL");
+        assert_eq!(default_c_arg_for("char*"), "(char*)NULL");
+        assert_eq!(
+            default_c_arg_for("const struct foo*"),
+            "(const struct foo*)NULL"
+        );
+        assert_eq!(default_c_arg_for("size_t"), "(size_t)0");
+        assert_eq!(default_c_arg_for("int"), "0");
+        assert_eq!(default_c_arg_for("unsigned int"), "0u");
+        assert_eq!(default_c_arg_for("double"), "0.0");
     }
 
     #[test]
