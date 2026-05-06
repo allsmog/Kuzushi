@@ -1,8 +1,14 @@
 # Ralph Rust UX Progress
 
-Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
-Active story: UX-015 - Final Ink/React Removal Gate
-Status: UX-014 complete and pushed in iteration 27 as `6a63d78`; UX-015 pending next iteration
+Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup (complete)
+Active story: Stage 3 - Kuzushi whitebox-static mode
+Status: KUZUSHI_UX_PHASE_DONE
+
+Marker:
+
+```text
+KUZUSHI_UX_PHASE_DONE
+```
 
 ## Stage 2 Checklist
 
@@ -20,9 +26,84 @@ Status: UX-014 complete and pushed in iteration 27 as `6a63d78`; UX-015 pending 
 - UX-012 Stable finding aliases: complete in iteration 25.
 - UX-013 Better empty states and errors: complete in iteration 26.
 - UX-014 Explicit plain / screen-reader / low-bandwidth mode: complete; pushed in iteration 27 as `6a63d78`.
-- UX-015 Final Ink/React removal gate: pending.
+- UX-015 Final Ink/React removal gate: complete in iteration 28.
+
+## Final Ink/React Gate Inventory
+
+Removed or isolated TypeScript/Ink runtime surfaces:
+
+- `bin.kuzushi-ts` in `package.json`: removed before this final gate; the
+  package exposes only `bin.kuzushi = ./bin/kuzushi-rs.mjs`.
+- `scripts.dev:ts` and `scripts/kuzushi-dev`: removed before this final gate;
+  `pnpm dev -- <args>` runs `cargo run -p kuzushi-cli -- <args>`.
+- `src/cli.ts shell` -> `src/copilot/shell.ts`: isolated in
+  `src/cli/commands/shell.ts`, which now exits with a Rust replacement message
+  instead of importing the retained Ink shell.
+- `dist/cli*` TypeScript CLI outputs: excluded from the npm tarball through
+  `package.json` `files` negations.
+- Pre-cutover architecture PNG/SVG diagrams: documented as removed in
+  `docs/rust-migration-status.md`; the Mermaid source now describes Rust.
+
+Retained TypeScript/Ink files and why they are not CLI runtime:
+
+- `src/ui/**` and `tests/ui/**`: retained for reference-only and test-only
+  terminal behavior snapshots while Rust Ratatui remains the operator-facing
+  shell. `src/ui/README.md` records the restriction.
+- `src/copilot/**` and `src/copilot/mock-tui/**`: retained for migration
+  parity, mock scenarios, shell helper tests, and non-runtime library coverage;
+  they are not reachable from `bin/kuzushi-rs.mjs`.
+- `src/modules/**`, `src/agents/**`, scanners, and report helpers: retained as
+  library/reference code and published module/testing API support where
+  exported; they are not the package CLI entrypoint.
+- `ink`, `react`, and `@types/react` remain `devDependencies` only because the
+  retained Vitest snapshots and mock UI fixtures still compile `src/ui/**`.
+  They are not production dependencies and are not required for normal
+  `kuzushi` execution.
+
+Gate facts:
+
+- `package.json` `bin.kuzushi` resolves to `./bin/kuzushi-rs.mjs`.
+- `README.md`, `RELEASING.md`, `docs/rust-migration-status.md`,
+  `crates/kuzushi-cli/tests/cutover_cli.rs`, and `tests/e2e/run-smoke.sh`
+  point at the Rust CLI/native wrapper path.
+- `rg -n "ink|react" package.json src tests crates README.md RELEASING.md`
+  still reports expected dev-only `package.json` entries, documented retained
+  `src/ui/**`/test references, and many non-UI words such as `sink` and
+  `thinking`; none are a package CLI runtime entrypoint.
 
 ## Iteration Log
+
+### Iteration 28 - UX-015
+
+- Task attempted: complete the final Ink/React removal gate by verifying the
+  npm runtime path, documenting the retained/deleted TypeScript/Ink inventory,
+  and proving the package dry run includes the native Rust binary.
+- Files changed:
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short --branch` in the clean isolated clone
+  - `sed -n '1,260p' RALPH_RUST_UX_PROGRESS.md`
+  - `rg -n "ink|react" package.json src tests crates README.md RELEASING.md`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-cli --test cutover_cli`
+  - `cargo test -p kuzushi-tui commands::tests`
+  - `pnpm exec vitest run tests/cli/legacy-shell-isolation.test.ts`
+  - `pnpm check`
+  - `pnpm verify:pack`
+- Result: complete. The Rust cutover and legacy-isolation tests pass, Biome
+  exits successfully with existing warnings, and `pnpm verify:pack` runs
+  `prepack`, rebuilds/stages the release native binary, and dry-runs an npm
+  tarball containing `bin/kuzushi-rs.mjs` plus
+  `native/darwin-arm64/kuzushi`. The progress file now records the final
+  retained/removed Ink/React inventory and the `KUZUSHI_UX_PHASE_DONE` marker.
+- Remaining work: Stage 3 `whitebox-static`.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary workspace remains stale at `80d23a4` with staged/modified
+    earlier Stage 2 files. The active pushed Stage 2 state is the clean
+    isolated clone at `/tmp/kuzushi-ux2-clone.PJaRge`.
+  - The isolated clone did not have `node_modules`; this iteration temporarily
+    linked the primary checkout's installed `node_modules` to run the TS and
+    package checks, then removed the symlink before committing.
 
 ### Iteration 27 - UX-014
 
