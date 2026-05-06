@@ -2,7 +2,7 @@
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
 Active story: UX-010 - Tab Completion For High-Value Arguments
-Status: UX-009 complete in iteration 22; commit/push gate pending in this iteration
+Status: UX-009 complete and pushed in iteration 22 as `ce2efb0`; UX-010 pending next iteration
 
 ## Stage 2 Checklist
 
@@ -49,7 +49,7 @@ Status: UX-009 complete in iteration 22; commit/push gate pending in this iterat
   routeable alias. A new command-catalog drift test materializes every
   help/catalog form, rejects unrouted forms, and compares the cataloged route
   kinds against the intended public shell command surface.
-- Remaining work: commit and push UX-009, then UX-010 through UX-015.
+- Remaining work: UX-010 through UX-015.
 - Blockers or repo facts that contradicted this prompt:
   - The primary workspace remains stale at `80d23a4` with earlier Stage 2 files
     staged/modified, so this iteration continued in the clean isolated clone at
