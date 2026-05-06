@@ -137,6 +137,12 @@ pub struct Finding {
     )]
     pub static_proof_state: Option<StaticProofState>,
     pub triage: Option<TriageOutcome>,
+    /// Most-recent empirical verification, when present. Loaded by
+    /// `FindingStore::get_finding_by_*` from the `verifications` side
+    /// table; in-memory `Finding`s built via `Finding::new_tool` leave
+    /// this `None` until persisted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification: Option<PersistedVerification>,
     pub created_at: String,
     /// Discovery channel — populated automatically from `tool` if not
     /// set explicitly.
@@ -252,6 +258,7 @@ impl Finding {
             actor_fingerprint: None,
             static_proof_state: None,
             triage: None,
+            verification: None,
             created_at: now_isoish(),
             vuln_source,
             dedup_key,
@@ -359,11 +366,18 @@ impl TryFrom<&str> for StaticProofState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct TriageOutcome {
     pub verdict: TriageVerdict,
     pub confidence: f32,
     pub rationale: String,
+    /// USD cost of the LLM call that produced this verdict. Populated
+    /// by providers that surface usage (e.g. `AnthropicOAuthRuntime`
+    /// reads `usage.input_tokens` / `usage.output_tokens` and applies
+    /// the per-model rate). Defaults to `0.0`. Drives `triage:run`'s
+    /// in-process cost cap.
+    #[serde(default)]
+    pub cost_usd: f64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -439,11 +453,14 @@ pub struct PatchResult {
     pub updated_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TriageVerdict {
     TruePositive,
     FalsePositive,
+    /// Default — used when no verdict has been assigned yet (or when
+    /// a provider failed to produce one). Conservative by design.
+    #[default]
     NeedsReview,
     ByDesign,
 }
@@ -809,6 +826,94 @@ pub fn resolve_finding_alias(findings: &[Finding], reference: &str) -> Option<Fi
         .map(|(_, finding)| finding)
 }
 
+/// Persisted form of a `VerificationOutcome`. Lives here (rather than in
+/// `crate::verify`) to avoid a circular dep — the verify module
+/// constructs these from its richer in-memory types when persisting.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedVerification {
+    pub proof_level: u8,
+    pub proof_verdict: PersistedProofVerdict,
+    pub backend: PersistedSandboxBackend,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub harness_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crash_evidence: Option<String>,
+    pub duration_ms: u64,
+    pub cost_usd: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PersistedProofVerdict {
+    Exploited,
+    NotReproduced,
+    HarnessFailedToBuild,
+    InfrastructureError,
+    LanguageUnsupportedYet,
+    InsufficientFindingDetail,
+}
+
+impl PersistedProofVerdict {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Exploited => "exploited",
+            Self::NotReproduced => "not_reproduced",
+            Self::HarnessFailedToBuild => "harness_failed_to_build",
+            Self::InfrastructureError => "infrastructure_error",
+            Self::LanguageUnsupportedYet => "language_unsupported_yet",
+            Self::InsufficientFindingDetail => "insufficient_finding_detail",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(value: &str) -> Option<Self> {
+        Some(match value {
+            "exploited" => Self::Exploited,
+            "not_reproduced" => Self::NotReproduced,
+            "harness_failed_to_build" => Self::HarnessFailedToBuild,
+            "infrastructure_error" => Self::InfrastructureError,
+            "language_unsupported_yet" => Self::LanguageUnsupportedYet,
+            "insufficient_finding_detail" => Self::InsufficientFindingDetail,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PersistedSandboxBackend {
+    Bwrap,
+    Podman,
+    Plain,
+}
+
+impl PersistedSandboxBackend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bwrap => "bwrap",
+            Self::Podman => "podman",
+            Self::Plain => "plain",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(value: &str) -> Option<Self> {
+        Some(match value {
+            "bwrap" => Self::Bwrap,
+            "podman" => Self::Podman,
+            "plain" => Self::Plain,
+            _ => return None,
+        })
+    }
+}
+
 pub struct FindingStore {
     conn: Connection,
 }
@@ -898,6 +1003,23 @@ impl FindingStore {
               on patch_results(fingerprint, created_at desc);
             create index if not exists idx_patch_results_repo_status
               on patch_results(repo, status);
+
+            create table if not exists verifications (
+              id integer primary key autoincrement,
+              finding_id integer not null references findings(id) on delete cascade,
+              proof_level integer not null,
+              proof_verdict text not null,
+              backend text not null,
+              language text,
+              harness_path text,
+              crash_evidence text,
+              duration_ms integer not null default 0,
+              cost_usd real not null default 0.0,
+              notes_json text,
+              created_at text not null
+            );
+            create index if not exists idx_verifications_finding
+              on verifications(finding_id, created_at desc);
             "#,
         )?;
         ensure_column(
@@ -929,6 +1051,12 @@ impl FindingStore {
                on findings(scan_id, dedup_key) where dedup_key is not null;
              create index if not exists idx_findings_vuln_source
                on findings(vuln_source) where vuln_source is not null;",
+        )?;
+        ensure_column(
+            &self.conn,
+            "triage",
+            "cost_usd",
+            "alter table triage add column cost_usd real not null default 0.0",
         )?;
         Ok(())
     }
@@ -1083,6 +1211,7 @@ impl FindingStore {
                 actor_fingerprint: None,
                 static_proof_state: None,
                 triage: None,
+                verification: None,
                 created_at: String::new(),
                 vuln_source,
                 dedup_key: Some(dedup_key.to_string()),
@@ -1093,13 +1222,14 @@ impl FindingStore {
     pub fn save_triage(&self, finding_id: i64, triage: &TriageOutcome) -> Result<()> {
         self.conn.execute(
             r#"
-            insert into triage(finding_id, verdict, confidence, rationale, created_at)
-            values (?1, ?2, ?3, ?4, ?5)
+            insert into triage(finding_id, verdict, confidence, rationale, created_at, cost_usd)
+            values (?1, ?2, ?3, ?4, ?5, ?6)
             on conflict(finding_id) do update set
               verdict = excluded.verdict,
               confidence = excluded.confidence,
               rationale = excluded.rationale,
-              created_at = excluded.created_at
+              created_at = excluded.created_at,
+              cost_usd = excluded.cost_usd
             "#,
             params![
                 finding_id,
@@ -1107,9 +1237,87 @@ impl FindingStore {
                 triage.confidence,
                 triage.rationale,
                 now_isoish(),
+                triage.cost_usd,
             ],
         )?;
         Ok(())
+    }
+
+    /// Persist an empirical verification outcome alongside its finding.
+    /// Each call appends a new row — the same finding can be verified
+    /// multiple times (e.g. as the harness improves) and the latest row
+    /// wins by `created_at desc`.
+    pub fn save_verification(
+        &self,
+        finding_id: i64,
+        record: &PersistedVerification,
+    ) -> Result<i64> {
+        let notes_json = serde_json::to_string(&record.notes)
+            .context("Could not serialize verification notes")?;
+        self.conn.execute(
+            r#"
+            insert into verifications(
+              finding_id, proof_level, proof_verdict, backend, language,
+              harness_path, crash_evidence, duration_ms, cost_usd,
+              notes_json, created_at
+            )
+            values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            "#,
+            params![
+                finding_id,
+                record.proof_level as i64,
+                record.proof_verdict.as_str(),
+                record.backend.as_str(),
+                record.language.as_deref(),
+                record.harness_path.as_deref(),
+                record.crash_evidence.as_deref(),
+                record.duration_ms as i64,
+                record.cost_usd,
+                notes_json,
+                now_isoish(),
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Fetch the most recent verification record for a finding, if any.
+    pub fn get_latest_verification(
+        &self,
+        finding_id: i64,
+    ) -> Result<Option<PersistedVerification>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            select proof_level, proof_verdict, backend, language,
+                   harness_path, crash_evidence, duration_ms, cost_usd,
+                   notes_json, created_at
+            from verifications
+            where finding_id = ?1
+            order by created_at desc, id desc
+            limit 1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![finding_id])?;
+        if let Some(row) = rows.next()? {
+            let notes_json: String = row.get(8)?;
+            let notes: Vec<String> = serde_json::from_str(&notes_json).unwrap_or_default();
+            let proof_verdict_str: String = row.get(1)?;
+            let backend_str: String = row.get(2)?;
+            return Ok(Some(PersistedVerification {
+                proof_level: row.get::<_, i64>(0)? as u8,
+                proof_verdict: PersistedProofVerdict::from_str(&proof_verdict_str)
+                    .unwrap_or(PersistedProofVerdict::NotReproduced),
+                backend: PersistedSandboxBackend::from_str(&backend_str)
+                    .unwrap_or(PersistedSandboxBackend::Plain),
+                language: row.get::<_, Option<String>>(3)?,
+                harness_path: row.get::<_, Option<String>>(4)?,
+                crash_evidence: row.get::<_, Option<String>>(5)?,
+                duration_ms: row.get::<_, i64>(6)? as u64,
+                cost_usd: row.get(7)?,
+                notes,
+                created_at: row.get(9)?,
+            }));
+        }
+        Ok(None)
     }
 
     pub fn insert_patch_result(&self, result: &PatchResult) -> Result<()> {
@@ -1171,7 +1379,7 @@ impl FindingStore {
               f.id, f.scan_id, f.fingerprint, f.rule_id, f.title, f.severity,
               f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
               f.static_proof_state, f.created_at,
-              t.verdict, t.confidence, t.rationale,
+              t.verdict, t.confidence, t.rationale, t.cost_usd,
               f.vuln_source, f.dedup_key
             from findings f
             left join triage t on t.finding_id = f.id
@@ -1191,7 +1399,7 @@ impl FindingStore {
               f.id, f.scan_id, f.fingerprint, f.rule_id, f.title, f.severity,
               f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
               f.static_proof_state, f.created_at,
-              t.verdict, t.confidence, t.rationale,
+              t.verdict, t.confidence, t.rationale, t.cost_usd,
               f.vuln_source, f.dedup_key
             from findings f
             left join triage t on t.finding_id = f.id
@@ -1226,14 +1434,15 @@ impl FindingStore {
     }
 
     pub fn get_finding_by_fingerprint(&self, fingerprint: &str) -> Result<Option<Finding>> {
-        self.conn
+        let mut finding = self
+            .conn
             .query_row(
                 r#"
                 select
                   f.id, f.scan_id, f.fingerprint, f.rule_id, f.title, f.severity,
                   f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
                   f.static_proof_state, f.created_at,
-                  t.verdict, t.confidence, t.rationale,
+                  t.verdict, t.confidence, t.rationale, t.cost_usd,
                   f.vuln_source, f.dedup_key
                 from findings f
                 left join triage t on t.finding_id = f.id
@@ -1245,7 +1454,17 @@ impl FindingStore {
                 row_to_finding,
             )
             .optional()
-            .context("Could not load finding")
+            .context("Could not load finding")?;
+
+        // Attach the latest verification when one exists. Single-finding
+        // path so the extra query is cheap; bulk listings keep using
+        // `row_to_finding` directly.
+        if let Some(ref mut f) = finding {
+            if let Some(id) = f.id {
+                f.verification = self.get_latest_verification(id)?;
+            }
+        }
+        Ok(finding)
     }
 
     pub fn get_finding_by_reference(&self, reference: &str) -> Result<Option<Finding>> {
@@ -1265,7 +1484,7 @@ impl FindingStore {
               f.id, f.scan_id, f.fingerprint, f.rule_id, f.title, f.severity,
               f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
               f.static_proof_state, f.created_at,
-              t.verdict, t.confidence, t.rationale,
+              t.verdict, t.confidence, t.rationale, t.cost_usd,
               f.vuln_source, f.dedup_key
             from findings f
             left join triage t on t.finding_id = f.id
@@ -1321,12 +1540,13 @@ fn row_to_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
             verdict: TriageVerdict::try_from(verdict.as_str()).map_err(to_sql_error)?,
             confidence: row.get::<_, f32>(15)?,
             rationale: row.get(16)?,
+            cost_usd: row.get::<_, Option<f64>>(17)?.unwrap_or_default(),
         }),
         None => None,
     };
 
-    let vuln_source: Option<String> = row.get(17).ok();
-    let dedup_key: Option<String> = row.get(18).ok();
+    let vuln_source: Option<String> = row.get(18).ok();
+    let dedup_key: Option<String> = row.get(19).ok();
     Ok(Finding {
         id: row.get(0)?,
         scan_id: row.get(1)?,
@@ -1347,6 +1567,7 @@ fn row_to_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
             .map_err(to_sql_error)?,
         created_at: row.get(13)?,
         triage,
+        verification: None,
         vuln_source: vuln_source.as_deref().and_then(VulnSource::parse),
         dedup_key,
     })
@@ -1694,6 +1915,7 @@ mod tests {
                     verdict: TriageVerdict::NeedsReview,
                     confidence: 0.42,
                     rationale: "needs dataflow confirmation".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -1964,6 +2186,7 @@ mod tests {
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "confirmed".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -1974,6 +2197,7 @@ mod tests {
                     verdict: TriageVerdict::FalsePositive,
                     confidence: 0.8,
                     rationale: "safe".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -1994,5 +2218,121 @@ mod tests {
             .unwrap();
         assert_eq!(review.count, 1);
         assert_eq!(review.findings[0].rule_id, "demo.review");
+    }
+
+    #[test]
+    fn save_and_get_verification_round_trip() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-v1", Path::new("/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "verify-test",
+            "rule.test",
+            "src/x.rs",
+            10,
+            None,
+            Severity::High,
+            "test",
+        );
+        let finding_id = store.insert_finding("run-v1", &finding).unwrap();
+
+        let record = PersistedVerification {
+            proof_level: 4,
+            proof_verdict: PersistedProofVerdict::Exploited,
+            backend: PersistedSandboxBackend::Bwrap,
+            language: Some("rust".to_string()),
+            harness_path: Some("/tmp/h".to_string()),
+            crash_evidence: Some("SIGSEGV".to_string()),
+            duration_ms: 1234,
+            cost_usd: 0.05,
+            notes: vec!["one".to_string(), "two".to_string()],
+            created_at: String::new(),
+        };
+        let row_id = store.save_verification(finding_id, &record).unwrap();
+        assert!(row_id > 0);
+
+        let fetched = store
+            .get_latest_verification(finding_id)
+            .unwrap()
+            .expect("should round-trip");
+        assert_eq!(fetched.proof_level, 4);
+        assert_eq!(fetched.proof_verdict, PersistedProofVerdict::Exploited);
+        assert_eq!(fetched.backend, PersistedSandboxBackend::Bwrap);
+        assert_eq!(fetched.language.as_deref(), Some("rust"));
+        assert_eq!(fetched.harness_path.as_deref(), Some("/tmp/h"));
+        assert_eq!(fetched.crash_evidence.as_deref(), Some("SIGSEGV"));
+        assert_eq!(fetched.duration_ms, 1234);
+        assert!((fetched.cost_usd - 0.05).abs() < 1e-9);
+        assert_eq!(fetched.notes, vec!["one".to_string(), "two".to_string()]);
+        assert!(!fetched.created_at.is_empty());
+    }
+
+    #[test]
+    fn get_latest_verification_returns_most_recent_row() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-v2", Path::new("/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "verify-test",
+            "rule.test",
+            "src/x.rs",
+            1,
+            None,
+            Severity::High,
+            "test",
+        );
+        let finding_id = store.insert_finding("run-v2", &finding).unwrap();
+
+        let earlier = PersistedVerification {
+            proof_level: 2,
+            proof_verdict: PersistedProofVerdict::NotReproduced,
+            backend: PersistedSandboxBackend::Plain,
+            language: Some("rust".to_string()),
+            harness_path: None,
+            crash_evidence: None,
+            duration_ms: 100,
+            cost_usd: 0.0,
+            notes: vec![],
+            created_at: String::new(),
+        };
+        let later = PersistedVerification {
+            proof_level: 4,
+            proof_verdict: PersistedProofVerdict::Exploited,
+            backend: PersistedSandboxBackend::Bwrap,
+            language: Some("rust".to_string()),
+            harness_path: None,
+            crash_evidence: Some("SIGSEGV".to_string()),
+            duration_ms: 200,
+            cost_usd: 0.0,
+            notes: vec![],
+            created_at: String::new(),
+        };
+        store.save_verification(finding_id, &earlier).unwrap();
+        store.save_verification(finding_id, &later).unwrap();
+
+        let fetched = store.get_latest_verification(finding_id).unwrap().unwrap();
+        assert_eq!(fetched.proof_level, 4);
+        assert_eq!(fetched.proof_verdict, PersistedProofVerdict::Exploited);
+    }
+
+    #[test]
+    fn get_latest_verification_returns_none_when_no_rows() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-v3", Path::new("/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "verify-test",
+            "rule.test",
+            "src/x.rs",
+            1,
+            None,
+            Severity::High,
+            "test",
+        );
+        let finding_id = store.insert_finding("run-v3", &finding).unwrap();
+        assert!(store.get_latest_verification(finding_id).unwrap().is_none());
     }
 }

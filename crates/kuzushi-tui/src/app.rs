@@ -3810,6 +3810,7 @@ impl ShellApp {
                 tool_name.as_str(),
                 "triage:run"
                     | "verify:finding"
+                    | "verify:exploit"
                     | "patch:finding"
                     | "agentic-sast:scan"
                     | "carlini-threat-hunt:run"
@@ -3956,6 +3957,9 @@ impl ShellApp {
 
     fn default_tool_for_focused_module(&self) -> Option<String> {
         let module = self.focused_module.as_ref()?;
+        if module == "verify" && self.registry.resolve_tool("verify:finding").is_some() {
+            return Some("verify:finding".to_string());
+        }
         let prefix = format!("{module}:");
         self.registry
             .tools()
@@ -6694,6 +6698,7 @@ esac
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.92,
                     rationale: "request body reaches exec".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -8787,6 +8792,7 @@ JSON
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "confirmed".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -8883,6 +8889,7 @@ JSON
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "confirmed".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -8944,6 +8951,7 @@ JSON
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "confirmed".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -9214,6 +9222,7 @@ JSON
             actor_fingerprint: None,
             static_proof_state: None,
             triage: None,
+            verification: None,
             created_at: String::new(),
             vuln_source: None,
             dedup_key: None,

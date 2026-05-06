@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::findings::{Finding, Severity, StaticProofState};
 use crate::modules::ToolExecutionContext;
+use crate::runtime::SubagentRole;
 use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolPolicy};
 use crate::whitebox_static::{
     agent_tool_policy_for_input, mark_whitebox_static_findings, whitebox_static_profile_requested,
@@ -48,13 +49,23 @@ struct SystemsHuntInput {
     max_cwe_classes: usize,
     artifact_dir: String,
     model: Option<String>,
+    /// Max files visited by `collect_inventory`. Default 5000 (was
+    /// 200) — large enough to cover libxml2-class libraries in a
+    /// single walk; tunable for million-LoC monorepos.
+    max_files: usize,
+    /// Bytes read per file during the *fast* classify pass. Default
+    /// 16 KiB (was 4 KiB) — captures ~250 lines of code, enough for
+    /// most function-level signals without bloating wallclock.
+    head_bytes: usize,
 }
 
 impl SystemsHuntInput {
     fn from_tool_input(input: &Value) -> Result<Self> {
         Ok(Self {
             max_findings: positive_usize(input, &["maxFindings", "max_findings"], 30)?,
-            max_surfaces: positive_usize(input, &["maxSurfaces", "max_surfaces"], 10)?,
+            max_surfaces: positive_usize(input, &["maxSurfaces", "max_surfaces"], 50)?,
+            max_files: positive_usize(input, &["maxFiles", "max_files"], 5000)?,
+            head_bytes: positive_usize(input, &["headBytes", "head_bytes"], 16384)?,
             max_trigger_hypotheses_per_surface: positive_usize(
                 input,
                 &[
@@ -308,6 +319,27 @@ pub fn execute_systems_hunt_tool(
         }
         other => anyhow::bail!("unknown systems-hunt tool {other:?}"),
     }
+}
+
+/// Walk `target` with the (configurable) systems-hunt surface
+/// scorer and return the ranked surface list — *without* the LLM
+/// invariant/trigger/finding stages. Useful for plugging the surface
+/// ranker into custom pipelines, scoring scripts, and the
+/// libxml2-style live experiments.
+///
+/// `input` accepts the same JSON shape as
+/// `run_systems_hunt_report` (`maxFiles`, `headBytes`,
+/// `maxSurfaces`, ...). Index augmentation runs internally; failures
+/// are silent.
+pub fn gather_surfaces(target: &Path, input: &Value) -> Result<SystemsContextOutput> {
+    if !target.is_dir() {
+        anyhow::bail!(
+            "systems-hunt: target is not a directory: {}",
+            target.display()
+        );
+    }
+    let options = SystemsHuntInput::from_tool_input(input)?;
+    gather_systems_context(target, &options)
 }
 
 pub fn run_systems_hunt_report(
@@ -579,7 +611,7 @@ fn gather_systems_context(
     target: &Path,
     options: &SystemsHuntInput,
 ) -> Result<SystemsContextOutput> {
-    let inventory = collect_inventory(target, 200, 4096)?;
+    let inventory = collect_inventory(target, options.max_files, options.head_bytes)?;
     let mut by_file: BTreeMap<String, SurfaceAccumulator> = BTreeMap::new();
 
     for (file_path, body) in &inventory {
@@ -618,6 +650,27 @@ fn gather_systems_context(
         .into_values()
         .map(SurfaceAccumulator::finish)
         .collect::<Vec<_>>();
+    // Pre-sort: the index-augmentation step only queries the top-N
+    // surfaces (most expensive backend calls otherwise dominate cost
+    // on large repos), so sort first, augment, then re-sort.
+    surfaces.sort_by(|left, right| {
+        right
+            .score
+            .cmp(&left.score)
+            .then_with(|| left.file_path.cmp(&right.file_path))
+            .then_with(|| left.start_line.cmp(&right.start_line))
+    });
+
+    // Block-on the async index augmentation. Failures (no joern,
+    // network error, …) leave surfaces unchanged.
+    let augment_count = surfaces.len().min(options.max_surfaces.saturating_mul(2));
+    let to_augment = surfaces
+        .drain(..augment_count.min(surfaces.len()))
+        .collect();
+    let augmented = score_with_index_blocking(to_augment);
+    let mut surfaces: Vec<RankedSystemsSurface> = augmented.into_iter().chain(surfaces).collect();
+    // Re-sort after augmentation: index bumps may have re-ordered the
+    // top of the list.
     surfaces.sort_by(|left, right| {
         right
             .score
@@ -643,6 +696,26 @@ fn gather_systems_context(
     })
 }
 
+fn score_with_index_blocking(surfaces: Vec<RankedSystemsSurface>) -> Vec<RankedSystemsSurface> {
+    fn run(surfaces: Vec<RankedSystemsSurface>) -> Vec<RankedSystemsSurface> {
+        match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt.block_on(score_with_index(surfaces)),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    if tokio::runtime::Handle::try_current().is_ok() {
+        std::thread::spawn(move || run(surfaces))
+            .join()
+            .unwrap_or_default()
+    } else {
+        run(surfaces)
+    }
+}
+
 fn query_systems_invariants(
     runtime: &dyn AgentRuntime,
     model: &str,
@@ -651,23 +724,174 @@ fn query_systems_invariants(
     _options: &SystemsHuntInput,
     agent_tool_policy: AgentToolPolicy,
 ) -> Result<SystemsInvariantOutput> {
-    let response = runtime.query_blocking(
-        AgentQueryRequest::new(
-            model.to_string(),
-            target.to_path_buf(),
-            SYSTEMS_INVARIANT_SYSTEM_PROMPT.to_string(),
-            format!(
+    // Pick a sub-agent role appropriate for the dominant surface kind.
+    // When at least one Rust unsafe-region surface is present, the
+    // UnsafeBlockReasoner preamble keeps the agent on-task. Otherwise
+    // fall through to Generic — same behavior as before.
+    let role = pick_role_for_invariants(context);
+    let request = AgentQueryRequest::new(
+        model.to_string(),
+        target.to_path_buf(),
+        SYSTEMS_INVARIANT_SYSTEM_PROMPT.to_string(),
+        format!(
             "Extract safety invariants for these low-level surfaces. Return JSON with invariants[].\n\n{}",
             serde_json::to_string_pretty(context)?
         ),
-        )
-        .with_tool_policy(agent_tool_policy),
-    )?;
+    )
+    .with_tool_policy(agent_tool_policy);
+    let response = if role == SubagentRole::Generic {
+        runtime.query_blocking(request)?
+    } else {
+        runtime.spawn_subagent_blocking(role, request)?
+    };
     let raw = parse_agent_json(response)
         .context("systems-hunt:systems-invariant-extract expected JSON with an invariants array")?;
     Ok(SystemsInvariantOutput {
         invariants: parse_invariants(&raw),
     })
+}
+
+/// Pick a sub-agent role for the invariant-extraction step based on the
+/// surface mix in `context`. The first matching rule wins:
+/// - Any Rust unsafe-region surface → UnsafeBlockReasoner
+/// - Any FFI-boundary surface → FfiBoundaryReasoner
+/// - Any resource-provenance surface in `.rs` → LifetimeAliasingReasoner
+/// - Otherwise → Generic (no preamble change)
+pub(crate) fn pick_role_for_invariants(context: &SystemsContextOutput) -> SubagentRole {
+    let has_rust_unsafe = context
+        .surfaces
+        .iter()
+        .any(|s| s.kind == "unsafe-region" && s.file_path.to_ascii_lowercase().ends_with(".rs"));
+    if has_rust_unsafe {
+        return SubagentRole::UnsafeBlockReasoner;
+    }
+    let has_ffi = context
+        .surfaces
+        .iter()
+        .any(|s| s.kind == "ffi-boundary" || s.domains.iter().any(|d| d == "ffi"));
+    if has_ffi {
+        return SubagentRole::FfiBoundaryReasoner;
+    }
+    let has_rust_provenance = context.surfaces.iter().any(|s| {
+        s.kind == "resource-provenance" && s.file_path.to_ascii_lowercase().ends_with(".rs")
+    });
+    if has_rust_provenance {
+        return SubagentRole::LifetimeAliasingReasoner;
+    }
+    SubagentRole::Generic
+}
+
+/// Augment surfaces with structural data from the code-index facade
+/// when one is available. When no index backend is live (joern absent),
+/// returns the surfaces unchanged. Fails soft on any backend error.
+///
+/// Use this from agentic flows that want signal beyond the
+/// text-walking `gather_systems_context` produces. The legacy DAG
+/// pipeline does not call this function — opt-in only.
+pub async fn try_augment_with_index(
+    surfaces: Vec<RankedSystemsSurface>,
+) -> Vec<RankedSystemsSurface> {
+    score_with_index(surfaces).await
+}
+
+/// Score-aware augmentation: contributes deterministic bumps to each
+/// surface's `score` based on what the codeindex facade can prove
+/// about it. Now called from the main `gather_systems_context` flow
+/// (was opt-in via `try_augment_with_index`).
+///
+/// Bumps:
+/// - Rust unsafe-region surface with N indexed unsafe blocks in the
+///   same file: `+10 × min(N, 5)`.
+/// - FFI-boundary surface with at least one indexed FFI hit: `+8`.
+/// - Surface where joern's taint engine finds an attacker→sink path:
+///   `+15` and prepends a "codeindex: taint reachable" reason.
+///
+/// All bumps are best-effort. When no joern backend is live, the
+/// surfaces pass through unchanged.
+pub(crate) async fn score_with_index(
+    surfaces: Vec<RankedSystemsSurface>,
+) -> Vec<RankedSystemsSurface> {
+    use kuzushi_codeindex::IndexFacade;
+
+    let mut facade = IndexFacade::with_available_backends().await;
+    if !facade
+        .live_backends()
+        .iter()
+        .any(|b| matches!(b, kuzushi_codeindex::Backend::Joern))
+    {
+        return surfaces;
+    }
+
+    // Repo-wide FFI-boundary lookup once; result reused across
+    // surfaces to keep cost bounded.
+    let ffi_set: std::collections::BTreeSet<String> = match facade.ffi_boundaries().await {
+        Ok(value) => value
+            .get("boundaries")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| item.get("file").and_then(Value::as_str).map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        Err(_) => std::collections::BTreeSet::new(),
+    };
+
+    let mut out = Vec::with_capacity(surfaces.len());
+    for mut surface in surfaces {
+        let is_rusty_or_native = surface.file_path.to_ascii_lowercase().ends_with(".rs")
+            || surface.file_path.to_ascii_lowercase().ends_with(".c")
+            || surface.file_path.to_ascii_lowercase().ends_with(".cpp")
+            || surface.file_path.to_ascii_lowercase().ends_with(".cc");
+
+        if is_rusty_or_native && surface.kind == "unsafe-region" {
+            if let Ok(value) = facade.unsafe_blocks(Some(&surface.file_path)).await {
+                if let Some(arr) = value.get("blocks").and_then(Value::as_array) {
+                    let n = arr.len();
+                    if n > 0 {
+                        let bump = (n.min(5) as i64) * 10;
+                        surface.score += bump;
+                        surface
+                            .reasons
+                            .insert(0, format!("codeindex: {n} unsafe block(s) (+{bump})"));
+                    }
+                }
+            }
+        }
+
+        if surface.kind == "ffi-boundary"
+            || surface.domains.iter().any(|d| d == "ffi")
+            || ffi_set.iter().any(|f| f == &surface.file_path)
+        {
+            surface.score += 8;
+            surface
+                .reasons
+                .insert(0, "codeindex: FFI boundary present (+8)".to_string());
+        }
+
+        // Sink-reachability check: only worth running for the
+        // dangerous-call-site signals classify_line surfaces.
+        if surface
+            .reasons
+            .iter()
+            .any(|r| r.contains("memcpy") || r.contains("strcat") || r.contains("strcpy"))
+        {
+            if let Ok(value) = facade
+                .taint_paths("argv|recv|read|fread", "memcpy|strcat|strcpy", Some(5))
+                .await
+            {
+                if value.get("paths").is_some() {
+                    surface.score += 15;
+                    surface
+                        .reasons
+                        .insert(0, "codeindex: taint path reachable (+15)".to_string());
+                }
+            }
+        }
+
+        out.push(surface);
+    }
+    out
 }
 
 fn query_systems_triggers(
@@ -1734,6 +1958,7 @@ mod tests {
                             "cheapVerifiable": true
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             if system_prompt == SYSTEMS_TRIGGER_SYSTEM_PROMPT {
@@ -1752,6 +1977,7 @@ mod tests {
                             "rationale": "length reaches memcpy"
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             if system_prompt == SYSTEMS_HUNT_SYSTEM_PROMPT {
@@ -1774,6 +2000,7 @@ mod tests {
                             "cheapVerifiable": true
                         }]
                     })),
+                    ..Default::default()
                 });
             }
             anyhow::bail!("unexpected prompt {system_prompt}")
@@ -1868,5 +2095,188 @@ mod tests {
 
         assert!(err.contains("requires an explicit model"));
         assert!(err.contains("will not choose a fallback model"));
+    }
+
+    // ----- pick_role_for_invariants --------------------------------
+
+    fn surface(file: &str, kind: &str) -> RankedSystemsSurface {
+        RankedSystemsSurface {
+            id: "test".to_string(),
+            file_path: file.to_string(),
+            start_line: 1,
+            display_name: "test".to_string(),
+            kind: kind.to_string(),
+            score: 0,
+            domains: Vec::new(),
+            reasons: Vec::new(),
+            attacker_controlled_fields: Vec::new(),
+            hardening_signals: Vec::new(),
+            evidence: Vec::new(),
+        }
+    }
+
+    fn ctx_with(surfaces: Vec<RankedSystemsSurface>) -> SystemsContextOutput {
+        SystemsContextOutput {
+            surfaces,
+            surface_packs: Vec::new(),
+            metadata: SystemsContextMetadata {
+                codeql_available: false,
+                codeql_db_path: None,
+                bash_probing_used: false,
+            },
+        }
+    }
+
+    #[test]
+    fn role_unsafe_block_for_rust_unsafe_region() {
+        let ctx = ctx_with(vec![surface("crates/foo/src/lib.rs", "unsafe-region")]);
+        assert_eq!(
+            pick_role_for_invariants(&ctx),
+            SubagentRole::UnsafeBlockReasoner
+        );
+    }
+
+    #[test]
+    fn role_ffi_for_ffi_boundary_kind() {
+        let ctx = ctx_with(vec![surface("src/foo.c", "ffi-boundary")]);
+        assert_eq!(
+            pick_role_for_invariants(&ctx),
+            SubagentRole::FfiBoundaryReasoner
+        );
+    }
+
+    #[test]
+    fn role_ffi_for_ffi_domain_label() {
+        let mut s = surface("src/foo.c", "other-kind");
+        s.domains.push("ffi".to_string());
+        let ctx = ctx_with(vec![s]);
+        assert_eq!(
+            pick_role_for_invariants(&ctx),
+            SubagentRole::FfiBoundaryReasoner
+        );
+    }
+
+    #[test]
+    fn role_lifetime_for_rust_resource_provenance() {
+        let ctx = ctx_with(vec![surface(
+            "crates/foo/src/lib.rs",
+            "resource-provenance",
+        )]);
+        assert_eq!(
+            pick_role_for_invariants(&ctx),
+            SubagentRole::LifetimeAliasingReasoner
+        );
+    }
+
+    #[test]
+    fn role_generic_for_c_unsafe_region() {
+        // C "unsafe" regions don't get the Rust UnsafeBlockReasoner —
+        // they're a generic surface from the role-routing perspective.
+        let ctx = ctx_with(vec![surface("src/parser.c", "unsafe-region")]);
+        assert_eq!(pick_role_for_invariants(&ctx), SubagentRole::Generic);
+    }
+
+    #[test]
+    fn role_generic_for_empty_context() {
+        let ctx = ctx_with(Vec::new());
+        assert_eq!(pick_role_for_invariants(&ctx), SubagentRole::Generic);
+    }
+
+    #[test]
+    fn role_unsafe_takes_priority_over_ffi() {
+        // When both kinds appear, Rust unsafe-region wins because it's
+        // checked first in the cascade.
+        let mut ffi = surface("src/foo.c", "ffi-boundary");
+        ffi.domains.push("ffi".to_string());
+        let ctx = ctx_with(vec![surface("crates/x/src/lib.rs", "unsafe-region"), ffi]);
+        assert_eq!(
+            pick_role_for_invariants(&ctx),
+            SubagentRole::UnsafeBlockReasoner
+        );
+    }
+
+    // ----- try_augment_with_index ----------------------------------
+
+    #[tokio::test]
+    async fn augment_with_index_returns_input_unchanged_when_no_backend_live() {
+        // Sandbox has no joern; the augmenter must short-circuit.
+        let surfaces = vec![surface("crates/foo/src/lib.rs", "unsafe-region")];
+        let augmented = try_augment_with_index(surfaces.clone()).await;
+        assert_eq!(augmented.len(), 1);
+        assert_eq!(augmented[0].file_path, surfaces[0].file_path);
+        // No new "codeindex:" reason should have been added.
+        assert!(!augmented[0]
+            .reasons
+            .iter()
+            .any(|r| r.starts_with("codeindex:")));
+    }
+
+    #[tokio::test]
+    async fn augment_with_index_handles_empty_surface_list() {
+        let augmented = try_augment_with_index(Vec::new()).await;
+        assert!(augmented.is_empty());
+    }
+
+    // ----- walker scaling defaults --------------------------------
+
+    #[test]
+    fn input_default_max_files_scaled_to_5000() {
+        let parsed = SystemsHuntInput::from_tool_input(&serde_json::json!({})).unwrap();
+        assert_eq!(parsed.max_files, 5000);
+    }
+
+    #[test]
+    fn input_default_head_bytes_scaled_to_16k() {
+        let parsed = SystemsHuntInput::from_tool_input(&serde_json::json!({})).unwrap();
+        assert_eq!(parsed.head_bytes, 16384);
+    }
+
+    #[test]
+    fn input_default_max_surfaces_widened_to_50() {
+        let parsed = SystemsHuntInput::from_tool_input(&serde_json::json!({})).unwrap();
+        assert_eq!(parsed.max_surfaces, 50);
+    }
+
+    #[test]
+    fn input_walker_caps_are_overridable() {
+        let parsed = SystemsHuntInput::from_tool_input(&serde_json::json!({
+            "maxFiles": 100,
+            "headBytes": 2048,
+            "maxSurfaces": 5,
+        }))
+        .unwrap();
+        assert_eq!(parsed.max_files, 100);
+        assert_eq!(parsed.head_bytes, 2048);
+        assert_eq!(parsed.max_surfaces, 5);
+    }
+
+    #[test]
+    fn input_walker_caps_reject_zero() {
+        // positive_usize rejects 0 — these caps must never be 0.
+        let err = SystemsHuntInput::from_tool_input(&serde_json::json!({
+            "maxFiles": 0,
+        }));
+        assert!(err.is_err());
+        let err = SystemsHuntInput::from_tool_input(&serde_json::json!({
+            "headBytes": 0,
+        }));
+        assert!(err.is_err());
+    }
+
+    // ----- score_with_index degradation contract --------------------
+
+    #[tokio::test]
+    async fn score_with_index_returns_unchanged_without_backend() {
+        let surfaces = vec![
+            surface("src/x.c", "unsafe-region"),
+            surface("src/y.rs", "unsafe-region"),
+        ];
+        let scored = score_with_index(surfaces.clone()).await;
+        assert_eq!(scored.len(), surfaces.len());
+        for (left, right) in scored.iter().zip(surfaces.iter()) {
+            assert_eq!(left.score, right.score);
+            // No "codeindex:" reasons added when no backend live.
+            assert!(left.reasons.iter().all(|r| !r.starts_with("codeindex:")));
+        }
     }
 }

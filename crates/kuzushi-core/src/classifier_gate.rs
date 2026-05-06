@@ -313,6 +313,7 @@ impl<'a> LikelyVulnClassifier<'a> {
                 self.current_threshold(),
                 self.quantile.lock().unwrap().count
             ),
+            ..Default::default()
         }
     }
 
@@ -444,6 +445,7 @@ mod tests {
                     "score": self.score,
                     "reason": "test"
                 })),
+                ..Default::default()
             })
         }
         fn triage_finding_blocking(&self, _: TriageRequest) -> Result<TriageOutcome> {
@@ -578,6 +580,7 @@ mod tests {
                     structured: Some(serde_json::json!({
                         "likely": true, "score": 0.0, "reason": "no score"
                     })),
+                    ..Default::default()
                 })
             }
             fn triage_finding_blocking(&self, _: TriageRequest) -> Result<TriageOutcome> {
@@ -603,6 +606,7 @@ mod tests {
                 Ok(AgentQueryResponse {
                     text: "I don't know what to say".to_string(),
                     structured: None,
+                    ..Default::default()
                 })
             }
             fn triage_finding_blocking(&self, _: TriageRequest) -> Result<TriageOutcome> {
@@ -630,6 +634,7 @@ mod tests {
                     text: "Sure: ```json\n{\"likely\":true,\"score\":0.92,\"reason\":\"obvious\"}\n```"
                         .to_string(),
                     structured: None,
+                    ..Default::default()
                 })
             }
             fn triage_finding_blocking(&self, _: TriageRequest) -> Result<TriageOutcome> {

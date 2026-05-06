@@ -854,6 +854,7 @@ mod tests {
             Ok(AgentQueryResponse {
                 text: q.remove(0),
                 structured: None,
+                ..Default::default()
             })
         }
         fn triage_finding_blocking(&self, _: TriageRequest) -> Result<TriageOutcome> {
@@ -885,6 +886,7 @@ mod tests {
                 ScriptedItem::Ok(text) => Ok(AgentQueryResponse {
                     text,
                     structured: None,
+                    ..Default::default()
                 }),
                 ScriptedItem::Err(message) => anyhow::bail!(message),
             }

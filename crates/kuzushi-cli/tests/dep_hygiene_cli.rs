@@ -54,6 +54,7 @@ fn seed_true_positive_finding(repo: &std::path::Path) -> String {
                 verdict: TriageVerdict::TruePositive,
                 confidence: 0.93,
                 rationale: "request body reaches exec".to_string(),
+                ..Default::default()
             },
         )
         .unwrap();
@@ -2885,6 +2886,7 @@ fn seed_triaged_finding(repo: &std::path::Path) -> Finding {
                 verdict: TriageVerdict::TruePositive,
                 confidence: 0.9,
                 rationale: "confirmed".to_string(),
+                ..Default::default()
             },
         )
         .unwrap();
@@ -2944,6 +2946,7 @@ fn seed_findings(repo: &std::path::Path) {
                 verdict: TriageVerdict::TruePositive,
                 confidence: 0.9,
                 rationale: "confirmed".to_string(),
+                ..Default::default()
             },
         )
         .unwrap();
