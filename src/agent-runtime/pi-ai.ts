@@ -21,7 +21,7 @@ import { resolveAgentRuntimeConfig } from "../credentials.js";
 import { KuzushiError, wrapError } from "../errors.js";
 import { installGlobalDispatcher } from "../http-agent.js";
 import { getLogger } from "../logger.js";
-import { getFreshAnthropicAccessToken } from "../oauth-store.js";
+import { getFreshOAuthAccessTokenForProvider } from "../oauth-store.js";
 import { getRateLimitRegistry } from "../scheduler/index.js";
 import type { AgentRuntimeCredentials } from "../types.js";
 import { isRecord, normalizeCostUsd, toErrorMessage } from "../utils.js";
@@ -157,6 +157,7 @@ async function* streamLlmCall(
     thinkingDisabled?: boolean;
     maxRetries?: number;
     backoffMs?: number;
+    apiKey?: string;
     observability?: { bus?: MessageBus; model?: string; runId?: string };
   },
 ): AsyncGenerator<AssistantMessageEvent, PiAiAssistantMessage> {
@@ -167,6 +168,7 @@ async function* streamLlmCall(
     signal: options.signal,
     temperature: options.temperature,
     maxTokens: options.maxTokens,
+    apiKey: options.apiKey,
     ...buildReasoningOptions(options.effort, options.thinkingDisabled),
   };
 
@@ -306,11 +308,7 @@ export class PiAiAgentRuntime implements AgentRuntime {
       callsite: "pi-ai.query",
     });
     assertRuntimeModelSelection(request.options.model, request.options.fallbackModel);
-    const oauthAccess = await getFreshAnthropicAccessToken();
-    const effectiveConfig: AgentRuntimeCredentials | undefined = oauthAccess
-      ? { ...(this.runtimeConfig ?? {}), authToken: oauthAccess }
-      : this.runtimeConfig;
-    const restoreRuntimeEnv = applyRuntimeEnvOverrides(effectiveConfig);
+    const restoreRuntimeEnv = applyRuntimeEnvOverrides(this.runtimeConfig);
     const startedAtMs = Date.now();
     const signal = request.options.abortController?.signal;
     const maxBudgetUsd = normalizeBudget(request.options.maxBudgetUsd);
@@ -484,16 +482,19 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
       // return value, which we capture with the two-step do-while/yield*
       // pattern below — `yield*` forwards the yielded events and binds
       // the return value on completion.
+      const oauthApiKey = await getFreshOAuthAccessTokenForProvider(String(model.provider));
+      const restoreOAuthEnv = applyProviderOAuthEnv(String(model.provider), oauthApiKey);
       const streamGen = streamLlmCall(modelSpec, model, context, {
         signal,
         temperature: options.temperature,
         maxTokens: options.maxOutputTokens,
         effort: options.effort,
         thinkingDisabled: options.thinkingDisabled,
+        apiKey: oauthApiKey,
         observability,
       });
       let assistant: PiAiAssistantMessage;
-      {
+      try {
         let next: IteratorResult<AssistantMessageEvent, PiAiAssistantMessage>;
         for (;;) {
           next = await streamGen.next();
@@ -520,6 +521,8 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
             yield mapped;
           }
         }
+      } finally {
+        restoreOAuthEnv();
       }
 
       // Handle transient soft errors (stopReason === "error" with transient message).
@@ -583,6 +586,7 @@ async function* runTurnLoop(args: RunTurnLoopArgs): AsyncIterable<AgentMessage> 
             maxTokens: options.maxOutputTokens,
             effort: options.effort,
             thinkingDisabled: options.thinkingDisabled,
+            apiKey: oauthApiKey,
             // Soft-retry loop manages its own attempt count; disable
             // streamLlmCall's internal network-retry so we don't double-retry.
             maxRetries: 0,
@@ -1181,17 +1185,6 @@ class PiAiSession implements AgentSession {
       throw new Error("pi-ai session query already in flight");
     }
     this.inFlight = true;
-    // Long-lived sessions may outlive an OAuth access token's ~8h validity.
-    // Refresh-from-store before each turn so an overnight shell doesn't die
-    // mid-stream when the access token expires. Pi-ai reads
-    // ANTHROPIC_OAUTH_TOKEN at request time, so writing the latest access
-    // there is enough — no need to thread it through the constructor's
-    // runtimeConfig snapshot.
-    const sessionOauthAccess = await getFreshAnthropicAccessToken();
-    if (sessionOauthAccess) {
-      process.env["ANTHROPIC_OAUTH_TOKEN"] = sessionOauthAccess;
-      process.env["ANTHROPIC_AUTH_TOKEN"] = sessionOauthAccess;
-    }
     const startedAtMs = Date.now();
     this.context.messages.push({
       role: "user",
@@ -1279,6 +1272,28 @@ function applyRuntimeEnvOverrides(runtimeConfig: AgentRuntimeCredentials | undef
       } else {
         process.env["ANTHROPIC_BASE_URL"] = originalBaseUrl;
       }
+    }
+  };
+}
+
+function applyProviderOAuthEnv(provider: string, accessToken: string | undefined): () => void {
+  if (!accessToken || provider !== "anthropic") return () => {};
+
+  const originalAuthToken = process.env["ANTHROPIC_AUTH_TOKEN"];
+  const originalOauthToken = process.env["ANTHROPIC_OAUTH_TOKEN"];
+  process.env["ANTHROPIC_AUTH_TOKEN"] = accessToken;
+  process.env["ANTHROPIC_OAUTH_TOKEN"] = accessToken;
+
+  return () => {
+    if (originalAuthToken === undefined) {
+      delete process.env["ANTHROPIC_AUTH_TOKEN"];
+    } else {
+      process.env["ANTHROPIC_AUTH_TOKEN"] = originalAuthToken;
+    }
+    if (originalOauthToken === undefined) {
+      delete process.env["ANTHROPIC_OAUTH_TOKEN"];
+    } else {
+      process.env["ANTHROPIC_OAUTH_TOKEN"] = originalOauthToken;
     }
   };
 }

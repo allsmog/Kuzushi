@@ -3,7 +3,12 @@ import type { Finding } from "../../src/scanners/types.js";
 import { getActionableFindings, initDb, upsertFinding } from "../../src/store.js";
 import type { TriageResult } from "../../src/types.js";
 import { runInteractiveReview } from "../../src/ui/review.js";
-import { runConfigConfirmation, runCredentialPrompt, runSetupWizard } from "../../src/ui/setup.js";
+import {
+  runConfigConfirmation,
+  runCredentialPrompt,
+  runModelPrompt,
+  runSetupWizard,
+} from "../../src/ui/setup.js";
 import { createUIStore } from "../../src/ui/state.js";
 
 function makeFinding(fp: string): Finding {
@@ -112,6 +117,34 @@ describe("ui flow helpers", () => {
     preflight?.onCancel();
 
     await expect(promise).resolves.toEqual({ action: "cancel" });
+    expect(store.getState().preflight).toBeNull();
+    expect(store.getState().mode).toBe("shell");
+  });
+
+  it("runs the model picker as a shell-mode preflight prompt", async () => {
+    const store = createUIStore();
+    store.update({ mode: "shell" });
+
+    const promise = runModelPrompt(
+      store,
+      {
+        activeModel: "anthropic:claude-sonnet-4-6",
+        availableModels: ["anthropic:claude-sonnet-4-6"],
+        credentialedProviders: ["anthropic", "openai-codex"],
+      },
+      "shell",
+    );
+
+    const preflight = store.getState().preflight;
+    expect(store.getState().mode).toBe("preflight");
+    expect(preflight?.kind).toBe("model");
+
+    preflight?.kind === "model" && preflight.onComplete("openai-codex:gpt-5.4-mini");
+
+    await expect(promise).resolves.toEqual({
+      action: "proceed",
+      model: "openai-codex:gpt-5.4-mini",
+    });
     expect(store.getState().preflight).toBeNull();
     expect(store.getState().mode).toBe("shell");
   });

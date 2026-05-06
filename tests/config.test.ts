@@ -21,6 +21,9 @@ const {
   unsetConfigValue,
   configPath,
   projectConfigPath,
+  localCredentialsPath,
+  findLocalCredentialsRoot,
+  loadLocalCredentials,
   DEFAULTS,
   TOP_LEVEL_CONFIG_SETTERS,
 } = await import("../src/config.js");
@@ -234,6 +237,35 @@ describe("loadConfig", () => {
 
     const config = loadConfig(TMP_REPO, { trustProjectConfig: true });
     expect(config.agentRuntimeConfig).toEqual({ baseUrl: "https://trusted.example/" });
+  });
+
+  it("loads nearest project-local credentials from a subdirectory", () => {
+    const nested = path.join(TMP_REPO, "src", "app");
+    mkdirSync(path.join(TMP_REPO, ".kuzushi"), { recursive: true });
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(
+      localCredentialsPath(TMP_REPO),
+      JSON.stringify({ apiKey: "sk-local", baseUrl: "https://proxy.example/" }),
+    );
+
+    expect(findLocalCredentialsRoot(nested)).toBe(TMP_REPO);
+    expect(loadLocalCredentials(nested)).toEqual({
+      apiKey: "sk-local",
+      baseUrl: "https://proxy.example/",
+    });
+  });
+
+  it("accepts legacy nested local credential slots", () => {
+    mkdirSync(path.join(TMP_REPO, ".kuzushi"), { recursive: true });
+    writeFileSync(
+      localCredentialsPath(TMP_REPO),
+      JSON.stringify({ piAi: { apiKey: "sk-piai", baseUrl: "https://proxy.example/" } }),
+    );
+
+    expect(loadLocalCredentials(TMP_REPO)).toEqual({
+      apiKey: "sk-piai",
+      baseUrl: "https://proxy.example/",
+    });
   });
 
   it("rejects file references that escape the config directory", () => {

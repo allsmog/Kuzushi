@@ -152,7 +152,7 @@ if command -v semgrep >/dev/null 2>&1; then
 else
   warn "semgrep not installed — required for 'pnpm test:e2e' and the default scan pipeline."
   hint "Install: 'pip install semgrep' (pypi) or 'brew install semgrep' (macOS)."
-  hint "Kuzushi auto-downloads Opengrep as a fallback at runtime, but tests need semgrep."
+  hint "The Rust scanner fails with an actionable missing-binary error if semgrep is absent."
 fi
 
 if command -v codeql >/dev/null 2>&1; then
@@ -227,4 +227,4 @@ section "Bootstrap complete"
 printf "%sNext:%s  pnpm doctor     # re-verify env\n" "$BOLD" "$RESET"
 printf "       pnpm typecheck   # type-check all sources\n"
 printf "       pnpm test        # run unit tests\n"
-printf "       pnpm dev --help  # run the CLI in dev mode\n"
+printf "       pnpm dev -- --help  # run the native CLI in dev mode\n"
