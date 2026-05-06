@@ -399,6 +399,147 @@ async function promptManualCode() {
   }
 }
 
+/**
+ * `next-step` envelope handler. Single-round-trip request to Anthropic's
+ * Messages API with tool definitions; returns either a tool_call or a
+ * final answer for the Rust-side run_tool_loop driver.
+ *
+ * Auth precedence: OAuth file → ANTHROPIC_OAUTH_TOKEN env → API key.
+ *
+ * Cost: derived from `response.usage` × per-model rate band. Rates are
+ * approximate (input + output, ignoring prompt cache). Use the spend
+ * ledger as the source of truth for budget enforcement, not these
+ * numbers.
+ */
+async function handleNextStep(request) {
+  const [provider, modelId] = parseModelSpec(request.model);
+  if (provider !== "anthropic") {
+    throw new Error(
+      `next-step bridge only supports anthropic models in this version (got ${provider}). ` +
+        "Open a follow-up phase to add openai/gemini.",
+    );
+  }
+
+  // Resolve auth header.
+  const oauthToken = await getFreshOAuthAccessTokenForProvider("anthropic");
+  const envOauth = providerAuthToken("anthropic");
+  const apiKey = configuredProviderApiKey("anthropic", request) ?? process.env.ANTHROPIC_API_KEY;
+  if (!oauthToken && !envOauth && !apiKey) {
+    throw new Error(
+      "next-step: no Anthropic credentials. Set up `kuzushi auth login anthropic`, " +
+        "ANTHROPIC_OAUTH_TOKEN, or ANTHROPIC_API_KEY.",
+    );
+  }
+
+  const headers = {
+    "content-type": "application/json",
+    "anthropic-version": "2023-06-01",
+  };
+  if (oauthToken || envOauth) {
+    headers.authorization = `Bearer ${oauthToken ?? envOauth}`;
+    // Claude Code OAuth tokens require this beta tag on the Messages API.
+    headers["anthropic-beta"] = "oauth-2025-04-20";
+  } else {
+    headers["x-api-key"] = apiKey;
+  }
+
+  const body = {
+    model: modelId,
+    system: request.systemPrompt ?? request.system_prompt ?? "",
+    messages: request.messages ?? [],
+    tools: (request.tools ?? []).map((t) => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.input_schema ?? t.inputSchema,
+    })),
+    max_tokens: request.max_tokens ?? request.maxTokens ?? 4096,
+  };
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `next-step: Anthropic API ${response.status} ${response.statusText}: ${text.slice(0, 500)}`,
+    );
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`next-step: Anthropic returned non-JSON body: ${text.slice(0, 200)}`);
+  }
+
+  const usage = parsed.usage ?? {};
+  const cost_usd = approximateCostUsd(modelId, usage);
+
+  // Walk content blocks. Per Anthropic's API, multiple blocks can appear
+  // (e.g. text + tool_use). We surface the first tool_use as a ToolCall;
+  // if there's none, the message is a Final.
+  const blocks = Array.isArray(parsed.content) ? parsed.content : [];
+  for (const block of blocks) {
+    if (block?.type === "tool_use") {
+      return {
+        ok: true,
+        step: "tool_call",
+        call: {
+          name: block.name,
+          input: block.input ?? {},
+          callId: block.id,
+        },
+        cost_usd,
+      };
+    }
+  }
+
+  // No tool_use → final.
+  const finalText = blocks
+    .filter((b) => b?.type === "text" && typeof b.text === "string")
+    .map((b) => b.text)
+    .join("");
+  return {
+    ok: true,
+    step: "final",
+    text: finalText,
+    structured: maybeParseJson(finalText),
+    cost_usd,
+  };
+}
+
+/**
+ * Approximate USD cost from Anthropic's `usage` block. Numbers are
+ * rough — production should swap in a per-model rate card. The spend
+ * ledger is the authoritative budget enforcer regardless of accuracy
+ * here.
+ */
+function approximateCostUsd(modelId, usage) {
+  const id = (modelId ?? "").toLowerCase();
+  // ($/1k input tokens, $/1k output tokens).
+  let inRate;
+  let outRate;
+  if (id.includes("haiku")) {
+    inRate = 0.0008;
+    outRate = 0.004;
+  } else if (id.includes("opus")) {
+    inRate = 0.015;
+    outRate = 0.075;
+  } else if (id.includes("sonnet")) {
+    inRate = 0.003;
+    outRate = 0.015;
+  } else {
+    inRate = 0.003;
+    outRate = 0.015;
+  }
+  const input = (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
+  const output = usage.output_tokens ?? 0;
+  return (input * inRate) / 1000 + (output * outRate) / 1000;
+}
+
 async function main() {
   if (process.argv[2] === "--oauth-login") {
     await runOAuthLogin(process.argv[3] ?? "openai-codex");
@@ -406,6 +547,14 @@ async function main() {
   }
 
   const request = JSON.parse(await readStdin());
+
+  // Route on envelope type. Default = legacy single-shot via pi-agent-core.
+  if (request.type === "next-step") {
+    const result = await handleNextStep(request);
+    process.stdout.write(JSON.stringify(result));
+    return;
+  }
+
   const [{ Agent, default: DefaultAgent }, { getModel }] = await Promise.all([
     import("@mariozechner/pi-agent-core"),
     import("@mariozechner/pi-ai"),
