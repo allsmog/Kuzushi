@@ -2,7 +2,7 @@
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
 Active story: UX-013 - Better Empty States And Errors
-Status: UX-012 complete in iteration 25; UX-013 pending next iteration
+Status: UX-012 complete and pushed in iteration 25 as `623f5ca`; UX-013 pending next iteration
 
 ## Stage 2 Checklist
 
@@ -48,12 +48,14 @@ Status: UX-012 complete in iteration 25; UX-013 pending next iteration
   - `cargo test -p kuzushi-tui renderer::tests -- --nocapture`
   - `cargo test -p kuzushi-tui app::tests -- --nocapture`
   - `cargo test -p kuzushi-cli findings -- --nocapture`
-- Result: implementation complete. Stable `F-NNNN` alias assignment now lives
-  in `kuzushi-core` and sorts by severity then fingerprint. CLI findings output
-  uses the alias plus secondary fingerprint, PR-comment diff sections preserve
-  global aliases instead of renumbering subsets, TUI completion/list/open/detail
-  paths share the same alias resolver, scan completion logs the stable top
-  alias, and replay/trace views show the current alias reference table.
+- Result: complete and pushed to `origin/main` as
+  `623f5ca ralph:ux stabilize finding aliases`. Stable `F-NNNN` alias
+  assignment now lives in `kuzushi-core` and sorts by severity then
+  fingerprint. CLI findings output uses the alias plus secondary fingerprint,
+  PR-comment diff sections preserve global aliases instead of renumbering
+  subsets, TUI completion/list/open/detail paths share the same alias resolver,
+  scan completion logs the stable top alias, and replay/trace views show the
+  current alias reference table.
 - Remaining work: UX-013 through UX-015.
 - Blockers or repo facts that contradicted this prompt:
   - The primary workspace remains stale at `80d23a4` with earlier Stage 2 files
