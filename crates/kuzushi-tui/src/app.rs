@@ -124,11 +124,13 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
 use kuzushi_core::modules::{OptionSpec, OptionType, ToolDescriptor, ToolExecutionContext};
 use kuzushi_core::{
     attach_source, attachment_store_path, default_scan_engines, detach_source,
-    export_workspace_findings, is_supported_attachment_module, known_artifacts, list_attachments,
-    load_persistent_threat_model, reparse_source, save_persistent_threat_model, AgentQueryRequest,
-    AgentRuntime, AttachmentRecord, Finding, FindingListFilter, FindingStore, KnownArtifact,
-    ModuleRegistry, OptionScope, OptionTarget, RuntimeKind, ScanCancellation, ScanRunOptions,
-    Severity, ToolOptionStore, V2Config, WorkspaceTarget, SUPPORTED_ATTACHMENT_MODULES,
+    export_workspace_findings, format_finding_alias, is_supported_attachment_module,
+    known_artifacts, list_attachments, load_persistent_threat_model, parse_finding_alias,
+    reparse_source, resolve_finding_alias, save_persistent_threat_model, sorted_finding_aliases,
+    AgentQueryRequest, AgentRuntime, AttachmentRecord, Finding, FindingListFilter, FindingStore,
+    KnownArtifact, ModuleRegistry, OptionScope, OptionTarget, RuntimeKind, ScanCancellation,
+    ScanRunOptions, Severity, ToolOptionStore, V2Config, WorkspaceTarget,
+    SUPPORTED_ATTACHMENT_MODULES,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
 use ratatui::backend::CrosstermBackend;
@@ -1026,8 +1028,8 @@ impl ShellApp {
         }
 
         let mut values = Vec::new();
-        for (index, finding) in findings.iter().enumerate() {
-            values.push(format_finding_alias(index));
+        for (alias, finding) in sorted_finding_aliases(&findings) {
+            values.push(alias);
             values.push(short_fingerprint(&finding.fingerprint));
             values.push(finding.fingerprint.clone());
         }
@@ -3429,7 +3431,7 @@ impl ShellApp {
 
         let reference = if let Some(index) = parse_finding_alias(reference) {
             self.refresh_findings(false);
-            let Some(finding) = self.findings.get(index) else {
+            let Some(finding) = resolve_finding_alias(&self.findings, reference) else {
                 self.log(
                     "error",
                     format!(
@@ -3588,6 +3590,7 @@ impl ShellApp {
                     scan.error = None;
                 }
                 self.refresh_findings(false);
+                self.log_scan_alias_hint();
                 self.log(
                     "scan",
                     format!(
@@ -3616,6 +3619,19 @@ impl ShellApp {
                 }
                 self.log("scan", format!("cancelled {}", short_fingerprint(&run_id)));
             }
+        }
+    }
+
+    fn log_scan_alias_hint(&mut self) {
+        if let Some((alias, finding)) = sorted_finding_aliases(&self.findings).into_iter().next() {
+            self.log(
+                "scan",
+                format!(
+                    "top alias {alias} -> {} ({})",
+                    short_fingerprint(&finding.fingerprint),
+                    truncate_ascii(&finding.title, 64)
+                ),
+            );
         }
     }
 
@@ -4194,19 +4210,6 @@ fn config_completion_keys() -> &'static [&'static str] {
     ]
 }
 
-fn format_finding_alias(index: usize) -> String {
-    format!("F-{:04}", index + 1)
-}
-
-fn parse_finding_alias(reference: &str) -> Option<usize> {
-    let reference = reference.trim();
-    let suffix = reference
-        .strip_prefix("F-")
-        .or_else(|| reference.strip_prefix("f-"))?;
-    let index = suffix.parse::<usize>().ok()?;
-    index.checked_sub(1)
-}
-
 pub fn format_chain_alias(index: usize) -> String {
     format!("C-{:02}", index + 1)
 }
@@ -4235,34 +4238,6 @@ pub(crate) fn sorted_chain_aliases(chains: &[ExploitChain]) -> Vec<(String, Expl
         .enumerate()
         .map(|(index, chain)| (format_chain_alias(index), chain.clone()))
         .collect()
-}
-
-pub(crate) fn sorted_finding_aliases(findings: &[Finding]) -> Vec<(String, Finding)> {
-    let mut indexed: Vec<&Finding> = findings.iter().collect();
-    indexed.sort_by(|a, b| {
-        let by_severity = severity_rank(&a.severity).cmp(&severity_rank(&b.severity));
-        if by_severity == std::cmp::Ordering::Equal {
-            a.fingerprint.cmp(&b.fingerprint)
-        } else {
-            by_severity
-        }
-    });
-    indexed
-        .into_iter()
-        .enumerate()
-        .map(|(index, finding)| (format_finding_alias(index), finding.clone()))
-        .collect()
-}
-
-fn severity_rank(severity: &Severity) -> u8 {
-    match severity {
-        Severity::Critical => 0,
-        Severity::High => 1,
-        Severity::Medium => 2,
-        Severity::Low => 3,
-        Severity::Info => 4,
-        Severity::Unknown => 5,
-    }
 }
 
 pub fn format_alias_table(
@@ -6319,6 +6294,69 @@ JSON
                 .as_ref()
                 .map(|finding| finding.fingerprint.as_str()),
             Some(finding.fingerprint.as_str())
+        );
+    }
+
+    #[test]
+    fn open_command_resolves_alias_from_stable_sorted_mapping() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .insert_scan_run("run-1", workspace.root(), "completed")
+            .unwrap();
+        let mut stable_first = make_finding(Severity::High, "aaaa1111", "stable first");
+        let stable_later = make_finding(Severity::High, "zzzz1111", "stored later");
+        stable_first.file_path = "src/a.rs".to_string();
+        store.insert_finding("run-1", &stable_first).unwrap();
+        store.insert_finding("run-1", &stable_later).unwrap();
+
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.handle_command(ShellCommand::Open("F-0001".to_string()));
+
+        assert_eq!(app.shell_view, ShellView::Finding);
+        assert_eq!(
+            app.selected_finding
+                .as_ref()
+                .map(|finding| finding.fingerprint.as_str()),
+            Some("aaaa1111")
+        );
+    }
+
+    #[test]
+    fn scan_completion_logs_same_stable_alias_used_by_findings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .insert_scan_run("run-1", workspace.root(), "completed")
+            .unwrap();
+        let stable_first = make_finding(Severity::High, "aaaa1111", "stable first");
+        let stored_later = make_finding(Severity::High, "zzzz1111", "stored later");
+        store.insert_finding("run-1", &stable_first).unwrap();
+        store.insert_finding("run-1", &stored_later).unwrap();
+
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.scan = Some(ScanPanelState {
+            run_id: None,
+            target: workspace.root().to_path_buf(),
+            stage: "running scan".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        app.apply_scan_event(ScanEvent::Finished {
+            run_id: "run-1".to_string(),
+            findings_count: 2,
+        });
+
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "scan" && line.body.contains("top alias F-0001 -> aaaa1111")
+        }));
+        assert_eq!(
+            kuzushi_core::stable_finding_alias(&app.findings, "aaaa1111").as_deref(),
+            Some("F-0001")
         );
     }
 

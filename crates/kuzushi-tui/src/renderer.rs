@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 
 use kuzushi_core::modules::{ModuleKind, OptionSpec, OptionType};
-use kuzushi_core::{AttachmentKind, Finding, Severity, SUPPORTED_ATTACHMENT_MODULES};
+use kuzushi_core::{
+    sorted_finding_aliases, stable_finding_alias, AttachmentKind, Finding, Severity,
+    SUPPORTED_ATTACHMENT_MODULES,
+};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span, Style};
 use ratatui::widgets::Paragraph;
@@ -1000,12 +1003,14 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             theme::subtle(),
         ),
     ]));
-    for (index, finding) in app.findings.iter().enumerate() {
-        let alias = format!("F-{number:04}", number = index + 1);
+    for (index, (alias, finding)) in sorted_finding_aliases(&app.findings)
+        .into_iter()
+        .enumerate()
+    {
         let selected = app
             .selected_finding
             .as_ref()
-            .is_some_and(|selected| selected.fingerprint == finding.fingerprint);
+            .is_some_and(|selected| selected.fingerprint.as_str() == finding.fingerprint.as_str());
         let cursor_row = app.findings_cursor == index;
         let marker = if selected {
             ">"
@@ -1031,33 +1036,33 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             ),
             Span::raw("  "),
             Span::raw(pad(
-                &finding_verdict_label(finding),
+                &finding_verdict_label(&finding),
                 widths.get(2).copied().unwrap_or(9),
             )),
             Span::raw("  "),
             Span::raw(pad(
-                &finding_confidence_label(finding),
+                &finding_confidence_label(&finding),
                 widths.get(3).copied().unwrap_or(5),
             )),
             Span::raw("  "),
             Span::raw(pad(
-                &finding_proof_state_label(finding),
+                &finding_proof_state_label(&finding),
                 widths.get(4).copied().unwrap_or(12),
             )),
             Span::raw("  "),
             Span::raw(pad(
-                &finding_cwe_label(finding),
+                &finding_cwe_label(&finding),
                 widths.get(5).copied().unwrap_or(8),
             )),
             Span::raw("  "),
             Span::raw(fit(
-                &finding_source_label(finding),
+                &finding_source_label(&finding),
                 widths.get(6).copied().unwrap_or(12),
             )),
         ]));
         lines.push(indent(
             muted(&fit(
-                &format!("loc {} | {}", finding_location(finding), finding.title),
+                &format!("loc {} | {}", finding_location(&finding), finding.title),
                 area.width.saturating_sub(2) as usize,
             )),
             2,
@@ -1066,7 +1071,7 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             muted(&fit(
                 &format!(
                     "evidence: {} | next: open {}",
-                    finding_evidence_preview(finding),
+                    finding_evidence_preview(&finding),
                     alias
                 ),
                 area.width.saturating_sub(2) as usize,
@@ -1091,6 +1096,9 @@ fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         Span::styled(finding.title.clone(), theme::heading()),
     ]));
     lines.push(blank());
+    if let Some(alias) = stable_finding_alias(&app.findings, &finding.fingerprint) {
+        lines.push(detail("alias", &alias));
+    }
     lines.push(detail(
         "location",
         &format!("{}:{}", finding.file_path, finding.start_line),
@@ -1316,6 +1324,7 @@ fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> 
         "triage",
         &format!(".kuzushi/runs/{run_id}/triage.jsonl"),
     ));
+    lines.extend(alias_reference_lines(app, area));
     lines
 }
 
@@ -1332,6 +1341,25 @@ fn trace_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> {
         "verify",
         &format!(".kuzushi/runs/{run_id}/verify.jsonl"),
     ));
+    lines.extend(alias_reference_lines(app, area));
+    lines
+}
+
+fn alias_reference_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let aliases = sorted_finding_aliases(&app.findings);
+    lines.push(blank());
+    if aliases.is_empty() {
+        lines.push(muted("aliases: load findings first with findings"));
+        return lines;
+    }
+    lines.push(divider("ALIASES", area.width));
+    for (alias, finding) in aliases.into_iter().take(3) {
+        lines.push(detail(
+            &alias,
+            &format!("{} {}", short(&finding.fingerprint), finding.title),
+        ));
+    }
     lines
 }
 
@@ -3154,6 +3182,8 @@ mod tests {
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains("dangerous sink"));
+        assert!(rendered.contains("alias"));
+        assert!(rendered.contains("F-0001"));
         assert!(rendered.contains("fingerprint"));
     }
 
@@ -3291,6 +3321,30 @@ mod tests {
             );
             assert!(exit_row.contains("exit requested; closing shell"));
             assert!(prompt_row.trim_start().starts_with("kuzushi>"));
+        }
+    }
+
+    #[test]
+    fn replay_and_trace_surfaces_reuse_current_finding_aliases() {
+        for view in [
+            ShellView::Replay("run-1".to_string()),
+            ShellView::Trace("run-1".to_string()),
+        ] {
+            let backend = TestBackend::new(80, 18);
+            let mut terminal = Terminal::new(backend).unwrap();
+            let mut app = ShellApp::new(V2Config::default(), None);
+            let mut finding =
+                Finding::new_semgrep("demo.rule", "src/app.ts", 8, None, Severity::High, "sink");
+            finding.fingerprint = "aaaa1111".to_string();
+            app.findings = vec![finding];
+            app.shell_view = view;
+
+            terminal.draw(|frame| render_app(frame, &app)).unwrap();
+            let rendered = format!("{:?}", terminal.backend().buffer());
+
+            assert!(rendered.contains("ALIASES"));
+            assert!(rendered.contains("F-0001"));
+            assert!(rendered.contains("aaaa1111"));
         }
     }
 
