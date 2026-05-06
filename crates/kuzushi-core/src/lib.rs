@@ -15,6 +15,7 @@ pub mod recon;
 pub mod runtime;
 pub mod scan;
 pub mod secret_scan;
+pub mod spend;
 pub mod systems_hunt;
 pub mod threat_model;
 pub mod variant_ndiff;
@@ -64,6 +65,7 @@ pub use secret_scan::{
     scan_for_secrets, SecretScanFinding, SecretScanOptions, SecretScanReport, SecretScanScanner,
     SecretSeverity,
 };
+pub use spend::{parse_budget_flag, Operation as SpendOperation, SpendError, SpendLimiter, SpendTicket};
 pub use systems_hunt::{execute_systems_hunt_tool, run_systems_hunt_report, SystemsHuntReport};
 pub use threat_model::{
     execute_threat_model_tool, load_persistent_threat_model, save_persistent_threat_model,

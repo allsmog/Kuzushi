@@ -41,6 +41,11 @@ enum Command {
         /// Emit one line per pipeline event in a deterministic, grep-friendly format.
         #[arg(long, conflicts_with = "json")]
         ci: bool,
+        /// Per-operation USD budget caps, e.g. `triage=50,deep-audit=200,full-mode-multi=300`.
+        /// Caps are persisted to the spend ledger and enforced before each LLM call
+        /// once the runtime is wired through (Phase 4+). Set without value to clear all caps.
+        #[arg(long)]
+        budget: Option<String>,
     },
     /// List persisted findings.
     Findings {
@@ -136,7 +141,8 @@ async fn main() -> Result<()> {
             triage,
             json,
             ci,
-        } => scan_command(target, tasks, triage, json, ci).await,
+            budget,
+        } => scan_command(target, tasks, triage, json, ci, budget).await,
         Command::Findings {
             target,
             limit,
@@ -219,11 +225,32 @@ async fn scan_command(
     triage: bool,
     json: bool,
     ci: bool,
+    budget: Option<String>,
 ) -> Result<()> {
     let workspace = WorkspaceTarget::new(&target)?;
     let config = load_config_for_target(Some(workspace.root()))?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let registry = ModuleRegistry::with_v2_builtins();
+
+    // Persist any --budget caps to the spend ledger before the scan starts.
+    // The actual enforcement lives in RoutedRuntime once wired (Phase 4+);
+    // here we make sure the operator's intent is recorded.
+    if let Some(spec) = budget.as_deref() {
+        let pairs = kuzushi_core::parse_budget_flag(spec)
+            .with_context(|| format!("invalid --budget spec {spec:?}"))?;
+        let limiter = kuzushi_core::SpendLimiter::open(workspace.findings_db_path())
+            .context("could not open spend ledger")?;
+        for (op, cap) in &pairs {
+            limiter
+                .set_cap(*op, *cap)
+                .with_context(|| format!("could not set cap for {}", op.as_db_str()))?;
+        }
+        if !json && !ci {
+            for (op, cap) in &pairs {
+                eprintln!("budget: {} = ${:.2}", op.as_db_str(), cap);
+            }
+        }
+    }
     let input = serde_json::json!({
         "taskMode": if tasks.is_empty() { "auto" } else { "manual" },
         "tasks": tasks,
