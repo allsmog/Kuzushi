@@ -74,3 +74,61 @@ async fn verify_catches_cwe121_stack_overflow() {
     ));
     assert!(outcome.duration_ms > 0);
 }
+
+#[tokio::test]
+#[ignore = "live experiment; requires clang with libFuzzer (libclang-rt-dev)"]
+async fn fuzz_catches_cwe121_stack_overflow() {
+    if kuzushi_sandbox::which("clang").is_none() {
+        eprintln!("no clang on PATH; libFuzzer mode requires clang");
+        return;
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("vulnerable.c");
+    std::fs::write(&path, VULN_C).unwrap();
+
+    let mut finding = Finding::new_tool(
+        "experiment",
+        "cwe-121-stack-overflow",
+        path.to_str().unwrap(),
+        7,
+        Some(7),
+        Severity::Critical,
+        "stack buffer overflow via untrusted length",
+    );
+    finding.id = Some(1);
+
+    let opts = VerifyOptions {
+        backend: Some(SandboxBackend::Plain),
+        timeout_ms: 90_000,
+        trust_plain_backend: true,
+        fuzz_seconds: Some(10),
+        ..VerifyOptions::default()
+    };
+    let outcome = verify_finding(&finding, opts).await.unwrap();
+
+    eprintln!(
+        "fuzz outcome: proof_level={} verdict={:?} duration_ms={}",
+        outcome.proof_level, outcome.proof_verdict, outcome.duration_ms
+    );
+    if let Some(text) = outcome.crash_evidence.as_deref() {
+        eprintln!(
+            "crash excerpt:\n{}",
+            text.lines().take(15).collect::<Vec<_>>().join("\n")
+        );
+    }
+
+    // libFuzzer should generate an input large enough to overflow the
+    // 16-byte `dest` array in copy_attacker_buffer. We expect ASan to
+    // catch it, classifier to surface proof_level=4.
+    assert_eq!(outcome.language.as_deref(), Some("c"));
+    assert!(outcome.duration_ms > 0);
+    assert!(
+        matches!(
+            outcome.proof_verdict,
+            ProofVerdict::Exploited | ProofVerdict::NotReproduced
+        ),
+        "fuzz path must terminate with a verdict; got {:?}",
+        outcome.proof_verdict
+    );
+}

@@ -438,6 +438,25 @@ fn harness_failed_to_build(
     evidence: String,
     duration_ms: u64,
 ) -> VerificationOutcome {
+    let mut notes: Vec<String> = vec![];
+    // Surface common toolchain-installation gaps explicitly so the
+    // operator gets an actionable hint instead of having to read the
+    // raw linker error out of crash_evidence.
+    if evidence.contains("libclang_rt.fuzzer") {
+        notes.push(
+            "libFuzzer runtime missing. Install your distro's `libclang-rt-dev` (Debian/Ubuntu) or `compiler-rt` (Fedora/Arch) package, or use a clang build that ships libFuzzer.".to_string(),
+        );
+    }
+    if evidence.contains("libclang_rt.asan") || evidence.contains("libasan") {
+        notes.push(
+            "AddressSanitizer runtime missing. Install your distro's `libclang-rt-dev` / `libasan` package.".to_string(),
+        );
+    }
+    if evidence.contains("unrecognized argument to '-fsanitize=' option: 'fuzzer'") {
+        notes.push(
+            "Selected compiler does not support `-fsanitize=fuzzer`. Install clang and re-run; gcc has no equivalent flag.".to_string(),
+        );
+    }
     VerificationOutcome {
         proof_level: 1,
         proof_verdict: ProofVerdict::HarnessFailedToBuild,
@@ -447,7 +466,7 @@ fn harness_failed_to_build(
         crash_evidence: Some(evidence),
         duration_ms,
         cost_usd: 0.0,
-        notes: vec![],
+        notes,
     }
 }
 
@@ -1641,9 +1660,29 @@ async fn verify_c_like(
         }
     };
 
+    let fuzz_seconds = opts.fuzz_seconds;
+
     // Pick a compiler binary that's actually on PATH; ASan is the
     // gold-standard observation primitive for memory-corruption bugs.
-    let cc = pick_c_compiler(compiler);
+    // libFuzzer mode hard-requires clang because `-fsanitize=fuzzer`
+    // is a clang-only flag.
+    let cc = if fuzz_seconds.is_some() {
+        let candidate = match compiler {
+            CCompiler::Gcc => "clang",
+            CCompiler::Gpp => "clang++",
+        };
+        if kuzushi_sandbox::which(candidate).is_some() {
+            Some(candidate.to_string())
+        } else {
+            return Ok(infrastructure_error(
+                backend,
+                Some(project.path.clone()),
+                format!("fuzzSeconds set but {candidate} is not on PATH; libFuzzer requires clang"),
+            ));
+        }
+    } else {
+        pick_c_compiler(compiler)
+    };
     if cc.is_none() {
         return Ok(infrastructure_error(
             backend,
@@ -1653,7 +1692,6 @@ async fn verify_c_like(
     }
     let cc = cc.unwrap();
 
-    let fuzz_seconds = opts.fuzz_seconds;
     let driver_filename = if fuzz_seconds.is_some() {
         "fuzz.c"
     } else {
