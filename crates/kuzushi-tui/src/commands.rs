@@ -361,6 +361,7 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
         command: "threats [1-5]",
         aliases: &[
             "/threats [1-5]",
+            "threats summary",
             "threats dfd",
             "threats stride",
             "threats stories",
@@ -368,6 +369,12 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
         ],
         category: ShellCommandCategory::FindingsEvidence,
         description: "threat model views",
+    },
+    ShellCommandSpec {
+        command: "threats edit",
+        aliases: &["/threats edit"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "open the editable threat model view",
     },
     ShellCommandSpec {
         command: "auth",
@@ -1287,6 +1294,140 @@ mod tests {
                     "catalog form {form:?} materialized as {sample:?} did not route"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn command_catalog_covers_every_public_route_kind() {
+        let mut routed = std::collections::BTreeSet::new();
+        for spec in shell_command_specs() {
+            let mut forms = vec![spec.command];
+            forms.extend(spec.aliases.iter().copied());
+            for form in forms {
+                routed.insert(route_kind(&parse_command(&sample_help_form(form))));
+            }
+        }
+
+        let expected = std::collections::BTreeSet::from([
+            "actor",
+            "attach",
+            "ask",
+            "auth",
+            "auth-login",
+            "back",
+            "backend",
+            "clear",
+            "config",
+            "context",
+            "cost",
+            "detach",
+            "findings",
+            "help",
+            "history",
+            "kb",
+            "load",
+            "model",
+            "modules",
+            "open",
+            "options",
+            "pause",
+            "plan",
+            "plan-apply",
+            "plan-discard",
+            "prompts",
+            "prompt",
+            "provider",
+            "quickstart",
+            "quit",
+            "reparse",
+            "replay",
+            "resume",
+            "run-tool",
+            "scan",
+            "set-option",
+            "show-aliases",
+            "show-runs",
+            "since",
+            "story",
+            "target",
+            "task",
+            "tasks",
+            "threat",
+            "threat-ask",
+            "threat-apply",
+            "threat-editor",
+            "threat-regen",
+            "threat-reject",
+            "tools",
+            "trace",
+            "tune",
+            "unset-option",
+            "use",
+            "workspace",
+        ]);
+
+        assert_eq!(routed, expected);
+    }
+
+    fn route_kind(command: &ShellCommand) -> &'static str {
+        match command {
+            ShellCommand::Help => "help",
+            ShellCommand::Back => "back",
+            ShellCommand::Modules => "modules",
+            ShellCommand::Tools => "tools",
+            ShellCommand::Findings => "findings",
+            ShellCommand::Open(_) => "open",
+            ShellCommand::Scan(_) => "scan",
+            ShellCommand::Model(_) => "model",
+            ShellCommand::Auth => "auth",
+            ShellCommand::AuthLogin(_) => "auth-login",
+            ShellCommand::Provider(_) => "provider",
+            ShellCommand::Backend(_) => "backend",
+            ShellCommand::Cost => "cost",
+            ShellCommand::Config => "config",
+            ShellCommand::Use(_) => "use",
+            ShellCommand::Tune => "tune",
+            ShellCommand::Threat(_) => "threat",
+            ShellCommand::ThreatEditor => "threat-editor",
+            ShellCommand::ThreatRegen => "threat-regen",
+            ShellCommand::ThreatAsk(_) => "threat-ask",
+            ShellCommand::ThreatApply => "threat-apply",
+            ShellCommand::ThreatReject => "threat-reject",
+            ShellCommand::Prompts => "prompts",
+            ShellCommand::Prompt(_) => "prompt",
+            ShellCommand::Actor(_) => "actor",
+            ShellCommand::ShowRuns => "show-runs",
+            ShellCommand::ShowAliases(_) => "show-aliases",
+            ShellCommand::Since(_) => "since",
+            ShellCommand::Replay(_) => "replay",
+            ShellCommand::Trace(_) => "trace",
+            ShellCommand::Plan(_) => "plan",
+            ShellCommand::PlanApply => "plan-apply",
+            ShellCommand::PlanDiscard => "plan-discard",
+            ShellCommand::Quickstart => "quickstart",
+            ShellCommand::Target(_) => "target",
+            ShellCommand::Ask(_) => "ask",
+            ShellCommand::Options { .. } => "options",
+            ShellCommand::SetOption { .. } => "set-option",
+            ShellCommand::UnsetOption { .. } => "unset-option",
+            ShellCommand::Tasks => "tasks",
+            ShellCommand::Task(_) => "task",
+            ShellCommand::Context(_) => "context",
+            ShellCommand::Workspace(_) => "workspace",
+            ShellCommand::KnowledgeBase(_) => "kb",
+            ShellCommand::Attach(_) => "attach",
+            ShellCommand::Detach(_) => "detach",
+            ShellCommand::Reparse(_) => "reparse",
+            ShellCommand::History => "history",
+            ShellCommand::Clear => "clear",
+            ShellCommand::Load(_) => "load",
+            ShellCommand::Resume(_) => "resume",
+            ShellCommand::Pause => "pause",
+            ShellCommand::Story => "story",
+            ShellCommand::RunTool { .. } => "run-tool",
+            ShellCommand::Quit => "quit",
+            ShellCommand::Empty => "empty",
+            ShellCommand::Unknown(_) => "unknown",
         }
     }
 

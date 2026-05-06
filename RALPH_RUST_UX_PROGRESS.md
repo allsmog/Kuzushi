@@ -1,8 +1,8 @@
 # Ralph Rust UX Progress
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
-Active story: UX-009 - Slash Command Taxonomy And Drift Tests
-Status: UX-008 complete and pushed in iteration 21 as `93ae872`; UX-009 pending next iteration
+Active story: UX-010 - Tab Completion For High-Value Arguments
+Status: UX-009 complete in iteration 22; commit/push gate pending in this iteration
 
 ## Stage 2 Checklist
 
@@ -14,7 +14,7 @@ Status: UX-008 complete and pushed in iteration 21 as `93ae872`; UX-009 pending 
 - UX-006 Rust doctor / preflight: complete; pushed in iteration 19 as `69f2e2a`.
 - UX-007 Input mode clarity: complete; pushed in iteration 20 as `d1a5e7f`.
 - UX-008 Honest abort state: complete; pushed in iteration 21 as `93ae872`.
-- UX-009 Slash command taxonomy and drift tests: pending.
+- UX-009 Slash command taxonomy and drift tests: complete in iteration 22.
 - UX-010 Tab completion for high-value arguments: pending.
 - UX-011 Findings row/card density: pending.
 - UX-012 Stable finding aliases: pending.
@@ -23,6 +23,37 @@ Status: UX-008 complete and pushed in iteration 21 as `93ae872`; UX-009 pending 
 - UX-015 Final Ink/React removal gate: pending.
 
 ## Iteration Log
+
+### Iteration 22 - UX-009
+
+- Task attempted: tighten Rust shell slash-command taxonomy and drift coverage
+  so grouped help/catalog entries cannot advertise unrouted commands and the
+  intended public route kinds remain represented.
+- Files changed:
+  - `crates/kuzushi-tui/src/commands.rs`
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `sed -n '1,240p' RALPH_RUST_BRIDGE_GAPS_PROGRESS.md`
+  - `sed -n '1,220p' RALPH_RUST_UX_PROGRESS.md`
+  - `git -C /tmp/kuzushi-ux2-clone.PJaRge status --short --branch`
+  - `git -C /tmp/kuzushi-ux2-clone.PJaRge log --oneline -8 --decorate`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-tui commands::tests::command_catalog_advertises_only_routed_commands commands::tests::command_catalog_covers_every_public_route_kind` (invalid Cargo invocation; Cargo accepts one test-name filter)
+  - `cargo test -p kuzushi-tui renderer::tests::renders_help_grouped_by_operator_workflow`
+  - `cargo test -p kuzushi-tui command_catalog`
+  - `cargo test -p kuzushi-tui commands::tests`
+  - `cargo test -p kuzushi-tui help_command_routes_to_rust_shell_help_without_removed_cli_paths`
+- Result: implementation complete. The grouped command catalog now advertises
+  the already-routed `threats edit` command and includes `threats summary` as a
+  routeable alias. A new command-catalog drift test materializes every
+  help/catalog form, rejects unrouted forms, and compares the cataloged route
+  kinds against the intended public shell command surface.
+- Remaining work: commit and push UX-009, then UX-010 through UX-015.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary workspace remains stale at `80d23a4` with earlier Stage 2 files
+    staged/modified, so this iteration continued in the clean isolated clone at
+    `/tmp/kuzushi-ux2-clone.PJaRge`.
 
 ### Iteration 21 - UX-008
 
