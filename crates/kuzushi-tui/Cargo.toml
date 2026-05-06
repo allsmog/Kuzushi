@@ -18,4 +18,5 @@ serde_json.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+insta.workspace = true
 tempfile.workspace = true
