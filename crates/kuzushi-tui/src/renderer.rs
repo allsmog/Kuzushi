@@ -6,7 +6,7 @@ use kuzushi_core::{
     SUPPORTED_ATTACHMENT_MODULES,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::prelude::{Frame, Line, Span, Style};
+use ratatui::prelude::{Frame, Line, Modifier, Span, Style};
 use ratatui::widgets::Paragraph;
 
 use crate::app::{LogLine, ScanPanelState, ShellApp, ShellView, ThreatView};
@@ -30,7 +30,18 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         0
     };
     let keybind_height = if area.height >= 8 { 2 } else { 0 };
-    let status_height = if area.height >= 6 { 1 } else { 0 };
+    // Below the rich-status threshold we still want a 1-row orientation line
+    // so the operator can see which view they're on and how to escape — but
+    // only if the window has at least enough vertical space to keep the prompt
+    // and at least one line of content visible.
+    let status_height = if area.height >= 6 {
+        1
+    } else if area.height >= 4 {
+        1
+    } else {
+        0
+    };
+    let compact_status = area.height < 6 && area.height >= 4;
     let throttle_height = if app.advisory.throttle.is_some() && area.height >= 5 {
         1
     } else {
@@ -89,7 +100,7 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         .split(area);
 
     let mut index = 0;
-    render_lines(frame, chunks[index], view_lines);
+    render_view_lines(frame, chunks[index], view_lines, app.scroll_offset);
     index += 1;
     index += 1;
 
@@ -98,7 +109,11 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         index += 1;
     }
     if status_height > 0 {
-        render_status_footer(frame, chunks[index], app);
+        if compact_status {
+            render_compact_status(frame, chunks[index], app);
+        } else {
+            render_status_footer(frame, chunks[index], app);
+        }
         index += 1;
     }
     if keybind_height > 0 {
@@ -1085,8 +1100,13 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             }
         });
 
+    let head_glyph = if app.has_running_work() {
+        format!("{} ", app.spinner_glyph())
+    } else {
+        "● ".to_string()
+    };
     lines.push(Line::from(vec![
-        Span::styled("● ", theme::accent()),
+        Span::styled(head_glyph, theme::accent()),
         Span::styled(target, theme::label()),
         Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
         Span::raw(stage),
@@ -1187,7 +1207,21 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let aliases = sorted_finding_aliases(&app.findings);
     let cursor = app.findings_cursor.min(aliases.len().saturating_sub(1));
     let mut body = Vec::new();
-    for (index, (alias, finding)) in aliases.into_iter().enumerate() {
+    // Lazy windowing: each finding occupies three rendered rows, so we only
+    // need enough findings to cover the scrolled-into viewport plus a small
+    // buffer for partial rows on either edge. Without this cap a workspace
+    // with 10k findings would format ~30k Lines per frame even though only
+    // ~24 rows are visible. We always also keep the cursor row and the
+    // selected finding visible so navigation across the whole list still
+    // feels seamless.
+    let scroll = app.scroll_offset as usize;
+    let visible_rows = area.height.max(1) as usize;
+    let row_budget = scroll + visible_rows + 6;
+    let mut max_findings = row_budget.div_ceil(3) + 2;
+    if app.findings_cursor >= max_findings.saturating_sub(1) {
+        max_findings = app.findings_cursor + 2;
+    }
+    for (index, (alias, finding)) in aliases.into_iter().take(max_findings).enumerate() {
         let selected = app
             .selected_finding
             .as_ref()
@@ -2129,16 +2163,16 @@ fn agent_chat_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     };
 
     let status = if agent.abort_requested {
-        "abort requested"
+        "abort requested".to_string()
     } else if agent.running {
-        "running"
+        format!("{} running", app.spinner_glyph())
     } else if agent.error.is_some() {
-        "failed"
+        "failed".to_string()
     } else {
-        "answered"
+        "answered".to_string()
     };
     lines.push(detail("mode", "agent chat"));
-    lines.push(detail("status", status));
+    lines.push(detail("status", &status));
     lines.push(detail(
         "model",
         app.config.model.as_deref().unwrap_or("unconfigured"),
@@ -2484,6 +2518,64 @@ fn render_cost_cap_halt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     render_lines(frame, area, lines);
 }
 
+/// Tiny-terminal status line. When the height is too small for the rich
+/// status_footer + keybind_footer pair, we still fit a single row that names
+/// the current view, the most relevant counter, and the universal escape
+/// chord. Without this, on a 4–5 row terminal the operator sees only a
+/// stripped view + prompt with no orientation cue.
+fn render_compact_status(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    if area.height == 0 {
+        return;
+    }
+    let view = compact_view_label(&app.shell_view);
+    let counter = match app.shell_view {
+        ShellView::Findings => format!("{} findings", app.findings.len()),
+        ShellView::History => format!("{} history", app.command_history.len()),
+        ShellView::Catalog | ShellView::Module => {
+            format!("{} mods", app.registry.modules().count())
+        }
+        _ => routing_mode_segment(app),
+    };
+    let chord = if app.has_running_work() {
+        format!("{} running · Ctrl-C abort", app.spinner_glyph())
+    } else {
+        "?=help · Ctrl-C exit".to_string()
+    };
+    let segments = [view, counter, chord];
+    let line = status_line(&segments, area.width);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn compact_view_label(view: &ShellView) -> String {
+    match view {
+        ShellView::Catalog => "catalog",
+        ShellView::Module => "module",
+        ShellView::ModuleRun => "run",
+        ShellView::Findings => "findings",
+        ShellView::Finding => "finding",
+        ShellView::Tune => "tune",
+        ShellView::Threat(_) => "threats",
+        ShellView::ThreatEditor => "threat-edit",
+        ShellView::PromptsEditor => "prompts",
+        ShellView::ActorDetail(_) => "actor",
+        ShellView::Runs => "runs",
+        ShellView::Replay(_) => "replay",
+        ShellView::Trace(_) => "trace",
+        ShellView::Help => "help",
+        ShellView::Config => "config",
+        ShellView::Tools => "tools",
+        ShellView::Options(_) => "options",
+        ShellView::SastTasks => "tasks",
+        ShellView::Context => "context",
+        ShellView::Workspace => "workspace",
+        ShellView::KnowledgeBase => "kb",
+        ShellView::AgentChat => "agent",
+        ShellView::History => "history",
+        ShellView::Story => "story",
+    }
+    .to_string()
+}
+
 fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if area.height == 0 {
         return;
@@ -2619,14 +2711,52 @@ fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
             .unwrap_or_else(|| "kuzushi/module> ".to_string()),
         RoutingMode::Shell => "kuzushi> ".to_string(),
     };
-    let segments = prompt_segments(&prompt, &app.input, area.width as usize, " ");
-    let line = Line::from(vec![
+    let segments = prompt_segments(&prompt, &app.input, app.cursor, area.width as usize, " ");
+    let prompt_chars = segments.prompt.chars().count();
+    let before_chars = segments.before_cursor.chars().count();
+    let after_empty = segments.after_cursor.is_empty();
+    let mut spans: Vec<Span<'static>> = vec![
         Span::styled(segments.prompt, theme::label()),
         Span::raw(segments.before_cursor),
-        Span::styled(segments.cursor_text, theme::selection()),
-        Span::raw(segments.after_cursor),
-    ]);
-    frame.render_widget(Paragraph::new(line), area);
+    ];
+
+    // Inline tab-completion preview: dim ghost text trailing the cursor when
+    // the operator is at end-of-line and there is exactly one obvious next
+    // completion. When a preview exists, the cursor block highlights the
+    // first ghost character (rather than a stand-alone space, which would
+    // look like an extra gap between input and suggestion).
+    let preview = if after_empty {
+        app.completion_preview()
+    } else {
+        None
+    };
+    let used = prompt_chars + before_chars;
+
+    if let Some(preview) = preview {
+        let mut chars = preview.chars();
+        if let Some(first) = chars.next() {
+            spans.push(Span::styled(first.to_string(), theme::selection()));
+            let remaining = (area.width as usize)
+                .saturating_sub(used + 1)
+                .saturating_sub(1);
+            if remaining > 0 {
+                let tail: String = chars.take(remaining).collect();
+                if !tail.is_empty() {
+                    spans.push(Span::styled(
+                        tail,
+                        theme::subtle().add_modifier(Modifier::DIM),
+                    ));
+                }
+            }
+        } else {
+            spans.push(Span::styled(segments.cursor_text, theme::selection()));
+        }
+    } else {
+        spans.push(Span::styled(segments.cursor_text, theme::selection()));
+        spans.push(Span::raw(segments.after_cursor));
+    }
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -2863,6 +2993,25 @@ fn render_lines(frame: &mut Frame<'_>, area: Rect, lines: Vec<Line<'static>>) {
         return;
     }
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn render_view_lines(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    lines: Vec<Line<'static>>,
+    scroll_offset: u16,
+) {
+    if area.height == 0 {
+        return;
+    }
+    let total = lines.len() as u16;
+    let max_offset = total.saturating_sub(area.height);
+    let offset = scroll_offset.min(max_offset);
+    let mut paragraph = Paragraph::new(lines);
+    if offset > 0 {
+        paragraph = paragraph.scroll((offset, 0));
+    }
+    frame.render_widget(paragraph, area);
 }
 
 fn status_line(items: &[String], width: u16) -> Line<'static> {
@@ -3318,6 +3467,7 @@ struct PromptSegments {
 fn prompt_segments(
     prompt: &str,
     input: &str,
+    cursor: usize,
     columns: usize,
     cursor_glyph: &str,
 ) -> PromptSegments {
@@ -3327,7 +3477,7 @@ fn prompt_segments(
     let editor_width = width.saturating_sub(fitted_prompt.chars().count()).max(1);
 
     let input_chars = input.chars().collect::<Vec<_>>();
-    let cursor = input_chars.len();
+    let cursor = cursor.min(input_chars.len());
     let mut visual_chars = input_chars.clone();
     let cursor_text = if cursor < visual_chars.len() {
         visual_chars[cursor].to_string()
@@ -3488,6 +3638,34 @@ mod tests {
     }
 
     #[test]
+    fn findings_lines_window_caps_at_visible_budget() {
+        // 1000 findings, 24-row pane: only emit ~visible-window-worth instead
+        // of formatting all 1000 (~3000 lines) per frame. Without the cap the
+        // produced Vec<Line> would balloon proportionally to findings count.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Findings;
+        for i in 0..1000 {
+            app.findings.push(Finding::new_semgrep(
+                "rule",
+                "src/x.ts",
+                i + 1,
+                None,
+                Severity::High,
+                "title",
+            ));
+        }
+        let area = Rect::new(0, 0, 80, 24);
+        let lines = findings_lines(&app, area);
+        // Header (context strip + filters strip + table header) is roughly 5
+        // lines; allow a generous upper bound. The point is "not all 3000".
+        assert!(
+            lines.len() < 200,
+            "expected lazy windowing to cap output, got {} lines",
+            lines.len()
+        );
+    }
+
+    #[test]
     fn renders_dense_findings_rows_at_80_columns() {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -3582,7 +3760,7 @@ mod tests {
         let backend = TestBackend::new(40, 12);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.input = "scan ./a/very/long/path/that/should/not/wrap".to_string();
+        app.set_input("scan ./a/very/long/path/that/should/not/wrap");
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3604,7 +3782,7 @@ mod tests {
             "result",
             "next action: inspect configuration and rerun scan with a narrower target",
         );
-        app.input = "run sast:scan {\"severity\":[\"high\"],\"triage\":true}".to_string();
+        app.set_input("run sast:scan {\"severity\":[\"high\"],\"triage\":true}");
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let buffer = terminal.backend().buffer();
