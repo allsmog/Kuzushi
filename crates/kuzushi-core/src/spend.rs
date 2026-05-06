@@ -99,14 +99,18 @@ impl SpendTicket {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SpendError {
-    #[error("budget exceeded for {op}: cap=${cap:.2}, committed=${committed:.2}, request=${request:.2}")]
+    #[error(
+        "budget exceeded for {op}: cap=${cap:.2}, committed=${committed:.2}, request=${request:.2}"
+    )]
     Exceeded {
         op: &'static str,
         cap: f64,
         committed: f64,
         request: f64,
     },
-    #[error("hard ceiling exceeded: cap=${cap:.2}, committed=${committed:.2}, request=${request:.2}")]
+    #[error(
+        "hard ceiling exceeded: cap=${cap:.2}, committed=${committed:.2}, request=${request:.2}"
+    )]
     HardCeilingExceeded {
         cap: f64,
         committed: f64,
@@ -391,7 +395,10 @@ fn read_hard_ceiling_from_env() -> Option<f64> {
     if trimmed.is_empty() {
         return None;
     }
-    trimmed.parse::<f64>().ok().filter(|v| v.is_finite() && *v >= 0.0)
+    trimmed
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite() && *v >= 0.0)
 }
 
 fn unix_seconds() -> i64 {
@@ -412,9 +419,7 @@ pub fn parse_budget_flag(value: &str) -> Result<Vec<(Operation, f64)>> {
             continue;
         }
         let (key, val) = pair.split_once('=').ok_or_else(|| {
-            anyhow::anyhow!(
-                "budget pair {pair:?} must use op=USD form (e.g. deep-audit=200)"
-            )
+            anyhow::anyhow!("budget pair {pair:?} must use op=USD form (e.g. deep-audit=200)")
         })?;
         let key = key.trim().replace('-', "_").to_lowercase();
         let op = Operation::from_db_str(&key).ok_or_else(|| {
@@ -531,9 +536,7 @@ mod tests {
 
     #[test]
     fn parse_budget_flag_rejects_unknown_op() {
-        let err = parse_budget_flag("unknown_op=10")
-            .unwrap_err()
-            .to_string();
+        let err = parse_budget_flag("unknown_op=10").unwrap_err().to_string();
         assert!(err.contains("unknown_op"), "{err}");
     }
 

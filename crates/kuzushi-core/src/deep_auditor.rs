@@ -204,10 +204,9 @@ pub fn run_deep_auditor(
 
 fn render_user_prompt(finding: &Finding) -> String {
     let location = match finding.end_line {
-        Some(end) if end != finding.start_line => format!(
-            "{}:{}–{}",
-            finding.file_path, finding.start_line, end
-        ),
+        Some(end) if end != finding.start_line => {
+            format!("{}:{}–{}", finding.file_path, finding.start_line, end)
+        }
         _ => format!("{}:{}", finding.file_path, finding.start_line),
     };
     format!(
@@ -268,7 +267,11 @@ fn collect_implicit_evidence(transcript: &[LoopHistoryEntry]) -> Vec<EvidenceCit
                 if !result.is_error && last_call_args.is_some() =>
             {
                 let args = last_call_args.take().unwrap();
-                let file = args.get("file").and_then(Value::as_str).unwrap_or("").to_string();
+                let file = args
+                    .get("file")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
                 if file.is_empty() {
                     continue;
                 }
@@ -300,7 +303,9 @@ fn try_parse_loose_json<T: serde::de::DeserializeOwned>(text: &str) -> Option<T>
     // Strip ```json fences if present, then locate the outermost {...}.
     let trimmed = text.trim();
     let stripped = if trimmed.starts_with("```") {
-        let after = trimmed.trim_start_matches("```json").trim_start_matches("```");
+        let after = trimmed
+            .trim_start_matches("```json")
+            .trim_start_matches("```");
         after.trim_end_matches("```").trim().to_string()
     } else {
         trimmed.to_string()
@@ -345,11 +350,7 @@ fn build_triage_outcome(analysis: &VulnAnalysis, outcome: &AgentLoopOutcome) -> 
 /// Persist evidence citations into the optional `findings_evidence`
 /// table. Best-effort — failures log but don't propagate, since the
 /// audit verdict itself is the primary artefact.
-pub fn save_evidence(
-    db_path: &Path,
-    finding_id: i64,
-    evidence: &[EvidenceCitation],
-) -> Result<()> {
+pub fn save_evidence(db_path: &Path, finding_id: i64, evidence: &[EvidenceCitation]) -> Result<()> {
     if evidence.is_empty() {
         return Ok(());
     }
@@ -393,7 +394,9 @@ mod tests {
     use super::*;
     use crate::agent_router::{AgentRouter, RoutedRuntime};
     use crate::findings::Severity;
-    use crate::runtime::{AgentLoopStep, AgentQueryRequest, AgentQueryResponse, ToolCall, TriageRequest};
+    use crate::runtime::{
+        AgentLoopStep, AgentQueryRequest, AgentQueryResponse, ToolCall, TriageRequest,
+    };
     use std::sync::{Arc, Mutex};
 
     /// Mock runtime that walks a scripted sequence of steps. Tests use it
@@ -444,7 +447,11 @@ mod tests {
     fn routed_runtime_with_role(steps: Vec<AgentLoopStep>) -> RoutedRuntime {
         let runtime: Arc<dyn AgentRuntime> = ScriptedRuntime::new(steps);
         let mut router = AgentRouter::empty();
-        router_add_route(&mut router, AgentRole::DeepAuditor, "anthropic:claude-opus-4-7");
+        router_add_route(
+            &mut router,
+            AgentRole::DeepAuditor,
+            "anthropic:claude-opus-4-7",
+        );
         RoutedRuntime::new(runtime, Arc::new(router), None)
     }
 
@@ -457,11 +464,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join("models.toml"),
-            format!(
-                "[roles.{}]\nprimary = \"{}\"\n",
-                role.as_key(),
-                primary
-            ),
+            format!("[roles.{}]\nprimary = \"{}\"\n", role.as_key(), primary),
         )
         .unwrap();
         let loaded = AgentRouter::load(&crate::config::ConfigPaths {

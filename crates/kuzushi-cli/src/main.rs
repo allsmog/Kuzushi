@@ -591,7 +591,9 @@ fn auth_ping(provider: &str, model_override: Option<String>, target: Option<Path
 
     // OAuth + API-key checks.
     if provider == "anthropic" {
-        if let Some(oauth_cfg) = &config.runtime.anthropic_oauth {
+        let paths = kuzushi_core::ConfigPaths::from_target(workspace.as_ref().map(WorkspaceTarget::root))?;
+        let oauth_cfg = kuzushi_core::config::load_anthropic_oauth_config(&paths)?;
+        if let Some(oauth_cfg) = &oauth_cfg {
             match kuzushi_openai::probe_anthropic_oauth(oauth_cfg)? {
                 kuzushi_openai::OauthReadiness::Ready { expires_at_ms } => log(
                     true,

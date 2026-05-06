@@ -52,7 +52,10 @@ fn ripgrep_binary() -> String {
 
 pub fn find_references(root: &Path, input: &FindReferencesInput) -> Result<FindReferencesOutput> {
     let symbol = input.symbol.trim();
-    anyhow::ensure!(!symbol.is_empty(), "find_references: symbol must be non-empty");
+    anyhow::ensure!(
+        !symbol.is_empty(),
+        "find_references: symbol must be non-empty"
+    );
     anyhow::ensure!(
         !symbol.contains('\n') && !symbol.contains('\0'),
         "find_references: symbol may not contain newlines or null bytes"

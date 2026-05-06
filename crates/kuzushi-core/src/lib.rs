@@ -13,7 +13,6 @@ pub mod diff_scope;
 pub mod events;
 pub mod findings;
 pub mod full_mode_multi;
-pub mod git_diff_scope;
 pub mod iac_scan;
 pub mod modules;
 pub mod options;
@@ -66,8 +65,8 @@ pub use concurrency::{
     current_priority, default_concurrency_for, with_priority, ModelGate, Priority, PriorityPermit,
 };
 pub use config::{
-    load_config, load_config_for_target, AnthropicOauthConfig, ConfigPaths, RuntimeConfig,
-    RuntimeKind, V2Config,
+    load_anthropic_oauth_config, load_config, load_config_for_target, AnthropicOauthConfig,
+    ConfigPaths, RuntimeConfig, RuntimeKind, V2Config,
 };
 pub use deep_auditor::{
     run_deep_auditor, save_evidence, DeepAuditConfig, DeepAuditOutcome, EvidenceCitation,
@@ -78,22 +77,21 @@ pub use dep_hygiene::{
     DepHygieneReport, DepHygieneScanner, DepHygieneSeverity, ManifestKind,
 };
 pub use diff_scope::{
-    build_whitebox_diff_scope_report, ChangedFile, ChangedLineRange, DiffContext, DiffContextKind,
-    DiffFileStatus, DiffFindingStatus, DiffFindingTag, DiffRangeKind, DiffScopeSummary,
-    WhiteboxDiffScopeReport,
+    build_whitebox_diff_scope_report, git_diff_files, ChangedFile, ChangedLineRange, DiffContext,
+    DiffContextKind, DiffFileStatus, DiffFindingStatus, DiffFindingTag, DiffRangeKind, DiffScope,
+    DiffScopeSummary, WhiteboxDiffScopeReport,
 };
 pub use findings::{
-    compute_dedup_key, extract_cwe, format_finding_alias, normalize_cwe, parse_finding_alias,
-    resolve_finding_alias, sorted_finding_aliases, stable_finding_alias, Finding,
-    FindingListFilter, FindingListReport, FindingStore, FindingVerdictFilter, PatchAttempt,
-    PatchResult, PatchStatus, Severity, StaticProofState, TriageOutcome, TriageVerdict, VulnSource,
+    format_finding_alias, parse_finding_alias, resolve_finding_alias, sorted_finding_aliases,
+    stable_finding_alias, Finding, FindingListFilter, FindingListReport, FindingStore,
+    FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus, Severity, StaticProofState,
+    TriageOutcome, TriageVerdict,
 };
 pub use full_mode_multi::{
     cost_summary as full_mode_cost_summary, plan as full_mode_plan, report_to_tool_json,
     run as run_full_mode_multi, ChunkPlan, CostSummary, FileBucket, FullModeConfig,
     FullModeLanguage, FullModePlan, FullModeReport,
 };
-pub use git_diff_scope::{git_diff_files, DiffScope as GitDiffScope};
 pub use iac_scan::{
     scan_iac, IacScanFinding, IacScanKind, IacScanOptions, IacScanReport, IacScanScanner,
 };
