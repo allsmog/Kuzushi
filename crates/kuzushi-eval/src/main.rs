@@ -100,6 +100,14 @@ struct FindingRow {
     #[serde(default)]
     message: String,
     tool: String,
+    /// Discovery channel — comes from main's whitebox-static work.
+    #[serde(default)]
+    vuln_source: Option<String>,
+    /// Static-proof state from the whitebox validator: `validated`,
+    /// `unsupported`, `pending`, etc. None = no static proof, e.g.
+    /// LLM-only finding.
+    #[serde(default)]
+    static_proof_state: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -114,6 +122,10 @@ struct MatchReport {
     near_misses: usize,
     precision: f64,
     recall: RecallByTolerance,
+    /// Proof-state breakdown across the *hit* set. Operators use this to
+    /// see whether recall is coming from validated static evidence vs
+    /// LLM conjecture — same recall number, very different confidence.
+    proof_state_breakdown: ProofStateBreakdown,
     matches: Vec<MatchRow>,
     missed_oracle: Vec<MissedOracle>,
     expected_min_recall: f64,
@@ -144,6 +156,23 @@ struct MatchRow {
     cwe_match: bool,
     finding_cwes: Vec<String>,
     oracle_cwes: Vec<String>,
+    /// Discovery channel(s) the finding came from. Mirrors the column
+    /// added by Phase 9 / the merge with main's whitebox work.
+    vuln_source: Option<String>,
+    /// `Some(state)` if main's whitebox validator wrote a proof outcome
+    /// (`validated` / `unsupported` / `pending` / …); `None` = LLM-only.
+    static_proof_state: Option<String>,
+}
+
+#[derive(Debug, Serialize, Default)]
+struct ProofStateBreakdown {
+    /// `static_proof_state == Some("validated")` — backed by deterministic
+    /// proof from the static evidence graph.
+    validated: usize,
+    /// Any other state set by the whitebox validator.
+    other_static: usize,
+    /// `static_proof_state == None` — LLM-only finding, no proof yet.
+    llm_only: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -269,6 +298,8 @@ fn score(cli: &Cli, oracle: &Oracle, findings: &FindingsDump, target: &Path) -> 
                     cwe_match: *cwe_match,
                     finding_cwes: extract_cwes(&cwe_re, f),
                     oracle_cwes: oracle.ground_truth[oi].cwe.clone(),
+                    vuln_source: f.vuln_source.clone(),
+                    static_proof_state: f.static_proof_state.clone(),
                 });
             }
             None => {
@@ -304,6 +335,19 @@ fn score(cli: &Cli, oracle: &Oracle, findings: &FindingsDump, target: &Path) -> 
         hits as f64 / findings.findings.len() as f64
     };
 
+    // Proof-state breakdown across the *primary-tolerance* hit set —
+    // gives operators a confidence dimension on top of the recall number.
+    let mut proof_state_breakdown = ProofStateBreakdown::default();
+    for row in &matches_out {
+        if row.best_tolerance == "exact_line" || row.best_tolerance == "pm_lines" {
+            match row.static_proof_state.as_deref() {
+                Some("validated") => proof_state_breakdown.validated += 1,
+                Some(_) => proof_state_breakdown.other_static += 1,
+                None => proof_state_breakdown.llm_only += 1,
+            }
+        }
+    }
+
     MatchReport {
         slice: cli.slice.clone(),
         oracle_cve: oracle.cve.clone(),
@@ -315,6 +359,7 @@ fn score(cli: &Cli, oracle: &Oracle, findings: &FindingsDump, target: &Path) -> 
         near_misses,
         precision,
         recall,
+        proof_state_breakdown,
         matches: matches_out,
         missed_oracle: missed,
         expected_min_recall: oracle.expected_min_recall.unwrap_or(0.0),

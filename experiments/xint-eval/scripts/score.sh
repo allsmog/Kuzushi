@@ -23,8 +23,8 @@ git_sha=$(git -C "$(git rev-parse --show-toplevel)" rev-parse --short HEAD 2>/de
   echo
   echo "Kuzushi commit: \`$git_sha\`"
   echo
-  echo "| slice | findings | hits | misses | precision | recall_exact | recall_±10 | recall_fn | recall_file | usd | wall_s |"
-  echo "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
+  echo "| slice | findings | hits | misses | precision | recall_exact | recall_±10 | recall_fn | recall_file | proof_validated | proof_llm_only | usd | wall_s |"
+  echo "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
 } > "$SUMMARY"
 
 agg_hits=0
@@ -45,10 +45,12 @@ for slice_dir in "$REPORT_DIR"/*/; do
   recall_pm10=$(jq -r '.recall.pm_lines  // 0 | (. * 1000 | floor / 1000)' "$match")
   recall_fn=$(jq -r '.recall.function_  // .recall.function // 0 | (. * 1000 | floor / 1000)' "$match")
   recall_file=$(jq -r '.recall.file_only // 0 | (. * 1000 | floor / 1000)' "$match")
+  proof_validated=$(jq -r '.proof_state_breakdown.validated // 0' "$match")
+  proof_llm_only=$(jq -r '.proof_state_breakdown.llm_only // 0' "$match")
   usd=$(jq -r '.cost_usd // 0 | (. * 100 | floor / 100)' "$match")
   wall=$(jq -r '.wall_seconds // 0' "$match")
 
-  echo "| $slice | $findings_count | $hits | $misses | $precision | $recall_exact | $recall_pm10 | $recall_fn | $recall_file | $usd | $wall |" >> "$SUMMARY"
+  echo "| $slice | $findings_count | $hits | $misses | $precision | $recall_exact | $recall_pm10 | $recall_fn | $recall_file | $proof_validated | $proof_llm_only | $usd | $wall |" >> "$SUMMARY"
 
   agg_hits=$(( agg_hits + hits ))
   agg_total=$(( agg_total + findings_count ))
