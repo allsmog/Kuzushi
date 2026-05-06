@@ -1,8 +1,8 @@
 # Ralph Rust UX Progress
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
-Active story: UX-011 - Findings Row/Card Density
-Status: UX-010 complete and pushed in iteration 23 as `2f7f7db`; UX-011 pending next iteration
+Active story: UX-012 - Stable Finding Aliases
+Status: UX-011 complete in iteration 24; UX-012 pending next iteration
 
 ## Stage 2 Checklist
 
@@ -16,13 +16,40 @@ Status: UX-010 complete and pushed in iteration 23 as `2f7f7db`; UX-011 pending 
 - UX-008 Honest abort state: complete; pushed in iteration 21 as `93ae872`.
 - UX-009 Slash command taxonomy and drift tests: complete in iteration 22.
 - UX-010 Tab completion for high-value arguments: complete in iteration 23.
-- UX-011 Findings row/card density: pending.
+- UX-011 Findings row/card density: complete in iteration 24.
 - UX-012 Stable finding aliases: pending.
 - UX-013 Better empty states and errors: pending.
 - UX-014 Explicit plain / screen-reader / low-bandwidth mode: pending.
 - UX-015 Final Ink/React removal gate: pending.
 
 ## Iteration Log
+
+### Iteration 24 - UX-011
+
+- Task attempted: densify the Rust TUI findings list so default finding rows
+  show alias, severity, verdict, confidence, proof/static state, CWE,
+  engine/source, title, location, evidence preview, and the next open action at
+  80 columns.
+- Files changed:
+  - `crates/kuzushi-tui/src/renderer.rs`
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `sed -n '1,260p' RALPH_RUST_UX_PROGRESS.md` in the clean isolated clone
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-tui renderer::tests::renders_dense_findings_rows_at_80_columns`
+  - `cargo test -p kuzushi-tui renderer::tests`
+  - `cargo fmt --all --check`
+- Result: implementation complete. The default findings view now renders a
+  compact three-line finding row with the required operator fields, derives
+  static/proof state and confidence from triage when present, parses CWE IDs
+  from finding text or rule IDs, and keeps every rendered row within an
+  80-column test buffer.
+- Remaining work: UX-012 through UX-015.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary workspace remains stale at `80d23a4` with earlier Stage 2 files
+    staged/modified, so this iteration continued in the clean isolated clone at
+    `/tmp/kuzushi-ux2-clone.PJaRge`.
 
 ### Iteration 23 - UX-010
 
