@@ -457,49 +457,353 @@ name = "trigger"
 path = "tests/trigger.rs"
 "#;
 
-/// Build the source for the trigger `#[test]`. Embeds the located
-/// enclosing function signature as a comment so the harness output
-/// makes it clear *which* function this run is exercising; the harness
-/// does not yet invoke that function (full call-synthesis routes
-/// through the codeindex facade in a follow-up).
+/// Build the source for the trigger `#[test]`. When the suspect file is
+/// readable, copies it into the harness as a `suspect` module and
+/// synthesizes a call to the enclosing function with the payload. When
+/// the signature shape isn't one we can construct an argument tuple
+/// for, falls back to a payload-only harness with a comment recording
+/// why.
 fn build_rust_trigger(finding: &Finding) -> RustTriggerSource {
     let payload = synth_payload_from_finding(finding);
-    let suspect =
-        extract_enclosing_function(std::path::Path::new(&finding.file_path), finding.start_line);
-    let suspect_comment = match &suspect {
-        Some(f) => format!(
-            "// Located enclosing function near {}:{} (signature at line {}) → `{}`",
-            finding.file_path,
-            f.line,
-            f.signature_line,
-            f.signature.trim()
+    let suspect_path = std::path::Path::new(&finding.file_path);
+    let suspect = extract_enclosing_function(suspect_path, finding.start_line);
+    let suspect_source = std::fs::read_to_string(suspect_path).ok();
+
+    let parsed_sig = suspect
+        .as_ref()
+        .and_then(|f| parse_rust_signature(&f.signature));
+    let call_plan = parsed_sig
+        .as_ref()
+        .and_then(|sig| plan_call_expression(sig));
+
+    let suspect_comment = match (&suspect, &call_plan) {
+        (Some(f), Some(plan)) => format!(
+            "// Suspect: {file}:{line} (signature at {sig_line}) — calling `{name}(...)` via {kind}",
+            file = finding.file_path,
+            line = f.line,
+            sig_line = f.signature_line,
+            name = plan.fn_name,
+            kind = plan.call_kind
         ),
-        None => format!(
-            "// No enclosing function located near {}:{} (proceeding with payload-only harness)",
+        (Some(f), None) => format!(
+            "// Suspect: {file}:{line} (signature at {sig_line}) → `{sig}`\n\
+             // Couldn't synthesize a call (signature not in the supported pattern set);\n\
+             // falling back to payload-only harness.",
+            file = finding.file_path,
+            line = f.line,
+            sig_line = f.signature_line,
+            sig = f.signature.trim()
+        ),
+        (None, _) => format!(
+            "// No enclosing function located near {}:{}; payload-only harness.",
             finding.file_path, finding.start_line
         ),
     };
+
+    let (lib_rs, call_block) = match (&suspect_source, &call_plan) {
+        (Some(src), Some(plan)) if rust_source_appears_self_contained(src) => {
+            // Wrap the suspect file as `pub mod suspect;` inside the
+            // harness lib so the test can name-resolve into it.
+            let lib = format!(
+                "// kuzushi-verify-harness\n\
+                 #![allow(unused, dead_code, deprecated, clippy::all)]\n\
+                 #[path = \"suspect.rs\"]\n\
+                 pub mod suspect;\n"
+            );
+            let call = format!(
+                "             // Real sink call (synthesized from {fname}'s signature).\n\
+                 {invoke}",
+                fname = plan.fn_name,
+                invoke = plan.call_expression
+            );
+            (lib, call)
+        }
+        _ => (
+            "// kuzushi-verify-harness\n".to_string(),
+            "             // Payload-only harness — no sink call wired.\n\
+             let _ = std::hint::black_box(payload);\n"
+                .to_string(),
+        ),
+    };
+
     let body = format!(
         "// Synthesised by kuzushi verify for finding {fp}\n\
          {suspect_comment}\n\
          #[test]\n\
          fn trigger() {{\n\
              let payload: Vec<u8> = vec!{payload:?};\n\
-             // The payload is intentionally not consumed by a sink yet —\n\
-             // the actual sink-call is wired by codeindex integration in a\n\
-             // follow-up. For now this harness exercises the build/observe\n\
-             // loop end-to-end without calling unsafe code.\n\
-             let _ = std::hint::black_box(payload);\n\
+             let _ = std::hint::black_box(&payload);\n\
+{call_block}\
          }}\n",
         fp = finding.fingerprint,
         suspect_comment = suspect_comment,
         payload = payload,
+        call_block = call_block,
     );
+
     RustTriggerSource {
         cargo_toml: HARNESS_CARGO_TOML.to_string(),
-        lib_rs: "// kuzushi-verify-harness\n".to_string(),
+        lib_rs,
         trigger_test: body,
+        suspect_source: suspect_source.clone(),
     }
+}
+
+/// Quick screen for whether copying the suspect file alone is likely to
+/// give the harness a chance of building. Refuses copies that import
+/// non-standard crates or use proc macros that we can't replicate
+/// without the parent crate's full `Cargo.toml`.
+fn rust_source_appears_self_contained(source: &str) -> bool {
+    for line in source.lines().take(200) {
+        let trimmed = line.trim();
+        if trimmed.starts_with("extern crate ") {
+            return false;
+        }
+        if let Some(rest) = trimmed.strip_prefix("use ") {
+            // `use crate::...` and `use self::...` cross module boundaries
+            // we haven't replicated; refuse rather than hand the compiler
+            // a guaranteed-fail build.
+            if rest.starts_with("crate::") || rest.starts_with("super::") {
+                return false;
+            }
+        }
+        if trimmed.starts_with("#[macro_use") || trimmed.starts_with("#[derive(") {
+            // Conservative: `derive` macros may pull in dep types we
+            // haven't declared. Allow only the std-derives.
+            if let Some(inner) = trimmed
+                .strip_prefix("#[derive(")
+                .and_then(|s| s.strip_suffix(")]"))
+            {
+                if !inner.split(',').all(|name| {
+                    matches!(
+                        name.trim(),
+                        "Debug"
+                            | "Clone"
+                            | "Copy"
+                            | "PartialEq"
+                            | "Eq"
+                            | "PartialOrd"
+                            | "Ord"
+                            | "Hash"
+                            | "Default"
+                    )
+                }) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Parsed signature we can use to plan a call. Keep the structure
+/// minimal — argument *names* don't matter for synthesis, only types.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RustSignature {
+    pub fn_name: String,
+    pub args: Vec<String>,
+    pub return_type: Option<String>,
+}
+
+/// Parse a single-line Rust function signature like
+/// `pub fn parse_packet(input: &[u8], n: usize) -> Result<u32>` into a
+/// `RustSignature`. Returns `None` when the input doesn't look like a
+/// `fn` declaration our caller can use.
+pub(crate) fn parse_rust_signature(signature: &str) -> Option<RustSignature> {
+    let trimmed = signature.trim();
+    // Find `fn ` token.
+    let fn_start = trimmed.find("fn ")?;
+    let after_fn = &trimmed[fn_start + 3..];
+    // Function name: everything up to `(` or `<` (generics).
+    let name_end = after_fn.find(['(', '<']).unwrap_or(after_fn.len());
+    let fn_name = after_fn[..name_end].trim().to_string();
+    if fn_name.is_empty()
+        || !fn_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return None;
+    }
+    // Find balanced argument parens.
+    let arg_open = after_fn.find('(')?;
+    let mut depth = 0_i32;
+    let mut arg_close = None;
+    for (i, ch) in after_fn[arg_open..].char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    arg_close = Some(arg_open + i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let arg_close = arg_close?;
+    let arg_list = &after_fn[arg_open + 1..arg_close];
+    let args = split_top_level_args(arg_list)
+        .into_iter()
+        .filter_map(|raw| extract_arg_type(&raw))
+        .collect::<Vec<_>>();
+    // Return type: search after the `)` for `-> ...` ending at `{` or end.
+    let tail = &after_fn[arg_close + 1..];
+    let return_type = tail.find("->").and_then(|arrow| {
+        let after_arrow = &tail[arrow + 2..];
+        let stop = after_arrow
+            .find('{')
+            .or_else(|| after_arrow.find(';'))
+            .unwrap_or(after_arrow.len());
+        let rt = after_arrow[..stop].trim().trim_end_matches("where");
+        if rt.is_empty() {
+            None
+        } else {
+            Some(rt.trim().to_string())
+        }
+    });
+    Some(RustSignature {
+        fn_name,
+        args,
+        return_type,
+    })
+}
+
+fn split_top_level_args(arg_list: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0_i32;
+    for ch in arg_list.chars() {
+        match ch {
+            '(' | '<' | '[' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' | '>' | ']' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                if !current.trim().is_empty() {
+                    out.push(current.trim().to_string());
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    if !current.trim().is_empty() {
+        out.push(current.trim().to_string());
+    }
+    out
+}
+
+fn extract_arg_type(raw: &str) -> Option<String> {
+    // Skip self receivers entirely — methods on a type can't be
+    // invoked from a free harness without constructing an instance.
+    let trimmed = raw.trim();
+    if trimmed == "self"
+        || trimmed == "&self"
+        || trimmed == "&mut self"
+        || trimmed.starts_with("self:")
+    {
+        return None;
+    }
+    // Argument shape is `<pattern>: <type>`. The pattern can include
+    // `mut`, attributes, tuples — we only care about the type part.
+    let colon = trimmed.find(':')?;
+    let ty = trimmed[colon + 1..].trim().to_string();
+    Some(ty)
+}
+
+/// A planned synthetic call into the suspect function.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CallPlan {
+    pub fn_name: String,
+    /// Single line of Rust source that invokes the function. Always ends
+    /// with `;` so it can be slotted into a function body verbatim.
+    pub call_expression: String,
+    /// One-line description of the synthesis pattern (for the harness
+    /// header comment).
+    pub call_kind: &'static str,
+}
+
+/// Pick a call expression appropriate for the signature's argument
+/// types. Returns `None` when no supported pattern matches — the
+/// harness will then fall back to the payload-only mode.
+pub(crate) fn plan_call_expression(sig: &RustSignature) -> Option<CallPlan> {
+    let fn_path = format!("suspect::{}", sig.fn_name);
+    let returns_value = sig.return_type.is_some();
+    let bind = if returns_value { "let _ = " } else { "" };
+
+    // Zero-arg: the easiest case.
+    if sig.args.is_empty() {
+        return Some(CallPlan {
+            fn_name: sig.fn_name.clone(),
+            call_expression: format!("            {bind}{fn_path}();\n"),
+            call_kind: "zero-argument call",
+        });
+    }
+
+    // Single-arg patterns we recognize.
+    if sig.args.len() == 1 {
+        let ty = normalize_type(&sig.args[0]);
+        let arg_expr = match ty.as_str() {
+            "&[u8]" => Some("&payload"),
+            "&Vec<u8>" => Some("&payload"),
+            "Vec<u8>" => Some("payload.clone()"),
+            "&str" => Some("std::str::from_utf8(&payload).unwrap_or(\"\")"),
+            "String" => Some("String::from_utf8_lossy(&payload).into_owned()"),
+            "usize" => Some("payload.len()"),
+            "u32" => Some("payload.len() as u32"),
+            "u64" => Some("payload.len() as u64"),
+            "i32" => Some("payload.len() as i32"),
+            "i64" => Some("payload.len() as i64"),
+            _ => None,
+        };
+        return arg_expr.map(|expr| CallPlan {
+            fn_name: sig.fn_name.clone(),
+            call_expression: format!("            {bind}{fn_path}({expr});\n"),
+            call_kind: "single-arg payload call",
+        });
+    }
+
+    // Two-arg `(buf, len)` pattern very common in C-FFI-style Rust.
+    if sig.args.len() == 2 {
+        let a = normalize_type(&sig.args[0]);
+        let b = normalize_type(&sig.args[1]);
+        if (a == "&[u8]" || a == "*const u8") && (b == "usize" || b == "u32" || b == "u64") {
+            let len_cast = match b.as_str() {
+                "u32" => "payload.len() as u32",
+                "u64" => "payload.len() as u64",
+                _ => "payload.len()",
+            };
+            let buf_expr = if a == "*const u8" {
+                "payload.as_ptr()"
+            } else {
+                "&payload"
+            };
+            return Some(CallPlan {
+                fn_name: sig.fn_name.clone(),
+                call_expression: format!("            {bind}{fn_path}({buf_expr}, {len_cast});\n"),
+                call_kind: "(buf, len) C-FFI-style call",
+            });
+        }
+    }
+
+    None
+}
+
+fn normalize_type(ty: &str) -> String {
+    // Collapse whitespace; strip path prefixes from the standard
+    // collections so `std::vec::Vec<u8>` and `Vec<u8>` are treated the
+    // same.
+    let mut out = ty.split_whitespace().collect::<Vec<_>>().join(" ");
+    out = out.replace("std::vec::Vec", "Vec");
+    out = out.replace("alloc::vec::Vec", "Vec");
+    out = out.replace("std::string::String", "String");
+    out = out.replace("alloc::string::String", "String");
+    out
 }
 
 fn synth_payload_from_finding(finding: &Finding) -> Vec<u8> {
@@ -517,6 +821,11 @@ struct RustTriggerSource {
     cargo_toml: String,
     lib_rs: String,
     trigger_test: String,
+    /// Full source of the suspect file when readable. Copied into
+    /// `src/suspect.rs` so the harness's `pub mod suspect;` can
+    /// resolve into it. `None` when `build_rust_trigger` decided not
+    /// to wire a sink call.
+    suspect_source: Option<String>,
 }
 
 async fn scaffold_rust_project(src: &RustTriggerSource) -> Result<ScaffoldedProject> {
@@ -526,6 +835,9 @@ async fn scaffold_rust_project(src: &RustTriggerSource) -> Result<ScaffoldedProj
     tokio::fs::create_dir_all(root.join("tests")).await?;
     tokio::fs::write(root.join("Cargo.toml"), &src.cargo_toml).await?;
     tokio::fs::write(root.join("src").join("lib.rs"), &src.lib_rs).await?;
+    if let Some(suspect) = &src.suspect_source {
+        tokio::fs::write(root.join("src").join("suspect.rs"), suspect).await?;
+    }
     tokio::fs::write(root.join("tests").join("trigger.rs"), &src.trigger_test).await?;
     Ok(ScaffoldedProject {
         path: root,
@@ -603,14 +915,11 @@ pub(crate) fn looks_like_function_signature(trimmed: &str) -> bool {
         return false;
     }
 
-    let ends_with_brace = trimmed.ends_with('{');
-    let ends_with_colon = trimmed.ends_with(':');
-    let multiline_continuation = trimmed.ends_with('(') || trimmed.ends_with(',');
-    if !ends_with_brace && !ends_with_colon && !multiline_continuation {
-        return false;
-    }
-
-    if trimmed.starts_with("fn ")
+    // For function-keyword languages (Rust / Python / JS), the leading
+    // keyword is the strong signal — the trailing terminator just has
+    // to be one of: `{` (body opens), `:` (Python), `(`/`,` (multi-line
+    // signature), or the line contains `{` (one-liner with body inline).
+    let has_fn_keyword = trimmed.starts_with("fn ")
         || trimmed.starts_with("pub fn ")
         || trimmed.contains(" fn ")
         || trimmed.starts_with("def ")
@@ -618,9 +927,28 @@ pub(crate) fn looks_like_function_signature(trimmed: &str) -> bool {
         || trimmed.starts_with("function ")
         || trimmed.starts_with("async function ")
         || trimmed.starts_with("export function ")
-        || trimmed.starts_with("export async function ")
-    {
-        return true;
+        || trimmed.starts_with("export async function ");
+    if has_fn_keyword {
+        let ends_ok = trimmed.ends_with('{')
+            || trimmed.ends_with(':')
+            || trimmed.ends_with('(')
+            || trimmed.ends_with(',');
+        // One-liner: `fn foo(x: u8) -> u32 { x as u32 }` — body brace
+        // appears somewhere before the final `}`.
+        let body_brace_anywhere = trimmed.contains('{');
+        if ends_ok || body_brace_anywhere {
+            return true;
+        }
+        // No body and no continuation marker — not a definition (could
+        // be a `fn ` token in a prose comment).
+        return false;
+    }
+
+    let ends_with_brace = trimmed.ends_with('{');
+    let ends_with_colon = trimmed.ends_with(':');
+    let multiline_continuation = trimmed.ends_with('(') || trimmed.ends_with(',');
+    if !ends_with_brace && !ends_with_colon && !multiline_continuation {
+        return false;
     }
     // C-like definition: `<type> name(` with no leading control keyword.
     // We've already required the line to end with `{`, `(`, or `,`.
@@ -1581,8 +1909,13 @@ mod tests {
         let mut finding = finding_for(path.to_str().unwrap());
         finding.start_line = 2;
         let trigger = build_rust_trigger(&finding);
+        // Either the located-function header or the synthesized-call
+        // header should appear; both name the function.
         assert!(trigger.trigger_test.contains("parse"));
-        assert!(trigger.trigger_test.contains("Located enclosing function"));
+        assert!(
+            trigger.trigger_test.contains("Suspect:")
+                || trigger.trigger_test.contains("Located enclosing function")
+        );
     }
 
     #[test]
@@ -1593,5 +1926,173 @@ mod tests {
         assert!(trigger
             .trigger_test
             .contains("No enclosing function located"));
+        assert!(trigger.suspect_source.is_none());
+    }
+
+    // ----- Rust signature parsing ----------------------------------
+
+    #[test]
+    fn parse_rust_signature_extracts_name_and_arg_types() {
+        let sig = parse_rust_signature("pub fn parse_packet(input: &[u8], n: usize) -> u32 {")
+            .expect("should parse");
+        assert_eq!(sig.fn_name, "parse_packet");
+        assert_eq!(sig.args, vec!["&[u8]".to_string(), "usize".to_string()]);
+        assert_eq!(sig.return_type.as_deref(), Some("u32"));
+    }
+
+    #[test]
+    fn parse_rust_signature_handles_zero_args() {
+        let sig = parse_rust_signature("fn run() {").expect("should parse");
+        assert_eq!(sig.fn_name, "run");
+        assert!(sig.args.is_empty());
+        assert!(sig.return_type.is_none());
+    }
+
+    #[test]
+    fn parse_rust_signature_handles_generics() {
+        let sig =
+            parse_rust_signature("pub async fn decode<T: AsRef<[u8]>>(input: T) -> Result<u32, E>")
+                .expect("should parse");
+        assert_eq!(sig.fn_name, "decode");
+        assert_eq!(sig.args, vec!["T".to_string()]);
+    }
+
+    #[test]
+    fn parse_rust_signature_skips_self_receiver() {
+        let sig =
+            parse_rust_signature("pub fn parse(&self, input: &[u8]) -> u32").expect("should parse");
+        // self is dropped; only the &[u8] remains.
+        assert_eq!(sig.args, vec!["&[u8]".to_string()]);
+    }
+
+    #[test]
+    fn parse_rust_signature_handles_nested_tuple_arg() {
+        let sig =
+            parse_rust_signature("fn pair(input: (u8, u8), bytes: &[u8])").expect("should parse");
+        assert_eq!(sig.args, vec!["(u8, u8)".to_string(), "&[u8]".to_string()]);
+    }
+
+    #[test]
+    fn parse_rust_signature_returns_none_for_non_function() {
+        assert!(parse_rust_signature("if foo { bar }").is_none());
+        assert!(parse_rust_signature("struct S { ... }").is_none());
+    }
+
+    // ----- call-plan synthesis -------------------------------------
+
+    #[test]
+    fn plan_call_zero_args() {
+        let sig = parse_rust_signature("fn run()").unwrap();
+        let plan = plan_call_expression(&sig).unwrap();
+        assert!(plan.call_expression.contains("suspect::run()"));
+        assert!(plan.call_kind.contains("zero-argument"));
+    }
+
+    #[test]
+    fn plan_call_byte_slice_arg() {
+        let sig = parse_rust_signature("fn parse(input: &[u8])").unwrap();
+        let plan = plan_call_expression(&sig).unwrap();
+        assert!(plan.call_expression.contains("suspect::parse(&payload)"));
+    }
+
+    #[test]
+    fn plan_call_buf_len_pair_synthesizes_c_ffi_call() {
+        let sig = parse_rust_signature("fn copy(buf: &[u8], len: usize)").unwrap();
+        let plan = plan_call_expression(&sig).unwrap();
+        assert!(plan.call_expression.contains("&payload, payload.len()"));
+        assert_eq!(plan.call_kind, "(buf, len) C-FFI-style call");
+    }
+
+    #[test]
+    fn plan_call_raw_pointer_buf_uses_as_ptr() {
+        let sig = parse_rust_signature("fn read(buf: *const u8, len: usize)").unwrap();
+        let plan = plan_call_expression(&sig).unwrap();
+        assert!(plan.call_expression.contains("payload.as_ptr()"));
+    }
+
+    #[test]
+    fn plan_call_returns_none_for_unsupported_signatures() {
+        let sig = parse_rust_signature("fn complex(a: u32, b: f64, c: &MyStruct)").unwrap();
+        assert!(plan_call_expression(&sig).is_none());
+    }
+
+    #[test]
+    fn plan_call_uses_let_binding_when_return_type_present() {
+        let sig = parse_rust_signature("fn parse(input: &[u8]) -> u32").unwrap();
+        let plan = plan_call_expression(&sig).unwrap();
+        assert!(plan.call_expression.contains("let _ ="));
+    }
+
+    // ----- self-contained source heuristic --------------------------
+
+    #[test]
+    fn self_contained_accepts_simple_file() {
+        let src = "use std::ops::Range;\npub fn f() {}";
+        assert!(rust_source_appears_self_contained(src));
+    }
+
+    #[test]
+    fn self_contained_rejects_extern_crate() {
+        let src = "extern crate libc;\npub fn f() {}";
+        assert!(!rust_source_appears_self_contained(src));
+    }
+
+    #[test]
+    fn self_contained_rejects_crate_relative_use() {
+        let src = "use crate::other::T;\npub fn f() {}";
+        assert!(!rust_source_appears_self_contained(src));
+    }
+
+    #[test]
+    fn self_contained_rejects_non_std_derive() {
+        let src = "#[derive(serde::Serialize)]\npub struct S;";
+        assert!(!rust_source_appears_self_contained(src));
+    }
+
+    #[test]
+    fn self_contained_accepts_std_derives() {
+        let src = "#[derive(Debug, Clone, PartialEq)]\npub struct S;";
+        assert!(rust_source_appears_self_contained(src));
+    }
+
+    // ----- end-to-end harness shape ---------------------------------
+
+    #[tokio::test]
+    async fn scaffolder_writes_suspect_rs_when_source_is_self_contained() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("lib.rs");
+        std::fs::write(
+            &path,
+            "pub fn parse(input: &[u8]) -> usize { input.len() }\n",
+        )
+        .unwrap();
+        let mut finding = finding_for(path.to_str().unwrap());
+        finding.start_line = 1;
+        let trigger = build_rust_trigger(&finding);
+        assert!(trigger.suspect_source.is_some());
+        let project = scaffold_rust_project(&trigger).await.unwrap();
+        let suspect = std::fs::read_to_string(project.path.join("src").join("suspect.rs")).unwrap();
+        assert!(suspect.contains("pub fn parse"));
+        let lib = std::fs::read_to_string(project.path.join("src").join("lib.rs")).unwrap();
+        assert!(lib.contains("pub mod suspect"));
+        let test = std::fs::read_to_string(project.path.join("tests").join("trigger.rs")).unwrap();
+        assert!(test.contains("suspect::parse(&payload)"));
+    }
+
+    #[test]
+    fn build_rust_trigger_skips_sink_call_for_non_self_contained_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("lib.rs");
+        std::fs::write(
+            &path,
+            "use crate::other::Helper;\npub fn parse(input: &[u8]) {}\n",
+        )
+        .unwrap();
+        let mut finding = finding_for(path.to_str().unwrap());
+        finding.start_line = 2;
+        let trigger = build_rust_trigger(&finding);
+        // No sink call — payload-only fallback because the file uses
+        // `crate::` paths.
+        assert!(trigger.trigger_test.contains("Payload-only harness"));
     }
 }
