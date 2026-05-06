@@ -339,6 +339,120 @@ impl Executor for DockerExecutor {
     }
 }
 
+/// Remote-execution executor scaffold (HTTP-based).
+///
+/// Wraps the request/response surface for a remote backend (Vercel
+/// Sandbox, AWS Batch, Kubernetes Jobs) without committing to a specific
+/// transport. Today the implementation is a *seam* — `launch` and
+/// `collect` build the request structure but return a clear error
+/// pointing at the unimplemented transport. A follow-up PR fills in
+/// `reqwest`-based POST/GET against `endpoint`.
+///
+/// The point of shipping the scaffold now is operator-visible: a
+/// `kuzushi scan --executor sandbox:https://...` flag doesn't 500 with
+/// "unknown executor"; it errors with "remote backend not yet wired",
+/// which is a different and more truthful signal.
+pub struct SandboxExecutor {
+    endpoint: String,
+    api_key: Option<String>,
+    /// Per-instance prefix prepended to every run id so concurrent
+    /// kuzushi processes against the same remote backend don't collide.
+    client_id: String,
+    results: Mutex<HashMap<String, ExecutorResult>>,
+}
+
+impl SandboxExecutor {
+    /// Construct a SandboxExecutor pointed at `endpoint` (e.g.
+    /// `https://sandbox.example.com/v1`). The optional `api_key` flows
+    /// into an `Authorization: Bearer …` header on each request.
+    pub fn new(endpoint: impl Into<String>) -> Self {
+        Self {
+            endpoint: endpoint.into(),
+            api_key: None,
+            client_id: format!("kuzushi-{}", std::process::id()),
+            results: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn with_api_key(mut self, key: impl Into<String>) -> Self {
+        self.api_key = Some(key.into());
+        self
+    }
+
+    pub fn with_client_id(mut self, client_id: impl Into<String>) -> Self {
+        self.client_id = client_id.into();
+        self
+    }
+
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
+
+    /// Public for callers / tests that want to inspect the constructed
+    /// HTTP request body before transport lands.
+    pub fn build_request_body(&self, request: &ExecutorRequest) -> Result<String> {
+        // Idempotency: prefix the operator-supplied run_id with our
+        // client_id so two concurrent scans against the same endpoint
+        // don't collide. The remote backend should treat
+        // `<client_id>/<run_id>` as a unique key.
+        let payload = serde_json::json!({
+            "clientId": self.client_id,
+            "runId": request.run_id,
+            "command": request.command,
+            "workingDir": request.working_dir.display().to_string(),
+            "env": request.env,
+            "stdin": request.stdin,
+        });
+        serde_json::to_string(&payload).context("could not encode SandboxExecutor payload")
+    }
+}
+
+impl Executor for SandboxExecutor {
+    fn launch(&self, request: ExecutorRequest) -> Result<String> {
+        // The body is built so callers can verify auth + idempotency
+        // shape, then we surface a clear error so we don't silently
+        // pretend to dispatch.
+        let _body = self.build_request_body(&request)?;
+        let _has_auth = self.api_key.is_some();
+        anyhow::bail!(
+            "SandboxExecutor transport not yet implemented; \
+             the request body and auth headers are constructed but no \
+             HTTP client has shipped. Endpoint: {}",
+            self.endpoint
+        )
+    }
+
+    fn collect(&self, run_id: &str) -> Result<ExecutorResult> {
+        let guard = self
+            .results
+            .lock()
+            .expect("SandboxExecutor results lock poisoned");
+        guard
+            .get(run_id)
+            .cloned()
+            .with_context(|| format!("SandboxExecutor has no record of run id {run_id}"))
+    }
+
+    fn status(&self, run_id: &str) -> Result<ExecutorStatus> {
+        let guard = self
+            .results
+            .lock()
+            .expect("SandboxExecutor results lock poisoned");
+        Ok(guard
+            .get(run_id)
+            .map(|result| result.status)
+            .unwrap_or(ExecutorStatus::Unknown))
+    }
+
+    fn name(&self) -> &str {
+        "sandbox"
+    }
+}
+
 /// Stand-in for callers that want a `Box<dyn Executor>` slot but don't
 /// have a real backend wired yet. Always returns `Unknown`.
 pub struct NoopExecutor;
@@ -444,6 +558,44 @@ mod tests {
     fn docker_executor_reports_unknown_run_id() {
         let exec = DockerExecutor::new("alpine:3.19");
         assert_eq!(exec.status("nope").unwrap(), ExecutorStatus::Unknown);
+    }
+
+    #[test]
+    fn sandbox_executor_builds_request_body_with_idempotency_key() {
+        let exec = SandboxExecutor::new("https://sandbox.example.com/v1")
+            .with_api_key("vck_demo")
+            .with_client_id("kuzushi-test");
+        let body = exec
+            .build_request_body(&ExecutorRequest {
+                run_id: "run-99".to_string(),
+                command: vec!["ls".to_string()],
+                working_dir: PathBuf::from("/work"),
+                env: HashMap::from([("KEY".to_string(), "VAL".to_string())]),
+                stdin: None,
+            })
+            .unwrap();
+        assert!(body.contains("\"clientId\":\"kuzushi-test\""));
+        assert!(body.contains("\"runId\":\"run-99\""));
+        assert!(body.contains("\"workingDir\":\"/work\""));
+        assert!(body.contains("\"command\":[\"ls\"]"));
+        assert!(body.contains("\"KEY\":\"VAL\""));
+    }
+
+    #[test]
+    fn sandbox_executor_launch_errors_until_transport_lands() {
+        let exec = SandboxExecutor::new("https://sandbox.example.com");
+        let err = exec
+            .launch(ExecutorRequest {
+                run_id: "x".to_string(),
+                command: vec!["true".to_string()],
+                working_dir: PathBuf::from("."),
+                env: HashMap::new(),
+                stdin: None,
+            })
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("transport not yet implemented"));
+        assert!(err.contains("https://sandbox.example.com"));
     }
 
     #[test]

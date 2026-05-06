@@ -1225,6 +1225,12 @@ pub struct RefusalReport {
     pub skipped: Vec<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub raw: String,
+    /// `true` when the report came from a structured follow-up turn (extra
+    /// agent call), `false` when it came from the heuristic scan over the
+    /// triage rationale or an empty default. Callers use this to decide
+    /// whether to charge `Operation::RefusalFollowup` budget.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub source_followup: bool,
 }
 
 impl RefusalReport {
@@ -1284,6 +1290,7 @@ pub fn detect_refusal_in_text(raw: &str) -> RefusalReport {
             reason,
             skipped: Vec::new(),
             raw: raw.to_string(),
+            source_followup: false,
         }
     } else {
         RefusalReport::default()

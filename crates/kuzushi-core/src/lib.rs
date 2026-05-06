@@ -78,7 +78,7 @@ pub use deep_auditor::{
 };
 pub use executor::{
     DockerExecutor, Executor, ExecutorRequest, ExecutorResult, ExecutorStatus, LocalExecutor,
-    NoopExecutor,
+    NoopExecutor, SandboxExecutor,
 };
 pub use dep_hygiene::{
     analyze_manifest as analyze_dep_hygiene_manifest, check_dependency_hygiene, DepHygieneFinding,
@@ -121,9 +121,9 @@ pub use runtime::{
 };
 pub use scan::{
     default_scan_engines, index_codeql_sarif_as_static_evidence, normalize_codeql_sarif,
-    normalize_semgrep_json, run_scan_engines, run_semgrep_scan, scan_engines_for_tasks,
-    CodeqlScanner, ScanCancellation, ScanEngine, ScanEngineOutput, ScanRun, ScanRunOptions,
-    SemgrepScanner,
+    normalize_semgrep_json, run_scan_engines, run_semgrep_scan, run_semgrep_scan_with_executor,
+    scan_engines_for_tasks, CodeqlScanner, ScanCancellation, ScanEngine, ScanEngineOutput,
+    ScanRun, ScanRunOptions, SemgrepScanner,
 };
 pub use secret_scan::{
     scan_for_secrets, SecretScanFinding, SecretScanOptions, SecretScanReport, SecretScanScanner,

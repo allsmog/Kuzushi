@@ -2897,8 +2897,9 @@ fn init_git_repo(repo: &std::path::Path) {
         vec!["init"],
         vec!["config", "user.email", "kuzushi@example.test"],
         vec!["config", "user.name", "Kuzushi Test"],
+        vec!["config", "commit.gpgsign", "false"],
         vec!["add", "."],
-        vec!["commit", "-m", "fixture"],
+        vec!["commit", "--no-gpg-sign", "-m", "fixture"],
     ] {
         let output = Command::new("git")
             .args(args)

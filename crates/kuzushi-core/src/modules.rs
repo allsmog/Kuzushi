@@ -339,8 +339,15 @@ impl ModuleRegistry {
             "semgrep:scan" => {
                 let target = resolve_tool_target(&input, ctx)?;
                 let scanner = SemgrepScanner::from_tool_input(&input)?;
-                let mut findings =
-                    scanner.scan_with_cancel(&target, &ScanCancellation::default())?;
+                // When the operator wired ctx.executor (e.g. via `kuzushi
+                // scan --executor docker:alpine:3.19`), route the scan
+                // through the container instead of spawning a local
+                // subprocess. The local path stays the default.
+                let mut findings = if let Some(executor) = ctx.executor {
+                    scanner.scan_via_executor(&target, executor)?
+                } else {
+                    scanner.scan_with_cancel(&target, &ScanCancellation::default())?
+                };
                 let index_static_evidence = whitebox_static_profile_requested(&input)?;
                 if index_static_evidence {
                     mark_whitebox_static_findings(&mut findings, StaticProofState::SignalOnly)?;
@@ -5409,6 +5416,10 @@ struct TriageRunInput {
     batch_size: usize,
     prompt_template: Option<String>,
     scan_id: Option<String>,
+    /// If `true`, score each finding via the cheap classifier gate before
+    /// deciding to fire the full triage. Operators can also opt in by
+    /// setting `KUZUSHI_GATE=1`.
+    gate: bool,
 }
 
 impl TriageRunInput {
@@ -5461,6 +5472,10 @@ impl TriageRunInput {
             .transpose()?;
         let scan_id = optional_nonempty_string(input, "scanId")?
             .or(optional_nonempty_string(input, "scan_id")?);
+        let gate = input
+            .get("gate")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
 
         Ok(Self {
             fingerprints: if fingerprints.is_empty() {
@@ -5471,6 +5486,7 @@ impl TriageRunInput {
             batch_size,
             prompt_template,
             scan_id,
+            gate,
         })
     }
 }
@@ -5515,19 +5531,113 @@ fn run_triage(
         "triage:run requires an explicit model in config.toml or KUZUSHI_MODEL; Kuzushi will not choose a fallback model",
     )?;
 
+    // Optional cheap classifier-gate up front. Honour `KUZUSHI_GATE=1` (env)
+    // or input field `gate: true` to enable. The gate is best-effort: any
+    // construction error logs a warning and the run continues without it.
+    let gate_enabled = input.gate
+        || std::env::var("KUZUSHI_GATE")
+            .ok()
+            .map(|v| matches!(v.trim(), "1" | "true" | "yes" | "on"))
+            .unwrap_or(false);
+    let gate = if gate_enabled {
+        match crate::classifier_gate::LikelyVulnClassifier::with_plain_runtime(
+            runtime,
+            &model,
+            crate::classifier_gate::ClassifierConfig::default(),
+        ) {
+            Ok(gate) => Some(gate),
+            Err(error) => {
+                eprintln!("[warn] classifier_gate disabled: {error}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let mut tp = 0usize;
     let mut fp = 0usize;
     let mut needs_review = 0usize;
     let mut by_design = 0usize;
+    let mut gated_count = 0usize;
     let mut results = Vec::new();
 
     let mut total_cost = 0.0f64;
+    let mut total_gate_cost = 0.0f64;
     for finding in findings {
         let finding_id = finding
             .id
             .context("triage:run loaded a finding without a SQLite id")?;
         let fingerprint = finding.fingerprint.clone();
         let scan_id = finding.scan_id.clone();
+
+        // Cheap classifier gate: if score below threshold, write a synthetic
+        // "skipped" outcome and move on without burning the deep auditor's
+        // budget. Costs are tracked under Operation::ClassifierGate.
+        if let Some(gate) = gate.as_ref() {
+            let gate_ticket = match ctx.spend {
+                Some(limiter) => match limiter.deposit(
+                    crate::spend::Operation::ClassifierGate,
+                    0.001,
+                ) {
+                    Ok(ticket) => Some(ticket),
+                    Err(_) => None,
+                },
+                None => None,
+            };
+            match gate.score(&finding, workspace.root()) {
+                Ok(score) => {
+                    let gate_cost = if let Some(ticket) = gate_ticket {
+                        let estimate = ticket.est_usd();
+                        if let Some(limiter) = ctx.spend {
+                            let _ = limiter.refund(ticket, estimate);
+                        }
+                        estimate
+                    } else {
+                        0.001
+                    };
+                    total_gate_cost += gate_cost;
+                    let accepted = gate.should_deep_audit(score);
+                    if let Err(error) = gate.record_decision(store, &finding, score, accepted) {
+                        eprintln!(
+                            "[warn] could not record gate decision for {fingerprint}: {error}"
+                        );
+                    }
+                    if !accepted {
+                        let outcome = gate.skip_outcome(score);
+                        store.save_triage(finding_id, &outcome)?;
+                        match outcome.verdict {
+                            TriageVerdict::TruePositive => tp += 1,
+                            TriageVerdict::FalsePositive => fp += 1,
+                            TriageVerdict::NeedsReview => needs_review += 1,
+                            TriageVerdict::ByDesign => by_design += 1,
+                        }
+                        gated_count += 1;
+                        results.push(json!({
+                            "fingerprint": fingerprint,
+                            "verdict": outcome.verdict.as_str(),
+                            "confidence": outcome.confidence,
+                            "rationale": outcome.rationale,
+                            "gateScore": score,
+                            "gated": true,
+                            "costUsd": gate_cost,
+                        }));
+                        continue;
+                    }
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[warn] classifier_gate scoring failed for {fingerprint}: {error}; falling back to full triage"
+                    );
+                    if let Some(ticket) = gate_ticket {
+                        if let Some(limiter) = ctx.spend {
+                            let _ = limiter.refund(ticket, 0.0);
+                        }
+                    }
+                }
+            }
+        }
+
         // Open a spend ticket if a limiter is wired through the context.
         // Best-effort: if `deposit` fails (cap exceeded), skip this finding
         // with an actionable error rather than poisoning the rest of the run.
@@ -5543,7 +5653,7 @@ fn run_triage(
             },
             None => None,
         };
-        let outcome = runtime.triage_finding_blocking(TriageRequest {
+        let (outcome, refusal) = runtime.triage_finding_with_refusal_blocking(TriageRequest {
             model: model.clone(),
             cwd: workspace.root().to_path_buf(),
             finding,
@@ -5571,8 +5681,32 @@ fn run_triage(
         };
         total_cost += settled_cost;
 
+        // The followup turn — if the runtime fired one — is its own
+        // budgeted operation so `kuzushi metrics` can split it out.
+        let followup_cost = if refusal.source_followup {
+            if let Some(limiter) = ctx.spend {
+                match limiter.deposit(crate::spend::Operation::RefusalFollowup, 0.005) {
+                    Ok(ticket) => {
+                        let estimate = ticket.est_usd();
+                        let _ = limiter.refund(ticket, estimate);
+                        estimate
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "[warn] refusal-followup budget exceeded for {fingerprint}: {error}"
+                        );
+                        0.0
+                    }
+                }
+            } else {
+                0.005
+            }
+        } else {
+            0.0
+        };
+        total_cost += followup_cost;
+
         store.save_triage(finding_id, &outcome)?;
-        let refusal = crate::findings::detect_refusal_in_text(&outcome.rationale);
         let history_run_id = input
             .scan_id
             .as_deref()
@@ -5599,18 +5733,26 @@ fn run_triage(
             "confidence": outcome.confidence,
             "rationale": outcome.rationale,
             "refused": refusal.refused,
-            "costUsd": settled_cost,
+            "refusalSourceFollowup": refusal.source_followup,
+            "costUsd": settled_cost + followup_cost,
+            "refusalCostUsd": followup_cost,
         }));
     }
 
     let triaged = results.len();
+    let total_with_gate = total_cost + total_gate_cost;
     let mut summary = format!(
         "[+] Triaged {triaged} of {triaged} findings\n      tp={tp}  fp={fp}  needs_review={needs_review}"
     );
     if by_design > 0 {
         summary.push_str(&format!("  by_design={by_design}"));
     }
-    summary.push_str(&format!("\n      cost=${total_cost:.4}"));
+    if gated_count > 0 {
+        summary.push_str(&format!("  gated={gated_count}"));
+    }
+    summary.push_str(&format!(
+        "\n      cost=${total_with_gate:.4} (gate=${total_gate_cost:.4})"
+    ));
     if !missing_fingerprints.is_empty() {
         summary.push_str(&format!(
             "\n[!] {} requested finding(s) were not found",
@@ -5628,12 +5770,14 @@ fn run_triage(
             "fp": fp,
             "needsReview": needs_review,
             "byDesign": by_design,
-            "costUsd": total_cost,
+            "gated": gated_count,
+            "costUsd": total_with_gate,
+            "gateCostUsd": total_gate_cost,
             "missingFingerprints": missing_fingerprints,
             "batchSize": input.batch_size,
             "results": results,
         },
-        "costUsd": total_cost,
+        "costUsd": total_with_gate,
     }))
 }
 
@@ -9956,8 +10100,9 @@ OUT
             vec!["init"],
             vec!["config", "user.email", "kuzushi@example.test"],
             vec!["config", "user.name", "Kuzushi Test"],
+            vec!["config", "commit.gpgsign", "false"],
             vec!["add", "."],
-            vec!["commit", "-m", "fixture"],
+            vec!["commit", "--no-gpg-sign", "-m", "fixture"],
         ] {
             let output = Command::new("git")
                 .args(args)

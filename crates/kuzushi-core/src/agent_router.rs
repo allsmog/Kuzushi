@@ -819,4 +819,85 @@ fallbacks = ["openai:o3"]
             Some("triage-model")
         );
     }
+
+    #[test]
+    fn end_to_end_models_toml_to_resolve_model() {
+        // models.toml on disk → AgentRouter::load → RoutedRuntime →
+        // resolve_model returns the role's primary. This is the path an
+        // operator's `[roles.classifier_gate]` setting flows through.
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        write_models_toml(
+            &home,
+            r#"
+default_model = "openai:gpt-4o-mini"
+
+[roles.classifier_gate]
+primary = "openai:gpt-4o-mini"
+
+[roles.deep_auditor]
+primary = "anthropic:claude-opus-4-7"
+"#,
+        );
+        let router = AgentRouter::load(&ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap();
+        let routed = RoutedRuntime::new(
+            RecorderRuntime::new(),
+            Arc::new(router),
+            None,
+        );
+        assert_eq!(
+            routed.resolve_model(AgentRole::ClassifierGate, 0, None),
+            Some("openai:gpt-4o-mini".to_string())
+        );
+        assert_eq!(
+            routed.resolve_model(AgentRole::DeepAuditor, 0, None),
+            Some("anthropic:claude-opus-4-7".to_string())
+        );
+    }
+
+    #[test]
+    fn option_store_setg_override_wins_over_models_toml() {
+        // `setg MODEL_CLASSIFIER_GATE openai:gpt-5` should override the
+        // models.toml `[roles.classifier_gate]` entry without rewriting the
+        // file. with_option_store snapshots that override at construction.
+        use crate::options::{OptionScope, OptionTarget};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        write_models_toml(
+            &home,
+            r#"
+[roles.classifier_gate]
+primary = "openai:gpt-4o-mini"
+"#,
+        );
+        let router = AgentRouter::load(&ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap();
+
+        let mut store = crate::options::ToolOptionStore::new();
+        store.set_value(
+            OptionScope::Global,
+            OptionTarget::All,
+            "MODEL_CLASSIFIER_GATE",
+            serde_json::Value::String("openai:gpt-5".to_string()),
+        );
+        let routed = RoutedRuntime::new(
+            RecorderRuntime::new(),
+            Arc::new(router),
+            None,
+        )
+        .with_option_store(&store);
+
+        assert_eq!(
+            routed.resolve_model(AgentRole::ClassifierGate, 0, None),
+            Some("openai:gpt-5".to_string())
+        );
+    }
 }
