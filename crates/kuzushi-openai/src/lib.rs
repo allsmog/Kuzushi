@@ -1,7 +1,11 @@
 use std::env;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -19,6 +23,21 @@ pub struct PiAgentCoreRuntime {
     api_key: Option<String>,
     base_url: Option<String>,
     thinking_level: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BridgeCancellation {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl BridgeCancellation {
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
 }
 
 impl PiAgentCoreRuntime {
@@ -64,12 +83,20 @@ impl PiAgentCoreRuntime {
             .filter(|value| !value.is_empty());
         self
     }
-}
 
-#[async_trait]
-impl AgentRuntime for PiAgentCoreRuntime {
-    fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
-        let bridge_request = BridgeRequest {
+    pub fn query_blocking_with_cancellation(
+        &self,
+        request: AgentQueryRequest,
+        cancellation: &BridgeCancellation,
+    ) -> Result<AgentQueryResponse> {
+        let bridge_request = self.bridge_request(request);
+        let response =
+            run_bridge_with_cancellation(&self.command, &bridge_request, Some(cancellation))?;
+        response.into_agent_response()
+    }
+
+    fn bridge_request(&self, request: AgentQueryRequest) -> BridgeRequest {
+        BridgeRequest {
             model: request.model,
             cwd: request.cwd.display().to_string(),
             system_prompt: request.system_prompt,
@@ -78,22 +105,16 @@ impl AgentRuntime for PiAgentCoreRuntime {
             api_key: self.api_key.clone(),
             base_url: self.base_url.clone(),
             thinking_level: self.thinking_level.clone(),
-        };
-
-        let response = run_bridge(&self.command, &bridge_request)?;
-        if !response.ok {
-            anyhow::bail!(
-                "pi-agent-core bridge failed: {}",
-                response
-                    .error
-                    .unwrap_or_else(|| "unknown error".to_string())
-            );
         }
+    }
+}
 
-        Ok(AgentQueryResponse {
-            text: response.text.unwrap_or_default(),
-            structured: response.structured,
-        })
+#[async_trait]
+impl AgentRuntime for PiAgentCoreRuntime {
+    fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+        let bridge_request = self.bridge_request(request);
+        let response = run_bridge(&self.command, &bridge_request)?;
+        response.into_agent_response()
     }
 
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
@@ -146,6 +167,18 @@ fn triage_prompt(finding: &kuzushi_core::Finding, template: Option<&str>) -> Res
 }
 
 fn run_bridge(command: &[String], request: &BridgeRequest) -> Result<BridgeResponse> {
+    run_bridge_with_cancellation(command, request, None)
+}
+
+fn run_bridge_with_cancellation(
+    command: &[String],
+    request: &BridgeRequest,
+    cancellation: Option<&BridgeCancellation>,
+) -> Result<BridgeResponse> {
+    if cancellation.is_some_and(BridgeCancellation::is_cancelled) {
+        anyhow::bail!("pi-agent-core bridge abort requested");
+    }
+
     let mut child = Command::new(&command[0])
         .args(&command[1..])
         .stdin(Stdio::piped())
@@ -153,6 +186,17 @@ fn run_bridge(command: &[String], request: &BridgeRequest) -> Result<BridgeRespo
         .stderr(Stdio::piped())
         .spawn()
         .with_context(|| format!("Could not start pi-agent-core bridge {}", command[0]))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .context("Could not open pi-agent-core bridge stdout")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("Could not open pi-agent-core bridge stderr")?;
+    let stdout_reader = thread::spawn(move || read_pipe(stdout));
+    let stderr_reader = thread::spawn(move || read_pipe(stderr));
 
     {
         let stdin = child
@@ -162,29 +206,68 @@ fn run_bridge(command: &[String], request: &BridgeRequest) -> Result<BridgeRespo
         let body = serde_json::to_vec(request).context("Could not encode bridge request")?;
         stdin.write_all(&body)?;
     }
+    drop(child.stdin.take());
 
-    let output = child
-        .wait_with_output()
-        .context("Could not read pi-agent-core bridge output")?;
-    if !output.status.success() {
-        if !output.stdout.is_empty() {
-            if let Ok(response) = serde_json::from_slice::<BridgeResponse>(&output.stdout) {
-                return Ok(response);
-            }
+    loop {
+        if cancellation.is_some_and(BridgeCancellation::is_cancelled) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            anyhow::bail!("pi-agent-core bridge abort requested");
         }
-        anyhow::bail!(
-            "pi-agent-core bridge exited with {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
 
-    serde_json::from_slice::<BridgeResponse>(&output.stdout).with_context(|| {
-        format!(
-            "Could not parse bridge JSON: {}",
-            String::from_utf8_lossy(&output.stdout)
-        )
-    })
+        if let Some(status) = child
+            .try_wait()
+            .context("Could not read pi-agent-core bridge status")?
+        {
+            let stdout = stdout_reader.join().unwrap_or_else(|_| Vec::new());
+            let stderr = stderr_reader.join().unwrap_or_else(|_| Vec::new());
+            if !status.success() {
+                if !stdout.is_empty() {
+                    if let Ok(response) = serde_json::from_slice::<BridgeResponse>(&stdout) {
+                        return Ok(response);
+                    }
+                }
+                anyhow::bail!(
+                    "pi-agent-core bridge exited with {}: {}",
+                    status,
+                    String::from_utf8_lossy(&stderr)
+                );
+            }
+
+            return serde_json::from_slice::<BridgeResponse>(&stdout).with_context(|| {
+                format!(
+                    "Could not parse bridge JSON: {}",
+                    String::from_utf8_lossy(&stdout)
+                )
+            });
+        }
+
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn read_pipe(mut pipe: impl Read) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    let _ = pipe.read_to_end(&mut buffer);
+    buffer
+}
+
+impl BridgeResponse {
+    fn into_agent_response(self) -> Result<AgentQueryResponse> {
+        if !self.ok {
+            anyhow::bail!(
+                "pi-agent-core bridge failed: {}",
+                self.error.unwrap_or_else(|| "unknown error".to_string())
+            );
+        }
+
+        Ok(AgentQueryResponse {
+            text: self.text.unwrap_or_default(),
+            structured: self.structured,
+        })
+    }
 }
 
 fn default_bridge_command(source_root: &Path) -> Vec<String> {
@@ -230,6 +313,10 @@ struct BridgeResponse {
 mod tests {
     use super::*;
     use kuzushi_core::{Finding, RuntimeConfig, RuntimeKind, Severity};
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
     #[test]
     fn uses_configured_bridge_command() {
@@ -281,5 +368,61 @@ mod tests {
 
         assert!(err.contains("pi-agent-core bridge failed"));
         assert!(err.contains("install @mariozechner/pi-agent-core"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancellable_query_reports_abort_requested_without_waiting_for_bridge_completion() {
+        let dir = unique_temp_dir("kuzushi-openai-cancel");
+        fs::create_dir_all(&dir).unwrap();
+        let bridge = dir.join("sleep-bridge.sh");
+        fs::write(
+            &bridge,
+            "#!/bin/sh\ncat >/dev/null\nsleep 30\nprintf '%s' '{\"ok\":true,\"text\":\"late\"}'\n",
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&bridge).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&bridge, permissions).unwrap();
+
+        let runtime = RuntimeConfig {
+            kind: RuntimeKind::PiAgentCore,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            agent_bridge_command: Some(vec![bridge.display().to_string()]),
+        };
+        let bridge_runtime = PiAgentCoreRuntime::from_runtime_config(&runtime, &dir).unwrap();
+        let cancel = BridgeCancellation::default();
+        let worker_cancel = cancel.clone();
+        let request = AgentQueryRequest {
+            model: "openai:gpt-4.1".to_string(),
+            cwd: dir.clone(),
+            system_prompt: "system".to_string(),
+            prompt: "question".to_string(),
+        };
+
+        let started = Instant::now();
+        let worker = thread::spawn(move || {
+            bridge_runtime.query_blocking_with_cancellation(request, &worker_cancel)
+        });
+        thread::sleep(Duration::from_millis(150));
+        cancel.cancel();
+
+        let err = worker.join().unwrap().unwrap_err().to_string();
+        let _ = fs::remove_dir_all(&dir);
+
+        assert!(err.contains("abort requested"));
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "cancellation should not wait for bridge script sleep"
+        );
+    }
+
+    fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
     }
 }
