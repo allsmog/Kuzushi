@@ -1,14 +1,14 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-003 - Scrub Scanner Subprocess Environments
-Status: WB-002 complete and pushed as `ac4bd30`; WB-003 pending
+Active story: WB-004 - Add static proof taxonomy
+Status: WB-003 complete in this workspace; commit/push pending
 
 ## Stage 3 Checklist
 
 - WB-001 Add explicit whitebox-static mode: complete in iteration 29.
 - WB-002 Remove shell execution from default whitebox agent tools: complete in iteration 30.
-- WB-003 Scrub scanner subprocess environments: pending.
+- WB-003 Scrub scanner subprocess environments: complete in iteration 31.
 - WB-004 Add static proof taxonomy: pending.
 - WB-005 Add static evidence graph: pending.
 - WB-006 Add source span extractor: pending.
@@ -30,6 +30,43 @@ Status: WB-002 complete and pushed as `ac4bd30`; WB-003 pending
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 31 - WB-003
+
+- Task attempted: scrub Rust scanner subprocess environments so static scanner
+  children do not inherit credential-shaped operator environment variables.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `crates/kuzushi-core/src/scan.rs`
+- Tests/checks run:
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core scanner_env`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-core semgrep`
+  - `cargo test -p kuzushi-core codeql`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core`
+  - `pnpm eval:kuzushi-whitebox-static` with the primary checkout's
+    `node_modules` temporarily symlinked into the clean clone
+- Result: implementation complete. Semgrep and CodeQL subprocess launches now
+  call a shared scrubbed scanner environment helper that clears inherited env
+  and only restores a narrow non-secret allowlist. Focused fake-scanner tests
+  set `AWS_SECRET_ACCESS_KEY`, `GITHUB_TOKEN`, and `DATABASE_URL` in the parent
+  process and prove those names are absent in both Semgrep and every CodeQL
+  child invocation. The existing Rust dependency-hygiene scanner remains
+  deterministic/offline and does not spawn dependency prefetch subprocesses.
+  WB-003 is marked `passes: true` in the PRD after the story gate and focused
+  checks passed.
+- Remaining work: commit and push WB-003, then start WB-004.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files. This iteration continued in the
+    clean isolated clone at `/tmp/kuzushi-ux2-clone.PJaRge`, which contains the
+    active pushed Stage 2 and WB-001/WB-002 state.
+  - The isolated clone still does not have its own `node_modules`; the eval
+    used a temporary symlink to the primary checkout's installed dependencies,
+    then removed the symlink before commit.
 
 ### Iteration 30 - WB-002
 
