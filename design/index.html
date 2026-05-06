@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Kuzushi TUI · Mockups</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --term-bg:        #0b0d10;
+    --term-bg-elev:   #0f1115;
+    --t-primary:      #cfd6e0;
+    --t-muted:        #7d8794;
+    --t-subtle:       #3d4654;
+    --t-accent:       #7fb8ff;
+    --t-label:        #a6cdff;
+    --t-heading:      #ffffff;
+    --t-success:      #57c479;
+    --t-warn:         #e2c14a;
+    --t-danger:       #e25c5c;
+    --t-sel-fg:       #0b0d10;
+    --t-sel-bg:       #7fb8ff;
+    --sev-critical:   #e25c5c;
+    --sev-high:       #ff8b8b;
+    --sev-medium:     #e2c14a;
+    --sev-low:        #7fb8ff;
+  }
+  html,body { margin:0; padding:0; background:#f0eee9; }
+  body { font-family: 'Inter', system-ui, sans-serif; color:#2a251f; }
+  .term {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-feature-settings: "calt" 0, "liga" 0;
+    font-variant-ligatures: none;
+    background: var(--term-bg);
+    color: var(--t-primary);
+    padding: 12px 14px;
+    border-radius: 0 0 6px 6px;
+    line-height: 1.28;
+    white-space: pre;
+    overflow: hidden;
+    font-size: 12.5px;
+    width: 100%; height: 100%;
+    box-sizing: border-box; position: relative;
+  }
+  .term .row { display:block; }
+  .term-frame {
+    display:flex; flex-direction:column;
+    background: var(--term-bg);
+    border-radius: 8px;
+    overflow:hidden;
+    box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 18px 60px rgba(0,0,0,.18), 0 0 0 1px rgba(0,0,0,.5);
+    height: 100%;
+  }
+  .term-chrome {
+    display:flex; align-items:center; gap:6px;
+    padding: 8px 12px;
+    background: #15181d;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: rgba(255,255,255,.5);
+    flex: 0 0 auto;
+  }
+  .term-chrome .dot { width:11px; height:11px; border-radius:50%; }
+  .term-chrome .dot.r { background:#ff5f57; }
+  .term-chrome .dot.y { background:#febc2e; }
+  .term-chrome .dot.g { background:#28c840; }
+  .term-chrome .title { margin-left:auto; margin-right:auto; transform:translateX(-22px); }
+
+  .c-primary  { color: var(--t-primary); }
+  .c-muted    { color: var(--t-muted); }
+  .c-subtle   { color: var(--t-subtle); }
+  .c-accent   { color: var(--t-accent); }
+  .c-label    { color: var(--t-label);   font-weight: 700; }
+  .c-heading  { color: var(--t-heading); font-weight: 700; }
+  .c-success  { color: var(--t-success); }
+  .c-warn     { color: var(--t-warn); }
+  .c-danger   { color: var(--t-danger); }
+  .c-sel { color: var(--t-sel-fg); background: var(--t-sel-bg); font-weight: 700; }
+  .c-sev-critical { color: var(--sev-critical); font-weight:700; }
+  .c-sev-high     { color: var(--sev-high); }
+  .c-sev-medium   { color: var(--sev-medium); }
+  .c-sev-low      { color: var(--sev-low); }
+
+  .page-header {
+    padding: 24px 32px 16px;
+    display:flex; align-items:flex-end; justify-content:space-between; gap:24px;
+    border-bottom: 1px solid rgba(0,0,0,.06);
+  }
+  .page-header h1 {
+    font-family: 'Inter', sans-serif;
+    font-size: 22px; font-weight:700; margin:0;
+    letter-spacing:-0.01em;
+  }
+  .page-header .sub { font-size: 12.5px; color:rgba(60,50,40,.7); margin-top:4px; }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div class="page-header">
+    <div>
+      <h1>Kuzushi · Ratatui Shell — Catalog &amp; Module Views</h1>
+      <div class="sub">growing-console aesthetic (Metasploit muscle memory + Claude Code transcript) · 8-role theme · all frames 120 cols</div>
+    </div>
+  </div>
+  <div id="root"></div>
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="mockups/_shared.jsx"></script>
+  <script type="text/babel" src="mockups/catalog.jsx"></script>
+  <script type="text/babel" src="mockups/context.jsx"></script>
+  <script type="text/babel" src="mockups/recon.jsx"></script>
+  <script type="text/babel" src="mockups/threat-model.jsx"></script>
+  <script type="text/babel" src="mockups/sast.jsx"></script>
+  <script type="text/babel" src="mockups/sast-running.jsx"></script>
+  <script type="text/babel" src="mockups/carlini.jsx"></script>
+  <script type="text/babel" src="mockups/carlini-running.jsx"></script>
+  <script type="text/babel" src="mockups/agentic-sast.jsx"></script>
+  <script type="text/babel" src="mockups/agentic-sast-running.jsx"></script>
+  <script type="text/babel" src="app.jsx"></script>
+</body>
+</html>
