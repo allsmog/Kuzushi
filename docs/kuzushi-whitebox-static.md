@@ -1,0 +1,66 @@
+# Kuzushi Whitebox-Static
+
+`whitebox-static` is Kuzushi's additive static-only analysis mode for source
+repositories. It uses the Rust CLI/core path and keeps the existing scan,
+triage, verify, patch, and report capabilities available outside this mode.
+
+## Static-Only Contract
+
+Whitebox-static does not perform active exploitation, HTTP replay, fuzzing, live
+target scanning, harness execution, or runtime verification. It disables
+verification, dynamic analysis, crypto behavioral testing, patching, and
+auto-patching within the mode. Runtime exploitability is not assessed in
+whitebox mode.
+
+Whitebox-static reports use static proof language:
+
+- `statically confirmed`
+- `statically rejected`
+- `needs runtime evidence`
+
+If source evidence is insufficient, the finding must say so instead of claiming
+runtime exploitability.
+
+## zero-harness repo ingest
+
+The mode ingests repository content without running the application or package
+manager. It reuses `context:build` output where available, then reads local
+source, manifests, configuration, and existing `.kuzushi` artifacts. Scanner
+signals are treated as evidence inputs, not automatic true positives.
+
+## Attack-Surface Map
+
+Whitebox-static builds a source-derived attack-surface map from routes,
+handlers, CLI entrypoints, background jobs, deserialization points, file
+upload/parse paths, auth boundaries, database query boundaries, and command
+execution boundaries. The map is static and may be incomplete when framework
+registration is dynamic.
+
+## source-grounded static proof
+
+Every persisted claim must cite repository files and line spans under the repo
+root. Static proof connects source evidence to security-sensitive sinks,
+sanitizer or guard assessment, assumptions, and missing evidence. A scanner
+signal can support a claim, but it does not confirm the claim by itself.
+
+## Prioritized High-Impact Findings
+
+Prioritization favors source-grounded paths that cross attacker-controlled
+entrypoints, privilege or trust boundaries, sensitive sinks, weak or missing
+guards, and higher-confidence dataflow evidence. Generic scanner noise should
+rank below a source-linked flow with a credible impact path.
+
+## Trigger And Impact Narratives
+
+Reports may include a static trigger path and potential impact narrative. These
+narratives describe how the code appears to route data from an entrypoint to a
+sink and what impact could follow if runtime preconditions hold. They must also
+state evidence limits, assumptions, and missing runtime evidence.
+
+## Evidence Limits
+
+Whitebox-static cannot prove that an issue is reachable in a deployed runtime,
+that a route is exposed in production, that auth middleware behaves as expected,
+or that a sink is exploitable with a concrete request. Those questions remain
+outside this static-only mode and should be labeled `needs runtime evidence`.
+In short, runtime exploitability is not assessed in whitebox mode.

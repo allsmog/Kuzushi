@@ -173,6 +173,40 @@ fn findings_empty_state_names_next_scan_command() {
 }
 
 #[test]
+fn scan_mode_whitebox_static_is_static_only_and_json_visible() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("package.json"),
+        r#"{"dependencies":{"lodash":"latest"}}"#,
+    )
+    .unwrap();
+    let raw = stdout(
+        kuzushi()
+            .args([
+                "scan",
+                "--mode",
+                "whitebox-static",
+                "--tasks",
+                "dep-hygiene",
+                "--json",
+            ])
+            .arg(tmp.path())
+            .output()
+            .unwrap(),
+    );
+    let report: Value = serde_json::from_str(&raw).unwrap();
+
+    assert_eq!(report["mode"], "whitebox-static");
+    assert_eq!(report["whiteboxStatic"]["enabled"], true);
+    assert_eq!(report["whiteboxStatic"]["verify"], false);
+    assert_eq!(report["whiteboxStatic"]["autoPatch"], false);
+    assert_eq!(report["whiteboxStatic"]["dynamicAnalysis"], false);
+    assert_eq!(report["whiteboxStatic"]["pocExecution"], false);
+    assert_eq!(report["whiteboxStatic"]["executionProofStates"], false);
+    assert_eq!(report["findingsCount"], 1);
+}
+
+#[test]
 fn npm_wrapper_help_reaches_the_rust_binary() {
     let output = Command::new("node")
         .current_dir(repo_root())
