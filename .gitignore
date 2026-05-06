@@ -28,6 +28,7 @@ vendor/
 .worktrees
 perf/results.json
 *.txt
+!experiments/xint-eval/scope/*.txt
 .kuzushi/credentials.json
 .ralph/
 ralph-*.md

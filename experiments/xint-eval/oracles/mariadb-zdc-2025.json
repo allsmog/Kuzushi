@@ -1,0 +1,20 @@
+{
+  "cve": "MARIADB-ZDC-2025",
+  "slice": "mariadb",
+  "name": "MariaDB ZeroDay Cloud 2025 RCE",
+  "commit": "",
+  "commit_note": "Pre-patch SHA TBD. ZeroDay Cloud disclosure window 2025-Q4.",
+  "ground_truth": [
+    {
+      "file": "sql/",
+      "function": "",
+      "line_start": 1,
+      "line_end": 9999,
+      "cwe": ["CWE-89", "CWE-78", "CWE-94"],
+      "kind": "rce",
+      "notes": "Directory-level placeholder covering SQL parser + executor. Largest of the four codebases (~5M+ LOC) — sparse-checkout enforcement matters most here."
+    }
+  ],
+  "expected_min_recall": 0.0,
+  "notes": "Best-effort oracle pending public disclosure detail."
+}
