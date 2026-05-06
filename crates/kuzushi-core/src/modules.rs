@@ -34,8 +34,10 @@ use crate::variant_ndiff::{
     run_variant_lift_pattern,
 };
 use crate::whitebox_static::{
-    agent_tool_policy_for_input, apply_whitebox_static_sast_policy, mark_whitebox_static_findings,
-    whitebox_static_profile_requested,
+    agent_tool_policy_for_input, apply_whitebox_static_sast_policy,
+    build_whitebox_static_triage_prompt, mark_whitebox_static_findings,
+    parse_whitebox_static_triage_response, whitebox_static_profile_requested,
+    whitebox_static_triage_outcome, WHITEBOX_STATIC_TRIAGE_SYSTEM_PROMPT,
 };
 use crate::workspace::{export_workspace_findings, WorkspaceExportFormat, WorkspaceTarget};
 use crate::x_ray::execute_x_ray_tool;
@@ -811,11 +813,16 @@ fn run_sast_scan(
 
     let triage = if triage_requested {
         let fingerprints = fingerprints_for_sast_runs(store, &run_ids)?;
-        let triage_input = if fingerprints.is_empty() {
+        let mut triage_input = if fingerprints.is_empty() {
             json!({ "scanId": run_ids.primary.clone() })
         } else {
             json!({ "fingerprints": fingerprints })
         };
+        if whitebox_static.is_some() {
+            if let Value::Object(object) = &mut triage_input {
+                object.insert("mode".to_string(), json!("whitebox-static"));
+            }
+        }
         let output = run_triage(triage_input, ctx, runtime)?;
         write_triage_jsonl(&artifacts, &output)?;
         Some(output)
@@ -4841,6 +4848,7 @@ struct TriageRunInput {
     batch_size: usize,
     prompt_template: Option<String>,
     scan_id: Option<String>,
+    whitebox_static: bool,
 }
 
 impl TriageRunInput {
@@ -4893,6 +4901,7 @@ impl TriageRunInput {
             .transpose()?;
         let scan_id = optional_nonempty_string(input, "scanId")?
             .or(optional_nonempty_string(input, "scan_id")?);
+        let whitebox_static = whitebox_static_profile_requested(input)?;
 
         Ok(Self {
             fingerprints: if fingerprints.is_empty() {
@@ -4903,6 +4912,7 @@ impl TriageRunInput {
             batch_size,
             prompt_template,
             scan_id,
+            whitebox_static,
         })
     }
 }
@@ -4958,12 +4968,80 @@ fn run_triage(
             .id
             .context("triage:run loaded a finding without a SQLite id")?;
         let fingerprint = finding.fingerprint.clone();
-        let outcome = runtime.triage_finding_blocking(TriageRequest {
-            model: model.clone(),
-            cwd: workspace.root().to_path_buf(),
-            finding,
-            prompt_template: input.prompt_template.clone(),
-        })?;
+        let whitebox_static_triage = if input.whitebox_static {
+            let response = runtime.query_blocking(
+                AgentQueryRequest::new(
+                    model.clone(),
+                    workspace.root(),
+                    WHITEBOX_STATIC_TRIAGE_SYSTEM_PROMPT,
+                    build_whitebox_static_triage_prompt(
+                        &finding,
+                        input.prompt_template.as_deref(),
+                    )?,
+                )
+                .with_tool_policy(agent_tool_policy_for_input(&json!({
+                    "mode": "whitebox-static"
+                }))?),
+            )?;
+            let structured = response
+                .structured
+                .or_else(|| serde_json::from_str::<Value>(&response.text).ok());
+            match structured {
+                Some(value) => match parse_whitebox_static_triage_response(value) {
+                    Ok(response) => Some(response),
+                    Err(error) => {
+                        let outcome = TriageOutcome {
+                            verdict: TriageVerdict::NeedsReview,
+                            confidence: 0.1,
+                            rationale: format!(
+                                "whitebox-static triage response did not match schema: {error}"
+                            ),
+                        };
+                        store.save_triage(finding_id, &outcome)?;
+                        results.push(json!({
+                            "fingerprint": fingerprint,
+                            "verdict": outcome.verdict.as_str(),
+                            "confidence": outcome.confidence,
+                            "rationale": outcome.rationale,
+                            "staticProofState": "needs_runtime_evidence",
+                        }));
+                        needs_review += 1;
+                        continue;
+                    }
+                },
+                None => {
+                    let outcome = TriageOutcome {
+                        verdict: TriageVerdict::NeedsReview,
+                        confidence: 0.0,
+                        rationale: "whitebox-static triage response did not include JSON"
+                            .to_string(),
+                    };
+                    store.save_triage(finding_id, &outcome)?;
+                    results.push(json!({
+                        "fingerprint": fingerprint,
+                        "verdict": outcome.verdict.as_str(),
+                        "confidence": outcome.confidence,
+                        "rationale": outcome.rationale,
+                        "staticProofState": "needs_runtime_evidence",
+                    }));
+                    needs_review += 1;
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
+
+        let outcome = if let Some(response) = &whitebox_static_triage {
+            whitebox_static_triage_outcome(response)
+        } else {
+            runtime.triage_finding_blocking(TriageRequest {
+                model: model.clone(),
+                cwd: workspace.root().to_path_buf(),
+                finding,
+                prompt_template: input.prompt_template.clone(),
+            })?
+        };
 
         match outcome.verdict {
             TriageVerdict::TruePositive => tp += 1,
@@ -4973,12 +5051,17 @@ fn run_triage(
         }
 
         store.save_triage(finding_id, &outcome)?;
-        results.push(json!({
+        let mut result = json!({
             "fingerprint": fingerprint,
             "verdict": outcome.verdict.as_str(),
             "confidence": outcome.confidence,
             "rationale": outcome.rationale,
-        }));
+        });
+        if let Some(response) = whitebox_static_triage {
+            result["staticProofState"] = json!(response.static_proof_state.as_str());
+            result["whiteboxTriage"] = json!(response);
+        }
+        results.push(result);
     }
 
     let triaged = results.len();
@@ -7490,6 +7573,9 @@ fn triage_module() -> BuiltinModule {
             "triage:run",
             "Triage findings with pi-agent-core.",
             vec![
+                opt("mode", OptionType::Enum, "Triage contract mode.")
+                    .choices(&["standard", "whitebox-static"])
+                    .default(json!("standard")),
                 opt("scanId", OptionType::String, "Scan run id to triage."),
                 opt(
                     "fingerprint",
@@ -8985,6 +9071,47 @@ mod tests {
                         }],
                         "overallRisk": "medium",
                         "confidence": "medium"
+                    })),
+                });
+            }
+            let is_whitebox_triage_request =
+                self.queries.lock().unwrap().last().is_some_and(|query| {
+                    query.system_prompt.contains("whitebox-static triage agent")
+                });
+            if is_whitebox_triage_request {
+                return Ok(AgentQueryResponse {
+                    text: String::new(),
+                    structured: Some(json!({
+                        "verdict": "true_positive",
+                        "confidence": 0.86,
+                        "staticProofState": "statically_confirmed",
+                        "source": {
+                            "filePath": "src/db.ts",
+                            "startLine": 9,
+                            "summary": "request query parameter"
+                        },
+                        "sink": {
+                            "filePath": "src/db.ts",
+                            "startLine": 9,
+                            "summary": "raw SQL query"
+                        },
+                        "path": [{
+                            "filePath": "src/db.ts",
+                            "line": 9,
+                            "summary": "source and sink are local to the cited expression"
+                        }],
+                        "sanitizerAssessment": "No sanitizer is visible in the cited line.",
+                        "guardAssessment": "No parameterized-query guard is visible in the cited line.",
+                        "citations": [{
+                            "filePath": "src/db.ts",
+                            "startLine": 9,
+                            "endLine": 9
+                        }],
+                        "assumptions": ["The scanner location is source-derived."],
+                        "missingEvidence": ["Runtime reachability is not assessed."],
+                        "triggerNarrative": "The request value is used in SQL construction in source.",
+                        "impactNarrative": "The sink is a database query boundary.",
+                        "recommendedFix": "Use parameterized queries."
                     })),
                 });
             }
@@ -12050,6 +12177,99 @@ OUT
             requests[0].prompt_template.as_deref(),
             Some("Use repository evidence only.")
         );
+    }
+
+    #[test]
+    fn whitebox_triage_prompt_uses_static_schema_and_read_only_tools() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/db.ts"),
+            "const query = req.query.q;\ndb.query(query);\n",
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .insert_scan_run("run-1", workspace.root(), "completed")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.sql",
+            "src/db.ts",
+            9,
+            Some(9),
+            Severity::High,
+            "SQL injection in search",
+        )
+        .with_static_proof_state(StaticProofState::SignalOnly);
+        store.insert_finding("run-1", &finding).unwrap();
+
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "triage:run",
+                json!({
+                    "mode": "whitebox-static",
+                    "fingerprint": finding.fingerprint.clone(),
+                    "TRIAGE_PROMPT": "Prefer source citations."
+                }),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(
+            result
+                .pointer("/data/results/0/staticProofState")
+                .and_then(Value::as_str),
+            Some("statically_confirmed")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/results/0/whiteboxTriage/source/filePath")
+                .and_then(Value::as_str),
+            Some("src/db.ts")
+        );
+
+        let queries = runtime.queries();
+        assert_eq!(queries.len(), 1);
+        let query = &queries[0];
+        assert!(query.system_prompt.contains("whitebox-static triage agent"));
+        assert!(query.prompt.contains("staticProofState"));
+        assert!(query.prompt.contains("source"));
+        assert!(query.prompt.contains("sink"));
+        assert!(query.prompt.contains("sanitizerAssessment"));
+        assert!(query.prompt.contains("guardAssessment"));
+        assert!(query.prompt.contains("citations"));
+        assert!(query.prompt.contains("missingEvidence"));
+        assert!(query.prompt.contains("triggerNarrative"));
+        assert!(query.prompt.contains("impactNarrative"));
+        assert!(query.prompt.contains("recommendedFix"));
+        assert!(query.prompt.contains("payloads"));
+        assert!(query.prompt.contains("PoCs"));
+        assert!(query.prompt.contains("exploit execution"));
+        assert!(query.prompt.contains("runtime exploitability claims"));
+        assert_eq!(query.tool_policy.profile, "whitebox-static");
+        assert_eq!(query.tool_policy.tools, vec!["Read", "Glob", "Grep", "LS"]);
+
+        let stored = store
+            .get_finding_by_fingerprint(&finding.fingerprint)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stored.triage.as_ref().map(|triage| triage.verdict),
+            Some(TriageVerdict::TruePositive)
+        );
+        assert!(runtime.requests().is_empty());
     }
 
     #[test]

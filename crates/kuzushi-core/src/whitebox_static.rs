@@ -2,11 +2,17 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use crate::findings::{Finding, StaticProofState};
+use crate::findings::{Finding, StaticProofState, TriageOutcome, TriageVerdict};
 use crate::runtime::AgentToolPolicy;
 
 pub const WHITEBOX_STATIC_AGENT_TOOL_PROFILE: &str = "whitebox-static";
 pub const WHITEBOX_STATIC_READ_ONLY_AGENT_TOOLS: &[&str] = &["Read", "Glob", "Grep", "LS"];
+pub const WHITEBOX_STATIC_TRIAGE_SYSTEM_PROMPT: &str = r#"You are Kuzushi's whitebox-static triage agent.
+Use static source evidence only. Do not perform active exploitation, HTTP replay, fuzzing, live target scanning, PoC generation, or PoC execution.
+Return only JSON matching the whitebox-static triage schema provided in the prompt.
+Forbidden in whitebox-static triage: payloads, PoCs, exploit execution, runtime exploitability claims, and claims that something is runtime exploitable.
+Use true_positive only when staticProofState is statically_confirmed and every material claim is backed by source citations. Otherwise use false_positive, by_design, or needs_review.
+"#;
 const WHITEBOX_STATIC_FORBIDDEN_AGENT_TOOLS: &[&str] = &[
     "bash",
     "shell",
@@ -55,6 +61,59 @@ pub struct WhiteboxStaticPolicy {
     pub execution_proof_states: bool,
     pub runtime_exploitability_claims: bool,
     pub disabled: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WhiteboxStaticTriageEndpoint {
+    pub file_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<u32>,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WhiteboxStaticTriagePathStep {
+    pub file_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WhiteboxStaticTriageCitation {
+    pub file_path: String,
+    pub start_line: u32,
+    pub end_line: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snippet_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WhiteboxStaticTriageResponse {
+    pub verdict: TriageVerdict,
+    pub confidence: f32,
+    pub static_proof_state: StaticProofState,
+    pub source: WhiteboxStaticTriageEndpoint,
+    pub sink: WhiteboxStaticTriageEndpoint,
+    #[serde(default)]
+    pub path: Vec<WhiteboxStaticTriagePathStep>,
+    pub sanitizer_assessment: String,
+    pub guard_assessment: String,
+    #[serde(default)]
+    pub citations: Vec<WhiteboxStaticTriageCitation>,
+    #[serde(default)]
+    pub assumptions: Vec<String>,
+    #[serde(default)]
+    pub missing_evidence: Vec<String>,
+    pub trigger_narrative: String,
+    pub impact_narrative: String,
+    pub recommended_fix: String,
 }
 
 impl WhiteboxStaticPolicy {
@@ -205,6 +264,160 @@ pub fn mark_whitebox_static_findings(
         finding.set_static_proof_state(state);
     }
     Ok(())
+}
+
+pub fn whitebox_static_triage_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+            "verdict",
+            "confidence",
+            "staticProofState",
+            "source",
+            "sink",
+            "path",
+            "sanitizerAssessment",
+            "guardAssessment",
+            "citations",
+            "assumptions",
+            "missingEvidence",
+            "triggerNarrative",
+            "impactNarrative",
+            "recommendedFix"
+        ],
+        "properties": {
+            "verdict": {
+                "type": "string",
+                "enum": ["true_positive", "false_positive", "needs_review", "by_design"]
+            },
+            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "staticProofState": {
+                "type": "string",
+                "enum": [
+                    "signal_only",
+                    "code_cited",
+                    "source_sink_linked",
+                    "sanitizer_checked",
+                    "statically_confirmed",
+                    "statically_rejected",
+                    "needs_runtime_evidence"
+                ]
+            },
+            "source": {"$ref": "#/$defs/endpoint"},
+            "sink": {"$ref": "#/$defs/endpoint"},
+            "path": {
+                "type": "array",
+                "items": {"$ref": "#/$defs/pathStep"}
+            },
+            "sanitizerAssessment": {"type": "string"},
+            "guardAssessment": {"type": "string"},
+            "citations": {
+                "type": "array",
+                "items": {"$ref": "#/$defs/citation"}
+            },
+            "assumptions": {"type": "array", "items": {"type": "string"}},
+            "missingEvidence": {"type": "array", "items": {"type": "string"}},
+            "triggerNarrative": {"type": "string"},
+            "impactNarrative": {"type": "string"},
+            "recommendedFix": {"type": "string"}
+        },
+        "$defs": {
+            "endpoint": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["filePath", "summary"],
+                "properties": {
+                    "filePath": {"type": "string"},
+                    "startLine": {"type": "integer", "minimum": 1},
+                    "endLine": {"type": "integer", "minimum": 1},
+                    "summary": {"type": "string"}
+                }
+            },
+            "pathStep": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["filePath", "summary"],
+                "properties": {
+                    "filePath": {"type": "string"},
+                    "line": {"type": "integer", "minimum": 1},
+                    "summary": {"type": "string"}
+                }
+            },
+            "citation": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["filePath", "startLine", "endLine"],
+                "properties": {
+                    "filePath": {"type": "string"},
+                    "startLine": {"type": "integer", "minimum": 1},
+                    "endLine": {"type": "integer", "minimum": 1},
+                    "snippetHash": {"type": "string"}
+                }
+            }
+        }
+    })
+}
+
+pub fn build_whitebox_static_triage_prompt(
+    finding: &Finding,
+    operator_prompt: Option<&str>,
+) -> Result<String> {
+    let schema = serde_json::to_string_pretty(&whitebox_static_triage_schema())
+        .context("Could not serialize whitebox-static triage schema")?;
+    let finding_json =
+        serde_json::to_string_pretty(finding).context("Could not serialize finding")?;
+    let operator_prompt = operator_prompt
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("No additional operator instructions.");
+
+    Ok(format!(
+        r#"Whitebox-static triage task.
+
+Operator instructions:
+{operator_prompt}
+
+Static-only rules:
+- Use source-grounded static evidence only.
+- Do not provide payloads, PoCs, exploit execution steps, HTTP replay, fuzzing, or live target scanning instructions.
+- Do not make runtime exploitability claims and do not say the finding is runtime exploitable.
+- If source evidence is insufficient, set staticProofState to needs_runtime_evidence and explain missingEvidence.
+- Use statically_confirmed only when source, sink, path or local/direct reason, sanitizer assessment, guard assessment, and citations are all present.
+
+Return only JSON matching this schema:
+{schema}
+
+Finding JSON:
+{finding_json}"#
+    ))
+}
+
+pub fn parse_whitebox_static_triage_response(value: Value) -> Result<WhiteboxStaticTriageResponse> {
+    let mut response: WhiteboxStaticTriageResponse = serde_json::from_value(value)
+        .context("whitebox-static triage response did not match schema")?;
+    response.confidence = response.confidence.clamp(0.0, 1.0);
+    Ok(response)
+}
+
+pub fn whitebox_static_triage_outcome(response: &WhiteboxStaticTriageResponse) -> TriageOutcome {
+    TriageOutcome {
+        verdict: response.verdict,
+        confidence: response.confidence,
+        rationale: format!(
+            "staticProofState={}; trigger={}; impact={}; sanitizer={}; guard={}; missingEvidence={}",
+            response.static_proof_state.as_str(),
+            response.trigger_narrative.trim(),
+            response.impact_narrative.trim(),
+            response.sanitizer_assessment.trim(),
+            response.guard_assessment.trim(),
+            if response.missing_evidence.is_empty() {
+                "none".to_string()
+            } else {
+                response.missing_evidence.join("; ")
+            }
+        ),
+    }
 }
 
 fn is_forbidden_agent_tool(tool: &str) -> bool {
@@ -483,5 +696,109 @@ mod tests {
             findings[1].static_proof_state,
             Some(StaticProofState::SourceSinkLinked)
         );
+    }
+
+    #[test]
+    fn whitebox_triage_prompt_schema_includes_static_contract_and_forbidden_terms() {
+        let finding = Finding::new_semgrep(
+            "demo.sql",
+            "src/db.ts",
+            7,
+            Some(8),
+            crate::findings::Severity::High,
+            "request parameter reaches SQL query",
+        );
+        let schema = whitebox_static_triage_schema();
+        let required = schema
+            .get("required")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+
+        for field in [
+            "verdict",
+            "staticProofState",
+            "source",
+            "sink",
+            "path",
+            "sanitizerAssessment",
+            "guardAssessment",
+            "citations",
+            "assumptions",
+            "missingEvidence",
+            "triggerNarrative",
+            "impactNarrative",
+            "recommendedFix",
+        ] {
+            assert!(required.contains(&field), "missing schema field {field}");
+        }
+
+        let prompt =
+            build_whitebox_static_triage_prompt(&finding, Some("Use only citations.")).unwrap();
+        assert!(prompt.contains("payloads"));
+        assert!(prompt.contains("PoCs"));
+        assert!(prompt.contains("exploit execution"));
+        assert!(prompt.contains("runtime exploitability claims"));
+        assert!(prompt.contains("staticProofState"));
+        assert!(prompt.contains("request parameter reaches SQL query"));
+
+        assert!(WHITEBOX_STATIC_TRIAGE_SYSTEM_PROMPT.contains("payloads"));
+        assert!(WHITEBOX_STATIC_TRIAGE_SYSTEM_PROMPT.contains("PoCs"));
+        assert!(WHITEBOX_STATIC_TRIAGE_SYSTEM_PROMPT.contains("exploit execution"));
+        assert!(WHITEBOX_STATIC_TRIAGE_SYSTEM_PROMPT.contains("runtime exploitability claims"));
+    }
+
+    #[test]
+    fn whitebox_triage_response_parses_and_maps_to_triage_outcome() {
+        let response = parse_whitebox_static_triage_response(json!({
+            "verdict": "true_positive",
+            "confidence": 1.7,
+            "staticProofState": "statically_confirmed",
+            "source": {
+                "filePath": "src/routes.ts",
+                "startLine": 4,
+                "summary": "request query parameter"
+            },
+            "sink": {
+                "filePath": "src/db.ts",
+                "startLine": 9,
+                "summary": "raw SQL query"
+            },
+            "path": [{
+                "filePath": "src/routes.ts",
+                "line": 4,
+                "summary": "q flows into search"
+            }],
+            "sanitizerAssessment": "No sanitizer is visible on the cited path.",
+            "guardAssessment": "Authentication exists, but no SQL construction guard is visible.",
+            "citations": [{
+                "filePath": "src/routes.ts",
+                "startLine": 4,
+                "endLine": 4,
+                "snippetHash": "sha256:demo"
+            }],
+            "assumptions": ["The route is reachable from Express."],
+            "missingEvidence": ["Runtime reachability is not assessed."],
+            "triggerNarrative": "A request query value reaches search construction statically.",
+            "impactNarrative": "The static sink is a database query boundary.",
+            "recommendedFix": "Use parameterized queries."
+        }))
+        .unwrap();
+
+        assert_eq!(response.confidence, 1.0);
+        assert_eq!(
+            response.static_proof_state,
+            StaticProofState::StaticallyConfirmed
+        );
+
+        let outcome = whitebox_static_triage_outcome(&response);
+        assert_eq!(outcome.verdict, TriageVerdict::TruePositive);
+        assert_eq!(outcome.confidence, 1.0);
+        assert!(outcome
+            .rationale
+            .contains("staticProofState=statically_confirmed"));
+        assert!(!outcome.rationale.contains("Use parameterized queries"));
     }
 }
