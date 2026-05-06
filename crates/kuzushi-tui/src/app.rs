@@ -12,6 +12,9 @@ const CTRL_C_ARM_WINDOW: Duration = Duration::from_secs(2);
 const THROTTLE_STALE_AFTER: Duration = Duration::from_secs(30);
 const VIEWPORT_PAGE_LINES: usize = 10;
 const FINDINGS_PAGE_ROWS: usize = 10;
+/// Cadence at which the animated spinner advances while work is in flight.
+/// 80ms ≈ 12.5 frames/s, which feels lively without burning redraws.
+const SPINNER_FRAME: Duration = Duration::from_millis(80);
 
 #[derive(Debug, Clone, Default)]
 pub struct AdvisoryState {
@@ -107,6 +110,104 @@ impl PlanChange {
             PlanChange::Note { text } => format!("note {text}"),
         }
     }
+}
+
+/// Cursor-selectable rows on the Tune view. Each variant maps to one of the
+/// existing bare-verb actions the operator could already type by hand
+/// (`show` / `set "..."` / `reset`); having them in a list lets us drive
+/// them via Up/Down/Enter instead of forcing the operator to know the
+/// vocabulary up front.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TuneAction {
+    ShowHouseRules,
+    EditHouseRules,
+    ResetHouseRules,
+}
+
+impl TuneAction {
+    pub const ORDER: &'static [TuneAction] = &[
+        TuneAction::ShowHouseRules,
+        TuneAction::EditHouseRules,
+        TuneAction::ResetHouseRules,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TuneAction::ShowHouseRules => "show house rules",
+            TuneAction::EditHouseRules => "edit house rules (set \"...\")",
+            TuneAction::ResetHouseRules => "reset house rules",
+        }
+    }
+
+    pub fn hint(self) -> &'static str {
+        match self {
+            TuneAction::ShowHouseRules => "log the current house-rules text into the transcript",
+            TuneAction::EditHouseRules => "prefill the prompt with `set \"\"` so you can type a value",
+            TuneAction::ResetHouseRules => "delete the house-rules file and revert to defaults",
+        }
+    }
+}
+
+/// Filter modes for the ActorDetail transcript. Each variant returns true
+/// for the log lines we want visible. Cycling lets the operator narrow
+/// noisy scans down to just findings or just errors without losing access
+/// to the full transcript on demand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ActorDetailFilter {
+    #[default]
+    All,
+    Findings,
+    Errors,
+    Tools,
+}
+
+impl ActorDetailFilter {
+    pub const ORDER: &'static [ActorDetailFilter] = &[
+        ActorDetailFilter::All,
+        ActorDetailFilter::Findings,
+        ActorDetailFilter::Errors,
+        ActorDetailFilter::Tools,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ActorDetailFilter::All => "all",
+            ActorDetailFilter::Findings => "findings",
+            ActorDetailFilter::Errors => "errors",
+            ActorDetailFilter::Tools => "tools",
+        }
+    }
+
+    /// True if the given log-prefix should be shown under this filter.
+    pub fn keeps(self, prefix: &str) -> bool {
+        match self {
+            ActorDetailFilter::All => true,
+            ActorDetailFilter::Findings => prefix == "finding" || prefix == "title",
+            ActorDetailFilter::Errors => prefix == "error",
+            ActorDetailFilter::Tools => matches!(
+                prefix,
+                "scan" | "tool" | "agent" | "answer" | "plan" | "tune" | "prompt"
+            ),
+        }
+    }
+
+    pub fn next(self) -> Self {
+        let order = Self::ORDER;
+        let pos = order.iter().position(|f| *f == self).unwrap_or(0);
+        order[(pos + 1) % order.len()]
+    }
+}
+
+/// Bare-key actions on the PromptsEditor view's currently-selected row.
+/// Each one maps to an existing `handle_prompt_verb` invocation so we
+/// share the file I/O and logging pathway with the typed-verb route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptsAction {
+    Show,
+    Edit,
+    Diff,
+    Reset,
+    Set,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -404,6 +505,8 @@ pub(crate) enum HotkeyTrigger {
     Enter,
     PageUp,
     PageDown,
+    Up,
+    Down,
 }
 
 impl HotkeyTrigger {
@@ -416,6 +519,8 @@ impl HotkeyTrigger {
             (Self::Enter, KeyCode::Enter) => true,
             (Self::PageUp, KeyCode::PageUp) => true,
             (Self::PageDown, KeyCode::PageDown) => true,
+            (Self::Up, KeyCode::Up) => true,
+            (Self::Down, KeyCode::Down) => true,
             _ => false,
         }
     }
@@ -442,6 +547,14 @@ pub(crate) enum ViewHotkeyAction {
     ViewScrollDown,
     ViewScrollTop,
     ViewScrollBottom,
+    TuneCursorPrevious,
+    TuneCursorNext,
+    TuneActivate,
+    PromptsCursorPrevious,
+    PromptsCursorNext,
+    PromptsAction(PromptsAction),
+    ActorDetailFilterCycle,
+    ActorDetailFilterReset,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -492,6 +605,11 @@ pub struct ShellApp {
     pub pending_plan: Option<PlanProposal>,
     pub plan_cursor: usize,
     pub plan_skipped: BTreeSet<usize>,
+    pub tune_cursor: usize,
+    pub prompts_cursor: usize,
+    pub actor_detail_filter: ActorDetailFilter,
+    pub spinner_phase: u8,
+    pub last_spinner_advance: Option<Instant>,
     pub planner_running: bool,
     pub plan_abort_requested: bool,
     pub pending_threat_patch: Option<ThreatPatch>,
@@ -556,6 +674,11 @@ impl ShellApp {
             pending_plan: None,
             plan_cursor: 0,
             plan_skipped: BTreeSet::new(),
+            tune_cursor: 0,
+            prompts_cursor: 0,
+            actor_detail_filter: ActorDetailFilter::All,
+            spinner_phase: 0,
+            last_spinner_advance: None,
             planner_running: false,
             plan_abort_requested: false,
             pending_threat_patch: None,
@@ -853,11 +976,16 @@ impl ShellApp {
             || self.threat_worker_running
     }
 
-    /// Static spinner glyph for now — when the animated spinner cherry-pick
-    /// (d78526b) is integrated against main's structure this will rotate
-    /// through a braille frame set keyed off `spinner_phase`.
+    /// Animated spinner: rotates through a 10-frame braille set keyed off
+    /// `spinner_phase`. The phase is advanced from `tick()` only when there
+    /// is in-flight work, so an idle shell doesn't burn redraws on a frame
+    /// that never changes. The frame set matches the one used by Ink and
+    /// most modern CLIs for instant familiarity.
     pub fn spinner_glyph(&self) -> &'static str {
-        "⠋"
+        const FRAMES: &[&str] = &[
+            "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
+        ];
+        FRAMES[(self.spinner_phase as usize) % FRAMES.len()]
     }
 
     pub fn first_finding_scan_command(&self) -> &'static str {
@@ -1450,7 +1578,14 @@ impl ShellApp {
         values
     }
 
-    pub fn drain_background_events(&mut self) {
+    /// Drain anything queued on the background-worker channels and apply it
+    /// to ShellApp state. Returns true when at least one event landed, so
+    /// the run loop can use it as a "redraw needed" signal — without that
+    /// the idle-redraw skip would miss async updates (a finding arriving
+    /// while no key was pressed would render nothing until the next
+    /// keystroke).
+    pub fn drain_background_events(&mut self) -> bool {
+        let mut changed = false;
         let mut events = Vec::new();
         if let Some(rx) = &self.scan_rx {
             while let Ok(event) = rx.try_recv() {
@@ -1460,6 +1595,7 @@ impl ShellApp {
 
         for event in events {
             self.apply_scan_event(event);
+            changed = true;
         }
 
         if self.scan.as_ref().is_some_and(|scan| !scan.running) {
@@ -1476,6 +1612,7 @@ impl ShellApp {
 
         for event in agent_events {
             self.apply_agent_event(event);
+            changed = true;
         }
 
         if self.agent_chat.as_ref().is_some_and(|agent| !agent.running) {
@@ -1490,6 +1627,7 @@ impl ShellApp {
         }
         for event in plan_events {
             self.apply_plan_event(event);
+            changed = true;
         }
         if !self.planner_running {
             self.plan_rx = None;
@@ -1503,10 +1641,13 @@ impl ShellApp {
         }
         for event in threat_events {
             self.apply_threat_patch_event(event);
+            changed = true;
         }
         if !self.threat_worker_running {
             self.threat_rx = None;
         }
+
+        changed
     }
 
     #[cfg(test)]
@@ -1796,6 +1937,113 @@ impl ShellApp {
             self.plan_skipped.remove(&idx);
         } else {
             self.plan_skipped.insert(idx);
+        }
+    }
+
+    pub fn tune_action_count(&self) -> usize {
+        TuneAction::ORDER.len()
+    }
+
+    pub fn tune_cursor_clamped(&self) -> usize {
+        let total = self.tune_action_count();
+        if total == 0 {
+            0
+        } else {
+            self.tune_cursor.min(total - 1)
+        }
+    }
+
+    pub fn current_tune_action(&self) -> Option<TuneAction> {
+        TuneAction::ORDER.get(self.tune_cursor_clamped()).copied()
+    }
+
+    /// The four prompt verbs (scan / triage / verify / summary) the
+    /// PromptsEditor view rows are built from. Centralised here so both the
+    /// renderer and the cursor-clamp share the same source of truth.
+    pub const PROMPT_VERB_NAMES: &'static [&'static str] = &[
+        "scan", "triage", "verify", "summary",
+    ];
+
+    pub fn prompts_cursor_clamped(&self) -> usize {
+        let total = Self::PROMPT_VERB_NAMES.len();
+        if total == 0 {
+            0
+        } else {
+            self.prompts_cursor.min(total - 1)
+        }
+    }
+
+    pub fn current_prompt_verb_name(&self) -> Option<&'static str> {
+        Self::PROMPT_VERB_NAMES
+            .get(self.prompts_cursor_clamped())
+            .copied()
+    }
+
+    pub fn move_prompts_cursor(&mut self, delta: i32) {
+        let total = Self::PROMPT_VERB_NAMES.len();
+        if total == 0 {
+            self.prompts_cursor = 0;
+            return;
+        }
+        let cur = self.prompts_cursor.min(total - 1) as i32;
+        let next = (cur + delta).clamp(0, total as i32 - 1) as usize;
+        self.prompts_cursor = next;
+    }
+
+    /// Bare-key shortcuts on the PromptsEditor cursor row. e/s/d/r/Enter all
+    /// invoke an existing prompt verb against the highlighted row's verb
+    /// name, so the operator can drive the entire view without typing the
+    /// vocabulary by hand. The "set" path prefills `set <verb> ""` and parks
+    /// the cursor between the quotes (mirrors Tune's edit prefill).
+    pub fn activate_prompts_action(&mut self, action: PromptsAction) {
+        let Some(name) = self.current_prompt_verb_name() else {
+            return;
+        };
+        let name = name.to_string();
+        match action {
+            PromptsAction::Show => self.handle_prompt_verb(&format!("show {name}")),
+            PromptsAction::Edit => self.handle_prompt_verb(&format!("edit {name}")),
+            PromptsAction::Diff => self.handle_prompt_verb(&format!("diff {name}")),
+            PromptsAction::Reset => self.handle_prompt_verb(&format!("reset {name}")),
+            PromptsAction::Set => {
+                let prefill = format!("set {name} \"\"");
+                let cursor = prefill.chars().count() - 1;
+                self.input = prefill;
+                self.cursor = cursor;
+                self.history_index = None;
+            }
+        }
+    }
+
+    pub fn move_tune_cursor(&mut self, delta: i32) {
+        let total = self.tune_action_count();
+        if total == 0 {
+            self.tune_cursor = 0;
+            return;
+        }
+        let cur = self.tune_cursor.min(total - 1) as i32;
+        let next = (cur + delta).clamp(0, total as i32 - 1) as usize;
+        self.tune_cursor = next;
+    }
+
+    /// Run whatever action sits under the Tune cursor right now. ShowHouseRules
+    /// and ResetHouseRules dispatch directly to the existing bare verbs; the
+    /// EditHouseRules action seeds the input buffer with `set ""` and parks the
+    /// cursor between the quotes so the operator can immediately start typing.
+    pub fn activate_tune_action(&mut self) {
+        let Some(action) = self.current_tune_action() else {
+            return;
+        };
+        match action {
+            TuneAction::ShowHouseRules => self.handle_tune_verb("show"),
+            TuneAction::ResetHouseRules => self.handle_tune_verb("reset"),
+            TuneAction::EditHouseRules => {
+                let prefill = "set \"\"".to_string();
+                let cursor = prefill.chars().count() - 1;
+                self.input = prefill;
+                self.cursor = cursor;
+                self.history_index = None;
+            }
         }
     }
 
@@ -2249,6 +2497,145 @@ impl ShellApp {
             // Universal vi-style scroll hotkeys for any text-heavy view that
             // the operator can land on without an active list-cursor (i.e. not
             // Findings, which already has its own j/k/g/G bindings above). j/k
+            // ActorDetail filter cycle. `f` advances the filter through
+            // all → findings → errors → tools → all; `0` snaps back to all.
+            // We additionally allow universal vi-scroll on this view since
+            // the transcript can be tall — but only the `f` and `0` chords
+            // are unique to ActorDetail.
+            ShellView::ActorDetail(_) => vec![
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('f'),
+                    hint: "f",
+                    label: "filter",
+                    action: ViewHotkeyAction::ActorDetailFilterCycle,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('0'),
+                    hint: "0",
+                    label: "reset filter",
+                    action: ViewHotkeyAction::ActorDetailFilterReset,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('j'),
+                    hint: "j/k/g/G",
+                    label: "scroll",
+                    action: ViewHotkeyAction::ViewScrollDown,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('k'),
+                    hint: "j/k/g/G",
+                    label: "scroll",
+                    action: ViewHotkeyAction::ViewScrollUp,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('g'),
+                    hint: "j/k/g/G",
+                    label: "scroll",
+                    action: ViewHotkeyAction::ViewScrollTop,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('G'),
+                    hint: "j/k/g/G",
+                    label: "scroll",
+                    action: ViewHotkeyAction::ViewScrollBottom,
+                },
+            ],
+            // Cursor-driven PromptsEditor: Up/Down/j/k picks a verb row;
+            // single-letter chords run an action against that row. We avoid
+            // 'g/G' here since the verbs (e/s/d/r) are unambiguous and we
+            // don't want to shadow them with scroll meanings.
+            ShellView::PromptsEditor => vec![
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('j'),
+                    hint: "j/k",
+                    label: "row",
+                    action: ViewHotkeyAction::PromptsCursorNext,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('k'),
+                    hint: "j/k",
+                    label: "row",
+                    action: ViewHotkeyAction::PromptsCursorPrevious,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Down,
+                    hint: "↑/↓",
+                    label: "row",
+                    action: ViewHotkeyAction::PromptsCursorNext,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Up,
+                    hint: "↑/↓",
+                    label: "row",
+                    action: ViewHotkeyAction::PromptsCursorPrevious,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('e'),
+                    hint: "e/s/d/r",
+                    label: "edit/show/diff/reset",
+                    action: ViewHotkeyAction::PromptsAction(PromptsAction::Edit),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('s'),
+                    hint: "e/s/d/r",
+                    label: "edit/show/diff/reset",
+                    action: ViewHotkeyAction::PromptsAction(PromptsAction::Show),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('d'),
+                    hint: "e/s/d/r",
+                    label: "edit/show/diff/reset",
+                    action: ViewHotkeyAction::PromptsAction(PromptsAction::Diff),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('r'),
+                    hint: "e/s/d/r",
+                    label: "edit/show/diff/reset",
+                    action: ViewHotkeyAction::PromptsAction(PromptsAction::Reset),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Enter,
+                    hint: "Enter",
+                    label: "show",
+                    action: ViewHotkeyAction::PromptsAction(PromptsAction::Show),
+                },
+            ],
+            // Cursor-driven Tune form: Up/Down/j/k pick a row, Enter
+            // activates it. Tune is its own arm because Enter has special
+            // meaning here (run the verb under the cursor) which conflicts
+            // with the universal scroll bindings below.
+            ShellView::Tune => vec![
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('j'),
+                    hint: "j/k",
+                    label: "row",
+                    action: ViewHotkeyAction::TuneCursorNext,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('k'),
+                    hint: "j/k",
+                    label: "row",
+                    action: ViewHotkeyAction::TuneCursorPrevious,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Down,
+                    hint: "↑/↓",
+                    label: "row",
+                    action: ViewHotkeyAction::TuneCursorNext,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Up,
+                    hint: "↑/↓",
+                    label: "row",
+                    action: ViewHotkeyAction::TuneCursorPrevious,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Enter,
+                    hint: "Enter",
+                    label: "activate",
+                    action: ViewHotkeyAction::TuneActivate,
+                },
+            ],
             // move one row, g/G jump to top/bottom — matches less, vim, and
             // Ink's old shell.
             ShellView::Help
@@ -4609,6 +4996,22 @@ impl ShellApp {
                 self.findings_cursor = (self.findings_cursor + 1)
                     .min(self.findings.len().saturating_sub(1));
             }
+            // Let the view's keybinding table claim Up/Down before we fall back
+            // to history recall — Tune view registers row navigation here.
+            KeyCode::Up
+                if self.input.is_empty()
+                    && plain_modifiers
+                    && self.handle_view_hotkey(KeyEvent::new(
+                        KeyCode::Up,
+                        KeyModifiers::empty(),
+                    )) => {}
+            KeyCode::Down
+                if self.input.is_empty()
+                    && plain_modifiers
+                    && self.handle_view_hotkey(KeyEvent::new(
+                        KeyCode::Down,
+                        KeyModifiers::empty(),
+                    )) => {}
             // History recall when input is empty (otherwise Up/Down move the editing cursor
             // through multi-line content; we keep things simple and always recall history).
             KeyCode::Up if plain_modifiers => self.history_prev(),
@@ -4745,6 +5148,18 @@ impl ShellApp {
             ViewHotkeyAction::ViewScrollDown => self.scroll_view_down(1),
             ViewHotkeyAction::ViewScrollTop => self.scroll_view_to_top(),
             ViewHotkeyAction::ViewScrollBottom => self.scroll_view_to_bottom(),
+            ViewHotkeyAction::TuneCursorPrevious => self.move_tune_cursor(-1),
+            ViewHotkeyAction::TuneCursorNext => self.move_tune_cursor(1),
+            ViewHotkeyAction::TuneActivate => self.activate_tune_action(),
+            ViewHotkeyAction::PromptsCursorPrevious => self.move_prompts_cursor(-1),
+            ViewHotkeyAction::PromptsCursorNext => self.move_prompts_cursor(1),
+            ViewHotkeyAction::PromptsAction(action) => self.activate_prompts_action(action),
+            ViewHotkeyAction::ActorDetailFilterCycle => {
+                self.actor_detail_filter = self.actor_detail_filter.next();
+            }
+            ViewHotkeyAction::ActorDetailFilterReset => {
+                self.actor_detail_filter = ActorDetailFilter::All;
+            }
         }
         true
     }
@@ -4961,17 +5376,43 @@ impl ShellApp {
         );
     }
 
-    pub fn tick(&mut self) {
+    /// Advance time-driven state. Returns true when something visible
+    /// changed so the run loop can decide whether to redraw — keeping the
+    /// idle shell off the redraw treadmill. Spinner advancement only counts
+    /// as "changed" when there's running work AND at least SPINNER_FRAME
+    /// has elapsed since the last advance.
+    pub fn tick(&mut self) -> bool {
+        let mut changed = false;
         if let Some(armed_at) = self.ctrl_c_armed_at {
             if Instant::now().duration_since(armed_at) > CTRL_C_ARM_WINDOW {
                 self.ctrl_c_armed_at = None;
+                changed = true;
             }
         }
         if let Some(throttle) = &self.advisory.throttle {
             if Instant::now().duration_since(throttle.since) > THROTTLE_STALE_AFTER {
                 self.advisory.throttle = None;
+                changed = true;
             }
         }
+        if self.has_running_work() {
+            let now = Instant::now();
+            let due = self
+                .last_spinner_advance
+                .map(|prev| now.duration_since(prev) >= SPINNER_FRAME)
+                .unwrap_or(true);
+            if due {
+                self.spinner_phase = self.spinner_phase.wrapping_add(1);
+                self.last_spinner_advance = Some(now);
+                changed = true;
+            }
+        } else if self.last_spinner_advance.is_some() {
+            // Work just completed — reset so the next animation starts at
+            // frame 0 instead of mid-rotation.
+            self.last_spinner_advance = None;
+            self.spinner_phase = 0;
+        }
+        changed
     }
 
     pub fn ctrl_c_armed(&self) -> bool {
@@ -5537,21 +5978,45 @@ pub fn run_shell_with_plain(
     let mut app = ShellApp::new(config, target);
 
     let result = (|| -> Result<()> {
+        // First frame is unconditional so the operator sees the catalog
+        // immediately. After that we only redraw when something actually
+        // changed (a tick result, a background event, or an input event)
+        // — at idle the loop blocks in event::poll for the spinner cadence.
+        let mut needs_redraw = true;
         loop {
-            app.tick();
-            app.drain_background_events();
+            let tick_changed = app.tick();
+            let drained = app.drain_background_events();
             app.sync_view_change();
-            terminal.draw(|frame| render_app(frame, &app))?;
+            if needs_redraw || tick_changed || drained {
+                terminal.draw(|frame| render_app(frame, &app))?;
+                needs_redraw = false;
+            }
             if app.should_quit {
                 break;
             }
 
-            if event::poll(Duration::from_millis(100))? {
+            // Poll for the spinner cadence while work is running so the
+            // animation stays smooth; otherwise nap for 250ms which keeps
+            // throttle/budget banner expiry responsive without idling
+            // through a 60fps redraw loop.
+            let poll_ms = if app.has_running_work() { 80 } else { 250 };
+            if event::poll(Duration::from_millis(poll_ms))? {
                 match event::read()? {
-                    Event::Key(key) => app.handle_key(key),
-                    Event::Paste(text) => app.handle_paste(&text),
-                    Event::Mouse(mouse) => app.handle_mouse(mouse),
-                    Event::Resize(_, _) => {}
+                    Event::Key(key) => {
+                        app.handle_key(key);
+                        needs_redraw = true;
+                    }
+                    Event::Paste(text) => {
+                        app.handle_paste(&text);
+                        needs_redraw = true;
+                    }
+                    Event::Mouse(mouse) => {
+                        app.handle_mouse(mouse);
+                        needs_redraw = true;
+                    }
+                    Event::Resize(_, _) => {
+                        needs_redraw = true;
+                    }
                     _ => {}
                 }
             }
@@ -9354,6 +9819,8 @@ JSON
             HotkeyTrigger::Enter => KeyCode::Enter,
             HotkeyTrigger::PageUp => KeyCode::PageUp,
             HotkeyTrigger::PageDown => KeyCode::PageDown,
+            HotkeyTrigger::Up => KeyCode::Up,
+            HotkeyTrigger::Down => KeyCode::Down,
         };
         KeyEvent::new(code, KeyModifiers::empty())
     }
@@ -9681,6 +10148,128 @@ JSON
             app.help_scroll < after_one + (after_one - baseline),
             "PageUp should retreat"
         );
+    }
+
+    #[test]
+    fn spinner_advances_only_while_work_is_running() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let initial = app.spinner_phase;
+        // Idle: tick reports no change and the spinner does not advance.
+        assert!(!app.tick());
+        assert_eq!(app.spinner_phase, initial);
+        // With a running scan and the previous-advance timestamp pushed past
+        // the SPINNER_FRAME threshold, tick advances the phase and reports
+        // change.
+        app.scan = Some(crate::app::ScanPanelState {
+            run_id: None,
+            target: PathBuf::from("."),
+            stage: "running".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        app.last_spinner_advance = Some(Instant::now() - Duration::from_millis(200));
+        assert!(app.tick());
+        assert_eq!(app.spinner_phase, initial.wrapping_add(1));
+        // Frame glyph stays stable across the wraparound.
+        let glyph = app.spinner_glyph();
+        assert!(!glyph.is_empty());
+        // When work clears, tick resets the spinner state so the next
+        // animation starts from frame 0.
+        app.scan.as_mut().unwrap().running = false;
+        let _ = app.tick();
+        assert_eq!(app.spinner_phase, 0);
+        assert!(app.last_spinner_advance.is_none());
+    }
+
+    #[test]
+    fn actor_detail_filter_cycle_and_reset() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::ActorDetail(1);
+        // Default filter is All; pressing 'f' advances to the next variant
+        // each time, wrapping after Tools.
+        assert_eq!(app.actor_detail_filter, ActorDetailFilter::All);
+        app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()));
+        assert_eq!(app.actor_detail_filter, ActorDetailFilter::Findings);
+        app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()));
+        assert_eq!(app.actor_detail_filter, ActorDetailFilter::Errors);
+        app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()));
+        assert_eq!(app.actor_detail_filter, ActorDetailFilter::Tools);
+        app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()));
+        assert_eq!(app.actor_detail_filter, ActorDetailFilter::All);
+        // 0 snaps back to All from anywhere.
+        app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()));
+        assert_eq!(app.actor_detail_filter, ActorDetailFilter::Findings);
+        app.handle_key(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::empty()));
+        assert_eq!(app.actor_detail_filter, ActorDetailFilter::All);
+    }
+
+    #[test]
+    fn actor_detail_filter_keeps_matching_prefixes() {
+        // Pure unit test on the filter predicate so we don't have to
+        // simulate a transcript through the renderer.
+        assert!(ActorDetailFilter::All.keeps("anything"));
+        assert!(ActorDetailFilter::Findings.keeps("finding"));
+        assert!(!ActorDetailFilter::Findings.keeps("scan"));
+        assert!(ActorDetailFilter::Errors.keeps("error"));
+        assert!(!ActorDetailFilter::Errors.keeps("finding"));
+        assert!(ActorDetailFilter::Tools.keeps("scan"));
+        assert!(ActorDetailFilter::Tools.keeps("agent"));
+        assert!(!ActorDetailFilter::Tools.keeps("error"));
+    }
+
+    #[test]
+    fn prompts_editor_cursor_and_action_shortcuts() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::PromptsEditor;
+        // Cursor starts on the first verb (scan).
+        assert_eq!(app.current_prompt_verb_name(), Some("scan"));
+        // j/Down advance through scan → triage → verify → summary; past the
+        // end clamps.
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        assert_eq!(app.current_prompt_verb_name(), Some("triage"));
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+        assert_eq!(app.current_prompt_verb_name(), Some("verify"));
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        assert_eq!(app.current_prompt_verb_name(), Some("summary"));
+        // 's' on the highlighted row prefixes the show verb; the log records
+        // a "no override" line because no fixture file exists.
+        let log_before = app.log.len();
+        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()));
+        assert!(app.log.len() > log_before, "show should append to log");
+        // 'r' on the cursor row (still summary) calls reset; with no module
+        // focused the handler logs a guidance message rather than mutating
+        // the filesystem.
+        let log_before = app.log.len();
+        app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::empty()));
+        assert!(app.log.len() > log_before, "reset should append to log");
+    }
+
+    #[test]
+    fn tune_view_cursor_and_activate() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Tune;
+        // Cursor starts at the first row.
+        assert_eq!(app.tune_cursor, 0);
+        // Down (and j) advance through the action list.
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+        assert_eq!(app.tune_cursor, 1);
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        assert_eq!(app.tune_cursor, 2);
+        // Past the end clamps.
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        assert_eq!(app.tune_cursor, 2);
+        // Up (and k) walk back.
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
+        assert_eq!(app.tune_cursor, 1);
+        // Enter on the EditHouseRules row prefills `set ""` and parks the
+        // cursor between the quotes.
+        assert_eq!(app.current_tune_action(), Some(TuneAction::EditHouseRules));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert_eq!(app.input, "set \"\"");
+        assert_eq!(app.cursor, app.input.chars().count() - 1);
     }
 
     #[test]
