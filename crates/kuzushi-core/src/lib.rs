@@ -2,6 +2,7 @@ pub mod agent_router;
 pub mod artifact_kb;
 pub mod attachments;
 pub mod carlini_threat_hunt;
+pub mod code_nav;
 pub mod config;
 pub mod dep_hygiene;
 pub mod events;
@@ -35,6 +36,10 @@ pub use attachments::{
 };
 pub use agent_router::{AgentRole, AgentRouter, ModelRoute, RoutedRuntime};
 pub use carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hunt_report};
+pub use code_nav::{
+    code_nav_tool_specs, code_nav_toolbox, find_references_tool, list_definitions_tool,
+    read_definition_tool, read_source_tool, CodeNavConfig, CodeNavTool,
+};
 pub use config::{
     load_config, load_config_for_target, AnthropicOauthConfig, ConfigPaths, RuntimeConfig,
     RuntimeKind, V2Config,
