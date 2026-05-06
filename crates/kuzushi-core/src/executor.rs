@@ -339,37 +339,44 @@ impl Executor for DockerExecutor {
     }
 }
 
-/// Remote-execution executor scaffold (HTTP-based).
+/// Remote-execution executor (HTTP-based, blocking via `ureq`).
 ///
-/// Wraps the request/response surface for a remote backend (Vercel
-/// Sandbox, AWS Batch, Kubernetes Jobs) without committing to a specific
-/// transport. Today the implementation is a *seam* — `launch` and
-/// `collect` build the request structure but return a clear error
-/// pointing at the unimplemented transport. A follow-up PR fills in
-/// `reqwest`-based POST/GET against `endpoint`.
+/// Wraps a generic request/response surface for a remote backend
+/// (Vercel Sandbox, AWS Batch, Kubernetes Jobs). The protocol is
+/// intentionally simple so a thin shim in front of any backend works:
 ///
-/// The point of shipping the scaffold now is operator-visible: a
-/// `kuzushi scan --executor sandbox:https://...` flag doesn't 500 with
-/// "unknown executor"; it errors with "remote backend not yet wired",
-/// which is a different and more truthful signal.
+///   POST  <endpoint>/runs           { clientId, runId, command, ... }
+///   GET   <endpoint>/runs/<id>      -> { status, stdout, stderr, exitCode, ... }
+///   GET   <endpoint>/runs/<id>/status -> { status }
+///
+/// Authentication: when `api_key` is set, every request carries
+/// `Authorization: Bearer <key>`. The `clientId/runId` pair is the
+/// idempotency key so concurrent kuzushi processes against the same
+/// backend don't collide.
 pub struct SandboxExecutor {
     endpoint: String,
     api_key: Option<String>,
     /// Per-instance prefix prepended to every run id so concurrent
     /// kuzushi processes against the same remote backend don't collide.
     client_id: String,
+    /// Per-call HTTP timeout. Defaults to 60s; override for long scans.
+    timeout: std::time::Duration,
     results: Mutex<HashMap<String, ExecutorResult>>,
 }
 
 impl SandboxExecutor {
     /// Construct a SandboxExecutor pointed at `endpoint` (e.g.
-    /// `https://sandbox.example.com/v1`). The optional `api_key` flows
-    /// into an `Authorization: Bearer …` header on each request.
+    /// `https://sandbox.example.com/v1`). Trailing slash is normalised.
     pub fn new(endpoint: impl Into<String>) -> Self {
+        let mut endpoint: String = endpoint.into();
+        while endpoint.ends_with('/') {
+            endpoint.pop();
+        }
         Self {
-            endpoint: endpoint.into(),
+            endpoint,
             api_key: None,
             client_id: format!("kuzushi-{}", std::process::id()),
+            timeout: std::time::Duration::from_secs(60),
             results: Mutex::new(HashMap::new()),
         }
     }
@@ -384,6 +391,11 @@ impl SandboxExecutor {
         self
     }
 
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
     pub fn endpoint(&self) -> &str {
         &self.endpoint
     }
@@ -393,12 +405,8 @@ impl SandboxExecutor {
     }
 
     /// Public for callers / tests that want to inspect the constructed
-    /// HTTP request body before transport lands.
+    /// JSON body without firing a real request.
     pub fn build_request_body(&self, request: &ExecutorRequest) -> Result<String> {
-        // Idempotency: prefix the operator-supplied run_id with our
-        // client_id so two concurrent scans against the same endpoint
-        // don't collide. The remote backend should treat
-        // `<client_id>/<run_id>` as a unique key.
         let payload = serde_json::json!({
             "clientId": self.client_id,
             "runId": request.run_id,
@@ -409,43 +417,136 @@ impl SandboxExecutor {
         });
         serde_json::to_string(&payload).context("could not encode SandboxExecutor payload")
     }
+
+    fn agent(&self) -> ureq::Agent {
+        ureq::AgentBuilder::new()
+            .timeout(self.timeout)
+            .build()
+    }
+
+    fn authed_post(&self, url: &str, body: &str) -> Result<String> {
+        let agent = self.agent();
+        let mut req = agent.post(url).set("Content-Type", "application/json");
+        if let Some(key) = &self.api_key {
+            req = req.set("Authorization", &format!("Bearer {key}"));
+        }
+        let response = req
+            .send_string(body)
+            .map_err(|error| anyhow::anyhow!("sandbox POST {url} failed: {error}"))?;
+        response
+            .into_string()
+            .with_context(|| format!("sandbox POST {url} response body"))
+    }
+
+    fn authed_get(&self, url: &str) -> Result<String> {
+        let agent = self.agent();
+        let mut req = agent.get(url);
+        if let Some(key) = &self.api_key {
+            req = req.set("Authorization", &format!("Bearer {key}"));
+        }
+        let response = req
+            .call()
+            .map_err(|error| anyhow::anyhow!("sandbox GET {url} failed: {error}"))?;
+        response
+            .into_string()
+            .with_context(|| format!("sandbox GET {url} response body"))
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SandboxLaunchResponse {
+    #[serde(default)]
+    run_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SandboxResultResponse {
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    stdout: Option<String>,
+    #[serde(default)]
+    stderr: Option<String>,
+    #[serde(default)]
+    exit_code: Option<i32>,
+}
+
+fn parse_sandbox_status(raw: Option<&str>) -> ExecutorStatus {
+    match raw.map(str::to_ascii_lowercase).as_deref() {
+        Some("pending") => ExecutorStatus::Pending,
+        Some("running") => ExecutorStatus::Running,
+        Some("succeeded") | Some("complete") | Some("completed") => ExecutorStatus::Succeeded,
+        Some("failed") | Some("error") => ExecutorStatus::Failed,
+        Some("cancelled") | Some("canceled") => ExecutorStatus::Cancelled,
+        _ => ExecutorStatus::Unknown,
+    }
 }
 
 impl Executor for SandboxExecutor {
     fn launch(&self, request: ExecutorRequest) -> Result<String> {
-        // The body is built so callers can verify auth + idempotency
-        // shape, then we surface a clear error so we don't silently
-        // pretend to dispatch.
-        let _body = self.build_request_body(&request)?;
-        let _has_auth = self.api_key.is_some();
-        anyhow::bail!(
-            "SandboxExecutor transport not yet implemented; \
-             the request body and auth headers are constructed but no \
-             HTTP client has shipped. Endpoint: {}",
-            self.endpoint
-        )
+        let body = self.build_request_body(&request)?;
+        let url = format!("{}/runs", self.endpoint);
+        let raw = self.authed_post(&url, &body)?;
+        let response: SandboxLaunchResponse = serde_json::from_str(&raw).with_context(|| {
+            format!("sandbox launch returned non-JSON or unexpected shape: {raw:.300}")
+        })?;
+        // Trust the operator-supplied run_id when the server echoes it
+        // back (most idempotent backends do); otherwise prefer the
+        // server's id so two callers with identical run_ids don't
+        // overwrite each other's slot in `self.results`.
+        let id = response.run_id.unwrap_or_else(|| request.run_id.clone());
+        Ok(id)
     }
 
     fn collect(&self, run_id: &str) -> Result<ExecutorResult> {
-        let guard = self
-            .results
+        let url = format!("{}/runs/{run_id}", self.endpoint);
+        let raw = self.authed_get(&url)?;
+        let response: SandboxResultResponse = serde_json::from_str(&raw).with_context(|| {
+            format!("sandbox collect returned non-JSON or unexpected shape: {raw:.300}")
+        })?;
+        let result = ExecutorResult {
+            run_id: run_id.to_string(),
+            status: parse_sandbox_status(response.status.as_deref()),
+            stdout: response.stdout.unwrap_or_default(),
+            stderr: response.stderr.unwrap_or_default(),
+            exit_code: response.exit_code,
+            started_at: None,
+            completed_at: None,
+        };
+        // Cache the result so a follow-up `status(...)` call can answer
+        // without a second round-trip.
+        self.results
             .lock()
-            .expect("SandboxExecutor results lock poisoned");
-        guard
-            .get(run_id)
-            .cloned()
-            .with_context(|| format!("SandboxExecutor has no record of run id {run_id}"))
+            .expect("SandboxExecutor results lock poisoned")
+            .insert(run_id.to_string(), result.clone());
+        Ok(result)
     }
 
     fn status(&self, run_id: &str) -> Result<ExecutorStatus> {
-        let guard = self
+        // Prefer the cached result if `collect` has already fetched.
+        if let Some(cached) = self
             .results
             .lock()
-            .expect("SandboxExecutor results lock poisoned");
-        Ok(guard
+            .expect("SandboxExecutor results lock poisoned")
             .get(run_id)
-            .map(|result| result.status)
-            .unwrap_or(ExecutorStatus::Unknown))
+        {
+            return Ok(cached.status);
+        }
+        let url = format!("{}/runs/{run_id}/status", self.endpoint);
+        let raw = match self.authed_get(&url) {
+            Ok(value) => value,
+            Err(_) => return Ok(ExecutorStatus::Unknown),
+        };
+        #[derive(serde::Deserialize)]
+        struct StatusResponse {
+            #[serde(default)]
+            status: Option<String>,
+        }
+        let response: StatusResponse =
+            serde_json::from_str(&raw).unwrap_or(StatusResponse { status: None });
+        Ok(parse_sandbox_status(response.status.as_deref()))
     }
 
     fn name(&self) -> &str {
@@ -582,11 +683,21 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_executor_launch_errors_until_transport_lands() {
-        let exec = SandboxExecutor::new("https://sandbox.example.com");
+    fn sandbox_executor_normalises_trailing_slash_in_endpoint() {
+        let exec = SandboxExecutor::new("https://sandbox.example.com/v1/");
+        assert_eq!(exec.endpoint(), "https://sandbox.example.com/v1");
+    }
+
+    #[test]
+    fn sandbox_executor_launch_against_unreachable_host_surfaces_a_clear_error() {
+        // Loopback to a port that almost-certainly nothing is bound to;
+        // ureq will return a connect/connection-refused error which we
+        // surface with the URL so operators can read it.
+        let exec = SandboxExecutor::new("http://127.0.0.1:1")
+            .with_timeout(std::time::Duration::from_millis(150));
         let err = exec
             .launch(ExecutorRequest {
-                run_id: "x".to_string(),
+                run_id: "rid".to_string(),
                 command: vec!["true".to_string()],
                 working_dir: PathBuf::from("."),
                 env: HashMap::new(),
@@ -594,8 +705,26 @@ mod tests {
             })
             .unwrap_err()
             .to_string();
-        assert!(err.contains("transport not yet implemented"));
-        assert!(err.contains("https://sandbox.example.com"));
+        assert!(err.contains("sandbox POST"));
+        assert!(err.contains("/runs"));
+    }
+
+    #[test]
+    fn parse_sandbox_status_recognises_common_strings() {
+        assert_eq!(parse_sandbox_status(Some("pending")), ExecutorStatus::Pending);
+        assert_eq!(parse_sandbox_status(Some("Running")), ExecutorStatus::Running);
+        assert_eq!(
+            parse_sandbox_status(Some("SUCCEEDED")),
+            ExecutorStatus::Succeeded
+        );
+        assert_eq!(parse_sandbox_status(Some("complete")), ExecutorStatus::Succeeded);
+        assert_eq!(parse_sandbox_status(Some("failed")), ExecutorStatus::Failed);
+        assert_eq!(
+            parse_sandbox_status(Some("cancelled")),
+            ExecutorStatus::Cancelled
+        );
+        assert_eq!(parse_sandbox_status(None), ExecutorStatus::Unknown);
+        assert_eq!(parse_sandbox_status(Some("weird")), ExecutorStatus::Unknown);
     }
 
     #[test]

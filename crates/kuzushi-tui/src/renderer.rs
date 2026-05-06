@@ -1179,6 +1179,28 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         lines.push(transcript_line("error", error, false));
     }
 
+    // Triage telemetry (populated by `absorb_triage_telemetry` after every
+    // `triage:run` result lands). Only surface the row when there's
+    // something to show — otherwise it's noise.
+    if let Some(scan) = scan {
+        let any = scan.gate_accepted > 0
+            || scan.gate_skipped > 0
+            || scan.refusal_followups > 0;
+        if any {
+            lines.push(blank());
+            lines.push(Line::from(vec![
+                Span::styled("triage telemetry  ", theme::label()),
+                Span::styled(
+                    format!(
+                        "gate accept {} · gate skip {} · refusal followups {}",
+                        scan.gate_accepted, scan.gate_skipped, scan.refusal_followups
+                    ),
+                    theme::muted(),
+                ),
+            ]));
+        }
+    }
+
     lines.push(blank());
     lines.push(divider("TRANSCRIPT", area.width));
     lines.extend(transcript_lines(
@@ -4688,6 +4710,9 @@ mod tests {
             running: true,
             abort_requested: false,
             error: None,
+            gate_accepted: 0,
+            gate_skipped: 0,
+            refusal_followups: 0,
         });
         app.shell_view = ShellView::ModuleRun;
 
@@ -5269,6 +5294,9 @@ mod tests {
             running: true,
             abort_requested: false,
             error: None,
+            gate_accepted: 0,
+            gate_skipped: 0,
+            refusal_followups: 0,
         });
         app.shell_view = ShellView::ModuleRun;
 
@@ -5358,6 +5386,9 @@ mod tests {
             running: true,
             abort_requested: true,
             error: None,
+            gate_accepted: 0,
+            gate_skipped: 0,
+            refusal_followups: 0,
         });
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -5400,6 +5431,9 @@ mod tests {
                     running: true,
                     abort_requested: false,
                     error: None,
+                    gate_accepted: 0,
+                    gate_skipped: 0,
+                    refusal_followups: 0,
                 });
                 app.shell_view = ShellView::ModuleRun;
                 (app, "mode:run", "kuzushi/run>")

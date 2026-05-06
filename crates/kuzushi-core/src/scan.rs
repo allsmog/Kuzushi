@@ -518,6 +518,74 @@ impl CodeqlScanner {
         Ok(self.scan_with_artifacts(target, cancel)?.findings)
     }
 
+    /// Run the codeql analysis via an [`Executor`] backend instead of
+    /// spawning a local subprocess.
+    ///
+    /// **Requirements:** `self.language` must be set explicitly. Multi-
+    /// language detection requires walking the target's filesystem, which
+    /// the executor's working_dir bind-mount may not expose to the host.
+    /// Pass `{"language":"javascript"}` (or whatever) on the tool input
+    /// when you opt into executor mode.
+    pub fn scan_via_executor(
+        &self,
+        target: &Path,
+        executor: &dyn crate::executor::Executor,
+    ) -> Result<Vec<Finding>> {
+        let language = self
+            .language
+            .as_ref()
+            .context(
+                "codeql via executor requires an explicit `language` (multi-language detection \
+                 walks the host filesystem and is unsupported through executor backends).",
+            )?
+            .clone();
+        let suite_clause = self
+            .suite
+            .as_ref()
+            .map(|suite| format!(" {suite}"))
+            .unwrap_or_default();
+
+        // Single-shot bash-style command: build the DB inside the
+        // executor's working_dir, run analyze with --output=/dev/stdout
+        // (codeql 2.20+) so we capture SARIF without reading a file
+        // back from the executor. `sarif-latest` is the format kuzushi
+        // already normalises.
+        let script = format!(
+            "set -e; \
+             codeql database create db --language={language} --source-root=. >&2; \
+             codeql database analyze db --format=sarif-latest --output=/dev/stdout{suite_clause}",
+        );
+        let command = vec!["sh".to_string(), "-c".to_string(), script];
+
+        let run_id = format!("codeql-{}", uuid::Uuid::new_v4());
+        let request = crate::executor::ExecutorRequest {
+            run_id: run_id.clone(),
+            command,
+            working_dir: target.to_path_buf(),
+            env: std::collections::HashMap::new(),
+            stdin: None,
+        };
+        executor
+            .launch(request)
+            .with_context(|| format!("codeql launch via {} executor", executor.name()))?;
+        let result = executor
+            .collect(&run_id)
+            .with_context(|| format!("codeql collect via {} executor", executor.name()))?;
+        if !matches!(result.status, crate::executor::ExecutorStatus::Succeeded) {
+            anyhow::bail!(
+                "codeql via {} executor exited with {:?}: {}",
+                executor.name(),
+                result.exit_code,
+                result.stderr.trim()
+            );
+        }
+        let repo_name = target
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("repo");
+        normalize_codeql_sarif(&result.stdout, repo_name)
+    }
+
     pub fn scan_with_artifacts(
         &self,
         target: &Path,

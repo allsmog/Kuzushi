@@ -913,10 +913,25 @@ fn init_command(target: Option<PathBuf>, force: bool, skip_doctor: bool) -> Resu
         }
     };
 
+    // Roll the previously-separate `kuzushi config init` into the same
+    // verb: if the global config file is missing, write defaults so the
+    // operator doesn't have to learn a second subcommand. Existing files
+    // are kept (the `config init --force` path is still available
+    // separately if a wholesale reset is wanted).
+    let global_paths = kuzushi_core::ConfigPaths::from_target(None)?;
+    let global_path = global_paths.global_config_path();
+    let global_status = if global_path.exists() {
+        "kept (exists)"
+    } else {
+        write_default_config(&global_path)?;
+        "wrote defaults"
+    };
+
     println!("Kuzushi init");
     println!("Target:        {}", target.display());
     println!("State dir:     {}", kuzushi_dir.display());
     println!("CONTEXT.md:    {context_status}");
+    println!("Global config: {} ({})", global_path.display(), global_status);
     println!();
     println!("Paste this into Claude Code or Codex to fill in CONTEXT.md:");
     println!();
