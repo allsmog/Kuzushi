@@ -23,10 +23,44 @@ pub struct AgentQueryRequest {
     pub prompt: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentQueryResponse {
+    #[serde(default)]
     pub text: String,
+    #[serde(default)]
     pub structured: Option<Value>,
+    /// Cost in USD for this single API call. Populated by providers
+    /// that track token usage (e.g. `AnthropicOAuthRuntime` reads
+    /// `usage.input_tokens` / `usage.output_tokens` and multiplies by
+    /// the per-model rate). Defaults to `0.0` for providers that
+    /// don't surface usage.
+    #[serde(default)]
+    pub cost_usd: f64,
+    /// Input/output token counts when the provider reports them.
+    /// Used for cost aggregation and as a sanity check on the cost
+    /// calculation. Both default to `0`.
+    #[serde(default)]
+    pub input_tokens: u32,
+    #[serde(default)]
+    pub output_tokens: u32,
+}
+
+/// Model-capability tier used by routing in multi-stage triage. The
+/// concrete model name (`claude-haiku-4-5-...`, `claude-sonnet-4-6`,
+/// `claude-opus-4-7`) is provider-specific; this enum is the
+/// provider-agnostic handle Stage 2 / Stage 3 dispatch keys off of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelTier {
+    /// Cheapest tier — Haiku-class. ~$0.001/k tokens. Use for fast
+    /// scans + Stage 2 noise reduction.
+    Cheap,
+    /// Mid-tier — current Sonnet. Default when no explicit tier is
+    /// requested.
+    Mid,
+    /// Most-capable tier — Opus. Reserve for Stage 3 verify on the
+    /// few survivors that warrant the cost.
+    Deep,
 }
 
 /// Specialist role for a sub-agent. Mirrors the RoboDuck pattern of
@@ -105,6 +139,14 @@ pub trait AgentRuntime: Send + Sync {
         self.triage_finding_blocking(request)
     }
 
+    /// Resolve a tier handle (`Cheap`/`Mid`/`Deep`) to a concrete model
+    /// name. Default: pass-through to whatever the operator
+    /// configured. Providers that can route across model classes
+    /// override this so multi-stage triage can ask for a cheap pass.
+    fn model_for_tier(&self, _tier: ModelTier, configured: &str) -> String {
+        configured.to_string()
+    }
+
     /// Spawn a role-scoped sub-agent. The default implementation prepends
     /// the role's system-prompt preamble and forwards to `query_blocking`,
     /// so any provider that implements `query_blocking` automatically gains
@@ -156,6 +198,7 @@ mod tests {
             Ok(AgentQueryResponse {
                 text: "ok".to_string(),
                 structured: None,
+                ..Default::default()
             })
         }
 

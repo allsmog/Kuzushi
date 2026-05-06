@@ -90,9 +90,15 @@ impl AgentRuntime for PiAgentCoreRuntime {
             );
         }
 
+        // pi-agent-core bridge doesn't surface token usage in its
+        // current schema; cost defaults to 0 here. The native
+        // AnthropicOAuthRuntime is the path that populates real cost.
         Ok(AgentQueryResponse {
             text: response.text.unwrap_or_default(),
             structured: response.structured,
+            cost_usd: 0.0,
+            input_tokens: 0,
+            output_tokens: 0,
         })
     }
 

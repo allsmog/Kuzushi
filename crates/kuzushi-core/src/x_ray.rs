@@ -859,6 +859,7 @@ mod tests {
                 "invariantsMarkdown": "# Invariants\n\n### G-1 Balance conservation\n",
                 "architectureSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" />\n",
             })),
+            ..Default::default()
         });
 
         let output = execute_x_ray_tool(
@@ -911,6 +912,7 @@ mod tests {
                 "invariantsMarkdown": "# Invariants\n\n### G-1 Ledger conservation\n",
                 "architectureSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" />\n",
             })),
+            ..Default::default()
         });
 
         let output = execute_x_ray_tool(
@@ -940,6 +942,7 @@ mod tests {
         let runtime = MockRuntime::new(AgentQueryResponse {
             text: String::new(),
             structured: None,
+            ..Default::default()
         });
 
         let err = execute_x_ray_tool(
