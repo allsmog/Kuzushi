@@ -61,7 +61,7 @@
       "acceptance": ["Semgrep and CodeQL subprocesses use a scrubbed env helper or Rust equivalent.", "Tests prove AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN, and DATABASE_URL are not visible to scanner subprocesses."],
       "storyGate": "cargo test -p kuzushi-core scanner_env",
       "forbidden": ["credential env inheritance", "network-only dependency prefetch"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-004",

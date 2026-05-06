@@ -176,6 +176,79 @@ fn child_process_group_id(child: &Child) -> Option<u32> {
     }
 }
 
+const SCANNER_ENV_ALLOWLIST: &[&str] = &[
+    "PATH",
+    "PATHEXT",
+    "SystemRoot",
+    "WINDIR",
+    "COMSPEC",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "HOME",
+    "USERPROFILE",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "NO_COLOR",
+    "TERM",
+];
+
+fn configure_scanner_subprocess_env(command: &mut Command) {
+    command.env_clear();
+    for (key, value) in scrubbed_scanner_environment() {
+        command.env(key, value);
+    }
+}
+
+fn scrubbed_scanner_environment() -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+    env::vars_os()
+        .filter(|(key, _)| key.to_str().is_some_and(|key| is_safe_scanner_env_key(key)))
+        .collect()
+}
+
+fn is_safe_scanner_env_key(key: &str) -> bool {
+    let upper = key.to_ascii_uppercase();
+    if is_credential_env_key(&upper) {
+        return false;
+    }
+
+    SCANNER_ENV_ALLOWLIST
+        .iter()
+        .any(|allowed| allowed.eq_ignore_ascii_case(key))
+        || upper.starts_with("LC_")
+}
+
+fn is_credential_env_key(upper_key: &str) -> bool {
+    const SENSITIVE_EXACT: &[&str] = &[
+        "AWS_SECRET_ACCESS_KEY",
+        "GITHUB_TOKEN",
+        "DATABASE_URL",
+        "DB_URL",
+    ];
+    const SENSITIVE_FRAGMENTS: &[&str] = &[
+        "SECRET",
+        "TOKEN",
+        "PASSWORD",
+        "PASSWD",
+        "API_KEY",
+        "PRIVATE_KEY",
+        "CREDENTIAL",
+        "CONNECTION_STRING",
+        "COOKIE",
+        "SESSION",
+    ];
+
+    SENSITIVE_EXACT.contains(&upper_key)
+        || SENSITIVE_FRAGMENTS
+            .iter()
+            .any(|fragment| upper_key.contains(fragment))
+}
+
 #[derive(Debug, Clone)]
 pub struct SemgrepScanner {
     pub binary: String,
@@ -243,6 +316,7 @@ impl SemgrepScanner {
             .arg(target)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        configure_scanner_subprocess_env(&mut command);
 
         #[cfg(unix)]
         unsafe {
@@ -562,6 +636,7 @@ impl CodeqlScanner {
             command.current_dir(cwd);
         }
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        configure_scanner_subprocess_env(&mut command);
 
         #[cfg(unix)]
         unsafe {
@@ -1803,6 +1878,32 @@ fn shell_join(args: &[String]) -> String {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::Mutex;
+
+    static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = env::var_os(key);
+            env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                env::set_var(self.key, previous);
+            } else {
+                env::remove_var(self.key);
+            }
+        }
+    }
 
     #[test]
     fn normalizes_semgrep_json_to_findings() {
@@ -1886,6 +1987,56 @@ mod tests {
         assert!(ids.contains(&"dep-hygiene"));
         assert!(ids.contains(&"secret-scan"));
         assert!(ids.contains(&"iac-scan"));
+    }
+
+    #[test]
+    fn scanner_env_helper_filters_credential_shaped_variables() {
+        assert!(!is_safe_scanner_env_key("AWS_SECRET_ACCESS_KEY"));
+        assert!(!is_safe_scanner_env_key("GITHUB_TOKEN"));
+        assert!(!is_safe_scanner_env_key("DATABASE_URL"));
+        assert!(!is_safe_scanner_env_key("OPENAI_API_KEY"));
+        assert!(is_safe_scanner_env_key("PATH"));
+        assert!(is_safe_scanner_env_key("TMPDIR"));
+        assert!(is_safe_scanner_env_key("LC_ALL"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scanner_env_scrubs_credentials_from_semgrep_subprocess() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _lock = ENV_TEST_LOCK.lock().unwrap();
+        let _aws = EnvVarGuard::set("AWS_SECRET_ACCESS_KEY", "do-not-leak-aws");
+        let _github = EnvVarGuard::set("GITHUB_TOKEN", "do-not-leak-github");
+        let _database = EnvVarGuard::set("DATABASE_URL", "postgres://do-not-leak");
+
+        let tmp = tempfile::tempdir().unwrap();
+        let scanner_path = tmp.path().join("semgrep-env-fixture.sh");
+        fs::write(
+            &scanner_path,
+            r#"#!/bin/sh
+if [ "${AWS_SECRET_ACCESS_KEY+x}" = "x" ] || [ "${GITHUB_TOKEN+x}" = "x" ] || [ "${DATABASE_URL+x}" = "x" ]; then
+  echo "credential env leaked to semgrep" >&2
+  exit 44
+fi
+printf '{"results":[]}'
+"#,
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&scanner_path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&scanner_path, permissions).unwrap();
+
+        let scanner = SemgrepScanner {
+            binary: scanner_path.display().to_string(),
+            config: vec!["ignored".to_string()],
+        };
+
+        let findings = scanner
+            .scan_with_cancel(tmp.path(), &ScanCancellation::default())
+            .unwrap();
+
+        assert!(findings.is_empty());
     }
 
     #[cfg(unix)]
@@ -2133,6 +2284,64 @@ exit 2
         assert_eq!(run.findings_count, 2);
         assert!(findings.iter().any(|finding| finding.tool == "codeql"));
         assert!(findings.iter().any(|finding| finding.tool == "dep-hygiene"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scanner_env_scrubs_credentials_from_codeql_subprocesses() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _lock = ENV_TEST_LOCK.lock().unwrap();
+        let _aws = EnvVarGuard::set("AWS_SECRET_ACCESS_KEY", "do-not-leak-aws");
+        let _github = EnvVarGuard::set("GITHUB_TOKEN", "do-not-leak-github");
+        let _database = EnvVarGuard::set("DATABASE_URL", "postgres://do-not-leak");
+
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("package.json"), "{}\n").unwrap();
+        fs::write(tmp.path().join("server.js"), "db.query(req.query.q)\n").unwrap();
+        let binary = tmp.path().join("codeql-env-fixture.sh");
+        fs::write(
+            &binary,
+            r#"#!/bin/sh
+if [ "${AWS_SECRET_ACCESS_KEY+x}" = "x" ] || [ "${GITHUB_TOKEN+x}" = "x" ] || [ "${DATABASE_URL+x}" = "x" ]; then
+  echo "credential env leaked to codeql" >&2
+  exit 44
+fi
+if [ "$1" = "database" ] && [ "$2" = "create" ]; then
+  mkdir -p "$3"
+  printf 'name: test\n' > "$3/codeql-database.yml"
+  exit 0
+fi
+if [ "$1" = "database" ] && [ "$2" = "analyze" ]; then
+  out=""
+  for arg in "$@"; do
+    case "$arg" in
+      --output=*) out="${arg#--output=}" ;;
+    esac
+  done
+  printf '{"runs":[]}' > "$out"
+  exit 0
+fi
+echo "unexpected codeql args: $*" >&2
+exit 2
+"#,
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&binary).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&binary, permissions).unwrap();
+
+        let scanner = CodeqlScanner {
+            binary: Some(binary.display().to_string()),
+            language: Some("javascript".to_string()),
+            ..CodeqlScanner::default()
+        };
+
+        let findings = scanner
+            .scan_with_cancel(tmp.path(), &ScanCancellation::default())
+            .unwrap();
+
+        assert!(findings.is_empty());
     }
 
     #[test]
