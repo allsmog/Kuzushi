@@ -35,7 +35,8 @@ use crate::variant_ndiff::{
 };
 use crate::whitebox_static::{
     agent_tool_policy_for_input, apply_whitebox_static_sast_policy, mark_whitebox_static_findings,
-    whitebox_static_profile_requested,
+    whitebox_static_profile_requested, whitebox_static_proof_state_from_input,
+    whitebox_static_triage_prompt_block, whitebox_static_triage_system_prompt,
 };
 use crate::workspace::{export_workspace_findings, WorkspaceExportFormat, WorkspaceTarget};
 use crate::x_ray::execute_x_ray_tool;
@@ -1304,6 +1305,12 @@ fn run_agentic_sast_report(
         .context(
             "agentic-sast:scan requires an explicit model in config.toml, KUZUSHI_MODEL, or tool input; Kuzushi will not choose a fallback model",
         )?;
+    let whitebox_static = whitebox_static_profile_requested(input)?;
+    let system_prompt = if whitebox_static {
+        whitebox_static_triage_system_prompt().to_string()
+    } else {
+        AGENTIC_SAST_SYSTEM_PROMPT.to_string()
+    };
     let agent_tool_policy = agent_tool_policy_for_input(input)?;
 
     let inventory = collect_agentic_repo_inventory(&target, 80, 2048)?;
@@ -1311,8 +1318,8 @@ fn run_agentic_sast_report(
         AgentQueryRequest::new(
             model.clone(),
             target.clone(),
-            AGENTIC_SAST_SYSTEM_PROMPT.to_string(),
-            build_agentic_sast_prompt(&target, &options, &inventory, None),
+            system_prompt.clone(),
+            build_agentic_sast_prompt(&target, &options, &inventory, None, whitebox_static),
         )
         .with_tool_policy(agent_tool_policy.clone()),
     )?;
@@ -1325,8 +1332,14 @@ fn run_agentic_sast_report(
             AgentQueryRequest::new(
                 model.clone(),
                 target.clone(),
-                AGENTIC_SAST_SYSTEM_PROMPT.to_string(),
-                build_agentic_sast_prompt(&target, &options, &inventory, Some(&review_context)),
+                system_prompt,
+                build_agentic_sast_prompt(
+                    &target,
+                    &options,
+                    &inventory,
+                    Some(&review_context),
+                    whitebox_static,
+                ),
             )
             .with_tool_policy(agent_tool_policy.clone()),
         )?;
@@ -1339,7 +1352,7 @@ fn run_agentic_sast_report(
         }
         findings = merged.into_values().take(options.max_findings).collect();
     }
-    if whitebox_static_profile_requested(input)? {
+    if whitebox_static {
         mark_whitebox_static_findings(&mut findings, StaticProofState::CodeCited)?;
     }
 
@@ -1460,6 +1473,7 @@ fn build_agentic_sast_prompt(
     options: &AgenticSastInput,
     inventory: &[(String, String)],
     review_context: Option<&str>,
+    whitebox_static: bool,
 ) -> String {
     let mut prompt = vec![
         "Scan this repository for concrete application-security vulnerabilities.".to_string(),
@@ -1477,6 +1491,10 @@ fn build_agentic_sast_prompt(
         String::new(),
         "Evidence requirements: name the attacker-controlled source, sink, missing guard, and exact file:line. Omit uncertain or hypothetical findings.".to_string(),
     ];
+    if whitebox_static {
+        prompt.push(String::new());
+        prompt.push(whitebox_static_triage_prompt_block().to_string());
+    }
     if let Some(review_context) = review_context {
         prompt.push(String::new());
         prompt.push(review_context.to_string());
@@ -1533,17 +1551,19 @@ fn normalize_agentic_sast_findings(
         let Value::Object(object) = item else {
             continue;
         };
+        let raw_item = Value::Object(object.clone());
         let rule_id = read_object_string(&object, &["ruleId", "rule_id"])
             .unwrap_or_else(|| "agentic-sast/finding".to_string());
-        let file_path = normalize_agentic_file_path(
-            read_object_string(&object, &["filePath", "file_path"])
-                .unwrap_or_else(|| "unknown".to_string()),
-            target,
-        );
+        let file_path =
+            normalize_agentic_file_path(resolve_agentic_schema_file_path(&object), target);
         let start_line = read_object_u64(&object, &["startLine", "start_line"])
+            .or_else(|| read_nested_object_u64(&object, "source", &["startLine", "start_line"]))
+            .or_else(|| first_citation_u64(&object, &["startLine", "start_line"]))
             .filter(|value| *value > 0)
             .unwrap_or(1) as u32;
         let end_line = read_object_u64(&object, &["endLine", "end_line"])
+            .or_else(|| read_nested_object_u64(&object, "source", &["endLine", "end_line"]))
+            .or_else(|| first_citation_u64(&object, &["endLine", "end_line"]))
             .filter(|value| *value > 0)
             .map(|value| value as u32);
         let severity = agentic_severity(
@@ -1551,23 +1571,142 @@ fn normalize_agentic_sast_findings(
                 .as_deref()
                 .unwrap_or("WARNING"),
         );
-        let mut message =
-            read_object_string(&object, &["message"]).unwrap_or_else(|| rule_id.clone());
+        let mut message = read_object_string(&object, &["message"])
+            .or_else(|| read_object_string(&object, &["title"]))
+            .unwrap_or_else(|| rule_id.clone());
         if let Some(evidence) = read_object_string(&object, &["evidence"]) {
             if !evidence.trim().is_empty() {
                 message.push_str("\n\nEvidence: ");
                 message.push_str(evidence.trim());
             }
         }
+        append_agentic_schema_field(&mut message, &object, "verdict", "Verdict");
+        append_agentic_schema_field(
+            &mut message,
+            &object,
+            "staticProofState",
+            "Static proof state",
+        );
+        append_agentic_schema_object_summary(&mut message, &object, "source", "Source");
+        append_agentic_schema_object_summary(&mut message, &object, "sink", "Sink");
+        append_agentic_schema_object_summary(&mut message, &object, "path", "Path");
+        append_agentic_schema_object_summary(
+            &mut message,
+            &object,
+            "sanitizerAssessment",
+            "Sanitizer assessment",
+        );
+        append_agentic_schema_object_summary(
+            &mut message,
+            &object,
+            "guardAssessment",
+            "Guard assessment",
+        );
+        append_agentic_schema_field(
+            &mut message,
+            &object,
+            "triggerNarrative",
+            "Trigger narrative",
+        );
+        append_agentic_schema_field(&mut message, &object, "impactNarrative", "Impact narrative");
+        append_agentic_schema_field(&mut message, &object, "recommendedFix", "Recommended fix");
         if let Some(confidence) = read_object_string(&object, &["confidence"]) {
             message.push_str("\nConfidence: ");
             message.push_str(confidence.trim());
         }
-        findings.push(Finding::new_tool(
+        let mut finding = Finding::new_tool(
             "agentic", rule_id, file_path, start_line, end_line, severity, message,
-        ));
+        );
+        if let Some(state) = whitebox_static_proof_state_from_input(&raw_item)? {
+            finding.set_static_proof_state(state);
+        }
+        findings.push(finding);
     }
     Ok(findings)
+}
+
+fn resolve_agentic_schema_file_path(object: &Map<String, Value>) -> String {
+    read_object_string(object, &["filePath", "file_path"])
+        .or_else(|| read_nested_object_string(object, "source", &["filePath", "file_path"]))
+        .or_else(|| read_nested_object_string(object, "sink", &["filePath", "file_path"]))
+        .or_else(|| first_citation_string(object, &["filePath", "file_path"]))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn read_nested_object_string(
+    object: &Map<String, Value>,
+    nested_key: &str,
+    keys: &[&str],
+) -> Option<String> {
+    object
+        .get(nested_key)
+        .and_then(Value::as_object)
+        .and_then(|nested| read_object_string(nested, keys))
+}
+
+fn read_nested_object_u64(
+    object: &Map<String, Value>,
+    nested_key: &str,
+    keys: &[&str],
+) -> Option<u64> {
+    object
+        .get(nested_key)
+        .and_then(Value::as_object)
+        .and_then(|nested| read_object_u64(nested, keys))
+}
+
+fn first_citation_string(object: &Map<String, Value>, keys: &[&str]) -> Option<String> {
+    object
+        .get("citations")
+        .and_then(Value::as_array)
+        .and_then(|citations| citations.first())
+        .and_then(Value::as_object)
+        .and_then(|citation| read_object_string(citation, keys))
+}
+
+fn first_citation_u64(object: &Map<String, Value>, keys: &[&str]) -> Option<u64> {
+    object
+        .get("citations")
+        .and_then(Value::as_array)
+        .and_then(|citations| citations.first())
+        .and_then(Value::as_object)
+        .and_then(|citation| read_object_u64(citation, keys))
+}
+
+fn append_agentic_schema_field(
+    message: &mut String,
+    object: &Map<String, Value>,
+    key: &str,
+    label: &str,
+) {
+    if let Some(value) = read_object_string(object, &[key]) {
+        if !value.trim().is_empty() {
+            message.push('\n');
+            message.push_str(label);
+            message.push_str(": ");
+            message.push_str(value.trim());
+        }
+    }
+}
+
+fn append_agentic_schema_object_summary(
+    message: &mut String,
+    object: &Map<String, Value>,
+    key: &str,
+    label: &str,
+) {
+    let Some(value) = object.get(key).and_then(Value::as_object) else {
+        return;
+    };
+    let summary = read_object_string(value, &["description", "explanation", "status", "kind"])
+        .filter(|text| !text.trim().is_empty());
+    let Some(summary) = summary else {
+        return;
+    };
+    message.push('\n');
+    message.push_str(label);
+    message.push_str(": ");
+    message.push_str(summary.trim());
 }
 
 fn normalize_agentic_file_path(path: String, target: &Path) -> String {
@@ -10658,6 +10797,153 @@ OUT
                 "forbidden whitebox tool was enabled: {forbidden}"
             );
         }
+    }
+
+    #[test]
+    fn whitebox_triage_prompt_for_agentic_sast_uses_static_schema() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/db.ts"), "db.query(req.query.q)\n").unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        registry
+            .execute_tool_with_runtime(
+                "sast:scan",
+                json!({
+                    "mode": "whitebox-static",
+                    "taskMode": "manual",
+                    "tasks": ["agentic"],
+                    "maxFindings": 5
+                }),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        let query = runtime.queries().pop().unwrap();
+        assert!(query.system_prompt.contains("whitebox-static mode"));
+        for field in [
+            "\"verdict\"",
+            "\"staticProofState\"",
+            "\"source\"",
+            "\"sink\"",
+            "\"path\"",
+            "\"sanitizerAssessment\"",
+            "\"guardAssessment\"",
+            "\"citations\"",
+            "\"assumptions\"",
+            "\"missingEvidence\"",
+            "\"triggerNarrative\"",
+            "\"impactNarrative\"",
+            "\"recommendedFix\"",
+        ] {
+            assert!(query.system_prompt.contains(field), "missing {field}");
+        }
+        for rule in [
+            "Do not include payloads",
+            "PoCs",
+            "exploit execution",
+            "runtime exploitability claims",
+            "no active exploitation",
+            "no HTTP replay",
+            "no fuzzing",
+            "no live target scanning",
+            "no PoC generation",
+            "no PoC execution",
+        ] {
+            assert!(
+                query.system_prompt.contains(rule) || query.prompt.contains(rule),
+                "whitebox prompt did not include rule {rule}"
+            );
+        }
+        assert!(query
+            .prompt
+            .contains("Every reported claim must cite repository source lines"));
+    }
+
+    #[test]
+    fn whitebox_triage_prompt_response_normalizes_static_schema_fields() {
+        let temp = tempdir().unwrap();
+        let raw = json!({
+            "findings": [{
+                "ruleId": "agentic/whitebox-sql",
+                "title": "Request input reaches SQL query",
+                "verdict": "needs_review",
+                "staticProofState": "sanitizer_checked",
+                "severity": "high",
+                "confidence": "medium",
+                "source": {
+                    "kind": "attacker_input",
+                    "filePath": "src/routes.ts",
+                    "startLine": 12,
+                    "endLine": 12,
+                    "description": "req.query.q is read by the route"
+                },
+                "sink": {
+                    "kind": "sql_query",
+                    "filePath": "src/routes.ts",
+                    "startLine": 14,
+                    "endLine": 14,
+                    "description": "db.query receives the interpolated value"
+                },
+                "path": {
+                    "kind": "direct",
+                    "explanation": "The local handler passes q into db.query."
+                },
+                "sanitizerAssessment": {
+                    "status": "unknown",
+                    "explanation": "No sanitizer appears in the cited snippet."
+                },
+                "guardAssessment": {
+                    "status": "present",
+                    "explanation": "requireAuth gates the route."
+                },
+                "citations": [{
+                    "filePath": "src/routes.ts",
+                    "startLine": 12,
+                    "endLine": 14,
+                    "snippet": "const q = req.query.q;"
+                }],
+                "assumptions": ["Express route wiring is static."],
+                "missingEvidence": ["Runtime reachability is not assessed."],
+                "triggerNarrative": "Static trigger path: GET /search reads q.",
+                "impactNarrative": "Potential SQL injection if q is unsanitized.",
+                "recommendedFix": "Use parameterized queries."
+            }]
+        });
+
+        let findings = normalize_agentic_sast_findings(raw, temp.path(), 5).unwrap();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule_id, "agentic/whitebox-sql");
+        assert_eq!(findings[0].file_path, "src/routes.ts");
+        assert_eq!(findings[0].start_line, 12);
+        assert_eq!(
+            findings[0].static_proof_state,
+            Some(StaticProofState::SanitizerChecked)
+        );
+        assert!(findings[0]
+            .message
+            .contains("Static proof state: sanitizer_checked"));
+        assert!(findings[0]
+            .message
+            .contains("Sanitizer assessment: No sanitizer appears"));
+        assert!(findings[0]
+            .message
+            .contains("Trigger narrative: Static trigger path"));
+        assert!(findings[0]
+            .message
+            .contains("Recommended fix: Use parameterized queries."));
     }
 
     #[test]
