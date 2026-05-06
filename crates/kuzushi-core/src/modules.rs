@@ -183,6 +183,7 @@ impl ModuleRegistry {
 
         registry.register(catalog_module());
         registry.register(config_module());
+        registry.register(router_module());
         registry.register(workspace_module());
         registry.register(context_module());
         registry.register(context_lite_module());
@@ -387,6 +388,7 @@ impl ModuleRegistry {
                 execute_systems_hunt_tool(name, input, ctx, runtime)
             }
             "config:show" => Ok(json!(ctx.config)),
+            "router:show" => router_show_tool(input, ctx),
             "workspace:status" => Ok(json!({
                 "ok": ctx.workspace.is_some(),
                 "output": workspace_status_output(ctx),
@@ -7042,6 +7044,85 @@ fn config_module() -> BuiltinModule {
         ModuleKind::Governance,
         "Inspect effective configuration.",
         vec![tool("config:show", "Show the effective config.")],
+        vec![],
+    )
+}
+
+fn router_show_tool(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    use crate::agent_router::{AgentRole, AgentRouter};
+    use crate::config::ConfigPaths;
+
+    // Load models.toml if present. Best-effort — missing file = empty router.
+    let target = ctx.workspace.map(|workspace| workspace.root().to_path_buf());
+    let router = ConfigPaths::from_target(target.as_deref())
+        .ok()
+        .and_then(|paths| AgentRouter::load(&paths).ok())
+        .unwrap_or_default();
+
+    let mut roles = Vec::with_capacity(AgentRole::all().len());
+    for role in AgentRole::all() {
+        let key = role.option_store_key();
+        // Operator override merged via effective_tool_input lives in `input`.
+        let option_override = input
+            .as_object()
+            .and_then(|obj| obj.get(&key))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        let toml_route = router.route(*role).cloned();
+
+        let effective = option_override
+            .clone()
+            .or_else(|| toml_route.as_ref().map(|r| r.primary.clone()))
+            .or_else(|| router.default_model().map(str::to_string))
+            .or_else(|| ctx.config.model.clone());
+
+        roles.push(json!({
+            "role": role.as_key(),
+            "optionKey": key,
+            "operatorOverride": option_override,
+            "tomlPrimary": toml_route.as_ref().map(|r| r.primary.clone()),
+            "tomlFallbacks": toml_route.as_ref().map(|r| r.fallbacks.clone()).unwrap_or_default(),
+            "effective": effective,
+        }));
+    }
+
+    Ok(json!({
+        "ok": true,
+        "configModel": ctx.config.model,
+        "tomlDefaultModel": router.default_model(),
+        "roles": roles,
+    }))
+}
+
+fn router_module() -> BuiltinModule {
+    use crate::agent_router::AgentRole;
+    let mut model_specs: Vec<OptionSpec> = AgentRole::all()
+        .iter()
+        .map(|role| {
+            let name = role.option_store_key();
+            let description = format!(
+                "Override model for the `{}` role. Format: provider:modelId. \
+                 Settable from the shell with `setg {} <model>`. Wins over models.toml.",
+                role.as_key(),
+                name
+            );
+            opt(&name, OptionType::String, &description)
+        })
+        .collect();
+    // Stable order across builds.
+    model_specs.sort_by(|a, b| a.name.cmp(&b.name));
+
+    builtin_module(
+        "router",
+        "Agent router",
+        ModuleKind::Governance,
+        "Per-role model routing. Set MODEL_<ROLE> via `setg` to override models.toml.",
+        vec![tool_with_options(
+            "router:show",
+            "Show effective per-role model routing.",
+            model_specs,
+        )],
         vec![],
     )
 }

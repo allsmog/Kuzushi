@@ -1,3 +1,4 @@
+pub mod agent_router;
 pub mod artifact_kb;
 pub mod attachments;
 pub mod carlini_threat_hunt;
@@ -31,6 +32,7 @@ pub use attachments::{
     known_artifacts, list_attachments, reparse_source, AttachmentKind, AttachmentRecord,
     KnownArtifact, SUPPORTED_ATTACHMENT_MODULES,
 };
+pub use agent_router::{AgentRole, AgentRouter, ModelRoute, RoutedRuntime};
 pub use carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hunt_report};
 pub use config::{
     load_config, load_config_for_target, AnthropicOauthConfig, ConfigPaths, RuntimeConfig,
