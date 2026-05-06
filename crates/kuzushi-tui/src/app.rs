@@ -2,11 +2,11 @@ use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::io::{self, IsTerminal, Read, Stdout};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 const CTRL_C_ARM_WINDOW: Duration = Duration::from_secs(2);
 const THROTTLE_STALE_AFTER: Duration = Duration::from_secs(30);
@@ -346,6 +346,47 @@ pub struct FindingsFilter {
 }
 
 #[derive(Debug, Clone)]
+pub struct RunListEntry {
+    pub run_id: String,
+    pub modified: Option<SystemTime>,
+    pub has_summary: bool,
+}
+
+pub fn collect_run_listings(target: Option<&Path>) -> Vec<RunListEntry> {
+    let Some(target) = target else {
+        return Vec::new();
+    };
+    let dir = target.join(".kuzushi").join("runs");
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut listings: Vec<RunListEntry> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_type()
+                .map(|file_type| file_type.is_dir())
+                .unwrap_or(false)
+        })
+        .map(|entry| {
+            let run_id = entry.file_name().to_string_lossy().to_string();
+            let modified = entry
+                .metadata()
+                .ok()
+                .and_then(|metadata| metadata.modified().ok());
+            let has_summary = entry.path().join("summary.json").exists();
+            RunListEntry {
+                run_id,
+                modified,
+                has_summary,
+            }
+        })
+        .collect();
+    listings.sort_by(|a, b| b.modified.cmp(&a.modified));
+    listings
+}
+
+#[derive(Debug, Clone)]
 pub struct DiffScope {
     pub reference: String,
     pub paths: BTreeSet<String>,
@@ -449,6 +490,10 @@ pub(crate) enum ViewHotkeyAction {
     ActorDetail(usize),
     PauseScan,
     ResumeScan,
+    RunsNext,
+    RunsPrevious,
+    RunsReplay,
+    RunsTrace,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -507,6 +552,8 @@ pub struct ShellApp {
     pub history_scroll: usize,
     pub kb_scroll: usize,
     pub findings_filter: FindingsFilter,
+    pub runs_list: Vec<RunListEntry>,
+    pub runs_cursor: usize,
     pub last_char_at: Option<Instant>,
     scan_rx: Option<Receiver<ScanEvent>>,
     scan_cancel: Option<ScanCancellation>,
@@ -566,6 +613,8 @@ impl ShellApp {
             history_scroll: 0,
             kb_scroll: 0,
             findings_filter: FindingsFilter::default(),
+            runs_list: Vec::new(),
+            runs_cursor: 0,
             last_char_at: None,
             scan_rx: None,
             scan_cancel: None,
@@ -714,8 +763,16 @@ impl ShellApp {
                 self.log("actor", index.to_string());
             }
             ShellCommand::ShowRuns => {
+                self.refresh_runs_list();
                 self.shell_view = ShellView::Runs;
-                self.log("runs", "recent runs");
+                let count = self.runs_list.len();
+                let active = if self.scan.is_some() { " (1 active)" } else { "" };
+                self.log(
+                    "runs",
+                    format!(
+                        "{count} on-disk run(s){active}; Enter=replay · Tab=trace"
+                    ),
+                );
             }
             ShellCommand::ShowAliases(prefix) => {
                 self.show_aliases(prefix.as_deref());
@@ -1895,6 +1952,38 @@ impl ShellApp {
                     action: ViewHotkeyAction::ThreatView(ThreatView::Summary),
                 },
             ],
+            ShellView::Runs => {
+                let mut bindings = Vec::new();
+                if !self.runs_list.is_empty() {
+                    bindings.extend(vec![
+                        ViewKeybinding {
+                            trigger: HotkeyTrigger::Char('j'),
+                            hint: "j/k",
+                            label: "move",
+                            action: ViewHotkeyAction::RunsNext,
+                        },
+                        ViewKeybinding {
+                            trigger: HotkeyTrigger::Char('k'),
+                            hint: "j/k",
+                            label: "move",
+                            action: ViewHotkeyAction::RunsPrevious,
+                        },
+                        ViewKeybinding {
+                            trigger: HotkeyTrigger::Enter,
+                            hint: "Enter",
+                            label: "replay",
+                            action: ViewHotkeyAction::RunsReplay,
+                        },
+                        ViewKeybinding {
+                            trigger: HotkeyTrigger::Char('t'),
+                            hint: "t",
+                            label: "trace",
+                            action: ViewHotkeyAction::RunsTrace,
+                        },
+                    ]);
+                }
+                bindings
+            }
             ShellView::ModuleRun => {
                 let mut bindings = Vec::new();
                 for index in 1..=4 {
@@ -4396,8 +4485,40 @@ impl ShellApp {
             ViewHotkeyAction::ResumeScan => {
                 self.handle_command(ShellCommand::Resume(None));
             }
+            ViewHotkeyAction::RunsNext => {
+                let max = self.runs_list.len().saturating_sub(1);
+                self.runs_cursor = (self.runs_cursor + 1).min(max);
+            }
+            ViewHotkeyAction::RunsPrevious => {
+                self.runs_cursor = self.runs_cursor.saturating_sub(1);
+            }
+            ViewHotkeyAction::RunsReplay => {
+                if let Some(entry) = self.runs_list.get(self.runs_cursor) {
+                    let run_id = entry.run_id.clone();
+                    self.handle_command(ShellCommand::Replay(run_id));
+                } else {
+                    return false;
+                }
+            }
+            ViewHotkeyAction::RunsTrace => {
+                if let Some(entry) = self.runs_list.get(self.runs_cursor) {
+                    let run_id = entry.run_id.clone();
+                    self.handle_command(ShellCommand::Trace(run_id));
+                } else {
+                    return false;
+                }
+            }
         }
         true
+    }
+
+    fn refresh_runs_list(&mut self) {
+        self.runs_list = collect_run_listings(self.target.as_deref());
+        if self.runs_list.is_empty() {
+            self.runs_cursor = 0;
+        } else {
+            self.runs_cursor = self.runs_cursor.min(self.runs_list.len() - 1);
+        }
     }
 
     fn page_down_current_view(&mut self) {

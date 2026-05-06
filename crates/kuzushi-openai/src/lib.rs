@@ -6,8 +6,8 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolPolicy, RuntimeConfig,
-    TriageOutcome, TriageRequest, TriageVerdict, V2Config,
+    append_bootstrap_context, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolPolicy,
+    RuntimeConfig, TriageOutcome, TriageRequest, TriageVerdict, V2Config,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -69,10 +69,11 @@ impl PiAgentCoreRuntime {
 #[async_trait]
 impl AgentRuntime for PiAgentCoreRuntime {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+        let system_prompt = append_bootstrap_context(&request.system_prompt, &request.cwd);
         let bridge_request = BridgeRequest {
             model: request.model,
             cwd: request.cwd.display().to_string(),
-            system_prompt: request.system_prompt,
+            system_prompt,
             prompt: request.prompt,
             api_key_env: self.api_key_env.clone(),
             api_key: self.api_key.clone(),
