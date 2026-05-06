@@ -44,6 +44,17 @@ impl Default for RuntimeConfig {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct AnthropicOauthConfig {
+    /// Path to the OAuth credentials bag. Relative paths resolve under HOME.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credentials_path: Option<PathBuf>,
+    /// Allow ANTHROPIC_AUTH_TOKEN / ANTHROPIC_OAUTH_TOKEN when the bag is absent.
+    #[serde(default)]
+    pub allow_env_token: bool,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeKind {
@@ -93,6 +104,7 @@ struct PartialRuntimeConfig {
     api_key_env: Option<String>,
     base_url: Option<Option<String>>,
     agent_bridge_command: Option<Option<Vec<String>>>,
+    anthropic_oauth: Option<Option<AnthropicOauthConfig>>,
 }
 
 pub fn load_config_for_target(target: Option<&Path>) -> Result<V2Config> {
@@ -116,6 +128,24 @@ pub fn load_config(paths: ConfigPaths) -> Result<V2Config> {
     apply_env_overrides(&mut config);
     validate_config(&config)?;
     Ok(config)
+}
+
+pub fn load_anthropic_oauth_config(paths: &ConfigPaths) -> Result<Option<AnthropicOauthConfig>> {
+    let mut oauth = None;
+
+    let global_path = paths.global_config_path();
+    if global_path.exists() {
+        merge_oauth_file(&mut oauth, &global_path)?;
+    }
+
+    if let Some(project_path) = paths.project_config_path() {
+        if project_path.exists() {
+            merge_oauth_file(&mut oauth, &project_path)?;
+        }
+    }
+
+    apply_oauth_env_overrides(&mut oauth);
+    Ok(oauth)
 }
 
 pub fn write_default_config(path: &Path) -> Result<()> {
@@ -162,6 +192,19 @@ fn merge_config(config: &mut V2Config, patch: PartialConfig) {
     }
 }
 
+fn merge_oauth_file(oauth: &mut Option<AnthropicOauthConfig>, path: &Path) -> Result<()> {
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("Could not read {}", path.display()))?;
+    let patch: PartialConfig =
+        toml::from_str(&raw).with_context(|| format!("Could not parse {}", path.display()))?;
+    if let Some(runtime) = patch.runtime {
+        if let Some(anthropic_oauth) = runtime.anthropic_oauth {
+            *oauth = anthropic_oauth;
+        }
+    }
+    Ok(())
+}
+
 fn apply_env_overrides(config: &mut V2Config) {
     if let Some(model) = first_env(&["KUZUSHI_MODEL", "KUZUSHI_V2_MODEL"]) {
         let trimmed = model.trim();
@@ -191,6 +234,23 @@ fn apply_env_overrides(config: &mut V2Config) {
         let parts = shell_words(&command);
         if !parts.is_empty() {
             config.runtime.agent_bridge_command = Some(parts);
+        }
+    }
+}
+
+fn apply_oauth_env_overrides(oauth: &mut Option<AnthropicOauthConfig>) {
+    let oauth_enabled = first_env(&["KUZUSHI_ANTHROPIC_OAUTH"])
+        .map(|value| matches!(value.trim(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+    let oauth_path = first_env(&["KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS"])
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+
+    if oauth_enabled || oauth_path.is_some() {
+        let oauth = oauth.get_or_insert_with(AnthropicOauthConfig::default);
+        if let Some(path) = oauth_path {
+            oauth.credentials_path = Some(path);
         }
     }
 }
@@ -286,6 +346,72 @@ base_url = "https://api.example.test/v1"
             config.runtime.base_url.as_deref(),
             Some("https://api.example.test/v1")
         );
+    }
+
+    #[test]
+    fn parses_anthropic_oauth_block_from_toml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v2/config.toml"),
+            r#"
+model = "anthropic:claude-sonnet-4-6"
+
+[runtime]
+api_key_env = "ANTHROPIC_API_KEY"
+
+[runtime.anthropic_oauth]
+credentials_path = ".kuzushi/oauth-credentials.json"
+allow_env_token = true
+"#,
+        )
+        .unwrap();
+
+        let paths = ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        };
+        load_config(paths.clone()).unwrap();
+        let oauth = load_anthropic_oauth_config(&paths)
+            .unwrap()
+            .expect("oauth block parsed");
+
+        assert!(oauth.allow_env_token);
+        assert_eq!(
+            oauth.credentials_path.as_deref().and_then(Path::to_str),
+            Some(".kuzushi/oauth-credentials.json")
+        );
+    }
+
+    #[test]
+    fn env_var_enables_anthropic_oauth_with_defaults() {
+        let tmp = tempfile::tempdir().unwrap();
+        let prev_enable = env::var("KUZUSHI_ANTHROPIC_OAUTH").ok();
+        let prev_creds = env::var("KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS").ok();
+        unsafe {
+            env::set_var("KUZUSHI_ANTHROPIC_OAUTH", "1");
+            env::remove_var("KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS");
+        }
+
+        let paths = ConfigPaths {
+            home_dir: tmp.path().join("home"),
+            target_dir: None,
+        };
+        let oauth = load_anthropic_oauth_config(&paths);
+
+        unsafe {
+            match prev_enable {
+                Some(value) => env::set_var("KUZUSHI_ANTHROPIC_OAUTH", value),
+                None => env::remove_var("KUZUSHI_ANTHROPIC_OAUTH"),
+            }
+            match prev_creds {
+                Some(value) => env::set_var("KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS", value),
+                None => env::remove_var("KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS"),
+            }
+        }
+
+        assert!(oauth.unwrap().is_some());
     }
 
     #[test]
