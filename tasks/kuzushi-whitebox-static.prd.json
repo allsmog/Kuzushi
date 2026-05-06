@@ -182,7 +182,7 @@
       "acceptance": ["Citations resolve under repo root and snippets match.", "statically_confirmed cannot persist with unverified citations."],
       "storyGate": "cargo test -p kuzushi-core whitebox_citations",
       "forbidden": ["fabricated citation", "stale citation"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-015",

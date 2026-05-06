@@ -90,9 +90,10 @@ pub use static_evidence::{
     STATIC_EVIDENCE_NODE_KINDS,
 };
 pub use static_proof_validator::{
-    validate_static_proof_claim, verify_static_proof_citation, StaticProofAssessment,
-    StaticProofAssessmentStatus, StaticProofCitation, StaticProofClaim, StaticProofEvidence,
-    StaticProofValidation, VerifiedStaticProofCitation,
+    static_proof_claim_from_whitebox_schema, validate_static_proof_claim,
+    verify_static_proof_citation, StaticProofAssessment, StaticProofAssessmentStatus,
+    StaticProofCitation, StaticProofClaim, StaticProofEvidence, StaticProofValidation,
+    VerifiedStaticProofCitation,
 };
 pub use static_registry::{
     default_static_registry, match_static_registry, static_registry_version, StaticRegistryEntry,

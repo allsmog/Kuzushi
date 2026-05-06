@@ -2,9 +2,11 @@ use std::path::Path;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 use crate::findings::{StaticProofState, TriageVerdict};
 use crate::source_span::{extract_source_span, SourceSpan};
+use crate::whitebox_static::whitebox_static_proof_state_from_str;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -198,6 +200,58 @@ pub fn validate_static_proof_claim(
     }
 }
 
+pub fn static_proof_claim_from_whitebox_schema(value: &Value) -> Result<StaticProofClaim> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("whitebox-static proof claim must be a JSON object"))?;
+    let requested_state = read_object_string(object, &["staticProofState", "static_proof_state"])
+        .map(|state| whitebox_static_proof_state_from_str(&state))
+        .transpose()?
+        .unwrap_or(StaticProofState::NeedsRuntimeEvidence);
+    Ok(StaticProofClaim {
+        requested_state,
+        source_or_entrypoint_evidence: proof_evidence_from_object(
+            object.get("source").and_then(Value::as_object),
+            "source",
+        ),
+        sink_evidence: proof_evidence_from_object(
+            object.get("sink").and_then(Value::as_object),
+            "sink",
+        ),
+        path_explanation: read_nested_object_string(
+            object,
+            "path",
+            &["explanation", "description"],
+        )
+        .or_else(|| read_object_string(object, &["pathExplanation", "path_explanation"])),
+        local_direct_reason: read_nested_object_string(object, "path", &["localDirectReason"])
+            .or_else(|| read_object_string(object, &["localDirectReason", "local_direct_reason"])),
+        sanitizer_assessment: proof_assessment_from_object(
+            object
+                .get("sanitizerAssessment")
+                .or_else(|| object.get("sanitizer_assessment"))
+                .and_then(Value::as_object),
+        ),
+        guard_assessment: proof_assessment_from_object(
+            object
+                .get("guardAssessment")
+                .or_else(|| object.get("guard_assessment"))
+                .and_then(Value::as_object),
+        ),
+        citations: proof_citations_from_array(object.get("citations").and_then(Value::as_array)),
+        assumptions: string_array(
+            object
+                .get("assumptions")
+                .or_else(|| object.get("staticAssumptions")),
+        ),
+        missing_evidence: string_array(
+            object
+                .get("missingEvidence")
+                .or_else(|| object.get("missing_evidence")),
+        ),
+    })
+}
+
 pub fn verify_static_proof_citation(
     repo_root: impl AsRef<Path>,
     citation: &StaticProofCitation,
@@ -279,6 +333,131 @@ fn validate_citation_snippet(span: &SourceSpan, citation: &StaticProofCitation) 
     Ok(())
 }
 
+fn proof_evidence_from_object(
+    object: Option<&Map<String, Value>>,
+    fallback_label: &str,
+) -> Vec<StaticProofEvidence> {
+    let Some(object) = object else {
+        return Vec::new();
+    };
+    let label = read_object_string(object, &["kind", "label"]).unwrap_or_else(|| {
+        fallback_label
+            .split('_')
+            .next()
+            .unwrap_or(fallback_label)
+            .to_string()
+    });
+    let detail = read_object_string(object, &["description", "detail", "explanation"])
+        .unwrap_or_else(|| label.clone());
+    let mut evidence = StaticProofEvidence::new(label, detail);
+    if let Some(citation) = proof_citation_from_object(object) {
+        evidence = evidence.with_citation(citation);
+    }
+    vec![evidence]
+}
+
+fn proof_assessment_from_object(object: Option<&Map<String, Value>>) -> StaticProofAssessment {
+    let Some(object) = object else {
+        return StaticProofAssessment::new(StaticProofAssessmentStatus::Unknown, "");
+    };
+    let status = read_object_string(object, &["status"])
+        .as_deref()
+        .map(parse_assessment_status)
+        .unwrap_or(StaticProofAssessmentStatus::Unknown);
+    let explanation = read_object_string(object, &["explanation", "description", "rationale"])
+        .unwrap_or_default();
+    StaticProofAssessment::new(status, explanation)
+}
+
+fn parse_assessment_status(value: &str) -> StaticProofAssessmentStatus {
+    match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+        "present" => StaticProofAssessmentStatus::Present,
+        "absent" => StaticProofAssessmentStatus::Absent,
+        "not_applicable" | "n/a" | "na" => StaticProofAssessmentStatus::NotApplicable,
+        _ => StaticProofAssessmentStatus::Unknown,
+    }
+}
+
+fn proof_citations_from_array(items: Option<&Vec<Value>>) -> Vec<StaticProofCitation> {
+    items
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .filter_map(proof_citation_from_object)
+        .collect()
+}
+
+fn proof_citation_from_object(object: &Map<String, Value>) -> Option<StaticProofCitation> {
+    let file_path = read_object_string(object, &["filePath", "file_path"])?;
+    let start_line = read_object_u64(object, &["startLine", "start_line"])?;
+    let end_line = read_object_u64(object, &["endLine", "end_line"]).unwrap_or(start_line);
+    if start_line == 0
+        || end_line == 0
+        || start_line > u32::MAX as u64
+        || end_line > u32::MAX as u64
+    {
+        return None;
+    }
+    let mut citation = StaticProofCitation::new(file_path, start_line as u32, end_line as u32);
+    if let Some(snippet) = read_object_string(object, &["snippet"]) {
+        citation = citation.with_snippet(snippet);
+    }
+    if let Some(hash) = read_object_string(
+        object,
+        &[
+            "snippetHash",
+            "snippet_hash",
+            "contentHash",
+            "content_hash",
+            "sourceContentHash",
+        ],
+    ) {
+        citation = citation.with_snippet_hash(hash);
+    }
+    Some(citation)
+}
+
+fn read_nested_object_string(
+    object: &Map<String, Value>,
+    nested_key: &str,
+    keys: &[&str],
+) -> Option<String> {
+    object
+        .get(nested_key)
+        .and_then(Value::as_object)
+        .and_then(|nested| read_object_string(nested, keys))
+}
+
+fn read_object_string(object: &Map<String, Value>, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| object.get(*key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn read_object_u64(object: &Map<String, Value>, keys: &[&str]) -> Option<u64> {
+    keys.iter().find_map(|key| {
+        object.get(*key).and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_str()?.trim().parse::<u64>().ok())
+        })
+    })
+}
+
+fn string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
 fn contains_forbidden_runtime_claim(claim: &StaticProofClaim) -> bool {
     let mut text = String::new();
     text.push_str(claim.path_explanation.as_deref().unwrap_or_default());
@@ -337,6 +516,7 @@ mod tests {
     use std::fs;
 
     use crate::static_evidence::static_content_hash;
+    use serde_json::json;
 
     use super::*;
 
@@ -461,6 +641,116 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.contains("snippet hash mismatch")));
+    }
+
+    #[test]
+    fn whitebox_citations_verify_file_lines_snippet_and_hash() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/routes.ts"),
+            "const q = req.query.q;\ndb.query(q);\n",
+        )
+        .unwrap();
+        let snippet = "const q = req.query.q;\ndb.query(q);";
+        let citation = StaticProofCitation::new("src/routes.ts", 1, 2)
+            .with_snippet(snippet)
+            .with_snippet_hash(static_content_hash(snippet));
+
+        let verified = verify_static_proof_citation(temp.path(), &citation).unwrap();
+
+        assert_eq!(verified.file_path, "src/routes.ts");
+        assert_eq!(verified.start_line, 1);
+        assert_eq!(verified.end_line, 2);
+        assert_eq!(verified.snippet_hash, static_content_hash(snippet));
+    }
+
+    #[test]
+    fn whitebox_citations_reject_out_of_repo_missing_lines_and_stale_snippets() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("route.ts"), "const q = req.query.q;\n").unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        fs::write(outside.path(), "const secret = true;\n").unwrap();
+
+        let out_of_repo = verify_static_proof_citation(
+            temp.path(),
+            &StaticProofCitation::new(outside.path().display().to_string(), 1, 1),
+        )
+        .unwrap_err()
+        .to_string();
+        let missing_line =
+            verify_static_proof_citation(temp.path(), &StaticProofCitation::new("route.ts", 1, 3))
+                .unwrap_err()
+                .to_string();
+        let stale_snippet = verify_static_proof_citation(
+            temp.path(),
+            &StaticProofCitation::new("route.ts", 1, 1).with_snippet("const q = req.body.q;"),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            out_of_repo.contains("outside repository root"),
+            "{out_of_repo}"
+        );
+        assert!(
+            missing_line.contains("exceeds file line count"),
+            "{missing_line}"
+        );
+        assert!(
+            stale_snippet.contains("snippet text does not match"),
+            "{stale_snippet}"
+        );
+    }
+
+    #[test]
+    fn whitebox_citations_parse_llm_schema_into_static_proof_claim() {
+        let raw = json!({
+            "staticProofState": "statically_confirmed",
+            "source": {
+                "kind": "attacker_input",
+                "filePath": "src/routes.ts",
+                "startLine": 1,
+                "endLine": 1,
+                "description": "req.query.q is read"
+            },
+            "sink": {
+                "kind": "sql_query",
+                "filePath": "src/routes.ts",
+                "startLine": 2,
+                "endLine": 2,
+                "description": "db.query receives q"
+            },
+            "path": {"kind": "direct", "explanation": "q is passed directly"},
+            "sanitizerAssessment": {"status": "absent", "explanation": "none"},
+            "guardAssessment": {"status": "present", "explanation": "requireAuth"},
+            "citations": [{
+                "filePath": "src/routes.ts",
+                "startLine": 1,
+                "endLine": 2,
+                "snippet": "const q = req.query.q;\ndb.query(q);",
+                "snippetHash": "hash"
+            }],
+            "assumptions": ["static route wiring"],
+            "missingEvidence": ["runtime evidence"]
+        });
+
+        let claim = static_proof_claim_from_whitebox_schema(&raw).unwrap();
+
+        assert_eq!(claim.requested_state, StaticProofState::StaticallyConfirmed);
+        assert_eq!(claim.source_or_entrypoint_evidence.len(), 1);
+        assert_eq!(claim.sink_evidence.len(), 1);
+        assert_eq!(
+            claim.sanitizer_assessment.status,
+            StaticProofAssessmentStatus::Absent
+        );
+        assert_eq!(
+            claim.guard_assessment.status,
+            StaticProofAssessmentStatus::Present
+        );
+        assert_eq!(claim.citations.len(), 1);
+        assert_eq!(claim.assumptions, vec!["static route wiring"]);
+        assert_eq!(claim.missing_evidence, vec!["runtime evidence"]);
     }
 
     #[test]
