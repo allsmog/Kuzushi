@@ -1,0 +1,8 @@
+src/backend/utils
+src/backend/parser
+src/backend/optimizer
+src/backend/executor
+src/backend/access
+src/backend/commands
+src/include
+contrib
