@@ -213,6 +213,7 @@ impl ModuleRegistry {
         registry.register(taint_iris_next_module());
         registry.register(systems_hunt_module());
         registry.register(triage_module());
+        registry.register(audit_module());
         registry.register(verify_module());
         registry.register(patch_module());
         registry.register(findings_module());
@@ -438,6 +439,7 @@ impl ModuleRegistry {
             "sast:scan" => run_sast_scan(input, ctx, runtime),
             "triage:run" => run_triage(input, ctx, runtime),
             "triage:deep" => run_triage_deep(input, ctx, runtime),
+            "audit:full-mode" => run_audit_full_mode(input, ctx, runtime),
             "verify:finding" => run_verify_finding(input, ctx, runtime),
             "verify:exploit" => run_verify_exploit(input, ctx),
             "patch:finding" => run_patch_finding(input, ctx, runtime),
@@ -6228,6 +6230,158 @@ fn run_triage_deep(
     }))
 }
 
+/// Whole-codebase chunked audit. Plans the workspace into N-token
+/// chunks and dispatches each through the configured `full_mode_multi`
+/// role. Findings discovered by the model land in the workspace's
+/// `FindingStore`. Cost is metered against the `FullModeMulti`
+/// operation cap.
+fn run_audit_full_mode(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    let workspace = ctx.workspace.context(
+        "audit:full-mode needs an active workspace. Pass --target <repo> or start the shell with --target.",
+    )?;
+    let store = ctx
+        .findings_store
+        .context("audit:full-mode requires a findings store for the active workspace")?;
+
+    let max_tokens = input
+        .get("maxTokensPerChunk")
+        .or_else(|| input.get("max_tokens_per_chunk"))
+        .and_then(Value::as_u64)
+        .unwrap_or(80_000) as usize;
+    let deposit_usd = input
+        .get("depositUsdPerChunk")
+        .or_else(|| input.get("deposit_usd_per_chunk"))
+        .and_then(Value::as_f64)
+        .unwrap_or(0.10);
+    let dry_run = input
+        .get("dryRun")
+        .or_else(|| input.get("dry_run"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let language = match input
+        .get("language")
+        .and_then(Value::as_str)
+        .unwrap_or("c")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "c" => crate::full_mode_multi::FullModeLanguage::C,
+        "unknown" => crate::full_mode_multi::FullModeLanguage::Unknown,
+        other => anyhow::bail!("audit:full-mode language must be `c` or `unknown` (got {other:?})"),
+    };
+    let include_extensions: Vec<String> = match input
+        .get("includeExtensions")
+        .or_else(|| input.get("include_extensions"))
+    {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    // Dry-run is the cheap planning path; skip the runtime
+    // requirement so operators can preview chunk shape without a
+    // model in scope.
+    let runtime_for_run = if dry_run {
+        None
+    } else {
+        Some(runtime.context(
+            "audit:full-mode requires the pi-agent-core runtime unless dryRun=true. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
+        )?)
+    };
+    let configured_model = ctx.config.model.clone().unwrap_or_default();
+    let model = match runtime_for_run {
+        Some(rt) => {
+            // Honour models.toml [roles.full_mode_multi] when a
+            // RoutedRuntime is in scope; otherwise the operator
+            // default carries through.
+            let resolved = rt.model_for_role("full_mode_multi", &configured_model);
+            if resolved.trim().is_empty() {
+                anyhow::bail!(
+                    "audit:full-mode requires an explicit model in config.toml or KUZUSHI_MODEL; Kuzushi will not choose a fallback model"
+                );
+            }
+            resolved
+        }
+        None => configured_model.clone(),
+    };
+
+    let cfg = crate::full_mode_multi::FullModeConfig {
+        workspace_root: workspace.root().to_path_buf(),
+        max_tokens_per_chunk: max_tokens,
+        deposit_usd_per_chunk: deposit_usd,
+        include_extensions,
+        language,
+        dry_run,
+        scope_files: None,
+    };
+
+    let limiter = SpendLimiter::open(workspace.spend_db_path()).ok();
+    let report = match runtime_for_run {
+        Some(rt) => {
+            crate::full_mode_multi::run_with_runtime(rt, limiter.as_ref(), &cfg, model.clone())?
+        }
+        None => {
+            // Dry-run path: re-use the public `plan` entry point and
+            // wrap in an empty report shape.
+            let plan = crate::full_mode_multi::plan(&cfg)?;
+            crate::full_mode_multi::FullModeReport {
+                findings: Vec::new(),
+                plan,
+                chunks_dispatched: 0,
+                chunks_failed: 0,
+                cost_usd: 0.0,
+                dry_run: true,
+            }
+        }
+    };
+
+    // Persist findings produced by the audit pass when not in
+    // dry-run. Failure to persist a single finding shouldn't kill
+    // the whole pass.
+    let mut persisted = 0usize;
+    if !report.dry_run {
+        let scan_id = format!("audit-full-mode-{}", uuid::Uuid::new_v4());
+        if store
+            .insert_scan_run(&scan_id, workspace.root(), "completed")
+            .is_ok()
+        {
+            for finding in &report.findings {
+                if store.insert_finding(&scan_id, finding).is_ok() {
+                    persisted += 1;
+                }
+            }
+        }
+    }
+
+    let summary = format!(
+        "[+] audit:full-mode chunks={dispatched}/{total} findings={n} cost=${cost:.4}{dry}",
+        dispatched = report.chunks_dispatched,
+        total = report.plan.chunks.len(),
+        n = report.findings.len(),
+        cost = report.cost_usd,
+        dry = if report.dry_run { " (dry-run)" } else { "" }
+    );
+
+    let cost_summary = crate::full_mode_multi::cost_summary(&report.plan, Some(&model));
+    Ok(json!({
+        "ok": true,
+        "output": summary,
+        "data": {
+            "report": crate::full_mode_multi::report_to_tool_json(&report),
+            "costEstimate": cost_summary,
+            "findingsPersisted": persisted,
+            "dryRun": report.dry_run,
+        },
+        "costUsd": report.cost_usd,
+    }))
+}
+
 const VERIFY_SYSTEM_PROMPT: &str = r#"You are Kuzushi's exploitability verification agent.
 Return only JSON with these fields:
 {"fingerprint":"...","exploitable":true|false,"poc_payload":string|null,"poc_description":"...","attack_vector":string|null,"preconditions":["..."],"confidence":0.0-1.0}."#;
@@ -8782,6 +8936,53 @@ fn triage_module() -> BuiltinModule {
             ),
         ],
         vec![dag("triage:run", "triage", &["semgrep:scan"])],
+    )
+}
+
+fn audit_module() -> BuiltinModule {
+    builtin_module(
+        "audit",
+        "Audit",
+        ModuleKind::Defense,
+        "Whole-codebase chunked LLM audit pass. Plans the workspace into N-token chunks and dispatches each through the configured `full_mode_multi` model role.",
+        vec![tool_with_options(
+            "audit:full-mode",
+            "Full-mode multi-pass audit. Uses `models.toml [roles.full_mode_multi]` when present.",
+            vec![
+                opt(
+                    "maxTokensPerChunk",
+                    OptionType::Int,
+                    "Hard ceiling on tokens per dispatched chunk. Default 80,000.",
+                )
+                .default(json!(80_000)),
+                opt(
+                    "depositUsdPerChunk",
+                    OptionType::Float,
+                    "Conservative deposit per chunk against the FullModeMulti spend cap.",
+                )
+                .default(json!(0.10)),
+                opt(
+                    "language",
+                    OptionType::Enum,
+                    "Prompt selector: `c` or `unknown`.",
+                )
+                .choices(&["c", "unknown"])
+                .default(json!("c")),
+                opt(
+                    "dryRun",
+                    OptionType::Bool,
+                    "Plan + cost-estimate only; no model dispatch.",
+                )
+                .default(json!(false)),
+                opt(
+                    "includeExtensions",
+                    OptionType::StringList,
+                    "File extensions to include. Empty defaults to {c,cc,cpp,cxx,h,hh,hpp,hxx}.",
+                ),
+                model_option(),
+            ],
+        )],
+        vec![],
     )
 }
 
@@ -13996,6 +14197,85 @@ OUT
         assert!(
             err.contains("fingerprint"),
             "expected error to mention fingerprint; actual: {err}"
+        );
+    }
+
+    #[test]
+    fn audit_full_mode_dry_run_plans_chunks_without_runtime() {
+        // Dry-run is the cheap planning path — it must succeed
+        // without a runtime in scope so operators can preview chunk
+        // shape and cost estimate before paying any model spend.
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        // Drop a couple of small C files into the workspace so the
+        // planner has something to chunk.
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/a.c"), "void a(void) {}\n".repeat(10)).unwrap();
+        fs::write(
+            temp.path().join("src/b.c"),
+            "int main(void){return 0;}\n".repeat(10),
+        )
+        .unwrap();
+
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("anthropic:claude-sonnet-4-6".to_string());
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "audit:full-mode",
+                json!({"dryRun": true, "language": "c"}),
+                &ctx,
+                None,
+            )
+            .expect("audit:full-mode dry-run should succeed without a runtime");
+        assert_eq!(
+            result.pointer("/data/dryRun").and_then(Value::as_bool),
+            Some(true)
+        );
+        // `report_to_tool_json` nests the `FullModeReport` under
+        // `data`, so the chunk array lives at /data/report/data/plan/chunks.
+        let chunks = result
+            .pointer("/data/report/data/plan/chunks")
+            .and_then(Value::as_array)
+            .expect("chunks array")
+            .len();
+        assert!(chunks >= 1, "expected at least one chunk, got {chunks}");
+        assert_eq!(
+            result
+                .pointer("/data/findingsPersisted")
+                .and_then(Value::as_u64),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn audit_full_mode_requires_runtime_when_not_dry_run() {
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("anthropic:claude-sonnet-4-6".to_string());
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let err = registry
+            .execute_tool_with_runtime("audit:full-mode", json!({}), &ctx, None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("requires the pi-agent-core runtime"),
+            "actual: {err}"
         );
     }
 

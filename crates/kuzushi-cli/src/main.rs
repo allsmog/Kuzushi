@@ -1056,6 +1056,7 @@ fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Res
             || tool == "taint-iris-next:hunt"
             || tool == "triage:run"
             || tool == "triage:deep"
+            || tool == "audit:full-mode"
             || tool == "verify:finding"
             || tool == "patch:finding"
             || tool == "context-lite:index"
@@ -1075,6 +1076,7 @@ fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Res
             tool.starts_with("findings:")
                 || tool == "triage:run"
                 || tool == "triage:deep"
+                || tool == "audit:full-mode"
                 || tool == "verify:finding"
                 || tool == "patch:finding"
                 || tool == "agentic-sast:scan"
@@ -1110,6 +1112,7 @@ fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Res
         tool.as_str(),
         "triage:run"
             | "triage:deep"
+            | "audit:full-mode"
             | "verify:finding"
             | "patch:finding"
             | "agentic-sast:scan"
