@@ -20,6 +20,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use kuzushi_mcp_common::schema::Symbol;
+use serde_json::Value;
 
 /// Top-level facade. Holds at most one running MCP client per backend.
 #[derive(Default)]
@@ -157,6 +158,175 @@ impl IndexFacade {
         anyhow::bail!("no backend was able to answer references({symbol})")
     }
 
+    /// Methods that call the named function. Routes per [`RoutingTable`].
+    /// Tries clang first when (file, line, column) is supplied; otherwise
+    /// falls through to joern's name-based query.
+    pub async fn callers_of(
+        &mut self,
+        symbol: &str,
+        position: Option<&FilePosition>,
+    ) -> Result<Value> {
+        for backend in self.routing.order_for(Query::CallersOfFunction) {
+            let Some(client) = self.client_mut(backend) else {
+                continue;
+            };
+            let (tool, args) = match (backend, position) {
+                (Backend::Clang, Some(pos)) => (
+                    "clang.callers",
+                    serde_json::json!({
+                        "repoPath": pos.repo,
+                        "file": pos.file,
+                        "line": pos.line,
+                        "column": pos.column,
+                    }),
+                ),
+                (Backend::Joern, _) => ("joern.callers_of", serde_json::json!({ "fn": symbol })),
+                // gtags and clang-without-position can't answer a
+                // function-callers query usefully; skip.
+                _ => continue,
+            };
+            match client.call_tool(tool, args).await {
+                Ok(value) => return Ok(value),
+                Err(err) => {
+                    eprintln!(
+                        "[codeindex] {} backend failed for callers_of({symbol}): {err}",
+                        backend.binary_name()
+                    );
+                    continue;
+                }
+            }
+        }
+        anyhow::bail!("no backend was able to answer callers_of({symbol})")
+    }
+
+    /// Methods called by the named function. Routes per [`RoutingTable`].
+    pub async fn callees_of(
+        &mut self,
+        symbol: &str,
+        position: Option<&FilePosition>,
+    ) -> Result<Value> {
+        for backend in self.routing.order_for(Query::CalleesOfFunction) {
+            let Some(client) = self.client_mut(backend) else {
+                continue;
+            };
+            let (tool, args) = match (backend, position) {
+                (Backend::Joern, _) => ("joern.callees_of", serde_json::json!({ "fn": symbol })),
+                (Backend::Clang, Some(pos)) => (
+                    "clang.callees",
+                    serde_json::json!({
+                        "repoPath": pos.repo,
+                        "file": pos.file,
+                        "line": pos.line,
+                        "column": pos.column,
+                    }),
+                ),
+                _ => continue,
+            };
+            match client.call_tool(tool, args).await {
+                Ok(value) => return Ok(value),
+                Err(err) => {
+                    eprintln!(
+                        "[codeindex] {} backend failed for callees_of({symbol}): {err}",
+                        backend.binary_name()
+                    );
+                    continue;
+                }
+            }
+        }
+        anyhow::bail!("no backend was able to answer callees_of({symbol})")
+    }
+
+    /// Taint paths from a source pattern to a sink pattern. joern only;
+    /// no fallback because gtags and clang lack the dataflow primitives.
+    pub async fn taint_paths(
+        &mut self,
+        source: &str,
+        sink: &str,
+        max_paths: Option<usize>,
+    ) -> Result<Value> {
+        let Some(client) = self.client_mut(Backend::Joern) else {
+            anyhow::bail!(
+                "BackendUnavailable: taint_paths requires joern; install via https://docs.joern.io/installation"
+            );
+        };
+        let mut args = serde_json::json!({
+            "source": source,
+            "sink": sink,
+        });
+        if let Some(n) = max_paths {
+            args["maxPaths"] = serde_json::json!(n);
+        }
+        client.call_tool("joern.taint_paths", args).await
+    }
+
+    /// Locate `unsafe { ... }` regions, optionally constrained to a file.
+    /// joern Rust frontend.
+    pub async fn unsafe_blocks(&mut self, file: Option<&str>) -> Result<Value> {
+        let Some(client) = self.client_mut(Backend::Joern) else {
+            anyhow::bail!(
+                "BackendUnavailable: unsafe_blocks requires joern; install via https://docs.joern.io/installation"
+            );
+        };
+        let mut args = serde_json::json!({});
+        if let Some(f) = file {
+            args["file"] = serde_json::json!(f);
+        }
+        client.call_tool("joern.unsafe_blocks", args).await
+    }
+
+    /// Locate FFI boundaries (extern, JNI, dlsym/dlopen). joern only.
+    pub async fn ffi_boundaries(&mut self) -> Result<Value> {
+        let Some(client) = self.client_mut(Backend::Joern) else {
+            anyhow::bail!(
+                "BackendUnavailable: ffi_boundaries requires joern; install via https://docs.joern.io/installation"
+            );
+        };
+        client
+            .call_tool("joern.ffi_boundaries", serde_json::json!({}))
+            .await
+    }
+
+    /// Type information at a position. clang only — needs type-and-macro
+    /// awareness from clangd.
+    pub async fn type_at(&mut self, position: &FilePosition) -> Result<Value> {
+        let Some(client) = self.client_mut(Backend::Clang) else {
+            anyhow::bail!(
+                "BackendUnavailable: type_at requires clangd; install LLVM (`apt install clangd` / `brew install llvm`)"
+            );
+        };
+        client
+            .call_tool(
+                "clang.type_at",
+                serde_json::json!({
+                    "repoPath": position.repo,
+                    "file": position.file,
+                    "line": position.line,
+                    "column": position.column,
+                }),
+            )
+            .await
+    }
+
+    /// AST subtree at a position via clangd's `textDocument/ast` extension.
+    pub async fn ast(&mut self, position: &FilePosition) -> Result<Value> {
+        let Some(client) = self.client_mut(Backend::Clang) else {
+            anyhow::bail!(
+                "BackendUnavailable: ast requires clangd; install LLVM (`apt install clangd` / `brew install llvm`)"
+            );
+        };
+        client
+            .call_tool(
+                "clang.ast",
+                serde_json::json!({
+                    "repoPath": position.repo,
+                    "file": position.file,
+                    "line": position.line,
+                    "column": position.column,
+                }),
+            )
+            .await
+    }
+
     fn client_mut(&mut self, backend: Backend) -> Option<&mut McpClient> {
         match backend {
             Backend::Gtags => self.gtags.as_mut(),
@@ -164,6 +334,17 @@ impl IndexFacade {
             Backend::Joern => self.joern.as_mut(),
         }
     }
+}
+
+/// Convenience input for the position-aware facade methods. Accepts a
+/// repo path + file (relative to the repo) + 1-based line/column.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilePosition {
+    pub repo: std::path::PathBuf,
+    pub file: String,
+    pub line: u32,
+    pub column: u32,
 }
 
 #[cfg(test)]
@@ -184,5 +365,63 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("no backend"));
+    }
+
+    #[tokio::test]
+    async fn callers_of_errors_when_no_backend_live() {
+        let mut facade = IndexFacade::new();
+        let err = facade.callers_of("foo", None).await.unwrap_err();
+        assert!(err.to_string().contains("no backend"));
+    }
+
+    #[tokio::test]
+    async fn taint_paths_reports_backend_unavailable_without_joern() {
+        let mut facade = IndexFacade::new();
+        let err = facade
+            .taint_paths("argv", "system", None)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("BackendUnavailable"));
+        assert!(err.to_string().contains("joern"));
+    }
+
+    #[tokio::test]
+    async fn unsafe_blocks_reports_backend_unavailable_without_joern() {
+        let mut facade = IndexFacade::new();
+        let err = facade.unsafe_blocks(None).await.unwrap_err();
+        assert!(err.to_string().contains("joern"));
+    }
+
+    #[tokio::test]
+    async fn ffi_boundaries_reports_backend_unavailable_without_joern() {
+        let mut facade = IndexFacade::new();
+        let err = facade.ffi_boundaries().await.unwrap_err();
+        assert!(err.to_string().contains("joern"));
+    }
+
+    #[tokio::test]
+    async fn type_at_reports_backend_unavailable_without_clang() {
+        let mut facade = IndexFacade::new();
+        let pos = FilePosition {
+            repo: std::path::PathBuf::from("/tmp"),
+            file: "x.c".to_string(),
+            line: 1,
+            column: 1,
+        };
+        let err = facade.type_at(&pos).await.unwrap_err();
+        assert!(err.to_string().contains("clangd"));
+    }
+
+    #[tokio::test]
+    async fn ast_reports_backend_unavailable_without_clang() {
+        let mut facade = IndexFacade::new();
+        let pos = FilePosition {
+            repo: std::path::PathBuf::from("/tmp"),
+            file: "x.c".to_string(),
+            line: 1,
+            column: 1,
+        };
+        let err = facade.ast(&pos).await.unwrap_err();
+        assert!(err.to_string().contains("clangd"));
     }
 }

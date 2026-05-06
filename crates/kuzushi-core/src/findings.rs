@@ -73,6 +73,12 @@ pub struct Finding {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actor_fingerprint: Option<String>,
     pub triage: Option<TriageOutcome>,
+    /// Most-recent empirical verification, when present. Loaded by
+    /// `FindingStore::get_finding_by_*` from the `verifications` side
+    /// table; in-memory `Finding`s built via `Finding::new_tool` leave
+    /// this `None` until persisted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification: Option<PersistedVerification>,
     pub created_at: String,
 }
 
@@ -112,6 +118,7 @@ impl Finding {
             tool,
             actor_fingerprint: None,
             triage: None,
+            verification: None,
             created_at: now_isoish(),
         }
     }
@@ -971,7 +978,8 @@ impl FindingStore {
     }
 
     pub fn get_finding_by_fingerprint(&self, fingerprint: &str) -> Result<Option<Finding>> {
-        self.conn
+        let mut finding = self
+            .conn
             .query_row(
                 r#"
                 select
@@ -989,7 +997,17 @@ impl FindingStore {
                 row_to_finding,
             )
             .optional()
-            .context("Could not load finding")
+            .context("Could not load finding")?;
+
+        // Attach the latest verification when one exists. Single-finding
+        // path so the extra query is cheap; bulk listings keep using
+        // `row_to_finding` directly.
+        if let Some(ref mut f) = finding {
+            if let Some(id) = f.id {
+                f.verification = self.get_latest_verification(id)?;
+            }
+        }
+        Ok(finding)
     }
 
     pub fn get_finding_by_reference(&self, reference: &str) -> Result<Option<Finding>> {
@@ -1082,6 +1100,11 @@ fn row_to_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
         actor_fingerprint: row.get(11)?,
         created_at: row.get(12)?,
         triage,
+        // `verification` is loaded by callers that need it via a
+        // separate `get_latest_verification` lookup keyed on
+        // `finding.id`. We keep `row_to_finding` cheap and avoid the
+        // extra query on bulk list paths.
+        verification: None,
     })
 }
 

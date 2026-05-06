@@ -80,39 +80,70 @@ pub fn build_registry() -> ToolRegistry {
             CalleesOfTool,
         )
         .register(
-            stub_descriptor(
-                "joern.reaching_def",
-                "Reaching definitions for a variable at a position (planned).",
-            ),
-            NotYetImplemented("joern.reaching_def"),
+            Tool {
+                name: "joern.reaching_def".into(),
+                description: "Reaching definitions for a variable at a (file, line). Wraps `reachingDefIn`.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "required": ["file", "line", "var"],
+                    "properties": {
+                        "file": {"type": "string"},
+                        "line": {"type": "integer", "minimum": 1},
+                        "var": {"type": "string"}
+                    }
+                }),
+            },
+            ReachingDefTool,
         )
         .register(
-            stub_descriptor(
-                "joern.taint_paths",
-                "Taint paths from source to sink — wraps `reachableByFlows` (planned).",
-            ),
-            NotYetImplemented("joern.taint_paths"),
+            Tool {
+                name: "joern.taint_paths".into(),
+                description: "Taint paths from source to sink. Wraps `reachableByFlows`. Returns a list of paths (each a sequence of CPG nodes).".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "required": ["source", "sink"],
+                    "properties": {
+                        "source": {"type": "string"},
+                        "sink": {"type": "string"},
+                        "maxPaths": {"type": "integer", "minimum": 1, "default": 50}
+                    }
+                }),
+            },
+            TaintPathsTool,
         )
         .register(
-            stub_descriptor(
-                "joern.unsafe_blocks",
-                "Locate `unsafe { ... }` regions via the joern Rust frontend (planned).",
-            ),
-            NotYetImplemented("joern.unsafe_blocks"),
+            Tool {
+                name: "joern.unsafe_blocks".into(),
+                description: "Locate `unsafe { ... }` regions via the joern Rust frontend. Optional `file` filter.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": { "file": {"type": "string"} }
+                }),
+            },
+            UnsafeBlocksTool,
         )
         .register(
-            stub_descriptor(
-                "joern.ffi_boundaries",
-                "Locate FFI boundaries — `extern \"C\"`, JNI, etc. (planned).",
-            ),
-            NotYetImplemented("joern.ffi_boundaries"),
+            Tool {
+                name: "joern.ffi_boundaries".into(),
+                description: "Locate FFI boundaries: `extern \"C\"` decls, JNI calls, dlsym/dlopen.".into(),
+                input_schema: json!({"type": "object", "properties": {}}),
+            },
+            FfiBoundariesTool,
         )
         .register(
-            stub_descriptor(
-                "joern.method_at",
-                "Return the method enclosing a (file, line) position (planned).",
-            ),
-            NotYetImplemented("joern.method_at"),
+            Tool {
+                name: "joern.method_at".into(),
+                description: "Return the method enclosing a (file, line) coordinate.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "required": ["file", "line"],
+                    "properties": {
+                        "file": {"type": "string"},
+                        "line": {"type": "integer", "minimum": 1}
+                    }
+                }),
+            },
+            MethodAtTool,
         )
         .register(
             Tool {
@@ -124,6 +155,11 @@ pub fn build_registry() -> ToolRegistry {
         )
 }
 
+/// Build a placeholder descriptor used by tools that don't have their
+/// implementation wired yet. Currently unused (all five planned tools
+/// are now live) but kept as a reusable helper for the next round of
+/// additions.
+#[allow(dead_code)]
 fn stub_descriptor(name: &'static str, desc: &'static str) -> Tool {
     Tool {
         name: name.into(),
@@ -138,6 +174,14 @@ struct QueryTool;
 struct CallersOfTool;
 struct CalleesOfTool;
 struct CpgSizeTool;
+struct ReachingDefTool;
+struct TaintPathsTool;
+struct UnsafeBlocksTool;
+struct FfiBoundariesTool;
+struct MethodAtTool;
+/// Sentinel handler kept for any future stubs we register before
+/// implementing. No tool is currently registered as a stub.
+#[allow(dead_code)]
 struct NotYetImplemented(&'static str);
 
 #[async_trait]
@@ -216,6 +260,85 @@ impl ToolHandler for CpgSizeTool {
 }
 
 #[async_trait]
+impl ToolHandler for ReachingDefTool {
+    async fn call(&self, args: Value) -> Result<Value> {
+        ensure_joern_available()?;
+        let file = require_str(&args, "file")?.to_string();
+        let line = args
+            .get("line")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| anyhow::anyhow!("missing required integer argument: line"))?
+            as u32;
+        let var = require_str(&args, "var")?.to_string();
+        let raw = run_query(&queries::reaching_def(&file, line, &var)).await?;
+        let parsed: Value = serde_json::from_str(&raw).unwrap_or(Value::String(raw));
+        Ok(json!({ "var": var, "file": file, "line": line, "definitions": parsed }))
+    }
+}
+
+#[async_trait]
+impl ToolHandler for TaintPathsTool {
+    async fn call(&self, args: Value) -> Result<Value> {
+        ensure_joern_available()?;
+        let source = require_str(&args, "source")?.to_string();
+        let sink = require_str(&args, "sink")?.to_string();
+        let max_paths = args
+            .get("maxPaths")
+            .or_else(|| args.get("max_paths"))
+            .and_then(Value::as_u64)
+            .unwrap_or(50) as usize;
+        let raw = run_query(&queries::taint_paths(&source, &sink, max_paths)).await?;
+        let parsed: Value = serde_json::from_str(&raw).unwrap_or(Value::String(raw));
+        Ok(json!({
+            "source": source,
+            "sink": sink,
+            "maxPaths": max_paths,
+            "paths": parsed,
+        }))
+    }
+}
+
+#[async_trait]
+impl ToolHandler for UnsafeBlocksTool {
+    async fn call(&self, args: Value) -> Result<Value> {
+        ensure_joern_available()?;
+        let file = args.get("file").and_then(Value::as_str);
+        let raw = run_query(&queries::unsafe_blocks(file)).await?;
+        let parsed: Value = serde_json::from_str(&raw).unwrap_or(Value::String(raw));
+        Ok(json!({
+            "file": file,
+            "blocks": parsed,
+        }))
+    }
+}
+
+#[async_trait]
+impl ToolHandler for FfiBoundariesTool {
+    async fn call(&self, _args: Value) -> Result<Value> {
+        ensure_joern_available()?;
+        let raw = run_query(queries::ffi_boundaries()).await?;
+        let parsed: Value = serde_json::from_str(&raw).unwrap_or(Value::String(raw));
+        Ok(json!({ "boundaries": parsed }))
+    }
+}
+
+#[async_trait]
+impl ToolHandler for MethodAtTool {
+    async fn call(&self, args: Value) -> Result<Value> {
+        ensure_joern_available()?;
+        let file = require_str(&args, "file")?.to_string();
+        let line = args
+            .get("line")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| anyhow::anyhow!("missing required integer argument: line"))?
+            as u32;
+        let raw = run_query(&queries::method_at(&file, line)).await?;
+        let parsed: Value = serde_json::from_str(&raw).unwrap_or(Value::String(raw));
+        Ok(json!({ "file": file, "line": line, "method": parsed }))
+    }
+}
+
+#[async_trait]
 impl ToolHandler for NotYetImplemented {
     async fn call(&self, _args: Value) -> Result<Value> {
         anyhow::bail!(
@@ -260,9 +383,57 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stubs_return_not_yet_implemented() {
-        let tool = NotYetImplemented("joern.taint_paths");
+    async fn stubs_marker_struct_still_returns_not_yet_implemented() {
+        // Kept for any future tool we register as a stub before wiring.
+        let tool = NotYetImplemented("future.tool");
         let err = tool.call(json!({})).await.unwrap_err();
         assert!(err.to_string().starts_with("NotYetImplemented:"));
+    }
+
+    #[tokio::test]
+    async fn taint_paths_reports_backend_unavailable_when_joern_missing() {
+        if which("joern-parse").is_some() || which("joern").is_some() {
+            return;
+        }
+        let tool = TaintPathsTool;
+        let err = tool
+            .call(json!({"source": "argv", "sink": "system"}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().starts_with("BackendUnavailable:"));
+    }
+
+    #[tokio::test]
+    async fn taint_paths_requires_source_and_sink() {
+        if which("joern-parse").is_none() && which("joern").is_none() {
+            return;
+        }
+        let tool = TaintPathsTool;
+        let err = tool.call(json!({"source": "argv"})).await.unwrap_err();
+        assert!(err.to_string().contains("sink"));
+    }
+
+    #[tokio::test]
+    async fn reaching_def_requires_var_file_and_line() {
+        if which("joern-parse").is_none() && which("joern").is_none() {
+            return;
+        }
+        let tool = ReachingDefTool;
+        let err = tool.call(json!({"file": "/r/a.c"})).await.unwrap_err();
+        assert!(err.to_string().contains("line"));
+    }
+
+    #[tokio::test]
+    async fn unsafe_blocks_accepts_optional_file() {
+        // Schema check only — both valid and invalid args go through the
+        // joern probe; this exercises the schema-validation arm.
+        if which("joern-parse").is_some() || which("joern").is_some() {
+            return;
+        }
+        let tool = UnsafeBlocksTool;
+        let err = tool.call(json!({})).await.unwrap_err();
+        assert!(err.to_string().starts_with("BackendUnavailable:"));
+        let err = tool.call(json!({"file": "/r/lib.rs"})).await.unwrap_err();
+        assert!(err.to_string().starts_with("BackendUnavailable:"));
     }
 }

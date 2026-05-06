@@ -85,6 +85,12 @@ enum Command {
         #[command(subcommand)]
         command: McpCommand,
     },
+    /// Probe external toolchains and report which Kuzushi capabilities are available.
+    Doctor {
+        /// Emit JSON instead of human-readable summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Render a markdown PR comment summarising persisted findings.
     PrComment {
         #[arg(long)]
@@ -192,6 +198,7 @@ async fn main() -> Result<()> {
         Command::Tools { json } => tools_command(json),
         Command::Run { tool, input } => run_tool_command(tool, input, cli.target),
         Command::Mcp { command } => mcp_command(command).await,
+        Command::Doctor { json } => doctor_command(json).await,
         Command::PrComment {
             target,
             repo,
@@ -212,6 +219,94 @@ async fn main() -> Result<()> {
             git_sha,
         ),
     }
+}
+
+async fn doctor_command(json: bool) -> Result<()> {
+    use serde_json::json as jval;
+
+    // Probe each external dependency. We deliberately don't abort on
+    // missing binaries — the point of `kuzushi doctor` is to surface
+    // which capabilities are degraded.
+    let mut probes: Vec<(String, &'static str, &'static [&'static str])> = vec![
+        (
+            "scan/cargo-audit".to_string(),
+            "cargo-audit",
+            &["--version"],
+        ),
+        ("scan/semgrep".to_string(), "semgrep", &["--version"]),
+        ("scan/codeql".to_string(), "codeql", &["--version"]),
+        ("verify/cargo".to_string(), "cargo", &["--version"]),
+        ("verify/clang".to_string(), "clang", &["--version"]),
+        ("verify/gcc".to_string(), "gcc", &["--version"]),
+        ("verify/python3".to_string(), "python3", &["--version"]),
+        ("verify/node".to_string(), "node", &["--version"]),
+        ("verify/tsx".to_string(), "tsx", &["--version"]),
+        ("verify/ts-node".to_string(), "ts-node", &["--version"]),
+        ("sandbox/bwrap".to_string(), "bwrap", &["--version"]),
+        ("sandbox/podman".to_string(), "podman", &["--version"]),
+        ("index/gtags".to_string(), "gtags", &["--version"]),
+        ("index/global".to_string(), "global", &["--version"]),
+        ("index/clangd".to_string(), "clangd", &["--version"]),
+        ("index/joern".to_string(), "joern", &["--version"]),
+        (
+            "index/joern-parse".to_string(),
+            "joern-parse",
+            &["--version"],
+        ),
+        ("index/java".to_string(), "java", &["-version"]),
+        ("clang/cmake".to_string(), "cmake", &["--version"]),
+        ("clang/bear".to_string(), "bear", &["--version"]),
+    ];
+
+    let mut entries: Vec<serde_json::Value> = Vec::with_capacity(probes.len());
+    for (capability, binary, args) in probes.drain(..) {
+        let probe = kuzushi_mcp_common::doctor::probe(binary, args).await;
+        entries.push(jval!({
+            "capability": capability,
+            "binary": probe.binary,
+            "found": probe.found,
+            "path": probe.path,
+            "version": probe.version,
+        }));
+    }
+
+    if json {
+        let envelope = jval!({
+            "ok": true,
+            "capabilities": entries,
+        });
+        println!("{}", serde_json::to_string_pretty(&envelope)?);
+        return Ok(());
+    }
+
+    println!("Kuzushi doctor — toolchain probe");
+    println!("================================");
+    let mut missing = 0usize;
+    for entry in &entries {
+        let cap = entry["capability"].as_str().unwrap_or("?");
+        let bin = entry["binary"].as_str().unwrap_or("?");
+        let found = entry["found"].as_bool().unwrap_or(false);
+        let version = entry["version"].as_str().unwrap_or("");
+        let mark = if found { "ok " } else { "-- " };
+        if !found {
+            missing += 1;
+        }
+        if found {
+            println!("  [{mark}] {cap:<24} {bin:<14} {version}");
+        } else {
+            println!("  [{mark}] {cap:<24} {bin:<14} (not found)");
+        }
+    }
+    println!();
+    if missing == 0 {
+        println!("All probed binaries are present.");
+    } else {
+        println!(
+            "{missing} of {total} probed binaries are missing — capabilities backed by them will degrade gracefully.",
+            total = entries.len()
+        );
+    }
+    Ok(())
 }
 
 async fn mcp_command(command: McpCommand) -> Result<()> {

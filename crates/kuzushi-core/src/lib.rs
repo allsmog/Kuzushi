@@ -71,6 +71,17 @@ pub use threat_model::{
     execute_threat_model_tool, load_persistent_threat_model, save_persistent_threat_model,
 };
 pub use verify::{verify_finding, ProofVerdict, VerificationOutcome, VerifyOptions};
+
+/// Code-index facade and routing primitives, re-exported so other
+/// modules don't need to take a separate dep on `kuzushi-codeindex`.
+pub mod code_index {
+    pub use kuzushi_codeindex::{
+        Backend, BackendCapability, FilePosition, IndexFacade, McpClient, Query, RoutingTable,
+    };
+    pub use kuzushi_mcp_common::schema::{
+        EdgeKind, FileSpan, Method, Position, Range, Symbol, SymbolKind,
+    };
+}
 pub use workspace::{
     export_workspace_findings, WorkspaceExportFormat, WorkspaceFindingsExport, WorkspaceTarget,
 };
