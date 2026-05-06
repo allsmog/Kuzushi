@@ -70,7 +70,7 @@
       ],
       "storyGate": "cargo check -p kuzushi-core && cargo test -p kuzushi-core modules",
       "commitMessage": "refactor: simplify core module registry",
-      "passes": false
+      "passes": true
     },
     {
       "id": "UB-003",
@@ -92,7 +92,7 @@
       ],
       "storyGate": "cargo test -p kuzushi-tui app::tests",
       "commitMessage": "refactor: simplify rust tui app state",
-      "passes": false
+      "passes": true
     },
     {
       "id": "UB-004",
@@ -114,7 +114,7 @@
       ],
       "storyGate": "cargo test -p kuzushi-tui renderer::tests",
       "commitMessage": "refactor: simplify rust tui renderer",
-      "passes": false
+      "passes": true
     },
     {
       "id": "UB-005",
@@ -136,7 +136,7 @@
       ],
       "storyGate": "cargo check -p kuzushi-core && cargo test -p kuzushi-core verify",
       "commitMessage": "refactor: simplify verification pipeline",
-      "passes": false
+      "passes": true
     },
     {
       "id": "UB-006",
@@ -158,7 +158,7 @@
       ],
       "storyGate": "cargo check -p kuzushi-core && cargo test -p kuzushi-core findings",
       "commitMessage": "refactor: simplify findings helpers",
-      "passes": false
+      "passes": true
     },
     {
       "id": "UB-007",
@@ -184,7 +184,7 @@
       ],
       "storyGate": "cargo check -p kuzushi-core && cargo test -p kuzushi-core",
       "commitMessage": "refactor: simplify secondary rust hotspot",
-      "passes": false
+      "passes": true
     },
     {
       "id": "UB-008",
@@ -204,7 +204,7 @@
       "requiresAiChanges": false,
       "storyGate": "cargo test --workspace && pnpm build",
       "commitMessage": "chore: record uncle bob simplification milestone",
-      "passes": false
+      "passes": true
     }
   ]
 }
