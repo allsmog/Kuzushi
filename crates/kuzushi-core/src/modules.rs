@@ -32,7 +32,7 @@ use crate::variant_ndiff::{
     run_ndiff_extract_fix_pattern, run_ndiff_fetch_cve, run_ndiff_hunt_variants, run_variant_hunt,
     run_variant_lift_pattern,
 };
-use crate::whitebox_static::apply_whitebox_static_sast_policy;
+use crate::whitebox_static::{agent_tool_policy_for_input, apply_whitebox_static_sast_policy};
 use crate::workspace::{export_workspace_findings, WorkspaceExportFormat, WorkspaceTarget};
 use crate::x_ray::execute_x_ray_tool;
 use uuid::Uuid;
@@ -638,9 +638,15 @@ fn run_sast_scan(
         engine_ids.push("taint-iris-next");
         let mut next_input = input.clone();
         if let Value::Object(object) = &mut next_input {
-            object
-                .entry("mode".to_string())
-                .or_insert_with(|| json!("hunt"));
+            let should_use_hunt_mode = object
+                .get("mode")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .map(|mode| matches!(mode, "standard" | "whitebox-static"))
+                .unwrap_or(true);
+            if should_use_hunt_mode {
+                object.insert("mode".to_string(), json!("hunt"));
+            }
         }
         Some(run_taint_iris_next_report(&next_input, ctx, runtime)?)
     } else {
@@ -1228,25 +1234,32 @@ fn run_agentic_sast_report(
         .context(
             "agentic-sast:scan requires an explicit model in config.toml, KUZUSHI_MODEL, or tool input; Kuzushi will not choose a fallback model",
         )?;
+    let agent_tool_policy = agent_tool_policy_for_input(input)?;
 
     let inventory = collect_agentic_repo_inventory(&target, 80, 2048)?;
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model: model.clone(),
-        cwd: target.clone(),
-        system_prompt: AGENTIC_SAST_SYSTEM_PROMPT.to_string(),
-        prompt: build_agentic_sast_prompt(&target, &options, &inventory, None),
-    })?;
+    let response = runtime.query_blocking(
+        AgentQueryRequest::new(
+            model.clone(),
+            target.clone(),
+            AGENTIC_SAST_SYSTEM_PROMPT.to_string(),
+            build_agentic_sast_prompt(&target, &options, &inventory, None),
+        )
+        .with_tool_policy(agent_tool_policy.clone()),
+    )?;
     let first_raw = parse_agentic_sast_response(response)?;
     let mut findings = normalize_agentic_sast_findings(first_raw, &target, options.max_findings)?;
 
     if options.passes == 2 && !findings.is_empty() {
         let review_context = summarize_agentic_findings_for_review(&findings);
-        let review_response = runtime.query_blocking(AgentQueryRequest {
-            model: model.clone(),
-            cwd: target.clone(),
-            system_prompt: AGENTIC_SAST_SYSTEM_PROMPT.to_string(),
-            prompt: build_agentic_sast_prompt(&target, &options, &inventory, Some(&review_context)),
-        })?;
+        let review_response = runtime.query_blocking(
+            AgentQueryRequest::new(
+                model.clone(),
+                target.clone(),
+                AGENTIC_SAST_SYSTEM_PROMPT.to_string(),
+                build_agentic_sast_prompt(&target, &options, &inventory, Some(&review_context)),
+            )
+            .with_tool_policy(agent_tool_policy.clone()),
+        )?;
         let review_raw = parse_agentic_sast_response(review_response)?;
         let review_findings =
             normalize_agentic_sast_findings(review_raw, &target, options.max_findings)?;
@@ -1722,12 +1735,15 @@ fn run_taint_iris_report(
 
     let inventory = collect_agentic_repo_inventory(&target, 80, 2048)?;
     let codeql_db = resolve_taint_codeql_db_path(&target, ctx.workspace.map(WorkspaceTarget::root));
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model: model.clone(),
-        cwd: target.clone(),
-        system_prompt: TAINT_IRIS_SYSTEM_PROMPT.to_string(),
-        prompt: build_taint_iris_prompt(&target, &cwes, &inventory, codeql_db.as_deref(), &options),
-    })?;
+    let response = runtime.query_blocking(
+        AgentQueryRequest::new(
+            model.clone(),
+            target.clone(),
+            TAINT_IRIS_SYSTEM_PROMPT.to_string(),
+            build_taint_iris_prompt(&target, &cwes, &inventory, codeql_db.as_deref(), &options),
+        )
+        .with_tool_policy(agent_tool_policy_for_input(input)?),
+    )?;
     let raw = parse_taint_iris_response(response)?;
     let findings = normalize_taint_iris_findings(raw, &target, options.max_findings)?;
     let persisted = persist_taint_iris_findings(&target, &findings, ctx)?;
@@ -1760,12 +1776,15 @@ fn run_taint_cwe_select_value(
         "pipeline:taint-cwe-select requires an explicit model in config.toml, KUZUSHI_MODEL, or tool input; Kuzushi will not choose a fallback model",
     )?;
     let inventory = collect_agentic_repo_inventory(target, 60, 1024)?;
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model: model.to_string(),
-        cwd: target.to_path_buf(),
-        system_prompt: TAINT_CWE_SELECT_SYSTEM_PROMPT.to_string(),
-        prompt: build_taint_cwe_select_prompt(target, &inventory),
-    })?;
+    let response = runtime.query_blocking(
+        AgentQueryRequest::new(
+            model.to_string(),
+            target.to_path_buf(),
+            TAINT_CWE_SELECT_SYSTEM_PROMPT.to_string(),
+            build_taint_cwe_select_prompt(target, &inventory),
+        )
+        .with_tool_policy(agent_tool_policy_for_input(input)?),
+    )?;
     parse_taint_cwe_select_response(response)
 }
 
@@ -2744,7 +2763,14 @@ fn run_taint_iris_next_report(
         .context(
             "taint-iris-next:hunt requires an explicit model in config.toml, KUZUSHI_MODEL, or tool input; Kuzushi will not choose a fallback model",
         )?;
-    let agent = run_taint_iris_next_agent(&plan, &evidence, &agent_prompt, runtime, &model)?;
+    let agent = run_taint_iris_next_agent(
+        &plan,
+        &evidence,
+        &agent_prompt,
+        runtime,
+        &model,
+        agent_tool_policy_for_input(input)?,
+    )?;
     let persisted = persist_taint_iris_next_findings(&target, &agent.findings, ctx)?;
     let output = render_taint_iris_next_output(&plan, &evidence, Some(&agent));
     let status = if agent.outcome == "agent-output-invalid" {
@@ -3790,23 +3816,30 @@ fn run_taint_iris_next_agent(
     agent_prompt: &str,
     runtime: &dyn AgentRuntime,
     model: &str,
+    agent_tool_policy: crate::runtime::AgentToolPolicy,
 ) -> Result<TaintIrisNextAgentResult> {
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model: model.to_string(),
-        cwd: plan.repo_root.clone(),
-        system_prompt: TAINT_IRIS_NEXT_SYSTEM_PROMPT.to_string(),
-        prompt: agent_prompt.to_string(),
-    })?;
+    let response = runtime.query_blocking(
+        AgentQueryRequest::new(
+            model.to_string(),
+            plan.repo_root.clone(),
+            TAINT_IRIS_NEXT_SYSTEM_PROMPT.to_string(),
+            agent_prompt.to_string(),
+        )
+        .with_tool_policy(agent_tool_policy.clone()),
+    )?;
     let mut retry_count = 0usize;
     let mut parsed = parse_taint_iris_next_agent_response(response);
     if parsed.is_err() {
         retry_count = 1;
-        let repair = runtime.query_blocking(AgentQueryRequest {
-            model: model.to_string(),
-            cwd: plan.repo_root.clone(),
-            system_prompt: TAINT_IRIS_NEXT_SYSTEM_PROMPT.to_string(),
-            prompt: build_taint_iris_next_repair_prompt(plan, evidence),
-        })?;
+        let repair = runtime.query_blocking(
+            AgentQueryRequest::new(
+                model.to_string(),
+                plan.repo_root.clone(),
+                TAINT_IRIS_NEXT_SYSTEM_PROMPT.to_string(),
+                build_taint_iris_next_repair_prompt(plan, evidence),
+            )
+            .with_tool_policy(agent_tool_policy),
+        )?;
         parsed = parse_taint_iris_next_agent_response(repair);
     }
 
@@ -5008,12 +5041,12 @@ fn run_verify_finding(
     )?;
 
     let prompt = build_verify_prompt(&finding, &triage, input.prompt_template.as_deref())?;
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: workspace.root().to_path_buf(),
-        system_prompt: VERIFY_SYSTEM_PROMPT.to_string(),
+        workspace.root().to_path_buf(),
+        VERIFY_SYSTEM_PROMPT.to_string(),
         prompt,
-    })?;
+    ))?;
     let raw = match response.structured {
         Some(value) => value,
         None => parse_json_object_from_agent_text(&response.text).with_context(|| {
@@ -5582,16 +5615,16 @@ fn vendor_assessment_assess(
             "vendor-assessment:assess with parsed documents requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
         )?;
         let model = resolve_tool_model("vendor-assessment:assess", &input, ctx)?;
-        let response = runtime.query_blocking(AgentQueryRequest {
+        let response = runtime.query_blocking(AgentQueryRequest::new(
             model,
-            cwd: root.clone(),
-            system_prompt: "You are Kuzushi's vendor security assessment agent. Return only JSON with overallRisk, confidence, summary, domains, mitigations, and documents.".to_string(),
-            prompt: prompts
+            root.clone(),
+            "You are Kuzushi's vendor security assessment agent. Return only JSON with overallRisk, confidence, summary, domains, mitigations, and documents.".to_string(),
+            prompts
                 .iter()
                 .map(|(_, content)| content.as_str())
                 .collect::<Vec<_>>()
                 .join("\n\n"),
-        })?;
+        ))?;
         let raw = response
             .structured
             .or_else(|| parse_json_object_from_agent_text(&response.text).ok());
@@ -6077,15 +6110,15 @@ fn run_plugin_finding_adapter(
             .unwrap_or(50)
             .min(200);
     let inventory = collect_agentic_repo_inventory(&target, 100, 4096)?;
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: target.clone(),
-        system_prompt: format!(
+        target.clone(),
+        format!(
             "You are Kuzushi's {} pi-agent-core adapter. Return only JSON matching {{\"findings\":[{{\"ruleId\":\"...\",\"filePath\":\"relative/path\",\"startLine\":1,\"severity\":\"critical|high|medium|low|info\",\"message\":\"evidence-backed finding\",\"evidence\":\"source-grounded proof\"}}]}}.",
             spec.tool_name
         ),
-        prompt: build_plugin_adapter_prompt(spec, &target, &plugin_root, &input, &inventory),
-    })?;
+        build_plugin_adapter_prompt(spec, &target, &plugin_root, &input, &inventory),
+    ))?;
     let raw = response.structured.unwrap_or_else(|| {
         parse_json_object_from_agent_text(&response.text).unwrap_or(json!({"findings": []}))
     });
@@ -6272,12 +6305,12 @@ fn run_shinsa_assessment(
     let output_dir = string_input_any(&input, &["outputDir", "output_dir"])
         .unwrap_or_else(|| "shinsa-output".to_string());
     let inventory = collect_agentic_repo_inventory(&target, 100, 4096)?;
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: target.clone(),
-        system_prompt: "You are Kuzushi's Shinsa compliance adapter. Return only JSON with summary, findings, controls, and maturity.".to_string(),
-        prompt: build_shinsa_prompt(mode, &output_dir, &plugin_root, &input, &inventory),
-    })?;
+        target.clone(),
+        "You are Kuzushi's Shinsa compliance adapter. Return only JSON with summary, findings, controls, and maturity.".to_string(),
+        build_shinsa_prompt(mode, &output_dir, &plugin_root, &input, &inventory),
+    ))?;
     let raw = response.structured.unwrap_or_else(|| {
         parse_json_object_from_agent_text(&response.text).unwrap_or(json!({"findings": []}))
     });
@@ -6443,12 +6476,12 @@ fn prompt_armor_runtime_tool(
     ))?;
     let model = resolve_tool_model(tool_name, &input, ctx)?;
     let inventory = collect_agentic_repo_inventory(&target, 100, 4096)?;
-    let response = runtime.query_blocking(AgentQueryRequest {
+    let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
-        cwd: target.clone(),
-        system_prompt: "You are Kuzushi's PromptArmor adapter. Return only JSON with findings and summary. Ground findings in source snippets when doing static analyze.".to_string(),
-        prompt: build_prompt_armor_prompt(command, &plugin_root, &input, &inventory),
-    })?;
+        target.clone(),
+        "You are Kuzushi's PromptArmor adapter. Return only JSON with findings and summary. Ground findings in source snippets when doing static analyze.".to_string(),
+        build_prompt_armor_prompt(command, &plugin_root, &input, &inventory),
+    ))?;
     let raw = response.structured.unwrap_or_else(|| {
         parse_json_object_from_agent_text(&response.text).unwrap_or(json!({"findings": []}))
     });
@@ -10374,6 +10407,64 @@ OUT
         assert_eq!(query.model, "openai:gpt-4.1");
         assert!(query.prompt.contains("src/db.ts"));
         assert!(query.prompt.contains("db.query(req.query.q)"));
+    }
+
+    #[test]
+    fn whitebox_agent_tools_for_agentic_sast_are_read_only() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/db.ts"), "db.query(req.query.q)\n").unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "sast:scan",
+                json!({
+                    "mode": "whitebox-static",
+                    "taskMode": "manual",
+                    "tasks": ["agentic"],
+                    "maxFindings": 5
+                }),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(
+            result.pointer("/data/mode").and_then(Value::as_str),
+            Some("whitebox-static")
+        );
+        let query = runtime.queries().pop().unwrap();
+        assert_eq!(query.tool_policy.profile, "whitebox-static");
+        assert_eq!(
+            query.tool_policy.tools,
+            vec![
+                "Read".to_string(),
+                "Glob".to_string(),
+                "Grep".to_string(),
+                "LS".to_string()
+            ]
+        );
+        for forbidden in ["Bash", "shell", "Write", "Edit", "patch", "apply_patch"] {
+            assert!(
+                !query
+                    .tool_policy
+                    .tools
+                    .iter()
+                    .any(|tool| tool.eq_ignore_ascii_case(forbidden)),
+                "forbidden whitebox tool was enabled: {forbidden}"
+            );
+        }
     }
 
     #[test]

@@ -6,8 +6,8 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, RuntimeConfig, TriageOutcome,
-    TriageRequest, TriageVerdict, V2Config,
+    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolPolicy, RuntimeConfig,
+    TriageOutcome, TriageRequest, TriageVerdict, V2Config,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -78,6 +78,7 @@ impl AgentRuntime for PiAgentCoreRuntime {
             api_key: self.api_key.clone(),
             base_url: self.base_url.clone(),
             thinking_level: self.thinking_level.clone(),
+            tool_policy: request.tool_policy,
         };
 
         let response = run_bridge(&self.command, &bridge_request)?;
@@ -98,12 +99,12 @@ impl AgentRuntime for PiAgentCoreRuntime {
 
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
         let prompt = triage_prompt(&request.finding, request.prompt_template.as_deref())?;
-        let response = self.query_blocking(AgentQueryRequest {
-            model: request.model,
-            cwd: request.cwd,
-            system_prompt: TRIAGE_SYSTEM_PROMPT.to_string(),
+        let response = self.query_blocking(AgentQueryRequest::new(
+            request.model,
+            request.cwd,
+            TRIAGE_SYSTEM_PROMPT.to_string(),
             prompt,
-        })?;
+        ))?;
 
         if let Some(structured) = response.structured {
             if let Ok(outcome) = serde_json::from_value::<TriageOutcome>(structured.clone()) {
@@ -215,6 +216,7 @@ struct BridgeRequest {
     api_key: Option<String>,
     base_url: Option<String>,
     thinking_level: Option<String>,
+    tool_policy: AgentToolPolicy,
 }
 
 #[derive(Debug, Deserialize)]
