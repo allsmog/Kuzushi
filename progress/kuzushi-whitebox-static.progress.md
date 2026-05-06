@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-011 - Add attack-surface map from source
-Status: WB-010 complete in iteration 38; WB-011 pending
+Active story: WB-012 - Add static proof validator
+Status: WB-011 complete in iteration 39; WB-012 pending
 
 ## Stage 3 Checklist
 
@@ -16,7 +16,7 @@ Status: WB-010 complete in iteration 38; WB-011 pending
 - WB-008 Normalize CodeQL SARIF code flows into static evidence: complete in iteration 36.
 - WB-009 Build deterministic repository inventory: complete in iteration 37.
 - WB-010 Build source/sink/sanitizer/guard registry: complete in iteration 38.
-- WB-011 Add attack-surface map from source: pending.
+- WB-011 Add attack-surface map from source: complete in iteration 39.
 - WB-012 Add static proof validator: pending.
 - WB-013 Constrain LLM triage to whitebox schema: pending.
 - WB-014 Verify LLM citations before persistence: pending.
@@ -30,6 +30,49 @@ Status: WB-010 complete in iteration 38; WB-011 pending
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 39 - WB-011
+
+- Task attempted: add a deterministic whitebox-static attack-surface map from
+  repository source without live app execution.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `crates/kuzushi-core/src/attack_surface.rs`
+  - `crates/kuzushi-core/src/lib.rs`
+  - `crates/kuzushi-core/src/modules.rs`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `git status --short --branch` in the clean nested clone
+  - `sed -n '1,260p' progress/kuzushi-whitebox-static.progress.md`
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core attack_surface`
+  - `cargo test -p kuzushi-core dispatches_context_build_snapshot`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `pnpm eval:kuzushi-whitebox-static` with the primary checkout's
+    `node_modules` temporarily symlinked into the clean nested clone
+- Result: implementation complete. `attack_surface.rs` now builds a
+  deterministic source-derived map with `http_route`, `rpc_handler`,
+  `cli_entrypoint`, `background_job`, `deserialization_point`,
+  `file_upload_parse_path`, `auth_boundary`, `db_query_boundary`, and
+  `command_execution_boundary` surfaces. Node/Express fixtures cover routes,
+  GraphQL/RPC, uploads, auth middleware, parser boundaries, DB calls, command
+  execution, background jobs, and CLI arguments, while verifying that package
+  scripts are not executed. `context:build` now embeds `attackSurfaceMap` and
+  projects routes, background jobs, data stores, and service boundaries into
+  the app model. WB-011 is marked `passes: true` in the PRD after the story
+  gate and fast whitebox checks passed.
+- Remaining work: WB-012 through WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files. This iteration continued in the
+    clean nested clone at `/tmp/kuzushi-ux2-clone.PJaRge` after fast-forwarding
+    it to `origin/main`.
+  - The nested clone does not have its own `node_modules`; the eval used a
+    temporary symlink to the primary checkout's installed dependencies and then
+    removed it before commit.
 
 ### Iteration 38 - WB-010
 
