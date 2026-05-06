@@ -27,9 +27,11 @@ use crate::scan::{
     SemgrepPersistedRun, SemgrepScanReport, SemgrepScanner,
 };
 use crate::secret_scan::{scan_for_secrets, SecretScanOptions};
+use crate::static_evidence::StaticEvidenceStore;
 use crate::static_proof_validator::{
     static_proof_claim_from_whitebox_schema, validate_static_proof_claim, StaticProofValidation,
 };
+use crate::static_ranking::rank_static_findings;
 use crate::systems_hunt::{execute_systems_hunt_tool, run_systems_hunt_report};
 use crate::threat_model::execute_threat_model_tool;
 use crate::variant_ndiff::{
@@ -812,6 +814,13 @@ fn run_sast_scan(
             artifacts.dir.join("scan-input.json").display()
         )
     })?;
+    let static_ranking = if whitebox_static.is_some() {
+        Some(write_static_ranking_json(
+            workspace, store, &run_ids, &artifacts,
+        )?)
+    } else {
+        None
+    };
 
     let triage = if triage_requested {
         let fingerprints = fingerprints_for_sast_runs(store, &run_ids)?;
@@ -863,6 +872,20 @@ fn run_sast_scan(
             "  Mode: whitebox-static (static-only; verify, dynamic analysis, PoC, and patch disabled)"
                 .to_string(),
         );
+        if let Some(top) = static_ranking
+            .as_ref()
+            .and_then(|ranking| ranking.pointer("/ranked/0"))
+        {
+            let score = top
+                .pointer("/impact/total")
+                .and_then(Value::as_i64)
+                .unwrap_or_default();
+            let title = top
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("top static-impact finding");
+            lines.push(format!("  Static ranking: top score {score} · {title}"));
+        }
     }
     lines.push(format!("  Engines: {}", engine_ids.join(", ")));
     if let Some(triage_output) = triage
@@ -906,6 +929,7 @@ fn run_sast_scan(
             "taintIris": taint_iris_report.as_ref().map(|report| json!(report)),
             "taintIrisNext": taint_iris_next_report.as_ref().map(|report| json!(report)),
             "systemsHunt": systems_hunt_report.as_ref().map(|report| json!(report)),
+            "staticRanking": static_ranking,
             "triage": triage.as_ref().and_then(|value| value.get("data")).cloned(),
             "verification": {
                 "verified": verification_results.len(),
@@ -1011,6 +1035,58 @@ fn fingerprints_for_sast_runs(store: &FindingStore, run_ids: &SastRunIds) -> Res
         }
     }
     Ok(fingerprints)
+}
+
+fn findings_for_sast_runs(store: &FindingStore, run_ids: &SastRunIds) -> Result<Vec<Finding>> {
+    let mut findings = Vec::new();
+    let mut seen = BTreeSet::new();
+    for run_id in run_ids.all() {
+        for finding in store.list_findings_for_scan_id(run_id)? {
+            if seen.insert(finding.fingerprint.clone()) {
+                findings.push(finding);
+            }
+        }
+    }
+    Ok(findings)
+}
+
+fn write_static_ranking_json(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    run_ids: &SastRunIds,
+    artifacts: &SastRunArtifacts,
+) -> Result<Value> {
+    let findings = findings_for_sast_runs(store, run_ids)?;
+    let attack_surface = crate::attack_surface::build_attack_surface_map(workspace.root()).ok();
+    let evidence_store = StaticEvidenceStore::open(workspace).ok();
+    let ranked = rank_static_findings(&findings, attack_surface.as_ref(), evidence_store.as_ref())?;
+    let artifact_path = artifacts.dir.join("static-ranking.json");
+    let report = json!({
+        "count": ranked.len(),
+        "ranked": ranked,
+        "attackSurfaceAvailable": attack_surface.is_some(),
+        "evidenceDb": evidence_store
+            .as_ref()
+            .map(|store| store.db_path().to_string()),
+        "artifact": artifact_path.display().to_string(),
+        "deterministic": true,
+        "factors": [
+            "attackSurfaceReachability",
+            "sourceSinkClass",
+            "dataSensitivity",
+            "privilegeBoundary",
+            "sanitizerAbsence",
+            "frameworkContext",
+            "codeqlFlowQuality",
+            "confidence"
+        ],
+    });
+    fs::write(
+        &artifact_path,
+        format!("{}\n", serde_json::to_string_pretty(&report)?),
+    )
+    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    Ok(report)
 }
 
 fn true_positive_fingerprints_for_sast_runs(

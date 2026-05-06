@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-015 - Prioritize findings by static impact
-Status: WB-014 complete in iteration 42; WB-015 pending
+Active story: WB-016 - Add Static Trigger/Impact Narratives
+Status: WB-015 complete in iteration 43; WB-016 pending
 
 ## Stage 3 Checklist
 
@@ -20,7 +20,7 @@ Status: WB-014 complete in iteration 42; WB-015 pending
 - WB-012 Add static proof validator: complete in iteration 40.
 - WB-013 Constrain LLM triage to whitebox schema: complete in iteration 41.
 - WB-014 Verify LLM citations before persistence: complete in iteration 42.
-- WB-015 Prioritize findings by static impact: pending.
+- WB-015 Prioritize findings by static impact: complete in iteration 43.
 - WB-016 Add static trigger/impact narratives: pending.
 - WB-017 Add variant search from statically confirmed findings: pending.
 - WB-018 Add candidate Semgrep rule synthesis: pending.
@@ -30,6 +30,51 @@ Status: WB-014 complete in iteration 42; WB-015 pending
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 43 - WB-015
+
+- Task attempted: add deterministic whitebox-static finding prioritization so
+  source-grounded, high-impact static flows rank ahead of generic scanner
+  noise.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `crates/kuzushi-core/src/static_ranking.rs`
+  - `crates/kuzushi-core/src/lib.rs`
+  - `crates/kuzushi-core/src/modules.rs`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `git status --short --branch` in the clean nested clone
+  - `sed -n '1,240p' progress/kuzushi-whitebox-static.progress.md`
+  - `rg -n "WB-015|priority|prioriti|rank|staticProof|StaticProof|attackSurface|static impact|confidence|CodeQL|flow" tasks/kuzushi-whitebox-static.prd.json crates/kuzushi-core/src evals docs tests -S`
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core static_ranking`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `pnpm eval:kuzushi-whitebox-static` with the primary checkout's
+    `node_modules` temporarily symlinked into the clean nested clone
+- Result: implementation complete. `static_ranking.rs` now scores findings with
+  deterministic factors for severity, static proof state, attack-surface
+  reachability, source/sink class, data sensitivity, privilege boundary,
+  sanitizer or guard absence, framework context, CodeQL flow quality,
+  confidence, and scanner-noise penalties. `sast:scan` writes
+  `.kuzushi/runs/<runId>/static-ranking.json` in `whitebox-static` mode and
+  includes the ranking in the tool result. Tests prove a CodeQL-backed
+  source-to-sink SQL flow reachable from an Express route outranks a critical
+  generic Semgrep noise finding, ties are deterministic, and sanitized or
+  statically rejected findings are downranked. WB-015 is marked `passes: true`
+  in the PRD after the story gate and fast whitebox checks passed.
+- Remaining work: WB-016 through WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files, while the clean nested clone at
+    `/Users/operator/VibeCode/open-sourced/kuzushi/.codex-active/kuzushi-stage3`
+    contains the active pushed Stage 3 state. This iteration continued in the
+    nested clone to avoid resetting or overwriting the primary worktree.
+  - The nested clone does not have its own `node_modules`; the eval used a
+    temporary symlink to the primary checkout's installed dependencies and then
+    removed it before commit.
 
 ### Iteration 42 - WB-014
 
