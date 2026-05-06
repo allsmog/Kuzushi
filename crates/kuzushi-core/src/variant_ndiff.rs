@@ -1562,6 +1562,7 @@ mod tests {
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.91,
                     rationale: "user input reaches exec".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -1644,6 +1645,7 @@ mod tests {
                     verdict: TriageVerdict::NeedsReview,
                     confidence: 0.4,
                     rationale: "not confirmed".to_string(),
+                    ..Default::default()
                 },
             )
             .unwrap();
