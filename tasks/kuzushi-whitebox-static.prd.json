@@ -171,7 +171,7 @@
       "acceptance": ["Schema includes verdict, staticProofState, source, sink, path, assessments, citations, assumptions, missingEvidence, narratives, and fix.", "Prompt forbids payloads, PoCs, exploit execution, and runtime exploitability claims."],
       "storyGate": "cargo test -p kuzushi-core whitebox_triage_prompt",
       "forbidden": ["payloads", "PoCs", "runtime exploitability claims"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-014",

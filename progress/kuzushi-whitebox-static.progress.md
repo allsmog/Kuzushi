@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-013 - Constrain LLM triage to whitebox schema
-Status: WB-012 complete in iteration 40; WB-013 pending
+Active story: WB-014 - Verify LLM citations before persistence
+Status: WB-013 complete in iteration 41; WB-014 pending
 
 ## Stage 3 Checklist
 
@@ -18,7 +18,7 @@ Status: WB-012 complete in iteration 40; WB-013 pending
 - WB-010 Build source/sink/sanitizer/guard registry: complete in iteration 38.
 - WB-011 Add attack-surface map from source: complete in iteration 39.
 - WB-012 Add static proof validator: complete in iteration 40.
-- WB-013 Constrain LLM triage to whitebox schema: pending.
+- WB-013 Constrain LLM triage to whitebox schema: complete in iteration 41.
 - WB-014 Verify LLM citations before persistence: pending.
 - WB-015 Prioritize findings by static impact: pending.
 - WB-016 Add static trigger/impact narratives: pending.
@@ -30,6 +30,53 @@ Status: WB-012 complete in iteration 40; WB-013 pending
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 41 - WB-013
+
+- Task attempted: constrain model-backed whitebox-static agentic SAST triage to
+  a static-only, source-grounded schema and forbid dynamic/exploitative output
+  in the prompt contract.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `crates/kuzushi-core/src/whitebox_static.rs`
+  - `crates/kuzushi-core/src/modules.rs`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `git status --short --branch` in the clean nested clone
+  - `sed -n '1,260p' progress/kuzushi-whitebox-static.progress.md`
+  - `sed -n '1,260p' tasks/kuzushi-whitebox-static.prd.json`
+  - `rg -n "WB-013|whitebox_triage_prompt|staticProofState|prompt" crates/kuzushi-core/src crates/kuzushi-core/tests tests evals docs tasks progress`
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core whitebox_triage_prompt`
+  - `cargo fmt --all --check`
+  - `git diff --check`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `pnpm eval:kuzushi-whitebox-static` with the primary checkout's
+    `node_modules` temporarily symlinked into the clean nested clone
+- Result: implementation complete. `whitebox_static.rs` now owns the
+  whitebox-static triage system prompt and prompt block with a JSON schema
+  containing `verdict`, `staticProofState`, `source`, `sink`, `path`,
+  sanitizer/guard assessments, citations, assumptions, missing evidence,
+  trigger/impact narratives, and recommended fixes. The prompt forbids
+  payloads, PoCs, exploit execution, HTTP replay, fuzzing, live target
+  scanning, and runtime exploitability claims. `agentic-sast:scan` uses this
+  contract only in `whitebox-static` mode, while standard mode keeps the
+  existing schema. The agentic normalizer now accepts the new schema fields,
+  preserves static proof state, and falls back to cited/source/sink locations.
+  WB-013 is marked `passes: true` in the PRD after the story gate and fast
+  whitebox checks passed.
+- Remaining work: WB-014 through WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files, while the clean nested clone at
+    `/Users/operator/VibeCode/open-sourced/kuzushi/.codex-active/kuzushi-stage3`
+    contains the active pushed Stage 3 state. This iteration continued in the
+    nested clone to avoid resetting or overwriting the primary worktree.
+  - The nested clone does not have its own `node_modules`; the eval used a
+    temporary symlink to the primary checkout's installed dependencies and then
+    removed it before commit.
 
 ### Iteration 40 - WB-012
 
