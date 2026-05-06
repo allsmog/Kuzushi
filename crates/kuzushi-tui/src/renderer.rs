@@ -1164,6 +1164,37 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         lines.push(transcript_line("error", error, false));
     }
 
+    if !app.findings.is_empty() {
+        lines.push(blank());
+        let triaged = app.findings.iter().filter(|f| f.triage.is_some()).count();
+        let pending = app.findings.len().saturating_sub(triaged);
+        let header = format!(
+            "FINDINGS · {triaged} triaged · {pending} pending",
+        );
+        lines.push(section_header_line(&header, area.width));
+        let aliases = sorted_finding_aliases(&app.findings);
+        for (alias, finding) in aliases.into_iter().take(8) {
+            lines.push(compact_finding_row(
+                &alias,
+                finding.severity,
+                &finding.title,
+                &finding_location(&finding),
+                area.width,
+            ));
+        }
+        if app.findings.len() > 8 {
+            lines.push(Line::from(vec![
+                Span::raw("   "),
+                Span::styled(
+                    format!("… {} more · ", app.findings.len() - 8),
+                    theme::muted(),
+                ),
+                Span::styled("/findings", theme::accent()),
+                Span::styled(" to drill in", theme::muted()),
+            ]));
+        }
+    }
+
     lines.push(blank());
     lines.push(divider("TRANSCRIPT", area.width));
     lines.extend(transcript_lines(
