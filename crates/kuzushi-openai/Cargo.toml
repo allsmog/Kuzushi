@@ -11,6 +11,10 @@ repository.workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+dirs.workspace = true
 kuzushi-core = { path = "../kuzushi-core" }
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
