@@ -965,6 +965,8 @@ fn metrics_command(target: Option<PathBuf>, recent: usize, json: bool) -> Result
     let total_findings: usize = by_severity.iter().map(|(_, count)| count).sum();
     let total_runs = runs.len();
 
+    let analysis_summary = aggregate_analysis_history(&store)?;
+
     let tp = verdict_count(&by_verdict, "true_positive");
     let fp = verdict_count(&by_verdict, "false_positive");
     let triaged = tp + fp;
@@ -992,6 +994,16 @@ fn metrics_command(target: Option<PathBuf>, recent: usize, json: bool) -> Result
                 "truePositive": tp,
                 "falsePositive": fp,
                 "tpRate": tp_rate,
+                "analysisHistory": {
+                    "entries": analysis_summary.total_entries,
+                    "findingsCovered": analysis_summary.findings_covered,
+                    "byAgentType": analysis_summary.by_agent_type
+                        .iter()
+                        .cloned()
+                        .collect::<std::collections::BTreeMap<String, usize>>(),
+                    "totalCostUsd": analysis_summary.total_cost_usd,
+                    "refusalEntries": analysis_summary.refusal_entries,
+                },
             }))?
         );
         return Ok(());
@@ -1023,6 +1035,34 @@ fn metrics_command(target: Option<PathBuf>, recent: usize, json: bool) -> Result
             .map(|rate| format!("{:.1}%", rate * 100.0))
             .unwrap_or_else(|| "n/a".to_string())
     );
+    if analysis_summary.total_entries > 0 {
+        println!();
+        println!(
+            "Analysis history:       {} entr(y|ies) across {} finding(s){}",
+            analysis_summary.total_entries,
+            analysis_summary.findings_covered,
+            if analysis_summary.refusal_entries > 0 {
+                format!(" · {} ⚠ refusal(s)", analysis_summary.refusal_entries)
+            } else {
+                String::new()
+            }
+        );
+        if !analysis_summary.by_agent_type.is_empty() {
+            let line = analysis_summary
+                .by_agent_type
+                .iter()
+                .map(|(agent, count)| format!("{agent} {count}"))
+                .collect::<Vec<_>>()
+                .join(" · ");
+            println!("By agent type:          {line}");
+        }
+        if analysis_summary.total_cost_usd > 0.0 {
+            println!(
+                "Total recorded cost:    ${:.4}",
+                analysis_summary.total_cost_usd
+            );
+        }
+    }
     if !runs.is_empty() {
         println!();
         println!("Recent runs:");
@@ -1038,6 +1078,39 @@ fn metrics_command(target: Option<PathBuf>, recent: usize, json: bool) -> Result
         }
     }
     Ok(())
+}
+
+#[derive(Debug, Default)]
+struct AnalysisSummary {
+    total_entries: usize,
+    findings_covered: usize,
+    by_agent_type: Vec<(String, usize)>,
+    total_cost_usd: f64,
+    refusal_entries: usize,
+}
+
+fn aggregate_analysis_history(store: &FindingStore) -> Result<AnalysisSummary> {
+    let report = store.list_findings_filtered(&FindingListFilter::default())?;
+    let mut summary = AnalysisSummary::default();
+    let mut by_agent: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    for finding in &report.findings {
+        let history = store.get_analysis_history(&finding.fingerprint)?;
+        if history.is_empty() {
+            continue;
+        }
+        summary.findings_covered += 1;
+        summary.total_entries += history.len();
+        for entry in history {
+            *by_agent.entry(entry.agent_type.clone()).or_default() += 1;
+            summary.total_cost_usd += entry.cost_usd;
+            if entry.refusal.refused {
+                summary.refusal_entries += 1;
+            }
+        }
+    }
+    summary.by_agent_type = by_agent.into_iter().collect();
+    Ok(summary)
 }
 
 fn verdict_count(by_verdict: &[(String, usize)], target: &str) -> usize {

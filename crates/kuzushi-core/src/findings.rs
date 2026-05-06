@@ -1054,6 +1054,36 @@ impl FindingStore {
             .with_context(|| format!("Could not parse analysis_history_json for {fingerprint}"))
     }
 
+    /// Convenience for emit-hook callers: build an [`AnalysisEntry`] from the
+    /// most-common subset of fields and append it. `created_at` is filled in
+    /// automatically. Use [`append_analysis_entry`] directly when you need
+    /// per-call usage tokens or a reinvestigate marker.
+    pub fn record_analysis(
+        &self,
+        fingerprint: &str,
+        run_id: &str,
+        agent_type: &str,
+        model: &str,
+        cost_usd: f64,
+        refusal: &RefusalReport,
+    ) -> Result<()> {
+        let entry = AnalysisEntry {
+            run_id: run_id.to_string(),
+            agent_type: agent_type.to_string(),
+            model: model.to_string(),
+            agent_session_id: None,
+            finding_count: 1,
+            num_turns: 0,
+            cost_usd,
+            usage: AnalysisUsage::default(),
+            reinvestigate_marker: None,
+            refusal: refusal.clone(),
+            created_at: now_isoish(),
+        };
+        self.append_analysis_entry(fingerprint, &entry)?;
+        Ok(())
+    }
+
     pub fn aggregate_severity_counts(&self) -> Result<Vec<(Severity, usize)>> {
         let mut stmt = self.conn.prepare(
             r#"

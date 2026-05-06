@@ -4153,6 +4153,13 @@ impl ShellApp {
         FindingStore::open(workspace.findings_db_path())
     }
 
+    /// Read-only counterpart to [`open_store`]. Doesn't mutate `self.target`,
+    /// so it can be called from the renderer with `&ShellApp`.
+    pub fn open_store_readonly(&self) -> Result<FindingStore> {
+        let workspace = self.current_workspace()?;
+        FindingStore::open(workspace.findings_db_path())
+    }
+
     fn current_workspace(&self) -> Result<WorkspaceTarget> {
         let target = self.target.clone().unwrap_or_else(|| PathBuf::from("."));
         WorkspaceTarget::new(target)
