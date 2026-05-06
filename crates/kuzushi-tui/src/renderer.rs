@@ -1275,11 +1275,26 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     lines.push(blank());
     lines.push(divider("TRANSCRIPT", area.width));
-    lines.extend(transcript_lines(
-        app,
-        area.height.saturating_sub(lines.len() as u16) as usize,
-    ));
+    let body_budget = area.height.saturating_sub(lines.len() as u16) as usize;
+    let transcript = transcript_lines(app, body_budget.saturating_sub(1).max(0));
+    lines.extend(transcript);
+    if scan_running && body_budget > 0 {
+        lines.push(streaming_cursor_line());
+    }
     lines
+}
+
+/// One-row streaming cursor block — a single styled cell at the end of the
+/// transcript that mirrors the design's `<span className="cursor">` from the
+/// running mockups (sast-running.jsx, carlini-running.jsx, agentic-sast-running.jsx).
+fn streaming_cursor_line() -> Line<'static> {
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(
+            " ",
+            Style::default().fg(theme::TERM_BG).bg(theme::T_PRIMARY),
+        ),
+    ])
 }
 
 fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -4253,6 +4268,56 @@ mod tests {
         assert!(rendered.contains("sast"));
         assert!(!rendered.contains("dag"));
         assert!(!rendered.contains("DAG"));
+    }
+
+    #[test]
+    fn module_run_body_ends_with_streaming_cursor_when_scan_active() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.scan = Some(crate::app::ScanPanelState {
+            run_id: Some("run-abc".to_string()),
+            target: std::path::PathBuf::from("./demo"),
+            stage: "scanning".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        app.shell_view = ShellView::ModuleRun;
+        let area = Rect::new(0, 0, 120, 30);
+        let lines = module_run_lines(&app, area);
+        let last = lines.last().expect("expected non-empty body");
+        let last_text: String = last.spans.iter().map(|s| s.content.as_ref()).collect();
+        // The cursor line is " " + a single styled-block " ", so two visible cells.
+        assert_eq!(
+            last_text, "  ",
+            "expected streaming cursor line at end while scan running, got {last_text:?}"
+        );
+        // Sanity: confirm a styled span with primary bg exists on that line.
+        let has_inverse = last
+            .spans
+            .iter()
+            .any(|sp| sp.style.bg.is_some() && sp.content.as_ref() == " ");
+        assert!(has_inverse, "streaming cursor should be a styled background cell");
+    }
+
+    #[test]
+    fn module_run_body_omits_streaming_cursor_when_idle() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::ModuleRun;
+        let area = Rect::new(0, 0, 120, 30);
+        let lines = module_run_lines(&app, area);
+        // No scan → no streaming cursor expected.
+        for line in &lines {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let has_cursor = line
+                .spans
+                .iter()
+                .any(|sp| sp.style.bg.is_some() && sp.content.as_ref() == " ");
+            assert!(
+                !has_cursor || text.trim() != "",
+                "unexpected streaming cursor while idle: {text:?}"
+            );
+        }
     }
 
     #[test]
