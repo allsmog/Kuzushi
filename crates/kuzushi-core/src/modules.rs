@@ -8264,6 +8264,9 @@ fn build_context_snapshot(input: Value, ctx: &ToolExecutionContext<'_>) -> Resul
     )?;
 
     let repo_context = infer_repo_context(workspace.root(), &files_sample)?;
+    let repository_inventory =
+        crate::repository_inventory::build_repository_inventory(workspace.root())?;
+    let app_model_routes = repository_inventory_routes(&repository_inventory);
     let file_tree = files_sample
         .iter()
         .map(|path| json!({ "path": path }))
@@ -8280,6 +8283,7 @@ fn build_context_snapshot(input: Value, ctx: &ToolExecutionContext<'_>) -> Resul
             "enrichment": enrichment,
         },
         "repoContext": repo_context,
+        "repositoryInventory": repository_inventory,
         "fileIndex": {
             "tree": file_tree,
             "totalFiles": files_indexed,
@@ -8287,7 +8291,7 @@ fn build_context_snapshot(input: Value, ctx: &ToolExecutionContext<'_>) -> Resul
             "patternMatches": {},
         },
         "appModel": {
-            "routes": [],
+            "routes": app_model_routes,
             "outboundClients": [],
             "serviceBoundaries": [],
             "dataStores": [],
@@ -8319,6 +8323,25 @@ fn build_context_snapshot(input: Value, ctx: &ToolExecutionContext<'_>) -> Resul
             "snapshot": snapshot,
         },
     }))
+}
+
+fn repository_inventory_routes(
+    inventory: &crate::repository_inventory::RepositoryInventory,
+) -> Vec<Value> {
+    inventory
+        .routes_controllers
+        .iter()
+        .filter(|item| item.kind == "route")
+        .map(|item| {
+            json!({
+                "path": item.route,
+                "method": item.method,
+                "source": item.path,
+                "line": item.line,
+                "framework": item.framework,
+            })
+        })
+        .collect()
 }
 
 fn save_context_snapshot(root: &Path, snapshot: &Value) -> Result<PathBuf> {
