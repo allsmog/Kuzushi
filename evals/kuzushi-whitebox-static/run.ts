@@ -47,6 +47,7 @@ const core = read("crates/kuzushi-core/src/whitebox_static.rs");
 const staticNarrative = read("crates/kuzushi-core/src/static_narrative.rs");
 const variants = read("crates/kuzushi-core/src/variant_ndiff.rs");
 const semgrepRuleSynthesis = read("crates/kuzushi-core/src/semgrep_rule_synthesis.rs");
+const whiteboxSuppressions = read("crates/kuzushi-core/src/whitebox_suppressions.rs");
 
 const results: EvalResult[] = [
   prd.branchName === "kuzushi-whitebox-static" && prd.stories?.length === 22
@@ -86,6 +87,13 @@ const results: EvalResult[] = [
     "SemgrepRuleFixture",
     "enabled: false",
     "validationPassed",
+  ]),
+  requireContains("whitebox_false_positive_memory", whiteboxSuppressions, [
+    "WhiteboxSuppressionRecord",
+    "expires_at_unix",
+    "suppressed source snippet hash changed",
+    "findings_remain_visible",
+    "whitebox-suppressions.json",
   ]),
 ];
 
