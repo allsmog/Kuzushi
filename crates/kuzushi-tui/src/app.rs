@@ -463,6 +463,8 @@ impl ShellApp {
             threat_rx: None,
         };
         app.log("system", "kuzushi shell");
+        app.log("startup", app.startup_summary_line());
+        app.log("first-run", app.first_finding_hint());
         app.log(
             "help",
             "/scan, /run <tool>, /ask <question>, ?text, /workspace, /context build, /tasks, /options [tool], /auth login openai-codex|anthropic, /provider, /backend, /model, /cost, /kb, /history, /clear, /load <specifier>, /findings, /modules, /tools, /quit",
@@ -482,6 +484,34 @@ impl ShellApp {
             let overflow = self.log.len() - 500;
             self.log.drain(0..overflow);
         }
+    }
+
+    pub fn first_finding_scan_command(&self) -> &'static str {
+        if self.target.is_some() {
+            "scan"
+        } else {
+            "scan ."
+        }
+    }
+
+    pub fn first_finding_hint(&self) -> String {
+        format!(
+            "First finding: run `{}`, then `findings`.",
+            self.first_finding_scan_command()
+        )
+    }
+
+    fn startup_summary_line(&self) -> String {
+        let target = self
+            .target
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "none".to_string());
+        format!(
+            "ready: {} module(s), {} tool(s), target {target}",
+            self.registry.modules().count(),
+            self.registry.tools().count()
+        )
     }
 
     pub fn handle_command(&mut self, command: ShellCommand) {
@@ -1919,19 +1949,27 @@ impl ShellApp {
 
     pub fn show_quickstart(&mut self) {
         self.shell_view = ShellView::Help;
+        let scan_command = self.first_finding_scan_command();
         let lines = [
             "Welcome to kuzushi! Quickstart:",
-            "  1. /target <path>           — point the shell at a repo",
-            "  2. /model openai:gpt-5.5    — pick a provider/model",
-            "  3. /scan ./repo             — run configured scanners",
-            "  4. /findings                — browse persisted findings",
-            "  5. /threats                 — review or regenerate the threat model",
-            "  6. /plan <english>          — Haiku-driven natural-language plans",
+            if self.target.is_some() {
+                "  1. scan                    - run configured scanners on the active target"
+            } else {
+                "  1. scan .                  - run configured scanners on this directory"
+            },
+            "  2. findings                - browse persisted findings",
+            "  3. context build           - write .kuzushi/context-snapshot.json",
+            "  4. model                   - choose an explicit provider/model for ask/triage",
+            "  5. ask <question>          - ask after a model is configured",
             "Press Ctrl+O to toggle the live event timeline.",
         ];
         for line in lines {
             self.log("quickstart", line);
         }
+        self.log(
+            "quickstart",
+            format!("Exact first-finding path: {scan_command} -> findings"),
+        );
     }
 
     pub fn handle_target_command(&mut self, raw: Option<&str>) {
@@ -8068,7 +8106,38 @@ JSON
         assert!(app
             .log
             .iter()
-            .any(|line| line.prefix == "quickstart" && line.body.contains("/scan ./repo")));
+            .any(|line| line.prefix == "quickstart" && line.body.contains("scan .")));
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "quickstart" && line.body.contains("scan . -> findings")
+        }));
+    }
+
+    #[test]
+    fn startup_logs_first_finding_path_for_bare_shell() {
+        let app = ShellApp::new(V2Config::default(), None);
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.prefix == "startup" && line.body.contains("module(s)")));
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "first-run"
+                && line.body.contains("scan .")
+                && line.body.contains("findings")
+        }));
+    }
+
+    #[test]
+    fn startup_logs_active_target_first_finding_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        assert_eq!(app.first_finding_scan_command(), "scan");
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "first-run"
+                && line.body.contains("scan")
+                && !line.body.contains("scan .")
+                && line.body.contains("findings")
+        }));
     }
 
     #[test]
