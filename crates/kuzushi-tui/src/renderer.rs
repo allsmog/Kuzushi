@@ -1807,44 +1807,229 @@ fn prompts_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 fn actor_detail_lines(app: &ShellApp, area: Rect, index: usize) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
-    lines.push(divider(&format!("ACTOR {index}"), area.width));
-    lines.push(detail("tool", "semgrep:scan"));
+
+    let profile = actor_profile(index);
+    let label = profile
+        .map(|profile| profile.label)
+        .unwrap_or("agent (uncategorized)");
+    lines.push(divider(
+        &format!("ACTOR {index} — {label}"),
+        area.width,
+    ));
+
+    let entries: Vec<&LogLine> = app
+        .log
+        .iter()
+        .filter(|line| profile.is_some_and(|profile| profile.matches(line)))
+        .collect();
+    let scan_status_str = app
+        .scan
+        .as_ref()
+        .map(scan_status)
+        .unwrap_or_else(|| "idle".to_string());
+    lines.push(detail("status", &scan_status_str));
     lines.push(detail(
-        "status",
-        app.scan
-            .as_ref()
-            .map(scan_status)
-            .unwrap_or_else(|| "idle".to_string())
-            .as_str(),
+        "events",
+        &format!("{} message(s)", entries.len()),
     ));
+    if let Some(profile) = profile {
+        lines.push(muted(&format!(
+            "filter: log prefixes {}",
+            profile.prefixes.join(", ")
+        )));
+    }
     lines.push(blank());
-    lines.extend(transcript_lines(
-        app,
-        area.height.saturating_sub(6) as usize,
-    ));
+
+    if entries.is_empty() {
+        lines.push(muted(
+            "No transcript yet for this actor. Run scan, ask, or triage to populate.",
+        ));
+        return lines;
+    }
+
+    let body_height = area.height.saturating_sub(lines.len() as u16) as usize;
+    if body_height == 0 {
+        return lines;
+    }
+    let start = entries.len().saturating_sub(body_height);
+    for line in &entries[start..] {
+        let kind = classify_transcript(&line.prefix);
+        let (glyph, style) = transcript_glyph(kind);
+        let body_width = area.width.saturating_sub(6) as usize;
+        lines.push(Line::from(vec![
+            Span::styled(format!("{glyph}  "), style),
+            Span::styled(format!("{:>8} ", line.prefix), theme::subtle()),
+            Span::raw(fit(&line.body, body_width)),
+        ]));
+    }
     lines
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ActorProfile {
+    label: &'static str,
+    prefixes: &'static [&'static str],
+}
+
+impl ActorProfile {
+    fn matches(self, line: &LogLine) -> bool {
+        self.prefixes
+            .iter()
+            .any(|prefix| prefix_matches(*prefix, &line.prefix))
+    }
+}
+
+fn prefix_matches(needle: &str, haystack: &str) -> bool {
+    haystack == needle
+        || haystack.starts_with(&format!("{needle}:"))
+        || haystack.starts_with(&format!("{needle} "))
+}
+
+fn actor_profile(index: usize) -> Option<ActorProfile> {
+    match index {
+        1 => Some(ActorProfile {
+            label: "scanner (semgrep / codeql / sast)",
+            prefixes: &["scan", "semgrep", "codeql", "sast", "scanner", "stage"],
+        }),
+        2 => Some(ActorProfile {
+            label: "triage",
+            prefixes: &["triage", "verdict", "tp", "fp"],
+        }),
+        3 => Some(ActorProfile {
+            label: "verify / proof",
+            prefixes: &["verify", "proof", "patch"],
+        }),
+        4 => Some(ActorProfile {
+            label: "agent / ask / plan",
+            prefixes: &["agent", "ask", "plan", "thinking", "tool"],
+        }),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TranscriptKind {
+    Tool,
+    Result,
+    Thinking,
+    Finding,
+    Other,
+}
+
+fn classify_transcript(prefix: &str) -> TranscriptKind {
+    let lower = prefix.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "tool"
+            | "run"
+            | "scan"
+            | "scanner"
+            | "stage"
+            | "semgrep"
+            | "codeql"
+            | "sast"
+            | "verify"
+            | "patch"
+    ) {
+        return TranscriptKind::Tool;
+    }
+    if matches!(
+        lower.as_str(),
+        "result" | "output" | "findings" | "verdict" | "tp" | "fp" | "proof"
+    ) {
+        return TranscriptKind::Result;
+    }
+    if matches!(lower.as_str(), "thinking" | "plan" | "agent" | "ask") {
+        return TranscriptKind::Thinking;
+    }
+    if matches!(lower.as_str(), "finding" | "triage" | "open") {
+        return TranscriptKind::Finding;
+    }
+    TranscriptKind::Other
+}
+
+fn transcript_glyph(kind: TranscriptKind) -> (&'static str, Style) {
+    match kind {
+        TranscriptKind::Tool => ("●", theme::accent()),
+        TranscriptKind::Result => ("⎿", theme::muted()),
+        TranscriptKind::Thinking => ("✻", theme::warn()),
+        TranscriptKind::Finding => ("★", theme::danger()),
+        TranscriptKind::Other => (" ", theme::subtle()),
+    }
 }
 
 fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("RUNS", area.width));
+
     if let Some(scan) = &app.scan {
-        lines.push(header(&["run", "status", "findings", "target"]));
-        lines.push(row(&[
-            scan.run_id
-                .as_deref()
-                .map(short)
-                .unwrap_or_else(|| "pending".to_string()),
-            scan_status(scan),
-            scan.findings_count.to_string(),
-            fit(&scan.target.display().to_string(), value_width(area, 34)),
-        ]));
-    } else {
-        lines.push(muted(
-            "No scan run is active in this shell session. Next: scan <target> or show runs.",
+        lines.push(detail(
+            "active",
+            &format!(
+                "{} · {} · {} finding(s)",
+                scan.run_id.as_deref().map(short).unwrap_or_else(|| "pending".to_string()),
+                scan_status(scan),
+                scan.findings_count
+            ),
         ));
+        lines.push(blank());
     }
+
+    if app.runs_list.is_empty() {
+        lines.push(muted(
+            "No on-disk runs found at .kuzushi/runs/. Next: scan <target>.",
+        ));
+        return lines;
+    }
+
+    lines.push(header(&["run", "modified", "summary"]));
+    let visible_rows = area.height.saturating_sub(lines.len() as u16) as usize;
+    let start = app
+        .runs_cursor
+        .saturating_sub(visible_rows.saturating_sub(1));
+    for (offset, entry) in app
+        .runs_list
+        .iter()
+        .skip(start)
+        .take(visible_rows)
+        .enumerate()
+    {
+        let index = start + offset;
+        let cursor_row = app.runs_cursor == index;
+        let marker = if cursor_row { ">" } else { " " };
+        let modified = entry
+            .modified
+            .map(|time| {
+                let elapsed = std::time::SystemTime::now()
+                    .duration_since(time)
+                    .unwrap_or_default();
+                let secs = elapsed.as_secs();
+                if secs < 60 {
+                    format!("{secs}s ago")
+                } else if secs < 3600 {
+                    format!("{}m ago", secs / 60)
+                } else if secs < 86_400 {
+                    format!("{}h ago", secs / 3600)
+                } else {
+                    format!("{}d ago", secs / 86_400)
+                }
+            })
+            .unwrap_or_else(|| "?".to_string());
+        let summary = if entry.has_summary { "yes" } else { "no" };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{marker} "), theme::subtle()),
+            Span::raw(pad(&entry.run_id, 24)),
+            Span::raw("  "),
+            Span::raw(pad(&modified, 12)),
+            Span::raw("  "),
+            Span::raw(summary.to_string()),
+        ]));
+    }
+    lines.push(blank());
+    lines.push(muted(
+        "j/k move · Enter replay · t trace · back home",
+    ));
     lines
 }
 

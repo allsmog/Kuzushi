@@ -1,6 +1,7 @@
 pub mod artifact_kb;
 pub mod attachments;
 pub mod attack_surface;
+pub mod bootstrap;
 pub mod carlini_threat_hunt;
 pub mod config;
 pub mod dep_hygiene;
@@ -47,6 +48,7 @@ pub use attack_surface::{
     build_attack_surface_map, build_attack_surface_map_from_inventory, AttackSurface,
     AttackSurfaceKind, AttackSurfaceMap, AttackSurfaceSummary,
 };
+pub use bootstrap::{append_bootstrap_context, load_bootstrap_context};
 pub use carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hunt_report};
 pub use config::{
     load_config, load_config_for_target, ConfigPaths, RuntimeConfig, RuntimeKind, V2Config,
