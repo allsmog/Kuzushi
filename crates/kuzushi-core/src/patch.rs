@@ -191,6 +191,20 @@ pub fn run_patch_finding(
         updated_at: None,
     };
     store.insert_patch_result(&result)?;
+    let history_run_id = finding.scan_id.as_deref().unwrap_or("patch");
+    if let Err(error) = store.record_analysis(
+        &finding.fingerprint,
+        history_run_id,
+        "patch",
+        &model,
+        result.cost_usd.unwrap_or(0.0),
+        &crate::findings::RefusalReport::default(),
+    ) {
+        eprintln!(
+            "[warn] could not record analysis history for {}: {error}",
+            finding.fingerprint
+        );
+    }
 
     Ok(patch_result_to_tool_json(
         &finding.fingerprint,

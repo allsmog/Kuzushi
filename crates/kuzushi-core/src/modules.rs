@@ -5526,6 +5526,7 @@ fn run_triage(
             .id
             .context("triage:run loaded a finding without a SQLite id")?;
         let fingerprint = finding.fingerprint.clone();
+        let scan_id = finding.scan_id.clone();
         let outcome = runtime.triage_finding_blocking(TriageRequest {
             model: model.clone(),
             cwd: workspace.root().to_path_buf(),
@@ -5541,11 +5542,33 @@ fn run_triage(
         }
 
         store.save_triage(finding_id, &outcome)?;
+        let refusal = crate::findings::detect_refusal_in_text(&outcome.rationale);
+        let history_run_id = input
+            .scan_id
+            .as_deref()
+            .or(scan_id.as_deref())
+            .unwrap_or("triage");
+        if let Err(error) = store.record_analysis(
+            &fingerprint,
+            history_run_id,
+            "triage",
+            &model,
+            0.0,
+            &refusal,
+        ) {
+            // Non-fatal: emit-hook failure should not poison a triage that
+            // already wrote the verdict. Surface in output so operators can
+            // diagnose without losing the verdict.
+            eprintln!(
+                "[warn] could not record analysis history for {fingerprint}: {error}"
+            );
+        }
         results.push(json!({
             "fingerprint": fingerprint,
             "verdict": outcome.verdict.as_str(),
             "confidence": outcome.confidence,
             "rationale": outcome.rationale,
+            "refused": refusal.refused,
         }));
     }
 
@@ -5691,7 +5714,7 @@ fn run_verify_finding(
 
     let prompt = build_verify_prompt(&finding, &triage, input.prompt_template.as_deref())?;
     let response = runtime.query_blocking(AgentQueryRequest::new(
-        model,
+        model.clone(),
         workspace.root().to_path_buf(),
         VERIFY_SYSTEM_PROMPT.to_string(),
         prompt,
@@ -5725,11 +5748,28 @@ fn run_verify_finding(
     }
     lines.push("      cost=$0.0000".to_string());
 
+    let refusal = crate::findings::detect_refusal_in_text(&response.text);
+    let history_run_id = finding.scan_id.as_deref().unwrap_or("verify");
+    if let Err(error) = store.record_analysis(
+        &finding.fingerprint,
+        history_run_id,
+        "verify",
+        &model,
+        0.0,
+        &refusal,
+    ) {
+        eprintln!(
+            "[warn] could not record analysis history for {}: {error}",
+            finding.fingerprint
+        );
+    }
+
     Ok(json!({
         "ok": true,
         "output": lines.join("\n"),
         "data": result,
         "costUsd": 0.0,
+        "refused": refusal.refused,
     }))
 }
 

@@ -1409,6 +1409,42 @@ fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         lines.push(detail("rationale", &triage.rationale));
     }
 
+    let history = app
+        .open_store_readonly()
+        .ok()
+        .and_then(|store| store.get_analysis_history(&finding.fingerprint).ok())
+        .unwrap_or_default();
+    if !history.is_empty() {
+        lines.push(blank());
+        lines.push(divider("ANALYSIS HISTORY", area.width));
+        lines.push(detail("entries", &history.len().to_string()));
+        let visible_rows = (area.height.saturating_sub(lines.len() as u16) as usize).min(8);
+        let start = history.len().saturating_sub(visible_rows);
+        for entry in &history[start..] {
+            let cost = if entry.cost_usd > 0.0 {
+                format!(" · ${:.4}", entry.cost_usd)
+            } else {
+                String::new()
+            };
+            let refused = if entry.refusal.refused { " · ⚠" } else { "" };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{:>9} ", entry.agent_type),
+                    theme::label(),
+                ),
+                Span::raw(entry.model.clone()),
+                Span::styled(
+                    format!("{cost}{refused}"),
+                    if entry.refusal.refused {
+                        theme::warn()
+                    } else {
+                        theme::muted()
+                    },
+                ),
+            ]));
+        }
+    }
+
     lines
 }
 
