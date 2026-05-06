@@ -17,6 +17,11 @@ pub enum ShellCommand {
     Provider(Option<String>),
     Backend(Option<String>),
     Cost,
+    /// Show the per-role model routing in effect (from `models.toml`)
+    /// plus the operator default and any session overrides.
+    Models,
+    /// Alias for `Models`.
+    Route,
     Config,
     Use(String),
     Tune,
@@ -413,6 +418,12 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
         description: "show known session cost estimate",
     },
     ShellCommandSpec {
+        command: "models",
+        aliases: &["/models", "route", "/route"],
+        category: ShellCommandCategory::AuthConfigModel,
+        description: "show models.toml routing per role + operator default",
+    },
+    ShellCommandSpec {
         command: "config",
         aliases: &["/config"],
         category: ShellCommandCategory::AuthConfigModel,
@@ -660,6 +671,8 @@ pub fn parse_command(input: &str) -> ShellCommand {
         "provider" => ShellCommand::Provider(parts.next().map(ToString::to_string)),
         "backend" => ShellCommand::Backend(parts.next().map(ToString::to_string)),
         "cost" => ShellCommand::Cost,
+        "models" => ShellCommand::Models,
+        "route" => ShellCommand::Route,
         "config" => ShellCommand::Config,
         "use" => parts
             .next()
@@ -1034,6 +1047,10 @@ mod tests {
             ShellCommand::Backend(Some("pi-agent-core".to_string()))
         );
         assert_eq!(parse_command("/cost"), ShellCommand::Cost);
+        assert_eq!(parse_command("/models"), ShellCommand::Models);
+        assert_eq!(parse_command("models"), ShellCommand::Models);
+        assert_eq!(parse_command("/route"), ShellCommand::Route);
+        assert_eq!(parse_command("route"), ShellCommand::Route);
         assert_eq!(parse_command("/config"), ShellCommand::Config);
         assert_eq!(
             parse_command("/use semgrep"),
@@ -1348,6 +1365,7 @@ mod tests {
             "kb",
             "load",
             "model",
+            "models",
             "modules",
             "open",
             "options",
@@ -1363,6 +1381,7 @@ mod tests {
             "reparse",
             "replay",
             "resume",
+            "route",
             "run-tool",
             "scan",
             "set-option",
@@ -1434,6 +1453,8 @@ mod tests {
             ShellCommand::Provider(_) => "provider",
             ShellCommand::Backend(_) => "backend",
             ShellCommand::Cost => "cost",
+            ShellCommand::Models => "models",
+            ShellCommand::Route => "route",
             ShellCommand::Config => "config",
             ShellCommand::Use(_) => "use",
             ShellCommand::Tune => "tune",

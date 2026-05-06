@@ -19,4 +19,5 @@ serde_json.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+kuzushi-sandbox = { path = "../kuzushi-sandbox" }
 tempfile.workspace = true

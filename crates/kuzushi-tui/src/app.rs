@@ -626,6 +626,7 @@ impl ShellApp {
             ShellCommand::Provider(provider) => self.handle_provider_command(provider),
             ShellCommand::Backend(backend) => self.handle_backend_command(backend),
             ShellCommand::Cost => self.show_cost_status(),
+            ShellCommand::Models | ShellCommand::Route => self.show_routing_status(),
             ShellCommand::Config => {
                 self.shell_view = ShellView::Config;
                 self.sync_selected_model_index();
@@ -2617,6 +2618,134 @@ impl ShellApp {
                 .to_string()
         };
         self.log("cost", message);
+    }
+
+    /// Render the active per-role model routing for `/models` /
+    /// `/route`. Sources, in priority order:
+    ///   1. `ToolOptionStore` `MODEL_<ROLE>` overrides (from
+    ///      `setg MODEL_DEEP_AUDITOR ...` and friends).
+    ///   2. `~/.kuzushi/models.toml` and per-target overrides.
+    ///   3. Operator default (`config.model`).
+    ///
+    /// The render is intentionally one-line-per-role so it pastes
+    /// cleanly into a status report.
+    fn show_routing_status(&mut self) {
+        use kuzushi_core::config::ConfigPaths;
+        use kuzushi_core::AgentRouter;
+
+        self.shell_view = ShellView::Config;
+        let target_dir = self.target.clone();
+        let paths = match ConfigPaths::from_target(target_dir.as_deref()) {
+            Ok(p) => p,
+            Err(err) => {
+                self.log(
+                    "error",
+                    format!("/models could not resolve config paths: {err}"),
+                );
+                return;
+            }
+        };
+        let router = match AgentRouter::load(&paths) {
+            Ok(r) => r,
+            Err(err) => {
+                self.log(
+                    "error",
+                    format!("/models failed to load models.toml: {err}"),
+                );
+                return;
+            }
+        };
+
+        let operator_default: String = self
+            .config
+            .model
+            .clone()
+            .unwrap_or_else(|| "(unset)".to_string());
+        let router_default: String = router
+            .default_model()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "(none)".to_string());
+        self.log(
+            "models",
+            format!(
+                "operator default: {operator_default}    models.toml default: {router_default}"
+            ),
+        );
+
+        let role_keys = [
+            "triage",
+            "classifier_gate",
+            "deep_auditor",
+            "full_mode_multi",
+            "systems_hunt",
+            "carlini",
+            "variant_ndiff",
+            "threat_model",
+            "x_ray",
+            "patch",
+        ];
+        // Pull the option-store overrides at the global `(Global, All)`
+        // binding — that's where `setg MODEL_<ROLE>` lands.
+        let store_overrides = self
+            .option_store
+            .values_for(OptionScope::Global, &OptionTarget::All)
+            .cloned();
+        for key in role_keys {
+            let role = match kuzushi_core::AgentRole::from_key(key) {
+                Some(r) => r,
+                None => continue,
+            };
+            let route = router.route(role).map(|r| r.primary.clone());
+            let override_key = format!("MODEL_{}", key.to_ascii_uppercase());
+            let override_: Option<String> = store_overrides
+                .as_ref()
+                .and_then(|values| values.get(&override_key))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| s.to_string());
+            let resolved = override_
+                .clone()
+                .or_else(|| route.clone())
+                .unwrap_or_else(|| {
+                    router
+                        .default_model()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| operator_default.clone())
+                });
+            let source = if override_.is_some() {
+                "setg"
+            } else if route.is_some() {
+                "models.toml"
+            } else if router.default_model().is_some() {
+                "models.toml default"
+            } else {
+                "operator default"
+            };
+            self.log("models", format!("  {key:<16} {resolved}    [{source}]"));
+        }
+
+        // Spend ledger snapshot — useful operator hint that lives near
+        // the routing config because both shape per-role economics.
+        if let Ok(workspace) = self.current_workspace() {
+            match kuzushi_core::SpendLimiter::open(workspace.spend_db_path()) {
+                Ok(limiter) => {
+                    for op in [
+                        kuzushi_core::SpendOperation::Triage,
+                        kuzushi_core::SpendOperation::ClassifierGate,
+                        kuzushi_core::SpendOperation::DeepAudit,
+                        kuzushi_core::SpendOperation::FullModeMulti,
+                        kuzushi_core::SpendOperation::Patch,
+                    ] {
+                        if let Some(cap) = limiter.cap(op) {
+                            self.log("spend", format!("  cap[{op:?}] = ${cap:.4}"));
+                        }
+                    }
+                }
+                Err(err) => {
+                    self.log("spend", format!("spend ledger unavailable: {err}"));
+                }
+            }
+        }
     }
 
     pub(crate) fn provider_label(&self) -> String {
@@ -7580,6 +7709,65 @@ JSON
         assert!(app.log.iter().any(|line| {
             line.prefix == "cost" && line.body.contains("session estimate $0.0456")
         }));
+    }
+
+    #[test]
+    fn models_command_logs_per_role_routing_with_source_tags() {
+        // With no models.toml, every role should resolve to the
+        // operator default (or "(unset)" if there isn't one) and the
+        // source tag should be `operator default`. Validates that:
+        //   - the parser routes both `/models` and `/route` here
+        //   - the handler iterates every role
+        //   - the source-tag branches don't panic on an empty router
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let mut app = ShellApp::new(config, None);
+        app.handle_command(ShellCommand::Models);
+
+        let model_lines: Vec<&String> = app
+            .log
+            .iter()
+            .filter(|line| line.prefix == "models")
+            .map(|line| &line.body)
+            .collect();
+        // Header + 10 role lines.
+        assert!(
+            model_lines.len() >= 11,
+            "expected ≥11 models lines, got {}: {:?}",
+            model_lines.len(),
+            model_lines
+        );
+        assert!(
+            model_lines
+                .iter()
+                .any(|line| line.contains("operator default: openai:gpt-4.1")),
+            "header should report operator default; lines: {model_lines:?}"
+        );
+        for role in [
+            "triage",
+            "classifier_gate",
+            "deep_auditor",
+            "full_mode_multi",
+            "patch",
+        ] {
+            assert!(
+                model_lines.iter().any(|l| l.contains(role)),
+                "expected line for role {role}; lines: {model_lines:?}"
+            );
+        }
+
+        // /route is an alias and should produce the same output.
+        let baseline = model_lines.len();
+        app.handle_command(ShellCommand::Route);
+        let after = app
+            .log
+            .iter()
+            .filter(|line| line.prefix == "models")
+            .count();
+        assert!(
+            after >= baseline + 11,
+            "/route should append another full routing block; before={baseline} after={after}"
+        );
     }
 
     #[test]
