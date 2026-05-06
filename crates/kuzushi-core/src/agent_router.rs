@@ -49,7 +49,10 @@ use serde::{Deserialize, Serialize};
 use crate::config::ConfigPaths;
 use crate::findings::TriageOutcome;
 use crate::options::{OptionScope, OptionTarget, ToolOptionStore};
-use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageRequest};
+use crate::runtime::{
+    AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolLoopRequest,
+    LoopHistoryEntry, TriageRequest,
+};
 
 /// Logical role assigned to an agent call. Each role maps to one
 /// [`ModelRoute`] in `models.toml`.
@@ -432,6 +435,18 @@ impl AgentRuntime for RoutedRuntime {
 
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
         self.inner.triage_finding_blocking(request)
+    }
+
+    fn supports_tools(&self) -> bool {
+        self.inner.supports_tools()
+    }
+
+    fn next_step_blocking(
+        &self,
+        request: &AgentToolLoopRequest,
+        history: &[LoopHistoryEntry],
+    ) -> Result<AgentLoopStep> {
+        self.inner.next_step_blocking(request, history)
     }
 }
 

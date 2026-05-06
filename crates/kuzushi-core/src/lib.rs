@@ -4,6 +4,7 @@ pub mod attachments;
 pub mod carlini_threat_hunt;
 pub mod code_nav;
 pub mod config;
+pub mod deep_auditor;
 pub mod dep_hygiene;
 pub mod events;
 pub mod findings;
@@ -39,6 +40,10 @@ pub use carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hunt_r
 pub use code_nav::{
     code_nav_tool_specs, code_nav_toolbox, find_references_tool, list_definitions_tool,
     read_definition_tool, read_source_tool, CodeNavConfig, CodeNavTool,
+};
+pub use deep_auditor::{
+    run_deep_auditor, save_evidence, DeepAuditConfig, DeepAuditOutcome, EvidenceCitation,
+    VulnAnalysis,
 };
 pub use config::{
     load_config, load_config_for_target, AnthropicOauthConfig, ConfigPaths, RuntimeConfig,
