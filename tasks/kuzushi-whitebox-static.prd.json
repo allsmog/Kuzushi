@@ -138,7 +138,7 @@
       "acceptance": ["Registry entries include language, framework, kind, symbol/path pattern, CWE, and rationale.", "Registry match alone is not vulnerability proof."],
       "storyGate": "cargo test -p kuzushi-core static_registry",
       "forbidden": ["registry match as proof"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-011",
