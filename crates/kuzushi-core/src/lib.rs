@@ -64,8 +64,9 @@ pub use dep_hygiene::{
     DepHygieneReport, DepHygieneScanner, DepHygieneSeverity, ManifestKind,
 };
 pub use findings::{
-    Finding, FindingListFilter, FindingListReport, FindingStore, FindingVerdictFilter,
-    PatchAttempt, PatchResult, PatchStatus, Severity, TriageOutcome, TriageVerdict,
+    compute_dedup_key, extract_cwe, normalize_cwe, Finding, FindingListFilter, FindingListReport,
+    FindingStore, FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus, Severity,
+    TriageOutcome, TriageVerdict, VulnSource,
 };
 pub use full_mode_multi::{
     cost_summary as full_mode_cost_summary, plan as full_mode_plan, report_to_tool_json,

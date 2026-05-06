@@ -61,6 +61,10 @@ enum Command {
         name: Option<String>,
         #[arg(long = "file-path")]
         file_path: Option<String>,
+        /// Filter by discovery channel: sarif, ainalysis, ainalysis-multi,
+        /// diff-analyzer, infer, fuzzing. Comma- or repeat-separated.
+        #[arg(long = "vuln-source", value_delimiter = ',')]
+        vuln_source: Vec<String>,
         #[arg(long)]
         json: bool,
     },
@@ -150,10 +154,11 @@ async fn main() -> Result<()> {
             verdict,
             name,
             file_path,
+            vuln_source,
             json,
         } => findings_command(
             target.or(cli.target),
-            FindingListFilter::from_parts(severity, verdict, name, file_path, limit)?,
+            FindingListFilter::from_parts_full(severity, verdict, name, file_path, vuln_source, limit)?,
             json,
         ),
         Command::Config { command } => config_command(command, cli.target),

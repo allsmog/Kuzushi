@@ -282,6 +282,8 @@ mod tests {
             actor_fingerprint: None,
             triage: None,
             created_at: String::new(),
+            vuln_source: None,
+            dedup_key: None,
         }
     }
 
