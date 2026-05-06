@@ -200,11 +200,11 @@
       "title": "Add Static Trigger/Impact Narratives",
       "priority": 16,
       "why": "Reports need useful narratives that are explicit about static evidence limits.",
-      "targets": ["crates/kuzushi-core/src/reporting.rs", "crates/kuzushi-core/src/whitebox_static.rs"],
+      "targets": ["crates/kuzushi-core/src/static_narrative.rs", "crates/kuzushi-core/src/modules.rs", "crates/kuzushi-core/src/whitebox_static.rs"],
       "acceptance": ["Reports can include static trigger path, potential impact, and evidence limits.", "Tests reject exploited, confirmed exploit, and PoC payload language."],
       "storyGate": "cargo test -p kuzushi-core static_narrative",
       "forbidden": ["exploited", "confirmed exploit", "PoC payloads"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-017",
