@@ -1,14 +1,14 @@
 # Ralph Rust UX Progress
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
-Active story: UX-003 - Fix Shell Redraw And Prompt Overlap
-Status: UX-003 implementation complete; commit/push pending
+Active story: UX-004 - Improve Exit And Unknown Command Handling
+Status: UX-003 complete and pushed; UX-004 pending
 
 ## Stage 2 Checklist
 
 - UX-001 Remove Ink/React from runtime CLI packaging: complete; pushed in iteration 5.
 - UX-002 Delete or isolate legacy Ink UI code: complete; pushed in iteration 12 as `5e73f6f`.
-- UX-003 Fix shell redraw and prompt overlap: implementation complete; commit/push pending.
+- UX-003 Fix shell redraw and prompt overlap: complete; pushed in iteration 13 as `bba14f9`.
 - UX-004 Improve exit and unknown command handling: pending.
 - UX-005 Visible startup progress and first-run path: pending.
 - UX-006 Rust doctor / preflight: pending.
@@ -356,18 +356,22 @@ Status: UX-003 implementation complete; commit/push pending
   - `cargo test -p kuzushi-tui`
   - `cargo fmt --all --check`
   - `git diff --check`
-- Result: implementation complete. The renderer now places the flexible spacer
+- Result: complete and pushed to `origin/main` as
+  `bba14f9 ralph:ux fix rust shell prompt layout`. The renderer now places the flexible spacer
   between the main view and the lower chrome instead of after the prompt, and
   renders the transcript after status/keybind/cards so the latest command log
   remains immediately above the prompt. Exit commands now add a visible
   `system` transcript line before `should_quit` is set. Focused Ratatui tests
   cover 80-column prompt/log placement, long input separation, and visible
   `/exit`, `exit`, and `/exitj` rendering.
-- Remaining work: commit and push UX-003, then start UX-004.
+- Remaining work: UX-004 through UX-015.
 - Blockers or repo facts that contradicted this prompt:
   - The primary workspace still has the previously pushed UX-002 slice staged
     because local Git metadata writes under `.git` remain blocked in this
     environment and local `main` remains stale at `80d23a4`.
+  - The implementation commit was made and pushed from the isolated clone at
+    `/tmp/kuzushi-ux2-clone.PJaRge` because the primary workspace cannot write
+    Git metadata under `.git`.
 
 ### Iteration 12 - UX-002 Push Complete
 
