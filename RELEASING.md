@@ -30,6 +30,9 @@
   state writability, findings DB openability, optional scanner binaries,
   pi-agent-core bridge readiness, and model/auth setup. It reports credential
   environment variable names only, never secret values.
+- `kuzushi --plain shell` plus `KUZUSHI_PLAIN=1`,
+  `KUZUSHI_SCREEN_READER=1`, or `KUZUSHI_LOW_BANDWIDTH=1` force strict
+  line-oriented shell output with no ANSI escapes, animation, or box drawing.
 
 ### v1.0.0 — Clean Code major refactor
 

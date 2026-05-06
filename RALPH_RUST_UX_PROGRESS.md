@@ -1,8 +1,8 @@
 # Ralph Rust UX Progress
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
-Active story: UX-014 - Explicit Plain / Screen-Reader / Low-Bandwidth Mode
-Status: UX-013 complete and pushed in iteration 26 as `7564f7c`; UX-014 pending next iteration
+Active story: UX-015 - Final Ink/React Removal Gate
+Status: UX-014 complete in this iteration; commit/push gate pending
 
 ## Stage 2 Checklist
 
@@ -19,10 +19,52 @@ Status: UX-013 complete and pushed in iteration 26 as `7564f7c`; UX-014 pending 
 - UX-011 Findings row/card density: complete in iteration 24.
 - UX-012 Stable finding aliases: complete in iteration 25.
 - UX-013 Better empty states and errors: complete in iteration 26.
-- UX-014 Explicit plain / screen-reader / low-bandwidth mode: pending.
+- UX-014 Explicit plain / screen-reader / low-bandwidth mode: complete in this iteration.
 - UX-015 Final Ink/React removal gate: pending.
 
 ## Iteration Log
+
+### Iteration 27 - UX-014
+
+- Task attempted: add an explicit strict plain/screen-reader/low-bandwidth
+  shell mode that operators can force by flag or environment while preserving
+  readable non-TTY output.
+- Files changed:
+  - `crates/kuzushi-cli/src/main.rs`
+  - `crates/kuzushi-cli/tests/cutover_cli.rs`
+  - `crates/kuzushi-tui/src/app.rs`
+  - `crates/kuzushi-tui/src/lib.rs`
+  - `README.md`
+  - `RELEASING.md`
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `git status --short` in the clean isolated clone
+  - `sed -n '1,90p' RALPH_RUST_UX_PROGRESS.md`
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-cli --test cutover_cli plain_flag_forces_line_oriented_shell_output`
+  - `cargo test -p kuzushi-cli --test cutover_cli plain_env_aliases_are_line_oriented_for_screen_reader_mode`
+  - `cargo test -p kuzushi-cli tests::plain_flag_suppresses_tty_startup_progress`
+  - `cargo test -p kuzushi-tui renderer::tests::plain`
+  - `cargo test -p kuzushi-cli --test cutover_cli`
+  - `cargo test -p kuzushi-cli`
+  - `cargo test -p kuzushi-tui`
+  - `cargo fmt --all --check`
+  - `git diff --check`
+- Result: complete. `kuzushi --plain shell` now forces the shell through the
+  strict line-oriented renderer, and `KUZUSHI_PLAIN=1`,
+  `KUZUSHI_SCREEN_READER=1`, and `KUZUSHI_LOW_BANDWIDTH=1` do the same. The
+  plain CLI tests assert shell output has no ANSI escapes or box drawing.
+  Startup progress is suppressed when plain mode is requested, so low-bandwidth
+  output stays deterministic and line oriented.
+- Remaining work: commit and push UX-014, then complete UX-015.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary workspace remains stale at `80d23a4` with staged/modified
+    earlier Stage 2 files. The active progress and pushed Stage 2 state are in
+    the clean isolated clone at `/tmp/kuzushi-ux2-clone.PJaRge`, currently on
+    `449250d`.
+  - The primary checkout's progress file incorrectly showed UX-008 active; the
+    isolated clone progress showed UX-014 as the actual highest-priority
+    incomplete Stage 2 task.
 
 ### Iteration 26 - UX-013
 

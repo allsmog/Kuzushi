@@ -12,7 +12,7 @@ use kuzushi_core::{
     ModuleRegistry, PrCommentInput, WorkspaceTarget,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
-use kuzushi_tui::run_shell;
+use kuzushi_tui::run_shell_with_plain;
 
 #[derive(Debug, Parser)]
 #[command(name = "kuzushi")]
@@ -20,6 +20,9 @@ use kuzushi_tui::run_shell;
 struct Cli {
     #[arg(long, global = true)]
     target: Option<PathBuf>,
+    /// Force line-oriented output with no ANSI, animation, or box drawing.
+    #[arg(long, global = true)]
+    plain: bool,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -127,12 +130,13 @@ enum ConfigCommand {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let plain = plain_output_requested(cli.plain);
     let command = cli.command.unwrap_or(Command::Shell { target: None });
 
     match command {
         Command::Shell { target } => {
             let target = target.or(cli.target);
-            if should_emit_shell_startup_progress() {
+            if should_emit_shell_startup_progress(plain) {
                 for line in shell_startup_progress_messages(target.as_deref()) {
                     eprintln!("{line}");
                 }
@@ -143,7 +147,7 @@ async fn main() -> Result<()> {
                 .transpose()
                 .context("Could not resolve shell target")?;
             let config = load_config_for_target(workspace.as_ref().map(WorkspaceTarget::root))?;
-            run_shell(config, workspace.as_ref())
+            run_shell_with_plain(config, workspace.as_ref(), plain)
         }
         Command::Scan {
             target,
@@ -192,11 +196,14 @@ async fn main() -> Result<()> {
     }
 }
 
-fn should_emit_shell_startup_progress() -> bool {
-    io::stdin().is_terminal()
-        && io::stdout().is_terminal()
-        && io::stderr().is_terminal()
-        && std::env::var_os("KUZUSHI_PLAIN").is_none()
+fn plain_output_requested(flag: bool) -> bool {
+    flag || std::env::var_os("KUZUSHI_PLAIN").is_some()
+        || std::env::var_os("KUZUSHI_SCREEN_READER").is_some()
+        || std::env::var_os("KUZUSHI_LOW_BANDWIDTH").is_some()
+}
+
+fn should_emit_shell_startup_progress(plain: bool) -> bool {
+    io::stdin().is_terminal() && io::stdout().is_terminal() && io::stderr().is_terminal() && !plain
 }
 
 fn shell_startup_progress_messages(target: Option<&Path>) -> Vec<String> {
@@ -1112,6 +1119,12 @@ mod tests {
         assert!(targeted.contains("target ."));
         assert!(targeted.contains("first finding: scan, then findings"));
         assert!(!targeted.contains("scan ."));
+    }
+
+    #[test]
+    fn plain_flag_suppresses_tty_startup_progress() {
+        assert!(plain_output_requested(true));
+        assert!(!should_emit_shell_startup_progress(true));
     }
 }
 

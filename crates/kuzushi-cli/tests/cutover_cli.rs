@@ -25,12 +25,26 @@ fn stdout(output: std::process::Output) -> String {
     String::from_utf8(output.stdout).expect("stdout should be UTF-8")
 }
 
+fn assert_strict_plain(label: &str, output: &str) {
+    assert!(
+        !output.contains("\x1b["),
+        "{label} must not contain ANSI escapes:\n{output}"
+    );
+    for forbidden in ["┌", "┐", "└", "┘", "─", "│", "╭", "╮", "╰", "╯"] {
+        assert!(
+            !output.contains(forbidden),
+            "{label} must not contain box drawing {forbidden:?}:\n{output}"
+        );
+    }
+}
+
 #[test]
 fn rust_cli_help_is_the_documented_primary_surface() {
     let out = stdout(kuzushi().arg("--help").output().unwrap());
 
     assert!(out.contains("Kuzushi security copilot"));
     assert!(out.contains("Usage: kuzushi"));
+    assert!(out.contains("--plain"));
     for command in [
         "shell", "scan", "findings", "config", "modules", "tools", "doctor", "run",
     ] {
@@ -43,6 +57,40 @@ fn rust_cli_help_is_the_documented_primary_surface() {
             "help should not advertise removed/non-Rust surface {removed:?}:\n{out}"
         );
     }
+}
+
+#[test]
+fn plain_flag_forces_line_oriented_shell_output() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = stdout(
+        kuzushi()
+            .args(["--plain", "shell", "--target"])
+            .arg(tmp.path())
+            .output()
+            .unwrap(),
+    );
+
+    assert!(out.contains("kuzushi shell"));
+    assert!(out.contains("mode:shell"));
+    assert!(out.contains("First finding"));
+    assert_strict_plain("--plain shell", &out);
+}
+
+#[test]
+fn plain_env_aliases_are_line_oriented_for_screen_reader_mode() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = stdout(
+        kuzushi()
+            .env("KUZUSHI_SCREEN_READER", "1")
+            .args(["shell", "--target"])
+            .arg(tmp.path())
+            .output()
+            .unwrap(),
+    );
+
+    assert!(out.contains("kuzushi shell"));
+    assert!(out.contains("mode:shell"));
+    assert_strict_plain("KUZUSHI_SCREEN_READER shell", &out);
 }
 
 #[test]

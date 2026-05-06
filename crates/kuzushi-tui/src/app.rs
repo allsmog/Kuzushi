@@ -4615,10 +4615,24 @@ fn json_string_array(value: Option<&serde_json::Value>) -> Vec<String> {
 }
 
 pub fn run_shell(config: V2Config, target: Option<&WorkspaceTarget>) -> Result<()> {
+    run_shell_with_plain(config, target, false)
+}
+
+pub fn run_shell_with_plain(
+    config: V2Config,
+    target: Option<&WorkspaceTarget>,
+    force_plain: bool,
+) -> Result<()> {
     let mut stdin = io::stdin();
     let stdin_is_terminal = stdin.is_terminal();
     let stdout_is_terminal = io::stdout().is_terminal();
-    if !stdin_is_terminal || !stdout_is_terminal || env::var_os("KUZUSHI_PLAIN").is_some() {
+    if force_plain
+        || !stdin_is_terminal
+        || !stdout_is_terminal
+        || env::var_os("KUZUSHI_PLAIN").is_some()
+        || env::var_os("KUZUSHI_SCREEN_READER").is_some()
+        || env::var_os("KUZUSHI_LOW_BANDWIDTH").is_some()
+    {
         return run_plain_shell(config, target, &mut stdin, stdin_is_terminal);
     }
 
