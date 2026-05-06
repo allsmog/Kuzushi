@@ -6,7 +6,7 @@ use kuzushi_core::{
     SUPPORTED_ATTACHMENT_MODULES,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::prelude::{Frame, Line, Span, Style};
+use ratatui::prelude::{Frame, Line, Modifier, Span, Style};
 use ratatui::widgets::Paragraph;
 
 use crate::app::{LogLine, ScanPanelState, ShellApp, ShellView, ThreatView};
@@ -30,7 +30,18 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         0
     };
     let keybind_height = if area.height >= 8 { 2 } else { 0 };
-    let status_height = if area.height >= 6 { 1 } else { 0 };
+    // Below the rich-status threshold we still want a 1-row orientation line
+    // so the operator can see which view they're on and how to escape — but
+    // only if the window has at least enough vertical space to keep the prompt
+    // and at least one line of content visible.
+    let status_height = if area.height >= 6 {
+        1
+    } else if area.height >= 4 {
+        1
+    } else {
+        0
+    };
+    let compact_status = area.height < 6 && area.height >= 4;
     let throttle_height = if app.advisory.throttle.is_some() && area.height >= 5 {
         1
     } else {
@@ -98,7 +109,11 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         index += 1;
     }
     if status_height > 0 {
-        render_status_footer(frame, chunks[index], app);
+        if compact_status {
+            render_compact_status(frame, chunks[index], app);
+        } else {
+            render_status_footer(frame, chunks[index], app);
+        }
         index += 1;
     }
     if keybind_height > 0 {
@@ -2484,6 +2499,64 @@ fn render_cost_cap_halt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     render_lines(frame, area, lines);
 }
 
+/// Tiny-terminal status line. When the height is too small for the rich
+/// status_footer + keybind_footer pair, we still fit a single row that names
+/// the current view, the most relevant counter, and the universal escape
+/// chord. Without this, on a 4–5 row terminal the operator sees only a
+/// stripped view + prompt with no orientation cue.
+fn render_compact_status(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    if area.height == 0 {
+        return;
+    }
+    let view = compact_view_label(&app.shell_view);
+    let counter = match app.shell_view {
+        ShellView::Findings => format!("{} findings", app.findings.len()),
+        ShellView::History => format!("{} history", app.command_history.len()),
+        ShellView::Catalog | ShellView::Module => {
+            format!("{} mods", app.registry.modules().count())
+        }
+        _ => routing_mode_segment(app),
+    };
+    let chord = if app.has_running_work() {
+        format!("{} running · Ctrl-C abort", app.spinner_glyph())
+    } else {
+        "?=help · Ctrl-C exit".to_string()
+    };
+    let segments = [view, counter, chord];
+    let line = status_line(&segments, area.width);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn compact_view_label(view: &ShellView) -> String {
+    match view {
+        ShellView::Catalog => "catalog",
+        ShellView::Module => "module",
+        ShellView::ModuleRun => "run",
+        ShellView::Findings => "findings",
+        ShellView::Finding => "finding",
+        ShellView::Tune => "tune",
+        ShellView::Threat(_) => "threats",
+        ShellView::ThreatEditor => "threat-edit",
+        ShellView::PromptsEditor => "prompts",
+        ShellView::ActorDetail(_) => "actor",
+        ShellView::Runs => "runs",
+        ShellView::Replay(_) => "replay",
+        ShellView::Trace(_) => "trace",
+        ShellView::Help => "help",
+        ShellView::Config => "config",
+        ShellView::Tools => "tools",
+        ShellView::Options(_) => "options",
+        ShellView::SastTasks => "tasks",
+        ShellView::Context => "context",
+        ShellView::Workspace => "workspace",
+        ShellView::KnowledgeBase => "kb",
+        ShellView::AgentChat => "agent",
+        ShellView::History => "history",
+        ShellView::Story => "story",
+    }
+    .to_string()
+}
+
 fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if area.height == 0 {
         return;
@@ -2626,13 +2699,49 @@ fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         area.width as usize,
         " ",
     );
-    let line = Line::from(vec![
+    let prompt_chars = segments.prompt.chars().count();
+    let before_chars = segments.before_cursor.chars().count();
+    let after_empty = segments.after_cursor.is_empty();
+    let mut spans: Vec<Span<'static>> = vec![
         Span::styled(segments.prompt, theme::label()),
         Span::raw(segments.before_cursor),
-        Span::styled(segments.cursor_text, theme::selection()),
-        Span::raw(segments.after_cursor),
-    ]);
-    frame.render_widget(Paragraph::new(line), area);
+    ];
+
+    // Inline tab-completion preview: dim ghost text trailing the cursor when
+    // the operator is at end-of-line and there is exactly one obvious next
+    // completion. When a preview exists, the cursor block highlights the
+    // first ghost character (rather than a stand-alone space, which would
+    // look like an extra gap between input and suggestion).
+    let preview = if after_empty {
+        app.completion_preview()
+    } else {
+        None
+    };
+    let used = prompt_chars + before_chars;
+
+    if let Some(preview) = preview {
+        let mut chars = preview.chars();
+        if let Some(first) = chars.next() {
+            spans.push(Span::styled(first.to_string(), theme::selection()));
+            let remaining = (area.width as usize).saturating_sub(used + 1).saturating_sub(1);
+            if remaining > 0 {
+                let tail: String = chars.take(remaining).collect();
+                if !tail.is_empty() {
+                    spans.push(Span::styled(
+                        tail,
+                        theme::subtle().add_modifier(Modifier::DIM),
+                    ));
+                }
+            }
+        } else {
+            spans.push(Span::styled(segments.cursor_text, theme::selection()));
+        }
+    } else {
+        spans.push(Span::styled(segments.cursor_text, theme::selection()));
+        spans.push(Span::raw(segments.after_cursor));
+    }
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
