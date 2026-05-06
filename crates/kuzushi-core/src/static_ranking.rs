@@ -1,13 +1,13 @@
 use std::cmp::Ordering;
 
 use anyhow::Result;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::attack_surface::{AttackSurface, AttackSurfaceKind, AttackSurfaceMap};
 use crate::findings::{Finding, Severity, StaticProofState, TriageVerdict};
 use crate::static_evidence::{StaticEvidenceNode, StaticEvidenceNodeKind, StaticEvidenceStore};
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StaticRankedFinding {
     pub rank: usize,
@@ -22,7 +22,7 @@ pub struct StaticRankedFinding {
     pub impact: StaticImpactScore,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StaticImpactScore {
     pub total: i32,
@@ -30,7 +30,7 @@ pub struct StaticImpactScore {
     pub reasons: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StaticImpactFactors {
     pub severity: i32,

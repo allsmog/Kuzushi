@@ -44,6 +44,7 @@ const prd = JSON.parse(read("tasks/kuzushi-whitebox-static.prd.json"));
 const docs = read("docs/kuzushi-whitebox-static.md");
 const cli = read("crates/kuzushi-cli/src/main.rs");
 const core = read("crates/kuzushi-core/src/whitebox_static.rs");
+const staticNarrative = read("crates/kuzushi-core/src/static_narrative.rs");
 
 const results: EvalResult[] = [
   prd.branchName === "kuzushi-whitebox-static" && prd.stories?.length === 22
@@ -64,6 +65,12 @@ const results: EvalResult[] = [
     "crypto_behavioral_testing: false",
     "execution_proof_states: false",
     "runtime_exploitability_claims: false",
+  ]),
+  requireContains("static_narratives", staticNarrative, [
+    "Static trigger path",
+    "Potential impact",
+    "Evidence limits",
+    "validate_static_narrative_text",
   ]),
 ];
 

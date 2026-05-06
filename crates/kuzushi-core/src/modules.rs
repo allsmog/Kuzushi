@@ -28,10 +28,11 @@ use crate::scan::{
 };
 use crate::secret_scan::{scan_for_secrets, SecretScanOptions};
 use crate::static_evidence::StaticEvidenceStore;
+use crate::static_narrative::build_static_narrative_report;
 use crate::static_proof_validator::{
     static_proof_claim_from_whitebox_schema, validate_static_proof_claim, StaticProofValidation,
 };
-use crate::static_ranking::rank_static_findings;
+use crate::static_ranking::{rank_static_findings, StaticRankedFinding};
 use crate::systems_hunt::{execute_systems_hunt_tool, run_systems_hunt_report};
 use crate::threat_model::execute_threat_model_tool;
 use crate::variant_ndiff::{
@@ -821,6 +822,16 @@ fn run_sast_scan(
     } else {
         None
     };
+    let static_narratives = if whitebox_static.is_some() {
+        Some(write_static_narratives_json(
+            store,
+            &run_ids,
+            &artifacts,
+            static_ranking.as_ref(),
+        )?)
+    } else {
+        None
+    };
 
     let triage = if triage_requested {
         let fingerprints = fingerprints_for_sast_runs(store, &run_ids)?;
@@ -886,6 +897,18 @@ fn run_sast_scan(
                 .unwrap_or("top static-impact finding");
             lines.push(format!("  Static ranking: top score {score} · {title}"));
         }
+        if let Some(top) = static_narratives
+            .as_ref()
+            .and_then(|narratives| narratives.pointer("/narratives/0"))
+        {
+            let location = top
+                .get("location")
+                .and_then(Value::as_str)
+                .unwrap_or("top static finding");
+            lines.push(format!(
+                "  Static narrative: trigger path summarized for {location}"
+            ));
+        }
     }
     lines.push(format!("  Engines: {}", engine_ids.join(", ")));
     if let Some(triage_output) = triage
@@ -902,6 +925,13 @@ fn run_sast_scan(
             patch_results.len()
         ));
     }
+    let static_narratives_artifact = static_narratives.as_ref().map(|_| {
+        artifacts
+            .dir
+            .join("static-narratives.json")
+            .display()
+            .to_string()
+    });
 
     let result = json!({
         "ok": true,
@@ -930,6 +960,7 @@ fn run_sast_scan(
             "taintIrisNext": taint_iris_next_report.as_ref().map(|report| json!(report)),
             "systemsHunt": systems_hunt_report.as_ref().map(|report| json!(report)),
             "staticRanking": static_ranking,
+            "staticNarratives": static_narratives,
             "triage": triage.as_ref().and_then(|value| value.get("data")).cloned(),
             "verification": {
                 "verified": verification_results.len(),
@@ -948,6 +979,7 @@ fn run_sast_scan(
             "artifacts": {
                 "dir": artifacts.dir.display().to_string(),
                 "summary": artifacts.summary.display().to_string(),
+                "staticNarratives": static_narratives_artifact,
                 "triageJsonl": artifacts.triage_jsonl.display().to_string(),
                 "verifyJsonl": artifacts.verify_jsonl.display().to_string(),
             },
@@ -1080,6 +1112,34 @@ fn write_static_ranking_json(
             "codeqlFlowQuality",
             "confidence"
         ],
+    });
+    fs::write(
+        &artifact_path,
+        format!("{}\n", serde_json::to_string_pretty(&report)?),
+    )
+    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    Ok(report)
+}
+
+fn write_static_narratives_json(
+    store: &FindingStore,
+    run_ids: &SastRunIds,
+    artifacts: &SastRunArtifacts,
+    static_ranking: Option<&Value>,
+) -> Result<Value> {
+    let findings = findings_for_sast_runs(store, run_ids)?;
+    let ranked = static_ranking
+        .and_then(|ranking| ranking.get("ranked").cloned())
+        .map(serde_json::from_value::<Vec<StaticRankedFinding>>)
+        .transpose()?
+        .unwrap_or_default();
+    let narrative_report = build_static_narrative_report(&findings, &ranked)?;
+    let artifact_path = artifacts.dir.join("static-narratives.json");
+    let report = json!({
+        "count": narrative_report.count,
+        "narratives": narrative_report.narratives,
+        "artifact": artifact_path.display().to_string(),
+        "deterministic": narrative_report.deterministic,
     });
     fs::write(
         &artifact_path,
@@ -12103,6 +12163,31 @@ OUT
         assert!(scan_input.contains("\"mode\": \"whitebox-static\""));
         assert!(!scan_input.contains("execution_confirmed"));
         assert!(scan_input.contains("needs_runtime_evidence"));
+        assert!(result
+            .get("output")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("Static narrative: trigger path summarized"));
+        assert!(result
+            .pointer("/data/staticNarratives/count")
+            .and_then(Value::as_u64)
+            .is_some_and(|count| count > 0));
+        let static_narratives = fs::read_to_string(
+            result
+                .pointer("/data/artifacts/staticNarratives")
+                .and_then(Value::as_str)
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(static_narratives.contains("Static trigger path"));
+        assert!(static_narratives.contains("Potential impact"));
+        assert!(static_narratives.contains("Evidence limits"));
+        assert!(!static_narratives
+            .to_ascii_lowercase()
+            .contains("confirmed exploit"));
+        assert!(!static_narratives
+            .to_ascii_lowercase()
+            .contains("poc payload"));
 
         let stored = store.list_findings(10).unwrap();
         assert!(!stored.is_empty());

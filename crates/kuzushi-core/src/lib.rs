@@ -18,6 +18,7 @@ pub mod scan;
 pub mod secret_scan;
 pub mod source_span;
 pub mod static_evidence;
+pub mod static_narrative;
 pub mod static_proof_validator;
 pub mod static_ranking;
 pub mod static_registry;
@@ -89,6 +90,10 @@ pub use static_evidence::{
     StaticEvidenceEdge, StaticEvidenceEdgeKind, StaticEvidenceIndexReport, StaticEvidenceNode,
     StaticEvidenceNodeKind, StaticEvidenceStore, STATIC_EVIDENCE_EDGE_KINDS,
     STATIC_EVIDENCE_NODE_KINDS,
+};
+pub use static_narrative::{
+    build_static_narrative_report, validate_static_narrative_text, StaticFindingNarrative,
+    StaticNarrativeReport,
 };
 pub use static_proof_validator::{
     static_proof_claim_from_whitebox_schema, validate_static_proof_claim,

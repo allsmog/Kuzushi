@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-016 - Add Static Trigger/Impact Narratives
-Status: WB-015 complete in iteration 43; WB-016 pending
+Active story: WB-017 - Add variant search from statically confirmed findings
+Status: WB-016 complete in iteration 44; WB-017 pending
 
 ## Stage 3 Checklist
 
@@ -21,7 +21,7 @@ Status: WB-015 complete in iteration 43; WB-016 pending
 - WB-013 Constrain LLM triage to whitebox schema: complete in iteration 41.
 - WB-014 Verify LLM citations before persistence: complete in iteration 42.
 - WB-015 Prioritize findings by static impact: complete in iteration 43.
-- WB-016 Add static trigger/impact narratives: pending.
+- WB-016 Add static trigger/impact narratives: complete in iteration 44.
 - WB-017 Add variant search from statically confirmed findings: pending.
 - WB-018 Add candidate Semgrep rule synthesis: pending.
 - WB-019 Add whitebox false-positive memory: pending.
@@ -30,6 +30,57 @@ Status: WB-015 complete in iteration 43; WB-016 pending
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 44 - WB-016
+
+- Task attempted: add source-grounded static trigger, potential impact, and
+  evidence-limit narratives for whitebox-static reports without exploit/PoC
+  language.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `evals/kuzushi-whitebox-static/run.ts`
+  - `crates/kuzushi-core/src/static_narrative.rs`
+  - `crates/kuzushi-core/src/static_ranking.rs`
+  - `crates/kuzushi-core/src/modules.rs`
+  - `crates/kuzushi-core/src/lib.rs`
+- Tests/checks run:
+  - `git status --short --branch` in the primary checkout
+  - `git status --short --branch` in the clean nested clone
+  - `sed -n '1,180p' progress/kuzushi-whitebox-static.progress.md`
+  - `rg -n "triggerNarrative|impactNarrative|narrative|static trigger|impact|evidence limits|ProofNarrative|report" crates/kuzushi-core/src evals docs tasks -g '!docs/architecture.svg'`
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core static_narrative`
+  - `cargo test -p kuzushi-core whitebox_static_sast_mode_disables_execution_and_patch_paths`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `git diff --check`
+  - `pnpm eval:kuzushi-whitebox-static` with the primary checkout's
+    `node_modules` temporarily symlinked into the clean nested clone
+- Result: implementation complete. `static_narrative.rs` now builds a
+  deterministic narrative report containing `staticTriggerPath`,
+  `potentialImpact`, and `evidenceLimits` for whitebox-static findings, ordered
+  by static ranking when available. It rejects `exploited`, `confirmed
+  exploit`, PoC, payload, replay, fuzzing, and live-target language. Whitebox
+  `sast:scan` now writes `.kuzushi/runs/<runId>/static-narratives.json`,
+  includes the report in tool JSON as `staticNarratives`, and records the
+  artifact path. The eval now checks for the static narrative implementation.
+  WB-016 is marked `passes: true` in the PRD after the story gate and fast
+  whitebox checks passed.
+- Remaining work: WB-017 through WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files, while the clean nested clone at
+    `/Users/operator/VibeCode/open-sourced/kuzushi/.codex-active/kuzushi-stage3`
+    contains the active pushed Stage 3 state. This iteration continued in the
+    nested clone to avoid resetting or overwriting the primary worktree.
+  - The nested clone does not have its own `node_modules`; the eval used a
+    temporary symlink to the primary checkout's installed dependencies and then
+    removed it before commit.
+  - The first eval wrapper command failed after the eval itself passed because
+    `status` is a read-only zsh variable; it was rerun with `exit_code` and
+    passed.
 
 ### Iteration 43 - WB-015
 
