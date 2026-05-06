@@ -130,7 +130,7 @@ use kuzushi_core::{
     ModuleRegistry, OptionScope, OptionTarget, RuntimeKind, ScanCancellation, ScanRunOptions,
     Severity, ToolOptionStore, V2Config, WorkspaceTarget, SUPPORTED_ATTACHMENT_MODULES,
 };
-use kuzushi_openai::PiAgentCoreRuntime;
+use kuzushi_openai::{BridgeCancellation, PiAgentCoreRuntime};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use uuid::Uuid;
@@ -408,8 +408,11 @@ pub struct ShellApp {
     scan_rx: Option<Receiver<ScanEvent>>,
     scan_cancel: Option<ScanCancellation>,
     agent_rx: Option<Receiver<AgentEvent>>,
+    agent_cancel: Option<BridgeCancellation>,
     plan_rx: Option<Receiver<PlanEvent>>,
+    plan_cancel: Option<BridgeCancellation>,
     threat_rx: Option<Receiver<ThreatPatchEvent>>,
+    threat_cancel: Option<BridgeCancellation>,
 }
 
 impl ShellApp {
@@ -459,10 +462,15 @@ impl ShellApp {
             scan_rx: None,
             scan_cancel: None,
             agent_rx: None,
+            agent_cancel: None,
             plan_rx: None,
+            plan_cancel: None,
             threat_rx: None,
+            threat_cancel: None,
         };
         app.log("system", "kuzushi shell");
+        app.log("startup", app.startup_summary_line());
+        app.log("first-run", app.first_finding_hint());
         app.log(
             "help",
             "/scan, /run <tool>, /ask <question>, ?text, /workspace, /context build, /tasks, /options [tool], /auth login openai-codex|anthropic, /provider, /backend, /model, /cost, /kb, /history, /clear, /load <specifier>, /findings, /modules, /tools, /quit",
@@ -482,6 +490,34 @@ impl ShellApp {
             let overflow = self.log.len() - 500;
             self.log.drain(0..overflow);
         }
+    }
+
+    pub fn first_finding_scan_command(&self) -> &'static str {
+        if self.target.is_some() {
+            "scan"
+        } else {
+            "scan ."
+        }
+    }
+
+    pub fn first_finding_hint(&self) -> String {
+        format!(
+            "First finding: run `{}`, then `findings`.",
+            self.first_finding_scan_command()
+        )
+    }
+
+    fn startup_summary_line(&self) -> String {
+        let target = self
+            .target
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "none".to_string());
+        format!(
+            "ready: {} module(s), {} tool(s), target {target}",
+            self.registry.modules().count(),
+            self.registry.tools().count()
+        )
     }
 
     pub fn handle_command(&mut self, command: ShellCommand) {
@@ -1048,6 +1084,7 @@ impl ShellApp {
 
         if self.agent_chat.as_ref().is_some_and(|agent| !agent.running) {
             self.agent_rx = None;
+            self.agent_cancel = None;
         }
 
         let mut plan_events = Vec::new();
@@ -1061,6 +1098,7 @@ impl ShellApp {
         }
         if !self.planner_running {
             self.plan_rx = None;
+            self.plan_cancel = None;
         }
 
         let mut threat_events = Vec::new();
@@ -1074,6 +1112,7 @@ impl ShellApp {
         }
         if !self.threat_worker_running {
             self.threat_rx = None;
+            self.threat_cancel = None;
         }
     }
 
@@ -1131,12 +1170,14 @@ impl ShellApp {
         let config = self.config.clone();
         let thinking_level = self.session_thinking_level.clone();
         let (tx, rx) = mpsc::channel();
+        let cancel = BridgeCancellation::default();
         self.threat_rx = Some(rx);
+        self.threat_cancel = Some(cancel.clone());
         self.threat_worker_running = true;
         self.log("threats", "regenerating threat-model patch");
 
         thread::spawn(move || {
-            threat_regen_worker(config, model, thinking_level, cwd, existing, tx)
+            threat_regen_worker(config, model, thinking_level, cwd, existing, cancel, tx)
         });
     }
 
@@ -1174,12 +1215,23 @@ impl ShellApp {
         let thinking_level = self.session_thinking_level.clone();
         let question = question.to_string();
         let (tx, rx) = mpsc::channel();
+        let cancel = BridgeCancellation::default();
         self.threat_rx = Some(rx);
+        self.threat_cancel = Some(cancel.clone());
         self.threat_worker_running = true;
         self.log("threats", format!("asking: {question}"));
 
         thread::spawn(move || {
-            threat_ask_worker(config, model, thinking_level, cwd, existing, question, tx)
+            threat_ask_worker(
+                config,
+                model,
+                thinking_level,
+                cwd,
+                existing,
+                question,
+                cancel,
+                tx,
+            )
         });
     }
 
@@ -1222,6 +1274,7 @@ impl ShellApp {
     pub fn set_pending_threat_patch(&mut self, patch: ThreatPatch) {
         self.pending_threat_patch = Some(patch);
         self.threat_worker_running = false;
+        self.threat_cancel = None;
     }
 
     fn apply_plan_event(&mut self, event: PlanEvent) {
@@ -1245,6 +1298,7 @@ impl ShellApp {
 
     pub fn set_pending_plan(&mut self, plan: PlanProposal) {
         self.planner_running = false;
+        self.plan_cancel = None;
         self.pending_plan = Some(plan);
     }
 
@@ -1287,11 +1341,15 @@ impl ShellApp {
         let thinking_level = self.session_thinking_level.clone();
         let goal_owned = goal.to_string();
         let (tx, rx) = mpsc::channel();
+        let cancel = BridgeCancellation::default();
         self.plan_rx = Some(rx);
+        self.plan_cancel = Some(cancel.clone());
         self.planner_running = true;
         self.log("plan", format!("planning: {goal_owned}"));
 
-        thread::spawn(move || planner_worker(config, model, thinking_level, cwd, goal_owned, tx));
+        thread::spawn(move || {
+            planner_worker(config, model, thinking_level, cwd, goal_owned, cancel, tx)
+        });
     }
 
     pub fn apply_pending_plan(&mut self) {
@@ -1413,6 +1471,8 @@ impl ShellApp {
             error: None,
         });
         self.agent_rx = Some(rx);
+        let cancel = BridgeCancellation::default();
+        self.agent_cancel = Some(cancel.clone());
         self.shell_view = ShellView::AgentChat;
         self.log(
             "agent",
@@ -1425,7 +1485,9 @@ impl ShellApp {
             ),
         );
 
-        thread::spawn(move || agent_worker(config, model, thinking_level, cwd, question, tx));
+        thread::spawn(move || {
+            agent_worker(config, model, thinking_level, cwd, question, cancel, tx)
+        });
     }
 
     fn handle_context_command(&mut self, command: ContextCommand) {
@@ -1468,6 +1530,7 @@ impl ShellApp {
         self.selected_finding = None;
         self.agent_chat = None;
         self.agent_rx = None;
+        self.agent_cancel = None;
         self.shell_view = ShellView::Catalog;
         self.log(
             "system",
@@ -1919,19 +1982,27 @@ impl ShellApp {
 
     pub fn show_quickstart(&mut self) {
         self.shell_view = ShellView::Help;
+        let scan_command = self.first_finding_scan_command();
         let lines = [
             "Welcome to kuzushi! Quickstart:",
-            "  1. /target <path>           — point the shell at a repo",
-            "  2. /model openai:gpt-5.5    — pick a provider/model",
-            "  3. /scan ./repo             — run configured scanners",
-            "  4. /findings                — browse persisted findings",
-            "  5. /threats                 — review or regenerate the threat model",
-            "  6. /plan <english>          — Haiku-driven natural-language plans",
+            if self.target.is_some() {
+                "  1. scan                    - run configured scanners on the active target"
+            } else {
+                "  1. scan .                  - run configured scanners on this directory"
+            },
+            "  2. findings                - browse persisted findings",
+            "  3. context build           - write .kuzushi/context-snapshot.json",
+            "  4. model                   - choose an explicit provider/model for ask/triage",
+            "  5. ask <question>          - ask after a model is configured",
             "Press Ctrl+O to toggle the live event timeline.",
         ];
         for line in lines {
             self.log("quickstart", line);
         }
+        self.log(
+            "quickstart",
+            format!("Exact first-finding path: {scan_command} -> findings"),
+        );
     }
 
     pub fn handle_target_command(&mut self, raw: Option<&str>) {
@@ -3800,6 +3871,10 @@ impl ShellApp {
 
     fn request_exit(&mut self) {
         self.cancel_active_scan();
+        self.request_agentic_abort();
+        if !self.should_quit {
+            self.log("system", "exit requested; closing shell");
+        }
         self.should_quit = true;
     }
 
@@ -3812,14 +3887,21 @@ impl ShellApp {
             cancel.cancel();
         }
         if let Some(scan) = &mut self.scan {
-            scan.stage = "cancelling".to_string();
+            scan.stage = "abort requested".to_string();
         }
-        self.log("scan", "cancelling active scan");
+        self.log(
+            "scan",
+            "abort requested; waiting for active scanner subprocess to stop",
+        );
         true
     }
 
     fn handle_quit_chord(&mut self) {
         if self.cancel_active_scan() {
+            self.ctrl_c_armed_at = None;
+            return;
+        }
+        if self.request_agentic_abort() {
             self.ctrl_c_armed_at = None;
             return;
         }
@@ -3835,6 +3917,65 @@ impl ShellApp {
             "system",
             "press Ctrl+C again within 2s to exit (any other key cancels)",
         );
+    }
+
+    pub fn has_active_agentic_work(&self) -> bool {
+        self.agent_chat.as_ref().is_some_and(|agent| agent.running)
+            || self.planner_running
+            || self.threat_worker_running
+    }
+
+    fn request_agentic_abort(&mut self) -> bool {
+        let mut requested = false;
+
+        if self.agent_chat.as_ref().is_some_and(|agent| agent.running) {
+            if let Some(cancel) = &self.agent_cancel {
+                cancel.cancel();
+            }
+            if let Some(agent) = &mut self.agent_chat {
+                agent.running = false;
+                agent.answer = None;
+                agent.error =
+                    Some("abort requested; waiting for pi-agent-core bridge to stop".to_string());
+            }
+            self.agent_rx = None;
+            self.agent_cancel = None;
+            self.log(
+                "agent",
+                "abort requested; pi-agent-core bridge may finish stopping in background",
+            );
+            requested = true;
+        }
+
+        if self.planner_running {
+            if let Some(cancel) = &self.plan_cancel {
+                cancel.cancel();
+            }
+            self.planner_running = false;
+            self.plan_rx = None;
+            self.plan_cancel = None;
+            self.log(
+                "plan",
+                "abort requested; no plan will be applied unless a proposal was already shown",
+            );
+            requested = true;
+        }
+
+        if self.threat_worker_running {
+            if let Some(cancel) = &self.threat_cancel {
+                cancel.cancel();
+            }
+            self.threat_worker_running = false;
+            self.threat_rx = None;
+            self.threat_cancel = None;
+            self.log(
+                "threats",
+                "abort requested; no threat-model changes were applied",
+            );
+            requested = true;
+        }
+
+        requested
     }
 
     pub fn tick(&mut self) {
@@ -3919,11 +4060,12 @@ impl ShellApp {
 
     fn abort_for_budget(&mut self) {
         self.advisory.budget_halt = None;
-        let cancelled = self.cancel_active_scan();
+        let scan_abort_requested = self.cancel_active_scan();
+        let agent_abort_requested = self.request_agentic_abort();
         self.log(
             "budget",
             format!(
-                "aborting due to cost cap (scan cancelled: {cancelled}). Next: /cost or /scan",
+                "aborting due to cost cap (scan abort requested: {scan_abort_requested}, agent abort requested: {agent_abort_requested}). Next: /cost or /scan",
             ),
         );
     }
@@ -4260,11 +4402,17 @@ fn thinking_level_from_input(input: &serde_json::Value) -> Option<String> {
 }
 
 fn unknown_command_message(raw: &str) -> String {
-    if raw.trim_start().starts_with('/') {
-        format!("unknown command {raw:?}. Next: help")
+    let trimmed = raw.trim();
+    let normalized = trimmed.strip_prefix('/').unwrap_or(trimmed);
+    let verb = normalized.split_whitespace().next().unwrap_or_default();
+
+    if verb == "ask" {
+        "ask needs a question. Next: /ask <question>".to_string()
+    } else if trimmed.starts_with('/') {
+        format!("unknown command {trimmed:?}. Next: /help")
     } else {
         format!(
-            "unknown command {raw:?}. Free-form chat is explicit only. Next: /ask <question> or help"
+            "unknown command {trimmed:?}. Free-form chat is explicit only. Next: /ask <question> or help"
         )
     }
 }
@@ -4536,9 +4684,10 @@ fn agent_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     question: String,
+    cancel: BridgeCancellation,
     tx: Sender<AgentEvent>,
 ) {
-    let result = run_agent_worker(config, model, thinking_level, cwd, question);
+    let result = run_agent_worker(config, model, thinking_level, cwd, question, &cancel);
     let event = match result {
         Ok(text) => AgentEvent::Answered { text },
         Err(error) => AgentEvent::Failed {
@@ -4554,15 +4703,19 @@ fn run_agent_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     question: String,
+    cancel: &BridgeCancellation,
 ) -> Result<String> {
     let runtime =
         PiAgentCoreRuntime::from_config(&config, &cwd)?.with_thinking_level(thinking_level);
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model,
-        cwd,
-        system_prompt: ASK_SYSTEM_PROMPT.to_string(),
-        prompt: question,
-    })?;
+    let response = runtime.query_blocking_with_cancellation(
+        AgentQueryRequest {
+            model,
+            cwd,
+            system_prompt: ASK_SYSTEM_PROMPT.to_string(),
+            prompt: question,
+        },
+        cancel,
+    )?;
     let answer = response.text.trim();
     if answer.is_empty() {
         anyhow::bail!("agent returned no answer");
@@ -4594,9 +4747,10 @@ fn planner_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     goal: String,
+    cancel: BridgeCancellation,
     tx: Sender<PlanEvent>,
 ) {
-    let event = match run_planner_worker(config, model, thinking_level, cwd, &goal) {
+    let event = match run_planner_worker(config, model, thinking_level, cwd, &goal, &cancel) {
         Ok(plan) => PlanEvent::Proposed(plan),
         Err(error) => PlanEvent::Failed {
             error: error.to_string(),
@@ -4611,15 +4765,19 @@ fn run_planner_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     goal: &str,
+    cancel: &BridgeCancellation,
 ) -> Result<PlanProposal> {
     let runtime =
         PiAgentCoreRuntime::from_config(&config, &cwd)?.with_thinking_level(thinking_level);
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model,
-        cwd,
-        system_prompt: PLAN_SYSTEM_PROMPT.to_string(),
-        prompt: goal.to_string(),
-    })?;
+    let response = runtime.query_blocking_with_cancellation(
+        AgentQueryRequest {
+            model,
+            cwd,
+            system_prompt: PLAN_SYSTEM_PROMPT.to_string(),
+            prompt: goal.to_string(),
+        },
+        cancel,
+    )?;
     let body = response.text.trim();
     if body.is_empty() {
         anyhow::bail!("planner returned no content");
@@ -4749,9 +4907,11 @@ fn threat_regen_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     existing: serde_json::Value,
+    cancel: BridgeCancellation,
     tx: Sender<ThreatPatchEvent>,
 ) {
-    let event = match run_threat_regen_worker(config, model, thinking_level, cwd, existing) {
+    let event = match run_threat_regen_worker(config, model, thinking_level, cwd, existing, &cancel)
+    {
         Ok(patch) => ThreatPatchEvent::Proposed(patch),
         Err(error) => ThreatPatchEvent::Failed {
             error: error.to_string(),
@@ -4766,6 +4926,7 @@ fn run_threat_regen_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     existing: serde_json::Value,
+    cancel: &BridgeCancellation,
 ) -> Result<ThreatPatch> {
     let runtime =
         PiAgentCoreRuntime::from_config(&config, &cwd)?.with_thinking_level(thinking_level);
@@ -4774,12 +4935,15 @@ fn run_threat_regen_worker(
         THREAT_REGEN_PROMPT,
         serde_json::to_string_pretty(&existing).unwrap_or_else(|_| "null".to_string())
     );
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model,
-        cwd,
-        system_prompt: THREAT_PATCH_SYSTEM_PROMPT.to_string(),
-        prompt,
-    })?;
+    let response = runtime.query_blocking_with_cancellation(
+        AgentQueryRequest {
+            model,
+            cwd,
+            system_prompt: THREAT_PATCH_SYSTEM_PROMPT.to_string(),
+            prompt,
+        },
+        cancel,
+    )?;
     let body = response.text.trim();
     if body.is_empty() {
         anyhow::bail!("threat regen returned no content");
@@ -4794,10 +4958,18 @@ fn threat_ask_worker(
     cwd: PathBuf,
     existing: serde_json::Value,
     question: String,
+    cancel: BridgeCancellation,
     tx: Sender<ThreatPatchEvent>,
 ) {
-    let event = match run_threat_ask_worker(config, model, thinking_level, cwd, existing, &question)
-    {
+    let event = match run_threat_ask_worker(
+        config,
+        model,
+        thinking_level,
+        cwd,
+        existing,
+        &question,
+        &cancel,
+    ) {
         Ok(answer) => ThreatPatchEvent::Answer { text: answer },
         Err(error) => ThreatPatchEvent::Failed {
             error: error.to_string(),
@@ -4813,6 +4985,7 @@ fn run_threat_ask_worker(
     cwd: PathBuf,
     existing: serde_json::Value,
     question: &str,
+    cancel: &BridgeCancellation,
 ) -> Result<String> {
     let runtime =
         PiAgentCoreRuntime::from_config(&config, &cwd)?.with_thinking_level(thinking_level);
@@ -4820,12 +4993,15 @@ fn run_threat_ask_worker(
         "OPERATOR QUESTION:\n{question}\n\nCURRENT THREAT MODEL JSON:\n{}",
         serde_json::to_string_pretty(&existing).unwrap_or_else(|_| "null".to_string())
     );
-    let response = runtime.query_blocking(AgentQueryRequest {
-        model,
-        cwd,
-        system_prompt: ASK_SYSTEM_PROMPT.to_string(),
-        prompt,
-    })?;
+    let response = runtime.query_blocking_with_cancellation(
+        AgentQueryRequest {
+            model,
+            cwd,
+            system_prompt: ASK_SYSTEM_PROMPT.to_string(),
+            prompt,
+        },
+        cancel,
+    )?;
     let answer = response.text.trim();
     if answer.is_empty() {
         anyhow::bail!("threat-ask returned no content");
@@ -6838,6 +7014,50 @@ JSON
     }
 
     #[test]
+    fn exit_and_unknown_command_feedback_is_actionable() {
+        for command in ["/exit", "exit", "/exitj"] {
+            let mut app = ShellApp::new(V2Config::default(), None);
+
+            app.submit_line(command);
+
+            assert!(app.should_quit, "{command} should request shutdown");
+            assert!(app.agent_chat.is_none());
+            assert!(app
+                .log
+                .iter()
+                .any(|line| line.prefix == ">" && line.body == command));
+            assert!(app.log.iter().any(|line| {
+                line.prefix == "system" && line.body.contains("exit requested; closing shell")
+            }));
+        }
+
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.submit_line("/definitely-not-real");
+        let slash_error = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(slash_error.contains("Next: /help"));
+        assert!(app.agent_chat.is_none());
+        assert!(!app.should_quit);
+
+        app.submit_line("ask");
+        let missing_ask_error = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "error")
+            .map(|line| line.body.as_str())
+            .unwrap_or_default();
+        assert!(missing_ask_error.contains("Next: /ask <question>"));
+        assert!(app.agent_chat.is_none());
+        assert_eq!(app.shell_view, ShellView::Catalog);
+    }
+
+    #[test]
     fn session_history_clear_load_resume_pause_and_story_are_explicit() {
         let mut app = ShellApp::new(V2Config::default(), None);
 
@@ -7792,8 +8012,16 @@ JSON
         assert!(!app.should_quit);
         assert_eq!(
             app.scan.as_ref().map(|scan| scan.stage.as_str()),
-            Some("cancelling")
+            Some("abort requested")
         );
+        assert!(app
+            .log
+            .iter()
+            .any(|line| { line.prefix == "scan" && line.body.contains("abort requested") }));
+        assert!(!app
+            .log
+            .iter()
+            .any(|line| line.body.to_ascii_lowercase().contains("killed")));
     }
 
     #[test]
@@ -8015,7 +8243,38 @@ JSON
         assert!(app
             .log
             .iter()
-            .any(|line| line.prefix == "quickstart" && line.body.contains("/scan ./repo")));
+            .any(|line| line.prefix == "quickstart" && line.body.contains("scan .")));
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "quickstart" && line.body.contains("scan . -> findings")
+        }));
+    }
+
+    #[test]
+    fn startup_logs_first_finding_path_for_bare_shell() {
+        let app = ShellApp::new(V2Config::default(), None);
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.prefix == "startup" && line.body.contains("module(s)")));
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "first-run"
+                && line.body.contains("scan .")
+                && line.body.contains("findings")
+        }));
+    }
+
+    #[test]
+    fn startup_logs_active_target_first_finding_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        assert_eq!(app.first_finding_scan_command(), "scan");
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "first-run"
+                && line.body.contains("scan")
+                && !line.body.contains("scan .")
+                && line.body.contains("findings")
+        }));
     }
 
     #[test]
@@ -8389,5 +8648,76 @@ JSON
         app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(!app.should_quit);
         assert!(!app.ctrl_c_armed(), "scan-cancel path must not arm exit");
+    }
+
+    #[test]
+    fn ctrl_c_during_agent_chat_requests_abort_without_claiming_kill() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let cancel = BridgeCancellation::default();
+        app.agent_cancel = Some(cancel.clone());
+        app.agent_rx = Some(mpsc::channel().1);
+        app.agent_chat = Some(AgentChatView {
+            question: "what should I run?".to_string(),
+            answer: None,
+            running: true,
+            error: None,
+        });
+        app.shell_view = ShellView::AgentChat;
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+        assert!(!app.should_quit);
+        assert!(!app.ctrl_c_armed(), "agent abort path must not arm exit");
+        assert!(cancel.is_cancelled());
+        let agent = app.agent_chat.as_ref().unwrap();
+        assert!(!agent.running);
+        assert!(agent
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("abort requested")));
+        assert!(app
+            .log
+            .iter()
+            .any(|line| { line.prefix == "agent" && line.body.contains("abort requested") }));
+        assert!(!app.log.iter().any(|line| {
+            let body = line.body.to_ascii_lowercase();
+            body.contains("killed") || body.contains("kill")
+        }));
+    }
+
+    #[test]
+    fn ctrl_c_during_planner_or_threat_worker_requests_abort_before_exit() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let plan_cancel = BridgeCancellation::default();
+        app.plan_cancel = Some(plan_cancel.clone());
+        app.plan_rx = Some(mpsc::channel().1);
+        app.planner_running = true;
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+        assert!(!app.should_quit);
+        assert!(!app.ctrl_c_armed());
+        assert!(plan_cancel.is_cancelled());
+        assert!(!app.planner_running);
+        assert!(app
+            .log
+            .iter()
+            .any(|line| { line.prefix == "plan" && line.body.contains("abort requested") }));
+
+        let threat_cancel = BridgeCancellation::default();
+        app.threat_cancel = Some(threat_cancel.clone());
+        app.threat_rx = Some(mpsc::channel().1);
+        app.threat_worker_running = true;
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+        assert!(!app.should_quit);
+        assert!(!app.ctrl_c_armed());
+        assert!(threat_cancel.is_cancelled());
+        assert!(!app.threat_worker_running);
+        assert!(app
+            .log
+            .iter()
+            .any(|line| { line.prefix == "threats" && line.body.contains("abort requested") }));
     }
 }
