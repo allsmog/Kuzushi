@@ -1,0 +1,86 @@
+# Kuzushi Whitebox-Static Progress
+
+Stage: 3 - Kuzushi whitebox-static mode
+Active story: WB-002 - Remove Shell Execution From Default Whitebox Agent Tools
+Status: WB-001 complete; WB-002 pending after commit/push gate
+
+## Stage 3 Checklist
+
+- WB-001 Add explicit whitebox-static mode: complete in iteration 29.
+- WB-002 Remove shell execution from default whitebox agent tools: pending.
+- WB-003 Scrub scanner subprocess environments: pending.
+- WB-004 Add static proof taxonomy: pending.
+- WB-005 Add static evidence graph: pending.
+- WB-006 Add source span extractor: pending.
+- WB-007 Normalize Semgrep findings into static evidence: pending.
+- WB-008 Normalize CodeQL SARIF code flows into static evidence: pending.
+- WB-009 Build deterministic repository inventory: pending.
+- WB-010 Build source/sink/sanitizer/guard registry: pending.
+- WB-011 Add attack-surface map from source: pending.
+- WB-012 Add static proof validator: pending.
+- WB-013 Constrain LLM triage to whitebox schema: pending.
+- WB-014 Verify LLM citations before persistence: pending.
+- WB-015 Prioritize findings by static impact: pending.
+- WB-016 Add static trigger/impact narratives: pending.
+- WB-017 Add variant search from statically confirmed findings: pending.
+- WB-018 Add candidate Semgrep rule synthesis: pending.
+- WB-019 Add whitebox false-positive memory: pending.
+- WB-020 Add diff-aware whitebox PR mode: pending.
+- WB-021 Add deterministic eval harness: pending.
+- WB-022 Add whitebox demo fixture: pending.
+
+## Iteration Log
+
+### Iteration 29 - WB-001
+
+- Task attempted: create the Stage 3 whitebox-static scaffolding and add an
+  explicit Rust `whitebox-static` SAST mode gate that disables verification,
+  PoC/dynamic/crypto-behavioral execution toggles, patching, auto-patching,
+  and execution proof states before `sast:scan` dispatch continues.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `scripts/ralph-kuzushi-whitebox-static.sh`
+  - `evals/kuzushi-whitebox-static/run.ts`
+  - `docs/kuzushi-whitebox-static.md`
+  - `package.json`
+  - `crates/kuzushi-core/src/whitebox_static.rs`
+  - `crates/kuzushi-core/src/lib.rs`
+  - `crates/kuzushi-core/src/modules.rs`
+  - `crates/kuzushi-cli/src/main.rs`
+  - `crates/kuzushi-cli/tests/cutover_cli.rs`
+- Tests/checks run:
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `pnpm eval:kuzushi-whitebox-static` (failed before the script change because
+    the direct `tsx` CLI tried to listen on an IPC pipe and hit `EPERM`)
+  - `TMPDIR=/private/tmp pnpm eval:kuzushi-whitebox-static` (same direct `tsx`
+    IPC failure)
+  - `node --import tsx evals/kuzushi-whitebox-static/run.ts` (initially exposed
+    missing exact docs phrases, then passed after docs wording was updated)
+  - `pnpm eval:kuzushi-whitebox-static` with the primary checkout's
+    `node_modules` temporarily symlinked into the clean clone
+  - `cargo fmt --all --check`
+  - `bash -n scripts/ralph-kuzushi-whitebox-static.sh`
+  - `node -e "JSON.parse(require('fs').readFileSync('tasks/kuzushi-whitebox-static.prd.json','utf8'))"`
+- Result: complete. `sast:scan` now accepts `mode: "whitebox-static"` and the
+  Rust CLI exposes `kuzushi scan --mode whitebox-static`. The mode sanitizes
+  verification, PoC/harness execution, dynamic analysis, crypto behavioral
+  testing, patching, auto-patching, runtime exploitability claims, and
+  execution proof states before SAST dispatch, then records a static-only policy
+  object in run output and artifacts. The Stage 3 PRD, progress file,
+  automation script, eval stub, and docs now exist; WB-001 is marked
+  `passes: true` in the PRD after focused gates passed.
+- Remaining work: commit and push WB-001, then start WB-002.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale at the Stage 1 bridge commit with staged Stage 2 changes.
+    Stage 2 completion and the active pushed state are in the clean isolated
+    clone at `/tmp/kuzushi-ux2-clone.PJaRge`, so this Stage 3 slice continues
+    there to preserve the ordered commit/push gates.
+  - The prompt requested wiring `eval:kuzushi-whitebox-static` directly to
+    `tsx evals/kuzushi-whitebox-static/run.ts`, but the direct `tsx` CLI cannot
+    open its IPC pipe in this sandbox (`listen EPERM`). The package script uses
+    the same loader through `node --import tsx ...` so `pnpm
+    eval:kuzushi-whitebox-static` is runnable.

@@ -32,6 +32,7 @@ use crate::variant_ndiff::{
     run_ndiff_extract_fix_pattern, run_ndiff_fetch_cve, run_ndiff_hunt_variants, run_variant_hunt,
     run_variant_lift_pattern,
 };
+use crate::whitebox_static::apply_whitebox_static_sast_policy;
 use crate::workspace::{export_workspace_findings, WorkspaceExportFormat, WorkspaceTarget};
 use crate::x_ray::execute_x_ray_tool;
 use uuid::Uuid;
@@ -562,6 +563,7 @@ fn run_sast_scan(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
+    let (input, whitebox_static) = apply_whitebox_static_sast_policy(input)?;
     let workspace = ctx
         .workspace
         .context("sast:scan requires a workspace target; pass --target <repo> or start the shell with --target <repo>")?;
@@ -776,6 +778,12 @@ fn run_sast_scan(
         findings_count,
         workspace.findings_db_path().display()
     )];
+    if whitebox_static.is_some() {
+        lines.push(
+            "  Mode: whitebox-static (static-only; verify, dynamic analysis, PoC, and patch disabled)"
+                .to_string(),
+        );
+    }
     lines.push(format!("  Engines: {}", engine_ids.join(", ")));
     if let Some(triage_output) = triage
         .as_ref()
@@ -806,6 +814,10 @@ fn run_sast_scan(
                 "systemsHunt": run_ids.systems_hunt,
             },
             "target": workspace.root().display().to_string(),
+            "mode": whitebox_static
+                .as_ref()
+                .map_or("standard", |policy| policy.mode.as_str()),
+            "whiteboxStatic": whitebox_static.as_ref().map(|policy| policy.to_json()),
             "findingsCount": findings_count,
             "db": workspace.findings_db_path().display().to_string(),
             "engines": engine_ids,
@@ -7132,6 +7144,9 @@ fn sast_module() -> BuiltinModule {
             "sast:scan",
             "Run the full SAST pipeline for the current target.",
             vec![
+                opt("mode", OptionType::Enum, "Analysis mode or preset.")
+                    .choices(&["standard", "whitebox-static"])
+                    .default(json!("standard")),
                 opt("taskMode", OptionType::Enum, "Task-selection mode.")
                     .choices(&["auto", "manual"])
                     .default(json!("auto")),
@@ -11209,6 +11224,102 @@ OUT
             .unwrap();
         assert_eq!(patch_results.len(), 1);
         assert_eq!(patch_results[0].status, PatchStatus::Sound);
+    }
+
+    #[test]
+    fn whitebox_static_sast_mode_disables_execution_and_patch_paths() {
+        let temp = tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"lodash":"latest"}}"#,
+        )
+        .unwrap();
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "sast:scan",
+                json!({
+                    "mode": "whitebox-static",
+                    "taskMode": "manual",
+                    "tasks": ["dep-hygiene"],
+                    "verify": true,
+                    "autoPatch": true,
+                    "pocHarness": true,
+                    "pocExecution": true,
+                    "dynamicAnalysis": true,
+                    "cryptoBehavioralTesting": true,
+                    "proofState": "execution_confirmed"
+                }),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(
+            result.pointer("/data/mode").and_then(Value::as_str),
+            Some("whitebox-static")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/whiteboxStatic/enabled")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        for pointer in [
+            "/data/whiteboxStatic/verify",
+            "/data/whiteboxStatic/pocHarness",
+            "/data/whiteboxStatic/pocExecution",
+            "/data/whiteboxStatic/dynamicAnalysis",
+            "/data/whiteboxStatic/cryptoBehavioralTesting",
+            "/data/whiteboxStatic/patching",
+            "/data/whiteboxStatic/autoPatch",
+            "/data/whiteboxStatic/executionProofStates",
+            "/data/whiteboxStatic/runtimeExploitabilityClaims",
+        ] {
+            assert_eq!(
+                result.pointer(pointer).and_then(Value::as_bool),
+                Some(false)
+            );
+        }
+        assert_eq!(
+            result
+                .pointer("/data/verification/verified")
+                .and_then(Value::as_u64),
+            Some(0)
+        );
+        assert_eq!(
+            result
+                .pointer("/data/patch/patched")
+                .and_then(Value::as_u64),
+            Some(0)
+        );
+        assert!(runtime.requests().is_empty());
+        assert!(runtime.queries().is_empty());
+
+        let scan_input = fs::read_to_string(
+            result
+                .pointer("/data/artifacts/dir")
+                .and_then(Value::as_str)
+                .map(Path::new)
+                .unwrap()
+                .join("scan-input.json"),
+        )
+        .unwrap();
+        assert!(scan_input.contains("\"mode\": \"whitebox-static\""));
+        assert!(!scan_input.contains("execution_confirmed"));
+        assert!(scan_input.contains("needs_runtime_evidence"));
     }
 
     #[cfg(unix)]

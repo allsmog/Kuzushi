@@ -4,7 +4,7 @@ use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use kuzushi_core::config::write_default_config;
 use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::{
@@ -38,6 +38,8 @@ enum Command {
     /// Run configured scanners and persist findings.
     Scan {
         target: PathBuf,
+        #[arg(long, value_enum, default_value_t = ScanModeArg::Standard)]
+        mode: ScanModeArg,
         #[arg(long, value_delimiter = ',')]
         tasks: Vec<String>,
         #[arg(long)]
@@ -114,6 +116,21 @@ enum Command {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ScanModeArg {
+    Standard,
+    WhiteboxStatic,
+}
+
+impl ScanModeArg {
+    fn as_input_value(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::WhiteboxStatic => "whitebox-static",
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 enum ConfigCommand {
     /// Print the effective config.
@@ -151,11 +168,12 @@ async fn main() -> Result<()> {
         }
         Command::Scan {
             target,
+            mode,
             tasks,
             triage,
             json,
             ci,
-        } => scan_command(target, tasks, triage, json, ci).await,
+        } => scan_command(target, mode, tasks, triage, json, ci).await,
         Command::Findings {
             target,
             limit,
@@ -256,6 +274,7 @@ fn pr_comment_command(
 
 async fn scan_command(
     target: PathBuf,
+    mode: ScanModeArg,
     tasks: Vec<String>,
     triage: bool,
     json: bool,
@@ -266,6 +285,7 @@ async fn scan_command(
     let store = FindingStore::open(workspace.findings_db_path())?;
     let registry = ModuleRegistry::with_v2_builtins();
     let input = serde_json::json!({
+        "mode": mode.as_input_value(),
         "taskMode": if tasks.is_empty() { "auto" } else { "manual" },
         "tasks": tasks,
         "triage": triage,
@@ -377,6 +397,8 @@ async fn scan_command(
                 "target": data.get("target").cloned(),
                 "findingsCount": data.get("findingsCount").cloned(),
                 "db": workspace.findings_db_path(),
+                "mode": data.get("mode").cloned(),
+                "whiteboxStatic": data.get("whiteboxStatic").cloned(),
                 "triage": data.get("triage").cloned(),
             })
         );
@@ -1129,15 +1151,23 @@ mod tests {
 }
 
 fn wants_sast_runtime(input: &serde_json::Value) -> bool {
-    input
+    let whitebox_static = kuzushi_core::whitebox_static_enabled(input).unwrap_or(false);
+    let triage_runtime = input
         .get("triage")
         .or_else(|| input.get("aiTriage"))
         .or_else(|| input.get("ai_triage"))
-        .or_else(|| input.get("verify"))
-        .or_else(|| input.get("autoPatch"))
-        .or_else(|| input.get("auto_patch"))
         .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
+        .unwrap_or(false);
+    let execution_runtime = !whitebox_static
+        && input
+            .get("verify")
+            .or_else(|| input.get("autoPatch"))
+            .or_else(|| input.get("auto_patch"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+
+    triage_runtime
+        || execution_runtime
         || input
             .get("tasks")
             .and_then(serde_json::Value::as_array)
