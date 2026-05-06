@@ -4,6 +4,7 @@ pub mod attachments;
 pub mod carlini_threat_hunt;
 pub mod classifier_gate;
 pub mod code_nav;
+pub mod concurrency;
 pub mod config;
 pub mod deep_auditor;
 pub mod dep_hygiene;
@@ -45,6 +46,10 @@ pub use code_nav::{
 };
 pub use classifier_gate::{
     ClassifierConfig, LikelyVulnClassifier, QuantileEstimator, Score,
+};
+pub use concurrency::{
+    current_priority, default_concurrency_for, with_priority, ModelGate, Priority,
+    PriorityPermit,
 };
 pub use deep_auditor::{
     run_deep_auditor, save_evidence, DeepAuditConfig, DeepAuditOutcome, EvidenceCitation,
