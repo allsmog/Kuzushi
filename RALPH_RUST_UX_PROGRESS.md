@@ -2,14 +2,14 @@
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
 Active story: UX-004 - Improve Exit And Unknown Command Handling
-Status: UX-003 complete and pushed; UX-004 pending
+Status: UX-004 complete; push pending
 
 ## Stage 2 Checklist
 
 - UX-001 Remove Ink/React from runtime CLI packaging: complete; pushed in iteration 5.
 - UX-002 Delete or isolate legacy Ink UI code: complete; pushed in iteration 12 as `5e73f6f`.
 - UX-003 Fix shell redraw and prompt overlap: complete; pushed in iteration 13 as `bba14f9`.
-- UX-004 Improve exit and unknown command handling: pending.
+- UX-004 Improve exit and unknown command handling: complete; push pending in iteration 14.
 - UX-005 Visible startup progress and first-run path: pending.
 - UX-006 Rust doctor / preflight: pending.
 - UX-007 Input mode clarity: pending.
@@ -337,6 +337,33 @@ Status: UX-003 complete and pushed; UX-004 pending
   - The primary workspace still has the UX-002 slice staged and local `main`
     remains at `80d23a4` because Git metadata writes under `.git` remain
     blocked in this environment.
+
+### Iteration 14 - UX-004
+
+- Task attempted: improve Rust shell exit and unknown-command handling without
+  enabling implicit model chat for bare prose.
+- Files changed:
+  - `crates/kuzushi-tui/src/app.rs`
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-tui exit_and_unknown_command_feedback_is_actionable`
+  - `cargo test -p kuzushi-tui commands::tests::unknown_prose_does_not_route_to_agent_chat`
+  - `cargo test -p kuzushi-tui renderer::tests::renders_exit_commands_before_closing`
+  - `cargo test -p kuzushi-tui ask_requires_explicit_model_and_unknown_prose_stays_deterministic`
+- Result: implementation complete; commit/push gate pending. `/exit`, `exit`,
+  and `/exitj` request shutdown and leave a visible transcript line. Unknown
+  slash commands now point to `/help`, missing explicit ask commands point to
+  `/ask <question>`, and bare prose remains deterministic with no agent chat
+  route.
+- Remaining work: push UX-004, then UX-005 through UX-015.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary workspace still has the previously pushed Stage 2 files staged
+    because local Git metadata writes under `.git` remain blocked in this
+    environment and local `main` remains stale at `80d23a4`.
+  - `git -C /tmp/kuzushi-ux2-clone.PJaRge fetch origin main` failed with
+    `Could not resolve host: github.com`, so push availability is not currently
+    guaranteed.
 
 ### Iteration 13 - UX-003
 
