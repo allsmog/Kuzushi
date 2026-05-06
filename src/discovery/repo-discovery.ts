@@ -64,7 +64,10 @@ export async function discoverRepoStructure(
 
   // Pass 2: LLM carving (only when runtime is provided)
   if (options.runtime) {
-    const model = options.model ?? "claude-sonnet-4-20250514";
+    const model = options.model?.trim();
+    if (!model) {
+      throw new Error("LLM repo discovery requires an explicit configured model");
+    }
     const carved = await carveModulesWithLlm(
       repoRoot,
       allNodes,

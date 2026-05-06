@@ -2,17 +2,59 @@
 import { spawn } from "node:child_process";
 import {
   chmodSync,
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+
+async function withCredentialsLock(filePath, fn, { timeoutMs = 30_000, pollMs = 80 } = {}) {
+  const lockPath = `${filePath}.lock`;
+  mkdirSync(path.dirname(lockPath), { recursive: true });
+  const start = Date.now();
+  let fd;
+  while (true) {
+    try {
+      fd = openSync(lockPath, "wx", 0o600);
+      break;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      if (Date.now() - start > timeoutMs) {
+        try {
+          rmSync(lockPath, { force: true });
+        } catch {
+          /* ignore stale-lock cleanup failures */
+        }
+        continue;
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+      /* ignore */
+    }
+    try {
+      rmSync(lockPath, { force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 async function readStdin() {
   let data = "";
@@ -464,11 +506,24 @@ function readOauthCredentials(home = os.homedir()) {
 
 function writeOauthCredentials(bag, home = os.homedir()) {
   const filePath = oauthCredentialsPath(home);
-  mkdirSync(path.dirname(filePath), { recursive: true });
-  writeFileSync(filePath, `${JSON.stringify(bag, null, 2)}\n`, {
+  const dir = path.dirname(filePath);
+  mkdirSync(dir, { recursive: true });
+  try {
+    chmodSync(dir, 0o700);
+  } catch {
+    /* best effort */
+  }
+  const tmpPath = `${filePath}.tmp.${process.pid}`;
+  writeFileSync(tmpPath, `${JSON.stringify(bag, null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600,
   });
+  try {
+    chmodSync(tmpPath, 0o600);
+  } catch {
+    /* best effort */
+  }
+  renameSync(tmpPath, filePath);
   try {
     chmodSync(filePath, 0o600);
   } catch {
@@ -510,23 +565,30 @@ async function loadOAuthModule() {
 
 async function getFreshOAuthAccessTokenForProvider(provider) {
   if (provider !== "anthropic" && provider !== "openai-codex") return undefined;
-  const bag = readOauthCredentials();
-  const creds = bag[provider];
-  if (!isProviderCreds(creds)) return undefined;
-  if (Date.now() < creds.expires) return creds.access;
+  const bagInitial = readOauthCredentials();
+  const credsInitial = bagInitial[provider];
+  if (!isProviderCreds(credsInitial)) return undefined;
+  if (Date.now() < credsInitial.expires) return credsInitial.access;
 
-  try {
-    const oauth = await loadOAuthModule();
-    const refresh =
-      provider === "anthropic" ? oauth.refreshAnthropicToken : oauth.refreshOpenAICodexToken;
-    if (typeof refresh !== "function") return undefined;
-    const next = await refresh(creds.refresh);
-    if (!isProviderCreds(next)) return undefined;
-    writeOauthCredentials({ ...bag, [provider]: next });
-    return next.access;
-  } catch {
-    return undefined;
-  }
+  return withCredentialsLock(oauthCredentialsPath(), async () => {
+    const bag = readOauthCredentials();
+    const creds = bag[provider];
+    if (!isProviderCreds(creds)) return undefined;
+    if (Date.now() < creds.expires) return creds.access;
+
+    try {
+      const oauth = await loadOAuthModule();
+      const refresh =
+        provider === "anthropic" ? oauth.refreshAnthropicToken : oauth.refreshOpenAICodexToken;
+      if (typeof refresh !== "function") return undefined;
+      const next = await refresh(creds.refresh);
+      if (!isProviderCreds(next)) return undefined;
+      writeOauthCredentials({ ...bag, [provider]: next });
+      return next.access;
+    } catch {
+      return undefined;
+    }
+  });
 }
 
 function providerAuthToken(provider) {
@@ -569,8 +631,10 @@ async function runOAuthLogin(rawProvider) {
   if (!persistable.refresh || !persistable.access) {
     throw new Error(`${provider} OAuth flow returned no usable credentials`);
   }
-  const bag = readOauthCredentials();
-  const filePath = writeOauthCredentials({ ...bag, [provider]: persistable });
+  const filePath = await withCredentialsLock(oauthCredentialsPath(), async () => {
+    const bag = readOauthCredentials();
+    return writeOauthCredentials({ ...bag, [provider]: persistable });
+  });
   process.stdout.write(`${provider} OAuth credentials saved to ${filePath}\n`);
 }
 
@@ -604,6 +668,177 @@ async function promptManualCode() {
   }
 }
 
+async function handlePing(request) {
+  const [provider, modelId] = parseModelSpec(request.model);
+  if (provider !== "anthropic") {
+    throw new Error(`auth ping currently only supports anthropic models (got ${provider})`);
+  }
+
+  const oauthToken = await getFreshOAuthAccessTokenForProvider("anthropic");
+  const envOauth = providerAuthToken("anthropic");
+  const apiKey = configuredProviderApiKey("anthropic", request) ?? process.env.ANTHROPIC_API_KEY;
+  if (!oauthToken && !envOauth && !apiKey) {
+    throw new Error(
+      "auth ping: no Anthropic credentials. Run OAuth login or set ANTHROPIC_OAUTH_TOKEN / ANTHROPIC_API_KEY.",
+    );
+  }
+
+  const headers = {
+    "content-type": "application/json",
+    "anthropic-version": "2023-06-01",
+  };
+  let authMode;
+  if (oauthToken || envOauth) {
+    headers.authorization = `Bearer ${oauthToken ?? envOauth}`;
+    headers["anthropic-beta"] = "oauth-2025-04-20";
+    authMode = oauthToken ? "oauth-file" : "oauth-env";
+  } else {
+    headers["x-api-key"] = apiKey;
+    authMode = "api-key";
+  }
+
+  const t0 = Date.now();
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: modelId,
+      max_tokens: 1,
+      messages: [{ role: "user", content: "ok" }],
+    }),
+  });
+  const text = await response.text();
+  const latency_ms = Date.now() - t0;
+  if (!response.ok) {
+    throw new Error(
+      `auth ping: Anthropic API ${response.status} ${response.statusText}: ${text.slice(0, 300)}`,
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`auth ping: Anthropic returned non-JSON body: ${text.slice(0, 200)}`);
+  }
+  const usage = parsed.usage ?? {};
+  return {
+    ok: true,
+    auth_mode: authMode,
+    model: modelId,
+    latency_ms,
+    input_tokens: usage.input_tokens ?? 0,
+    output_tokens: usage.output_tokens ?? 0,
+    cost_usd: approximateCostUsd(modelId, usage),
+  };
+}
+
+async function handleNextStep(request) {
+  const [provider, modelId] = parseModelSpec(request.model);
+  if (provider !== "anthropic") {
+    throw new Error(
+      `next-step bridge only supports anthropic models in this version (got ${provider})`,
+    );
+  }
+
+  const oauthToken = await getFreshOAuthAccessTokenForProvider("anthropic");
+  const envOauth = providerAuthToken("anthropic");
+  const apiKey = configuredProviderApiKey("anthropic", request) ?? process.env.ANTHROPIC_API_KEY;
+  if (!oauthToken && !envOauth && !apiKey) {
+    throw new Error(
+      "next-step: no Anthropic credentials. Set up OAuth or ANTHROPIC_OAUTH_TOKEN / ANTHROPIC_API_KEY.",
+    );
+  }
+
+  const headers = {
+    "content-type": "application/json",
+    "anthropic-version": "2023-06-01",
+  };
+  if (oauthToken || envOauth) {
+    headers.authorization = `Bearer ${oauthToken ?? envOauth}`;
+    headers["anthropic-beta"] = "oauth-2025-04-20";
+  } else {
+    headers["x-api-key"] = apiKey;
+  }
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: modelId,
+      system: request.systemPrompt ?? request.system_prompt ?? "",
+      messages: request.messages ?? [],
+      tools: (request.tools ?? []).map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        input_schema: tool.input_schema ?? tool.inputSchema,
+      })),
+      max_tokens: request.max_tokens ?? request.maxTokens ?? 4096,
+    }),
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `next-step: Anthropic API ${response.status} ${response.statusText}: ${text.slice(0, 500)}`,
+    );
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`next-step: Anthropic returned non-JSON body: ${text.slice(0, 200)}`);
+  }
+
+  const cost_usd = approximateCostUsd(modelId, parsed.usage ?? {});
+  const blocks = Array.isArray(parsed.content) ? parsed.content : [];
+  for (const block of blocks) {
+    if (block?.type === "tool_use") {
+      return {
+        ok: true,
+        step: "tool_call",
+        call: {
+          name: block.name,
+          input: block.input ?? {},
+          callId: block.id,
+        },
+        cost_usd,
+      };
+    }
+  }
+
+  const finalText = blocks
+    .filter((block) => block?.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("");
+  return {
+    ok: true,
+    step: "final",
+    text: finalText,
+    structured: maybeParseJson(finalText),
+    cost_usd,
+  };
+}
+
+function approximateCostUsd(modelId, usage) {
+  const id = String(modelId ?? "").toLowerCase();
+  let inRate;
+  let outRate;
+  if (id.includes("haiku")) {
+    inRate = 0.0008;
+    outRate = 0.004;
+  } else if (id.includes("opus")) {
+    inRate = 0.015;
+    outRate = 0.075;
+  } else {
+    inRate = 0.003;
+    outRate = 0.015;
+  }
+  const input = (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
+  const output = usage.output_tokens ?? 0;
+  return (input * inRate) / 1000 + (output * outRate) / 1000;
+}
+
 async function main() {
   if (process.argv[2] === "--oauth-login") {
     await runOAuthLogin(process.argv[3] ?? "openai-codex");
@@ -611,6 +846,17 @@ async function main() {
   }
 
   const request = JSON.parse(await readStdin());
+  if (request.type === "next-step") {
+    const result = await handleNextStep(request);
+    process.stdout.write(JSON.stringify(result));
+    return;
+  }
+  if (request.type === "ping") {
+    const result = await handlePing(request);
+    process.stdout.write(JSON.stringify(result));
+    return;
+  }
+
   const [{ Agent, default: DefaultAgent }, { getModel }] = await Promise.all([
     import("@mariozechner/pi-agent-core"),
     import("@mariozechner/pi-ai"),
