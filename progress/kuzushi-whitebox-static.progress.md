@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-017 - Add variant search from statically confirmed findings
-Status: WB-016 complete in iteration 44; WB-017 pending
+Active story: WB-018 - Add candidate Semgrep rule synthesis
+Status: WB-017 complete in iteration 45; WB-018 pending
 
 ## Stage 3 Checklist
 
@@ -22,7 +22,7 @@ Status: WB-016 complete in iteration 44; WB-017 pending
 - WB-014 Verify LLM citations before persistence: complete in iteration 42.
 - WB-015 Prioritize findings by static impact: complete in iteration 43.
 - WB-016 Add static trigger/impact narratives: complete in iteration 44.
-- WB-017 Add variant search from statically confirmed findings: pending.
+- WB-017 Add variant search from statically confirmed findings: complete in iteration 45.
 - WB-018 Add candidate Semgrep rule synthesis: pending.
 - WB-019 Add whitebox false-positive memory: pending.
 - WB-020 Add diff-aware whitebox PR mode: pending.
@@ -30,6 +30,51 @@ Status: WB-016 complete in iteration 44; WB-017 pending
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 45 - WB-017
+
+- Task attempted: add deterministic whitebox-static variant search from
+  statically confirmed findings without letting variants inherit confirmation.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `evals/kuzushi-whitebox-static/run.ts`
+  - `docs/kuzushi-whitebox-static.md`
+  - `crates/kuzushi-core/src/variant_ndiff.rs`
+  - `crates/kuzushi-core/src/modules.rs`
+  - `crates/kuzushi-core/src/lib.rs`
+- Tests/checks run:
+  - `git status --short --branch` in the primary checkout
+  - `git status --short --branch` in the clean nested clone
+  - `sed -n '1,220p' progress/kuzushi-whitebox-static.progress.md`
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core whitebox_variants`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `git diff --check`
+  - `pnpm eval:kuzushi-whitebox-static` with the primary checkout's
+    `node_modules` temporarily symlinked into the clean nested clone
+- Result: implementation complete. `variant_ndiff.rs` now derives reusable
+  source/sink/missing-guard patterns only from `statically_confirmed` findings
+  and their static evidence, scans sibling source files deterministically, and
+  emits whitebox variant candidates as `code_cited` findings that explicitly
+  require independent validation. Guarded sibling candidates are skipped, and
+  non-confirmed findings do not seed patterns. Whitebox `sast:scan` now writes
+  `.kuzushi/runs/<runId>/static-variants.json`, includes `staticVariants` in
+  tool JSON, and never marks variants confirmed by inheritance. WB-017 is
+  marked `passes: true` in the PRD after the story gate and fast whitebox
+  checks passed.
+- Remaining work: WB-018 through WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files, while the clean nested clone at
+    `/Users/operator/VibeCode/open-sourced/kuzushi/.codex-active/kuzushi-stage3`
+    contains the active pushed Stage 3 state. This iteration continued in the
+    nested clone to avoid resetting or overwriting the primary worktree.
+  - The nested clone does not have its own `node_modules`; the eval used a
+    temporary symlink to the primary checkout's installed dependencies and then
+    removed it before commit.
 
 ### Iteration 44 - WB-016
 

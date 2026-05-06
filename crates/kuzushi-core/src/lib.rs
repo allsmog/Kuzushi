@@ -114,6 +114,10 @@ pub use systems_hunt::{execute_systems_hunt_tool, run_systems_hunt_report, Syste
 pub use threat_model::{
     execute_threat_model_tool, load_persistent_threat_model, save_persistent_threat_model,
 };
+pub use variant_ndiff::{
+    derive_whitebox_variant_patterns, hunt_whitebox_static_variants, WhiteboxVariantPattern,
+    WhiteboxVariantSearchReport,
+};
 pub use whitebox_static::{
     agent_tool_policy_for_input, analysis_mode_from_input, apply_whitebox_static_sast_policy,
     default_whitebox_static_agent_tool_policy, mark_whitebox_static_findings,

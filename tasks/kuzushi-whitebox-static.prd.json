@@ -215,7 +215,7 @@
       "acceptance": ["Derive reusable patterns from confirmed evidence.", "Variants start as signal_only or code_cited, not confirmed."],
       "storyGate": "cargo test -p kuzushi-core whitebox_variants",
       "forbidden": ["variant confirmed by inheritance"],
-      "passes": false
+      "passes": true
     },
     {
       "id": "WB-018",

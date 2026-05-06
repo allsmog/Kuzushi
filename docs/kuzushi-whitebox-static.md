@@ -57,6 +57,13 @@ narratives describe how the code appears to route data from an entrypoint to a
 sink and what impact could follow if runtime preconditions hold. They must also
 state evidence limits, assumptions, and missing runtime evidence.
 
+## Static Variant Search
+
+When a finding is `statically confirmed`, whitebox-static can derive a reusable
+source/sink/missing-guard pattern and scan sibling source files for similar
+code shapes. These are review candidates only: generated variants begin as
+`code_cited` or `signal_only`, never `statically confirmed` by inheritance.
+
 ## Evidence Limits
 
 Whitebox-static cannot prove that an issue is reachable in a deployed runtime,

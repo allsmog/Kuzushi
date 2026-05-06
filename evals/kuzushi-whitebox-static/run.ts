@@ -45,6 +45,7 @@ const docs = read("docs/kuzushi-whitebox-static.md");
 const cli = read("crates/kuzushi-cli/src/main.rs");
 const core = read("crates/kuzushi-core/src/whitebox_static.rs");
 const staticNarrative = read("crates/kuzushi-core/src/static_narrative.rs");
+const variants = read("crates/kuzushi-core/src/variant_ndiff.rs");
 
 const results: EvalResult[] = [
   prd.branchName === "kuzushi-whitebox-static" && prd.stories?.length === 22
@@ -71,6 +72,12 @@ const results: EvalResult[] = [
     "Potential impact",
     "Evidence limits",
     "validate_static_narrative_text",
+  ]),
+  requireContains("whitebox_variants", variants, [
+    "hunt_whitebox_static_variants",
+    "StaticallyConfirmed",
+    "CodeCited",
+    "requires independent validation",
   ]),
 ];
 
