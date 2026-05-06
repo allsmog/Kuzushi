@@ -904,8 +904,13 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             }
         });
 
+    let head_glyph = if app.has_running_work() {
+        format!("{} ", app.spinner_glyph())
+    } else {
+        "● ".to_string()
+    };
     lines.push(Line::from(vec![
-        Span::styled("● ", theme::accent()),
+        Span::styled(head_glyph, theme::accent()),
         Span::styled(target, theme::label()),
         Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
         Span::raw(stage),
@@ -1887,16 +1892,16 @@ fn agent_chat_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     };
 
     let status = if agent.abort_requested {
-        "abort requested"
+        "abort requested".to_string()
     } else if agent.running {
-        "running"
+        format!("{} running", app.spinner_glyph())
     } else if agent.error.is_some() {
-        "failed"
+        "failed".to_string()
     } else {
-        "answered"
+        "answered".to_string()
     };
     lines.push(detail("mode", "agent chat"));
-    lines.push(detail("status", status));
+    lines.push(detail("status", &status));
     lines.push(detail(
         "model",
         app.config.model.as_deref().unwrap_or("unconfigured"),
