@@ -478,6 +478,7 @@ mod tests {
             Ok(AgentQueryResponse {
                 text: "ok".to_string(),
                 structured: None,
+                ..Default::default()
             })
         }
 
@@ -487,6 +488,7 @@ mod tests {
                 verdict: crate::findings::TriageVerdict::NeedsReview,
                 confidence: 0.0,
                 rationale: "test".to_string(),
+                ..Default::default()
             })
         }
     }

@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::dep_hygiene::DepHygieneScanner;
+use crate::dep_hygiene::{CargoAuditScanner, DepHygieneScanner};
 use crate::findings::{Finding, FindingStore, Severity, StaticProofState};
 use crate::iac_scan::IacScanScanner;
 use crate::secret_scan::SecretScanScanner;
@@ -1029,6 +1029,7 @@ pub fn default_scan_engines() -> Vec<Box<dyn ScanEngine>> {
     vec![
         Box::new(SemgrepScanner::default()),
         Box::new(DepHygieneScanner),
+        Box::new(CargoAuditScanner),
         Box::new(SecretScanScanner),
         Box::new(IacScanScanner::default()),
     ]
@@ -1045,11 +1046,12 @@ pub fn scan_engines_for_tasks(tasks: &[String]) -> Result<Vec<Box<dyn ScanEngine
             "semgrep" | "semgrep:scan" => scanners.push(Box::new(SemgrepScanner::default())),
             "codeql" | "codeql:scan" => scanners.push(Box::new(CodeqlScanner::default())),
             "dep-hygiene" | "dep-hygiene:check" => scanners.push(Box::new(DepHygieneScanner)),
+            "cargo-audit" | "cargo-audit:scan" => scanners.push(Box::new(CargoAuditScanner)),
             "secret-scan" | "secret-scan:scan" => scanners.push(Box::new(SecretScanScanner)),
             "iac-scan" | "iac-scan:scan" => scanners.push(Box::new(IacScanScanner::default())),
             "" => {}
             other => anyhow::bail!(
-                "unknown scan task {other:?}; supported tasks: semgrep, codeql, dep-hygiene, secret-scan, iac-scan, agentic, carlini-threat-hunt, taint-iris, taint-iris-next, systems-hunt"
+                "unknown scan task {other:?}; supported tasks: semgrep, codeql, dep-hygiene, cargo-audit, secret-scan, iac-scan, agentic, carlini-threat-hunt, taint-iris, taint-iris-next, systems-hunt"
             ),
         }
     }
