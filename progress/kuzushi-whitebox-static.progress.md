@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-014 - Verify LLM citations before persistence
-Status: WB-013 complete in iteration 41; WB-014 pending
+Active story: WB-015 - Prioritize findings by static impact
+Status: WB-014 complete in iteration 42; WB-015 pending
 
 ## Stage 3 Checklist
 
@@ -19,7 +19,7 @@ Status: WB-013 complete in iteration 41; WB-014 pending
 - WB-011 Add attack-surface map from source: complete in iteration 39.
 - WB-012 Add static proof validator: complete in iteration 40.
 - WB-013 Constrain LLM triage to whitebox schema: complete in iteration 41.
-- WB-014 Verify LLM citations before persistence: pending.
+- WB-014 Verify LLM citations before persistence: complete in iteration 42.
 - WB-015 Prioritize findings by static impact: pending.
 - WB-016 Add static trigger/impact narratives: pending.
 - WB-017 Add variant search from statically confirmed findings: pending.
@@ -30,6 +30,50 @@ Status: WB-013 complete in iteration 41; WB-014 pending
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 42 - WB-014
+
+- Task attempted: verify whitebox-static LLM citations before agentic SAST
+  findings persist, and ensure `statically_confirmed` claims with fabricated,
+  stale, out-of-repo, or bad-line citations are downgraded.
+- Files changed:
+  - `tasks/kuzushi-whitebox-static.prd.json`
+  - `progress/kuzushi-whitebox-static.progress.md`
+  - `crates/kuzushi-core/src/static_proof_validator.rs`
+  - `crates/kuzushi-core/src/modules.rs`
+  - `crates/kuzushi-core/src/lib.rs`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `git status --short --branch` in the clean nested clone
+  - `sed -n '1,240p' progress/kuzushi-whitebox-static.progress.md`
+  - `rg -n "whitebox|citation|StaticProofClaim|triage|missingEvidence|statically_confirmed|staticProofState" crates/kuzushi-core/src/modules.rs crates/kuzushi-core/src/whitebox_static.rs`
+  - `cargo fmt --all`
+  - `cargo test -p kuzushi-core whitebox_citations`
+  - `cargo test -p kuzushi-core static_proof_validator`
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-core whitebox`
+  - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
+  - `pnpm eval:kuzushi-whitebox-static` with the primary checkout's
+    `node_modules` temporarily symlinked into the clean nested clone
+- Result: implementation complete. The static proof validator can now parse
+  the whitebox triage schema directly, verify citation files and line ranges
+  under the repo root, compare exact snippets and snippet hashes, and reject
+  out-of-repo, stale, or fabricated citations. `agentic-sast:scan` now runs
+  this validation in `whitebox-static` mode before findings are inserted into
+  the findings DB; invalid `statically_confirmed` claims are persisted only as
+  `needs_runtime_evidence` with citation-validation issues in the finding
+  message. WB-014 is marked `passes: true` in the PRD after the story gate and
+  fast whitebox checks passed.
+- Remaining work: WB-015 through WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files, while the clean nested clone at
+    `/Users/operator/VibeCode/open-sourced/kuzushi/.codex-active/kuzushi-stage3`
+    contains the active pushed Stage 3 state. This iteration continued in the
+    nested clone to avoid resetting or overwriting the primary worktree.
+  - The nested clone does not have its own `node_modules`; the eval used a
+    temporary symlink to the primary checkout's installed dependencies and then
+    removed it before commit.
 
 ### Iteration 41 - WB-013
 

@@ -27,6 +27,9 @@ use crate::scan::{
     SemgrepPersistedRun, SemgrepScanReport, SemgrepScanner,
 };
 use crate::secret_scan::{scan_for_secrets, SecretScanOptions};
+use crate::static_proof_validator::{
+    static_proof_claim_from_whitebox_schema, validate_static_proof_claim, StaticProofValidation,
+};
 use crate::systems_hunt::{execute_systems_hunt_tool, run_systems_hunt_report};
 use crate::threat_model::execute_threat_model_tool;
 use crate::variant_ndiff::{
@@ -1324,7 +1327,8 @@ fn run_agentic_sast_report(
         .with_tool_policy(agent_tool_policy.clone()),
     )?;
     let first_raw = parse_agentic_sast_response(response)?;
-    let mut findings = normalize_agentic_sast_findings(first_raw, &target, options.max_findings)?;
+    let mut findings =
+        normalize_agentic_sast_findings(first_raw, &target, options.max_findings, whitebox_static)?;
 
     if options.passes == 2 && !findings.is_empty() {
         let review_context = summarize_agentic_findings_for_review(&findings);
@@ -1344,8 +1348,12 @@ fn run_agentic_sast_report(
             .with_tool_policy(agent_tool_policy.clone()),
         )?;
         let review_raw = parse_agentic_sast_response(review_response)?;
-        let review_findings =
-            normalize_agentic_sast_findings(review_raw, &target, options.max_findings)?;
+        let review_findings = normalize_agentic_sast_findings(
+            review_raw,
+            &target,
+            options.max_findings,
+            whitebox_static,
+        )?;
         let mut merged = BTreeMap::new();
         for finding in findings.into_iter().chain(review_findings) {
             merged.entry(finding.fingerprint.clone()).or_insert(finding);
@@ -1531,6 +1539,7 @@ fn normalize_agentic_sast_findings(
     raw: Value,
     target: &Path,
     max_findings: usize,
+    whitebox_static: bool,
 ) -> Result<Vec<Finding>> {
     let findings_value = match raw {
         Value::Object(object) => object
@@ -1617,12 +1626,43 @@ fn normalize_agentic_sast_findings(
         let mut finding = Finding::new_tool(
             "agentic", rule_id, file_path, start_line, end_line, severity, message,
         );
-        if let Some(state) = whitebox_static_proof_state_from_input(&raw_item)? {
+        if whitebox_static {
+            let validation = validate_agentic_whitebox_static_claim(target, &raw_item)?;
+            apply_agentic_static_validation(&mut finding, &validation);
+        } else if let Some(state) = whitebox_static_proof_state_from_input(&raw_item)? {
             finding.set_static_proof_state(state);
         }
         findings.push(finding);
     }
     Ok(findings)
+}
+
+fn validate_agentic_whitebox_static_claim(
+    target: &Path,
+    raw_item: &Value,
+) -> Result<StaticProofValidation> {
+    let claim = static_proof_claim_from_whitebox_schema(raw_item)?;
+    Ok(validate_static_proof_claim(target, &claim))
+}
+
+fn apply_agentic_static_validation(finding: &mut Finding, validation: &StaticProofValidation) {
+    finding.set_static_proof_state(validation.final_state);
+    if validation.accepted {
+        if !validation.verified_citations.is_empty() {
+            finding.message.push_str("\nVerified citations: ");
+            finding
+                .message
+                .push_str(&validation.verified_citations.len().to_string());
+        }
+        return;
+    }
+    finding
+        .message
+        .push_str("\nWhitebox citation validation: downgraded to needs_runtime_evidence.");
+    for issue in validation.issues.iter().take(6) {
+        finding.message.push_str("\n- ");
+        finding.message.push_str(issue);
+    }
 }
 
 fn resolve_agentic_schema_file_path(object: &Map<String, Value>) -> String {
@@ -10874,6 +10914,18 @@ OUT
     #[test]
     fn whitebox_triage_prompt_response_normalizes_static_schema_fields() {
         let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        let mut source = (1..=11)
+            .map(|line| format!("// filler {line}"))
+            .collect::<Vec<_>>();
+        source.push("const q = req.query.q;".to_string());
+        source.push("db.query(q);".to_string());
+        source.push("return q;".to_string());
+        fs::write(
+            temp.path().join("src/routes.ts"),
+            format!("{}\n", source.join("\n")),
+        )
+        .unwrap();
         let raw = json!({
             "findings": [{
                 "ruleId": "agentic/whitebox-sql",
@@ -10892,8 +10944,8 @@ OUT
                 "sink": {
                     "kind": "sql_query",
                     "filePath": "src/routes.ts",
-                    "startLine": 14,
-                    "endLine": 14,
+                    "startLine": 13,
+                    "endLine": 13,
                     "description": "db.query receives the interpolated value"
                 },
                 "path": {
@@ -10912,7 +10964,7 @@ OUT
                     "filePath": "src/routes.ts",
                     "startLine": 12,
                     "endLine": 14,
-                    "snippet": "const q = req.query.q;"
+                    "snippet": "const q = req.query.q;\ndb.query(q);\nreturn q;"
                 }],
                 "assumptions": ["Express route wiring is static."],
                 "missingEvidence": ["Runtime reachability is not assessed."],
@@ -10922,7 +10974,7 @@ OUT
             }]
         });
 
-        let findings = normalize_agentic_sast_findings(raw, temp.path(), 5).unwrap();
+        let findings = normalize_agentic_sast_findings(raw, temp.path(), 5, true).unwrap();
 
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "agentic/whitebox-sql");
@@ -10944,6 +10996,91 @@ OUT
         assert!(findings[0]
             .message
             .contains("Recommended fix: Use parameterized queries."));
+    }
+
+    #[test]
+    fn whitebox_citations_downgrade_statically_confirmed_before_persistence() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/routes.ts"),
+            "const q = req.query.q;\ndb.query(q);\n",
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+        let raw = json!({
+            "findings": [{
+                "ruleId": "agentic/whitebox-stale",
+                "title": "Request input reaches SQL query",
+                "verdict": "true_positive",
+                "staticProofState": "statically_confirmed",
+                "severity": "high",
+                "source": {
+                    "kind": "attacker_input",
+                    "filePath": "src/routes.ts",
+                    "startLine": 1,
+                    "endLine": 1,
+                    "description": "req.query.q is read"
+                },
+                "sink": {
+                    "kind": "sql_query",
+                    "filePath": "src/routes.ts",
+                    "startLine": 2,
+                    "endLine": 2,
+                    "description": "db.query receives q"
+                },
+                "path": {
+                    "kind": "direct",
+                    "explanation": "q is passed directly to db.query."
+                },
+                "sanitizerAssessment": {
+                    "status": "absent",
+                    "explanation": "No sanitizer appears between source and sink."
+                },
+                "guardAssessment": {
+                    "status": "not_applicable",
+                    "explanation": "The claim does not depend on an auth guard."
+                },
+                "citations": [{
+                    "filePath": "src/routes.ts",
+                    "startLine": 1,
+                    "endLine": 2,
+                    "snippet": "const q = req.query.q;\ndb.query(req.body.q);"
+                }],
+                "assumptions": ["Static route wiring is inferred from source."],
+                "missingEvidence": ["Runtime reachability is not assessed."]
+            }]
+        });
+
+        let findings = normalize_agentic_sast_findings(raw, temp.path(), 5, true).unwrap();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].static_proof_state,
+            Some(StaticProofState::NeedsRuntimeEvidence)
+        );
+        assert!(findings[0]
+            .message
+            .contains("Whitebox citation validation: downgraded"));
+        assert!(findings[0].message.contains("snippet text does not match"));
+
+        let persisted = persist_agentic_sast_findings(temp.path(), &findings, &ctx)
+            .unwrap()
+            .unwrap();
+        assert!(!persisted.run_id.is_empty());
+        let stored = store.list_findings(10).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(
+            stored[0].static_proof_state,
+            Some(StaticProofState::NeedsRuntimeEvidence)
+        );
     }
 
     #[test]
