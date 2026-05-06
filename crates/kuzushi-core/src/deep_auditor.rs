@@ -86,6 +86,12 @@ pub struct DeepAuditConfig {
     pub max_steps: u32,
     pub deposit_usd: f64,
     pub system_prompt: Option<String>,
+    /// When `true` (default), the auditor's user prompt is augmented with
+    /// a "Pre-populated Static Evidence" markdown block built from the
+    /// whitebox-static narrative + registry + evidence-graph slice.
+    /// Disable for ablation studies or when the static layer is known
+    /// stale.
+    pub include_static_evidence: bool,
 }
 
 impl DeepAuditConfig {
@@ -95,6 +101,7 @@ impl DeepAuditConfig {
             max_steps: DEFAULT_MAX_STEPS,
             deposit_usd: DEFAULT_DEPOSIT_USD,
             system_prompt: None,
+            include_static_evidence: true,
         }
     }
 }
@@ -110,6 +117,10 @@ Rules:
 - Check for guards (length checks, allow-lists, type tags) that would prevent the
   vulnerability — if any exists and is reachable, mark triggerable=false.
 - Cite every file:line range you relied on as an evidence entry.
+- If a "Pre-populated Static Evidence" section is present in the user message,
+  treat its registry-tagged sources/sinks/sanitizers as authoritative starting
+  points and verify them in the source rather than re-discovering. Spend your
+  tool budget on flow analysis, not symbol lookup.
 
 Return ONLY a JSON object matching:
 
@@ -158,6 +169,30 @@ pub fn run_deep_auditor(
     };
 
     // 3. Build request + toolbox.
+    //
+    // Append a "Pre-populated Static Evidence" markdown block to the user
+    // prompt when the whitebox-static layer has anything to say about
+    // this finding. Falls back to the bare prompt when the store is
+    // empty or no narrative/registry hits exist for the language. This
+    // is on by default; disable via DeepAuditConfig.include_static_evidence.
+    let mut user_prompt = render_user_prompt(finding);
+    if cfg.include_static_evidence {
+        let mut srcs = crate::static_context::StaticContextSources::new(&cfg.workspace_root);
+        // Use the finding's title as a symbol hint; the registry pattern
+        // matcher uses substring search so even multi-token titles
+        // produce useful hits.
+        if !finding.title.trim().is_empty() {
+            srcs.symbol_hint = Some(finding.title.as_str());
+        }
+        if !finding.message.trim().is_empty() {
+            srcs.source_snippet = Some(finding.message.as_str());
+        }
+        if let Some(block) = crate::static_context::assemble_static_context(finding, &srcs) {
+            user_prompt.push_str("\n\n");
+            user_prompt.push_str(&block);
+        }
+    }
+
     let request = AgentToolLoopRequest {
         model,
         cwd: cfg.workspace_root.clone(),
@@ -165,7 +200,7 @@ pub fn run_deep_auditor(
             .system_prompt
             .clone()
             .unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string()),
-        prompt: render_user_prompt(finding),
+        prompt: user_prompt,
         tools: code_nav_tool_specs(),
         max_steps: cfg.max_steps.max(1),
     };
@@ -403,12 +438,20 @@ mod tests {
     /// to drive deterministic auditor behaviour.
     struct ScriptedRuntime {
         steps: Mutex<Vec<AgentLoopStep>>,
+        /// Captures the user prompt of every `next_step_blocking` call so
+        /// tests can assert on injected blocks (e.g. static evidence).
+        captured_prompts: Mutex<Vec<String>>,
     }
     impl ScriptedRuntime {
         fn new(steps: Vec<AgentLoopStep>) -> Arc<Self> {
             Arc::new(Self {
                 steps: Mutex::new(steps),
+                captured_prompts: Mutex::new(Vec::new()),
             })
+        }
+
+        fn last_prompt(&self) -> Option<String> {
+            self.captured_prompts.lock().unwrap().last().cloned()
         }
     }
     impl AgentRuntime for ScriptedRuntime {
@@ -423,9 +466,13 @@ mod tests {
         }
         fn next_step_blocking(
             &self,
-            _request: &AgentToolLoopRequest,
+            request: &AgentToolLoopRequest,
             _history: &[LoopHistoryEntry],
         ) -> Result<AgentLoopStep> {
+            self.captured_prompts
+                .lock()
+                .unwrap()
+                .push(request.prompt.clone());
             let mut s = self.steps.lock().unwrap();
             anyhow::ensure!(!s.is_empty(), "scripted runtime exhausted");
             Ok(s.remove(0))
@@ -453,6 +500,26 @@ mod tests {
             "anthropic:claude-opus-4-7",
         );
         RoutedRuntime::new(runtime, Arc::new(router), None)
+    }
+
+    /// Same as `routed_runtime_with_role` but returns the typed
+    /// `Arc<ScriptedRuntime>` alongside the routed wrapper so tests can
+    /// inspect captured prompts after the loop ran.
+    fn routed_runtime_with_role_typed(
+        steps: Vec<AgentLoopStep>,
+    ) -> (RoutedRuntime, Arc<ScriptedRuntime>) {
+        let runtime = ScriptedRuntime::new(steps);
+        let runtime_dyn: Arc<dyn AgentRuntime> = runtime.clone();
+        let mut router = AgentRouter::empty();
+        router_add_route(
+            &mut router,
+            AgentRole::DeepAuditor,
+            "anthropic:claude-opus-4-7",
+        );
+        (
+            RoutedRuntime::new(runtime_dyn, Arc::new(router), None),
+            runtime,
+        )
     }
 
     fn router_add_route(router: &mut AgentRouter, role: AgentRole, primary: &str) {
@@ -661,5 +728,70 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    /// Default-on path: `include_static_evidence: true` causes the
+    /// auditor to append a "Pre-populated Static Evidence" section to
+    /// the user prompt the bridge sees.
+    #[test]
+    fn appends_static_evidence_block_when_enabled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path();
+        std::fs::write(workspace.join("foo.c"), "void foo() {}\n").unwrap();
+        let steps = vec![AgentLoopStep::Final {
+            text: String::new(),
+            structured: Some(serde_json::json!({
+                "triggerable": false,
+                "rationale": "no input reaches the function",
+                "confidence": 0.9,
+                "evidence": []
+            })),
+            cost_usd: Some(0.001),
+        }];
+        let (routed, scripted) = routed_runtime_with_role_typed(steps);
+        // Default config: include_static_evidence == true.
+        let cfg = DeepAuditConfig::new(workspace);
+        let _ = run_deep_auditor(&routed, None, &cfg, &finding()).unwrap();
+        let captured = scripted.last_prompt().expect("a prompt was sent");
+        assert!(
+            captured.contains("Pre-populated Static Evidence"),
+            "static-evidence header missing from prompt: {captured}"
+        );
+        // The narrative-only block is always derivable, so we should
+        // also see at least the trigger-path heading.
+        assert!(
+            captured.contains("Trigger path:"),
+            "narrative trigger-path missing: {captured}"
+        );
+    }
+
+    /// Opt-out path: `include_static_evidence: false` keeps the bare
+    /// prompt — same shape as the pre-Track-B behaviour.
+    #[test]
+    fn skips_static_evidence_block_when_disabled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path();
+        std::fs::write(workspace.join("foo.c"), "void foo() {}\n").unwrap();
+        let steps = vec![AgentLoopStep::Final {
+            text: String::new(),
+            structured: Some(serde_json::json!({
+                "triggerable": false,
+                "rationale": "no input reaches the function",
+                "confidence": 0.9,
+                "evidence": []
+            })),
+            cost_usd: Some(0.001),
+        }];
+        let (routed, scripted) = routed_runtime_with_role_typed(steps);
+        let cfg = DeepAuditConfig {
+            include_static_evidence: false,
+            ..DeepAuditConfig::new(workspace)
+        };
+        let _ = run_deep_auditor(&routed, None, &cfg, &finding()).unwrap();
+        let captured = scripted.last_prompt().expect("a prompt was sent");
+        assert!(
+            !captured.contains("Pre-populated Static Evidence"),
+            "static-evidence header should NOT appear when disabled: {captured}"
+        );
     }
 }
