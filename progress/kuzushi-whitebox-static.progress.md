@@ -2,7 +2,7 @@
 
 Stage: 3 - Kuzushi whitebox-static mode
 Active story: WB-022 - Add whitebox demo fixture
-Status: WB-021 complete in this workspace; commit/push pending
+Status: WB-021 pushed in iteration 53; WB-022 pending
 
 ## Stage 3 Checklist
 
@@ -50,7 +50,8 @@ Status: WB-021 complete in this workspace; commit/push pending
   - `cargo test -p kuzushi-core whitebox`
   - `cargo test -p kuzushi-cli --test cutover_cli whitebox`
   - `git diff --check`
-- Result: implementation complete. `evals/kuzushi-whitebox-static/run.ts`
+- Result: implementation complete and pushed to `origin/main` as `9e1e49e`.
+  `evals/kuzushi-whitebox-static/run.ts`
   now loads local JSON fixtures, computes deterministic scores for detection,
   groundedness, proof completeness, false-positive rejection, prioritization,
   narrative quality, cost, and latency, and exits nonzero if a passing fixture
