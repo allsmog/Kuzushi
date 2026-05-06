@@ -5615,7 +5615,14 @@ fn run_triage(
     let model_configured = ctx.config.model.clone().context(
         "triage:run requires an explicit model in config.toml or KUZUSHI_MODEL; Kuzushi will not choose a fallback model",
     )?;
-    let stage2_model = runtime.model_for_tier(input.stage2_tier, &model_configured);
+    // Stage 2 model resolution. Tier-based pick first (so explicit
+    // `stage2Tier` requests override role config), then role-based
+    // routing through `models.toml [roles.triage]` if a RoutedRuntime
+    // is in play. Plain runtimes return the tier pick unchanged.
+    let stage2_model = {
+        let tiered = runtime.model_for_tier(input.stage2_tier, &model_configured);
+        runtime.model_for_role("triage", &tiered)
+    };
 
     let total = findings.len();
 
@@ -5992,9 +5999,14 @@ fn run_triage_deep(
             "triage:deep needs a runtime that supports tool-augmented loops; the configured runtime does not"
         );
     }
-    let model = ctx.config.model.clone().context(
+    let configured_model = ctx.config.model.clone().context(
         "triage:deep requires an explicit model in config.toml or KUZUSHI_MODEL; Kuzushi will not choose a fallback model",
     )?;
+    // If the runtime is a `RoutedRuntime` (constructed by the CLI
+    // when `~/.kuzushi/models.toml` is present), this picks the
+    // model bound to `[roles.deep_auditor]`. Plain runtimes return
+    // the configured model unchanged.
+    let model = runtime.model_for_role("deep_auditor", &configured_model);
 
     let max_steps = input
         .get("maxSteps")

@@ -123,20 +123,22 @@ use crossterm::cursor::MoveTo;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
+use kuzushi_core::config::ConfigPaths;
 use kuzushi_core::modules::{OptionSpec, OptionType, ToolDescriptor, ToolExecutionContext};
 use kuzushi_core::{
     attach_source, attachment_store_path, default_scan_engines, detach_source,
     export_workspace_findings, format_finding_alias, is_supported_attachment_module,
     known_artifacts, list_attachments, load_persistent_threat_model, parse_finding_alias,
     reparse_source, resolve_finding_alias, save_persistent_threat_model, sorted_finding_aliases,
-    AgentQueryRequest, AgentRuntime, AttachmentRecord, Finding, FindingListFilter, FindingStore,
-    KnownArtifact, ModuleRegistry, OptionScope, OptionTarget, RuntimeKind, ScanCancellation,
-    ScanRunOptions, Severity, ToolOptionStore, V2Config, WorkspaceTarget,
-    SUPPORTED_ATTACHMENT_MODULES,
+    AgentQueryRequest, AgentRouter, AgentRuntime, AttachmentRecord, Finding, FindingListFilter,
+    FindingStore, KnownArtifact, ModuleRegistry, OptionScope, OptionTarget, RoutedRuntime,
+    RuntimeKind, ScanCancellation, ScanRunOptions, Severity, ToolOptionStore, V2Config,
+    WorkspaceTarget, SUPPORTED_ATTACHMENT_MODULES,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::commands::{
@@ -3625,17 +3627,43 @@ impl ShellApp {
         } else {
             None
         };
+        // Wrap the underlying runtime in `Arc` so it can be moved into
+        // a `RoutedRuntime` whenever `~/.kuzushi/models.toml` (or
+        // `<target>/.kuzushi/models.toml`) defines role routes. With
+        // no routing config the bare runtime is dispatched as before.
+        let inner_arc: Option<Arc<dyn AgentRuntime>> = runtime.map(|r| {
+            let arc: Arc<dyn AgentRuntime> = Arc::new(r);
+            arc
+        });
+        let target_dir = workspace.as_ref().map(|w| w.root().to_path_buf());
+        let routed = match &inner_arc {
+            Some(arc) => match ConfigPaths::from_target(target_dir.as_deref()) {
+                Ok(paths) => match AgentRouter::load(&paths) {
+                    Ok(router) => Some(RoutedRuntime::new(
+                        arc.clone(),
+                        Arc::new(router),
+                        self.config.model.clone(),
+                    )),
+                    Err(_) => None,
+                },
+                Err(_) => None,
+            },
+            None => None,
+        };
+        let dispatched: Option<&dyn AgentRuntime> = match (&routed, &inner_arc) {
+            (Some(routed), _) => Some(routed as &dyn AgentRuntime),
+            (None, Some(arc)) => Some(arc.as_ref()),
+            _ => None,
+        };
         let ctx = ToolExecutionContext {
             config: &self.config,
             workspace: workspace.as_ref(),
             findings_store: store.as_ref(),
         };
-        match self.registry.execute_tool_with_runtime(
-            &tool_name,
-            input,
-            &ctx,
-            runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
-        ) {
+        match self
+            .registry
+            .execute_tool_with_runtime(&tool_name, input, &ctx, dispatched)
+        {
             Ok(result) => {
                 if let Some(cost_usd) = extract_cost_usd(&result) {
                     self.record_cost(cost_usd);

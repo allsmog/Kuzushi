@@ -438,6 +438,23 @@ impl AgentRuntime for RoutedRuntime {
     ) -> Result<AgentLoopStep> {
         self.inner.next_step_blocking(request, history)
     }
+
+    /// Honour `models.toml [roles.<key>]` when the trait method is
+    /// called against a `RoutedRuntime`. Falls through to `configured`
+    /// when the role key is unknown or the routing table has no
+    /// entry, preserving the trait's pass-through default.
+    fn model_for_role(&self, role_key: &str, configured: &str) -> String {
+        let Some(role) = AgentRole::from_key(role_key) else {
+            return configured.to_string();
+        };
+        let explicit = if configured.trim().is_empty() {
+            None
+        } else {
+            Some(configured)
+        };
+        self.resolve_model(role, 0, explicit)
+            .unwrap_or_else(|| configured.to_string())
+    }
 }
 
 #[cfg(test)]
@@ -813,5 +830,53 @@ fallbacks = ["openai:o3"]
             inner.last_triage_model.lock().unwrap().as_deref(),
             Some("triage-model")
         );
+    }
+
+    #[test]
+    fn model_for_role_trait_method_returns_routed_value() {
+        // Trait-method exposed by `RoutedRuntime` lets tools that hold
+        // only `&dyn AgentRuntime` honour `[roles.<key>]` without
+        // taking an `Arc<dyn AgentRuntime>`. Verify the override
+        // picks the role's model when the key matches a known role.
+        let inner = RecorderRuntime::new();
+        let mut router = AgentRouter::empty();
+        router.routes.insert(
+            AgentRole::DeepAuditor,
+            ModelRoute::new("anthropic:claude-opus-4-7"),
+        );
+        let routed = RoutedRuntime::new(
+            inner.clone(),
+            Arc::new(router),
+            Some("anthropic:claude-sonnet-4-6".to_string()),
+        );
+
+        // Caller passes the operator default (sonnet); router swaps it.
+        let model = routed.model_for_role("deep_auditor", "anthropic:claude-sonnet-4-6");
+        assert_eq!(model, "anthropic:claude-opus-4-7");
+    }
+
+    #[test]
+    fn model_for_role_falls_back_to_configured_for_unknown_role() {
+        let inner = RecorderRuntime::new();
+        let routed = RoutedRuntime::new(
+            inner,
+            Arc::new(AgentRouter::empty()),
+            Some("anthropic:claude-haiku-4-5".to_string()),
+        );
+
+        // Unknown role keys should pass through untouched.
+        let model = routed.model_for_role("not_a_real_role", "anthropic:claude-haiku-4-5");
+        assert_eq!(model, "anthropic:claude-haiku-4-5");
+    }
+
+    #[test]
+    fn model_for_role_passthrough_when_no_route_set() {
+        // Known role but no entry in models.toml — should fall through
+        // to the configured model rather than substituting a default.
+        let inner = RecorderRuntime::new();
+        let routed = RoutedRuntime::new(inner, Arc::new(AgentRouter::empty()), None);
+
+        let model = routed.model_for_role("deep_auditor", "anthropic:claude-sonnet-4-6");
+        assert_eq!(model, "anthropic:claude-sonnet-4-6");
     }
 }

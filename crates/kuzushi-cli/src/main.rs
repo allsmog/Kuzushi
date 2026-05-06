@@ -6,13 +6,15 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use kuzushi_core::config::write_default_config;
+use kuzushi_core::config::ConfigPaths;
 use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::{
-    build_pr_comment, load_config_for_target, AgentRuntime, FindingListFilter, FindingStore,
-    ModuleRegistry, PrCommentInput, WorkspaceTarget,
+    build_pr_comment, load_config_for_target, AgentRouter, AgentRuntime, FindingListFilter,
+    FindingStore, ModuleRegistry, PrCommentInput, RoutedRuntime, WorkspaceTarget,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
 use kuzushi_tui::run_shell_with_plain;
+use std::sync::Arc;
 
 #[derive(Debug, Parser)]
 #[command(name = "kuzushi")]
@@ -1105,6 +1107,7 @@ fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Res
     let runtime = if matches!(
         tool.as_str(),
         "triage:run"
+            | "triage:deep"
             | "verify:finding"
             | "patch:finding"
             | "agentic-sast:scan"
@@ -1151,17 +1154,41 @@ fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Res
     } else {
         None
     };
+    // Wrap the underlying runtime in an `Arc` so it can be moved into
+    // a `RoutedRuntime` whenever the operator has installed
+    // `~/.kuzushi/models.toml` (or `<target>/.kuzushi/models.toml`).
+    // When no routing config exists, the bare runtime is used
+    // directly. Bound at this scope so `routed.as_ref()` outlives
+    // the registry call below.
+    let inner_arc: Option<Arc<dyn AgentRuntime>> = runtime.map(|r| {
+        let arc: Arc<dyn AgentRuntime> = Arc::new(r);
+        arc
+    });
+    let routed = match (&inner_arc, target.as_deref()) {
+        (Some(arc), target) => match ConfigPaths::from_target(target) {
+            Ok(paths) => match AgentRouter::load(&paths) {
+                Ok(router) => Some(RoutedRuntime::new(
+                    arc.clone(),
+                    Arc::new(router),
+                    config.model.clone(),
+                )),
+                Err(_) => None,
+            },
+            Err(_) => None,
+        },
+        _ => None,
+    };
     let ctx = ToolExecutionContext {
         config: &config,
         workspace: workspace.as_ref(),
         findings_store: store.as_ref(),
     };
-    let output = registry.execute_tool_with_runtime(
-        &tool,
-        input,
-        &ctx,
-        runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
-    )?;
+    let dispatched: Option<&dyn AgentRuntime> = match (&routed, &inner_arc) {
+        (Some(routed), _) => Some(routed as &dyn AgentRuntime),
+        (None, Some(arc)) => Some(arc.as_ref()),
+        _ => None,
+    };
+    let output = registry.execute_tool_with_runtime(&tool, input, &ctx, dispatched)?;
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }
