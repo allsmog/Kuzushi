@@ -2,12 +2,12 @@
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
 Active story: UX-002 - Delete Or Isolate Legacy Ink UI Code
-Status: UX-001 committed and pushed; UX-002 pending
+Status: UX-002 implementation/checks complete; commit/push pending
 
 ## Stage 2 Checklist
 
 - UX-001 Remove Ink/React from runtime CLI packaging: complete; pushed in iteration 5.
-- UX-002 Delete or isolate legacy Ink UI code: pending.
+- UX-002 Delete or isolate legacy Ink UI code: implementation complete; commit/push pending.
 - UX-003 Fix shell redraw and prompt overlap: pending.
 - UX-004 Improve exit and unknown command handling: pending.
 - UX-005 Visible startup progress and first-run path: pending.
@@ -170,3 +170,40 @@ Status: UX-001 committed and pushed; UX-002 pending
   - The primary workspace's local `main` ref remains at `80d23a4` because local
     Git metadata writes are blocked, but `origin/main` was advanced through the
     isolated clone.
+
+### Iteration 6 - UX-002
+
+- Task attempted: isolate retained TypeScript/Ink shell code from executable
+  source CLI routes while keeping it available only as reference/test material.
+- Files changed:
+  - `src/cli/commands/shell.ts`
+  - `tests/cli/legacy-shell-isolation.test.ts`
+  - `crates/kuzushi-cli/tests/cutover_cli.rs`
+  - `src/ui/README.md`
+  - `README.md`
+  - `RELEASING.md`
+  - `docs/rust-migration-status.md`
+  - `RALPH_RUST_UX_PROGRESS.md`
+- Tests/checks run:
+  - `cargo fmt --all --check`
+  - `cargo test -p kuzushi-cli --test cutover_cli`
+  - `pnpm exec vitest run tests/cli/legacy-shell-isolation.test.ts`
+  - `pnpm typecheck`
+  - `pnpm exec biome check src/cli/commands/shell.ts tests/cli/legacy-shell-isolation.test.ts src/ui/README.md README.md RELEASING.md docs/rust-migration-status.md`
+- Result: implementation complete. The source-only TypeScript `shell` command
+  no longer imports `src/copilot/shell.ts`, `configureAgentRuntime`,
+  credential loading, Ink, or React; it fails with a precise Rust shell
+  replacement. Added static and direct-unit regression coverage plus an
+  in-directory `src/ui/README.md` labeling retained Ink/React code as
+  reference/test-only. Docs now record the removed source CLI path.
+- Remaining work: commit and push UX-002 before starting UX-003.
+- Blockers or repo facts that contradicted this prompt:
+  - The first `pnpm test -- tests/cli/legacy-shell-isolation.test.ts`
+    invocation accidentally selected the full Vitest suite because of the
+    package-script argument separator. It failed for existing environment
+    issues: `better-sqlite3` was compiled for Node ABI 141 while the active
+    Node requires ABI 131, and this sandbox blocks listening sockets. The
+    focused test was rerun successfully with `pnpm exec vitest run ...`.
+  - Spawning `tsx src/cli.ts shell` is not viable in this sandbox because `tsx`
+    cannot create its IPC pipe (`listen EPERM`). The regression uses a direct
+    Vitest import of `runShellCommand` instead.
