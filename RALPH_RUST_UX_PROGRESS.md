@@ -1,8 +1,8 @@
 # Ralph Rust UX Progress
 
 Stage: 2 - Rust Terminal UX Repair And Ink Runtime Cleanup
-Active story: UX-010 - Tab Completion For High-Value Arguments
-Status: UX-010 implementation complete in iteration 23; commit/push gate pending in this iteration
+Active story: UX-011 - Findings Row/Card Density
+Status: UX-010 complete and pushed in iteration 23 as `2f7f7db`; UX-011 pending next iteration
 
 ## Stage 2 Checklist
 
@@ -46,7 +46,7 @@ Status: UX-010 implementation complete in iteration 23; commit/push gate pending
   run IDs, attachment IDs, model selectors, and config keys. This iteration
   locked actual `Tab` key application for command and task-ID completion and
   made the idle footer advertise `[Tab] complete`.
-- Remaining work: push UX-010, then UX-011 through UX-015.
+- Remaining work: UX-011 through UX-015.
 - Blockers or repo facts that contradicted this prompt:
   - The primary workspace remains stale at `80d23a4` with earlier Stage 2 files
     staged/modified, so this iteration continued in the clean isolated clone at
