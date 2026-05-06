@@ -1,8 +1,8 @@
 # Kuzushi Whitebox-Static Progress
 
 Stage: 3 - Kuzushi whitebox-static mode
-Active story: WB-019 - Add whitebox false-positive memory push gate
-Status: WB-019 implementation complete and locally committed in iteration 47; push pending because this sandbox cannot resolve github.com
+Active story: WB-020 - Add diff-aware whitebox PR mode
+Status: WB-019 pushed in iteration 49; WB-020 pending
 
 ## Stage 3 Checklist
 
@@ -24,12 +24,36 @@ Status: WB-019 implementation complete and locally committed in iteration 47; pu
 - WB-016 Add static trigger/impact narratives: complete in iteration 44.
 - WB-017 Add variant search from statically confirmed findings: complete in iteration 45.
 - WB-018 Add candidate Semgrep rule synthesis: complete in iteration 46.
-- WB-019 Add whitebox false-positive memory: complete locally in iteration 47; push pending.
+- WB-019 Add whitebox false-positive memory: complete and pushed in iteration 49.
 - WB-020 Add diff-aware whitebox PR mode: pending.
 - WB-021 Add deterministic eval harness: pending.
 - WB-022 Add whitebox demo fixture: pending.
 
 ## Iteration Log
+
+### Iteration 49 - WB-019 Push Gate
+
+- Task attempted: complete the required push gate for the already-local
+  WB-019 false-positive memory commit before starting WB-020.
+- Files changed:
+  - `progress/kuzushi-whitebox-static.progress.md`
+- Tests/checks run:
+  - `git status --short` in the primary checkout
+  - `git status --short --branch` in the clean nested clone
+  - `sed -n '1,260p' progress/kuzushi-whitebox-static.progress.md`
+  - `git show --stat --oneline --decorate HEAD`
+  - `git diff --stat origin/main..HEAD`
+  - `git push origin HEAD:main`
+- Result: complete. The local WB-019 implementation commit
+  `4704589 ralph:whitebox-static complete WB-019 - Add whitebox false-positive memory`
+  was pushed to `origin/main`.
+- Remaining work: WB-020 through WB-022.
+- Blockers or repo facts that contradicted this prompt:
+  - The primary checkout under `/Users/operator/VibeCode/open-sourced/kuzushi`
+    remains stale with staged Stage 2 files, while the clean nested clone at
+    `/Users/operator/VibeCode/open-sourced/kuzushi/.codex-active/kuzushi-stage3`
+    contains the active pushed Stage 3 state. This iteration continued in the
+    nested clone to avoid resetting or overwriting the primary worktree.
 
 ### Iteration 47 - WB-019
 
