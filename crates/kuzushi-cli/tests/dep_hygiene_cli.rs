@@ -2895,12 +2895,26 @@ fn seed_triaged_finding(repo: &std::path::Path) -> Finding {
 
 #[cfg(unix)]
 fn init_git_repo(repo: &std::path::Path) {
+    // Disable GPG signing on the throwaway fixture commit so this
+    // test runs cleanly under sandboxed git wrappers that route
+    // commits through a signing server.
     for args in [
         vec!["init"],
         vec!["config", "user.email", "kuzushi@example.test"],
         vec!["config", "user.name", "Kuzushi Test"],
+        vec!["config", "commit.gpgsign", "false"],
+        vec!["config", "tag.gpgsign", "false"],
         vec!["add", "."],
-        vec!["commit", "-m", "fixture"],
+        vec![
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "tag.gpgsign=false",
+            "commit",
+            "--no-gpg-sign",
+            "-m",
+            "fixture",
+        ],
     ] {
         let output = Command::new("git")
             .args(args)
