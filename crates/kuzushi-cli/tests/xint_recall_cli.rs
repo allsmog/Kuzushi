@@ -19,60 +19,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use kuzushi_core::{Finding, FindingStore, Severity, WorkspaceTarget};
+use kuzushi_eval::load_oracle as lib_load_oracle;
+use kuzushi_eval::run_scorer as lib_run_scorer;
 use serde_json::Value;
 
-fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf()
-}
-
-fn kuzushi_eval_bin() -> PathBuf {
-    let workspace = workspace_root();
-    let candidates = [
-        workspace.join("target/debug/kuzushi-eval"),
-        workspace.join("target/release/kuzushi-eval"),
-    ];
-    for c in &candidates {
-        if c.exists() {
-            return c.clone();
-        }
-    }
-    // Build it on demand if neither exists yet.
-    let status = Command::new("cargo")
-        .args(["build", "-p", "kuzushi-eval"])
-        .current_dir(&workspace)
-        .status()
-        .expect("cargo build of kuzushi-eval");
-    assert!(status.success(), "could not build kuzushi-eval");
-    workspace.join("target/debug/kuzushi-eval")
-}
-
 fn load_oracle(slice: &str) -> (PathBuf, Value) {
-    let oracle_dir = workspace_root()
-        .join("experiments")
-        .join("xint-eval")
-        .join("oracles");
-    let mut found: Option<PathBuf> = None;
-    for entry in fs::read_dir(&oracle_dir).unwrap() {
-        let p = entry.unwrap().path();
-        if p.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let body = fs::read_to_string(&p).unwrap();
-        let v: Value = serde_json::from_str(&body).unwrap();
-        if v["slice"].as_str() == Some(slice) {
-            found = Some(p);
-            break;
-        }
-    }
-    let path = found.unwrap_or_else(|| panic!("no oracle for slice {slice}"));
-    let body = fs::read_to_string(&path).unwrap();
-    let v: Value = serde_json::from_str(&body).unwrap();
-    (path, v)
+    lib_load_oracle(slice).expect("load oracle")
 }
 
 /// Build a synthetic slice whose layout matches the oracle's referenced
@@ -187,33 +139,7 @@ fn run_findings_dump(slice: &Path) -> Value {
 
 fn run_scorer(slice_name: &str, slice: &Path, oracle_path: &Path) -> Value {
     let dump = run_findings_dump(slice);
-    let tmp_findings = slice.join("findings_dump.json");
-    fs::write(&tmp_findings, serde_json::to_string(&dump).unwrap()).unwrap();
-
-    let scorer = kuzushi_eval_bin();
-    let output = Command::new(&scorer)
-        .args([
-            "--oracle",
-            oracle_path.to_str().unwrap(),
-            "--findings",
-            tmp_findings.to_str().unwrap(),
-            "--slice",
-            slice_name,
-            "--target",
-            slice.to_str().unwrap(),
-            "--wall-seconds",
-            "0",
-        ])
-        .output()
-        .expect("kuzushi-eval");
-    if !output.status.success() {
-        panic!(
-            "kuzushi-eval failed: stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    serde_json::from_slice(&output.stdout).expect("scorer json")
+    lib_run_scorer(slice_name, slice, oracle_path, &dump).expect("kuzushi-eval scorer")
 }
 
 fn run_recall_test(slice_name: &str) {
