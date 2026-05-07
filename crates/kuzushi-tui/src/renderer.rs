@@ -3392,6 +3392,14 @@ fn aligned_header(values: &[&str], widths: &[usize]) -> Line<'static> {
 }
 
 fn aligned_row(values: &[String], widths: &[usize]) -> Line<'static> {
+    // Mockup table rows (`design/mockups/tools.jsx`, `modules.jsx`,
+    // `cost.jsx`, etc.) consistently put the first column (the
+    // identifier) in c-accent, with subsequent value columns in
+    // c-primary and metadata columns (last when present) in c-muted.
+    // The Ratatui `aligned_row` was leaving columns 1+ in
+    // `Style::default()`, which renders as terminal default white —
+    // visibly distinct from the mockup's softer c-primary tint.
+    let last = values.len().saturating_sub(1);
     Line::from(
         values
             .iter()
@@ -3400,8 +3408,10 @@ fn aligned_row(values: &[String], widths: &[usize]) -> Line<'static> {
             .map(|(index, (value, width))| {
                 let style = if index == 0 {
                     theme::accent()
+                } else if values.len() > 2 && index == last {
+                    theme::muted()
                 } else {
-                    Style::default()
+                    theme::primary()
                 };
                 Span::styled(format!("{}  ", pad(&fit(value, *width), *width)), style)
             })
