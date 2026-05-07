@@ -45,6 +45,7 @@ use uuid::Uuid;
 
 mod chrome_rce;
 mod context;
+mod generic_findings;
 mod native_scanners;
 mod options;
 mod plugin_adapters;
@@ -53,6 +54,7 @@ mod prompt_armor;
 mod sast_run;
 mod vendor_assessment;
 
+use generic_findings::normalize_reported_file_path;
 use options::{json_summary, validate_tool_input_options};
 use sast_run::{
     fingerprints_for_sast_runs, sast_patch_input, true_positive_fingerprints_for_sast_runs,
@@ -1409,7 +1411,7 @@ fn normalize_agentic_sast_findings(
         let rule_id = read_object_string(&object, &["ruleId", "rule_id"])
             .unwrap_or_else(|| "agentic-sast/finding".to_string());
         let file_path =
-            normalize_agentic_file_path(resolve_agentic_schema_file_path(&object), target);
+            normalize_reported_file_path(resolve_agentic_schema_file_path(&object), target);
         let start_line = read_object_u64(&object, &["startLine", "start_line"])
             .or_else(|| read_nested_object_u64(&object, "source", &["startLine", "start_line"]))
             .or_else(|| first_citation_u64(&object, &["startLine", "start_line"]))
@@ -1592,18 +1594,6 @@ fn append_agentic_schema_object_summary(
     message.push_str(label);
     message.push_str(": ");
     message.push_str(summary.trim());
-}
-
-fn normalize_agentic_file_path(path: String, target: &Path) -> String {
-    let candidate = PathBuf::from(path.trim());
-    if candidate.is_absolute() {
-        return candidate
-            .strip_prefix(target)
-            .unwrap_or(&candidate)
-            .display()
-            .to_string();
-    }
-    path.trim().to_string()
 }
 
 fn agentic_severity(value: &str) -> Severity {
@@ -2078,7 +2068,7 @@ fn normalize_taint_iris_findings(
         let cwe = read_object_string(&object, &["cwe", "CWE"]).unwrap_or_else(|| "CWE".to_string());
         let rule_id = read_object_string(&object, &["ruleId", "rule_id"])
             .unwrap_or_else(|| format!("taint-iris/{}", sanitize_rule_segment(&cwe)));
-        let file_path = normalize_agentic_file_path(
+        let file_path = normalize_reported_file_path(
             read_object_string(&object, &["filePath", "file_path"])
                 .unwrap_or_else(|| "unknown".to_string()),
             target,
@@ -4188,7 +4178,7 @@ fn normalize_taint_iris_next_findings(
         }
         let title = read_object_string(&object, &["title"])
             .unwrap_or_else(|| format!("{} taint finding", cwe));
-        let file_path = normalize_agentic_file_path(
+        let file_path = normalize_reported_file_path(
             read_object_string(&object, &["filePath", "file_path"])
                 .unwrap_or_else(|| "unknown".to_string()),
             &plan.repo_root,
@@ -5740,13 +5730,6 @@ fn looks_like_prompt_path(value: &str) -> bool {
         || value.ends_with(".prompt")
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-struct GenericPersistedRun {
-    run_id: String,
-    findings_db: String,
-}
-
 fn run_pipeline_task_selector(input: Value, _ctx: &ToolExecutionContext<'_>) -> Result<Value> {
     let requested = string_array_or_csv_input(&input, &["tasks", "taskIds", "task_ids"])
         .unwrap_or_else(|| {
@@ -5790,142 +5773,6 @@ fn run_pipeline_approval_gate(input: Value) -> Result<Value> {
             "approved": approved,
         },
     }))
-}
-
-fn normalize_agent_json_findings(
-    raw: Value,
-    target: &Path,
-    tool_slug: &str,
-    max_findings: usize,
-) -> Result<Vec<Finding>> {
-    let findings_value = match raw {
-        Value::Object(object) => object
-            .get("findings")
-            .cloned()
-            .unwrap_or_else(|| Value::Array(Vec::new())),
-        Value::Array(items) => Value::Array(items),
-        _ => Value::Array(Vec::new()),
-    };
-    let Value::Array(items) = findings_value else {
-        anyhow::bail!("{tool_slug} adapter output parse failed: findings must be an array");
-    };
-    let mut findings = Vec::new();
-    for item in items.into_iter().take(max_findings) {
-        let Value::Object(object) = item else {
-            continue;
-        };
-        let rule_id = read_object_string(&object, &["ruleId", "rule_id", "id"])
-            .unwrap_or_else(|| format!("{tool_slug}/finding"));
-        let file_path = normalize_agentic_file_path(
-            read_object_string(&object, &["filePath", "file_path", "path"])
-                .unwrap_or_else(|| "unknown".to_string()),
-            target,
-        );
-        let start_line = read_object_u64(&object, &["startLine", "start_line", "line"])
-            .filter(|line| *line > 0)
-            .unwrap_or(1) as u32;
-        let end_line = read_object_u64(&object, &["endLine", "end_line"])
-            .filter(|line| *line > 0)
-            .map(|line| line as u32);
-        let severity = generic_severity(
-            read_object_string(&object, &["severity"])
-                .as_deref()
-                .unwrap_or("medium"),
-        );
-        let mut message = read_object_string(&object, &["message", "title", "summary"])
-            .unwrap_or_else(|| rule_id.clone());
-        for (label, keys) in [
-            ("Evidence", &["evidence", "proof"][..]),
-            ("CWE", &["cwe"][..]),
-            ("Control", &["control"][..]),
-            ("Recommendation", &["recommendation", "recommendedFix"][..]),
-        ] {
-            if let Some(value) = read_object_string(&object, keys) {
-                message.push_str(&format!("\n{label}: {value}"));
-            } else {
-                let values = read_object_string_array(&object, keys);
-                if !values.is_empty() {
-                    message.push_str(&format!("\n{label}: {}", values.join(", ")));
-                }
-            }
-        }
-        findings.push(Finding::new_tool(
-            tool_slug.to_string(),
-            rule_id,
-            file_path,
-            start_line,
-            end_line,
-            severity,
-            message,
-        ));
-    }
-    Ok(findings)
-}
-
-fn generic_severity(value: &str) -> Severity {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "critical" => Severity::Critical,
-        "high" | "error" => Severity::High,
-        "medium" | "warning" => Severity::Medium,
-        "low" => Severity::Low,
-        "info" | "informational" => Severity::Info,
-        _ => Severity::Unknown,
-    }
-}
-
-fn persist_tool_findings(
-    tool_slug: &str,
-    target: &Path,
-    findings: &[Finding],
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Option<GenericPersistedRun>> {
-    let (Some(workspace), Some(store)) = (ctx.workspace, ctx.findings_store) else {
-        return Ok(None);
-    };
-    workspace.ensure_state_dir()?;
-    let run_id = format!("{tool_slug}-{}", Uuid::new_v4());
-    store.insert_scan_run(&run_id, target, "running")?;
-    for finding in findings {
-        store.insert_finding(&run_id, finding)?;
-    }
-    store.complete_scan_run(&run_id, "completed", findings.len())?;
-    Ok(Some(GenericPersistedRun {
-        run_id,
-        findings_db: workspace.findings_db_path().display().to_string(),
-    }))
-}
-
-fn render_generic_findings_output(
-    tool_name: &str,
-    target: &Path,
-    findings: &[Finding],
-    persisted: &Option<GenericPersistedRun>,
-) -> String {
-    let mut lines = vec![format!(
-        "{tool_name} complete for {}\n  Findings: {}",
-        target.display(),
-        findings.len()
-    )];
-    if let Some(persisted) = persisted {
-        lines.push(format!(
-            "  Persisted run: {} ({})",
-            persisted.run_id, persisted.findings_db
-        ));
-    }
-    if !findings.is_empty() {
-        lines.push(String::new());
-        lines.push("Top findings:".to_string());
-        for finding in findings.iter().take(10) {
-            lines.push(format!(
-                "  - {} - {} - {}:{}",
-                finding.severity.as_str(),
-                finding.rule_id,
-                finding.file_path,
-                finding.start_line
-            ));
-        }
-    }
-    lines.join("\n")
 }
 
 fn resolve_tool_model(
