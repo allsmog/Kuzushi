@@ -633,11 +633,11 @@ mod tests {
         // Two-step script: model reads source, then returns final.
         let steps = vec![
             AgentLoopStep::ToolCall {
-                call: ToolCall {
+                calls: vec![ToolCall {
                     name: "read_source".to_string(),
                     input: serde_json::json!({ "file": "foo.c" }),
                     call_id: "c1".to_string(),
-                },
+                }],
             },
             AgentLoopStep::Final {
                 text: String::new(),
@@ -678,11 +678,11 @@ mod tests {
         std::fs::write(workspace.join("a.c"), "int a;\nint b;\nint c;\n").unwrap();
         let steps = vec![
             AgentLoopStep::ToolCall {
-                call: ToolCall {
+                calls: vec![ToolCall {
                     name: "read_source".to_string(),
                     input: serde_json::json!({ "file": "a.c", "start_line": 1, "end_line": 3 }),
                     call_id: "c1".to_string(),
-                },
+                }],
             },
             AgentLoopStep::Final {
                 text: "I cannot determine triggerability".to_string(),

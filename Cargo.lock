@@ -975,6 +975,7 @@ dependencies = [
  "kuzushi-core",
  "kuzushi-sandbox",
  "reqwest",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
