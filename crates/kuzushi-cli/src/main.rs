@@ -16,7 +16,7 @@ use kuzushi_tui::run_shell_with_plain;
 
 #[derive(Debug, Parser)]
 #[command(name = "kuzushi")]
-#[command(about = "Kuzushi security copilot", version)]
+#[command(about = "Kuzushi security-native code agent", version)]
 struct Cli {
     #[arg(long, global = true)]
     target: Option<PathBuf>,

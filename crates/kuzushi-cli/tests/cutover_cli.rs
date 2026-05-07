@@ -67,7 +67,7 @@ fn plain_shell_script(script: &str) -> String {
 fn rust_cli_help_is_the_documented_primary_surface() {
     let out = stdout(kuzushi().arg("--help").output().unwrap());
 
-    assert!(out.contains("Kuzushi security copilot"));
+    assert!(out.contains("Kuzushi security-native code agent"));
     assert!(out.contains("Usage: kuzushi"));
     assert!(out.contains("--plain"));
     for command in [
@@ -285,7 +285,7 @@ fn npm_wrapper_help_reaches_the_rust_binary() {
         .unwrap();
     let out = stdout(output);
 
-    assert!(out.contains("Kuzushi security copilot"));
+    assert!(out.contains("Kuzushi security-native code agent"));
     assert!(out.contains("Usage: kuzushi"));
     assert!(out.contains("modules"));
     assert!(out.contains("tools"));
