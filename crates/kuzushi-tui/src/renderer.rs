@@ -2584,13 +2584,32 @@ fn render_plan_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
             theme::warn(),
         ));
     }
-    lines.push(Line::styled(
-        fit(
-            "[j/k] move   [space] toggle   [y] apply active   [n] discard   /yes   /no",
-            area.width as usize,
-        ),
-        theme::label(),
-    ));
+    // Mirror the keybind footer's accent-key + muted-hint shape rather
+    // than `[k]` chrome.  Per `design/mockups/plan.jsx` and the rest of
+    // the shell.  Slash verbs (/yes, /no) are kept as muted hints since
+    // they aren't single keys.
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled("j/k", theme::accent()),
+        Span::raw(" "),
+        Span::styled("move", theme::muted()),
+        Span::raw("   "),
+        Span::styled("space", theme::accent()),
+        Span::raw(" "),
+        Span::styled("toggle", theme::muted()),
+        Span::raw("   "),
+        Span::styled("y", theme::accent()),
+        Span::raw(" "),
+        Span::styled("apply active", theme::muted()),
+        Span::raw("   "),
+        Span::styled("n", theme::accent()),
+        Span::raw(" "),
+        Span::styled("discard", theme::muted()),
+        Span::raw("   "),
+        Span::styled("/yes", theme::muted()),
+        Span::raw("   "),
+        Span::styled("/no", theme::muted()),
+    ]));
     render_lines(frame, area, lines);
 }
 
@@ -6676,6 +6695,40 @@ mod tests {
                 .any(|(role, text)| role == "muted" && text.contains("never run here")),
             "muted suffix missing: {buckets:?}"
         );
+    }
+
+    #[test]
+    fn plan_card_keybind_row_drops_bracket_chrome() {
+        // The plan-card keybind row used to advertise `[j/k] move
+        // [space] toggle [y] apply active [n] discard`. The mockups and
+        // the rest of the shell use unbracketed `<key> <hint>` pairs
+        // (see `keybindings_line` + `design/mockups/plan.jsx`).  Verify
+        // the new spans reach the buffer without `[ ]` chrome.
+        use crate::app::{PlanChange, PlanProposal};
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.pending_plan = Some(PlanProposal {
+            goal: "demo".to_string(),
+            summary: "demo summary".to_string(),
+            changes: vec![PlanChange::Note {
+                text: "stub change".to_string(),
+            }],
+            unsupported: vec![],
+        });
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("PLAN"));
+        assert!(rendered.contains("j/k move"));
+        assert!(rendered.contains("space toggle"));
+        assert!(rendered.contains("y apply active"));
+        assert!(rendered.contains("n discard"));
+        assert!(!rendered.contains("[j/k]"), "stale bracket: {rendered}");
+        assert!(!rendered.contains("[space]"), "stale bracket: {rendered}");
+        assert!(!rendered.contains("[y]"), "stale bracket: {rendered}");
+        assert!(!rendered.contains("[n]"), "stale bracket: {rendered}");
     }
 
     #[test]
