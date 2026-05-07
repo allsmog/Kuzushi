@@ -235,6 +235,7 @@ fn shell_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         }
         ShellView::Story => story_lines(app, area),
         ShellView::Auth => auth_lines(app, area),
+        ShellView::Cost => cost_lines(app, area),
     }
 }
 
@@ -2850,6 +2851,86 @@ impl AuthProviderState {
     }
 }
 
+/// `/cost` view — budget bars + per-tool spend.  Mirrors
+/// `design/mockups/cost.jsx`.  Pulls real cost numbers from
+/// `app.session_cost_usd`, `app.last_tool_cost_usd`, and
+/// `app.session_budget_usd`.
+fn cost_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let mut lines = context_strip(app, area);
+    lines.push(blank());
+
+    // BUDGETS section ----------------------------------------------------
+    lines.push(divider("BUDGETS", area.width));
+    let session = app.session_cost_usd;
+    let session_budget = app.session_budget_usd.unwrap_or(5.0);
+    lines.push(cost_budget_bar("this session    ", session, session_budget));
+    if let Some(last) = app.last_tool_cost_usd {
+        lines.push(cost_budget_bar("last tool       ", last, session_budget));
+    }
+    lines.push(blank());
+
+    // SPEND section ------------------------------------------------------
+    lines.push(divider("SPEND", area.width));
+    let session_text = format_session_cost(session);
+    let last_text = app
+        .last_tool_cost_usd
+        .map(|c| format!("${c:.4}"))
+        .unwrap_or_else(|| "—".to_string());
+    lines.push(detail("session", &session_text));
+    lines.push(detail("last tool", &last_text));
+    if let Some(budget) = app.session_budget_usd {
+        lines.push(detail("budget", &format!("${budget:.2}")));
+    } else {
+        lines.push(detail("budget", "unset"));
+    }
+    lines.push(blank());
+
+    // CTA row
+    lines.push(command_list_line(
+        &[
+            "model <provider:id>",
+            "config",
+            "back",
+        ],
+        area.width as usize,
+    ));
+    lines.push(muted(
+        "Per-tool spend ledger appears once Rust tools report `costUsd` (scanner-only work may stay $0).",
+    ));
+    lines
+}
+
+/// Render a single 30-cell budget bar matching
+/// `design/mockups/cost.jsx::bar`.  Bar is severity-tinted by spend
+/// percentage (success < 85% < warn < 100% < danger).
+fn cost_budget_bar(label: &str, used: f64, cap: f64) -> Line<'static> {
+    let bar_w: usize = 30;
+    let pct = if cap > 0.0 { (used / cap).clamp(0.0, 1.0) } else { 0.0 };
+    let fill = (bar_w as f64 * pct).round() as usize;
+    let empty = bar_w - fill;
+    let pct_int = (pct * 100.0).round() as usize;
+    let style = if pct_int >= 100 {
+        theme::danger()
+    } else if pct_int >= 85 {
+        theme::warn()
+    } else {
+        theme::success()
+    };
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(format!("{:18}", label), theme::primary()),
+        Span::styled(" [", theme::subtle()),
+        Span::styled("█".repeat(fill), style),
+        Span::styled("░".repeat(empty), theme::subtle()),
+        Span::styled("] ", theme::subtle()),
+        Span::styled(format!("${used:>6.2}"), theme::primary()),
+        Span::styled(" / ", theme::muted()),
+        Span::styled(format!("${cap:>6.2}"), theme::muted()),
+        Span::raw(" "),
+        Span::styled(format!("{pct_int:>3}%"), style),
+    ])
+}
+
 fn kb_artifact_widths(width: u16) -> Vec<usize> {
     let total = width as usize;
     let state = 7;
@@ -4849,6 +4930,7 @@ fn view_status_segment(app: &ShellApp) -> String {
         ShellView::History => "history".to_string(),
         ShellView::Story => "story".to_string(),
         ShellView::Auth => "auth".to_string(),
+        ShellView::Cost => "cost".to_string(),
     }
 }
 
@@ -7001,6 +7083,7 @@ mod tests {
             (ShellView::History, "COMMAND HISTORY"),
             (ShellView::Story, "SESSION STORY"),
             (ShellView::Auth, "PROVIDERS"),
+            (ShellView::Cost, "BUDGETS"),
         ];
 
         for (view, expected) in cases {
@@ -7477,6 +7560,32 @@ mod tests {
         assert!(rendered.contains("failed"));
         assert!(rendered.contains("18"));
         assert!(rendered.contains("replay <runId>"));
+    }
+
+    #[test]
+    fn cost_view_renders_budget_bar_and_session_spend() {
+        // `/cost` (`design/mockups/cost.jsx`) shows BUDGETS bars +
+        // SPEND key/values.  Verify both sections render and the bar
+        // graphics + percentage reach the buffer.
+        let backend = TestBackend::new(120, 26);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.session_cost_usd = 1.42;
+        app.session_budget_usd = Some(5.0);
+        app.last_tool_cost_usd = Some(0.18);
+        app.shell_view = ShellView::Cost;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("BUDGETS"));
+        assert!(rendered.contains("SPEND"));
+        assert!(rendered.contains("█"));
+        assert!(rendered.contains("░"));
+        assert!(rendered.contains("$1.42"));
+        assert!(rendered.contains("$5.00"));
+        // 1.42 / 5.00 = 28.4% → 28%, success-tinted (< 85%).
+        assert!(rendered.contains("28%"));
     }
 
     #[test]
