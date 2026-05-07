@@ -267,7 +267,19 @@ Active branch: `ralph/overnight-polish`
 
 1. Add a docs-only CI guard for `pnpm check:docs` if maintainers want drift
    checks on Markdown-only PRs.
-2. Consider the optional plain `kuzushi finding <id>` detail command after the
-   P0 public-surface changes land.
-3. Continue the next safe complexity cut from
+2. Continue the next safe complexity cut from
    `docs/assessments/complexity-crap-hotspots.md`.
+
+### Follow-up implementation - Finding detail and proof state
+
+- Added `kuzushi finding <alias-or-fingerprint-prefix> [--target <repo>] [--json]`.
+- Added `FindingDetailReport` in `crates/kuzushi-core/src/findings/detail.rs`
+  so proof-state, runtime-validation, patch-result, and next-action language is
+  shared and testable outside the CLI entrypoint.
+- Prefix lookup now attaches the latest verification record through the same
+  helper as exact fingerprint lookup.
+- README now shows the detail command in the canonical
+  `doctor -> scan -> findings -> finding -> pr-comment` workflow.
+- Focused checks run:
+  `cargo fmt --all --check`, `cargo test -p kuzushi-core findings`, and
+  `cargo test -p kuzushi-cli --test cutover_cli finding_detail_resolves_alias_and_outputs_json_report`.

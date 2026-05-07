@@ -90,10 +90,11 @@ pub use diff_scope::{
 pub use events::{CoreEvent, EventSink, InMemoryEventSink, ScanProgress};
 pub use findings::{
     compute_dedup_key, extract_cwe, format_finding_alias, normalize_cwe, parse_finding_alias,
-    resolve_finding_alias, sorted_finding_aliases, stable_finding_alias, Finding,
-    FindingListFilter, FindingListReport, FindingStore, FindingVerdictFilter, PatchAttempt,
-    PatchResult, PatchStatus, PersistedProofVerdict, PersistedSandboxBackend,
-    PersistedVerification, Severity, StaticProofState, TriageOutcome, TriageVerdict, VulnSource,
+    proof_state_label, resolve_finding_alias, runtime_validation_label, sorted_finding_aliases,
+    stable_finding_alias, Finding, FindingDetailReport, FindingListFilter, FindingListReport,
+    FindingNextAction, FindingStore, FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus,
+    PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, Severity,
+    StaticProofState, TriageOutcome, TriageVerdict, VulnSource,
 };
 pub use full_mode_multi::{
     cost_summary as full_mode_cost_summary, plan as full_mode_plan, report_to_tool_json,

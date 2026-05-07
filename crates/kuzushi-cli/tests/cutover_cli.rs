@@ -3,6 +3,11 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+use kuzushi_core::{
+    Finding, FindingStore, PatchResult, PatchStatus, PersistedProofVerdict,
+    PersistedSandboxBackend, PersistedVerification, Severity, StaticProofState, TriageOutcome,
+    TriageVerdict,
+};
 use serde_json::Value;
 
 fn kuzushi() -> Command {
@@ -71,7 +76,7 @@ fn rust_cli_help_is_the_documented_primary_surface() {
     assert!(out.contains("Usage: kuzushi"));
     assert!(out.contains("--plain"));
     for command in [
-        "shell", "scan", "findings", "config", "modules", "tools", "doctor", "run",
+        "shell", "scan", "findings", "finding", "config", "modules", "tools", "doctor", "run",
     ] {
         assert!(out.contains(command), "missing command {command} in help");
     }
@@ -239,6 +244,115 @@ fn findings_empty_state_names_next_scan_command() {
     assert!(out.contains("no findings found"));
     assert!(out.contains("Next: kuzushi scan"));
     assert!(out.contains(&tmp.path().display().to_string()));
+}
+
+#[test]
+fn finding_detail_resolves_alias_and_outputs_json_report() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join(".kuzushi/v2/findings.sqlite3");
+    let store = FindingStore::open(&db_path).unwrap();
+    store
+        .insert_scan_run("run-detail", tmp.path(), "completed")
+        .unwrap();
+    let finding = Finding::new_semgrep(
+        "demo.detail",
+        "src/app.js",
+        7,
+        Some(8),
+        Severity::High,
+        "Request query data reaches an HTML response without escaping",
+    )
+    .with_static_proof_state(StaticProofState::SourceSinkLinked);
+    let fingerprint = finding.fingerprint.clone();
+    let finding_id = store.insert_finding("run-detail", &finding).unwrap();
+    store
+        .save_triage(
+            finding_id,
+            &TriageOutcome {
+                verdict: TriageVerdict::TruePositive,
+                confidence: 0.88,
+                rationale: "source and sink are linked".to_string(),
+                cost_usd: 0.01,
+            },
+        )
+        .unwrap();
+    store
+        .save_verification(
+            finding_id,
+            &PersistedVerification {
+                proof_level: 4,
+                proof_verdict: PersistedProofVerdict::Exploited,
+                backend: PersistedSandboxBackend::Plain,
+                language: Some("javascript".to_string()),
+                harness_path: None,
+                crash_evidence: Some("payload executed".to_string()),
+                duration_ms: 42,
+                cost_usd: 0.0,
+                notes: vec!["fixture confirmed".to_string()],
+                created_at: String::new(),
+            },
+        )
+        .unwrap();
+    store
+        .insert_patch_result(&PatchResult {
+            patch_run_id: "patch-1".to_string(),
+            fingerprint: fingerprint.clone(),
+            repo: tmp.path().display().to_string(),
+            diff: None,
+            status: PatchStatus::BuildFailed,
+            iterations: 1,
+            build_command: None,
+            test_command: Some("pnpm test".to_string()),
+            worktree_path: None,
+            cost_usd: Some(0.0),
+            validator_log: None,
+            history: Vec::new(),
+            created_at: None,
+            updated_at: None,
+        })
+        .unwrap();
+
+    let plain = stdout(
+        kuzushi()
+            .args(["finding", "F-0001", "--target"])
+            .arg(tmp.path())
+            .output()
+            .unwrap(),
+    );
+    assert!(plain.contains("Finding F-0001"));
+    assert!(plain.contains("Proof state: source_sink_linked"));
+    assert!(plain.contains("Runtime validation: execution_confirmed"));
+    assert!(plain.contains("Patch result:"));
+    assert!(plain.contains("Next action: patch"));
+
+    let prefix = &fingerprint[..8];
+    let raw = stdout(
+        kuzushi()
+            .args(["finding", prefix, "--target"])
+            .arg(tmp.path())
+            .arg("--json")
+            .output()
+            .unwrap(),
+    );
+    let report: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(report["alias"], "F-0001");
+    assert_eq!(report["finding"]["fingerprint"], fingerprint);
+    assert_eq!(
+        report["proofState"]
+            .as_str()
+            .unwrap()
+            .starts_with("source_sink_linked"),
+        true
+    );
+    assert_eq!(
+        report["runtimeValidation"]
+            .as_str()
+            .unwrap()
+            .starts_with("execution_confirmed"),
+        true
+    );
+    assert_eq!(report["nextAction"], "patch");
+    assert_eq!(report["patchResults"].as_array().unwrap().len(), 1);
 }
 
 #[test]
