@@ -1,0 +1,166 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+assertion_line: 162
+---
+mode:shell | target:none | catalog | 0 findings | 35 mods
+
+--------------------------------------------------------- HELP ---------------------------------------------------------
+Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
+Examples: scan . | use semgrep | run . | findings | open F-0001 | model 1
+
+NAVIGATION
+command | aliases / examples | description
+help - show grouped shell help
+  aliases / examples: /help, /h, h, ?
+modules - browse native Rust modules
+  aliases / examples: /modules, /m, m, show modules
+tools - list routed Rust tools
+  aliases / examples: /tools, show tools
+use <module> - focus a module
+  aliases / examples: use semgrep, /use <module>
+back - return to the previous view
+  aliases / examples: /back, /b, b
+quickstart - first-run guided setup
+  aliases / examples: /quickstart
+
+RUN / SCAN
+command | aliases / examples | description
+scan [target] - run configured scanners
+  aliases / examples: scan ., /scan [target]
+run <tool> [json] - dispatch a tool; run . uses focused module or sast:scan
+  aliases / examples: run ., /run <tool> [json], run . [json]
+ask <question> - explicit agent question
+  aliases / examples: /ask <question>, ?text
+
+OPTIONS / TASKS
+command | aliases / examples | description
+options [tool] - show tool options
+  aliases / examples: /options [tool]
+show options [tool] - show tool options
+  aliases / examples: /show options [tool]
+show advanced - advanced and evasion options
+  aliases / examples: /show advanced
+show missing - required options without values
+  aliases / examples: /show missing
+set <key> <value> - set a session option
+  aliases / examples: /set <key> <value>
+setg <key> <value> - set a global option
+  aliases / examples: /setg <key> <value>
+unset <key> - clear a session option
+  aliases / examples: /unset <key>
+unsetg <key> - clear a global option
+  aliases / examples: /unsetg <key>
+tasks - choose SAST scanner tasks
+  aliases / examples: /tasks
+task block <id> - block a SAST task
+  aliases / examples: task deny <id>, /task block <id>
+task allow <id> - allow a SAST task
+  aliases / examples: /task allow <id>, task unblock <id>
+task toggle [id] - toggle a SAST task
+  aliases / examples: /task toggle [id]
+task mode auto|manual|toggle - switch SAST task selection
+  aliases / examples: /task mode auto|manual|toggle
+task reset - reset SAST task state
+  aliases / examples: /task reset
+
+CONTEXT / KB
+command | aliases / examples | description
+context - show current context snapshot
+  aliases / examples: /context
+context build - build repository context
+  aliases / examples: /context build
+context status - show context status
+  aliases / examples: /context status
+context regen <slice> - rebuild all, repo, or app-model
+  aliases / examples: /context regen <slice>
+kb [module] - show local KB attachments
+  aliases / examples: attachments, /kb [module]
+attach <path-or-url> - record local file or URL metadata
+  aliases / examples: /attach <path-or-url>
+detach <id> - remove a KB attachment
+  aliases / examples: /detach <id>
+reparse <id> - refresh local attachment metadata
+  aliases / examples: /reparse <id>
+workspace - show target and state status
+  aliases / examples: /workspace, workspace status
+workspace export findings <path> - export findings JSON or JSONL
+  aliases / examples: /workspace export findings <path>, findings export <path>
+
+FINDINGS / EVIDENCE
+command | aliases / examples | description
+findings - open persisted findings
+  aliases / examples: /f, f, /findings
+open <id> - open a finding alias or fingerprint
+  aliases / examples: open F-0001, /open <id>
+show aliases [prefix] - list finding aliases
+  aliases / examples: /show aliases [prefix]
+show runs - recent run artifacts
+  aliases / examples: /show runs, runs, /runs
+replay <run> - render a run summary
+  aliases / examples: /replay <run>
+trace <run> - stream run events
+  aliases / examples: /trace <run>
+since <ref> - scope findings to a git ref
+  aliases / examples: /since <ref>
+threats [1-5] - threat model views
+  aliases / examples: /threats [1-5], threats summary, threats dfd, threats stride, threats stories, threats scope
+threats edit - open the editable threat model view
+  aliases / examples: /threats edit
+threats regen - Haiku-driven threat-model patch; review then /threats apply
+  aliases / examples: /threats regen
+threats ask <question> - ask the agent about the current threat model
+  aliases / examples: /threats ask <question>
+threats apply - apply the pending threat-model patch
+  aliases / examples: /threats apply
+threats reject - discard the pending threat-model patch
+  aliases / examples: /threats reject
+
+AUTH / CONFIG / MODEL
+command | aliases / examples | description
+auth - show env/OAuth status without secrets
+  aliases / examples: /auth, auth status
+auth login <provider> - start supported OAuth login
+  aliases / examples: auth codex, auth anthropic, /auth login <provider>
+provider - show pi-agent-core provider choices
+  aliases / examples: /provider
+backend - show Rust runtime backend
+  aliases / examples: /backend
+model [choice] - select explicit provider:model
+  aliases / examples: model 1, /model [choice]
+cost - show known session cost estimate
+  aliases / examples: /cost
+config - show runtime config status
+  aliases / examples: /config
+target [path] - switch scan target without restart
+  aliases / examples: /target [path]
+
+SESSION
+command | aliases / examples | description
+history - show command history
+  aliases / examples: /history
+clear - clear conversation log
+  aliases / examples: /clear
+load <specifier> - static registry status or load error
+  aliases / examples: /load <specifier>
+pause - document live-control absence
+  aliases / examples: /pause
+resume [runId] - document checkpoint-resume absence
+  aliases / examples: /resume [runId]
+story - show session story replacements
+  aliases / examples: /story
+prompts - prompt override view
+  aliases / examples: /prompts, show prompts
+prompt <verb> - prompt editor action
+  aliases / examples: /prompt <verb>
+tune - module controls
+  aliases / examples: /tune, /t, t
+actor <n> - actor transcript detail
+  aliases / examples: /actor <n>
+plan <english> - Haiku natural-language planner; review then /yes or /no
+  aliases / examples: /plan <english>
+yes - apply pending plan
+  aliases / examples: /yes, y
+no - discard pending plan
+  aliases / examples: /no, n
+quit - exit the shell
+  aliases / examples: q, /q, exit, /quit, /exit, exitj, /exitj

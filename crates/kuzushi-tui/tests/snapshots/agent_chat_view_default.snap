@@ -1,0 +1,8 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+assertion_line: 277
+---
+KUZUSHI  mode:agent | target none | 0 findings | ctx missing | module agent | model unconfigured | cost $0.0000
+
+-------------------------------------------------------- AGENT ---------------------------------------------------------
+No active question. Use ask <question> or ?text.

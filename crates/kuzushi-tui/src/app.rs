@@ -112,6 +112,89 @@ impl PlanChange {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TuneAction {
+    ShowHouseRules,
+    EditHouseRules,
+    ResetHouseRules,
+}
+
+impl TuneAction {
+    pub const ORDER: &'static [TuneAction] = &[
+        TuneAction::ShowHouseRules,
+        TuneAction::EditHouseRules,
+        TuneAction::ResetHouseRules,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TuneAction::ShowHouseRules => "show house rules",
+            TuneAction::EditHouseRules => "edit house rules (set \"...\")",
+            TuneAction::ResetHouseRules => "reset house rules",
+        }
+    }
+
+    pub fn hint(self) -> &'static str {
+        match self {
+            TuneAction::ShowHouseRules => "log the current house-rules text into the transcript",
+            TuneAction::EditHouseRules => {
+                "prefill the prompt with `set \"\"` so you can type a value"
+            }
+            TuneAction::ResetHouseRules => "delete the house-rules file and revert to defaults",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ActorDetailFilter {
+    #[default]
+    All,
+    Findings,
+    Errors,
+    Tools,
+}
+
+impl ActorDetailFilter {
+    pub fn label(self) -> &'static str {
+        match self {
+            ActorDetailFilter::All => "all",
+            ActorDetailFilter::Findings => "findings",
+            ActorDetailFilter::Errors => "errors",
+            ActorDetailFilter::Tools => "tools",
+        }
+    }
+
+    pub fn keeps(self, prefix: &str) -> bool {
+        match self {
+            ActorDetailFilter::All => true,
+            ActorDetailFilter::Findings => prefix == "finding" || prefix == "title",
+            ActorDetailFilter::Errors => prefix == "error",
+            ActorDetailFilter::Tools => matches!(
+                prefix,
+                "scan" | "tool" | "agent" | "answer" | "plan" | "tune" | "prompt"
+            ),
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            ActorDetailFilter::All => ActorDetailFilter::Findings,
+            ActorDetailFilter::Findings => ActorDetailFilter::Errors,
+            ActorDetailFilter::Errors => ActorDetailFilter::Tools,
+            ActorDetailFilter::Tools => ActorDetailFilter::All,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptsAction {
+    Show,
+    Edit,
+    Diff,
+    Reset,
+    Set,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThreatPatch {
     pub goal: String,
@@ -134,8 +217,9 @@ use kuzushi_core::{
     export_workspace_findings, format_finding_alias, is_supported_attachment_module,
     known_artifacts, list_attachments, load_persistent_threat_model, parse_finding_alias,
     reparse_source, resolve_finding_alias, save_persistent_threat_model, sorted_finding_aliases,
-    AgentQueryRequest, AgentRuntime, AttachmentRecord, Finding, FindingListFilter, FindingStore,
-    KnownArtifact, ModuleRegistry, OptionScope, OptionTarget, RuntimeKind, ScanCancellation,
+    AgentQueryRequest, AgentRuntime, AgenticSastReport, AttachmentRecord, CarliniThreatHuntReport,
+    Finding, FindingListFilter, FindingStore, KnownArtifact, ModuleRegistry, OptionScope,
+    OptionTarget, ReconHost, ReconNote, ReconService, RuntimeKind, ScanCancellation, ScanProgress,
     ScanRunOptions, Severity, ToolOptionStore, V2Config, WorkspaceTarget,
     SUPPORTED_ATTACHMENT_MODULES,
 };
@@ -243,6 +327,19 @@ pub struct AgentChatView {
     pub running: bool,
     pub abort_requested: bool,
     pub error: Option<String>,
+}
+
+/// Cached structured snapshot of the most recent recon tool result. The TUI
+/// renderer prefers reading from this snapshot (when populated) rather than
+/// grepping the freeform log lines, so transcript truncation does not erase
+/// recon evidence.
+#[derive(Debug, Clone, Default)]
+pub struct ReconSnapshot {
+    pub hosts: Vec<ReconHost>,
+    pub services: Vec<ReconService>,
+    pub notes: Vec<ReconNote>,
+    pub last_tool: Option<String>,
+    pub last_target: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -430,6 +527,11 @@ pub struct ShellApp {
     pub session_budget_usd: Option<f64>,
     pub advisory: AdvisoryState,
     pub pending_plan: Option<PlanProposal>,
+    pub plan_cursor: usize,
+    pub plan_skipped: BTreeSet<usize>,
+    pub tune_cursor: usize,
+    pub prompts_cursor: usize,
+    pub actor_detail_filter: ActorDetailFilter,
     pub planner_running: bool,
     pub plan_abort_requested: bool,
     pub pending_threat_patch: Option<ThreatPatch>,
@@ -448,6 +550,10 @@ pub struct ShellApp {
     pub spinner_phase: u8,
     pub last_spinner_advance: Option<Instant>,
     pub force_full_redraw: bool,
+    pub recon_snapshot: Option<ReconSnapshot>,
+    pub carlini_snapshot: Option<CarliniThreatHuntReport>,
+    pub agentic_sast_snapshot: Option<AgenticSastReport>,
+    pub scan_progress: Option<ScanProgress>,
     scan_rx: Option<Receiver<ScanEvent>>,
     scan_cancel: Option<ScanCancellation>,
     agent_rx: Option<Receiver<AgentEvent>>,
@@ -496,6 +602,11 @@ impl ShellApp {
             session_budget_usd: parse_budget_env(),
             advisory: AdvisoryState::default(),
             pending_plan: None,
+            plan_cursor: 0,
+            plan_skipped: BTreeSet::new(),
+            tune_cursor: 0,
+            prompts_cursor: 0,
+            actor_detail_filter: ActorDetailFilter::All,
             planner_running: false,
             plan_abort_requested: false,
             pending_threat_patch: None,
@@ -514,6 +625,10 @@ impl ShellApp {
             spinner_phase: 0,
             last_spinner_advance: None,
             force_full_redraw: false,
+            recon_snapshot: None,
+            carlini_snapshot: None,
+            agentic_sast_snapshot: None,
+            scan_progress: None,
             scan_rx: None,
             scan_cancel: None,
             agent_rx: None,
@@ -1651,6 +1766,8 @@ impl ShellApp {
                         plan.changes.len()
                     ),
                 );
+                self.plan_cursor = 0;
+                self.plan_skipped.clear();
                 self.pending_plan = Some(plan);
             }
             PlanEvent::Failed { error } => {
@@ -1661,7 +1778,139 @@ impl ShellApp {
 
     pub fn set_pending_plan(&mut self, plan: PlanProposal) {
         self.planner_running = false;
+        self.plan_cursor = 0;
+        self.plan_skipped.clear();
         self.pending_plan = Some(plan);
+    }
+
+    pub fn plan_change_count(&self) -> usize {
+        self.pending_plan
+            .as_ref()
+            .map(|plan| plan.changes.len())
+            .unwrap_or(0)
+    }
+
+    pub fn plan_cursor_clamped(&self) -> usize {
+        let total = self.plan_change_count();
+        if total == 0 {
+            0
+        } else {
+            self.plan_cursor.min(total - 1)
+        }
+    }
+
+    pub fn plan_change_skipped(&self, idx: usize) -> bool {
+        self.plan_skipped.contains(&idx)
+    }
+
+    pub fn move_plan_cursor(&mut self, delta: i32) {
+        let total = self.plan_change_count();
+        if total == 0 {
+            self.plan_cursor = 0;
+            return;
+        }
+        let cur = self.plan_cursor.min(total - 1) as i32;
+        self.plan_cursor = (cur + delta).clamp(0, total as i32 - 1) as usize;
+    }
+
+    pub fn toggle_plan_change_skip(&mut self) {
+        if self.plan_change_count() == 0 {
+            return;
+        }
+        let idx = self.plan_cursor_clamped();
+        if self.plan_skipped.contains(&idx) {
+            self.plan_skipped.remove(&idx);
+        } else {
+            self.plan_skipped.insert(idx);
+        }
+    }
+
+    pub fn tune_action_count(&self) -> usize {
+        TuneAction::ORDER.len()
+    }
+
+    pub fn tune_cursor_clamped(&self) -> usize {
+        let total = self.tune_action_count();
+        if total == 0 {
+            0
+        } else {
+            self.tune_cursor.min(total - 1)
+        }
+    }
+
+    pub fn current_tune_action(&self) -> Option<TuneAction> {
+        TuneAction::ORDER.get(self.tune_cursor_clamped()).copied()
+    }
+
+    pub const PROMPT_VERB_NAMES: &'static [&'static str] = &["scan", "triage", "verify", "summary"];
+
+    pub fn prompts_cursor_clamped(&self) -> usize {
+        let total = Self::PROMPT_VERB_NAMES.len();
+        if total == 0 {
+            0
+        } else {
+            self.prompts_cursor.min(total - 1)
+        }
+    }
+
+    pub fn current_prompt_verb_name(&self) -> Option<&'static str> {
+        Self::PROMPT_VERB_NAMES
+            .get(self.prompts_cursor_clamped())
+            .copied()
+    }
+
+    pub fn move_prompts_cursor(&mut self, delta: i32) {
+        let total = Self::PROMPT_VERB_NAMES.len();
+        if total == 0 {
+            self.prompts_cursor = 0;
+            return;
+        }
+        let cur = self.prompts_cursor.min(total - 1) as i32;
+        self.prompts_cursor = (cur + delta).clamp(0, total as i32 - 1) as usize;
+    }
+
+    pub fn activate_prompts_action(&mut self, action: PromptsAction) {
+        let Some(name) = self.current_prompt_verb_name() else {
+            return;
+        };
+        match action {
+            PromptsAction::Show => self.handle_prompt_verb(&format!("show {name}")),
+            PromptsAction::Edit => self.handle_prompt_verb(&format!("edit {name}")),
+            PromptsAction::Diff => self.handle_prompt_verb(&format!("diff {name}")),
+            PromptsAction::Reset => self.handle_prompt_verb(&format!("reset {name}")),
+            PromptsAction::Set => {
+                let prefill = format!("set {name} \"\"");
+                self.cursor = prefill.chars().count() - 1;
+                self.input = prefill;
+                self.history_index = None;
+            }
+        }
+    }
+
+    pub fn move_tune_cursor(&mut self, delta: i32) {
+        let total = self.tune_action_count();
+        if total == 0 {
+            self.tune_cursor = 0;
+            return;
+        }
+        let cur = self.tune_cursor.min(total - 1) as i32;
+        self.tune_cursor = (cur + delta).clamp(0, total as i32 - 1) as usize;
+    }
+
+    pub fn activate_tune_action(&mut self) {
+        let Some(action) = self.current_tune_action() else {
+            return;
+        };
+        match action {
+            TuneAction::ShowHouseRules => self.handle_tune_verb("show"),
+            TuneAction::ResetHouseRules => self.handle_tune_verb("reset"),
+            TuneAction::EditHouseRules => {
+                let prefill = "set \"\"".to_string();
+                self.cursor = prefill.chars().count() - 1;
+                self.input = prefill;
+                self.history_index = None;
+            }
+        }
     }
 
     pub fn start_planner(&mut self, goal: &str) {
@@ -1717,7 +1966,10 @@ impl ShellApp {
         };
         let total = plan.changes.len();
         let mut applied = 0usize;
-        for change in plan.changes {
+        for (idx, change) in plan.changes.into_iter().enumerate() {
+            if self.plan_skipped.contains(&idx) {
+                continue;
+            }
             match change {
                 PlanChange::SetOption {
                     global,
@@ -1749,6 +2001,8 @@ impl ShellApp {
             }
         }
         self.log("plan", format!("applied {applied}/{total} change(s)"));
+        self.plan_cursor = 0;
+        self.plan_skipped.clear();
         for line in plan.unsupported {
             self.log("plan-skip", line);
         }
@@ -1756,6 +2010,8 @@ impl ShellApp {
 
     pub fn discard_pending_plan(&mut self) {
         if self.pending_plan.take().is_some() {
+            self.plan_cursor = 0;
+            self.plan_skipped.clear();
             self.log("plan", "discarded pending plan");
         }
     }
@@ -3737,6 +3993,7 @@ impl ShellApp {
                 if matches!(tool_name.as_str(), "context:build" | "context-lite:index") {
                     let _ = self.refresh_context_view();
                 }
+                self.cache_tool_snapshot(&tool_name, &result);
                 let rendered = result
                     .get("output")
                     .and_then(serde_json::Value::as_str)
@@ -3750,6 +4007,54 @@ impl ShellApp {
                 "error",
                 with_next_step(error.to_string(), "tools, options <tool>, or model <n>"),
             ),
+        }
+    }
+
+    /// Cache structured snapshot of a tool result for the renderer to read
+    /// instead of grepping the freeform `app.log` lines. Keeps recon /
+    /// carlini-threat-hunt / agentic-sast snapshots reachable across log
+    /// truncation.
+    pub(crate) fn cache_tool_snapshot(&mut self, tool_name: &str, result: &serde_json::Value) {
+        let Some(data) = result.get("data") else {
+            return;
+        };
+        if tool_name.starts_with("recon:") {
+            let hosts = data
+                .get("hosts")
+                .and_then(|value| serde_json::from_value::<Vec<ReconHost>>(value.clone()).ok())
+                .unwrap_or_default();
+            let services = data
+                .get("services")
+                .and_then(|value| serde_json::from_value::<Vec<ReconService>>(value.clone()).ok())
+                .unwrap_or_default();
+            let notes = data
+                .get("notes")
+                .and_then(|value| serde_json::from_value::<Vec<ReconNote>>(value.clone()).ok())
+                .unwrap_or_default();
+            let last_tool = data
+                .get("tool")
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string)
+                .unwrap_or_else(|| tool_name.to_string());
+            let last_target = data
+                .get("target")
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string);
+            self.recon_snapshot = Some(ReconSnapshot {
+                hosts,
+                services,
+                notes,
+                last_tool: Some(last_tool),
+                last_target,
+            });
+        } else if tool_name.starts_with("carlini-threat-hunt:") {
+            if let Ok(report) = serde_json::from_value::<CarliniThreatHuntReport>(data.clone()) {
+                self.carlini_snapshot = Some(report);
+            }
+        } else if tool_name.starts_with("agentic-sast:") {
+            if let Ok(report) = serde_json::from_value::<AgenticSastReport>(data.clone()) {
+                self.agentic_sast_snapshot = Some(report);
+            }
         }
     }
 
@@ -8509,6 +8814,8 @@ JSON
             HotkeyTrigger::Enter => KeyCode::Enter,
             HotkeyTrigger::PageUp => KeyCode::PageUp,
             HotkeyTrigger::PageDown => KeyCode::PageDown,
+            HotkeyTrigger::Up => KeyCode::Up,
+            HotkeyTrigger::Down => KeyCode::Down,
         };
         KeyEvent::new(code, KeyModifiers::empty())
     }
@@ -9488,6 +9795,87 @@ JSON
                 && line.body.contains("abort requested")
                 && line.body.contains("not confirmed")
         }));
+    }
+
+    #[test]
+    fn actor_detail_filter_cycle_and_reset() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::ActorDetail(1);
+
+        assert_eq!(app.actor_detail_filter, ActorDetailFilter::All);
+        app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()));
+        assert_eq!(app.actor_detail_filter, ActorDetailFilter::Findings);
+        app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()));
+        assert_eq!(app.actor_detail_filter, ActorDetailFilter::Errors);
+        app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()));
+        assert_eq!(app.actor_detail_filter, ActorDetailFilter::Tools);
+        app.handle_key(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::empty()));
+        assert_eq!(app.actor_detail_filter, ActorDetailFilter::All);
+    }
+
+    #[test]
+    fn prompts_editor_cursor_and_action_shortcuts() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::PromptsEditor;
+
+        assert_eq!(app.current_prompt_verb_name(), Some("scan"));
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        assert_eq!(app.current_prompt_verb_name(), Some("triage"));
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+        assert_eq!(app.current_prompt_verb_name(), Some("verify"));
+        let log_before = app.log.len();
+        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()));
+        assert!(app.log.len() > log_before);
+    }
+
+    #[test]
+    fn tune_view_cursor_and_activate() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Tune;
+
+        assert_eq!(app.tune_cursor, 0);
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+        assert_eq!(app.tune_cursor, 1);
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        assert_eq!(app.tune_cursor, 2);
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
+        assert_eq!(app.current_tune_action(), Some(TuneAction::EditHouseRules));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        assert_eq!(app.input, "set \"\"");
+        assert_eq!(app.cursor, app.input.chars().count() - 1);
+    }
+
+    #[test]
+    fn plan_cursor_navigation_and_skip_toggle() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_pending_plan(PlanProposal {
+            goal: "test".to_string(),
+            summary: "summary".to_string(),
+            changes: vec![
+                PlanChange::Note {
+                    text: "first".to_string(),
+                },
+                PlanChange::Note {
+                    text: "second".to_string(),
+                },
+                PlanChange::Note {
+                    text: "third".to_string(),
+                },
+            ],
+            unsupported: Vec::new(),
+        });
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+        assert_eq!(app.plan_cursor, 2);
+        app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::empty()));
+        assert!(app.plan_change_skipped(2));
+        app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()));
+        assert_eq!(app.plan_cursor, 1);
+        app.discard_pending_plan();
+        assert!(app.pending_plan.is_none());
+        assert_eq!(app.plan_cursor, 0);
+        assert!(app.plan_skipped.is_empty());
     }
 
     fn assert_plain_output_strict_80(output: &str) {

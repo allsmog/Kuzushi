@@ -1,0 +1,19 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+assertion_line: 307
+---
+mode:shell | target:none | catalog | 0 findings | 35 mods
+
+------------------------------------------------------- OPTIONS --------------------------------------------------------
+tool: sast:scan
+view: standard
+
+option            value         default     req      type    description                                                
+mode              -             standard    no       enum    Analysis mode or preset. Choices: standard|whitebox-static.
+taskMode          -             auto        no       enum    Task-selection mode. Choices: auto|manual.                 
+tasks             -             -           no       list    Manual task allowlist. Use /tasks to edit.                 
+disabledTasks     -             -           no       list    Auto-mode task denylist. Use /tasks to edit.               
+severity          -             -           no       list    Optional severity filter: critical, high, medium, low, o...
+triage            -             false       no       bool    Run model-backed triage after static scanners.             
+
+Next: set <key> <value>, setg <key> <value>, show advanced, show missing

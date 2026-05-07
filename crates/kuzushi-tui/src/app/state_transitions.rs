@@ -5,8 +5,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKi
 use crate::commands::ShellCommand;
 
 use super::{
-    BudgetHalt, ShellApp, ShellView, ThreatView, ThrottleAdvisory, CTRL_C_ARM_WINDOW,
-    FINDINGS_PAGE_ROWS, SPINNER_FRAME, THROTTLE_STALE_AFTER, VIEWPORT_PAGE_LINES,
+    ActorDetailFilter, BudgetHalt, PromptsAction, ShellApp, ShellView, ThreatView,
+    ThrottleAdvisory, CTRL_C_ARM_WINDOW, FINDINGS_PAGE_ROWS, SPINNER_FRAME, THROTTLE_STALE_AFTER,
+    VIEWPORT_PAGE_LINES,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,6 +16,8 @@ pub(crate) enum HotkeyTrigger {
     Enter,
     PageUp,
     PageDown,
+    Up,
+    Down,
 }
 
 impl HotkeyTrigger {
@@ -27,6 +30,8 @@ impl HotkeyTrigger {
             (Self::Enter, KeyCode::Enter) => true,
             (Self::PageUp, KeyCode::PageUp) => true,
             (Self::PageDown, KeyCode::PageDown) => true,
+            (Self::Up, KeyCode::Up) => true,
+            (Self::Down, KeyCode::Down) => true,
             _ => false,
         }
     }
@@ -49,6 +54,18 @@ pub(crate) enum ViewHotkeyAction {
     ActorDetail(usize),
     PauseScan,
     ResumeScan,
+    ViewScrollUp,
+    ViewScrollDown,
+    ViewScrollTop,
+    ViewScrollBottom,
+    TuneCursorPrevious,
+    TuneCursorNext,
+    TuneActivate,
+    PromptsCursorPrevious,
+    PromptsCursorNext,
+    PromptsAction(PromptsAction),
+    ActorDetailFilterCycle,
+    ActorDetailFilterReset,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -184,6 +201,138 @@ impl ShellApp {
                 }
                 bindings
             }
+            ShellView::ActorDetail(_) => vec![
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('f'),
+                    hint: "f",
+                    label: "filter",
+                    action: ViewHotkeyAction::ActorDetailFilterCycle,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('0'),
+                    hint: "0",
+                    label: "reset filter",
+                    action: ViewHotkeyAction::ActorDetailFilterReset,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('j'),
+                    hint: "j/k/g/G",
+                    label: "scroll",
+                    action: ViewHotkeyAction::ViewScrollDown,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('k'),
+                    hint: "j/k/g/G",
+                    label: "scroll",
+                    action: ViewHotkeyAction::ViewScrollUp,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('g'),
+                    hint: "j/k/g/G",
+                    label: "scroll",
+                    action: ViewHotkeyAction::ViewScrollTop,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('G'),
+                    hint: "j/k/g/G",
+                    label: "scroll",
+                    action: ViewHotkeyAction::ViewScrollBottom,
+                },
+            ],
+            ShellView::PromptsEditor => vec![
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('j'),
+                    hint: "j/k",
+                    label: "row",
+                    action: ViewHotkeyAction::PromptsCursorNext,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('k'),
+                    hint: "j/k",
+                    label: "row",
+                    action: ViewHotkeyAction::PromptsCursorPrevious,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Down,
+                    hint: "Up/Down",
+                    label: "row",
+                    action: ViewHotkeyAction::PromptsCursorNext,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Up,
+                    hint: "Up/Down",
+                    label: "row",
+                    action: ViewHotkeyAction::PromptsCursorPrevious,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('e'),
+                    hint: "e/s/d/r",
+                    label: "edit",
+                    action: ViewHotkeyAction::PromptsAction(PromptsAction::Edit),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('s'),
+                    hint: "e/s/d/r",
+                    label: "show",
+                    action: ViewHotkeyAction::PromptsAction(PromptsAction::Show),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('d'),
+                    hint: "e/s/d/r",
+                    label: "diff",
+                    action: ViewHotkeyAction::PromptsAction(PromptsAction::Diff),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('r'),
+                    hint: "e/s/d/r",
+                    label: "reset",
+                    action: ViewHotkeyAction::PromptsAction(PromptsAction::Reset),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('S'),
+                    hint: "S",
+                    label: "set",
+                    action: ViewHotkeyAction::PromptsAction(PromptsAction::Set),
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Enter,
+                    hint: "Enter",
+                    label: "show",
+                    action: ViewHotkeyAction::PromptsAction(PromptsAction::Show),
+                },
+            ],
+            ShellView::Tune => vec![
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('j'),
+                    hint: "j/k",
+                    label: "row",
+                    action: ViewHotkeyAction::TuneCursorNext,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Char('k'),
+                    hint: "j/k",
+                    label: "row",
+                    action: ViewHotkeyAction::TuneCursorPrevious,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Down,
+                    hint: "Up/Down",
+                    label: "row",
+                    action: ViewHotkeyAction::TuneCursorNext,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Up,
+                    hint: "Up/Down",
+                    label: "row",
+                    action: ViewHotkeyAction::TuneCursorPrevious,
+                },
+                ViewKeybinding {
+                    trigger: HotkeyTrigger::Enter,
+                    hint: "Enter",
+                    label: "activate",
+                    action: ViewHotkeyAction::TuneActivate,
+                },
+            ],
             _ => Vec::new(),
         }
     }
@@ -225,6 +374,29 @@ impl ShellApp {
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                     self.discard_pending_plan();
+                    return;
+                }
+                KeyCode::Char(' ') => {
+                    self.toggle_plan_change_skip();
+                    return;
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.move_plan_cursor(1);
+                    return;
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.move_plan_cursor(-1);
+                    return;
+                }
+                KeyCode::Char('g') => {
+                    self.plan_cursor = 0;
+                    return;
+                }
+                KeyCode::Char('G') => {
+                    let total = self.plan_change_count();
+                    if total > 0 {
+                        self.plan_cursor = total - 1;
+                    }
                     return;
                 }
                 _ => {}
@@ -299,6 +471,10 @@ impl ShellApp {
                 self.findings_cursor =
                     (self.findings_cursor + 1).min(self.findings.len().saturating_sub(1));
             }
+            KeyCode::Up
+                if self.input.is_empty() && plain_modifiers && self.handle_view_hotkey(key) => {}
+            KeyCode::Down
+                if self.input.is_empty() && plain_modifiers && self.handle_view_hotkey(key) => {}
             KeyCode::Up if plain_modifiers => self.history_prev(),
             KeyCode::Down if plain_modifiers => self.history_next(),
             KeyCode::Enter
@@ -441,6 +617,22 @@ impl ShellApp {
             }
             ViewHotkeyAction::ResumeScan => {
                 self.handle_command(ShellCommand::Resume(None));
+            }
+            ViewHotkeyAction::ViewScrollUp => self.scroll_up(1),
+            ViewHotkeyAction::ViewScrollDown => self.scroll_down(1),
+            ViewHotkeyAction::ViewScrollTop => self.scroll_to_top(),
+            ViewHotkeyAction::ViewScrollBottom => self.scroll_to_bottom(),
+            ViewHotkeyAction::TuneCursorPrevious => self.move_tune_cursor(-1),
+            ViewHotkeyAction::TuneCursorNext => self.move_tune_cursor(1),
+            ViewHotkeyAction::TuneActivate => self.activate_tune_action(),
+            ViewHotkeyAction::PromptsCursorPrevious => self.move_prompts_cursor(-1),
+            ViewHotkeyAction::PromptsCursorNext => self.move_prompts_cursor(1),
+            ViewHotkeyAction::PromptsAction(action) => self.activate_prompts_action(action),
+            ViewHotkeyAction::ActorDetailFilterCycle => {
+                self.actor_detail_filter = self.actor_detail_filter.next();
+            }
+            ViewHotkeyAction::ActorDetailFilterReset => {
+                self.actor_detail_filter = ActorDetailFilter::All;
             }
         }
         true

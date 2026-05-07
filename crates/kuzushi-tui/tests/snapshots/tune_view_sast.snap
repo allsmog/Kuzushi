@@ -1,0 +1,23 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+assertion_line: 150
+---
+KUZUSHI  mode:module | target none | 0 findings | ctx missing | module sast | model unconfigured | cost $0.0000
+
+--------------------------------------------------------- TUNE ---------------------------------------------------------
+module sast
+severity floor medium
+triage confidence 0.70
+scan concurrency adaptive
+house rules .kuzushi/house-rules/sast.md
+
+------------------------------------------------------- ACTIONS --------------------------------------------------------
+> show house rules
+    log the current house-rules text into the transcript
+  edit house rules (set "...")
+    prefill the prompt with `set ""` so you can type a value
+  reset house rules
+    delete the house-rules file and revert to defaults
+
+(no house rules set; pick edit house rules and type a value)
+Up/Down move | Enter activate | show/set/reset direct | back
