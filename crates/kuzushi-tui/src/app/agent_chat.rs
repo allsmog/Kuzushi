@@ -6,6 +6,10 @@ pub struct AgentChatView {
     pub abort_requested: bool,
     pub error: Option<String>,
     pub history: Vec<ChatTurn>,
+    /// Synthetic run id used for `<target>/.kuzushi/runs/<run_id>/trace.jsonl`.
+    pub run_id: Option<String>,
+    /// Wall-clock seconds since epoch when the active turn was dispatched.
+    pub started_secs: u64,
 }
 
 impl Default for AgentChatView {
@@ -17,6 +21,8 @@ impl Default for AgentChatView {
             abort_requested: false,
             error: None,
             history: Vec::new(),
+            run_id: None,
+            started_secs: 0,
         }
     }
 }
@@ -44,6 +50,8 @@ impl AgentChatView {
             abort_requested: false,
             error: None,
             history,
+            run_id: None,
+            started_secs: 0,
         }
     }
 }

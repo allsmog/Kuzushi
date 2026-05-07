@@ -531,6 +531,13 @@ pub struct ShellApp {
     /// Patch staged for human approval — populated when a tool
     /// produces a `pending_patch` artefact.  See `ShellView::Patch`.
     pub pending_patch: Option<PendingPatch>,
+    /// Session-scoped allowlist of `<tool> <target>` strings approved
+    /// via `Y` (allow + remember).  `confirm_gate_for_tool` checks this
+    /// before raising a fresh gate so re-runs don't re-prompt.
+    pub confirm_allowlist: std::collections::BTreeSet<String>,
+    /// Session-scoped denylist of `<tool> <target>` strings rejected
+    /// via `N` (deny + add to denylist).  Re-runs are auto-refused.
+    pub confirm_denylist: std::collections::BTreeSet<String>,
     pub config: V2Config,
     pub registry: ModuleRegistry,
     pub option_store: ToolOptionStore,
@@ -606,6 +613,8 @@ impl ShellApp {
             catalog_expanded: false,
             catalog_cursor: 0,
             pending_patch: None,
+            confirm_allowlist: std::collections::BTreeSet::new(),
+            confirm_denylist: std::collections::BTreeSet::new(),
             config,
             registry: ModuleRegistry::with_v2_builtins(),
             option_store: ToolOptionStore::new(),
@@ -2234,6 +2243,16 @@ impl ShellApp {
         let (tx, rx) = mpsc::channel();
         let mut next = prior.fold_for_next_turn(question.clone());
         next.running = true;
+        // Mint a synthetic run id from wall-clock seconds so the
+        // operator can `/trace agent-<n>` and the trace.jsonl is
+        // findable by the runs ledger.  Same shape used by scan runs.
+        let started_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
+        let agent_run_id = format!("agent-{started_secs}");
+        next.run_id = Some(agent_run_id.clone());
+        next.started_secs = started_secs;
         self.agent_chat = Some(next);
         self.agent_rx = Some(rx);
         self.shell_view = ShellView::AgentChat;
@@ -2246,6 +2265,32 @@ impl ShellApp {
                     .map(|level| format!(" / {level}"))
                     .unwrap_or_default()
             ),
+        );
+
+        // Emit a `plan` step capturing the question that just dispatched
+        // — gives the trace view a leading row even before the LLM
+        // answers.
+        append_trace_step(
+            self.target.as_deref(),
+            &agent_run_id,
+            1,
+            "plan",
+            &format!("ask {} ({model})", short_label(&question, 80)),
+            None,
+            None,
+        );
+        // Drop a synthetic summary.json so `/runs` lists the agent run
+        // alongside scan runs.  Best-effort write; failures are silent.
+        write_run_summary(
+            self.target.as_deref(),
+            &agent_run_id,
+            "running",
+            None,
+            self.target
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .as_deref()
+                .unwrap_or("."),
         );
 
         thread::spawn(move || agent_worker(config, model, thinking_level, cwd, question, tx));
@@ -4040,6 +4085,26 @@ impl ShellApp {
                 }
             };
 
+        // Confirm gate preflight (`design/mockups/confirm-dialog.jsx`).
+        // If the tool + input matches a known-risky shape (network
+        // egress, fs:write outside `.kuzushi/`, destructive verb),
+        // surface a `PendingConfirm` and pause the dispatch.  The
+        // operator resolves with y/Y/n/N; on `y`/`Y` they re-run the
+        // command and the gate doesn't fire again because `remembered`
+        // adds the target to the session allowlist.
+        if let Some(request) = confirm_gate_for_tool(&tool_name, &input, &self.confirm_allowlist) {
+            self.log(
+                "system",
+                format!(
+                    "{} requires approval — {}",
+                    tool_name,
+                    request.kind.label().to_lowercase()
+                ),
+            );
+            self.request_confirm(request);
+            return;
+        }
+
         let workspace = match self.current_workspace() {
             Ok(workspace) => Some(workspace),
             Err(error) => {
@@ -4205,6 +4270,16 @@ impl ShellApp {
         } else if tool_name.starts_with("agentic-sast:") {
             if let Ok(report) = serde_json::from_value::<AgenticSastReport>(data.clone()) {
                 self.agentic_sast_snapshot = Some(report);
+            }
+        } else if tool_name == "patch:run" || tool_name == "patch:finding" {
+            // `patch:run` / `patch:finding` produce a staged patch the
+            // operator must approve (`design/mockups/patch.jsx`).  Cache
+            // the structured payload into `pending_patch` and navigate
+            // to the Patch view so it surfaces immediately.
+            if let Some(patch) = parse_pending_patch(data) {
+                let alias = patch.alias.clone();
+                self.pending_patch = Some(patch);
+                self.shell_view = ShellView::Patch(alias);
             }
         }
     }
@@ -4486,6 +4561,24 @@ impl ShellApp {
                 if let Some(scan) = &mut self.scan {
                     scan.stage = stage.clone();
                 }
+                // Emit a `tool` step in the run's trace.jsonl per stage
+                // change so the trace view tracks scan progress in real
+                // time, not just at completion.
+                let target = self.target.clone();
+                if let Some(scan) = &self.scan {
+                    if let Some(rid) = &scan.run_id {
+                        let n = self.log.iter().filter(|line| line.prefix == "scan").count() + 1;
+                        append_trace_step(
+                            target.as_deref(),
+                            rid,
+                            n,
+                            "tool",
+                            &short_label(&stage, 80),
+                            None,
+                            None,
+                        );
+                    }
+                }
                 self.log("scan", stage);
             }
             ScanEvent::FindingStored {
@@ -4518,6 +4611,28 @@ impl ShellApp {
                     scan.abort_requested = false;
                     scan.error = None;
                 }
+                let target_label = self
+                    .target
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| ".".to_string());
+                let target_path = self.target.clone();
+                append_trace_step(
+                    target_path.as_deref(),
+                    &run_id,
+                    1_000,
+                    "tool",
+                    &format!("completed · {findings_count} finding(s)"),
+                    None,
+                    None,
+                );
+                write_run_summary(
+                    target_path.as_deref(),
+                    &run_id,
+                    "complete",
+                    Some(findings_count as u64),
+                    &target_label,
+                );
                 self.refresh_findings(false);
                 self.log_scan_alias_hint();
                 self.log(
@@ -4534,11 +4649,30 @@ impl ShellApp {
                     error,
                     "tasks, task block semgrep, or run semgrep:scan {\"binary\":\"/path/to/semgrep\"}",
                 );
+                let run_id = self.scan.as_ref().and_then(|scan| scan.run_id.clone());
                 if let Some(scan) = &mut self.scan {
                     scan.stage = "failed".to_string();
                     scan.running = false;
                     scan.abort_requested = false;
                     scan.error = Some(actionable.clone());
+                }
+                if let Some(rid) = &run_id {
+                    let target = self.target.clone();
+                    append_trace_step(
+                        target.as_deref(),
+                        rid,
+                        1_000,
+                        "refused",
+                        &short_label(&actionable, 80),
+                        None,
+                        None,
+                    );
+                    let target_label = self
+                        .target
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| ".".to_string());
+                    write_run_summary(target.as_deref(), rid, "failed", None, &target_label);
                 }
                 self.log("error", actionable);
             }
@@ -4550,6 +4684,22 @@ impl ShellApp {
                     scan.abort_requested = false;
                     scan.error = None;
                 }
+                let target = self.target.clone();
+                let target_label = self
+                    .target
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| ".".to_string());
+                append_trace_step(
+                    target.as_deref(),
+                    &run_id,
+                    1_000,
+                    "refused",
+                    "cancelled",
+                    None,
+                    None,
+                );
+                write_run_summary(target.as_deref(), &run_id, "paused", None, &target_label);
                 self.log("scan", format!("cancelled {}", short_fingerprint(&run_id)));
             }
         }
@@ -4573,6 +4723,24 @@ impl ShellApp {
             .agent_chat
             .as_ref()
             .is_some_and(|agent| agent.abort_requested);
+        let run_id = self
+            .agent_chat
+            .as_ref()
+            .and_then(|agent| agent.run_id.clone());
+        let started_secs = self
+            .agent_chat
+            .as_ref()
+            .map(|agent| agent.started_secs)
+            .unwrap_or(0);
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let latency_ms = if started_secs > 0 && now_secs >= started_secs {
+            Some((now_secs - started_secs) * 1000)
+        } else {
+            None
+        };
         match event {
             AgentEvent::Answered { text } => {
                 if let Some(agent) = &mut self.agent_chat {
@@ -4593,7 +4761,32 @@ impl ShellApp {
                         "pi-agent-core response arrived after abort request; ignored",
                     );
                 } else {
-                    self.log("answer", text);
+                    self.log("answer", text.clone());
+                    // Emit `llm` step for the answer.  Cost lives on the
+                    // session total (`record_cost` already updated it),
+                    // so we don't double-report here.
+                    if let Some(rid) = &run_id {
+                        append_trace_step(
+                            self.target.as_deref(),
+                            rid,
+                            2,
+                            "llm",
+                            &format!("answer ({} chars)", text.chars().count()),
+                            latency_ms,
+                            None,
+                        );
+                        write_run_summary(
+                            self.target.as_deref(),
+                            rid,
+                            "complete",
+                            None,
+                            self.target
+                                .as_ref()
+                                .map(|p| p.display().to_string())
+                                .as_deref()
+                                .unwrap_or("."),
+                        );
+                    }
                 }
             }
             AgentEvent::Failed { error } => {
@@ -4615,7 +4808,29 @@ impl ShellApp {
                         format!("pi-agent-core ended after abort request: {error}"),
                     );
                 } else {
-                    self.log("error", error);
+                    self.log("error", error.clone());
+                    if let Some(rid) = &run_id {
+                        append_trace_step(
+                            self.target.as_deref(),
+                            rid,
+                            2,
+                            "refused",
+                            &short_label(&error, 80),
+                            latency_ms,
+                            None,
+                        );
+                        write_run_summary(
+                            self.target.as_deref(),
+                            rid,
+                            "failed",
+                            None,
+                            self.target
+                                .as_ref()
+                                .map(|p| p.display().to_string())
+                                .as_deref()
+                                .unwrap_or("."),
+                        );
+                    }
                 }
             }
         }
@@ -5072,6 +5287,302 @@ pub(crate) fn bridge_command_status(config: &V2Config) -> &'static str {
     } else {
         "bundled/default"
     }
+}
+
+/// Truncate `text` to `max` chars, appending `…` when clipped.  Used
+/// for trace.jsonl `label` fields so a long answer doesn't bloat the
+/// jsonl file.
+fn short_label(text: &str, max: usize) -> String {
+    let cleaned = text.replace('\n', " ");
+    if cleaned.chars().count() <= max {
+        cleaned
+    } else {
+        let mut out: String = cleaned.chars().take(max - 1).collect();
+        out.push('…');
+        out
+    }
+}
+
+/// Write a minimal `summary.json` for `<target>/.kuzushi/runs/<run_id>/`
+/// so the runs ledger can list synthetic agent / scan runs alongside
+/// real artefacts.  Best-effort; silent on failure.
+pub fn write_run_summary(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    status: &str,
+    findings: Option<u64>,
+    target_label: &str,
+) {
+    // Only write when an explicit workspace target is set — otherwise
+    // synthetic agent runs would land in the cwd's .kuzushi/runs and
+    // pollute test workspaces (cwd is `crates/<name>` during cargo test).
+    let Some(target) = target else { return };
+    let runs_root = target.join(".kuzushi/runs");
+    let dir = runs_root.join(run_id);
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let mut summary = serde_json::Map::new();
+    summary.insert("status".to_string(), serde_json::json!(status));
+    if let Some(n) = findings {
+        summary.insert("findings".to_string(), serde_json::json!(n));
+    }
+    summary.insert("target".to_string(), serde_json::json!(target_label));
+    let bytes = match serde_json::to_vec_pretty(&serde_json::Value::Object(summary)) {
+        Ok(bytes) => bytes,
+        Err(_) => return,
+    };
+    let _ = std::fs::write(dir.join("summary.json"), bytes);
+}
+
+/// Append a single `TraceStep`-shaped JSON object to the trace.jsonl
+/// for the given `run_id` under `<target>/.kuzushi/runs/<run_id>/`.
+/// No-ops on any I/O error so a missing target dir or read-only mount
+/// doesn't crash a worker — trace writes are observability, not a
+/// correctness contract.  `kind` is the renderer's tint key:
+/// `plan` / `tool` / `llm` / `critic` / `refused`.
+pub fn append_trace_step(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    n: usize,
+    kind: &str,
+    label: &str,
+    latency_ms: Option<u64>,
+    cost_usd: Option<f64>,
+) {
+    let Some(target) = target else { return };
+    let runs_root = target.join(".kuzushi/runs");
+    let dir = runs_root.join(run_id);
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join("trace.jsonl");
+    let mut entry = serde_json::Map::new();
+    entry.insert("n".to_string(), serde_json::json!(n));
+    entry.insert("kind".to_string(), serde_json::json!(kind));
+    entry.insert("label".to_string(), serde_json::json!(label));
+    if let Some(ms) = latency_ms {
+        entry.insert("latency_ms".to_string(), serde_json::json!(ms));
+    }
+    if let Some(cost) = cost_usd {
+        entry.insert("cost_usd".to_string(), serde_json::json!(cost));
+    }
+    let line = match serde_json::to_string(&serde_json::Value::Object(entry)) {
+        Ok(line) => line,
+        Err(_) => return,
+    };
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+/// Stable key for a `<tool> <target>` allowlist/denylist entry.
+fn confirm_allowlist_key(tool: &str, target: &str) -> String {
+    format!("{tool} {target}")
+}
+
+/// Returns a `PendingConfirm` when `<tool>` + `<input>` look like a
+/// gated dispatch per `design/mockups/confirm-dialog.jsx`:
+///
+///   - `sandbox:run` (or any `*:run` tool) with a `target` URL or
+///     `network: true` → CONFIRM · network egress
+///   - `fs:write` with a `path` outside `.kuzushi/` →
+///     CONFIRM · fs:write outside .kuzushi/
+///   - any tool whose `cmd` / `verb` matches a destructive pattern
+///     (`rm -rf`, `git push --force`, `:force`, `chmod -R 777`,
+///     `> /dev/`, ...) → REFUSED · destructive verb (no override).
+///
+/// `allowlist` is consulted first — already-approved `<tool> <target>`
+/// entries skip the gate entirely.  Returns None for tools that aren't
+/// known-risky.
+pub fn confirm_gate_for_tool(
+    tool: &str,
+    input: &serde_json::Value,
+    allowlist: &std::collections::BTreeSet<String>,
+) -> Option<PendingConfirm> {
+    // Destructive verb check first — destructive verbs are unconditional,
+    // even an entry on the allowlist shouldn't bypass.
+    let cmd_target = input
+        .get("cmd")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| input.get("verb").and_then(serde_json::Value::as_str))
+        .or_else(|| input.get("command").and_then(serde_json::Value::as_str))
+        .unwrap_or("");
+    if !cmd_target.is_empty() && is_destructive_verb(cmd_target) {
+        return Some(PendingConfirm {
+            kind: ConfirmKind::DestructiveVerb,
+            tool: tool.to_string(),
+            target: cmd_target.to_string(),
+            rationale: input
+                .get("rationale")
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string),
+            allowlist: None,
+            actor: input
+                .get("actor")
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string),
+            remembered: false,
+        });
+    }
+
+    // Network egress: `sandbox:run` with `network: true` or a URL target.
+    if tool == "sandbox:run" || tool.ends_with(":run-with-network") {
+        let network = input
+            .get("network")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let target = input
+            .get("target")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| input.get("url").and_then(serde_json::Value::as_str))
+            .unwrap_or("");
+        let url_target = target.starts_with("http://") || target.starts_with("https://");
+        if network || url_target {
+            let key = confirm_allowlist_key(tool, target);
+            if allowlist.contains(&key) {
+                return None;
+            }
+            return Some(PendingConfirm {
+                kind: ConfirmKind::NetworkEgress,
+                tool: tool.to_string(),
+                target: target.to_string(),
+                rationale: input
+                    .get("rationale")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string),
+                allowlist: input
+                    .get("allowlist_match")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string),
+                actor: input
+                    .get("actor")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string),
+                remembered: false,
+            });
+        }
+    }
+
+    // fs:write outside .kuzushi/.
+    if tool == "fs:write" {
+        let path = input
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        if !path.is_empty() && !path.starts_with(".kuzushi/") && !path.contains("/.kuzushi/") {
+            let key = confirm_allowlist_key(tool, path);
+            if allowlist.contains(&key) {
+                return None;
+            }
+            return Some(PendingConfirm {
+                kind: ConfirmKind::FsWriteOutsideKuzushi,
+                tool: tool.to_string(),
+                target: path.to_string(),
+                rationale: input
+                    .get("rationale")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string),
+                allowlist: None,
+                actor: input
+                    .get("actor")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string),
+                remembered: false,
+            });
+        }
+    }
+
+    None
+}
+
+/// Pattern-match destructive shell verbs.  Conservative: only flags
+/// patterns that are unambiguously destructive (no false-positives on
+/// `git push origin foo` etc.).
+fn is_destructive_verb(cmd: &str) -> bool {
+    let lower = cmd.to_lowercase();
+    let stripped = lower.trim();
+    stripped.contains("rm -rf")
+        || stripped.contains("rm -fr")
+        || stripped.contains("git push --force")
+        || stripped.contains("git push -f")
+        || stripped.contains("--force-with-lease=") && stripped.starts_with("git push")
+        || stripped.contains("chmod -r 777")
+        || stripped.contains("dd of=/dev/")
+        || stripped.contains("> /dev/sda")
+        || stripped.contains("mkfs")
+        || stripped.starts_with("shutdown")
+        || stripped.starts_with("reboot")
+        || stripped.contains("git reset --hard origin")
+        || stripped.contains("git filter-branch")
+        || (stripped.starts_with("rm ") && stripped.contains(" -rf"))
+}
+
+/// Parse a `patch:run` / `patch:finding` result into a `PendingPatch`.
+/// Tools should produce `data` shaped like:
+///   `{ alias, rationale, side_effect?, diff, tests: [{name, blurb}],
+///      guardrail?, staged_at? }`
+/// All fields except `alias` + `rationale` + `diff` are optional —
+/// missing fields collapse to None / empty.
+pub fn parse_pending_patch(data: &serde_json::Value) -> Option<PendingPatch> {
+    let alias = data
+        .get("alias")
+        .and_then(serde_json::Value::as_str)?
+        .to_string();
+    let rationale = data
+        .get("rationale")
+        .and_then(serde_json::Value::as_str)?
+        .to_string();
+    let diff = data
+        .get("diff")
+        .and_then(serde_json::Value::as_str)?
+        .to_string();
+    let side_effect = data
+        .get("side_effect")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string);
+    let tests = data
+        .get("tests")
+        .and_then(serde_json::Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|t| {
+                    let name = t
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)?
+                        .to_string();
+                    let blurb = t
+                        .get("blurb")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    Some((name, blurb))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let guardrail = data
+        .get("guardrail")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string);
+    let staged_at = data
+        .get("staged_at")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string);
+    Some(PendingPatch {
+        alias,
+        rationale,
+        side_effect,
+        diff,
+        tests,
+        guardrail,
+        staged_at,
+    })
 }
 
 fn extract_cost_usd(result: &serde_json::Value) -> Option<f64> {
@@ -10519,6 +11030,8 @@ JSON
             abort_requested: false,
             error: None,
             history: Vec::new(),
+            run_id: None,
+            started_secs: 0,
         });
 
         app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
@@ -10546,6 +11059,8 @@ JSON
             abort_requested: true,
             error: None,
             history: Vec::new(),
+            run_id: None,
+            started_secs: 0,
         });
 
         app.apply_agent_event(AgentEvent::Answered {
@@ -10672,6 +11187,188 @@ JSON
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         assert_eq!(app.input, "set \"\"");
         assert_eq!(app.cursor, app.input.chars().count() - 1);
+    }
+
+    #[test]
+    fn confirm_gate_detects_network_egress_for_sandbox_run_with_url() {
+        let allow = std::collections::BTreeSet::new();
+        let req = confirm_gate_for_tool(
+            "sandbox:run",
+            &serde_json::json!({"target": "https://refund.acme/api"}),
+            &allow,
+        )
+        .expect("network egress gate");
+        assert_eq!(req.kind, ConfirmKind::NetworkEgress);
+        assert_eq!(req.tool, "sandbox:run");
+        assert_eq!(req.target, "https://refund.acme/api");
+    }
+
+    #[test]
+    fn confirm_gate_skips_network_when_allowlisted() {
+        let mut allow = std::collections::BTreeSet::new();
+        allow.insert("sandbox:run https://refund.acme/api".to_string());
+        assert!(confirm_gate_for_tool(
+            "sandbox:run",
+            &serde_json::json!({"target": "https://refund.acme/api"}),
+            &allow,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn confirm_gate_detects_fs_write_outside_kuzushi() {
+        let allow = std::collections::BTreeSet::new();
+        let req = confirm_gate_for_tool(
+            "fs:write",
+            &serde_json::json!({"path": "apps/web/agents/concierge.ts"}),
+            &allow,
+        )
+        .expect("fs:write gate");
+        assert_eq!(req.kind, ConfirmKind::FsWriteOutsideKuzushi);
+
+        // .kuzushi/ paths bypass the gate.
+        assert!(confirm_gate_for_tool(
+            "fs:write",
+            &serde_json::json!({"path": ".kuzushi/runs/r-1/patch.diff"}),
+            &allow,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn confirm_gate_destructive_verb_unconditional_even_when_allowlisted() {
+        let mut allow = std::collections::BTreeSet::new();
+        // Even an explicit entry shouldn't bypass destructive verb gates.
+        allow.insert("shell:run rm -rf .git".to_string());
+        let req = confirm_gate_for_tool(
+            "shell:run",
+            &serde_json::json!({"cmd": "rm -rf .git"}),
+            &allow,
+        )
+        .expect("destructive verb gate");
+        assert_eq!(req.kind, ConfirmKind::DestructiveVerb);
+    }
+
+    #[test]
+    fn confirm_resolve_remember_writes_session_allowlist() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory.pending_confirm = Some(PendingConfirm {
+            kind: ConfirmKind::NetworkEgress,
+            tool: "sandbox:run".to_string(),
+            target: "https://refund.acme/api".to_string(),
+            rationale: None,
+            allowlist: None,
+            actor: None,
+            remembered: false,
+        });
+        app.resolve_confirm(true, true);
+        assert!(app
+            .confirm_allowlist
+            .contains("sandbox:run https://refund.acme/api"));
+        assert!(app.advisory.pending_confirm.is_none());
+    }
+
+    #[test]
+    fn append_trace_step_writes_jsonl_under_target() {
+        // The trace writer should land at
+        // <target>/.kuzushi/runs/<runId>/trace.jsonl with one JSON
+        // object per line.
+        let tmp = tempfile::tempdir().unwrap();
+        append_trace_step(
+            Some(tmp.path()),
+            "agent-42",
+            1,
+            "plan",
+            "ask demo question",
+            Some(400),
+            None,
+        );
+        append_trace_step(
+            Some(tmp.path()),
+            "agent-42",
+            2,
+            "llm",
+            "answer (24 chars)",
+            Some(1200),
+            Some(0.012),
+        );
+        let path = tmp.path().join(".kuzushi/runs/agent-42/trace.jsonl");
+        let body = std::fs::read_to_string(&path).expect("trace.jsonl");
+        let lines: Vec<&str> = body.lines().collect();
+        assert_eq!(lines.len(), 2);
+        let first: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(first["n"], 1);
+        assert_eq!(first["kind"], "plan");
+        assert_eq!(first["label"], "ask demo question");
+        assert_eq!(first["latency_ms"], 400);
+        let second: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
+        assert_eq!(second["kind"], "llm");
+        assert_eq!(second["cost_usd"], 0.012);
+    }
+
+    #[test]
+    fn append_trace_step_no_op_when_target_is_none() {
+        // Sanity: passing None must not pollute the cwd.  The function
+        // returns silently.
+        append_trace_step(None, "agent-x", 1, "plan", "no target", None, None);
+    }
+
+    #[test]
+    fn write_run_summary_writes_summary_json_under_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_run_summary(Some(tmp.path()), "r-1", "complete", Some(11), "/tmp/demo");
+        let body = std::fs::read_to_string(tmp.path().join(".kuzushi/runs/r-1/summary.json"))
+            .expect("summary.json");
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["status"], "complete");
+        assert_eq!(parsed["findings"], 11);
+        assert_eq!(parsed["target"], "/tmp/demo");
+    }
+
+    #[test]
+    fn cache_tool_snapshot_populates_pending_patch_for_patch_run() {
+        // patch:run / patch:finding tools produce a structured payload
+        // the operator must approve.  Verify cache_tool_snapshot parses
+        // the payload, sets `pending_patch`, and navigates to the Patch
+        // view automatically.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let result = serde_json::json!({
+            "data": {
+                "alias": "F-0001",
+                "rationale": "switch to sqlx::query!() macro",
+                "side_effect": "closes F-0014",
+                "diff": "--- a/x.rs\n+++ b/x.rs\n@@ -1 +1 @@\n-old\n+new\n",
+                "tests": [
+                    {"name": "rejects_sqli", "blurb": "1 OR 1=1 → BadId"},
+                    {"name": "happy_path", "blurb": "valid uuid"},
+                ],
+                "guardrail": "approval.patches = human-required",
+                "staged_at": ".kuzushi/runs/r-1/patch.diff",
+            }
+        });
+        app.cache_tool_snapshot("patch:run", &result);
+        let patch = app.pending_patch.as_ref().expect("pending patch");
+        assert_eq!(patch.alias, "F-0001");
+        assert!(patch.rationale.contains("sqlx::query!"));
+        assert_eq!(patch.tests.len(), 2);
+        assert_eq!(
+            patch.guardrail.as_deref(),
+            Some("approval.patches = human-required")
+        );
+        assert_eq!(app.shell_view, ShellView::Patch("F-0001".to_string()));
+    }
+
+    #[test]
+    fn parse_pending_patch_skips_when_required_fields_missing() {
+        // alias + rationale + diff are required; missing any of them
+        // means the result wasn't a patch payload, so the parser
+        // returns None instead of fabricating a patch.
+        assert!(parse_pending_patch(&serde_json::json!({})).is_none());
+        assert!(
+            parse_pending_patch(&serde_json::json!({"alias": "F-1", "rationale": "x"})).is_none()
+        );
+        assert!(parse_pending_patch(&serde_json::json!({"alias": "F-1", "diff": "x"})).is_none());
+        assert!(parse_pending_patch(&serde_json::json!({"rationale": "x", "diff": "x"})).is_none());
     }
 
     #[test]

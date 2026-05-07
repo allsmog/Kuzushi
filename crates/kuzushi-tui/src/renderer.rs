@@ -8014,6 +8014,8 @@ mod tests {
             abort_requested: false,
             error: None,
             history: Vec::new(),
+            run_id: None,
+            started_secs: 0,
         });
         app.shell_view = ShellView::AgentChat;
 
@@ -8047,6 +8049,8 @@ mod tests {
             abort_requested: true,
             error: None,
             history: Vec::new(),
+            run_id: None,
+            started_secs: 0,
         });
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -9227,6 +9231,8 @@ mod tests {
                     error: None,
                 },
             ],
+            run_id: None,
+            started_secs: 0,
         });
         app.shell_view = ShellView::AgentChat;
 
@@ -9266,6 +9272,8 @@ mod tests {
             abort_requested: false,
             error: None,
             history: Vec::new(),
+            run_id: None,
+            started_secs: 0,
         };
         let next2 = prev.fold_for_next_turn("second question".to_string());
         assert_eq!(next2.history.len(), 1);
@@ -9295,6 +9303,8 @@ mod tests {
             abort_requested: false,
             error: None,
             history: Vec::new(),
+            run_id: None,
+            started_secs: 0,
         });
         app.shell_view = ShellView::AgentChat;
 
