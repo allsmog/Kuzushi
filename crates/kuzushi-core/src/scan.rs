@@ -521,24 +521,74 @@ impl CodeqlScanner {
     /// Run the codeql analysis via an [`Executor`] backend instead of
     /// spawning a local subprocess.
     ///
-    /// **Requirements:** `self.language` must be set explicitly. Multi-
-    /// language detection requires walking the target's filesystem, which
-    /// the executor's working_dir bind-mount may not expose to the host.
-    /// Pass `{"language":"javascript"}` (or whatever) on the tool input
-    /// when you opt into executor mode.
+    /// Language selection (in order):
+    /// 1. `self.language` — explicit single language wins.
+    /// 2. `self.multi_language` — host-side heuristic detect (walks the
+    ///    target filesystem looking for `package.json`, `go.mod`, etc.)
+    ///    and dispatches one analyze pass per detected language.
+    /// 3. Single-best-guess host heuristic — when neither flag is set,
+    ///    falls back to whichever language wins the heuristic, or
+    ///    errors with an actionable hint.
+    ///
+    /// SARIF documents are captured per-language and persisted on the
+    /// returned [`ScanEngineOutput`] so the executor path produces the
+    /// same artefacts the local-subprocess path does.
     pub fn scan_via_executor(
         &self,
         target: &Path,
         executor: &dyn crate::executor::Executor,
-    ) -> Result<Vec<Finding>> {
-        let language = self
-            .language
-            .as_ref()
-            .context(
-                "codeql via executor requires an explicit `language` (multi-language detection \
-                 walks the host filesystem and is unsupported through executor backends).",
-            )?
-            .clone();
+    ) -> Result<ScanEngineOutput> {
+        let languages: Vec<String> = if let Some(language) = &self.language {
+            vec![language.clone()]
+        } else if self.multi_language {
+            multi_language_heuristic(target)
+        } else {
+            match detect_codeql_language_from_heuristics(target) {
+                Some(language) => vec![language],
+                None => anyhow::bail!(
+                    "codeql via executor could not infer the target language. Pass \
+                     `{{\"language\":\"javascript\"}}` (or python, java, go, ruby, \
+                     rust, csharp, cpp) on the tool input, or set \
+                     `multi_language` to scan every language found."
+                ),
+            }
+        };
+        let repo_name = target
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("repo")
+            .to_string();
+
+        let mut output = ScanEngineOutput::default();
+        let mut errors = Vec::new();
+        for language in &languages {
+            match self.scan_via_executor_single_language(target, executor, language, &repo_name) {
+                Ok(mut single) => {
+                    output.findings.append(&mut single.findings);
+                    output
+                        .codeql_sarif_documents
+                        .append(&mut single.codeql_sarif_documents);
+                }
+                Err(error) => errors.push(format!("{language}: {error}")),
+            }
+        }
+        if output.findings.is_empty() && !errors.is_empty() {
+            anyhow::bail!(
+                "codeql via {} executor: every language pass failed: {}",
+                executor.name(),
+                errors.join("; ")
+            );
+        }
+        Ok(output)
+    }
+
+    fn scan_via_executor_single_language(
+        &self,
+        target: &Path,
+        executor: &dyn crate::executor::Executor,
+        language: &str,
+        repo_name: &str,
+    ) -> Result<ScanEngineOutput> {
         let suite_clause = self
             .suite
             .as_ref()
@@ -552,12 +602,12 @@ impl CodeqlScanner {
         // already normalises.
         let script = format!(
             "set -e; \
-             codeql database create db --language={language} --source-root=. >&2; \
-             codeql database analyze db --format=sarif-latest --output=/dev/stdout{suite_clause}",
+             codeql database create db-{language} --language={language} --source-root=. >&2; \
+             codeql database analyze db-{language} --format=sarif-latest --output=/dev/stdout{suite_clause}",
         );
         let command = vec!["sh".to_string(), "-c".to_string(), script];
 
-        let run_id = format!("codeql-{}", uuid::Uuid::new_v4());
+        let run_id = format!("codeql-{language}-{}", uuid::Uuid::new_v4());
         let request = crate::executor::ExecutorRequest {
             run_id: run_id.clone(),
             command,
@@ -579,11 +629,11 @@ impl CodeqlScanner {
                 result.stderr.trim()
             );
         }
-        let repo_name = target
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("repo");
-        normalize_codeql_sarif(&result.stdout, repo_name)
+        let findings = normalize_codeql_sarif(&result.stdout, repo_name)?;
+        Ok(ScanEngineOutput {
+            findings,
+            codeql_sarif_documents: vec![result.stdout],
+        })
     }
 
     pub fn scan_with_artifacts(
@@ -2060,6 +2110,74 @@ fn detect_all_codeql_languages(
     languages.sort();
     languages.dedup();
     Ok(languages)
+}
+
+/// Walk the target's top-level + manifest files for *every* recognisable
+/// codeql language. Used by `scan_via_executor` when the operator opted
+/// into multi-language mode without a host-side codeql binary that could
+/// answer `codeql resolve languages`.
+fn multi_language_heuristic(target: &Path) -> Vec<String> {
+    let mut languages = Vec::new();
+    if target.join("package.json").exists()
+        || top_level_has_extension(target, ".js")
+        || top_level_has_extension(target, ".ts")
+        || top_level_has_extension(target, ".tsx")
+        || top_level_has_extension(target, ".jsx")
+    {
+        languages.push("javascript".to_string());
+    }
+    if target.join("go.mod").exists() || top_level_has_extension(target, ".go") {
+        languages.push("go".to_string());
+    }
+    if target.join("pom.xml").exists()
+        || target.join("build.gradle").exists()
+        || target.join("build.gradle.kts").exists()
+        || target.join("gradlew").exists()
+        || target.join("mvnw").exists()
+        || top_level_has_extension(target, ".java")
+    {
+        languages.push("java".to_string());
+    }
+    if target.join("requirements.txt").exists()
+        || target.join("pyproject.toml").exists()
+        || target.join("setup.py").exists()
+        || top_level_has_extension(target, ".py")
+    {
+        languages.push("python".to_string());
+    }
+    if target.join("Cargo.toml").exists() || top_level_has_extension(target, ".rs") {
+        languages.push("rust".to_string());
+    }
+    if target.join("Gemfile").exists() || top_level_has_extension(target, ".rb") {
+        languages.push("ruby".to_string());
+    }
+    if top_level_has_extension(target, ".sln")
+        || top_level_has_extension(target, ".csproj")
+        || top_level_has_extension(target, ".cs")
+    {
+        languages.push("csharp".to_string());
+    }
+    if top_level_has_extension(target, ".c")
+        || top_level_has_extension(target, ".cpp")
+        || top_level_has_extension(target, ".cc")
+        || top_level_has_extension(target, ".h")
+        || top_level_has_extension(target, ".hpp")
+    {
+        languages.push("cpp".to_string());
+    }
+    languages.sort();
+    languages.dedup();
+    languages
+}
+
+fn top_level_has_extension(target: &Path, suffix: &str) -> bool {
+    let Ok(entries) = fs::read_dir(target) else {
+        return false;
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .any(|name| name.ends_with(suffix))
 }
 
 fn detect_codeql_language_from_heuristics(target: &Path) -> Option<String> {

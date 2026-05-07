@@ -362,15 +362,13 @@ impl ModuleRegistry {
             "codeql:scan" => {
                 let target = resolve_tool_target(&input, ctx)?;
                 let scanner = CodeqlScanner::from_tool_input(&input)?;
-                // Mirror the semgrep:scan executor path. SARIF artifacts
-                // are not produced via the executor route today (the
-                // analyze command writes only stdout-as-SARIF, no
-                // separate artifact files), so the artifact list comes
-                // back empty; the local-subprocess path still produces
-                // them.
+                // Mirror the semgrep:scan executor path. The executor
+                // route now persists SARIF artifacts on the
+                // ScanEngineOutput exactly like the local path so
+                // replay artefacts (`.kuzushi/runs/<runId>/sarif/...`)
+                // are produced regardless of backend.
                 let mut output = if let Some(executor) = ctx.executor {
-                    let findings = scanner.scan_via_executor(&target, executor)?;
-                    crate::scan::ScanEngineOutput::from_findings(findings)
+                    scanner.scan_via_executor(&target, executor)?
                 } else {
                     scanner.scan_with_artifacts(&target, &ScanCancellation::default())?
                 };
@@ -5588,7 +5586,10 @@ fn run_triage(
             let gate_ticket = match ctx.spend {
                 Some(limiter) => match limiter.deposit(
                     crate::spend::Operation::ClassifierGate,
-                    0.001,
+                    crate::spend::estimate_deposit_usd(
+                        crate::spend::Operation::ClassifierGate,
+                        &model,
+                    ),
                 ) {
                     Ok(ticket) => Some(ticket),
                     Err(_) => None,
@@ -5652,7 +5653,10 @@ fn run_triage(
         // Best-effort: if `deposit` fails (cap exceeded), skip this finding
         // with an actionable error rather than poisoning the rest of the run.
         let spend_ticket = match ctx.spend {
-            Some(limiter) => match limiter.deposit(crate::spend::Operation::Triage, 0.01) {
+            Some(limiter) => match limiter.deposit(
+                crate::spend::Operation::Triage,
+                crate::spend::estimate_deposit_usd(crate::spend::Operation::Triage, &model),
+            ) {
                 Ok(ticket) => Some(ticket),
                 Err(error) => {
                     eprintln!(
@@ -5695,7 +5699,13 @@ fn run_triage(
         // budgeted operation so `kuzushi metrics` can split it out.
         let followup_cost = if refusal.source_followup {
             if let Some(limiter) = ctx.spend {
-                match limiter.deposit(crate::spend::Operation::RefusalFollowup, 0.005) {
+                match limiter.deposit(
+                    crate::spend::Operation::RefusalFollowup,
+                    crate::spend::estimate_deposit_usd(
+                        crate::spend::Operation::RefusalFollowup,
+                        &model,
+                    ),
+                ) {
                     Ok(ticket) => {
                         let estimate = ticket.est_usd();
                         let _ = limiter.refund(ticket, estimate);
@@ -5901,7 +5911,16 @@ fn run_verify_finding(
     let spend_ticket = match ctx.spend {
         Some(limiter) => Some(
             limiter
-                .deposit(crate::spend::Operation::Triage, 0.02)
+                .deposit(
+                    crate::spend::Operation::Triage,
+                    // verify is an extra triage-shaped call; price it at
+                    // 2x the triage estimate to reflect the longer
+                    // verification prompt + response.
+                    crate::spend::estimate_deposit_usd(
+                        crate::spend::Operation::Triage,
+                        &model,
+                    ) * 2.0,
+                )
                 .with_context(|| {
                     format!(
                         "verify:finding could not deposit spend for {}",
