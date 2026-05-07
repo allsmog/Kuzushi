@@ -54,18 +54,35 @@ pub(in crate::renderer) fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line
         if app.findings.is_empty() {
             lines.push(muted(&fit(&app.first_finding_hint(), area.width as usize)));
         }
-        lines.push(Line::from(vec![
-            Span::styled("Start here: ", theme::muted()),
-            Span::styled("kuzushi doctor --target .", theme::accent()),
-            Span::styled(" -> ", theme::subtle()),
-            Span::styled("context build", theme::accent()),
-            Span::styled(" -> ", theme::subtle()),
-            Span::styled(app.first_finding_scan_command(), theme::accent()),
-            Span::styled(" -> ", theme::subtle()),
-            Span::styled("findings", theme::accent()),
-            Span::styled(" -> ", theme::subtle()),
-            Span::styled("pr-comment", theme::accent()),
-        ]));
+        if area.width < 96 {
+            lines.push(Line::from(vec![
+                Span::styled("Start here: ", theme::muted()),
+                Span::styled("kuzushi doctor --target .", theme::accent()),
+                Span::styled(" -> ", theme::subtle()),
+                Span::styled("context build", theme::accent()),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("Then: ", theme::muted()),
+                Span::styled(app.first_finding_scan_command(), theme::accent()),
+                Span::styled(" -> ", theme::subtle()),
+                Span::styled("findings", theme::accent()),
+                Span::styled(" -> ", theme::subtle()),
+                Span::styled("pr-comment", theme::accent()),
+            ]));
+        } else {
+            lines.push(Line::from(vec![
+                Span::styled("Start here: ", theme::muted()),
+                Span::styled("kuzushi doctor --target .", theme::accent()),
+                Span::styled(" -> ", theme::subtle()),
+                Span::styled("context build", theme::accent()),
+                Span::styled(" -> ", theme::subtle()),
+                Span::styled(app.first_finding_scan_command(), theme::accent()),
+                Span::styled(" -> ", theme::subtle()),
+                Span::styled("findings", theme::accent()),
+                Span::styled(" -> ", theme::subtle()),
+                Span::styled("pr-comment", theme::accent()),
+            ]));
+        }
         // Three labelled CTAs on one row; each label muted, each command
         // accent, with subtle ` · ` separators — mirrors the mockup's
         // colour split for command CTAs in `auth.jsx::m`.
