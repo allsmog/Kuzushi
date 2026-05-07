@@ -5247,10 +5247,10 @@ mod tests {
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains("SCAN PROGRESS"));
-        // Spinner cycles through SPINNER_FRAMES based on log length; any frame is valid.
+        // Spinner is keyed off `app.log.len()`; with 4 seeded lines, 4 % 6 == 4 → frame `⠟`.
         assert!(
-            SPINNER_FRAMES.iter().any(|frame| rendered.contains(frame)),
-            "expected one of the braille spinner frames in: {rendered}"
+            rendered.contains("⠟"),
+            "expected braille spinner frame `⠟` (index 4) in: {rendered}"
         );
         assert!(rendered.contains("● /scan"));
         assert!(rendered.contains("⏵ scan starting ./demo"));
