@@ -2608,13 +2608,23 @@ fn render_cost_cap_halt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         ),
         area.width as usize,
     );
-    let actions = fit(
-        "[c] continue past cap   [a] abort scan",
-        area.width as usize,
-    );
     let mut lines = vec![Line::styled(header, theme::danger())];
     if area.height > 1 {
-        lines.push(Line::styled(actions, theme::warn()));
+        // Mirror the unbracketed key style from `keybindings_line` /
+        // `design/mockups/_shared.jsx::footer` — accent key + muted hint
+        // separated by 3 spaces.  Matches the rest of the shell's
+        // muscle-memory rather than re-introducing `[k]` chrome.
+        let action_line = Line::from(vec![
+            Span::raw(" "),
+            Span::styled("c", theme::accent()),
+            Span::raw(" "),
+            Span::styled("continue past cap", theme::warn()),
+            Span::raw("   "),
+            Span::styled("a", theme::accent()),
+            Span::raw(" "),
+            Span::styled("abort scan", theme::warn()),
+        ]);
+        lines.push(action_line);
     }
     render_lines(frame, area, lines);
 }
@@ -6666,6 +6676,32 @@ mod tests {
                 .any(|(role, text)| role == "muted" && text.contains("never run here")),
             "muted suffix missing: {buckets:?}"
         );
+    }
+
+    #[test]
+    fn cost_cap_halt_row_drops_bracket_chrome() {
+        // The cost-cap halt panel was the last place advertising bracketed
+        // key chrome (`[c] continue past cap   [a] abort scan`).  The
+        // mockups (e.g. `design/mockups/budget-stop.jsx`) use the same
+        // unbracketed `<key> <hint>   <key> <hint>` shape as the keybind
+        // footer.  Verify the panel renders the unbracketed form when the
+        // budget is halted.
+        let backend = TestBackend::new(80, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory.budget_halt = Some(crate::app::BudgetHalt {
+            limit_usd: 1.0,
+            spent_usd: 1.5,
+        });
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("COST CAP HALT"));
+        assert!(rendered.contains("continue past cap"));
+        assert!(rendered.contains("abort scan"));
+        assert!(!rendered.contains("[c]"), "stale bracket chrome: {rendered}");
+        assert!(!rendered.contains("[a]"), "stale bracket chrome: {rendered}");
     }
 
     #[test]
