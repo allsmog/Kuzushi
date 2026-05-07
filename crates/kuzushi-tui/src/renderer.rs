@@ -47,6 +47,7 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     };
     let plan_height = plan_card_height(app, area);
     let threat_patch_height = threat_patch_card_height(app, area);
+    let confirm_height = confirm_card_height(app, area);
     let fixed_height = prompt_height
         + transcript_height
         + keybind_height
@@ -54,7 +55,8 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         + throttle_height
         + budget_height
         + plan_height
-        + threat_patch_height;
+        + threat_patch_height
+        + confirm_height;
     let max_view_height = area.height.saturating_sub(fixed_height).max(1);
     let view_area = Rect {
         height: max_view_height,
@@ -81,6 +83,9 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     }
     if threat_patch_height > 0 {
         constraints.push(Constraint::Length(threat_patch_height));
+    }
+    if confirm_height > 0 {
+        constraints.push(Constraint::Length(confirm_height));
     }
     if transcript_height > 0 {
         constraints.push(Constraint::Length(transcript_height));
@@ -121,11 +126,115 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         render_threat_patch_card(frame, chunks[index], app);
         index += 1;
     }
+    if confirm_height > 0 {
+        render_confirm_card(frame, chunks[index], app);
+        index += 1;
+    }
     if transcript_height > 0 {
         render_transcript(frame, chunks[index], app);
         index += 1;
     }
     render_prompt(frame, chunks[index], app);
+}
+
+fn confirm_card_height(app: &ShellApp, area: Rect) -> u16 {
+    if area.height < 6 {
+        return 0;
+    }
+    if app.advisory.pending_confirm.is_none() {
+        return 0;
+    }
+    // Header + 3 detail rows (tool, target, rationale/allowlist) + key
+    // row.  Up to 6 rows; clamp so very narrow viewports still get a
+    // 3-row minimum.
+    6.min(area.height.saturating_sub(8) as u16).max(3)
+}
+
+fn render_confirm_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    if area.height == 0 {
+        return;
+    }
+    let Some(confirm) = app.advisory.pending_confirm.as_ref() else {
+        return;
+    };
+    let (header_glyph, header_style) = match confirm.kind {
+        crate::app::ConfirmKind::DestructiveVerb => ("✗", theme::danger()),
+        _ => ("⚠", theme::warn()),
+    };
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled(format!("{header_glyph} "), header_style),
+        Span::styled(confirm.kind.label().to_string(), header_style),
+    ]));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled("tool      ", theme::muted()),
+        Span::styled(confirm.tool.clone(), theme::primary()),
+        Span::raw("   "),
+        Span::styled("target ", theme::muted()),
+        Span::styled(
+            fit(&confirm.target, (area.width as usize).saturating_sub(40)),
+            theme::primary(),
+        ),
+    ]));
+    if let Some(actor) = &confirm.actor {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("actor     ", theme::muted()),
+            Span::styled(actor.clone(), theme::primary()),
+        ]));
+    }
+    if let Some(rationale) = &confirm.rationale {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("rationale ", theme::muted()),
+            Span::styled(
+                fit(rationale, (area.width as usize).saturating_sub(14)),
+                theme::primary(),
+            ),
+        ]));
+    }
+    if let Some(allowlist) = &confirm.allowlist {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("allowlist ", theme::muted()),
+            Span::styled(
+                fit(allowlist, (area.width as usize).saturating_sub(14)),
+                theme::muted(),
+            ),
+        ]));
+    }
+    if confirm.kind.allows_yes() {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("y", theme::success()),
+            Span::raw(" "),
+            Span::styled("allow once", theme::muted()),
+            Span::raw("   "),
+            Span::styled("Y", theme::success()),
+            Span::raw(" "),
+            Span::styled("allow + remember", theme::muted()),
+            Span::raw("   "),
+            Span::styled("n", theme::danger()),
+            Span::raw(" "),
+            Span::styled("deny once", theme::muted()),
+            Span::raw("   "),
+            Span::styled("N", theme::danger()),
+            Span::raw(" "),
+            Span::styled("deny + add to denylist", theme::muted()),
+        ]));
+    } else {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("rule      ", theme::muted()),
+            Span::styled(
+                "destructive verb · always refused (no override)".to_string(),
+                theme::danger(),
+            ),
+        ]));
+    }
+    render_lines(frame, area, lines);
 }
 
 fn threat_patch_card_height(app: &ShellApp, area: Rect) -> u16 {
@@ -8089,6 +8198,90 @@ mod tests {
         assert!(rendered.contains("abort scan"));
         assert!(!rendered.contains("[c]"), "stale bracket chrome: {rendered}");
         assert!(!rendered.contains("[a]"), "stale bracket chrome: {rendered}");
+    }
+
+    #[test]
+    fn confirm_card_renders_tool_target_and_y_n_action_row() {
+        // `design/mockups/confirm-dialog.jsx` paints CONFIRM gates with
+        // a warn header, tool/target/rationale rows, and a y/Y/n/N action
+        // row.  Verify each lands in the buffer when the gate is pending.
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory.pending_confirm = Some(crate::app::PendingConfirm {
+            kind: crate::app::ConfirmKind::NetworkEgress,
+            tool: "sandbox:run".to_string(),
+            target: "curl https://refund.acme/api/internal/balances".to_string(),
+            rationale: Some("verify F-0012 reachability".to_string()),
+            allowlist: Some("refund.acme on project allowlist".to_string()),
+            actor: Some("attacker".to_string()),
+            remembered: false,
+        });
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("CONFIRM"));
+        assert!(rendered.contains("network egress"));
+        assert!(rendered.contains("sandbox:run"));
+        assert!(rendered.contains("curl https://refund.acme"));
+        assert!(rendered.contains("verify F-0012"));
+        assert!(rendered.contains("refund.acme on project allowlist"));
+        assert!(rendered.contains("allow once"));
+        assert!(rendered.contains("deny + add to denylist"));
+    }
+
+    #[test]
+    fn confirm_card_destructive_kind_renders_unconditional_refusal() {
+        // Destructive verbs (`rm -rf`, `git push --force`, etc.) get a
+        // RED header + REFUSED · destructive verb label + the
+        // unconditional-refusal rule, no y/Y override available.
+        let backend = TestBackend::new(120, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory.pending_confirm = Some(crate::app::PendingConfirm {
+            kind: crate::app::ConfirmKind::DestructiveVerb,
+            tool: "shell:run".to_string(),
+            target: "rm -rf .git".to_string(),
+            rationale: None,
+            allowlist: None,
+            actor: Some("attacker".to_string()),
+            remembered: false,
+        });
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("REFUSED"));
+        assert!(rendered.contains("destructive verb"));
+        assert!(rendered.contains("rm -rf .git"));
+        assert!(rendered.contains("always refused"));
+        assert!(!rendered.contains("allow once"));
+    }
+
+    #[test]
+    fn confirm_keys_resolve_pending_confirm_with_remember_flag() {
+        // y/Y/n/N drive `resolve_confirm`; verify the resolver clears
+        // the gate and threads the `remembered` flag through.
+        use crossterm::event::{KeyEvent, KeyCode, KeyModifiers};
+
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory.pending_confirm = Some(crate::app::PendingConfirm {
+            kind: crate::app::ConfirmKind::NetworkEgress,
+            tool: "sandbox:run".to_string(),
+            target: "curl x".to_string(),
+            rationale: None,
+            allowlist: None,
+            actor: None,
+            remembered: false,
+        });
+        app.handle_key(KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::empty()));
+        assert!(app.advisory.pending_confirm.is_none());
+        // The system log line records the outcome.
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.body.contains("allowed") && line.body.contains("remembered")));
     }
 
     #[test]

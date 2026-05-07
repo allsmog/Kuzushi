@@ -350,6 +350,33 @@ impl ShellApp {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
+        // Pending confirm gate (`design/mockups/confirm-dialog.jsx`)
+        // intercepts y/Y/n/N before any view-specific hotkey: tools that
+        // request approval need a deterministic response, not the
+        // operator's input line.
+        if self.advisory.pending_confirm.is_some() && key.modifiers.is_empty() {
+            if let KeyCode::Char(ch) = key.code {
+                match ch {
+                    'y' => {
+                        self.resolve_confirm(true, false);
+                        return;
+                    }
+                    'Y' => {
+                        self.resolve_confirm(true, true);
+                        return;
+                    }
+                    'n' => {
+                        self.resolve_confirm(false, false);
+                        return;
+                    }
+                    'N' => {
+                        self.resolve_confirm(false, true);
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
         if self.is_budget_halted() && key.modifiers.is_empty() {
             if let KeyCode::Char(ch) = key.code {
                 match ch.to_ascii_lowercase() {
