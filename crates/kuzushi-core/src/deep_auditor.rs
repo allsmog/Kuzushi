@@ -31,7 +31,8 @@ use crate::agent_router::{AgentRole, RoutedRuntime};
 use crate::code_nav::{code_nav_tool_specs, code_nav_toolbox, CodeNavConfig};
 use crate::findings::{Finding, TriageOutcome, TriageVerdict};
 use crate::runtime::{
-    run_tool_loop, AgentLoopOutcome, AgentRuntime, AgentToolLoopRequest, LoopHistoryEntry,
+    run_tool_loop_with_sink, AgentLoopOutcome, AgentRuntime, AgentToolLoopRequest,
+    LoopHistoryEntry, LoopStepSink, NoopLoopStepSink,
 };
 use crate::spend::{Operation, SpendLimiter};
 
@@ -173,9 +174,14 @@ pub fn run_deep_auditor(
     let mut toolbox = code_nav_toolbox(CodeNavConfig::new(&cfg.workspace_root));
 
     // 4. Drive the loop.
-    let outcome: AgentLoopOutcome =
-        run_tool_loop(runtime as &dyn AgentRuntime, &request, &mut toolbox)
-            .context("deep_audit tool loop failed")?;
+    let mut sink = NoopLoopStepSink;
+    let outcome: AgentLoopOutcome = run_tool_loop_with_sink(
+        runtime as &dyn AgentRuntime,
+        &request,
+        &mut toolbox,
+        &mut sink,
+    )
+    .context("deep_audit tool loop failed")?;
 
     // 5. Settle spend.
     if let (Some(limiter), Some(ticket)) = (spend, ticket) {
@@ -215,6 +221,22 @@ pub fn run_deep_audit_with_runtime(
     finding: &Finding,
     model: String,
 ) -> Result<DeepAuditOutcome> {
+    let mut sink = NoopLoopStepSink;
+    run_deep_audit_with_runtime_and_sink(runtime, spend, cfg, finding, model, &mut sink)
+}
+
+/// Variant of [`run_deep_audit_with_runtime`] that streams per-step
+/// progress through `sink`. Use this when the caller wants to surface
+/// live activity (e.g. operator-facing progress lines from
+/// `triage:deep`) instead of waiting for the whole audit to finish.
+pub fn run_deep_audit_with_runtime_and_sink(
+    runtime: &dyn AgentRuntime,
+    spend: Option<&SpendLimiter>,
+    cfg: &DeepAuditConfig,
+    finding: &Finding,
+    model: String,
+    sink: &mut dyn LoopStepSink,
+) -> Result<DeepAuditOutcome> {
     let ticket = match spend {
         Some(limiter) => Some(
             limiter
@@ -238,8 +260,8 @@ pub fn run_deep_audit_with_runtime(
 
     let mut toolbox = code_nav_toolbox(CodeNavConfig::new(&cfg.workspace_root));
 
-    let outcome: AgentLoopOutcome =
-        run_tool_loop(runtime, &request, &mut toolbox).context("deep_audit tool loop failed")?;
+    let outcome: AgentLoopOutcome = run_tool_loop_with_sink(runtime, &request, &mut toolbox, sink)
+        .context("deep_audit tool loop failed")?;
 
     if let (Some(limiter), Some(ticket)) = (spend, ticket) {
         let actual = if outcome.cost_usd > 0.0 {
@@ -700,6 +722,51 @@ mod tests {
         assert_eq!(outcome.evidence[0].file, "a.c");
         assert_eq!(outcome.evidence[0].start_line, 1);
         assert_eq!(outcome.evidence[0].end_line, 3);
+    }
+
+    #[test]
+    fn run_deep_audit_with_runtime_and_sink_emits_at_least_one_event() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path();
+        std::fs::write(workspace.join("a.c"), "int a;\nint b;\nint c;\n").unwrap();
+        let steps = vec![
+            AgentLoopStep::ToolCall {
+                calls: vec![ToolCall {
+                    name: "read_source".to_string(),
+                    input: serde_json::json!({ "file": "a.c", "start_line": 1, "end_line": 3 }),
+                    call_id: "c1".to_string(),
+                }],
+            },
+            AgentLoopStep::Final {
+                text: String::new(),
+                structured: Some(serde_json::json!({
+                    "triggerable": false,
+                    "rationale": "safe",
+                    "confidence": 0.9,
+                    "evidence": []
+                })),
+                cost_usd: Some(0.01),
+            },
+        ];
+        let runtime: Arc<dyn AgentRuntime> = ScriptedRuntime::new(steps);
+        let cfg = DeepAuditConfig::new(workspace);
+        let count = Mutex::new(0u32);
+        let mut sink = |_ev: &crate::runtime::LoopStepEvent| {
+            *count.lock().unwrap() += 1;
+        };
+        let outcome = run_deep_audit_with_runtime_and_sink(
+            runtime.as_ref(),
+            None,
+            &cfg,
+            &finding(),
+            "anthropic:claude-opus-4-7".to_string(),
+            &mut sink,
+        )
+        .unwrap();
+
+        assert!(*count.lock().unwrap() >= 1);
+        assert_eq!(outcome.steps_used, 2);
+        assert_eq!(outcome.triage.verdict, TriageVerdict::FalsePositive);
     }
 
     #[test]
