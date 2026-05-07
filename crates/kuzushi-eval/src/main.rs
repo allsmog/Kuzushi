@@ -7,7 +7,7 @@
 // Phase 0 ships without tree-sitter, so the `function` tolerance falls back to
 // pm_lines:50. Phase 5 will rewire it to the real enclosing-function lookup.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -126,6 +126,11 @@ struct MatchReport {
     /// see whether recall is coming from validated static evidence vs
     /// LLM conjecture — same recall number, very different confidence.
     proof_state_breakdown: ProofStateBreakdown,
+    /// Discovery-channel breakdown across the *hit* set: how many hits
+    /// came from each `vuln_source` (sarif / ainalysis / ainalysis_multi
+    /// / diff_analyzer / unknown). Lets operators see which channel is
+    /// pulling its weight on a given slice.
+    vuln_source_breakdown: BTreeMap<String, usize>,
     matches: Vec<MatchRow>,
     missed_oracle: Vec<MissedOracle>,
     expected_min_recall: f64,
@@ -338,6 +343,7 @@ fn score(cli: &Cli, oracle: &Oracle, findings: &FindingsDump, target: &Path) -> 
     // Proof-state breakdown across the *primary-tolerance* hit set —
     // gives operators a confidence dimension on top of the recall number.
     let mut proof_state_breakdown = ProofStateBreakdown::default();
+    let mut vuln_source_breakdown: BTreeMap<String, usize> = BTreeMap::new();
     for row in &matches_out {
         if row.best_tolerance == "exact_line" || row.best_tolerance == "pm_lines" {
             match row.static_proof_state.as_deref() {
@@ -345,6 +351,11 @@ fn score(cli: &Cli, oracle: &Oracle, findings: &FindingsDump, target: &Path) -> 
                 Some(_) => proof_state_breakdown.other_static += 1,
                 None => proof_state_breakdown.llm_only += 1,
             }
+            let key = row
+                .vuln_source
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string());
+            *vuln_source_breakdown.entry(key).or_insert(0) += 1;
         }
     }
 
@@ -360,6 +371,7 @@ fn score(cli: &Cli, oracle: &Oracle, findings: &FindingsDump, target: &Path) -> 
         precision,
         recall,
         proof_state_breakdown,
+        vuln_source_breakdown,
         matches: matches_out,
         missed_oracle: missed,
         expected_min_recall: oracle.expected_min_recall.unwrap_or(0.0),
