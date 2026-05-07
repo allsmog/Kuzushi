@@ -1007,13 +1007,36 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
 
     if app.findings.is_empty() {
-        lines.push(muted("No findings yet."));
+        // Empty state matches `design/mockups/empty-states.jsx::panel`:
+        //   divider with `· empty` suffix · ∅ glyph + label · explanations
+        //   · blank · CTA rows with `▸` warn glyph + accent command +
+        //   muted blurb.
         let hint = if app.context_view.exists {
-            "Next: scan — runs configured scanners against the active target."
+            "scan runs configured scanners against the active target."
         } else {
-            "Next: scan after `context build` so scanners have structure to walk."
+            "scan dispatches the umbrella scanner once context-snapshot exists."
         };
-        lines.push(muted(hint));
+        let context_cta = if app.context_view.exists {
+            None
+        } else {
+            Some(("context build", "build the snapshot first if you have time"))
+        };
+        lines.push(divider("FINDINGS · empty", area.width));
+        lines.extend(empty_state_panel(
+            "no findings yet",
+            &[
+                "kuzushi keeps the ledger in .kuzushi/v2/findings.sqlite3.",
+                "nothing has been promoted on this workspace.",
+            ],
+            &[
+                Some(("scan", hint)),
+                context_cta,
+                Some(("load gh:<owner>/<repo>#<pr>", "seed findings from a GitHub PR")),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
+        ));
         return lines;
     }
 
@@ -4088,6 +4111,58 @@ fn keybind_hint_line(pairs: &[(&str, &str)]) -> Line<'static> {
     Line::from(spans)
 }
 
+/// Empty-state panel matching `design/mockups/empty-states.jsx::panel`:
+///
+///        ∅  no findings yet
+///           kuzushi keeps the ledger in .kuzushi/v2/findings.sqlite3.
+///           nothing has been promoted on this workspace.
+///
+///        ▸ scan          umbrella SAST · semgrep + secrets + agentic
+///        ▸ context build build the snapshot first if you have time
+///
+/// `glyph_label` is rendered with the ∅ glyph in subtle and the label
+/// in muted.  `explanations` are muted prose lines.  `ctas` are
+/// (command, blurb) pairs rendered with `▸` warn glyph + c-accent
+/// command + c-muted blurb.  Caller supplies the section header
+/// (typically `divider("FINDINGS · empty", width)`).
+fn empty_state_panel(
+    glyph_label: &str,
+    explanations: &[&str],
+    ctas: &[(&str, &str)],
+) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(vec![
+        Span::raw("       "),
+        Span::styled("∅  ", theme::subtle()),
+        Span::styled(glyph_label.to_string(), theme::muted()),
+    ]));
+    for explanation in explanations {
+        lines.push(Line::from(vec![
+            Span::raw("       "),
+            Span::styled((*explanation).to_string(), theme::muted()),
+        ]));
+    }
+    if !ctas.is_empty() {
+        lines.push(blank());
+    }
+    for (cmd, blurb) in ctas {
+        // 22-char command pad keeps the blurbs visually aligned across
+        // CTA rows (matches the mockup's fixed indent + spacing).
+        let cmd_padded = if cmd.chars().count() >= 22 {
+            format!("{cmd}  ")
+        } else {
+            format!("{cmd}{}", " ".repeat(22 - cmd.chars().count()))
+        };
+        lines.push(Line::from(vec![
+            Span::raw("       "),
+            Span::styled("▸ ", theme::warn()),
+            Span::styled(cmd_padded, theme::accent()),
+            Span::styled((*blurb).to_string(), theme::muted()),
+        ]));
+    }
+    lines
+}
+
 /// Render a "next-action" hint line as accent-tinted commands separated
 /// by subtle middots, matching how `design/mockups/_shared.jsx`
 /// next-action lines are typically painted (e.g. CTA rows in
@@ -5507,8 +5582,12 @@ mod tests {
 
     #[test]
     fn renders_actionable_empty_states_at_80_columns() {
+        // Each empty-state surface advertises a concrete next step.  The
+        // findings empty state matches `design/mockups/empty-states.jsx::panel`
+        // (▸ scan ...) so the marker we look for is the recommended-action
+        // command, not the literal `Next:` prose prefix.
         for (view, expected) in [
-            (ShellView::Findings, "Next: scan"),
+            (ShellView::Findings, "no findings yet"),
             (ShellView::Runs, "Next: `scan`"),
             (ShellView::Workspace, "Next: scan <target>"),
         ] {
@@ -7666,6 +7745,27 @@ mod tests {
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
         assert!(rendered.contains("▌"), "cursor glyph missing: {rendered}");
+    }
+
+    #[test]
+    fn findings_empty_state_uses_panel_pattern_per_mockup() {
+        // `design/mockups/empty-states.jsx::panel` paints empty-state
+        // panels with: `· empty` divider, `∅` glyph + label, muted
+        // explanations, and `▸` CTA rows with accent commands.
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Findings;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("FINDINGS · empty"));
+        assert!(rendered.contains("∅"));
+        assert!(rendered.contains("no findings yet"));
+        assert!(rendered.contains("findings.sqlite3"));
+        assert!(rendered.contains("▸"));
+        assert!(rendered.contains("scan"));
     }
 
     #[test]
