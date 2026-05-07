@@ -1473,18 +1473,45 @@ fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             &["run", "status", "findings", "target"],
             &widths,
         ));
-        lines.push(aligned_row(
-            &[
-                scan.run_id
-                    .as_deref()
-                    .map(short)
-                    .unwrap_or_else(|| "pending".to_string()),
-                scan_status(scan),
-                scan.findings_count.to_string(),
-                scan.target.display().to_string(),
-            ],
-            &widths,
-        ));
+        // Status-column tint per `design/mockups/runs.jsx::r`:
+        //   complete → c-success, partial/paused → c-warn,
+        //   failed → c-danger, otherwise c-subtle.
+        let run_id = scan
+            .run_id
+            .as_deref()
+            .map(short)
+            .unwrap_or_else(|| "pending".to_string());
+        let status_text = scan_status(scan);
+        let status_style = if scan.error.is_some() {
+            theme::danger()
+        } else if scan.running && scan.abort_requested {
+            theme::warn()
+        } else if scan.running {
+            theme::warn()
+        } else {
+            theme::success()
+        };
+        let findings_text = scan.findings_count.to_string();
+        let target_text = scan.target.display().to_string();
+        let run_w = widths[0];
+        let status_w = widths[1];
+        let findings_w = widths[2];
+        let target_w = widths[3];
+        lines.push(Line::from(vec![
+            Span::styled(format!("{}  ", pad(&run_id, run_w)), theme::accent()),
+            Span::styled(
+                format!("{}  ", pad(&fit(&status_text, status_w), status_w)),
+                status_style,
+            ),
+            Span::styled(
+                format!("{}  ", pad(&findings_text, findings_w)),
+                theme::primary(),
+            ),
+            Span::styled(
+                format!("{}  ", pad(&fit(&target_text, target_w), target_w)),
+                theme::muted(),
+            ),
+        ]));
     } else {
         lines.push(muted(
             "No scan run is active in this shell session. Next: `scan` to start one, or `replay <runId>` for a past run on disk.",
@@ -6758,6 +6785,57 @@ mod tests {
         assert!(!rendered.contains("[space]"), "stale bracket: {rendered}");
         assert!(!rendered.contains("[y]"), "stale bracket: {rendered}");
         assert!(!rendered.contains("[n]"), "stale bracket: {rendered}");
+    }
+
+    #[test]
+    fn runs_view_tints_status_column_per_mockup() {
+        // `design/mockups/runs.jsx::r` paints the status cell with a
+        // status-aware colour (complete → c-success, paused → c-warn,
+        // failed → c-danger).  The Ratatui runs view used to leave
+        // that column in default style.  Verify `runs_lines` puts the
+        // success tint on a non-erroring scan and keeps the run-id
+        // accent.
+        let backend = TestBackend::new(120, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.scan = Some(crate::app::ScanPanelState {
+            run_id: Some("r-08e1aa".to_string()),
+            target: std::path::PathBuf::from("/tmp/demo"),
+            stage: "complete".to_string(),
+            findings_count: 11,
+            running: false,
+            abort_requested: false,
+            error: None,
+        });
+        app.shell_view = ShellView::Runs;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("RUNS"));
+        assert!(rendered.contains("r-08e1aa"));
+        assert!(rendered.contains("11"));
+        // Verify by inspecting the line spans directly so we know the
+        // status text is wearing the success style and the run id keeps
+        // its accent style.
+        let area = ratatui::layout::Rect::new(0, 0, 120, 22);
+        let lines = runs_lines(&app, area);
+        let row = lines
+            .iter()
+            .find(|line| line_text(line).contains("r-08e1aa"))
+            .expect("run row missing");
+        let mut saw_run_accent = false;
+        let mut saw_status_success = false;
+        for span in &row.spans {
+            if span.content.contains("r-08e1aa") && span.style == theme::accent() {
+                saw_run_accent = true;
+            }
+            if span.style == theme::success() {
+                saw_status_success = true;
+            }
+        }
+        assert!(saw_run_accent, "run id should be accent: {row:?}");
+        assert!(saw_status_success, "status should be success: {row:?}");
     }
 
     #[test]
