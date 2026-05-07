@@ -346,6 +346,65 @@ pub struct AgentChatView {
     pub running: bool,
     pub abort_requested: bool,
     pub error: Option<String>,
+    /// Prior turns in the same chat session, oldest first.  Each
+    /// `ask <q>` after the first folds the previous turn into history
+    /// before swapping `question`/`answer` to the new turn.  Mirrors
+    /// `design/mockups/agent-chat.jsx` multi-turn bubble layout.
+    pub history: Vec<ChatTurn>,
+}
+
+impl Default for AgentChatView {
+    fn default() -> Self {
+        Self {
+            question: String::new(),
+            answer: None,
+            running: false,
+            abort_requested: false,
+            error: None,
+            history: Vec::new(),
+        }
+    }
+}
+
+impl AgentChatView {
+    /// Fold the *current* turn (`question` + `answer` + `error`) into
+    /// `history` and return a fresh view ready to receive the next turn.
+    /// Preserves history across calls so subsequent `ask` commands
+    /// build a multi-turn conversation per
+    /// `design/mockups/agent-chat.jsx::bubble`.
+    pub fn fold_for_next_turn(&self, question: String) -> Self {
+        let mut history = self.history.clone();
+        if !self.question.is_empty()
+            && (self.answer.is_some() || self.error.is_some() || !self.running)
+        {
+            history.push(ChatTurn {
+                question: self.question.clone(),
+                answer: self.answer.clone(),
+                error: self.error.clone(),
+            });
+        }
+        // Cap history at 12 turns so very long sessions don't blow the
+        // viewport — older turns rotate off the top.
+        let drop = history.len().saturating_sub(12);
+        if drop > 0 {
+            history.drain(..drop);
+        }
+        Self {
+            question,
+            answer: None,
+            running: false,
+            abort_requested: false,
+            error: None,
+            history,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatTurn {
+    pub question: String,
+    pub answer: Option<String>,
+    pub error: Option<String>,
 }
 
 /// Cached structured snapshot of the most recent recon tool result. The TUI
@@ -2221,17 +2280,20 @@ impl ShellApp {
             return;
         }
 
+        // Fold any previous turn into history before we mint the new
+        // turn — gives multi-turn parity with `agent-chat.jsx::bubble`.
+        let prior = self
+            .agent_chat
+            .as_ref()
+            .cloned()
+            .unwrap_or_default();
         let Some(model) = self.config.model.clone() else {
             self.shell_view = ShellView::AgentChat;
-            self.agent_chat = Some(AgentChatView {
-                question: question.to_string(),
-                answer: None,
-                running: false,
-                abort_requested: false,
-                error: Some(
-                    "ask requires an explicit model. Next: model, then choose a pi-agent-core provider/model".to_string(),
-                ),
-            });
+            let mut next = prior.fold_for_next_turn(question.to_string());
+            next.error = Some(
+                "ask requires an explicit model. Next: model, then choose a pi-agent-core provider/model".to_string(),
+            );
+            self.agent_chat = Some(next);
             self.log(
                 "error",
                 "ask requires an explicit model. Next: model, then choose a pi-agent-core provider/model",
@@ -2240,13 +2302,9 @@ impl ShellApp {
         };
         if let Err(message) = validate_shell_model_id(&model) {
             self.shell_view = ShellView::AgentChat;
-            self.agent_chat = Some(AgentChatView {
-                question: question.to_string(),
-                answer: None,
-                running: false,
-                abort_requested: false,
-                error: Some(message.clone()),
-            });
+            let mut next = prior.fold_for_next_turn(question.to_string());
+            next.error = Some(message.clone());
+            self.agent_chat = Some(next);
             self.log("error", message);
             return;
         }
@@ -2260,13 +2318,9 @@ impl ShellApp {
         let thinking_level = self.session_thinking_level.clone();
         let question = question.to_string();
         let (tx, rx) = mpsc::channel();
-        self.agent_chat = Some(AgentChatView {
-            question: question.clone(),
-            answer: None,
-            running: true,
-            abort_requested: false,
-            error: None,
-        });
+        let mut next = prior.fold_for_next_turn(question.clone());
+        next.running = true;
+        self.agent_chat = Some(next);
         self.agent_rx = Some(rx);
         self.shell_view = ShellView::AgentChat;
         self.log(
@@ -10319,6 +10373,7 @@ JSON
             running: true,
             abort_requested: false,
             error: None,
+            history: Vec::new(),
         });
 
         app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
@@ -10345,6 +10400,7 @@ JSON
             running: true,
             abort_requested: true,
             error: None,
+            history: Vec::new(),
         });
 
         app.apply_agent_event(AgentEvent::Answered {
