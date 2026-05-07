@@ -503,6 +503,9 @@ pub enum ShellView {
     AgentChat,
     History,
     Story,
+    /// `/auth` providers + model + spend surface.  See
+    /// `design/mockups/auth.jsx`.
+    Auth,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2906,7 +2909,9 @@ impl ShellApp {
     }
 
     fn show_auth_status(&mut self) {
-        self.shell_view = ShellView::Config;
+        // `/auth` now lands on the dedicated Auth surface
+        // (`design/mockups/auth.jsx`) instead of the generic Config panel.
+        self.shell_view = ShellView::Auth;
         let api_key_env = self.config.runtime.api_key_env.as_str();
         let env_status = if env::var_os(api_key_env).is_some() {
             "set"
