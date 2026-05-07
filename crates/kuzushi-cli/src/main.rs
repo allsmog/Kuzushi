@@ -89,7 +89,9 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
-    /// Diagnostic + credential subcommands.
+    /// Diagnostic credential subcommands. For interactive OAuth login,
+    /// use `kuzushi shell` then `auth login openai-codex` or
+    /// `auth login anthropic`.
     Auth {
         #[command(subcommand)]
         command: AuthCommand,
@@ -225,16 +227,20 @@ async fn main() -> Result<()> {
     match command {
         Command::Shell { target } => {
             let target = target.or(cli.target);
-            if should_emit_shell_startup_progress(plain) {
-                for line in shell_startup_progress_messages(target.as_deref()) {
-                    eprintln!("{line}");
-                }
-            }
+            // Resolve the workspace before printing boot progress. Otherwise
+            // a bad --target path prints "first finding: scan ..." (which
+            // can never run) and only then bails out — confusing the
+            // operator into thinking the scan was almost ready.
             let workspace = target
                 .as_deref()
                 .map(WorkspaceTarget::new)
                 .transpose()
                 .context("Could not resolve shell target")?;
+            if should_emit_shell_startup_progress(plain) {
+                for line in shell_startup_progress_messages(target.as_deref()) {
+                    eprintln!("{line}");
+                }
+            }
             let config = load_config_for_target(workspace.as_ref().map(WorkspaceTarget::root))?;
             run_shell_with_plain(config, workspace.as_ref(), plain)
         }
