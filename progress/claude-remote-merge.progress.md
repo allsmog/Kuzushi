@@ -111,4 +111,4 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 - Final gate found and fixed an existing `ModelGate` wakeup-order bug: `PriorityPermit::drop` now releases the semaphore permit before notifying queued waiters, preventing `concurrency::tests::high_priority_preempts_low_priority_in_queue` from sleeping forever.
 - Final checks passed: `cargo fmt --all --check`; `cargo test --workspace`; `pnpm build` (using the original checkout's existing `node_modules` symlinked into the temp clone for tool resolution, then removed).
 - No conflict markers remain.
-- Pending push to `origin/main` from the integration clone.
+- Pushed `main` to `origin/main`; original checkout fast-forwarded and is clean/aligned.
