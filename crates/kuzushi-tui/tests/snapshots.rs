@@ -127,6 +127,45 @@ fn module_view_focused_on_recon_with_recent_activity() {
 }
 
 #[test]
+fn findings_list_view_with_two_findings() {
+    use kuzushi_core::Severity;
+    let mut app = fresh_app();
+    let mut critical = Finding::new_semgrep(
+        "demo.sqli",
+        "apps/api/orders.rs",
+        142,
+        Some(142),
+        Severity::Critical,
+        "sql injection via order_id concatenation",
+    );
+    critical.triage = Some(TriageOutcome {
+        verdict: TriageVerdict::TruePositive,
+        confidence: 0.91,
+        rationale: "concatenated input".to_string(),
+    });
+    let untriaged = Finding::new_tool(
+        "codeql",
+        "js/path-injection",
+        "apps/web/server.ts",
+        301,
+        None,
+        Severity::High,
+        "path traversal in /assets/<file>",
+    );
+    app.findings = vec![critical, untriaged];
+    app.shell_view = ShellView::Findings;
+    insta::with_settings!({
+        prepend_module_to_snapshot => false,
+        omit_expression => true,
+        filters => vec![
+            (r"\$\d+\.\d{4}", "$0.0000"),
+        ],
+    }, {
+        insta::assert_snapshot!("findings_list_two_findings", render_at_120(&app));
+    });
+}
+
+#[test]
 fn module_run_view_with_findings_and_active_scan() {
     let mut app = fresh_app();
     let mut finding = Finding::new_semgrep(

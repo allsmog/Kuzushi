@@ -1315,25 +1315,16 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         return lines;
     }
 
-    let widths = finding_summary_widths(area.width.saturating_sub(2));
-    lines.push(Line::from(vec![
-        Span::raw("  "),
-        Span::styled(
-            table_text(
-                &[
-                    "alias",
-                    "severity",
-                    "verdict",
-                    "conf",
-                    "proof/static",
-                    "cwe",
-                    "source",
-                ],
-                &widths,
-            ),
-            theme::subtle(),
+    let triaged = app.findings.iter().filter(|f| f.triage.is_some()).count();
+    let pending = app.findings.len().saturating_sub(triaged);
+    lines.push(section_header_line(
+        &format!(
+            "FINDINGS · {} · {triaged} triaged · {pending} pending",
+            app.findings.len()
         ),
-    ]));
+        area.width,
+    ));
+
     let aliases = sorted_finding_aliases(&app.findings);
     let cursor = app.findings_cursor.min(aliases.len().saturating_sub(1));
     let mut body = Vec::new();
@@ -1344,78 +1335,89 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             .is_some_and(|selected| selected.fingerprint.as_str() == finding.fingerprint.as_str());
         let cursor_row = app.findings_cursor == index;
         let marker = if cursor_row {
-            ">"
+            "▌ "
         } else if selected {
-            "*"
+            "* "
         } else {
-            " "
+            "  "
         };
-        body.push(Line::from(vec![
-            Span::styled(marker, theme::subtle()),
-            Span::raw(" "),
-            Span::styled(
-                pad(&alias, widths.first().copied().unwrap_or(8)),
-                theme::accent(),
-            ),
+        let marker_style = if cursor_row {
+            theme::accent()
+        } else if selected {
+            theme::warn()
+        } else {
+            theme::subtle()
+        };
+
+        // Row 1: marker · alias · severity chip · title · location.
+        // At narrow widths (<100 cols), location moves to row 2 so the title
+        // doesn't get truncated to nothing.
+        let alias_w = 8;
+        let sev_w = 9;
+        let prefix_used = 2 + alias_w + 2 + sev_w;
+        let total = (area.width as usize).saturating_sub(prefix_used);
+        let location = finding_location(&finding);
+        let wide = area.width >= 100;
+        let location_w = if wide {
+            location.chars().count().min(total.saturating_sub(2)).max(8)
+        } else {
+            0
+        };
+        let name_w = if wide {
+            total.saturating_sub(location_w + 2).max(12)
+        } else {
+            total.max(12)
+        };
+        let mut row1 = vec![
+            Span::styled(marker, marker_style),
+            Span::styled(pad(&alias, alias_w), theme::accent()),
             Span::raw("  "),
             Span::styled(
-                pad(
-                    finding.severity.as_str(),
-                    widths.get(1).copied().unwrap_or(8),
-                ),
+                pad(&finding.severity.as_str().to_uppercase(), sev_w),
                 theme::severity(finding.severity),
             ),
-            Span::raw("  "),
-            Span::raw(pad(
-                &finding_verdict_label(&finding),
-                widths.get(2).copied().unwrap_or(9),
-            )),
-            Span::raw("  "),
-            Span::raw(pad(
-                &finding_confidence_label(&finding),
-                widths.get(3).copied().unwrap_or(5),
-            )),
-            Span::raw("  "),
-            Span::raw(pad(
-                &finding_proof_state_label(&finding),
-                widths.get(4).copied().unwrap_or(12),
-            )),
-            Span::raw("  "),
-            Span::raw(pad(
-                &finding_cwe_label(&finding),
-                widths.get(5).copied().unwrap_or(8),
-            )),
-            Span::raw("  "),
-            Span::raw(fit(
-                &finding_source_label(&finding),
-                widths.get(6).copied().unwrap_or(12),
-            )),
-        ]));
-        body.push(indent(
-            muted(&fit(
-                &format!("loc {} | {}", finding_location(&finding), finding.title),
-                area.width.saturating_sub(2) as usize,
-            )),
-            2,
-        ));
-        body.push(indent(
-            muted(&fit(
-                &format!(
-                    "evidence: {} | next: open {}",
-                    finding_evidence_preview(&finding),
-                    alias
-                ),
-                area.width.saturating_sub(2) as usize,
-            )),
-            2,
-        ));
+            Span::styled(pad(&fit(&finding.title, name_w), name_w), theme::primary()),
+        ];
+        if wide {
+            row1.push(Span::raw("  "));
+            row1.push(Span::styled(fit(&location, location_w), theme::muted()));
+        }
+        body.push(Line::from(row1));
+
+        // Row 2: indented muted detail (location at narrow widths +
+        // verdict · conf · cwe · source · evidence).
+        let verdict = finding_verdict_label(&finding);
+        let conf = finding_confidence_label(&finding);
+        let cwe = finding_cwe_label(&finding);
+        let source = finding_source_label(&finding);
+        let evidence = finding_evidence_preview(&finding);
+        if wide {
+            // Single indented detail line.
+            let detail = format!("{verdict} · conf {conf} · {cwe} · {source} · {evidence}");
+            body.push(indent(
+                muted(&fit(&detail, area.width.saturating_sub(4) as usize)),
+                4,
+            ));
+        } else {
+            // Narrow widths get a 3-row layout: location on its own line, then
+            // verdict/conf/cwe/source. Keeps all identifiers visible at 80 cols.
+            body.push(indent(
+                muted(&fit(&location, area.width.saturating_sub(4) as usize)),
+                4,
+            ));
+            let detail = format!("{verdict} · conf {conf} · {cwe} · {source}");
+            body.push(indent(
+                muted(&fit(&detail, area.width.saturating_sub(4) as usize)),
+                4,
+            ));
+        }
     }
 
     let body_height = area.height.saturating_sub(lines.len() as u16) as usize;
     if body_height == 0 {
         return lines;
     }
-    let row_height = 3;
+    let row_height = if area.width >= 100 { 2 } else { 3 };
     let visible_rows = (body_height / row_height).max(1);
     let start_row = viewport_start_for_cursor(app.findings.len(), visible_rows, cursor);
     lines.extend(
@@ -4504,27 +4506,24 @@ mod tests {
         let rendered = format!("{:?}", buffer);
 
         for expected in [
-            "alias",
-            "severity",
-            "verdict",
-            "conf",
-            "proof/static",
-            "cwe",
-            "source",
+            // Section header replaces the old column-name row.
+            "FINDINGS",
+            "1 TRIAGED",
+            "1 PENDING",
+            // Severity chips uppercase per design.
             "F-0001",
-            "high",
+            "HIGH",
+            "F-0002",
+            "MEDIUM",
+            // Compact row 1 carries title + location.
+            "SQL injection in admin search",
+            "src/controllers/admin_search.ts:117-119",
+            // Compact row 2 detail line.
             "tp",
             "91%",
-            "triaged-tp",
             "CWE-89",
             "semgrep",
-            "loc src/controllers/admin_search.ts:117-119",
-            "SQL injection in admin search",
-            "req.query.q flows into db.query",
-            "next: open F-0001",
-            "F-0002",
             "untriaged",
-            "static-sig",
             "codeql",
         ] {
             assert!(rendered.contains(expected), "missing {expected}");
