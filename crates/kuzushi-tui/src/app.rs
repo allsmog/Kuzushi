@@ -8167,7 +8167,11 @@ JSON
         assert!(output.contains("COMMAND RESULT"));
         assert!(output.contains("command: /back"));
         assert!(output.contains("> /back"));
-        assert!(output.contains("kuzushi shell"));
+        // Catalog body now reads "KUZUSHI · CATALOG · N modules" (plain
+        // renderer rewrites `·` to `|`). Confirm the operator still gets a
+        // clear signal that they're back at the root catalog screen.
+        assert!(output.contains("KUZUSHI | CATALOG"));
+        assert!(output.contains("modules"));
         assert_plain_output_strict_80(&output);
     }
 
