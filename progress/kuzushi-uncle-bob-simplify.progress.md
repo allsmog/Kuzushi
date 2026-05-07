@@ -71,6 +71,27 @@ Status: continuing focused slices because `crates/kuzushi-core/src/modules.rs` r
   remains the dominant production hotspot even after this SAST artifact slice.
 - Blockers or repo facts that contradicted this prompt: none.
 
+### UB-002 manual follow-up, iteration 3
+
+- Task attempted: extracted the vendor-assessment module descriptor and tool
+  handlers from `crates/kuzushi-core/src/modules.rs` into
+  `crates/kuzushi-core/src/modules/vendor_assessment.rs`.
+- Files changed:
+  `crates/kuzushi-core/src/modules.rs`,
+  `crates/kuzushi-core/src/modules/vendor_assessment.rs`, and this progress
+  note.
+- Tests/checks run:
+  `cargo test -p kuzushi-core modules::tests::dispatches_vendor_assessment_artifacts_through_registry`;
+  `cargo check -p kuzushi-core`; `cargo test -p kuzushi-core modules`.
+- Result: gates passed; `vendor-assessment:*` tool names, registry dispatch,
+  model requirement behavior, scope JSON, prompt bundles, and report artifacts
+  remain covered by the existing registry test.
+- Remaining work: continue decomposing `modules.rs` by cohesive module family;
+  it remains the largest production Rust file after this slice.
+- Blockers or repo facts that contradicted this prompt: this sandbox cannot
+  write `.git/index.lock` (`Operation not permitted`), so staging, commit, and
+  push were not performed here.
+
 ### UB-003 automation gate
 
 - Task attempted: ran the Uncle Bob simplification loop for Extract Rust TUI App State Transitions.
