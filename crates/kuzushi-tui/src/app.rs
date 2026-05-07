@@ -5262,12 +5262,30 @@ fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
         stdout,
         Clear(ClearType::All),
         MoveTo(0, 0),
-        EnableBracketedPaste,
-        EnableMouseCapture
+        EnableBracketedPaste
     )
     .context("Could not reset terminal viewport")?;
+    if mouse_capture_enabled() {
+        execute!(stdout, EnableMouseCapture).context("Could not enable mouse capture")?;
+    }
     let backend = CrosstermBackend::new(stdout);
     Terminal::new(backend).context("Could not initialize terminal")
+}
+
+fn mouse_capture_enabled() -> bool {
+    let value = env::var("KUZUSHI_MOUSE_CAPTURE").ok();
+    mouse_capture_setting_enabled(value.as_deref())
+}
+
+fn mouse_capture_setting_enabled(value: Option<&str>) -> bool {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+
+    value == "1"
+        || value.eq_ignore_ascii_case("true")
+        || value.eq_ignore_ascii_case("yes")
+        || value.eq_ignore_ascii_case("on")
 }
 
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
@@ -6219,6 +6237,18 @@ mod tests {
         OptionScope, OptionTarget, RuntimeConfig, RuntimeKind, TriageOutcome, TriageVerdict,
     };
     use std::fs;
+
+    #[test]
+    fn mouse_capture_requires_truthy_opt_in() {
+        assert!(!mouse_capture_setting_enabled(None));
+        assert!(!mouse_capture_setting_enabled(Some("")));
+        assert!(!mouse_capture_setting_enabled(Some("0")));
+        assert!(!mouse_capture_setting_enabled(Some("false")));
+        assert!(mouse_capture_setting_enabled(Some("1")));
+        assert!(mouse_capture_setting_enabled(Some("true")));
+        assert!(mouse_capture_setting_enabled(Some("YES")));
+        assert!(mouse_capture_setting_enabled(Some(" on ")));
+    }
 
     #[cfg(unix)]
     fn fake_semgrep_binary(dir: &PathBuf) -> PathBuf {

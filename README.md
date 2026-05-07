@@ -81,6 +81,9 @@ Bare `kuzushi` starts the shell.
 Use `--plain` or `KUZUSHI_PLAIN=1` to force line-oriented output with no ANSI
 escapes, animation, or box drawing. `KUZUSHI_SCREEN_READER=1` and
 `KUZUSHI_LOW_BANDWIDTH=1` are aliases for the same strict plain shell mode.
+The interactive shell leaves normal terminal text selection/copy available by
+default. Set `KUZUSHI_MOUSE_CAPTURE=1` only if you want mouse-wheel handling
+inside the TUI and your terminal still gives you a selection modifier.
 
 | Command | Purpose |
 | --- | --- |
