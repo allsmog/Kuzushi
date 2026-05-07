@@ -2,16 +2,38 @@
 
 A self-contained brief to hand to **Claude Design** (or any Claude surface
 running design work) to produce updated, enhanced terminal UI designs for the
-Rust shell. Paste everything below the `===` line as the user message. The
-brief is intentionally exhaustive on constraints so the model does not have to
-read the repo to produce useful output.
+current Rust-native shell. Paste everything below the `===` line as the user
+message. The brief is intentionally exhaustive on constraints so the model does
+not have to read the repo to produce useful output.
+
+This is not a migration prompt for the legacy TypeScript/Ink shell. That UI is
+retained only as reference/test-only code; new operator-facing shell work
+belongs in `crates/kuzushi-tui`.
 
 ---
+
+## Current-state references
+
+- UX audit: [`../assessments/rust-tui-ux-audit.md`](../assessments/rust-tui-ux-audit.md).
+  Check this before commissioning new mockups. Preserve resolved Rust TUI
+  behavior such as viewported long views, shared hotkey/footer descriptors, and
+  visible help aliases/examples.
+- Migration/cutover context:
+  [`../rust-migration-status.md`](../rust-migration-status.md) and
+  [`../../README.md#typescript-retention`](../../README.md#typescript-retention).
+  These documents define the Rust-native runtime boundary and why Ink should
+  not be treated as the current implementation.
+- Historical Ink UX/DX notes live in
+  [`../assessments/ux-dx-gaps.md`](../assessments/ux-dx-gaps.md). Use them only
+  for background; the implementation target for this prompt is the Rust
+  `ShellView` surface.
 
 ## How to use
 
 - Open Claude Design (or claude.ai with design skill enabled).
 - Paste the prompt below as the first user message.
+- First skim the current-state references above, especially the Rust TUI audit,
+  so design requests do not re-open already-fixed audit items.
 - Attach screenshots of the current TUI if you have them — they're optional
   because the prompt enumerates every existing view in text.
 - Iterate per view. The prompt asks Claude to produce one mockup at a time so
@@ -29,9 +51,25 @@ security-research operator console built with `ratatui 0.29` + `crossterm
 sub-view, mapped 1:1 to ratatui widgets that the engineering team can
 implement without invention.
 
-You are **not** designing a GUI. Every pixel is a monospace cell. Every color
-is one of eight named theme styles. Every interaction is a keystroke or a
+Assume the operator-facing shell is already Rust-native. The retained
+TypeScript/Ink shell is not the target and should not drive layout, interaction,
+or terminology decisions.
+
+You are **not** designing a GUI. Every pixel is a monospace cell. Every color is
+one of the existing semantic theme roles. Every interaction is a keystroke or a
 slash-verb typed into the prompt line.
+
+# Current Rust TUI audit constraints
+
+The companion audit is `docs/assessments/rust-tui-ux-audit.md`. Design within
+these current constraints:
+
+- Preserve fixed behavior around viewported long views, shared hotkey/footer
+  descriptors, visible help aliases/examples, and deterministic Rust TUI tests.
+- Treat plain/scripted output as a first-class accessibility surface; mockups
+  must include a useful non-TTY rendering, not only a box-stripped TTY view.
+- Do not borrow TypeScript/Ink-specific commands, layout assumptions, or
+  component names unless they also exist in the Rust `ShellView` surface.
 
 # Surface constraints (hard)
 
