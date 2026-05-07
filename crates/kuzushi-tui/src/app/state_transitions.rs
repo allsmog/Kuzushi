@@ -504,7 +504,7 @@ impl ShellApp {
                 self.submit_line(&raw);
             }
             KeyCode::Esc => {
-                self.clear_input();
+                self.esc_clear_or_restore();
             }
             _ => {}
         }
