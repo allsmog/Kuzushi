@@ -1,4 +1,4 @@
-use super::ShellApp;
+use super::{confirm_allowlist_key, ShellApp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfirmKind {
@@ -57,6 +57,14 @@ impl ShellApp {
             });
         }
         request.remembered = outcome && remember;
+        if remember {
+            let key = confirm_allowlist_key(&request.tool, &request.target);
+            if outcome {
+                self.confirm_allowlist.insert(key);
+            } else {
+                self.confirm_denylist.insert(key);
+            }
+        }
         let glyph = if outcome { "✓" } else { "✗" };
         let verb = if outcome {
             if remember {
