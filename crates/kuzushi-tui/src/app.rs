@@ -4409,6 +4409,10 @@ impl ShellApp {
     }
 
     pub fn tick(&mut self) {
+        // Bump spinner frame ~10×/s (event loop polls at 100ms timeout). Wrap on
+        // overflow — the renderer takes `% SPINNER_FRAMES.len()` so any cycle
+        // is fine.
+        self.spinner_tick = self.spinner_tick.wrapping_add(1);
         if let Some(armed_at) = self.ctrl_c_armed_at {
             if Instant::now().duration_since(armed_at) > CTRL_C_ARM_WINDOW {
                 self.ctrl_c_armed_at = None;
@@ -4983,15 +4987,25 @@ pub fn run_shell_with_plain(
     let mut terminal = setup_terminal()?;
     let mut app = ShellApp::new(config, target);
 
+    let spinner_period = Duration::from_millis(100);
+    let mut last_spinner_tick = Instant::now();
+
     loop {
         app.tick();
         app.drain_background_events();
+        let now = Instant::now();
+        let elapsed = now.duration_since(last_spinner_tick);
+        if elapsed >= spinner_period {
+            let frames = (elapsed.as_millis() / spinner_period.as_millis()).max(1) as u64;
+            app.spinner_tick = app.spinner_tick.wrapping_add(frames);
+            last_spinner_tick = now;
+        }
         terminal.draw(|frame| render_app(frame, &app))?;
         if app.should_quit {
             break;
         }
 
-        if event::poll(Duration::from_millis(100))? {
+        if event::poll(spinner_period)? {
             if let Event::Key(key) = event::read()? {
                 app.handle_key(key);
             }

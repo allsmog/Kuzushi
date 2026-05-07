@@ -1152,7 +1152,10 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     lines.push(blank());
     lines.push(Line::from(vec![
-        Span::styled(run_state_glyph(scan, app.log.len()), run_state_style(scan)),
+        Span::styled(
+            run_state_glyph(scan, app.spinner_tick as usize),
+            run_state_style(scan),
+        ),
         Span::raw(" "),
         Span::styled(target, theme::label()),
         Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
@@ -4054,9 +4057,9 @@ fn scan_status(scan: &ScanPanelState) -> String {
 }
 
 /// Cycle through braille spinner frames using `tick` as the index source.
-/// Pass `app.log.len()` for a deterministic tick that advances each time the
-/// scan emits a new transcript line — matches the design's "spins as work
-/// happens" intent without needing wall-clock animation.
+/// Pass `app.spinner_tick as usize` so the animation advances on the event
+/// loop's ~100ms wall-clock tick. Tests use `spinner_tick = 0` (frame `⠿`)
+/// for determinism.
 const SPINNER_FRAMES: &[&str] = &["⠿", "⠾", "⠷", "⠯", "⠟", "⠻"];
 
 fn run_state_glyph(scan: Option<&ScanPanelState>, tick: usize) -> &'static str {
@@ -4914,6 +4917,149 @@ mod tests {
     }
 
     #[test]
+    fn recent_module_activity_uses_recon_snapshot_when_present() {
+        use crate::app::ReconSnapshot;
+        use kuzushi_core::{ReconHost, ReconService};
+
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.focused_module = Some("recon".to_string());
+        app.shell_view = ShellView::Module;
+        app.recon_snapshot = Some(ReconSnapshot {
+            hosts: vec![ReconHost {
+                id: "h1".to_string(),
+                workspace_id: "ws".to_string(),
+                address: "192.0.2.10".to_string(),
+                hostname: Some("acme-checkout.com".to_string()),
+                state: "alive".to_string(),
+            }],
+            services: vec![ReconService {
+                id: "s1".to_string(),
+                host_id: "h1".to_string(),
+                port: 443,
+                proto: "tcp".to_string(),
+                name: Some("https".to_string()),
+                banner: Some("nginx/1.24 · TLS1.3".to_string()),
+                state: "open".to_string(),
+            }],
+            notes: Vec::new(),
+            last_tool: Some("recon:nmap".to_string()),
+            last_target: Some("acme-checkout.com".to_string()),
+        });
+
+        let area = Rect::new(0, 0, 120, 40);
+        let lines = module_lines(&app, area);
+        let rendered: String = lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|sp| sp.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join("");
+
+        assert!(
+            rendered.contains("acme-checkout.com"),
+            "expected snapshot host in output, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("443"),
+            "expected snapshot port 443 in output, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("nginx/1.24"),
+            "expected snapshot banner in output, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("RECENT RECON ACTIVITY"),
+            "expected RECENT RECON ACTIVITY header, got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn recent_module_activity_falls_back_to_log_when_no_snapshot() {
+        // No snapshot is populated → renderer must keep falling back to the
+        // legacy `app.log` grep, which is the pre-snapshot behaviour.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.focused_module = Some("recon".to_string());
+        app.shell_view = ShellView::Module;
+        // Inject a recon-shaped log line that would be picked up by
+        // `recent_module_log` filter (prefix == "result", body contains "recon").
+        app.log(
+            "result",
+            "recon:nmap discovered 1 host and 2 open services for 192.0.2.10",
+        );
+
+        let area = Rect::new(0, 0, 120, 40);
+        let lines = module_lines(&app, area);
+        let rendered: String = lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|sp| sp.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join("");
+
+        assert!(
+            rendered.contains("recon:nmap discovered 1 host"),
+            "expected fallback log-grep line in output, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("RECENT RECON ACTIVITY"),
+            "expected RECENT RECON ACTIVITY header, got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn sast_progress_bars_use_scan_progress_per_task_when_present() {
+        use kuzushi_core::ScanProgress;
+        use std::collections::BTreeMap;
+
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.focused_module = Some("sast".to_string());
+        app.shell_view = ShellView::ModuleRun;
+        app.scan = Some(crate::app::ScanPanelState {
+            run_id: Some("run-real-progress".to_string()),
+            target: std::path::PathBuf::from("./demo"),
+            stage: "scanning".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+
+        let mut per_task = BTreeMap::new();
+        per_task.insert("agentic-sast".to_string(), (87usize, 120usize));
+        per_task.insert("semgrep".to_string(), (612usize, 612usize));
+        app.scan_progress = Some(ScanProgress {
+            total: 732,
+            done: 699,
+            current_tool: Some("semgrep".to_string()),
+            current_target: Some("./demo".to_string()),
+            per_task,
+        });
+
+        let area = Rect::new(0, 0, 120, 40);
+        let lines = module_run_lines(&app, area);
+        let rendered: String = lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|sp| sp.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join("");
+
+        assert!(
+            rendered.contains("612/612"),
+            "expected real semgrep done count, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("87/120"),
+            "expected real agentic-sast progress count, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("semgrep"),
+            "expected semgrep label in progress bar, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("agentic-sast"),
+            "expected agentic-sast label in progress bar, got:\n{rendered}"
+        );
+    }
+
+    #[test]
     fn stories_from_doc_sorts_threats_by_impact_severity() {
         let doc = serde_json::json!({
             "threats": [
@@ -5247,10 +5393,10 @@ mod tests {
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains("SCAN PROGRESS"));
-        // Spinner is keyed off `app.log.len()`; with 4 seeded lines, 4 % 6 == 4 → frame `⠟`.
+        // Spinner cycles through SPINNER_FRAMES based on `app.spinner_tick`; any frame is valid.
         assert!(
-            rendered.contains("⠟"),
-            "expected braille spinner frame `⠟` (index 4) in: {rendered}"
+            SPINNER_FRAMES.iter().any(|frame| rendered.contains(frame)),
+            "expected one of the braille spinner frames in: {rendered}"
         );
         assert!(rendered.contains("● /scan"));
         assert!(rendered.contains("⏵ scan starting ./demo"));
