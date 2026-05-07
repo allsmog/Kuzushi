@@ -125,6 +125,8 @@ cost - show known session cost estimate
   aliases / examples: /cost
 config - show runtime config status
   aliases / examples: /config
+permissions - show approval and sandbox policy
+  aliases / examples: /permissions, show permissions
 target [path] - switch scan target without restart
   aliases / examples: /target [path]
 

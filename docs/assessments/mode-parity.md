@@ -27,8 +27,8 @@ Legend: ✓ = present, ✗ = absent, ◐ = partial / opt-in, N/A = not applicabl
 | `ExecutionContext.datastore` (operator overrides)             | ✗    | ✓     | ✗   | shell-only; scan and run can only read `taskConfig` via `resolveOption`. |
 | `ExecutionContext.print` (PrintSink)                          | ◐    | ✓     | ✗   | scan workers wire it; run leaves it undefined. |
 | Findings persistence (`.kuzushi/findings.sqlite3`)            | ✓    | ✓     | ◐   | run touches the DB only for tools that open it themselves (e.g. `triage:run`). |
-| Per-run artefacts (`.kuzushi/runs/<runId>/`)                  | ✓    | ✗     | ✗   | scan writes `summary.json`, `triage.jsonl`, `verify.jsonl` via audit-worker; shell `run`/run mode never produce them. |
-| `runId` propagated into tool context                          | ✓    | ✗     | ✗   | shell + run never mint a `runId` for ad-hoc tool calls. |
+| Per-run artefacts (`.kuzushi/runs/<runId>/`)                  | ✓    | ✓     | ✓   | scan writes full pipeline artifacts; shell and `run` write shared `summary.json`, `trace.jsonl`, and result/input JSON for tool dispatch. |
+| `runId` propagated into tool context                          | ✓    | ◐     | ◐   | shell + run mint run ids for artifacts, but the id is not yet part of `ToolExecutionContext`. |
 | `--audit-log` produces JSONL trail                            | ✓    | ✗     | ✗   | scan-only flag; the underlying audit-worker is registered only by `registerAllWorkers`. |
 | Cost-tracking / `costBudgetUsd` enforcement                   | ✓    | ◐     | ✗   | scan: `bus/orchestrator.ts` halts at budget. shell: enforced if operator wires `enforcer:` (currently nobody does — see "Top gaps" 2). run: same gap. |
 | Cost-cap halt card (continue/abort)                           | ✓    | ✓     | N/A | scan-only UI; shell shows the card on its own pipeline runs; run is non-interactive. |
@@ -39,7 +39,7 @@ Legend: ✓ = present, ✗ = absent, ◐ = partial / opt-in, N/A = not applicabl
 | House rules (`.kuzushi/house-rules/<modId>.md`)               | ✗    | ◐     | ✗   | shell `tune` reads the file, but the contents are not threaded into any tool context. |
 | Threat model (`.kuzushi/threat-model.json`)                   | ✓    | ✓     | ◐   | shell + scan call `loadPersistentThreatModel(repoRoot)` directly; in run mode it works only if the executed tool itself reads the file. |
 | Alias generation (F-NNNN, C-NN)                               | ◐    | ✓     | ✗   | `computeFindingAliases` runs in shell; scan reports embed them through the report layer; run never aliases. |
-| Replay / trace (`/replay <runId>`, `/trace <runId>`)          | N/A  | ✓     | N/A | shell-only operator surface, but consumes scan-produced artefacts. |
+| Replay / trace (`/replay <runId>`, `/trace <runId>`)          | N/A  | ✓     | N/A | shell-only operator surface, but consumes shared run artefacts. |
 | Two-stage Ctrl+C at idle                                      | N/A  | ✓     | N/A | intentionally shell-only. |
 | `--ci` flag (one-line-per-event stream)                       | ✓    | N/A   | ✗   | shell is interactive; run currently has no machine-readable transition stream. |
 | Governance enforcer (scope/budget/tier)                       | ◐    | ◐     | ◐   | `CopilotCore` accepts an `enforcer` opt; **no caller wires one in any mode today**. |
@@ -103,12 +103,11 @@ Legend: ✓ = present, ✗ = absent, ◐ = partial / opt-in, N/A = not applicabl
    of free-form text. **Decision:** codify in CLAUDE.md — `--ci` is
    scan-only; `run --json` (existing) is the headless equivalent.
 
-8. **Per-run artefacts (`.kuzushi/runs/<runId>/`) are scan-only.**
-   *(Confidence: medium)* The audit-worker, replay surfaces, and report
-   writers all live under the scan path. Shell + run tool calls produce
-   no `runId`-keyed directory. **Decision:** intentional — single-tool
-   invocations don't have the multi-stage event stream that justifies a
-   per-run directory. Codified in CLAUDE.md.
+8. **Per-run artefacts (`.kuzushi/runs/<runId>/`) were scan-only.**
+   *(Fixed)* Shell tool dispatch and headless `kuzushi run` now mint a
+   run id and write a shared `summary.json`, `trace.jsonl`, and
+   input/result JSON artifacts. Scan still owns the richer
+   triage/verify/patch JSONL pipeline files.
 
 ## Codified intentional asymmetries
 
@@ -121,11 +120,12 @@ Legend: ✓ = present, ✗ = absent, ◐ = partial / opt-in, N/A = not applicabl
 - **`--ci` is scan-only.** Single-tool runs use `--json` for
   machine-readable output. Shell is interactive; CI mode is meaningless.
 - **`/replay <runId>` and `/trace <runId>` are shell-only operator
-  surfaces** that consume scan-produced `.kuzushi/runs/<runId>/`
+  surfaces** that consume shared `.kuzushi/runs/<runId>/`
   artefacts. They are read-only over a shared on-disk format.
-- **Per-run artefacts directory (`.kuzushi/runs/<runId>/`) is scan-only.**
-  Single-tool invocations (shell tool dispatch, `kuzushi run`) don't
-  produce the multi-stage transcript that justifies a run directory.
+- **Pipeline-only artefacts remain scan-only.** Single-tool invocations
+  write `summary.json`, `trace.jsonl`, and input/result JSON, but do not
+  produce scan-specific `triage.jsonl`, `verify.jsonl`, or `patch.jsonl`
+  unless the tool itself emits them.
 - **Workspace handle in `ExecutionContext` is shell-only.** `kuzushi run`
   takes a `--workspace` *id* (passed to tools that look it up themselves),
   but does not wire the `WorkspaceHandle` capability — that needs the
@@ -153,6 +153,9 @@ See the diff accompanying this assessment:
    passes `"run"`; the shell bootstrap passes `"shell"` (gap 6).
 6. `CLAUDE.md` gains a "Mode parity" section codifying the intentional
    asymmetries above.
+7. Shared run artifacts now cover scan, shell tool dispatch, and
+   headless `kuzushi run`; `kuzushi runs list/show/trace` exposes the
+   same on-disk format outside the TUI.
 
 ## Not fixed (tracked for follow-up)
 
@@ -167,6 +170,3 @@ See the diff accompanying this assessment:
   `init()` called during scan. The intent is that "scan mode" only loads
   modules it executes; codifying that explicitly is preferable to forcing
   every module to be DAG-aware. Documented under intentional asymmetries.
-- **Per-tool-call `runId` and audit-log directory for `kuzushi run`**:
-  on the fence — see decision in gap 8. Could be a follow-up if operators
-  want replay over single-tool runs.

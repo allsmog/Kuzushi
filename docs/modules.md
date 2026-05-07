@@ -215,7 +215,7 @@ set `hidden: true` and keep dependency names qualified.
 | `signal?: AbortSignal` | stable | Cancel long-running work. |
 | `host?: HostInfo` | stable (new) | `{ sdkVersion, capabilities }` — see §10. |
 | `logger?: ToolLogger` | stable (new) | `info/warn/error/debug` structured diagnostics. |
-| `uiStore?: HostUiHandle` | narrow-handle | Read/update the Ink shell's UI state. |
+| `uiStore?: HostUiHandle` | narrow-handle | Read/update live shell UI state when the Rust TUI wires it. |
 | `datastore?: ToolOptionStore` | narrow-handle | Read operator-set options (`setg FOO bar`). |
 | `workspace?: WorkspaceHandle` | narrow-handle | Hosts/services/vulns/notes. |
 | `events?: ModuleEventScope` | narrow-handle | Cross-module pub/sub (auto-torn-down on `dispose`). |

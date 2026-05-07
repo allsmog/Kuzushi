@@ -205,12 +205,12 @@ is expected to behave identically and should be filed as a parity bug.
   machine-readable output; the shell is interactive by definition. Don't
   add `--ci` to `run`.
 - **`/replay <runId>` and `/trace <runId>` are shell-only operator
-  surfaces** that *consume* scan-produced `.kuzushi/runs/<runId>/`
+  surfaces** that *consume* shared `.kuzushi/runs/<runId>/`
   artefacts. They are read-only over a shared on-disk format.
-- **Per-run artefacts (`.kuzushi/runs/<runId>/`) are scan-only.**
-  `kuzushi run` and shell tool dispatch don't mint a `runId` and don't
-  produce `summary.json` / `triage.jsonl` / `verify.jsonl`. The
-  audit-worker is registered only by `registerAllWorkers` (scan).
+- **Pipeline-only artefacts are scan-only.** `kuzushi run` and shell tool
+  dispatch now mint a `runId` and write `summary.json`, `trace.jsonl`,
+  and input/result JSON. They do not produce scan-specific `triage.jsonl`,
+  `verify.jsonl`, or `patch.jsonl` unless the tool itself emits them.
 - **`ExecutionContext.workspace` handle is shell-only.** `kuzushi run`
   takes `--workspace <id>` (forwarded to tools that look the workspace
   up themselves) but does not wire the `WorkspaceHandle` capability —

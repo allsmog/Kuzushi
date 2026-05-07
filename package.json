@@ -56,7 +56,7 @@
     "test:rust": "cargo test --workspace",
     "test:e2e": "bash tests/e2e/run-smoke.sh",
     "test:coverage": "vitest run --coverage",
-    "verify:pack": "npm pack --dry-run",
+    "verify:pack": "node scripts/verify-pack.mjs",
     "publish:npm": "bash scripts/publish-npm.sh",
     "publish:npm:dry": "bash scripts/publish-npm.sh",
     "publish:npm:go": "bash scripts/publish-npm.sh --publish",
