@@ -2,13 +2,21 @@
 
 Start: 2026-05-06
 Base branch: `main`
-Base commit: `823f4ec8`
+Base commit: `c4521210`
 
 ## Start Checks
 
 - `git status --short --branch`: clean, `## main...origin/main`
 - `git fetch --prune origin`: completed; repository reported existing `.git/gc.log` / unreachable loose-object warning
 - `git pull --ff-only`: already up to date
+
+Iteration 2 refresh:
+
+- `git status --short --branch`: clean, `## main...origin/main`
+- `git fetch --prune origin`: completed; updated `origin/claude/agentic-security-pipeline` and `origin/claude/ratatui-design-views`; repository again reported existing `.git/gc.log` / unreachable loose-object warning
+- `git pull --ff-only`: already up to date
+- Current `main`: `c4521210`
+- Note: original checkout Git metadata cannot create `ORIG_HEAD.lock` or object temporary files, so merges and commits are performed in writable local clone `/private/tmp/kuzushi-claude-merge-work` seeded from the same fetched refs.
 
 ## Authoritative Unmerged Branch Inventory
 
@@ -38,11 +46,12 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 
 ### `origin/claude/implement-index-html-zkHMO`
 
-- Status: inspected
+- Status: integrated in commit pending
 - Commits: `705e592c design: add Ratatui shell TUI mockups`
 - Scope: adds static React design/mockup files under `design/`
-- Conflict preview: `git merge-tree --write-tree main origin/claude/implement-index-html-zkHMO` failed with `unable to create temporary file: Operation not permitted`; no branch file overlap was shown by `git diff --name-status`
+- Conflict preview: failed in original checkout due `.git` temporary-file sandboxing; passed in writable temp clone with tree `aee8ca268d6e3379365b9c768fb11f56ee30f2ac`
 - Decision: full merge; preserve as design artifacts only
+- Checks: `cargo fmt --all --check` passed; `cargo check --workspace` passed
 
 ### `origin/claude/ratatui-design-views`
 
