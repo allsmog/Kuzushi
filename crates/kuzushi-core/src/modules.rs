@@ -8363,6 +8363,7 @@ fn run_deep_audit_tool(
         max_steps,
         deposit_usd,
         system_prompt: None,
+        include_static_evidence: true,
     };
     let outcome = run_deep_auditor(&routed, Some(&spend), &cfg, &finding)?;
 

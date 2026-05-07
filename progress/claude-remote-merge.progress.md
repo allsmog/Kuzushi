@@ -46,7 +46,7 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 
 ### `origin/claude/implement-index-html-zkHMO`
 
-- Status: integrated in commit pending
+- Status: integrated in commit `62dd986c` (`merge: integrate implement-index-html-zkHMO`)
 - Commits: `705e592c design: add Ratatui shell TUI mockups`
 - Scope: adds static React design/mockup files under `design/`
 - Conflict preview: failed in original checkout due `.git` temporary-file sandboxing; passed in writable temp clone with tree `aee8ca268d6e3379365b9c768fb11f56ee30f2ac`
@@ -55,7 +55,7 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 
 ### `origin/claude/ratatui-design-views`
 
-- Status: integrated in commit pending
+- Status: integrated in commit `64893e3c` (`merge: integrate ratatui-design-views`)
 - Commits: 20 commits through `7bdcac53 feat(core+tui): ScanProgress + cached recon/carlini/agentic snapshots`
 - Scope: Rust Ratatui design view updates, TUI renderer helpers, structured recon/carlini/agentic snapshots, scan progress type, and plain fixture tests
 - Conflict preview: `git merge-tree --write-tree main origin/claude/ratatui-design-views` reported one content conflict in `crates/kuzushi-tui/src/app.rs`
@@ -65,7 +65,7 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 
 ### `origin/claude/diagnose-rust-tui-ux-M8ycq`
 
-- Status: integrated by subset in commit pending
+- Status: integrated by subset in commit `1ed52b5b` (`merge: integrate useful diagnose-rust-tui-ux-M8ycq changes`)
 - Commits: six branch-local TUI UX commits plus an old merge from `main`
 - Scope inspected: Rust shell editing/scrolling, plan-card navigation, tune/prompts/actor-detail interactions, spinner behavior, and a TypeScript plain-renderer import reorder
 - Conflict preview: `git merge-tree --write-tree main origin/claude/diagnose-rust-tui-ux-M8ycq` reported conflicts in `crates/kuzushi-tui/src/app.rs`, `crates/kuzushi-tui/src/renderer.rs`, and `crates/kuzushi-tui/src/theme.rs`
@@ -75,7 +75,14 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 
 ### `origin/claude/check-ratatui-tui-Jj2eH`
 
-- Status: pending inspection
+- Status: integrated by subset in current working commit
+- Commits inspected: `87fe9ecf` eval defaults/scorer tests, `f858bad9` vuln_source/static-context scorer reporting, `36f2c829` tree-sitter backend, `b0054a67` deep-audit static-evidence context, `49e0fe31` diff-scope cleanup, plus older already-overlapping merge history
+- Scope inspected: `git log --oneline --max-count=20 main..origin/claude/check-ratatui-tui-Jj2eH`, `git diff --name-status main...`, `git diff --stat main...`, and `git merge-tree --write-tree main origin/claude/check-ratatui-tui-Jj2eH`
+- Conflict preview: broad conflicts across `Cargo.lock`, CLI main/tests, core config/diff-scope/findings/lib/runtime, OpenAI runtime, xint scripts/docs, and bridge script. The branch has multiple merge bases and stale broad history.
+- Decision: subset integration. Full merge would reintroduce stale core/runtime/harness edits and add new tree-sitter dependencies that are not needed for the current regex code-nav path and cannot be fetched reliably in this sandbox.
+- Integrated: `kuzushi-eval` proof-state and `vuln_source` hit breakdowns with `staticProofState`/`vulnSource` JSON aliases and focused unit tests; new `static_context` prompt assembler using current `static_evidence`, `static_narrative`, `static_ranking`, and `static_registry` APIs; default-on deep-auditor prompt injection with opt-out config and tests; public re-export for downstream smoke use.
+- Skipped: tree-sitter backend/dependency additions; stale diff-scope deletion and broad runtime/script/test changes already represented or superseded by current main.
+- Checks: `cargo fmt --all --check` passed; `cargo check --workspace` passed; `cargo test -p kuzushi-core` passed; `cargo test -p kuzushi-eval` passed; `cargo test -p kuzushi-cli --test xint_recall_cli` passed
 
 ### `origin/claude/vercel-security-harness-comparison-YQKnA`
 
