@@ -97,7 +97,7 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 
 ### `origin/claude/agentic-security-pipeline`
 
-- Status: skipped as obsolete/superseded in current working commit
+- Status: skipped as obsolete/superseded in commit `06ddb7da` (`chore: record skipped agentic-security-pipeline merge`)
 - Commits inspected: branch-local agentic pipeline commits from `a1bca700` through `e57e0e6c`, including classifier-gate Stage 1.5, triage/deep audit tools, tool-loop streaming, GatedRuntime, OAuth/live audit experiments, libFuzzer verify work, MCP/code-index docs, and old Rust TUI updates.
 - Scope inspected: `git log --oneline --max-count=20 main..origin/claude/agentic-security-pipeline`, `git diff --name-status main...`, `git diff --stat main...`, `git merge-tree --write-tree main origin/claude/agentic-security-pipeline`, plus exact two-dot diffs against current `main`.
 - Conflict preview: conflicts in progress docs, CLI main/tests, `agent_router`, `deep_auditor`, `findings`, `lib`, `runtime`, `static_ranking`, `systems_hunt`, `kuzushi-openai`, and TUI files; two-dot diff would delete current extracted TUI files, design artifacts, `static_context`, sandbox backend docs/examples, Uncle Bob progress files, and current module splits.
@@ -107,4 +107,8 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 
 ## Final Result
 
-- Pending
+- All six recomputed unmerged `origin/claude/*` branches have a recorded outcome: full merge (`implement-index-html-zkHMO`, `ratatui-design-views`), subset integration (`diagnose-rust-tui-ux-M8ycq`, `check-ratatui-tui-Jj2eH`, `vercel-security-harness-comparison-YQKnA`), or explicit skip (`agentic-security-pipeline`).
+- Final gate found and fixed an existing `ModelGate` wakeup-order bug: `PriorityPermit::drop` now releases the semaphore permit before notifying queued waiters, preventing `concurrency::tests::high_priority_preempts_low_priority_in_queue` from sleeping forever.
+- Final checks passed: `cargo fmt --all --check`; `cargo test --workspace`; `pnpm build` (using the original checkout's existing `node_modules` symlinked into the temp clone for tool resolution, then removed).
+- No conflict markers remain.
+- Pending push to `origin/main` from the integration clone.
