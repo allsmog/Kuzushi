@@ -341,10 +341,19 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         if app.findings.is_empty() {
             lines.push(muted(&fit(&app.first_finding_hint(), area.width as usize)));
         }
-        lines.push(muted(&fit(
-            "Quickstart: quickstart · Context: context build · Runtime: model",
-            area.width as usize,
-        )));
+        // Three labelled CTAs on one row; each label muted, each command
+        // accent, with subtle ` · ` separators — mirrors the mockup's
+        // colour split for command CTAs in `auth.jsx::m`.
+        lines.push(Line::from(vec![
+            Span::styled("Quickstart: ", theme::muted()),
+            Span::styled("quickstart", theme::accent()),
+            Span::styled(" · ", theme::subtle()),
+            Span::styled("Context: ", theme::muted()),
+            Span::styled("context build", theme::accent()),
+            Span::styled(" · ", theme::subtle()),
+            Span::styled("Runtime: ", theme::muted()),
+            Span::styled("model", theme::accent()),
+        ]));
         lines.push(muted(
             "Type help, modules, use <module>, scan, or run <tool> [json].",
         ));
@@ -394,12 +403,7 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         };
         let (_, blurb) = module_category_blurb(category);
         let widths = module_table_widths(area.width);
-        lines.push(divider(category, area.width));
-        lines.push(indent(
-            muted(&fit(blurb, area.width.saturating_sub(2) as usize)),
-            2,
-        ));
-        lines.push(table_header(&["id", "description"], &widths));
+        lines.push(category_divider(category, blurb, area.width));
         for module in rows {
             lines.push(catalog_module_row(
                 &module.metadata().id,
@@ -630,6 +634,30 @@ fn recon_snapshot_lines(snapshot: &super::app::ReconSnapshot, take: usize) -> Ve
 /// Format a carlini-threat-hunt snapshot as a small transcript block:
 /// actor / finding counts plus cost. Top finding lines are added when
 /// they fit, mirroring the textual `output()` summary on the report.
+/// Transcript-style finding row with severity tint.  Mirrors the mockup
+/// finding row colour split (`design/mockups/findings.jsx::findingRow`):
+///
+///   `▸ <severity>  <rule-id>  <path>:<line>`
+///   warn glyph + severity-tinted severity + accent rule-id + muted location.
+fn transcript_finding_line(
+    severity: Severity,
+    rule_id: &str,
+    file_path: &str,
+    line: u32,
+) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(" ▸ ", theme::warn()),
+        Span::styled(
+            format!("{:9}", severity.as_str().to_uppercase()),
+            theme::severity(severity),
+        ),
+        Span::raw(" "),
+        Span::styled(rule_id.to_string(), theme::accent()),
+        Span::raw("  "),
+        Span::styled(format!("{file_path}:{line}"), theme::muted()),
+    ])
+}
+
 fn carlini_snapshot_lines(report: &kuzushi_core::CarliniThreatHuntReport) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     lines.push(transcript_line(
@@ -651,16 +679,11 @@ fn carlini_snapshot_lines(report: &kuzushi_core::CarliniThreatHuntReport) -> Vec
         false,
     ));
     for finding in report.findings.iter().take(5) {
-        lines.push(transcript_line(
-            "finding",
-            &format!(
-                "{} {} {}:{}",
-                finding.severity.as_str(),
-                finding.rule_id,
-                finding.file_path,
-                finding.start_line,
-            ),
-            false,
+        lines.push(transcript_finding_line(
+            finding.severity,
+            &finding.rule_id,
+            &finding.file_path,
+            finding.start_line,
         ));
     }
     lines
@@ -687,16 +710,11 @@ fn agentic_sast_snapshot_lines(report: &kuzushi_core::AgenticSastReport) -> Vec<
         false,
     ));
     for finding in report.findings.iter().take(5) {
-        lines.push(transcript_line(
-            "finding",
-            &format!(
-                "{} {} {}:{}",
-                finding.severity.as_str(),
-                finding.rule_id,
-                finding.file_path,
-                finding.start_line,
-            ),
-            false,
+        lines.push(transcript_finding_line(
+            finding.severity,
+            &finding.rule_id,
+            &finding.file_path,
+            finding.start_line,
         ));
     }
     lines
@@ -763,7 +781,7 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         let progress = app.scan_progress.as_ref().expect("checked above");
         for (task_id, (done, total)) in progress.per_task.iter() {
             let kind = if *total == 0 {
-                ProgressKind::Failing
+                ProgressKind::Queued
             } else if done >= total {
                 ProgressKind::Done
             } else {
@@ -790,7 +808,7 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             if findings > 0 {
                 ProgressKind::Active
             } else {
-                ProgressKind::Failing
+                ProgressKind::Queued
             },
         ));
     } else if show_per_task {
@@ -817,7 +835,9 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             if findings > 0 {
                 ProgressKind::Active
             } else {
-                ProgressKind::Failing
+                // No findings yet → queued, not failing (failing would
+                // misread as an error in the placeholder pipeline).
+                ProgressKind::Queued
             },
         ));
     } else if app.focused_module.as_deref() == Some("sast") || scan.is_some() {
@@ -936,11 +956,31 @@ fn streaming_cursor_line() -> Line<'static> {
 fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
-    lines.push(Line::from(vec![
-        Span::styled("filters ", theme::label()),
-        Span::styled("[all] ", theme::selection()),
-        Span::styled("[critical] [high] [medium] [low]", theme::muted()),
-    ]));
+    // Filter chip row, mirroring `design/mockups/findings.jsx::chip`:
+    //   filters [all:38]  critical:5  high:11  medium:14  low:8
+    // Active chip wears `[label:n]` brackets in c-accent; inactive chips
+    // drop the brackets and render in c-muted with the count after the
+    // colon. Counts come from the persisted finding set so operators can
+    // size the filter buckets at a glance.
+    let counts = SeverityCounts::from_findings(&app.findings);
+    let total = app.findings.len();
+    let mut chip_spans: Vec<Span<'static>> = Vec::new();
+    chip_spans.push(Span::styled("filters ", theme::label()));
+    chip_spans.push(Span::styled(format!("[all:{total}]"), theme::accent()));
+    for (label, n, style) in [
+        (
+            "critical",
+            counts.critical,
+            theme::severity(Severity::Critical),
+        ),
+        ("high", counts.high, theme::severity(Severity::High)),
+        ("medium", counts.medium, theme::severity(Severity::Medium)),
+        ("low", counts.low, theme::severity(Severity::Low)),
+    ] {
+        chip_spans.push(Span::raw("  "));
+        chip_spans.push(Span::styled(format!("{label}:{n}"), style));
+    }
+    lines.push(Line::from(chip_spans));
     lines.push(blank());
 
     if app.findings.is_empty() {
@@ -1161,9 +1201,12 @@ fn tune_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             ));
         }
     }
-    lines.push(muted(
-        "Up/Down move | Enter activate | show/set/reset direct | back",
-    ));
+    lines.push(keybind_hint_line(&[
+        ("Up/Down", "move"),
+        ("Enter", "activate"),
+        ("show/set/reset", "direct"),
+        ("back", "home"),
+    ]));
     lines
 }
 
@@ -1390,9 +1433,16 @@ fn prompts_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ));
     }
     lines.push(blank());
-    lines.push(muted(
-        "Up/Down row | e edit | s show | d diff | r reset | S set | Enter show | back",
-    ));
+    lines.push(keybind_hint_line(&[
+        ("Up/Down", "row"),
+        ("e", "edit"),
+        ("s", "show"),
+        ("d", "diff"),
+        ("r", "reset"),
+        ("S", "set"),
+        ("Enter", "show"),
+        ("back", "home"),
+    ]));
     lines
 }
 
@@ -1410,7 +1460,12 @@ fn actor_detail_lines(app: &ShellApp, area: Rect, index: usize) -> Vec<Line<'sta
             .as_str(),
     ));
     lines.push(detail("filter", app.actor_detail_filter.label()));
-    lines.push(muted("f cycle filter | 0 reset | j/k/g/G scroll | back"));
+    lines.push(keybind_hint_line(&[
+        ("f", "cycle filter"),
+        ("0", "reset"),
+        ("j/k/g/G", "scroll"),
+        ("back", "home"),
+    ]));
     lines.push(blank());
 
     let visible = area.height.saturating_sub(8).max(2) as usize;
@@ -1445,18 +1500,45 @@ fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             &["run", "status", "findings", "target"],
             &widths,
         ));
-        lines.push(aligned_row(
-            &[
-                scan.run_id
-                    .as_deref()
-                    .map(short)
-                    .unwrap_or_else(|| "pending".to_string()),
-                scan_status(scan),
-                scan.findings_count.to_string(),
-                scan.target.display().to_string(),
-            ],
-            &widths,
-        ));
+        // Status-column tint per `design/mockups/runs.jsx::r`:
+        //   complete → c-success, partial/paused → c-warn,
+        //   failed → c-danger, otherwise c-subtle.
+        let run_id = scan
+            .run_id
+            .as_deref()
+            .map(short)
+            .unwrap_or_else(|| "pending".to_string());
+        let status_text = scan_status(scan);
+        let status_style = if scan.error.is_some() {
+            theme::danger()
+        } else if scan.running && scan.abort_requested {
+            theme::warn()
+        } else if scan.running {
+            theme::warn()
+        } else {
+            theme::success()
+        };
+        let findings_text = scan.findings_count.to_string();
+        let target_text = scan.target.display().to_string();
+        let run_w = widths[0];
+        let status_w = widths[1];
+        let findings_w = widths[2];
+        let target_w = widths[3];
+        lines.push(Line::from(vec![
+            Span::styled(format!("{}  ", pad(&run_id, run_w)), theme::accent()),
+            Span::styled(
+                format!("{}  ", pad(&fit(&status_text, status_w), status_w)),
+                status_style,
+            ),
+            Span::styled(
+                format!("{}  ", pad(&findings_text, findings_w)),
+                theme::primary(),
+            ),
+            Span::styled(
+                format!("{}  ", pad(&fit(&target_text, target_w), target_w)),
+                theme::muted(),
+            ),
+        ]));
     } else {
         lines.push(muted(
             "No scan run is active in this shell session. Next: `scan` to start one, or `replay <runId>` for a past run on disk.",
@@ -1554,15 +1636,11 @@ fn help_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let widths = help_table_widths(area.width);
     for category in ShellCommandCategory::ORDER {
         lines.push(blank());
-        lines.push(Line::styled(category.label(), theme::subtle()));
-        if widths.len() == 2 {
-            lines.push(table_header(&["command", "aliases / examples"], &widths));
-        } else {
-            lines.push(table_header(
-                &["command", "aliases / examples", "description"],
-                &widths,
-            ));
-        }
+        lines.push(category_divider(
+            category.label(),
+            help_category_blurb(category),
+            area.width,
+        ));
         for spec in shell_command_specs()
             .iter()
             .filter(|spec| spec.category == category)
@@ -1578,6 +1656,19 @@ fn help_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         }
     }
     lines
+}
+
+/// Section blurbs for the `/help` view, aligned with `design/mockups/help.jsx::sec`.
+pub(super) fn help_category_blurb(category: ShellCommandCategory) -> &'static str {
+    match category {
+        ShellCommandCategory::Navigation => "browse modules and tools",
+        ShellCommandCategory::RunScan => "dispatch tools and scans",
+        ShellCommandCategory::OptionsTasks => "options + sast task control",
+        ShellCommandCategory::ContextKb => "workspace + attachments",
+        ShellCommandCategory::FindingsEvidence => "browse / open / triage findings",
+        ShellCommandCategory::AuthConfigModel => "auth, model, runtime config",
+        ShellCommandCategory::Session => "history, cost, lifecycle",
+    }
 }
 
 fn quickstart_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -1762,10 +1853,15 @@ fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ));
     }
     lines.push(blank());
-    lines.push(muted(&fit(
-        "Up/Down select · Enter choose · model <n> [xhigh] · auth login openai-codex|anthropic",
+    lines.push(command_list_line(
+        &[
+            "Up/Down select",
+            "Enter choose",
+            "model <n> [xhigh]",
+            "auth login openai-codex|anthropic",
+        ],
         area.width as usize,
-    )));
+    ));
     lines
 }
 
@@ -1944,10 +2040,16 @@ fn sast_tasks_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ));
     }
     lines.push(blank());
-    lines.push(muted(&fit(
-        "/task block <id> · /task allow <id> · /task toggle [id] · /task mode auto|manual|toggle · /task reset",
+    lines.push(command_list_line(
+        &[
+            "/task block <id>",
+            "/task allow <id>",
+            "/task toggle [id]",
+            "/task mode auto|manual|toggle",
+            "/task reset",
+        ],
         area.width as usize,
-    )));
+    ));
     lines
 }
 
@@ -2016,10 +2118,15 @@ fn context_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     lines.push(blank());
-    lines.push(muted(&fit(
-        "context build · context status · context regen repo · context regen app-model",
+    lines.push(command_list_line(
+        &[
+            "context build",
+            "context status",
+            "context regen repo",
+            "context regen app-model",
+        ],
         area.width as usize,
-    )));
+    ));
     lines
 }
 
@@ -2077,12 +2184,82 @@ fn workspace_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ));
     }
 
+    // Severity rollup bar — see `design/mockups/workspace.jsx::rollupBar`.
+    // Surfaces the persisted-findings distribution at a glance so an
+    // operator landing on `/workspace` sees the shape of the work without
+    // jumping into `/findings` first.
+    let total = app.findings.len();
+    if total > 0 {
+        let counts = SeverityCounts::from_findings(&app.findings);
+        lines.push(blank());
+        lines.push(divider(
+            &format!("FINDINGS ROLLUP · {total} persisted"),
+            area.width,
+        ));
+        for (label, n, severity) in [
+            ("CRITICAL", counts.critical, Severity::Critical),
+            ("HIGH    ", counts.high, Severity::High),
+            ("MEDIUM  ", counts.medium, Severity::Medium),
+            ("LOW     ", counts.low, Severity::Low),
+        ] {
+            lines.push(severity_rollup_bar(label, n, total, severity));
+        }
+    }
+
     lines.push(blank());
-    lines.push(muted(&fit(
-        "workspace status · workspace export findings <path>.json · findings export <path>.json",
+    lines.push(command_list_line(
+        &[
+            "workspace status",
+            "workspace export findings <path>.json",
+            "findings export <path>.json",
+        ],
         area.width as usize,
-    )));
+    ));
     lines
+}
+
+/// Chat bubble tag header matching `design/mockups/agent-chat.jsx::bubble`:
+///
+///   ` <tag> ──────────────────────────...──`
+///
+/// `tag_style` carries the role tint (`c-accent` for the operator side,
+/// `c-success` for the agent side, `c-danger` for errors).
+fn chat_bubble_header(tag: &str, tag_style: Style, width: u16) -> Line<'static> {
+    let safe_width = width.max(8) as usize;
+    let used = 1 + tag.chars().count() + 2;
+    let fill = safe_width.saturating_sub(used).max(1);
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(tag.to_string(), tag_style),
+        Span::raw(" "),
+        Span::styled(theme::RULE_CHAR.repeat(fill), theme::subtle()),
+    ])
+}
+
+/// Render a single `█████░░░░░░ N/total` rollup bar matching
+/// `design/mockups/workspace.jsx::rollupBar`. Bar is 28 cells wide, with
+/// the filled portion in the severity tint and the unfilled portion in
+/// `theme::subtle()`.
+fn severity_rollup_bar(label: &str, n: usize, total: usize, severity: Severity) -> Line<'static> {
+    let bar_w: usize = 28;
+    let filled = if total == 0 {
+        0
+    } else {
+        ((bar_w * n) as f64 / total as f64).round() as usize
+    };
+    let filled = filled.clamp(if n > 0 { 1 } else { 0 }, bar_w);
+    let empty = bar_w - filled;
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(label.to_string(), theme::severity(severity)),
+        Span::styled(" [".to_string(), theme::subtle()),
+        Span::styled("█".repeat(filled), theme::severity(severity)),
+        Span::styled("░".repeat(empty), theme::subtle()),
+        Span::styled("] ".to_string(), theme::subtle()),
+        Span::styled(format!("{n:>3}"), theme::primary()),
+        Span::styled("/".to_string(), theme::subtle()),
+        Span::styled(total.to_string(), theme::muted()),
+    ])
 }
 
 fn knowledge_base_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -2165,10 +2342,15 @@ fn knowledge_base_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         }
     }
     lines.push(blank());
-    lines.push(muted(&fit(
-        "kb [module] · attach <path-or-url> · detach <id> · reparse <id>",
+    lines.push(command_list_line(
+        &[
+            "kb [module]",
+            "attach <path-or-url>",
+            "detach <id>",
+            "reparse <id>",
+        ],
         area.width as usize,
-    )));
+    ));
     lines
 }
 
@@ -2198,40 +2380,47 @@ fn agent_chat_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         app.config.model.as_deref().unwrap_or("unconfigured"),
     ));
     lines.push(blank());
-    lines.push(styled("question", theme::label()));
-    lines.push(indent(
-        muted(&fit(&agent.question, area.width.saturating_sub(2) as usize)),
-        2,
-    ));
+    // Bubble-style tag matching `design/mockups/agent-chat.jsx::bubble`:
+    //   `  you  ──...──`  (c-accent tag)
+    //   `   <body>`        (c-primary)
+    //   blank
+    //   ` agent ──...──`  (c-success tag)
+    //   `   <body>`
+    lines.push(chat_bubble_header("  you  ", theme::accent(), area.width));
+    for line in wrap_text(&agent.question, area.width.saturating_sub(3) as usize) {
+        lines.push(indent(styled(&line, theme::primary()), 3));
+    }
     lines.push(blank());
 
     if let Some(error) = &agent.error {
-        lines.push(styled("error", theme::danger()));
-        lines.push(indent(
-            muted(&fit(error, area.width.saturating_sub(2) as usize)),
-            2,
-        ));
+        lines.push(chat_bubble_header(" error ", theme::danger(), area.width));
+        for line in wrap_text(error, area.width.saturating_sub(3) as usize) {
+            lines.push(indent(styled(&line, theme::danger()), 3));
+        }
     } else if let Some(answer) = &agent.answer {
-        lines.push(styled("answer", theme::label()));
-        for line in wrap_text(answer, area.width.saturating_sub(2) as usize)
+        lines.push(chat_bubble_header(" agent ", theme::success(), area.width));
+        for line in wrap_text(answer, area.width.saturating_sub(3) as usize)
             .into_iter()
-            .take(8)
+            .take(12)
         {
-            lines.push(indent(muted(&line), 2));
+            lines.push(indent(styled(&line, theme::primary()), 3));
         }
     } else if agent.abort_requested {
-        lines.push(muted(
-            "Abort requested; waiting for pi-agent-core to return. Process kill is not confirmed.",
+        lines.push(chat_bubble_header(" agent ", theme::success(), area.width));
+        lines.push(indent(
+            muted("Abort requested; waiting for pi-agent-core to return. Process kill is not confirmed."),
+            3,
         ));
     } else {
-        lines.push(muted("Waiting for pi-agent-core response..."));
+        lines.push(chat_bubble_header(" agent ", theme::success(), area.width));
+        lines.push(indent(muted("…streaming"), 3));
     }
 
     lines.push(blank());
-    lines.push(muted(&fit(
-        "ask <question> · ?text · model provider:model-id · back",
+    lines.push(command_list_line(
+        &["ask <question>", "?text", "model provider:model-id", "back"],
         area.width as usize,
-    )));
+    ));
     lines
 }
 
@@ -2260,10 +2449,10 @@ fn history_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     lines.push(blank());
-    lines.push(muted(&fit(
-        "clear · run <tool> · show runs · back",
+    lines.push(command_list_line(
+        &["clear", "run <tool>", "show runs", "back"],
         area.width as usize,
-    )));
+    ));
     lines
 }
 
@@ -2316,10 +2505,16 @@ fn story_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     lines.push(blank());
-    lines.push(muted(&fit(
-        "Ctrl+O toggle · /history commands · /show runs · /replay <runId> · /trace <runId>",
+    lines.push(command_list_line(
+        &[
+            "Ctrl+O toggle",
+            "/history commands",
+            "/show runs",
+            "/replay <runId>",
+            "/trace <runId>",
+        ],
         area.width as usize,
-    )));
+    ));
     lines
 }
 
@@ -2438,11 +2633,21 @@ fn render_throttle_banner(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     let Some(throttle) = &app.advisory.throttle else {
         return;
     };
-    let text = fit(
-        &format!("⚠ rate limit · {} · {}", throttle.source, throttle.message),
-        area.width as usize,
-    );
-    frame.render_widget(Paragraph::new(Line::styled(text, theme::warn())), area);
+    // Chip-style banner per `design/mockups/rate-limited.jsx`:
+    //   ` RATE LIMIT  <source> · <message>`
+    // The chip itself stays warn-tinted so it pops; the source label is
+    // primary and the message muted so the eye lands on the chip first.
+    let source_budget = (area.width as usize).saturating_sub(15 + throttle.source.chars().count());
+    let message = fit(&throttle.message, source_budget.max(8));
+    let line = Line::from(vec![
+        Span::raw(" "),
+        Span::styled(" RATE LIMIT ", theme::warn()),
+        Span::raw("  "),
+        Span::styled(throttle.source.clone(), theme::primary()),
+        Span::styled(" · ", theme::subtle()),
+        Span::styled(message, theme::muted()),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 fn render_plan_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
@@ -2497,13 +2702,32 @@ fn render_plan_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
             theme::warn(),
         ));
     }
-    lines.push(Line::styled(
-        fit(
-            "[j/k] move   [space] toggle   [y] apply active   [n] discard   /yes   /no",
-            area.width as usize,
-        ),
-        theme::label(),
-    ));
+    // Mirror the keybind footer's accent-key + muted-hint shape rather
+    // than `[k]` chrome.  Per `design/mockups/plan.jsx` and the rest of
+    // the shell.  Slash verbs (/yes, /no) are kept as muted hints since
+    // they aren't single keys.
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled("j/k", theme::accent()),
+        Span::raw(" "),
+        Span::styled("move", theme::muted()),
+        Span::raw("   "),
+        Span::styled("space", theme::accent()),
+        Span::raw(" "),
+        Span::styled("toggle", theme::muted()),
+        Span::raw("   "),
+        Span::styled("y", theme::accent()),
+        Span::raw(" "),
+        Span::styled("apply active", theme::muted()),
+        Span::raw("   "),
+        Span::styled("n", theme::accent()),
+        Span::raw(" "),
+        Span::styled("discard", theme::muted()),
+        Span::raw("   "),
+        Span::styled("/yes", theme::muted()),
+        Span::raw("   "),
+        Span::styled("/no", theme::muted()),
+    ]));
     render_lines(frame, area, lines);
 }
 
@@ -2521,13 +2745,23 @@ fn render_cost_cap_halt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         ),
         area.width as usize,
     );
-    let actions = fit(
-        "[c] continue past cap   [a] abort scan",
-        area.width as usize,
-    );
     let mut lines = vec![Line::styled(header, theme::danger())];
     if area.height > 1 {
-        lines.push(Line::styled(actions, theme::warn()));
+        // Mirror the unbracketed key style from `keybindings_line` /
+        // `design/mockups/_shared.jsx::footer` — accent key + muted hint
+        // separated by 3 spaces.  Matches the rest of the shell's
+        // muscle-memory rather than re-introducing `[k]` chrome.
+        let action_line = Line::from(vec![
+            Span::raw(" "),
+            Span::styled("c", theme::accent()),
+            Span::raw(" "),
+            Span::styled("continue past cap", theme::warn()),
+            Span::raw("   "),
+            Span::styled("a", theme::accent()),
+            Span::raw(" "),
+            Span::styled("abort scan", theme::warn()),
+        ]);
+        lines.push(action_line);
     }
     render_lines(frame, area, lines);
 }
@@ -2613,13 +2847,35 @@ fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         right_segments.insert(0, "Ctrl+C again to exit".to_string());
     }
     let right = join_segments(&right_segments);
-    let text = justify(left, right, area.width as usize);
+    // Prefer the right segment when widths are tight: the top status strip
+    // already shows mode + target + ctx, so on narrow terminals truncating
+    // the duplicated left side keeps findings count + ctrl-c hint visible.
+    let text = justify_prefer_right(left, right, area.width as usize);
     let style = if app.ctrl_c_armed() {
         theme::warn()
     } else {
         theme::primary()
     };
     frame.render_widget(Paragraph::new(Line::styled(text, style)), area);
+}
+
+fn justify_prefer_right(left: String, right: String, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if right.is_empty() {
+        return fit(&left, width);
+    }
+    let right = fit(&right, width);
+    let right_len = right.chars().count();
+    if right_len + 1 >= width {
+        return right;
+    }
+    let left_budget = width.saturating_sub(right_len + 1);
+    let left = fit(&left, left_budget);
+    let left_len = left.chars().count();
+    let pad = width.saturating_sub(left_len + right_len);
+    format!("{left}{}{}", " ".repeat(pad), right)
 }
 
 fn render_keybind_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
@@ -2633,13 +2889,64 @@ fn render_keybind_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     ));
 
     if area.height > 1 {
-        lines.push(Line::styled(
-            keybindings_text(app, area.width as usize),
-            theme::primary(),
-        ));
+        lines.push(keybindings_line(app, area.width as usize));
     }
 
     render_lines(frame, area, lines);
+}
+
+/// Render the bottom keybind row to match `design/mockups/_shared.jsx::footer`:
+///   `<key>` in accent, `<hint>` in muted, three-space separator between
+///   pairs.  Keys flow left-to-right and the row is truncated, with an
+///   actionable `help more` pointer if the full set won't fit.
+fn keybindings_line(app: &ShellApp, width: usize) -> Line<'static> {
+    const TAIL: &str = "help more";
+    // Reserve enough headroom so the `help more` overflow chip always fits
+    // (`   ` separator + the chip itself).
+    let reserve = 3 + TAIL.chars().count();
+    let bindings = keybindings(app);
+    let bindings_len = bindings.len();
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::raw(" "));
+    let mut used = 1usize;
+    let mut overflow = false;
+    let mut placed = 0usize;
+
+    for (i, (key, hint)) in bindings.into_iter().enumerate() {
+        let pair = format!("{key} {hint}");
+        let sep = if placed == 0 { 0 } else { 3 };
+        let need = sep + pair.chars().count();
+        // Last binding doesn't need to leave room for the tail chip — there
+        // is nothing left to point at.
+        let cap = if i + 1 == bindings_len {
+            width.saturating_sub(1)
+        } else {
+            width.saturating_sub(reserve + 1)
+        };
+        if used + need > cap && placed > 0 {
+            overflow = true;
+            break;
+        }
+        if placed > 0 {
+            spans.push(Span::raw("   "));
+            used += 3;
+        }
+        spans.push(Span::styled(key.to_string(), theme::accent()));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(hint.to_string(), theme::muted()));
+        used += pair.chars().count();
+        placed += 1;
+    }
+
+    if overflow {
+        spans.push(Span::raw("   "));
+        spans.push(Span::styled("help".to_string(), theme::accent()));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled("more".to_string(), theme::muted()));
+    }
+
+    Line::from(spans)
 }
 
 fn render_transcript(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
@@ -2667,9 +2974,14 @@ fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     };
     let segments = prompt_segments(&prompt, &app.input, app.cursor, area.width as usize, " ");
     let line = Line::from(vec![
-        Span::styled(segments.prompt, theme::label()),
+        // Prompt prefix in c-muted per `design/mockups/_shared.jsx::footer`
+        // (`<span className="c-muted">{promptText}</span>`). The Ratatui
+        // shell was using c-label (bold blue) which fought with the cursor
+        // block for attention; the mockup intentionally lets the cursor be
+        // the focal point and keeps the static prefix dim.
+        Span::styled(segments.prompt, theme::muted()),
         Span::raw(segments.before_cursor),
-        Span::styled(segments.cursor_text, theme::selection()),
+        Span::styled(segments.cursor_text, theme::cursor_block()),
         Span::raw(segments.after_cursor),
     ]);
     frame.render_widget(Paragraph::new(line), area);
@@ -2681,44 +2993,106 @@ fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         .as_ref()
         .map(|path| compact_target_path(&path.display().to_string()))
         .unwrap_or_else(|| "none".to_string());
-    // Top header "module" segment mirrors the bottom status's view label so
-    // operators see the same word in both. Previously "module catalog" /
-    // "module agent" mismatched the bottom strip and read like tautologies
-    // ("agent" isn't a module, the catalog is the screen they're already on).
-    let module = view_status_segment(app);
-    let ctx = if app.context_view.exists {
-        "✓ present"
-    } else {
-        "missing"
-    };
+    let view = view_status_segment(app);
     let model = app.config.model.as_deref().unwrap_or("unconfigured");
-    let mut segments = vec![
-        routing_mode_segment(app),
-        format!("target {target}"),
+    let cost_visible = app.session_cost_usd > 0.0;
+    let cost_text = format_session_cost(app.session_cost_usd);
+
+    // Build the strip as styled spans matching `design/mockups/_shared.jsx::statusStrip`:
+    //   ` KUZUSHI  mode <m>  target <path>  findings <n>  ctx <s>  view <v>  model <m>`
+    // - heading: bold white
+    // - segment label: muted
+    // - segment value: primary
+    // - `✓` ctx checkmark when context snapshot exists: success
+    // - view segment mirrors the bottom status view label from `view_status_segment`
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled("KUZUSHI", theme::heading()));
+    spans.push(Span::raw("  "));
+
+    let push_segment =
+        |spans: &mut Vec<Span<'static>>, label: &'static str, value: String, style: Style| {
+            spans.push(Span::styled(format!("{label} "), theme::muted()));
+            spans.push(Span::styled(value, style));
+            spans.push(Span::raw("  "));
+        };
+
+    let mode_segment = routing_mode_segment(app);
+    let mode = mode_segment
+        .strip_prefix("mode:")
+        .unwrap_or(&mode_segment)
+        .to_string();
+    push_segment(&mut spans, "mode", mode, theme::accent());
+
+    // target
+    push_segment(&mut spans, "target", target.clone(), theme::primary());
+
+    // findings
+    push_segment(
+        &mut spans,
+        "findings",
         findings_count_summary(&app.findings),
-        format!("ctx {ctx}"),
-        format!("view {module}"),
-        format!("model {model}"),
-    ];
-    // Only show cost once a tool has actually charged for something.
-    // `cost $0.0000` at startup eats ~13 cells for no information and
-    // pushes `model unconfigured` off the right edge of 120-col terminals.
-    if app.session_cost_usd > 0.0 {
-        segments.push(format!(
-            "cost {}",
-            format_session_cost(app.session_cost_usd)
-        ));
-    }
-    let rest = fit(
-        &join_segments(&segments),
-        area.width.saturating_sub(9) as usize,
+        theme::primary(),
     );
 
-    vec![Line::from(vec![
-        Span::styled("KUZUSHI", theme::heading()),
-        Span::raw("  "),
-        Span::styled(rest, theme::primary()),
-    ])]
+    // ctx
+    spans.push(Span::styled("ctx ", theme::muted()));
+    if app.context_view.exists {
+        spans.push(Span::styled("✓ ", theme::success()));
+        spans.push(Span::styled("present", theme::primary()));
+    } else {
+        spans.push(Span::styled("missing", theme::warn()));
+    }
+    spans.push(Span::raw("  "));
+
+    // view
+    push_segment(&mut spans, "view", view.clone(), theme::accent());
+
+    // model
+    push_segment(&mut spans, "model", model.to_string(), theme::primary());
+
+    if cost_visible {
+        spans.push(Span::styled("cost ", theme::muted()));
+        spans.push(Span::styled(cost_text, theme::primary()));
+    } else if matches!(spans.last(), Some(span) if span.content == "  ") {
+        spans.pop();
+    }
+
+    // Width safety: if the multi-span row would exceed the available width,
+    // fall back to a single fitted line so right-edge segments don't drop
+    // silently off-screen on narrow terminals.
+    let total_chars: usize = spans.iter().map(|span| span.content.chars().count()).sum();
+    if total_chars + 1 > area.width as usize {
+        let mut compact = vec![
+            routing_mode_segment(app),
+            format!("target {target}"),
+            findings_count_summary(&app.findings),
+        ];
+        if app.context_view.exists {
+            compact.push("ctx ✓ present".to_string());
+        } else {
+            compact.push("ctx missing".to_string());
+        }
+        compact.push(format!("view {view}"));
+        compact.push(format!("model {model}"));
+        if cost_visible {
+            compact.push(format!(
+                "cost {}",
+                format_session_cost(app.session_cost_usd)
+            ));
+        }
+        let rest = fit(
+            &join_segments(&compact),
+            area.width.saturating_sub(9) as usize,
+        );
+        return vec![Line::from(vec![
+            Span::styled("KUZUSHI", theme::heading()),
+            Span::raw("  "),
+            Span::styled(rest, theme::primary()),
+        ])];
+    }
+
+    vec![Line::from(spans)]
 }
 
 fn transcript_lines(app: &ShellApp, visible: usize) -> Vec<Line<'static>> {
@@ -2755,12 +3129,22 @@ fn transcript_line(prefix: &str, body: &str, continuation: bool) -> Line<'static
 }
 
 fn transcript_glyph(prefix: &str, continuation: bool) -> (&'static str, Style, bool) {
+    // Glyph + color mapping mirrors `design/mockups/_shared.jsx::logLine`:
+    //   in:    ●  c-accent     (operator input echo)
+    //   run:   ⏵  c-primary    (tool/module dispatch)
+    //   ok:    ✓  c-success    (success)
+    //   err:   ✗  c-danger     (failure)
+    //   agent: ◆  c-accent     (LLM message)
+    //   flow:  …  c-muted      (streaming/in-flight)
+    //   find:  ▸  c-warn       (finding)
+    //   log:   ·  c-subtle     (ambient/log)
     if continuation {
         return ("…", theme::muted(), false);
     }
     match prefix {
         ">" => ("●", theme::accent(), false),
-        "tool" | "scan" | "run" | "resume" | "pause" => ("⏵", theme::accent(), true),
+        "tool" | "scan" | "run" | "resume" | "pause" => ("⏵", theme::primary(), true),
+        "ok" | "success" | "done" => ("✓", theme::success(), true),
         "result" | "answer" | "agent" | "plan" | "threats" => ("◆", theme::accent(), true),
         "finding" | "open" | "title" | "triage" | "aliases" => ("▸", theme::warn(), true),
         "error" => ("✗", theme::danger(), true),
@@ -2780,31 +3164,6 @@ fn transcript_body_style(prefix: &str) -> Style {
         "result" | "answer" | "agent" => theme::primary(),
         _ => Style::default(),
     }
-}
-
-fn keybindings_text(app: &ShellApp, width: usize) -> String {
-    let bindings = keybindings(app);
-    let mut shown = Vec::new();
-    let mut overflow = false;
-    for (key, label) in bindings {
-        let next = format!("[{key}] {label}");
-        let candidate = if shown.is_empty() {
-            next.clone()
-        } else {
-            format!("{}  ·  {next}", shown.join("  ·  "))
-        };
-        if candidate.chars().count() > width.saturating_sub(8) && !shown.is_empty() {
-            overflow = true;
-            break;
-        }
-        shown.push(next);
-    }
-    // Replace the silent `+more` with an actionable pointer so an operator
-    // on a 50-column terminal knows the rest of the keys live in `help`.
-    if overflow {
-        shown.push("[help] more".to_string());
-    }
-    fit(&shown.join("  ·  "), width)
 }
 
 fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
@@ -2936,9 +3295,14 @@ fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
             ("back", "home"),
         ],
         ShellView::Help => vec![
+            // Mirrors `design/mockups/help.jsx` keybinds: highlight the
+            // shell verbs that are always available so the help screen
+            // doubles as a discovery surface.
+            ("?<text>", "agent chat"),
+            ("Tab", "complete"),
+            ("Ctrl+R", "search history"),
             ("PgUp/PgDn", "scroll"),
-            ("back", "home"),
-            ("Ctrl+C", "exit"),
+            ("back", "catalog"),
         ],
         ShellView::Tools => vec![
             ("PgUp/PgDn", "scroll"),
@@ -2976,9 +3340,22 @@ fn render_lines(frame: &mut Frame<'_>, area: Rect, lines: Vec<Line<'static>>) {
 }
 
 fn detail(key: &str, value: &str) -> Line<'static> {
+    // Mockup `kv(key, val, …)` from `design/mockups/config.jsx` /
+    // `workspace.jsx` puts the key in c-muted and the value in c-primary
+    // (and pads the key to a fixed column for alignment). The Ratatui
+    // `detail` was emitting a label-color (bold blue) key + default-style
+    // value, which read as a section header rather than a kv row. Use
+    // muted+primary so detail rows blend into the mockup's denser feel.
+    let key_pad = 18usize;
+    let key_padded = if key.chars().count() >= key_pad {
+        format!("{key} ")
+    } else {
+        let pad_chars = key_pad - key.chars().count();
+        format!("{key}{}", " ".repeat(pad_chars + 1))
+    };
     Line::from(vec![
-        Span::styled(format!("{key} "), theme::label()),
-        Span::raw(value.to_string()),
+        Span::styled(key_padded, theme::muted()),
+        Span::styled(value.to_string(), theme::primary()),
     ])
 }
 
@@ -2991,15 +3368,38 @@ fn join_or_dash(values: &[String]) -> String {
 }
 
 fn divider(title: &str, width: u16) -> Line<'static> {
+    // `design/mockups/_shared.jsx::sectionHeader` lays the rule out
+    // left-aligned: ` ── LABEL ────...────`. The TUI used to center the
+    // label between two rules, which read as a heavy decorative bar that
+    // didn't match the lightweight muscle-memory feel of the mockups.
     let safe_width = width.max(8) as usize;
-    let title = format!(" {title} ");
-    let remaining = safe_width.saturating_sub(title.chars().count());
-    let left = remaining / 2;
-    let right = remaining.saturating_sub(left);
+    let lead = "── ";
+    let label = format!("{title} ");
+    let used = 1 + lead.chars().count() + label.chars().count();
+    let fill = safe_width.saturating_sub(used).max(1);
     Line::from(vec![
-        Span::styled(theme::RULE_CHAR.repeat(left), theme::subtle()),
-        Span::styled(title, theme::muted()),
-        Span::styled(theme::RULE_CHAR.repeat(right), theme::subtle()),
+        Span::raw(" "),
+        Span::styled(lead.to_string(), theme::subtle()),
+        Span::styled(label, theme::label()),
+        Span::styled(theme::RULE_CHAR.repeat(fill), theme::subtle()),
+    ])
+}
+
+/// Catalog category divider that embeds the section blurb on the rule line:
+///   `── OFFENSE find vulnerabilities by … ──────────`
+/// Mirrors `catHead` in `design/mockups/catalog.jsx`.
+fn category_divider(name: &str, blurb: &str, width: u16) -> Line<'static> {
+    let safe_width = width.max(8) as usize;
+    let lead = "── ";
+    let label = format!("{name} ");
+    let blurb_text = format!("{blurb} ");
+    let used = lead.chars().count() + label.chars().count() + blurb_text.chars().count();
+    let fill = safe_width.saturating_sub(used).max(1);
+    Line::from(vec![
+        Span::styled(lead.to_string(), theme::subtle()),
+        Span::styled(label, theme::label()),
+        Span::styled(blurb_text, theme::muted()),
+        Span::styled(theme::RULE_CHAR.repeat(fill), theme::subtle()),
     ])
 }
 
@@ -3012,19 +3412,27 @@ fn module_table_widths(width: u16) -> Vec<usize> {
 }
 
 fn table_header(values: &[&str], widths: &[usize]) -> Line<'static> {
-    Line::styled(table_text(values, widths), theme::subtle())
+    // Mockup column headers wear `c-label` (bold blue), see e.g.
+    // `design/mockups/findings.jsx::heads` and `tools.jsx::heads`.
+    Line::styled(table_text(values, widths), theme::label())
 }
 
 fn table_row(values: &[&str], widths: &[usize]) -> Line<'static> {
+    // Same colour split as `aligned_row` so help/options/findings tables
+    // share the mockup tint:
+    //   col 0 → c-accent (identifier), middle → c-primary, last → c-muted
     let mut spans = Vec::new();
+    let last = values.len().saturating_sub(1);
     for (index, value) in values.iter().enumerate() {
         if index > 0 {
             spans.push(Span::raw("  "));
         }
         let style = if index == 0 {
             theme::accent()
+        } else if values.len() > 2 && index == last {
+            theme::muted()
         } else {
-            Style::default()
+            theme::primary()
         };
         spans.push(Span::styled(
             pad(value, widths.get(index).copied().unwrap_or(12)),
@@ -3066,13 +3474,22 @@ fn aligned_header(values: &[&str], widths: &[usize]) -> Line<'static> {
             .iter()
             .zip(widths.iter())
             .map(|(value, width)| {
-                Span::styled(format!("{}  ", pad(value, *width)), theme::subtle())
+                // c-label header per `design/mockups/_shared.jsx` headers.
+                Span::styled(format!("{}  ", pad(value, *width)), theme::label())
             })
             .collect::<Vec<_>>(),
     )
 }
 
 fn aligned_row(values: &[String], widths: &[usize]) -> Line<'static> {
+    // Mockup table rows (`design/mockups/tools.jsx`, `modules.jsx`,
+    // `cost.jsx`, etc.) consistently put the first column (the
+    // identifier) in c-accent, with subsequent value columns in
+    // c-primary and metadata columns (last when present) in c-muted.
+    // The Ratatui `aligned_row` was leaving columns 1+ in
+    // `Style::default()`, which renders as terminal default white —
+    // visibly distinct from the mockup's softer c-primary tint.
+    let last = values.len().saturating_sub(1);
     Line::from(
         values
             .iter()
@@ -3081,8 +3498,10 @@ fn aligned_row(values: &[String], widths: &[usize]) -> Line<'static> {
             .map(|(index, (value, width))| {
                 let style = if index == 0 {
                     theme::accent()
+                } else if values.len() > 2 && index == last {
+                    theme::muted()
                 } else {
-                    Style::default()
+                    theme::primary()
                 };
                 Span::styled(format!("{}  ", pad(&fit(value, *width), *width)), style)
             })
@@ -3138,6 +3557,56 @@ fn styled(value: &str, style: Style) -> Line<'static> {
     Line::styled(value.to_string(), style)
 }
 
+/// Inline keybind hint matching `keybindings_line` shape:
+///
+///   ` <key> <hint>   <key> <hint>   …`
+///   accent  muted    accent  muted
+///                 · 3-space separator
+///
+/// Used for in-panel keybind footers (prompts editor, actor detail,
+/// etc.) where a full `render_keybind_footer` rule isn't appropriate
+/// but the operator still needs the local key reference.
+fn keybind_hint_line(pairs: &[(&str, &str)]) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = vec![Span::raw(" ")];
+    for (i, (key, hint)) in pairs.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw("   "));
+        }
+        spans.push(Span::styled((*key).to_string(), theme::accent()));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled((*hint).to_string(), theme::muted()));
+    }
+    Line::from(spans)
+}
+
+/// Render a "next-action" hint line as accent-tinted commands separated
+/// by subtle middots, matching how `design/mockups/_shared.jsx`
+/// next-action lines are typically painted (e.g. CTA rows in
+/// `empty-states.jsx`, `auth.jsx`, `workspace.jsx`):
+///
+///   `kb [module] · attach <path> · detach <id>`
+///   ───────────   ─────────────   ──────────────
+///   accent        accent          accent
+///         · subtle separators
+fn command_list_line(commands: &[&str], width: usize) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut used = 0usize;
+    for (i, cmd) in commands.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" · ".to_string(), theme::subtle()));
+            used += 3;
+        }
+        let cmd_chars = cmd.chars().count();
+        if used + cmd_chars > width {
+            spans.push(Span::styled("…".to_string(), theme::subtle()));
+            break;
+        }
+        spans.push(Span::styled((*cmd).to_string(), theme::accent()));
+        used += cmd_chars;
+    }
+    Line::from(spans)
+}
+
 fn indent(line: Line<'static>, spaces: usize) -> Line<'static> {
     let mut spans = vec![Span::raw(" ".repeat(spaces))];
     spans.extend(line.spans);
@@ -3146,10 +3615,45 @@ fn indent(line: Line<'static>, spaces: usize) -> Line<'static> {
 
 fn next_action_line(text: &str, width: usize) -> Line<'static> {
     let available = width.saturating_sub(8);
-    Line::from(vec![
-        Span::styled("▸ NEXT ", theme::warn()),
-        Span::styled(fit(text, available), theme::primary()),
-    ])
+    let fitted = fit(text, available);
+    // Mirror the mockup's c-warn / c-primary / c-accent / c-muted split for
+    // the catalog NEXT line (see `design/mockups/catalog.jsx`):
+    //   ▸ NEXT  Run sast:scan against ~/work/acme-checkout — never run …
+    //   ----    --- --------- ----------------------------- -------------
+    //   warn    pri accent    primary                       muted
+    // Tool name accent: detect a `Run <tool> ` prefix and split off the
+    // identifier so an operator's eye lands on the actual command they're
+    // about to dispatch.  Em-dash split: any ambient context after ` — `
+    // (run history, finding count) reads softer than the imperative.
+    let mut spans: Vec<Span<'static>> = vec![Span::styled("▸ NEXT ", theme::warn())];
+
+    // Split at em-dash first so the muted suffix is always its own span.
+    let (head, tail_with_dash) = match fitted.find(" — ") {
+        Some(idx) => (&fitted[..idx], Some(&fitted[idx..])),
+        None => (fitted.as_str(), None),
+    };
+
+    // Within the imperative head, detect `Run <tool> ` and accent the tool.
+    if let Some(rest) = head.strip_prefix("Run ") {
+        if let Some(space_idx) = rest.find(' ') {
+            let tool = &rest[..space_idx];
+            let after = &rest[space_idx..];
+            spans.push(Span::styled("Run ".to_string(), theme::primary()));
+            spans.push(Span::styled(tool.to_string(), theme::accent()));
+            spans.push(Span::styled(after.to_string(), theme::primary()));
+        } else {
+            // `Run <single-word>` with no trailing context — accent it all.
+            spans.push(Span::styled("Run ".to_string(), theme::primary()));
+            spans.push(Span::styled(rest.to_string(), theme::accent()));
+        }
+    } else {
+        spans.push(Span::styled(head.to_string(), theme::primary()));
+    }
+
+    if let Some(tail) = tail_with_dash {
+        spans.push(Span::styled(tail.to_string(), theme::muted()));
+    }
+    Line::from(spans)
 }
 
 /// Context-aware NEXT hint for the catalog view. Picks the most relevant
@@ -3185,6 +3689,8 @@ fn catalog_next_hint(app: &ShellApp) -> String {
 pub(crate) enum ProgressKind {
     Done,
     Active,
+    Queued,
+    #[allow(dead_code)]
     Failing,
 }
 
@@ -3193,12 +3699,24 @@ impl ProgressKind {
         match self {
             ProgressKind::Done => theme::success(),
             ProgressKind::Active => theme::warn(),
+            // Queued bars stay subtle in the mockup
+            // (`design/mockups/sast-running.jsx::bar` passes c-subtle for
+            // the "queued" status); `Failing` should be reserved for true
+            // errors so a deferred task isn't painted danger-red.
+            ProgressKind::Queued => theme::subtle(),
             ProgressKind::Failing => theme::danger(),
         }
     }
 
     fn status_style(self) -> Style {
-        self.fill_style()
+        match self {
+            ProgressKind::Done => theme::success(),
+            ProgressKind::Active => theme::warn(),
+            // Pre-flight queued status reads better in muted than subtle —
+            // `c-subtle` empty cells need a slightly stronger label.
+            ProgressKind::Queued => theme::muted(),
+            ProgressKind::Failing => theme::danger(),
+        }
     }
 }
 
@@ -3239,15 +3757,25 @@ fn progress_bar_line(
 }
 
 /// Section header matching `design/mockups/_shared.jsx::sectionHeader()`:
-/// uppercase bold heading on the left, subtle dash filler on the right.
+///
+///   ` ── LABEL ──────────────────...─`
+///
+/// Same shape as `divider` so every section title in the shell reads as
+/// one consistent rule.  Kept as a separate function (rather than calling
+/// `divider`) so the 12+ call sites don't all churn — if the two ever
+/// diverge again the design intent stays explicit at each site.  Auto-
+/// uppercases the label to mirror the prior heading-style convention.
 fn section_header_line(label: &str, width: u16) -> Line<'static> {
-    let text = label.to_uppercase();
-    let total = width as usize;
-    let used = text.chars().count() + 2;
-    let dashes = total.saturating_sub(used).max(2);
+    let safe_width = width.max(8) as usize;
+    let lead = "── ";
+    let label_text = format!("{} ", label.to_uppercase());
+    let used = 1 + lead.chars().count() + label_text.chars().count();
+    let fill = safe_width.saturating_sub(used).max(1);
     Line::from(vec![
-        Span::styled(format!("{text}  "), theme::heading()),
-        Span::styled("─".repeat(dashes), theme::subtle()),
+        Span::raw(" "),
+        Span::styled(lead.to_string(), theme::subtle()),
+        Span::styled(label_text, theme::label()),
+        Span::styled(theme::RULE_CHAR.repeat(fill), theme::subtle()),
     ])
 }
 
@@ -3801,11 +4329,23 @@ fn module_playbook_lines(module_id: &str, width: u16) -> Vec<Line<'static>> {
         ),
     };
     lines.push(transcript_line("tool", &fit(run, width as usize), false));
-    lines.push(transcript_line(
-        "help",
-        &fit(inspect, width as usize),
-        false,
-    ));
+    // The `help` line is a `cmd · cmd · cmd` list — accent each command
+    // and tint separators subtle, matching `command_list_line`.  Keep
+    // the leading ` · ` glyph + `help ` label so the prefix still scans
+    // as transcript context (the divider above is `── NEXT ──`, the row
+    // is "help  <commands>").
+    let commands: Vec<&str> = inspect.split(" · ").collect();
+    let mut spans: Vec<Span<'static>> = vec![
+        Span::styled(" · ", theme::muted()),
+        Span::styled("help ", theme::subtle()),
+    ];
+    for (i, cmd) in commands.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" · ", theme::subtle()));
+        }
+        spans.push(Span::styled((*cmd).to_string(), theme::accent()));
+    }
+    lines.push(Line::from(spans));
     lines
 }
 
@@ -3989,27 +4529,6 @@ fn join_segments(values: &[String]) -> String {
         .cloned()
         .collect::<Vec<_>>()
         .join(theme::STATUS_SEPARATOR)
-}
-
-fn justify(left: String, right: String, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    let left = fit(&left, width);
-    if right.is_empty() {
-        return left;
-    }
-    let right = fit(&right, width);
-    let left_len = left.chars().count();
-    let right_len = right.chars().count();
-    if left_len + right_len + 1 >= width {
-        return fit(&format!("{left} {}", right), width);
-    }
-    format!(
-        "{left}{}{}",
-        " ".repeat(width - left_len - right_len),
-        right
-    )
 }
 
 fn compact_target_path(value: &str) -> String {
@@ -4349,8 +4868,11 @@ mod tests {
         assert!(rendered.contains("KUZUSHI · CATALOG"));
         assert!(rendered.contains("modules"));
         assert!(rendered.contains("kuzushi>"));
-        assert!(rendered.contains("[Tab] complete"));
-        assert!(rendered.contains("[modules]"));
+        assert!(rendered.contains("Tab complete"));
+        // The keybind footer now matches `design/mockups/_shared.jsx::footer`,
+        // which renders unbracketed pairs. The `modules` keybind (Ratatui
+        // catalog default) is still in the row — just without `[ ]` chrome.
+        assert!(rendered.contains("modules browse"));
         assert!(!rendered.contains("command log"));
         assert!(!rendered.contains("┌"));
         assert!(!rendered.contains("v2"));
@@ -4644,7 +5166,11 @@ mod tests {
 
         assert!(rendered.contains("82 findings"));
         assert!(rendered.contains("semgrep"));
-        assert!(rendered.contains("description"));
+        // Category divider embeds the section blurb on the rule line — see
+        // `category_divider` and `design/mockups/catalog.jsx::catHead`. Narrow
+        // terminals truncate, so assert on the shortest blurb word that
+        // survives an 58-col render: "OFFENSE" itself.
+        assert!(rendered.contains("OFFENSE"));
         assert!(!rendered.contains("module context-lite"));
         assert!(!rendered.contains("command log"));
     }
@@ -5449,6 +5975,73 @@ mod tests {
     }
 
     #[test]
+    fn workspace_view_renders_findings_rollup_bar_when_findings_exist() {
+        // Mockup parity: `design/mockups/workspace.jsx::rollupBar`. With
+        // persisted findings, the workspace view shows a 28-cell severity
+        // rollup bar per category so the operator sees the distribution
+        // shape at a glance.
+        let backend = TestBackend::new(120, 36);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.workspace_view = crate::app::WorkspaceView {
+            root: Some(std::path::PathBuf::from("/tmp/kuzushi-demo")),
+            state_dir: None,
+            findings_db: None,
+            findings_count: Some(38),
+            last_export: None,
+            status: "workspace ready".to_string(),
+        };
+        app.findings = (0..38)
+            .map(|index| {
+                let sev = match index % 4 {
+                    0 => Severity::Critical,
+                    1 => Severity::High,
+                    2 => Severity::Medium,
+                    _ => Severity::Low,
+                };
+                Finding::new_semgrep(
+                    format!("rule.{index}"),
+                    "src/x.rs",
+                    index + 1,
+                    None,
+                    sev,
+                    "demo",
+                )
+            })
+            .collect();
+        app.shell_view = ShellView::Workspace;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains("FINDINGS ROLLUP"),
+            "missing rollup divider: {rendered}"
+        );
+        assert!(rendered.contains("CRITICAL"));
+        assert!(rendered.contains("HIGH"));
+        assert!(rendered.contains("MEDIUM"));
+        assert!(rendered.contains("LOW"));
+        assert!(rendered.contains("█"));
+        assert!(rendered.contains("░"));
+        assert!(rendered.contains("/38"));
+    }
+
+    #[test]
+    fn workspace_view_skips_rollup_when_no_findings() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Workspace;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        // No findings → no FINDINGS ROLLUP section (no empty bars to show).
+        assert!(!rendered.contains("FINDINGS ROLLUP"));
+    }
+
+    #[test]
     fn plain_options_table_has_no_ansi_or_box_drawing() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.option_store.set_value(
@@ -5682,7 +6275,11 @@ mod tests {
             );
         }
 
-        assert!(rendered.contains("aliases / examples"));
+        // Per `design/mockups/help.jsx`, sections embed their blurb on the
+        // category divider rule line — no separate `aliases / examples` table
+        // header.  The featured-example + per-category alias assertions
+        // above already prove the alias/example text reaches the buffer.
+        assert!(rendered.contains("browse modules and tools"));
         assert!(!rendered.contains("TypeScript"));
         assert!(!rendered.contains("Ink"));
     }
@@ -5695,7 +6292,7 @@ mod tests {
         let rendered = render_plain_app(&app, 80);
 
         assert!(rendered.contains("HELP"));
-        assert!(rendered.contains("aliases / examples"));
+        assert!(rendered.contains("browse modules and tools"));
         for example in shell_help_examples() {
             assert!(
                 rendered.contains(example),
@@ -5734,7 +6331,7 @@ mod tests {
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let last_page = format!("{:?}", terminal.backend().buffer());
         assert!(last_page.contains("SESSION"));
-        assert!(last_page.contains("[PgUp/PgDn] scroll"), "{last_page}");
+        assert!(last_page.contains("PgUp/PgDn scroll"), "{last_page}");
         assert!(!last_page.contains("┌"));
     }
 
@@ -5754,7 +6351,7 @@ mod tests {
             rendered.contains(&last_tool),
             "missing last tool {last_tool}"
         );
-        assert!(rendered.contains("[PgUp/PgDn] scroll"));
+        assert!(rendered.contains("PgUp/PgDn scroll"));
         assert!(!rendered.contains("┌"));
     }
 
@@ -5783,7 +6380,7 @@ mod tests {
             rendered.contains(&last_defense_module),
             "missing last module {last_defense_module}"
         );
-        assert!(rendered.contains("[PgUp/PgDn] scroll"));
+        assert!(rendered.contains("PgUp/PgDn scroll"));
         assert!(!rendered.contains("┌"));
     }
 
@@ -5815,9 +6412,9 @@ mod tests {
         assert!(rendered.contains("F-0030"));
         assert!(rendered.contains("title-29"));
         assert!(!rendered.contains("F-0001"));
-        assert!(rendered.contains("[j/k/g/G] move"));
-        assert!(rendered.contains("[PgUp/PgDn] page"));
-        assert!(rendered.contains("[Enter] open"));
+        assert!(rendered.contains("j/k/g/G move"));
+        assert!(rendered.contains("PgUp/PgDn page"));
+        assert!(rendered.contains("Enter open"));
         assert!(!rendered.contains("┌"));
     }
 
@@ -5839,9 +6436,9 @@ mod tests {
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
 
-        assert!(rendered.contains("[j/k/g/G] move"));
-        assert!(rendered.contains("[PgUp/PgDn] page"));
-        assert!(rendered.contains("[Enter] open"));
+        assert!(rendered.contains("j/k/g/G move"));
+        assert!(rendered.contains("PgUp/PgDn page"));
+        assert!(rendered.contains("Enter open"));
         assert!(!rendered.contains("[open <id>]"));
     }
 
@@ -5865,8 +6462,8 @@ mod tests {
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let running = format!("{:?}", terminal.backend().buffer());
-        assert!(running.contains("[1..4] actor"));
-        assert!(running.contains("[p] pause"));
+        assert!(running.contains("1..4 actor"));
+        assert!(running.contains("p pause"));
         assert!(!running.contains("[actor 1]"));
 
         cancel.pause();
@@ -5875,9 +6472,11 @@ mod tests {
         }
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let paused = format!("{:?}", terminal.backend().buffer());
-        assert!(paused.contains("[1..4] actor"));
-        assert!(paused.contains("[r] resume"));
-        assert!(!paused.contains("[p] pause"));
+        assert!(paused.contains("1..4 actor"));
+        assert!(paused.contains("r resume"));
+        // The unbracketed pause hint is gone too (sanity: keybind list flips
+        // pause→resume on pause).
+        assert!(!paused.contains("p pause"));
     }
 
     #[test]
@@ -6107,7 +6706,7 @@ mod tests {
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
         assert!(
-            rendered.contains("[help] more"),
+            rendered.contains("help more"),
             "narrow keybind footer must point at help: {rendered}"
         );
         assert!(
@@ -6271,11 +6870,326 @@ mod tests {
 
     #[test]
     fn section_header_uppercases_and_pads_dashes() {
+        // Per `design/mockups/_shared.jsx::sectionHeader`, the header lays
+        // out as ` ── LABEL ──...─` (leading space, subtle rule, label,
+        // subtle fill).  Uppercasing the label is preserved so e.g.
+        // `findings · 11 triaged` still reads as `FINDINGS · 11 TRIAGED`.
         let line = section_header_line("findings · 11 triaged", 60);
         let text = line_text(&line);
-        assert!(text.starts_with("FINDINGS · 11 TRIAGED"));
+        assert!(text.starts_with(" ── FINDINGS · 11 TRIAGED "));
         assert!(text.ends_with("─"));
         assert_eq!(text.chars().count(), 60);
+    }
+
+    #[test]
+    fn next_action_line_splits_run_tool_into_warn_primary_accent_muted() {
+        // `design/mockups/catalog.jsx` paints the catalog NEXT line in four
+        // colors: c-warn glyph, c-primary verb, c-accent tool name,
+        // c-primary continuation, c-muted ambient suffix after ` — `.
+        let line = next_action_line(
+            "Run sast:scan against ~/work/acme-checkout — never run here, 0 findings on record",
+            120,
+        );
+
+        // Verify the textual ordering by colour bucket — collect span
+        // contents grouped by foreground style so the test fails loudly
+        // if a future refactor flattens them back into one primary span.
+        let mut buckets: Vec<(String, String)> = Vec::new();
+        for span in &line.spans {
+            let role = if span.style == theme::warn() {
+                "warn"
+            } else if span.style == theme::accent() {
+                "accent"
+            } else if span.style == theme::muted() {
+                "muted"
+            } else if span.style == theme::primary() {
+                "primary"
+            } else {
+                "other"
+            };
+            buckets.push((role.to_string(), span.content.to_string()));
+        }
+
+        // Glyph + tool name + ambient suffix all show up in the right roles.
+        assert!(
+            buckets
+                .iter()
+                .any(|(role, text)| role == "warn" && text.contains("▸ NEXT")),
+            "warn glyph missing: {buckets:?}"
+        );
+        assert!(
+            buckets
+                .iter()
+                .any(|(role, text)| role == "accent" && text == "sast:scan"),
+            "accent tool name missing: {buckets:?}"
+        );
+        assert!(
+            buckets
+                .iter()
+                .any(|(role, text)| role == "muted" && text.contains("never run here")),
+            "muted suffix missing: {buckets:?}"
+        );
+    }
+
+    #[test]
+    fn plan_card_keybind_row_drops_bracket_chrome() {
+        // The plan-card keybind row used to advertise `[j/k] move
+        // [space] toggle [y] apply active [n] discard`. The mockups and
+        // the rest of the shell use unbracketed `<key> <hint>` pairs
+        // (see `keybindings_line` + `design/mockups/plan.jsx`).  Verify
+        // the new spans reach the buffer without `[ ]` chrome.
+        use crate::app::{PlanChange, PlanProposal};
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.pending_plan = Some(PlanProposal {
+            goal: "demo".to_string(),
+            summary: "demo summary".to_string(),
+            changes: vec![PlanChange::Note {
+                text: "stub change".to_string(),
+            }],
+            unsupported: vec![],
+        });
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("PLAN"));
+        assert!(rendered.contains("j/k move"));
+        assert!(rendered.contains("space toggle"));
+        assert!(rendered.contains("y apply active"));
+        assert!(rendered.contains("n discard"));
+        assert!(!rendered.contains("[j/k]"), "stale bracket: {rendered}");
+        assert!(!rendered.contains("[space]"), "stale bracket: {rendered}");
+        assert!(!rendered.contains("[y]"), "stale bracket: {rendered}");
+        assert!(!rendered.contains("[n]"), "stale bracket: {rendered}");
+    }
+
+    #[test]
+    fn command_list_line_accents_each_command_with_subtle_separators() {
+        // `command_list_line` builds the inline next-action hint that
+        // appears at the bottom of many views (workspace, agent-chat,
+        // history, kb).  The mockup paints commands in c-accent and
+        // the ` · ` separator in c-subtle.
+        let line = command_list_line(&["scan .", "findings", "back"], 120);
+        let mut accent_chunks = 0usize;
+        let mut subtle_chunks = 0usize;
+        for span in &line.spans {
+            if span.style == theme::accent() {
+                accent_chunks += 1;
+            } else if span.style == theme::subtle() {
+                subtle_chunks += 1;
+            }
+        }
+        assert_eq!(accent_chunks, 3, "expected 3 accent commands");
+        assert_eq!(subtle_chunks, 2, "expected 2 subtle middot separators");
+    }
+
+    #[test]
+    fn command_list_line_truncates_with_ellipsis_when_width_runs_out() {
+        // Narrow width should drop trailing commands behind a subtle `…`
+        // rather than overflow the row.
+        let line = command_list_line(&["aaaaaaaa", "bbbbbbbb", "cccccccc"], 12);
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("…"), "missing ellipsis: {text}");
+    }
+
+    #[test]
+    fn runs_view_tints_status_column_per_mockup() {
+        // `design/mockups/runs.jsx::r` paints the status cell with a
+        // status-aware colour (complete → c-success, paused → c-warn,
+        // failed → c-danger).  The Ratatui runs view used to leave
+        // that column in default style.  Verify `runs_lines` puts the
+        // success tint on a non-erroring scan and keeps the run-id
+        // accent.
+        let backend = TestBackend::new(120, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.scan = Some(crate::app::ScanPanelState {
+            run_id: Some("r-08e1aa".to_string()),
+            target: std::path::PathBuf::from("/tmp/demo"),
+            stage: "complete".to_string(),
+            findings_count: 11,
+            running: false,
+            abort_requested: false,
+            error: None,
+        });
+        app.shell_view = ShellView::Runs;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("RUNS"));
+        assert!(rendered.contains("r-08e1aa"));
+        assert!(rendered.contains("11"));
+        // Verify by inspecting the line spans directly so we know the
+        // status text is wearing the success style and the run id keeps
+        // its accent style.
+        let area = ratatui::layout::Rect::new(0, 0, 120, 22);
+        let lines = runs_lines(&app, area);
+        let row = lines
+            .iter()
+            .find(|line| line_text(line).contains("r-08e1aa"))
+            .expect("run row missing");
+        let mut saw_run_accent = false;
+        let mut saw_status_success = false;
+        for span in &row.spans {
+            if span.content.contains("r-08e1aa") && span.style == theme::accent() {
+                saw_run_accent = true;
+            }
+            if span.style == theme::success() {
+                saw_status_success = true;
+            }
+        }
+        assert!(saw_run_accent, "run id should be accent: {row:?}");
+        assert!(saw_status_success, "status should be success: {row:?}");
+    }
+
+    #[test]
+    fn transcript_finding_line_tints_severity_per_mockup() {
+        // `design/mockups/findings.jsx::findingRow` puts the severity in a
+        // severity-tinted span, the rule-id in c-accent, and the location
+        // in c-muted.  Verify `transcript_finding_line` builds the same
+        // four-color split (warn glyph, severity tint, accent rule-id,
+        // muted location).
+        let line = transcript_finding_line(Severity::Critical, "demo.rule", "src/x.rs", 142);
+        let mut roles: Vec<&str> = Vec::new();
+        for span in &line.spans {
+            roles.push(if span.style == theme::warn() {
+                "warn"
+            } else if span.style == theme::severity(Severity::Critical) {
+                "sev-critical"
+            } else if span.style == theme::accent() {
+                "accent"
+            } else if span.style == theme::muted() {
+                "muted"
+            } else {
+                "other"
+            });
+        }
+        assert!(roles.contains(&"warn"), "warn glyph missing: {roles:?}");
+        assert!(
+            roles.contains(&"sev-critical"),
+            "critical severity tint missing: {roles:?}"
+        );
+        assert!(
+            roles.contains(&"accent"),
+            "accent rule-id missing: {roles:?}"
+        );
+        assert!(
+            roles.contains(&"muted"),
+            "muted location missing: {roles:?}"
+        );
+    }
+
+    #[test]
+    fn throttle_banner_uses_chip_style_per_mockup() {
+        // `design/mockups/rate-limited.jsx` paints the throttle banner as
+        // ` RATE LIMIT  <source> · <message>` with a warn-tinted chip
+        // prefix and a muted message tail.  The Ratatui shell was emitting
+        // `⚠ rate limit · <source> · <message>` in one warn span — the
+        // chip-style prefix is what the operator's eye locks onto.
+        let backend = TestBackend::new(120, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory.throttle = Some(crate::app::ThrottleAdvisory {
+            source: "anthropic".to_string(),
+            message: "429 retry-after 14s".to_string(),
+            since: std::time::Instant::now(),
+        });
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("RATE LIMIT"));
+        assert!(rendered.contains("anthropic"));
+        assert!(rendered.contains("429 retry-after"));
+        assert!(
+            !rendered.contains("⚠ rate limit"),
+            "stale prose banner: {rendered}"
+        );
+    }
+
+    #[test]
+    fn cost_cap_halt_row_drops_bracket_chrome() {
+        // The cost-cap halt panel was the last place advertising bracketed
+        // key chrome (`[c] continue past cap   [a] abort scan`).  The
+        // mockups (e.g. `design/mockups/budget-stop.jsx`) use the same
+        // unbracketed `<key> <hint>   <key> <hint>` shape as the keybind
+        // footer.  Verify the panel renders the unbracketed form when the
+        // budget is halted.
+        let backend = TestBackend::new(80, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory.budget_halt = Some(crate::app::BudgetHalt {
+            limit_usd: 1.0,
+            spent_usd: 1.5,
+        });
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("COST CAP HALT"));
+        assert!(rendered.contains("continue past cap"));
+        assert!(rendered.contains("abort scan"));
+        assert!(
+            !rendered.contains("[c]"),
+            "stale bracket chrome: {rendered}"
+        );
+        assert!(
+            !rendered.contains("[a]"),
+            "stale bracket chrome: {rendered}"
+        );
+    }
+
+    #[test]
+    fn agent_chat_renders_role_tagged_bubbles() {
+        // `design/mockups/agent-chat.jsx::bubble` paints a tag header on
+        // each turn:  `  you  ──...──`  (c-accent) for the operator side,
+        // ` agent ──...──` (c-success) for the agent side.  Verify both
+        // tags reach the buffer when an agent question is in flight.
+        let backend = TestBackend::new(120, 26);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(
+            V2Config {
+                model: Some("openai:gpt-4.1".to_string()),
+                ..V2Config::default()
+            },
+            None,
+        );
+        app.agent_chat = Some(crate::app::AgentChatView {
+            question: "What should I run first?".to_string(),
+            answer: Some("Run sast:scan against the active target.".to_string()),
+            running: false,
+            abort_requested: false,
+            error: None,
+        });
+        app.shell_view = ShellView::AgentChat;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("you"), "missing operator tag: {rendered}");
+        assert!(rendered.contains("agent"), "missing agent tag: {rendered}");
+        assert!(rendered.contains("What should I run first?"));
+        assert!(rendered.contains("Run sast:scan against the active target."));
+    }
+
+    #[test]
+    fn next_action_line_falls_back_to_primary_when_no_run_or_em_dash() {
+        // Free-form NEXT hints (e.g. "Build the context snapshot with …")
+        // should still render as warn glyph + primary body — no tool-name
+        // accent, no muted suffix.
+        let line = next_action_line(
+            "Build the context snapshot with `context build` so SAST has structure to walk.",
+            120,
+        );
+        assert!(line
+            .spans
+            .iter()
+            .any(|s| s.style == theme::warn() && s.content.contains("▸ NEXT")));
+        assert!(!line.spans.iter().any(|s| s.style == theme::accent()));
+        assert!(!line.spans.iter().any(|s| s.style == theme::muted()));
     }
 
     #[test]

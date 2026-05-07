@@ -2,11 +2,11 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 45
 ---
-KUZUSHI  mode:shell | target none | 0 findings | ctx missing | view threats:dfd | model unconfigured
+ KUZUSHI  mode shell  target none  findings 0 findings  ctx missing  view threats:dfd  model unconfigured
 
 1 DFD  2 STRIDE  3 STORIES  4 SCOPE  5 SUMMARY
 
-DFD | ACME-CHECKOUT  ---------------------------------------------------------------------------------------------------
+ -- DFD | ACME-CHECKOUT ------------------------------------------------------------------------------------------------
      --------------         ---------------         ----------------
      -   user    -  https  -  api edge  -   sql   -   postgres   -
      -   browser - ------► -   nginx    - ------► -   primary db -

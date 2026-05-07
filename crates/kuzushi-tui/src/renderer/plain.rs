@@ -8,8 +8,8 @@ use crate::commands::{
 };
 
 use super::{
-    compact_target_path, findings_count_summary, fit, format_json_value, join_or_dash,
-    kb_artifact_widths, kb_attachment_widths, model_auth_status, option_description,
+    compact_target_path, findings_count_summary, fit, format_json_value, help_category_blurb,
+    join_or_dash, kb_artifact_widths, kb_attachment_widths, model_auth_status, option_description,
     option_table_widths, option_type_label, option_visible, options_filter_label,
     routing_mode_segment, sast_task_table_widths, shell_view_lines, table_text, wrap_text,
 };
@@ -249,8 +249,13 @@ fn plain_help_lines(app: &ShellApp, width: usize) -> Vec<String> {
 
     for category in ShellCommandCategory::ORDER {
         lines.push(String::new());
-        lines.push(category.label().to_string());
-        lines.push("command | aliases / examples | description".to_string());
+        // Mirror the `category_divider` from the Ratatui renderer in plain
+        // text: section name followed by the design-mockup blurb on one line.
+        lines.push(format!(
+            "{} — {}",
+            category.label(),
+            help_category_blurb(category)
+        ));
         for spec in shell_command_specs()
             .iter()
             .filter(|spec| spec.category == category)
@@ -562,12 +567,17 @@ fn plain_model_widths(width: usize) -> Vec<usize> {
 }
 
 fn plain_section_divider(title: &str, width: usize) -> String {
+    // Mirror the styled `divider` from renderer.rs in plain text:
+    //   ` ── TITLE ──────────────────...───`
+    // Per `design/mockups/_shared.jsx::sectionHeader`. Use ASCII hyphen
+    // for the rule so non-Unicode terminals/log scrapers don't choke on
+    // the box-drawing char.
     let safe_width = width.max(8);
-    let title = format!(" {title} ");
-    let remaining = safe_width.saturating_sub(title.chars().count());
-    let left = remaining / 2;
-    let right = remaining.saturating_sub(left);
-    format!("{}{}{}", "-".repeat(left), title, "-".repeat(right))
+    let lead = "-- ";
+    let label = format!("{title} ");
+    let used = 1 + lead.chars().count() + label.chars().count();
+    let fill = safe_width.saturating_sub(used).max(1);
+    format!(" {}{}{}", lead, label, "-".repeat(fill))
 }
 
 fn line_to_unstyled_text(line: Line<'static>) -> String {
