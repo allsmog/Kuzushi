@@ -2628,13 +2628,11 @@ fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         .as_ref()
         .map(|path| compact_target_path(&path.display().to_string()))
         .unwrap_or_else(|| "none".to_string());
-    let module = if matches!(app.shell_view, ShellView::AgentChat) {
-        "agent".to_string()
-    } else {
-        app.focused_module
-            .clone()
-            .unwrap_or_else(|| "catalog".to_string())
-    };
+    // Top header "module" segment mirrors the bottom status's view label so
+    // operators see the same word in both. Previously "module catalog" /
+    // "module agent" mismatched the bottom strip and read like tautologies
+    // ("agent" isn't a module, the catalog is the screen they're already on).
+    let module = view_status_segment(app);
     let ctx = if app.context_view.exists {
         "✓ present"
     } else {
@@ -2646,7 +2644,7 @@ fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         format!("target {target}"),
         findings_count_summary(&app.findings),
         format!("ctx {ctx}"),
-        format!("module {module}"),
+        format!("view {module}"),
         format!("model {model}"),
     ];
     // Only show cost once a tool has actually charged for something.
