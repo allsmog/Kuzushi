@@ -109,6 +109,24 @@ Status: continuing focused slices because `crates/kuzushi-core/src/modules.rs` r
   it remains the largest production Rust file after this PromptArmor slice.
 - Blockers or repo facts that contradicted this prompt: none.
 
+### UB-002 manual follow-up, iteration 6
+
+- Task attempted: extracted the Chrome RCE module descriptor and executor
+  helpers from `crates/kuzushi-core/src/modules.rs` into
+  `crates/kuzushi-core/src/modules/chrome_rce.rs`.
+- Files changed:
+  `crates/kuzushi-core/src/modules.rs`,
+  `crates/kuzushi-core/src/modules/chrome_rce.rs`, and this progress note.
+- Tests/checks run: `cargo fmt --all`;
+  `cargo test -p kuzushi-core modules::tests::dispatches_chrome_rce`;
+  `cargo check -p kuzushi-core`; `cargo test -p kuzushi-core modules`.
+- Result: gates passed; `chrome-rce:*` tool metadata, DAG registration,
+  deterministic scan behavior, git-diff review trigger behavior, and persisted
+  findings remain covered by the existing module tests.
+- Remaining work: continue decomposing `modules.rs` by cohesive module family;
+  it remains the largest production Rust file after this Chrome RCE slice.
+- Blockers or repo facts that contradicted this prompt: none.
+
 ### UB-003 automation gate
 
 - Task attempted: ran the Uncle Bob simplification loop for Extract Rust TUI App State Transitions.
