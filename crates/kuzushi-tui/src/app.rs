@@ -2214,7 +2214,7 @@ impl ShellApp {
         );
     }
 
-    fn clear_conversation(&mut self) {
+    pub(crate) fn clear_conversation(&mut self) {
         self.log.clear();
         self.selected_finding = None;
         self.agent_chat = None;
@@ -7843,6 +7843,28 @@ JSON
         // never see it; verify the typo path only fires on alias args.
         let message = unknown_command_message("findings random");
         assert!(message.contains("Free-form chat"));
+    }
+
+    #[test]
+    fn ctrl_l_clears_conversation_and_preserves_input() {
+        // Industry-standard muscle memory (bash/zsh): Ctrl+L clears the
+        // screen while keeping any partially typed command intact.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.log("scan", "noise from earlier work");
+        let log_count_before = app.log.len();
+        assert!(log_count_before > 1);
+
+        // Mid-command Ctrl+L: log clears, input survives, no stray 'l'.
+        app.set_input("scan ./repo");
+        let cursor_before = app.cursor;
+        app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert_eq!(app.input, "scan ./repo");
+        assert_eq!(app.cursor, cursor_before);
+        assert!(app.log.len() < log_count_before);
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.body.contains("Conversation cleared")));
     }
 
     #[test]

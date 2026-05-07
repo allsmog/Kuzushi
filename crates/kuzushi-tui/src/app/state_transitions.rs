@@ -440,6 +440,17 @@ impl ShellApp {
             KeyCode::Char('h') if ctrl => self.backspace(),
             KeyCode::Char('p') if ctrl => self.history_prev(),
             KeyCode::Char('n') if ctrl => self.history_next(),
+            // Bash/Zsh muscle memory: Ctrl+L clears the conversation log
+            // while preserving the partially typed input. Always wins
+            // regardless of input state so we don't accidentally insert
+            // a literal `l` after a mid-command Ctrl+L.
+            KeyCode::Char('l') if ctrl => {
+                let saved_input = std::mem::take(&mut self.input);
+                let saved_cursor = self.cursor;
+                self.clear_conversation();
+                self.input = saved_input;
+                self.cursor = saved_cursor.min(self.input.chars().count());
+            }
             KeyCode::Left if ctrl || alt => self.move_cursor_word_left(),
             KeyCode::Right if ctrl || alt => self.move_cursor_word_right(),
             KeyCode::Backspace if ctrl || alt => self.delete_word_left(),
