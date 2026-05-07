@@ -182,15 +182,18 @@ impl AgentRuntime for PiAgentCoreRuntime {
 
         match response.step.as_deref() {
             Some("tool_call") => {
+                // The bridge currently emits at most one call per
+                // step, but the trait now carries `Vec<ToolCall>`.
+                // Wrap whatever it returned in a one-element vec.
                 let call = response
                     .call
                     .context("next-step: tool_call missing call body")?;
                 Ok(AgentLoopStep::ToolCall {
-                    call: ToolCall {
+                    calls: vec![ToolCall {
                         name: call.name,
                         input: call.input,
                         call_id: call.call_id,
-                    },
+                    }],
                 })
             }
             Some("final") => Ok(AgentLoopStep::Final {

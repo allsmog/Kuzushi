@@ -425,8 +425,15 @@ pub fn run_with_runtime(
 
         let result = runtime.query_blocking(request);
 
+        // Use the response's realised `cost_usd` when the provider
+        // surfaces token usage (the native `AnthropicOAuthRuntime`
+        // does, deriving from `usage.input_tokens` /
+        // `usage.output_tokens`). Fall back to the deposit when the
+        // bridge can't compute usage (legacy pi-agent-core path),
+        // and to zero when the chunk failed entirely.
         let actual_cost = match &result {
-            Ok(_) => cfg.deposit_usd_per_chunk, // bridge cost surfaces in Phase 5c+
+            Ok(response) if response.cost_usd > 0.0 => response.cost_usd,
+            Ok(_) => cfg.deposit_usd_per_chunk,
             Err(_) => 0.0,
         };
         if let (Some(limiter), Some(t)) = (spend, ticket) {

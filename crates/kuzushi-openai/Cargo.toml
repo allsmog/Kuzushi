@@ -20,4 +20,5 @@ tokio.workspace = true
 
 [dev-dependencies]
 kuzushi-sandbox = { path = "../kuzushi-sandbox" }
+rusqlite.workspace = true
 tempfile.workspace = true

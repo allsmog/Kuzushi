@@ -218,9 +218,14 @@ pub struct AgentToolLoopRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "step", rename_all = "snake_case")]
 pub enum AgentLoopStep {
+    /// One or more tool invocations the model wants the harness to
+    /// execute. Anthropic's API returns up to N parallel `tool_use`
+    /// blocks in a single turn; the harness runs them, then feeds
+    /// the matching `tool_result` blocks back as the next user
+    /// message. Single-call providers populate a one-element vec.
     ToolCall {
-        #[serde(flatten)]
-        call: ToolCall,
+        #[serde(default)]
+        calls: Vec<ToolCall>,
     },
     Final {
         #[serde(default)]
@@ -408,14 +413,26 @@ pub fn run_tool_loop(
             .next_step_blocking(request, &transcript)
             .with_context(|| format!("agent loop step {step} failed"))?;
         match outcome {
-            AgentLoopStep::ToolCall { call } => {
-                transcript.push(LoopHistoryEntry::AssistantToolCall(call.clone()));
-                let result = handler.run(&call).unwrap_or_else(|err| ToolResult {
-                    call_id: call.call_id.clone(),
-                    output: serde_json::json!({ "error": err.to_string() }),
-                    is_error: true,
-                });
-                transcript.push(LoopHistoryEntry::ToolResult(result));
+            AgentLoopStep::ToolCall { calls } => {
+                if calls.is_empty() {
+                    anyhow::bail!(
+                        "agent loop step {step}: runtime returned ToolCall with no calls"
+                    );
+                }
+                // Run every tool the model wanted in parallel-from-its
+                // perspective. The transcript records each call
+                // immediately followed by its result, in the order the
+                // runtime returned them — Anthropic's API requires the
+                // tool_result blocks to land in the matching order.
+                for call in &calls {
+                    transcript.push(LoopHistoryEntry::AssistantToolCall(call.clone()));
+                    let result = handler.run(call).unwrap_or_else(|err| ToolResult {
+                        call_id: call.call_id.clone(),
+                        output: serde_json::json!({ "error": err.to_string() }),
+                        is_error: true,
+                    });
+                    transcript.push(LoopHistoryEntry::ToolResult(result));
+                }
             }
             AgentLoopStep::Final {
                 text,
@@ -531,5 +548,140 @@ mod tests {
             "lifetime-aliasing"
         );
         assert_eq!(SubagentRole::FfiBoundaryReasoner.name(), "ffi-boundary");
+    }
+
+    /// Scripted runtime that emits a fixed sequence of `AgentLoopStep`s.
+    /// Used to drive `run_tool_loop` deterministically without hitting
+    /// any provider.
+    struct ScriptedRuntime {
+        steps: std::sync::Mutex<std::collections::VecDeque<AgentLoopStep>>,
+    }
+
+    impl ScriptedRuntime {
+        fn new(steps: Vec<AgentLoopStep>) -> Self {
+            Self {
+                steps: std::sync::Mutex::new(steps.into()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl AgentRuntime for ScriptedRuntime {
+        fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            unreachable!("not used in tool-loop tests")
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            unreachable!("not used in tool-loop tests")
+        }
+
+        fn supports_tools(&self) -> bool {
+            true
+        }
+
+        fn next_step_blocking(
+            &self,
+            _request: &AgentToolLoopRequest,
+            _history: &[LoopHistoryEntry],
+        ) -> Result<AgentLoopStep> {
+            self.steps
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or_else(|| anyhow::anyhow!("scripted runtime exhausted"))
+        }
+    }
+
+    #[test]
+    fn run_tool_loop_runs_every_call_in_a_multi_call_step_in_order() {
+        // Single tool-loop step that asks for two parallel reads.
+        // Each call must land in the transcript followed immediately
+        // by its tool_result, in the order the runtime returned them.
+        let steps = vec![
+            AgentLoopStep::ToolCall {
+                calls: vec![
+                    ToolCall {
+                        name: "read_a".to_string(),
+                        input: serde_json::json!({}),
+                        call_id: "c1".to_string(),
+                    },
+                    ToolCall {
+                        name: "read_b".to_string(),
+                        input: serde_json::json!({}),
+                        call_id: "c2".to_string(),
+                    },
+                ],
+            },
+            AgentLoopStep::Final {
+                text: "done".to_string(),
+                structured: None,
+                cost_usd: Some(0.001),
+            },
+        ];
+        let runtime = ScriptedRuntime::new(steps);
+        let request = AgentToolLoopRequest {
+            model: "anthropic:claude-sonnet-4-6".to_string(),
+            cwd: PathBuf::from("."),
+            system_prompt: String::new(),
+            prompt: String::new(),
+            tools: Vec::new(),
+            max_steps: 5,
+        };
+
+        let mut log: Vec<String> = Vec::new();
+        let mut handler = |call: &ToolCall| -> Result<ToolResult> {
+            log.push(call.call_id.clone());
+            Ok(ToolResult {
+                call_id: call.call_id.clone(),
+                output: serde_json::json!({"ok": true}),
+                is_error: false,
+            })
+        };
+        let outcome = run_tool_loop(&runtime, &request, &mut handler).unwrap();
+
+        // Both tools were dispatched, in order.
+        assert_eq!(log, vec!["c1".to_string(), "c2".to_string()]);
+        // Transcript: 2 tool_calls + 2 tool_results + 1 assistant text.
+        assert_eq!(outcome.transcript.len(), 5);
+        assert!(matches!(
+            outcome.transcript[0],
+            LoopHistoryEntry::AssistantToolCall(_)
+        ));
+        assert!(matches!(
+            outcome.transcript[1],
+            LoopHistoryEntry::ToolResult(_)
+        ));
+        assert!(matches!(
+            outcome.transcript[2],
+            LoopHistoryEntry::AssistantToolCall(_)
+        ));
+        assert!(matches!(
+            outcome.transcript[3],
+            LoopHistoryEntry::ToolResult(_)
+        ));
+        assert_eq!(outcome.text, "done");
+        assert_eq!(outcome.steps_used, 2);
+        assert!(!outcome.truncated);
+    }
+
+    #[test]
+    fn run_tool_loop_errors_when_runtime_returns_empty_calls_vec() {
+        let steps = vec![AgentLoopStep::ToolCall { calls: Vec::new() }];
+        let runtime = ScriptedRuntime::new(steps);
+        let request = AgentToolLoopRequest {
+            model: "anthropic:claude-sonnet-4-6".to_string(),
+            cwd: PathBuf::from("."),
+            system_prompt: String::new(),
+            prompt: String::new(),
+            tools: Vec::new(),
+            max_steps: 1,
+        };
+        let mut handler = |_call: &ToolCall| -> Result<ToolResult> {
+            unreachable!("should never be called on empty-vec path")
+        };
+        let err = run_tool_loop(&runtime, &request, &mut handler)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("ToolCall with no calls"), "actual err: {err}");
     }
 }

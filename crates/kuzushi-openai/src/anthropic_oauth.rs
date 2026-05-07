@@ -499,29 +499,29 @@ impl AnthropicOAuthRuntime {
         // The model may emit *both* text and a tool_use block in the
         // same turn (e.g. brief narration before a tool call). We
         // honour `stop_reason` as the disambiguator: when it's
-        // `tool_use` we return the first tool_use block as the next
-        // step; otherwise we treat the response as terminal.
+        // `tool_use` we return *every* tool_use block as the next
+        // step (Anthropic emits up to N parallel calls per turn).
+        // Otherwise we treat the response as terminal.
         let stop_reason = parsed.stop_reason.as_deref().unwrap_or("end_turn");
         if stop_reason == "tool_use" {
-            // Pick the first tool_use block. If there are several
-            // we'd need parallel tool calls — Anthropic's
-            // documentation supports them but our `AgentLoopStep`
-            // shape currently only carries one. Multi-call support
-            // is a follow-up on the trait.
-            let call = parsed.content.iter().find_map(|block| match block {
-                ApiContentBlock::ToolUse { id, name, input } => Some(ToolCall {
-                    name: name.clone(),
-                    input: input.clone(),
-                    call_id: id.clone(),
-                }),
-                _ => None,
-            });
-            match call {
-                Some(call) => Ok(AgentLoopStep::ToolCall { call }),
-                None => anyhow::bail!(
+            let calls: Vec<ToolCall> = parsed
+                .content
+                .iter()
+                .filter_map(|block| match block {
+                    ApiContentBlock::ToolUse { id, name, input } => Some(ToolCall {
+                        name: name.clone(),
+                        input: input.clone(),
+                        call_id: id.clone(),
+                    }),
+                    _ => None,
+                })
+                .collect();
+            if calls.is_empty() {
+                anyhow::bail!(
                     "Anthropic OAuth next-step: stop_reason=tool_use but no tool_use block: {raw}"
-                ),
+                );
             }
+            Ok(AgentLoopStep::ToolCall { calls })
         } else {
             let text = parsed
                 .content
