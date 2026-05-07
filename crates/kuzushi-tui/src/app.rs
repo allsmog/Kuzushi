@@ -8716,18 +8716,37 @@ JSON
     }
 
     #[test]
-    fn bracketed_paste_inserts_text_without_submit() {
+    fn bracketed_paste_single_line_inserts_text_without_submit() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::empty()));
         app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::empty()));
-        // A pasted blob (with embedded newline) is inserted verbatim — Enter is NOT
-        // synthesized, so the line stays in the buffer until the operator submits.
-        app.handle_paste(" world\nmore");
-        assert_eq!(app.input, "hi world\nmore");
+        // Single-line pastes insert verbatim — Enter is NOT synthesized.
+        app.handle_paste(" world");
+        assert_eq!(app.input, "hi world");
         assert_eq!(app.cursor, app.input.chars().count());
         // Pressing Enter after a paste submits the line normally.
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         assert!(app.input.is_empty());
+    }
+
+    #[test]
+    fn multi_line_paste_keeps_first_line_and_warns() {
+        // Pasting 3 lines should not auto-submit each one — the shell is a
+        // single-command-per-Enter prompt and submitting `rm` from a pasted
+        // snippet would be catastrophic. Keep the first line, warn the user,
+        // let them review and submit explicitly.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.handle_paste("first\r\nsecond\nthird");
+        assert_eq!(app.input, "first");
+        assert_eq!(app.cursor, "first".chars().count());
+        let advisory = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "paste")
+            .expect("expected a paste advisory log line");
+        assert!(advisory.body.contains("kept first line"));
+        assert!(advisory.body.contains("dropped 2"));
     }
 
     #[test]
