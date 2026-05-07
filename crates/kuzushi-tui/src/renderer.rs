@@ -2611,13 +2611,35 @@ fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         right_segments.insert(0, "Ctrl+C again to exit".to_string());
     }
     let right = join_segments(&right_segments);
-    let text = justify(left, right, area.width as usize);
+    // Prefer the right segment when widths are tight: the top status strip
+    // already shows mode + target + ctx, so on narrow terminals truncating
+    // the duplicated left side keeps findings count + ctrl-c hint visible.
+    let text = justify_prefer_right(left, right, area.width as usize);
     let style = if app.ctrl_c_armed() {
         theme::warn()
     } else {
         theme::primary()
     };
     frame.render_widget(Paragraph::new(Line::styled(text, style)), area);
+}
+
+fn justify_prefer_right(left: String, right: String, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if right.is_empty() {
+        return fit(&left, width);
+    }
+    let right = fit(&right, width);
+    let right_len = right.chars().count();
+    if right_len + 1 >= width {
+        return right;
+    }
+    let left_budget = width.saturating_sub(right_len + 1);
+    let left = fit(&left, left_budget);
+    let left_len = left.chars().count();
+    let pad = width.saturating_sub(left_len + right_len);
+    format!("{left}{}{}", " ".repeat(pad), right)
 }
 
 fn render_keybind_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
@@ -2730,41 +2752,89 @@ fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         .as_ref()
         .map(|path| compact_target_path(&path.display().to_string()))
         .unwrap_or_else(|| "none".to_string());
-    // Top header "module" segment mirrors the bottom status's view label so
-    // operators see the same word in both. Previously "module catalog" /
-    // "module agent" mismatched the bottom strip and read like tautologies
-    // ("agent" isn't a module, the catalog is the screen they're already on).
-    let module = view_status_segment(app);
-    let ctx = if app.context_view.exists {
-        "✓ present"
-    } else {
-        "missing"
-    };
+    let focused_module = app.focused_module.as_deref().unwrap_or("—");
     let model = app.config.model.as_deref().unwrap_or("unconfigured");
-    let mut segments = vec![
-        routing_mode_segment(app),
-        format!("target {target}"),
-        findings_count_summary(&app.findings),
-        format!("ctx {ctx}"),
-        format!("view {module}"),
-        format!("model {model}"),
-    ];
-    // Only show cost once a tool has actually charged for something.
-    // `cost $0.0000` at startup eats ~13 cells for no information and
-    // pushes `model unconfigured` off the right edge of 120-col terminals.
-    if app.session_cost_usd > 0.0 {
-        segments.push(format!("cost {}", format_session_cost(app.session_cost_usd)));
-    }
-    let rest = fit(
-        &join_segments(&segments),
-        area.width.saturating_sub(9) as usize,
-    );
+    let cost_visible = app.session_cost_usd > 0.0;
+    let cost_text = format_session_cost(app.session_cost_usd);
 
-    vec![Line::from(vec![
-        Span::styled("KUZUSHI", theme::heading()),
-        Span::raw("  "),
-        Span::styled(rest, theme::primary()),
-    ])]
+    // Build the strip as styled spans matching `design/mockups/_shared.jsx::statusStrip`:
+    //   ` KUZUSHI  target <path>  ctx ✓ present  model <m>  module <m>  cost <c>`
+    // - heading: bold white
+    // - segment label: muted
+    // - segment value: primary
+    // - `✓` ctx checkmark when context snapshot exists: success
+    // - module em-dash (no focused module): muted; focused module: accent
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled("KUZUSHI", theme::heading()));
+    spans.push(Span::raw("  "));
+
+    // target
+    spans.push(Span::styled("target ", theme::muted()));
+    spans.push(Span::styled(target, theme::primary()));
+    spans.push(Span::raw("  "));
+
+    // ctx
+    spans.push(Span::styled("ctx ", theme::muted()));
+    if app.context_view.exists {
+        spans.push(Span::styled("✓ ", theme::success()));
+        spans.push(Span::styled("present", theme::primary()));
+    } else {
+        spans.push(Span::styled("missing", theme::warn()));
+    }
+    spans.push(Span::raw("  "));
+
+    // model
+    spans.push(Span::styled("model ", theme::muted()));
+    spans.push(Span::styled(model.to_string(), theme::primary()));
+    spans.push(Span::raw("  "));
+
+    // module
+    spans.push(Span::styled("module ", theme::muted()));
+    let module_style = if focused_module == "—" {
+        theme::muted()
+    } else {
+        theme::accent()
+    };
+    spans.push(Span::styled(focused_module.to_string(), module_style));
+
+    if cost_visible {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled("cost ", theme::muted()));
+        spans.push(Span::styled(cost_text, theme::primary()));
+    }
+
+    // Width safety: if the multi-span row would exceed the available width,
+    // fall back to a single fitted line so right-edge segments don't drop
+    // silently off-screen on narrow terminals.
+    let total_chars: usize = spans
+        .iter()
+        .map(|span| span.content.chars().count())
+        .sum();
+    if total_chars + 1 > area.width as usize {
+        let mut compact = vec![format!("target {}", spans.iter().nth(4).map(|s| s.content.to_string()).unwrap_or_default())];
+        if app.context_view.exists {
+            compact.push("ctx ✓ present".to_string());
+        } else {
+            compact.push("ctx missing".to_string());
+        }
+        compact.push(format!("model {model}"));
+        compact.push(format!("module {focused_module}"));
+        if cost_visible {
+            compact.push(format!("cost {}", format_session_cost(app.session_cost_usd)));
+        }
+        let rest = fit(
+            &join_segments(&compact),
+            area.width.saturating_sub(9) as usize,
+        );
+        return vec![Line::from(vec![
+            Span::styled("KUZUSHI", theme::heading()),
+            Span::raw("  "),
+            Span::styled(rest, theme::primary()),
+        ])];
+    }
+
+    vec![Line::from(spans)]
 }
 
 fn transcript_lines(app: &ShellApp, visible: usize) -> Vec<Line<'static>> {
