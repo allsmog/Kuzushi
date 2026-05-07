@@ -2,16 +2,16 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 69
 ---
-KUZUSHI  mode:module | target none | 0 findings | ctx missing | view sast | model unconfigured
+ KUZUSHI  mode module  target none  findings 0 findings  ctx missing  view sast  model unconfigured
 
  ● /use sast
  | use focused module sast | primary tool sast:scan
 sast | SAST Pipeline
   Full SAST pipeline: context, scanners, AI triage, verification, patch, and report
 
--------------------------------------------------------- TOOLS ---------------------------------------------------------
+ -- TOOLS --------------------------------------------------------------------------------------------------------------
  ⏵ sast:scan                      headless Run the full SAST pipeline for the current target.
 
---------------------------------------------------------- NEXT ---------------------------------------------------------
+ -- NEXT ---------------------------------------------------------------------------------------------------------------
  ⏵ tool run . or scan to launch the umbrella scanner
  | help tasks | findings | use triage

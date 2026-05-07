@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 33
 ---
-KUZUSHI  mode:shell | target none | 0 findings | ctx missing | view catalog | model unconfigured
+ KUZUSHI  mode shell  target none  findings 0 findings  ctx missing  view catalog  model unconfigured
 
 KUZUSHI | CATALOG | 35 modules
 

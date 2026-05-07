@@ -2,11 +2,11 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 57
 ---
-KUZUSHI  mode:shell | target none | 0 findings | ctx missing | view threats:scope | model unconfigured
+ KUZUSHI  mode shell  target none  findings 0 findings  ctx missing  view threats:scope  model unconfigured
 
 1 DFD  2 STRIDE  3 STORIES  4 SCOPE  5 SUMMARY
 
-SCOPE | 11 ISSUES  -----------------------------------------------------------------------------------------------------
+ -- SCOPE | 11 ISSUES --------------------------------------------------------------------------------------------------
    CRITICAL | 2
       • sql injection via order_id concatenation
       • prompt injection sink reads user body

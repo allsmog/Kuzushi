@@ -4,7 +4,7 @@ assertion_line: 253
 ---
 mode:shell | target:none | catalog | 0 findings | 35 mods
 
------------------------------------------------------- WORKSPACE -------------------------------------------------------
+ -- WORKSPACE ----------------------------------------------------------------------------------------------------------
 status: no active workspace. Next: scan <target> or start shell with --target .
 target: none
 state: .kuzushi/v2

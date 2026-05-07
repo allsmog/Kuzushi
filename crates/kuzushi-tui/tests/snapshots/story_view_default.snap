@@ -2,9 +2,9 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 289
 ---
-KUZUSHI  mode:shell | target none | 0 findings | ctx missing | view story | model unconfigured
+ KUZUSHI  mode shell  target none  findings 0 findings  ctx missing  view story  model unconfigured
 
------------------------------------------ SESSION STORY | live event timeline ------------------------------------------
+ -- SESSION STORY | live event timeline --------------------------------------------------------------------------------
 
 system      kuzushi shell  
 startup     ready: 35 module(s), 61 tool(s), target none  

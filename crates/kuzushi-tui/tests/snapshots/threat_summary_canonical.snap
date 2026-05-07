@@ -2,11 +2,11 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 57
 ---
-KUZUSHI  mode:shell | target none | 0 findings | ctx missing | view threats:summary | model unconfigured
+ KUZUSHI  mode shell  target none  findings 0 findings  ctx missing  view threats:summary  model unconfigured
 
 1 DFD  2 STRIDE  3 STORIES  4 SCOPE  5 SUMMARY
 
-THREAT MODEL | 8 ISSUES  -----------------------------------------------------------------------------------------------
+ -- THREAT MODEL | 8 ISSUES --------------------------------------------------------------------------------------------
     S  Spoofing        2 issues  | jwt without aud-claim, mailgun cname dangling
     T  Tampering       1 issue  | worker pool reads unsigned amqp messages
     R  Repudiation     0 issues

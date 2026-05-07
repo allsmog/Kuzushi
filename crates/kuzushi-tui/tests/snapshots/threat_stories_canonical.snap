@@ -2,11 +2,11 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 45
 ---
-KUZUSHI  mode:shell | target none | 0 findings | ctx missing | view threats:stories | model unconfigured
+ KUZUSHI  mode shell  target none  findings 0 findings  ctx missing  view threats:stories  model unconfigured
 
 1 DFD  2 STRIDE  3 STORIES  4 SCOPE  5 SUMMARY
 
-ATTACKER STORIES | 4  --------------------------------------------------------------------------------------------------
+ -- ATTACKER STORIES | 4 -----------------------------------------------------------------------------------------------
    ▸ T-001   CRITICAL sql injection via order_id concatenation
               attack POST /orders/<id>
               loc    apps/api/orders.rs:142

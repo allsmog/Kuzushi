@@ -4,12 +4,11 @@ assertion_line: 162
 ---
 mode:shell | target:none | catalog | 0 findings | 35 mods
 
---------------------------------------------------------- HELP ---------------------------------------------------------
+ -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
 Examples: scan . | use semgrep | run . | findings | open F-0001 | model 1
 
-NAVIGATION
-command | aliases / examples | description
+NAVIGATION — browse modules and tools
 help - show grouped shell help
   aliases / examples: /help, /h, h, ?
 modules - browse native Rust modules
@@ -23,8 +22,7 @@ back - return to the previous view
 quickstart - first-run guided setup
   aliases / examples: /quickstart
 
-RUN / SCAN
-command | aliases / examples | description
+RUN / SCAN — dispatch tools and scans
 scan [target] - run configured scanners
   aliases / examples: scan ., /scan [target]
 run <tool> [json] - dispatch a tool; run . uses focused module or sast:scan
@@ -32,8 +30,7 @@ run <tool> [json] - dispatch a tool; run . uses focused module or sast:scan
 ask <question> - explicit agent question
   aliases / examples: /ask <question>, ?text
 
-OPTIONS / TASKS
-command | aliases / examples | description
+OPTIONS / TASKS — options + sast task control
 options [tool] - show tool options
   aliases / examples: /options [tool]
 show options [tool] - show tool options
@@ -63,8 +60,7 @@ task mode auto|manual|toggle - switch SAST task selection
 task reset - reset SAST task state
   aliases / examples: /task reset
 
-CONTEXT / KB
-command | aliases / examples | description
+CONTEXT / KB — workspace + attachments
 context - show current context snapshot
   aliases / examples: /context
 context build - build repository context
@@ -86,8 +82,7 @@ workspace - show target and state status
 workspace export findings <path> - export findings JSON or JSONL
   aliases / examples: /workspace export findings <path>, findings export <path>
 
-FINDINGS / EVIDENCE
-command | aliases / examples | description
+FINDINGS / EVIDENCE — browse / open / triage findings
 findings - open persisted findings
   aliases / examples: /f, f, /findings
 open <id> - open a finding alias or fingerprint
@@ -115,8 +110,7 @@ threats apply - apply the pending threat-model patch
 threats reject - discard the pending threat-model patch
   aliases / examples: /threats reject
 
-AUTH / CONFIG / MODEL
-command | aliases / examples | description
+AUTH / CONFIG / MODEL — auth, model, runtime config
 auth - show env/OAuth status without secrets
   aliases / examples: /auth, auth status
 auth login <provider> - start supported OAuth login
@@ -134,8 +128,7 @@ config - show runtime config status
 target [path] - switch scan target without restart
   aliases / examples: /target [path]
 
-SESSION
-command | aliases / examples | description
+SESSION — history, cost, lifecycle
 history - show command history
   aliases / examples: /history
 clear - clear conversation log
