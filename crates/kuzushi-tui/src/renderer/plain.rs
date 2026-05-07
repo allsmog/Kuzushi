@@ -8,8 +8,8 @@ use crate::commands::{
 };
 
 use super::{
-    compact_target_path, findings_count_summary, fit, format_json_value, join_or_dash,
-    kb_artifact_widths, kb_attachment_widths, model_auth_status, option_description,
+    compact_target_path, findings_count_summary, fit, format_json_value, help_category_blurb,
+    join_or_dash, kb_artifact_widths, kb_attachment_widths, model_auth_status, option_description,
     option_table_widths, option_type_label, option_visible, options_filter_label,
     routing_mode_segment, sast_task_table_widths, shell_view_lines, table_text, wrap_text,
 };
@@ -249,8 +249,13 @@ fn plain_help_lines(app: &ShellApp, width: usize) -> Vec<String> {
 
     for category in ShellCommandCategory::ORDER {
         lines.push(String::new());
-        lines.push(category.label().to_string());
-        lines.push("command | aliases / examples | description".to_string());
+        // Mirror the `category_divider` from the Ratatui renderer in plain
+        // text: section name followed by the design-mockup blurb on one line.
+        lines.push(format!(
+            "{} — {}",
+            category.label(),
+            help_category_blurb(category)
+        ));
         for spec in shell_command_specs()
             .iter()
             .filter(|spec| spec.category == category)
