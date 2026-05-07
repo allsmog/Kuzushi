@@ -376,6 +376,7 @@ pub enum ShellView {
     Replay(String),
     Trace(String),
     Help,
+    Quickstart,
     Config,
     Tools,
     Options(OptionsView),
@@ -2343,24 +2344,11 @@ impl ShellApp {
     }
 
     pub fn show_quickstart(&mut self) {
-        self.shell_view = ShellView::Help;
+        self.shell_view = ShellView::Quickstart;
+        // Two log lines (not eight) for the operator-facing transcript.
+        // The full guide is rendered in the Quickstart view, which gets the
+        // full body area instead of the 2-row transcript strip.
         let scan_command = self.first_finding_scan_command();
-        let lines = [
-            "Welcome to kuzushi! Quickstart:",
-            if self.target.is_some() {
-                "  1. scan                    - run configured scanners on the active target"
-            } else {
-                "  1. scan .                  - run configured scanners on this directory"
-            },
-            "  2. findings                - browse persisted findings",
-            "  3. context build           - write .kuzushi/context-snapshot.json",
-            "  4. model                   - choose an explicit provider/model for ask/triage",
-            "  5. ask <question>          - ask after a model is configured",
-            "Press Ctrl+O to toggle the live event timeline.",
-        ];
-        for line in lines {
-            self.log("quickstart", line);
-        }
         self.log(
             "quickstart",
             format!("Exact first-finding path: {scan_command} -> findings"),
@@ -8660,17 +8648,27 @@ JSON
     }
 
     #[test]
-    fn quickstart_emits_guided_help_lines() {
+    fn quickstart_opens_dedicated_view_with_concise_log() {
+        // Previously Quickstart switched to Help and dumped 8 log lines into a
+        // 2-row transcript, so 6 of them were unreadable. Now it switches to
+        // ShellView::Quickstart (which renders the full guide in the body
+        // area) and only logs the single first-finding path entry.
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.handle_command(ShellCommand::Quickstart);
-        assert_eq!(app.shell_view, ShellView::Help);
-        assert!(app
+        let baseline_quickstart_lines = app
             .log
             .iter()
-            .any(|line| line.prefix == "quickstart" && line.body.contains("scan .")));
-        assert!(app.log.iter().any(|line| {
-            line.prefix == "quickstart" && line.body.contains("scan . -> findings")
-        }));
+            .filter(|line| line.prefix == "quickstart")
+            .count();
+        app.handle_command(ShellCommand::Quickstart);
+        assert_eq!(app.shell_view, ShellView::Quickstart);
+        let new_lines: Vec<_> = app
+            .log
+            .iter()
+            .filter(|line| line.prefix == "quickstart")
+            .skip(baseline_quickstart_lines)
+            .collect();
+        assert_eq!(new_lines.len(), 1, "expected exactly one transcript line");
+        assert!(new_lines[0].body.contains("scan . -> findings"));
     }
 
     #[test]

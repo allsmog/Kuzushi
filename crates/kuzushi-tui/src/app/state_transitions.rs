@@ -449,7 +449,9 @@ impl ShellApp {
                         .min(self.findings.len().saturating_sub(1));
                 }
             }
-            ShellView::Help => self.help_scroll = self.help_scroll.saturating_add(step),
+            ShellView::Help | ShellView::Quickstart => {
+                self.help_scroll = self.help_scroll.saturating_add(step);
+            }
             ShellView::Tools => self.tools_scroll = self.tools_scroll.saturating_add(step),
             ShellView::History => self.history_scroll = self.history_scroll.saturating_add(step),
             ShellView::KnowledgeBase => self.kb_scroll = self.kb_scroll.saturating_add(step),
@@ -467,7 +469,9 @@ impl ShellApp {
             ShellView::Findings => {
                 self.findings_cursor = self.findings_cursor.saturating_sub(FINDINGS_PAGE_ROWS);
             }
-            ShellView::Help => self.help_scroll = self.help_scroll.saturating_sub(step),
+            ShellView::Help | ShellView::Quickstart => {
+                self.help_scroll = self.help_scroll.saturating_sub(step);
+            }
             ShellView::Tools => self.tools_scroll = self.tools_scroll.saturating_sub(step),
             ShellView::History => self.history_scroll = self.history_scroll.saturating_sub(step),
             ShellView::KnowledgeBase => self.kb_scroll = self.kb_scroll.saturating_sub(step),
@@ -483,6 +487,7 @@ impl ShellApp {
         match &self.shell_view {
             ShellView::Catalog => self.catalog_expanded,
             ShellView::Help
+            | ShellView::Quickstart
             | ShellView::Tools
             | ShellView::Options(_)
             | ShellView::Runs
@@ -511,6 +516,7 @@ impl ShellApp {
             ShellView::Finding => ShellView::Findings,
             ShellView::Findings
             | ShellView::Help
+            | ShellView::Quickstart
             | ShellView::Config
             | ShellView::Tools
             | ShellView::Runs
