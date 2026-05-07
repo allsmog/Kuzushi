@@ -3895,7 +3895,7 @@ fn view_status_segment(app: &ShellApp) -> String {
         ShellView::Quickstart => "quickstart".to_string(),
         ShellView::Config => "config".to_string(),
         ShellView::Tools => "tools".to_string(),
-        ShellView::Options(view) => format!("options:{}", view.tool_name),
+        ShellView::Options(view) => format!("options[{}]", view.tool_name),
         ShellView::SastTasks => "tasks".to_string(),
         ShellView::Context => "context".to_string(),
         ShellView::Workspace => "workspace".to_string(),
