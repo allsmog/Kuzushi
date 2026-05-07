@@ -2174,10 +2174,14 @@ fn workspace_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     lines.push(blank());
-    lines.push(muted(&fit(
-        "workspace status · workspace export findings <path>.json · findings export <path>.json",
+    lines.push(command_list_line(
+        &[
+            "workspace status",
+            "workspace export findings <path>.json",
+            "findings export <path>.json",
+        ],
         area.width as usize,
-    )));
+    ));
     lines
 }
 
@@ -2305,10 +2309,15 @@ fn knowledge_base_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         }
     }
     lines.push(blank());
-    lines.push(muted(&fit(
-        "kb [module] · attach <path-or-url> · detach <id> · reparse <id>",
+    lines.push(command_list_line(
+        &[
+            "kb [module]",
+            "attach <path-or-url>",
+            "detach <id>",
+            "reparse <id>",
+        ],
         area.width as usize,
-    )));
+    ));
     lines
 }
 
@@ -2375,10 +2384,15 @@ fn agent_chat_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     lines.push(blank());
-    lines.push(muted(&fit(
-        "ask <question> · ?text · model provider:model-id · back",
+    lines.push(command_list_line(
+        &[
+            "ask <question>",
+            "?text",
+            "model provider:model-id",
+            "back",
+        ],
         area.width as usize,
-    )));
+    ));
     lines
 }
 
@@ -2407,10 +2421,10 @@ fn history_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     lines.push(blank());
-    lines.push(muted(&fit(
-        "clear · run <tool> · show runs · back",
+    lines.push(command_list_line(
+        &["clear", "run <tool>", "show runs", "back"],
         area.width as usize,
-    )));
+    ));
     lines
 }
 
@@ -2463,10 +2477,16 @@ fn story_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     lines.push(blank());
-    lines.push(muted(&fit(
-        "Ctrl+O toggle · /history commands · /show runs · /replay <runId> · /trace <runId>",
+    lines.push(command_list_line(
+        &[
+            "Ctrl+O toggle",
+            "/history commands",
+            "/show runs",
+            "/replay <runId>",
+            "/trace <runId>",
+        ],
         area.width as usize,
-    )));
+    ));
     lines
 }
 
@@ -3490,6 +3510,34 @@ fn muted(value: &str) -> Line<'static> {
 
 fn styled(value: &str, style: Style) -> Line<'static> {
     Line::styled(value.to_string(), style)
+}
+
+/// Render a "next-action" hint line as accent-tinted commands separated
+/// by subtle middots, matching how `design/mockups/_shared.jsx`
+/// next-action lines are typically painted (e.g. CTA rows in
+/// `empty-states.jsx`, `auth.jsx`, `workspace.jsx`):
+///
+///   `kb [module] · attach <path> · detach <id>`
+///   ───────────   ─────────────   ──────────────
+///   accent        accent          accent
+///         · subtle separators
+fn command_list_line(commands: &[&str], width: usize) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut used = 0usize;
+    for (i, cmd) in commands.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" · ".to_string(), theme::subtle()));
+            used += 3;
+        }
+        let cmd_chars = cmd.chars().count();
+        if used + cmd_chars > width {
+            spans.push(Span::styled("…".to_string(), theme::subtle()));
+            break;
+        }
+        spans.push(Span::styled((*cmd).to_string(), theme::accent()));
+        used += cmd_chars;
+    }
+    Line::from(spans)
 }
 
 fn indent(line: Line<'static>, spaces: usize) -> Line<'static> {
@@ -6820,6 +6868,35 @@ mod tests {
         assert!(!rendered.contains("[space]"), "stale bracket: {rendered}");
         assert!(!rendered.contains("[y]"), "stale bracket: {rendered}");
         assert!(!rendered.contains("[n]"), "stale bracket: {rendered}");
+    }
+
+    #[test]
+    fn command_list_line_accents_each_command_with_subtle_separators() {
+        // `command_list_line` builds the inline next-action hint that
+        // appears at the bottom of many views (workspace, agent-chat,
+        // history, kb).  The mockup paints commands in c-accent and
+        // the ` · ` separator in c-subtle.
+        let line = command_list_line(&["scan .", "findings", "back"], 120);
+        let mut accent_chunks = 0usize;
+        let mut subtle_chunks = 0usize;
+        for span in &line.spans {
+            if span.style == theme::accent() {
+                accent_chunks += 1;
+            } else if span.style == theme::subtle() {
+                subtle_chunks += 1;
+            }
+        }
+        assert_eq!(accent_chunks, 3, "expected 3 accent commands");
+        assert_eq!(subtle_chunks, 2, "expected 2 subtle middot separators");
+    }
+
+    #[test]
+    fn command_list_line_truncates_with_ellipsis_when_width_runs_out() {
+        // Narrow width should drop trailing commands behind a subtle `…`
+        // rather than overflow the row.
+        let line = command_list_line(&["aaaaaaaa", "bbbbbbbb", "cccccccc"], 12);
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("…"), "missing ellipsis: {text}");
     }
 
     #[test]
