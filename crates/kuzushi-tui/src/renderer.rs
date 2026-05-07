@@ -929,9 +929,12 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     if app.findings.is_empty() {
         lines.push(muted("No findings yet."));
-        lines.push(muted(
-            "Next: scan, scan <target>, or context build before scanning.",
-        ));
+        let hint = if app.context_view.exists {
+            "Next: scan — runs configured scanners against the active target."
+        } else {
+            "Next: scan after `context build` so scanners have structure to walk."
+        };
+        lines.push(muted(hint));
         return lines;
     }
 
@@ -1435,7 +1438,7 @@ fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ]));
     } else {
         lines.push(muted(
-            "No scan run is active in this shell session. Next: scan <target> or show runs.",
+            "No scan run is active in this shell session. Next: `scan` to start one, or `replay <runId>` for a past run on disk.",
         ));
     }
     lines
@@ -4412,7 +4415,7 @@ mod tests {
     fn renders_actionable_empty_states_at_80_columns() {
         for (view, expected) in [
             (ShellView::Findings, "Next: scan"),
-            (ShellView::Runs, "Next: scan <target>"),
+            (ShellView::Runs, "Next: `scan`"),
             (ShellView::Workspace, "Next: scan <target>"),
         ] {
             let backend = TestBackend::new(80, 18);
