@@ -3449,15 +3449,25 @@ fn progress_bar_line(
 }
 
 /// Section header matching `design/mockups/_shared.jsx::sectionHeader()`:
-/// uppercase bold heading on the left, subtle dash filler on the right.
+///
+///   ` ── LABEL ──────────────────...─`
+///
+/// Same shape as `divider` so every section title in the shell reads as
+/// one consistent rule.  Kept as a separate function (rather than calling
+/// `divider`) so the 12+ call sites don't all churn — if the two ever
+/// diverge again the design intent stays explicit at each site.  Auto-
+/// uppercases the label to mirror the prior heading-style convention.
 fn section_header_line(label: &str, width: u16) -> Line<'static> {
-    let text = label.to_uppercase();
-    let total = width as usize;
-    let used = text.chars().count() + 2;
-    let dashes = total.saturating_sub(used).max(2);
+    let safe_width = width.max(8) as usize;
+    let lead = "── ";
+    let label_text = format!("{} ", label.to_uppercase());
+    let used = 1 + lead.chars().count() + label_text.chars().count();
+    let fill = safe_width.saturating_sub(used).max(1);
     Line::from(vec![
-        Span::styled(format!("{text}  "), theme::heading()),
-        Span::styled("─".repeat(dashes), theme::subtle()),
+        Span::raw(" "),
+        Span::styled(lead.to_string(), theme::subtle()),
+        Span::styled(label_text, theme::label()),
+        Span::styled(theme::RULE_CHAR.repeat(fill), theme::subtle()),
     ])
 }
 
@@ -6540,9 +6550,13 @@ mod tests {
 
     #[test]
     fn section_header_uppercases_and_pads_dashes() {
+        // Per `design/mockups/_shared.jsx::sectionHeader`, the header lays
+        // out as ` ── LABEL ──...─` (leading space, subtle rule, label,
+        // subtle fill).  Uppercasing the label is preserved so e.g.
+        // `findings · 11 triaged` still reads as `FINDINGS · 11 TRIAGED`.
         let line = section_header_line("findings · 11 triaged", 60);
         let text = line_text(&line);
-        assert!(text.starts_with("FINDINGS · 11 TRIAGED"));
+        assert!(text.starts_with(" ── FINDINGS · 11 TRIAGED "));
         assert!(text.ends_with("─"));
         assert_eq!(text.chars().count(), 60);
     }
