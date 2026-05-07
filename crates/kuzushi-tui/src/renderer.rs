@@ -2871,12 +2871,22 @@ fn transcript_line(prefix: &str, body: &str, continuation: bool) -> Line<'static
 }
 
 fn transcript_glyph(prefix: &str, continuation: bool) -> (&'static str, Style, bool) {
+    // Glyph + color mapping mirrors `design/mockups/_shared.jsx::logLine`:
+    //   in:    ●  c-accent     (operator input echo)
+    //   run:   ⏵  c-primary    (tool/module dispatch)
+    //   ok:    ✓  c-success    (success)
+    //   err:   ✗  c-danger     (failure)
+    //   agent: ◆  c-accent     (LLM message)
+    //   flow:  …  c-muted      (streaming/in-flight)
+    //   find:  ▸  c-warn       (finding)
+    //   log:   ·  c-subtle     (ambient/log)
     if continuation {
         return ("…", theme::muted(), false);
     }
     match prefix {
         ">" => ("●", theme::accent(), false),
-        "tool" | "scan" | "run" | "resume" | "pause" => ("⏵", theme::accent(), true),
+        "tool" | "scan" | "run" | "resume" | "pause" => ("⏵", theme::primary(), true),
+        "ok" | "success" | "done" => ("✓", theme::success(), true),
         "result" | "answer" | "agent" | "plan" | "threats" => ("◆", theme::accent(), true),
         "finding" | "open" | "title" | "triage" | "aliases" => ("▸", theme::warn(), true),
         "error" => ("✗", theme::danger(), true),
@@ -3260,10 +3270,24 @@ fn indent(line: Line<'static>, spaces: usize) -> Line<'static> {
 
 fn next_action_line(text: &str, width: usize) -> Line<'static> {
     let available = width.saturating_sub(8);
-    Line::from(vec![
-        Span::styled("▸ NEXT ", theme::warn()),
-        Span::styled(fit(text, available), theme::primary()),
-    ])
+    let fitted = fit(text, available);
+    // Mirror the mockup's c-warn / c-primary / c-muted split for the catalog
+    // NEXT line (see `design/mockups/catalog.jsx`):
+    //   ▸ NEXT  Run sast:scan against ~/work/acme-checkout — never run here
+    //   ----    -------------------------------------- --- -----------------
+    //   warn    primary                                     muted
+    // Use the em-dash (` — `) as the muted-suffix split if present so the
+    // ambient context (run history, finding count) reads softer than the
+    // imperative action.
+    let mut spans: Vec<Span<'static>> = vec![Span::styled("▸ NEXT ", theme::warn())];
+    if let Some(idx) = fitted.find(" — ") {
+        let (head, tail) = fitted.split_at(idx);
+        spans.push(Span::styled(head.to_string(), theme::primary()));
+        spans.push(Span::styled(tail.to_string(), theme::muted()));
+    } else {
+        spans.push(Span::styled(fitted, theme::primary()));
+    }
+    Line::from(spans)
 }
 
 /// Context-aware NEXT hint for the catalog view. Picks the most relevant
