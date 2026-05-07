@@ -3400,6 +3400,41 @@ fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     frame.render_widget(Paragraph::new(line), area);
 }
 
+/// Returns a one-word stage label when the shell has a long-running
+/// worker active (scan / agent / planner / threats).  None when idle —
+/// in which case the top status strip skips the `stage ⠿ …` segment.
+fn active_stage_label(app: &ShellApp) -> Option<&'static str> {
+    if let Some(scan) = app.scan.as_ref() {
+        if scan.running {
+            if scan.abort_requested {
+                return Some("aborting");
+            }
+            return Some("running");
+        }
+    }
+    if let Some(agent) = app.agent_chat.as_ref() {
+        if agent.running {
+            if agent.abort_requested {
+                return Some("aborting");
+            }
+            return Some("asking");
+        }
+    }
+    if app.planner_running {
+        if app.plan_abort_requested {
+            return Some("aborting");
+        }
+        return Some("planning");
+    }
+    if app.threat_worker_running {
+        if app.threat_abort_requested {
+            return Some("aborting");
+        }
+        return Some("modeling");
+    }
+    None
+}
+
 fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let target = app
         .target
@@ -3451,6 +3486,20 @@ fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         theme::accent()
     };
     spans.push(Span::styled(focused_module.to_string(), module_style));
+
+    // stage segment: only when something is running, per
+    // `design/mockups/sast-running.jsx::customStrip`:
+    //   `stage ⠿ running` (warn-tinted)
+    // Includes a spinner frame so the strip animates while the worker
+    // ticks.
+    let stage_label = active_stage_label(app);
+    if let Some(label) = stage_label {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled("stage ", theme::muted()));
+        let frame = SPINNER_FRAMES[(app.spinner_phase as usize) % SPINNER_FRAMES.len()];
+        spans.push(Span::styled(format!("{frame} "), theme::warn()));
+        spans.push(Span::styled(label.to_string(), theme::warn()));
+    }
 
     if cost_visible {
         spans.push(Span::raw("  "));
@@ -7560,6 +7609,39 @@ mod tests {
         assert!(rendered.contains("failed"));
         assert!(rendered.contains("18"));
         assert!(rendered.contains("replay <runId>"));
+    }
+
+    #[test]
+    fn top_status_strip_shows_stage_spinner_while_scan_runs() {
+        // `design/mockups/sast-running.jsx::customStrip` adds a `stage ⠿
+        // running` segment to the top strip while a worker ticks.  Verify
+        // the segment appears for a running scan and disappears when idle.
+        let backend = TestBackend::new(120, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        // Idle: no stage segment.
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let idle = format!("{:?}", terminal.backend().buffer());
+        assert!(!idle.contains("stage "), "stage shouldn't show idle: {idle}");
+
+        // Running: stage segment with spinner glyph.
+        app.scan = Some(crate::app::ScanPanelState {
+            run_id: Some("r-now".to_string()),
+            target: std::path::PathBuf::from("."),
+            stage: "running".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let running = format!("{:?}", terminal.backend().buffer());
+        assert!(running.contains("stage "), "stage missing: {running}");
+        assert!(running.contains("running"));
+        // Any of the SPINNER_FRAMES shows up.
+        let saw_spinner = SPINNER_FRAMES.iter().any(|f| running.contains(f));
+        assert!(saw_spinner, "spinner glyph missing: {running}");
     }
 
     #[test]
