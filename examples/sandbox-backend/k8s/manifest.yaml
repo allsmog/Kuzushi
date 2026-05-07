@@ -1,0 +1,98 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kuzushi-sandbox-adapter
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kuzushi-sandbox-adapter
+  namespace: default
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kuzushi-sandbox-adapter
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kuzushi-sandbox-adapter
+subjects:
+  - kind: ServiceAccount
+    name: kuzushi-sandbox-adapter
+    namespace: default
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kuzushi-sandbox-adapter
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kuzushi-sandbox-adapter
+  template:
+    metadata:
+      labels:
+        app: kuzushi-sandbox-adapter
+    spec:
+      serviceAccountName: kuzushi-sandbox-adapter
+      containers:
+        - name: adapter
+          image: ghcr.io/<you>/kuzushi-sandbox-adapter:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: KUZUSHI_SANDBOX_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kuzushi-sandbox
+                  key: KUZUSHI_SANDBOX_API_KEY
+            - name: KUZUSHI_RUNNER_IMAGE
+              value: ghcr.io/<you>/kuzushi-runner:latest
+            - name: KUZUSHI_NAMESPACE
+              value: default
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kuzushi-sandbox-adapter
+  namespace: default
+spec:
+  selector:
+    app: kuzushi-sandbox-adapter
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
