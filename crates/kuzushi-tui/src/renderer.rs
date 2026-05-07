@@ -3343,21 +3343,42 @@ fn indent(line: Line<'static>, spaces: usize) -> Line<'static> {
 fn next_action_line(text: &str, width: usize) -> Line<'static> {
     let available = width.saturating_sub(8);
     let fitted = fit(text, available);
-    // Mirror the mockup's c-warn / c-primary / c-muted split for the catalog
-    // NEXT line (see `design/mockups/catalog.jsx`):
-    //   ▸ NEXT  Run sast:scan against ~/work/acme-checkout — never run here
-    //   ----    -------------------------------------- --- -----------------
-    //   warn    primary                                     muted
-    // Use the em-dash (` — `) as the muted-suffix split if present so the
-    // ambient context (run history, finding count) reads softer than the
-    // imperative action.
+    // Mirror the mockup's c-warn / c-primary / c-accent / c-muted split for
+    // the catalog NEXT line (see `design/mockups/catalog.jsx`):
+    //   ▸ NEXT  Run sast:scan against ~/work/acme-checkout — never run …
+    //   ----    --- --------- ----------------------------- -------------
+    //   warn    pri accent    primary                       muted
+    // Tool name accent: detect a `Run <tool> ` prefix and split off the
+    // identifier so an operator's eye lands on the actual command they're
+    // about to dispatch.  Em-dash split: any ambient context after ` — `
+    // (run history, finding count) reads softer than the imperative.
     let mut spans: Vec<Span<'static>> = vec![Span::styled("▸ NEXT ", theme::warn())];
-    if let Some(idx) = fitted.find(" — ") {
-        let (head, tail) = fitted.split_at(idx);
-        spans.push(Span::styled(head.to_string(), theme::primary()));
-        spans.push(Span::styled(tail.to_string(), theme::muted()));
+
+    // Split at em-dash first so the muted suffix is always its own span.
+    let (head, tail_with_dash) = match fitted.find(" — ") {
+        Some(idx) => (&fitted[..idx], Some(&fitted[idx..])),
+        None => (fitted.as_str(), None),
+    };
+
+    // Within the imperative head, detect `Run <tool> ` and accent the tool.
+    if let Some(rest) = head.strip_prefix("Run ") {
+        if let Some(space_idx) = rest.find(' ') {
+            let tool = &rest[..space_idx];
+            let after = &rest[space_idx..];
+            spans.push(Span::styled("Run ".to_string(), theme::primary()));
+            spans.push(Span::styled(tool.to_string(), theme::accent()));
+            spans.push(Span::styled(after.to_string(), theme::primary()));
+        } else {
+            // `Run <single-word>` with no trailing context — accent it all.
+            spans.push(Span::styled("Run ".to_string(), theme::primary()));
+            spans.push(Span::styled(rest.to_string(), theme::accent()));
+        }
     } else {
-        spans.push(Span::styled(fitted, theme::primary()));
+        spans.push(Span::styled(head.to_string(), theme::primary()));
+    }
+
+    if let Some(tail) = tail_with_dash {
+        spans.push(Span::styled(tail.to_string(), theme::muted()));
     }
     Line::from(spans)
 }
@@ -6559,6 +6580,77 @@ mod tests {
         assert!(text.starts_with(" ── FINDINGS · 11 TRIAGED "));
         assert!(text.ends_with("─"));
         assert_eq!(text.chars().count(), 60);
+    }
+
+    #[test]
+    fn next_action_line_splits_run_tool_into_warn_primary_accent_muted() {
+        // `design/mockups/catalog.jsx` paints the catalog NEXT line in four
+        // colors: c-warn glyph, c-primary verb, c-accent tool name,
+        // c-primary continuation, c-muted ambient suffix after ` — `.
+        let line = next_action_line(
+            "Run sast:scan against ~/work/acme-checkout — never run here, 0 findings on record",
+            120,
+        );
+
+        // Verify the textual ordering by colour bucket — collect span
+        // contents grouped by foreground style so the test fails loudly
+        // if a future refactor flattens them back into one primary span.
+        let mut buckets: Vec<(String, String)> = Vec::new();
+        for span in &line.spans {
+            let role = if span.style == theme::warn() {
+                "warn"
+            } else if span.style == theme::accent() {
+                "accent"
+            } else if span.style == theme::muted() {
+                "muted"
+            } else if span.style == theme::primary() {
+                "primary"
+            } else {
+                "other"
+            };
+            buckets.push((role.to_string(), span.content.to_string()));
+        }
+
+        // Glyph + tool name + ambient suffix all show up in the right roles.
+        assert!(
+            buckets.iter().any(|(role, text)| role == "warn" && text.contains("▸ NEXT")),
+            "warn glyph missing: {buckets:?}"
+        );
+        assert!(
+            buckets
+                .iter()
+                .any(|(role, text)| role == "accent" && text == "sast:scan"),
+            "accent tool name missing: {buckets:?}"
+        );
+        assert!(
+            buckets
+                .iter()
+                .any(|(role, text)| role == "muted" && text.contains("never run here")),
+            "muted suffix missing: {buckets:?}"
+        );
+    }
+
+    #[test]
+    fn next_action_line_falls_back_to_primary_when_no_run_or_em_dash() {
+        // Free-form NEXT hints (e.g. "Build the context snapshot with …")
+        // should still render as warn glyph + primary body — no tool-name
+        // accent, no muted suffix.
+        let line = next_action_line(
+            "Build the context snapshot with `context build` so SAST has structure to walk.",
+            120,
+        );
+        assert!(line
+            .spans
+            .iter()
+            .any(|s| s.style == theme::warn() && s.content.contains("▸ NEXT")));
+        assert!(!line
+            .spans
+            .iter()
+            .any(|s| s.style == theme::accent()));
+        assert!(!line
+            .spans
+            .iter()
+            .any(|s| s.style == theme::muted()));
     }
 
     #[test]
