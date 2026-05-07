@@ -1,0 +1,23 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+assertion_line: 137
+---
+mode:shell | target:none | catalog | 0 findings | 30 mods
+
+------------------------------------------------------ SAST TASKS ------------------------------------------------------
+mode: auto + denylist
+selected: 4/10 enabled, 0 blocked
+
+state  id                        cost   scan                notes                                                       
+[x]    semgrep                   low    semgrep             pattern scanner                                             
+[A]    codeql                    high   codeql              semantic query scanner                                      
+[x]    dep-hygiene               low    dep-hygiene         dependency manifest hygiene                                 
+[x]    secret-scan               low    secret-scan         local secret patterns                                       
+[x]    iac-scan                  low    iac-scan            IaC misconfiguration scanner                                
+[A]    agentic                   high   agentic             model-backed detector set; run via sast:scan                
+[A]    carlini-threat-hunt       high   carlini-threat-...  actor-driven hunt; run via sast:scan                        
+[A]    taint-iris                high   taint-iris          source-to-sink analysis; run via sast:scan                  
+[A]    taint-iris-next           high   taint-iris-next     next taint workflow; run via sast:scan                      
+[A]    systems-hunt              high   systems-hunt        systems invariant hunt; run via sast:scan                   
+
+Next: task block <id>, task allow <id>, task toggle [id], task mode auto|manual|toggle

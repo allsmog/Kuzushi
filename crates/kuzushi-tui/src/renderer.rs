@@ -1152,7 +1152,7 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     lines.push(blank());
     lines.push(Line::from(vec![
-        Span::styled(run_state_glyph(scan), run_state_style(scan)),
+        Span::styled(run_state_glyph(scan, app.log.len()), run_state_style(scan)),
         Span::raw(" "),
         Span::styled(target, theme::label()),
         Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
@@ -4024,10 +4024,16 @@ fn scan_status(scan: &ScanPanelState) -> String {
     }
 }
 
-fn run_state_glyph(scan: Option<&ScanPanelState>) -> &'static str {
+/// Cycle through braille spinner frames using `tick` as the index source.
+/// Pass `app.log.len()` for a deterministic tick that advances each time the
+/// scan emits a new transcript line — matches the design's "spins as work
+/// happens" intent without needing wall-clock animation.
+const SPINNER_FRAMES: &[&str] = &["⠿", "⠾", "⠷", "⠯", "⠟", "⠻"];
+
+fn run_state_glyph(scan: Option<&ScanPanelState>, tick: usize) -> &'static str {
     match scan {
         Some(scan) if scan.running && scan.abort_requested => "✗",
-        Some(scan) if scan.running => "⠿",
+        Some(scan) if scan.running => SPINNER_FRAMES[tick % SPINNER_FRAMES.len()],
         Some(scan) if scan.error.is_some() => "✗",
         Some(_) => "✓",
         None => "●",
@@ -4739,6 +4745,50 @@ mod tests {
     }
 
     #[test]
+    fn spinner_cycles_through_six_frames_by_log_length() {
+        let scan = crate::app::ScanPanelState {
+            run_id: None,
+            target: std::path::PathBuf::from("./demo"),
+            stage: "scanning".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        };
+        let frames: Vec<&str> = (0..12)
+            .map(|tick| run_state_glyph(Some(&scan), tick))
+            .collect();
+        // First 6 ticks cover all 6 frames
+        let unique: std::collections::BTreeSet<&&str> = frames.iter().take(6).collect();
+        assert_eq!(unique.len(), 6, "first 6 frames should be unique: {frames:?}");
+        // Frame at tick N == frame at tick N+6 (cycle period)
+        for tick in 0..6 {
+            assert_eq!(
+                frames[tick], frames[tick + 6],
+                "spinner should repeat every 6 ticks"
+            );
+        }
+    }
+
+    #[test]
+    fn spinner_shows_static_glyph_when_scan_idle_or_done() {
+        // Idle: no scan -> ●
+        assert_eq!(run_state_glyph(None, 0), "●");
+        assert_eq!(run_state_glyph(None, 99), "●");
+        // Done: scan present, not running, no error -> ✓
+        let done = crate::app::ScanPanelState {
+            run_id: None,
+            target: std::path::PathBuf::from("."),
+            stage: String::new(),
+            findings_count: 0,
+            running: false,
+            abort_requested: false,
+            error: None,
+        };
+        assert_eq!(run_state_glyph(Some(&done), 4), "✓");
+    }
+
+    #[test]
     fn module_run_body_ends_with_streaming_cursor_when_scan_active() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.scan = Some(crate::app::ScanPanelState {
@@ -5122,7 +5172,11 @@ mod tests {
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains("SCAN PROGRESS"));
-        assert!(rendered.contains("⠿"));
+        // Spinner cycles through SPINNER_FRAMES based on log length; any frame is valid.
+        assert!(
+            SPINNER_FRAMES.iter().any(|frame| rendered.contains(frame)),
+            "expected one of the braille spinner frames in: {rendered}"
+        );
         assert!(rendered.contains("● /scan"));
         assert!(rendered.contains("⏵ scan starting ./demo"));
         assert!(rendered.contains("▸ finding abc123 high dangerous sink"));

@@ -127,6 +127,43 @@ fn module_view_focused_on_recon_with_recent_activity() {
 }
 
 #[test]
+fn sast_tasks_view_default() {
+    let mut app = fresh_app();
+    app.shell_view = ShellView::SastTasks;
+    insta::with_settings!({
+        prepend_module_to_snapshot => false,
+        omit_expression => true,
+    }, {
+        insta::assert_snapshot!("sast_tasks_default", render_at_120(&app));
+    });
+}
+
+#[test]
+fn tune_view_for_focused_module() {
+    let mut app = fresh_app();
+    app.focused_module = Some("sast".to_string());
+    app.shell_view = ShellView::Tune;
+    insta::with_settings!({
+        prepend_module_to_snapshot => false,
+        omit_expression => true,
+    }, {
+        insta::assert_snapshot!("tune_view_sast", render_at_120(&app));
+    });
+}
+
+#[test]
+fn help_view_default() {
+    let mut app = fresh_app();
+    app.shell_view = ShellView::Help;
+    insta::with_settings!({
+        prepend_module_to_snapshot => false,
+        omit_expression => true,
+    }, {
+        insta::assert_snapshot!("help_view_default", render_at_120(&app));
+    });
+}
+
+#[test]
 fn findings_list_view_with_two_findings() {
     use kuzushi_core::Severity;
     let mut app = fresh_app();
