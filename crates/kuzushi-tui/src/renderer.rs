@@ -1418,9 +1418,16 @@ fn prompts_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ));
     }
     lines.push(blank());
-    lines.push(muted(
-        "Up/Down row | e edit | s show | d diff | r reset | S set | Enter show | back",
-    ));
+    lines.push(keybind_hint_line(&[
+        ("Up/Down", "row"),
+        ("e", "edit"),
+        ("s", "show"),
+        ("d", "diff"),
+        ("r", "reset"),
+        ("S", "set"),
+        ("Enter", "show"),
+        ("back", "home"),
+    ]));
     lines
 }
 
@@ -1438,25 +1445,11 @@ fn actor_detail_lines(app: &ShellApp, area: Rect, index: usize) -> Vec<Line<'sta
             .as_str(),
     ));
     lines.push(detail("filter", app.actor_detail_filter.label()));
-    // Inline keybind hint matches `keybindings_line` shape (accent key +
-    // muted hint, 3-space separator) per `design/mockups/_shared.jsx::footer`.
-    lines.push(Line::from(vec![
-        Span::raw(" "),
-        Span::styled("f", theme::accent()),
-        Span::raw(" "),
-        Span::styled("cycle filter", theme::muted()),
-        Span::raw("   "),
-        Span::styled("0", theme::accent()),
-        Span::raw(" "),
-        Span::styled("reset", theme::muted()),
-        Span::raw("   "),
-        Span::styled("j/k/g/G", theme::accent()),
-        Span::raw(" "),
-        Span::styled("scroll", theme::muted()),
-        Span::raw("   "),
-        Span::styled("back", theme::accent()),
-        Span::raw(" "),
-        Span::styled("home", theme::muted()),
+    lines.push(keybind_hint_line(&[
+        ("f", "cycle filter"),
+        ("0", "reset"),
+        ("j/k/g/G", "scroll"),
+        ("back", "home"),
     ]));
     lines.push(blank());
 
@@ -3526,6 +3519,28 @@ fn muted(value: &str) -> Line<'static> {
 
 fn styled(value: &str, style: Style) -> Line<'static> {
     Line::styled(value.to_string(), style)
+}
+
+/// Inline keybind hint matching `keybindings_line` shape:
+///
+///   ` <key> <hint>   <key> <hint>   …`
+///   accent  muted    accent  muted
+///                 · 3-space separator
+///
+/// Used for in-panel keybind footers (prompts editor, actor detail,
+/// etc.) where a full `render_keybind_footer` rule isn't appropriate
+/// but the operator still needs the local key reference.
+fn keybind_hint_line(pairs: &[(&str, &str)]) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = vec![Span::raw(" ")];
+    for (i, (key, hint)) in pairs.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw("   "));
+        }
+        spans.push(Span::styled((*key).to_string(), theme::accent()));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled((*hint).to_string(), theme::muted()));
+    }
+    Line::from(spans)
 }
 
 /// Render a "next-action" hint line as accent-tinted commands separated
