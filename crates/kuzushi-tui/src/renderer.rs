@@ -1899,20 +1899,134 @@ fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> 
 fn trace_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
-    lines.push(divider("TRACE", area.width));
-    lines.push(detail("run", run_id));
+    lines.push(divider(&format!("TRACE · {run_id}"), area.width));
     let triage_path = run_artifact_path(app, run_id, "triage.jsonl");
     let verify_path = run_artifact_path(app, run_id, "verify.jsonl");
+    let trace_path = run_artifact_path(app, run_id, "trace.jsonl");
+    lines.push(detail("run", run_id));
+    lines.push(run_artifact_detail("trace", &trace_path));
     lines.push(run_artifact_detail("triage", &triage_path));
     lines.push(run_artifact_detail("verify", &verify_path));
-    if !triage_path.exists() && !verify_path.exists() {
+
+    // STEPS section per `design/mockups/trace.jsx::step` — one row per
+    // agent step with kind-tinted column + label + latency + cost.
+    let steps = parse_trace_jsonl(&trace_path);
+    if steps.is_empty() {
         lines.push(blank());
-        lines.push(muted(
-            "(run artefacts not on disk; check `show runs` for valid runIds)",
-        ));
+        if !trace_path.exists() {
+            lines.push(muted(
+                "(no trace.jsonl on disk; trace artefacts ship with agentic / patch / verify runs)",
+            ));
+        } else {
+            lines.push(muted("(trace.jsonl is empty)"));
+        }
+    } else {
+        lines.push(blank());
+        lines.push(divider("STEPS", area.width));
+        for step in &steps {
+            lines.push(trace_step_line(step, area.width));
+        }
     }
     lines.extend(alias_reference_lines(app, area));
     lines
+}
+
+#[derive(Debug, Clone)]
+struct TraceStep {
+    n: usize,
+    kind: String,
+    label: String,
+    latency_ms: Option<u64>,
+    cost_usd: Option<f64>,
+}
+
+/// Parse a `trace.jsonl` artefact into typed steps.  Each line is a
+/// JSON object with at minimum a `kind` (string) and `label` (string);
+/// `n`, `latency_ms`, `cost_usd` are optional and default sensibly.
+fn parse_trace_jsonl(path: &std::path::Path) -> Vec<TraceStep> {
+    let Ok(bytes) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    let Ok(text) = std::str::from_utf8(&bytes) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (idx, raw) in text.lines().enumerate() {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        let value: serde_json::Value = match serde_json::from_str(raw) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let n = value
+            .get("n")
+            .and_then(serde_json::Value::as_u64)
+            .map(|n| n as usize)
+            .unwrap_or(idx + 1);
+        let kind = value
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("step")
+            .to_string();
+        let label = value
+            .get("label")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("(no label)")
+            .to_string();
+        let latency_ms = value
+            .get("latency_ms")
+            .and_then(serde_json::Value::as_u64);
+        let cost_usd = value
+            .get("cost_usd")
+            .and_then(serde_json::Value::as_f64);
+        out.push(TraceStep {
+            n,
+            kind,
+            label,
+            latency_ms,
+            cost_usd,
+        });
+    }
+    out
+}
+
+fn trace_step_line(step: &TraceStep, width: u16) -> Line<'static> {
+    let kind_style = match step.kind.as_str() {
+        "plan" => theme::label(),
+        "tool" => theme::success(),
+        "llm" => theme::accent(),
+        "refused" => theme::danger(),
+        "critic" => theme::warn(),
+        _ => theme::muted(),
+    };
+    let latency = step
+        .latency_ms
+        .map(|ms| {
+            if ms >= 1000 {
+                format!("{:.1}s", ms as f64 / 1000.0)
+            } else {
+                format!("{ms}ms")
+            }
+        })
+        .unwrap_or_else(|| "—".to_string());
+    let cost = step
+        .cost_usd
+        .map(|c| format!("${c:.4}"))
+        .unwrap_or_else(|| "—".to_string());
+    let label_budget = (width as usize).saturating_sub(28).max(20);
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(format!("{:>3} ", step.n), theme::subtle()),
+        Span::styled(format!("{:8}", step.kind), kind_style),
+        Span::raw(" "),
+        Span::styled(fit(&step.label, label_budget), theme::primary()),
+        Span::raw("  "),
+        Span::styled(format!("{:>7}", latency), theme::muted()),
+        Span::raw("  "),
+        Span::styled(cost, theme::muted()),
+    ])
 }
 
 fn run_artifact_path(app: &ShellApp, run_id: &str, leaf: &str) -> std::path::PathBuf {
@@ -8380,6 +8494,64 @@ mod tests {
         assert!(rendered.contains("abort scan"));
         assert!(!rendered.contains("[c]"), "stale bracket chrome: {rendered}");
         assert!(!rendered.contains("[a]"), "stale bracket chrome: {rendered}");
+    }
+
+    #[test]
+    fn trace_view_renders_steps_from_trace_jsonl() {
+        // `design/mockups/trace.jsx::step` shows one row per agent step
+        // with kind-tinted column + label + latency + cost.  Seed a
+        // small trace.jsonl on disk and verify rows + columns reach
+        // the buffer.
+        let tmp = tempfile::tempdir().unwrap();
+        let runs_root = tmp.path().join(".kuzushi/runs/r-1");
+        std::fs::create_dir_all(&runs_root).unwrap();
+        std::fs::write(
+            runs_root.join("trace.jsonl"),
+            r#"{"n":1,"kind":"plan","label":"plan(F-0012, h=2) → 4-step plan","latency_ms":400,"cost_usd":0.0}
+{"n":2,"kind":"tool","label":"kb:fetch a-04","latency_ms":100,"cost_usd":0.0}
+{"n":3,"kind":"llm","label":"compose injection candidates","latency_ms":4100,"cost_usd":0.012}
+{"n":4,"kind":"refused","label":"write_patch_attempt → policy","latency_ms":0}
+"#,
+        )
+        .unwrap();
+
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.target = Some(tmp.path().to_path_buf());
+        app.shell_view = ShellView::Trace("r-1".to_string());
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("TRACE · r-1"));
+        assert!(rendered.contains("STEPS"));
+        // All 4 step labels.
+        assert!(rendered.contains("plan(F-0012"));
+        assert!(rendered.contains("kb:fetch"));
+        assert!(rendered.contains("compose injection"));
+        assert!(rendered.contains("write_patch_attempt"));
+        // Latency formatting: 400ms; 4.1s.
+        assert!(rendered.contains("400ms"));
+        assert!(rendered.contains("4.1s"));
+        // Cost.
+        assert!(rendered.contains("$0.0120"));
+    }
+
+    #[test]
+    fn trace_view_empty_when_no_trace_jsonl_on_disk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let backend = TestBackend::new(120, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.target = Some(tmp.path().to_path_buf());
+        app.shell_view = ShellView::Trace("r-missing".to_string());
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("TRACE · r-missing"));
+        assert!(rendered.contains("no trace.jsonl"));
     }
 
     #[test]
