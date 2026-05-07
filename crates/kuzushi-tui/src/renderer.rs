@@ -2091,12 +2091,60 @@ fn workspace_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ));
     }
 
+    // Severity rollup bar — see `design/mockups/workspace.jsx::rollupBar`.
+    // Surfaces the persisted-findings distribution at a glance so an
+    // operator landing on `/workspace` sees the shape of the work without
+    // jumping into `/findings` first.
+    let total = app.findings.len();
+    if total > 0 {
+        let counts = SeverityCounts::from_findings(&app.findings);
+        lines.push(blank());
+        lines.push(divider(
+            &format!("FINDINGS ROLLUP · {total} persisted"),
+            area.width,
+        ));
+        for (label, n, severity) in [
+            ("CRITICAL", counts.critical, Severity::Critical),
+            ("HIGH    ", counts.high, Severity::High),
+            ("MEDIUM  ", counts.medium, Severity::Medium),
+            ("LOW     ", counts.low, Severity::Low),
+        ] {
+            lines.push(severity_rollup_bar(label, n, total, severity));
+        }
+    }
+
     lines.push(blank());
     lines.push(muted(&fit(
         "workspace status · workspace export findings <path>.json · findings export <path>.json",
         area.width as usize,
     )));
     lines
+}
+
+/// Render a single `█████░░░░░░ N/total` rollup bar matching
+/// `design/mockups/workspace.jsx::rollupBar`. Bar is 28 cells wide, with
+/// the filled portion in the severity tint and the unfilled portion in
+/// `theme::subtle()`.
+fn severity_rollup_bar(label: &str, n: usize, total: usize, severity: Severity) -> Line<'static> {
+    let bar_w: usize = 28;
+    let filled = if total == 0 {
+        0
+    } else {
+        ((bar_w * n) as f64 / total as f64).round() as usize
+    };
+    let filled = filled.clamp(if n > 0 { 1 } else { 0 }, bar_w);
+    let empty = bar_w - filled;
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(label.to_string(), theme::severity(severity)),
+        Span::styled(" [".to_string(), theme::subtle()),
+        Span::styled("█".repeat(filled), theme::severity(severity)),
+        Span::styled("░".repeat(empty), theme::subtle()),
+        Span::styled("] ".to_string(), theme::subtle()),
+        Span::styled(format!("{n:>3}"), theme::primary()),
+        Span::styled("/".to_string(), theme::subtle()),
+        Span::styled(total.to_string(), theme::muted()),
+    ])
 }
 
 fn knowledge_base_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -5594,6 +5642,73 @@ mod tests {
         assert!(rendered.contains("findings.json"));
         assert!(rendered.contains("workspace export"));
         assert!(!rendered.contains("┌"));
+    }
+
+    #[test]
+    fn workspace_view_renders_findings_rollup_bar_when_findings_exist() {
+        // Mockup parity: `design/mockups/workspace.jsx::rollupBar`. With
+        // persisted findings, the workspace view shows a 28-cell severity
+        // rollup bar per category so the operator sees the distribution
+        // shape at a glance.
+        let backend = TestBackend::new(120, 36);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.workspace_view = crate::app::WorkspaceView {
+            root: Some(std::path::PathBuf::from("/tmp/kuzushi-demo")),
+            state_dir: None,
+            findings_db: None,
+            findings_count: Some(38),
+            last_export: None,
+            status: "workspace ready".to_string(),
+        };
+        app.findings = (0..38)
+            .map(|index| {
+                let sev = match index % 4 {
+                    0 => Severity::Critical,
+                    1 => Severity::High,
+                    2 => Severity::Medium,
+                    _ => Severity::Low,
+                };
+                Finding::new_semgrep(
+                    format!("rule.{index}"),
+                    "src/x.rs",
+                    index + 1,
+                    None,
+                    sev,
+                    "demo",
+                )
+            })
+            .collect();
+        app.shell_view = ShellView::Workspace;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains("FINDINGS ROLLUP"),
+            "missing rollup divider: {rendered}"
+        );
+        assert!(rendered.contains("CRITICAL"));
+        assert!(rendered.contains("HIGH"));
+        assert!(rendered.contains("MEDIUM"));
+        assert!(rendered.contains("LOW"));
+        assert!(rendered.contains("█"));
+        assert!(rendered.contains("░"));
+        assert!(rendered.contains("/38"));
+    }
+
+    #[test]
+    fn workspace_view_skips_rollup_when_no_findings() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Workspace;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        // No findings → no FINDINGS ROLLUP section (no empty bars to show).
+        assert!(!rendered.contains("FINDINGS ROLLUP"));
     }
 
     #[test]
