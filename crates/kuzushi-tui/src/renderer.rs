@@ -3082,15 +3082,20 @@ fn join_or_dash(values: &[String]) -> String {
 }
 
 fn divider(title: &str, width: u16) -> Line<'static> {
+    // `design/mockups/_shared.jsx::sectionHeader` lays the rule out
+    // left-aligned: ` ── LABEL ────...────`. The TUI used to center the
+    // label between two rules, which read as a heavy decorative bar that
+    // didn't match the lightweight muscle-memory feel of the mockups.
     let safe_width = width.max(8) as usize;
-    let title = format!(" {title} ");
-    let remaining = safe_width.saturating_sub(title.chars().count());
-    let left = remaining / 2;
-    let right = remaining.saturating_sub(left);
+    let lead = "── ";
+    let label = format!("{title} ");
+    let used = 1 + lead.chars().count() + label.chars().count();
+    let fill = safe_width.saturating_sub(used).max(1);
     Line::from(vec![
-        Span::styled(theme::RULE_CHAR.repeat(left), theme::subtle()),
-        Span::styled(title, theme::muted()),
-        Span::styled(theme::RULE_CHAR.repeat(right), theme::subtle()),
+        Span::raw(" "),
+        Span::styled(lead.to_string(), theme::subtle()),
+        Span::styled(label, theme::label()),
+        Span::styled(theme::RULE_CHAR.repeat(fill), theme::subtle()),
     ])
 }
 
