@@ -11,5 +11,13 @@ triage confidence 0.70
 scan concurrency adaptive
 house rules .kuzushi/house-rules/sast.md
 
-(no house rules set; type `set "..."` to add some)
-Verbs (no slash needed): show | set "..." | reset | prompt edit <verb> | back
+------------------------------------------------------- ACTIONS --------------------------------------------------------
+> show house rules
+    log the current house-rules text into the transcript
+  edit house rules (set "...")
+    prefill the prompt with `set ""` so you can type a value
+  reset house rules
+    delete the house-rules file and revert to defaults
+
+(no house rules set; pick edit house rules and type a value)
+Up/Down move | Enter activate | show/set/reset direct | back

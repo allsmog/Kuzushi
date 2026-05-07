@@ -65,7 +65,13 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 
 ### `origin/claude/diagnose-rust-tui-ux-M8ycq`
 
-- Status: pending inspection
+- Status: integrated by subset in commit pending
+- Commits: six branch-local TUI UX commits plus an old merge from `main`
+- Scope inspected: Rust shell editing/scrolling, plan-card navigation, tune/prompts/actor-detail interactions, spinner behavior, and a TypeScript plain-renderer import reorder
+- Conflict preview: `git merge-tree --write-tree main origin/claude/diagnose-rust-tui-ux-M8ycq` reported conflicts in `crates/kuzushi-tui/src/app.rs`, `crates/kuzushi-tui/src/renderer.rs`, and `crates/kuzushi-tui/src/theme.rs`
+- Decision: subset integration, not full merge. Full branch diff is stale against current main and would remove current extracted files (`app/state_transitions.rs`, `renderer/plain.rs`), current crates, design artifacts, and this progress ledger. Kept current Rust Ratatui/extracted structure and integrated useful branch deltas: plan row cursor/skip support, Tune action cursor/activation, Prompts row actions, ActorDetail filter cycle/reset, renderer affordances, and updated snapshot fixture.
+- Skipped: stale TypeScript/Ink-side import reorder in `tests/ui/plain-renderer.test.ts`; stale whole-file TUI/theme rewrites that conflict with current extracted modules and design palette.
+- Checks: `cargo fmt --all --check` passed; `cargo check --workspace` passed; `cargo test -p kuzushi-tui` passed; `cargo test -p kuzushi-cli --test cutover_cli` passed
 
 ### `origin/claude/check-ratatui-tui-Jj2eH`
 
