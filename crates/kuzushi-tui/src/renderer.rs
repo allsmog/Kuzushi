@@ -944,7 +944,7 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             ));
         }
         lines.push(next_action_line(
-            &app.first_finding_hint(),
+            &catalog_next_hint(app),
             area.width as usize,
         ));
         lines.push(muted(&fit(
@@ -3327,6 +3327,35 @@ fn next_action_line(text: &str, width: usize) -> Line<'static> {
     ])
 }
 
+/// Context-aware NEXT hint for the catalog view. Picks the most relevant
+/// next action based on whether context is built, target is selected, and
+/// findings exist.
+fn catalog_next_hint(app: &ShellApp) -> String {
+    if !app.context_view.exists {
+        return "Build the context snapshot with `context build` so SAST has structure to walk."
+            .to_string();
+    }
+    let critical_count = app
+        .findings
+        .iter()
+        .filter(|f| f.severity == Severity::Critical)
+        .count();
+    if critical_count > 0 {
+        if let Some((alias, _)) = sorted_finding_aliases(&app.findings).into_iter().next() {
+            return format!(
+                "Drill in: `open {alias}` for the highest-severity finding · `findings` for the list."
+            );
+        }
+    }
+    if !app.findings.is_empty() {
+        return format!(
+            "{} finding(s) waiting · `findings` to triage · `threats build` for STRIDE.",
+            app.findings.len()
+        );
+    }
+    app.first_finding_hint()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProgressKind {
     Done,
@@ -4742,6 +4771,52 @@ mod tests {
         assert!(rendered.contains("sast"));
         assert!(!rendered.contains("dag"));
         assert!(!rendered.contains("DAG"));
+    }
+
+    #[test]
+    fn catalog_next_hint_steers_through_context_then_findings() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        // Default fresh app: no context snapshot built.
+        assert!(
+            catalog_next_hint(&app).contains("context build"),
+            "fresh app should suggest context build"
+        );
+
+        // After context exists but no findings: first-finding scan hint.
+        app.context_view.exists = true;
+        let hint = catalog_next_hint(&app);
+        assert!(
+            hint.contains("First finding") || hint.contains("scan"),
+            "ctx-built no-findings should suggest scanning, got: {hint}"
+        );
+
+        // With non-critical findings: drill-in suggestion.
+        let medium = Finding::new_semgrep(
+            "demo.rule",
+            "src/a.rs",
+            1,
+            None,
+            Severity::Medium,
+            "x",
+        );
+        app.findings = vec![medium];
+        let hint = catalog_next_hint(&app);
+        assert!(hint.contains("findings"), "got: {hint}");
+        assert!(hint.contains("triage"), "got: {hint}");
+
+        // With a critical finding: open-by-alias suggestion.
+        let critical = Finding::new_semgrep(
+            "demo.crit",
+            "src/b.rs",
+            2,
+            None,
+            Severity::Critical,
+            "y",
+        );
+        app.findings.push(critical);
+        let hint = catalog_next_hint(&app);
+        assert!(hint.contains("open F-"), "got: {hint}");
     }
 
     #[test]
