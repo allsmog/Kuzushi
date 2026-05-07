@@ -1572,6 +1572,26 @@ mod tests {
         assert!(parsed.technologies.contains(&"next.js".to_string()));
     }
 
+    #[test]
+    fn recon_store_lists_notes_with_optional_type_filter() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut store = ReconWorkspaceStore::open(&workspace).unwrap();
+        let workspace_id = store.ensure_default_workspace(workspace.root()).unwrap();
+
+        store
+            .create_note(&workspace_id, None, None, "http", json!({"title":"web"}))
+            .unwrap();
+        store
+            .create_note(&workspace_id, None, None, "dns", json!({"title":"dns"}))
+            .unwrap();
+
+        assert_eq!(store.list_notes(&workspace_id, None).unwrap().len(), 2);
+        let http = store.list_notes(&workspace_id, Some("http")).unwrap();
+        assert_eq!(http.len(), 1);
+        assert_eq!(http[0].ntype, "http");
+    }
+
     #[cfg(unix)]
     #[test]
     fn nmap_executor_invokes_subprocess_and_persists_workspace_rows() {

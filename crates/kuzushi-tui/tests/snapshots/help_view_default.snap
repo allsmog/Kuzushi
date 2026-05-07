@@ -25,7 +25,7 @@ quickstart - first-run guided setup
 RUN / SCAN — dispatch tools and scans
 scan [target] - run configured scanners
   aliases / examples: scan ., /scan [target]
-run <tool> [json] - dispatch a tool; run . uses focused module or sast:scan
+run <tool> [json] - dispatch a tool; run . is shell-only focused-module shorthand
   aliases / examples: run ., /run <tool> [json], run . [json]
 ask <question> - explicit agent question
   aliases / examples: /ask <question>, ?text

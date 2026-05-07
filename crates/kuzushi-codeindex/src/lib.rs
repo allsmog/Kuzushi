@@ -71,91 +71,23 @@ impl IndexFacade {
 
     /// Find symbol definitions. Routes per [`RoutingTable`].
     pub async fn definitions(&mut self, symbol: &str, repo: &Path) -> Result<Vec<Symbol>> {
-        for backend in self.routing.order_for(Query::Definitions) {
-            let Some(client) = self.client_mut(backend) else {
-                continue;
-            };
-            let tool = match backend {
-                Backend::Clang => "clang.definition",
-                Backend::Gtags => "gtags.definitions",
-                Backend::Joern => "joern.query",
-            };
-            let args = match backend {
-                Backend::Gtags => serde_json::json!({
-                    "symbol": symbol,
-                    "repoPath": repo,
-                }),
-                Backend::Clang => serde_json::json!({
-                    // Without a (file, line, column) we can't ask clangd
-                    // for a definition; for the symbol-by-name route we
-                    // fall through to gtags.
-                    "skip": true,
-                }),
-                Backend::Joern => serde_json::json!({
-                    "scala": format!("cpg.method.name(\"{}\").l", symbol.replace('"', "\\\""))
-                }),
-            };
-            if let Some(skip) = args.get("skip") {
-                if skip == &serde_json::Value::Bool(true) {
-                    continue;
-                }
-            }
-            match client.call_tool(tool, args).await {
-                Ok(value) => {
-                    if let Some(matches) = value.get("matches") {
-                        if let Ok(syms) = serde_json::from_value::<Vec<Symbol>>(matches.clone()) {
-                            return Ok(syms);
-                        }
-                    }
-                    return Ok(Vec::new());
-                }
-                Err(err) => {
-                    eprintln!(
-                        "[codeindex] {} backend failed for definitions({symbol}): {err}",
-                        backend.binary_name()
-                    );
-                    continue;
-                }
-            }
-        }
-        anyhow::bail!("no backend was able to answer definitions({symbol})")
+        let value = self
+            .first_successful_backend(Query::Definitions, "definitions", symbol, |backend| {
+                definition_call(backend, symbol, repo)
+            })
+            .await?;
+        Ok(symbol_matches(&value))
     }
 
     /// Find symbol references (callers, usages). Routes per
     /// [`RoutingTable`].
     pub async fn references(&mut self, symbol: &str, repo: &Path) -> Result<Vec<Symbol>> {
-        for backend in self.routing.order_for(Query::References) {
-            let Some(client) = self.client_mut(backend) else {
-                continue;
-            };
-            // Same shape as definitions for gtags; clang/joern need
-            // location/Scala respectively.
-            if backend != Backend::Gtags {
-                continue;
-            }
-            let args = serde_json::json!({
-                "symbol": symbol,
-                "repoPath": repo,
-            });
-            match client.call_tool("gtags.references", args).await {
-                Ok(value) => {
-                    if let Some(matches) = value.get("matches") {
-                        if let Ok(syms) = serde_json::from_value::<Vec<Symbol>>(matches.clone()) {
-                            return Ok(syms);
-                        }
-                    }
-                    return Ok(Vec::new());
-                }
-                Err(err) => {
-                    eprintln!(
-                        "[codeindex] {} backend failed for references({symbol}): {err}",
-                        backend.binary_name()
-                    );
-                    continue;
-                }
-            }
-        }
-        anyhow::bail!("no backend was able to answer references({symbol})")
+        let value = self
+            .first_successful_backend(Query::References, "references", symbol, |backend| {
+                references_call(backend, symbol, repo)
+            })
+            .await?;
+        Ok(symbol_matches(&value))
     }
 
     /// Methods that call the named function. Routes per [`RoutingTable`].
@@ -166,37 +98,10 @@ impl IndexFacade {
         symbol: &str,
         position: Option<&FilePosition>,
     ) -> Result<Value> {
-        for backend in self.routing.order_for(Query::CallersOfFunction) {
-            let Some(client) = self.client_mut(backend) else {
-                continue;
-            };
-            let (tool, args) = match (backend, position) {
-                (Backend::Clang, Some(pos)) => (
-                    "clang.callers",
-                    serde_json::json!({
-                        "repoPath": pos.repo,
-                        "file": pos.file,
-                        "line": pos.line,
-                        "column": pos.column,
-                    }),
-                ),
-                (Backend::Joern, _) => ("joern.callers_of", serde_json::json!({ "fn": symbol })),
-                // gtags and clang-without-position can't answer a
-                // function-callers query usefully; skip.
-                _ => continue,
-            };
-            match client.call_tool(tool, args).await {
-                Ok(value) => return Ok(value),
-                Err(err) => {
-                    eprintln!(
-                        "[codeindex] {} backend failed for callers_of({symbol}): {err}",
-                        backend.binary_name()
-                    );
-                    continue;
-                }
-            }
-        }
-        anyhow::bail!("no backend was able to answer callers_of({symbol})")
+        self.first_successful_backend(Query::CallersOfFunction, "callers_of", symbol, |backend| {
+            callers_call(backend, symbol, position)
+        })
+        .await
     }
 
     /// Methods called by the named function. Routes per [`RoutingTable`].
@@ -205,35 +110,10 @@ impl IndexFacade {
         symbol: &str,
         position: Option<&FilePosition>,
     ) -> Result<Value> {
-        for backend in self.routing.order_for(Query::CalleesOfFunction) {
-            let Some(client) = self.client_mut(backend) else {
-                continue;
-            };
-            let (tool, args) = match (backend, position) {
-                (Backend::Joern, _) => ("joern.callees_of", serde_json::json!({ "fn": symbol })),
-                (Backend::Clang, Some(pos)) => (
-                    "clang.callees",
-                    serde_json::json!({
-                        "repoPath": pos.repo,
-                        "file": pos.file,
-                        "line": pos.line,
-                        "column": pos.column,
-                    }),
-                ),
-                _ => continue,
-            };
-            match client.call_tool(tool, args).await {
-                Ok(value) => return Ok(value),
-                Err(err) => {
-                    eprintln!(
-                        "[codeindex] {} backend failed for callees_of({symbol}): {err}",
-                        backend.binary_name()
-                    );
-                    continue;
-                }
-            }
-        }
-        anyhow::bail!("no backend was able to answer callees_of({symbol})")
+        self.first_successful_backend(Query::CalleesOfFunction, "callees_of", symbol, |backend| {
+            callees_call(backend, symbol, position)
+        })
+        .await
     }
 
     /// Taint paths from a source pattern to a sink pattern. joern only;
@@ -334,6 +214,117 @@ impl IndexFacade {
             Backend::Joern => self.joern.as_mut(),
         }
     }
+
+    async fn first_successful_backend<F>(
+        &mut self,
+        query: Query,
+        operation: &str,
+        symbol: &str,
+        mut build_call: F,
+    ) -> Result<Value>
+    where
+        F: FnMut(Backend) -> Option<BackendToolCall>,
+    {
+        for backend in self.routing.order_for(query) {
+            let Some(call) = build_call(backend) else {
+                continue;
+            };
+            let Some(client) = self.client_mut(backend) else {
+                continue;
+            };
+            match client.call_tool(call.tool, call.args).await {
+                Ok(value) => return Ok(value),
+                Err(err) => log_backend_failure(backend, operation, symbol, &err),
+            }
+        }
+        anyhow::bail!("no backend was able to answer {operation}({symbol})")
+    }
+}
+
+struct BackendToolCall {
+    tool: &'static str,
+    args: Value,
+}
+
+fn definition_call(backend: Backend, symbol: &str, repo: &Path) -> Option<BackendToolCall> {
+    match backend {
+        Backend::Gtags => Some(BackendToolCall {
+            tool: "gtags.definitions",
+            args: serde_json::json!({ "symbol": symbol, "repoPath": repo }),
+        }),
+        Backend::Joern => Some(BackendToolCall {
+            tool: "joern.query",
+            args: serde_json::json!({
+                "scala": format!("cpg.method.name(\"{}\").l", symbol.replace('"', "\\\""))
+            }),
+        }),
+        Backend::Clang => None,
+    }
+}
+
+fn references_call(backend: Backend, symbol: &str, repo: &Path) -> Option<BackendToolCall> {
+    (backend == Backend::Gtags).then(|| BackendToolCall {
+        tool: "gtags.references",
+        args: serde_json::json!({ "symbol": symbol, "repoPath": repo }),
+    })
+}
+
+fn callers_call(
+    backend: Backend,
+    symbol: &str,
+    position: Option<&FilePosition>,
+) -> Option<BackendToolCall> {
+    match (backend, position) {
+        (Backend::Clang, Some(pos)) => Some(clang_position_call("clang.callers", pos)),
+        (Backend::Joern, _) => Some(joern_function_call("joern.callers_of", symbol)),
+        _ => None,
+    }
+}
+
+fn callees_call(
+    backend: Backend,
+    symbol: &str,
+    position: Option<&FilePosition>,
+) -> Option<BackendToolCall> {
+    match (backend, position) {
+        (Backend::Joern, _) => Some(joern_function_call("joern.callees_of", symbol)),
+        (Backend::Clang, Some(pos)) => Some(clang_position_call("clang.callees", pos)),
+        _ => None,
+    }
+}
+
+fn clang_position_call(tool: &'static str, position: &FilePosition) -> BackendToolCall {
+    BackendToolCall {
+        tool,
+        args: serde_json::json!({
+            "repoPath": position.repo,
+            "file": position.file,
+            "line": position.line,
+            "column": position.column,
+        }),
+    }
+}
+
+fn joern_function_call(tool: &'static str, symbol: &str) -> BackendToolCall {
+    BackendToolCall {
+        tool,
+        args: serde_json::json!({ "fn": symbol }),
+    }
+}
+
+fn symbol_matches(value: &Value) -> Vec<Symbol> {
+    value
+        .get("matches")
+        .cloned()
+        .and_then(|matches| serde_json::from_value::<Vec<Symbol>>(matches).ok())
+        .unwrap_or_default()
+}
+
+fn log_backend_failure(backend: Backend, operation: &str, symbol: &str, err: &anyhow::Error) {
+    eprintln!(
+        "[codeindex] {} backend failed for {operation}({symbol}): {err}",
+        backend.binary_name()
+    );
 }
 
 /// Convenience input for the position-aware facade methods. Accepts a
@@ -372,6 +363,36 @@ mod tests {
         let mut facade = IndexFacade::new();
         let err = facade.callers_of("foo", None).await.unwrap_err();
         assert!(err.to_string().contains("no backend"));
+    }
+
+    #[test]
+    fn backend_call_builders_encode_supported_routes_only() {
+        let repo = Path::new("/repo");
+        let def = definition_call(Backend::Gtags, "parse", repo).unwrap();
+        assert_eq!(def.tool, "gtags.definitions");
+        assert_eq!(def.args["symbol"], serde_json::json!("parse"));
+        assert!(definition_call(Backend::Clang, "parse", repo).is_none());
+
+        let pos = FilePosition {
+            repo: std::path::PathBuf::from("/repo"),
+            file: "src/a.c".to_string(),
+            line: 10,
+            column: 3,
+        };
+        let callers = callers_call(Backend::Clang, "parse", Some(&pos)).unwrap();
+        assert_eq!(callers.tool, "clang.callers");
+        assert_eq!(callers.args["line"], serde_json::json!(10));
+        assert!(callers_call(Backend::Gtags, "parse", Some(&pos)).is_none());
+
+        let callees = callees_call(Backend::Joern, "parse", None).unwrap();
+        assert_eq!(callees.tool, "joern.callees_of");
+        assert_eq!(callees.args["fn"], serde_json::json!("parse"));
+    }
+
+    #[test]
+    fn symbol_matches_tolerates_missing_or_malformed_payloads() {
+        assert!(symbol_matches(&serde_json::json!({})).is_empty());
+        assert!(symbol_matches(&serde_json::json!({"matches": {"bad": true}})).is_empty());
     }
 
     #[tokio::test]

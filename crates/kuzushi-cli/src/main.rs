@@ -122,7 +122,8 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Execute a native tool descriptor-backed command.
+    /// Execute a native tool descriptor-backed command. Use an explicit
+    /// `module:tool`; shell-only `run .` needs focused module state.
     Run {
         tool: String,
         #[arg(long, default_value = "{}")]
@@ -355,37 +356,45 @@ fn shell_startup_progress_messages(target: Option<&Path>) -> Vec<String> {
 
 async fn mcp_command(command: McpCommand) -> Result<()> {
     match command {
-        McpCommand::Serve { backend } => {
-            // Exec into the per-backend server binary so its stdio loop
-            // is the one talking to the MCP client. We use `exec` semantics
-            // via std::process so signals flow through cleanly.
-            let binary = backend.binary();
-            let err = std::process::Command::new(binary)
-                .args::<[&str; 0], _>([])
-                .status();
-            match err {
-                Ok(status) => std::process::exit(status.code().unwrap_or(0)),
-                Err(e) => anyhow::bail!(
-                    "could not spawn `{binary}`: {e}. Build the workspace and add the target dir to PATH (e.g. `cargo build && export PATH=$PWD/target/debug:$PATH`)"
-                ),
-            }
-        }
-        McpCommand::Health { backend } => {
-            let binary = backend.binary();
-            let output = std::process::Command::new(binary)
-                .arg("--health")
-                .output()
-                .with_context(|| {
-                    format!(
-                        "could not spawn `{binary} --health`. Build the workspace and add the target dir to PATH."
-                    )
-                })?;
-            // Print whatever the binary produced; --health emits JSON.
-            std::io::Write::write_all(&mut std::io::stdout(), &output.stdout).ok();
-            std::io::Write::write_all(&mut std::io::stderr(), &output.stderr).ok();
-            std::process::exit(output.status.code().unwrap_or(0));
-        }
+        McpCommand::Serve { backend } => serve_mcp_backend(backend),
+        McpCommand::Health { backend } => health_mcp_backend(backend),
     }
+}
+
+fn serve_mcp_backend(backend: McpBackend) -> Result<()> {
+    let binary = backend.binary();
+    let status = std::process::Command::new(binary)
+        .args::<[&str; 0], _>([])
+        .status()
+        .with_context(|| mcp_spawn_error(binary))?;
+    std::process::exit(status.code().unwrap_or(0));
+}
+
+fn health_mcp_backend(backend: McpBackend) -> Result<()> {
+    let binary = backend.binary();
+    let output = std::process::Command::new(binary)
+        .arg("--health")
+        .output()
+        .with_context(|| mcp_health_spawn_error(binary))?;
+    write_mcp_output(&output.stdout, &output.stderr);
+    std::process::exit(output.status.code().unwrap_or(0));
+}
+
+fn mcp_spawn_error(binary: &str) -> String {
+    format!(
+        "could not spawn `{binary}`. Build the workspace and add the target dir to PATH (e.g. `cargo build && export PATH=$PWD/target/debug:$PATH`)"
+    )
+}
+
+fn mcp_health_spawn_error(binary: &str) -> String {
+    format!(
+        "could not spawn `{binary} --health`. Build the workspace and add the target dir to PATH."
+    )
+}
+
+fn write_mcp_output(stdout: &[u8], stderr: &[u8]) {
+    std::io::Write::write_all(&mut std::io::stdout(), stdout).ok();
+    std::io::Write::write_all(&mut std::io::stderr(), stderr).ok();
 }
 
 fn pr_comment_command(
@@ -441,62 +450,10 @@ async fn scan_command(
     let store = FindingStore::open(workspace.findings_db_path())?;
     let registry = ModuleRegistry::with_v2_builtins();
 
-    // Resolve --since into a list of repo-relative paths and write to
-    // `<target>/.kuzushi/v2/since.txt` for engines that support it.
-    if let Some(since_ref) = since.as_deref() {
-        let scope = kuzushi_core::git_diff_files(workspace.root(), since_ref, include_worktree)
-            .with_context(|| format!("--since {since_ref:?} failed"))?;
-        let scope_file = workspace.findings_db_path().with_file_name("since.txt");
-        let body: String = scope
-            .files
-            .iter()
-            .map(|p| format!("{}\n", p.display()))
-            .collect();
-        std::fs::write(&scope_file, body)
-            .with_context(|| format!("could not write {}", scope_file.display()))?;
-        if !json && !ci {
-            eprintln!(
-                "scope: {} files since {} {}",
-                scope.files.len(),
-                since_ref,
-                if include_worktree { "(+worktree)" } else { "" }
-            );
-        }
-    }
-
-    // Persist any --budget caps to the spend ledger before the scan starts.
-    // The actual enforcement lives in RoutedRuntime once wired (Phase 4+);
-    // here we make sure the operator's intent is recorded.
-    if let Some(spec) = budget.as_deref() {
-        let pairs = kuzushi_core::parse_budget_flag(spec)
-            .with_context(|| format!("invalid --budget spec {spec:?}"))?;
-        let limiter = kuzushi_core::SpendLimiter::open(workspace.findings_db_path())
-            .context("could not open spend ledger")?;
-        for (op, cap) in &pairs {
-            limiter
-                .set_cap(*op, *cap)
-                .with_context(|| format!("could not set cap for {}", op.as_db_str()))?;
-        }
-        if !json && !ci {
-            for (op, cap) in &pairs {
-                eprintln!("budget: {} = ${:.2}", op.as_db_str(), cap);
-            }
-        }
-    }
-    let input = serde_json::json!({
-        "mode": mode.as_input_value(),
-        "taskMode": if tasks.is_empty() { "auto" } else { "manual" },
-        "tasks": tasks,
-        "triage": triage,
-    });
-    let runtime = if wants_sast_runtime(&input) {
-        Some(PiAgentCoreRuntime::from_config(
-            &config,
-            std::env::current_dir()?,
-        )?)
-    } else {
-        None
-    };
+    apply_scan_since_scope(&workspace, since.as_deref(), include_worktree, json, ci)?;
+    apply_scan_budget_caps(&workspace, budget.as_deref(), json, ci)?;
+    let input = scan_tool_input(mode, &tasks, triage);
+    let runtime = scan_runtime(&config, &input)?;
     let ctx = ToolExecutionContext {
         config: &config,
         workspace: Some(&workspace),
@@ -504,26 +461,7 @@ async fn scan_command(
     };
 
     let started = std::time::Instant::now();
-    if ci {
-        println!(
-            "{}",
-            ci_line(
-                started,
-                "scan",
-                &format!(
-                    "{} started [model={} tasks={}]",
-                    target.display(),
-                    config.model.as_deref().unwrap_or("unconfigured"),
-                    if tasks.is_empty() {
-                        "auto".to_string()
-                    } else {
-                        tasks.join(",")
-                    },
-                ),
-            )
-        );
-        println!("{}", ci_line(started, "phase", "(init) → scanning"));
-    }
+    emit_scan_ci_start(ci, started, &target, &config, &tasks);
 
     let result = registry.execute_tool_with_runtime(
         "sast:scan",
@@ -532,82 +470,268 @@ async fn scan_command(
         runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
     );
     let elapsed = started.elapsed();
+    let result = scan_result_or_report_ci_error(result, ci, started, elapsed)?;
+    emit_scan_output(&workspace, &result, json, ci, started, elapsed)
+}
 
-    let result = match result {
-        Ok(value) => value,
-        Err(error) => {
-            if ci {
-                println!(
-                    "{}",
-                    ci_line(
-                        started,
-                        "phase",
-                        &format!("scanning → failed ({})", format_duration(elapsed))
-                    )
-                );
-                println!("{}", ci_line(started, "error", &error.to_string()));
-                println!("{}", ci_line(started, "exit", "1"));
-            }
-            return Err(error);
-        }
+fn apply_scan_since_scope(
+    workspace: &WorkspaceTarget,
+    since: Option<&str>,
+    include_worktree: bool,
+    json: bool,
+    ci: bool,
+) -> Result<()> {
+    let Some(since_ref) = since else {
+        return Ok(());
     };
-    let data = result
-        .get("data")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
-    let count = data
-        .get("findingsCount")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    let cost = result
-        .get("costUsd")
-        .and_then(serde_json::Value::as_f64)
-        .unwrap_or(0.0);
+    let scope = kuzushi_core::git_diff_files(workspace.root(), since_ref, include_worktree)
+        .with_context(|| format!("--since {since_ref:?} failed"))?;
+    let scope_file = workspace.findings_db_path().with_file_name("since.txt");
+    std::fs::write(&scope_file, scan_scope_body(&scope.files))
+        .with_context(|| format!("could not write {}", scope_file.display()))?;
+    emit_scan_scope_line(&scope.files, since_ref, include_worktree, json, ci);
+    Ok(())
+}
 
+fn scan_scope_body(files: &[PathBuf]) -> String {
+    files.iter().map(|p| format!("{}\n", p.display())).collect()
+}
+
+fn emit_scan_scope_line(
+    files: &[PathBuf],
+    since_ref: &str,
+    include_worktree: bool,
+    json: bool,
+    ci: bool,
+) {
+    if !json && !ci {
+        eprintln!(
+            "scope: {} files since {} {}",
+            files.len(),
+            since_ref,
+            scan_worktree_suffix(include_worktree)
+        );
+    }
+}
+
+fn scan_worktree_suffix(include_worktree: bool) -> &'static str {
+    if include_worktree {
+        "(+worktree)"
+    } else {
+        ""
+    }
+}
+
+fn apply_scan_budget_caps(
+    workspace: &WorkspaceTarget,
+    budget: Option<&str>,
+    json: bool,
+    ci: bool,
+) -> Result<()> {
+    let Some(spec) = budget else {
+        return Ok(());
+    };
+    let pairs = kuzushi_core::parse_budget_flag(spec)
+        .with_context(|| format!("invalid --budget spec {spec:?}"))?;
+    let limiter = kuzushi_core::SpendLimiter::open(workspace.findings_db_path())
+        .context("could not open spend ledger")?;
+    for (op, cap) in &pairs {
+        limiter
+            .set_cap(*op, *cap)
+            .with_context(|| format!("could not set cap for {}", op.as_db_str()))?;
+    }
+    emit_scan_budget_lines(&pairs, json, ci);
+    Ok(())
+}
+
+fn emit_scan_budget_lines(pairs: &[(kuzushi_core::SpendOperation, f64)], json: bool, ci: bool) {
+    if !json && !ci {
+        for (op, cap) in pairs {
+            eprintln!("budget: {} = ${:.2}", op.as_db_str(), cap);
+        }
+    }
+}
+
+fn scan_tool_input(mode: ScanModeArg, tasks: &[String], triage: bool) -> serde_json::Value {
+    serde_json::json!({
+        "mode": mode.as_input_value(),
+        "taskMode": scan_task_mode(tasks),
+        "tasks": tasks,
+        "triage": triage,
+    })
+}
+
+fn scan_task_mode(tasks: &[String]) -> &'static str {
+    if tasks.is_empty() {
+        "auto"
+    } else {
+        "manual"
+    }
+}
+
+fn scan_runtime(
+    config: &kuzushi_core::V2Config,
+    input: &serde_json::Value,
+) -> Result<Option<PiAgentCoreRuntime>> {
+    if wants_sast_runtime(input) {
+        Ok(Some(PiAgentCoreRuntime::from_config(
+            config,
+            std::env::current_dir()?,
+        )?))
+    } else {
+        Ok(None)
+    }
+}
+
+fn emit_scan_ci_start(
+    ci: bool,
+    started: std::time::Instant,
+    target: &Path,
+    config: &kuzushi_core::V2Config,
+    tasks: &[String],
+) {
+    if ci {
+        println!(
+            "{}",
+            ci_line(started, "scan", &scan_started_body(target, config, tasks))
+        );
+        println!("{}", ci_line(started, "phase", "(init) → scanning"));
+    }
+}
+
+fn scan_started_body(target: &Path, config: &kuzushi_core::V2Config, tasks: &[String]) -> String {
+    format!(
+        "{} started [model={} tasks={}]",
+        target.display(),
+        config.model.as_deref().unwrap_or("unconfigured"),
+        scan_tasks_label(tasks),
+    )
+}
+
+fn scan_tasks_label(tasks: &[String]) -> String {
+    if tasks.is_empty() {
+        "auto".to_string()
+    } else {
+        tasks.join(",")
+    }
+}
+
+fn scan_result_or_report_ci_error(
+    result: Result<serde_json::Value>,
+    ci: bool,
+    started: std::time::Instant,
+    elapsed: std::time::Duration,
+) -> Result<serde_json::Value> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            emit_scan_ci_error(ci, started, elapsed, &error);
+            Err(error)
+        }
+    }
+}
+
+fn emit_scan_ci_error(
+    ci: bool,
+    started: std::time::Instant,
+    elapsed: std::time::Duration,
+    error: &anyhow::Error,
+) {
     if ci {
         println!(
             "{}",
             ci_line(
                 started,
                 "phase",
-                &format!("scanning → done ({})", format_duration(elapsed))
+                &format!("scanning → failed ({})", format_duration(elapsed))
             )
         );
-        println!(
-            "{}",
-            ci_line(
-                started,
-                "summary",
-                &format!(
-                    "{count} finding(s) · ${cost:.4} · {}",
-                    format_duration(elapsed)
-                )
-            )
-        );
-        println!("{}", ci_line(started, "exit", "0"));
+        println!("{}", ci_line(started, "error", &error.to_string()));
+        println!("{}", ci_line(started, "exit", "1"));
+    }
+}
+
+fn emit_scan_output(
+    workspace: &WorkspaceTarget,
+    result: &serde_json::Value,
+    json: bool,
+    ci: bool,
+    started: std::time::Instant,
+    elapsed: std::time::Duration,
+) -> Result<()> {
+    let data = scan_result_data(result);
+    if ci {
+        emit_scan_ci_success(result, &data, started, elapsed);
         return Ok(());
     }
-
     if json {
-        println!(
-            "{}",
-            serde_json::json!({
-                "runId": data.get("runId").cloned(),
-                "target": data.get("target").cloned(),
-                "findingsCount": data.get("findingsCount").cloned(),
-                "db": workspace.findings_db_path(),
-                "mode": data.get("mode").cloned(),
-                "whiteboxStatic": data.get("whiteboxStatic").cloned(),
-                "triage": data.get("triage").cloned(),
-            })
-        );
-    } else {
-        if let Some(output) = result.get("output").and_then(serde_json::Value::as_str) {
-            println!("{output}");
-        }
+        println!("{}", scan_json_output(workspace, &data));
+    } else if let Some(output) = result.get("output").and_then(serde_json::Value::as_str) {
+        println!("{output}");
     }
-
     Ok(())
+}
+
+fn scan_result_data(result: &serde_json::Value) -> serde_json::Value {
+    result
+        .get("data")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+fn emit_scan_ci_success(
+    result: &serde_json::Value,
+    data: &serde_json::Value,
+    started: std::time::Instant,
+    elapsed: std::time::Duration,
+) {
+    println!(
+        "{}",
+        ci_line(
+            started,
+            "phase",
+            &format!("scanning → done ({})", format_duration(elapsed))
+        )
+    );
+    println!(
+        "{}",
+        ci_line(
+            started,
+            "summary",
+            &format!(
+                "{} finding(s) · ${:.4} · {}",
+                scan_findings_count(data),
+                scan_cost_usd(result),
+                format_duration(elapsed)
+            )
+        )
+    );
+    println!("{}", ci_line(started, "exit", "0"));
+}
+
+fn scan_findings_count(data: &serde_json::Value) -> u64 {
+    data.get("findingsCount")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+}
+
+fn scan_cost_usd(result: &serde_json::Value) -> f64 {
+    result
+        .get("costUsd")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0)
+}
+
+fn scan_json_output(workspace: &WorkspaceTarget, data: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "runId": data.get("runId").cloned(),
+        "target": data.get("target").cloned(),
+        "findingsCount": data.get("findingsCount").cloned(),
+        "db": workspace.findings_db_path(),
+        "mode": data.get("mode").cloned(),
+        "whiteboxStatic": data.get("whiteboxStatic").cloned(),
+        "triage": data.get("triage").cloned(),
+    })
 }
 
 fn ci_line(started: std::time::Instant, prefix: &str, body: &str) -> String {
@@ -719,81 +843,171 @@ fn auth_ping(
     model_override: Option<String>,
     target: Option<PathBuf>,
 ) -> Result<()> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
+    let workspace = auth_ping_workspace(target)?;
+    let config = auth_ping_config(workspace.as_ref())?;
+    let mut log = AuthPingLog::default();
+    run_auth_ping_checks(provider, model_override, &config, &mut log)
+}
 
-    // Step 1: config + credential probe (read-only, no network).
-    let workspace = target.as_deref().map(WorkspaceTarget::new).transpose()?;
-    let config = load_config_for_target(workspace.as_ref().map(WorkspaceTarget::root))?;
+fn auth_ping_workspace(target: Option<PathBuf>) -> Result<Option<WorkspaceTarget>> {
+    target.as_deref().map(WorkspaceTarget::new).transpose()
+}
 
-    let mut all_ok = true;
-    let mut log = |ok: bool, msg: String| {
+fn auth_ping_config(workspace: Option<&WorkspaceTarget>) -> Result<kuzushi_core::V2Config> {
+    load_config_for_target(workspace.map(WorkspaceTarget::root))
+}
+
+fn run_auth_ping_checks(
+    provider: &str,
+    model_override: Option<String>,
+    config: &kuzushi_core::V2Config,
+    log: &mut AuthPingLog,
+) -> Result<()> {
+    eprintln!("[auth ping] provider = {provider}");
+    probe_auth_credentials(provider, config, log)?;
+
+    let model = auth_ping_model(model_override, config);
+    log.record(true, format!("ping model = {model}"));
+
+    let bridge_command = required_auth_ping_bridge_command(config, log);
+    let envelope = auth_ping_envelope(config, model);
+    let parsed = run_auth_ping_bridge(&bridge_command, &envelope, log)?;
+    record_auth_ping_result(&parsed, log);
+    log.exit_if_failed();
+    eprintln!("\x1b[32mauth ping: OK\x1b[0m");
+    Ok(())
+}
+
+fn required_auth_ping_bridge_command(
+    config: &kuzushi_core::V2Config,
+    log: &mut AuthPingLog,
+) -> Vec<String> {
+    let command = auth_ping_bridge_command(config);
+    if command.is_empty() {
+        log.record(false, "bridge command is empty");
+        std::process::exit(1);
+    }
+    command
+}
+
+fn record_auth_ping_result(parsed: &serde_json::Value, log: &mut AuthPingLog) {
+    if let Some(error) = bridge_ping_error(parsed) {
+        log.record(false, format!("bridge ping failed: {error}"));
+        std::process::exit(1);
+    }
+    log.record(true, bridge_ping_summary(parsed));
+}
+
+struct AuthPingLog {
+    all_ok: bool,
+}
+
+impl Default for AuthPingLog {
+    fn default() -> Self {
+        Self { all_ok: true }
+    }
+}
+
+impl AuthPingLog {
+    fn record(&mut self, ok: bool, msg: impl Into<String>) {
+        let msg = msg.into();
         if ok {
             eprintln!("  \x1b[32m✓\x1b[0m {msg}");
         } else {
             eprintln!("  \x1b[31m✗\x1b[0m {msg}");
-            all_ok = false;
-        }
-    };
-
-    eprintln!("[auth ping] provider = {provider}");
-
-    // OAuth + API-key checks.
-    if provider == "anthropic" {
-        if let Some(oauth_cfg) = &config.runtime.anthropic_oauth {
-            match kuzushi_openai::probe_anthropic_oauth(oauth_cfg)? {
-                kuzushi_openai::OauthReadiness::Ready { expires_at_ms } => log(
-                    true,
-                    format!(
-                        "oauth credentials ready (expires {})",
-                        format_unix_ms(expires_at_ms)
-                    ),
-                ),
-                kuzushi_openai::OauthReadiness::Expired { expires_at_ms } => log(
-                    true,
-                    format!(
-                        "oauth credentials present but expired ({}); will refresh on next call",
-                        format_unix_ms(expires_at_ms)
-                    ),
-                ),
-                kuzushi_openai::OauthReadiness::Missing { searched } => log(
-                    false,
-                    format!("oauth credentials missing at {}", searched.display()),
-                ),
-                kuzushi_openai::OauthReadiness::Invalid { searched, reason } => log(
-                    false,
-                    format!(
-                        "oauth credentials invalid at {}: {reason}",
-                        searched.display()
-                    ),
-                ),
-            }
-        } else {
-            log(
-                true,
-                "oauth not configured; will check env / api key".to_string(),
-            );
-        }
-        if std::env::var("ANTHROPIC_OAUTH_TOKEN").is_ok()
-            || std::env::var("ANTHROPIC_AUTH_TOKEN").is_ok()
-        {
-            log(
-                true,
-                "ANTHROPIC_OAUTH_TOKEN/AUTH_TOKEN env present".to_string(),
-            );
-        }
-        if std::env::var("ANTHROPIC_API_KEY").is_ok() {
-            log(true, "ANTHROPIC_API_KEY env present".to_string());
+            self.all_ok = false;
         }
     }
 
-    // Step 2: bridge ping envelope.
-    let model = model_override
-        .or_else(|| config.model.clone())
-        .unwrap_or_else(|| "anthropic:claude-haiku-4-5".to_string());
-    log(true, format!("ping model = {model}"));
+    fn exit_if_failed(&self) {
+        if !self.all_ok {
+            std::process::exit(1);
+        }
+    }
+}
 
-    let bridge_command = config
+fn probe_auth_credentials(
+    provider: &str,
+    config: &kuzushi_core::V2Config,
+    log: &mut AuthPingLog,
+) -> Result<()> {
+    if provider == "anthropic" {
+        probe_anthropic_credentials(config, log)?;
+    }
+    Ok(())
+}
+
+fn probe_anthropic_credentials(
+    config: &kuzushi_core::V2Config,
+    log: &mut AuthPingLog,
+) -> Result<()> {
+    if let Some(oauth_cfg) = &config.runtime.anthropic_oauth {
+        let readiness = kuzushi_openai::probe_anthropic_oauth(oauth_cfg)?;
+        record_anthropic_oauth_readiness(readiness, log);
+    } else {
+        log.record(true, "oauth not configured; will check env / api key");
+    }
+    record_anthropic_env_presence(log);
+    Ok(())
+}
+
+fn record_anthropic_oauth_readiness(
+    readiness: kuzushi_openai::OauthReadiness,
+    log: &mut AuthPingLog,
+) {
+    let (ok, message) = anthropic_oauth_readiness_message(readiness);
+    log.record(ok, message);
+}
+
+fn anthropic_oauth_readiness_message(readiness: kuzushi_openai::OauthReadiness) -> (bool, String) {
+    match readiness {
+        kuzushi_openai::OauthReadiness::Ready { expires_at_ms } => (
+            true,
+            format!(
+                "oauth credentials ready (expires {})",
+                format_unix_ms(expires_at_ms)
+            ),
+        ),
+        kuzushi_openai::OauthReadiness::Expired { expires_at_ms } => (
+            true,
+            format!(
+                "oauth credentials present but expired ({}); will refresh on next call",
+                format_unix_ms(expires_at_ms)
+            ),
+        ),
+        kuzushi_openai::OauthReadiness::Missing { searched } => (
+            false,
+            format!("oauth credentials missing at {}", searched.display()),
+        ),
+        kuzushi_openai::OauthReadiness::Invalid { searched, reason } => (
+            false,
+            format!(
+                "oauth credentials invalid at {}: {reason}",
+                searched.display()
+            ),
+        ),
+    }
+}
+
+fn record_anthropic_env_presence(log: &mut AuthPingLog) {
+    if std::env::var("ANTHROPIC_OAUTH_TOKEN").is_ok()
+        || std::env::var("ANTHROPIC_AUTH_TOKEN").is_ok()
+    {
+        log.record(true, "ANTHROPIC_OAUTH_TOKEN/AUTH_TOKEN env present");
+    }
+    if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+        log.record(true, "ANTHROPIC_API_KEY env present");
+    }
+}
+
+fn auth_ping_model(model_override: Option<String>, config: &kuzushi_core::V2Config) -> String {
+    model_override
+        .or_else(|| config.model.clone())
+        .unwrap_or_else(|| "anthropic:claude-haiku-4-5".to_string())
+}
+
+fn auth_ping_bridge_command(config: &kuzushi_core::V2Config) -> Vec<String> {
+    config
         .runtime
         .agent_bridge_command
         .clone()
@@ -802,18 +1016,26 @@ fn auth_ping(
                 "node".to_string(),
                 "scripts/pi-agent-core-bridge.mjs".to_string(),
             ]
-        });
-    if bridge_command.is_empty() {
-        log(false, "bridge command is empty".to_string());
-        std::process::exit(1);
-    }
+        })
+}
 
-    let envelope = serde_json::json!({
+fn auth_ping_envelope(config: &kuzushi_core::V2Config, model: String) -> serde_json::Value {
+    serde_json::json!({
         "type": "ping",
         "model": model,
         "apiKeyEnv": config.runtime.api_key_env,
         "apiKey": std::env::var(&config.runtime.api_key_env).ok(),
-    });
+    })
+}
+
+fn run_auth_ping_bridge(
+    bridge_command: &[String],
+    envelope: &serde_json::Value,
+    log: &mut AuthPingLog,
+) -> Result<serde_json::Value> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
     let mut child = Command::new(&bridge_command[0])
         .args(&bridge_command[1..])
         .stdin(Stdio::piped())
@@ -831,24 +1053,35 @@ fn auth_ping(
     let output = child
         .wait_with_output()
         .context("could not read bridge output")?;
-    let parsed: serde_json::Value = match serde_json::from_slice(&output.stdout) {
-        Ok(v) => v,
+    match parse_bridge_stdout(&output.stdout) {
+        Ok(value) => Ok(value),
         Err(e) => {
-            log(false, format!("bridge returned non-JSON output: {e}"));
+            log.record(false, format!("bridge returned non-JSON output: {e}"));
             eprintln!("    stdout: {}", String::from_utf8_lossy(&output.stdout));
             eprintln!("    stderr: {}", String::from_utf8_lossy(&output.stderr));
             std::process::exit(1);
         }
-    };
-    if parsed.get("ok").and_then(serde_json::Value::as_bool) != Some(true) {
-        let err = parsed
+    }
+}
+
+fn parse_bridge_stdout(stdout: &[u8]) -> std::result::Result<serde_json::Value, serde_json::Error> {
+    serde_json::from_slice(stdout)
+}
+
+fn bridge_ping_error(parsed: &serde_json::Value) -> Option<String> {
+    if parsed.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
+        return None;
+    }
+    Some(
+        parsed
             .get("error")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or("(no error message)");
-        log(false, format!("bridge ping failed: {err}"));
-        std::process::exit(1);
-    }
+            .unwrap_or("(no error message)")
+            .to_string(),
+    )
+}
 
+fn bridge_ping_summary(parsed: &serde_json::Value) -> String {
     let auth_mode = parsed
         .get("auth_mode")
         .and_then(serde_json::Value::as_str)
@@ -869,18 +1102,9 @@ fn auth_ping(
         .get("cost_usd")
         .and_then(serde_json::Value::as_f64)
         .unwrap_or(0.0);
-    log(
-        true,
-        format!(
-            "round-trip ok via {auth_mode} ({latency_ms}ms, {in_tok}/{out_tok} tokens, ~${cost:.5})"
-        ),
-    );
-
-    if !all_ok {
-        std::process::exit(1);
-    }
-    eprintln!("\x1b[32mauth ping: OK\x1b[0m");
-    Ok(())
+    format!(
+        "round-trip ok via {auth_mode} ({latency_ms}ms, {in_tok}/{out_tok} tokens, ~${cost:.5})"
+    )
 }
 
 fn format_unix_ms(ms: u64) -> String {
@@ -1382,128 +1606,17 @@ fn print_doctor_json(report: &DoctorReport) -> Result<()> {
 }
 
 fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Result<()> {
-    let workspace = match target.as_deref() {
-        Some(target) => Some(WorkspaceTarget::new(target)?),
-        None if tool.starts_with("findings:")
-            || tool.starts_with("context:")
-            || tool.starts_with("recon:")
-            || tool.starts_with("vendor-assessment:")
-            || tool.starts_with("chrome-rce:")
-            || tool.starts_with("vuln-scout:")
-            || tool.starts_with("tob:")
-            || tool.starts_with("shinsa:")
-            || tool.starts_with("prompt-armor:")
-            || tool.starts_with("x-ray:")
-            || tool.starts_with("threat-model:")
-            || tool.starts_with("randori:")
-            || tool.starts_with("variant:")
-            || tool.starts_with("ndiff:")
-            || tool.starts_with("systems-hunt:")
-            || tool == "carlini-threat-hunt:run"
-            || tool == "agentic-sast:scan"
-            || tool == "taint-iris:hunt"
-            || tool == "taint-iris-next:hunt"
-            || tool == "triage:run"
-            || tool == "verify:finding"
-            || tool == "verify:exploit"
-            || tool == "patch:finding"
-            || tool == "context-lite:index"
-            || tool == "full-mode:hunt"
-            || tool == "classifier-gate:score"
-            || tool == "deep-audit:run"
-            || matches!(
-                tool.as_str(),
-                "sast:scan" | "semgrep:scan" | "codeql:scan" | "iac-scan:scan"
-            ) =>
-        {
-            Some(WorkspaceTarget::new(".")?)
-        }
-        None => None,
-    };
+    reject_shell_only_run_dot(&tool)?;
+    let workspace = run_tool_workspace(&tool, target.as_deref())?;
     let config = load_config_for_target(workspace.as_ref().map(WorkspaceTarget::root))?;
     let store = workspace
         .as_ref()
-        .filter(|_| {
-            tool.starts_with("findings:")
-                || tool == "triage:run"
-                || tool == "verify:finding"
-                || tool == "verify:exploit"
-                || tool == "patch:finding"
-                || tool == "agentic-sast:scan"
-                || tool == "carlini-threat-hunt:run"
-                || tool.starts_with("chrome-rce:")
-                || tool == "vuln-scout:audit"
-                || tool == "tob:audit"
-                || matches!(
-                    tool.as_str(),
-                    "shinsa:scan"
-                        | "shinsa:quick-check"
-                        | "shinsa:nist-scan"
-                        | "shinsa:nist-quick-check"
-                        | "prompt-armor:scan"
-                        | "prompt-armor:analyze"
-                        | "prompt-armor:attack"
-                )
-                || tool.starts_with("variant:")
-                || tool == "ndiff:hunt-variants"
-                || tool.starts_with("systems-hunt:")
-                || tool == "taint-iris:hunt"
-                || tool == "taint-iris-next:hunt"
-                || matches!(
-                    tool.as_str(),
-                    "sast:scan" | "semgrep:scan" | "codeql:scan" | "iac-scan:scan"
-                )
-        })
+        .filter(|_| tool_needs_finding_store(&tool))
         .map(|workspace| FindingStore::open(workspace.findings_db_path()))
         .transpose()?;
     let input = serde_json::from_str(&input).context("--input must be JSON")?;
     let registry = ModuleRegistry::with_v2_builtins();
-    let runtime = if matches!(
-        tool.as_str(),
-        "triage:run"
-            | "verify:finding"
-            | "patch:finding"
-            | "agentic-sast:scan"
-            | "carlini-threat-hunt:run"
-            | "vendor-assessment:assess"
-            | "vuln-scout:audit"
-            | "tob:audit"
-            | "shinsa:scan"
-            | "shinsa:quick-check"
-            | "shinsa:nist-scan"
-            | "shinsa:nist-quick-check"
-            | "prompt-armor:scan"
-            | "prompt-armor:analyze"
-            | "prompt-armor:attack"
-            | "variant:lift-pattern"
-            | "variant:hunt"
-            | "ndiff:extract-fix-pattern"
-            | "ndiff:hunt-variants"
-            | "systems-hunt:systems-invariant-extract"
-            | "systems-hunt:systems-trigger-synth"
-            | "systems-hunt:systems-hunt"
-            | "systems-hunt:deep-semantic-cwe-select"
-            | "systems-hunt:deep-semantic-hunt"
-            | "taint-iris:hunt"
-            | "taint-iris-next:hunt"
-            | "full-mode:hunt"
-            | "classifier-gate:score"
-            | "deep-audit:run"
-            | "smoke:next-step"
-    ) {
-        Some(PiAgentCoreRuntime::from_config(
-            &config,
-            std::env::current_dir()?,
-        )?)
-    } else if tool == "sast:scan" && wants_sast_runtime(&input) {
-        Some(PiAgentCoreRuntime::from_config(
-            &config,
-            std::env::current_dir()?,
-        )?)
-    } else if matches!(
-        tool.as_str(),
-        "threat-model:build" | "randori:pasta" | "x-ray:run" | "x-ray:x-ray"
-    ) {
+    let runtime = if tool_needs_runtime(&tool, &input) {
         Some(PiAgentCoreRuntime::from_config(
             &config,
             std::env::current_dir()?,
@@ -1524,6 +1637,146 @@ fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Res
     )?;
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
+}
+
+fn reject_shell_only_run_dot(tool: &str) -> Result<()> {
+    if tool == "." {
+        anyhow::bail!(
+            "`kuzushi run .` is shell-only because the terminal command has no focused module. Use `kuzushi shell`, then `use <module>` and `run .`; from a terminal run an explicit tool such as `kuzushi --target . run context:build --input '{{}}'`."
+        );
+    }
+    Ok(())
+}
+
+fn run_tool_workspace(tool: &str, target: Option<&Path>) -> Result<Option<WorkspaceTarget>> {
+    match target {
+        Some(target) => Ok(Some(WorkspaceTarget::new(target)?)),
+        None if tool_defaults_to_workspace(tool) => Ok(Some(WorkspaceTarget::new(".")?)),
+        None => Ok(None),
+    }
+}
+
+const WORKSPACE_TOOL_PREFIXES: &[&str] = &[
+    "findings:",
+    "context:",
+    "recon:",
+    "vendor-assessment:",
+    "chrome-rce:",
+    "vuln-scout:",
+    "tob:",
+    "shinsa:",
+    "prompt-armor:",
+    "x-ray:",
+    "threat-model:",
+    "randori:",
+    "variant:",
+    "ndiff:",
+    "systems-hunt:",
+];
+
+const WORKSPACE_TOOL_NAMES: &[&str] = &[
+    "carlini-threat-hunt:run",
+    "agentic-sast:scan",
+    "taint-iris:hunt",
+    "taint-iris-next:hunt",
+    "triage:run",
+    "verify:finding",
+    "verify:exploit",
+    "patch:finding",
+    "context-lite:index",
+    "full-mode:hunt",
+    "classifier-gate:score",
+    "deep-audit:run",
+    "sast:scan",
+    "semgrep:scan",
+    "codeql:scan",
+    "iac-scan:scan",
+];
+
+const FINDING_STORE_TOOL_PREFIXES: &[&str] =
+    &["findings:", "chrome-rce:", "variant:", "systems-hunt:"];
+
+const FINDING_STORE_TOOL_NAMES: &[&str] = &[
+    "triage:run",
+    "verify:finding",
+    "verify:exploit",
+    "patch:finding",
+    "agentic-sast:scan",
+    "carlini-threat-hunt:run",
+    "vuln-scout:audit",
+    "tob:audit",
+    "shinsa:scan",
+    "shinsa:quick-check",
+    "shinsa:nist-scan",
+    "shinsa:nist-quick-check",
+    "prompt-armor:scan",
+    "prompt-armor:analyze",
+    "prompt-armor:attack",
+    "ndiff:hunt-variants",
+    "taint-iris:hunt",
+    "taint-iris-next:hunt",
+    "sast:scan",
+    "semgrep:scan",
+    "codeql:scan",
+    "iac-scan:scan",
+];
+
+const RUNTIME_TOOL_NAMES: &[&str] = &[
+    "triage:run",
+    "verify:finding",
+    "patch:finding",
+    "agentic-sast:scan",
+    "carlini-threat-hunt:run",
+    "vendor-assessment:assess",
+    "vuln-scout:audit",
+    "tob:audit",
+    "shinsa:scan",
+    "shinsa:quick-check",
+    "shinsa:nist-scan",
+    "shinsa:nist-quick-check",
+    "prompt-armor:scan",
+    "prompt-armor:analyze",
+    "prompt-armor:attack",
+    "variant:lift-pattern",
+    "variant:hunt",
+    "ndiff:extract-fix-pattern",
+    "ndiff:hunt-variants",
+    "systems-hunt:systems-invariant-extract",
+    "systems-hunt:systems-trigger-synth",
+    "systems-hunt:systems-hunt",
+    "systems-hunt:deep-semantic-cwe-select",
+    "systems-hunt:deep-semantic-hunt",
+    "taint-iris:hunt",
+    "taint-iris-next:hunt",
+    "full-mode:hunt",
+    "classifier-gate:score",
+    "deep-audit:run",
+    "smoke:next-step",
+    "threat-model:build",
+    "randori:pasta",
+    "x-ray:run",
+    "x-ray:x-ray",
+];
+
+fn tool_defaults_to_workspace(tool: &str) -> bool {
+    has_known_prefix(tool, WORKSPACE_TOOL_PREFIXES) || has_known_name(tool, WORKSPACE_TOOL_NAMES)
+}
+
+fn tool_needs_finding_store(tool: &str) -> bool {
+    has_known_prefix(tool, FINDING_STORE_TOOL_PREFIXES)
+        || has_known_name(tool, FINDING_STORE_TOOL_NAMES)
+}
+
+fn tool_needs_runtime(tool: &str, input: &serde_json::Value) -> bool {
+    has_known_name(tool, RUNTIME_TOOL_NAMES) || tool == "sast:scan" && wants_sast_runtime(input)
+}
+
+fn has_known_prefix(tool: &str, prefixes: &[&str]) -> bool {
+    prefixes.iter().any(|prefix| tool.starts_with(prefix))
+}
+
+fn has_known_name(tool: &str, names: &[&str]) -> bool {
+    names.contains(&tool)
 }
 
 #[cfg(test)]
@@ -1576,6 +1829,164 @@ mod tests {
     fn plain_flag_suppresses_tty_startup_progress() {
         assert!(plain_output_requested(true));
         assert!(!should_emit_shell_startup_progress(true));
+    }
+
+    #[test]
+    fn auth_ping_model_preserves_operator_override_then_config_then_default() {
+        let mut config = kuzushi_core::V2Config::default();
+        config.model = Some("openai:gpt-5.4".to_string());
+
+        assert_eq!(
+            auth_ping_model(Some("anthropic:claude-sonnet-4-5".to_string()), &config),
+            "anthropic:claude-sonnet-4-5"
+        );
+        assert_eq!(auth_ping_model(None, &config), "openai:gpt-5.4");
+
+        config.model = None;
+        assert_eq!(auth_ping_model(None, &config), "anthropic:claude-haiku-4-5");
+    }
+
+    #[test]
+    fn auth_ping_readiness_messages_cover_oauth_states() {
+        let (ok, ready) =
+            anthropic_oauth_readiness_message(kuzushi_openai::OauthReadiness::Ready {
+                expires_at_ms: 0,
+            });
+        assert!(ok);
+        assert!(ready.contains("oauth credentials ready"));
+
+        let (ok, expired) =
+            anthropic_oauth_readiness_message(kuzushi_openai::OauthReadiness::Expired {
+                expires_at_ms: 0,
+            });
+        assert!(ok);
+        assert!(expired.contains("will refresh on next call"));
+
+        let missing_path = PathBuf::from("/tmp/kuzushi-oauth.json");
+        let (ok, missing) =
+            anthropic_oauth_readiness_message(kuzushi_openai::OauthReadiness::Missing {
+                searched: missing_path.clone(),
+            });
+        assert!(!ok);
+        assert!(missing.contains(&missing_path.display().to_string()));
+
+        let (ok, invalid) =
+            anthropic_oauth_readiness_message(kuzushi_openai::OauthReadiness::Invalid {
+                searched: missing_path,
+                reason: "malformed json".to_string(),
+            });
+        assert!(!ok);
+        assert!(invalid.contains("malformed json"));
+    }
+
+    #[test]
+    fn bridge_ping_error_and_summary_parse_bridge_json() {
+        let parsed = parse_bridge_stdout(
+            br#"{"ok":true,"auth_mode":"oauth","latency_ms":7,"input_tokens":2,"output_tokens":3,"cost_usd":0.0042}"#,
+        )
+        .unwrap();
+
+        assert_eq!(bridge_ping_error(&parsed), None);
+        assert_eq!(
+            bridge_ping_summary(&parsed),
+            "round-trip ok via oauth (7ms, 2/3 tokens, ~$0.00420)"
+        );
+
+        let failed = serde_json::json!({"ok": false, "error": "bad credentials"});
+        assert_eq!(
+            bridge_ping_error(&failed),
+            Some("bad credentials".to_string())
+        );
+    }
+
+    #[test]
+    fn run_auth_ping_bridge_round_trips_json_over_stdio() {
+        let mut log = AuthPingLog::default();
+        let envelope = serde_json::json!({
+            "ok": true,
+            "auth_mode": "echo",
+            "latency_ms": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0.0
+        });
+
+        let parsed = run_auth_ping_bridge(&["cat".to_string()], &envelope, &mut log).unwrap();
+
+        assert_eq!(parsed, envelope);
+    }
+
+    #[test]
+    fn config_show_and_path_commands_return_success() {
+        let temp = tempfile::tempdir().unwrap();
+
+        config_command(ConfigCommand::Show, Some(temp.path().to_path_buf())).unwrap();
+        config_command(ConfigCommand::Path, None).unwrap();
+    }
+
+    #[test]
+    fn run_tool_policy_predicates_cover_workspace_store_and_runtime() {
+        assert!(tool_defaults_to_workspace(
+            "systems-hunt:deep-semantic-hunt"
+        ));
+        assert!(tool_defaults_to_workspace("findings:list"));
+        assert!(!tool_defaults_to_workspace("clang.health"));
+
+        assert!(tool_needs_finding_store("variant:hunt"));
+        assert!(tool_needs_finding_store("prompt-armor:scan"));
+        assert!(!tool_needs_finding_store("context-lite:index"));
+
+        assert!(tool_needs_runtime("deep-audit:run", &serde_json::json!({})));
+        assert!(tool_needs_runtime(
+            "sast:scan",
+            &serde_json::json!({"triage": true})
+        ));
+        assert!(!tool_needs_runtime(
+            "sast:scan",
+            &serde_json::json!({"whiteboxStatic": true})
+        ));
+    }
+
+    #[test]
+    fn scan_helpers_format_scope_tasks_and_json_summary() {
+        let scope = scan_scope_body(&[PathBuf::from("src/lib.rs"), PathBuf::from("Cargo.toml")]);
+        assert_eq!(scope, "src/lib.rs\nCargo.toml\n");
+        assert_eq!(scan_task_mode(&[]), "auto");
+        assert_eq!(scan_task_mode(&["sast".to_string()]), "manual");
+        assert_eq!(scan_worktree_suffix(true), "(+worktree)");
+        assert_eq!(scan_worktree_suffix(false), "");
+
+        let mut config = kuzushi_core::V2Config::default();
+        config.model = Some("anthropic:claude-sonnet-4-5".to_string());
+        assert!(scan_started_body(
+            Path::new("."),
+            &config,
+            &["sast".to_string(), "triage".to_string()]
+        )
+        .contains("tasks=sast,triage"));
+
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let data = serde_json::json!({
+            "runId": "run-1",
+            "target": ".",
+            "findingsCount": 2,
+            "mode": "standard",
+            "whiteboxStatic": true,
+            "triage": false,
+        });
+        let summary = scan_json_output(&workspace, &data);
+        assert_eq!(summary["findingsCount"], serde_json::json!(2));
+        assert!(summary["db"].as_str().unwrap().contains(".kuzushi"));
+    }
+
+    #[test]
+    fn mcp_backend_binary_names_are_stable() {
+        assert_eq!(McpBackend::Gtags.binary(), "kuzushi-mcp-gtags");
+        assert_eq!(McpBackend::Clang.binary(), "kuzushi-mcp-clang");
+        assert_eq!(McpBackend::Joern.binary(), "kuzushi-mcp-joern");
+        assert!(mcp_spawn_error("kuzushi-mcp-gtags").contains("cargo build"));
+        assert!(mcp_health_spawn_error("kuzushi-mcp-gtags").contains("--health"));
     }
 }
 

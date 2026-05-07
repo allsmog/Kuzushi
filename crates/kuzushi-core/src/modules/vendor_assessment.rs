@@ -7,10 +7,13 @@ use serde_json::{json, Map, Value};
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
 use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 
+use super::input::{
+    read_bool_any, resolve_input_path, string_array_or_csv_input, string_input_any,
+};
+use super::support::unix_millis;
 use super::{
-    builtin_module, json_summary, model_option, opt, read_bool_any, resolve_input_path,
-    resolve_tool_model, resolve_tool_target, string_array_or_csv_input, string_input_any, tool,
-    tool_with_options, unix_millis, BuiltinModule, ModuleKind, OptionType, ToolExecutionContext,
+    builtin_module, json_summary, model_option, opt, resolve_tool_model, resolve_tool_target, tool,
+    tool_with_options, BuiltinModule, ModuleKind, OptionType, ToolExecutionContext,
 };
 
 pub(super) fn module() -> BuiltinModule {
@@ -526,4 +529,46 @@ fn render_report_markdown(report: &Value) -> String {
         }
     }
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::V2Config;
+    use crate::workspace::WorkspaceTarget;
+
+    #[test]
+    fn scope_sets_persists_and_clears_vendor_assessment_scope() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+        };
+
+        let updated = scope(
+            json!({
+                "vendorName": "Acme",
+                "productName": "Acme AI",
+                "profile": "enterprise-ai"
+            }),
+            &ctx,
+        )
+        .unwrap();
+        assert_eq!(
+            updated.pointer("/data/scope/vendorName"),
+            Some(&json!("Acme"))
+        );
+        assert!(workspace
+            .root()
+            .join(".kuzushi/vendor-assessment/scope.json")
+            .exists());
+
+        let cleared = scope(json!({"clear": true}), &ctx).unwrap();
+        assert_eq!(cleared.pointer("/data/cleared"), Some(&json!(true)));
+        assert_eq!(cleared.pointer("/data/scope/vendorName"), Some(&json!("")));
+        assert_eq!(cleared.pointer("/data/scope/documents"), Some(&json!([])));
+    }
 }

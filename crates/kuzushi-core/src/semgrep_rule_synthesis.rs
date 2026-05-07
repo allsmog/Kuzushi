@@ -595,4 +595,25 @@ mod tests {
         );
         assert!(candidate.rule_yaml.contains("validationPassed: false"));
     }
+
+    #[test]
+    fn semgrep_language_for_path_covers_supported_extensions() {
+        let cases = [
+            ("app.js", "javascript"),
+            ("component.tsx", "typescript"),
+            ("worker.py", "python"),
+            ("main.go", "go"),
+            ("lib.rs", "rust"),
+            ("Service.java", "java"),
+            ("Handler.kt", "kotlin"),
+            ("job.rb", "ruby"),
+            ("index.php", "php"),
+            ("native.c", "c"),
+            ("header.hpp", "cpp"),
+            ("Dockerfile", "generic"),
+        ];
+        for (path, language) in cases {
+            assert_eq!(semgrep_language_for_path(path), language);
+        }
+    }
 }

@@ -175,6 +175,12 @@ struct MissedOracle {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let report = load_match_report(&cli)?;
+    println!("{}", render_match_report(&report, cli.pretty)?);
+    Ok(())
+}
+
+fn load_match_report(cli: &Cli) -> Result<MatchReport> {
     let oracle: Oracle = serde_json::from_str(
         &fs::read_to_string(&cli.oracle)
             .with_context(|| format!("read oracle {}", cli.oracle.display()))?,
@@ -189,15 +195,16 @@ fn main() -> Result<()> {
 
     let target = cli.target.canonicalize().unwrap_or(cli.target.clone());
 
-    let report = score(&cli, &oracle, &findings, &target);
+    Ok(score(cli, &oracle, &findings, &target))
+}
 
-    let out = if cli.pretty {
+fn render_match_report(report: &MatchReport, pretty: bool) -> Result<String> {
+    let output = if pretty {
         serde_json::to_string_pretty(&report)?
     } else {
         serde_json::to_string(&report)?
     };
-    println!("{out}");
-    Ok(())
+    Ok(output)
 }
 
 fn score(cli: &Cli, oracle: &Oracle, findings: &FindingsDump, target: &Path) -> MatchReport {
@@ -488,6 +495,16 @@ mod tests {
     }
 
     #[test]
+    fn tolerance_priority_and_labels_are_ordered_by_match_strength() {
+        assert_eq!(Tolerance::ExactLine.priority(), 4);
+        assert_eq!(Tolerance::PmLines.priority(), 3);
+        assert_eq!(Tolerance::Function.priority(), 2);
+        assert_eq!(Tolerance::FileOnly.priority(), 1);
+        assert_eq!(Tolerance::ExactLine.as_str(), "exact_line");
+        assert_eq!(Tolerance::FileOnly.as_str(), "file_only");
+    }
+
+    #[test]
     fn path_matches_directory_oracle() {
         assert!(path_matches("crypto/skcipher.c", "crypto/"));
         assert!(path_matches("crypto/sub/foo.c", "crypto/"));
@@ -536,6 +553,62 @@ mod tests {
         assert_eq!(report.hits, 1);
         assert_eq!(report.recall.pm_lines, 1.0);
         assert_eq!(report.recall.exact_line, 0.0);
+    }
+
+    #[test]
+    fn load_match_report_reads_json_files_and_renderer_respects_pretty_flag() {
+        let temp = std::env::temp_dir().join(format!(
+            "kuzushi-eval-load-report-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp).unwrap();
+        let oracle = temp.join("oracle.json");
+        let findings = temp.join("findings.json");
+        std::fs::write(
+            &oracle,
+            r#"{
+                "cve":"CVE-TEST",
+                "ground_truth":[{
+                    "file":"src/foo.c",
+                    "line_start":10,
+                    "line_end":10,
+                    "cwe":["CWE-787"]
+                }]
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &findings,
+            r#"{
+                "count":1,
+                "findings":[{
+                    "fingerprint":"fp",
+                    "rule_id":"test.cwe-787",
+                    "severity":"high",
+                    "file_path":"src/foo.c",
+                    "start_line":10,
+                    "message":"CWE-787",
+                    "tool":"semgrep"
+                }]
+            }"#,
+        )
+        .unwrap();
+        let cli = Cli {
+            oracle,
+            findings,
+            slice: "test".to_string(),
+            target: temp,
+            wall_seconds: 0,
+            pretty: false,
+        };
+
+        let report = load_match_report(&cli).unwrap();
+        assert_eq!(report.hits, 1);
+        assert!(!render_match_report(&report, false).unwrap().contains('\n'));
+        assert!(render_match_report(&report, true).unwrap().contains('\n'));
     }
 
     #[test]

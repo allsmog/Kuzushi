@@ -754,6 +754,25 @@ mod tests {
     use super::*;
     use crate::findings::{Severity, StaticProofState};
 
+    #[test]
+    fn diff_status_helpers_cover_all_stable_labels() {
+        assert_eq!(DiffFindingStatus::New.as_str(), "new");
+        assert_eq!(DiffFindingStatus::Existing.as_str(), "existing");
+        assert_eq!(DiffFindingStatus::Fixed.as_str(), "fixed");
+        assert_eq!(
+            DiffFindingStatus::ChangedContext.as_str(),
+            "changed-context"
+        );
+
+        assert_eq!(status_from_name_status("A"), DiffFileStatus::Added);
+        assert_eq!(status_from_name_status("M"), DiffFileStatus::Modified);
+        assert_eq!(status_from_name_status("D"), DiffFileStatus::Deleted);
+        assert_eq!(status_from_name_status("R100"), DiffFileStatus::Renamed);
+        assert_eq!(status_from_name_status("C075"), DiffFileStatus::Copied);
+        assert_eq!(status_from_name_status("T"), DiffFileStatus::TypeChanged);
+        assert_eq!(status_from_name_status("?"), DiffFileStatus::Unknown);
+    }
+
     #[cfg(unix)]
     fn init_git_repo(dir: &Path) {
         for args in [

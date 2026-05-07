@@ -1308,34 +1308,66 @@ fn persist_findings(
 }
 
 fn fetch_cve_or_advisory(id: &str, input: &Value) -> Result<Option<CveRecord>> {
-    if let Some(record) = record_from_input(id, input)? {
-        return Ok(Some(record));
-    }
-    if input
-        .get("offline")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    record_from_input(id, input)?.map_or_else(
+        || fetch_online_cve_or_advisory(id, input),
+        |record| Ok(Some(record)),
+    )
+}
+
+fn fetch_online_cve_or_advisory(id: &str, input: &Value) -> Result<Option<CveRecord>> {
+    if input_is_offline(input) {
         return Ok(None);
     }
+    fetch_advisory_from_source(advisory_source_for_id(id)?, id, input)
+}
 
+fn fetch_advisory_from_source(
+    source: AdvisorySource,
+    id: &str,
+    input: &Value,
+) -> Result<Option<CveRecord>> {
+    match source {
+        AdvisorySource::Nvd => fetch_nvd_advisory(id, input),
+        AdvisorySource::Ghsa => fetch_ghsa_advisory(id, input),
+    }
+}
+
+fn fetch_nvd_advisory(id: &str, input: &Value) -> Result<Option<CveRecord>> {
+    let raw = curl_json(&nvd_advisory_url(id), input, "ndiff:fetch-cve")?;
+    Ok(map_nvd_record(id, raw))
+}
+
+fn fetch_ghsa_advisory(id: &str, input: &Value) -> Result<Option<CveRecord>> {
+    let normalized = id.to_ascii_lowercase();
+    let raw = curl_json(&ghsa_advisory_url(&normalized), input, "ndiff:fetch-cve")?;
+    Ok(Some(map_ghsa_record(&normalized, raw)))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdvisorySource {
+    Nvd,
+    Ghsa,
+}
+
+fn advisory_source_for_id(id: &str) -> Result<AdvisorySource> {
     if id.to_ascii_uppercase().starts_with("CVE-") {
-        let url = format!(
-            "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={}",
-            shell_escape_url(id)
-        );
-        let raw = curl_json(&url, input, "ndiff:fetch-cve")?;
-        return Ok(map_nvd_record(id, raw));
+        return Ok(AdvisorySource::Nvd);
     }
     if id.to_ascii_lowercase().starts_with("ghsa-") {
-        let url = format!(
-            "https://api.github.com/advisories/{}",
-            shell_escape_url(&id.to_ascii_lowercase())
-        );
-        let raw = curl_json(&url, input, "ndiff:fetch-cve")?;
-        return Ok(Some(map_ghsa_record(&id.to_ascii_lowercase(), raw)));
+        return Ok(AdvisorySource::Ghsa);
     }
     anyhow::bail!("Unrecognized advisory ID: {id:?} (expected CVE-* or GHSA-*)")
+}
+
+fn nvd_advisory_url(id: &str) -> String {
+    format!(
+        "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={}",
+        shell_escape_url(id)
+    )
+}
+
+fn ghsa_advisory_url(id: &str) -> String {
+    format!("https://api.github.com/advisories/{}", shell_escape_url(id))
 }
 
 fn record_from_input(id: &str, input: &Value) -> Result<Option<CveRecord>> {
@@ -1360,75 +1392,24 @@ fn record_from_input(id: &str, input: &Value) -> Result<Option<CveRecord>> {
     Ok(None)
 }
 
+fn input_is_offline(input: &Value) -> bool {
+    input
+        .get("offline")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
 fn map_nvd_record(id: &str, raw: Value) -> Option<CveRecord> {
-    let vulnerabilities = raw.get("vulnerabilities")?.as_array()?;
-    let first = vulnerabilities.first()?.clone();
-    let cve = first.get("cve").cloned().unwrap_or_else(|| json!({}));
-    let description = cve
-        .get("descriptions")
-        .and_then(Value::as_array)
-        .and_then(|items| {
-            items.iter().find_map(|item| {
-                (item.get("lang").and_then(Value::as_str) == Some("en"))
-                    .then(|| item.get("value").and_then(Value::as_str))
-                    .flatten()
-            })
-        })
-        .unwrap_or_default()
-        .to_string();
-    let mut cwes = Vec::new();
-    if let Some(weaknesses) = cve.get("weaknesses").and_then(Value::as_array) {
-        for weakness in weaknesses {
-            if let Some(descriptions) = weakness.get("description").and_then(Value::as_array) {
-                for description in descriptions {
-                    if let Some(value) = description.get("value").and_then(Value::as_str) {
-                        if value.starts_with("CWE-") {
-                            cwes.push(value.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    let mut patches = Vec::new();
-    if let Some(references) = cve.get("references").and_then(Value::as_array) {
-        for reference in references {
-            let Some(url) = reference.get("url").and_then(Value::as_str) else {
-                continue;
-            };
-            let tags = reference
-                .get("tags")
-                .and_then(Value::as_array)
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            if tags.iter().any(|tag| tag == "Patch")
-                || url.contains("/commit/")
-                || url.contains("/pull/")
-                || url.ends_with(".diff")
-                || url.ends_with(".patch")
-            {
-                patches.push(CvePatchRef {
-                    url: url.to_string(),
-                    kind: "nvd".to_string(),
-                    title: (!tags.is_empty()).then(|| tags.join(",")),
-                });
-            }
-        }
-    }
+    let first = first_nvd_vulnerability(&raw)?;
+    let cve = nvd_cve_payload(&first);
     Some(CveRecord {
         id: id.to_ascii_uppercase(),
-        description,
-        cwes,
+        description: nvd_english_description(&cve),
+        cwes: nvd_cwes(&cve),
         severity: nvd_severity(&cve),
         cvss_score: nvd_cvss_score(&cve),
         affected: Vec::new(),
-        patches,
+        patches: nvd_patches(&cve),
         published_at: cve
             .get("published")
             .and_then(Value::as_str)
@@ -1436,6 +1417,93 @@ fn map_nvd_record(id: &str, raw: Value) -> Option<CveRecord> {
         source: "nvd".to_string(),
         raw: first,
     })
+}
+
+fn first_nvd_vulnerability(raw: &Value) -> Option<Value> {
+    raw.get("vulnerabilities")?.as_array()?.first().cloned()
+}
+
+fn nvd_cve_payload(vulnerability: &Value) -> Value {
+    vulnerability
+        .get("cve")
+        .cloned()
+        .unwrap_or_else(|| json!({}))
+}
+
+fn nvd_english_description(cve: &Value) -> String {
+    cve.get("descriptions")
+        .and_then(Value::as_array)
+        .and_then(|items| items.iter().find_map(nvd_english_description_value))
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn nvd_english_description_value(item: &Value) -> Option<&str> {
+    if item.get("lang").and_then(Value::as_str) != Some("en") {
+        return None;
+    }
+    item.get("value").and_then(Value::as_str)
+}
+
+fn nvd_cwes(cve: &Value) -> Vec<String> {
+    cve.get("weaknesses")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(nvd_weakness_descriptions)
+        .filter_map(|description| description.get("value").and_then(Value::as_str))
+        .filter(|value| value.starts_with("CWE-"))
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn nvd_weakness_descriptions(weakness: &Value) -> &[Value] {
+    weakness
+        .get("description")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+}
+
+fn nvd_patches(cve: &Value) -> Vec<CvePatchRef> {
+    cve.get("references")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(nvd_patch_ref)
+        .collect()
+}
+
+fn nvd_patch_ref(reference: &Value) -> Option<CvePatchRef> {
+    let url = reference.get("url").and_then(Value::as_str)?;
+    let tags = nvd_reference_tags(reference);
+    if !is_nvd_patch_reference(url, &tags) {
+        return None;
+    }
+    Some(CvePatchRef {
+        url: url.to_string(),
+        kind: "nvd".to_string(),
+        title: (!tags.is_empty()).then(|| tags.join(",")),
+    })
+}
+
+fn nvd_reference_tags(reference: &Value) -> Vec<String> {
+    reference
+        .get("tags")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn is_nvd_patch_reference(url: &str, tags: &[String]) -> bool {
+    tags.iter().any(|tag| tag == "Patch")
+        || url.contains("/commit/")
+        || url.contains("/pull/")
+        || url.ends_with(".diff")
+        || url.ends_with(".patch")
 }
 
 fn nvd_severity(cve: &Value) -> Option<String> {
@@ -1958,6 +2026,135 @@ mod tests {
         fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
             anyhow::bail!("triage not used")
         }
+    }
+
+    #[test]
+    fn fetch_patch_text_prefers_fixture_then_offline_then_local_file() {
+        let fixture = fetch_patch_text(
+            "https://example.test/fix.patch",
+            &json!({
+                "patchFixtures": {
+                    "https://example.test/fix.patch": "diff --git a/file b/file"
+                },
+                "offline": true
+            }),
+        )
+        .unwrap();
+        assert_eq!(fixture.as_deref(), Some("diff --git a/file b/file"));
+
+        let offline = fetch_patch_text(
+            "https://example.test/missing.patch",
+            &json!({"offline": true}),
+        )
+        .unwrap();
+        assert_eq!(offline, None);
+
+        let temp = tempdir().unwrap();
+        let patch_path = temp.path().join("local.patch");
+        fs::write(&patch_path, "local diff").unwrap();
+        let local = fetch_patch_text(&patch_path.display().to_string(), &json!({})).unwrap();
+        assert_eq!(local.as_deref(), Some("local diff"));
+    }
+
+    #[test]
+    fn advisory_source_and_urls_cover_cve_ghsa_and_unknown_ids() {
+        assert_eq!(
+            advisory_source_for_id("CVE-2024-1234").unwrap(),
+            AdvisorySource::Nvd
+        );
+        assert_eq!(
+            advisory_source_for_id("ghsa-abcd-efgh-ijkl").unwrap(),
+            AdvisorySource::Ghsa
+        );
+        assert!(advisory_source_for_id("OSV-2024-1")
+            .unwrap_err()
+            .to_string()
+            .contains("expected CVE-* or GHSA-*"));
+        assert_eq!(
+            nvd_advisory_url("CVE-2024-1234"),
+            "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2024-1234"
+        );
+        assert_eq!(
+            ghsa_advisory_url("ghsa-abcd-efgh-ijkl"),
+            "https://api.github.com/advisories/ghsa-abcd-efgh-ijkl"
+        );
+        assert!(input_is_offline(&json!({"offline": true})));
+        assert!(!input_is_offline(&json!({})));
+    }
+
+    #[test]
+    fn fetch_cve_or_advisory_prefers_inline_and_fixture_records_before_offline_gate() {
+        let inline = fetch_cve_or_advisory(
+            "CVE-2024-1234",
+            &json!({
+                "record": {
+                    "id": "CVE-2024-1234",
+                    "description": "inline",
+                    "cwes": ["CWE-79"],
+                    "severity": "HIGH",
+                    "cvssScore": 7.5,
+                    "affected": [],
+                    "patches": [],
+                    "source": "fixture",
+                    "raw": {}
+                },
+                "offline": true
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(inline.description, "inline");
+
+        let fixture = fetch_cve_or_advisory(
+            "ghsa-abcd-efgh-ijkl",
+            &json!({
+                "fixtures": {
+                    "GHSA-ABCD-EFGH-IJKL": {
+                        "id": "GHSA-ABCD-EFGH-IJKL",
+                        "description": "fixture",
+                        "cwes": [],
+                        "affected": [],
+                        "patches": [],
+                        "source": "fixture",
+                        "raw": {}
+                    }
+                },
+                "offline": true
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(fixture.description, "fixture");
+        assert!(
+            fetch_cve_or_advisory("not-an-advisory", &json!({"offline": true}))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn nvd_patch_reference_detection_covers_tags_and_patch_url_shapes() {
+        assert!(is_nvd_patch_reference(
+            "https://example.test/advisory",
+            &["Patch".to_string()]
+        ));
+        assert!(is_nvd_patch_reference(
+            "https://github.com/org/repo/commit/abc",
+            &[]
+        ));
+        assert!(is_nvd_patch_reference(
+            "https://github.com/org/repo/pull/1",
+            &[]
+        ));
+        assert!(is_nvd_patch_reference("https://example.test/fix.diff", &[]));
+        assert!(is_nvd_patch_reference(
+            "https://example.test/fix.patch",
+            &[]
+        ));
+        assert!(!is_nvd_patch_reference(
+            "https://example.test/release-notes",
+            &[]
+        ));
     }
 
     fn seeded_workspace() -> (tempfile::TempDir, WorkspaceTarget, FindingStore, String) {

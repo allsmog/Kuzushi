@@ -339,4 +339,58 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn code_nav_tool_names_match_registered_tool_names() {
+        assert_eq!(CodeNavTool::ReadSource.name(), "read_source");
+        assert_eq!(CodeNavTool::FindReferences.name(), "find_references");
+        assert_eq!(CodeNavTool::ListDefinitions.name(), "list_definitions");
+        assert_eq!(CodeNavTool::ReadDefinition.name(), "read_definition");
+    }
+
+    #[test]
+    fn definition_tools_round_trip_via_toolbox() {
+        if !rg_available() {
+            eprintln!("rg not on PATH; skipping");
+            return;
+        }
+        let tmp = tempdir().unwrap();
+        fs::write(
+            tmp.path().join("lib.rs"),
+            "pub struct User { id: u64 }\n\nfn load_user() -> User { User { id: 1 } }\n",
+        )
+        .unwrap();
+        let mut tb = code_nav_toolbox(CodeNavConfig::new(tmp.path()));
+
+        let list = crate::runtime::ToolCallHandler::run(
+            &mut tb,
+            &ToolCall {
+                name: "list_definitions".to_string(),
+                input: json!({ "file": "lib.rs" }),
+                call_id: "list".to_string(),
+            },
+        )
+        .unwrap();
+        assert!(!list.is_error, "{list:?}");
+        assert!(list.output["definitions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["name"] == json!("load_user")));
+
+        let read = crate::runtime::ToolCallHandler::run(
+            &mut tb,
+            &ToolCall {
+                name: "read_definition".to_string(),
+                input: json!({ "name": "load_user" }),
+                call_id: "read".to_string(),
+            },
+        )
+        .unwrap();
+        assert!(!read.is_error, "{read:?}");
+        assert!(read.output["source"]
+            .as_str()
+            .unwrap()
+            .contains("fn load_user"));
+    }
 }

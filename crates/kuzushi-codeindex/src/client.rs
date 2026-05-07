@@ -84,28 +84,9 @@ impl McpClient {
     pub async fn call_tool(&self, name: &str, arguments: Value) -> Result<Value> {
         self.ensure_initialized().await?;
         let resp = self
-            .request(
-                "tools/call",
-                json!({ "name": name, "arguments": arguments }),
-            )
+            .request("tools/call", tool_call_params(name, arguments))
             .await?;
-
-        if resp.get("isError") == Some(&json!(true)) {
-            let msg = resp
-                .get("content")
-                .and_then(Value::as_array)
-                .and_then(|arr| arr.first())
-                .and_then(|item| item.get("text"))
-                .and_then(Value::as_str)
-                .unwrap_or("(no error message)")
-                .to_string();
-            anyhow::bail!("{}: {}", self.binary, msg);
-        }
-
-        if let Some(structured) = resp.get("structuredContent") {
-            return Ok(structured.clone());
-        }
-        Ok(resp)
+        tool_call_result(&self.binary, resp)
     }
 
     pub async fn shutdown(&self) -> Result<()> {
@@ -118,20 +99,16 @@ impl McpClient {
 
     async fn request(&self, method: &str, params: Value) -> Result<Value> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let body = json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        });
-        self.write_line(&body).await?;
+        self.write_line(&json_rpc_request_body(id, method, params))
+            .await?;
+        self.read_response_for_id(id).await
+    }
+
+    async fn read_response_for_id(&self, id: i64) -> Result<Value> {
         loop {
             let resp = self.read_line().await?;
-            if resp.get("id") == Some(&json!(id)) {
-                if let Some(err) = resp.get("error") {
-                    anyhow::bail!("{}: {err}", self.binary);
-                }
-                return Ok(resp.get("result").cloned().unwrap_or(Value::Null));
+            if let Some(result) = response_result_for_id(&self.binary, &resp, id)? {
+                return Ok(result);
             }
             // Notifications and responses to other ids are ignored; we
             // serialise calls so this should be rare in practice.
@@ -148,12 +125,9 @@ impl McpClient {
     }
 
     async fn write_line(&self, body: &Value) -> Result<()> {
-        let raw = serde_json::to_string(body)?;
+        let raw = json_line(body)?;
         let mut stdin = self.stdin.lock().await;
-        stdin.write_all(raw.as_bytes()).await?;
-        stdin.write_all(b"\n").await?;
-        stdin.flush().await?;
-        Ok(())
+        write_json_line(&mut stdin, &raw).await
     }
 
     async fn read_line(&self) -> Result<Value> {
@@ -165,6 +139,58 @@ impl McpClient {
         }
         Ok(serde_json::from_str(line.trim_end())?)
     }
+}
+
+fn tool_call_params(name: &str, arguments: Value) -> Value {
+    json!({ "name": name, "arguments": arguments })
+}
+
+fn json_rpc_request_body(id: i64, method: &str, params: Value) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": method,
+        "params": params,
+    })
+}
+
+fn tool_call_result(binary: &str, resp: Value) -> Result<Value> {
+    if resp.get("isError") == Some(&json!(true)) {
+        anyhow::bail!("{}: {}", binary, tool_error_message(&resp));
+    }
+    Ok(resp.get("structuredContent").cloned().unwrap_or(resp))
+}
+
+fn tool_error_message(resp: &Value) -> String {
+    resp.get("content")
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.first())
+        .and_then(|item| item.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or("(no error message)")
+        .to_string()
+}
+
+fn response_result_for_id(binary: &str, resp: &Value, id: i64) -> Result<Option<Value>> {
+    if resp.get("id") != Some(&json!(id)) {
+        return Ok(None);
+    }
+    if let Some(err) = resp.get("error") {
+        anyhow::bail!("{}: {err}", binary);
+    }
+    Ok(Some(resp.get("result").cloned().unwrap_or(Value::Null)))
+}
+
+fn json_line(body: &Value) -> Result<Vec<u8>> {
+    let mut raw = serde_json::to_string(body)?;
+    raw.push('\n');
+    Ok(raw.into_bytes())
+}
+
+async fn write_json_line(stdin: &mut ChildStdin, raw: &[u8]) -> Result<()> {
+    stdin.write_all(raw).await?;
+    stdin.flush().await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -179,5 +205,72 @@ mod tests {
             .unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("kuzushi-no-such-mcp-binary-zzz") || msg.contains("could not spawn"));
+    }
+
+    #[test]
+    fn tool_call_result_prefers_structured_content_and_reports_errors() {
+        assert_eq!(
+            tool_call_params("clang.definition", json!({"file": "a.c"})),
+            json!({"name": "clang.definition", "arguments": {"file": "a.c"}})
+        );
+
+        let structured = tool_call_result(
+            "mcp",
+            json!({
+                "content": [{"text": "ignored"}],
+                "structuredContent": {"ok": true}
+            }),
+        )
+        .unwrap();
+        assert_eq!(structured, json!({"ok": true}));
+
+        let raw = tool_call_result("mcp", json!({"content": []})).unwrap();
+        assert_eq!(raw, json!({"content": []}));
+
+        let err = tool_call_result(
+            "mcp",
+            json!({"isError": true, "content": [{"text": "bad input"}]}),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("mcp: bad input"));
+    }
+
+    #[test]
+    fn response_matching_ignores_other_ids_and_extracts_errors_results_and_nulls() {
+        assert_eq!(
+            response_result_for_id("mcp", &json!({"id": 1, "result": {"ok": true}}), 2).unwrap(),
+            None
+        );
+        assert_eq!(
+            response_result_for_id("mcp", &json!({"id": 2, "result": {"ok": true}}), 2).unwrap(),
+            Some(json!({"ok": true}))
+        );
+        assert_eq!(
+            response_result_for_id("mcp", &json!({"id": 2}), 2).unwrap(),
+            Some(Value::Null)
+        );
+        let err =
+            response_result_for_id("mcp", &json!({"id": 2, "error": {"code": -1}}), 2).unwrap_err();
+        assert!(err.to_string().contains("mcp"));
+    }
+
+    #[test]
+    fn json_line_serializes_with_trailing_newline() {
+        let raw = json_line(&json!({"jsonrpc": "2.0"})).unwrap();
+        assert!(raw.ends_with(b"\n"));
+        assert!(std::str::from_utf8(&raw).unwrap().contains("\"jsonrpc\""));
+    }
+
+    #[test]
+    fn json_rpc_request_body_includes_id_method_and_params() {
+        assert_eq!(
+            json_rpc_request_body(7, "tools/list", json!({"cursor": null})),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/list",
+                "params": {"cursor": null}
+            })
+        );
     }
 }

@@ -41,6 +41,9 @@ wrapper at a specific binary.
 # Check config, local state, scanners, and the pi-agent-core bridge.
 kuzushi doctor --target .
 
+# Build the repository context snapshot used by shell and model-backed tools.
+kuzushi --target . run context:build --input '{}'
+
 # Run the standard native scan path with deterministic CI-style progress.
 kuzushi scan . --mode standard --ci
 
@@ -95,7 +98,7 @@ inside the TUI and your terminal still gives you a selection modifier.
 | `kuzushi modules [--json]` | List visible native modules. |
 | `kuzushi tools [--json]` | List visible executable tool descriptors. |
 | `kuzushi doctor [--target <repo>] [--json]` | Check config, local state, findings DB openability, scanner binaries, bridge readiness, and model/auth setup. |
-| `kuzushi run <module:tool> --input '<json>'` | Execute one tool through the Rust registry. Use global `--target` for workspace-backed tools. |
+| `kuzushi run <module:tool> --input '<json>'` | Execute one explicit tool through the Rust registry. Use global `--target` for workspace-backed tools; `run .` is shell-only focused-module shorthand. |
 | `kuzushi mcp <server>` | Run a local MCP server over stdio. |
 | `kuzushi auth` | Print auth diagnostics; interactive provider login is handled inside `kuzushi shell`. |
 | `kuzushi config show` | Print effective config. |
@@ -111,6 +114,7 @@ kuzushi scan . --tasks agentic-sast --triage --json
 kuzushi findings --target . --severity high,critical --limit 10
 kuzushi finding F-0001 --target .
 kuzushi pr-comment --target . --repo allsmog/Kuzushi > kuzushi-report.md
+kuzushi --target . run context:build --input '{}'
 kuzushi --target . run semgrep:scan --input '{"config":"p/default"}'
 kuzushi --target . run findings:list --input '{"severity":["high"],"limit":10}'
 kuzushi --target . run triage:run --input '{"fingerprints":["abc123"]}'
@@ -141,7 +145,7 @@ Piped shell output automatically uses the same strict plain renderer as
 | --- | --- |
 | `/help` | Show grouped shell help. |
 | `/modules`, `/tools`, `/use <module>`, `/back` | Browse modules/tools, focus a module, and step back. |
-| `/run <tool> [json]`, `run . [json]`, `/scan [target]` | Dispatch a tool or start the native scan path. |
+| `/run <tool> [json]`, `run . [json]`, `/scan [target]` | Dispatch a tool or start the native scan path. In the shell, `run .` resolves to the focused module's primary tool; from a terminal use `kuzushi run <module:tool>`. |
 | `/ask <question>`, `ask <question>`, `?text` | Ask an explicit agent question with the configured model. |
 | `/options [tool]`, `show options [tool]`, `show advanced`, `show missing` | Inspect typed Rust tool options and missing required values. |
 | `/set <key> <value>`, `setg <key> <value>`, `/unset <key>`, `unsetg <key>` | Set or clear session/global option values for subsequent runs and scans. |

@@ -82,6 +82,36 @@ impl ViewKeybinding {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KeyModifierState {
+    ctrl: bool,
+    alt: bool,
+    plain: bool,
+    no_modifiers: bool,
+}
+
+impl KeyModifierState {
+    fn new(key: KeyEvent) -> Self {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        Self {
+            ctrl,
+            alt,
+            plain: !ctrl && !alt,
+            no_modifiers: key.modifiers.is_empty(),
+        }
+    }
+
+    fn ctrl_or_alt(self) -> bool {
+        self.ctrl || self.alt
+    }
+}
+
+fn is_quit_chord(key: KeyEvent) -> bool {
+    key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('d'))
+}
+
 impl ShellApp {
     pub(crate) fn view_keybindings(&self) -> Vec<ViewKeybinding> {
         match self.shell_view {
@@ -350,191 +380,227 @@ impl ShellApp {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
-        // Pending confirm gate (`design/mockups/confirm-dialog.jsx`)
-        // intercepts y/Y/n/N before any view-specific hotkey: tools that
-        // request approval need a deterministic response, not the
-        // operator's input line.
-        if self.advisory.pending_confirm.is_some() && key.modifiers.is_empty() {
-            if let KeyCode::Char(ch) = key.code {
-                match ch {
-                    'y' => {
-                        self.resolve_confirm(true, false);
-                        return;
-                    }
-                    'Y' => {
-                        self.resolve_confirm(true, true);
-                        return;
-                    }
-                    'n' => {
-                        self.resolve_confirm(false, false);
-                        return;
-                    }
-                    'N' => {
-                        self.resolve_confirm(false, true);
-                        return;
-                    }
-                    _ => {}
-                }
-            }
-        }
-        if self.is_budget_halted() && key.modifiers.is_empty() {
-            if let KeyCode::Char(ch) = key.code {
-                match ch.to_ascii_lowercase() {
-                    'c' => {
-                        self.continue_past_budget();
-                        return;
-                    }
-                    'a' => {
-                        self.abort_for_budget();
-                        return;
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        if self.pending_plan.is_some() && self.input.is_empty() && key.modifiers.is_empty() {
-            match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    self.apply_pending_plan();
-                    return;
-                }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                    self.discard_pending_plan();
-                    return;
-                }
-                KeyCode::Char(' ') => {
-                    self.toggle_plan_change_skip();
-                    return;
-                }
-                KeyCode::Char('j') | KeyCode::Down => {
-                    self.move_plan_cursor(1);
-                    return;
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    self.move_plan_cursor(-1);
-                    return;
-                }
-                KeyCode::Char('g') => {
-                    self.plan_cursor = 0;
-                    return;
-                }
-                KeyCode::Char('G') => {
-                    let total = self.plan_change_count();
-                    if total > 0 {
-                        self.plan_cursor = total - 1;
-                    }
-                    return;
-                }
-                _ => {}
-            }
-        }
-
-        let is_quit_chord = key.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('d'));
-        if !is_quit_chord {
-            self.ctrl_c_armed_at = None;
-        }
-
-        if key.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(key.code, KeyCode::Char('o') | KeyCode::Char('O'))
-        {
-            self.toggle_story_overlay();
+        if self.handle_modal_key(key) {
             return;
         }
 
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let alt = key.modifiers.contains(KeyModifiers::ALT);
-        let plain_modifiers = !ctrl && !alt;
+        self.update_quit_chord_arm(key);
+        if self.handle_story_toggle_key(key) {
+            return;
+        }
 
-        // Any non-Tab keystroke breaks the Tab-completion cycle. The cycle
-        // is rebuilt the next time Tab is pressed against the new input.
+        let modifiers = KeyModifierState::new(key);
+        self.reset_completion_cycle_for_key(key);
+
+        if self.handle_control_key(key, modifiers)
+            || self.handle_cursor_key(key, modifiers)
+            || self.handle_empty_input_view_key(key, modifiers)
+            || self.handle_history_key(key, modifiers)
+            || self.handle_text_key(key)
+        {
+            return;
+        }
+    }
+
+    fn handle_modal_key(&mut self, key: KeyEvent) -> bool {
+        self.handle_confirm_key(key)
+            || self.handle_budget_key(key)
+            || self.handle_pending_plan_key(key)
+    }
+
+    fn handle_confirm_key(&mut self, key: KeyEvent) -> bool {
+        if self.advisory.pending_confirm.is_none() || !key.modifiers.is_empty() {
+            return false;
+        }
+        let KeyCode::Char(ch) = key.code else {
+            return false;
+        };
+        match ch {
+            'y' => {
+                self.resolve_confirm(true, false);
+            }
+            'Y' => {
+                self.resolve_confirm(true, true);
+            }
+            'n' => {
+                self.resolve_confirm(false, false);
+            }
+            'N' => {
+                self.resolve_confirm(false, true);
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn handle_budget_key(&mut self, key: KeyEvent) -> bool {
+        if !self.is_budget_halted() || !key.modifiers.is_empty() {
+            return false;
+        }
+        let KeyCode::Char(ch) = key.code else {
+            return false;
+        };
+        match ch.to_ascii_lowercase() {
+            'c' => self.continue_past_budget(),
+            'a' => self.abort_for_budget(),
+            _ => return false,
+        }
+        true
+    }
+
+    fn handle_pending_plan_key(&mut self, key: KeyEvent) -> bool {
+        if self.pending_plan.is_none() || !self.input.is_empty() || !key.modifiers.is_empty() {
+            return false;
+        }
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => self.apply_pending_plan(),
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.discard_pending_plan(),
+            KeyCode::Char(' ') => self.toggle_plan_change_skip(),
+            KeyCode::Char('j') | KeyCode::Down => self.move_plan_cursor(1),
+            KeyCode::Char('k') | KeyCode::Up => self.move_plan_cursor(-1),
+            KeyCode::Char('g') => self.plan_cursor = 0,
+            KeyCode::Char('G') => self.move_plan_cursor_to_end(),
+            _ => return false,
+        }
+        true
+    }
+
+    fn move_plan_cursor_to_end(&mut self) {
+        let total = self.plan_change_count();
+        if total > 0 {
+            self.plan_cursor = total - 1;
+        }
+    }
+
+    fn update_quit_chord_arm(&mut self, key: KeyEvent) {
+        if !is_quit_chord(key) {
+            self.ctrl_c_armed_at = None;
+        }
+    }
+
+    fn handle_story_toggle_key(&mut self, key: KeyEvent) -> bool {
+        if !key.modifiers.contains(KeyModifiers::CONTROL)
+            || !matches!(key.code, KeyCode::Char('o') | KeyCode::Char('O'))
+        {
+            return false;
+        }
+        self.toggle_story_overlay();
+        true
+    }
+
+    fn reset_completion_cycle_for_key(&mut self, key: KeyEvent) {
         if !matches!(key.code, KeyCode::Tab) {
             self.reset_completion_cycle();
         }
+    }
 
+    fn handle_control_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
+        if !modifiers.ctrl {
+            return false;
+        }
         match key.code {
-            KeyCode::Char('c') | KeyCode::Char('d') if ctrl => {
-                self.handle_quit_chord();
-            }
-            KeyCode::Char('a') if ctrl => self.move_cursor_home(),
-            KeyCode::Char('e') if ctrl => self.move_cursor_end(),
-            KeyCode::Char('b') if ctrl => self.move_cursor_left(),
-            KeyCode::Char('f') if ctrl => self.move_cursor_right(),
-            KeyCode::Char('w') if ctrl => self.delete_word_left(),
-            KeyCode::Char('u') if ctrl => self.kill_to_start(),
-            KeyCode::Char('k') if ctrl => self.kill_to_end(),
-            KeyCode::Char('h') if ctrl => self.backspace(),
-            KeyCode::Char('p') if ctrl => self.history_prev(),
-            KeyCode::Char('n') if ctrl => self.history_next(),
-            // Bash/Zsh muscle memory: Ctrl+L clears the conversation log
-            // while preserving the partially typed input. Always wins
-            // regardless of input state so we don't accidentally insert
-            // a literal `l` after a mid-command Ctrl+L.
-            KeyCode::Char('l') if ctrl => {
-                let saved_input = std::mem::take(&mut self.input);
-                let saved_cursor = self.cursor;
-                self.clear_conversation();
-                self.input = saved_input;
-                self.cursor = saved_cursor.min(self.input.chars().count());
-            }
-            KeyCode::Left if ctrl || alt => self.move_cursor_word_left(),
-            KeyCode::Right if ctrl || alt => self.move_cursor_word_right(),
-            KeyCode::Backspace if ctrl || alt => self.delete_word_left(),
-            KeyCode::Left if plain_modifiers => self.move_cursor_left(),
-            KeyCode::Right if plain_modifiers => self.move_cursor_right(),
+            KeyCode::Char('c') | KeyCode::Char('d') => self.handle_quit_chord(),
+            KeyCode::Char('a') => self.move_cursor_home(),
+            KeyCode::Char('e') => self.move_cursor_end(),
+            KeyCode::Char('b') => self.move_cursor_left(),
+            KeyCode::Char('f') => self.move_cursor_right(),
+            KeyCode::Char('w') => self.delete_word_left(),
+            KeyCode::Char('u') => self.kill_to_start(),
+            KeyCode::Char('k') => self.kill_to_end(),
+            KeyCode::Char('h') => self.backspace(),
+            KeyCode::Char('p') => self.history_prev(),
+            KeyCode::Char('n') => self.history_next(),
+            KeyCode::Char('l') => self.clear_conversation_preserving_input(),
+            _ => return false,
+        }
+        true
+    }
+
+    fn clear_conversation_preserving_input(&mut self) {
+        let saved_input = std::mem::take(&mut self.input);
+        let saved_cursor = self.cursor;
+        self.clear_conversation();
+        self.input = saved_input;
+        self.cursor = saved_cursor.min(self.input.chars().count());
+    }
+
+    fn handle_cursor_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
+        match key.code {
+            KeyCode::Left if modifiers.ctrl_or_alt() => self.move_cursor_word_left(),
+            KeyCode::Right if modifiers.ctrl_or_alt() => self.move_cursor_word_right(),
+            KeyCode::Backspace if modifiers.ctrl_or_alt() => self.delete_word_left(),
+            KeyCode::Left if modifiers.plain => self.move_cursor_left(),
+            KeyCode::Right if modifiers.plain => self.move_cursor_right(),
             KeyCode::Home => self.move_cursor_home(),
             KeyCode::End => self.move_cursor_end(),
             KeyCode::Delete => self.delete_forward(),
-            KeyCode::Up
-                if self.input.is_empty()
-                    && plain_modifiers
-                    && matches!(self.shell_view, ShellView::Config) =>
-            {
-                self.move_model_selection(-1);
-            }
-            KeyCode::Down
-                if self.input.is_empty()
-                    && plain_modifiers
-                    && matches!(self.shell_view, ShellView::Config) =>
-            {
-                self.move_model_selection(1);
-            }
-            KeyCode::Up
-                if self.input.is_empty()
-                    && plain_modifiers
-                    && matches!(self.shell_view, ShellView::Findings) =>
-            {
-                self.findings_cursor = self.findings_cursor.saturating_sub(1);
-            }
-            KeyCode::Down
-                if self.input.is_empty()
-                    && plain_modifiers
-                    && matches!(self.shell_view, ShellView::Findings) =>
-            {
+            _ => return false,
+        }
+        true
+    }
+
+    fn handle_empty_input_view_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
+        if !self.input.is_empty() {
+            return false;
+        }
+        if self.handle_config_view_key(key, modifiers) {
+            return true;
+        }
+        if self.handle_findings_view_key(key, modifiers) {
+            return true;
+        }
+        if matches!(key.code, KeyCode::Up | KeyCode::Down)
+            && modifiers.plain
+            && self.handle_view_hotkey(key)
+        {
+            return true;
+        }
+        modifiers.no_modifiers && self.handle_view_hotkey(key)
+    }
+
+    fn handle_config_view_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
+        if !modifiers.plain || !matches!(self.shell_view, ShellView::Config) {
+            return false;
+        }
+        match key.code {
+            KeyCode::Up => self.move_model_selection(-1),
+            KeyCode::Down => self.move_model_selection(1),
+            KeyCode::Enter => self.select_current_model_choice(),
+            _ => return false,
+        }
+        true
+    }
+
+    fn handle_findings_view_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
+        if !modifiers.plain || !matches!(self.shell_view, ShellView::Findings) {
+            return false;
+        }
+        match key.code {
+            KeyCode::Up => self.findings_cursor = self.findings_cursor.saturating_sub(1),
+            KeyCode::Down => {
                 self.findings_cursor =
                     (self.findings_cursor + 1).min(self.findings.len().saturating_sub(1));
             }
-            KeyCode::Up
-                if self.input.is_empty() && plain_modifiers && self.handle_view_hotkey(key) => {}
-            KeyCode::Down
-                if self.input.is_empty() && plain_modifiers && self.handle_view_hotkey(key) => {}
-            KeyCode::Up if plain_modifiers => self.history_prev(),
-            KeyCode::Down if plain_modifiers => self.history_next(),
-            KeyCode::Enter
-                if self.input.is_empty()
-                    && plain_modifiers
-                    && matches!(self.shell_view, ShellView::Config) =>
-            {
-                self.select_current_model_choice();
-            }
-            _ if self.input.is_empty()
-                && key.modifiers.is_empty()
-                && self.handle_view_hotkey(key) => {}
-            KeyCode::Char(ch) => {
-                self.insert_char_at_cursor(ch);
-                self.last_char_at = Some(Instant::now());
-            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn handle_history_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
+        if !modifiers.plain {
+            return false;
+        }
+        match key.code {
+            KeyCode::Up => self.history_prev(),
+            KeyCode::Down => self.history_next(),
+            _ => return false,
+        }
+        true
+    }
+
+    fn handle_text_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char(ch) => self.insert_printable_key(ch),
             KeyCode::Backspace => self.backspace(),
             KeyCode::Tab => self.apply_completion(),
             KeyCode::PageDown if self.input.is_empty() && key.modifiers.is_empty() => {
@@ -543,27 +609,38 @@ impl ShellApp {
             KeyCode::PageUp if self.input.is_empty() && key.modifiers.is_empty() => {
                 self.page_up_current_view();
             }
-            KeyCode::Enter => {
-                let raw = self.take_input();
-                // Enter on the catalog with empty input runs `use <id>`
-                // for the row currently under the j/k cursor — matches
-                // `design/mockups/catalog.jsx` where Enter == /use.
-                if raw.is_empty()
-                    && matches!(self.shell_view, ShellView::Catalog)
-                    && self.catalog_expanded
-                {
-                    if let Some(id) = self.catalog_cursor_module_id() {
-                        self.submit_line(&format!("use {id}"));
-                        return;
-                    }
-                }
-                self.submit_line(&raw);
-            }
-            KeyCode::Esc => {
-                self.esc_clear_or_restore();
-            }
-            _ => {}
+            KeyCode::Enter => self.handle_enter_key(),
+            KeyCode::Esc => self.esc_clear_or_restore(),
+            _ => return false,
         }
+        true
+    }
+
+    fn insert_printable_key(&mut self, ch: char) {
+        self.insert_char_at_cursor(ch);
+        self.last_char_at = Some(Instant::now());
+    }
+
+    fn handle_enter_key(&mut self) {
+        let raw = self.take_input();
+        if self.submit_catalog_cursor_for_empty_enter(&raw) {
+            return;
+        }
+        self.submit_line(&raw);
+    }
+
+    fn submit_catalog_cursor_for_empty_enter(&mut self, raw: &str) -> bool {
+        if !raw.is_empty()
+            || !matches!(self.shell_view, ShellView::Catalog)
+            || !self.catalog_expanded
+        {
+            return false;
+        }
+        let Some(id) = self.catalog_cursor_module_id() else {
+            return false;
+        };
+        self.submit_line(&format!("use {id}"));
+        true
     }
 
     pub fn handle_paste(&mut self, text: &str) {

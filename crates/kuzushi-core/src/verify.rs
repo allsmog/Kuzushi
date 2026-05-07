@@ -251,74 +251,148 @@ async fn verify_rust(
     let trigger = build_rust_trigger(finding);
     let project = match scaffold_rust_project(&trigger).await {
         Ok(p) => p,
-        Err(err) => {
-            return Ok(infrastructure_error(
-                backend,
-                None,
-                format!("scaffold: {err}"),
-            ));
-        }
+        Err(err) => return Ok(scaffold_error(backend, "scaffold", err)),
     };
 
     // Compile-only first; saves wallclock when the harness can't even
     // build (no need to also run it).
-    let mut compile_cmd = SandboxExecOptions::new(vec![
-        "cargo".to_string(),
-        "test".to_string(),
-        "--no-run".to_string(),
-        "--offline".to_string(),
-    ]);
-    compile_cmd.timeout_ms = opts.timeout_ms;
-    compile_cmd.workdir = Some(project.path.clone());
-    compile_cmd.read_write_mounts = vec![MountSpec {
+    let compile = match sandbox_exec(backend, rust_compile_command(&project, opts)).await {
+        Ok(r) => r,
+        Err(err) => return Ok(project_error(backend, &project, "sandbox spawn", err)),
+    };
+    if let Some(outcome) = compile_failure_outcome(backend, &project, &compile) {
+        return Ok(outcome);
+    }
+
+    let run = match sandbox_exec(backend, rust_run_command(&project, opts)).await {
+        Ok(r) => r,
+        Err(err) => return Ok(project_error(backend, &project, "sandbox spawn", err)),
+    };
+
+    Ok(classify_run_result(&run, backend, &project.path, opts))
+}
+
+fn rust_compile_command(project: &ScaffoldedProject, opts: &VerifyOptions) -> SandboxExecOptions {
+    project_command(
+        project,
+        opts,
+        vec![
+            "cargo".to_string(),
+            "test".to_string(),
+            "--no-run".to_string(),
+            "--offline".to_string(),
+        ],
+    )
+}
+
+fn rust_run_command(project: &ScaffoldedProject, opts: &VerifyOptions) -> SandboxExecOptions {
+    project_command(project, opts, rust_test_argv())
+}
+
+fn project_command(
+    project: &ScaffoldedProject,
+    opts: &VerifyOptions,
+    argv: Vec<String>,
+) -> SandboxExecOptions {
+    let mut command = SandboxExecOptions::new(argv);
+    command.timeout_ms = opts.timeout_ms;
+    command.workdir = Some(project.path.clone());
+    command.read_write_mounts = project_rw_mounts(project);
+    command
+}
+
+fn project_rw_mounts(project: &ScaffoldedProject) -> Vec<MountSpec> {
+    vec![MountSpec {
         host_path: project.path.clone(),
         guest_path: project.path.clone(),
-    }];
-    let compile = match sandbox_exec(backend, compile_cmd).await {
-        Ok(r) => r,
-        Err(err) => {
-            return Ok(infrastructure_error(
-                backend,
-                Some(project.path.clone()),
-                format!("sandbox spawn: {err}"),
-            ));
-        }
-    };
-    if compile.exit_code != Some(0) {
-        return Ok(harness_failed_to_build(
+    }]
+}
+
+fn scaffold_error(
+    backend: SandboxBackend,
+    label: &str,
+    err: impl std::fmt::Display,
+) -> VerificationOutcome {
+    infrastructure_error(backend, None, format!("{label}: {err}"))
+}
+
+fn project_error(
+    backend: SandboxBackend,
+    project: &ScaffoldedProject,
+    label: &str,
+    err: impl std::fmt::Display,
+) -> VerificationOutcome {
+    infrastructure_error(
+        backend,
+        Some(project.path.clone()),
+        format!("{label}: {err}"),
+    )
+}
+
+fn compile_failure_outcome(
+    backend: SandboxBackend,
+    project: &ScaffoldedProject,
+    compile: &kuzushi_sandbox::SandboxExecResult,
+) -> Option<VerificationOutcome> {
+    (compile.exit_code != Some(0)).then(|| {
+        harness_failed_to_build(
             backend,
             project.path.clone(),
             compile.stderr.clone(),
             compile.duration_ms,
-        ));
-    }
+        )
+    })
+}
 
-    let mut run_cmd = SandboxExecOptions::new(vec![
+fn node_run_command(
+    project: &ScaffoldedProject,
+    opts: &VerifyOptions,
+    runner: NodeRunner,
+) -> SandboxExecOptions {
+    let trigger_name = runner.trigger_name();
+    let mut argv = runner.argv;
+    argv.push(project.path.join(trigger_name).display().to_string());
+    project_command(project, opts, argv)
+}
+
+fn c_compile_command(
+    project: &ScaffoldedProject,
+    opts: &VerifyOptions,
+    compiler: &str,
+    binary_path: &Path,
+) -> SandboxExecOptions {
+    let mut argv = vec![
+        compiler.to_string(),
+        "-O0".to_string(),
+        "-g".to_string(),
+        "-Werror=implicit-function-declaration".to_string(),
+    ];
+    argv.extend(c_sanitizer_flags(compiler).into_iter().map(str::to_string));
+    argv.extend([
+        "-o".to_string(),
+        binary_path.display().to_string(),
+        project.path.join("trigger.c").display().to_string(),
+        project.path.join("target.c").display().to_string(),
+    ]);
+    project_command(project, opts, argv)
+}
+
+fn c_run_command(
+    project: &ScaffoldedProject,
+    opts: &VerifyOptions,
+    binary_path: &Path,
+) -> SandboxExecOptions {
+    project_command(project, opts, vec![binary_path.display().to_string()])
+}
+
+fn rust_test_argv() -> Vec<String> {
+    vec![
         "cargo".to_string(),
         "test".to_string(),
         "--offline".to_string(),
         "--".to_string(),
         "--nocapture".to_string(),
-    ]);
-    run_cmd.timeout_ms = opts.timeout_ms;
-    run_cmd.workdir = Some(project.path.clone());
-    run_cmd.read_write_mounts = vec![MountSpec {
-        host_path: project.path.clone(),
-        guest_path: project.path.clone(),
-    }];
-
-    let run = match sandbox_exec(backend, run_cmd).await {
-        Ok(r) => r,
-        Err(err) => {
-            return Ok(infrastructure_error(
-                backend,
-                Some(project.path.clone()),
-                format!("sandbox spawn: {err}"),
-            ));
-        }
-    };
-
-    Ok(classify_run_result(&run, backend, &project.path, opts))
+    ]
 }
 
 /// Outcome constructor for sandbox/infrastructure failures (couldn't
@@ -1360,121 +1434,97 @@ async fn verify_c_like(
 ) -> Result<VerificationOutcome> {
     let project = match scaffold_c_project(finding, compiler).await {
         Ok(p) => p,
-        Err(err) => {
-            return Ok(infrastructure_error(
-                backend,
-                None,
-                format!("c scaffold: {err}"),
-            ));
-        }
+        Err(err) => return Ok(scaffold_error(backend, "c scaffold", err)),
     };
 
     // Pick a compiler binary that's actually on PATH; ASan is the
     // gold-standard observation primitive for memory-corruption bugs.
-    let cc = pick_c_compiler(compiler);
-    if cc.is_none() {
-        return Ok(infrastructure_error(
-            backend,
-            Some(project.path.clone()),
-            "no C/C++ compiler on PATH (looked for clang/gcc/clang++/g++)".to_string(),
-        ));
-    }
-    let cc = cc.unwrap();
+    let cc = match pick_c_compiler(compiler) {
+        Some(cc) => cc,
+        None => return Ok(missing_c_compiler(backend, &project)),
+    };
 
     let binary_path = project.path.join("trigger");
-    let mut argv: Vec<String> = vec![
-        cc.to_string(),
-        "-O0".to_string(),
-        "-g".to_string(),
-        "-Werror=implicit-function-declaration".to_string(),
-    ];
-    for flag in c_sanitizer_flags(&cc) {
-        argv.push(flag.to_string());
-    }
-    argv.extend([
-        "-o".to_string(),
-        binary_path.display().to_string(),
-        project.path.join("trigger.c").display().to_string(),
-        project.path.join("target.c").display().to_string(),
-    ]);
-    let mut compile_cmd = SandboxExecOptions::new(argv);
-    compile_cmd.timeout_ms = opts.timeout_ms;
-    compile_cmd.workdir = Some(project.path.clone());
-    compile_cmd.read_write_mounts = vec![MountSpec {
-        host_path: project.path.clone(),
-        guest_path: project.path.clone(),
-    }];
-
-    let compile = match sandbox_exec(backend, compile_cmd).await {
+    let compile = match sandbox_exec(
+        backend,
+        c_compile_command(&project, opts, &cc, &binary_path),
+    )
+    .await
+    {
         Ok(r) => r,
-        Err(err) => {
-            return Ok(infrastructure_error(
-                backend,
-                Some(project.path.clone()),
-                format!("c compile spawn: {err}"),
-            ));
-        }
+        Err(err) => return Ok(project_error(backend, &project, "c compile spawn", err)),
     };
-    if compile.exit_code != Some(0) {
-        return Ok(harness_failed_to_build(
-            backend,
-            project.path.clone(),
-            compile.stderr.clone(),
-            compile.duration_ms,
-        ));
+    if let Some(outcome) = compile_failure_outcome(backend, &project, &compile) {
+        return Ok(outcome);
     }
 
-    let mut run_cmd = SandboxExecOptions::new(vec![binary_path.display().to_string()]);
-    run_cmd.timeout_ms = opts.timeout_ms;
-    run_cmd.workdir = Some(project.path.clone());
-    run_cmd.read_write_mounts = vec![MountSpec {
-        host_path: project.path.clone(),
-        guest_path: project.path.clone(),
-    }];
-
-    let run = match sandbox_exec(backend, run_cmd).await {
+    let run = match sandbox_exec(backend, c_run_command(&project, opts, &binary_path)).await {
         Ok(r) => r,
-        Err(err) => {
-            return Ok(infrastructure_error(
-                backend,
-                Some(project.path.clone()),
-                format!("c run spawn: {err}"),
-            ));
-        }
+        Err(err) => return Ok(project_error(backend, &project, "c run spawn", err)),
     };
 
     Ok(classify_run_result(&run, backend, &project.path, opts))
 }
 
+fn missing_c_compiler(backend: SandboxBackend, project: &ScaffoldedProject) -> VerificationOutcome {
+    infrastructure_error(
+        backend,
+        Some(project.path.clone()),
+        "no C/C++ compiler on PATH (looked for clang/gcc/clang++/g++)".to_string(),
+    )
+}
+
 fn pick_c_compiler(compiler: CCompiler) -> Option<String> {
-    // Prefer whichever toolchain has its AddressSanitizer runtime
-    // actually installed. clang's runtime ships in a separate
-    // `libclang-rt-dev` package on most distros and is often missing;
-    // gcc's libasan is bundled with the gcc package itself.
-    let clang_has_asan = clang_asan_runtime_present();
-    let gcc_has_asan = gcc_asan_runtime_present();
+    CCompilerAvailability::detect(compiler).pick()
+}
 
-    let prefer = compiler.binary();
-    let fallback = compiler.fallback();
+#[derive(Debug, Clone, Copy)]
+struct CCompilerAvailability {
+    preferred: &'static str,
+    fallback: &'static str,
+    preferred_present: bool,
+    fallback_present: bool,
+    preferred_has_asan: bool,
+    fallback_has_asan: bool,
+}
 
-    let clang_present = kuzushi_sandbox::which(prefer).is_some();
-    let gcc_present = kuzushi_sandbox::which(fallback).is_some();
+impl CCompilerAvailability {
+    fn detect(compiler: CCompiler) -> Self {
+        Self {
+            preferred: compiler.binary(),
+            fallback: compiler.fallback(),
+            preferred_present: kuzushi_sandbox::which(compiler.binary()).is_some(),
+            fallback_present: kuzushi_sandbox::which(compiler.fallback()).is_some(),
+            preferred_has_asan: clang_asan_runtime_present(),
+            fallback_has_asan: gcc_asan_runtime_present(),
+        }
+    }
 
-    if clang_present && clang_has_asan {
-        return Some(prefer.to_string());
+    fn pick(self) -> Option<String> {
+        self.pick_with_asan().or_else(|| self.pick_available())
     }
-    if gcc_present && gcc_has_asan {
-        return Some(fallback.to_string());
+
+    fn pick_with_asan(self) -> Option<String> {
+        self.pick_if(
+            self.preferred,
+            self.preferred_present && self.preferred_has_asan,
+        )
+        .or_else(|| {
+            self.pick_if(
+                self.fallback,
+                self.fallback_present && self.fallback_has_asan,
+            )
+        })
     }
-    // No ASan runtime — pick whichever compiler is present and let the
-    // caller drop sanitizer flags via `c_sanitizer_flags`.
-    if clang_present {
-        return Some(prefer.to_string());
+
+    fn pick_available(self) -> Option<String> {
+        self.pick_if(self.preferred, self.preferred_present)
+            .or_else(|| self.pick_if(self.fallback, self.fallback_present))
     }
-    if gcc_present {
-        return Some(fallback.to_string());
+
+    fn pick_if(self, binary: &str, available: bool) -> Option<String> {
+        available.then(|| binary.to_string())
     }
-    None
 }
 
 fn clang_asan_runtime_present() -> bool {
@@ -1652,77 +1702,86 @@ async fn verify_node(
     opts: &VerifyOptions,
     extension: &str,
 ) -> Result<VerificationOutcome> {
-    // Pick a runner. For .ts/.tsx prefer `tsx` → `ts-node` → fall back
-    // to plain `node` (which only works if the input is already JS).
-    let want_typescript = matches!(extension, "ts" | "tsx" | "mts" | "cts");
-    let runner: Vec<String> = if want_typescript {
-        if let Some(_path) = kuzushi_sandbox::which("tsx") {
-            vec!["tsx".to_string()]
-        } else if let Some(_path) = kuzushi_sandbox::which("ts-node") {
-            vec!["ts-node".to_string()]
-        } else if kuzushi_sandbox::which("node").is_some() {
-            // Last-ditch: run `node --import tsx` if @kuzushi happens
-            // to bundle it via npx. Otherwise fall through to node and
-            // hope the snippet is JS-compatible.
-            vec!["node".to_string()]
-        } else {
-            return Ok(infrastructure_error(
-                backend,
-                None,
-                "no JS/TS runner on PATH; install Node.js (`apt install nodejs` / `brew install node`) and optionally `tsx` for native TypeScript".to_string(),
-            ));
-        }
-    } else if kuzushi_sandbox::which("node").is_some() {
-        vec!["node".to_string()]
-    } else {
-        return Ok(infrastructure_error(
-            backend,
-            None,
-            "node not on PATH; install Node.js to verify .js findings".to_string(),
-        ));
+    let runner = match NodeRunner::for_extension(extension) {
+        Some(runner) => runner,
+        None => return Ok(missing_node_runner(backend, extension)),
     };
 
     let project = match scaffold_node_project(finding, extension).await {
         Ok(p) => p,
-        Err(err) => {
-            return Ok(infrastructure_error(
-                backend,
-                None,
-                format!("node scaffold: {err}"),
-            ));
-        }
+        Err(err) => return Ok(scaffold_error(backend, "node scaffold", err)),
     };
 
-    // The trigger file extension matches the input's: `.js` for JS,
-    // `.ts` for TS. tsx/ts-node will run the .ts directly; plain node
-    // gets the .js fallback.
-    let trigger_name = if want_typescript {
-        "trigger.ts"
-    } else {
-        "trigger.js"
-    };
-    let mut argv = runner;
-    argv.push(project.path.join(trigger_name).display().to_string());
-    let mut run_cmd = SandboxExecOptions::new(argv);
-    run_cmd.timeout_ms = opts.timeout_ms;
-    run_cmd.workdir = Some(project.path.clone());
-    run_cmd.read_write_mounts = vec![MountSpec {
-        host_path: project.path.clone(),
-        guest_path: project.path.clone(),
-    }];
-
-    let run = match sandbox_exec(backend, run_cmd).await {
+    let run = match sandbox_exec(backend, node_run_command(&project, opts, runner)).await {
         Ok(r) => r,
-        Err(err) => {
-            return Ok(infrastructure_error(
-                backend,
-                Some(project.path.clone()),
-                format!("node run spawn: {err}"),
-            ));
-        }
+        Err(err) => return Ok(project_error(backend, &project, "node run spawn", err)),
     };
 
     Ok(classify_run_result(&run, backend, &project.path, opts))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NodeRunner {
+    argv: Vec<String>,
+    typescript: bool,
+}
+
+impl NodeRunner {
+    fn for_extension(extension: &str) -> Option<Self> {
+        if is_typescript_extension(extension) {
+            Self::typescript()
+        } else {
+            Self::javascript()
+        }
+    }
+
+    fn typescript() -> Option<Self> {
+        first_present_binary(["tsx", "ts-node", "node"]).map(|binary| Self {
+            argv: vec![binary.to_string()],
+            typescript: true,
+        })
+    }
+
+    fn javascript() -> Option<Self> {
+        first_present_binary(["node"]).map(|binary| Self {
+            argv: vec![binary.to_string()],
+            typescript: false,
+        })
+    }
+
+    fn trigger_name(&self) -> &'static str {
+        if self.typescript {
+            "trigger.ts"
+        } else {
+            "trigger.js"
+        }
+    }
+}
+
+fn first_present_binary<const N: usize>(candidates: [&'static str; N]) -> Option<&'static str> {
+    candidates
+        .into_iter()
+        .find(|binary| kuzushi_sandbox::which(binary).is_some())
+}
+
+fn is_typescript_extension(extension: &str) -> bool {
+    matches!(extension, "ts" | "tsx" | "mts" | "cts")
+}
+
+fn missing_node_runner(backend: SandboxBackend, extension: &str) -> VerificationOutcome {
+    if is_typescript_extension(extension) {
+        infrastructure_error(
+            backend,
+            None,
+            "no JS/TS runner on PATH; install Node.js (`apt install nodejs` / `brew install node`) and optionally `tsx` for native TypeScript".to_string(),
+        )
+    } else {
+        infrastructure_error(
+            backend,
+            None,
+            "node not on PATH; install Node.js to verify .js findings".to_string(),
+        )
+    }
 }
 
 async fn scaffold_node_project(finding: &Finding, extension: &str) -> Result<ScaffoldedProject> {
@@ -1928,6 +1987,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn verify_rust_reaches_a_terminal_outcome() {
+        let finding = finding_for("src/lib.rs");
+        let outcome = verify_finding(&finding, VerifyOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(outcome.language.as_deref(), Some("rust"));
+        assert!(matches!(
+            outcome.proof_verdict,
+            ProofVerdict::Exploited
+                | ProofVerdict::NotReproduced
+                | ProofVerdict::HarnessFailedToBuild
+                | ProofVerdict::InfrastructureError
+        ));
+    }
+
+    #[tokio::test]
+    async fn verify_c_reaches_a_terminal_outcome() {
+        let finding = finding_for("src/x.c");
+        let outcome = verify_finding(&finding, VerifyOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(outcome.language.as_deref(), Some("c"));
+        assert!(matches!(
+            outcome.proof_verdict,
+            ProofVerdict::Exploited
+                | ProofVerdict::NotReproduced
+                | ProofVerdict::HarnessFailedToBuild
+                | ProofVerdict::InfrastructureError
+        ));
+    }
+
+    #[tokio::test]
+    async fn verify_node_reaches_a_terminal_outcome() {
+        let finding = finding_for("src/x.js");
+        let outcome = verify_finding(&finding, VerifyOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(outcome.language.as_deref(), Some("javascript"));
+        assert!(matches!(
+            outcome.proof_verdict,
+            ProofVerdict::Exploited
+                | ProofVerdict::NotReproduced
+                | ProofVerdict::HarnessFailedToBuild
+                | ProofVerdict::InfrastructureError
+        ));
+    }
+
+    #[tokio::test]
     async fn verify_returns_unsupported_for_unknown_extension() {
         let finding = finding_for("src/Makefile");
         let outcome = verify_finding(&finding, VerifyOptions::default())
@@ -1967,6 +2074,36 @@ mod tests {
             .unwrap();
         assert!(trigger.contains("#[test]"));
         assert!(trigger.contains("fn trigger()"));
+    }
+
+    #[tokio::test]
+    async fn verifier_command_helpers_mount_project_read_write() {
+        let src = build_rust_trigger(&finding_for("src/x.rs"));
+        let project = scaffold_rust_project(&src).await.unwrap();
+        let opts = VerifyOptions {
+            timeout_ms: 1234,
+            ..VerifyOptions::default()
+        };
+
+        let command = rust_compile_command(&project, &opts);
+        assert_eq!(command.timeout_ms, 1234);
+        assert_eq!(command.workdir.as_deref(), Some(project.path.as_path()));
+        assert_eq!(command.read_write_mounts.len(), 1);
+        assert_eq!(command.read_write_mounts[0].host_path, project.path);
+    }
+
+    #[tokio::test]
+    async fn compile_failure_outcome_maps_nonzero_exit_to_harness_failure() {
+        let src = build_rust_trigger(&finding_for("src/x.rs"));
+        let project = scaffold_rust_project(&src).await.unwrap();
+        let compile = sandbox_result(ExitOutcome::Exited, Some(1), None);
+
+        let outcome = compile_failure_outcome(SandboxBackend::Bwrap, &project, &compile).unwrap();
+        assert_eq!(outcome.proof_verdict, ProofVerdict::HarnessFailedToBuild);
+        assert_eq!(
+            outcome.harness_path.as_deref(),
+            Some(project.path.as_path())
+        );
     }
 
     #[test]
@@ -2513,6 +2650,54 @@ mod tests {
         assert!(body.contains("Uint8Array.from"));
         assert!(body.contains("function trigger"));
         assert!(body.contains("process.exit(0)"));
+    }
+
+    #[test]
+    fn node_runner_metadata_tracks_extension_and_script_name() {
+        assert!(is_typescript_extension("tsx"));
+        assert!(!is_typescript_extension("js"));
+
+        let ts = NodeRunner {
+            argv: vec!["tsx".to_string()],
+            typescript: true,
+        };
+        let js = NodeRunner {
+            argv: vec!["node".to_string()],
+            typescript: false,
+        };
+        assert_eq!(ts.trigger_name(), "trigger.ts");
+        assert_eq!(js.trigger_name(), "trigger.js");
+        assert!(missing_node_runner(SandboxBackend::Plain, "ts")
+            .crash_evidence
+            .unwrap()
+            .contains("JS/TS runner"));
+    }
+
+    #[test]
+    fn c_compiler_availability_prefers_asan_then_present_toolchain() {
+        let availability = CCompilerAvailability {
+            preferred: "clang",
+            fallback: "gcc",
+            preferred_present: true,
+            fallback_present: true,
+            preferred_has_asan: false,
+            fallback_has_asan: true,
+        };
+        assert_eq!(availability.pick().as_deref(), Some("gcc"));
+
+        let availability = CCompilerAvailability {
+            preferred_has_asan: false,
+            fallback_has_asan: false,
+            ..availability
+        };
+        assert_eq!(availability.pick().as_deref(), Some("clang"));
+
+        let availability = CCompilerAvailability {
+            preferred_present: false,
+            fallback_present: false,
+            ..availability
+        };
+        assert_eq!(availability.pick(), None);
     }
 
     // ----- new language paths return BackendUnavailable when no toolchain

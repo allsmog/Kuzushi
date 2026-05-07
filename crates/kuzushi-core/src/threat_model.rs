@@ -503,170 +503,8 @@ fn convert_randori_artifacts_to_document(
     let mut flows = BTreeMap::<String, Value>::new();
     let mut trust_boundaries = BTreeMap::<String, Value>::new();
 
-    if let Some(s2) = artifacts.s2_scope.as_ref().and_then(Value::as_object) {
-        for actor in records(s2.get("actors")) {
-            let Some(id) = str_field(actor, &["id"]) else {
-                continue;
-            };
-            let name = str_field(actor, &["name"]).unwrap_or_else(|| id.clone());
-            insert_node(
-                &mut nodes,
-                &id,
-                actor_type_to_dfd_type(str_field(actor, &["type"]).as_deref().unwrap_or("")),
-                &name,
-                str_field(actor, &["description"])
-                    .as_deref()
-                    .unwrap_or(&name),
-                str_field(actor, &["trust_zone", "trustZone", "trust_level"])
-                    .as_deref()
-                    .unwrap_or("external"),
-            );
-        }
-        for service in records(s2.get("services")) {
-            let Some(id) = str_field(service, &["id"]) else {
-                continue;
-            };
-            let name = str_field(service, &["name"]).unwrap_or_else(|| id.clone());
-            insert_node(
-                &mut nodes,
-                &id,
-                "process",
-                &name,
-                str_field(service, &["description"])
-                    .as_deref()
-                    .unwrap_or(&name),
-                "internal",
-            );
-        }
-        for database in records(s2.get("databases")) {
-            let Some(id) = str_field(database, &["id"]) else {
-                continue;
-            };
-            let name = str_field(database, &["name"]).unwrap_or_else(|| id.clone());
-            insert_node(
-                &mut nodes,
-                &id,
-                "data-store",
-                &name,
-                str_field(database, &["description"])
-                    .as_deref()
-                    .unwrap_or(&name),
-                "internal",
-            );
-        }
-        if let Some(components) = s2.get("components").and_then(Value::as_object) {
-            for (kind, list) in components {
-                for component in records(Some(list)) {
-                    let Some(id) = str_field(component, &["id", "name"]) else {
-                        continue;
-                    };
-                    let name = str_field(component, &["name"]).unwrap_or_else(|| id.clone());
-                    insert_node(
-                        &mut nodes,
-                        &id,
-                        component_kind_to_dfd_type(kind),
-                        &name,
-                        str_field(component, &["description"])
-                            .as_deref()
-                            .unwrap_or(kind),
-                        str_field(component, &["trust_zone", "trustZone"])
-                            .as_deref()
-                            .unwrap_or("internal"),
-                    );
-                }
-            }
-        }
-        collect_flows(s2.get("data_flows"), &mut flows);
-    }
-
-    if let Some(s3) = artifacts
-        .s3_decomposition
-        .as_ref()
-        .and_then(Value::as_object)
-    {
-        for (key, default_type, default_zone) in [
-            ("external_entities", "external-entity", "external"),
-            ("entry_points", "process", "entrypoint"),
-            ("processes", "process", "internal"),
-            ("data_stores", "data-store", "internal"),
-        ] {
-            for item in records(s3.get(key)) {
-                let Some(id) = str_field(item, &["id"]) else {
-                    continue;
-                };
-                let name = str_field(item, &["name"]).unwrap_or_else(|| id.clone());
-                insert_node(
-                    &mut nodes,
-                    &id,
-                    default_type,
-                    &name,
-                    str_field(item, &["description", "notes"])
-                        .as_deref()
-                        .unwrap_or(&name),
-                    str_field(item, &["trust_zone", "trustZone"])
-                        .as_deref()
-                        .unwrap_or(default_zone),
-                );
-            }
-        }
-        for item in records_or_record_collections(s3.get("dfd_elements")) {
-            let Some(id) = str_field(item, &["id"]) else {
-                continue;
-            };
-            let name = str_field(item, &["name"]).unwrap_or_else(|| id.clone());
-            insert_node(
-                &mut nodes,
-                &id,
-                normalize_dfd_type(str_field(item, &["type"]).as_deref().unwrap_or("process")),
-                &name,
-                str_field(item, &["description"])
-                    .as_deref()
-                    .unwrap_or(&name),
-                str_field(item, &["trust_zone", "trustZone", "component"])
-                    .as_deref()
-                    .unwrap_or("unknown"),
-            );
-        }
-        collect_flows(s3.get("data_flows"), &mut flows);
-        for boundary in records(s3.get("trust_boundaries")) {
-            let Some(id) = str_field(boundary, &["id"]) else {
-                continue;
-            };
-            let name = str_field(boundary, &["name"]).unwrap_or_else(|| id.clone());
-            let mut crossings = string_array_field(
-                boundary,
-                &[
-                    "crossing_flow_ids",
-                    "crossingFlowIds",
-                    "crossing_flows",
-                    "flows",
-                ],
-            );
-            for flow in flows.values() {
-                let includes = flow
-                    .get("trustBoundaryIds")
-                    .and_then(Value::as_array)
-                    .is_some_and(|ids| ids.iter().any(|value| value.as_str() == Some(&id)));
-                if includes {
-                    if let Some(flow_id) = flow.get("id").and_then(Value::as_str) {
-                        crossings.push(flow_id.to_string());
-                    }
-                }
-            }
-            crossings.sort();
-            crossings.dedup();
-            trust_boundaries.insert(
-                id.clone(),
-                json!({
-                    "id": id,
-                    "name": name,
-                    "innerZone": str_field(boundary, &["inner_zone", "innerZone"]).unwrap_or_else(|| "internal".to_string()),
-                    "outerZone": str_field(boundary, &["outer_zone", "outerZone"]).unwrap_or_else(|| "external".to_string()),
-                    "crossingFlowIds": crossings,
-                }),
-            );
-        }
-    }
+    collect_s2_scope_parts(artifacts, &mut nodes, &mut flows);
+    collect_s3_decomposition_parts(artifacts, &mut nodes, &mut flows, &mut trust_boundaries);
 
     let threats = artifacts
         .s4_threats
@@ -694,6 +532,234 @@ fn convert_randori_artifacts_to_document(
         }
     }
     Ok(Some(document))
+}
+
+fn collect_s2_scope_parts(
+    artifacts: &RandoriArtifacts,
+    nodes: &mut BTreeMap<String, Value>,
+    flows: &mut BTreeMap<String, Value>,
+) {
+    let Some(s2) = artifacts.s2_scope.as_ref().and_then(Value::as_object) else {
+        return;
+    };
+    collect_s2_actors(s2, nodes);
+    collect_s2_services(s2, nodes);
+    collect_s2_databases(s2, nodes);
+    collect_s2_components(s2, nodes);
+    collect_flows(s2.get("data_flows"), flows);
+}
+
+fn collect_s2_actors(s2: &serde_json::Map<String, Value>, nodes: &mut BTreeMap<String, Value>) {
+    for actor in records(s2.get("actors")) {
+        let Some(id) = str_field(actor, &["id"]) else {
+            continue;
+        };
+        let name = str_field(actor, &["name"]).unwrap_or_else(|| id.clone());
+        insert_node(
+            nodes,
+            &id,
+            actor_type_to_dfd_type(str_field(actor, &["type"]).as_deref().unwrap_or("")),
+            &name,
+            str_field(actor, &["description"])
+                .as_deref()
+                .unwrap_or(&name),
+            str_field(actor, &["trust_zone", "trustZone", "trust_level"])
+                .as_deref()
+                .unwrap_or("external"),
+        );
+    }
+}
+
+fn collect_s2_services(s2: &serde_json::Map<String, Value>, nodes: &mut BTreeMap<String, Value>) {
+    for service in records(s2.get("services")) {
+        let Some(id) = str_field(service, &["id"]) else {
+            continue;
+        };
+        let name = str_field(service, &["name"]).unwrap_or_else(|| id.clone());
+        insert_node(
+            nodes,
+            &id,
+            "process",
+            &name,
+            str_field(service, &["description"])
+                .as_deref()
+                .unwrap_or(&name),
+            "internal",
+        );
+    }
+}
+
+fn collect_s2_databases(s2: &serde_json::Map<String, Value>, nodes: &mut BTreeMap<String, Value>) {
+    for database in records(s2.get("databases")) {
+        let Some(id) = str_field(database, &["id"]) else {
+            continue;
+        };
+        let name = str_field(database, &["name"]).unwrap_or_else(|| id.clone());
+        insert_node(
+            nodes,
+            &id,
+            "data-store",
+            &name,
+            str_field(database, &["description"])
+                .as_deref()
+                .unwrap_or(&name),
+            "internal",
+        );
+    }
+}
+
+fn collect_s2_components(s2: &serde_json::Map<String, Value>, nodes: &mut BTreeMap<String, Value>) {
+    let Some(components) = s2.get("components").and_then(Value::as_object) else {
+        return;
+    };
+    for (kind, list) in components {
+        for component in records(Some(list)) {
+            let Some(id) = str_field(component, &["id", "name"]) else {
+                continue;
+            };
+            let name = str_field(component, &["name"]).unwrap_or_else(|| id.clone());
+            insert_node(
+                nodes,
+                &id,
+                component_kind_to_dfd_type(kind),
+                &name,
+                str_field(component, &["description"])
+                    .as_deref()
+                    .unwrap_or(kind),
+                str_field(component, &["trust_zone", "trustZone"])
+                    .as_deref()
+                    .unwrap_or("internal"),
+            );
+        }
+    }
+}
+
+fn collect_s3_decomposition_parts(
+    artifacts: &RandoriArtifacts,
+    nodes: &mut BTreeMap<String, Value>,
+    flows: &mut BTreeMap<String, Value>,
+    trust_boundaries: &mut BTreeMap<String, Value>,
+) {
+    let Some(s3) = artifacts
+        .s3_decomposition
+        .as_ref()
+        .and_then(Value::as_object)
+    else {
+        return;
+    };
+    collect_s3_standard_nodes(s3, nodes);
+    collect_s3_dfd_elements(s3, nodes);
+    collect_flows(s3.get("data_flows"), flows);
+    collect_s3_trust_boundaries(s3, flows, trust_boundaries);
+}
+
+fn collect_s3_standard_nodes(
+    s3: &serde_json::Map<String, Value>,
+    nodes: &mut BTreeMap<String, Value>,
+) {
+    for (key, default_type, default_zone) in [
+        ("external_entities", "external-entity", "external"),
+        ("entry_points", "process", "entrypoint"),
+        ("processes", "process", "internal"),
+        ("data_stores", "data-store", "internal"),
+    ] {
+        for item in records(s3.get(key)) {
+            let Some(id) = str_field(item, &["id"]) else {
+                continue;
+            };
+            let name = str_field(item, &["name"]).unwrap_or_else(|| id.clone());
+            insert_node(
+                nodes,
+                &id,
+                default_type,
+                &name,
+                str_field(item, &["description", "notes"])
+                    .as_deref()
+                    .unwrap_or(&name),
+                str_field(item, &["trust_zone", "trustZone"])
+                    .as_deref()
+                    .unwrap_or(default_zone),
+            );
+        }
+    }
+}
+
+fn collect_s3_dfd_elements(
+    s3: &serde_json::Map<String, Value>,
+    nodes: &mut BTreeMap<String, Value>,
+) {
+    for item in records_or_record_collections(s3.get("dfd_elements")) {
+        let Some(id) = str_field(item, &["id"]) else {
+            continue;
+        };
+        let name = str_field(item, &["name"]).unwrap_or_else(|| id.clone());
+        insert_node(
+            nodes,
+            &id,
+            normalize_dfd_type(str_field(item, &["type"]).as_deref().unwrap_or("process")),
+            &name,
+            str_field(item, &["description"])
+                .as_deref()
+                .unwrap_or(&name),
+            str_field(item, &["trust_zone", "trustZone", "component"])
+                .as_deref()
+                .unwrap_or("unknown"),
+        );
+    }
+}
+
+fn collect_s3_trust_boundaries(
+    s3: &serde_json::Map<String, Value>,
+    flows: &BTreeMap<String, Value>,
+    trust_boundaries: &mut BTreeMap<String, Value>,
+) {
+    for boundary in records(s3.get("trust_boundaries")) {
+        let Some(id) = str_field(boundary, &["id"]) else {
+            continue;
+        };
+        let name = str_field(boundary, &["name"]).unwrap_or_else(|| id.clone());
+        let crossings = crossing_flow_ids(boundary, flows, &id);
+        trust_boundaries.insert(
+            id.clone(),
+            json!({
+                "id": id,
+                "name": name,
+                "innerZone": str_field(boundary, &["inner_zone", "innerZone"]).unwrap_or_else(|| "internal".to_string()),
+                "outerZone": str_field(boundary, &["outer_zone", "outerZone"]).unwrap_or_else(|| "external".to_string()),
+                "crossingFlowIds": crossings,
+            }),
+        );
+    }
+}
+
+fn crossing_flow_ids(
+    boundary: &Map<String, Value>,
+    flows: &BTreeMap<String, Value>,
+    boundary_id: &str,
+) -> Vec<String> {
+    let mut crossings = string_array_field(
+        boundary,
+        &[
+            "crossing_flow_ids",
+            "crossingFlowIds",
+            "crossing_flows",
+            "flows",
+        ],
+    );
+    for flow in flows.values() {
+        let includes = flow
+            .get("trustBoundaryIds")
+            .and_then(Value::as_array)
+            .is_some_and(|ids| ids.iter().any(|value| value.as_str() == Some(boundary_id)));
+        if includes {
+            if let Some(flow_id) = flow.get("id").and_then(Value::as_str) {
+                crossings.push(flow_id.to_string());
+            }
+        }
+    }
+    crossings.sort();
+    crossings.dedup();
+    crossings
 }
 
 fn collect_flows(raw: Option<&Value>, flows: &mut BTreeMap<String, Value>) {
@@ -1642,6 +1708,44 @@ mod tests {
         let parsed =
             parse_json_value_from_agent_text("```json\n{\"version\":\"2.0\"}\n```").unwrap();
         assert_eq!(parsed.get("version").and_then(Value::as_str), Some("2.0"));
+    }
+
+    #[test]
+    fn parse_narrative_normalizes_aliases_and_skips_empty_documents() {
+        assert!(parse_narrative(&json!({})).is_none());
+
+        let parsed = parse_narrative(&json!({
+            "overview": "internet-facing upload flow",
+            "inputCategories": {
+                "attackerControlled": ["filename"],
+                "operator_controlled": ["feature flag"]
+            },
+            "criticality_buckets": {
+                "critical": ["auth"],
+                "low": ["marketing"]
+            },
+            "attackerStories": [{
+                "title": "Upload shell",
+                "narrative": "Attacker uploads a script.",
+                "mitigation": "content-type allowlist",
+                "threat_ids": ["T1"]
+            }],
+            "out_of_scope": ["admin laptops"]
+        }))
+        .unwrap();
+
+        assert_eq!(parsed["overview"], json!("internet-facing upload flow"));
+        assert_eq!(
+            parsed["inputCategories"]["attackerControlled"],
+            json!(["filename"])
+        );
+        assert_eq!(
+            parsed["inputCategories"]["operatorControlled"],
+            json!(["feature flag"])
+        );
+        assert_eq!(parsed["criticalityBuckets"]["critical"], json!(["auth"]));
+        assert_eq!(parsed["attackerStories"][0]["threatIds"], json!(["T1"]));
+        assert_eq!(parsed["outOfScope"], json!(["admin laptops"]));
     }
 
     struct MockThreatRuntime {

@@ -252,50 +252,85 @@ impl CodeqlScanner {
         target: &Path,
         cancel: &ScanCancellation,
     ) -> Result<ScanEngineOutput> {
-        if cancel.is_cancelled() {
-            anyhow::bail!("codeql scan cancelled");
-        }
-        if !target.is_dir() {
-            anyhow::bail!("codeql: target is not a directory: {}", target.display());
-        }
-
+        validate_codeql_scan_target(target, cancel)?;
         let binary = resolve_codeql_binary(self.binary.as_deref())?;
-        let repo_name = target
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("repo")
-            .to_string();
+        let repo_name = codeql_repo_name(target);
 
-        if self.multi_language && self.language.is_none() {
-            let languages = detect_all_codeql_languages(target, &binary, cancel)?;
-            let mut output = ScanEngineOutput::default();
-            let mut errors = Vec::new();
-            for language in languages {
-                let mut scanner = self.clone();
-                scanner.language = Some(language.clone());
-                scanner.multi_language = false;
-                match scanner.scan_single_language_artifacts(target, &binary, &repo_name, cancel) {
-                    Ok(mut language_output) => {
-                        output.findings.append(&mut language_output.findings);
-                        output
-                            .codeql_sarif_documents
-                            .append(&mut language_output.codeql_sarif_documents);
-                    }
-                    Err(error) if cancel.is_cancelled() => return Err(error),
-                    Err(error) => errors.push(format!("{language}: {error}")),
-                }
-            }
-
-            if output.findings.is_empty() && !errors.is_empty() {
-                anyhow::bail!(
-                    "codeql: all language analyses failed: {}",
-                    errors.join("; ")
-                );
-            }
-            return Ok(output);
+        if self.should_scan_all_codeql_languages() {
+            return self.scan_all_language_artifacts(target, &binary, &repo_name, cancel);
         }
 
         self.scan_single_language_artifacts(target, &binary, &repo_name, cancel)
+    }
+
+    fn should_scan_all_codeql_languages(&self) -> bool {
+        self.multi_language && self.language.is_none()
+    }
+
+    fn scan_all_language_artifacts(
+        &self,
+        target: &Path,
+        binary: &str,
+        repo_name: &str,
+        cancel: &ScanCancellation,
+    ) -> Result<ScanEngineOutput> {
+        let languages = detect_all_codeql_languages(target, binary, cancel)?;
+        let (output, errors) =
+            self.collect_codeql_language_outputs(target, binary, repo_name, cancel, languages)?;
+        codeql_multi_language_output(output, errors)
+    }
+
+    fn collect_codeql_language_outputs(
+        &self,
+        target: &Path,
+        binary: &str,
+        repo_name: &str,
+        cancel: &ScanCancellation,
+        languages: Vec<String>,
+    ) -> Result<(ScanEngineOutput, Vec<String>)> {
+        let mut output = ScanEngineOutput::default();
+        let mut errors = Vec::new();
+        for language in languages {
+            self.scan_one_detected_language(
+                target,
+                binary,
+                repo_name,
+                cancel,
+                &language,
+                &mut output,
+                &mut errors,
+            )?;
+        }
+        Ok((output, errors))
+    }
+
+    fn scan_one_detected_language(
+        &self,
+        target: &Path,
+        binary: &str,
+        repo_name: &str,
+        cancel: &ScanCancellation,
+        language: &str,
+        output: &mut ScanEngineOutput,
+        errors: &mut Vec<String>,
+    ) -> Result<()> {
+        let mut scanner = self.clone();
+        scanner.language = Some(language.to_string());
+        scanner.multi_language = false;
+        match scanner.scan_single_language_artifacts(target, binary, repo_name, cancel) {
+            Ok(mut language_output) => {
+                output.findings.append(&mut language_output.findings);
+                output
+                    .codeql_sarif_documents
+                    .append(&mut language_output.codeql_sarif_documents);
+                Ok(())
+            }
+            Err(error) if cancel.is_cancelled() => Err(error),
+            Err(error) => {
+                errors.push(format!("{language}: {error}"));
+                Ok(())
+            }
+        }
     }
 
     fn scan_single_language_artifacts(
@@ -322,54 +357,80 @@ impl CodeqlScanner {
         cancel: &ScanCancellation,
     ) -> Result<CodeqlDatabase> {
         if let Some(configured_db_path) = &self.db_path {
-            let db_path = resolve_repo_path(target, configured_db_path);
-            if !is_codeql_database_dir(&db_path) {
-                anyhow::bail!(
-                    "Configured CodeQL database path is not valid: {}",
-                    db_path.display()
-                );
-            }
-
-            let language = self
-                .language
-                .clone()
-                .or_else(|| {
-                    detect_language_from_database(binary, &db_path, cancel)
-                        .ok()
-                        .flatten()
-                })
-                .or_else(|| detect_codeql_language_from_heuristics(target))
-                .unwrap_or_else(|| "javascript".to_string());
-
-            return Ok(CodeqlDatabase { db_path, language });
+            return self.configured_codeql_database(target, binary, cancel, configured_db_path);
         }
 
-        let language = match self.language.clone() {
-            Some(language) => language,
-            None => detect_codeql_language(target, binary, cancel)?,
-        };
+        let language = self.required_codeql_language(target, binary, cancel)?;
         let db_path = target.join(".kuzushi").join("codeql-db");
         if is_codeql_database_dir(&db_path) {
             return Ok(CodeqlDatabase { db_path, language });
         }
 
-        if db_path.exists() {
-            if db_path.is_dir() {
-                fs::remove_dir_all(&db_path).with_context(|| {
-                    format!("codeql: could not remove stale {}", db_path.display())
-                })?;
-            } else {
-                fs::remove_file(&db_path).with_context(|| {
-                    format!("codeql: could not remove stale {}", db_path.display())
-                })?;
-            }
-        }
-        if let Some(parent) = db_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("codeql: could not create {}", parent.display()))?;
-        }
+        remove_stale_codeql_database(&db_path)?;
+        create_codeql_database_parent(&db_path)?;
+        self.create_codeql_database(target, binary, cancel, &db_path, &language)?;
+        Ok(CodeqlDatabase { db_path, language })
+    }
 
-        let mut create_args = vec![
+    fn configured_codeql_database(
+        &self,
+        target: &Path,
+        binary: &str,
+        cancel: &ScanCancellation,
+        configured_db_path: &str,
+    ) -> Result<CodeqlDatabase> {
+        let db_path = resolve_repo_path(target, configured_db_path);
+        if !is_codeql_database_dir(&db_path) {
+            anyhow::bail!(
+                "Configured CodeQL database path is not valid: {}",
+                db_path.display()
+            );
+        }
+        Ok(CodeqlDatabase {
+            language: self.configured_codeql_language(target, binary, cancel, &db_path),
+            db_path,
+        })
+    }
+
+    fn configured_codeql_language(
+        &self,
+        target: &Path,
+        binary: &str,
+        cancel: &ScanCancellation,
+        db_path: &Path,
+    ) -> String {
+        self.language
+            .clone()
+            .or_else(|| {
+                detect_language_from_database(binary, db_path, cancel)
+                    .ok()
+                    .flatten()
+            })
+            .or_else(|| detect_codeql_language_from_heuristics(target))
+            .unwrap_or_else(|| "javascript".to_string())
+    }
+
+    fn required_codeql_language(
+        &self,
+        target: &Path,
+        binary: &str,
+        cancel: &ScanCancellation,
+    ) -> Result<String> {
+        match self.language.clone() {
+            Some(language) => Ok(language),
+            None => detect_codeql_language(target, binary, cancel),
+        }
+    }
+
+    fn create_codeql_database(
+        &self,
+        target: &Path,
+        binary: &str,
+        cancel: &ScanCancellation,
+        db_path: &Path,
+        language: &str,
+    ) -> Result<()> {
+        let create_args = vec![
             "database".to_string(),
             "create".to_string(),
             db_path.display().to_string(),
@@ -391,9 +452,7 @@ impl CodeqlScanner {
         } else {
             self.run_codeql_command(binary, &create_args, Some(target), cancel)?;
         }
-
-        create_args.clear();
-        Ok(CodeqlDatabase { db_path, language })
+        Ok(())
     }
 
     fn run_codeql_analysis(
@@ -541,6 +600,58 @@ impl ScanEngine for CodeqlScanner {
     ) -> Result<ScanEngineOutput> {
         self.scan_with_artifacts(target, cancellation)
     }
+}
+
+fn validate_codeql_scan_target(target: &Path, cancel: &ScanCancellation) -> Result<()> {
+    if cancel.is_cancelled() {
+        anyhow::bail!("codeql scan cancelled");
+    }
+    if !target.is_dir() {
+        anyhow::bail!("codeql: target is not a directory: {}", target.display());
+    }
+    Ok(())
+}
+
+fn codeql_repo_name(target: &Path) -> String {
+    target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("repo")
+        .to_string()
+}
+
+fn remove_stale_codeql_database(db_path: &Path) -> Result<()> {
+    if !db_path.exists() {
+        return Ok(());
+    }
+    if db_path.is_dir() {
+        fs::remove_dir_all(db_path)
+            .with_context(|| format!("codeql: could not remove stale {}", db_path.display()))
+    } else {
+        fs::remove_file(db_path)
+            .with_context(|| format!("codeql: could not remove stale {}", db_path.display()))
+    }
+}
+
+fn create_codeql_database_parent(db_path: &Path) -> Result<()> {
+    let Some(parent) = db_path.parent() else {
+        return Ok(());
+    };
+    fs::create_dir_all(parent)
+        .with_context(|| format!("codeql: could not create {}", parent.display()))
+}
+
+fn codeql_multi_language_output(
+    output: ScanEngineOutput,
+    errors: Vec<String>,
+) -> Result<ScanEngineOutput> {
+    if output.findings.is_empty() && !errors.is_empty() {
+        anyhow::bail!(
+            "codeql: all language analyses failed: {}",
+            errors.join("; ")
+        );
+    }
+    Ok(output)
 }
 
 #[derive(Debug, Clone)]
@@ -1640,46 +1751,9 @@ fn detect_all_codeql_languages(
     binary: &str,
     cancel: &ScanCancellation,
 ) -> Result<Vec<String>> {
-    let mut languages = Vec::new();
-    if target.join("package.json").exists() {
-        languages.push("javascript".to_string());
-    }
-    if target.join("go.mod").exists() {
-        languages.push("go".to_string());
-    }
-    if target.join("pom.xml").exists()
-        || target.join("build.gradle").exists()
-        || target.join("build.gradle.kts").exists()
-    {
-        languages.push("java".to_string());
-    }
-    if target.join("requirements.txt").exists()
-        || target.join("pyproject.toml").exists()
-        || target.join("setup.py").exists()
-    {
-        languages.push("python".to_string());
-    }
-    if target.join("Cargo.toml").exists() {
-        languages.push("rust".to_string());
-    }
-    if target.join("Gemfile").exists() {
-        languages.push("ruby".to_string());
-    }
-    let top_level = fs::read_dir(target)
-        .map(|entries| {
-            entries
-                .filter_map(Result::ok)
-                .filter_map(|entry| entry.file_name().into_string().ok())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    if top_level
-        .iter()
-        .any(|name| name.ends_with(".sln") || name.ends_with(".csproj"))
-        && !languages.iter().any(|language| language == "csharp")
-    {
-        languages.push("csharp".to_string());
-    }
+    let top_level = top_level_entry_names(target);
+    let mut languages = codeql_languages_from_markers(target, CODEQL_ALL_MARKER_RULES);
+    push_codeql_language_from_top_level(&top_level, &mut languages);
 
     if languages.is_empty() {
         languages.push(detect_codeql_language(target, binary, cancel)?);
@@ -1691,51 +1765,137 @@ fn detect_all_codeql_languages(
 }
 
 fn detect_codeql_language_from_heuristics(target: &Path) -> Option<String> {
-    if target.join("package.json").exists() {
-        return Some("javascript".to_string());
-    }
-    if target.join("go.mod").exists() {
-        return Some("go".to_string());
-    }
-    if target.join("pom.xml").exists()
-        || target.join("build.gradle").exists()
-        || target.join("build.gradle.kts").exists()
-        || target.join("gradlew").exists()
-        || target.join("mvnw").exists()
-    {
-        return Some("java".to_string());
-    }
-    if target.join("requirements.txt").exists()
-        || target.join("pyproject.toml").exists()
-        || target.join("setup.py").exists()
-    {
-        return Some("python".to_string());
-    }
-    if target.join("Cargo.toml").exists() {
-        return Some("rust".to_string());
-    }
-    if target.join("Gemfile").exists() {
-        return Some("ruby".to_string());
-    }
+    codeql_language_from_markers(target, CODEQL_HEURISTIC_MARKER_RULES)
+        .or_else(|| codeql_language_from_top_level(&top_level_entry_names(target)))
+}
 
-    let top_level = fs::read_dir(target)
+struct CodeqlMarkerRule {
+    language: &'static str,
+    markers: &'static [&'static str],
+}
+
+const CODEQL_ALL_MARKER_RULES: &[CodeqlMarkerRule] = &[
+    CodeqlMarkerRule {
+        language: "javascript",
+        markers: &["package.json"],
+    },
+    CodeqlMarkerRule {
+        language: "go",
+        markers: &["go.mod"],
+    },
+    CodeqlMarkerRule {
+        language: "java",
+        markers: &["pom.xml", "build.gradle", "build.gradle.kts"],
+    },
+    CodeqlMarkerRule {
+        language: "python",
+        markers: &["requirements.txt", "pyproject.toml", "setup.py"],
+    },
+    CodeqlMarkerRule {
+        language: "rust",
+        markers: &["Cargo.toml"],
+    },
+    CodeqlMarkerRule {
+        language: "ruby",
+        markers: &["Gemfile"],
+    },
+];
+
+const CODEQL_HEURISTIC_MARKER_RULES: &[CodeqlMarkerRule] = &[
+    CodeqlMarkerRule {
+        language: "javascript",
+        markers: &["package.json"],
+    },
+    CodeqlMarkerRule {
+        language: "go",
+        markers: &["go.mod"],
+    },
+    CodeqlMarkerRule {
+        language: "java",
+        markers: &[
+            "pom.xml",
+            "build.gradle",
+            "build.gradle.kts",
+            "gradlew",
+            "mvnw",
+        ],
+    },
+    CodeqlMarkerRule {
+        language: "python",
+        markers: &["requirements.txt", "pyproject.toml", "setup.py"],
+    },
+    CodeqlMarkerRule {
+        language: "rust",
+        markers: &["Cargo.toml"],
+    },
+    CodeqlMarkerRule {
+        language: "ruby",
+        markers: &["Gemfile"],
+    },
+];
+
+fn codeql_languages_from_markers(target: &Path, rules: &[CodeqlMarkerRule]) -> Vec<String> {
+    rules
+        .iter()
+        .filter(|rule| has_any_codeql_marker(target, rule.markers))
+        .map(|rule| rule.language.to_string())
+        .collect()
+}
+
+fn codeql_language_from_markers(target: &Path, rules: &[CodeqlMarkerRule]) -> Option<String> {
+    rules
+        .iter()
+        .find(|rule| has_any_codeql_marker(target, rule.markers))
+        .map(|rule| rule.language.to_string())
+}
+
+fn has_any_codeql_marker(target: &Path, markers: &[&str]) -> bool {
+    markers.iter().any(|marker| target.join(marker).exists())
+}
+
+fn top_level_entry_names(target: &Path) -> Vec<String> {
+    fs::read_dir(target)
         .map(|entries| {
             entries
                 .filter_map(Result::ok)
                 .filter_map(|entry| entry.file_name().into_string().ok())
                 .collect::<Vec<_>>()
         })
-        .unwrap_or_default();
-    if top_level
-        .iter()
-        .any(|name| name.ends_with(".sln") || name.ends_with(".csproj"))
+        .unwrap_or_default()
+}
+
+fn push_codeql_language_from_top_level(top_level: &[String], languages: &mut Vec<String>) {
+    if codeql_top_level_has_csharp(top_level)
+        && !languages.iter().any(|language| language == "csharp")
     {
+        languages.push("csharp".to_string());
+    }
+}
+
+fn codeql_language_from_top_level(top_level: &[String]) -> Option<String> {
+    if codeql_top_level_has_csharp(top_level) {
         return Some("csharp".to_string());
     }
-    if top_level.iter().any(|name| name.ends_with(".go")) {
+    top_level_source_language(top_level)
+}
+
+fn codeql_top_level_has_csharp(top_level: &[String]) -> bool {
+    top_level
+        .iter()
+        .any(|name| name.ends_with(".sln") || name.ends_with(".csproj"))
+}
+
+fn top_level_source_language(top_level: &[String]) -> Option<String> {
+    top_level
+        .iter()
+        .find_map(|name| codeql_language_for_source_file(name))
+}
+
+fn codeql_language_for_source_file(name: &str) -> Option<String> {
+    if name.ends_with(".go") {
         return Some("go".to_string());
     }
-    if top_level.iter().any(|name| name.ends_with(".py")) {
+    if name.ends_with(".py") {
         return Some("python".to_string());
     }
     None
@@ -1769,44 +1929,42 @@ fn parse_codeql_language_list(raw: &str) -> Vec<String> {
         return Vec::new();
     }
 
-    if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
-        let mut languages = Vec::new();
-        match parsed {
-            Value::Array(values) => {
-                for value in values {
-                    if let Some(language) = language_from_value(&value) {
-                        languages.push(language);
-                    }
-                }
-            }
-            Value::Object(map) => {
-                if let Some(Value::Array(values)) = map.get("languages") {
-                    for value in values {
-                        if let Some(language) = language_from_value(value) {
-                            languages.push(language);
-                        }
-                    }
-                } else {
-                    for key in map.keys() {
-                        if let Some(language) = normalize_codeql_language(key) {
-                            languages.push(language);
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-        languages.sort();
-        languages.dedup();
-        if !languages.is_empty() {
-            return languages;
-        }
+    if let Some(languages) = parse_codeql_language_json(trimmed) {
+        return languages;
     }
 
-    let mut languages = trimmed
-        .lines()
-        .filter_map(normalize_codeql_language)
-        .collect::<Vec<_>>();
+    dedupe_codeql_languages(trimmed.lines().filter_map(normalize_codeql_language))
+}
+
+fn parse_codeql_language_json(raw: &str) -> Option<Vec<String>> {
+    let parsed = serde_json::from_str::<Value>(raw).ok()?;
+    let languages = dedupe_codeql_languages(languages_from_codeql_json(parsed));
+    (!languages.is_empty()).then_some(languages)
+}
+
+fn languages_from_codeql_json(parsed: Value) -> Vec<String> {
+    match parsed {
+        Value::Array(values) => values.iter().filter_map(language_from_value).collect(),
+        Value::Object(map) => languages_from_codeql_object(&map),
+        _ => Vec::new(),
+    }
+}
+
+fn languages_from_codeql_object(map: &serde_json::Map<String, Value>) -> Vec<String> {
+    match map.get("languages") {
+        Some(Value::Array(values)) => values.iter().filter_map(language_from_value).collect(),
+        _ => map
+            .keys()
+            .filter_map(|key| normalize_codeql_language(key))
+            .collect(),
+    }
+}
+
+fn dedupe_codeql_languages<I>(languages: I) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut languages = languages.into_iter().collect::<Vec<_>>();
     languages.sort();
     languages.dedup();
     languages
@@ -1825,37 +1983,74 @@ fn language_from_value(value: &Value) -> Option<String> {
 
 fn normalize_codeql_language(value: &str) -> Option<String> {
     let normalized = value.trim().to_ascii_lowercase();
-    if normalized.is_empty() {
-        return None;
-    }
-    if normalized.contains("javascript") || normalized.contains("typescript") {
-        return Some("javascript".to_string());
-    }
-    if normalized.contains("python") {
-        return Some("python".to_string());
-    }
-    if normalized == "c#" || normalized.contains("csharp") {
-        return Some("csharp".to_string());
-    }
-    if normalized.contains("java") {
-        return Some("java".to_string());
-    }
-    if normalized.contains("go") {
-        return Some("go".to_string());
-    }
-    if normalized.contains("cpp") || normalized == "c++" || normalized.contains("c-cpp") {
-        return Some("cpp".to_string());
-    }
-    if normalized.contains("swift") {
-        return Some("swift".to_string());
-    }
-    if normalized.contains("ruby") {
-        return Some("ruby".to_string());
-    }
-    if normalized.contains("rust") {
-        return Some("rust".to_string());
-    }
-    None
+    non_empty_string(&normalized)
+        .and_then(|language| codeql_language_rule_for(language).map(str::to_string))
+}
+
+struct CodeqlLanguageRule {
+    language: &'static str,
+    contains: &'static [&'static str],
+    exact: &'static [&'static str],
+}
+
+const CODEQL_LANGUAGE_RULES: &[CodeqlLanguageRule] = &[
+    CodeqlLanguageRule {
+        language: "javascript",
+        contains: &["javascript", "typescript"],
+        exact: &[],
+    },
+    CodeqlLanguageRule {
+        language: "python",
+        contains: &["python"],
+        exact: &[],
+    },
+    CodeqlLanguageRule {
+        language: "csharp",
+        contains: &["csharp"],
+        exact: &["c#"],
+    },
+    CodeqlLanguageRule {
+        language: "java",
+        contains: &["java"],
+        exact: &[],
+    },
+    CodeqlLanguageRule {
+        language: "go",
+        contains: &["go"],
+        exact: &[],
+    },
+    CodeqlLanguageRule {
+        language: "cpp",
+        contains: &["cpp", "c-cpp"],
+        exact: &["c++"],
+    },
+    CodeqlLanguageRule {
+        language: "swift",
+        contains: &["swift"],
+        exact: &[],
+    },
+    CodeqlLanguageRule {
+        language: "ruby",
+        contains: &["ruby"],
+        exact: &[],
+    },
+    CodeqlLanguageRule {
+        language: "rust",
+        contains: &["rust"],
+        exact: &[],
+    },
+];
+
+fn codeql_language_rule_for(value: &str) -> Option<&'static str> {
+    CODEQL_LANGUAGE_RULES
+        .iter()
+        .find(|rule| codeql_language_rule_matches(rule, value))
+        .map(|rule| rule.language)
+}
+
+fn codeql_language_rule_matches(rule: &CodeqlLanguageRule, value: &str) -> bool {
+    rule.exact.iter().any(|exact| exact == &value)
+        || rule.contains.iter().any(|needle| value.contains(needle))
 }
 
 fn is_compiled_codeql_language(language: &str) -> bool {
@@ -2438,6 +2633,160 @@ printf '{"results":[]}'
             .unwrap()
             .iter()
             .any(|edge| edge.kind == StaticEvidenceEdgeKind::FlowsTo));
+    }
+
+    #[test]
+    fn severity_rank_orders_all_core_severities() {
+        assert_eq!(severity_rank(Severity::Critical), 5);
+        assert_eq!(severity_rank(Severity::High), 4);
+        assert_eq!(severity_rank(Severity::Medium), 3);
+        assert_eq!(severity_rank(Severity::Low), 2);
+        assert_eq!(severity_rank(Severity::Info), 1);
+        assert_eq!(severity_rank(Severity::Unknown), 0);
+    }
+
+    #[test]
+    fn codeql_uri_normalization_decodes_file_urls_and_windows_drives() {
+        assert_eq!(
+            normalize_artifact_uri("file:///Users/me/src%20dir/app.js"),
+            "Users/me/src dir/app.js"
+        );
+        assert_eq!(
+            normalize_artifact_uri("file:///C:/repo/src%2Fmain.cpp"),
+            "repo/src/main.cpp"
+        );
+        assert_eq!(percent_decode("a%2Fb%ZZ"), "a/b%ZZ");
+        assert_eq!(hex_value(b'f'), Some(15));
+        assert_eq!(hex_value(b'F'), Some(15));
+        assert_eq!(hex_value(b'9'), Some(9));
+        assert_eq!(hex_value(b'g'), None);
+    }
+
+    #[test]
+    fn codeql_language_json_accepts_arrays_objects_and_aliases() {
+        let from_array = languages_from_codeql_json(json!([
+            "JavaScript",
+            {"name": "python"},
+            {"name": "c++"},
+            {"name": "unknown"},
+            7
+        ]));
+        assert_eq!(from_array, vec!["javascript", "python", "cpp"]);
+
+        let from_languages_key = languages_from_codeql_json(json!({
+            "languages": [{"name": "c#"}, "go"]
+        }));
+        assert_eq!(from_languages_key, vec!["csharp", "go"]);
+
+        let from_object_keys = languages_from_codeql_json(json!({
+            "ruby": {},
+            "typescript": true,
+            "not-a-language": {}
+        }));
+        assert_eq!(from_object_keys, vec!["ruby", "javascript"]);
+
+        assert_eq!(
+            language_from_value(&json!(" java ")),
+            Some("java".to_string())
+        );
+        assert_eq!(
+            language_from_value(&json!({"name": "ruby"})),
+            Some("ruby".to_string())
+        );
+        assert_eq!(language_from_value(&json!({})), None);
+    }
+
+    #[test]
+    fn codeql_binary_resolution_prefers_config_then_path() {
+        let _lock = ENV_TEST_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let bin_dir = tmp.path().join("bin");
+        fs::create_dir(&bin_dir).unwrap();
+        let codeql = bin_dir.join(if cfg!(windows) {
+            "codeql.exe"
+        } else {
+            "codeql"
+        });
+        fs::write(&codeql, "").unwrap();
+        let _path = EnvVarGuard::set("PATH", &bin_dir.display().to_string());
+
+        assert_eq!(
+            resolve_codeql_binary(Some(" /custom/codeql ")).unwrap(),
+            "/custom/codeql"
+        );
+        assert_eq!(
+            resolve_codeql_binary(None).unwrap(),
+            codeql.display().to_string()
+        );
+    }
+
+    #[test]
+    fn codeql_positive_u32_accepts_numbers_strings_and_rejects_bad_values() {
+        assert_eq!(
+            positive_u32(&json!({"threads": 4}), "threads").unwrap(),
+            Some(4)
+        );
+        assert_eq!(
+            positive_u32(&json!({"threads": " 6 "}), "threads").unwrap(),
+            Some(6)
+        );
+        assert_eq!(positive_u32(&json!({}), "threads").unwrap(), None);
+        assert_eq!(
+            positive_u32(&json!({"threads": u64::MAX}), "threads").unwrap(),
+            Some(u32::MAX)
+        );
+        assert!(positive_u32(&json!({"threads": 0}), "threads").is_err());
+        assert!(positive_u32(&json!({"threads": "nope"}), "threads").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_semgrep_scan_persists_findings_and_scan_run() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let scanner_path = tmp.path().join("semgrep-persist-fixture.sh");
+        fs::write(
+            &scanner_path,
+            r#"#!/bin/sh
+cat <<'JSON'
+{
+  "results": [
+    {
+      "check_id": "javascript.express.security.audit.xss",
+      "path": "server.js",
+      "start": { "line": 9 },
+      "end": { "line": 9 },
+      "extra": {
+        "severity": "ERROR",
+        "message": "Detected unescaped user input"
+      }
+    }
+  ]
+}
+JSON
+"#,
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&scanner_path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&scanner_path, permissions).unwrap();
+
+        fs::write(tmp.path().join("server.js"), "res.send(req.query.name)\n").unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let scanner = SemgrepScanner {
+            binary: scanner_path.display().to_string(),
+            config: vec!["ignored".to_string()],
+        };
+
+        let run = run_semgrep_scan(&workspace, &store, &scanner).unwrap();
+        let findings = store.list_findings(10).unwrap();
+
+        assert_eq!(run.findings_count, 1);
+        assert_eq!(run.target, workspace.root());
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].tool, "semgrep");
     }
 
     #[cfg(unix)]

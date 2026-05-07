@@ -1,0 +1,15 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+assertion_line: 33
+---
+ KUZUSHI  mode shell  target none  findings 0 findings  ctx missing  view findings  model unconfigured
+
+filters [all:0]  critical:0  high:0  medium:0  low:0
+
+ -- FINDINGS | empty ---------------------------------------------------------------------------------------------------
+       ∅  no findings yet
+       kuzushi keeps the ledger in .kuzushi/v2/findings.sqlite3.
+       nothing has been promoted on this workspace.
+
+       ▸ scan                  scan dispatches the umbrella scanner once context-snapshot exists.
+       ▸ context build         build the snapshot first if you have time

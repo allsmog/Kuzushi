@@ -90,6 +90,20 @@ fn rust_cli_help_is_the_documented_primary_surface() {
 }
 
 #[test]
+fn cli_run_dot_is_rejected_as_shell_only_shorthand() {
+    let output = kuzushi().args(["run", "."]).output().unwrap();
+
+    assert!(
+        !output.status.success(),
+        "terminal `kuzushi run .` must not silently dispatch"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("`kuzushi run .` is shell-only"), "{stderr}");
+    assert!(stderr.contains("use <module>"), "{stderr}");
+    assert!(stderr.contains("context:build"), "{stderr}");
+}
+
+#[test]
 fn plain_flag_forces_line_oriented_shell_output() {
     let tmp = tempfile::tempdir().unwrap();
     let out = stdout(

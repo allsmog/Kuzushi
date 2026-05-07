@@ -1251,6 +1251,15 @@ mod tests {
     use crate::workspace::WorkspaceTarget;
 
     #[test]
+    fn prompt_path_detection_matches_inline_and_file_prompt_shapes() {
+        assert!(looks_like_prompt_path("./prompt.md"));
+        assert!(looks_like_prompt_path("../prompt.txt"));
+        assert!(looks_like_prompt_path("/tmp/custom.prompt"));
+        assert!(looks_like_prompt_path("checked-in.md"));
+        assert!(!looks_like_prompt_path("Analyze auth flows only"));
+    }
+
+    #[test]
     fn prioritizes_high_impact_external_actors_and_flows() {
         let document = json!({
             "dfd": {
@@ -1277,6 +1286,30 @@ mod tests {
         assert_eq!(actors.prioritized[0].actor.id, "actor-admin");
         assert_eq!(actors.prioritized[0].flows[0].id, "flow-admin");
         assert_eq!(actors.prioritized[1].actor.id, "actor-user");
+    }
+
+    #[test]
+    fn threat_search_text_feeds_semantic_actor_matching() {
+        let threat = json!({
+            "title": "Pull request fork can poison build",
+            "requiredCapabilities": ["contributor account"],
+            "sources": [{
+                "name": "fork branch",
+                "description": "attacker controlled pull request",
+                "filePath": ".github/workflows/ci.yml"
+            }]
+        });
+        let actor = DfdNode {
+            id: "actor-pr-author".to_string(),
+            node_type: "external-entity".to_string(),
+            name: "PR Author".to_string(),
+            description: "Fork contributor".to_string(),
+            trust_zone: "external".to_string(),
+        };
+
+        let haystack = threat_search_text(&threat);
+        assert!(haystack.contains("pull request fork"));
+        assert!(actor_semantic_score(&actor, &haystack) >= 2);
     }
 
     #[test]

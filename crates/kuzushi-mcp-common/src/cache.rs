@@ -277,6 +277,29 @@ mod tests {
     }
 
     #[test]
+    fn read_git_remote_finds_origin_url_only_inside_origin_block() {
+        let tmp = tempfile::tempdir().unwrap();
+        let git_dir = tmp.path().join(".git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        std::fs::write(
+            git_dir.join("config"),
+            r#"
+[remote "upstream"]
+    url = git@example.com:wrong/repo.git
+[remote "origin"]
+    fetch = +refs/heads/*:refs/remotes/origin/*
+    url = git@example.com:org/repo.git
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            read_git_remote(tmp.path()).as_deref(),
+            Some("git@example.com:org/repo.git")
+        );
+    }
+
+    #[test]
     fn manifest_round_trips() {
         let manifest = CacheManifest {
             repos: vec![RepoEntry {

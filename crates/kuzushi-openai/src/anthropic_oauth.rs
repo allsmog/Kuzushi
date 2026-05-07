@@ -346,34 +346,42 @@ impl AgentRuntime for AnthropicOAuthRuntime {
             ))
             .await?;
 
-        let call_cost = response.cost_usd;
+        Ok(triage_outcome_from_response(response))
+    }
+}
 
-        if let Some(structured) = response.structured.as_ref() {
-            if let Ok(mut outcome) = serde_json::from_value::<TriageOutcome>(structured.clone()) {
-                outcome.cost_usd = call_cost;
-                return Ok(clamp_outcome(outcome));
-            }
-        }
+fn triage_outcome_from_response(response: AgentQueryResponse) -> TriageOutcome {
+    let call_cost = response.cost_usd;
+    if let Some(outcome) = structured_triage_outcome(response.structured.as_ref(), call_cost) {
+        return outcome;
+    }
+    text_triage_outcome(response.text, call_cost)
+}
 
-        if !response.text.is_empty() {
-            if let Ok(mut outcome) = serde_json::from_str::<TriageOutcome>(&response.text) {
-                outcome.cost_usd = call_cost;
-                return Ok(clamp_outcome(outcome));
-            }
-            return Ok(TriageOutcome {
-                verdict: TriageVerdict::NeedsReview,
-                confidence: 0.25,
-                rationale: response.text,
-                cost_usd: call_cost,
-            });
-        }
+fn structured_triage_outcome(structured: Option<&Value>, call_cost: f64) -> Option<TriageOutcome> {
+    let mut outcome = serde_json::from_value::<TriageOutcome>(structured?.clone()).ok()?;
+    outcome.cost_usd = call_cost;
+    Some(clamp_outcome(outcome))
+}
 
-        Ok(TriageOutcome {
+fn text_triage_outcome(text: String, call_cost: f64) -> TriageOutcome {
+    if text.is_empty() {
+        return TriageOutcome {
             verdict: TriageVerdict::NeedsReview,
             confidence: 0.0,
             rationale: "AnthropicOAuthRuntime returned no triage content".to_string(),
             cost_usd: call_cost,
-        })
+        };
+    }
+    if let Ok(mut outcome) = serde_json::from_str::<TriageOutcome>(&text) {
+        outcome.cost_usd = call_cost;
+        return clamp_outcome(outcome);
+    }
+    TriageOutcome {
+        verdict: TriageVerdict::NeedsReview,
+        confidence: 0.25,
+        rationale: text,
+        cost_usd: call_cost,
     }
 }
 
@@ -502,6 +510,47 @@ mod tests {
         outcome.confidence = -0.3;
         outcome = clamp_outcome(outcome);
         assert_eq!(outcome.confidence, 0.0);
+    }
+
+    #[test]
+    fn triage_outcome_from_response_prefers_structured_then_json_text_then_fallbacks() {
+        let structured = triage_outcome_from_response(AgentQueryResponse {
+            structured: Some(json!({
+                "verdict": "true_positive",
+                "confidence": 1.7,
+                "rationale": "structured"
+            })),
+            cost_usd: 0.12,
+            ..Default::default()
+        });
+        assert_eq!(structured.verdict, TriageVerdict::TruePositive);
+        assert_eq!(structured.confidence, 1.0);
+        assert_eq!(structured.cost_usd, 0.12);
+
+        let from_text = triage_outcome_from_response(AgentQueryResponse {
+            text: r#"{"verdict":"false_positive","confidence":0.8,"rationale":"json"}"#.to_string(),
+            cost_usd: 0.03,
+            ..Default::default()
+        });
+        assert_eq!(from_text.verdict, TriageVerdict::FalsePositive);
+        assert_eq!(from_text.cost_usd, 0.03);
+
+        let plain = triage_outcome_from_response(AgentQueryResponse {
+            text: "plain rationale".to_string(),
+            cost_usd: 0.04,
+            ..Default::default()
+        });
+        assert_eq!(plain.verdict, TriageVerdict::NeedsReview);
+        assert_eq!(plain.confidence, 0.25);
+        assert_eq!(plain.rationale, "plain rationale");
+
+        let empty = triage_outcome_from_response(AgentQueryResponse {
+            cost_usd: 0.05,
+            ..Default::default()
+        });
+        assert_eq!(empty.verdict, TriageVerdict::NeedsReview);
+        assert_eq!(empty.confidence, 0.0);
+        assert!(empty.rationale.contains("no triage content"));
     }
 
     // ----- cost estimation -----------------------------------------

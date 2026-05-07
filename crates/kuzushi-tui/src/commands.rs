@@ -160,7 +160,7 @@ const SHELL_COMMAND_SPECS: &[ShellCommandSpec] = &[
         command: "run <tool> [json]",
         aliases: &["run .", "/run <tool> [json]", "run . [json]"],
         category: ShellCommandCategory::RunScan,
-        description: "dispatch a tool; run . uses focused module or sast:scan",
+        description: "dispatch a tool; run . is shell-only focused-module shorthand",
     },
     ShellCommandSpec {
         command: "ask <question>",
@@ -613,188 +613,207 @@ pub fn parse_command(input: &str) -> ShellCommand {
     }
 
     let normalized = trimmed.strip_prefix('/').unwrap_or(trimmed);
-    let mut parts = normalized.split_whitespace();
-    let verb = parts.next().unwrap_or_default();
+    let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+    let verb = tokens.first().copied().unwrap_or_default();
+    let args = tokens.get(1..).unwrap_or_default();
 
-    match verb {
-        "help" | "h" => ShellCommand::Help,
+    parse_static_command(verb)
+        .or_else(|| parse_single_arg_command(verb, args, trimmed))
+        .or_else(|| parse_joined_arg_command(verb, args, trimmed))
+        .or_else(|| parse_nested_shell_command(verb, args, trimmed))
+        .unwrap_or_else(|| ShellCommand::Unknown(trimmed.to_string()))
+}
+
+fn parse_static_command(verb: &str) -> Option<ShellCommand> {
+    let command = match verb {
+        "help" | "h" | "?" => ShellCommand::Help,
         "back" | "b" => ShellCommand::Back,
         "modules" | "m" => ShellCommand::Modules,
         "tools" => ShellCommand::Tools,
-        "options" => ShellCommand::Options {
-            tool: parts.next().map(ToString::to_string),
-            filter: OptionsFilter::Standard,
-        },
-        "findings" | "f" => match parts.next() {
-            Some("export") => parts
-                .next()
-                .map(|path| {
-                    ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
-                        output: PathBuf::from(path),
-                    })
-                })
-                .unwrap_or_else(|| ShellCommand::Unknown("findings export".to_string())),
-            Some(other) => ShellCommand::Unknown(format!("findings {other}")),
-            None => ShellCommand::Findings,
-        },
-        "open" => parts
-            .next()
-            .map(|id| ShellCommand::Open(id.to_string()))
-            .unwrap_or_else(|| ShellCommand::Unknown(trimmed.to_string())),
-        "scan" => ShellCommand::Scan(parts.next().map(PathBuf::from)),
-        "model" => {
-            let rest = parts.collect::<Vec<_>>().join(" ");
-            ShellCommand::Model((!rest.trim().is_empty()).then_some(rest))
-        }
-        "auth" => match parts.next() {
-            None | Some("status") => ShellCommand::Auth,
-            Some("login") => ShellCommand::AuthLogin(parts.next().map(ToString::to_string)),
-            Some("openai-codex") | Some("codex") => {
-                ShellCommand::AuthLogin(Some("openai-codex".to_string()))
-            }
-            Some("anthropic") | Some("claude") => {
-                ShellCommand::AuthLogin(Some("anthropic".to_string()))
-            }
-            Some(other) => ShellCommand::Unknown(format!("auth {other}")),
-        },
-        "provider" => ShellCommand::Provider(parts.next().map(ToString::to_string)),
-        "backend" => ShellCommand::Backend(parts.next().map(ToString::to_string)),
         "cost" => ShellCommand::Cost,
         "config" => ShellCommand::Config,
-        "use" => parts
-            .next()
-            .map(|id| ShellCommand::Use(id.to_string()))
-            .unwrap_or_else(|| ShellCommand::Unknown(trimmed.to_string())),
         "tune" | "t" => ShellCommand::Tune,
-        "threats" => match parts.next() {
-            None | Some("summary") | Some("5") => ShellCommand::Threat(ThreatView::Summary),
-            Some("dfd") | Some("1") => ShellCommand::Threat(ThreatView::Dfd),
-            Some("stride") | Some("2") => ShellCommand::Threat(ThreatView::Stride),
-            Some("stories") | Some("3") => ShellCommand::Threat(ThreatView::Stories),
-            Some("scope") | Some("4") => ShellCommand::Threat(ThreatView::Scope),
-            Some("edit") => ShellCommand::ThreatEditor,
-            Some("regen") => ShellCommand::ThreatRegen,
-            Some("apply") => ShellCommand::ThreatApply,
-            Some("reject") | Some("discard") => ShellCommand::ThreatReject,
-            Some("ask") => {
-                let rest = parts.collect::<Vec<_>>().join(" ");
-                if rest.trim().is_empty() {
-                    ShellCommand::Unknown("/threats ask".to_string())
-                } else {
-                    ShellCommand::ThreatAsk(rest)
-                }
-            }
-            Some(other) => ShellCommand::Unknown(format!("/threats {other}")),
-        },
         "prompts" => ShellCommand::Prompts,
-        "prompt" => {
-            let rest = parts.collect::<Vec<_>>().join(" ");
-            if rest.is_empty() {
-                ShellCommand::Prompts
-            } else {
-                ShellCommand::Prompt(rest)
-            }
-        }
-        "actor" => parts
-            .next()
-            .and_then(|value| value.parse::<usize>().ok())
-            .map(ShellCommand::Actor)
-            .unwrap_or_else(|| ShellCommand::Unknown(trimmed.to_string())),
-        "show" => match parts.next() {
-            Some("modules") => ShellCommand::Modules,
-            Some("tools") => ShellCommand::Tools,
-            Some("runs") => ShellCommand::ShowRuns,
-            Some("aliases") => ShellCommand::ShowAliases(parts.next().map(ToString::to_string)),
-            Some("prompts") => ShellCommand::Prompts,
-            Some("options") => ShellCommand::Options {
-                tool: parts.next().map(ToString::to_string),
-                filter: OptionsFilter::Standard,
-            },
-            Some("advanced") => ShellCommand::Options {
-                tool: parts.next().map(ToString::to_string),
-                filter: OptionsFilter::Advanced,
-            },
-            Some("missing") => ShellCommand::Options {
-                tool: parts.next().map(ToString::to_string),
-                filter: OptionsFilter::Missing,
-            },
-            Some(other) => ShellCommand::Unknown(format!("/show {other}")),
-            None => ShellCommand::Unknown(trimmed.to_string()),
-        },
-        "since" => parts
-            .next()
-            .map(|reference| ShellCommand::Since(reference.to_string()))
-            .unwrap_or_else(|| ShellCommand::Unknown(trimmed.to_string())),
-        "replay" => parts
-            .next()
-            .map(|run_id| ShellCommand::Replay(run_id.to_string()))
-            .unwrap_or_else(|| ShellCommand::Unknown(trimmed.to_string())),
-        "trace" => parts
-            .next()
-            .map(|run_id| ShellCommand::Trace(run_id.to_string()))
-            .unwrap_or_else(|| ShellCommand::Unknown(trimmed.to_string())),
-        "plan" => {
-            let rest = parts.collect::<Vec<_>>().join(" ");
-            if rest.is_empty() {
-                ShellCommand::Unknown(trimmed.to_string())
-            } else {
-                ShellCommand::Plan(rest)
-            }
-        }
-        "yes" | "y" => ShellCommand::PlanApply,
-        "no" | "n" => ShellCommand::PlanDiscard,
-        "quickstart" => ShellCommand::Quickstart,
-        "target" => ShellCommand::Target(parts.next().map(ToString::to_string)),
-        "ask" => {
-            let rest = parts.collect::<Vec<_>>().join(" ");
-            if rest.is_empty() {
-                ShellCommand::Unknown(trimmed.to_string())
-            } else {
-                ShellCommand::Ask(rest)
-            }
-        }
-        "run" => parse_run_command(parts.collect::<Vec<_>>()),
-        "set" => parse_set_command(false, parts.collect::<Vec<_>>()),
-        "setg" => parse_set_command(true, parts.collect::<Vec<_>>()),
-        "unset" => parse_unset_command(false, parts.collect::<Vec<_>>()),
-        "unsetg" => parse_unset_command(true, parts.collect::<Vec<_>>()),
         "tasks" => ShellCommand::Tasks,
-        "task" => parse_task_command(parts.collect::<Vec<_>>()),
-        "context" => parse_context_command(parts.collect::<Vec<_>>()),
-        "workspace" => parse_workspace_command(parts.collect::<Vec<_>>()),
-        "kb" | "attachments" => ShellCommand::KnowledgeBase(parts.next().map(ToString::to_string)),
-        "attach" => {
-            let rest = parts.collect::<Vec<_>>().join(" ");
-            if rest.is_empty() {
-                ShellCommand::Unknown(trimmed.to_string())
-            } else {
-                ShellCommand::Attach(rest)
-            }
-        }
-        "detach" => parts
-            .next()
-            .map(|id| ShellCommand::Detach(id.to_string()))
-            .unwrap_or_else(|| ShellCommand::Unknown(trimmed.to_string())),
-        "reparse" => parts
-            .next()
-            .map(|id| ShellCommand::Reparse(id.to_string()))
-            .unwrap_or_else(|| ShellCommand::Unknown(trimmed.to_string())),
         "runs" => ShellCommand::ShowRuns,
         "history" => ShellCommand::History,
         "clear" => ShellCommand::Clear,
-        "load" => {
-            let specifier = parts.collect::<Vec<_>>().join(" ");
-            if specifier.trim().is_empty() {
-                ShellCommand::Load(None)
-            } else {
-                ShellCommand::Load(Some(specifier))
-            }
-        }
-        "resume" => ShellCommand::Resume(parts.next().map(ToString::to_string)),
         "pause" => ShellCommand::Pause,
         "story" => ShellCommand::Story,
+        "yes" | "y" => ShellCommand::PlanApply,
+        "no" | "n" => ShellCommand::PlanDiscard,
+        "quickstart" => ShellCommand::Quickstart,
         "quit" | "exit" | "q" | "exitj" => ShellCommand::Quit,
-        _ => ShellCommand::Unknown(trimmed.to_string()),
+        _ => return None,
+    };
+    Some(command)
+}
+
+fn parse_single_arg_command(verb: &str, args: &[&str], original: &str) -> Option<ShellCommand> {
+    let first = args.first().copied();
+    let command = match verb {
+        "open" => required_arg(first, original, ShellCommand::Open),
+        "scan" => ShellCommand::Scan(first.map(PathBuf::from)),
+        "provider" => ShellCommand::Provider(first.map(ToString::to_string)),
+        "backend" => ShellCommand::Backend(first.map(ToString::to_string)),
+        "use" => required_arg(first, original, ShellCommand::Use),
+        "actor" => first
+            .and_then(|value| value.parse::<usize>().ok())
+            .map(ShellCommand::Actor)
+            .unwrap_or_else(|| ShellCommand::Unknown(original.to_string())),
+        "since" => required_arg(first, original, ShellCommand::Since),
+        "replay" => required_arg(first, original, ShellCommand::Replay),
+        "trace" => required_arg(first, original, ShellCommand::Trace),
+        "target" => ShellCommand::Target(first.map(ToString::to_string)),
+        "detach" => required_arg(first, original, ShellCommand::Detach),
+        "reparse" => required_arg(first, original, ShellCommand::Reparse),
+        "resume" => ShellCommand::Resume(first.map(ToString::to_string)),
+        "kb" | "attachments" => ShellCommand::KnowledgeBase(first.map(ToString::to_string)),
+        _ => return None,
+    };
+    Some(command)
+}
+
+fn required_arg(
+    arg: Option<&str>,
+    original: &str,
+    build: impl FnOnce(String) -> ShellCommand,
+) -> ShellCommand {
+    arg.map(|value| build(value.to_string()))
+        .unwrap_or_else(|| ShellCommand::Unknown(original.to_string()))
+}
+
+fn parse_joined_arg_command(verb: &str, args: &[&str], original: &str) -> Option<ShellCommand> {
+    let rest = args.join(" ");
+    let command = match verb {
+        "model" => ShellCommand::Model((!rest.trim().is_empty()).then_some(rest)),
+        "prompt" => empty_joined_arg(rest, ShellCommand::Prompts, ShellCommand::Prompt),
+        "plan" => required_joined_arg(rest, original, ShellCommand::Plan),
+        "ask" => required_joined_arg(rest, original, ShellCommand::Ask),
+        "attach" => required_joined_arg(rest, original, ShellCommand::Attach),
+        "load" => ShellCommand::Load((!rest.trim().is_empty()).then_some(rest)),
+        _ => return None,
+    };
+    Some(command)
+}
+
+fn empty_joined_arg(
+    rest: String,
+    empty: ShellCommand,
+    build: impl FnOnce(String) -> ShellCommand,
+) -> ShellCommand {
+    if rest.is_empty() {
+        empty
+    } else {
+        build(rest)
+    }
+}
+
+fn required_joined_arg(
+    rest: String,
+    original: &str,
+    build: impl FnOnce(String) -> ShellCommand,
+) -> ShellCommand {
+    if rest.is_empty() {
+        ShellCommand::Unknown(original.to_string())
+    } else {
+        build(rest)
+    }
+}
+
+fn parse_nested_shell_command(verb: &str, args: &[&str], original: &str) -> Option<ShellCommand> {
+    let command = match verb {
+        "options" => options_command(args, OptionsFilter::Standard),
+        "findings" | "f" => parse_findings_command(args),
+        "auth" => parse_auth_command(args),
+        "threats" => parse_threat_command(args),
+        "show" => parse_show_command(args, original),
+        "run" => parse_run_command(args.to_vec()),
+        "set" => parse_set_command(false, args.to_vec()),
+        "setg" => parse_set_command(true, args.to_vec()),
+        "unset" => parse_unset_command(false, args.to_vec()),
+        "unsetg" => parse_unset_command(true, args.to_vec()),
+        "task" => parse_task_command(args.to_vec()),
+        "context" => parse_context_command(args.to_vec()),
+        "workspace" => parse_workspace_command(args.to_vec()),
+        _ => return None,
+    };
+    Some(command)
+}
+
+fn options_command(args: &[&str], filter: OptionsFilter) -> ShellCommand {
+    ShellCommand::Options {
+        tool: args.first().map(|value| (*value).to_string()),
+        filter,
+    }
+}
+
+fn parse_findings_command(args: &[&str]) -> ShellCommand {
+    match args.first().copied() {
+        Some("export") => args
+            .get(1)
+            .map(|path| {
+                ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+                    output: PathBuf::from(path),
+                })
+            })
+            .unwrap_or_else(|| ShellCommand::Unknown("findings export".to_string())),
+        Some(other) => ShellCommand::Unknown(format!("findings {other}")),
+        None => ShellCommand::Findings,
+    }
+}
+
+fn parse_auth_command(args: &[&str]) -> ShellCommand {
+    match args.first().copied() {
+        None | Some("status") => ShellCommand::Auth,
+        Some("login") => ShellCommand::AuthLogin(args.get(1).map(|value| (*value).to_string())),
+        Some("openai-codex") | Some("codex") => {
+            ShellCommand::AuthLogin(Some("openai-codex".to_string()))
+        }
+        Some("anthropic") | Some("claude") => {
+            ShellCommand::AuthLogin(Some("anthropic".to_string()))
+        }
+        Some(other) => ShellCommand::Unknown(format!("auth {other}")),
+    }
+}
+
+fn parse_threat_command(args: &[&str]) -> ShellCommand {
+    match args.first().copied() {
+        None | Some("summary") | Some("5") => ShellCommand::Threat(ThreatView::Summary),
+        Some("dfd") | Some("1") => ShellCommand::Threat(ThreatView::Dfd),
+        Some("stride") | Some("2") => ShellCommand::Threat(ThreatView::Stride),
+        Some("stories") | Some("3") => ShellCommand::Threat(ThreatView::Stories),
+        Some("scope") | Some("4") => ShellCommand::Threat(ThreatView::Scope),
+        Some("edit") => ShellCommand::ThreatEditor,
+        Some("regen") => ShellCommand::ThreatRegen,
+        Some("apply") => ShellCommand::ThreatApply,
+        Some("reject") | Some("discard") => ShellCommand::ThreatReject,
+        Some("ask") => threat_ask_command(args),
+        Some(other) => ShellCommand::Unknown(format!("/threats {other}")),
+    }
+}
+
+fn threat_ask_command(args: &[&str]) -> ShellCommand {
+    let rest = args.get(1..).unwrap_or_default().join(" ");
+    if rest.trim().is_empty() {
+        ShellCommand::Unknown("/threats ask".to_string())
+    } else {
+        ShellCommand::ThreatAsk(rest)
+    }
+}
+
+fn parse_show_command(args: &[&str], original: &str) -> ShellCommand {
+    match args.first().copied() {
+        Some("modules") => ShellCommand::Modules,
+        Some("tools") => ShellCommand::Tools,
+        Some("runs") => ShellCommand::ShowRuns,
+        Some("aliases") => ShellCommand::ShowAliases(args.get(1).map(|value| (*value).to_string())),
+        Some("prompts") => ShellCommand::Prompts,
+        Some("options") => options_command(&args[1..], OptionsFilter::Standard),
+        Some("advanced") => options_command(&args[1..], OptionsFilter::Advanced),
+        Some("missing") => options_command(&args[1..], OptionsFilter::Missing),
+        Some(other) => ShellCommand::Unknown(format!("/show {other}")),
+        None => ShellCommand::Unknown(original.to_string()),
     }
 }
 
