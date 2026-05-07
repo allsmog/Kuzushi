@@ -4868,7 +4868,8 @@ fn unknown_command_message(raw: &str) -> String {
     }
 
     if verb == "open" {
-        return "open needs a finding alias. Next: `findings` to list, then `open F-0001`".to_string();
+        return "open needs a finding alias. Next: `findings` to list, then `open F-0001`"
+            .to_string();
     }
 
     if verb == "since" {
@@ -4886,7 +4887,8 @@ fn unknown_command_message(raw: &str) -> String {
     }
 
     if verb == "run" {
-        return "run needs a tool id. Next: `tools` to list, then `run <tool> [json-input]`".to_string();
+        return "run needs a tool id. Next: `tools` to list, then `run <tool> [json-input]`"
+            .to_string();
     }
 
     if verb == "plan" {
@@ -4905,7 +4907,11 @@ fn unknown_command_message(raw: &str) -> String {
     }
 
     if matches!(verb, "unset" | "unsetg") {
-        let scope = if verb == "unsetg" { "global" } else { "session" };
+        let scope = if verb == "unsetg" {
+            "global"
+        } else {
+            "session"
+        };
         return format!(
             "{verb} needs a key. Next: `options [tool]` to discover keys, then `{verb} <key>` ({scope})"
         );
@@ -4946,8 +4952,8 @@ fn unknown_command_message(raw: &str) -> String {
             .filter(|arg| arg.to_ascii_uppercase().starts_with("F-"));
         if let Some(alias) = rest {
             return format!(
-                "{verb:?} doesn't take arguments. Next: `open {}` to view the finding."
-                , alias.to_ascii_uppercase()
+                "{verb:?} doesn't take arguments. Next: `open {}` to view the finding.",
+                alias.to_ascii_uppercase()
             );
         }
     }
@@ -7784,9 +7790,10 @@ JSON
         assert!(app.target.is_none());
         let _ = app.open_store();
         assert!(app.target.is_some());
-        assert!(app.log.iter().any(|line| {
-            line.prefix == "target" && line.body.contains("(implied from cwd)")
-        }));
+        assert!(app
+            .log
+            .iter()
+            .any(|line| { line.prefix == "target" && line.body.contains("(implied from cwd)") }));
 
         // Re-opening the same workspace doesn't re-log — only the first
         // transition is interesting.
@@ -7919,11 +7926,17 @@ JSON
 
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
         let first = app.input.clone();
-        assert!(first.starts_with("use s"), "expected use s* candidate, got {first:?}");
+        assert!(
+            first.starts_with("use s"),
+            "expected use s* candidate, got {first:?}"
+        );
 
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
         let second = app.input.clone();
-        assert_ne!(first, second, "second Tab should advance to a different module");
+        assert_ne!(
+            first, second,
+            "second Tab should advance to a different module"
+        );
         assert!(second.starts_with("use s"));
 
         // Many modules begin with "s" (sast, secret-scan, semgrep, shinsa,
