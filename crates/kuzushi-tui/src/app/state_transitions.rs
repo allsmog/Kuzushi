@@ -786,6 +786,7 @@ impl ShellApp {
     fn request_active_abort(&mut self) -> bool {
         let mut requested = false;
         requested |= self.request_scan_abort();
+        requested |= self.request_tool_abort();
         requested |= self.request_agent_abort();
         requested |= self.request_plan_abort();
         requested |= self.request_threat_abort();
@@ -810,6 +811,21 @@ impl ShellApp {
         self.log(
             "scan",
             "abort requested; waiting for scanner subprocess to stop (not claiming it was killed)",
+        );
+        true
+    }
+
+    fn request_tool_abort(&mut self) -> bool {
+        let Some(tool_name) = self.tool_running.clone() else {
+            return false;
+        };
+        if self.tool_abort_requested {
+            return false;
+        }
+        self.tool_abort_requested = true;
+        self.log(
+            "tool",
+            format!("{tool_name} abort requested; waiting for the current filesystem step to finish (process kill not confirmed)"),
         );
         true
     }
@@ -905,8 +921,13 @@ impl ShellApp {
 
     pub fn has_running_work(&self) -> bool {
         let scan_running = self.scan.as_ref().is_some_and(|scan| scan.running);
+        let tool_running = self.tool_running.is_some();
         let agent_running = self.agent_chat.as_ref().is_some_and(|agent| agent.running);
-        scan_running || agent_running || self.planner_running || self.threat_worker_running
+        scan_running
+            || tool_running
+            || agent_running
+            || self.planner_running
+            || self.threat_worker_running
     }
 
     pub fn spinner_glyph(&self) -> &'static str {
