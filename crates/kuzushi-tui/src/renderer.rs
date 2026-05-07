@@ -815,7 +815,11 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
                 ProgressKind::Failing
             },
         ));
-    } else {
+    } else if app.focused_module.as_deref() == Some("sast") || scan.is_some() {
+        // SAST pipeline placeholder — context:build → sast:scan → triage:run.
+        // Only render this when the focused module is `sast` or there's an
+        // actual scan running; otherwise the fixed three-row pipeline is
+        // misleading for non-SAST modules (chrome-rce, threat-model, etc.).
         lines.push(pipeline_row(
             if active_stage.contains("context") {
                 "⏵"
@@ -848,6 +852,13 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             } else {
                 "waiting for findings"
             },
+        ));
+    } else {
+        let module = app.focused_module.as_deref().unwrap_or("tool");
+        lines.push(pipeline_row(
+            "○",
+            module,
+            "no scan in flight; `run .` dispatches the module's primary tool",
         ));
     }
 
