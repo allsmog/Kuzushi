@@ -356,10 +356,17 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         })
         .or_else(|| modules.first())
     {
+        // Reserve space for the leading `▸ NEXT ` glyph + the literal
+        // `Run <id> against the active target — ` prefix so the truncation
+        // budget tracks the user's actual terminal width instead of an
+        // 88-column historical default.
+        let prefix = format!("Run {} against the active target — ", module.metadata().id);
+        let budget = (area.width as usize)
+            .saturating_sub(prefix.chars().count() + 8)
+            .max(40);
         let hint = format!(
-            "Run {} against the active target — {}",
-            module.metadata().id,
-            short_sentence(&module.metadata().description, 88)
+            "{prefix}{}",
+            short_sentence(&module.metadata().description, budget)
         );
         lines.push(next_action_line(&hint, area.width as usize));
         lines.push(blank());
