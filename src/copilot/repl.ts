@@ -5,7 +5,7 @@
  * (registry, bus, workspace, jobs), you don't want to restart the shell
  * and re-establish scan context. Drop into a REPL, inspect, exit.
  *
- * The REPL shares stdin/stdout with the host process, so Ink / readline
+ * The REPL shares stdin/stdout with the host process, so the shell prompt
  * should be paused before calling this. Resolves when the REPL session
  * ends (either `.exit`, Ctrl+D, or an explicit `process.exit` in the
  * REPL context — we use REPLServer#close to normalize all of them).

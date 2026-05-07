@@ -113,9 +113,8 @@ export const metadata = tokens.metadata;
 export { hint, muted, subtle };
 
 /**
- * Shared vertical/horizontal spacing scale. Use with Ink `<Box>` `marginTop`,
- * `marginBottom`, `paddingLeft`, etc. so every component pulls from one scale
- * instead of scattering magic numbers.
+ * Shared vertical/horizontal spacing scale for retained non-visual helpers.
+ * Rust TUI spacing belongs in `crates/kuzushi-tui`.
  */
 export const SPACING = {
   xs: 0,

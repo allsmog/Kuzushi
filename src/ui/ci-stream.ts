@@ -1,7 +1,7 @@
 /**
  * CI stream formatter — Phase B.5.
  *
- * When a scan runs with `--ci`, we don't want Ink's animated TUI; we want
+ * When a scan runs with `--ci`, we do not want an animated TUI; we want
  * one line per meaningful pipeline event so build logs stay grep-able and
  * tool integrations (Buildkite, GitHub Actions, GitLab, Drone) can parse
  * them. This module subscribes to a `UIStore`, diffs state, and prints

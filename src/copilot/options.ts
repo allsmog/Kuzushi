@@ -366,7 +366,7 @@ export function formatOptionsTable(store: Datastore, opts: FormatOptionsOpts = {
   // Leading 2-space indent + 3 cells each followed by 2-space gap.
   const descStart = 2 + widths.name + 2 + widths.current + 2 + widths.required + 2;
   const availableWidth = opts.availableWidth ?? process.stdout?.columns ?? 100;
-  // Reserve a 1-column safety margin so Ink/terminal doesn't wrap on its own.
+  // Reserve a 1-column safety margin so terminal output does not wrap on its own.
   // Enforce a 20-column minimum so descriptions stay readable on narrow shells
   // (a shorter column produces extreme single-word stacks that look worse than
   // a mild right-overflow).

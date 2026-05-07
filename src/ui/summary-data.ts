@@ -1,8 +1,8 @@
 /**
  * Extract summary data from the database for the UI.
  *
- * Separates data preparation from rendering — the same data powers
- * both the Ink ScanSummary component and the plain-text fallback.
+ * Separates data preparation from rendering. The same data powers summary
+ * output across retained TypeScript helpers and Rust-facing plain output.
  */
 
 import path from "node:path";

@@ -15,7 +15,7 @@
  *   - Headings are structural (`# TITLE`) with labels before values
  *     (`severity: HIGH`) so screen readers narrate the document order.
  *   - Every "No X" path routes through `describeEmptyState()` so the
- *     copy stays in sync with the Ink `<EmptyState>` component.
+ *     copy stays in sync with other plain/headless output.
  *
  * The renderer is pure / side-effect-free except for writing to stdout.
  * Tests inject `{ write: (line) => ... }` to capture output.
@@ -86,7 +86,7 @@ export function registerPlainTextRenderer(
   let lastQualityGate: unknown;
   // Phase D.5: shell-view + pendingPlan + threatModel + diffSince diff
   // trackers so the non-TTY path prints *something* when those state
-  // transitions fire. The TUI carries the layout; the plain renderer
+  // transitions fire. The Rust TUI carries the layout; the plain renderer
   // just logs the transition + headline counts so piped output stays
   // readable.
   let lastShellView: string | null = null;
@@ -243,7 +243,7 @@ export function registerPlainTextRenderer(
 
     // Phase D.5 — shell-view + pendingPlan + threatModel + diffSince
     // transitions. Each emits one terse line so piped output is still
-    // useful; the full layouts live in the Ink components.
+    // useful; the full layouts live in the Rust TUI.
     const shell = state.shell;
     if (shell) {
       if (shell.history.length < lastShellHistoryLength) {
@@ -684,7 +684,7 @@ function printActorDetailView(emit: Emit, shell: ShellState, state: UIState): vo
               ? "★"
               : "•";
     // For tool-* events the toolName leads, with the detail wrapped in
-    // `(...)` so grep parity with the Ink view stays useful. Free-form
+    // `(...)` so grep parity with the Rust view stays useful. Free-form
     // events (reasoning, finding-preview) just show the detail.
     if ((line.kind === "tool-start" || line.kind === "tool-progress") && line.toolName) {
       const head = line.detail ? `${line.toolName}(${line.detail})` : line.toolName;
@@ -824,7 +824,7 @@ function printCatalogView(emit: Emit, shell: ShellState): void {
     printEmpty(emit, "module-no-tools", { moduleId: "(no modules loaded)" });
     return;
   }
-  // Group by category so the structural order matches the Ink layout.
+  // Group by category so the structural order matches the Rust layout.
   const groups = new Map<string, Array<{ id: string; desc: string; lastRun: string }>>();
   for (const card of cards) {
     const key = card.external ? "external" : String(card.category ?? "other");
@@ -969,7 +969,7 @@ function printFindingsView(emit: Emit, shell: ShellState, state: UIState): void 
   }
 
   // Sort by severity rank (critical first) so the plain listing matches
-  // the Ink UnifiedFindings ordering.
+  // the Rust findings ordering.
   const sorted = [...findings].sort((a, b) => severityPlainRank(a) - severityPlainRank(b));
   const counts = tallyFindings(sorted);
   emit(
@@ -1186,16 +1186,16 @@ function printPendingPlan(emit: Emit, plan: ShellPlan): void {
     }
     if (changes > 3) emit(chalk.dim(`    (+${changes - 3} more)`));
   }
-  // Workstream 5 — the Ink PlanCard shows a `y / n / Esc` hint row; the
+  // Workstream 5 - the Rust plan view shows a `y / n / Esc` hint row; the
   // plain renderer prints an explicit prompt so non-TTY operators see
   // exactly which key to type. `apply? [y/n] ` matches README conventions.
   emit("apply? [y/n] ");
 }
 
 /**
- * Cost-cap halt overlay. Mirrors the Ink `<CostCapHalt>` card: spent /
- * cap + over amount, pause reason, and the continue/abort prompt. No
- * box-drawing — just structural headings.
+ * Cost-cap halt overlay. Mirrors the Rust cost-cap halt view: spent / cap,
+ * over amount, pause reason, and the continue/abort prompt. No box-drawing,
+ * just structural headings.
  */
 function printCostCapHalt(emit: Emit, state: UIState): void {
   const spent = state.runningCostUsd ?? 0;
