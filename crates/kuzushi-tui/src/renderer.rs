@@ -1449,14 +1449,16 @@ fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> 
     lines.push(blank());
     lines.push(divider("REPLAY", area.width));
     lines.push(detail("run", run_id));
-    lines.push(detail(
-        "summary",
-        &format!(".kuzushi/runs/{run_id}/summary.json"),
-    ));
-    lines.push(detail(
-        "triage",
-        &format!(".kuzushi/runs/{run_id}/triage.jsonl"),
-    ));
+    let summary_path = run_artifact_path(app, run_id, "summary.json");
+    let triage_path = run_artifact_path(app, run_id, "triage.jsonl");
+    lines.push(run_artifact_detail("summary", &summary_path));
+    lines.push(run_artifact_detail("triage", &triage_path));
+    if !summary_path.exists() {
+        lines.push(blank());
+        lines.push(muted(
+            "(run artefacts not on disk; check `show runs` for valid runIds)",
+        ));
+    }
     lines.extend(alias_reference_lines(app, area));
     lines
 }
@@ -1466,16 +1468,33 @@ fn trace_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> {
     lines.push(blank());
     lines.push(divider("TRACE", area.width));
     lines.push(detail("run", run_id));
-    lines.push(detail(
-        "triage",
-        &format!(".kuzushi/runs/{run_id}/triage.jsonl"),
-    ));
-    lines.push(detail(
-        "verify",
-        &format!(".kuzushi/runs/{run_id}/verify.jsonl"),
-    ));
+    let triage_path = run_artifact_path(app, run_id, "triage.jsonl");
+    let verify_path = run_artifact_path(app, run_id, "verify.jsonl");
+    lines.push(run_artifact_detail("triage", &triage_path));
+    lines.push(run_artifact_detail("verify", &verify_path));
+    if !triage_path.exists() && !verify_path.exists() {
+        lines.push(blank());
+        lines.push(muted(
+            "(run artefacts not on disk; check `show runs` for valid runIds)",
+        ));
+    }
     lines.extend(alias_reference_lines(app, area));
     lines
+}
+
+fn run_artifact_path(app: &ShellApp, run_id: &str, leaf: &str) -> std::path::PathBuf {
+    let runs_root = app
+        .target
+        .as_deref()
+        .map(|target| target.join(".kuzushi/runs"))
+        .unwrap_or_else(|| std::path::PathBuf::from(".kuzushi/runs"));
+    runs_root.join(run_id).join(leaf)
+}
+
+fn run_artifact_detail(label: &str, path: &std::path::Path) -> Line<'static> {
+    let display = path.display().to_string();
+    let suffix = if path.exists() { "" } else { " (missing)" };
+    detail(label, &format!("{display}{suffix}"))
 }
 
 fn alias_reference_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
