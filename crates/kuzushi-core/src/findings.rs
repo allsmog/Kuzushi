@@ -9,6 +9,11 @@ use serde::{Deserialize, Serialize};
 
 mod reporting;
 
+mod detail;
+
+pub use detail::{
+    proof_state_label, runtime_validation_label, FindingDetailReport, FindingNextAction,
+};
 pub use reporting::{
     format_finding_alias, parse_finding_alias, resolve_finding_alias, sorted_finding_aliases,
     stable_finding_alias, FindingListFilter, FindingListReport, FindingVerdictFilter,
@@ -1126,14 +1131,7 @@ impl FindingStore {
             .optional()
             .context("Could not load finding")?;
 
-        // Attach the latest verification when one exists. Single-finding
-        // path so the extra query is cheap; bulk listings keep using
-        // `row_to_finding` directly.
-        if let Some(ref mut f) = finding {
-            if let Some(id) = f.id {
-                f.verification = self.get_latest_verification(id)?;
-            }
-        }
+        self.attach_latest_verification(finding.as_mut())?;
         Ok(finding)
     }
 
@@ -1171,9 +1169,22 @@ impl FindingStore {
 
         match matches.len() {
             0 => Ok(None),
-            1 => Ok(matches.into_iter().next()),
+            1 => {
+                let mut finding = matches.into_iter().next();
+                self.attach_latest_verification(finding.as_mut())?;
+                Ok(finding)
+            }
             _ => anyhow::bail!("finding reference {reference:?} is ambiguous"),
         }
+    }
+
+    fn attach_latest_verification(&self, finding: Option<&mut Finding>) -> Result<()> {
+        if let Some(finding) = finding {
+            if let Some(id) = finding.id {
+                finding.verification = self.get_latest_verification(id)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1627,6 +1638,92 @@ mod tests {
         let resolved = store.get_finding_by_reference(prefix).unwrap().unwrap();
 
         assert_eq!(resolved.fingerprint, finding.fingerprint);
+    }
+
+    #[test]
+    fn reference_resolution_attaches_latest_verification_for_prefix() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-verify-prefix", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.verify",
+            "src/app.ts",
+            44,
+            Some(45),
+            Severity::High,
+            "User input reaches sink",
+        );
+        let finding_id = store.insert_finding("run-verify-prefix", &finding).unwrap();
+        store
+            .save_verification(
+                finding_id,
+                &PersistedVerification {
+                    proof_level: 4,
+                    proof_verdict: PersistedProofVerdict::Exploited,
+                    backend: PersistedSandboxBackend::Plain,
+                    language: Some("javascript".to_string()),
+                    harness_path: None,
+                    crash_evidence: Some("payload echoed".to_string()),
+                    duration_ms: 88,
+                    cost_usd: 0.0,
+                    notes: vec!["confirmed by fixture".to_string()],
+                    created_at: String::new(),
+                },
+            )
+            .unwrap();
+
+        let prefix = &finding.fingerprint[..8];
+        let resolved = store.get_finding_by_reference(prefix).unwrap().unwrap();
+
+        assert_eq!(
+            resolved.verification.as_ref().map(|v| v.proof_verdict),
+            Some(PersistedProofVerdict::Exploited)
+        );
+    }
+
+    #[test]
+    fn finding_detail_report_surfaces_proof_state_validation_and_next_action() {
+        let mut finding = Finding::new_semgrep(
+            "demo.xss",
+            "src/app.ts",
+            7,
+            Some(8),
+            Severity::High,
+            "Request query data is rendered into HTML without escaping",
+        )
+        .with_static_proof_state(StaticProofState::SourceSinkLinked);
+        finding.triage = Some(TriageOutcome {
+            verdict: TriageVerdict::TruePositive,
+            confidence: 0.91,
+            rationale: "source and sink are linked".to_string(),
+            cost_usd: 0.02,
+        });
+        finding.verification = Some(PersistedVerification {
+            proof_level: 4,
+            proof_verdict: PersistedProofVerdict::Exploited,
+            backend: PersistedSandboxBackend::Bwrap,
+            language: Some("javascript".to_string()),
+            harness_path: Some("/tmp/harness.js".to_string()),
+            crash_evidence: Some("<script>alert(1)</script>".to_string()),
+            duration_ms: 321,
+            cost_usd: 0.0,
+            notes: vec!["browser fixture confirmed execution".to_string()],
+            created_at: "now".to_string(),
+        });
+
+        let report = FindingDetailReport::new(Some("F-0001".to_string()), finding, Vec::new());
+        let output = report.output();
+
+        assert!(output.contains("Finding F-0001"));
+        assert!(output.contains("Proof state: source_sink_linked"));
+        assert!(output.contains("Runtime validation: execution_confirmed"));
+        assert!(output.contains("Proof ladder: validated"));
+        assert!(output.contains("Next action: patch"));
+        assert_eq!(report.next_action, FindingNextAction::Patch);
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["proofState"], "source_sink_linked - Source and sink are linked in static evidence, not empirically validated");
+        assert_eq!(json["nextAction"], "patch");
     }
 
     #[test]

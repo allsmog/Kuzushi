@@ -8,8 +8,9 @@ use clap::{Parser, Subcommand, ValueEnum};
 use kuzushi_core::config::write_default_config;
 use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::{
-    build_pr_comment, load_config_for_target, AgentRuntime, FindingListFilter, FindingStore,
-    ModuleRegistry, PrCommentInput, WorkspaceTarget,
+    build_pr_comment, load_config_for_target, resolve_finding_alias, stable_finding_alias,
+    AgentRuntime, FindingDetailReport, FindingListFilter, FindingStore, ModuleRegistry,
+    PrCommentInput, WorkspaceTarget,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
 use kuzushi_tui::run_shell_with_plain;
@@ -81,6 +82,14 @@ enum Command {
         /// diff-analyzer, infer, fuzzing. Comma- or repeat-separated.
         #[arg(long = "vuln-source", value_delimiter = ',')]
         vuln_source: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect one persisted finding by alias, fingerprint, or fingerprint prefix.
+    Finding {
+        reference: String,
+        #[arg(long)]
+        target: Option<PathBuf>,
         #[arg(long)]
         json: bool,
     },
@@ -289,6 +298,11 @@ async fn main() -> Result<()> {
             )?,
             json,
         ),
+        Command::Finding {
+            reference,
+            target,
+            json,
+        } => finding_command(target.or(cli.target), reference, json),
         Command::Config { command } => config_command(command, cli.target),
         Command::Auth { command } => auth_command(command, cli.target),
         Command::Modules { json } => modules_command(json),
@@ -626,6 +640,41 @@ fn findings_command(target: Option<PathBuf>, filter: FindingListFilter, json: bo
             workspace.findings_db_path().display(),
             workspace.root().display()
         );
+    } else {
+        println!("{}", report.output());
+    }
+    Ok(())
+}
+
+fn finding_command(target: Option<PathBuf>, reference: String, json: bool) -> Result<()> {
+    let target = target.unwrap_or_else(|| PathBuf::from("."));
+    let workspace = WorkspaceTarget::new(target)?;
+    let store = FindingStore::open(workspace.findings_db_path())?;
+    let all_findings = store
+        .list_findings_filtered(&FindingListFilter::with_limit(FindingListFilter::MAX_LIMIT))?
+        .findings;
+
+    let finding = if let Some(alias_finding) = resolve_finding_alias(&all_findings, &reference) {
+        store
+            .get_finding_by_fingerprint(&alias_finding.fingerprint)?
+            .unwrap_or(alias_finding)
+    } else {
+        store
+            .get_finding_by_reference(&reference)?
+            .with_context(|| {
+                format!(
+                    "no finding found for {reference:?} at {}\nNext: kuzushi findings --target {}",
+                    workspace.findings_db_path().display(),
+                    workspace.root().display()
+                )
+            })?
+    };
+    let alias = stable_finding_alias(&all_findings, &finding.fingerprint);
+    let patch_results = store.get_patch_results_for_finding(&finding.fingerprint)?;
+    let report = FindingDetailReport::new(alias, finding, patch_results);
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         println!("{}", report.output());
     }

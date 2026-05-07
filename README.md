@@ -47,6 +47,9 @@ kuzushi scan . --mode standard --ci
 # Inspect persisted findings.
 kuzushi findings --target . --limit 10
 
+# Inspect one finding's evidence, proof state, validation, and next action.
+kuzushi finding F-0001 --target .
+
 # Render a markdown PR/security review summary from persisted findings.
 kuzushi pr-comment --target . > kuzushi-report.md
 ```
@@ -84,6 +87,7 @@ escapes, animation, or box drawing. `KUZUSHI_SCREEN_READER=1` and
 | `kuzushi shell [--target <repo>]` | Start the Ratatui shell. |
 | `kuzushi scan <repo> [--mode standard\|whitebox-static] [--tasks a,b] [--triage] [--json] [--ci]` | Run the Rust SAST umbrella executor and persist findings. |
 | `kuzushi findings --target <repo> [--severity high,critical] [--verdict true_positive] [--name text] [--file-path path] [--limit 50] [--json]` | List persisted findings. |
+| `kuzushi finding <F-0001\|fingerprint-prefix> --target <repo> [--json]` | Inspect one finding's evidence, proof state, validation summary, patch result, and next action. |
 | `kuzushi pr-comment --target <repo> [--repo owner/name] [--run-url url] [--git-sha sha]` | Render persisted findings as a markdown PR/security review comment. |
 | `kuzushi modules [--json]` | List visible native modules. |
 | `kuzushi tools [--json]` | List visible executable tool descriptors. |
@@ -102,6 +106,7 @@ kuzushi doctor --target . --json
 kuzushi scan . --mode standard --tasks semgrep,secret-scan --json
 kuzushi scan . --tasks agentic-sast --triage --json
 kuzushi findings --target . --severity high,critical --limit 10
+kuzushi finding F-0001 --target .
 kuzushi pr-comment --target . --repo allsmog/Kuzushi > kuzushi-report.md
 kuzushi --target . run semgrep:scan --input '{"config":"p/default"}'
 kuzushi --target . run findings:list --input '{"severity":["high"],"limit":10}'

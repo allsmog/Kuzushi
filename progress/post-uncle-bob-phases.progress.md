@@ -23,6 +23,35 @@
 - Output type:
   docs plus a verified behavior-preserving code extraction from Phase 0.
 
+### Phase 2 follow-up - Finding detail/reporting slice
+
+- Files inspected:
+  `crates/kuzushi-core/src/findings.rs`,
+  `crates/kuzushi-core/src/findings/reporting.rs`,
+  `crates/kuzushi-cli/src/main.rs`, and
+  `crates/kuzushi-cli/tests/cutover_cli.rs`.
+- Decision made:
+  implement the high-value finding detail command as a read-only reporting
+  slice and keep proof-state rendering out of the CLI entrypoint.
+- Files changed:
+  `crates/kuzushi-core/src/findings/detail.rs`,
+  `crates/kuzushi-core/src/findings.rs`, `crates/kuzushi-core/src/lib.rs`,
+  `crates/kuzushi-cli/src/main.rs`, `crates/kuzushi-cli/tests/cutover_cli.rs`,
+  `README.md`, and `docs/assessments/complexity-crap-hotspots.md`.
+- Checks run:
+  `cargo fmt --all --check`, `cargo test -p kuzushi-core findings`, and
+  `cargo test -p kuzushi-cli --test cutover_cli finding_detail_resolves_alias_and_outputs_json_report`.
+- Result:
+  `kuzushi finding <alias-or-fingerprint-prefix>` now shows one finding's
+  evidence, proof state, runtime validation, latest patch result, and next
+  action in plain text or JSON. Fingerprint-prefix resolution now attaches the
+  latest persisted verification through the same helper as exact lookup.
+- Remaining risk:
+  the larger findings store still contains schema, filtering, and persistence
+  responsibilities; avoid schema-affecting cleanup without migration tests.
+- Output type:
+  code plus focused tests.
+
 ## Phase 3 - Human onboarding
 
 - Files inspected:

@@ -28,7 +28,7 @@ Evidence gathered:
 | 5 | `crates/kuzushi-core/src/scan.rs` | 2,812 lines; subprocess execution, scanner normalization, cancellation, and static evidence indexing mix side effects and parsing. | `cargo test -p kuzushi-core scan` | Defer; next safe cut is scanner process helpers vs JSON normalization. |
 | 6 | `crates/kuzushi-core/src/verify.rs` | 2,749 lines; runtime validation, sandbox, classification, and persistence decisions. High model/runtime invariant risk. | `cargo test -p kuzushi-core verify` | Defer without a focused failing test or clear extraction boundary. |
 | 7 | `src/store.ts` | 2,118 retained TS persistence facade; compatibility-sensitive. | `pnpm typecheck`, TS store tests | Defer; Rust findings store is the current operator path. |
-| 8 | `crates/kuzushi-core/src/findings.rs` | 1,946 lines; schema bootstrap, dedupe, aliases, filtering, reporting state. Persisted format risk. | `cargo test -p kuzushi-core findings` | Defer schema-affecting work; small reporting helpers are acceptable later. |
+| 8 | `crates/kuzushi-core/src/findings.rs` | 1,946 lines before the detail-command follow-up; schema bootstrap, dedupe, aliases, filtering, reporting state. Persisted format risk. | `cargo test -p kuzushi-core findings` | Fixed one non-schema slice: finding detail/proof-state rendering moved into `crates/kuzushi-core/src/findings/detail.rs`, and prefix lookup now shares verification attachment. |
 | 9 | `crates/kuzushi-core/src/modules/vendor_assessment.rs` | 498 lines; extracted but still mixes attachment parsing, prompt bundles, and reports. | `cargo test -p kuzushi-core modules` | Defer; not in first-wow path. |
 | 10 | `crates/kuzushi-core/src/modules/context.rs` | 494 lines; repo walk, inference, artifact writing. | `cargo test -p kuzushi-core modules::tests::dispatches_context_build_snapshot` | Defer; cohesive enough after extraction. |
 | 11 | `crates/kuzushi-core/src/modules/plugin_adapters.rs` | 477 lines; model/runtime-backed plugin wrappers plus persistence. | `cargo test -p kuzushi-core modules::tests::dispatches_plugin_backed_adapters_through_runtime_and_persists` | Defer due runtime no-fallback sensitivity. |
@@ -37,7 +37,7 @@ Evidence gathered:
 | 14 | `crates/kuzushi-core/src/modules/native_scanners.rs` | 296 lines; direct scanner tools and persistence. | `cargo test -p kuzushi-core modules::tests::dispatches_semgrep_scan_and_persists_findings` | Defer; first-wow relies on this staying stable. |
 | 15 | `crates/kuzushi-core/src/modules/input.rs` | 273 lines; newly extracted parsing helpers. | `cargo test -p kuzushi-core modules` | Fixed now; watch for future split if validation messages drift. |
 
-## Safe Cut Completed
+## Safe Cuts Completed
 
 The completed Phase 0 slice moved shared tool input parsing, SAST task
 filtering, prompt override loading, boolean/string coercion, and path
@@ -51,6 +51,20 @@ Why this was safe:
   were unchanged.
 - Focused Rust module tests passed.
 
+The follow-up finding-detail slice moved proof-state, runtime-validation,
+patch-result, and next-action rendering into
+`crates/kuzushi-core/src/findings/detail.rs`.
+
+Why this was safe:
+
+- It added a read-only CLI surface over existing finding, verification, and
+  patch-result tables.
+- It did not change SQLite schema, alias ordering, scanner behavior, or
+  persisted `.kuzushi` formats.
+- Prefix lookup now uses the same latest-verification attachment helper as
+  exact fingerprint lookup.
+- Focused findings and CLI cutover tests passed.
+
 ## Next 5 Complexity Cuts
 
 1. Split `scan.rs` subprocess process management from scanner JSON
@@ -61,8 +75,8 @@ Why this was safe:
    findings view because it maps to the public first-wow workflow.
 4. Extract verify evidence classification helpers from sandbox side effects in
    `verify.rs`; do not touch runtime/model fallback paths.
-5. Move findings report rendering helpers behind a reporting module without
-   changing SQLite schema or alias ordering.
+5. Continue moving findings report rendering helpers behind focused modules
+   without changing SQLite schema or alias ordering.
 
 ## Remaining Risk
 
