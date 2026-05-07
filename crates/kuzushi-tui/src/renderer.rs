@@ -1382,10 +1382,7 @@ fn prompts_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             fit(
                 &format!(
                     "{marker} {}",
-                    table_text(
-                        &[verb, "builtin", &path],
-                        &[12, 10, value_width(area, 28)],
-                    )
+                    table_text(&[verb, "builtin", &path], &[12, 10, value_width(area, 28)],)
                 ),
                 area.width as usize,
             ),
@@ -1601,7 +1598,10 @@ fn quickstart_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let steps = [
         ("1", scan_step),
         ("2", "findings                   browse persisted findings"),
-        ("3", "context build              write .kuzushi/context-snapshot.json"),
+        (
+            "3",
+            "context build              write .kuzushi/context-snapshot.json",
+        ),
         (
             "4",
             "model                      choose an explicit provider/model for ask/triage",
@@ -1740,7 +1740,10 @@ fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
     lines.push(divider("MODELS", area.width));
     let widths = [2usize, 2, 28, 6, value_width(area, 28)];
-    lines.push(aligned_header(&["", "#", "model", "effort", "auth"], &widths));
+    lines.push(aligned_header(
+        &["", "#", "model", "effort", "auth"],
+        &widths,
+    ));
     for (index, choice) in crate::app::model_choices().iter().enumerate() {
         let marker = if index == app.selected_model_index {
             ">"
@@ -1802,7 +1805,10 @@ fn tools_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
     lines.push(divider("TOOLS", area.width));
     let widths = [28usize, 8, value_width(area, 38)];
-    lines.push(aligned_header(&["tool", "headless", "description"], &widths));
+    lines.push(aligned_header(
+        &["tool", "headless", "description"],
+        &widths,
+    ));
     for tool in app.registry.tools() {
         lines.push(aligned_row(
             &[
@@ -2698,7 +2704,10 @@ fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     // `cost $0.0000` at startup eats ~13 cells for no information and
     // pushes `model unconfigured` off the right edge of 120-col terminals.
     if app.session_cost_usd > 0.0 {
-        segments.push(format!("cost {}", format_session_cost(app.session_cost_usd)));
+        segments.push(format!(
+            "cost {}",
+            format_session_cost(app.session_cost_usd)
+        ));
     }
     let rest = fit(
         &join_segments(&segments),
