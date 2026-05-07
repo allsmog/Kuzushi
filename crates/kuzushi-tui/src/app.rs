@@ -4320,7 +4320,17 @@ impl ShellApp {
 
     fn open_store(&mut self) -> Result<FindingStore> {
         let workspace = self.current_workspace()?;
-        self.target = Some(workspace.root().to_path_buf());
+        let resolved = workspace.root().to_path_buf();
+        // Surface the implicit target assignment so the operator isn't
+        // surprised by `target none` flipping to a real path the moment
+        // they type `findings`. We log on the first transition only.
+        if self.target.as_deref() != Some(resolved.as_path()) {
+            self.log(
+                "target",
+                format!("set to {} (implied from cwd)", resolved.display()),
+            );
+        }
+        self.target = Some(resolved);
         FindingStore::open(workspace.findings_db_path())
     }
 
@@ -7581,6 +7591,27 @@ JSON
         assert!(app.log.iter().any(|line| {
             line.prefix == "cost" && line.body.contains("session estimate $0.0456")
         }));
+    }
+
+    #[test]
+    fn implicit_target_assignment_emits_log_line() {
+        // P2-3: typing `findings` with no target silently flipped target
+        // from None to cwd. Now that flip emits a transcript line so the
+        // operator sees the new value before they wonder why the header
+        // changed.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        assert!(app.target.is_none());
+        let _ = app.open_store();
+        assert!(app.target.is_some());
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "target" && line.body.contains("(implied from cwd)")
+        }));
+
+        // Re-opening the same workspace doesn't re-log — only the first
+        // transition is interesting.
+        let log_count = app.log.len();
+        let _ = app.open_store();
+        assert_eq!(app.log.len(), log_count);
     }
 
     #[test]
