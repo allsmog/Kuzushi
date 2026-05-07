@@ -243,6 +243,25 @@ pub(crate) use state_transitions::{HotkeyTrigger, ViewHotkeyAction};
 pub struct LogLine {
     pub prefix: String,
     pub body: String,
+    /// Wall-clock time the line was logged (UTC seconds since epoch).
+    /// Rendered as `HH:MM:SS` per `design/mockups/_shared.jsx::logLine`.
+    /// `0` means "no timestamp" — used by historical/synthetic lines so
+    /// existing tests that build LogLines literally continue to work.
+    pub time_secs: u64,
+}
+
+impl LogLine {
+    pub fn new(prefix: impl Into<String>, body: impl Into<String>) -> Self {
+        let time_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
+        Self {
+            prefix: prefix.into(),
+            body: body.into(),
+            time_secs,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -662,10 +681,7 @@ impl ShellApp {
     }
 
     pub fn log(&mut self, prefix: impl Into<String>, body: impl Into<String>) {
-        self.log.push(LogLine {
-            prefix: prefix.into(),
-            body: body.into(),
-        });
+        self.log.push(LogLine::new(prefix, body));
         if self.log.len() > 500 {
             let overflow = self.log.len() - 500;
             self.log.drain(0..overflow);
