@@ -533,6 +533,7 @@ impl ShellApp {
             history_scroll: 0,
             kb_scroll: 0,
             last_char_at: None,
+            spinner_tick: 0,
             scan_rx: None,
             scan_cancel: None,
             agent_rx: None,
