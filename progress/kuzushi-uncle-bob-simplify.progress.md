@@ -106,8 +106,8 @@ Status: continuing focused slices because `crates/kuzushi-core/src/modules.rs` r
 - Files changed:
   `crates/kuzushi-core/src/modules.rs`,
   `crates/kuzushi-core/src/modules/prompt_armor.rs`, and this progress note.
-- Tests/checks run: `cargo fmt --all`; `cargo check -p kuzushi-core`;
-  `cargo test -p kuzushi-core modules`.
+- Tests/checks run: `cargo fmt --all`; `cargo fmt --all --check`;
+  `cargo check -p kuzushi-core`; `cargo test -p kuzushi-core modules`.
 - Result: gates passed; `prompt-armor:*` tool metadata, authorization gating,
   plugin-backed runtime dispatch, persisted findings, and DAG registration
   remain covered by the existing module tests.
@@ -234,6 +234,27 @@ Status: continuing focused slices because `crates/kuzushi-core/src/modules.rs` r
   it remains the largest production Rust file after this generic-findings
   slice.
 - Blockers or repo facts that contradicted this prompt: none.
+
+### UB-002 manual follow-up, iteration 11
+
+- Task attempted: extracted shared tool input parsing, prompt override
+  resolution, scan task filtering, and path resolution helpers from
+  `crates/kuzushi-core/src/modules.rs` into
+  `crates/kuzushi-core/src/modules/input.rs`.
+- Files changed:
+  `crates/kuzushi-core/src/modules.rs`,
+  `crates/kuzushi-core/src/modules/input.rs`, and this progress note.
+- Tests/checks run: `cargo fmt --all`; `cargo check -p kuzushi-core`;
+  `cargo test -p kuzushi-core modules`.
+- Result: gates passed; SAST task parsing, severity filters, prompt override
+  file loading, boolean/string option coercion, plugin adapter inputs, and
+  path resolution keep the same behavior behind a narrower input-helper
+  boundary.
+- Remaining work: continue decomposing `modules.rs` by cohesive module family;
+  it remains the largest production Rust file after this input-helper slice.
+- Blockers or repo facts that contradicted this prompt: this sandbox cannot
+  write `.git/index.lock` (`Operation not permitted`), so staging, commit, and
+  push were not performed here.
 
 ### UB-003 automation gate
 

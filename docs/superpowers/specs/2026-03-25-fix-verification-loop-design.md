@@ -1,5 +1,9 @@
 # Fix Verification Loop: Orchestrator-Integrated Closed-Loop Patching
 
+Status: historical TypeScript pipeline design spec. It is retained for
+architecture context; CLI flags such as `--verify` in this document are not
+current Rust operator examples.
+
 ## Context
 
 Kuzushi has a patch synthesis system (`src/patch.ts`) with iterative generation, 5-step validation (apply, build, PoC re-run, tests), and git worktree isolation. However, it's CLI-only (`kuzushi patch --fingerprint <fp>`) and not integrated into the automated pipeline. There is no closed-loop: after generating a patch, the scanner never re-runs on the patched code to confirm the vulnerability is actually gone.

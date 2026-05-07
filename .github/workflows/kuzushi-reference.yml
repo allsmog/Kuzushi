@@ -1,17 +1,15 @@
 # Reference GitHub Actions workflow for running Kuzushi in CI.
 #
 # Copy this file to your own repository under .github/workflows/kuzushi.yml
-# and tune it for your project. This template demonstrates the three
-# CI-integration shapes users typically need:
+# and tune it for your project. This template demonstrates the current Rust
+# CLI workflow:
 #
-#   1. Upload SARIF to GitHub Advanced Security (Code Scanning)
-#   2. Comment a finding summary on the pull request
-#   3. Upload JUnit XML so findings land in the "Checks" / test panel
+#   1. Run `doctor` and keep its JSON preflight output.
+#   2. Run `scan` with deterministic CI progress and persist findings.
+#   3. Export findings JSON and a markdown PR/security review comment.
 #
-# The workflow is NOT wired into Kuzushi's own CI — it is pure documentation.
-# We deliberately omit `pull_request` and `push` triggers so it only runs
-# under `workflow_dispatch` (manual). Copies in downstream repos should
-# add `pull_request` / `push` triggers back as appropriate.
+# The workflow is NOT wired into Kuzushi's own CI; it is documentation. Copies
+# in downstream repos should add `pull_request` / `push` triggers as needed.
 
 name: Kuzushi Security Scan (reference)
 
@@ -21,8 +19,6 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  security-events: write
-  checks: write
 
 jobs:
   scan:
@@ -36,40 +32,52 @@ jobs:
         with:
           node-version: "22"
 
-      # Install Kuzushi via your package manager of choice.
-      - run: npm install -g kuzushi
+      - name: Install Kuzushi
+        run: npm install -g kuzushi
 
-      # Optional: install scanner binaries the pipeline needs.
       - name: Install Semgrep
-        run: pip install semgrep
+        run: python -m pip install --upgrade semgrep
 
-      # Run the scan. Exit codes:
-      #   0 clean, 1 findings present, 2 config/usage error, 3 crash.
-      # We allow non-zero so subsequent steps (uploads, PR comment) still run.
+      - name: Run Kuzushi doctor
+        if: always()
+        run: kuzushi doctor --target . --json > kuzushi-doctor.json
+
       - name: Run Kuzushi scan
         id: kuzushi
-        continue-on-error: true
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        shell: bash
         run: |
-          kuzushi scan . \
-            --preset standard \
-            --verify \
-            --sarif kuzushi.sarif \
-            --junit kuzushi.junit.xml \
-            --output kuzushi-report.md \
-            --quality-gate \
-            --fail-on-tp
+          set +e
+          kuzushi scan . --mode standard --ci | tee kuzushi-scan.log
+          KUZUSHI_STATUS=${PIPESTATUS[0]}
+          set -e
+          echo "status=${KUZUSHI_STATUS}" >> "${GITHUB_OUTPUT}"
 
-      # 1. Upload SARIF to GitHub Code Scanning (Advanced Security).
-      - name: Upload SARIF
-        if: always() && hashFiles('kuzushi.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Export findings JSON
+        if: always()
+        run: kuzushi findings --target . --json > kuzushi-findings.json
+
+      - name: Render PR comment markdown
+        if: always()
+        run: |
+          kuzushi pr-comment \
+            --target . \
+            --repo "${GITHUB_REPOSITORY}" \
+            --run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --git-sha "${GITHUB_SHA}" \
+            > kuzushi-report.md
+
+      - name: Upload Kuzushi artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: kuzushi.sarif
-          category: kuzushi
+          name: kuzushi-security-scan
+          path: |
+            kuzushi-doctor.json
+            kuzushi-scan.log
+            kuzushi-findings.json
+            kuzushi-report.md
+          if-no-files-found: warn
 
-      # 2. Post a sticky PR comment with the finding summary.
       - name: Post PR comment
         if: github.event_name == 'pull_request' && hashFiles('kuzushi-report.md') != ''
         uses: marocchino/sticky-pull-request-comment@v2
@@ -77,17 +85,6 @@ jobs:
           header: kuzushi-scan
           path: kuzushi-report.md
 
-      # 3. Upload JUnit so findings render in the Checks tab.
-      - name: Publish JUnit report
-        if: always() && hashFiles('kuzushi.junit.xml') != ''
-        uses: mikepenz/action-junit-report@v4
-        with:
-          report_paths: kuzushi.junit.xml
-          check_name: "Kuzushi findings"
-          include_passed: false
-
-      # Fail the job with Kuzushi's own exit code so branch-protection
-      # rules that "require the kuzushi check to pass" behave correctly.
       - name: Propagate Kuzushi exit code
-        if: steps.kuzushi.outcome == 'failure'
-        run: exit 1
+        if: always()
+        run: exit "${{ steps.kuzushi.outputs.status || 1 }}"

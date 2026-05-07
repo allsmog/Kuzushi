@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 239
 ---
-KUZUSHI  mode:run | target none | 1 findings (1 critical) | ctx missing | module catalog | model unconfigured | cost ...
+KUZUSHI  mode:run | target none | 1 findings (1 critical) | ctx missing | view run | model unconfigured
 
 ⠿ ./acme-checkout | running: agentic-sast tracing | 1 finding(s) | run run-abc1
 
@@ -17,7 +17,4 @@ FINDINGS | 1 TRIAGED | 0 PENDING  ----------------------------------------------
 ------------------------------------------------------ TRANSCRIPT ------------------------------------------------------
  | system kuzushi shell
  | startup ready: 35 module(s), 61 tool(s), target none
- | first-run First finding: run `scan .`, then `findings`.
-| help /scan, /run <tool>, /ask <question>, ?text, /workspace, /context build, /tasks, /options [tool], /auth login
-openai-codex|anthropic, /provider, /backend, /model, /cost, /kb, /history, /clear, /load <specifier>, /findings,
-/modules, /tools, /quit
+ | help type help for commands | ? <text> to ask | scan to start

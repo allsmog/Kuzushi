@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+cat <<'JSON'
+{
+  "results": [
+    {
+      "check_id": "demo.express.reflected-xss",
+      "path": "server.js",
+      "start": { "line": 7 },
+      "end": { "line": 8 },
+      "extra": {
+        "severity": "ERROR",
+        "message": "Demo finding: request query data is rendered into an HTML response without escaping"
+      }
+    },
+    {
+      "check_id": "demo.node.command-injection",
+      "path": "server.js",
+      "start": { "line": 12 },
+      "end": { "line": 18 },
+      "extra": {
+        "severity": "WARNING",
+        "message": "Demo finding: request query data flows into child_process.exec"
+      }
+    }
+  ]
+}
+JSON

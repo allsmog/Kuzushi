@@ -46,6 +46,7 @@ use uuid::Uuid;
 mod chrome_rce;
 mod context;
 mod generic_findings;
+mod input;
 mod native_scanners;
 mod options;
 mod plugin_adapters;
@@ -55,6 +56,12 @@ mod sast_run;
 mod vendor_assessment;
 
 use generic_findings::normalize_reported_file_path;
+use input::{
+    bool_input, optional_nonempty_string, optional_taint_next_string, parse_sast_severity_filter,
+    parse_sast_tasks, positive_f64_input, positive_usize_input, read_bool_any, resolve_input_path,
+    resolve_prompt_override, resolve_prompt_override_for_key, same_scan_task,
+    string_array_or_csv_input, string_input_any, string_list_input,
+};
 use options::{json_summary, validate_tool_input_options};
 use sast_run::{
     fingerprints_for_sast_runs, sast_patch_input, true_positive_fingerprints_for_sast_runs,
@@ -4642,18 +4649,6 @@ fn persist_taint_iris_next_findings(
     }))
 }
 
-fn optional_taint_next_string(input: &Value, keys: &[&str]) -> Result<Option<String>> {
-    for key in keys {
-        if let Some(value) = input.get(*key) {
-            return match value {
-                Value::String(text) => Ok(Some(text.trim().to_string()).filter(|s| !s.is_empty())),
-                _ => anyhow::bail!("taint-iris-next:hunt {key} must be a string"),
-            };
-        }
-    }
-    Ok(None)
-}
-
 fn normalize_taint_next_language(value: &str) -> String {
     match value.trim().to_ascii_lowercase().as_str() {
         "js" | "javascript" => "javascript",
@@ -4691,162 +4686,6 @@ fn cwe_number(value: &str) -> u32 {
         .strip_prefix("CWE-")
         .and_then(|digits| digits.parse::<u32>().ok())
         .unwrap_or(u32::MAX)
-}
-
-fn positive_usize_input(input: &Value, keys: &[&str], label: &str) -> Result<Option<usize>> {
-    let Some(value) = keys.iter().find_map(|key| input.get(*key)) else {
-        return Ok(None);
-    };
-    match value {
-        Value::Number(number) => {
-            let value = number
-                .as_u64()
-                .with_context(|| format!("{label} must be a positive integer"))?;
-            if value == 0 {
-                anyhow::bail!("{label} must be a positive integer");
-            }
-            Ok(Some(value as usize))
-        }
-        Value::String(value) => {
-            let parsed = value
-                .trim()
-                .parse::<usize>()
-                .with_context(|| format!("{label} must be a positive integer"))?;
-            if parsed == 0 {
-                anyhow::bail!("{label} must be a positive integer");
-            }
-            Ok(Some(parsed))
-        }
-        _ => anyhow::bail!("{label} must be a positive integer"),
-    }
-}
-
-fn positive_f64_input(input: &Value, keys: &[&str], label: &str) -> Result<Option<f64>> {
-    let Some(value) = keys.iter().find_map(|key| input.get(*key)) else {
-        return Ok(None);
-    };
-    let parsed = match value {
-        Value::Number(number) => number
-            .as_f64()
-            .with_context(|| format!("{label} must be a positive number"))?,
-        Value::String(value) => value
-            .trim()
-            .parse::<f64>()
-            .with_context(|| format!("{label} must be a positive number"))?,
-        _ => anyhow::bail!("{label} must be a positive number"),
-    };
-    if !parsed.is_finite() || parsed <= 0.0 {
-        anyhow::bail!("{label} must be a positive number");
-    }
-    Ok(Some(parsed))
-}
-
-fn parse_sast_tasks(input: &Value) -> Result<Vec<String>> {
-    let requested = string_list_input(input, &["tasks", "taskIds", "task_ids"])?;
-    let disabled =
-        string_list_input(input, &["disabledTasks", "disabled_tasks"])?.unwrap_or_default();
-    let task_mode = input
-        .get("taskMode")
-        .or_else(|| input.get("task_mode"))
-        .and_then(Value::as_str)
-        .unwrap_or("auto");
-    if !matches!(task_mode, "auto" | "manual") {
-        anyhow::bail!("sast:scan taskMode must be \"auto\" or \"manual\"");
-    }
-    if task_mode == "manual" && requested.as_ref().map_or(true, Vec::is_empty) {
-        anyhow::bail!("sast:scan taskMode=manual requires a non-empty tasks array");
-    }
-
-    let mut tasks = requested.unwrap_or_else(|| {
-        if disabled.is_empty() {
-            Vec::new()
-        } else {
-            vec![
-                "semgrep".to_string(),
-                "dep-hygiene".to_string(),
-                "secret-scan".to_string(),
-                "iac-scan".to_string(),
-            ]
-        }
-    });
-
-    if !disabled.is_empty() {
-        tasks.retain(|task| {
-            !disabled
-                .iter()
-                .any(|disabled| same_scan_task(task, disabled))
-        });
-    }
-    Ok(tasks)
-}
-
-fn parse_sast_severity_filter(input: &Value) -> Result<Option<Vec<Severity>>> {
-    let Some(values) = string_list_input(input, &["severity"])? else {
-        return Ok(None);
-    };
-    if values.is_empty() {
-        return Ok(None);
-    }
-    values
-        .iter()
-        .map(|value| parse_sast_severity(value))
-        .collect::<Result<Vec<_>>>()
-        .map(Some)
-}
-
-fn parse_sast_severity(value: &str) -> Result<Severity> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "critical" => Ok(Severity::Critical),
-        "high" | "error" => Ok(Severity::High),
-        "medium" | "warning" => Ok(Severity::Medium),
-        "low" => Ok(Severity::Low),
-        "info" => Ok(Severity::Info),
-        "unknown" => Ok(Severity::Unknown),
-        other => anyhow::bail!("sast:scan unknown severity filter {other:?}"),
-    }
-}
-
-fn string_list_input(input: &Value, keys: &[&str]) -> Result<Option<Vec<String>>> {
-    let Some(raw) = keys.iter().find_map(|key| input.get(*key)) else {
-        return Ok(None);
-    };
-    let values = match raw {
-        Value::String(value) => value
-            .split(',')
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string)
-            .collect(),
-        Value::Array(items) => items
-            .iter()
-            .map(|item| {
-                item.as_str()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(ToString::to_string)
-                    .context("sast:scan list inputs must contain only non-empty strings")
-            })
-            .collect::<Result<Vec<_>>>()?,
-        _ => anyhow::bail!("sast:scan list inputs must be a string or string array"),
-    };
-    Ok(Some(values))
-}
-
-fn bool_input(input: &Value, keys: &[&str]) -> Result<bool> {
-    for key in keys {
-        if let Some(value) = input.get(*key) {
-            return value
-                .as_bool()
-                .with_context(|| format!("sast:scan {key} must be a boolean"));
-        }
-    }
-    Ok(false)
-}
-
-fn same_scan_task(left: &str, right: &str) -> bool {
-    let left = left.trim();
-    let right = right.trim();
-    left == right || left.split(':').next() == right.split(':').next()
 }
 
 #[derive(Debug, Clone)]
@@ -5695,41 +5534,6 @@ fn normalize_controls(object: &Map<String, Value>) -> Option<Value> {
     (!out.is_empty()).then(|| json!(out))
 }
 
-fn optional_nonempty_string(input: &Value, key: &str) -> Result<Option<String>> {
-    match input.get(key) {
-        Some(Value::String(value)) => Ok(Some(value.trim().to_string()).filter(|s| !s.is_empty())),
-        Some(_) => anyhow::bail!("triage:run {key} must be a string"),
-        None => Ok(None),
-    }
-}
-
-fn resolve_prompt_override(value: &str, cwd: &Path) -> Result<String> {
-    resolve_prompt_override_for_key(value, cwd, "TRIAGE_PROMPT")
-}
-
-fn resolve_prompt_override_for_key(value: &str, cwd: &Path, key: &str) -> Result<String> {
-    if !looks_like_prompt_path(value) {
-        return Ok(value.to_string());
-    }
-    let path = Path::new(value);
-    let path = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    };
-    fs::read_to_string(&path)
-        .with_context(|| format!("Could not read {key} from {}", path.display()))
-}
-
-fn looks_like_prompt_path(value: &str) -> bool {
-    value.starts_with("./")
-        || value.starts_with("../")
-        || value.starts_with('/')
-        || value.ends_with(".md")
-        || value.ends_with(".txt")
-        || value.ends_with(".prompt")
-}
-
 fn run_pipeline_task_selector(input: Value, _ctx: &ToolExecutionContext<'_>) -> Result<Value> {
     let requested = string_array_or_csv_input(&input, &["tasks", "taskIds", "task_ids"])
         .unwrap_or_else(|| {
@@ -5787,61 +5591,6 @@ fn resolve_tool_model(
                 "{tool_name} requires an explicit model in config.toml, KUZUSHI_MODEL, or tool input; Kuzushi will not choose a fallback model"
             )
         })
-}
-
-fn string_input_any(input: &Value, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| {
-        input
-            .get(*key)
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string)
-    })
-}
-
-fn string_array_or_csv_input(input: &Value, keys: &[&str]) -> Option<Vec<String>> {
-    keys.iter().find_map(|key| match input.get(*key) {
-        Some(Value::String(value)) => Some(
-            value
-                .split(',')
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToString::to_string)
-                .collect(),
-        ),
-        Some(Value::Array(items)) => Some(
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToString::to_string)
-                .collect(),
-        ),
-        _ => None,
-    })
-}
-
-fn read_bool_any(input: &Value, keys: &[&str]) -> Result<Option<bool>> {
-    for key in keys {
-        if let Some(value) = input.get(*key) {
-            return value
-                .as_bool()
-                .map(Some)
-                .with_context(|| format!("{key} must be a boolean"));
-        }
-    }
-    Ok(None)
-}
-
-fn resolve_input_path(root: &Path, value: &str) -> PathBuf {
-    let path = PathBuf::from(value.trim());
-    if path.is_absolute() {
-        path
-    } else {
-        root.join(path)
-    }
 }
 
 fn unix_millis() -> u128 {

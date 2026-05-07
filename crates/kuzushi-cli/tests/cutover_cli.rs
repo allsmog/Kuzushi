@@ -95,7 +95,7 @@ fn plain_flag_forces_line_oriented_shell_output() {
             .unwrap(),
     );
 
-    assert!(out.contains("kuzushi shell"));
+    assert!(out.contains("KUZUSHI"));
     assert!(out.contains("mode:shell"));
     assert!(out.contains("First finding"));
     assert_strict_plain("--plain shell", &out);
@@ -113,7 +113,7 @@ fn plain_env_aliases_are_line_oriented_for_screen_reader_mode() {
             .unwrap(),
     );
 
-    assert!(out.contains("kuzushi shell"));
+    assert!(out.contains("KUZUSHI"));
     assert!(out.contains("mode:shell"));
     assert_strict_plain("KUZUSHI_SCREEN_READER shell", &out);
 }
@@ -158,7 +158,7 @@ fn plain_scripted_shell_prints_result_for_unchanged_view_command() {
     assert!(out.contains("COMMAND RESULT"));
     assert!(out.contains("command: /back"));
     assert!(out.contains("> /back"));
-    assert!(out.contains("kuzushi shell"));
+    assert!(out.contains("KUZUSHI"));
     assert_strict_plain("--plain shell /back", &out);
 }
 

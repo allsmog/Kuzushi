@@ -115,7 +115,9 @@ Legend: ✓ = present, ✗ = absent, ◐ = partial / opt-in, N/A = not applicabl
 - **Two-stage Ctrl+C, cost-cap halt card, rate-limit banner, NL planner,
   `/replay`, `/trace`, threat views, prompts editor, finding alias drill,
   module-run transcript, actor-detail view** — all interactive-only by
-  design. They live behind `process.stdout.isTTY` paths in `shell.ts`.
+  design. They live in the Rust Ratatui shell under `crates/kuzushi-tui`;
+  plain/scripted output belongs in
+  `crates/kuzushi-tui/src/renderer/plain.rs`.
 - **`--ci` is scan-only.** Single-tool runs use `--json` for
   machine-readable output. Shell is interactive; CI mode is meaningless.
 - **`/replay <runId>` and `/trace <runId>` are shell-only operator

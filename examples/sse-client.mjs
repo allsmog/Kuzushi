@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 /**
- * Example SSE client for `kuzushi scan --stream`.
+ * Legacy SSE client reference.
  *
- * Usage:
+ * The current Rust CLI does not support `kuzushi scan --stream`. Keep this
+ * file only as a protocol sketch for older TypeScript pipeline experiments;
+ * do not use it as operator onboarding.
+ *
+ * Historical usage:
  *   1. In one terminal:
  *      $ kuzushi scan ./repo --stream --stream-port 4455
  *   2. In another terminal:

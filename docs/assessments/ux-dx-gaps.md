@@ -1,5 +1,9 @@
 # Shell UX/DX Gaps Assessment
 
+Status: historical Ink-era audit. The current operator-facing shell is Rust
+Ratatui under `crates/kuzushi-tui`; do not use the TypeScript/Ink paths below
+as places to add new interactive shell behavior.
+
 This is the audit + fix-list for the interactive Kuzushi shell (Ink TUI),
 slash-verb dispatch, plain-text fallback, and the keybind reducer.
 

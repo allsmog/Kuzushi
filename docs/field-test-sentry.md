@@ -1,5 +1,9 @@
 # Kuzushi Field-Test Issue Log
 
+Status: historical field-test log. It preserves old command lines and removed
+source helpers as evidence for fixes; do not treat those lines as current Rust
+CLI onboarding.
+
 Live notes from running `kuzushi scan` against `getsentry/sentry` inside a
 Claude Code remote sandbox via tmux. Logged in chronological order so
 the patch / triage trail is reproducible.
