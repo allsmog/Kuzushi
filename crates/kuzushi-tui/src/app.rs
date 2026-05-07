@@ -565,6 +565,9 @@ pub struct ShellApp {
     pub scan_progress: Option<ScanProgress>,
     scan_rx: Option<Receiver<ScanEvent>>,
     scan_cancel: Option<ScanCancellation>,
+    tool_rx: Option<Receiver<ToolEvent>>,
+    tool_running: Option<String>,
+    tool_abort_requested: bool,
     agent_rx: Option<Receiver<AgentEvent>>,
     plan_rx: Option<Receiver<PlanEvent>>,
     threat_rx: Option<Receiver<ThreatPatchEvent>>,
@@ -642,6 +645,9 @@ impl ShellApp {
             scan_progress: None,
             scan_rx: None,
             scan_cancel: None,
+            tool_rx: None,
+            tool_running: None,
+            tool_abort_requested: false,
             agent_rx: None,
             plan_rx: None,
             threat_rx: None,
@@ -1556,6 +1562,25 @@ impl ShellApp {
             self.scan_cancel = None;
         }
 
+        let mut tool_events = Vec::new();
+        if let Some(rx) = &self.tool_rx {
+            while let Ok(event) = rx.try_recv() {
+                tool_events.push(event);
+            }
+        }
+
+        if !tool_events.is_empty() {
+            changed = true;
+        }
+        for event in tool_events {
+            self.apply_tool_event(event);
+        }
+
+        if self.tool_running.is_none() {
+            self.tool_rx = None;
+            self.tool_abort_requested = false;
+        }
+
         let mut agent_events = Vec::new();
         if let Some(rx) = &self.agent_rx {
             while let Ok(event) = rx.try_recv() {
@@ -1640,6 +1665,49 @@ impl ShellApp {
         self.apply_agent_event(event);
         if self.agent_chat.as_ref().is_some_and(|agent| !agent.running) {
             self.agent_rx = None;
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn drain_next_tool_event_for_test(
+        &mut self,
+        timeout: Duration,
+    ) -> std::result::Result<(), String> {
+        let event = {
+            let Some(rx) = self.tool_rx.as_ref() else {
+                return Err(format!(
+                    "tool worker channel missing; recent log: [{}]",
+                    self.log
+                        .iter()
+                        .rev()
+                        .take(5)
+                        .map(|line| format!("{}: {}", line.prefix, line.body))
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                ));
+            };
+            match rx.recv_timeout(timeout) {
+                Ok(event) => event,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    return Err(format!(
+                        "timed out after {timeout:?} waiting for tool worker; running={:?}",
+                        self.tool_running
+                    ));
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(format!(
+                        "tool worker channel disconnected before reporting completion; running={:?}",
+                        self.tool_running
+                    ));
+                }
+            }
+        };
+
+        self.apply_tool_event(event);
+        if self.tool_running.is_none() {
+            self.tool_rx = None;
+            self.tool_abort_requested = false;
         }
         Ok(())
     }
@@ -3224,25 +3292,14 @@ impl ShellApp {
                 return;
             }
         };
-        let ctx = ToolExecutionContext {
-            config: &self.config,
-            workspace: Some(&workspace),
-            findings_store: None,
-        };
-        match self.registry.execute_tool("context:build", input, &ctx) {
-            Ok(result) => {
-                let rendered = result
-                    .get("output")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("context:build complete")
-                    .to_string();
-                let _ = self.refresh_context_view();
-                self.focused_module = Some("context".to_string());
-                self.shell_view = ShellView::Context;
-                self.log("result", rendered);
-            }
-            Err(error) => self.log("error", error.to_string()),
-        }
+        self.focused_module = Some("context".to_string());
+        self.shell_view = ShellView::Context;
+        self.start_background_tool(
+            "context:build".to_string(),
+            input,
+            workspace,
+            "indexing repository context",
+        );
     }
 
     fn regen_context_slice(&mut self, slice: &str) {
@@ -3906,6 +3963,14 @@ impl ShellApp {
     }
 
     fn run_tool(&mut self, tool: Option<String>, input: Option<String>) {
+        if let Some(tool_name) = self.tool_running.as_deref() {
+            self.log(
+                "tool",
+                format!("{tool_name} is still running; wait for its result before starting another tool"),
+            );
+            return;
+        }
+
         let tool_name = match tool {
             Some(tool) => tool,
             None => match self.default_tool_for_run_command() {
@@ -3965,6 +4030,16 @@ impl ShellApp {
                 return;
             }
         };
+        if matches!(tool_name.as_str(), "context:build" | "context-lite:index") {
+            self.shell_view = ShellView::ModuleRun;
+            self.start_background_tool(
+                tool_name,
+                input,
+                workspace.expect("current_workspace returned Some workspace"),
+                "indexing repository context",
+            );
+            return;
+        }
         let store = if tool_name.starts_with("findings:")
             || tool_name.starts_with("systems-hunt:")
             || tool_name.starts_with("chrome-rce:")
@@ -4078,28 +4153,98 @@ impl ShellApp {
             &ctx,
             runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
         ) {
-            Ok(result) => {
-                if let Some(cost_usd) = extract_cost_usd(&result) {
-                    self.record_cost(cost_usd);
-                }
-                if matches!(tool_name.as_str(), "context:build" | "context-lite:index") {
-                    let _ = self.refresh_context_view();
-                }
-                self.cache_tool_snapshot(&tool_name, &result);
-                let rendered = result
-                    .get("output")
-                    .and_then(serde_json::Value::as_str)
-                    .map(ToString::to_string)
-                    .unwrap_or_else(|| {
-                        serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
-                    });
-                self.log("result", rendered);
-            }
+            Ok(result) => self.apply_tool_result(&tool_name, result),
             Err(error) => self.log(
                 "error",
                 with_next_step(error.to_string(), "tools, options <tool>, or model <n>"),
             ),
         }
+    }
+
+    fn start_background_tool(
+        &mut self,
+        tool_name: String,
+        input: serde_json::Value,
+        workspace: WorkspaceTarget,
+        status: &'static str,
+    ) {
+        if let Some(active) = self.tool_running.as_deref() {
+            self.log(
+                "tool",
+                format!(
+                    "{active} is still running; wait for its result before starting {tool_name}"
+                ),
+            );
+            return;
+        }
+
+        let registry = self.registry.clone();
+        let config = self.config.clone();
+        let target = workspace.root().to_path_buf();
+        let (tx, rx) = mpsc::channel();
+        self.target = Some(target.clone());
+        self.tool_rx = Some(rx);
+        self.tool_running = Some(tool_name.clone());
+        self.tool_abort_requested = false;
+        self.log(
+            "tool",
+            format!(
+                "running {tool_name} in background; {status} under {}",
+                target.display()
+            ),
+        );
+
+        thread::spawn(move || {
+            background_tool_worker(registry, config, workspace, tool_name, input, tx)
+        });
+    }
+
+    fn apply_tool_event(&mut self, event: ToolEvent) {
+        let abort_requested = self.tool_abort_requested;
+        self.tool_running = None;
+        self.tool_abort_requested = false;
+        match event {
+            ToolEvent::Finished { tool_name, result } => {
+                if abort_requested {
+                    self.log(
+                        "tool",
+                        format!(
+                            "{tool_name} completed after abort request; applying completed result"
+                        ),
+                    );
+                }
+                self.apply_tool_result(&tool_name, result);
+            }
+            ToolEvent::Failed { tool_name, error } => {
+                let message = with_next_step(error, "tools, options <tool>, or model <n>");
+                if abort_requested {
+                    self.log(
+                        "error",
+                        format!("{tool_name} ended after abort request: {message}"),
+                    );
+                } else {
+                    self.log("error", message);
+                }
+            }
+        }
+    }
+
+    fn apply_tool_result(&mut self, tool_name: &str, result: serde_json::Value) {
+        if let Some(cost_usd) = extract_cost_usd(&result) {
+            self.record_cost(cost_usd);
+        }
+        if matches!(tool_name, "context:build" | "context-lite:index") {
+            let _ = self.refresh_context_view();
+        }
+        self.cache_tool_snapshot(tool_name, &result);
+        let rendered = result
+            .get("output")
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string)
+            .unwrap_or_else(|| {
+                serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
+            });
+        self.log("result", rendered);
     }
 
     /// Cache structured snapshot of a tool result for the renderer to read
@@ -5325,6 +5470,18 @@ enum ScanEvent {
 }
 
 #[derive(Debug)]
+enum ToolEvent {
+    Finished {
+        tool_name: String,
+        result: serde_json::Value,
+    },
+    Failed {
+        tool_name: String,
+        error: String,
+    },
+}
+
+#[derive(Debug)]
 enum AgentEvent {
     Answered { text: String },
     Failed { error: String },
@@ -5341,6 +5498,40 @@ pub enum ThreatPatchEvent {
     Proposed(ThreatPatch),
     Answer { text: String },
     Failed { error: String },
+}
+
+fn background_tool_worker(
+    registry: ModuleRegistry,
+    config: V2Config,
+    workspace: WorkspaceTarget,
+    tool_name: String,
+    input: serde_json::Value,
+    tx: Sender<ToolEvent>,
+) {
+    let result = run_background_tool(registry, config, &workspace, &tool_name, input);
+    let event = match result {
+        Ok(result) => ToolEvent::Finished { tool_name, result },
+        Err(error) => ToolEvent::Failed {
+            tool_name,
+            error: error.to_string(),
+        },
+    };
+    let _ = tx.send(event);
+}
+
+fn run_background_tool(
+    registry: ModuleRegistry,
+    config: V2Config,
+    workspace: &WorkspaceTarget,
+    tool_name: &str,
+    input: serde_json::Value,
+) -> Result<serde_json::Value> {
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(workspace),
+        findings_store: None,
+    };
+    registry.execute_tool(tool_name, input, &ctx)
 }
 
 fn agent_worker(
@@ -6250,6 +6441,11 @@ mod tests {
         assert!(mouse_capture_setting_enabled(Some(" on ")));
     }
 
+    fn drain_tool(app: &mut ShellApp) {
+        app.drain_next_tool_event_for_test(Duration::from_secs(5))
+            .unwrap();
+    }
+
     #[cfg(unix)]
     fn fake_semgrep_binary(dir: &PathBuf) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
@@ -7089,6 +7285,11 @@ JSON
         });
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
+        assert!(app.has_running_work());
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "tool" && line.body.contains("running context:build in background")
+        }));
+        drain_tool(&mut app);
         assert!(app.log.iter().any(|line| {
             line.prefix == "result" && line.body.contains("context:build indexed 2 files")
         }));
@@ -7115,6 +7316,8 @@ JSON
         app.handle_command(parse_command(r#"run . {"sampleLimit":10}"#));
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
+        assert!(app.has_running_work());
+        drain_tool(&mut app);
         assert!(app.context_view.exists);
         assert!(app.log.iter().any(|line| {
             line.prefix == "result" && line.body.contains("context:build indexed 2 files")
@@ -7138,6 +7341,8 @@ JSON
 
         assert_eq!(app.shell_view, ShellView::Context);
         assert_eq!(app.focused_module.as_deref(), Some("context"));
+        assert!(app.has_running_work());
+        drain_tool(&mut app);
         assert!(app.context_view.exists);
         assert!(app
             .log
@@ -7163,6 +7368,7 @@ JSON
         assert!(app.context_view.status.contains("missing"));
 
         app.handle_command(ShellCommand::Context(ContextCommand::Build));
+        drain_tool(&mut app);
         app.handle_command(ShellCommand::Context(ContextCommand::Show));
 
         assert!(app.context_view.exists);
@@ -7306,6 +7512,7 @@ JSON
             tool: None,
             input: None,
         });
+        drain_tool(&mut app);
 
         let snapshot =
             fs::read_to_string(workspace.root().join(".kuzushi/context-snapshot.json")).unwrap();
@@ -7341,6 +7548,7 @@ JSON
             tool: None,
             input: Some(r#"{"sampleLimit":2}"#.to_string()),
         });
+        drain_tool(&mut app);
 
         let snapshot =
             fs::read_to_string(workspace.root().join(".kuzushi/context-snapshot.json")).unwrap();
@@ -7659,6 +7867,7 @@ JSON
             tool: None,
             input: None,
         });
+        drain_tool(&mut app);
 
         let snapshot =
             fs::read_to_string(workspace.root().join(".kuzushi/context-snapshot.json")).unwrap();
@@ -10315,6 +10524,23 @@ JSON
         assert!(app.log.iter().any(|line| {
             line.prefix == "threats"
                 && line.body.contains("abort requested")
+                && line.body.contains("not confirmed")
+        }));
+    }
+
+    #[test]
+    fn ctrl_c_during_background_tool_requests_honest_abort_without_exiting() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.tool_running = Some("context:build".to_string());
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+        assert!(app.tool_abort_requested);
+        assert!(!app.ctrl_c_armed());
+        assert!(!app.should_quit);
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "tool"
+                && line.body.contains("context:build abort requested")
                 && line.body.contains("not confirmed")
         }));
     }
