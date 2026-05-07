@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use kuzushi_core::modules::{ModuleKind, OptionSpec, OptionType};
 use kuzushi_core::{
-    sorted_finding_aliases, stable_finding_alias, AttachmentKind, Finding, Severity,
-    SUPPORTED_ATTACHMENT_MODULES,
+    proof_state_label, runtime_validation_label, sorted_finding_aliases, stable_finding_alias,
+    AttachmentKind, Finding, Severity, SUPPORTED_ATTACHMENT_MODULES,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Modifier, Span, Style};
@@ -47,6 +47,7 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     };
     let plan_height = plan_card_height(app, area);
     let threat_patch_height = threat_patch_card_height(app, area);
+    let confirm_height = confirm_card_height(app, area);
     let fixed_height = prompt_height
         + transcript_height
         + keybind_height
@@ -54,7 +55,8 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         + throttle_height
         + budget_height
         + plan_height
-        + threat_patch_height;
+        + threat_patch_height
+        + confirm_height;
     let max_view_height = area.height.saturating_sub(fixed_height).max(1);
     let view_area = Rect {
         height: max_view_height,
@@ -81,6 +83,9 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     }
     if threat_patch_height > 0 {
         constraints.push(Constraint::Length(threat_patch_height));
+    }
+    if confirm_height > 0 {
+        constraints.push(Constraint::Length(confirm_height));
     }
     if transcript_height > 0 {
         constraints.push(Constraint::Length(transcript_height));
@@ -121,11 +126,115 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         render_threat_patch_card(frame, chunks[index], app);
         index += 1;
     }
+    if confirm_height > 0 {
+        render_confirm_card(frame, chunks[index], app);
+        index += 1;
+    }
     if transcript_height > 0 {
         render_transcript(frame, chunks[index], app);
         index += 1;
     }
     render_prompt(frame, chunks[index], app);
+}
+
+fn confirm_card_height(app: &ShellApp, area: Rect) -> u16 {
+    if area.height < 6 {
+        return 0;
+    }
+    if app.advisory.pending_confirm.is_none() {
+        return 0;
+    }
+    // Header + 3 detail rows (tool, target, rationale/allowlist) + key
+    // row.  Up to 6 rows; clamp so very narrow viewports still get a
+    // 3-row minimum.
+    6.min(area.height.saturating_sub(8) as u16).max(3)
+}
+
+fn render_confirm_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    if area.height == 0 {
+        return;
+    }
+    let Some(confirm) = app.advisory.pending_confirm.as_ref() else {
+        return;
+    };
+    let (header_glyph, header_style) = match confirm.kind {
+        crate::app::ConfirmKind::DestructiveVerb => ("✗", theme::danger()),
+        _ => ("⚠", theme::warn()),
+    };
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled(format!("{header_glyph} "), header_style),
+        Span::styled(confirm.kind.label().to_string(), header_style),
+    ]));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled("tool      ", theme::muted()),
+        Span::styled(confirm.tool.clone(), theme::primary()),
+        Span::raw("   "),
+        Span::styled("target ", theme::muted()),
+        Span::styled(
+            fit(&confirm.target, (area.width as usize).saturating_sub(40)),
+            theme::primary(),
+        ),
+    ]));
+    if let Some(actor) = &confirm.actor {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("actor     ", theme::muted()),
+            Span::styled(actor.clone(), theme::primary()),
+        ]));
+    }
+    if let Some(rationale) = &confirm.rationale {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("rationale ", theme::muted()),
+            Span::styled(
+                fit(rationale, (area.width as usize).saturating_sub(14)),
+                theme::primary(),
+            ),
+        ]));
+    }
+    if let Some(allowlist) = &confirm.allowlist {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("allowlist ", theme::muted()),
+            Span::styled(
+                fit(allowlist, (area.width as usize).saturating_sub(14)),
+                theme::muted(),
+            ),
+        ]));
+    }
+    if confirm.kind.allows_yes() {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("y", theme::success()),
+            Span::raw(" "),
+            Span::styled("allow once", theme::muted()),
+            Span::raw("   "),
+            Span::styled("Y", theme::success()),
+            Span::raw(" "),
+            Span::styled("allow + remember", theme::muted()),
+            Span::raw("   "),
+            Span::styled("n", theme::danger()),
+            Span::raw(" "),
+            Span::styled("deny once", theme::muted()),
+            Span::raw("   "),
+            Span::styled("N", theme::danger()),
+            Span::raw(" "),
+            Span::styled("deny + add to denylist", theme::muted()),
+        ]));
+    } else {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("rule      ", theme::muted()),
+            Span::styled(
+                "destructive verb · always refused (no override)".to_string(),
+                theme::danger(),
+            ),
+        ]));
+    }
+    render_lines(frame, area, lines);
 }
 
 fn threat_patch_card_height(app: &ShellApp, area: Rect) -> u16 {
@@ -234,6 +343,9 @@ fn shell_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             viewport_lines(history_lines(app, area), area.height, app.history_scroll)
         }
         ShellView::Story => story_lines(app, area),
+        ShellView::Auth => auth_lines(app, area),
+        ShellView::Cost => cost_lines(app, area),
+        ShellView::Patch(alias) => patch_lines(app, area, alias),
     }
 }
 
@@ -318,8 +430,20 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     let modules = app.registry.modules().collect::<Vec<_>>();
     if modules.is_empty() {
-        lines.push(styled("[!] No modules loaded", theme::warn()));
-        lines.push(muted("Run kuzushi modules to inspect the native registry."));
+        // Empty modules registry — almost never happens in production but
+        // matters for plugin-loading errors.  Match the mockup panel shape.
+        lines.push(divider("MODULES · empty", area.width));
+        lines.extend(empty_state_panel(
+            "no modules loaded",
+            &[
+                "the native module registry is empty.",
+                "this almost always means a plugin failed to register.",
+            ],
+            &[
+                ("doctor", "preflight checks for missing tools / plugins"),
+                ("modules", "re-inspect the native registry"),
+            ],
+        ));
         return lines;
     }
 
@@ -398,6 +522,24 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             .push(module);
     }
 
+    // Compute the row at which the catalog cursor sits.  Walk categories
+    // in render order and gather visible modules so the cursor index is
+    // stable across renders.  `j`/`k` in `state_transitions` clamp the
+    // cursor to the visible row count.
+    let mut visible_ids: Vec<String> = Vec::new();
+    for category in ["OFFENSE", "INTEL", "GOVERNANCE", "DEFENSE"] {
+        if let Some(rows) = grouped.get(category) {
+            for module in rows {
+                visible_ids.push(module.metadata().id.clone());
+            }
+        }
+    }
+    let cursor_id = if visible_ids.is_empty() {
+        None
+    } else {
+        Some(visible_ids[app.catalog_cursor.min(visible_ids.len() - 1)].clone())
+    };
+
     for category in ["OFFENSE", "INTEL", "GOVERNANCE", "DEFENSE"] {
         let Some(rows) = grouped.get(category) else {
             continue;
@@ -406,10 +548,17 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         let widths = module_table_widths(area.width);
         lines.push(category_divider(category, blurb, area.width));
         for module in rows {
+            let id = module.metadata().id.as_str();
+            // Row is highlighted when it's either the focused module
+            // (set by `use <id>`) or the j/k cursor row.  Both states
+            // share the `▌` accent + c-sel background per
+            // `design/mockups/catalog.jsx::modRow`.
+            let highlight =
+                app.focused_module.as_deref() == Some(id) || cursor_id.as_deref() == Some(id);
             lines.push(catalog_module_row(
                 &module.metadata().id,
                 &module.metadata().description,
-                app.focused_module.as_deref() == Some(module.metadata().id.as_str()),
+                highlight,
                 &widths,
             ));
         }
@@ -479,8 +628,57 @@ fn module_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             ));
         }
     }
-
     lines.push(blank());
+
+    // OPTIONS — set values from the option store, per
+    // `design/mockups/modules-detail.jsx::s2`.  Only show options that
+    // actually have stored values; keep the panel terse for modules
+    // that haven't been tuned.
+    let stored_options = module_stored_options(app, module);
+    if !stored_options.is_empty() {
+        lines.push(divider(
+            &format!("OPTIONS · {}", stored_options.len()),
+            area.width,
+        ));
+        for (name, value) in &stored_options {
+            lines.push(detail(name, value));
+        }
+        lines.push(blank());
+    }
+
+    // PROMPTS — `.kuzushi/prompts/<module>/<verb>.md` files on disk.
+    // Lists prompt verbs the operator has overridden so they can jump
+    // to the editor with `prompt edit <verb>`.
+    let prompts = module_prompts_on_disk(app, &module.metadata().id);
+    if !prompts.is_empty() {
+        lines.push(divider(&format!("PROMPTS · {}", prompts.len()), area.width));
+        for prompt in &prompts {
+            lines.push(detail(&prompt.verb, &prompt.path));
+        }
+        lines.push(blank());
+    }
+
+    // STATS — quick session-level counts the operator can verify
+    // without scrubbing the transcript.  Pulls live data only.
+    let module_log_count = app
+        .log
+        .iter()
+        .filter(|line| {
+            line.prefix == module.metadata().id
+                || line
+                    .prefix
+                    .starts_with(&format!("{}:", module.metadata().id))
+        })
+        .count();
+    if module_log_count > 0 {
+        lines.push(divider("STATS · this session", area.width));
+        lines.push(detail(
+            "log entries",
+            &format!("{module_log_count} from `{}`", module.metadata().id),
+        ));
+        lines.push(detail("tools bound", &module.tools().len().to_string()));
+        lines.push(blank());
+    }
     let activity_label = match module.metadata().id.as_str() {
         "recon" => Some("RECENT RECON ACTIVITY"),
         "carlini-threat-hunt" => Some("RECENT THREAT-HUNT ACTIVITY"),
@@ -501,6 +699,68 @@ fn module_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     ));
 
     lines
+}
+
+/// Returns `(option-name, formatted-value)` for every tool-scoped
+/// option in this module that has a stored value in the session/global
+/// option store.  Used by `module_lines` OPTIONS section to mirror
+/// `design/mockups/modules-detail.jsx::s2`.
+fn module_stored_options(
+    app: &ShellApp,
+    module: &kuzushi_core::BuiltinModule,
+) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for tool in module.tools() {
+        let stored = app.option_store.effective_stored_values(&tool.name);
+        for (name, value) in stored.iter() {
+            out.push((format!("{}::{}", tool.name, name), format_json_value(value)));
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+#[derive(Debug, Clone)]
+struct ModulePromptOnDisk {
+    verb: String,
+    path: String,
+}
+
+/// Walk `<target>/.kuzushi/prompts/<module>/` and return every `*.md`
+/// file as (verb, relative-path).  Per the agent guide in `CLAUDE.md`
+/// this is exactly the directory `executeTool` reads from for prompt
+/// overrides.  Empty when the dir doesn't exist.
+fn module_prompts_on_disk(app: &ShellApp, module_id: &str) -> Vec<ModulePromptOnDisk> {
+    let prompts_root = app
+        .target
+        .as_deref()
+        .map(|t| t.join(".kuzushi/prompts").join(module_id))
+        .unwrap_or_else(|| std::path::PathBuf::from(".kuzushi/prompts").join(module_id));
+    let Ok(entries) = std::fs::read_dir(&prompts_root) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with(".md") {
+            continue;
+        }
+        let verb = name.trim_end_matches(".md").to_string();
+        out.push(ModulePromptOnDisk {
+            verb,
+            path: entry
+                .path()
+                .strip_prefix(app.target.as_deref().unwrap_or(std::path::Path::new(".")))
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| entry.path().display().to_string()),
+        });
+    }
+    out.sort_by(|a, b| a.verb.cmp(&b.verb));
+    out
 }
 
 /// Pull the most recent N log lines that look like they came from the given
@@ -1018,13 +1278,39 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
 
     if app.findings.is_empty() {
-        lines.push(muted("No findings yet."));
+        // Empty state matches `design/mockups/empty-states.jsx::panel`:
+        //   divider with `· empty` suffix · ∅ glyph + label · explanations
+        //   · blank · CTA rows with `▸` warn glyph + accent command +
+        //   muted blurb.
         let hint = if app.context_view.exists {
-            "Next: scan — runs configured scanners against the active target."
+            "scan runs configured scanners against the active target."
         } else {
-            "Next: scan after `context build` so scanners have structure to walk."
+            "scan dispatches the umbrella scanner once context-snapshot exists."
         };
-        lines.push(muted(hint));
+        let context_cta = if app.context_view.exists {
+            None
+        } else {
+            Some(("context build", "build the snapshot first if you have time"))
+        };
+        lines.push(divider("FINDINGS · empty", area.width));
+        lines.extend(empty_state_panel(
+            "no findings yet",
+            &[
+                "kuzushi keeps the ledger in .kuzushi/v2/findings.sqlite3.",
+                "nothing has been promoted on this workspace.",
+            ],
+            &[
+                Some(("scan", hint)),
+                context_cta,
+                Some((
+                    "load gh:<owner>/<repo>#<pr>",
+                    "seed findings from a GitHub PR",
+                )),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
+        ));
         return lines;
     }
 
@@ -1164,6 +1450,20 @@ fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(detail("rule", &finding.rule_id));
     lines.push(detail("tool", &finding.tool));
     lines.push(detail("fingerprint", &finding.fingerprint));
+    lines.push(detail(
+        "proof state",
+        &fit(
+            proof_state_label(finding.static_proof_state.clone()),
+            value_width(area, 18),
+        ),
+    ));
+    lines.push(detail(
+        "runtime validation",
+        &fit(
+            &runtime_validation_label(finding.verification.as_ref()),
+            value_width(area, 18),
+        ),
+    ));
     lines.push(blank());
     lines.push(divider("EVIDENCE", area.width));
     for line in finding.message.lines().take(8) {
@@ -1181,6 +1481,16 @@ fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         lines.push(detail("rationale", &triage.rationale));
     }
 
+    lines.push(blank());
+    lines.push(command_list_line(
+        &[
+            "findings",
+            "workspace export findings <path>.json",
+            "kuzushi pr-comment",
+            "back",
+        ],
+        area.width as usize,
+    ));
     lines
 }
 
@@ -1528,15 +1838,15 @@ fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("RUNS", area.width));
+    let widths = [12usize, 14, 9, value_width(area, 40)];
+    lines.push(aligned_header(
+        &["runId", "status", "findings", "target"],
+        &widths,
+    ));
+
+    // Active scan first.
+    let mut emitted = 0usize;
     if let Some(scan) = &app.scan {
-        let widths = [10usize, 18, 10, value_width(area, 40)];
-        lines.push(aligned_header(
-            &["run", "status", "findings", "target"],
-            &widths,
-        ));
-        // Status-column tint per `design/mockups/runs.jsx::r`:
-        //   complete → c-success, partial/paused → c-warn,
-        //   failed → c-danger, otherwise c-subtle.
         let run_id = scan
             .run_id
             .as_deref()
@@ -1545,40 +1855,188 @@ fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         let status_text = scan_status(scan);
         let status_style = if scan.error.is_some() {
             theme::danger()
-        } else if scan.running && scan.abort_requested {
-            theme::warn()
         } else if scan.running {
             theme::warn()
         } else {
             theme::success()
         };
-        let findings_text = scan.findings_count.to_string();
-        let target_text = scan.target.display().to_string();
-        let run_w = widths[0];
-        let status_w = widths[1];
-        let findings_w = widths[2];
-        let target_w = widths[3];
-        lines.push(Line::from(vec![
-            Span::styled(format!("{}  ", pad(&run_id, run_w)), theme::accent()),
-            Span::styled(
-                format!("{}  ", pad(&fit(&status_text, status_w), status_w)),
-                status_style,
-            ),
-            Span::styled(
-                format!("{}  ", pad(&findings_text, findings_w)),
-                theme::primary(),
-            ),
-            Span::styled(
-                format!("{}  ", pad(&fit(&target_text, target_w), target_w)),
-                theme::muted(),
-            ),
-        ]));
+        lines.push(runs_row(
+            &run_id,
+            &status_text,
+            status_style,
+            &scan.findings_count.to_string(),
+            &scan.target.display().to_string(),
+            &widths,
+        ));
+        emitted += 1;
+    }
+
+    // Past runs from disk: `<target>/.kuzushi/runs/<runId>/`.  Read up to
+    // 20 most recent dirs (alphabetical-ish since runIds embed timestamps).
+    let runs_root = app
+        .target
+        .as_deref()
+        .map(|t| t.join(".kuzushi/runs"))
+        .unwrap_or_else(|| std::path::PathBuf::from(".kuzushi/runs"));
+    let mut past_runs: Vec<PastRun> = collect_past_runs(&runs_root);
+    past_runs.sort_by(|a, b| b.run_id.cmp(&a.run_id));
+    let take = (area.height.saturating_sub(8) as usize).max(5).min(20);
+    for past in past_runs.iter().take(take) {
+        // Skip the run that's already shown as the active scan.
+        if let Some(scan) = &app.scan {
+            if scan.run_id.as_deref().map(short).as_deref() == Some(short(&past.run_id).as_str()) {
+                continue;
+            }
+        }
+        let style = match past.status_kind {
+            PastRunStatus::Complete => theme::success(),
+            PastRunStatus::Partial | PastRunStatus::Paused => theme::warn(),
+            PastRunStatus::Failed => theme::danger(),
+            PastRunStatus::Unknown => theme::muted(),
+        };
+        lines.push(runs_row(
+            &short(&past.run_id),
+            past.status_label(),
+            style,
+            &past
+                .findings
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "—".to_string()),
+            &past.target,
+            &widths,
+        ));
+        emitted += 1;
+    }
+
+    if emitted == 0 {
+        // Empty state mirrors `design/mockups/empty-states.jsx::panel`
+        // for the runs ledger (`RUNS · empty`) — every dispatch writes
+        // a run dir, so suggest the cheapest first run.
+        lines.extend(empty_state_panel(
+            "no runs persisted",
+            &[
+                "every dispatch writes a run dir under .kuzushi/runs/<id>/.",
+                "this workspace has not run a module yet.",
+            ],
+            &[
+                ("scan", "first run will land at .kuzushi/runs/<id>/"),
+                ("use context", "cheapest first run · indexes the workspace"),
+            ],
+        ));
     } else {
-        lines.push(muted(
-            "No scan run is active in this shell session. Next: `scan` to start one, or `replay <runId>` for a past run on disk.",
+        lines.push(blank());
+        lines.push(command_list_line(
+            &["replay <runId>", "trace <runId>", "findings", "back"],
+            area.width as usize,
         ));
     }
     lines
+}
+
+fn runs_row(
+    run_id: &str,
+    status: &str,
+    status_style: Style,
+    findings: &str,
+    target: &str,
+    widths: &[usize; 4],
+) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{}  ", pad(run_id, widths[0])), theme::accent()),
+        Span::styled(
+            format!("{}  ", pad(&fit(status, widths[1]), widths[1])),
+            status_style,
+        ),
+        Span::styled(format!("{}  ", pad(findings, widths[2])), theme::primary()),
+        Span::styled(
+            format!("{}  ", pad(&fit(target, widths[3]), widths[3])),
+            theme::muted(),
+        ),
+    ])
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PastRunStatus {
+    Complete,
+    Partial,
+    Paused,
+    Failed,
+    Unknown,
+}
+
+#[derive(Debug, Clone)]
+struct PastRun {
+    run_id: String,
+    status_kind: PastRunStatus,
+    findings: Option<u64>,
+    target: String,
+}
+
+impl PastRun {
+    fn status_label(&self) -> &'static str {
+        match self.status_kind {
+            PastRunStatus::Complete => "complete",
+            PastRunStatus::Partial => "partial",
+            PastRunStatus::Paused => "paused",
+            PastRunStatus::Failed => "failed",
+            PastRunStatus::Unknown => "—",
+        }
+    }
+}
+
+/// Walk `<target>/.kuzushi/runs/` and parse each subdir's optional
+/// `summary.json` for status/findings/target.  Missing or unreadable
+/// summaries fall back to the run-id directory name + "unknown" status.
+fn collect_past_runs(runs_root: &std::path::Path) -> Vec<PastRun> {
+    let Ok(entries) = std::fs::read_dir(runs_root) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_dir() {
+            continue;
+        }
+        let run_id = entry.file_name().to_string_lossy().to_string();
+        let summary_path = entry.path().join("summary.json");
+        let (status_kind, findings, target) = if let Ok(bytes) = std::fs::read(&summary_path) {
+            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                let status = value
+                    .get("status")
+                    .and_then(serde_json::Value::as_str)
+                    .map(parse_past_run_status)
+                    .unwrap_or(PastRunStatus::Unknown);
+                let findings = value.get("findings").and_then(serde_json::Value::as_u64);
+                let target = value
+                    .get("target")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string)
+                    .unwrap_or_default();
+                (status, findings, target)
+            } else {
+                (PastRunStatus::Unknown, None, String::new())
+            }
+        } else {
+            (PastRunStatus::Unknown, None, String::new())
+        };
+        out.push(PastRun {
+            run_id,
+            status_kind,
+            findings,
+            target,
+        });
+    }
+    out
+}
+
+fn parse_past_run_status(s: &str) -> PastRunStatus {
+    match s.to_ascii_lowercase().as_str() {
+        "complete" | "done" | "ok" | "success" => PastRunStatus::Complete,
+        "partial" => PastRunStatus::Partial,
+        "paused" => PastRunStatus::Paused,
+        "failed" | "error" => PastRunStatus::Failed,
+        _ => PastRunStatus::Unknown,
+    }
 }
 
 fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> {
@@ -1603,20 +2061,130 @@ fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> 
 fn trace_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
-    lines.push(divider("TRACE", area.width));
-    lines.push(detail("run", run_id));
+    lines.push(divider(&format!("TRACE · {run_id}"), area.width));
     let triage_path = run_artifact_path(app, run_id, "triage.jsonl");
     let verify_path = run_artifact_path(app, run_id, "verify.jsonl");
+    let trace_path = run_artifact_path(app, run_id, "trace.jsonl");
+    lines.push(detail("run", run_id));
+    lines.push(run_artifact_detail("trace", &trace_path));
     lines.push(run_artifact_detail("triage", &triage_path));
     lines.push(run_artifact_detail("verify", &verify_path));
-    if !triage_path.exists() && !verify_path.exists() {
+
+    // STEPS section per `design/mockups/trace.jsx::step` — one row per
+    // agent step with kind-tinted column + label + latency + cost.
+    let steps = parse_trace_jsonl(&trace_path);
+    if steps.is_empty() {
         lines.push(blank());
-        lines.push(muted(
-            "(run artefacts not on disk; check `show runs` for valid runIds)",
-        ));
+        if !trace_path.exists() {
+            lines.push(muted(
+                "(no trace.jsonl on disk; trace artefacts ship with agentic / patch / verify runs)",
+            ));
+        } else {
+            lines.push(muted("(trace.jsonl is empty)"));
+        }
+    } else {
+        lines.push(blank());
+        lines.push(divider("STEPS", area.width));
+        for step in &steps {
+            lines.push(trace_step_line(step, area.width));
+        }
     }
     lines.extend(alias_reference_lines(app, area));
     lines
+}
+
+#[derive(Debug, Clone)]
+struct TraceStep {
+    n: usize,
+    kind: String,
+    label: String,
+    latency_ms: Option<u64>,
+    cost_usd: Option<f64>,
+}
+
+/// Parse a `trace.jsonl` artefact into typed steps.  Each line is a
+/// JSON object with at minimum a `kind` (string) and `label` (string);
+/// `n`, `latency_ms`, `cost_usd` are optional and default sensibly.
+fn parse_trace_jsonl(path: &std::path::Path) -> Vec<TraceStep> {
+    let Ok(bytes) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    let Ok(text) = std::str::from_utf8(&bytes) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (idx, raw) in text.lines().enumerate() {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        let value: serde_json::Value = match serde_json::from_str(raw) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let n = value
+            .get("n")
+            .and_then(serde_json::Value::as_u64)
+            .map(|n| n as usize)
+            .unwrap_or(idx + 1);
+        let kind = value
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("step")
+            .to_string();
+        let label = value
+            .get("label")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("(no label)")
+            .to_string();
+        let latency_ms = value.get("latency_ms").and_then(serde_json::Value::as_u64);
+        let cost_usd = value.get("cost_usd").and_then(serde_json::Value::as_f64);
+        out.push(TraceStep {
+            n,
+            kind,
+            label,
+            latency_ms,
+            cost_usd,
+        });
+    }
+    out
+}
+
+fn trace_step_line(step: &TraceStep, width: u16) -> Line<'static> {
+    let kind_style = match step.kind.as_str() {
+        "plan" => theme::label(),
+        "tool" => theme::success(),
+        "llm" => theme::accent(),
+        "refused" => theme::danger(),
+        "critic" => theme::warn(),
+        _ => theme::muted(),
+    };
+    let latency = step
+        .latency_ms
+        .map(|ms| {
+            if ms >= 1000 {
+                format!("{:.1}s", ms as f64 / 1000.0)
+            } else {
+                format!("{ms}ms")
+            }
+        })
+        .unwrap_or_else(|| "—".to_string());
+    let cost = step
+        .cost_usd
+        .map(|c| format!("${c:.4}"))
+        .unwrap_or_else(|| "—".to_string());
+    let label_budget = (width as usize).saturating_sub(28).max(20);
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(format!("{:>3} ", step.n), theme::subtle()),
+        Span::styled(format!("{:8}", step.kind), kind_style),
+        Span::raw(" "),
+        Span::styled(fit(&step.label, label_budget), theme::primary()),
+        Span::raw("  "),
+        Span::styled(format!("{:>7}", latency), theme::muted()),
+        Span::raw("  "),
+        Span::styled(cost, theme::muted()),
+    ])
 }
 
 fn run_artifact_path(app: &ShellApp, run_id: &str, leaf: &str) -> std::path::PathBuf {
@@ -1699,7 +2267,7 @@ pub(super) fn help_category_blurb(category: ShellCommandCategory) -> &'static st
         ShellCommandCategory::RunScan => "dispatch tools and scans",
         ShellCommandCategory::OptionsTasks => "options + sast task control",
         ShellCommandCategory::ContextKb => "workspace + attachments",
-        ShellCommandCategory::FindingsEvidence => "browse / open / triage findings",
+        ShellCommandCategory::FindingsEvidence => "browse findings, evidence, and report output",
         ShellCommandCategory::AuthConfigModel => "auth, model, runtime config",
         ShellCommandCategory::Session => "history, cost, lifecycle",
     }
@@ -1711,35 +2279,41 @@ fn quickstart_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(divider("QUICKSTART", area.width));
     lines.push(blank());
     lines.push(Line::styled(
-        "Welcome to kuzushi. Five steps to your first finding:",
+        "Welcome to kuzushi. Operator path:",
         theme::heading(),
     ));
     lines.push(blank());
     let scan_step = if app.target.is_some() {
-        "scan                       run configured scanners on the active target"
+        "scan / run                 scan the active target; run <tool> dispatches one tool"
     } else {
-        "scan .                     run configured scanners on this directory"
+        "scan . / run <tool>        scan this directory; run <tool> dispatches one tool"
     };
     let steps = [
-        ("1", scan_step),
-        ("2", "findings                   browse persisted findings"),
         (
-            "3",
-            "context build              write .kuzushi/context-snapshot.json",
+            "1",
+            "doctor                    CLI preflight: kuzushi doctor",
         ),
         (
+            "2",
+            "context build              write .kuzushi/context-snapshot.json",
+        ),
+        ("3", scan_step),
+        (
             "4",
-            "model                      choose an explicit provider/model for ask/triage",
+            "findings / open F-0001     inspect evidence and proof state",
         ),
         (
             "5",
-            "ask <question>             ask after a model is configured",
+            "report output              workspace export; kuzushi pr-comment",
         ),
     ];
     for (num, step) in steps {
         lines.push(Line::from(vec![
             Span::styled(format!("  {num}. "), theme::accent()),
-            Span::styled(step.to_string(), theme::primary()),
+            Span::styled(
+                fit(step, area.width.saturating_sub(5) as usize),
+                theme::primary(),
+            ),
         ]));
     }
     lines.push(blank());
@@ -2169,8 +2743,19 @@ fn context_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ));
     } else {
         lines.push(blank());
-        lines.push(muted(
-            "No context snapshot exists yet. Run context build to write .kuzushi/context-snapshot.json.",
+        lines.extend(empty_state_panel(
+            "no context snapshot yet",
+            &[
+                "context indexes the workspace into .kuzushi/context-snapshot.json.",
+                "every SAST module reads the snapshot for structure.",
+            ],
+            &[
+                ("context build", "write the full snapshot"),
+                (
+                    "context status",
+                    "inspect freshness if you think one exists",
+                ),
+            ],
         ));
     }
 
@@ -2236,8 +2821,25 @@ fn workspace_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     if view.root.is_none() {
         lines.push(blank());
-        lines.push(muted(
-            "No active workspace is selected. Run scan <target> or start kuzushi shell --target .",
+        // Empty state per `design/mockups/empty-states.jsx::panel` —
+        // operator hasn't picked a workspace yet, so spell out the two
+        // canonical entry points.
+        lines.extend(empty_state_panel(
+            "no workspace selected",
+            &[
+                "kuzushi anchors all state under <target>/.kuzushi/.",
+                "pick a target before running modules.",
+            ],
+            &[
+                (
+                    "scan <target>",
+                    "scan + remember <target> as the active workspace",
+                ),
+                (
+                    "kuzushi shell --target .",
+                    "launch with the current dir as workspace",
+                ),
+            ],
         ));
     }
 
@@ -2268,7 +2870,7 @@ fn workspace_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         &[
             "workspace status",
             "workspace export findings <path>.json",
-            "findings export <path>.json",
+            "kuzushi pr-comment",
         ],
         area.width as usize,
     ));
@@ -2371,12 +2973,25 @@ fn knowledge_base_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     lines.push(blank());
-    lines.push(divider("ATTACHED", area.width));
     if attachments.is_empty() {
-        lines.push(muted(
-            "No attachments yet. Use attach <repo-relative-path> or attach https://example/...",
+        lines.push(divider("ATTACHED · empty", area.width));
+        lines.extend(empty_state_panel(
+            "no attachments yet",
+            &[
+                "kuzushi indexes attachments under .kuzushi/v2/artifact-kb.sqlite3.",
+                "this module has no path or URL attachments bound.",
+            ],
+            &[
+                (
+                    "attach <path>",
+                    "add a workspace-relative file or directory",
+                ),
+                ("attach https://...", "add a URL · metadata-only by default"),
+                ("kb pull kev", "preload the KEV / NVD / CWE catalogs"),
+            ],
         ));
     } else {
+        lines.push(divider("ATTACHED", area.width));
         lines.push(table_header(
             &["id", "kind", "source", "status"],
             &kb_attachment_widths(area.width),
@@ -2414,12 +3029,27 @@ fn knowledge_base_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 fn agent_chat_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
-    lines.push(divider("AGENT", area.width));
 
     let Some(agent) = &app.agent_chat else {
-        lines.push(muted("No active question. Use ask <question> or ?text."));
+        // No question yet — render the mockup empty-state panel so the
+        // operator sees how to start a chat instead of a flat
+        // `No active question.` muted line.
+        lines.push(divider("AGENT · empty", area.width));
+        lines.extend(empty_state_panel(
+            "no question yet",
+            &[
+                "agent chat dispatches a single question through pi-agent-core.",
+                "tools and findings are read-only; the chat doesn't write to disk.",
+            ],
+            &[
+                ("ask <question>", "explicit agent route"),
+                ("?<text>", "always-on agent route from any view"),
+                ("model <provider:id>", "pick the model the agent will use"),
+            ],
+        ));
         return lines;
     };
+    lines.push(divider("AGENT", area.width));
 
     let status = if agent.abort_requested {
         "abort requested"
@@ -2437,29 +3067,50 @@ fn agent_chat_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         app.config.model.as_deref().unwrap_or("unconfigured"),
     ));
     lines.push(blank());
-    // Bubble-style tag matching `design/mockups/agent-chat.jsx::bubble`:
-    //   `  you  ──...──`  (c-accent tag)
-    //   `   <body>`        (c-primary)
-    //   blank
-    //   ` agent ──...──`  (c-success tag)
-    //   `   <body>`
+    // Multi-turn bubbles: render `agent.history` (oldest first) before
+    // the active turn so the operator sees the full conversation per
+    // `design/mockups/agent-chat.jsx::bubble`.  Each prior turn is
+    // rendered with a max of 6 answer lines so a long session doesn't
+    // blow the viewport — full text remains in the underlying log.
+    let body_w = area.width.saturating_sub(3) as usize;
+    for turn in &agent.history {
+        lines.push(chat_bubble_header("  you  ", theme::accent(), area.width));
+        for line in wrap_text(&turn.question, body_w) {
+            lines.push(indent(styled(&line, theme::primary()), 3));
+        }
+        lines.push(blank());
+        if let Some(error) = &turn.error {
+            lines.push(chat_bubble_header(" error ", theme::danger(), area.width));
+            for line in wrap_text(error, body_w).into_iter().take(6) {
+                lines.push(indent(styled(&line, theme::danger()), 3));
+            }
+        } else if let Some(answer) = &turn.answer {
+            lines.push(chat_bubble_header(" agent ", theme::success(), area.width));
+            for line in wrap_text(answer, body_w).into_iter().take(6) {
+                lines.push(indent(styled(&line, theme::primary()), 3));
+            }
+        } else {
+            lines.push(chat_bubble_header(" agent ", theme::success(), area.width));
+            lines.push(indent(muted("(no answer)"), 3));
+        }
+        lines.push(blank());
+    }
+
+    // Active turn — full bubble with up to 12 answer lines.
     lines.push(chat_bubble_header("  you  ", theme::accent(), area.width));
-    for line in wrap_text(&agent.question, area.width.saturating_sub(3) as usize) {
+    for line in wrap_text(&agent.question, body_w) {
         lines.push(indent(styled(&line, theme::primary()), 3));
     }
     lines.push(blank());
 
     if let Some(error) = &agent.error {
         lines.push(chat_bubble_header(" error ", theme::danger(), area.width));
-        for line in wrap_text(error, area.width.saturating_sub(3) as usize) {
+        for line in wrap_text(error, body_w) {
             lines.push(indent(styled(&line, theme::danger()), 3));
         }
     } else if let Some(answer) = &agent.answer {
         lines.push(chat_bubble_header(" agent ", theme::success(), area.width));
-        for line in wrap_text(answer, area.width.saturating_sub(3) as usize)
-            .into_iter()
-            .take(12)
-        {
+        for line in wrap_text(answer, body_w).into_iter().take(12) {
             lines.push(indent(styled(&line, theme::primary()), 3));
         }
     } else if agent.abort_requested {
@@ -2493,7 +3144,18 @@ fn history_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         .take(50)
         .collect::<Vec<_>>();
     if entries.is_empty() {
-        lines.push(muted("No command history yet. Next: help"));
+        lines.extend(empty_state_panel(
+            "no commands run yet",
+            &[
+                "session history records every operator-typed command line.",
+                "type something at the prompt and it will land here.",
+            ],
+            &[
+                ("help", "browse the full command catalog"),
+                ("modules", "see what's loaded"),
+                ("scan .", "smallest one-shot run"),
+            ],
+        ));
     } else {
         let start = app.command_history.len().saturating_sub(entries.len()) + 1;
         let width = (start + entries.len()).to_string().len();
@@ -2551,8 +3213,17 @@ fn story_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         .take(max_events)
         .collect::<Vec<_>>();
     if events.is_empty() {
-        lines.push(muted(
-            "No session events yet. Next: run <tool>, ask <question>, or scan <target>",
+        lines.extend(empty_state_panel(
+            "no session events yet",
+            &[
+                "the timeline replays prior scan / agent / module events.",
+                "run something to populate it.",
+            ],
+            &[
+                ("scan <target>", "umbrella scan against a workspace"),
+                ("ask <question>", "single-shot agent question"),
+                ("run <tool>", "dispatch a registered tool"),
+            ],
         ));
     } else {
         for line in events.into_iter().rev() {
@@ -2573,6 +3244,459 @@ fn story_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         area.width as usize,
     ));
     lines
+}
+
+/// `/auth` view — providers + effective model + spend.  Mirrors
+/// `design/mockups/auth.jsx`.  Pulls real auth state from environment
+/// variables, oauth helpers, and the active config — same data the
+/// transcript log line was already showing, but as a structured panel
+/// the operator can read at a glance.
+fn auth_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let mut lines = context_strip(app, area);
+    lines.push(blank());
+
+    // PROVIDERS section --------------------------------------------------
+    lines.push(divider("PROVIDERS", area.width));
+    let providers = auth_provider_rows(app);
+    for row in &providers {
+        lines.push(auth_provider_line(row));
+    }
+    lines.push(blank());
+
+    // MODEL · effective section -----------------------------------------
+    lines.push(divider("MODEL · effective", area.width));
+    let model = app.config.model.as_deref().unwrap_or("unconfigured");
+    let backend = crate::app::runtime_backend_label(&app.config);
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled("current  ", theme::muted()),
+        Span::styled(model.to_string(), theme::primary()),
+        Span::styled(" · ", theme::subtle()),
+        Span::styled("backend ", theme::muted()),
+        Span::styled(backend.to_string(), theme::primary()),
+        Span::styled(" · ", theme::subtle()),
+        Span::styled("routing ", theme::muted()),
+        Span::styled("direct", theme::primary()),
+    ]));
+    if let Some(reasoning) = app.session_thinking_level.as_deref() {
+        lines.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled("reasoning ", theme::muted()),
+            Span::styled(reasoning.to_string(), theme::primary()),
+        ]));
+    }
+    lines.push(blank());
+
+    // SPEND section ------------------------------------------------------
+    lines.push(divider("SPEND · this session", area.width));
+    let session_cost = format_session_cost(app.session_cost_usd);
+    let last_tool = app
+        .last_tool_cost_usd
+        .map(|c| format!("${c:.4}"))
+        .unwrap_or_else(|| "—".to_string());
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled("session   ", theme::muted()),
+        Span::styled(session_cost, theme::primary()),
+        Span::styled("   · ", theme::subtle()),
+        Span::styled("last tool ", theme::muted()),
+        Span::styled(last_tool, theme::primary()),
+    ]));
+    if let Some(budget) = app.session_budget_usd {
+        let pct = if budget > 0.0 {
+            (app.session_cost_usd / budget * 100.0).round() as usize
+        } else {
+            0
+        };
+        let pct_style = if pct >= 85 {
+            theme::warn()
+        } else {
+            theme::muted()
+        };
+        lines.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled("budget    ", theme::muted()),
+            Span::styled(format!("${budget:.2}"), theme::primary()),
+            Span::styled("   · ", theme::subtle()),
+            Span::styled(format!("{pct}%"), pct_style),
+        ]));
+    }
+    lines.push(blank());
+
+    // CTA row
+    lines.push(command_list_line(
+        &[
+            "auth login openai-codex",
+            "auth login anthropic",
+            "model <provider:id>",
+            "config",
+            "back",
+        ],
+        area.width as usize,
+    ));
+    lines
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthProviderState {
+    Connected,
+    Missing,
+    Inactive,
+}
+
+struct AuthProviderRow {
+    name: &'static str,
+    state: AuthProviderState,
+    detail: String,
+}
+
+/// Build the providers table for `auth_lines`.  Keeps the data source
+/// honest: `KUZUSHI_API_KEY` / `ANTHROPIC_API_KEY` for env-key auth,
+/// `oauth_provider_status` for OAuth.
+fn auth_provider_rows(app: &ShellApp) -> Vec<AuthProviderRow> {
+    let api_key_env = app.config.runtime.api_key_env.clone();
+    let env_set = std::env::var_os(api_key_env.as_str()).is_some();
+    let anthropic_set = std::env::var_os("ANTHROPIC_API_KEY").is_some();
+    let codex_oauth = crate::app::oauth_provider_status("openai-codex");
+    let anthropic_oauth = crate::app::oauth_provider_status("anthropic");
+
+    let env_state = if env_set {
+        AuthProviderState::Connected
+    } else {
+        AuthProviderState::Missing
+    };
+    let env_detail = if env_set {
+        format!("{api_key_env}=set; value hidden")
+    } else {
+        format!("{api_key_env}=missing")
+    };
+
+    let anthropic_state = if anthropic_set || anthropic_oauth == "ok" {
+        AuthProviderState::Connected
+    } else {
+        AuthProviderState::Missing
+    };
+    let anthropic_detail = format!(
+        "ANTHROPIC_API_KEY={}; oauth {}",
+        if anthropic_set { "set" } else { "missing" },
+        anthropic_oauth
+    );
+
+    let codex_state = if codex_oauth == "ok" {
+        AuthProviderState::Connected
+    } else {
+        AuthProviderState::Inactive
+    };
+    let codex_detail = format!("oauth {codex_oauth}");
+
+    vec![
+        AuthProviderRow {
+            name: "pi-agent-core",
+            state: env_state,
+            detail: env_detail,
+        },
+        AuthProviderRow {
+            name: "anthropic",
+            state: anthropic_state,
+            detail: anthropic_detail,
+        },
+        AuthProviderRow {
+            name: "openai-codex",
+            state: codex_state,
+            detail: codex_detail,
+        },
+    ]
+}
+
+fn auth_provider_line(row: &AuthProviderRow) -> Line<'static> {
+    let (glyph, glyph_style, label_style) = match row.state {
+        AuthProviderState::Connected => (" ✓ ", theme::success(), theme::success()),
+        AuthProviderState::Missing => (" ✗ ", theme::danger(), theme::danger()),
+        AuthProviderState::Inactive => (" · ", theme::subtle(), theme::muted()),
+    };
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(glyph, glyph_style),
+        Span::raw(" "),
+        Span::styled(format!("{:14}", row.name), theme::accent()),
+        Span::styled(format!("{:11}", row.state.label()), label_style),
+        Span::styled(row.detail.clone(), theme::muted()),
+    ])
+}
+
+impl AuthProviderState {
+    fn label(self) -> &'static str {
+        match self {
+            AuthProviderState::Connected => "connected",
+            AuthProviderState::Missing => "missing",
+            AuthProviderState::Inactive => "inactive",
+        }
+    }
+}
+
+/// `/patch <alias>` view — RATIONALE / DIFF / TESTS / GUARDRAIL
+/// matching `design/mockups/patch.jsx`.  Pulls from
+/// `app.pending_patch` when the alias matches; otherwise renders an
+/// empty state advising how to stage a patch.
+fn patch_lines(app: &ShellApp, area: Rect, alias: &str) -> Vec<Line<'static>> {
+    let mut lines = context_strip(app, area);
+    lines.push(blank());
+
+    let Some(patch) = app.pending_patch.as_ref().filter(|p| p.alias == alias) else {
+        lines.push(divider(&format!("PATCH · {alias} · empty"), area.width));
+        lines.extend(empty_state_panel(
+            "no patch staged",
+            &[
+                "patches are produced by `patch:run` and staged under .kuzushi/runs/.",
+                "the operator approves with /patch apply or rejects with /patch reject.",
+            ],
+            &[
+                ("use patch", "focus the patch module"),
+                (
+                    "run patch:run --finding F-…",
+                    "stage a patch for a verified finding",
+                ),
+                ("findings", "browse persisted findings to pick one"),
+            ],
+        ));
+        return lines;
+    };
+
+    // RATIONALE
+    lines.push(divider(
+        &format!("PATCH · {} · RATIONALE", patch.alias),
+        area.width,
+    ));
+    for line in wrap_text(&patch.rationale, area.width.saturating_sub(3) as usize) {
+        lines.push(indent(styled(&line, theme::primary()), 3));
+    }
+    if let Some(side) = &patch.side_effect {
+        lines.push(indent(
+            Line::from(vec![
+                Span::styled("side-effect: ", theme::muted()),
+                Span::styled(side.clone(), theme::primary()),
+            ]),
+            3,
+        ));
+    }
+    lines.push(blank());
+
+    // DIFF
+    let summary = patch_diff_summary(&patch.diff);
+    lines.push(divider(
+        &format!(
+            "DIFF · {files} file{plural} · +{adds} −{dels}",
+            files = summary.files,
+            plural = if summary.files == 1 { "" } else { "s" },
+            adds = summary.adds,
+            dels = summary.dels,
+        ),
+        area.width,
+    ));
+    for line in patch_diff_lines(&patch.diff, area.width) {
+        lines.push(line);
+    }
+    lines.push(blank());
+
+    // TESTS
+    if !patch.tests.is_empty() {
+        lines.push(divider(
+            &format!("TESTS · added · {}", patch.tests.len()),
+            area.width,
+        ));
+        for (name, blurb) in &patch.tests {
+            lines.push(Line::from(vec![
+                Span::raw("   "),
+                Span::styled(" ✓ ", theme::success()),
+                Span::styled(name.clone(), theme::primary()),
+                Span::raw("  "),
+                Span::styled(blurb.clone(), theme::muted()),
+            ]));
+        }
+        lines.push(blank());
+    }
+
+    // GUARDRAIL
+    if let Some(guard) = &patch.guardrail {
+        lines.push(divider("GUARDRAIL", area.width));
+        lines.push(Line::from(vec![
+            Span::raw("   "),
+            Span::styled(" ! ", theme::warn()),
+            Span::raw(" "),
+            Span::styled(guard.clone(), theme::primary()),
+            Span::styled(
+                " — patch is staged, NOT applied".to_string(),
+                theme::muted(),
+            ),
+        ]));
+        lines.push(command_list_line(
+            &[
+                "/patch apply",
+                "/patch reject",
+                "/patch regen --style defensive",
+            ],
+            area.width as usize,
+        ));
+        lines.push(blank());
+    }
+
+    if let Some(staged) = &patch.staged_at {
+        lines.push(Line::from(vec![
+            Span::styled(" staged at ", theme::muted()),
+            Span::styled(staged.clone(), theme::primary()),
+        ]));
+    }
+    lines
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct PatchDiffSummary {
+    files: usize,
+    adds: usize,
+    dels: usize,
+}
+
+/// Tally `+` / `-` line counts and `+++` file headers in a unified diff.
+fn patch_diff_summary(diff: &str) -> PatchDiffSummary {
+    let mut summary = PatchDiffSummary::default();
+    for line in diff.lines() {
+        if line.starts_with("+++") {
+            summary.files += 1;
+        } else if line.starts_with('+') && !line.starts_with("+++") {
+            summary.adds += 1;
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            summary.dels += 1;
+        }
+    }
+    if summary.files == 0 && (summary.adds > 0 || summary.dels > 0) {
+        summary.files = 1;
+    }
+    summary
+}
+
+/// Render a unified diff into styled `Line`s matching
+/// `design/mockups/patch.jsx::diff`:
+///   `+ added line`  in c-success
+///   `- deleted line` in c-danger
+///   `  ctx line`    in c-muted
+///   `@@ hunk @@`    in c-subtle
+///   `--- a/path`    file header in c-accent
+fn patch_diff_lines(diff: &str, width: u16) -> Vec<Line<'static>> {
+    let body_width = (width as usize).saturating_sub(7);
+    let mut out = Vec::new();
+    for raw in diff.lines() {
+        let line = if raw.starts_with("+++") || raw.starts_with("---") {
+            Line::from(vec![
+                Span::raw("   "),
+                Span::styled("── ", theme::subtle()),
+                Span::styled(fit(raw, body_width), theme::accent()),
+            ])
+        } else if let Some(rest) = raw.strip_prefix("@@") {
+            Line::from(vec![
+                Span::raw("   "),
+                Span::styled(format!("@@{rest}"), theme::subtle()),
+            ])
+        } else if let Some(rest) = raw.strip_prefix('+') {
+            Line::from(vec![
+                Span::raw("     "),
+                Span::styled("+ ", theme::success()),
+                Span::styled(fit(rest, body_width), theme::success()),
+            ])
+        } else if let Some(rest) = raw.strip_prefix('-') {
+            Line::from(vec![
+                Span::raw("     "),
+                Span::styled("- ", theme::danger()),
+                Span::styled(fit(rest, body_width), theme::danger()),
+            ])
+        } else {
+            Line::from(vec![
+                Span::raw("       "),
+                Span::styled(fit(raw, body_width), theme::muted()),
+            ])
+        };
+        out.push(line);
+    }
+    out
+}
+
+/// `/cost` view — budget bars + per-tool spend.  Mirrors
+/// `design/mockups/cost.jsx`.  Pulls real cost numbers from
+/// `app.session_cost_usd`, `app.last_tool_cost_usd`, and
+/// `app.session_budget_usd`.
+fn cost_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let mut lines = context_strip(app, area);
+    lines.push(blank());
+
+    // BUDGETS section ----------------------------------------------------
+    lines.push(divider("BUDGETS", area.width));
+    let session = app.session_cost_usd;
+    let session_budget = app.session_budget_usd.unwrap_or(5.0);
+    lines.push(cost_budget_bar("this session    ", session, session_budget));
+    if let Some(last) = app.last_tool_cost_usd {
+        lines.push(cost_budget_bar("last tool       ", last, session_budget));
+    }
+    lines.push(blank());
+
+    // SPEND section ------------------------------------------------------
+    lines.push(divider("SPEND", area.width));
+    let session_text = format_session_cost(session);
+    let last_text = app
+        .last_tool_cost_usd
+        .map(|c| format!("${c:.4}"))
+        .unwrap_or_else(|| "—".to_string());
+    lines.push(detail("session", &session_text));
+    lines.push(detail("last tool", &last_text));
+    if let Some(budget) = app.session_budget_usd {
+        lines.push(detail("budget", &format!("${budget:.2}")));
+    } else {
+        lines.push(detail("budget", "unset"));
+    }
+    lines.push(blank());
+
+    // CTA row
+    lines.push(command_list_line(
+        &["model <provider:id>", "config", "back"],
+        area.width as usize,
+    ));
+    lines.push(muted(
+        "Per-tool spend ledger appears once Rust tools report `costUsd` (scanner-only work may stay $0).",
+    ));
+    lines
+}
+
+/// Render a single 30-cell budget bar matching
+/// `design/mockups/cost.jsx::bar`.  Bar is severity-tinted by spend
+/// percentage (success < 85% < warn < 100% < danger).
+fn cost_budget_bar(label: &str, used: f64, cap: f64) -> Line<'static> {
+    let bar_w: usize = 30;
+    let pct = if cap > 0.0 {
+        (used / cap).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let fill = (bar_w as f64 * pct).round() as usize;
+    let empty = bar_w - fill;
+    let pct_int = (pct * 100.0).round() as usize;
+    let style = if pct_int >= 100 {
+        theme::danger()
+    } else if pct_int >= 85 {
+        theme::warn()
+    } else {
+        theme::success()
+    };
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(format!("{:18}", label), theme::primary()),
+        Span::styled(" [", theme::subtle()),
+        Span::styled("█".repeat(fill), style),
+        Span::styled("░".repeat(empty), theme::subtle()),
+        Span::styled("] ", theme::subtle()),
+        Span::styled(format!("${used:>6.2}"), theme::primary()),
+        Span::styled(" / ", theme::muted()),
+        Span::styled(format!("${cap:>6.2}"), theme::muted()),
+        Span::raw(" "),
+        Span::styled(format!("{pct_int:>3}%"), style),
+    ])
 }
 
 fn kb_artifact_widths(width: u16) -> Vec<usize> {
@@ -3061,6 +4185,41 @@ fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     frame.render_widget(Paragraph::new(line), area);
 }
 
+/// Returns a one-word stage label when the shell has a long-running
+/// worker active (scan / agent / planner / threats).  None when idle —
+/// in which case the top status strip skips the `stage ⠿ …` segment.
+fn active_stage_label(app: &ShellApp) -> Option<&'static str> {
+    if let Some(scan) = app.scan.as_ref() {
+        if scan.running {
+            if scan.abort_requested {
+                return Some("aborting");
+            }
+            return Some("running");
+        }
+    }
+    if let Some(agent) = app.agent_chat.as_ref() {
+        if agent.running {
+            if agent.abort_requested {
+                return Some("aborting");
+            }
+            return Some("asking");
+        }
+    }
+    if app.planner_running {
+        if app.plan_abort_requested {
+            return Some("aborting");
+        }
+        return Some("planning");
+    }
+    if app.threat_worker_running {
+        if app.threat_abort_requested {
+            return Some("aborting");
+        }
+        return Some("modeling");
+    }
+    None
+}
+
 fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let target = app
         .target
@@ -3134,6 +4293,20 @@ fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     // model
     push_segment(&mut spans, "model", model.to_string(), theme::primary());
 
+    // stage segment: only when something is running, per
+    // `design/mockups/sast-running.jsx::customStrip`:
+    //   `stage ⠿ running` (warn-tinted)
+    // Includes a spinner frame so the strip animates while the worker
+    // ticks.
+    let stage_label = active_stage_label(app);
+    if let Some(label) = stage_label {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled("stage ", theme::muted()));
+        let frame = SPINNER_FRAMES[(app.spinner_phase as usize) % SPINNER_FRAMES.len()];
+        spans.push(Span::styled(format!("{frame} "), theme::warn()));
+        spans.push(Span::styled(label.to_string(), theme::warn()));
+    }
+
     if cost_visible {
         spans.push(Span::styled("cost ", theme::muted()));
         spans.push(Span::styled(cost_text, theme::primary()));
@@ -3190,7 +4363,12 @@ fn transcript_lines(app: &ShellApp, visible: usize) -> Vec<Line<'static>> {
             line.body.lines().collect::<Vec<_>>()
         };
         for (index, body) in body_lines.into_iter().enumerate() {
-            rows.push(transcript_line(&line.prefix, body, index > 0));
+            rows.push(transcript_line_dated(
+                &line.prefix,
+                body,
+                index > 0,
+                line.time_secs,
+            ));
         }
     }
     let start = rows.len().saturating_sub(visible);
@@ -3198,8 +4376,30 @@ fn transcript_lines(app: &ShellApp, visible: usize) -> Vec<Line<'static>> {
 }
 
 fn transcript_line(prefix: &str, body: &str, continuation: bool) -> Line<'static> {
+    transcript_line_dated(prefix, body, continuation, 0)
+}
+
+/// `transcript_line` with an optional wall-clock timestamp prefix, matching
+/// `design/mockups/_shared.jsx::logLine`:
+///
+///   ` 14:32:14  ⏵ run  body…`
+///     subtle     glyph subtle  body
+///
+/// `time_secs == 0` skips the timestamp so synthetic lines (built inside
+/// the renderer for context-free hints) stay terse.
+fn transcript_line_dated(
+    prefix: &str,
+    body: &str,
+    continuation: bool,
+    time_secs: u64,
+) -> Line<'static> {
     let (glyph, style, show_label) = transcript_glyph(prefix, continuation);
-    let mut spans = vec![Span::styled(format!(" {glyph} "), style)];
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    if time_secs != 0 {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(wall_hms(time_secs), theme::subtle()));
+    }
+    spans.push(Span::styled(format!(" {glyph} "), style));
     if show_label {
         spans.push(Span::styled(prefix.to_string(), theme::subtle()));
         spans.push(Span::raw(" "));
@@ -3209,6 +4409,17 @@ fn transcript_line(prefix: &str, body: &str, continuation: bool) -> Line<'static
         transcript_body_style(prefix),
     ));
     Line::from(spans)
+}
+
+/// Format wall-clock seconds-since-epoch as `HH:MM:SS` (UTC).  Used by
+/// transcript timestamps; keeping it UTC keeps log-comparison across
+/// machines deterministic without a timezone database.
+fn wall_hms(time_secs: u64) -> String {
+    let day_secs = time_secs % 86_400;
+    let h = day_secs / 3600;
+    let m = (day_secs % 3600) / 60;
+    let s = day_secs % 60;
+    format!("{h:02}:{m:02}:{s:02}")
 }
 
 fn transcript_glyph(prefix: &str, continuation: bool) -> (&'static str, Style, bool) {
@@ -3311,10 +4522,11 @@ fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
             ("Ctrl+C", "exit"),
         ],
         ShellView::Catalog => vec![
+            ("j/k", "row"),
             ("PgUp/PgDn", "scroll"),
             ("use <id>", "focus module"),
             ("findings", "findings"),
-            ("help", "help"),
+            ("?", "help"),
         ],
         ShellView::Findings => {
             let mut bindings = Vec::new();
@@ -3677,6 +4889,60 @@ fn keybind_hint_line(pairs: &[(&str, &str)]) -> Line<'static> {
     Line::from(spans)
 }
 
+/// Empty-state panel matching `design/mockups/empty-states.jsx::panel`:
+///
+/// ```text
+///        ∅  no findings yet
+///           kuzushi keeps the ledger in .kuzushi/v2/findings.sqlite3.
+///           nothing has been promoted on this workspace.
+///
+///        ▸ scan          umbrella SAST · semgrep + secrets + agentic
+///        ▸ context build build the snapshot first if you have time
+/// ```
+///
+/// `glyph_label` is rendered with the ∅ glyph in subtle and the label
+/// in muted.  `explanations` are muted prose lines.  `ctas` are
+/// (command, blurb) pairs rendered with `▸` warn glyph + c-accent
+/// command + c-muted blurb.  Caller supplies the section header
+/// (typically `divider("FINDINGS · empty", width)`).
+fn empty_state_panel(
+    glyph_label: &str,
+    explanations: &[&str],
+    ctas: &[(&str, &str)],
+) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(vec![
+        Span::raw("       "),
+        Span::styled("∅  ", theme::subtle()),
+        Span::styled(glyph_label.to_string(), theme::muted()),
+    ]));
+    for explanation in explanations {
+        lines.push(Line::from(vec![
+            Span::raw("       "),
+            Span::styled((*explanation).to_string(), theme::muted()),
+        ]));
+    }
+    if !ctas.is_empty() {
+        lines.push(blank());
+    }
+    for (cmd, blurb) in ctas {
+        // 22-char command pad keeps the blurbs visually aligned across
+        // CTA rows (matches the mockup's fixed indent + spacing).
+        let cmd_padded = if cmd.chars().count() >= 22 {
+            format!("{cmd}  ")
+        } else {
+            format!("{cmd}{}", " ".repeat(22 - cmd.chars().count()))
+        };
+        lines.push(Line::from(vec![
+            Span::raw("       "),
+            Span::styled("▸ ", theme::warn()),
+            Span::styled(cmd_padded, theme::accent()),
+            Span::styled((*blurb).to_string(), theme::muted()),
+        ]));
+    }
+    lines
+}
+
 /// Render a "next-action" hint line as accent-tinted commands separated
 /// by subtle middots, matching how `design/mockups/_shared.jsx`
 /// next-action lines are typically painted (e.g. CTA rows in
@@ -3776,7 +5042,7 @@ fn catalog_next_hint(app: &ShellApp) -> String {
     }
     if !app.findings.is_empty() {
         return format!(
-            "{} finding(s) waiting · `findings` to triage · `threats build` for STRIDE.",
+            "{} finding(s) waiting · `findings` to triage · `threats regen` for STRIDE refresh.",
             app.findings.len()
         );
     }
@@ -3788,6 +5054,11 @@ pub(crate) enum ProgressKind {
     Done,
     Active,
     Queued,
+    /// Reserved for genuine error states (e.g. scan task crashed,
+    /// preflight check failed).  No call site currently produces it
+    /// because every "task didn't run" path correctly uses `Queued`,
+    /// but keeping the variant + danger-red style makes the API
+    /// honest if/when we need it.
     #[allow(dead_code)]
     Failing,
 }
@@ -4398,7 +5669,7 @@ fn module_playbook_lines(module_id: &str, width: u16) -> Vec<Line<'static>> {
     let mut lines = vec![divider("NEXT", width)];
     let (run, inspect) = match module_id {
         "context" => (
-            "run build to write .kuzushi/context-snapshot.json",
+            "context build or run . writes .kuzushi/context-snapshot.json",
             "context status · context regen repo",
         ),
         "recon" => (
@@ -4406,11 +5677,11 @@ fn module_playbook_lines(module_id: &str, width: u16) -> Vec<Line<'static>> {
             "workspace · findings · use threat-model",
         ),
         "threat-model" => (
-            "run build to refresh STRIDE / DFD artifacts",
+            "threats regen proposes a STRIDE / DFD patch; run . dispatches threat-model:build",
             "threats summary · threats edit · threats regen",
         ),
         "sast" => (
-            "run . or scan to launch the umbrella scanner",
+            "scan runs configured scanners; run . dispatches sast:scan",
             "tasks · findings · use triage",
         ),
         "carlini-threat-hunt" => (
@@ -4418,7 +5689,7 @@ fn module_playbook_lines(module_id: &str, width: u16) -> Vec<Line<'static>> {
             "show trace · findings · use verify",
         ),
         "agentic-sast" => (
-            "run scan to start dataflow and variant hunting agents",
+            "run . or run agentic-sast:scan starts dataflow and variant hunting agents",
             "findings · show trace · use verify",
         ),
         _ => (
@@ -4590,6 +5861,9 @@ fn view_status_segment(app: &ShellApp) -> String {
         ShellView::AgentChat => "agent".to_string(),
         ShellView::History => "history".to_string(),
         ShellView::Story => "story".to_string(),
+        ShellView::Auth => "auth".to_string(),
+        ShellView::Cost => "cost".to_string(),
+        ShellView::Patch(alias) => format!("patch:{alias}"),
     }
 }
 
@@ -4943,8 +6217,8 @@ impl SeverityCounts {
 #[cfg(test)]
 mod tests {
     use kuzushi_core::{
-        Finding, OptionScope, OptionTarget, ScanCancellation, Severity, TriageOutcome,
-        TriageVerdict, V2Config,
+        Finding, OptionScope, OptionTarget, ScanCancellation, Severity, StaticProofState,
+        TriageOutcome, TriageVerdict, V2Config,
     };
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
@@ -4996,6 +6270,44 @@ mod tests {
     }
 
     #[test]
+    fn quickstart_follows_doctor_context_scan_findings_report_path() {
+        let backend = TestBackend::new(80, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Quickstart;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered = format!("{:?}", buffer);
+
+        for expected in [
+            "Operator path",
+            "kuzushi doctor",
+            "context build",
+            "scan . / run <tool>",
+            "findings / open F-0001",
+            "proof state",
+            "workspace export",
+            "kuzushi pr-comment",
+        ] {
+            assert!(
+                rendered.contains(expected),
+                "missing {expected}: {rendered}"
+            );
+        }
+        assert!(rendered.find("kuzushi doctor").unwrap() < rendered.find("context build").unwrap());
+        assert!(rendered.find("context build").unwrap() < rendered.find("scan .").unwrap());
+        for y in 0..22 {
+            let row = buffer_row_text(buffer, 80, y);
+            assert!(
+                row.chars().count() <= 80,
+                "row exceeded 80 columns: {row:?}"
+            );
+        }
+        assert!(!rendered.contains("┌"));
+    }
+
+    #[test]
     fn renders_selected_finding_detail() {
         let backend = TestBackend::new(100, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -5019,6 +6331,36 @@ mod tests {
         assert!(rendered.contains("alias"));
         assert!(rendered.contains("F-0001"));
         assert!(rendered.contains("fingerprint"));
+    }
+
+    #[test]
+    fn finding_detail_surfaces_proof_state_and_report_commands_at_80_columns() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let finding = Finding::new_semgrep(
+            "demo.rule",
+            "src/app.ts",
+            8,
+            Some(8),
+            Severity::High,
+            "dangerous sink\nEvidence: request parameter reaches query builder",
+        )
+        .with_static_proof_state(StaticProofState::SourceSinkLinked);
+        app.findings = vec![finding.clone()];
+        app.selected_finding = Some(finding);
+        app.shell_view = ShellView::Finding;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("proof state"), "{rendered}");
+        assert!(rendered.contains("source_sink_linked"), "{rendered}");
+        assert!(rendered.contains("runtime validation"), "{rendered}");
+        assert!(rendered.contains("Evidence: request parameter reaches query builder"));
+        assert!(rendered.contains("workspace export findings"));
+        assert!(rendered.contains("kuzushi pr-comment"));
+        assert!(!rendered.contains("┌"));
     }
 
     #[test]
@@ -5091,10 +6433,13 @@ mod tests {
 
     #[test]
     fn renders_actionable_empty_states_at_80_columns() {
+        // Each empty-state surface advertises a concrete next step,
+        // matching `design/mockups/empty-states.jsx::panel` (`∅` glyph
+        // + label + indented muted explanation + `▸` CTA rows).
         for (view, expected) in [
-            (ShellView::Findings, "Next: scan"),
-            (ShellView::Runs, "Next: `scan`"),
-            (ShellView::Workspace, "Next: scan <target>"),
+            (ShellView::Findings, "no findings yet"),
+            (ShellView::Runs, "no runs persisted"),
+            (ShellView::Workspace, "no workspace selected"),
         ] {
             let backend = TestBackend::new(80, 18);
             let mut terminal = Terminal::new(backend).unwrap();
@@ -5317,6 +6662,8 @@ mod tests {
         let hint = catalog_next_hint(&app);
         assert!(hint.contains("findings"), "got: {hint}");
         assert!(hint.contains("triage"), "got: {hint}");
+        assert!(hint.contains("threats regen"), "got: {hint}");
+        assert!(!hint.contains("threats build"), "got: {hint}");
 
         // With a critical finding: open-by-alias suggestion.
         let critical =
@@ -5324,6 +6671,31 @@ mod tests {
         app.findings.push(critical);
         let hint = catalog_next_hint(&app);
         assert!(hint.contains("open F-"), "got: {hint}");
+    }
+
+    #[test]
+    fn module_playbooks_name_supported_run_and_scan_commands() {
+        let cases = [
+            ("context", "context build", "run build"),
+            ("threat-model", "threats regen", "threats build"),
+            ("sast", "scan runs configured scanners", "run . or scan"),
+            ("agentic-sast", "run agentic-sast:scan", "run scan"),
+        ];
+        for (module, required, stale) in cases {
+            let text = module_playbook_lines(module, 120)
+                .into_iter()
+                .map(|line| line_text(&line))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                text.contains(required),
+                "{module} missing {required}: {text}"
+            );
+            assert!(
+                !text.contains(stale),
+                "{module} still shows {stale}: {text}"
+            );
+        }
     }
 
     #[test]
@@ -6641,6 +8013,7 @@ mod tests {
             running: true,
             abort_requested: false,
             error: None,
+            history: Vec::new(),
         });
         app.shell_view = ShellView::AgentChat;
 
@@ -6673,6 +8046,7 @@ mod tests {
             running: true,
             abort_requested: true,
             error: None,
+            history: Vec::new(),
         });
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -6792,6 +8166,9 @@ mod tests {
             (ShellView::AgentChat, "AGENT"),
             (ShellView::History, "COMMAND HISTORY"),
             (ShellView::Story, "SESSION STORY"),
+            (ShellView::Auth, "PROVIDERS"),
+            (ShellView::Cost, "BUDGETS"),
+            (ShellView::Patch("F-0001".to_string()), "PATCH"),
         ];
 
         for (view, expected) in cases {
@@ -7234,6 +8611,264 @@ mod tests {
     }
 
     #[test]
+    fn runs_view_lists_past_runs_from_disk_with_summary_json() {
+        // Mockup parity: `design/mockups/runs.jsx` shows past runs as a
+        // table with status tinting.  Verify `runs_lines` reads
+        // `<target>/.kuzushi/runs/<runId>/summary.json` and renders one
+        // styled row per past run, with status colour driven by the
+        // `status` field.
+        let tmp = tempfile::tempdir().unwrap();
+        let runs_root = tmp.path().join(".kuzushi/runs");
+        std::fs::create_dir_all(runs_root.join("r-2026-05-06T14-31")).unwrap();
+        std::fs::create_dir_all(runs_root.join("r-2026-05-06T15-18")).unwrap();
+        std::fs::write(
+            runs_root.join("r-2026-05-06T14-31/summary.json"),
+            r#"{"status":"complete","findings":18,"target":"~/work/acme-checkout"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            runs_root.join("r-2026-05-06T15-18/summary.json"),
+            r#"{"status":"failed","findings":0,"target":"~/work/acme-checkout"}"#,
+        )
+        .unwrap();
+
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.target = Some(tmp.path().to_path_buf());
+        app.shell_view = ShellView::Runs;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("RUNS"));
+        // Both past runs reach the buffer (short() takes the leading 8 chars).
+        assert!(rendered.contains("r-2026-0"));
+        assert!(rendered.contains("complete"));
+        assert!(rendered.contains("failed"));
+        assert!(rendered.contains("18"));
+        assert!(rendered.contains("replay <runId>"));
+    }
+
+    #[test]
+    fn catalog_j_k_moves_row_cursor_and_highlights_row() {
+        // `design/mockups/catalog.jsx` advertises `j/k row` and shows the
+        // focused row with `▌` accent + c-sel background.  Verify that
+        // pressing `j` moves the cursor and that the catalog renders the
+        // cursor row with the `▌` glyph (catalog_module_row's selection
+        // form starts the row with `▌ `).
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let backend = TestBackend::new(120, 36);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.handle_command(crate::commands::ShellCommand::Modules);
+
+        // Cursor starts at 0; `j` advances it.
+        let before = app.catalog_cursor;
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        assert_eq!(app.catalog_cursor, before + 1);
+
+        // `k` reverses; from row 1 back to 0.
+        app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()));
+        assert_eq!(app.catalog_cursor, before);
+
+        // Render after a `j` press; the catalog body should contain the
+        // cursor `▌` glyph at least once.
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(rendered.contains("▌"), "cursor glyph missing: {rendered}");
+    }
+
+    #[test]
+    fn findings_empty_state_uses_panel_pattern_per_mockup() {
+        // `design/mockups/empty-states.jsx::panel` paints empty-state
+        // panels with: `· empty` divider, `∅` glyph + label, muted
+        // explanations, and `▸` CTA rows with accent commands.
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Findings;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("FINDINGS · empty"));
+        assert!(rendered.contains("∅"));
+        assert!(rendered.contains("no findings yet"));
+        assert!(rendered.contains("findings.sqlite3"));
+        assert!(rendered.contains("▸"));
+        assert!(rendered.contains("scan"));
+    }
+
+    #[test]
+    fn catalog_enter_runs_use_for_cursor_row() {
+        // Pressing Enter on the catalog with empty input dispatches
+        // `use <module>` for whatever row j/k put the cursor on, per
+        // `design/mockups/catalog.jsx::footer` (`enter run` keybind).
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.handle_command(crate::commands::ShellCommand::Modules);
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        let cursor_id = app.catalog_cursor_module_id().expect("cursor id");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        // After Enter, the focused module should be the cursor row.
+        assert_eq!(app.focused_module.as_deref(), Some(cursor_id.as_str()));
+    }
+
+    #[test]
+    fn catalog_g_and_uppercase_g_jump_cursor_to_bounds() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.handle_command(crate::commands::ShellCommand::Modules);
+        let total = app.catalog_module_count();
+        assert!(total > 0);
+
+        // G jumps to last row.
+        app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
+        assert_eq!(app.catalog_cursor, total - 1);
+
+        // g jumps to first.
+        app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
+        assert_eq!(app.catalog_cursor, 0);
+    }
+
+    #[test]
+    fn top_status_strip_shows_stage_spinner_while_scan_runs() {
+        // `design/mockups/sast-running.jsx::customStrip` adds a `stage ⠿
+        // running` segment to the top strip while a worker ticks.  Verify
+        // the segment appears for a running scan and disappears when idle.
+        let backend = TestBackend::new(120, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        // Idle: no stage segment.
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let idle = format!("{:?}", terminal.backend().buffer());
+        assert!(
+            !idle.contains("stage "),
+            "stage shouldn't show idle: {idle}"
+        );
+
+        // Running: stage segment with spinner glyph.
+        app.scan = Some(crate::app::ScanPanelState {
+            run_id: Some("r-now".to_string()),
+            target: std::path::PathBuf::from("."),
+            stage: "running".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let running = format!("{:?}", terminal.backend().buffer());
+        assert!(running.contains("stage "), "stage missing: {running}");
+        assert!(running.contains("running"));
+        // Any of the SPINNER_FRAMES shows up.
+        let saw_spinner = SPINNER_FRAMES.iter().any(|f| running.contains(f));
+        assert!(saw_spinner, "spinner glyph missing: {running}");
+    }
+
+    #[test]
+    fn cost_view_renders_budget_bar_and_session_spend() {
+        // `/cost` (`design/mockups/cost.jsx`) shows BUDGETS bars +
+        // SPEND key/values.  Verify both sections render and the bar
+        // graphics + percentage reach the buffer.
+        let backend = TestBackend::new(120, 26);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.session_cost_usd = 1.42;
+        app.session_budget_usd = Some(5.0);
+        app.last_tool_cost_usd = Some(0.18);
+        app.shell_view = ShellView::Cost;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("BUDGETS"));
+        assert!(rendered.contains("SPEND"));
+        assert!(rendered.contains("█"));
+        assert!(rendered.contains("░"));
+        assert!(rendered.contains("$1.42"));
+        assert!(rendered.contains("$5.00"));
+        // 1.42 / 5.00 = 28.4% → 28%, success-tinted (< 85%).
+        assert!(rendered.contains("28%"));
+    }
+
+    #[test]
+    fn auth_view_renders_providers_model_and_spend_sections() {
+        // `/auth` should land on a dedicated ShellView::Auth surface
+        // matching `design/mockups/auth.jsx` — providers list + effective
+        // model + session spend.
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(
+            V2Config {
+                model: Some("openai:gpt-4.1".to_string()),
+                ..V2Config::default()
+            },
+            None,
+        );
+        app.session_cost_usd = 0.42;
+        app.shell_view = ShellView::Auth;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("PROVIDERS"));
+        assert!(rendered.contains("MODEL"));
+        assert!(rendered.contains("SPEND"));
+        assert!(rendered.contains("openai:gpt-4.1"));
+        assert!(rendered.contains("$0.42"));
+        assert!(rendered.contains("auth login openai-codex"));
+    }
+
+    #[test]
+    fn transcript_log_line_renders_wall_clock_timestamp_when_present() {
+        // `design/mockups/_shared.jsx::logLine` paints each transcript row
+        // with a leading `HH:MM:SS` in c-subtle.  Verify the dated path
+        // emits a 5-or-8-char timestamp span styled subtle, before the
+        // glyph + prefix + body.
+        let line = transcript_line_dated(
+            "tool",
+            "ran semgrep:scan",
+            false,
+            // 14:32:14 UTC = 14*3600 + 32*60 + 14 = 52334 seconds into the day
+            52_334,
+        );
+        let mut saw_subtle_time = false;
+        let mut saw_glyph = false;
+        for span in &line.spans {
+            if span.content == "14:32:14" && span.style == theme::subtle() {
+                saw_subtle_time = true;
+            }
+            if span.content.contains("⏵") {
+                saw_glyph = true;
+            }
+        }
+        assert!(saw_subtle_time, "subtle HH:MM:SS missing: {line:?}");
+        assert!(saw_glyph, "transcript glyph missing: {line:?}");
+    }
+
+    #[test]
+    fn transcript_line_dated_skips_timestamp_when_zero() {
+        // Synthetic transcript lines (built inside the renderer for
+        // context-free hints) pass `time_secs = 0` and should produce no
+        // leading timestamp — keeping those lines terse.
+        let line = transcript_line_dated("tool", "synthetic", false, 0);
+        for span in &line.spans {
+            assert!(
+                !span.content.contains(':')
+                    || !matches!(span.content.chars().next(), Some('0'..='9')),
+                "unexpected timestamp on synthetic line: {span:?}"
+            );
+        }
+    }
+
+    #[test]
     fn throttle_banner_uses_chip_style_per_mockup() {
         // `design/mockups/rate-limited.jsx` paints the throttle banner as
         // ` RATE LIMIT  <source> · <message>` with a warn-tinted chip
@@ -7294,6 +8929,351 @@ mod tests {
     }
 
     #[test]
+    fn module_detail_renders_options_when_stored_values_exist() {
+        // `design/mockups/modules-detail.jsx::s2` shows OPTIONS · N as
+        // a section.  Verify storing a value through `option_store`
+        // surfaces the option in the panel.
+        let backend = TestBackend::new(120, 36);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.option_store.set_value(
+            kuzushi_core::OptionScope::Session,
+            kuzushi_core::OptionTarget::Tool("sast:scan".to_string()),
+            "triage",
+            serde_json::json!(true),
+        );
+        app.focused_module = Some("sast".to_string());
+        app.shell_view = ShellView::Module;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("OPTIONS"));
+        assert!(rendered.contains("triage"));
+        assert!(rendered.contains("true"));
+    }
+
+    #[test]
+    fn module_detail_lists_prompt_overrides_from_disk() {
+        // `design/mockups/modules-detail.jsx::s4` shows PROMPTS · N
+        // pulled from `.kuzushi/prompts/<module>/`.  Seed two prompt
+        // files and verify both surface as detail rows.
+        let tmp = tempfile::tempdir().unwrap();
+        let prompts_root = tmp.path().join(".kuzushi/prompts/sast");
+        std::fs::create_dir_all(&prompts_root).unwrap();
+        std::fs::write(prompts_root.join("system.md"), "system prompt body").unwrap();
+        std::fs::write(prompts_root.join("triage.md"), "triage prompt body").unwrap();
+
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.target = Some(tmp.path().to_path_buf());
+        app.focused_module = Some("sast".to_string());
+        app.shell_view = ShellView::Module;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("PROMPTS"));
+        assert!(rendered.contains("system"));
+        assert!(rendered.contains("triage"));
+    }
+
+    #[test]
+    fn trace_view_renders_steps_from_trace_jsonl() {
+        // `design/mockups/trace.jsx::step` shows one row per agent step
+        // with kind-tinted column + label + latency + cost.  Seed a
+        // small trace.jsonl on disk and verify rows + columns reach
+        // the buffer.
+        let tmp = tempfile::tempdir().unwrap();
+        let runs_root = tmp.path().join(".kuzushi/runs/r-1");
+        std::fs::create_dir_all(&runs_root).unwrap();
+        std::fs::write(
+            runs_root.join("trace.jsonl"),
+            r#"{"n":1,"kind":"plan","label":"plan(F-0012, h=2) → 4-step plan","latency_ms":400,"cost_usd":0.0}
+{"n":2,"kind":"tool","label":"kb:fetch a-04","latency_ms":100,"cost_usd":0.0}
+{"n":3,"kind":"llm","label":"compose injection candidates","latency_ms":4100,"cost_usd":0.012}
+{"n":4,"kind":"refused","label":"write_patch_attempt → policy","latency_ms":0}
+"#,
+        )
+        .unwrap();
+
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.target = Some(tmp.path().to_path_buf());
+        app.shell_view = ShellView::Trace("r-1".to_string());
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("TRACE · r-1"));
+        assert!(rendered.contains("STEPS"));
+        // All 4 step labels.
+        assert!(rendered.contains("plan(F-0012"));
+        assert!(rendered.contains("kb:fetch"));
+        assert!(rendered.contains("compose injection"));
+        assert!(rendered.contains("write_patch_attempt"));
+        // Latency formatting: 400ms; 4.1s.
+        assert!(rendered.contains("400ms"));
+        assert!(rendered.contains("4.1s"));
+        // Cost.
+        assert!(rendered.contains("$0.0120"));
+    }
+
+    #[test]
+    fn trace_view_empty_when_no_trace_jsonl_on_disk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let backend = TestBackend::new(120, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.target = Some(tmp.path().to_path_buf());
+        app.shell_view = ShellView::Trace("r-missing".to_string());
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("TRACE · r-missing"));
+        assert!(rendered.contains("no trace.jsonl"));
+    }
+
+    #[test]
+    fn patch_view_renders_rationale_diff_tests_and_guardrail_sections() {
+        // `design/mockups/patch.jsx` shows RATIONALE / DIFF / TESTS /
+        // GUARDRAIL.  Verify all four reach the buffer with diff lines
+        // styled per kind (add → success, del → danger, ctx → muted).
+        let backend = TestBackend::new(120, 48);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.pending_patch = Some(crate::app::PendingPatch {
+            alias: "F-0001".to_string(),
+            rationale: "replace format!() concatenation with sqlx::query!() macro".to_string(),
+            side_effect: Some("closes F-0001 (sqli)".to_string()),
+            diff: "--- a/apps/api/orders.rs\n+++ b/apps/api/orders.rs\n@@ -138,9 +138,12 @@\n     let q = format!(\"SELECT * FROM orders WHERE id={}\", id);\n-    let row = sqlx::query(&q)\n+    let row = sqlx::query!(\n+        \"SELECT id FROM orders WHERE id = $1\",\n+        id\n+    )\n     .fetch_one(db)\n     .await?;".to_string(),
+            tests: vec![
+                ("orders::tests::rejects_sqli_payload".to_string(), "1 OR 1=1 → BadId".to_string()),
+                ("orders::tests::happy_path_uuid".to_string(), "valid uuid → row".to_string()),
+            ],
+            guardrail: Some("approval.patches = human-required".to_string()),
+            staged_at: Some(".kuzushi/runs/r-2113/patch.diff".to_string()),
+        });
+        app.shell_view = ShellView::Patch("F-0001".to_string());
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        // All four sections.
+        assert!(rendered.contains("RATIONALE"));
+        assert!(rendered.contains("DIFF"));
+        assert!(rendered.contains("TESTS"));
+        assert!(rendered.contains("GUARDRAIL"));
+        // Rationale + side-effect.
+        assert!(rendered.contains("sqlx::query!()"));
+        assert!(rendered.contains("side-effect"));
+        // Diff content + summary.
+        assert!(rendered.contains("apps/api/orders.rs"));
+        assert!(rendered.contains("@@"));
+        assert!(rendered.contains("rejects_sqli_payload"));
+        // Diff summary in the divider — at least one file + add count.
+        assert!(rendered.contains("1 file"));
+        // Tests row.
+        assert!(rendered.contains("happy_path_uuid"));
+        // Guardrail action row.
+        assert!(rendered.contains("/patch apply"));
+        // Staged-at footer.
+        assert!(rendered.contains("staged at"));
+    }
+
+    #[test]
+    fn patch_view_empty_state_when_no_patch_pending() {
+        let backend = TestBackend::new(120, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Patch("F-0042".to_string());
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("PATCH · F-0042 · empty"));
+        assert!(rendered.contains("∅"));
+        assert!(rendered.contains("no patch staged"));
+        assert!(rendered.contains("patch:run"));
+    }
+
+    #[test]
+    fn patch_diff_summary_counts_files_adds_and_dels() {
+        let summary = patch_diff_summary(
+            "--- a/file1\n+++ b/file1\n@@ -1,3 +1,4 @@\n+added\n-removed\n ctx\n+added2",
+        );
+        assert_eq!(summary.files, 1);
+        assert_eq!(summary.adds, 2);
+        assert_eq!(summary.dels, 1);
+    }
+
+    #[test]
+    fn confirm_card_renders_tool_target_and_y_n_action_row() {
+        // `design/mockups/confirm-dialog.jsx` paints CONFIRM gates with
+        // a warn header, tool/target/rationale rows, and a y/Y/n/N action
+        // row.  Verify each lands in the buffer when the gate is pending.
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory.pending_confirm = Some(crate::app::PendingConfirm {
+            kind: crate::app::ConfirmKind::NetworkEgress,
+            tool: "sandbox:run".to_string(),
+            target: "curl https://refund.acme/api/internal/balances".to_string(),
+            rationale: Some("verify F-0012 reachability".to_string()),
+            allowlist: Some("refund.acme on project allowlist".to_string()),
+            actor: Some("attacker".to_string()),
+            remembered: false,
+        });
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("CONFIRM"));
+        assert!(rendered.contains("network egress"));
+        assert!(rendered.contains("sandbox:run"));
+        assert!(rendered.contains("curl https://refund.acme"));
+        assert!(rendered.contains("verify F-0012"));
+        assert!(rendered.contains("refund.acme on project allowlist"));
+        assert!(rendered.contains("allow once"));
+        assert!(rendered.contains("deny + add to denylist"));
+    }
+
+    #[test]
+    fn confirm_card_destructive_kind_renders_unconditional_refusal() {
+        // Destructive verbs (`rm -rf`, `git push --force`, etc.) get a
+        // RED header + REFUSED · destructive verb label + the
+        // unconditional-refusal rule, no y/Y override available.
+        let backend = TestBackend::new(120, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory.pending_confirm = Some(crate::app::PendingConfirm {
+            kind: crate::app::ConfirmKind::DestructiveVerb,
+            tool: "shell:run".to_string(),
+            target: "rm -rf .git".to_string(),
+            rationale: None,
+            allowlist: None,
+            actor: Some("attacker".to_string()),
+            remembered: false,
+        });
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("REFUSED"));
+        assert!(rendered.contains("destructive verb"));
+        assert!(rendered.contains("rm -rf .git"));
+        assert!(rendered.contains("always refused"));
+        assert!(!rendered.contains("allow once"));
+    }
+
+    #[test]
+    fn confirm_keys_resolve_pending_confirm_with_remember_flag() {
+        // y/Y/n/N drive `resolve_confirm`; verify the resolver clears
+        // the gate and threads the `remembered` flag through.
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory.pending_confirm = Some(crate::app::PendingConfirm {
+            kind: crate::app::ConfirmKind::NetworkEgress,
+            tool: "sandbox:run".to_string(),
+            target: "curl x".to_string(),
+            rationale: None,
+            allowlist: None,
+            actor: None,
+            remembered: false,
+        });
+        app.handle_key(KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::empty()));
+        assert!(app.advisory.pending_confirm.is_none());
+        // The system log line records the outcome.
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.body.contains("allowed") && line.body.contains("remembered")));
+    }
+
+    #[test]
+    fn agent_chat_renders_multi_turn_history_with_bubble_per_turn() {
+        // `design/mockups/agent-chat.jsx::bubble` paints multi-turn
+        // conversations as alternating you/agent bubbles.  Verify a
+        // history of two prior turns + an active turn all reach the
+        // buffer with their respective questions and answers visible.
+        let backend = TestBackend::new(120, 36);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(
+            V2Config {
+                model: Some("openai:gpt-4.1".to_string()),
+                ..V2Config::default()
+            },
+            None,
+        );
+        app.agent_chat = Some(crate::app::AgentChatView {
+            question: "now what?".to_string(),
+            answer: Some("scan first.".to_string()),
+            running: false,
+            abort_requested: false,
+            error: None,
+            history: vec![
+                crate::app::ChatTurn {
+                    question: "what should I do first?".to_string(),
+                    answer: Some("build context.".to_string()),
+                    error: None,
+                },
+                crate::app::ChatTurn {
+                    question: "did context build succeed?".to_string(),
+                    answer: Some("yes, snapshot at .kuzushi/context-snapshot.json.".to_string()),
+                    error: None,
+                },
+            ],
+        });
+        app.shell_view = ShellView::AgentChat;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        // History turn 1
+        assert!(rendered.contains("what should I do first?"));
+        assert!(rendered.contains("build context."));
+        // History turn 2
+        assert!(rendered.contains("did context build succeed?"));
+        assert!(rendered.contains("snapshot at"));
+        // Active turn
+        assert!(rendered.contains("now what?"));
+        assert!(rendered.contains("scan first."));
+        // Both you/agent tags present at least once each.
+        assert!(rendered.matches("you").count() >= 1);
+        assert!(rendered.matches("agent").count() >= 1);
+    }
+
+    #[test]
+    fn agent_chat_fold_for_next_turn_pushes_completed_turn_into_history() {
+        // Sanity-check the helper that backs the multi-turn UX: a
+        // completed turn should fold into history; an empty initial
+        // state should leave history empty.
+        use crate::app::AgentChatView;
+
+        let initial = AgentChatView::default();
+        let next = initial.fold_for_next_turn("first question".to_string());
+        assert!(next.history.is_empty());
+        assert_eq!(next.question, "first question");
+
+        let prev = AgentChatView {
+            question: "first question".to_string(),
+            answer: Some("first answer".to_string()),
+            running: false,
+            abort_requested: false,
+            error: None,
+            history: Vec::new(),
+        };
+        let next2 = prev.fold_for_next_turn("second question".to_string());
+        assert_eq!(next2.history.len(), 1);
+        assert_eq!(next2.history[0].question, "first question");
+        assert_eq!(next2.question, "second question");
+    }
+
+    #[test]
     fn agent_chat_renders_role_tagged_bubbles() {
         // `design/mockups/agent-chat.jsx::bubble` paints a tag header on
         // each turn:  `  you  ──...──`  (c-accent) for the operator side,
@@ -7314,6 +9294,7 @@ mod tests {
             running: false,
             abort_requested: false,
             error: None,
+            history: Vec::new(),
         });
         app.shell_view = ShellView::AgentChat;
 

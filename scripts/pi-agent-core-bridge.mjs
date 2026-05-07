@@ -439,6 +439,10 @@ function subscribeText(agent, onText) {
 async function runAgent(AgentCtor, model, request) {
   const agentTools = buildAgentTools(request);
   const allowedToolNames = new Set(agentTools.map((tool) => tool.name.toLowerCase()));
+  const systemPrompt = appendStructuredOutputContract(
+    request.systemPrompt ?? request.system_prompt ?? "",
+    request.structuredOutput ?? request.structured_output ?? request.outputFormat,
+  );
   const thinkingLevel =
     normalizeThinkingLevel(request.thinkingLevel) ??
     normalizeThinkingLevel(process.env.KUZUSHI_THINKING_LEVEL) ??
@@ -446,7 +450,7 @@ async function runAgent(AgentCtor, model, request) {
     "low";
   const agent = new AgentCtor({
     initialState: {
-      systemPrompt: request.systemPrompt,
+      systemPrompt,
       model,
       tools: agentTools,
       messages: [],
@@ -500,6 +504,26 @@ async function runAgent(AgentCtor, model, request) {
   }
 
   return text.trim();
+}
+
+function appendStructuredOutputContract(systemPrompt, contract) {
+  if (!contract || typeof contract !== "object") return systemPrompt;
+  const name =
+    typeof contract.name === "string" && contract.name.trim()
+      ? contract.name.trim()
+      : "structured-output";
+  const schema = contract.schema ?? {};
+  const strict = contract.strict === false ? "" : "strict ";
+  return [
+    systemPrompt,
+    "",
+    "Structured output contract:",
+    `Return only ${strict}JSON for \`${name}\`. Do not include markdown fences, prose, or trailing commentary.`,
+    "Required JSON schema:",
+    JSON.stringify(schema, null, 2),
+  ]
+    .filter((line, index) => index > 0 || String(line).trim())
+    .join("\n");
 }
 
 function oauthCredentialsPath(home = os.homedir()) {

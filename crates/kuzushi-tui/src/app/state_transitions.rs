@@ -349,7 +349,34 @@ impl ShellApp {
             && self.is_scan_paused()
     }
 
-    pub(super) fn handle_key(&mut self, key: KeyEvent) {
+    pub fn handle_key(&mut self, key: KeyEvent) {
+        // Pending confirm gate (`design/mockups/confirm-dialog.jsx`)
+        // intercepts y/Y/n/N before any view-specific hotkey: tools that
+        // request approval need a deterministic response, not the
+        // operator's input line.
+        if self.advisory.pending_confirm.is_some() && key.modifiers.is_empty() {
+            if let KeyCode::Char(ch) = key.code {
+                match ch {
+                    'y' => {
+                        self.resolve_confirm(true, false);
+                        return;
+                    }
+                    'Y' => {
+                        self.resolve_confirm(true, true);
+                        return;
+                    }
+                    'n' => {
+                        self.resolve_confirm(false, false);
+                        return;
+                    }
+                    'N' => {
+                        self.resolve_confirm(false, true);
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
         if self.is_budget_halted() && key.modifiers.is_empty() {
             if let KeyCode::Char(ch) = key.code {
                 match ch.to_ascii_lowercase() {
@@ -518,6 +545,18 @@ impl ShellApp {
             }
             KeyCode::Enter => {
                 let raw = self.take_input();
+                // Enter on the catalog with empty input runs `use <id>`
+                // for the row currently under the j/k cursor — matches
+                // `design/mockups/catalog.jsx` where Enter == /use.
+                if raw.is_empty()
+                    && matches!(self.shell_view, ShellView::Catalog)
+                    && self.catalog_expanded
+                {
+                    if let Some(id) = self.catalog_cursor_module_id() {
+                        self.submit_line(&format!("use {id}"));
+                        return;
+                    }
+                }
                 self.submit_line(&raw);
             }
             KeyCode::Esc => {
@@ -656,6 +695,31 @@ impl ShellApp {
     }
 
     fn handle_generic_scroll_hotkey(&mut self, key: KeyEvent) -> bool {
+        // Catalog j/k drives the row cursor (`design/mockups/catalog.jsx`
+        // advertises `j/k row`), not the module-scroll.  Catalog scrolling
+        // already lives on PgUp/PgDn for very tall workspaces.
+        if matches!(self.shell_view, ShellView::Catalog) && self.catalog_expanded {
+            match key.code {
+                KeyCode::Char('j') => {
+                    self.move_catalog_cursor(1);
+                    return true;
+                }
+                KeyCode::Char('k') => {
+                    self.move_catalog_cursor(-1);
+                    return true;
+                }
+                KeyCode::Char('g') => {
+                    self.catalog_cursor = 0;
+                    return true;
+                }
+                KeyCode::Char('G') => {
+                    let total = self.catalog_module_count();
+                    self.catalog_cursor = total.saturating_sub(1);
+                    return true;
+                }
+                _ => {}
+            }
+        }
         if !self.is_scrollable_view() {
             return false;
         }
@@ -753,6 +817,9 @@ impl ShellApp {
             | ShellView::Trace(_)
             | ShellView::History
             | ShellView::Story
+            | ShellView::Auth
+            | ShellView::Cost
+            | ShellView::Patch(_)
             | ShellView::Threat(_)
             | ShellView::ThreatEditor => ShellView::Catalog,
             ShellView::Tune

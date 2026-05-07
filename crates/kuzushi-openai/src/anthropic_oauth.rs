@@ -15,8 +15,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, ModelTier, TriageOutcome, TriageRequest,
-    TriageVerdict,
+    append_structured_output_contract, AgentQueryRequest, AgentQueryResponse, AgentRuntime,
+    ModelTier, TriageOutcome, TriageRequest, TriageVerdict,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -136,10 +136,14 @@ impl AnthropicOAuthRuntime {
         // we strip the provider prefix here so the backend sees just
         // `claude-...`. This mirrors the convention the bridge enforces.
         let model = strip_provider_prefix(&request.model);
+        let system_prompt = append_structured_output_contract(
+            &request.system_prompt,
+            request.structured_output.as_ref(),
+        );
         let body = json!({
             "model": model,
             "max_tokens": self.max_tokens,
-            "system": request.system_prompt,
+            "system": system_prompt,
             "messages": [{ "role": "user", "content": request.prompt }],
         });
 

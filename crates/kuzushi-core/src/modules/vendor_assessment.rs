@@ -5,12 +5,12 @@ use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
+use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 
 use super::{
-    builtin_module, json_summary, model_option, opt, parse_json_object_from_agent_text,
-    read_bool_any, resolve_input_path, resolve_tool_model, resolve_tool_target,
-    string_array_or_csv_input, string_input_any, tool, tool_with_options, unix_millis,
-    BuiltinModule, ModuleKind, OptionType, ToolExecutionContext,
+    builtin_module, json_summary, model_option, opt, read_bool_any, resolve_input_path,
+    resolve_tool_model, resolve_tool_target, string_array_or_csv_input, string_input_any, tool,
+    tool_with_options, unix_millis, BuiltinModule, ModuleKind, OptionType, ToolExecutionContext,
 };
 
 pub(super) fn module() -> BuiltinModule {
@@ -314,22 +314,29 @@ fn assess(
             "vendor-assessment:assess with parsed documents requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
         )?;
         let model = resolve_tool_model("vendor-assessment:assess", &input, ctx)?;
-        let response = runtime.query_blocking(AgentQueryRequest::new(
-            model,
-            root.clone(),
-            "You are Kuzushi's vendor security assessment agent. Return only JSON with overallRisk, confidence, summary, domains, mitigations, and documents.".to_string(),
-            prompts
-                .iter()
-                .map(|(_, content)| content.as_str())
-                .collect::<Vec<_>>()
-                .join("\n\n"),
-        ))?;
-        let raw = response
-            .structured
-            .or_else(|| parse_json_object_from_agent_text(&response.text).ok());
-        if let Some(Value::Object(object)) = raw {
-            merge_report_object(&mut report, object);
-        }
+        let raw = query_required_structured_json(
+            runtime,
+            AgentQueryRequest::new(
+                model,
+                root.clone(),
+                "You are Kuzushi's vendor security assessment agent. Return only JSON with overallRisk, confidence, summary, domains, mitigations, and documents.".to_string(),
+                prompts
+                    .iter()
+                    .map(|(_, content)| content.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n\n"),
+            ),
+            StructuredJsonContract::new(
+                "vendor-assessment:assess",
+                "VendorAssessmentReport",
+                vendor_assessment_schema(),
+            ),
+            require_json_object,
+        )?;
+        let Value::Object(object) = raw else {
+            unreachable!("require_json_object returned non-object");
+        };
+        merge_report_object(&mut report, object);
         cost_usd = 0.0;
     }
     let report_md = render_report_markdown(&report);
@@ -369,6 +376,30 @@ fn assess(
         },
         "costUsd": cost_usd,
     }))
+}
+
+fn require_json_object(value: Value) -> Result<Value> {
+    if value.is_object() {
+        Ok(value)
+    } else {
+        anyhow::bail!("vendor-assessment structured output must be a JSON object")
+    }
+}
+
+fn vendor_assessment_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["overallRisk", "confidence", "summary"],
+        "additionalProperties": true,
+        "properties": {
+            "overallRisk": {"type": "string"},
+            "confidence": {"type": "string"},
+            "summary": {"type": "string"},
+            "domains": {"type": "array", "items": {"type": "object"}},
+            "mitigations": {"type": "array", "items": {"type": "object"}},
+            "documents": {"type": "array", "items": {"type": "object"}}
+        }
+    })
 }
 
 fn build_prompt_bundle(scope: &Value) -> Vec<(String, String)> {

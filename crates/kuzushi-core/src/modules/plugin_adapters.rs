@@ -5,16 +5,17 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
+use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 
 use super::generic_findings::{
     normalize_agent_json_findings, persist_tool_findings, render_generic_findings_output,
 };
 use super::plugin_resolution::{resolve_required_plugin_root, PluginAdapterSpec};
 use super::{
-    builtin_module, collect_agentic_repo_inventory, dag, model_option,
-    parse_json_object_from_agent_text, positive_usize_input, resolve_tool_model,
-    resolve_tool_target, string_array_or_csv_input, string_input_any, target_option, tool,
-    tool_with_options, BuiltinModule, ModuleKind, ModuleRegistry, ToolExecutionContext,
+    builtin_module, collect_agentic_repo_inventory, dag, model_option, positive_usize_input,
+    resolve_tool_model, resolve_tool_target, string_array_or_csv_input, string_input_any,
+    target_option, tool, tool_with_options, BuiltinModule, ModuleKind, ModuleRegistry,
+    ToolExecutionContext,
 };
 
 pub(super) fn register_modules(registry: &mut ModuleRegistry) {
@@ -180,18 +181,20 @@ fn run_plugin_finding_adapter(
             .unwrap_or(50)
             .min(200);
     let inventory = collect_agentic_repo_inventory(&target, 100, 4096)?;
-    let response = runtime.query_blocking(AgentQueryRequest::new(
-        model,
-        target.clone(),
-        format!(
-            "You are Kuzushi's {} pi-agent-core adapter. Return only JSON matching {{\"findings\":[{{\"ruleId\":\"...\",\"filePath\":\"relative/path\",\"startLine\":1,\"severity\":\"critical|high|medium|low|info\",\"message\":\"evidence-backed finding\",\"evidence\":\"source-grounded proof\"}}]}}.",
-            spec.tool_name
+    let raw = query_required_structured_json(
+        runtime,
+        AgentQueryRequest::new(
+            model,
+            target.clone(),
+            format!(
+                "You are Kuzushi's {} pi-agent-core adapter. Return only JSON matching {{\"findings\":[{{\"ruleId\":\"...\",\"filePath\":\"relative/path\",\"startLine\":1,\"severity\":\"critical|high|medium|low|info\",\"message\":\"evidence-backed finding\",\"evidence\":\"source-grounded proof\"}}]}}.",
+                spec.tool_name
+            ),
+            build_plugin_adapter_prompt(spec, &target, &plugin_root, &input, &inventory),
         ),
-        build_plugin_adapter_prompt(spec, &target, &plugin_root, &input, &inventory),
-    ))?;
-    let raw = response.structured.unwrap_or_else(|| {
-        parse_json_object_from_agent_text(&response.text).unwrap_or(json!({"findings": []}))
-    });
+        StructuredJsonContract::new(spec.tool_name, "PluginAdapterFindings", findings_schema()),
+        require_json_object,
+    )?;
     let findings = normalize_agent_json_findings(raw, &target, spec.tool_slug, max_findings)?;
     let persisted = persist_tool_findings(spec.tool_slug, &target, &findings, ctx)?;
     Ok(json!({
@@ -206,6 +209,26 @@ fn run_plugin_finding_adapter(
         },
         "costUsd": 0.0,
     }))
+}
+
+fn require_json_object(value: Value) -> Result<Value> {
+    if value.is_object() {
+        Ok(value)
+    } else {
+        anyhow::bail!("plugin adapter structured output must be a JSON object")
+    }
+}
+
+fn findings_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["findings"],
+        "additionalProperties": true,
+        "properties": {
+            "summary": {"type": "string"},
+            "findings": {"type": "array", "items": {"type": "object"}}
+        }
+    })
 }
 
 fn build_plugin_adapter_prompt(
@@ -353,15 +376,17 @@ fn run_shinsa_assessment(
     let output_dir = string_input_any(&input, &["outputDir", "output_dir"])
         .unwrap_or_else(|| "shinsa-output".to_string());
     let inventory = collect_agentic_repo_inventory(&target, 100, 4096)?;
-    let response = runtime.query_blocking(AgentQueryRequest::new(
-        model,
-        target.clone(),
-        "You are Kuzushi's Shinsa compliance adapter. Return only JSON with summary, findings, controls, and maturity.".to_string(),
-        build_shinsa_prompt(mode, &output_dir, &plugin_root, &input, &inventory),
-    ))?;
-    let raw = response.structured.unwrap_or_else(|| {
-        parse_json_object_from_agent_text(&response.text).unwrap_or(json!({"findings": []}))
-    });
+    let raw = query_required_structured_json(
+        runtime,
+        AgentQueryRequest::new(
+            model,
+            target.clone(),
+            "You are Kuzushi's Shinsa compliance adapter. Return only JSON with summary, findings, controls, and maturity.".to_string(),
+            build_shinsa_prompt(mode, &output_dir, &plugin_root, &input, &inventory),
+        ),
+        StructuredJsonContract::new(tool_name, "ShinsaReport", findings_schema()),
+        require_json_object,
+    )?;
     let findings = normalize_agent_json_findings(raw.clone(), &target, "shinsa", 100)?;
     let persisted = persist_tool_findings("shinsa", &target, &findings, ctx)?;
     let out_root = target.join(&output_dir);

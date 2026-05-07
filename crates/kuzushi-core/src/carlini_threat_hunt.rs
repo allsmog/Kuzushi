@@ -11,6 +11,7 @@ use crate::artifact_kb::ArtifactKnowledgePromptContext;
 use crate::findings::{Finding, Severity, StaticProofState};
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
+use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 use crate::whitebox_static::{
     agent_tool_policy_for_input, mark_whitebox_static_findings, whitebox_static_profile_requested,
 };
@@ -102,7 +103,8 @@ pub fn run_carlini_threat_hunt_report(
                 &inventory,
                 &actor_fingerprint,
             );
-            let response = runtime.query_blocking(
+            let raw = query_required_structured_json(
+                runtime,
                 AgentQueryRequest::new(
                     model.clone(),
                     target.clone(),
@@ -110,11 +112,13 @@ pub fn run_carlini_threat_hunt_report(
                     prompt,
                 )
                 .with_tool_policy(agent_tool_policy_for_input(input)?),
+                StructuredJsonContract::new(
+                    "carlini-threat-hunt:run",
+                    "CarliniThreatFindings",
+                    findings_schema(),
+                ),
+                require_json_object,
             )?;
-            let raw = response.structured.unwrap_or_else(|| {
-                parse_json_object_from_agent_text(&response.text)
-                    .unwrap_or_else(|_| json!({"findings":[]}))
-            });
             let normalized =
                 normalize_findings(raw, &target, options.max_findings, &actor_fingerprint)?;
             for finding in normalized {
@@ -1015,21 +1019,22 @@ fn build_actor_fingerprint(actor: &DfdNode, run_index: usize) -> String {
     format!("{MODULE_ID}:{sanitized}:{run_index}")
 }
 
-fn parse_json_object_from_agent_text(text: &str) -> Result<Value> {
-    if let Ok(value) = serde_json::from_str::<Value>(text) {
+fn require_json_object(value: Value) -> Result<Value> {
+    if value.is_object() {
         return Ok(value);
     }
-    let start = text
-        .find('{')
-        .context("carlini-threat-hunt output parse failed: missing JSON object start")?;
-    let end = text
-        .rfind('}')
-        .context("carlini-threat-hunt output parse failed: missing JSON object end")?;
-    if end < start {
-        anyhow::bail!("carlini-threat-hunt output parse failed: malformed JSON object");
-    }
-    serde_json::from_str(&text[start..=end])
-        .with_context(|| "carlini-threat-hunt output parse failed: invalid JSON object")
+    anyhow::bail!("carlini-threat-hunt structured output must be a JSON object")
+}
+
+fn findings_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["findings"],
+        "additionalProperties": true,
+        "properties": {
+            "findings": {"type": "array", "items": {"type": "object"}}
+        }
+    })
 }
 
 fn normalize_file_path(target: &Path, file_path: &str) -> Option<String> {

@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 239
 ---
- KUZUSHI  mode run  target none  findings 1 findings (1 critical)  ctx missing  view run  model unconfigured
+KUZUSHI  mode:run | target none | 1 findings (1 critical) | ctx missing | view run | model unconfigured
 
 ⠿ ./acme-checkout | running: agentic-sast tracing | 1 finding(s) | run run-abc1
 
@@ -15,6 +15,6 @@ assertion_line: 239
  F-0001    CRITICAL sql injection via order_id concatenation                                      apps/api/orders.rs:142
 
  -- TRANSCRIPT ---------------------------------------------------------------------------------------------------------
- | system kuzushi shell
- | startup ready: 35 module(s), 61 tool(s), target none
- | help type help for commands | ? <text> to ask | scan to start
+ 15:21:17 | system kuzushi shell
+ 15:21:17 | startup ready: 35 module(s), 61 tool(s), target none
+ 15:21:17 | help type help for commands | ? <text> to ask | scan to start

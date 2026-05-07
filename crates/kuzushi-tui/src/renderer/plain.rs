@@ -391,7 +391,10 @@ fn plain_workspace_lines(app: &ShellApp, width: usize) -> Vec<String> {
         );
     }
     lines.push(String::new());
-    lines.push("Next: workspace status, workspace export findings findings.json".to_string());
+    lines.push(
+        "Next: workspace status, workspace export findings <path>.json, kuzushi pr-comment"
+            .to_string(),
+    );
     lines
 }
 

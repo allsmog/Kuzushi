@@ -82,7 +82,7 @@ workspace - show target and state status
 workspace export findings <path> - export findings JSON or JSONL
   aliases / examples: /workspace export findings <path>, findings export <path>
 
-FINDINGS / EVIDENCE — browse / open / triage findings
+FINDINGS / EVIDENCE — browse findings, evidence, and report output
 findings - open persisted findings
   aliases / examples: /f, f, /findings
 open <id> - open a finding alias or fingerprint
