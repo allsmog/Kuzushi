@@ -303,10 +303,15 @@ fn routing_mode_segment(app: &ShellApp) -> String {
 fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
+    // Drop the trailing "· kuzushi shell" segment — the user is in the
+    // shell already (the prompt and the top-row mode label both say so),
+    // and the muted suffix burned cells the catalog title needed for
+    // breathing room. Modules count is the more useful sub-title.
+    let module_count = app.registry.modules().count();
     lines.push(Line::from(vec![
         Span::styled("KUZUSHI · CATALOG", theme::heading()),
         Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
-        Span::styled("kuzushi shell", theme::muted()),
+        Span::styled(format!("{module_count} modules"), theme::muted()),
     ]));
     lines.push(blank());
 
@@ -4328,7 +4333,12 @@ mod tests {
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
 
-        assert!(rendered.contains("kuzushi shell"));
+        // Catalog title no longer repeats "kuzushi shell" (the prompt + the
+        // top header already identify the shell). Verify the new
+        // "KUZUSHI · CATALOG · N modules" signal is present, and the prompt
+        // sigil + keybind chips still render.
+        assert!(rendered.contains("KUZUSHI · CATALOG"));
+        assert!(rendered.contains("modules"));
         assert!(rendered.contains("kuzushi>"));
         assert!(rendered.contains("[Tab] complete"));
         assert!(rendered.contains("[modules]"));
