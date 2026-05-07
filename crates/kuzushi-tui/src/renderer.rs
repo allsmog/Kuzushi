@@ -394,12 +394,7 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         };
         let (_, blurb) = module_category_blurb(category);
         let widths = module_table_widths(area.width);
-        lines.push(divider(category, area.width));
-        lines.push(indent(
-            muted(&fit(blurb, area.width.saturating_sub(2) as usize)),
-            2,
-        ));
-        lines.push(table_header(&["id", "description"], &widths));
+        lines.push(category_divider(category, blurb, area.width));
         for module in rows {
             lines.push(catalog_module_row(
                 &module.metadata().id,
@@ -2994,6 +2989,24 @@ fn divider(title: &str, width: u16) -> Line<'static> {
     ])
 }
 
+/// Catalog category divider that embeds the section blurb on the rule line:
+///   `── OFFENSE find vulnerabilities by … ──────────`
+/// Mirrors `catHead` in `design/mockups/catalog.jsx`.
+fn category_divider(name: &str, blurb: &str, width: u16) -> Line<'static> {
+    let safe_width = width.max(8) as usize;
+    let lead = "── ";
+    let label = format!("{name} ");
+    let blurb_text = format!("{blurb} ");
+    let used = lead.chars().count() + label.chars().count() + blurb_text.chars().count();
+    let fill = safe_width.saturating_sub(used).max(1);
+    Line::from(vec![
+        Span::styled(lead.to_string(), theme::subtle()),
+        Span::styled(label, theme::label()),
+        Span::styled(blurb_text, theme::muted()),
+        Span::styled(theme::RULE_CHAR.repeat(fill), theme::subtle()),
+    ])
+}
+
 fn module_table_widths(width: u16) -> Vec<usize> {
     let total = width as usize;
     let id = if total < 72 { 14 } else { 22 };
@@ -4635,7 +4648,11 @@ mod tests {
 
         assert!(rendered.contains("82 findings"));
         assert!(rendered.contains("semgrep"));
-        assert!(rendered.contains("description"));
+        // Category divider embeds the section blurb on the rule line — see
+        // `category_divider` and `design/mockups/catalog.jsx::catHead`. Narrow
+        // terminals truncate, so assert on the shortest blurb word that
+        // survives an 58-col render: "OFFENSE" itself.
+        assert!(rendered.contains("OFFENSE"));
         assert!(!rendered.contains("module context-lite"));
         assert!(!rendered.contains("command log"));
     }
