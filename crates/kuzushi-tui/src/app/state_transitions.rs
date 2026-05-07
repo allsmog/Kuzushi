@@ -420,6 +420,12 @@ impl ShellApp {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let plain_modifiers = !ctrl && !alt;
 
+        // Any non-Tab keystroke breaks the Tab-completion cycle. The cycle
+        // is rebuilt the next time Tab is pressed against the new input.
+        if !matches!(key.code, KeyCode::Tab) {
+            self.reset_completion_cycle();
+        }
+
         match key.code {
             KeyCode::Char('c') | KeyCode::Char('d') if ctrl => {
                 self.handle_quit_chord();
