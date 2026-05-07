@@ -75,7 +75,7 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 
 ### `origin/claude/check-ratatui-tui-Jj2eH`
 
-- Status: integrated by subset in current working commit
+- Status: integrated by subset in commit `ce925dd3` (`merge: integrate useful check-ratatui-tui-Jj2eH changes`)
 - Commits inspected: `87fe9ecf` eval defaults/scorer tests, `f858bad9` vuln_source/static-context scorer reporting, `36f2c829` tree-sitter backend, `b0054a67` deep-audit static-evidence context, `49e0fe31` diff-scope cleanup, plus older already-overlapping merge history
 - Scope inspected: `git log --oneline --max-count=20 main..origin/claude/check-ratatui-tui-Jj2eH`, `git diff --name-status main...`, `git diff --stat main...`, and `git merge-tree --write-tree main origin/claude/check-ratatui-tui-Jj2eH`
 - Conflict preview: broad conflicts across `Cargo.lock`, CLI main/tests, core config/diff-scope/findings/lib/runtime, OpenAI runtime, xint scripts/docs, and bridge script. The branch has multiple merge bases and stale broad history.
