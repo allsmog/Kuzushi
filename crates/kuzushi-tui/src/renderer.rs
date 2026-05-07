@@ -217,6 +217,9 @@ fn shell_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ShellView::Replay(run_id) => replay_lines(app, area, run_id),
         ShellView::Trace(run_id) => trace_lines(app, area, run_id),
         ShellView::Help => viewport_lines(help_lines(app, area), area.height, app.help_scroll),
+        ShellView::Quickstart => {
+            viewport_lines(quickstart_lines(app, area), area.height, app.help_scroll)
+        }
         ShellView::Config => config_lines(app, area),
         ShellView::Tools => viewport_lines(tools_lines(app, area), area.height, app.tools_scroll),
         ShellView::Options(view) => options_lines(app, area, view),
@@ -1008,6 +1011,60 @@ fn help_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             }
         }
     }
+    lines
+}
+
+fn quickstart_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let mut lines = context_strip(app, area);
+    lines.push(blank());
+    lines.push(divider("QUICKSTART", area.width));
+    lines.push(blank());
+    lines.push(Line::styled(
+        "Welcome to kuzushi. Five steps to your first finding:",
+        theme::heading(),
+    ));
+    lines.push(blank());
+    let scan_step = if app.target.is_some() {
+        "scan                       run configured scanners on the active target"
+    } else {
+        "scan .                     run configured scanners on this directory"
+    };
+    let steps = [
+        ("1", scan_step),
+        ("2", "findings                   browse persisted findings"),
+        ("3", "context build              write .kuzushi/context-snapshot.json"),
+        (
+            "4",
+            "model                      choose an explicit provider/model for ask/triage",
+        ),
+        (
+            "5",
+            "ask <question>             ask after a model is configured",
+        ),
+    ];
+    for (num, step) in steps {
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {num}. "), theme::accent()),
+            Span::styled(step.to_string(), theme::primary()),
+        ]));
+    }
+    lines.push(blank());
+    lines.push(muted(&fit(
+        "Tip: Ctrl+O toggles the live event timeline.",
+        area.width as usize,
+    )));
+    lines.push(muted(&fit(
+        &format!(
+            "First-finding path: `{}` then `findings`.",
+            app.first_finding_scan_command()
+        ),
+        area.width as usize,
+    )));
+    lines.push(blank());
+    lines.push(muted(&fit(
+        "Type `help` for the full command reference, or `back` to return.",
+        area.width as usize,
+    )));
     lines
 }
 
@@ -2723,6 +2780,7 @@ fn view_status_segment(app: &ShellApp) -> String {
         ShellView::Replay(_) => "replay".to_string(),
         ShellView::Trace(_) => "trace".to_string(),
         ShellView::Help => "help".to_string(),
+        ShellView::Quickstart => "quickstart".to_string(),
         ShellView::Config => "config".to_string(),
         ShellView::Tools => "tools".to_string(),
         ShellView::Options(view) => format!("options:{}", view.tool_name),
