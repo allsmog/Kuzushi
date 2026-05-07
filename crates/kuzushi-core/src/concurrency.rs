@@ -193,7 +193,7 @@ impl ModelGate {
                     }
                     self.notify_next_head(&slot);
                     return PriorityPermit {
-                        _permit: permit,
+                        permit: Some(permit),
                         slot,
                         gate: self.clone(),
                     };
@@ -239,15 +239,17 @@ impl ModelGate {
 /// Permit returned by [`ModelGate::acquire`]. Releases on drop and wakes
 /// the next priority-queue head.
 pub struct PriorityPermit {
-    _permit: OwnedSemaphorePermit,
+    permit: Option<OwnedSemaphorePermit>,
     slot: ModelSlot,
     gate: ModelGate,
 }
 
 impl Drop for PriorityPermit {
     fn drop(&mut self) {
-        // The OwnedSemaphorePermit is released by its own Drop; we just
-        // need to wake whoever is currently the head so they can retry.
+        // Release the semaphore before notifying waiters. If we notify first,
+        // the queue head can wake, observe no capacity, and go back to sleep
+        // with no later notification from the permit release.
+        drop(self.permit.take());
         self.slot.permit_released.notify_waiters();
         self.gate.notify_next_head(&self.slot);
     }

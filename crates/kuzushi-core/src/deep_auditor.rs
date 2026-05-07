@@ -86,6 +86,8 @@ pub struct DeepAuditConfig {
     pub max_steps: u32,
     pub deposit_usd: f64,
     pub system_prompt: Option<String>,
+    /// Include whitebox-static narrative, registry, and evidence-graph context in the prompt.
+    pub include_static_evidence: bool,
 }
 
 impl DeepAuditConfig {
@@ -95,6 +97,7 @@ impl DeepAuditConfig {
             max_steps: DEFAULT_MAX_STEPS,
             deposit_usd: DEFAULT_DEPOSIT_USD,
             system_prompt: None,
+            include_static_evidence: true,
         }
     }
 }
@@ -110,6 +113,8 @@ Rules:
 - Check for guards (length checks, allow-lists, type tags) that would prevent the
   vulnerability — if any exists and is reachable, mark triggerable=false.
 - Cite every file:line range you relied on as an evidence entry.
+- If a "Pre-populated Static Evidence" section is present, treat registry-tagged
+  sources, sinks, sanitizers, and guards as starting points to verify in source.
 
 Return ONLY a JSON object matching:
 
@@ -158,6 +163,21 @@ pub fn run_deep_auditor(
     };
 
     // 3. Build request + toolbox.
+    let mut user_prompt = render_user_prompt(finding);
+    if cfg.include_static_evidence {
+        let mut sources = crate::static_context::StaticContextSources::new(&cfg.workspace_root);
+        if !finding.title.trim().is_empty() {
+            sources.symbol_hint = Some(finding.title.as_str());
+        }
+        if !finding.message.trim().is_empty() {
+            sources.source_snippet = Some(finding.message.as_str());
+        }
+        if let Some(block) = crate::static_context::assemble_static_context(finding, &sources) {
+            user_prompt.push_str("\n\n");
+            user_prompt.push_str(&block);
+        }
+    }
+
     let request = AgentToolLoopRequest {
         model,
         cwd: cfg.workspace_root.clone(),
@@ -165,7 +185,7 @@ pub fn run_deep_auditor(
             .system_prompt
             .clone()
             .unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string()),
-        prompt: render_user_prompt(finding),
+        prompt: user_prompt,
         tools: code_nav_tool_specs(),
         max_steps: cfg.max_steps.max(1),
     };
@@ -404,12 +424,18 @@ mod tests {
     /// to drive deterministic auditor behaviour.
     struct ScriptedRuntime {
         steps: Mutex<Vec<AgentLoopStep>>,
+        captured_prompts: Mutex<Vec<String>>,
     }
     impl ScriptedRuntime {
         fn new(steps: Vec<AgentLoopStep>) -> Arc<Self> {
             Arc::new(Self {
                 steps: Mutex::new(steps),
+                captured_prompts: Mutex::new(Vec::new()),
             })
+        }
+
+        fn last_prompt(&self) -> Option<String> {
+            self.captured_prompts.lock().unwrap().last().cloned()
         }
     }
     impl AgentRuntime for ScriptedRuntime {
@@ -424,9 +450,13 @@ mod tests {
         }
         fn next_step_blocking(
             &self,
-            _request: &AgentToolLoopRequest,
+            request: &AgentToolLoopRequest,
             _history: &[LoopHistoryEntry],
         ) -> Result<AgentLoopStep> {
+            self.captured_prompts
+                .lock()
+                .unwrap()
+                .push(request.prompt.clone());
             let mut s = self.steps.lock().unwrap();
             anyhow::ensure!(!s.is_empty(), "scripted runtime exhausted");
             Ok(s.remove(0))
@@ -454,6 +484,23 @@ mod tests {
             "anthropic:claude-opus-4-7",
         );
         RoutedRuntime::new(runtime, Arc::new(router), None)
+    }
+
+    fn routed_runtime_with_role_typed(
+        steps: Vec<AgentLoopStep>,
+    ) -> (RoutedRuntime, Arc<ScriptedRuntime>) {
+        let runtime = ScriptedRuntime::new(steps);
+        let runtime_dyn: Arc<dyn AgentRuntime> = runtime.clone();
+        let mut router = AgentRouter::empty();
+        router_add_route(
+            &mut router,
+            AgentRole::DeepAuditor,
+            "anthropic:claude-opus-4-7",
+        );
+        (
+            RoutedRuntime::new(runtime_dyn, Arc::new(router), None),
+            runtime,
+        )
     }
 
     fn router_add_route(router: &mut AgentRouter, role: AgentRole, primary: &str) {
@@ -638,6 +685,63 @@ mod tests {
         assert_eq!(outcome.evidence[0].file, "a.c");
         assert_eq!(outcome.evidence[0].start_line, 1);
         assert_eq!(outcome.evidence[0].end_line, 3);
+    }
+
+    #[test]
+    fn appends_static_evidence_block_when_enabled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path();
+        std::fs::write(workspace.join("foo.c"), "void foo() {}\n").unwrap();
+        let steps = vec![AgentLoopStep::Final {
+            text: String::new(),
+            structured: Some(serde_json::json!({
+                "triggerable": false,
+                "rationale": "no input reaches the function",
+                "confidence": 0.9,
+                "evidence": []
+            })),
+            cost_usd: Some(0.001),
+        }];
+        let (runtime, scripted) = routed_runtime_with_role_typed(steps);
+        let cfg = DeepAuditConfig::new(workspace);
+        let _ = run_deep_auditor(&runtime, None, &cfg, &finding()).unwrap();
+        let captured = scripted.last_prompt().expect("a prompt was sent");
+        assert!(
+            captured.contains("Pre-populated Static Evidence"),
+            "static-evidence header missing from prompt: {captured}"
+        );
+        assert!(
+            captured.contains("Trigger path:"),
+            "narrative trigger-path missing: {captured}"
+        );
+    }
+
+    #[test]
+    fn skips_static_evidence_block_when_disabled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path();
+        std::fs::write(workspace.join("foo.c"), "void foo() {}\n").unwrap();
+        let steps = vec![AgentLoopStep::Final {
+            text: String::new(),
+            structured: Some(serde_json::json!({
+                "triggerable": false,
+                "rationale": "no input reaches the function",
+                "confidence": 0.9,
+                "evidence": []
+            })),
+            cost_usd: Some(0.001),
+        }];
+        let (runtime, scripted) = routed_runtime_with_role_typed(steps);
+        let cfg = DeepAuditConfig {
+            include_static_evidence: false,
+            ..DeepAuditConfig::new(workspace)
+        };
+        let _ = run_deep_auditor(&runtime, None, &cfg, &finding()).unwrap();
+        let captured = scripted.last_prompt().expect("a prompt was sent");
+        assert!(
+            !captured.contains("Pre-populated Static Evidence"),
+            "static-evidence header should not appear when disabled: {captured}"
+        );
     }
 
     #[test]
