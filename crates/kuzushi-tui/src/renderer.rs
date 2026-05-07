@@ -1426,16 +1426,23 @@ fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
     lines.push(divider("RUNS", area.width));
     if let Some(scan) = &app.scan {
-        lines.push(header(&["run", "status", "findings", "target"]));
-        lines.push(row(&[
-            scan.run_id
-                .as_deref()
-                .map(short)
-                .unwrap_or_else(|| "pending".to_string()),
-            scan_status(scan),
-            scan.findings_count.to_string(),
-            fit(&scan.target.display().to_string(), value_width(area, 34)),
-        ]));
+        let widths = [10usize, 18, 10, value_width(area, 40)];
+        lines.push(aligned_header(
+            &["run", "status", "findings", "target"],
+            &widths,
+        ));
+        lines.push(aligned_row(
+            &[
+                scan.run_id
+                    .as_deref()
+                    .map(short)
+                    .unwrap_or_else(|| "pending".to_string()),
+                scan_status(scan),
+                scan.findings_count.to_string(),
+                scan.target.display().to_string(),
+            ],
+            &widths,
+        ));
     } else {
         lines.push(muted(
             "No scan run is active in this shell session. Next: `scan` to start one, or `replay <runId>` for a past run on disk.",
