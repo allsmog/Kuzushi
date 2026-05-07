@@ -7,6 +7,6 @@ KUZUSHI  mode:shell | target none | 0 findings | ctx missing | module catalog | 
 KUZUSHI | CATALOG | kuzushi shell
 
 [!] no target selected; `scan .` uses the current directory
-▸ NEXT First finding: run `scan .`, then `findings`.
+▸ NEXT Build the context snapshot with `context build` so SAST has structure to walk.
 Quickstart: quickstart | Context: context build | Runtime: model
 Type help, modules, use <module>, scan, or run <tool> [json].
