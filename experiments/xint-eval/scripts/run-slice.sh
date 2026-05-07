@@ -34,9 +34,11 @@ REPORT_DIR="${2:-$EVAL_DIR/reports/$(date -u +%Y%m%dT%H%M%S)}"
 mkdir -p "$REPORT_DIR/$SLICE"
 START_TS=$(date -u +%s)
 
-# Phase-0 baseline: existing scan tasks. Once Phase-7 lands, add full-mode:hunt
-# to TASKS via env override.
-TASKS="${KUZUSHI_EVAL_TASKS:-systems-hunt:run,carlini-threat-hunt:run,variant-ndiff:hunt}"
+# Default task set: every discovery channel that produces findings.
+# Phase 7 added `full-mode:hunt` (whole-codebase chunked LLM pass);
+# include it by default so the eval exercises that channel. Override
+# with KUZUSHI_EVAL_TASKS=… for ablation runs.
+TASKS="${KUZUSHI_EVAL_TASKS:-systems-hunt:run,carlini-threat-hunt:run,variant-ndiff:hunt,full-mode:hunt}"
 BUDGET="${KUZUSHI_EVAL_BUDGET:-triage=50,deep-audit=200,full-mode=300}"
 
 # Honour OAuth env variables if set; let kuzushi config defaults do the rest.

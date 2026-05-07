@@ -20,12 +20,24 @@ declare -A REPOS=(
   [mariadb]="https://github.com/MariaDB/server.git"
 )
 
-# Pre-patch SHAs. Override via env, e.g. KUZUSHI_SLICE_SHA_LINUX=abcdef...
+# Pre-patch SHAs / refs. Operator overrides via env, e.g.
+#   KUZUSHI_SLICE_SHA_LINUX=abcdef… scripts/fetch-slices.sh
+#
+# Defaults are best-effort pre-patch refs from public disclosures:
+#   - linux v6.13: pre-dates the May 2026 patches that fixed Copy Fail
+#     (CVE-2026-31431).
+#   - postgres REL_17_0: pre-dates the 2026-Q1 minor releases that
+#     fixed the 20-year data-exfil/RCE.
+#   - redis 7.4.0 + mariadb-11.4.2: ZeroDay-Cloud disclosures still
+#     have sparse public detail; pin to a stable tag operators can
+#     check against.
+#
+# Pin to the exact disclosure SHA when known via the env override.
 declare -A SHAS=(
-  [linux]="${KUZUSHI_SLICE_SHA_LINUX:-}"
-  [postgres]="${KUZUSHI_SLICE_SHA_POSTGRES:-}"
-  [redis]="${KUZUSHI_SLICE_SHA_REDIS:-}"
-  [mariadb]="${KUZUSHI_SLICE_SHA_MARIADB:-}"
+  [linux]="${KUZUSHI_SLICE_SHA_LINUX:-v6.13}"
+  [postgres]="${KUZUSHI_SLICE_SHA_POSTGRES:-REL_17_0}"
+  [redis]="${KUZUSHI_SLICE_SHA_REDIS:-7.4.0}"
+  [mariadb]="${KUZUSHI_SLICE_SHA_MARIADB:-mariadb-11.4.2}"
 )
 
 cd "$(git rev-parse --show-toplevel)"
@@ -61,7 +73,8 @@ for name in "${!REPOS[@]}"; do
     git fetch --depth=1 origin "$sha"
     git checkout --detach "$sha"
   else
-    echo "[$name] WARN: no SHA pinned (set KUZUSHI_SLICE_SHA_${name^^}); using current HEAD"
+    echo "[$name] WARN: KUZUSHI_SLICE_SHA_${name^^} explicitly empty; using current HEAD" >&2
+    echo "[$name] WARN: recall numbers from a tip-of-tree run are not reproducible" >&2
   fi
 
   resolved="$(git rev-parse HEAD)"
