@@ -234,6 +234,7 @@ fn shell_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             viewport_lines(history_lines(app, area), area.height, app.history_scroll)
         }
         ShellView::Story => story_lines(app, area),
+        ShellView::Auth => auth_lines(app, area),
     }
 }
 
@@ -2513,6 +2514,194 @@ fn story_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines
 }
 
+/// `/auth` view — providers + effective model + spend.  Mirrors
+/// `design/mockups/auth.jsx`.  Pulls real auth state from environment
+/// variables, oauth helpers, and the active config — same data the
+/// transcript log line was already showing, but as a structured panel
+/// the operator can read at a glance.
+fn auth_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let mut lines = context_strip(app, area);
+    lines.push(blank());
+
+    // PROVIDERS section --------------------------------------------------
+    lines.push(divider("PROVIDERS", area.width));
+    let providers = auth_provider_rows(app);
+    for row in &providers {
+        lines.push(auth_provider_line(row));
+    }
+    lines.push(blank());
+
+    // MODEL · effective section -----------------------------------------
+    lines.push(divider("MODEL · effective", area.width));
+    let model = app.config.model.as_deref().unwrap_or("unconfigured");
+    let backend = crate::app::runtime_backend_label(&app.config);
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled("current  ", theme::muted()),
+        Span::styled(model.to_string(), theme::primary()),
+        Span::styled(" · ", theme::subtle()),
+        Span::styled("backend ", theme::muted()),
+        Span::styled(backend.to_string(), theme::primary()),
+        Span::styled(" · ", theme::subtle()),
+        Span::styled("routing ", theme::muted()),
+        Span::styled("direct", theme::primary()),
+    ]));
+    if let Some(reasoning) = app.session_thinking_level.as_deref() {
+        lines.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled("reasoning ", theme::muted()),
+            Span::styled(reasoning.to_string(), theme::primary()),
+        ]));
+    }
+    lines.push(blank());
+
+    // SPEND section ------------------------------------------------------
+    lines.push(divider("SPEND · this session", area.width));
+    let session_cost = format_session_cost(app.session_cost_usd);
+    let last_tool = app
+        .last_tool_cost_usd
+        .map(|c| format!("${c:.4}"))
+        .unwrap_or_else(|| "—".to_string());
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled("session   ", theme::muted()),
+        Span::styled(session_cost, theme::primary()),
+        Span::styled("   · ", theme::subtle()),
+        Span::styled("last tool ", theme::muted()),
+        Span::styled(last_tool, theme::primary()),
+    ]));
+    if let Some(budget) = app.session_budget_usd {
+        let pct = if budget > 0.0 {
+            (app.session_cost_usd / budget * 100.0).round() as usize
+        } else {
+            0
+        };
+        let pct_style = if pct >= 85 {
+            theme::warn()
+        } else {
+            theme::muted()
+        };
+        lines.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled("budget    ", theme::muted()),
+            Span::styled(format!("${budget:.2}"), theme::primary()),
+            Span::styled("   · ", theme::subtle()),
+            Span::styled(format!("{pct}%"), pct_style),
+        ]));
+    }
+    lines.push(blank());
+
+    // CTA row
+    lines.push(command_list_line(
+        &[
+            "auth login openai-codex",
+            "auth login anthropic",
+            "model <provider:id>",
+            "config",
+            "back",
+        ],
+        area.width as usize,
+    ));
+    lines
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthProviderState {
+    Connected,
+    Missing,
+    Inactive,
+}
+
+struct AuthProviderRow {
+    name: &'static str,
+    state: AuthProviderState,
+    detail: String,
+}
+
+/// Build the providers table for `auth_lines`.  Keeps the data source
+/// honest: `KUZUSHI_API_KEY` / `ANTHROPIC_API_KEY` for env-key auth,
+/// `oauth_provider_status` for OAuth.
+fn auth_provider_rows(app: &ShellApp) -> Vec<AuthProviderRow> {
+    let api_key_env = app.config.runtime.api_key_env.clone();
+    let env_set = std::env::var_os(api_key_env.as_str()).is_some();
+    let anthropic_set = std::env::var_os("ANTHROPIC_API_KEY").is_some();
+    let codex_oauth = crate::app::oauth_provider_status("openai-codex");
+    let anthropic_oauth = crate::app::oauth_provider_status("anthropic");
+
+    let env_state = if env_set {
+        AuthProviderState::Connected
+    } else {
+        AuthProviderState::Missing
+    };
+    let env_detail = if env_set {
+        format!("{api_key_env}=set; value hidden")
+    } else {
+        format!("{api_key_env}=missing")
+    };
+
+    let anthropic_state = if anthropic_set || anthropic_oauth == "ok" {
+        AuthProviderState::Connected
+    } else {
+        AuthProviderState::Missing
+    };
+    let anthropic_detail = format!(
+        "ANTHROPIC_API_KEY={}; oauth {}",
+        if anthropic_set { "set" } else { "missing" },
+        anthropic_oauth
+    );
+
+    let codex_state = if codex_oauth == "ok" {
+        AuthProviderState::Connected
+    } else {
+        AuthProviderState::Inactive
+    };
+    let codex_detail = format!("oauth {codex_oauth}");
+
+    vec![
+        AuthProviderRow {
+            name: "pi-agent-core",
+            state: env_state,
+            detail: env_detail,
+        },
+        AuthProviderRow {
+            name: "anthropic",
+            state: anthropic_state,
+            detail: anthropic_detail,
+        },
+        AuthProviderRow {
+            name: "openai-codex",
+            state: codex_state,
+            detail: codex_detail,
+        },
+    ]
+}
+
+fn auth_provider_line(row: &AuthProviderRow) -> Line<'static> {
+    let (glyph, glyph_style, label_style) = match row.state {
+        AuthProviderState::Connected => (" ✓ ", theme::success(), theme::success()),
+        AuthProviderState::Missing => (" ✗ ", theme::danger(), theme::danger()),
+        AuthProviderState::Inactive => (" · ", theme::subtle(), theme::muted()),
+    };
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(glyph, glyph_style),
+        Span::raw(" "),
+        Span::styled(format!("{:14}", row.name), theme::accent()),
+        Span::styled(format!("{:11}", row.state.label()), label_style),
+        Span::styled(row.detail.clone(), theme::muted()),
+    ])
+}
+
+impl AuthProviderState {
+    fn label(self) -> &'static str {
+        match self {
+            AuthProviderState::Connected => "connected",
+            AuthProviderState::Missing => "missing",
+            AuthProviderState::Inactive => "inactive",
+        }
+    }
+}
+
 fn kb_artifact_widths(width: u16) -> Vec<usize> {
     let total = width as usize;
     let state = 7;
@@ -3706,6 +3895,12 @@ pub(crate) enum ProgressKind {
     Done,
     Active,
     Queued,
+    /// Reserved for genuine error states (e.g. scan task crashed,
+    /// preflight check failed).  No call site currently produces it
+    /// because every "task didn't run" path correctly uses `Queued`,
+    /// but keeping the variant + danger-red style makes the API
+    /// honest if/when we need it.
+    #[allow(dead_code)]
     Failing,
 }
 
@@ -4505,6 +4700,7 @@ fn view_status_segment(app: &ShellApp) -> String {
         ShellView::AgentChat => "agent".to_string(),
         ShellView::History => "history".to_string(),
         ShellView::Story => "story".to_string(),
+        ShellView::Auth => "auth".to_string(),
     }
 }
 
@@ -6656,6 +6852,7 @@ mod tests {
             (ShellView::AgentChat, "AGENT"),
             (ShellView::History, "COMMAND HISTORY"),
             (ShellView::Story, "SESSION STORY"),
+            (ShellView::Auth, "PROVIDERS"),
         ];
 
         for (view, expected) in cases {
@@ -7092,6 +7289,34 @@ mod tests {
         );
         assert!(roles.contains(&"accent"), "accent rule-id missing: {roles:?}");
         assert!(roles.contains(&"muted"), "muted location missing: {roles:?}");
+    }
+
+    #[test]
+    fn auth_view_renders_providers_model_and_spend_sections() {
+        // `/auth` should land on a dedicated ShellView::Auth surface
+        // matching `design/mockups/auth.jsx` — providers list + effective
+        // model + session spend.
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(
+            V2Config {
+                model: Some("openai:gpt-4.1".to_string()),
+                ..V2Config::default()
+            },
+            None,
+        );
+        app.session_cost_usd = 0.42;
+        app.shell_view = ShellView::Auth;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("PROVIDERS"));
+        assert!(rendered.contains("MODEL"));
+        assert!(rendered.contains("SPEND"));
+        assert!(rendered.contains("openai:gpt-4.1"));
+        assert!(rendered.contains("$0.42"));
+        assert!(rendered.contains("auth login openai-codex"));
     }
 
     #[test]
