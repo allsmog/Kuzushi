@@ -2026,7 +2026,7 @@ fn workspace_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     lines.push(blank());
     lines.push(muted(&fit(
-        "workspace status · workspace export findings findings.json · findings export findings.json",
+        "workspace status · workspace export findings <path>.json · findings export <path>.json",
         area.width as usize,
     )));
     lines
@@ -5381,7 +5381,7 @@ mod tests {
             )),
             findings_count: Some(2),
             last_export: Some(std::path::PathBuf::from("/tmp/findings.json")),
-            status: "workspace ready; 2 finding(s). Next: workspace export findings findings.json"
+            status: "workspace ready; 2 finding(s). Next: workspace export findings <path>.json"
                 .to_string(),
         };
         app.shell_view = ShellView::Workspace;
@@ -5507,7 +5507,7 @@ mod tests {
             )),
             findings_count: Some(2),
             last_export: None,
-            status: "workspace ready; 2 finding(s). Next: workspace export findings findings.json"
+            status: "workspace ready; 2 finding(s). Next: workspace export findings <path>.json"
                 .to_string(),
         };
         app.shell_view = ShellView::Workspace;
@@ -5515,7 +5515,7 @@ mod tests {
         let rendered = render_plain_app(&app, 52);
 
         assert!(rendered.contains("workspace ready; 2 finding(s)."));
-        assert!(rendered.contains("workspace export findings findings.json"));
+        assert!(rendered.contains("workspace export findings <path>.json"));
         assert!(!rendered.contains("workspace export findings..."));
         assert_strict_plain_width(&rendered, 52);
     }
