@@ -1438,7 +1438,26 @@ fn actor_detail_lines(app: &ShellApp, area: Rect, index: usize) -> Vec<Line<'sta
             .as_str(),
     ));
     lines.push(detail("filter", app.actor_detail_filter.label()));
-    lines.push(muted("f cycle filter | 0 reset | j/k/g/G scroll | back"));
+    // Inline keybind hint matches `keybindings_line` shape (accent key +
+    // muted hint, 3-space separator) per `design/mockups/_shared.jsx::footer`.
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled("f", theme::accent()),
+        Span::raw(" "),
+        Span::styled("cycle filter", theme::muted()),
+        Span::raw("   "),
+        Span::styled("0", theme::accent()),
+        Span::raw(" "),
+        Span::styled("reset", theme::muted()),
+        Span::raw("   "),
+        Span::styled("j/k/g/G", theme::accent()),
+        Span::raw(" "),
+        Span::styled("scroll", theme::muted()),
+        Span::raw("   "),
+        Span::styled("back", theme::accent()),
+        Span::raw(" "),
+        Span::styled("home", theme::muted()),
+    ]));
     lines.push(blank());
 
     let visible = area.height.saturating_sub(8).max(2) as usize;
