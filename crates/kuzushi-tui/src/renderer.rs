@@ -1376,10 +1376,11 @@ fn prompts_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         lines.push(Line::styled(
             fit(
                 &format!(
-                    "{marker} {} {} {}",
-                    pad(verb, 12),
-                    pad("builtin", 10),
-                    fit(&path, value_width(area, 28))
+                    "{marker} {}",
+                    table_text(
+                        &[verb, "builtin", &path],
+                        &[12, 10, value_width(area, 28)],
+                    )
                 ),
                 area.width as usize,
             ),
