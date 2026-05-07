@@ -611,6 +611,41 @@ fn deep_audit_run_persists_triage_outcome_with_evidence() {
 }
 
 #[test]
+fn assemble_static_context_smoke_through_public_surface() {
+    // Smoke-tests that the static-context re-export works for downstream
+    // consumers: build a finding with a CWE-78-shaped message, point the
+    // assembler at a fresh workspace (no DB), and assert the rendered
+    // markdown block carries the expected headings. Module-level tests
+    // cover the assembly logic in detail; this one guards the public
+    // re-export surface that the CLI + other crates depend on.
+    use kuzushi_core::{
+        assemble_static_context, Finding, Severity, StaticContextSources,
+    };
+
+    let tmp = tempfile::tempdir().unwrap();
+    let finding = Finding::new_tool(
+        "semgrep",
+        "test.cmd-injection",
+        "src/server.js",
+        42,
+        Some(42),
+        Severity::High,
+        "child_process.exec invocation with attacker-controlled argv (CWE-78)",
+    );
+    let mut sources = StaticContextSources::new(tmp.path());
+    sources.symbol_hint = Some("child_process.exec");
+    sources.source_snippet = Some("exec(req.body.cmd)");
+
+    let block = assemble_static_context(&finding, &sources)
+        .expect("assembler should produce a block when narrative + registry hit");
+    assert!(
+        block.contains("Pre-populated Static Evidence"),
+        "missing header: {block}"
+    );
+    assert!(block.contains("Trigger path"), "missing narrative: {block}");
+}
+
+#[test]
 fn recall_smoke_linux_copy_fail() {
     run_recall_test("linux");
 }

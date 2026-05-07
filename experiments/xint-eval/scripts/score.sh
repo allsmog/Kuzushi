@@ -31,6 +31,7 @@ agg_hits=0
 agg_total=0
 agg_oracle=0
 agg_usd=0
+declare -A channel_lines
 
 for slice_dir in "$REPORT_DIR"/*/; do
   slice=$(basename "$slice_dir")
@@ -52,6 +53,11 @@ for slice_dir in "$REPORT_DIR"/*/; do
 
   echo "| $slice | $findings_count | $hits | $misses | $precision | $recall_exact | $recall_pm10 | $recall_fn | $recall_file | $proof_validated | $proof_llm_only | $usd | $wall |" >> "$SUMMARY"
 
+  channels=$(jq -r '.vuln_source_breakdown // {} | to_entries | map("\(.key)=\(.value)") | join(", ")' "$match")
+  if [[ -n "$channels" ]]; then
+    channel_lines["$slice"]="$channels"
+  fi
+
   agg_hits=$(( agg_hits + hits ))
   agg_total=$(( agg_total + findings_count ))
   agg_oracle=$(( agg_oracle + hits + misses ))
@@ -69,6 +75,13 @@ done
   else overall_prec="0"
   fi
   echo "**Aggregate:** recall=$overall_recall precision=$overall_prec total_findings=$agg_total cost=\$$agg_usd"
+  if (( ${#channel_lines[@]} > 0 )); then
+    echo
+    echo "**Discovery channels (hit set, ±10):**"
+    for slice in "${!channel_lines[@]}"; do
+      echo "- \`$slice\`: ${channel_lines[$slice]}"
+    done
+  fi
 } >> "$SUMMARY"
 
 # Append one row per run to HISTORY.md
