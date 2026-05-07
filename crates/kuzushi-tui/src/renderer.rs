@@ -2536,12 +2536,22 @@ fn knowledge_base_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     lines.push(blank());
-    lines.push(divider("ATTACHED", area.width));
     if attachments.is_empty() {
-        lines.push(muted(
-            "No attachments yet. Use attach <repo-relative-path> or attach https://example/...",
+        lines.push(divider("ATTACHED · empty", area.width));
+        lines.extend(empty_state_panel(
+            "no attachments yet",
+            &[
+                "kuzushi indexes attachments under .kuzushi/v2/artifact-kb.sqlite3.",
+                "this module has no path or URL attachments bound.",
+            ],
+            &[
+                ("attach <path>", "add a workspace-relative file or directory"),
+                ("attach https://...", "add a URL · metadata-only by default"),
+                ("kb pull kev", "preload the KEV / NVD / CWE catalogs"),
+            ],
         ));
     } else {
+        lines.push(divider("ATTACHED", area.width));
         lines.push(table_header(
             &["id", "kind", "source", "status"],
             &kb_attachment_widths(area.width),
@@ -2678,7 +2688,18 @@ fn history_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         .take(50)
         .collect::<Vec<_>>();
     if entries.is_empty() {
-        lines.push(muted("No command history yet. Next: help"));
+        lines.extend(empty_state_panel(
+            "no commands run yet",
+            &[
+                "session history records every operator-typed command line.",
+                "type something at the prompt and it will land here.",
+            ],
+            &[
+                ("help", "browse the full command catalog"),
+                ("modules", "see what's loaded"),
+                ("scan .", "smallest one-shot run"),
+            ],
+        ));
     } else {
         let start = app.command_history.len().saturating_sub(entries.len()) + 1;
         let width = (start + entries.len()).to_string().len();
