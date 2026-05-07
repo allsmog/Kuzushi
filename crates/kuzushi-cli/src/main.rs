@@ -89,7 +89,9 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
-    /// Diagnostic + credential subcommands.
+    /// Diagnostic credential subcommands. For interactive OAuth login,
+    /// use `kuzushi shell` then `auth login openai-codex` or
+    /// `auth login anthropic`.
     Auth {
         #[command(subcommand)]
         command: AuthCommand,
