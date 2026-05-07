@@ -1839,10 +1839,15 @@ fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ));
     }
     lines.push(blank());
-    lines.push(muted(&fit(
-        "Up/Down select · Enter choose · model <n> [xhigh] · auth login openai-codex|anthropic",
+    lines.push(command_list_line(
+        &[
+            "Up/Down select",
+            "Enter choose",
+            "model <n> [xhigh]",
+            "auth login openai-codex|anthropic",
+        ],
         area.width as usize,
-    )));
+    ));
     lines
 }
 
@@ -2018,10 +2023,16 @@ fn sast_tasks_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ));
     }
     lines.push(blank());
-    lines.push(muted(&fit(
-        "/task block <id> · /task allow <id> · /task toggle [id] · /task mode auto|manual|toggle · /task reset",
+    lines.push(command_list_line(
+        &[
+            "/task block <id>",
+            "/task allow <id>",
+            "/task toggle [id]",
+            "/task mode auto|manual|toggle",
+            "/task reset",
+        ],
         area.width as usize,
-    )));
+    ));
     lines
 }
 
@@ -2090,10 +2101,15 @@ fn context_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     lines.push(blank());
-    lines.push(muted(&fit(
-        "context build · context status · context regen repo · context regen app-model",
+    lines.push(command_list_line(
+        &[
+            "context build",
+            "context status",
+            "context regen repo",
+            "context regen app-model",
+        ],
         area.width as usize,
-    )));
+    ));
     lines
 }
 
