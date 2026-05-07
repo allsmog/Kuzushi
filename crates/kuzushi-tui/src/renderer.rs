@@ -1113,20 +1113,24 @@ fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
     lines.push(blank());
     lines.push(divider("MODELS", area.width));
-    lines.push(header(&["", "#", "model", "effort", "auth"]));
+    let widths = [2usize, 2, 28, 6, value_width(area, 28)];
+    lines.push(aligned_header(&["", "#", "model", "effort", "auth"], &widths));
     for (index, choice) in crate::app::model_choices().iter().enumerate() {
         let marker = if index == app.selected_model_index {
             ">"
         } else {
             " "
         };
-        lines.push(row(&[
-            marker.to_string(),
-            choice.index.to_string(),
-            fit(choice.id, 28),
-            choice.thinking_level.to_string(),
-            fit(&model_auth_status(choice), value_width(area, 28)),
-        ]));
+        lines.push(aligned_row(
+            &[
+                marker.to_string(),
+                choice.index.to_string(),
+                choice.id.to_string(),
+                choice.thinking_level.to_string(),
+                model_auth_status(choice),
+            ],
+            &widths,
+        ));
     }
     lines.push(blank());
     lines.push(muted(&fit(
@@ -1965,9 +1969,7 @@ fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
             } else {
                 "ctx: missing".to_string()
             },
-            app.focused_module
-                .clone()
-                .unwrap_or_else(|| "catalog".to_string()),
+            view_status_segment(app),
         ])
     };
 
@@ -2028,7 +2030,7 @@ fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
             .unwrap_or_else(|| "kuzushi/module> ".to_string()),
         RoutingMode::Shell => "kuzushi> ".to_string(),
     };
-    let segments = prompt_segments(&prompt, &app.input, area.width as usize, " ");
+    let segments = prompt_segments(&prompt, &app.input, app.cursor, area.width as usize, " ");
     let line = Line::from(vec![
         Span::styled(segments.prompt, theme::label()),
         Span::raw(segments.before_cursor),
@@ -2420,6 +2422,36 @@ fn row(values: &[String]) -> Line<'static> {
     )
 }
 
+fn aligned_header(values: &[&str], widths: &[usize]) -> Line<'static> {
+    Line::from(
+        values
+            .iter()
+            .zip(widths.iter())
+            .map(|(value, width)| {
+                Span::styled(format!("{}  ", pad(value, *width)), theme::subtle())
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn aligned_row(values: &[String], widths: &[usize]) -> Line<'static> {
+    Line::from(
+        values
+            .iter()
+            .zip(widths.iter())
+            .enumerate()
+            .map(|(index, (value, width))| {
+                let style = if index == 0 {
+                    theme::accent()
+                } else {
+                    Style::default()
+                };
+                Span::styled(format!("{}  ", pad(&fit(value, *width), *width)), style)
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
 fn pipeline_row(symbol: &str, label: &str, detail: &str) -> Line<'static> {
     let style = match symbol {
         "✓" => theme::success(),
@@ -2653,6 +2685,54 @@ fn run_state_style(scan: Option<&ScanPanelState>) -> Style {
         Some(scan) if scan.error.is_some() => theme::danger(),
         Some(_) => theme::success(),
         None => theme::accent(),
+    }
+}
+
+fn view_status_segment(app: &ShellApp) -> String {
+    match &app.shell_view {
+        ShellView::Catalog => app
+            .focused_module
+            .clone()
+            .unwrap_or_else(|| "catalog".to_string()),
+        ShellView::Module => app
+            .focused_module
+            .clone()
+            .unwrap_or_else(|| "module".to_string()),
+        ShellView::ModuleRun => app
+            .focused_module
+            .as_ref()
+            .map(|module| format!("{module}/run"))
+            .unwrap_or_else(|| "run".to_string()),
+        ShellView::Findings => "findings".to_string(),
+        ShellView::Finding => "finding".to_string(),
+        ShellView::Tune => "tune".to_string(),
+        ShellView::Threat(view) => format!(
+            "threats:{}",
+            match view {
+                ThreatView::Dfd => "dfd",
+                ThreatView::Stride => "stride",
+                ThreatView::Stories => "stories",
+                ThreatView::Scope => "scope",
+                ThreatView::Summary => "summary",
+            }
+        ),
+        ShellView::ThreatEditor => "threats:edit".to_string(),
+        ShellView::PromptsEditor => "prompts".to_string(),
+        ShellView::ActorDetail(index) => format!("actor:{}", index + 1),
+        ShellView::Runs => "runs".to_string(),
+        ShellView::Replay(_) => "replay".to_string(),
+        ShellView::Trace(_) => "trace".to_string(),
+        ShellView::Help => "help".to_string(),
+        ShellView::Config => "config".to_string(),
+        ShellView::Tools => "tools".to_string(),
+        ShellView::Options(view) => format!("options:{}", view.tool_name),
+        ShellView::SastTasks => "tasks".to_string(),
+        ShellView::Context => "context".to_string(),
+        ShellView::Workspace => "workspace".to_string(),
+        ShellView::KnowledgeBase => "kb".to_string(),
+        ShellView::AgentChat => "agent".to_string(),
+        ShellView::History => "history".to_string(),
+        ShellView::Story => "story".to_string(),
     }
 }
 
@@ -2914,6 +2994,7 @@ struct PromptSegments {
 fn prompt_segments(
     prompt: &str,
     input: &str,
+    cursor_index: usize,
     columns: usize,
     cursor_glyph: &str,
 ) -> PromptSegments {
@@ -2923,7 +3004,7 @@ fn prompt_segments(
     let editor_width = width.saturating_sub(fitted_prompt.chars().count()).max(1);
 
     let input_chars = input.chars().collect::<Vec<_>>();
-    let cursor = input_chars.len();
+    let cursor = cursor_index.min(input_chars.len());
     let mut visual_chars = input_chars.clone();
     let cursor_text = if cursor < visual_chars.len() {
         visual_chars[cursor].to_string()
@@ -4176,5 +4257,59 @@ mod tests {
                 "plain line exceeded {width} columns: {line:?}"
             );
         }
+    }
+
+    #[test]
+    fn prompt_segments_highlight_follows_app_cursor() {
+        // Cursor at the END of the input — the cursor cell is the trailing
+        // glyph, before_cursor contains the whole input.
+        let segments = prompt_segments("kuzushi> ", "abcdef", 6, 40, " ");
+        assert_eq!(segments.before_cursor, "abcdef");
+        assert_eq!(segments.cursor_text, " ");
+        assert_eq!(segments.after_cursor, "");
+
+        // Cursor in the middle — the cursor cell is the char it sits on.
+        let segments = prompt_segments("kuzushi> ", "abcdef", 4, 40, " ");
+        assert_eq!(segments.before_cursor, "abcd");
+        assert_eq!(segments.cursor_text, "e");
+        assert_eq!(segments.after_cursor, "f");
+
+        // Cursor at the start — first char becomes the cursor cell.
+        let segments = prompt_segments("kuzushi> ", "abcdef", 0, 40, " ");
+        assert_eq!(segments.before_cursor, "");
+        assert_eq!(segments.cursor_text, "a");
+        assert_eq!(segments.after_cursor, "bcdef");
+
+        // Cursor past the end is clamped to len so we don't panic on stale
+        // indices coming from history-restore races.
+        let segments = prompt_segments("kuzushi> ", "abc", 99, 40, " ");
+        assert_eq!(segments.before_cursor, "abc");
+        assert_eq!(segments.cursor_text, " ");
+    }
+
+    #[test]
+    fn view_status_segment_reflects_actual_view_not_focused_module() {
+        // P1-2: previously the bottom status footer always read "catalog"
+        // while the user was on Help / Tools / Findings. Verify the helper
+        // returns the real view label so the status reflects what the user
+        // actually sees.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Help;
+        assert_eq!(view_status_segment(&app), "help");
+
+        app.shell_view = ShellView::Tools;
+        assert_eq!(view_status_segment(&app), "tools");
+
+        app.shell_view = ShellView::Findings;
+        assert_eq!(view_status_segment(&app), "findings");
+
+        app.shell_view = ShellView::Threat(ThreatView::Stride);
+        assert_eq!(view_status_segment(&app), "threats:stride");
+
+        // Module view still surfaces the focused module so operators can
+        // see which module they're driving.
+        app.focused_module = Some("semgrep".to_string());
+        app.shell_view = ShellView::Module;
+        assert_eq!(view_status_segment(&app), "semgrep");
     }
 }
