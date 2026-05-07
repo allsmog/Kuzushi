@@ -1552,15 +1552,11 @@ fn help_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let widths = help_table_widths(area.width);
     for category in ShellCommandCategory::ORDER {
         lines.push(blank());
-        lines.push(Line::styled(category.label(), theme::subtle()));
-        if widths.len() == 2 {
-            lines.push(table_header(&["command", "aliases / examples"], &widths));
-        } else {
-            lines.push(table_header(
-                &["command", "aliases / examples", "description"],
-                &widths,
-            ));
-        }
+        lines.push(category_divider(
+            category.label(),
+            help_category_blurb(category),
+            area.width,
+        ));
         for spec in shell_command_specs()
             .iter()
             .filter(|spec| spec.category == category)
@@ -1576,6 +1572,19 @@ fn help_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         }
     }
     lines
+}
+
+/// Section blurbs for the `/help` view, aligned with `design/mockups/help.jsx::sec`.
+pub(super) fn help_category_blurb(category: ShellCommandCategory) -> &'static str {
+    match category {
+        ShellCommandCategory::Navigation => "browse modules and tools",
+        ShellCommandCategory::RunScan => "dispatch tools and scans",
+        ShellCommandCategory::OptionsTasks => "options + sast task control",
+        ShellCommandCategory::ContextKb => "workspace + attachments",
+        ShellCommandCategory::FindingsEvidence => "browse / open / triage findings",
+        ShellCommandCategory::AuthConfigModel => "auth, model, runtime config",
+        ShellCommandCategory::Session => "history, cost, lifecycle",
+    }
 }
 
 fn quickstart_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -5690,7 +5699,11 @@ mod tests {
             );
         }
 
-        assert!(rendered.contains("aliases / examples"));
+        // Per `design/mockups/help.jsx`, sections embed their blurb on the
+        // category divider rule line — no separate `aliases / examples` table
+        // header.  The featured-example + per-category alias assertions
+        // above already prove the alias/example text reaches the buffer.
+        assert!(rendered.contains("browse modules and tools"));
         assert!(!rendered.contains("TypeScript"));
         assert!(!rendered.contains("Ink"));
     }
@@ -5703,7 +5716,7 @@ mod tests {
         let rendered = render_plain_app(&app, 80);
 
         assert!(rendered.contains("HELP"));
-        assert!(rendered.contains("aliases / examples"));
+        assert!(rendered.contains("browse modules and tools"));
         for example in shell_help_examples() {
             assert!(
                 rendered.contains(example),
