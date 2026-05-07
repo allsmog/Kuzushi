@@ -846,7 +846,15 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     if let Some(error) = scan.and_then(|scan| scan.error.as_ref()) {
         lines.push(blank());
-        lines.push(transcript_line("error", error, false));
+        // Word-wrap so the actionable next-step suggestion (e.g.
+        // `pipx install semgrep` or `brew install semgrep`) doesn't get
+        // truncated at the cell width. Continuation rows reuse the
+        // transcript "…" glyph so the prefix doesn't repeat.
+        let body_width = (area.width as usize).saturating_sub(6).max(20);
+        let wrapped = wrap_text(error, body_width);
+        for (index, segment) in wrapped.iter().enumerate() {
+            lines.push(transcript_line("error", segment, index > 0));
+        }
     }
 
     if !app.findings.is_empty() {
@@ -6001,6 +6009,36 @@ mod tests {
                 "plain line exceeded {width} columns: {line:?}"
             );
         }
+    }
+
+    #[test]
+    fn module_run_error_wraps_on_word_boundaries() {
+        // P4-4: previously the SCAN PROGRESS panel rendered the scan error
+        // as a single line that was truncated mid-word, hiding the
+        // actionable install command. Verify the renderer now uses
+        // wrap_text so the next-step suggestion survives the wrap.
+        use std::path::PathBuf;
+        let backend = TestBackend::new(72, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::ModuleRun;
+        app.scan = Some(ScanPanelState {
+            run_id: Some("abc1234".to_string()),
+            target: PathBuf::from("./repo"),
+            stage: "failed".to_string(),
+            findings_count: 0,
+            running: false,
+            abort_requested: false,
+            error: Some(
+                "semgrep: could not find scanner binary \"semgrep\". Install Semgrep \
+                 (for example `pipx install semgrep` or `brew install semgrep`)."
+                    .to_string(),
+            ),
+        });
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(rendered.contains("pipx install semgrep"));
+        assert!(rendered.contains("brew install semgrep"));
     }
 
     #[test]
