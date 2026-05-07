@@ -319,8 +319,20 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     let modules = app.registry.modules().collect::<Vec<_>>();
     if modules.is_empty() {
-        lines.push(styled("[!] No modules loaded", theme::warn()));
-        lines.push(muted("Run kuzushi modules to inspect the native registry."));
+        // Empty modules registry — almost never happens in production but
+        // matters for plugin-loading errors.  Match the mockup panel shape.
+        lines.push(divider("MODULES · empty", area.width));
+        lines.extend(empty_state_panel(
+            "no modules loaded",
+            &[
+                "the native module registry is empty.",
+                "this almost always means a plugin failed to register.",
+            ],
+            &[
+                ("doctor", "preflight checks for missing tools / plugins"),
+                ("modules", "re-inspect the native registry"),
+            ],
+        ));
         return lines;
     }
 
@@ -2567,12 +2579,27 @@ fn knowledge_base_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 fn agent_chat_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
-    lines.push(divider("AGENT", area.width));
 
     let Some(agent) = &app.agent_chat else {
-        lines.push(muted("No active question. Use ask <question> or ?text."));
+        // No question yet — render the mockup empty-state panel so the
+        // operator sees how to start a chat instead of a flat
+        // `No active question.` muted line.
+        lines.push(divider("AGENT · empty", area.width));
+        lines.extend(empty_state_panel(
+            "no question yet",
+            &[
+                "agent chat dispatches a single question through pi-agent-core.",
+                "tools and findings are read-only; the chat doesn't write to disk.",
+            ],
+            &[
+                ("ask <question>", "explicit agent route"),
+                ("?<text>", "always-on agent route from any view"),
+                ("model <provider:id>", "pick the model the agent will use"),
+            ],
+        ));
         return lines;
     };
+    lines.push(divider("AGENT", area.width));
 
     let status = if agent.abort_requested {
         "abort requested"
