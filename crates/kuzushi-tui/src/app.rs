@@ -428,6 +428,13 @@ pub struct AgentChatView {
     /// before swapping `question`/`answer` to the new turn.  Mirrors
     /// `design/mockups/agent-chat.jsx` multi-turn bubble layout.
     pub history: Vec<ChatTurn>,
+    /// Synthetic run id used for `<target>/.kuzushi/runs/<run_id>/trace.jsonl`.
+    /// Set when the turn is dispatched; reused across answer / failure
+    /// events for the same turn.
+    pub run_id: Option<String>,
+    /// Wall-clock seconds since epoch when the active turn was
+    /// dispatched; used to compute latency in trace.jsonl steps.
+    pub started_secs: u64,
 }
 
 impl Default for AgentChatView {
@@ -439,6 +446,8 @@ impl Default for AgentChatView {
             abort_requested: false,
             error: None,
             history: Vec::new(),
+            run_id: None,
+            started_secs: 0,
         }
     }
 }
@@ -473,6 +482,8 @@ impl AgentChatView {
             abort_requested: false,
             error: None,
             history,
+            run_id: None,
+            started_secs: 0,
         }
     }
 }
@@ -2471,6 +2482,16 @@ impl ShellApp {
         let (tx, rx) = mpsc::channel();
         let mut next = prior.fold_for_next_turn(question.clone());
         next.running = true;
+        // Mint a synthetic run id from wall-clock seconds so the
+        // operator can `/trace agent-<n>` and the trace.jsonl is
+        // findable by the runs ledger.  Same shape used by scan runs.
+        let started_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
+        let agent_run_id = format!("agent-{started_secs}");
+        next.run_id = Some(agent_run_id.clone());
+        next.started_secs = started_secs;
         self.agent_chat = Some(next);
         self.agent_rx = Some(rx);
         self.shell_view = ShellView::AgentChat;
@@ -2483,6 +2504,32 @@ impl ShellApp {
                     .map(|level| format!(" / {level}"))
                     .unwrap_or_default()
             ),
+        );
+
+        // Emit a `plan` step capturing the question that just dispatched
+        // — gives the trace view a leading row even before the LLM
+        // answers.
+        append_trace_step(
+            self.target.as_deref(),
+            &agent_run_id,
+            1,
+            "plan",
+            &format!("ask {} ({model})", short_label(&question, 80)),
+            None,
+            None,
+        );
+        // Drop a synthetic summary.json so `/runs` lists the agent run
+        // alongside scan runs.  Best-effort write; failures are silent.
+        write_run_summary(
+            self.target.as_deref(),
+            &agent_run_id,
+            "running",
+            None,
+            self.target
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .as_deref()
+                .unwrap_or("."),
         );
 
         thread::spawn(move || agent_worker(config, model, thinking_level, cwd, question, tx));
@@ -4772,6 +4819,29 @@ impl ShellApp {
                 if let Some(scan) = &mut self.scan {
                     scan.stage = stage.clone();
                 }
+                // Emit a `tool` step in the run's trace.jsonl per stage
+                // change so the trace view tracks scan progress in real
+                // time, not just at completion.
+                let target = self.target.clone();
+                if let Some(scan) = &self.scan {
+                    if let Some(rid) = &scan.run_id {
+                        let n = self
+                            .log
+                            .iter()
+                            .filter(|line| line.prefix == "scan")
+                            .count()
+                            + 1;
+                        append_trace_step(
+                            target.as_deref(),
+                            rid,
+                            n,
+                            "tool",
+                            &short_label(&stage, 80),
+                            None,
+                            None,
+                        );
+                    }
+                }
                 self.log("scan", stage);
             }
             ScanEvent::FindingStored {
@@ -4804,6 +4874,28 @@ impl ShellApp {
                     scan.abort_requested = false;
                     scan.error = None;
                 }
+                let target_label = self
+                    .target
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| ".".to_string());
+                let target_path = self.target.clone();
+                append_trace_step(
+                    target_path.as_deref(),
+                    &run_id,
+                    1_000,
+                    "tool",
+                    &format!("completed · {findings_count} finding(s)"),
+                    None,
+                    None,
+                );
+                write_run_summary(
+                    target_path.as_deref(),
+                    &run_id,
+                    "complete",
+                    Some(findings_count as u64),
+                    &target_label,
+                );
                 self.refresh_findings(false);
                 self.log_scan_alias_hint();
                 self.log(
@@ -4820,11 +4912,39 @@ impl ShellApp {
                     error,
                     "tasks, task block semgrep, or run semgrep:scan {\"binary\":\"/path/to/semgrep\"}",
                 );
+                let run_id = self
+                    .scan
+                    .as_ref()
+                    .and_then(|scan| scan.run_id.clone());
                 if let Some(scan) = &mut self.scan {
                     scan.stage = "failed".to_string();
                     scan.running = false;
                     scan.abort_requested = false;
                     scan.error = Some(actionable.clone());
+                }
+                if let Some(rid) = &run_id {
+                    let target = self.target.clone();
+                    append_trace_step(
+                        target.as_deref(),
+                        rid,
+                        1_000,
+                        "refused",
+                        &short_label(&actionable, 80),
+                        None,
+                        None,
+                    );
+                    let target_label = self
+                        .target
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| ".".to_string());
+                    write_run_summary(
+                        target.as_deref(),
+                        rid,
+                        "failed",
+                        None,
+                        &target_label,
+                    );
                 }
                 self.log("error", actionable);
             }
@@ -4836,6 +4956,22 @@ impl ShellApp {
                     scan.abort_requested = false;
                     scan.error = None;
                 }
+                let target = self.target.clone();
+                let target_label = self
+                    .target
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| ".".to_string());
+                append_trace_step(
+                    target.as_deref(),
+                    &run_id,
+                    1_000,
+                    "refused",
+                    "cancelled",
+                    None,
+                    None,
+                );
+                write_run_summary(target.as_deref(), &run_id, "paused", None, &target_label);
                 self.log("scan", format!("cancelled {}", short_fingerprint(&run_id)));
             }
         }
@@ -4859,6 +4995,24 @@ impl ShellApp {
             .agent_chat
             .as_ref()
             .is_some_and(|agent| agent.abort_requested);
+        let run_id = self
+            .agent_chat
+            .as_ref()
+            .and_then(|agent| agent.run_id.clone());
+        let started_secs = self
+            .agent_chat
+            .as_ref()
+            .map(|agent| agent.started_secs)
+            .unwrap_or(0);
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let latency_ms = if started_secs > 0 && now_secs >= started_secs {
+            Some((now_secs - started_secs) * 1000)
+        } else {
+            None
+        };
         match event {
             AgentEvent::Answered { text } => {
                 if let Some(agent) = &mut self.agent_chat {
@@ -4879,7 +5033,32 @@ impl ShellApp {
                         "pi-agent-core response arrived after abort request; ignored",
                     );
                 } else {
-                    self.log("answer", text);
+                    self.log("answer", text.clone());
+                    // Emit `llm` step for the answer.  Cost lives on the
+                    // session total (`record_cost` already updated it),
+                    // so we don't double-report here.
+                    if let Some(rid) = &run_id {
+                        append_trace_step(
+                            self.target.as_deref(),
+                            rid,
+                            2,
+                            "llm",
+                            &format!("answer ({} chars)", text.chars().count()),
+                            latency_ms,
+                            None,
+                        );
+                        write_run_summary(
+                            self.target.as_deref(),
+                            rid,
+                            "complete",
+                            None,
+                            self.target
+                                .as_ref()
+                                .map(|p| p.display().to_string())
+                                .as_deref()
+                                .unwrap_or("."),
+                        );
+                    }
                 }
             }
             AgentEvent::Failed { error } => {
@@ -4901,7 +5080,29 @@ impl ShellApp {
                         format!("pi-agent-core ended after abort request: {error}"),
                     );
                 } else {
-                    self.log("error", error);
+                    self.log("error", error.clone());
+                    if let Some(rid) = &run_id {
+                        append_trace_step(
+                            self.target.as_deref(),
+                            rid,
+                            2,
+                            "refused",
+                            &short_label(&error, 80),
+                            latency_ms,
+                            None,
+                        );
+                        write_run_summary(
+                            self.target.as_deref(),
+                            rid,
+                            "failed",
+                            None,
+                            self.target
+                                .as_ref()
+                                .map(|p| p.display().to_string())
+                                .as_deref()
+                                .unwrap_or("."),
+                        );
+                    }
                 }
             }
         }
@@ -5351,6 +5552,98 @@ pub(crate) fn bridge_command_status(config: &V2Config) -> &'static str {
         "configured"
     } else {
         "bundled/default"
+    }
+}
+
+/// Truncate `text` to `max` chars, appending `…` when clipped.  Used
+/// for trace.jsonl `label` fields so a long answer doesn't bloat the
+/// jsonl file.
+fn short_label(text: &str, max: usize) -> String {
+    let cleaned = text.replace('\n', " ");
+    if cleaned.chars().count() <= max {
+        cleaned
+    } else {
+        let mut out: String = cleaned.chars().take(max - 1).collect();
+        out.push('…');
+        out
+    }
+}
+
+/// Write a minimal `summary.json` for `<target>/.kuzushi/runs/<run_id>/`
+/// so the runs ledger can list synthetic agent / scan runs alongside
+/// real artefacts.  Best-effort; silent on failure.
+pub fn write_run_summary(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    status: &str,
+    findings: Option<u64>,
+    target_label: &str,
+) {
+    // Only write when an explicit workspace target is set — otherwise
+    // synthetic agent runs would land in the cwd's .kuzushi/runs and
+    // pollute test workspaces (cwd is `crates/<name>` during cargo test).
+    let Some(target) = target else { return };
+    let runs_root = target.join(".kuzushi/runs");
+    let dir = runs_root.join(run_id);
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let mut summary = serde_json::Map::new();
+    summary.insert("status".to_string(), serde_json::json!(status));
+    if let Some(n) = findings {
+        summary.insert("findings".to_string(), serde_json::json!(n));
+    }
+    summary.insert("target".to_string(), serde_json::json!(target_label));
+    let bytes = match serde_json::to_vec_pretty(&serde_json::Value::Object(summary)) {
+        Ok(bytes) => bytes,
+        Err(_) => return,
+    };
+    let _ = std::fs::write(dir.join("summary.json"), bytes);
+}
+
+/// Append a single `TraceStep`-shaped JSON object to the trace.jsonl
+/// for the given `run_id` under `<target>/.kuzushi/runs/<run_id>/`.
+/// No-ops on any I/O error so a missing target dir or read-only mount
+/// doesn't crash a worker — trace writes are observability, not a
+/// correctness contract.  `kind` is the renderer's tint key:
+/// `plan` / `tool` / `llm` / `critic` / `refused`.
+pub fn append_trace_step(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    n: usize,
+    kind: &str,
+    label: &str,
+    latency_ms: Option<u64>,
+    cost_usd: Option<f64>,
+) {
+    let Some(target) = target else { return };
+    let runs_root = target.join(".kuzushi/runs");
+    let dir = runs_root.join(run_id);
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join("trace.jsonl");
+    let mut entry = serde_json::Map::new();
+    entry.insert("n".to_string(), serde_json::json!(n));
+    entry.insert("kind".to_string(), serde_json::json!(kind));
+    entry.insert("label".to_string(), serde_json::json!(label));
+    if let Some(ms) = latency_ms {
+        entry.insert("latency_ms".to_string(), serde_json::json!(ms));
+    }
+    if let Some(cost) = cost_usd {
+        entry.insert("cost_usd".to_string(), serde_json::json!(cost));
+    }
+    let line = match serde_json::to_string(&serde_json::Value::Object(entry)) {
+        Ok(line) => line,
+        Err(_) => return,
+    };
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(f, "{line}");
     }
 }
 
@@ -10760,6 +11053,8 @@ JSON
             abort_requested: false,
             error: None,
             history: Vec::new(),
+        run_id: None,
+        started_secs: 0,
         });
 
         app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
@@ -10787,6 +11082,8 @@ JSON
             abort_requested: true,
             error: None,
             history: Vec::new(),
+        run_id: None,
+        started_secs: 0,
         });
 
         app.apply_agent_event(AgentEvent::Answered {
@@ -10952,6 +11249,69 @@ JSON
             .confirm_allowlist
             .contains("sandbox:run https://refund.acme/api"));
         assert!(app.advisory.pending_confirm.is_none());
+    }
+
+    #[test]
+    fn append_trace_step_writes_jsonl_under_target() {
+        // The trace writer should land at
+        // <target>/.kuzushi/runs/<runId>/trace.jsonl with one JSON
+        // object per line.
+        let tmp = tempfile::tempdir().unwrap();
+        append_trace_step(
+            Some(tmp.path()),
+            "agent-42",
+            1,
+            "plan",
+            "ask demo question",
+            Some(400),
+            None,
+        );
+        append_trace_step(
+            Some(tmp.path()),
+            "agent-42",
+            2,
+            "llm",
+            "answer (24 chars)",
+            Some(1200),
+            Some(0.012),
+        );
+        let path = tmp.path().join(".kuzushi/runs/agent-42/trace.jsonl");
+        let body = std::fs::read_to_string(&path).expect("trace.jsonl");
+        let lines: Vec<&str> = body.lines().collect();
+        assert_eq!(lines.len(), 2);
+        let first: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(first["n"], 1);
+        assert_eq!(first["kind"], "plan");
+        assert_eq!(first["label"], "ask demo question");
+        assert_eq!(first["latency_ms"], 400);
+        let second: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
+        assert_eq!(second["kind"], "llm");
+        assert_eq!(second["cost_usd"], 0.012);
+    }
+
+    #[test]
+    fn append_trace_step_no_op_when_target_is_none() {
+        // Sanity: passing None must not pollute the cwd.  The function
+        // returns silently.
+        append_trace_step(None, "agent-x", 1, "plan", "no target", None, None);
+    }
+
+    #[test]
+    fn write_run_summary_writes_summary_json_under_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_run_summary(
+            Some(tmp.path()),
+            "r-1",
+            "complete",
+            Some(11),
+            "/tmp/demo",
+        );
+        let body = std::fs::read_to_string(tmp.path().join(".kuzushi/runs/r-1/summary.json"))
+            .expect("summary.json");
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["status"], "complete");
+        assert_eq!(parsed["findings"], 11);
+        assert_eq!(parsed["target"], "/tmp/demo");
     }
 
     #[test]
