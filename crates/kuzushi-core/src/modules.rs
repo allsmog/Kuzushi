@@ -14264,6 +14264,118 @@ OUT
         );
     }
 
+    /// Tool-supporting runtime that emits a single `Final` step. Used
+    /// to exercise the `triage:deep` happy path through the gated
+    /// runtime — the gate must not break a single-step audit.
+    struct ScriptedToolRuntime {
+        next_step_calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ScriptedToolRuntime {
+        fn new() -> Self {
+            Self {
+                next_step_calls: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl AgentRuntime for ScriptedToolRuntime {
+        fn query_blocking(&self, _: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            unreachable!("triage:deep does not call query_blocking on the gated runtime")
+        }
+
+        fn triage_finding_blocking(&self, _: TriageRequest) -> Result<TriageOutcome> {
+            unreachable!("triage:deep does not call triage_finding_blocking")
+        }
+
+        fn supports_tools(&self) -> bool {
+            true
+        }
+
+        fn next_step_blocking(
+            &self,
+            _request: &crate::runtime::AgentToolLoopRequest,
+            _history: &[crate::runtime::LoopHistoryEntry],
+        ) -> Result<crate::runtime::AgentLoopStep> {
+            self.next_step_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(crate::runtime::AgentLoopStep::Final {
+                text: String::new(),
+                structured: Some(json!({
+                    "triggerable": false,
+                    "rationale": "no taint reaches a sink",
+                    "confidence": 0.9,
+                    "evidence": []
+                })),
+                cost_usd: Some(0.01),
+            })
+        }
+    }
+
+    #[test]
+    fn triage_deep_completes_through_gated_runtime() {
+        // End-to-end exercise: the registry dispatches `triage:deep`,
+        // `run_triage_deep` wraps the runtime in a `GatedRuntime`, and
+        // the underlying tool loop drives `next_step_blocking` exactly
+        // once before returning a `Final` step. The gate must not break
+        // the existing flow — confidence/verdict land in the result and
+        // the inner runtime is invoked exactly once.
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .insert_scan_run("run-1", workspace.root(), "completed")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.sql",
+            "src/db.ts",
+            9,
+            Some(9),
+            Severity::High,
+            "SQL injection in search",
+        );
+        let fingerprint = finding.fingerprint.clone();
+        store.insert_finding("run-1", &finding).unwrap();
+
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("anthropic:claude-haiku-4-5-20251001".to_string());
+        let runtime = ScriptedToolRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "triage:deep",
+                json!({ "fingerprint": fingerprint, "maxSteps": 4 }),
+                &ctx,
+                Some(&runtime),
+            )
+            .expect("triage:deep should complete through GatedRuntime");
+
+        assert_eq!(result.pointer("/ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            result.pointer("/data/verdict").and_then(Value::as_str),
+            Some("false_positive"),
+            "structured response with triggerable=false should map to false_positive verdict"
+        );
+        assert_eq!(
+            result.pointer("/data/stepsUsed").and_then(Value::as_u64),
+            Some(1)
+        );
+        // The gate must have let the single step through to the inner
+        // runtime; one Final step is enough to terminate the loop.
+        assert_eq!(
+            runtime
+                .next_step_calls
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
+    }
+
     #[test]
     fn audit_full_mode_dry_run_plans_chunks_without_runtime() {
         // Dry-run is the cheap planning path — it must succeed
