@@ -2729,6 +2729,7 @@ fn transcript_body_style(prefix: &str) -> Style {
 fn keybindings_text(app: &ShellApp, width: usize) -> String {
     let bindings = keybindings(app);
     let mut shown = Vec::new();
+    let mut overflow = false;
     for (key, label) in bindings {
         let next = format!("[{key}] {label}");
         let candidate = if shown.is_empty() {
@@ -2737,10 +2738,15 @@ fn keybindings_text(app: &ShellApp, width: usize) -> String {
             format!("{}  ·  {next}", shown.join("  ·  "))
         };
         if candidate.chars().count() > width.saturating_sub(8) && !shown.is_empty() {
-            shown.push("+more".to_string());
+            overflow = true;
             break;
         }
         shown.push(next);
+    }
+    // Replace the silent `+more` with an actionable pointer so an operator
+    // on a 50-column terminal knows the rest of the keys live in `help`.
+    if overflow {
+        shown.push("[help] more".to_string());
     }
     fit(&shown.join("  ·  "), width)
 }
@@ -6035,6 +6041,27 @@ mod tests {
                 "plain line exceeded {width} columns: {line:?}"
             );
         }
+    }
+
+    #[test]
+    fn keybindings_overflow_points_at_help() {
+        // P3-6: at narrow terminal widths the keybind footer used to drop
+        // remaining keys under a silent `+more` token. Operators had no way
+        // to discover the hidden bindings. Now the overflow chip tells
+        // them where to look.
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = ShellApp::new(V2Config::default(), None);
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(
+            rendered.contains("[help] more"),
+            "narrow keybind footer must point at help: {rendered}"
+        );
+        assert!(
+            !rendered.contains("+more"),
+            "silent +more chip must be replaced"
+        );
     }
 
     #[test]
