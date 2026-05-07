@@ -1494,15 +1494,15 @@ fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("RUNS", area.width));
+    let widths = [12usize, 14, 9, value_width(area, 40)];
+    lines.push(aligned_header(
+        &["runId", "status", "findings", "target"],
+        &widths,
+    ));
+
+    // Active scan first.
+    let mut emitted = 0usize;
     if let Some(scan) = &app.scan {
-        let widths = [10usize, 18, 10, value_width(area, 40)];
-        lines.push(aligned_header(
-            &["run", "status", "findings", "target"],
-            &widths,
-        ));
-        // Status-column tint per `design/mockups/runs.jsx::r`:
-        //   complete → c-success, partial/paused → c-warn,
-        //   failed → c-danger, otherwise c-subtle.
         let run_id = scan
             .run_id
             .as_deref()
@@ -1511,40 +1511,188 @@ fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         let status_text = scan_status(scan);
         let status_style = if scan.error.is_some() {
             theme::danger()
-        } else if scan.running && scan.abort_requested {
-            theme::warn()
         } else if scan.running {
             theme::warn()
         } else {
             theme::success()
         };
-        let findings_text = scan.findings_count.to_string();
-        let target_text = scan.target.display().to_string();
-        let run_w = widths[0];
-        let status_w = widths[1];
-        let findings_w = widths[2];
-        let target_w = widths[3];
-        lines.push(Line::from(vec![
-            Span::styled(format!("{}  ", pad(&run_id, run_w)), theme::accent()),
-            Span::styled(
-                format!("{}  ", pad(&fit(&status_text, status_w), status_w)),
-                status_style,
-            ),
-            Span::styled(
-                format!("{}  ", pad(&findings_text, findings_w)),
-                theme::primary(),
-            ),
-            Span::styled(
-                format!("{}  ", pad(&fit(&target_text, target_w), target_w)),
-                theme::muted(),
-            ),
-        ]));
-    } else {
+        lines.push(runs_row(
+            &run_id,
+            &status_text,
+            status_style,
+            &scan.findings_count.to_string(),
+            &scan.target.display().to_string(),
+            &widths,
+        ));
+        emitted += 1;
+    }
+
+    // Past runs from disk: `<target>/.kuzushi/runs/<runId>/`.  Read up to
+    // 20 most recent dirs (alphabetical-ish since runIds embed timestamps).
+    let runs_root = app
+        .target
+        .as_deref()
+        .map(|t| t.join(".kuzushi/runs"))
+        .unwrap_or_else(|| std::path::PathBuf::from(".kuzushi/runs"));
+    let mut past_runs: Vec<PastRun> = collect_past_runs(&runs_root);
+    past_runs.sort_by(|a, b| b.run_id.cmp(&a.run_id));
+    let take = (area.height.saturating_sub(8) as usize).max(5).min(20);
+    for past in past_runs.iter().take(take) {
+        // Skip the run that's already shown as the active scan.
+        if let Some(scan) = &app.scan {
+            if scan
+                .run_id
+                .as_deref()
+                .map(short)
+                .as_deref()
+                == Some(short(&past.run_id).as_str())
+            {
+                continue;
+            }
+        }
+        let style = match past.status_kind {
+            PastRunStatus::Complete => theme::success(),
+            PastRunStatus::Partial | PastRunStatus::Paused => theme::warn(),
+            PastRunStatus::Failed => theme::danger(),
+            PastRunStatus::Unknown => theme::muted(),
+        };
+        lines.push(runs_row(
+            &short(&past.run_id),
+            past.status_label(),
+            style,
+            &past
+                .findings
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "—".to_string()),
+            &past.target,
+            &widths,
+        ));
+        emitted += 1;
+    }
+
+    if emitted == 0 {
         lines.push(muted(
-            "No scan run is active in this shell session. Next: `scan` to start one, or `replay <runId>` for a past run on disk.",
+            "No scan run is active and no past runs on disk. Next: `scan` to start one.",
+        ));
+    } else {
+        lines.push(blank());
+        lines.push(command_list_line(
+            &["replay <runId>", "trace <runId>", "findings", "back"],
+            area.width as usize,
         ));
     }
     lines
+}
+
+fn runs_row(
+    run_id: &str,
+    status: &str,
+    status_style: Style,
+    findings: &str,
+    target: &str,
+    widths: &[usize; 4],
+) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{}  ", pad(run_id, widths[0])), theme::accent()),
+        Span::styled(
+            format!("{}  ", pad(&fit(status, widths[1]), widths[1])),
+            status_style,
+        ),
+        Span::styled(format!("{}  ", pad(findings, widths[2])), theme::primary()),
+        Span::styled(
+            format!("{}  ", pad(&fit(target, widths[3]), widths[3])),
+            theme::muted(),
+        ),
+    ])
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PastRunStatus {
+    Complete,
+    Partial,
+    Paused,
+    Failed,
+    Unknown,
+}
+
+#[derive(Debug, Clone)]
+struct PastRun {
+    run_id: String,
+    status_kind: PastRunStatus,
+    findings: Option<u64>,
+    target: String,
+}
+
+impl PastRun {
+    fn status_label(&self) -> &'static str {
+        match self.status_kind {
+            PastRunStatus::Complete => "complete",
+            PastRunStatus::Partial => "partial",
+            PastRunStatus::Paused => "paused",
+            PastRunStatus::Failed => "failed",
+            PastRunStatus::Unknown => "—",
+        }
+    }
+}
+
+/// Walk `<target>/.kuzushi/runs/` and parse each subdir's optional
+/// `summary.json` for status/findings/target.  Missing or unreadable
+/// summaries fall back to the run-id directory name + "unknown" status.
+fn collect_past_runs(runs_root: &std::path::Path) -> Vec<PastRun> {
+    let Ok(entries) = std::fs::read_dir(runs_root) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_dir() {
+            continue;
+        }
+        let run_id = entry.file_name().to_string_lossy().to_string();
+        let summary_path = entry.path().join("summary.json");
+        let (status_kind, findings, target) =
+            if let Ok(bytes) = std::fs::read(&summary_path) {
+                if let Ok(value) =
+                    serde_json::from_slice::<serde_json::Value>(&bytes)
+                {
+                    let status = value
+                        .get("status")
+                        .and_then(serde_json::Value::as_str)
+                        .map(parse_past_run_status)
+                        .unwrap_or(PastRunStatus::Unknown);
+                    let findings = value
+                        .get("findings")
+                        .and_then(serde_json::Value::as_u64);
+                    let target = value
+                        .get("target")
+                        .and_then(serde_json::Value::as_str)
+                        .map(ToString::to_string)
+                        .unwrap_or_default();
+                    (status, findings, target)
+                } else {
+                    (PastRunStatus::Unknown, None, String::new())
+                }
+            } else {
+                (PastRunStatus::Unknown, None, String::new())
+            };
+        out.push(PastRun {
+            run_id,
+            status_kind,
+            findings,
+            target,
+        });
+    }
+    out
+}
+
+fn parse_past_run_status(s: &str) -> PastRunStatus {
+    match s.to_ascii_lowercase().as_str() {
+        "complete" | "done" | "ok" | "success" => PastRunStatus::Complete,
+        "partial" => PastRunStatus::Partial,
+        "paused" => PastRunStatus::Paused,
+        "failed" | "error" => PastRunStatus::Failed,
+        _ => PastRunStatus::Unknown,
+    }
 }
 
 fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> {
@@ -7289,6 +7437,46 @@ mod tests {
         );
         assert!(roles.contains(&"accent"), "accent rule-id missing: {roles:?}");
         assert!(roles.contains(&"muted"), "muted location missing: {roles:?}");
+    }
+
+    #[test]
+    fn runs_view_lists_past_runs_from_disk_with_summary_json() {
+        // Mockup parity: `design/mockups/runs.jsx` shows past runs as a
+        // table with status tinting.  Verify `runs_lines` reads
+        // `<target>/.kuzushi/runs/<runId>/summary.json` and renders one
+        // styled row per past run, with status colour driven by the
+        // `status` field.
+        let tmp = tempfile::tempdir().unwrap();
+        let runs_root = tmp.path().join(".kuzushi/runs");
+        std::fs::create_dir_all(runs_root.join("r-2026-05-06T14-31")).unwrap();
+        std::fs::create_dir_all(runs_root.join("r-2026-05-06T15-18")).unwrap();
+        std::fs::write(
+            runs_root.join("r-2026-05-06T14-31/summary.json"),
+            r#"{"status":"complete","findings":18,"target":"~/work/acme-checkout"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            runs_root.join("r-2026-05-06T15-18/summary.json"),
+            r#"{"status":"failed","findings":0,"target":"~/work/acme-checkout"}"#,
+        )
+        .unwrap();
+
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.target = Some(tmp.path().to_path_buf());
+        app.shell_view = ShellView::Runs;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("RUNS"));
+        // Both past runs reach the buffer (short() takes the leading 8 chars).
+        assert!(rendered.contains("r-2026-0"));
+        assert!(rendered.contains("complete"));
+        assert!(rendered.contains("failed"));
+        assert!(rendered.contains("18"));
+        assert!(rendered.contains("replay <runId>"));
     }
 
     #[test]
