@@ -819,6 +819,7 @@ impl ShellApp {
             | ShellView::Story
             | ShellView::Auth
             | ShellView::Cost
+            | ShellView::Patch(_)
             | ShellView::Threat(_)
             | ShellView::ThreatEditor => ShellView::Catalog,
             ShellView::Tune
