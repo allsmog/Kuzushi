@@ -207,8 +207,9 @@ Active branch: `ralph/overnight-polish`
 ### Commits
 
 - `6443505b` - `docs: make rust cli onboarding truthful`
-- Final CLI help/progress amendments are included in the final pushed branch
-  state after this report entry.
+- `94585f84` - `test: align cli help with security-native thesis`
+- Final report status update: this commit.
+- Pushed branch: `origin/ralph/overnight-polish`.
 
 ### Public-surface changes
 
@@ -252,10 +253,13 @@ Active branch: `ralph/overnight-polish`
 
 ### Known failures or blockers
 
-- An initial `git restore --staged .` attempt failed with `.git/index.lock`
-  permission denial, but `git commit --no-verify` succeeded afterward. The
-  branch still needs the final amended/pushed state verified with
-  `git status --short --branch`.
+- No verification blockers remain. The final status check reported
+  `## ralph/overnight-polish...origin/ralph/overnight-polish` with a clean
+  worktree, and `git rev-list --left-right --count @{u}...HEAD` reported
+  `0 0`.
+- Non-blocking local Git note: an earlier `git restore --staged .` attempt
+  failed with `.git/index.lock` permission denial, and Git reports stale
+  unreachable loose objects in `.git/gc.log`; commits and push succeeded.
 - Process-list access is blocked, so the concurrent-loop check was
   inconclusive.
 
