@@ -99,10 +99,7 @@ pub fn attach_source(
 pub fn detach_source(workspace: &WorkspaceTarget, id: &str) -> Result<AttachmentRecord> {
     let mut store = load_store(workspace)?;
     let Some(index) = store.attachments.iter().position(|record| record.id == id) else {
-        anyhow::bail!(
-            "unknown attachment id {id:?}. Valid attachment IDs: {}. Next: kb",
-            valid_attachment_ids(&store.attachments)
-        );
+        anyhow::bail!("{}", attachment_id_error(id, &store.attachments));
     };
     let removed = store.attachments.remove(index);
     save_store(workspace, &store)?;
@@ -112,10 +109,7 @@ pub fn detach_source(workspace: &WorkspaceTarget, id: &str) -> Result<Attachment
 pub fn reparse_source(workspace: &WorkspaceTarget, id: &str) -> Result<AttachmentRecord> {
     let store = load_store(workspace)?;
     let Some(existing) = store.attachments.iter().find(|record| record.id == id) else {
-        anyhow::bail!(
-            "unknown attachment id {id:?}. Valid attachment IDs: {}. Next: kb",
-            valid_attachment_ids(&store.attachments)
-        );
+        anyhow::bail!("{}", attachment_id_error(id, &store.attachments));
     };
     let reparsed = match existing.kind {
         AttachmentKind::Path => {
@@ -326,6 +320,19 @@ fn valid_attachment_ids(records: &[AttachmentRecord]) -> String {
             .map(|record| record.id.as_str())
             .collect::<Vec<_>>()
             .join(", ")
+    }
+}
+
+fn attachment_id_error(id: &str, records: &[AttachmentRecord]) -> String {
+    if records.is_empty() {
+        format!(
+            "unknown attachment id {id:?}; no attachments stored. Next: `attach <path-or-url>` first, then `kb` to see IDs"
+        )
+    } else {
+        format!(
+            "unknown attachment id {id:?}. Valid attachment IDs: {}. Next: kb",
+            valid_attachment_ids(records)
+        )
     }
 }
 
