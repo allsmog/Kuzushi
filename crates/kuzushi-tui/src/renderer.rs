@@ -2757,8 +2757,17 @@ fn story_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         .take(max_events)
         .collect::<Vec<_>>();
     if events.is_empty() {
-        lines.push(muted(
-            "No session events yet. Next: run <tool>, ask <question>, or scan <target>",
+        lines.extend(empty_state_panel(
+            "no session events yet",
+            &[
+                "the timeline replays prior scan / agent / module events.",
+                "run something to populate it.",
+            ],
+            &[
+                ("scan <target>", "umbrella scan against a workspace"),
+                ("ask <question>", "single-shot agent question"),
+                ("run <tool>", "dispatch a registered tool"),
+            ],
         ));
     } else {
         for line in events.into_iter().rev() {
