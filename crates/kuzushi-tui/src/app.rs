@@ -20,6 +20,56 @@ const FINDINGS_PAGE_ROWS: usize = 10;
 pub struct AdvisoryState {
     pub throttle: Option<ThrottleAdvisory>,
     pub budget_halt: Option<BudgetHalt>,
+    /// Pending operator approval for a tool dispatch that triggered a
+    /// confirm gate (network egress, fs:write outside `.kuzushi/`,
+    /// destructive verb).  See `design/mockups/confirm-dialog.jsx`.
+    pub pending_confirm: Option<PendingConfirm>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmKind {
+    /// Network egress out of the sandbox.  y/Y allow, n/N deny.
+    NetworkEgress,
+    /// `fs:write` outside the workspace `.kuzushi/` dir.
+    FsWriteOutsideKuzushi,
+    /// Destructive verb (`rm -rf`, `git push --force`, etc.) — gate is
+    /// unconditional, no override available.  `n` is the only honest path.
+    DestructiveVerb,
+}
+
+impl ConfirmKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            ConfirmKind::NetworkEgress => "CONFIRM · network egress",
+            ConfirmKind::FsWriteOutsideKuzushi => "CONFIRM · fs:write outside .kuzushi/",
+            ConfirmKind::DestructiveVerb => "REFUSED · destructive verb",
+        }
+    }
+
+    /// Whether this gate accepts a `y` / `Y` allow path.  Destructive
+    /// verbs are unconditional refusals — `n` is the only outcome.
+    pub fn allows_yes(self) -> bool {
+        !matches!(self, ConfirmKind::DestructiveVerb)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingConfirm {
+    pub kind: ConfirmKind,
+    /// Tool that asked for the gate (e.g. `sandbox:run`, `fs:write`).
+    pub tool: String,
+    /// Verb / target string (e.g. `curl https://...`,
+    /// `apps/web/agents/concierge.ts`).  Free-form, rendered as primary.
+    pub target: String,
+    /// One-line rationale the agent provided when requesting the action.
+    pub rationale: Option<String>,
+    /// Allowlist match note ("refund.acme is on the project allowlist").
+    pub allowlist: Option<String>,
+    /// Actor the dispatch came from (planner / attacker / triager / …).
+    pub actor: Option<String>,
+    /// Whether the operator approved this confirm in the current run via
+    /// `Y` (allow + remember) — populated by the resolver, used by tests.
+    pub remembered: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -748,6 +798,51 @@ impl ShellApp {
             app.refresh_findings(false);
         }
         app
+    }
+
+    /// Surface a pending confirm gate.  Tools that need operator
+    /// approval call this; the renderer picks the dialog up via
+    /// `app.advisory.pending_confirm` and y/n keys resolve it.
+    pub fn request_confirm(&mut self, request: PendingConfirm) {
+        self.advisory.pending_confirm = Some(request);
+    }
+
+    /// Resolve the active confirm gate.  `outcome == true` means
+    /// `y`/`Y` (allow); `false` means `n`/`N` (deny).  `remember`
+    /// flags the uppercase-key form (allow + add to session allowlist
+    /// / denylist).  Returns the resolved request so the dispatcher
+    /// can act on it (record allowlist, etc.).
+    pub fn resolve_confirm(&mut self, outcome: bool, remember: bool) -> Option<PendingConfirm> {
+        let mut request = self.advisory.pending_confirm.take()?;
+        if !request.kind.allows_yes() && outcome {
+            // Destructive verbs are unconditional refusals — flip to deny.
+            return Some(PendingConfirm {
+                remembered: false,
+                ..request
+            });
+        }
+        request.remembered = outcome && remember;
+        let glyph = if outcome { "✓" } else { "✗" };
+        let verb = if outcome {
+            if remember {
+                "allowed (remembered for run)"
+            } else {
+                "allowed once"
+            }
+        } else if remember {
+            "denied (added to denylist)"
+        } else {
+            "denied once"
+        };
+        self.log(
+            "system",
+            format!(
+                "{glyph} {verb}: {tool} {target}",
+                tool = request.tool,
+                target = request.target
+            ),
+        );
+        Some(request)
     }
 
     /// Module count visible in the catalog grouped view.  Used by
