@@ -64,6 +64,14 @@ pub fn selection() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
+/// Inverse cursor block for the input prompt. Matches the mockup's
+/// `<span style={{background: var(--t-primary), color: var(--term-bg)}}>`
+/// cursor cell — softer than `selection()` since the prompt is always
+/// visible and shouldn't pulse the same way a row selection does.
+pub fn cursor_block() -> Style {
+    Style::default().fg(TERM_BG).bg(T_PRIMARY)
+}
+
 pub fn severity(severity: Severity) -> Style {
     match severity {
         Severity::Critical => Style::default()

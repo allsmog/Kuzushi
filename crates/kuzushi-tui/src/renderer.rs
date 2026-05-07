@@ -2756,7 +2756,7 @@ fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     let line = Line::from(vec![
         Span::styled(segments.prompt, theme::label()),
         Span::raw(segments.before_cursor),
-        Span::styled(segments.cursor_text, theme::selection()),
+        Span::styled(segments.cursor_text, theme::cursor_block()),
         Span::raw(segments.after_cursor),
     ]);
     frame.render_widget(Paragraph::new(line), area);
@@ -3053,9 +3053,14 @@ fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
             ("back", "home"),
         ],
         ShellView::Help => vec![
+            // Mirrors `design/mockups/help.jsx` keybinds: highlight the
+            // shell verbs that are always available so the help screen
+            // doubles as a discovery surface.
+            ("?<text>", "agent chat"),
+            ("Tab", "complete"),
+            ("Ctrl+R", "search history"),
             ("PgUp/PgDn", "scroll"),
-            ("back", "home"),
-            ("Ctrl+C", "exit"),
+            ("back", "catalog"),
         ],
         ShellView::Tools => vec![
             ("PgUp/PgDn", "scroll"),
