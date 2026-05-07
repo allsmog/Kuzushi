@@ -518,6 +518,18 @@ impl ShellApp {
             }
             KeyCode::Enter => {
                 let raw = self.take_input();
+                // Enter on the catalog with empty input runs `use <id>`
+                // for the row currently under the j/k cursor — matches
+                // `design/mockups/catalog.jsx` where Enter == /use.
+                if raw.is_empty()
+                    && matches!(self.shell_view, ShellView::Catalog)
+                    && self.catalog_expanded
+                {
+                    if let Some(id) = self.catalog_cursor_module_id() {
+                        self.submit_line(&format!("use {id}"));
+                        return;
+                    }
+                }
                 self.submit_line(&raw);
             }
             KeyCode::Esc => {

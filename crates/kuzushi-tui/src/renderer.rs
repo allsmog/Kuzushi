@@ -7669,6 +7669,22 @@ mod tests {
     }
 
     #[test]
+    fn catalog_enter_runs_use_for_cursor_row() {
+        // Pressing Enter on the catalog with empty input dispatches
+        // `use <module>` for whatever row j/k put the cursor on, per
+        // `design/mockups/catalog.jsx::footer` (`enter run` keybind).
+        use crossterm::event::{KeyEvent, KeyCode, KeyModifiers};
+
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.handle_command(crate::commands::ShellCommand::Modules);
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        let cursor_id = app.catalog_cursor_module_id().expect("cursor id");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        // After Enter, the focused module should be the cursor row.
+        assert_eq!(app.focused_module.as_deref(), Some(cursor_id.as_str()));
+    }
+
+    #[test]
     fn catalog_g_and_uppercase_g_jump_cursor_to_bounds() {
         use crossterm::event::{KeyEvent, KeyCode, KeyModifiers};
 
