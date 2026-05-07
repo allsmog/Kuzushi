@@ -2635,29 +2635,50 @@ fn agent_chat_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         app.config.model.as_deref().unwrap_or("unconfigured"),
     ));
     lines.push(blank());
-    // Bubble-style tag matching `design/mockups/agent-chat.jsx::bubble`:
-    //   `  you  ──...──`  (c-accent tag)
-    //   `   <body>`        (c-primary)
-    //   blank
-    //   ` agent ──...──`  (c-success tag)
-    //   `   <body>`
+    // Multi-turn bubbles: render `agent.history` (oldest first) before
+    // the active turn so the operator sees the full conversation per
+    // `design/mockups/agent-chat.jsx::bubble`.  Each prior turn is
+    // rendered with a max of 6 answer lines so a long session doesn't
+    // blow the viewport — full text remains in the underlying log.
+    let body_w = area.width.saturating_sub(3) as usize;
+    for turn in &agent.history {
+        lines.push(chat_bubble_header("  you  ", theme::accent(), area.width));
+        for line in wrap_text(&turn.question, body_w) {
+            lines.push(indent(styled(&line, theme::primary()), 3));
+        }
+        lines.push(blank());
+        if let Some(error) = &turn.error {
+            lines.push(chat_bubble_header(" error ", theme::danger(), area.width));
+            for line in wrap_text(error, body_w).into_iter().take(6) {
+                lines.push(indent(styled(&line, theme::danger()), 3));
+            }
+        } else if let Some(answer) = &turn.answer {
+            lines.push(chat_bubble_header(" agent ", theme::success(), area.width));
+            for line in wrap_text(answer, body_w).into_iter().take(6) {
+                lines.push(indent(styled(&line, theme::primary()), 3));
+            }
+        } else {
+            lines.push(chat_bubble_header(" agent ", theme::success(), area.width));
+            lines.push(indent(muted("(no answer)"), 3));
+        }
+        lines.push(blank());
+    }
+
+    // Active turn — full bubble with up to 12 answer lines.
     lines.push(chat_bubble_header("  you  ", theme::accent(), area.width));
-    for line in wrap_text(&agent.question, area.width.saturating_sub(3) as usize) {
+    for line in wrap_text(&agent.question, body_w) {
         lines.push(indent(styled(&line, theme::primary()), 3));
     }
     lines.push(blank());
 
     if let Some(error) = &agent.error {
         lines.push(chat_bubble_header(" error ", theme::danger(), area.width));
-        for line in wrap_text(error, area.width.saturating_sub(3) as usize) {
+        for line in wrap_text(error, body_w) {
             lines.push(indent(styled(&line, theme::danger()), 3));
         }
     } else if let Some(answer) = &agent.answer {
         lines.push(chat_bubble_header(" agent ", theme::success(), area.width));
-        for line in wrap_text(answer, area.width.saturating_sub(3) as usize)
-            .into_iter()
-            .take(12)
-        {
+        for line in wrap_text(answer, body_w).into_iter().take(12) {
             lines.push(indent(styled(&line, theme::primary()), 3));
         }
     } else if agent.abort_requested {
@@ -7177,6 +7198,7 @@ mod tests {
             running: true,
             abort_requested: false,
             error: None,
+            history: Vec::new(),
         });
         app.shell_view = ShellView::AgentChat;
 
@@ -7209,6 +7231,7 @@ mod tests {
             running: true,
             abort_requested: true,
             error: None,
+            history: Vec::new(),
         });
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -8069,6 +8092,85 @@ mod tests {
     }
 
     #[test]
+    fn agent_chat_renders_multi_turn_history_with_bubble_per_turn() {
+        // `design/mockups/agent-chat.jsx::bubble` paints multi-turn
+        // conversations as alternating you/agent bubbles.  Verify a
+        // history of two prior turns + an active turn all reach the
+        // buffer with their respective questions and answers visible.
+        let backend = TestBackend::new(120, 36);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(
+            V2Config {
+                model: Some("openai:gpt-4.1".to_string()),
+                ..V2Config::default()
+            },
+            None,
+        );
+        app.agent_chat = Some(crate::app::AgentChatView {
+            question: "now what?".to_string(),
+            answer: Some("scan first.".to_string()),
+            running: false,
+            abort_requested: false,
+            error: None,
+            history: vec![
+                crate::app::ChatTurn {
+                    question: "what should I do first?".to_string(),
+                    answer: Some("build context.".to_string()),
+                    error: None,
+                },
+                crate::app::ChatTurn {
+                    question: "did context build succeed?".to_string(),
+                    answer: Some("yes, snapshot at .kuzushi/context-snapshot.json.".to_string()),
+                    error: None,
+                },
+            ],
+        });
+        app.shell_view = ShellView::AgentChat;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        // History turn 1
+        assert!(rendered.contains("what should I do first?"));
+        assert!(rendered.contains("build context."));
+        // History turn 2
+        assert!(rendered.contains("did context build succeed?"));
+        assert!(rendered.contains("snapshot at"));
+        // Active turn
+        assert!(rendered.contains("now what?"));
+        assert!(rendered.contains("scan first."));
+        // Both you/agent tags present at least once each.
+        assert!(rendered.matches("you").count() >= 1);
+        assert!(rendered.matches("agent").count() >= 1);
+    }
+
+    #[test]
+    fn agent_chat_fold_for_next_turn_pushes_completed_turn_into_history() {
+        // Sanity-check the helper that backs the multi-turn UX: a
+        // completed turn should fold into history; an empty initial
+        // state should leave history empty.
+        use crate::app::AgentChatView;
+
+        let initial = AgentChatView::default();
+        let next = initial.fold_for_next_turn("first question".to_string());
+        assert!(next.history.is_empty());
+        assert_eq!(next.question, "first question");
+
+        let prev = AgentChatView {
+            question: "first question".to_string(),
+            answer: Some("first answer".to_string()),
+            running: false,
+            abort_requested: false,
+            error: None,
+            history: Vec::new(),
+        };
+        let next2 = prev.fold_for_next_turn("second question".to_string());
+        assert_eq!(next2.history.len(), 1);
+        assert_eq!(next2.history[0].question, "first question");
+        assert_eq!(next2.question, "second question");
+    }
+
+    #[test]
     fn agent_chat_renders_role_tagged_bubbles() {
         // `design/mockups/agent-chat.jsx::bubble` paints a tag header on
         // each turn:  `  you  ──...──`  (c-accent) for the operator side,
@@ -8089,6 +8191,7 @@ mod tests {
             running: false,
             abort_requested: false,
             error: None,
+            history: Vec::new(),
         });
         app.shell_view = ShellView::AgentChat;
 
