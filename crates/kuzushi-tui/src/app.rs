@@ -2725,7 +2725,14 @@ impl ShellApp {
             None => None,
         };
 
-        if force_module || (!force_global && self.focused_module.is_some()) {
+        // Default behavior with no global model yet: set the global model
+        // even if a module is focused. Otherwise `?question` traps the user
+        // because the agent path reads `config.model`, not the per-module
+        // option. Operators can still scope per-module explicitly with
+        // `model module <choice>`.
+        let scope_to_module = force_module
+            || (!force_global && self.focused_module.is_some() && self.config.model.is_some());
+        if scope_to_module {
             let Some(module_id) = self.focused_module.clone() else {
                 self.log(
                     "error",
@@ -2799,10 +2806,12 @@ impl ShellApp {
             );
         }
         if self.focused_module.is_some() {
-            self.log(
-                "model",
-                "focused module detected: model <n> sets this module; use model global <n> for global ask/defaults",
-            );
+            let hint = if self.config.model.is_none() {
+                "focused module detected, but no global model yet — model <n> sets the global model so `ask` works. Use `model module <n>` to scope per-module."
+            } else {
+                "focused module detected: model <n> sets this module; use `model global <n>` for global ask/defaults."
+            };
+            self.log("model", hint);
         }
     }
 
@@ -7553,6 +7562,51 @@ JSON
         assert!(app.log.iter().any(|line| {
             line.prefix == "cost" && line.body.contains("session estimate $0.0456")
         }));
+    }
+
+    #[test]
+    fn model_choice_with_focused_module_and_no_global_sets_global_first() {
+        // P5-2: previously `model 5` while focused on a module set the
+        // per-module option only and left config.model None, trapping the
+        // operator behind "ask requires an explicit model" the moment they
+        // typed `?question`. Now the first `model <n>` becomes global so
+        // the agent path has something to dispatch with; subsequent
+        // `model <n>` calls scope per-module.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.focused_module = Some("sast".to_string());
+        assert!(app.config.model.is_none());
+
+        app.handle_command(ShellCommand::Model(Some("5".to_string())));
+        assert_eq!(
+            app.config.model.as_deref(),
+            Some("anthropic:claude-sonnet-4-6"),
+            "first model selection with focused module must set global so /ask works"
+        );
+
+        // After a global is set, the next `model <n>` scopes per-module so
+        // operators can override per-tool without losing the global default.
+        app.handle_command(ShellCommand::Model(Some("6".to_string())));
+        assert_eq!(
+            app.config.model.as_deref(),
+            Some("anthropic:claude-sonnet-4-6"),
+            "second model selection must NOT clobber the global"
+        );
+        let module_values = app
+            .option_store
+            .values_for(
+                OptionScope::Session,
+                &OptionTarget::Module("sast".to_string()),
+            )
+            .expect("expected per-module options after second selection");
+        let module_model = module_values
+            .get("model")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        assert_eq!(
+            module_model.as_deref(),
+            Some("anthropic:claude-opus-4-7"),
+            "second selection must scope to the focused module"
+        );
     }
 
     #[test]
