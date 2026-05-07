@@ -1620,8 +1620,19 @@ fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     if emitted == 0 {
-        lines.push(muted(
-            "No scan run is active and no past runs on disk. Next: `scan` to start one.",
+        // Empty state mirrors `design/mockups/empty-states.jsx::panel`
+        // for the runs ledger (`RUNS · empty`) — every dispatch writes
+        // a run dir, so suggest the cheapest first run.
+        lines.extend(empty_state_panel(
+            "no runs persisted",
+            &[
+                "every dispatch writes a run dir under .kuzushi/runs/<id>/.",
+                "this workspace has not run a module yet.",
+            ],
+            &[
+                ("scan", "first run will land at .kuzushi/runs/<id>/"),
+                ("use context", "cheapest first run · indexes the workspace"),
+            ],
         ));
     } else {
         lines.push(blank());
@@ -2367,8 +2378,19 @@ fn workspace_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     if view.root.is_none() {
         lines.push(blank());
-        lines.push(muted(
-            "No active workspace is selected. Run scan <target> or start kuzushi shell --target .",
+        // Empty state per `design/mockups/empty-states.jsx::panel` —
+        // operator hasn't picked a workspace yet, so spell out the two
+        // canonical entry points.
+        lines.extend(empty_state_panel(
+            "no workspace selected",
+            &[
+                "kuzushi anchors all state under <target>/.kuzushi/.",
+                "pick a target before running modules.",
+            ],
+            &[
+                ("scan <target>", "scan + remember <target> as the active workspace"),
+                ("kuzushi shell --target .", "launch with the current dir as workspace"),
+            ],
         ));
     }
 
@@ -5582,14 +5604,13 @@ mod tests {
 
     #[test]
     fn renders_actionable_empty_states_at_80_columns() {
-        // Each empty-state surface advertises a concrete next step.  The
-        // findings empty state matches `design/mockups/empty-states.jsx::panel`
-        // (▸ scan ...) so the marker we look for is the recommended-action
-        // command, not the literal `Next:` prose prefix.
+        // Each empty-state surface advertises a concrete next step,
+        // matching `design/mockups/empty-states.jsx::panel` (`∅` glyph
+        // + label + indented muted explanation + `▸` CTA rows).
         for (view, expected) in [
             (ShellView::Findings, "no findings yet"),
-            (ShellView::Runs, "Next: `scan`"),
-            (ShellView::Workspace, "Next: scan <target>"),
+            (ShellView::Runs, "no runs persisted"),
+            (ShellView::Workspace, "no workspace selected"),
         ] {
             let backend = TestBackend::new(80, 18);
             let mut terminal = Terminal::new(backend).unwrap();
