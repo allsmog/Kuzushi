@@ -136,7 +136,10 @@ pub fn run_patch_finding(
 
     for attempt in 1..=input.max_iterations {
         let spend_ticket = match ctx.spend {
-            Some(limiter) => match limiter.deposit(crate::spend::Operation::Patch, 0.05) {
+            Some(limiter) => match limiter.deposit(
+                crate::spend::Operation::Patch,
+                crate::spend::estimate_deposit_usd(crate::spend::Operation::Patch, &model),
+            ) {
                 Ok(ticket) => Some(ticket),
                 Err(error) => {
                     eprintln!(

@@ -62,6 +62,13 @@ pub struct ExecutorResult {
     pub completed_at: Option<SystemTime>,
 }
 
+/// One line of output streamed from a running executor child.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamLine {
+    Stdout(String),
+    Stderr(String),
+}
+
 /// Minimum surface for fan-out execution. `launch` returns a run id the
 /// caller can later `collect` and `status` against. Trait is `Send + Sync`
 /// so backends can be `Arc`-shared between scan workers.
@@ -70,6 +77,28 @@ pub trait Executor: Send + Sync {
     fn collect(&self, run_id: &str) -> Result<ExecutorResult>;
     fn status(&self, run_id: &str) -> Result<ExecutorStatus>;
     fn name(&self) -> &str;
+
+    /// Run the request and stream stdout/stderr lines as they arrive,
+    /// then return the final [`ExecutorResult`]. Default impl falls back
+    /// to `launch` + `collect` and replays the captured output once at
+    /// the end — useful for backends that don't support streaming. The
+    /// [`LocalExecutor`] overrides this with a real pipe-reader thread
+    /// pair so operators see semgrep/codeql progress as it happens.
+    fn launch_streaming(
+        &self,
+        request: ExecutorRequest,
+        on_log: &mut dyn FnMut(StreamLine),
+    ) -> Result<ExecutorResult> {
+        let id = self.launch(request)?;
+        let result = self.collect(&id)?;
+        for line in result.stdout.lines() {
+            on_log(StreamLine::Stdout(line.to_string()));
+        }
+        for line in result.stderr.lines() {
+            on_log(StreamLine::Stderr(line.to_string()));
+        }
+        Ok(result)
+    }
 }
 
 /// In-process executor — runs commands synchronously in `launch` and stores
@@ -176,6 +205,122 @@ impl Executor for LocalExecutor {
 
     fn name(&self) -> &str {
         "local"
+    }
+
+    fn launch_streaming(
+        &self,
+        request: ExecutorRequest,
+        on_log: &mut dyn FnMut(StreamLine),
+    ) -> Result<ExecutorResult> {
+        use std::io::{BufRead, BufReader};
+        use std::sync::mpsc;
+        use std::thread;
+
+        let run_id = request.run_id.clone();
+        let started_at = SystemTime::now();
+
+        let mut command = std::process::Command::new(
+            request
+                .command
+                .first()
+                .context("LocalExecutor requires a non-empty command")?,
+        );
+        if request.command.len() > 1 {
+            command.args(&request.command[1..]);
+        }
+        command.current_dir(&request.working_dir);
+        for (key, value) in &request.env {
+            command.env(key, value);
+        }
+        if request.stdin.is_some() {
+            command.stdin(std::process::Stdio::piped());
+        }
+        command.stdout(std::process::Stdio::piped());
+        command.stderr(std::process::Stdio::piped());
+
+        let mut child = command
+            .spawn()
+            .with_context(|| format!("Could not start {:?}", request.command))?;
+        if let (Some(stdin_text), Some(mut stdin)) = (&request.stdin, child.stdin.take()) {
+            use std::io::Write;
+            stdin
+                .write_all(stdin_text.as_bytes())
+                .context("Could not write executor stdin")?;
+        }
+
+        let stdout_pipe = child.stdout.take().context("LocalExecutor child has no stdout pipe")?;
+        let stderr_pipe = child.stderr.take().context("LocalExecutor child has no stderr pipe")?;
+        let (tx, rx) = mpsc::channel::<StreamLine>();
+        let stdout_tx = tx.clone();
+        let stdout_handle = thread::spawn(move || {
+            let mut buf = String::new();
+            let reader = BufReader::new(stdout_pipe);
+            let mut buffered = String::new();
+            for line in reader.lines() {
+                match line {
+                    Ok(line) => {
+                        buffered.push_str(&line);
+                        buffered.push('\n');
+                        let _ = stdout_tx.send(StreamLine::Stdout(line));
+                    }
+                    Err(_) => break,
+                }
+            }
+            buf.push_str(&buffered);
+            buf
+        });
+        let stderr_tx = tx.clone();
+        let stderr_handle = thread::spawn(move || {
+            let mut buf = String::new();
+            let reader = BufReader::new(stderr_pipe);
+            let mut buffered = String::new();
+            for line in reader.lines() {
+                match line {
+                    Ok(line) => {
+                        buffered.push_str(&line);
+                        buffered.push('\n');
+                        let _ = stderr_tx.send(StreamLine::Stderr(line));
+                    }
+                    Err(_) => break,
+                }
+            }
+            buf.push_str(&buffered);
+            buf
+        });
+        drop(tx);
+
+        // Drain the channel synchronously into the operator-supplied
+        // callback as lines arrive; readers exit when the child closes
+        // its pipes.
+        for line in rx {
+            on_log(line);
+        }
+
+        let stdout = stdout_handle.join().unwrap_or_default();
+        let stderr = stderr_handle.join().unwrap_or_default();
+        let status = child
+            .wait()
+            .context("Could not wait on streaming executor child")?;
+        let completed_at = SystemTime::now();
+
+        let result = ExecutorResult {
+            run_id: run_id.clone(),
+            status: if status.success() {
+                ExecutorStatus::Succeeded
+            } else {
+                ExecutorStatus::Failed
+            },
+            stdout,
+            stderr,
+            exit_code: status.code(),
+            started_at: Some(started_at),
+            completed_at: Some(completed_at),
+        };
+        self.results
+            .lock()
+            .expect("LocalExecutor results lock poisoned")
+            .insert(run_id, result.clone());
+        Ok(result)
     }
 }
 
@@ -630,6 +775,106 @@ mod tests {
     fn collect_returns_error_for_unknown_run_id() {
         let exec = LocalExecutor::new();
         assert!(exec.collect("nope").is_err());
+    }
+
+    #[test]
+    fn local_executor_streams_lines_to_callback() {
+        let exec = LocalExecutor::new();
+        let lines: std::sync::Arc<std::sync::Mutex<Vec<StreamLine>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let lines_collector = lines.clone();
+        let request = ExecutorRequest {
+            run_id: "run-stream".to_string(),
+            command: vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                "echo first; echo second; echo err >&2".to_string(),
+            ],
+            working_dir: PathBuf::from("."),
+            env: HashMap::new(),
+            stdin: None,
+        };
+        let result = exec
+            .launch_streaming(request, &mut |line| {
+                lines_collector.lock().unwrap().push(line);
+            })
+            .unwrap();
+        assert_eq!(result.status, ExecutorStatus::Succeeded);
+        let captured = lines.lock().unwrap().clone();
+        assert!(
+            captured
+                .iter()
+                .any(|line| matches!(line, StreamLine::Stdout(s) if s == "first"))
+        );
+        assert!(
+            captured
+                .iter()
+                .any(|line| matches!(line, StreamLine::Stdout(s) if s == "second"))
+        );
+        assert!(
+            captured
+                .iter()
+                .any(|line| matches!(line, StreamLine::Stderr(s) if s == "err"))
+        );
+        // Streamed result still ends up in the cache for collect().
+        let cached = exec.collect("run-stream").unwrap();
+        assert!(cached.stdout.contains("first"));
+        assert!(cached.stdout.contains("second"));
+    }
+
+    #[test]
+    fn default_launch_streaming_replays_after_collect() {
+        // NoopExecutor.launch errors -> default impl propagates the error
+        // without invoking on_log. SandboxExecutor against an unreachable
+        // host has the same property (POST fails). Verify with a fake
+        // executor that captures whether on_log was called.
+        struct FakeExec;
+        impl Executor for FakeExec {
+            fn launch(&self, _request: ExecutorRequest) -> Result<String> {
+                Ok("rid".to_string())
+            }
+            fn collect(&self, _run_id: &str) -> Result<ExecutorResult> {
+                Ok(ExecutorResult {
+                    run_id: "rid".to_string(),
+                    status: ExecutorStatus::Succeeded,
+                    stdout: "alpha\nbeta\n".to_string(),
+                    stderr: "warn\n".to_string(),
+                    exit_code: Some(0),
+                    started_at: None,
+                    completed_at: None,
+                })
+            }
+            fn status(&self, _: &str) -> Result<ExecutorStatus> {
+                Ok(ExecutorStatus::Succeeded)
+            }
+            fn name(&self) -> &str {
+                "fake"
+            }
+        }
+
+        let exec = FakeExec;
+        let mut lines = Vec::new();
+        let result = exec
+            .launch_streaming(
+                ExecutorRequest {
+                    run_id: "rid".to_string(),
+                    command: vec!["true".to_string()],
+                    working_dir: PathBuf::from("."),
+                    env: HashMap::new(),
+                    stdin: None,
+                },
+                &mut |line| lines.push(line),
+            )
+            .unwrap();
+        assert_eq!(result.status, ExecutorStatus::Succeeded);
+        assert_eq!(
+            lines,
+            vec![
+                StreamLine::Stdout("alpha".to_string()),
+                StreamLine::Stdout("beta".to_string()),
+                StreamLine::Stderr("warn".to_string()),
+            ]
+        );
     }
 
     #[test]

@@ -78,6 +78,48 @@ impl Operation {
             Self::RefusalFollowup,
         ]
     }
+
+    /// Default per-call deposit estimate (in USD). Used as a fallback when
+    /// no model-specific override matches.
+    pub const fn default_deposit_usd(self) -> f64 {
+        match self {
+            Self::ClassifierGate => 0.001,
+            Self::RefusalFollowup => 0.005,
+            Self::Triage => 0.010,
+            Self::Patch => 0.050,
+            Self::DeepAudit => 0.500,
+            Self::FullModeMulti => 1.000,
+        }
+    }
+}
+
+/// Cheap multiplier applied to [`Operation::default_deposit_usd`] based on
+/// the model substring. Lets `kuzushi metrics` show realistic costs
+/// without making operators write a config file: a haiku triage at
+/// $0.001 and a sonnet/4o triage at $0.010 are both reasonable
+/// approximations of real provider rates.
+fn model_cost_multiplier(model: &str) -> f64 {
+    let lower = model.to_ascii_lowercase();
+    if lower.contains("haiku") || lower.contains("4o-mini") || lower.contains("gpt-5-nano") {
+        0.10
+    } else if lower.contains("opus") || lower.contains("o1-pro") || lower.contains("o3-pro") {
+        4.00
+    } else if lower.contains("sonnet")
+        || lower.contains("4o")
+        || lower.contains("gpt-5")
+        || lower.contains("gpt-4")
+    {
+        1.00
+    } else {
+        1.00
+    }
+}
+
+/// Estimate the deposit for a given operation against the configured model.
+/// Operators can still override by passing a literal to
+/// [`SpendLimiter::deposit`] directly; this is the recommended default.
+pub fn estimate_deposit_usd(op: Operation, model: &str) -> f64 {
+    op.default_deposit_usd() * model_cost_multiplier(model)
 }
 
 /// Handle returned by [`SpendLimiter::deposit`]. Pass to
@@ -564,5 +606,35 @@ mod tests {
         let total = s.total_spent(Operation::Patch).unwrap();
         // Estimate stays committed — the budget is held, the row is unsettled.
         assert!((total - 40.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn estimate_deposit_usd_scales_by_model_class() {
+        // Cheap models get a 0.10x multiplier so $0.01 triage becomes $0.001.
+        assert!(
+            (estimate_deposit_usd(Operation::Triage, "anthropic:claude-haiku-4-5") - 0.001).abs()
+                < 1e-9
+        );
+        // Mid-tier models stay at 1.0x.
+        assert!(
+            (estimate_deposit_usd(Operation::Triage, "anthropic:claude-sonnet-4-6") - 0.010).abs()
+                < 1e-9
+        );
+        // Big models get 4x.
+        assert!(
+            (estimate_deposit_usd(Operation::Triage, "anthropic:claude-opus-4-7") - 0.040).abs()
+                < 1e-9
+        );
+        // Unknown model strings fall through to 1.0x default.
+        assert!(
+            (estimate_deposit_usd(Operation::Triage, "unknown:model") - 0.010).abs() < 1e-9
+        );
+    }
+
+    #[test]
+    fn default_deposit_usd_covers_all_operations() {
+        for op in Operation::all() {
+            assert!(op.default_deposit_usd() > 0.0);
+        }
     }
 }
