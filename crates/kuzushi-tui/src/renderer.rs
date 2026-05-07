@@ -2631,13 +2631,64 @@ fn render_keybind_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     ));
 
     if area.height > 1 {
-        lines.push(Line::styled(
-            keybindings_text(app, area.width as usize),
-            theme::primary(),
-        ));
+        lines.push(keybindings_line(app, area.width as usize));
     }
 
     render_lines(frame, area, lines);
+}
+
+/// Render the bottom keybind row to match `design/mockups/_shared.jsx::footer`:
+///   `<key>` in accent, `<hint>` in muted, three-space separator between
+///   pairs.  Keys flow left-to-right and the row is truncated, with an
+///   actionable `help more` pointer if the full set won't fit.
+fn keybindings_line(app: &ShellApp, width: usize) -> Line<'static> {
+    const TAIL: &str = "help more";
+    // Reserve enough headroom so the `help more` overflow chip always fits
+    // (`   ` separator + the chip itself).
+    let reserve = 3 + TAIL.chars().count();
+    let bindings = keybindings(app);
+    let bindings_len = bindings.len();
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::raw(" "));
+    let mut used = 1usize;
+    let mut overflow = false;
+    let mut placed = 0usize;
+
+    for (i, (key, hint)) in bindings.into_iter().enumerate() {
+        let pair = format!("{key} {hint}");
+        let sep = if placed == 0 { 0 } else { 3 };
+        let need = sep + pair.chars().count();
+        // Last binding doesn't need to leave room for the tail chip — there
+        // is nothing left to point at.
+        let cap = if i + 1 == bindings_len {
+            width.saturating_sub(1)
+        } else {
+            width.saturating_sub(reserve + 1)
+        };
+        if used + need > cap && placed > 0 {
+            overflow = true;
+            break;
+        }
+        if placed > 0 {
+            spans.push(Span::raw("   "));
+            used += 3;
+        }
+        spans.push(Span::styled(key.to_string(), theme::accent()));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(hint.to_string(), theme::muted()));
+        used += pair.chars().count();
+        placed += 1;
+    }
+
+    if overflow {
+        spans.push(Span::raw("   "));
+        spans.push(Span::styled("help".to_string(), theme::accent()));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled("more".to_string(), theme::muted()));
+    }
+
+    Line::from(spans)
 }
 
 fn render_transcript(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
@@ -2775,31 +2826,6 @@ fn transcript_body_style(prefix: &str) -> Style {
         "result" | "answer" | "agent" => theme::primary(),
         _ => Style::default(),
     }
-}
-
-fn keybindings_text(app: &ShellApp, width: usize) -> String {
-    let bindings = keybindings(app);
-    let mut shown = Vec::new();
-    let mut overflow = false;
-    for (key, label) in bindings {
-        let next = format!("[{key}] {label}");
-        let candidate = if shown.is_empty() {
-            next.clone()
-        } else {
-            format!("{}  ·  {next}", shown.join("  ·  "))
-        };
-        if candidate.chars().count() > width.saturating_sub(8) && !shown.is_empty() {
-            overflow = true;
-            break;
-        }
-        shown.push(next);
-    }
-    // Replace the silent `+more` with an actionable pointer so an operator
-    // on a 50-column terminal knows the rest of the keys live in `help`.
-    if overflow {
-        shown.push("[help] more".to_string());
-    }
-    fit(&shown.join("  ·  "), width)
 }
 
 fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
@@ -4362,8 +4388,11 @@ mod tests {
         assert!(rendered.contains("KUZUSHI · CATALOG"));
         assert!(rendered.contains("modules"));
         assert!(rendered.contains("kuzushi>"));
-        assert!(rendered.contains("[Tab] complete"));
-        assert!(rendered.contains("[modules]"));
+        assert!(rendered.contains("Tab complete"));
+        // The keybind footer now matches `design/mockups/_shared.jsx::footer`,
+        // which renders unbracketed pairs. The `modules` keybind (Ratatui
+        // catalog default) is still in the row — just without `[ ]` chrome.
+        assert!(rendered.contains("modules browse"));
         assert!(!rendered.contains("command log"));
         assert!(!rendered.contains("┌"));
         assert!(!rendered.contains("v2"));
@@ -5755,7 +5784,7 @@ mod tests {
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let last_page = format!("{:?}", terminal.backend().buffer());
         assert!(last_page.contains("SESSION"));
-        assert!(last_page.contains("[PgUp/PgDn] scroll"), "{last_page}");
+        assert!(last_page.contains("PgUp/PgDn scroll"), "{last_page}");
         assert!(!last_page.contains("┌"));
     }
 
@@ -5775,7 +5804,7 @@ mod tests {
             rendered.contains(&last_tool),
             "missing last tool {last_tool}"
         );
-        assert!(rendered.contains("[PgUp/PgDn] scroll"));
+        assert!(rendered.contains("PgUp/PgDn scroll"));
         assert!(!rendered.contains("┌"));
     }
 
@@ -5804,7 +5833,7 @@ mod tests {
             rendered.contains(&last_defense_module),
             "missing last module {last_defense_module}"
         );
-        assert!(rendered.contains("[PgUp/PgDn] scroll"));
+        assert!(rendered.contains("PgUp/PgDn scroll"));
         assert!(!rendered.contains("┌"));
     }
 
@@ -5836,9 +5865,9 @@ mod tests {
         assert!(rendered.contains("F-0030"));
         assert!(rendered.contains("title-29"));
         assert!(!rendered.contains("F-0001"));
-        assert!(rendered.contains("[j/k/g/G] move"));
-        assert!(rendered.contains("[PgUp/PgDn] page"));
-        assert!(rendered.contains("[Enter] open"));
+        assert!(rendered.contains("j/k/g/G move"));
+        assert!(rendered.contains("PgUp/PgDn page"));
+        assert!(rendered.contains("Enter open"));
         assert!(!rendered.contains("┌"));
     }
 
@@ -5860,9 +5889,9 @@ mod tests {
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
 
-        assert!(rendered.contains("[j/k/g/G] move"));
-        assert!(rendered.contains("[PgUp/PgDn] page"));
-        assert!(rendered.contains("[Enter] open"));
+        assert!(rendered.contains("j/k/g/G move"));
+        assert!(rendered.contains("PgUp/PgDn page"));
+        assert!(rendered.contains("Enter open"));
         assert!(!rendered.contains("[open <id>]"));
     }
 
@@ -5886,8 +5915,8 @@ mod tests {
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let running = format!("{:?}", terminal.backend().buffer());
-        assert!(running.contains("[1..4] actor"));
-        assert!(running.contains("[p] pause"));
+        assert!(running.contains("1..4 actor"));
+        assert!(running.contains("p pause"));
         assert!(!running.contains("[actor 1]"));
 
         cancel.pause();
@@ -5896,9 +5925,11 @@ mod tests {
         }
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let paused = format!("{:?}", terminal.backend().buffer());
-        assert!(paused.contains("[1..4] actor"));
-        assert!(paused.contains("[r] resume"));
-        assert!(!paused.contains("[p] pause"));
+        assert!(paused.contains("1..4 actor"));
+        assert!(paused.contains("r resume"));
+        // The unbracketed pause hint is gone too (sanity: keybind list flips
+        // pause→resume on pause).
+        assert!(!paused.contains("p pause"));
     }
 
     #[test]
@@ -6128,7 +6159,7 @@ mod tests {
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
         assert!(
-            rendered.contains("[help] more"),
+            rendered.contains("help more"),
             "narrow keybind footer must point at help: {rendered}"
         );
         assert!(
