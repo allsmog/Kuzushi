@@ -3171,9 +3171,22 @@ fn render_lines(frame: &mut Frame<'_>, area: Rect, lines: Vec<Line<'static>>) {
 }
 
 fn detail(key: &str, value: &str) -> Line<'static> {
+    // Mockup `kv(key, val, …)` from `design/mockups/config.jsx` /
+    // `workspace.jsx` puts the key in c-muted and the value in c-primary
+    // (and pads the key to a fixed column for alignment). The Ratatui
+    // `detail` was emitting a label-color (bold blue) key + default-style
+    // value, which read as a section header rather than a kv row. Use
+    // muted+primary so detail rows blend into the mockup's denser feel.
+    let key_pad = 18usize;
+    let key_padded = if key.chars().count() >= key_pad {
+        format!("{key} ")
+    } else {
+        let pad_chars = key_pad - key.chars().count();
+        format!("{key}{}", " ".repeat(pad_chars + 1))
+    };
     Line::from(vec![
-        Span::styled(format!("{key} "), theme::label()),
-        Span::raw(value.to_string()),
+        Span::styled(key_padded, theme::muted()),
+        Span::styled(value.to_string(), theme::primary()),
     ])
 }
 
