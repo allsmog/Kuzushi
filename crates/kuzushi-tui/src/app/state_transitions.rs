@@ -343,6 +343,26 @@ impl ShellApp {
             .chars()
             .filter(|ch| *ch != '\r')
             .collect();
+        // Multi-line pastes: keep the first line so the user can review and
+        // submit explicitly, then warn about the dropped tail. Submitting
+        // every \n-separated line as its own command is what bash/zsh do;
+        // the kuzushi shell is a single-command-per-Enter prompt and
+        // exposing the same behavior runs unintended commands (e.g. pasting
+        // a snippet that begins with `rm`).
+        if normalised.contains('\n') {
+            let first_line = normalised.lines().next().unwrap_or("");
+            let total = normalised.chars().count();
+            let kept = first_line.chars().count();
+            self.insert_str_at_cursor(first_line);
+            let dropped_lines = normalised.lines().count().saturating_sub(1);
+            self.log(
+                "paste",
+                format!(
+                    "kept first line ({kept}/{total} chars); dropped {dropped_lines} more line(s). Submit, then paste the next part."
+                ),
+            );
+            return;
+        }
         self.insert_str_at_cursor(&normalised);
     }
 
