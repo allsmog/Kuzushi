@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
+use crate::binary_analysis::{scan_binaries, BinaryAnalysisOptions};
 use crate::carlini_threat_hunt::run_carlini_threat_hunt;
 use crate::dep_hygiene::check_dependency_hygiene;
 use crate::findings::FindingListFilter;
@@ -30,10 +31,10 @@ use super::triage::run_triage;
 use super::verify::{run_verify_exploit, run_verify_finding};
 use super::workspace_tools::{export_workspace_findings_tool, workspace_status_output};
 use super::{
-    agentic_sast_module, carlini_threat_hunt_module, catalog_module, chrome_rce,
-    classifier_gate_module, config_module, context, deep_audit_module, dep_hygiene_module,
-    findings_module, full_mode_module, native_scanners, ndiff_module, patch_module,
-    pipeline_module, plugin_adapters, prompt_armor, randori_module, recon_module,
+    agentic_sast_module, binary_analysis_module, carlini_threat_hunt_module, catalog_module,
+    chrome_rce, classifier_gate_module, config_module, context, deep_audit_module,
+    dep_hygiene_module, findings_module, full_mode_module, native_scanners, ndiff_module,
+    patch_module, pipeline_module, plugin_adapters, prompt_armor, randori_module, recon_module,
     resolve_tool_target, router_module, router_show_tool, run_classifier_score_tool,
     run_deep_audit_tool, run_full_mode_hunt_tool, run_smoke_next_step_tool, sast_module,
     secret_scan_module, smoke_module, systems_hunt_module, taint_iris_module,
@@ -80,6 +81,7 @@ impl ModuleRegistry {
         registry.register(chrome_rce::module());
         registry.register(dep_hygiene_module());
         registry.register(secret_scan_module());
+        registry.register(binary_analysis_module());
         registry.register(pipeline_module());
         registry.register(variant_module());
         registry.register(ndiff_module());
@@ -272,6 +274,7 @@ fn dispatch_native_security_tool(
     match name {
         "dep-hygiene:check" => Some(run_dep_hygiene_tool(input, ctx)),
         "secret-scan:scan" => Some(run_secret_scan_tool(input, ctx)),
+        "binary-analysis:scan" => Some(run_binary_analysis_tool(input, ctx)),
         "semgrep:scan" | "codeql:scan" | "iac-scan:scan" => {
             Some(native_scanners::execute_tool(name, input.clone(), ctx))
         }
@@ -290,6 +293,13 @@ fn run_secret_scan_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result
     let target = resolve_tool_target(input, ctx)?;
     let options = SecretScanOptions::from_tool_input(input)?;
     let report = scan_for_secrets(&target, &options, &ScanCancellation::default())?;
+    Ok(report.to_tool_json())
+}
+
+fn run_binary_analysis_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let target = resolve_tool_target(input, ctx)?;
+    let options = BinaryAnalysisOptions::from_tool_input(input)?;
+    let report = scan_binaries(&target, &options, &ScanCancellation::default())?;
     Ok(report.to_tool_json())
 }
 
@@ -635,6 +645,7 @@ mod tests {
 
         for expected in [
             "agentic-sast",
+            "binary-analysis",
             "carlini-threat-hunt",
             "chrome-rce",
             "codeql",
@@ -726,6 +737,7 @@ mod tests {
             "iac-scan:scan",
             "dep-hygiene:check",
             "secret-scan:scan",
+            "binary-analysis:scan",
             "semgrep:scan",
             "codeql:scan",
             "triage:run",

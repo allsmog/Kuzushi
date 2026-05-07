@@ -1202,6 +1202,30 @@ fn secret_scan_module() -> BuiltinModule {
     )
 }
 
+fn binary_analysis_module() -> BuiltinModule {
+    builtin_module(
+        "binary-analysis",
+        "Binary Analysis",
+        ModuleKind::Defense,
+        "Identify ELF/PE/Mach-O/Wasm binaries and report missing hardening + risky imports.",
+        vec![tool_with_options(
+            "binary-analysis:scan",
+            "Inspect compiled binaries for missing hardening flags and dangerous imports.",
+            vec![
+                target_option(),
+                opt(
+                    "maxFileBytes",
+                    OptionType::Int,
+                    "Maximum file size to scan (default 64 MiB).",
+                )
+                .default(json!(67_108_864u64)),
+                max_findings_option(1000),
+            ],
+        )],
+        vec![dag("binary-analysis:scan", "findings", &["context:build"])],
+    )
+}
+
 fn pipeline_module() -> BuiltinModule {
     hidden_module(
         "pipeline",

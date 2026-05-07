@@ -2,6 +2,7 @@ pub mod agent_router;
 pub mod artifact_kb;
 pub mod attachments;
 pub mod attack_surface;
+pub mod binary_analysis;
 pub mod carlini_threat_hunt;
 pub mod classifier_gate;
 pub mod code_nav;
