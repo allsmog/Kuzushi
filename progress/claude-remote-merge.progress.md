@@ -105,6 +105,23 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 - Skipped: full merge and cherry-picks. No production files changed for this branch; this ledger commit records the explicit skip with evidence.
 - Checks: no code changes for this branch; previous integration checks remain the relevant gates before final.
 
+## Ancestry Marker Merges
+
+After the useful subset/skipped branch outcomes were committed and pushed,
+`git branch -r --no-merged main | rg '^origin/claude/'` still listed branches
+that were intentionally not full-content merged. To make the integration state
+unambiguous for future branch inventory, these no-content `ours` merge markers
+were added after manual subset/skip decisions were already recorded:
+
+- `d7d677c1` — `merge: record integrated diagnose-rust-tui-ux-M8ycq`
+- `108758a3` — `merge: record integrated check-ratatui-tui-Jj2eH`
+- `fa87271d` — `merge: record integrated vercel-security-harness-comparison-YQKnA`
+- `96bfd439` — `merge: record skipped agentic-security-pipeline`
+
+These marker merges changed no production files; they only record ancestry for
+branches whose useful work was already integrated by subset or explicitly
+skipped with evidence above.
+
 ## Final Result
 
 - All six recomputed unmerged `origin/claude/*` branches have a recorded outcome: full merge (`implement-index-html-zkHMO`, `ratatui-design-views`), subset integration (`diagnose-rust-tui-ux-M8ycq`, `check-ratatui-tui-Jj2eH`, `vercel-security-harness-comparison-YQKnA`), or explicit skip (`agentic-security-pipeline`).
