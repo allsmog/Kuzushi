@@ -327,9 +327,12 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             ));
         }
         lines.push(next_action_line(
-            &app.first_finding_hint(),
+            &catalog_next_hint(app),
             area.width as usize,
         ));
+        if app.findings.is_empty() {
+            lines.push(muted(&fit(&app.first_finding_hint(), area.width as usize)));
+        }
         lines.push(muted(&fit(
             "Quickstart: quickstart · Context: context build · Runtime: model",
             area.width as usize,
@@ -458,11 +461,229 @@ fn module_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     lines.push(blank());
+    let activity_label = match module.metadata().id.as_str() {
+        "recon" => Some("RECENT RECON ACTIVITY"),
+        "carlini-threat-hunt" => Some("RECENT THREAT-HUNT ACTIVITY"),
+        "agentic-sast" => Some("RECENT AGENTIC-SAST ACTIVITY"),
+        _ => None,
+    };
+    if let Some(label) = activity_label {
+        let activity = recent_module_activity_lines(app, module.metadata().id.as_str(), 8);
+        if !activity.is_empty() {
+            lines.push(section_header_line(label, area.width));
+            lines.extend(activity);
+            lines.push(blank());
+        }
+    }
     lines.extend(module_playbook_lines(
         module.metadata().id.as_str(),
         area.width,
     ));
 
+    lines
+}
+
+/// Pull the most recent N log lines that look like they came from the given
+/// module (by prefix or body match). Returns oldest-first.
+fn recent_module_log(app: &ShellApp, module_id: &str, take: usize) -> Vec<(String, String)> {
+    let module_id = module_id.to_string();
+    let mut matches: Vec<(String, String)> = app
+        .log
+        .iter()
+        .rev()
+        .filter(|line| {
+            line.prefix == module_id
+                || line.prefix.starts_with(&format!("{module_id}:"))
+                || line.body.contains(&format!("{module_id}:"))
+                || (module_id == "recon"
+                    && (line.prefix == "tool" || line.prefix == "result")
+                    && line.body.contains("recon"))
+        })
+        .take(take)
+        .map(|line| (line.prefix.clone(), line.body.clone()))
+        .collect();
+    matches.reverse();
+    matches
+}
+
+/// Render the "RECENT … ACTIVITY" rows for a given module, preferring
+/// structured cached snapshots over freeform `app.log` grep where possible.
+///
+/// The grep path (`recent_module_log`) is brittle — it depends on log line
+/// shape and disappears when the bounded `app.log` ring is truncated.
+/// Whenever a tool dispatcher has populated a `*_snapshot` field on the
+/// app (`recon_snapshot`, `carlini_snapshot`, `agentic_sast_snapshot`),
+/// we render directly from typed data here. The grep is the fallback when
+/// no snapshot has been cached yet.
+fn recent_module_activity_lines(
+    app: &ShellApp,
+    module_id: &str,
+    take: usize,
+) -> Vec<Line<'static>> {
+    match module_id {
+        "recon" => {
+            if let Some(snapshot) = app.recon_snapshot.as_ref() {
+                let lines = recon_snapshot_lines(snapshot, take);
+                if !lines.is_empty() {
+                    return lines;
+                }
+            }
+        }
+        "carlini-threat-hunt" => {
+            if let Some(report) = app.carlini_snapshot.as_ref() {
+                return carlini_snapshot_lines(report);
+            }
+        }
+        "agentic-sast" => {
+            if let Some(report) = app.agentic_sast_snapshot.as_ref() {
+                return agentic_sast_snapshot_lines(report);
+            }
+        }
+        _ => {}
+    }
+
+    // Fallback: existing log-grep path (brittle but unchanged from before
+    // the snapshot caching was introduced).
+    let recent = recent_module_log(app, module_id, take);
+    let mut out = Vec::new();
+    for (prefix, body) in &recent {
+        for body_line in body.lines() {
+            out.push(transcript_line(prefix, body_line, false));
+        }
+    }
+    out
+}
+
+/// Format a recon snapshot as one transcript line per host/service hit,
+/// matching the design mockup `design/mockups/recon.jsx::hit()`:
+///   `▸ host:port  service  banner`
+/// Up to `take` rows total. If services are empty, falls back to one row
+/// per host (so single-host fingerprint scans still surface the host).
+fn recon_snapshot_lines(snapshot: &super::app::ReconSnapshot, take: usize) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let host_label = |service: &kuzushi_core::ReconService| -> String {
+        snapshot
+            .hosts
+            .iter()
+            .find(|host| host.id == service.host_id)
+            .map(|host| {
+                host.hostname
+                    .clone()
+                    .unwrap_or_else(|| host.address.clone())
+            })
+            .unwrap_or_else(|| "unknown".to_string())
+    };
+
+    if !snapshot.services.is_empty() {
+        for service in snapshot.services.iter().take(take) {
+            let host = host_label(service);
+            let svc = service
+                .name
+                .clone()
+                .unwrap_or_else(|| service.proto.clone());
+            let banner = service
+                .banner
+                .clone()
+                .unwrap_or_else(|| service.state.clone());
+            lines.push(Line::from(vec![
+                Span::styled(" ▸ ", theme::warn()),
+                Span::styled(host, theme::primary()),
+                Span::styled(":", theme::subtle()),
+                Span::styled(format!("{}", service.port), theme::accent()),
+                Span::raw("  "),
+                Span::styled(pad(&svc, 14), theme::muted()),
+                Span::styled(banner, theme::primary()),
+            ]));
+        }
+    } else {
+        for host in snapshot.hosts.iter().take(take) {
+            let label = host
+                .hostname
+                .clone()
+                .unwrap_or_else(|| host.address.clone());
+            lines.push(Line::from(vec![
+                Span::styled(" ▸ ", theme::warn()),
+                Span::styled(label, theme::primary()),
+                Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
+                Span::styled(host.state.clone(), theme::muted()),
+            ]));
+        }
+    }
+    lines
+}
+
+/// Format a carlini-threat-hunt snapshot as a small transcript block:
+/// actor / finding counts plus cost. Top finding lines are added when
+/// they fit, mirroring the textual `output()` summary on the report.
+fn carlini_snapshot_lines(report: &kuzushi_core::CarliniThreatHuntReport) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    lines.push(transcript_line(
+        "result",
+        &format!(
+            "carlini-threat-hunt: {} finding{} from {} actor{} ({} run{})",
+            report.count,
+            if report.count == 1 { "" } else { "s" },
+            report.actors,
+            if report.actors == 1 { "" } else { "s" },
+            report.actor_runs,
+            if report.actor_runs == 1 { "" } else { "s" },
+        ),
+        false,
+    ));
+    lines.push(transcript_line(
+        "cost",
+        &format!("cost ${:.4}", report.cost_usd),
+        false,
+    ));
+    for finding in report.findings.iter().take(5) {
+        lines.push(transcript_line(
+            "finding",
+            &format!(
+                "{} {} {}:{}",
+                finding.severity.as_str(),
+                finding.rule_id,
+                finding.file_path,
+                finding.start_line,
+            ),
+            false,
+        ));
+    }
+    lines
+}
+
+/// Format an agentic-sast snapshot as a one-line summary plus up to
+/// five top finding rows. Mirrors the `AgenticSastReport::output` shape
+/// but as styled transcript lines.
+fn agentic_sast_snapshot_lines(report: &kuzushi_core::AgenticSastReport) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    lines.push(transcript_line(
+        "result",
+        &format!(
+            "agentic-sast: {} finding{} under {}",
+            report.count,
+            if report.count == 1 { "" } else { "s" },
+            report.target,
+        ),
+        false,
+    ));
+    lines.push(transcript_line(
+        "cost",
+        &format!("cost ${:.4}", report.cost_usd),
+        false,
+    ));
+    for finding in report.findings.iter().take(5) {
+        lines.push(transcript_line(
+            "finding",
+            &format!(
+                "{} {} {}:{}",
+                finding.severity.as_str(),
+                finding.rule_id,
+                finding.file_path,
+                finding.start_line,
+            ),
+            false,
+        ));
+    }
     lines
 }
 
@@ -494,7 +715,10 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     lines.push(blank());
     lines.push(Line::from(vec![
-        Span::styled(run_state_glyph(scan), run_state_style(scan)),
+        Span::styled(
+            run_state_glyph(scan, app.spinner_phase as usize),
+            run_state_style(scan),
+        ),
         Span::raw(" "),
         Span::styled(target, theme::label()),
         Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
@@ -507,53 +731,172 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
 
     let active_stage = scan.map(|scan| scan.stage.as_str()).unwrap_or("idle");
+    let scan_running = scan.is_some_and(|s| s.running);
+    let scan_done =
+        scan.is_some() && !scan_running && scan.and_then(|s| s.error.as_ref()).is_none();
     lines.push(divider("SCAN PROGRESS", area.width));
-    lines.push(pipeline_row(
-        if active_stage.contains("context") {
-            "⏵"
-        } else {
-            "✓"
-        },
-        "context:build",
-        if active_stage.contains("context") {
-            "active"
-        } else {
-            "ready"
-        },
-    ));
-    lines.push(pipeline_row(
-        if scan.is_some_and(|scan| scan.running) {
-            "⏵"
-        } else if scan.is_some() {
-            "✓"
-        } else {
-            "○"
-        },
-        "sast:scan",
-        active_stage,
-    ));
-    lines.push(pipeline_row(
-        "○",
-        "triage:run",
-        if findings > 0 {
-            "queued after scan"
-        } else {
-            "waiting for findings"
-        },
-    ));
+
+    let sast_rows = app.sast_task_rows();
+    let show_per_task = sast_rows.iter().any(|r| r.selected)
+        && app.focused_module.as_deref() == Some("sast")
+        && (scan_running || scan_done);
+    let use_real_progress = show_per_task && app.scan_progress.is_some();
+    if use_real_progress {
+        // Snapshot-preferred branch: render real `done/total` from
+        // `ScanProgress.per_task` (stable BTreeMap order) instead of the
+        // binary running/done placeholder bars below.
+        let progress = app.scan_progress.as_ref().expect("checked above");
+        for (task_id, (done, total)) in progress.per_task.iter() {
+            let kind = if *total == 0 {
+                ProgressKind::Failing
+            } else if done >= total {
+                ProgressKind::Done
+            } else {
+                ProgressKind::Active
+            };
+            let status = if *total == 0 {
+                "queued".to_string()
+            } else if done >= total {
+                "done".to_string()
+            } else {
+                "running…".to_string()
+            };
+            lines.push(progress_bar_line(task_id, *done, *total, &status, kind));
+        }
+        lines.push(progress_bar_line(
+            "triage",
+            0,
+            findings.max(1),
+            if findings > 0 {
+                "queued after scan"
+            } else {
+                "waiting for findings"
+            },
+            if findings > 0 {
+                ProgressKind::Active
+            } else {
+                ProgressKind::Failing
+            },
+        ));
+    } else if show_per_task {
+        for row in &sast_rows {
+            if !row.selected {
+                continue;
+            }
+            let (kind, done_count, total, status) = if scan_done {
+                (ProgressKind::Done, 1usize, 1usize, "done".to_string())
+            } else {
+                (ProgressKind::Active, 0usize, 1usize, "running…".to_string())
+            };
+            lines.push(progress_bar_line(row.id, done_count, total, &status, kind));
+        }
+        lines.push(progress_bar_line(
+            "triage",
+            if scan_done && findings > 0 { 0 } else { 0 },
+            findings.max(1),
+            if findings > 0 {
+                "queued after scan"
+            } else {
+                "waiting for findings"
+            },
+            if findings > 0 {
+                ProgressKind::Active
+            } else {
+                ProgressKind::Failing
+            },
+        ));
+    } else {
+        lines.push(pipeline_row(
+            if active_stage.contains("context") {
+                "⏵"
+            } else {
+                "✓"
+            },
+            "context:build",
+            if active_stage.contains("context") {
+                "active"
+            } else {
+                "ready"
+            },
+        ));
+        lines.push(pipeline_row(
+            if scan_running {
+                "⏵"
+            } else if scan.is_some() {
+                "✓"
+            } else {
+                "○"
+            },
+            "sast:scan",
+            active_stage,
+        ));
+        lines.push(pipeline_row(
+            "○",
+            "triage:run",
+            if findings > 0 {
+                "queued after scan"
+            } else {
+                "waiting for findings"
+            },
+        ));
+    }
 
     if let Some(error) = scan.and_then(|scan| scan.error.as_ref()) {
         lines.push(blank());
         lines.push(transcript_line("error", error, false));
     }
 
+    if !app.findings.is_empty() {
+        lines.push(blank());
+        let triaged = app.findings.iter().filter(|f| f.triage.is_some()).count();
+        let pending = app.findings.len().saturating_sub(triaged);
+        let header = format!("FINDINGS · {triaged} triaged · {pending} pending",);
+        lines.push(section_header_line(&header, area.width));
+        let aliases = sorted_finding_aliases(&app.findings);
+        for (alias, finding) in aliases.into_iter().take(8) {
+            lines.push(compact_finding_row(
+                &alias,
+                finding.severity,
+                &finding.title,
+                &finding_location(&finding),
+                area.width,
+            ));
+        }
+        if app.findings.len() > 8 {
+            lines.push(Line::from(vec![
+                Span::raw("   "),
+                Span::styled(
+                    format!("… {} more · ", app.findings.len() - 8),
+                    theme::muted(),
+                ),
+                Span::styled("/findings", theme::accent()),
+                Span::styled(" to drill in", theme::muted()),
+            ]));
+        }
+    }
+
     lines.push(blank());
     lines.push(divider("TRANSCRIPT", area.width));
-    lines.extend(transcript_lines(
-        app,
-        area.height.saturating_sub(lines.len() as u16) as usize,
-    ));
+    let body_budget = area.height.saturating_sub(lines.len() as u16) as usize;
+    let transcript = transcript_lines(app, body_budget.saturating_sub(1).max(0));
+    lines.extend(transcript);
+    if scan_running && body_budget > 0 {
+        lines.push(streaming_cursor_line());
+    }
     lines
+}
+
+/// One-row streaming cursor block — a single styled cell at the end of the
+/// transcript that mirrors the design's `<span className="cursor">` from the
+/// running mockups (sast-running.jsx, carlini-running.jsx, agentic-sast-running.jsx).
+fn streaming_cursor_line() -> Line<'static> {
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(
+            " ",
+            Style::default().fg(theme::TERM_BG).bg(theme::T_PRIMARY),
+        ),
+    ])
 }
 
 fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -574,25 +917,16 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         return lines;
     }
 
-    let widths = finding_summary_widths(area.width.saturating_sub(2));
-    lines.push(Line::from(vec![
-        Span::raw("  "),
-        Span::styled(
-            table_text(
-                &[
-                    "alias",
-                    "severity",
-                    "verdict",
-                    "conf",
-                    "proof/static",
-                    "cwe",
-                    "source",
-                ],
-                &widths,
-            ),
-            theme::subtle(),
+    let triaged = app.findings.iter().filter(|f| f.triage.is_some()).count();
+    let pending = app.findings.len().saturating_sub(triaged);
+    lines.push(section_header_line(
+        &format!(
+            "FINDINGS · {} · {triaged} triaged · {pending} pending",
+            app.findings.len()
         ),
-    ]));
+        area.width,
+    ));
+
     let aliases = sorted_finding_aliases(&app.findings);
     let cursor = app.findings_cursor.min(aliases.len().saturating_sub(1));
     let mut body = Vec::new();
@@ -603,78 +937,89 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             .is_some_and(|selected| selected.fingerprint.as_str() == finding.fingerprint.as_str());
         let cursor_row = app.findings_cursor == index;
         let marker = if cursor_row {
-            ">"
+            "▌ "
         } else if selected {
-            "*"
+            "* "
         } else {
-            " "
+            "  "
         };
-        body.push(Line::from(vec![
-            Span::styled(marker, theme::subtle()),
-            Span::raw(" "),
-            Span::styled(
-                pad(&alias, widths.first().copied().unwrap_or(8)),
-                theme::accent(),
-            ),
+        let marker_style = if cursor_row {
+            theme::accent()
+        } else if selected {
+            theme::warn()
+        } else {
+            theme::subtle()
+        };
+
+        // Row 1: marker · alias · severity chip · title · location.
+        // At narrow widths (<100 cols), location moves to row 2 so the title
+        // doesn't get truncated to nothing.
+        let alias_w = 8;
+        let sev_w = 9;
+        let prefix_used = 2 + alias_w + 2 + sev_w;
+        let total = (area.width as usize).saturating_sub(prefix_used);
+        let location = finding_location(&finding);
+        let wide = area.width >= 100;
+        let location_w = if wide {
+            location.chars().count().min(total.saturating_sub(2)).max(8)
+        } else {
+            0
+        };
+        let name_w = if wide {
+            total.saturating_sub(location_w + 2).max(12)
+        } else {
+            total.max(12)
+        };
+        let mut row1 = vec![
+            Span::styled(marker, marker_style),
+            Span::styled(pad(&alias, alias_w), theme::accent()),
             Span::raw("  "),
             Span::styled(
-                pad(
-                    finding.severity.as_str(),
-                    widths.get(1).copied().unwrap_or(8),
-                ),
+                pad(&finding.severity.as_str().to_uppercase(), sev_w),
                 theme::severity(finding.severity),
             ),
-            Span::raw("  "),
-            Span::raw(pad(
-                &finding_verdict_label(&finding),
-                widths.get(2).copied().unwrap_or(9),
-            )),
-            Span::raw("  "),
-            Span::raw(pad(
-                &finding_confidence_label(&finding),
-                widths.get(3).copied().unwrap_or(5),
-            )),
-            Span::raw("  "),
-            Span::raw(pad(
-                &finding_proof_state_label(&finding),
-                widths.get(4).copied().unwrap_or(12),
-            )),
-            Span::raw("  "),
-            Span::raw(pad(
-                &finding_cwe_label(&finding),
-                widths.get(5).copied().unwrap_or(8),
-            )),
-            Span::raw("  "),
-            Span::raw(fit(
-                &finding_source_label(&finding),
-                widths.get(6).copied().unwrap_or(12),
-            )),
-        ]));
-        body.push(indent(
-            muted(&fit(
-                &format!("loc {} | {}", finding_location(&finding), finding.title),
-                area.width.saturating_sub(2) as usize,
-            )),
-            2,
-        ));
-        body.push(indent(
-            muted(&fit(
-                &format!(
-                    "evidence: {} | next: open {}",
-                    finding_evidence_preview(&finding),
-                    alias
-                ),
-                area.width.saturating_sub(2) as usize,
-            )),
-            2,
-        ));
+            Span::styled(pad(&fit(&finding.title, name_w), name_w), theme::primary()),
+        ];
+        if wide {
+            row1.push(Span::raw("  "));
+            row1.push(Span::styled(fit(&location, location_w), theme::muted()));
+        }
+        body.push(Line::from(row1));
+
+        // Row 2: indented muted detail (location at narrow widths +
+        // verdict · conf · cwe · source · evidence).
+        let verdict = finding_verdict_label(&finding);
+        let conf = finding_confidence_label(&finding);
+        let cwe = finding_cwe_label(&finding);
+        let source = finding_source_label(&finding);
+        let evidence = finding_evidence_preview(&finding);
+        if wide {
+            // Single indented detail line.
+            let detail = format!("{verdict} · conf {conf} · {cwe} · {source} · {evidence}");
+            body.push(indent(
+                muted(&fit(&detail, area.width.saturating_sub(4) as usize)),
+                4,
+            ));
+        } else {
+            // Narrow widths get a 3-row layout: location on its own line, then
+            // verdict/conf/cwe/source. Keeps all identifiers visible at 80 cols.
+            body.push(indent(
+                muted(&fit(&location, area.width.saturating_sub(4) as usize)),
+                4,
+            ));
+            let detail = format!("{verdict} · conf {conf} · {cwe} · {source}");
+            body.push(indent(
+                muted(&fit(&detail, area.width.saturating_sub(4) as usize)),
+                4,
+            ));
+        }
     }
 
     let body_height = area.height.saturating_sub(lines.len() as u16) as usize;
     if body_height == 0 {
         return lines;
     }
-    let row_height = 3;
+    let row_height = if area.width >= 100 { 2 } else { 3 };
     let visible_rows = (body_height / row_height).max(1);
     let start_row = viewport_start_for_cursor(app.findings.len(), visible_rows, cursor);
     lines.extend(
@@ -773,67 +1118,169 @@ fn threat_lines(app: &ShellApp, area: Rect, view: ThreatView) -> Vec<Line<'stati
 
     match view {
         ThreatView::Dfd => {
-            lines.push(divider("DFD", area.width));
-            lines.push(detail(
-                "external",
-                "browser, API clients, package registries",
-            ));
-            lines.push(detail("application", "source tree, handlers, jobs, CLIs"));
-            lines.push(detail("datastore", "SQLite state, config, run artifacts"));
-            lines.push(blank());
-            lines.push(Line::raw("external -> application -> datastore"));
+            lines.push(section_header_line("DFD · acme-checkout", area.width));
+            lines.extend(dfd_canonical_lines());
+            if let Some(doc) = current_threat_model_doc(app) {
+                if let Some(nodes) = dfd_nodes_from_doc(&doc) {
+                    lines.push(blank());
+                    lines.push(section_header_line(
+                        &format!("NODES FROM threat-model.json · {}", nodes.len()),
+                        area.width,
+                    ));
+                    for (id, node_type, zone) in nodes.into_iter().take(8) {
+                        lines.push(Line::from(vec![
+                            Span::raw("   "),
+                            Span::styled(pad(&id, 24), theme::accent()),
+                            Span::styled(pad(&node_type, 16), theme::muted()),
+                            Span::styled(zone, theme::subtle()),
+                        ]));
+                    }
+                }
+            }
         }
         ThreatView::Stride => {
-            lines.push(divider("STRIDE", area.width));
-            lines.push(header(&["element", "S", "T", "R", "I", "D", "E"]));
-            for element in ["entrypoints", "auth", "storage", "scanners"] {
-                lines.push(row(&[
-                    pad(element, 16),
-                    "med".to_string(),
-                    "high".to_string(),
-                    "low".to_string(),
-                    "med".to_string(),
-                    "low".to_string(),
-                    "med".to_string(),
-                ]));
+            let doc = current_threat_model_doc(app);
+            let rollup = doc
+                .as_ref()
+                .and_then(stride_rollup_from_doc)
+                .unwrap_or_else(stride_rollup_rows);
+            let total_issues: usize = rollup.iter().map(|r| r.3).sum();
+            lines.push(section_header_line(
+                &format!("STRIDE ROLLUP · {total_issues} issues"),
+                area.width,
+            ));
+            for (letter, sev, category, count, description) in &rollup {
+                lines.push(stride_row(
+                    letter,
+                    *sev,
+                    category,
+                    *count,
+                    description,
+                    area.width,
+                ));
             }
         }
         ThreatView::Stories => {
-            lines.push(divider("STORIES", area.width));
-            lines.push(detail(
-                "A1",
-                "malicious input reaches a sink through an unvalidated handler",
+            let doc = current_threat_model_doc(app);
+            let stories = doc
+                .as_ref()
+                .and_then(stories_from_doc)
+                .unwrap_or_else(canonical_stories_fixture);
+            lines.push(section_header_line(
+                &format!("ATTACKER STORIES · {}", stories.len()),
+                area.width,
             ));
-            lines.push(detail(
-                "A2",
-                "dependency behavior changes scanner or runtime assumptions",
-            ));
-            lines.push(detail(
-                "A3",
-                "local secrets leak through logs, artifacts, or prompt context",
-            ));
+            for (id, severity, title, attack, location) in stories.into_iter().take(8) {
+                lines.push(Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled("▸ ", theme::warn()),
+                    Span::styled(pad(&id, 8), theme::accent()),
+                    Span::styled(
+                        pad(&severity.as_str().to_uppercase(), 9),
+                        theme::severity(severity),
+                    ),
+                    Span::styled(title, theme::primary()),
+                ]));
+                if !attack.is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::raw("              "),
+                        Span::styled("attack ", theme::subtle()),
+                        Span::styled(attack, theme::muted()),
+                    ]));
+                }
+                if !location.is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::raw("              "),
+                        Span::styled("loc    ", theme::subtle()),
+                        Span::styled(location, theme::muted()),
+                    ]));
+                }
+            }
         }
         ThreatView::Scope => {
-            lines.push(divider("SCOPE", area.width));
-            lines.push(detail(
-                "critical",
-                "auth, request parsing, code execution paths",
+            let doc = current_threat_model_doc(app);
+            let buckets = doc
+                .as_ref()
+                .and_then(scope_buckets_from_doc)
+                .unwrap_or_else(canonical_scope_buckets);
+            let total: usize = buckets.iter().map(|(_, _, items)| items.len()).sum();
+            lines.push(section_header_line(
+                &format!("SCOPE · {total} issues"),
+                area.width,
             ));
-            lines.push(detail(
-                "high",
-                "persistence, background jobs, external tools",
-            ));
-            lines.push(detail(
-                "out of scope",
-                "generated caches, vendored fixtures",
-            ));
+            for (severity, label, items) in &buckets {
+                if items.is_empty() {
+                    continue;
+                }
+                lines.push(Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled(
+                        format!("{} · {}", label.to_uppercase(), items.len()),
+                        theme::severity(*severity),
+                    ),
+                ]));
+                for item in items.iter().take(4) {
+                    lines.push(Line::from(vec![
+                        Span::raw("      "),
+                        Span::styled("• ", theme::subtle()),
+                        Span::styled(item.clone(), theme::muted()),
+                    ]));
+                }
+                if items.len() > 4 {
+                    lines.push(Line::from(vec![
+                        Span::raw("      "),
+                        Span::styled(format!("… {} more", items.len() - 4), theme::subtle()),
+                    ]));
+                }
+            }
+            lines.push(blank());
+            lines.push(Line::from(vec![
+                Span::raw("   "),
+                Span::styled("OUT OF SCOPE", theme::muted()),
+            ]));
+            lines.push(Line::from(vec![
+                Span::raw("      "),
+                Span::styled("• ", theme::subtle()),
+                Span::styled("generated caches, vendored fixtures", theme::muted()),
+            ]));
         }
         ThreatView::Summary => {
-            lines.push(divider("SUMMARY", area.width));
-            lines.push(detail("elements", "4"));
-            lines.push(detail("stories", "3"));
-            lines.push(detail("highest risk", "scanners -> subprocess boundary"));
-            lines.push(detail("artifact", ".kuzushi/threat-model.json"));
+            let doc = current_threat_model_doc(app);
+            let rollup = doc
+                .as_ref()
+                .and_then(stride_rollup_from_doc)
+                .unwrap_or_else(stride_rollup_rows);
+            let total_issues: usize = rollup.iter().map(|r| r.3).sum();
+            lines.push(section_header_line(
+                &format!("THREAT MODEL · {total_issues} issues"),
+                area.width,
+            ));
+            for (letter, sev, category, count, description) in &rollup {
+                lines.push(stride_row(
+                    letter,
+                    *sev,
+                    category,
+                    *count,
+                    description,
+                    area.width,
+                ));
+            }
+            lines.push(blank());
+            lines.push(transcript_line(
+                "agent",
+                "biggest delta from last model: admin.acme-checkout.com shares the jwt secret.",
+                false,
+            ));
+            lines.push(transcript_line(
+                "flow",
+                "recommend split signing keys + audience claim",
+                false,
+            ));
+            lines.push(transcript_line(
+                "log",
+                "artifact .kuzushi/threat-model.json (proposed v4 · +12 −3)",
+                false,
+            ));
         }
     }
 
@@ -1697,21 +2144,6 @@ fn kb_attachment_widths(width: u16) -> Vec<usize> {
     vec![id, kind, source, status]
 }
 
-fn finding_summary_widths(width: u16) -> Vec<usize> {
-    let total = width as usize;
-    let alias = 8;
-    let severity = 8;
-    let verdict = 9;
-    let confidence = 5;
-    let proof = 12;
-    let cwe = 8;
-    let gaps = 12;
-    let source = total
-        .saturating_sub(alias + severity + verdict + confidence + proof + cwe + gaps)
-        .max(10);
-    vec![alias, severity, verdict, confidence, proof, cwe, source]
-}
-
 fn finding_location(finding: &Finding) -> String {
     match finding.end_line {
         Some(end_line) if end_line > finding.start_line => {
@@ -1743,21 +2175,6 @@ fn finding_confidence_label(finding: &Finding) -> String {
         .as_ref()
         .map(|triage| format!("{:.0}%", (triage.confidence.clamp(0.0, 1.0) * 100.0)))
         .unwrap_or_else(|| "-".to_string())
-}
-
-fn finding_proof_state_label(finding: &Finding) -> String {
-    match finding
-        .triage
-        .as_ref()
-        .map(|triage| triage.verdict.as_str())
-    {
-        Some("true_positive") => "triaged-tp",
-        Some("false_positive") => "triaged-fp",
-        Some("needs_review") => "needs-review",
-        Some("by_design") => "by-design",
-        Some(_) | None => "static-sig",
-    }
-    .to_string()
 }
 
 fn finding_cwe_label(finding: &Finding) -> String {
@@ -2482,6 +2899,578 @@ fn next_action_line(text: &str, width: usize) -> Line<'static> {
     ])
 }
 
+/// Context-aware NEXT hint for the catalog view. Picks the most relevant
+/// next action based on whether context is built, target is selected, and
+/// findings exist.
+fn catalog_next_hint(app: &ShellApp) -> String {
+    if !app.context_view.exists {
+        return "Build the context snapshot with `context build` so SAST has structure to walk."
+            .to_string();
+    }
+    let critical_count = app
+        .findings
+        .iter()
+        .filter(|f| f.severity == Severity::Critical)
+        .count();
+    if critical_count > 0 {
+        if let Some((alias, _)) = sorted_finding_aliases(&app.findings).into_iter().next() {
+            return format!(
+                "Drill in: `open {alias}` for the highest-severity finding · `findings` for the list."
+            );
+        }
+    }
+    if !app.findings.is_empty() {
+        return format!(
+            "{} finding(s) waiting · `findings` to triage · `threats build` for STRIDE.",
+            app.findings.len()
+        );
+    }
+    app.first_finding_hint()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProgressKind {
+    Done,
+    Active,
+    Failing,
+}
+
+impl ProgressKind {
+    fn fill_style(self) -> Style {
+        match self {
+            ProgressKind::Done => theme::success(),
+            ProgressKind::Active => theme::warn(),
+            ProgressKind::Failing => theme::danger(),
+        }
+    }
+
+    fn status_style(self) -> Style {
+        self.fill_style()
+    }
+}
+
+/// Render a progress bar matching `design/mockups/sast.jsx::bar()`:
+///
+/// ```text
+///    semgrep              [████████████████████░░░░]  612/612   done · 18 raw hits
+/// ```
+fn progress_bar_line(
+    label: &str,
+    done: usize,
+    total: usize,
+    status: &str,
+    kind: ProgressKind,
+) -> Line<'static> {
+    let bar_width: usize = 24;
+    let filled = if total == 0 {
+        0
+    } else {
+        let raw = (bar_width as f64 * done as f64 / total as f64).round() as usize;
+        raw.min(bar_width)
+    };
+    let empty = bar_width - filled;
+    let count = format!("{done}/{total}");
+    let count = format!("{:>7}", count);
+
+    Line::from(vec![
+        Span::raw("   "),
+        Span::styled(pad(label, 20), theme::primary()),
+        Span::styled(" [", theme::subtle()),
+        Span::styled("█".repeat(filled), kind.fill_style()),
+        Span::styled("░".repeat(empty), theme::subtle()),
+        Span::styled("] ", theme::subtle()),
+        Span::styled(count, theme::muted()),
+        Span::raw("  "),
+        Span::styled(status.to_string(), kind.status_style()),
+    ])
+}
+
+/// Section header matching `design/mockups/_shared.jsx::sectionHeader()`:
+/// uppercase bold heading on the left, subtle dash filler on the right.
+fn section_header_line(label: &str, width: u16) -> Line<'static> {
+    let text = label.to_uppercase();
+    let total = width as usize;
+    let used = text.chars().count() + 2;
+    let dashes = total.saturating_sub(used).max(2);
+    Line::from(vec![
+        Span::styled(format!("{text}  "), theme::heading()),
+        Span::styled("─".repeat(dashes), theme::subtle()),
+    ])
+}
+
+/// STRIDE rollup row matching `design/mockups/threat-model.jsx`:
+///
+/// ```text
+///    [ S ] Spoofing         2 issues  · jwt without aud-claim, mailgun cname dangling
+/// ```
+fn stride_row(
+    letter: &str,
+    severity: Severity,
+    category: &str,
+    count: usize,
+    description: &str,
+    width: u16,
+) -> Line<'static> {
+    let total = width as usize;
+    let used = 3 + 3 + 1 + 16 + 4 + 10;
+    let desc_w = total.saturating_sub(used).max(8);
+    let issues_label = if count == 1 { "issue" } else { "issues" };
+    let mut spans = vec![
+        Span::raw("   "),
+        Span::styled(format!(" {letter} "), theme::severity(severity)),
+        Span::raw(" "),
+        Span::styled(pad(category, 16), theme::muted()),
+        Span::styled(format!("{count} "), theme::primary()),
+        Span::styled(format!("{issues_label}"), theme::muted()),
+    ];
+    if !description.is_empty() {
+        spans.push(Span::styled("  · ", theme::muted()));
+        spans.push(Span::styled(fit(description, desc_w), theme::muted()));
+    }
+    Line::from(spans)
+}
+
+/// Returns the canonical 6-row STRIDE rollup matching the design fixture.
+/// Used as a fallback when no `.kuzushi/threat-model.json` is present.
+fn stride_rollup_rows() -> Vec<(&'static str, Severity, &'static str, usize, String)> {
+    vec![
+        (
+            "S",
+            Severity::High,
+            "Spoofing",
+            2,
+            "jwt without aud-claim, mailgun cname dangling".to_string(),
+        ),
+        (
+            "T",
+            Severity::Medium,
+            "Tampering",
+            1,
+            "worker pool reads unsigned amqp messages".to_string(),
+        ),
+        ("R", Severity::Low, "Repudiation", 0, String::new()),
+        (
+            "I",
+            Severity::Critical,
+            "Info-disclosure",
+            3,
+            "plaintext PII at db→s3 boundary, debug logs".to_string(),
+        ),
+        (
+            "D",
+            Severity::Medium,
+            "DoS",
+            1,
+            "no rate-limit on /checkout/confirm".to_string(),
+        ),
+        (
+            "E",
+            Severity::High,
+            "Elev-of-priv",
+            1,
+            "admin subdomain shares jwt secret with api".to_string(),
+        ),
+    ]
+}
+
+/// Canonical 10-row ASCII DFD matching `design/mockups/threat-model.jsx`.
+/// 5 boxed nodes + 2 annotated edges (jwt, plaintext PII).
+fn dfd_canonical_lines() -> Vec<Line<'static>> {
+    let sub = theme::subtle();
+    let acc = theme::accent();
+    let mut_ = theme::muted();
+    let warn = theme::warn();
+    vec![
+        Line::from(vec![
+            Span::raw("     "),
+            Span::styled(
+                "┌────────────┐         ┌─────────────┐         ┌──────────────┐",
+                sub,
+            ),
+        ]),
+        Line::from(vec![
+            Span::raw("     "),
+            Span::styled("│ ", sub),
+            Span::styled("  user    ", acc),
+            Span::styled("│  https  │ ", sub),
+            Span::styled(" api edge  ", acc),
+            Span::styled("│   sql   │ ", sub),
+            Span::styled("  postgres   ", acc),
+            Span::styled("│", sub),
+        ]),
+        Line::from(vec![
+            Span::raw("     "),
+            Span::styled("│ ", sub),
+            Span::styled("  browser ", mut_),
+            Span::styled("│ ──────► │ ", sub),
+            Span::styled("  nginx    ", mut_),
+            Span::styled("│ ──────► │ ", sub),
+            Span::styled("  primary db ", mut_),
+            Span::styled("│", sub),
+        ]),
+        Line::from(vec![
+            Span::raw("     "),
+            Span::styled(
+                "└────────────┘         └──────┬──────┘         └──────┬───────┘",
+                sub,
+            ),
+        ]),
+        Line::from(vec![
+            Span::raw("                                       "),
+            Span::styled("│ ", sub),
+            Span::styled("jwt", mut_),
+            Span::raw("                    "),
+            Span::styled("│ ", sub),
+            Span::styled("plaintext PII", warn),
+        ]),
+        Line::from(vec![
+            Span::raw("                                       "),
+            Span::styled("▼", sub),
+            Span::raw("                       "),
+            Span::styled("▼", sub),
+        ]),
+        Line::from(vec![
+            Span::raw("                              "),
+            Span::styled("┌──────────────┐         ┌──────────────┐", sub),
+        ]),
+        Line::from(vec![
+            Span::raw("                              "),
+            Span::styled("│ ", sub),
+            Span::styled(" worker pool  ", acc),
+            Span::styled("│  amqp   │ ", sub),
+            Span::styled(" s3 (us-east) ", acc),
+            Span::styled("│", sub),
+        ]),
+        Line::from(vec![
+            Span::raw("                              "),
+            Span::styled("│ ", sub),
+            Span::styled(" rabbitmq cli ", mut_),
+            Span::styled("│ ──────► │ ", sub),
+            Span::styled(" invoices/    ", mut_),
+            Span::styled("│", sub),
+        ]),
+        Line::from(vec![
+            Span::raw("                              "),
+            Span::styled("└──────────────┘         └──────────────┘", sub),
+        ]),
+    ]
+}
+
+/// Extract `(id, node_type, trust_zone)` triples from `dfd.nodes` if present.
+fn dfd_nodes_from_doc(doc: &serde_json::Value) -> Option<Vec<(String, String, String)>> {
+    let nodes = doc.get("dfd")?.get("nodes")?.as_array()?;
+    if nodes.is_empty() {
+        return None;
+    }
+    let rows = nodes
+        .iter()
+        .filter_map(|n| {
+            let id = n.get("id").and_then(|v| v.as_str())?.to_string();
+            let node_type = n
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("node")
+                .to_string();
+            let zone = n
+                .get("trustZone")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            Some((id, node_type, zone))
+        })
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        None
+    } else {
+        Some(rows)
+    }
+}
+
+/// Try to load the persisted threat model for the active workspace target.
+/// Returns `None` if the file doesn't exist or is empty/null.
+fn current_threat_model_doc(app: &ShellApp) -> Option<serde_json::Value> {
+    let cwd = app
+        .target
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let doc = kuzushi_core::load_persistent_threat_model(&cwd)?;
+    if doc.is_null() {
+        return None;
+    }
+    Some(doc)
+}
+
+/// Compute the STRIDE rollup from a persisted threat model document.
+/// Returns `None` if the document has no `threats` array or it's empty.
+fn stride_rollup_from_doc(
+    doc: &serde_json::Value,
+) -> Option<Vec<(&'static str, Severity, &'static str, usize, String)>> {
+    let threats = doc.get("threats")?.as_array()?;
+    if threats.is_empty() {
+        return None;
+    }
+    let cats: [(&'static str, &'static str, &'static str); 6] = [
+        ("S", "spoofing", "Spoofing"),
+        ("T", "tampering", "Tampering"),
+        ("R", "repudiation", "Repudiation"),
+        ("I", "information-disclosure", "Info-disclosure"),
+        ("D", "denial-of-service", "DoS"),
+        ("E", "elevation-of-privilege", "Elev-of-priv"),
+    ];
+    let mut rows = Vec::with_capacity(6);
+    for (letter, key, label) in cats {
+        let matching: Vec<&serde_json::Value> = threats
+            .iter()
+            .filter(|t| {
+                t.get("category")
+                    .and_then(|c| c.as_str())
+                    .map(|c| c.to_lowercase().replace('_', "-"))
+                    .as_deref()
+                    == Some(key)
+            })
+            .collect();
+        let count = matching.len();
+        let severity = matching
+            .iter()
+            .map(|t| {
+                t.get("impact")
+                    .and_then(|s| s.as_str())
+                    .map(impact_to_severity)
+                    .unwrap_or(Severity::Medium)
+            })
+            .max_by_key(|s| severity_rank(*s))
+            .unwrap_or(Severity::Low);
+        let description = matching
+            .iter()
+            .filter_map(|t| {
+                t.get("title")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.to_string())
+            })
+            .take(2)
+            .collect::<Vec<_>>()
+            .join(", ");
+        rows.push((letter, severity, label, count, description));
+    }
+    Some(rows)
+}
+
+/// `(id, severity, title, attack_vector, location)` — one attacker story.
+type StoryRow = (String, Severity, String, String, String);
+
+/// Extract attacker stories from the persisted threat model. Each `threats[]`
+/// entry becomes one story, sorted by impact severity (highest first).
+fn stories_from_doc(doc: &serde_json::Value) -> Option<Vec<StoryRow>> {
+    let threats = doc.get("threats")?.as_array()?;
+    if threats.is_empty() {
+        return None;
+    }
+    let mut rows: Vec<StoryRow> = threats
+        .iter()
+        .filter_map(|t| {
+            let id = t.get("id").and_then(|v| v.as_str())?.to_string();
+            let severity = t
+                .get("impact")
+                .and_then(|v| v.as_str())
+                .map(impact_to_severity)
+                .unwrap_or(Severity::Medium);
+            let title = t
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("untitled")
+                .to_string();
+            let attack = t
+                .get("attackVector")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let location = t
+                .get("affectedFiles")
+                .and_then(|v| v.as_array())
+                .and_then(|files| files.first())
+                .map(|f| {
+                    let path = f.get("filePath").and_then(|v| v.as_str()).unwrap_or("");
+                    let line = f.get("startLine").and_then(|v| v.as_u64()).unwrap_or(0);
+                    if path.is_empty() {
+                        String::new()
+                    } else if line == 0 {
+                        path.to_string()
+                    } else {
+                        format!("{path}:{line}")
+                    }
+                })
+                .unwrap_or_default();
+            Some((id, severity, title, attack, location))
+        })
+        .collect();
+    rows.sort_by_key(|(_, sev, _, _, _)| std::cmp::Reverse(severity_rank(*sev)));
+    Some(rows)
+}
+
+/// Fixture matching the canonical 4 attacker stories used when no real
+/// threat model is loaded.
+fn canonical_stories_fixture() -> Vec<StoryRow> {
+    vec![
+        (
+            "T-001".to_string(),
+            Severity::Critical,
+            "sql injection via order_id concatenation".to_string(),
+            "POST /orders/<id>".to_string(),
+            "apps/api/orders.rs:142".to_string(),
+        ),
+        (
+            "T-002".to_string(),
+            Severity::Critical,
+            "prompt injection sink reads user body".to_string(),
+            "user message → llm context".to_string(),
+            "apps/web/agents/concierge.ts:88".to_string(),
+        ),
+        (
+            "T-003".to_string(),
+            Severity::High,
+            "jwt verify accepts alg=none".to_string(),
+            "forged Authorization header".to_string(),
+            "apps/api/auth/jwt.rs:54".to_string(),
+        ),
+        (
+            "T-004".to_string(),
+            Severity::High,
+            "shell exec from cron payload".to_string(),
+            "scheduled job pulls untrusted task".to_string(),
+            "jobs/worker.py:213".to_string(),
+        ),
+    ]
+}
+
+/// `(severity, label, items)` — one criticality bucket of threat titles.
+type ScopeBucket = (Severity, &'static str, Vec<String>);
+
+/// Bucket threats from the persisted model by impact severity.
+fn scope_buckets_from_doc(doc: &serde_json::Value) -> Option<Vec<ScopeBucket>> {
+    let threats = doc.get("threats")?.as_array()?;
+    if threats.is_empty() {
+        return None;
+    }
+    let mut buckets: Vec<ScopeBucket> = vec![
+        (Severity::Critical, "critical", Vec::new()),
+        (Severity::High, "high", Vec::new()),
+        (Severity::Medium, "medium", Vec::new()),
+        (Severity::Low, "low", Vec::new()),
+    ];
+    for t in threats {
+        let severity = t
+            .get("impact")
+            .and_then(|v| v.as_str())
+            .map(impact_to_severity)
+            .unwrap_or(Severity::Medium);
+        let title = t
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("untitled")
+            .to_string();
+        if let Some((_, _, items)) = buckets.iter_mut().find(|(sev, _, _)| *sev == severity) {
+            items.push(title);
+        }
+    }
+    Some(buckets)
+}
+
+/// Fixture used when no real threat model is loaded — matches the canonical
+/// design content.
+fn canonical_scope_buckets() -> Vec<ScopeBucket> {
+    vec![
+        (
+            Severity::Critical,
+            "critical",
+            vec![
+                "sql injection via order_id concatenation".to_string(),
+                "prompt injection sink reads user body".to_string(),
+            ],
+        ),
+        (
+            Severity::High,
+            "high",
+            vec![
+                "jwt verify accepts alg=none".to_string(),
+                "shell exec from cron payload".to_string(),
+                "path traversal in /assets/<file>".to_string(),
+            ],
+        ),
+        (
+            Severity::Medium,
+            "medium",
+            vec![
+                "open redirect on /login?next=".to_string(),
+                "csrf token not bound to session".to_string(),
+                "unbounded regex on /search".to_string(),
+            ],
+        ),
+        (
+            Severity::Low,
+            "low",
+            vec![
+                "cors allows null origin".to_string(),
+                "cookie set without SameSite".to_string(),
+                "console.log of req.body in handler".to_string(),
+            ],
+        ),
+    ]
+}
+
+fn impact_to_severity(value: &str) -> Severity {
+    match value.to_lowercase().as_str() {
+        "critical" => Severity::Critical,
+        "high" => Severity::High,
+        "low" => Severity::Low,
+        "info" => Severity::Info,
+        _ => Severity::Medium,
+    }
+}
+
+fn severity_rank(severity: Severity) -> u8 {
+    match severity {
+        Severity::Critical => 5,
+        Severity::High => 4,
+        Severity::Medium => 3,
+        Severity::Low => 2,
+        Severity::Info => 1,
+        Severity::Unknown => 0,
+    }
+}
+
+/// One-line finding row matching `design/mockups/sast.jsx::finding()`:
+///
+/// ```text
+///  F-0001  CRITICAL  sql injection via order_id concatenation       apps/api/orders.rs:142
+/// ```
+fn compact_finding_row(
+    alias: &str,
+    severity: Severity,
+    name: &str,
+    location: &str,
+    width: u16,
+) -> Line<'static> {
+    let alias_w = 8;
+    let sev_w = 9;
+    let used = 1 + alias_w + 2 + sev_w;
+    let total = (width as usize).saturating_sub(used);
+    let location_w = location.chars().count().min(total.saturating_sub(2)).max(8);
+    let name_w = total.saturating_sub(location_w + 2).max(12);
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(pad(alias, alias_w), theme::accent()),
+        Span::raw("  "),
+        Span::styled(
+            pad(&severity.as_str().to_uppercase(), sev_w),
+            theme::severity(severity),
+        ),
+        Span::styled(pad(&fit(name, name_w), name_w), theme::primary()),
+        Span::styled("  ", Style::default()),
+        Span::styled(fit(location, location_w), theme::muted()),
+    ])
+}
+
 fn catalog_module_row(
     id: &str,
     description: &str,
@@ -2636,10 +3625,16 @@ fn scan_status(scan: &ScanPanelState) -> String {
     }
 }
 
-fn run_state_glyph(scan: Option<&ScanPanelState>) -> &'static str {
+/// Cycle through braille spinner frames using `tick` as the index source.
+/// Pass `app.spinner_phase as usize` so the animation advances on the event
+/// loop's ~100ms extracted shell tick. Tests use `spinner_phase = 0` (frame `⠿`)
+/// for determinism.
+const SPINNER_FRAMES: &[&str] = &["⠿", "⠾", "⠷", "⠯", "⠟", "⠻"];
+
+fn run_state_glyph(scan: Option<&ScanPanelState>, tick: usize) -> &'static str {
     match scan {
         Some(scan) if scan.running && scan.abort_requested => "✗",
-        Some(scan) if scan.running => "⠿",
+        Some(scan) if scan.running => SPINNER_FRAMES[tick % SPINNER_FRAMES.len()],
         Some(scan) if scan.error.is_some() => "✗",
         Some(_) => "✓",
         None => "●",
@@ -3119,27 +4114,24 @@ mod tests {
         let rendered = format!("{:?}", buffer);
 
         for expected in [
-            "alias",
-            "severity",
-            "verdict",
-            "conf",
-            "proof/static",
-            "cwe",
-            "source",
+            // Section header replaces the old column-name row.
+            "FINDINGS",
+            "1 TRIAGED",
+            "1 PENDING",
+            // Severity chips uppercase per design.
             "F-0001",
-            "high",
+            "HIGH",
+            "F-0002",
+            "MEDIUM",
+            // Compact row 1 carries title + location.
+            "SQL injection in admin search",
+            "src/controllers/admin_search.ts:117-119",
+            // Compact row 2 detail line.
             "tp",
             "91%",
-            "triaged-tp",
             "CWE-89",
             "semgrep",
-            "loc src/controllers/admin_search.ts:117-119",
-            "SQL injection in admin search",
-            "req.query.q flows into db.query",
-            "next: open F-0001",
-            "F-0002",
             "untriaged",
-            "static-sig",
             "codeql",
         ] {
             assert!(rendered.contains(expected), "missing {expected}");
@@ -3164,13 +4156,18 @@ mod tests {
             let backend = TestBackend::new(80, 18);
             let mut terminal = Terminal::new(backend).unwrap();
             let mut app = ShellApp::new(V2Config::default(), None);
+            let is_dfd = matches!(view, ShellView::Threat(ThreatView::Dfd));
             app.shell_view = view;
 
             terminal.draw(|frame| render_app(frame, &app)).unwrap();
             let rendered = format!("{:?}", terminal.backend().buffer());
 
             assert!(rendered.contains(expected), "missing {expected}");
-            assert!(!rendered.contains("┌"));
+            // Box-drawing is reserved for the DFD diagram; every other view
+            // must remain free of nested boxes (no Ink-style boxed dashboard).
+            if !is_dfd {
+                assert!(!rendered.contains("┌"), "{expected} drew a box");
+            }
         }
     }
 
@@ -3267,7 +4264,7 @@ mod tests {
 
     #[test]
     fn renders_threat_view_navigation() {
-        let backend = TestBackend::new(100, 24);
+        let backend = TestBackend::new(120, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
         app.shell_view = ShellView::Threat(ThreatView::Stride);
@@ -3276,7 +4273,7 @@ mod tests {
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains("STRIDE"));
-        assert!(rendered.contains("entrypoints"));
+        assert!(rendered.contains("Spoofing"));
     }
 
     #[test]
@@ -3350,6 +4347,596 @@ mod tests {
     }
 
     #[test]
+    fn catalog_next_hint_steers_through_context_then_findings() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        // Default fresh app: no context snapshot built.
+        assert!(
+            catalog_next_hint(&app).contains("context build"),
+            "fresh app should suggest context build"
+        );
+
+        // After context exists but no findings: first-finding scan hint.
+        app.context_view.exists = true;
+        let hint = catalog_next_hint(&app);
+        assert!(
+            hint.contains("First finding") || hint.contains("scan"),
+            "ctx-built no-findings should suggest scanning, got: {hint}"
+        );
+
+        // With non-critical findings: drill-in suggestion.
+        let medium = Finding::new_semgrep("demo.rule", "src/a.rs", 1, None, Severity::Medium, "x");
+        app.findings = vec![medium];
+        let hint = catalog_next_hint(&app);
+        assert!(hint.contains("findings"), "got: {hint}");
+        assert!(hint.contains("triage"), "got: {hint}");
+
+        // With a critical finding: open-by-alias suggestion.
+        let critical =
+            Finding::new_semgrep("demo.crit", "src/b.rs", 2, None, Severity::Critical, "y");
+        app.findings.push(critical);
+        let hint = catalog_next_hint(&app);
+        assert!(hint.contains("open F-"), "got: {hint}");
+    }
+
+    #[test]
+    fn spinner_cycles_through_six_frames_by_log_length() {
+        let scan = crate::app::ScanPanelState {
+            run_id: None,
+            target: std::path::PathBuf::from("./demo"),
+            stage: "scanning".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        };
+        let frames: Vec<&str> = (0..12)
+            .map(|tick| run_state_glyph(Some(&scan), tick))
+            .collect();
+        // First 6 ticks cover all 6 frames
+        let unique: std::collections::BTreeSet<&&str> = frames.iter().take(6).collect();
+        assert_eq!(
+            unique.len(),
+            6,
+            "first 6 frames should be unique: {frames:?}"
+        );
+        // Frame at tick N == frame at tick N+6 (cycle period)
+        for tick in 0..6 {
+            assert_eq!(
+                frames[tick],
+                frames[tick + 6],
+                "spinner should repeat every 6 ticks"
+            );
+        }
+    }
+
+    #[test]
+    fn spinner_shows_static_glyph_when_scan_idle_or_done() {
+        // Idle: no scan -> ●
+        assert_eq!(run_state_glyph(None, 0), "●");
+        assert_eq!(run_state_glyph(None, 99), "●");
+        // Done: scan present, not running, no error -> ✓
+        let done = crate::app::ScanPanelState {
+            run_id: None,
+            target: std::path::PathBuf::from("."),
+            stage: String::new(),
+            findings_count: 0,
+            running: false,
+            abort_requested: false,
+            error: None,
+        };
+        assert_eq!(run_state_glyph(Some(&done), 4), "✓");
+    }
+
+    #[test]
+    fn module_run_body_ends_with_streaming_cursor_when_scan_active() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.scan = Some(crate::app::ScanPanelState {
+            run_id: Some("run-abc".to_string()),
+            target: std::path::PathBuf::from("./demo"),
+            stage: "scanning".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+        app.shell_view = ShellView::ModuleRun;
+        let area = Rect::new(0, 0, 120, 30);
+        let lines = module_run_lines(&app, area);
+        let last = lines.last().expect("expected non-empty body");
+        let last_text: String = last.spans.iter().map(|s| s.content.as_ref()).collect();
+        // The cursor line is " " + a single styled-block " ", so two visible cells.
+        assert_eq!(
+            last_text, "  ",
+            "expected streaming cursor line at end while scan running, got {last_text:?}"
+        );
+        // Sanity: confirm a styled span with primary bg exists on that line.
+        let has_inverse = last
+            .spans
+            .iter()
+            .any(|sp| sp.style.bg.is_some() && sp.content.as_ref() == " ");
+        assert!(
+            has_inverse,
+            "streaming cursor should be a styled background cell"
+        );
+    }
+
+    #[test]
+    fn module_run_body_omits_streaming_cursor_when_idle() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::ModuleRun;
+        let area = Rect::new(0, 0, 120, 30);
+        let lines = module_run_lines(&app, area);
+        // No scan → no streaming cursor expected.
+        for line in &lines {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let has_cursor = line
+                .spans
+                .iter()
+                .any(|sp| sp.style.bg.is_some() && sp.content.as_ref() == " ");
+            assert!(
+                !has_cursor || text.trim() != "",
+                "unexpected streaming cursor while idle: {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn recent_module_activity_uses_recon_snapshot_when_present() {
+        use crate::app::ReconSnapshot;
+        use kuzushi_core::{ReconHost, ReconService};
+
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.focused_module = Some("recon".to_string());
+        app.shell_view = ShellView::Module;
+        app.recon_snapshot = Some(ReconSnapshot {
+            hosts: vec![ReconHost {
+                id: "h1".to_string(),
+                workspace_id: "ws".to_string(),
+                address: "192.0.2.10".to_string(),
+                hostname: Some("acme-checkout.com".to_string()),
+                state: "alive".to_string(),
+            }],
+            services: vec![ReconService {
+                id: "s1".to_string(),
+                host_id: "h1".to_string(),
+                port: 443,
+                proto: "tcp".to_string(),
+                name: Some("https".to_string()),
+                banner: Some("nginx/1.24 · TLS1.3".to_string()),
+                state: "open".to_string(),
+            }],
+            notes: Vec::new(),
+            last_tool: Some("recon:nmap".to_string()),
+            last_target: Some("acme-checkout.com".to_string()),
+        });
+
+        let area = Rect::new(0, 0, 120, 40);
+        let lines = module_lines(&app, area);
+        let rendered: String = lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|sp| sp.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join("");
+
+        assert!(
+            rendered.contains("acme-checkout.com"),
+            "expected snapshot host in output, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("443"),
+            "expected snapshot port 443 in output, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("nginx/1.24"),
+            "expected snapshot banner in output, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("RECENT RECON ACTIVITY"),
+            "expected RECENT RECON ACTIVITY header, got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn recent_module_activity_falls_back_to_log_when_no_snapshot() {
+        // No snapshot is populated → renderer must keep falling back to the
+        // legacy `app.log` grep, which is the pre-snapshot behaviour.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.focused_module = Some("recon".to_string());
+        app.shell_view = ShellView::Module;
+        // Inject a recon-shaped log line that would be picked up by
+        // `recent_module_log` filter (prefix == "result", body contains "recon").
+        app.log(
+            "result",
+            "recon:nmap discovered 1 host and 2 open services for 192.0.2.10",
+        );
+
+        let area = Rect::new(0, 0, 120, 40);
+        let lines = module_lines(&app, area);
+        let rendered: String = lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|sp| sp.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join("");
+
+        assert!(
+            rendered.contains("recon:nmap discovered 1 host"),
+            "expected fallback log-grep line in output, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("RECENT RECON ACTIVITY"),
+            "expected RECENT RECON ACTIVITY header, got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn sast_progress_bars_use_scan_progress_per_task_when_present() {
+        use kuzushi_core::ScanProgress;
+        use std::collections::BTreeMap;
+
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.focused_module = Some("sast".to_string());
+        app.shell_view = ShellView::ModuleRun;
+        app.scan = Some(crate::app::ScanPanelState {
+            run_id: Some("run-real-progress".to_string()),
+            target: std::path::PathBuf::from("./demo"),
+            stage: "scanning".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+
+        let mut per_task = BTreeMap::new();
+        per_task.insert("agentic-sast".to_string(), (87usize, 120usize));
+        per_task.insert("semgrep".to_string(), (612usize, 612usize));
+        app.scan_progress = Some(ScanProgress {
+            total: 732,
+            done: 699,
+            current_tool: Some("semgrep".to_string()),
+            current_target: Some("./demo".to_string()),
+            per_task,
+        });
+
+        let area = Rect::new(0, 0, 120, 40);
+        let lines = module_run_lines(&app, area);
+        let rendered: String = lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|sp| sp.content.as_ref()))
+            .collect::<Vec<_>>()
+            .join("");
+
+        assert!(
+            rendered.contains("612/612"),
+            "expected real semgrep done count, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("87/120"),
+            "expected real agentic-sast progress count, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("semgrep"),
+            "expected semgrep label in progress bar, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("agentic-sast"),
+            "expected agentic-sast label in progress bar, got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn stories_from_doc_sorts_threats_by_impact_severity() {
+        let doc = serde_json::json!({
+            "threats": [
+                {"id": "T-001", "title": "low risk",  "impact": "low",      "category": "spoofing",  "attackVector": "vec1"},
+                {"id": "T-002", "title": "critical bug", "impact": "critical","category": "tampering","attackVector": "vec2",
+                 "affectedFiles": [{"filePath": "src/api.rs", "startLine": 42}]},
+                {"id": "T-003", "title": "high issue", "impact": "high",     "category": "elevation_of_privilege"}
+            ]
+        });
+        let stories = stories_from_doc(&doc).expect("non-empty stories");
+        assert_eq!(stories.len(), 3);
+        assert_eq!(stories[0].0, "T-002");
+        assert_eq!(stories[0].1, Severity::Critical);
+        assert_eq!(stories[0].4, "src/api.rs:42");
+        assert_eq!(stories[1].0, "T-003");
+        assert_eq!(stories[1].1, Severity::High);
+        assert_eq!(stories[2].0, "T-001");
+    }
+
+    #[test]
+    fn scope_buckets_from_doc_groups_by_impact() {
+        let doc = serde_json::json!({
+            "threats": [
+                {"title": "a", "impact": "critical"},
+                {"title": "b", "impact": "high"},
+                {"title": "c", "impact": "high"},
+                {"title": "d", "impact": "medium"}
+            ]
+        });
+        let buckets = scope_buckets_from_doc(&doc).expect("non-empty");
+        assert_eq!(buckets[0].0, Severity::Critical);
+        assert_eq!(buckets[0].2.len(), 1);
+        assert_eq!(buckets[1].0, Severity::High);
+        assert_eq!(buckets[1].2.len(), 2);
+        assert_eq!(buckets[2].0, Severity::Medium);
+        assert_eq!(buckets[2].2.len(), 1);
+        assert_eq!(buckets[3].0, Severity::Low);
+        assert!(buckets[3].2.is_empty());
+    }
+
+    #[test]
+    fn threats_stories_view_renders_attacker_story_cards() {
+        let backend = TestBackend::new(120, 36);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Threat(ThreatView::Stories);
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("ATTACKER STORIES"));
+        assert!(rendered.contains("T-001"));
+        assert!(rendered.contains("CRITICAL"));
+        assert!(rendered.contains("attack"));
+        assert!(rendered.contains("loc"));
+        // Old placeholder gone
+        assert!(!rendered.contains("malicious input reaches a sink"));
+    }
+
+    #[test]
+    fn threats_scope_view_renders_criticality_buckets() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Threat(ThreatView::Scope);
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains("SCOPE · 11 ISSUES"),
+            "expected SCOPE · 11 ISSUES in: {rendered}"
+        );
+        assert!(rendered.contains("CRITICAL · 2"));
+        assert!(rendered.contains("HIGH · 3"));
+        assert!(rendered.contains("OUT OF SCOPE"));
+        // Old placeholders gone
+        assert!(!rendered.contains("auth, request parsing"));
+    }
+
+    #[test]
+    fn dfd_canonical_lines_render_design_diagram() {
+        let lines = dfd_canonical_lines();
+        assert_eq!(lines.len(), 10, "expected 10 rows in canonical DFD");
+        let texts: Vec<String> = lines
+            .iter()
+            .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+        assert!(texts[1].contains("user"));
+        assert!(texts[1].contains("api edge"));
+        assert!(texts[1].contains("postgres"));
+        assert!(texts[4].contains("jwt"));
+        assert!(texts[4].contains("plaintext PII"));
+        assert!(texts[7].contains("worker pool"));
+        assert!(texts[7].contains("s3 (us-east)"));
+        // top + bottom borders are pure box-drawing
+        assert!(texts[0].contains("┌────"));
+        assert!(texts[3].contains("└────"));
+    }
+
+    #[test]
+    fn dfd_nodes_from_doc_returns_id_type_zone_triples() {
+        let doc = serde_json::json!({
+            "dfd": {
+                "nodes": [
+                    {"id": "actor-user", "type": "external-entity", "name": "User",
+                     "description": "End user", "trustZone": "external"},
+                    {"id": "web", "type": "process", "name": "Web app",
+                     "description": "Server", "trustZone": "internal"}
+                ]
+            }
+        });
+        let nodes = dfd_nodes_from_doc(&doc).expect("expected non-empty nodes");
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].0, "actor-user");
+        assert_eq!(nodes[0].1, "external-entity");
+        assert_eq!(nodes[0].2, "external");
+        assert_eq!(nodes[1].0, "web");
+        assert_eq!(nodes[1].2, "internal");
+    }
+
+    #[test]
+    fn dfd_nodes_from_doc_returns_none_when_missing() {
+        assert!(dfd_nodes_from_doc(&serde_json::json!({})).is_none());
+        assert!(dfd_nodes_from_doc(&serde_json::json!({"dfd": {}})).is_none());
+        assert!(dfd_nodes_from_doc(&serde_json::json!({"dfd": {"nodes": []}})).is_none());
+    }
+
+    #[test]
+    fn threats_dfd_view_renders_canonical_diagram_header() {
+        let backend = TestBackend::new(120, 28);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Threat(ThreatView::Dfd);
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains("DFD · ACME-CHECKOUT"),
+            "expected DFD section header in: {rendered}"
+        );
+        assert!(rendered.contains("user"));
+        assert!(rendered.contains("api edge"));
+        assert!(rendered.contains("postgres"));
+        assert!(rendered.contains("worker pool"));
+        // Old placeholder content must be gone.
+        assert!(!rendered.contains("browser, API clients, package registries"));
+        assert!(!rendered.contains("source tree, handlers, jobs, CLIs"));
+    }
+
+    #[test]
+    fn stride_rollup_from_doc_parses_real_threats() {
+        let doc = serde_json::json!({
+            "threats": [
+                {"id": "T-001", "category": "spoofing",          "title": "spoofed login",    "impact": "high"},
+                {"id": "T-002", "category": "spoofing",          "title": "stolen token",     "impact": "medium"},
+                {"id": "T-003", "category": "tampering",         "title": "config tamper",    "impact": "critical"},
+                {"id": "T-004", "category": "information-disclosure", "title": "log leak",    "impact": "low"},
+            ]
+        });
+        let rollup = stride_rollup_from_doc(&doc).expect("expected rollup from non-empty threats");
+        assert_eq!(rollup.len(), 6);
+
+        let total: usize = rollup.iter().map(|r| r.3).sum();
+        assert_eq!(total, 4);
+
+        // Spoofing: 2 threats, max impact = high
+        let spoof = &rollup[0];
+        assert_eq!(spoof.0, "S");
+        assert_eq!(spoof.2, "Spoofing");
+        assert_eq!(spoof.3, 2);
+        assert_eq!(spoof.1, Severity::High);
+        assert!(spoof.4.contains("spoofed login"));
+        assert!(spoof.4.contains("stolen token"));
+
+        // Tampering: 1 threat, impact = critical
+        let tamper = &rollup[1];
+        assert_eq!(tamper.3, 1);
+        assert_eq!(tamper.1, Severity::Critical);
+        assert_eq!(tamper.4, "config tamper");
+
+        // Repudiation: 0 threats, default Low severity, empty description
+        let repud = &rollup[2];
+        assert_eq!(repud.3, 0);
+        assert_eq!(repud.1, Severity::Low);
+        assert!(repud.4.is_empty());
+
+        // Info-disclosure: 1 threat, impact = low
+        let info = &rollup[3];
+        assert_eq!(info.3, 1);
+        assert_eq!(info.1, Severity::Low);
+        assert_eq!(info.4, "log leak");
+    }
+
+    #[test]
+    fn stride_rollup_from_doc_returns_none_on_empty_or_missing_threats() {
+        assert!(stride_rollup_from_doc(&serde_json::json!({})).is_none());
+        assert!(stride_rollup_from_doc(&serde_json::json!({"threats": []})).is_none());
+        assert!(stride_rollup_from_doc(&serde_json::json!({"threats": null})).is_none());
+    }
+
+    #[test]
+    fn stride_rollup_from_doc_normalizes_underscored_categories() {
+        let doc = serde_json::json!({
+            "threats": [
+                {"category": "denial_of_service",        "title": "ddos",  "impact": "medium"},
+                {"category": "elevation_of_privilege",   "title": "sudo bypass", "impact": "critical"},
+            ]
+        });
+        let rollup = stride_rollup_from_doc(&doc).expect("rollup should accept underscored");
+        let dos = &rollup[4];
+        assert_eq!(dos.0, "D");
+        assert_eq!(dos.3, 1);
+        let elev = &rollup[5];
+        assert_eq!(elev.0, "E");
+        assert_eq!(elev.3, 1);
+        assert_eq!(elev.1, Severity::Critical);
+    }
+
+    #[test]
+    fn threats_summary_view_combines_stride_rollup_and_observations() {
+        let backend = TestBackend::new(120, 32);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Threat(ThreatView::Summary);
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains("THREAT MODEL · 8 ISSUES"),
+            "expected design summary header in: {rendered}"
+        );
+        assert!(rendered.contains("Spoofing"));
+        assert!(rendered.contains("admin.acme-checkout.com"));
+        assert!(rendered.contains("threat-model.json"));
+    }
+
+    #[test]
+    fn threats_stride_view_renders_design_rollup() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Threat(ThreatView::Stride);
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains("STRIDE ROLLUP"),
+            "expected STRIDE ROLLUP header in: {rendered}"
+        );
+        assert!(rendered.contains("Spoofing"));
+        assert!(rendered.contains("Tampering"));
+        assert!(rendered.contains("Repudiation"));
+        assert!(rendered.contains("Info-disclosure"));
+        assert!(rendered.contains("DoS"));
+        assert!(rendered.contains("Elev-of-priv"));
+        // Old hardcoded content must be gone.
+        assert!(!rendered.contains("entrypoints"));
+        assert!(!rendered.contains("scanners"));
+    }
+
+    #[test]
+    fn focused_recon_module_renders_recent_activity_section() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.log.clear();
+        app.log(
+            "recon:nmap",
+            "discovered 5 hosts and 18 services for acme-checkout.com",
+        );
+        app.log("recon:subdomain", "discovered 7 subdomains");
+        app.log("recon", "persisted 3 findings");
+        app.handle_command(crate::commands::ShellCommand::Use("recon".to_string()));
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains("RECENT RECON ACTIVITY"),
+            "expected design section header for recon: {rendered}"
+        );
+        assert!(rendered.contains("discovered 5 hosts"));
+        assert!(rendered.contains("discovered 7 subdomains"));
+    }
+
+    #[test]
+    fn focused_carlini_module_renders_recent_threat_hunt_activity() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.log.clear();
+        app.log("carlini-threat-hunt", "actor 1/4 dispatched");
+        app.log("carlini-threat-hunt", "actor 2/4 found path-traversal sink");
+        app.handle_command(crate::commands::ShellCommand::Use(
+            "carlini-threat-hunt".to_string(),
+        ));
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains("RECENT THREAT-HUNT ACTIVITY"),
+            "expected design section header for carlini: {rendered}"
+        );
+        assert!(rendered.contains("actor 1/4 dispatched"));
+    }
+
+    #[test]
     fn module_run_transcript_uses_growing_console_glyphs() {
         let backend = TestBackend::new(120, 30);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -3374,7 +4961,11 @@ mod tests {
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains("SCAN PROGRESS"));
-        assert!(rendered.contains("⠿"));
+        // Spinner cycles through SPINNER_FRAMES based on `app.spinner_phase`; any frame is valid.
+        assert!(
+            SPINNER_FRAMES.iter().any(|frame| rendered.contains(frame)),
+            "expected one of the braille spinner frames in: {rendered}"
+        );
         assert!(rendered.contains("● /scan"));
         assert!(rendered.contains("⏵ scan starting ./demo"));
         assert!(rendered.contains("▸ finding abc123 high dangerous sink"));
@@ -4137,13 +5728,18 @@ mod tests {
             let mut terminal = Terminal::new(backend).unwrap();
             let mut app = ShellApp::new(V2Config::default(), None);
             app.focused_module = Some("semgrep".to_string());
+            let is_dfd = matches!(view, ShellView::Threat(ThreatView::Dfd));
             app.shell_view = view;
 
             terminal.draw(|frame| render_app(frame, &app)).unwrap();
             let rendered = format!("{:?}", terminal.backend().buffer());
 
             assert!(rendered.contains(expected), "missing {expected}");
-            assert!(!rendered.contains("┌"));
+            // DFD diagram intentionally uses box-drawing; suppress the
+            // no-Ink-dashboard guard for that one view.
+            if !is_dfd {
+                assert!(!rendered.contains("┌"), "{expected} drew a box");
+            }
         }
     }
 
@@ -4176,5 +5772,70 @@ mod tests {
                 "plain line exceeded {width} columns: {line:?}"
             );
         }
+    }
+
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn progress_bar_line_matches_design_glyphs_and_count() {
+        let line = progress_bar_line(
+            "semgrep",
+            612,
+            612,
+            "done · 18 raw hits",
+            ProgressKind::Done,
+        );
+        let text = line_text(&line);
+        assert!(text.contains("semgrep"));
+        assert!(text.contains("[████████████████████████]"));
+        assert!(text.contains("612/612"));
+        assert!(text.contains("done · 18 raw hits"));
+    }
+
+    #[test]
+    fn progress_bar_line_partial_fills_proportionally() {
+        let line = progress_bar_line("agentic-sast", 87, 120, "tracing…", ProgressKind::Active);
+        let text = line_text(&line);
+        // 87/120 = 0.725; round(0.725 * 24) = 17 filled, 7 empty
+        let filled = text.matches('█').count();
+        let empty = text.matches('░').count();
+        assert_eq!(filled, 17, "expected 17 filled bars: {text:?}");
+        assert_eq!(empty, 7, "expected 7 empty bars: {text:?}");
+        assert!(text.contains("87/120"));
+    }
+
+    #[test]
+    fn progress_bar_line_zero_total_renders_empty() {
+        let line = progress_bar_line("idle", 0, 0, "queued", ProgressKind::Failing);
+        let text = line_text(&line);
+        assert_eq!(text.matches('█').count(), 0);
+        assert_eq!(text.matches('░').count(), 24);
+    }
+
+    #[test]
+    fn section_header_uppercases_and_pads_dashes() {
+        let line = section_header_line("findings · 11 triaged", 60);
+        let text = line_text(&line);
+        assert!(text.starts_with("FINDINGS · 11 TRIAGED"));
+        assert!(text.ends_with("─"));
+        assert_eq!(text.chars().count(), 60);
+    }
+
+    #[test]
+    fn compact_finding_row_renders_alias_severity_and_location() {
+        let line = compact_finding_row(
+            "F-0001",
+            Severity::Critical,
+            "sql injection via order_id concatenation",
+            "apps/api/orders.rs:142",
+            120,
+        );
+        let text = line_text(&line);
+        assert!(text.contains("F-0001"));
+        assert!(text.contains("CRITICAL"));
+        assert!(text.contains("sql injection via order_id"));
+        assert!(text.contains("apps/api/orders.rs:142"));
     }
 }

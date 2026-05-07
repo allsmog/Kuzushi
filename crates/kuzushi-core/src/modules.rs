@@ -1624,15 +1624,15 @@ impl AgenticSastInput {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct AgenticSastReport {
-    target: String,
-    count: usize,
-    findings: Vec<Finding>,
+pub struct AgenticSastReport {
+    pub target: String,
+    pub count: usize,
+    pub findings: Vec<Finding>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    persisted: Option<AgenticSastPersistedRun>,
-    cost_usd: f64,
+    pub persisted: Option<AgenticSastPersistedRun>,
+    pub cost_usd: f64,
 }
 
 impl AgenticSastReport {
@@ -1678,11 +1678,11 @@ impl AgenticSastReport {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct AgenticSastPersistedRun {
-    run_id: String,
-    findings_db: String,
+pub struct AgenticSastPersistedRun {
+    pub run_id: String,
+    pub findings_db: String,
 }
 
 const AGENTIC_SAST_SYSTEM_PROMPT: &str = r#"You are Kuzushi's agentic SAST scanner.
