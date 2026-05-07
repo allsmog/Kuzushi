@@ -627,8 +627,58 @@ fn module_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             ));
         }
     }
-
     lines.push(blank());
+
+    // OPTIONS — set values from the option store, per
+    // `design/mockups/modules-detail.jsx::s2`.  Only show options that
+    // actually have stored values; keep the panel terse for modules
+    // that haven't been tuned.
+    let stored_options = module_stored_options(app, module);
+    if !stored_options.is_empty() {
+        lines.push(divider(
+            &format!("OPTIONS · {}", stored_options.len()),
+            area.width,
+        ));
+        for (name, value) in &stored_options {
+            lines.push(detail(name, value));
+        }
+        lines.push(blank());
+    }
+
+    // PROMPTS — `.kuzushi/prompts/<module>/<verb>.md` files on disk.
+    // Lists prompt verbs the operator has overridden so they can jump
+    // to the editor with `prompt edit <verb>`.
+    let prompts = module_prompts_on_disk(app, &module.metadata().id);
+    if !prompts.is_empty() {
+        lines.push(divider(
+            &format!("PROMPTS · {}", prompts.len()),
+            area.width,
+        ));
+        for prompt in &prompts {
+            lines.push(detail(&prompt.verb, &prompt.path));
+        }
+        lines.push(blank());
+    }
+
+    // STATS — quick session-level counts the operator can verify
+    // without scrubbing the transcript.  Pulls live data only.
+    let module_log_count = app
+        .log
+        .iter()
+        .filter(|line| {
+            line.prefix == module.metadata().id
+                || line.prefix.starts_with(&format!("{}:", module.metadata().id))
+        })
+        .count();
+    if module_log_count > 0 {
+        lines.push(divider("STATS · this session", area.width));
+        lines.push(detail(
+            "log entries",
+            &format!("{module_log_count} from `{}`", module.metadata().id),
+        ));
+        lines.push(detail("tools bound", &module.tools().len().to_string()));
+        lines.push(blank());
+    }
     let activity_label = match module.metadata().id.as_str() {
         "recon" => Some("RECENT RECON ACTIVITY"),
         "carlini-threat-hunt" => Some("RECENT THREAT-HUNT ACTIVITY"),
@@ -649,6 +699,73 @@ fn module_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     ));
 
     lines
+}
+
+/// Returns `(option-name, formatted-value)` for every tool-scoped
+/// option in this module that has a stored value in the session/global
+/// option store.  Used by `module_lines` OPTIONS section to mirror
+/// `design/mockups/modules-detail.jsx::s2`.
+fn module_stored_options(
+    app: &ShellApp,
+    module: &kuzushi_core::BuiltinModule,
+) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for tool in module.tools() {
+        let stored = app.option_store.effective_stored_values(&tool.name);
+        for (name, value) in stored.iter() {
+            out.push((
+                format!("{}::{}", tool.name, name),
+                format_json_value(value),
+            ));
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+#[derive(Debug, Clone)]
+struct ModulePromptOnDisk {
+    verb: String,
+    path: String,
+}
+
+/// Walk `<target>/.kuzushi/prompts/<module>/` and return every `*.md`
+/// file as (verb, relative-path).  Per the agent guide in `CLAUDE.md`
+/// this is exactly the directory `executeTool` reads from for prompt
+/// overrides.  Empty when the dir doesn't exist.
+fn module_prompts_on_disk(app: &ShellApp, module_id: &str) -> Vec<ModulePromptOnDisk> {
+    let prompts_root = app
+        .target
+        .as_deref()
+        .map(|t| t.join(".kuzushi/prompts").join(module_id))
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(".kuzushi/prompts").join(module_id)
+        });
+    let Ok(entries) = std::fs::read_dir(&prompts_root) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with(".md") {
+            continue;
+        }
+        let verb = name.trim_end_matches(".md").to_string();
+        out.push(ModulePromptOnDisk {
+            verb,
+            path: entry
+                .path()
+                .strip_prefix(app.target.as_deref().unwrap_or(std::path::Path::new(".")))
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| entry.path().display().to_string()),
+        });
+    }
+    out.sort_by(|a, b| a.verb.cmp(&b.verb));
+    out
 }
 
 /// Pull the most recent N log lines that look like they came from the given
@@ -8494,6 +8611,57 @@ mod tests {
         assert!(rendered.contains("abort scan"));
         assert!(!rendered.contains("[c]"), "stale bracket chrome: {rendered}");
         assert!(!rendered.contains("[a]"), "stale bracket chrome: {rendered}");
+    }
+
+    #[test]
+    fn module_detail_renders_options_when_stored_values_exist() {
+        // `design/mockups/modules-detail.jsx::s2` shows OPTIONS · N as
+        // a section.  Verify storing a value through `option_store`
+        // surfaces the option in the panel.
+        let backend = TestBackend::new(120, 36);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.option_store.set_value(
+            kuzushi_core::OptionScope::Session,
+            kuzushi_core::OptionTarget::Tool("sast:scan".to_string()),
+            "triage",
+            serde_json::json!(true),
+        );
+        app.focused_module = Some("sast".to_string());
+        app.shell_view = ShellView::Module;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("OPTIONS"));
+        assert!(rendered.contains("triage"));
+        assert!(rendered.contains("true"));
+    }
+
+    #[test]
+    fn module_detail_lists_prompt_overrides_from_disk() {
+        // `design/mockups/modules-detail.jsx::s4` shows PROMPTS · N
+        // pulled from `.kuzushi/prompts/<module>/`.  Seed two prompt
+        // files and verify both surface as detail rows.
+        let tmp = tempfile::tempdir().unwrap();
+        let prompts_root = tmp.path().join(".kuzushi/prompts/sast");
+        std::fs::create_dir_all(&prompts_root).unwrap();
+        std::fs::write(prompts_root.join("system.md"), "system prompt body").unwrap();
+        std::fs::write(prompts_root.join("triage.md"), "triage prompt body").unwrap();
+
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.target = Some(tmp.path().to_path_buf());
+        app.focused_module = Some("sast".to_string());
+        app.shell_view = ShellView::Module;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("PROMPTS"));
+        assert!(rendered.contains("system"));
+        assert!(rendered.contains("triage"));
     }
 
     #[test]
