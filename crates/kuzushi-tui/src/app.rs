@@ -688,6 +688,13 @@ pub struct ShellApp {
     /// Patch staged for human approval — populated when a tool
     /// produces a `pending_patch` artefact.  See `ShellView::Patch`.
     pub pending_patch: Option<PendingPatch>,
+    /// Session-scoped allowlist of `<tool> <target>` strings approved
+    /// via `Y` (allow + remember).  `confirm_gate_for_tool` checks this
+    /// before raising a fresh gate so re-runs don't re-prompt.
+    pub confirm_allowlist: std::collections::BTreeSet<String>,
+    /// Session-scoped denylist of `<tool> <target>` strings rejected
+    /// via `N` (deny + add to denylist).  Re-runs are auto-refused.
+    pub confirm_denylist: std::collections::BTreeSet<String>,
     pub config: V2Config,
     pub registry: ModuleRegistry,
     pub option_store: ToolOptionStore,
@@ -760,6 +767,8 @@ impl ShellApp {
             catalog_expanded: false,
             catalog_cursor: 0,
             pending_patch: None,
+            confirm_allowlist: std::collections::BTreeSet::new(),
+            confirm_denylist: std::collections::BTreeSet::new(),
             config,
             registry: ModuleRegistry::with_v2_builtins(),
             option_store: ToolOptionStore::new(),
@@ -857,6 +866,18 @@ impl ShellApp {
             });
         }
         request.remembered = outcome && remember;
+        // Wire the resolution into the session allow/deny lists so
+        // re-runs (`run sandbox:run …` again) don't re-prompt.  Only
+        // the uppercase-key form (`Y` / `N`) flips the list — `y` / `n`
+        // are one-shot.
+        if remember {
+            let key = confirm_allowlist_key(&request.tool, &request.target);
+            if outcome {
+                self.confirm_allowlist.insert(key);
+            } else {
+                self.confirm_denylist.insert(key);
+            }
+        }
         let glyph = if outcome { "✓" } else { "✗" };
         let verb = if outcome {
             if remember {
@@ -4245,6 +4266,27 @@ impl ShellApp {
                 }
             };
 
+        // Confirm gate preflight (`design/mockups/confirm-dialog.jsx`).
+        // If the tool + input matches a known-risky shape (network
+        // egress, fs:write outside `.kuzushi/`, destructive verb),
+        // surface a `PendingConfirm` and pause the dispatch.  The
+        // operator resolves with y/Y/n/N; on `y`/`Y` they re-run the
+        // command and the gate doesn't fire again because `remembered`
+        // adds the target to the session allowlist.
+        if let Some(request) = confirm_gate_for_tool(&tool_name, &input, &self.confirm_allowlist)
+        {
+            self.log(
+                "system",
+                format!(
+                    "{} requires approval — {}",
+                    tool_name,
+                    request.kind.label().to_lowercase()
+                ),
+            );
+            self.request_confirm(request);
+            return;
+        }
+
         let workspace = match self.current_workspace() {
             Ok(workspace) => Some(workspace),
             Err(error) => {
@@ -5310,6 +5352,148 @@ pub(crate) fn bridge_command_status(config: &V2Config) -> &'static str {
     } else {
         "bundled/default"
     }
+}
+
+/// Stable key for a `<tool> <target>` allowlist/denylist entry.
+fn confirm_allowlist_key(tool: &str, target: &str) -> String {
+    format!("{tool} {target}")
+}
+
+/// Returns a `PendingConfirm` when `<tool>` + `<input>` look like a
+/// gated dispatch per `design/mockups/confirm-dialog.jsx`:
+///
+///   - `sandbox:run` (or any `*:run` tool) with a `target` URL or
+///     `network: true` → CONFIRM · network egress
+///   - `fs:write` with a `path` outside `.kuzushi/` →
+///     CONFIRM · fs:write outside .kuzushi/
+///   - any tool whose `cmd` / `verb` matches a destructive pattern
+///     (`rm -rf`, `git push --force`, `:force`, `chmod -R 777`,
+///     `> /dev/`, ...) → REFUSED · destructive verb (no override).
+///
+/// `allowlist` is consulted first — already-approved `<tool> <target>`
+/// entries skip the gate entirely.  Returns None for tools that aren't
+/// known-risky.
+pub fn confirm_gate_for_tool(
+    tool: &str,
+    input: &serde_json::Value,
+    allowlist: &std::collections::BTreeSet<String>,
+) -> Option<PendingConfirm> {
+    // Destructive verb check first — destructive verbs are unconditional,
+    // even an entry on the allowlist shouldn't bypass.
+    let cmd_target = input
+        .get("cmd")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| input.get("verb").and_then(serde_json::Value::as_str))
+        .or_else(|| input.get("command").and_then(serde_json::Value::as_str))
+        .unwrap_or("");
+    if !cmd_target.is_empty() && is_destructive_verb(cmd_target) {
+        return Some(PendingConfirm {
+            kind: ConfirmKind::DestructiveVerb,
+            tool: tool.to_string(),
+            target: cmd_target.to_string(),
+            rationale: input
+                .get("rationale")
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string),
+            allowlist: None,
+            actor: input
+                .get("actor")
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string),
+            remembered: false,
+        });
+    }
+
+    // Network egress: `sandbox:run` with `network: true` or a URL target.
+    if tool == "sandbox:run" || tool.ends_with(":run-with-network") {
+        let network = input
+            .get("network")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let target = input
+            .get("target")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| input.get("url").and_then(serde_json::Value::as_str))
+            .unwrap_or("");
+        let url_target = target.starts_with("http://") || target.starts_with("https://");
+        if network || url_target {
+            let key = confirm_allowlist_key(tool, target);
+            if allowlist.contains(&key) {
+                return None;
+            }
+            return Some(PendingConfirm {
+                kind: ConfirmKind::NetworkEgress,
+                tool: tool.to_string(),
+                target: target.to_string(),
+                rationale: input
+                    .get("rationale")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string),
+                allowlist: input
+                    .get("allowlist_match")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string),
+                actor: input
+                    .get("actor")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string),
+                remembered: false,
+            });
+        }
+    }
+
+    // fs:write outside .kuzushi/.
+    if tool == "fs:write" {
+        let path = input
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        if !path.is_empty() && !path.starts_with(".kuzushi/") && !path.contains("/.kuzushi/") {
+            let key = confirm_allowlist_key(tool, path);
+            if allowlist.contains(&key) {
+                return None;
+            }
+            return Some(PendingConfirm {
+                kind: ConfirmKind::FsWriteOutsideKuzushi,
+                tool: tool.to_string(),
+                target: path.to_string(),
+                rationale: input
+                    .get("rationale")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string),
+                allowlist: None,
+                actor: input
+                    .get("actor")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string),
+                remembered: false,
+            });
+        }
+    }
+
+    None
+}
+
+/// Pattern-match destructive shell verbs.  Conservative: only flags
+/// patterns that are unambiguously destructive (no false-positives on
+/// `git push origin foo` etc.).
+fn is_destructive_verb(cmd: &str) -> bool {
+    let lower = cmd.to_lowercase();
+    let stripped = lower.trim();
+    stripped.contains("rm -rf")
+        || stripped.contains("rm -fr")
+        || stripped.contains("git push --force")
+        || stripped.contains("git push -f")
+        || stripped.contains("--force-with-lease=") && stripped.starts_with("git push")
+        || stripped.contains("chmod -r 777")
+        || stripped.contains("dd of=/dev/")
+        || stripped.contains("> /dev/sda")
+        || stripped.contains("mkfs")
+        || stripped.starts_with("shutdown")
+        || stripped.starts_with("reboot")
+        || stripped.contains("git reset --hard origin")
+        || stripped.contains("git filter-branch")
+        || (stripped.starts_with("rm ") && stripped.contains(" -rf"))
 }
 
 /// Parse a `patch:run` / `patch:finding` result into a `PendingPatch`.
@@ -10689,6 +10873,85 @@ JSON
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         assert_eq!(app.input, "set \"\"");
         assert_eq!(app.cursor, app.input.chars().count() - 1);
+    }
+
+    #[test]
+    fn confirm_gate_detects_network_egress_for_sandbox_run_with_url() {
+        let allow = std::collections::BTreeSet::new();
+        let req = confirm_gate_for_tool(
+            "sandbox:run",
+            &serde_json::json!({"target": "https://refund.acme/api"}),
+            &allow,
+        )
+        .expect("network egress gate");
+        assert_eq!(req.kind, ConfirmKind::NetworkEgress);
+        assert_eq!(req.tool, "sandbox:run");
+        assert_eq!(req.target, "https://refund.acme/api");
+    }
+
+    #[test]
+    fn confirm_gate_skips_network_when_allowlisted() {
+        let mut allow = std::collections::BTreeSet::new();
+        allow.insert("sandbox:run https://refund.acme/api".to_string());
+        assert!(confirm_gate_for_tool(
+            "sandbox:run",
+            &serde_json::json!({"target": "https://refund.acme/api"}),
+            &allow,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn confirm_gate_detects_fs_write_outside_kuzushi() {
+        let allow = std::collections::BTreeSet::new();
+        let req = confirm_gate_for_tool(
+            "fs:write",
+            &serde_json::json!({"path": "apps/web/agents/concierge.ts"}),
+            &allow,
+        )
+        .expect("fs:write gate");
+        assert_eq!(req.kind, ConfirmKind::FsWriteOutsideKuzushi);
+
+        // .kuzushi/ paths bypass the gate.
+        assert!(confirm_gate_for_tool(
+            "fs:write",
+            &serde_json::json!({"path": ".kuzushi/runs/r-1/patch.diff"}),
+            &allow,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn confirm_gate_destructive_verb_unconditional_even_when_allowlisted() {
+        let mut allow = std::collections::BTreeSet::new();
+        // Even an explicit entry shouldn't bypass destructive verb gates.
+        allow.insert("shell:run rm -rf .git".to_string());
+        let req = confirm_gate_for_tool(
+            "shell:run",
+            &serde_json::json!({"cmd": "rm -rf .git"}),
+            &allow,
+        )
+        .expect("destructive verb gate");
+        assert_eq!(req.kind, ConfirmKind::DestructiveVerb);
+    }
+
+    #[test]
+    fn confirm_resolve_remember_writes_session_allowlist() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory.pending_confirm = Some(PendingConfirm {
+            kind: ConfirmKind::NetworkEgress,
+            tool: "sandbox:run".to_string(),
+            target: "https://refund.acme/api".to_string(),
+            rationale: None,
+            allowlist: None,
+            actor: None,
+            remembered: false,
+        });
+        app.resolve_confirm(true, true);
+        assert!(app
+            .confirm_allowlist
+            .contains("sandbox:run https://refund.acme/api"));
+        assert!(app.advisory.pending_confirm.is_none());
     }
 
     #[test]
