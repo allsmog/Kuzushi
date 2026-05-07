@@ -3085,7 +3085,12 @@ fn transcript_lines(app: &ShellApp, visible: usize) -> Vec<Line<'static>> {
             line.body.lines().collect::<Vec<_>>()
         };
         for (index, body) in body_lines.into_iter().enumerate() {
-            rows.push(transcript_line(&line.prefix, body, index > 0));
+            rows.push(transcript_line_dated(
+                &line.prefix,
+                body,
+                index > 0,
+                line.time_secs,
+            ));
         }
     }
     let start = rows.len().saturating_sub(visible);
@@ -3093,8 +3098,30 @@ fn transcript_lines(app: &ShellApp, visible: usize) -> Vec<Line<'static>> {
 }
 
 fn transcript_line(prefix: &str, body: &str, continuation: bool) -> Line<'static> {
+    transcript_line_dated(prefix, body, continuation, 0)
+}
+
+/// `transcript_line` with an optional wall-clock timestamp prefix, matching
+/// `design/mockups/_shared.jsx::logLine`:
+///
+///   ` 14:32:14  ⏵ run  body…`
+///     subtle     glyph subtle  body
+///
+/// `time_secs == 0` skips the timestamp so synthetic lines (built inside
+/// the renderer for context-free hints) stay terse.
+fn transcript_line_dated(
+    prefix: &str,
+    body: &str,
+    continuation: bool,
+    time_secs: u64,
+) -> Line<'static> {
     let (glyph, style, show_label) = transcript_glyph(prefix, continuation);
-    let mut spans = vec![Span::styled(format!(" {glyph} "), style)];
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    if time_secs != 0 {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(wall_hms(time_secs), theme::subtle()));
+    }
+    spans.push(Span::styled(format!(" {glyph} "), style));
     if show_label {
         spans.push(Span::styled(prefix.to_string(), theme::subtle()));
         spans.push(Span::raw(" "));
@@ -3104,6 +3131,17 @@ fn transcript_line(prefix: &str, body: &str, continuation: bool) -> Line<'static
         transcript_body_style(prefix),
     ));
     Line::from(spans)
+}
+
+/// Format wall-clock seconds-since-epoch as `HH:MM:SS` (UTC).  Used by
+/// transcript timestamps; keeping it UTC keeps log-comparison across
+/// machines deterministic without a timezone database.
+fn wall_hms(time_secs: u64) -> String {
+    let day_secs = time_secs % 86_400;
+    let h = day_secs / 3600;
+    let m = (day_secs % 3600) / 60;
+    let s = day_secs % 60;
+    format!("{h:02}:{m:02}:{s:02}")
 }
 
 fn transcript_glyph(prefix: &str, continuation: bool) -> (&'static str, Style, bool) {
@@ -7054,6 +7092,48 @@ mod tests {
         );
         assert!(roles.contains(&"accent"), "accent rule-id missing: {roles:?}");
         assert!(roles.contains(&"muted"), "muted location missing: {roles:?}");
+    }
+
+    #[test]
+    fn transcript_log_line_renders_wall_clock_timestamp_when_present() {
+        // `design/mockups/_shared.jsx::logLine` paints each transcript row
+        // with a leading `HH:MM:SS` in c-subtle.  Verify the dated path
+        // emits a 5-or-8-char timestamp span styled subtle, before the
+        // glyph + prefix + body.
+        let line = transcript_line_dated(
+            "tool",
+            "ran semgrep:scan",
+            false,
+            // 14:32:14 UTC = 14*3600 + 32*60 + 14 = 52334 seconds into the day
+            52_334,
+        );
+        let mut saw_subtle_time = false;
+        let mut saw_glyph = false;
+        for span in &line.spans {
+            if span.content == "14:32:14" && span.style == theme::subtle() {
+                saw_subtle_time = true;
+            }
+            if span.content.contains("⏵") {
+                saw_glyph = true;
+            }
+        }
+        assert!(saw_subtle_time, "subtle HH:MM:SS missing: {line:?}");
+        assert!(saw_glyph, "transcript glyph missing: {line:?}");
+    }
+
+    #[test]
+    fn transcript_line_dated_skips_timestamp_when_zero() {
+        // Synthetic transcript lines (built inside the renderer for
+        // context-free hints) pass `time_secs = 0` and should produce no
+        // leading timestamp — keeping those lines terse.
+        let line = transcript_line_dated("tool", "synthetic", false, 0);
+        for span in &line.spans {
+            assert!(
+                !span.content.contains(':')
+                    || !matches!(span.content.chars().next(), Some('0'..='9')),
+                "unexpected timestamp on synthetic line: {span:?}"
+            );
+        }
     }
 
     #[test]
