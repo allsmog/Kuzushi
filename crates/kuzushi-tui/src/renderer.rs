@@ -2631,17 +2631,22 @@ fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         "missing"
     };
     let model = app.config.model.as_deref().unwrap_or("unconfigured");
-    let cost = format!("${:.4}", app.session_cost_usd);
+    let mut segments = vec![
+        routing_mode_segment(app),
+        format!("target {target}"),
+        findings_count_summary(&app.findings),
+        format!("ctx {ctx}"),
+        format!("module {module}"),
+        format!("model {model}"),
+    ];
+    // Only show cost once a tool has actually charged for something.
+    // `cost $0.0000` at startup eats ~13 cells for no information and
+    // pushes `model unconfigured` off the right edge of 120-col terminals.
+    if app.session_cost_usd > 0.0 {
+        segments.push(format!("cost {}", format_session_cost(app.session_cost_usd)));
+    }
     let rest = fit(
-        &join_segments(&[
-            routing_mode_segment(app),
-            format!("target {target}"),
-            findings_count_summary(&app.findings),
-            format!("ctx {ctx}"),
-            format!("module {module}"),
-            format!("model {model}"),
-            format!("cost {cost}"),
-        ]),
+        &join_segments(&segments),
         area.width.saturating_sub(9) as usize,
     );
 
@@ -3966,6 +3971,19 @@ fn short(value: &str) -> String {
 fn short_sentence(value: &str, max_chars: usize) -> String {
     let first = value.split('.').next().unwrap_or(value).trim();
     fit(first, max_chars)
+}
+
+/// Compact dollar-amount format for the header. Sub-cent values keep four
+/// decimals (e.g. "$0.0042"); larger values drop to two so a long-running
+/// session doesn't read "$12.4567" and waste header cells.
+fn format_session_cost(usd: f64) -> String {
+    if usd < 0.01 {
+        format!("${usd:.4}")
+    } else if usd < 100.0 {
+        format!("${usd:.2}")
+    } else {
+        format!("${usd:.0}")
+    }
 }
 
 fn fit(value: &str, max_chars: usize) -> String {
@@ -6009,6 +6027,35 @@ mod tests {
                 "plain line exceeded {width} columns: {line:?}"
             );
         }
+    }
+
+    #[test]
+    fn header_hides_cost_at_zero_and_compacts_at_higher_amounts() {
+        // P4-7: at session_cost_usd == 0 the header used to render
+        // `cost $0.0000` (12 chars) which pushed `model unconfigured` off
+        // the right edge of 120-column terminals. Verify it's hidden until
+        // a tool charges, and that the format compacts above $0.01.
+        assert_eq!(format_session_cost(0.0042), "$0.0042");
+        assert_eq!(format_session_cost(0.42), "$0.42");
+        assert_eq!(format_session_cost(12.345), "$12.35");
+        assert_eq!(format_session_cost(245.6), "$246");
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.session_cost_usd = 0.0;
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(
+            !rendered.contains("cost $0.0000"),
+            "header still rendered zero-cost noise: {rendered}"
+        );
+
+        // Once a real cost is reported we expect the cost segment back.
+        app.session_cost_usd = 0.42;
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(rendered.contains("cost $0.42"));
     }
 
     #[test]
