@@ -2121,6 +2121,24 @@ fn workspace_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines
 }
 
+/// Chat bubble tag header matching `design/mockups/agent-chat.jsx::bubble`:
+///
+///   ` <tag> ──────────────────────────...──`
+///
+/// `tag_style` carries the role tint (`c-accent` for the operator side,
+/// `c-success` for the agent side, `c-danger` for errors).
+fn chat_bubble_header(tag: &str, tag_style: Style, width: u16) -> Line<'static> {
+    let safe_width = width.max(8) as usize;
+    let used = 1 + tag.chars().count() + 2;
+    let fill = safe_width.saturating_sub(used).max(1);
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(tag.to_string(), tag_style),
+        Span::raw(" "),
+        Span::styled(theme::RULE_CHAR.repeat(fill), theme::subtle()),
+    ])
+}
+
 /// Render a single `█████░░░░░░ N/total` rollup bar matching
 /// `design/mockups/workspace.jsx::rollupBar`. Bar is 28 cells wide, with
 /// the filled portion in the severity tint and the unfilled portion in
@@ -2260,33 +2278,40 @@ fn agent_chat_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         app.config.model.as_deref().unwrap_or("unconfigured"),
     ));
     lines.push(blank());
-    lines.push(styled("question", theme::label()));
-    lines.push(indent(
-        muted(&fit(&agent.question, area.width.saturating_sub(2) as usize)),
-        2,
-    ));
+    // Bubble-style tag matching `design/mockups/agent-chat.jsx::bubble`:
+    //   `  you  ──...──`  (c-accent tag)
+    //   `   <body>`        (c-primary)
+    //   blank
+    //   ` agent ──...──`  (c-success tag)
+    //   `   <body>`
+    lines.push(chat_bubble_header("  you  ", theme::accent(), area.width));
+    for line in wrap_text(&agent.question, area.width.saturating_sub(3) as usize) {
+        lines.push(indent(styled(&line, theme::primary()), 3));
+    }
     lines.push(blank());
 
     if let Some(error) = &agent.error {
-        lines.push(styled("error", theme::danger()));
-        lines.push(indent(
-            muted(&fit(error, area.width.saturating_sub(2) as usize)),
-            2,
-        ));
+        lines.push(chat_bubble_header(" error ", theme::danger(), area.width));
+        for line in wrap_text(error, area.width.saturating_sub(3) as usize) {
+            lines.push(indent(styled(&line, theme::danger()), 3));
+        }
     } else if let Some(answer) = &agent.answer {
-        lines.push(styled("answer", theme::label()));
-        for line in wrap_text(answer, area.width.saturating_sub(2) as usize)
+        lines.push(chat_bubble_header(" agent ", theme::success(), area.width));
+        for line in wrap_text(answer, area.width.saturating_sub(3) as usize)
             .into_iter()
-            .take(8)
+            .take(12)
         {
-            lines.push(indent(muted(&line), 2));
+            lines.push(indent(styled(&line, theme::primary()), 3));
         }
     } else if agent.abort_requested {
-        lines.push(muted(
-            "Abort requested; waiting for pi-agent-core to return. Process kill is not confirmed.",
+        lines.push(chat_bubble_header(" agent ", theme::success(), area.width));
+        lines.push(indent(
+            muted("Abort requested; waiting for pi-agent-core to return. Process kill is not confirmed."),
+            3,
         ));
     } else {
-        lines.push(muted("Waiting for pi-agent-core response..."));
+        lines.push(chat_bubble_header(" agent ", theme::success(), area.width));
+        lines.push(indent(muted("…streaming"), 3));
     }
 
     lines.push(blank());
@@ -6628,6 +6653,39 @@ mod tests {
                 .any(|(role, text)| role == "muted" && text.contains("never run here")),
             "muted suffix missing: {buckets:?}"
         );
+    }
+
+    #[test]
+    fn agent_chat_renders_role_tagged_bubbles() {
+        // `design/mockups/agent-chat.jsx::bubble` paints a tag header on
+        // each turn:  `  you  ──...──`  (c-accent) for the operator side,
+        // ` agent ──...──` (c-success) for the agent side.  Verify both
+        // tags reach the buffer when an agent question is in flight.
+        let backend = TestBackend::new(120, 26);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(
+            V2Config {
+                model: Some("openai:gpt-4.1".to_string()),
+                ..V2Config::default()
+            },
+            None,
+        );
+        app.agent_chat = Some(crate::app::AgentChatView {
+            question: "What should I run first?".to_string(),
+            answer: Some("Run sast:scan against the active target.".to_string()),
+            running: false,
+            abort_requested: false,
+            error: None,
+        });
+        app.shell_view = ShellView::AgentChat;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("you"), "missing operator tag: {rendered}");
+        assert!(rendered.contains("agent"), "missing agent tag: {rendered}");
+        assert!(rendered.contains("What should I run first?"));
+        assert!(rendered.contains("Run sast:scan against the active target."));
     }
 
     #[test]
