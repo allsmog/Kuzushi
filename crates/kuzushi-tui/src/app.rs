@@ -4874,6 +4874,22 @@ fn unknown_command_message(raw: &str) -> String {
         return format!("{trimmed:?} is a CLI subcommand, not an in-shell verb. Next: {cli_hint}");
     }
 
+    // `findings F-0001` / `finding F-0001` are common typos for `open F-0001`.
+    // The user clearly knows what alias they want; they just picked the
+    // wrong verb. Point them at the right one instead of punting to /ask.
+    if matches!(verb, "findings" | "finding") {
+        let rest = normalized
+            .split_whitespace()
+            .nth(1)
+            .filter(|arg| arg.to_ascii_uppercase().starts_with("F-"));
+        if let Some(alias) = rest {
+            return format!(
+                "{verb:?} doesn't take arguments. Next: `open {}` to view the finding."
+                , alias.to_ascii_uppercase()
+            );
+        }
+    }
+
     if trimmed.starts_with('/') {
         format!("unknown command {trimmed:?}. Next: /help")
     } else {
@@ -7713,6 +7729,24 @@ JSON
         let log_count = app.log.len();
         let _ = app.open_store();
         assert_eq!(app.log.len(), log_count);
+    }
+
+    #[test]
+    fn findings_alias_typo_suggests_open() {
+        // P-NEW-4: `findings F-0001` is a natural way to ask "show me this
+        // finding" but it actually meant `open F-0001`. The unknown-command
+        // hint now spots the alias and tells the operator the right verb.
+        let message = unknown_command_message("findings F-0001");
+        assert!(message.contains("`open F-0001`"));
+        assert!(!message.contains("Free-form chat"));
+
+        let message = unknown_command_message("finding f-007");
+        assert!(message.contains("`open F-007`"));
+
+        // Plain `findings` (no F-XXXX) is a real verb so the helper should
+        // never see it; verify the typo path only fires on alias args.
+        let message = unknown_command_message("findings random");
+        assert!(message.contains("Free-form chat"));
     }
 
     #[test]
