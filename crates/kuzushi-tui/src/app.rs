@@ -3133,7 +3133,7 @@ impl ShellApp {
                 self.shell_view = ShellView::Workspace;
                 self.log(
                     "error",
-                    format!("{error}. Next: workspace export findings findings.json"),
+                    format!("{error}. Next: workspace export findings <path>.json"),
                 );
             }
         }
@@ -3173,7 +3173,7 @@ impl ShellApp {
                     findings_count,
                     last_export,
                     status: format!(
-                        "workspace ready; {count_label} finding(s). Next: workspace export findings findings.json"
+                        "workspace ready; {count_label} finding(s). Next: workspace export findings <path>.json"
                     ),
                 }
             }
@@ -7178,7 +7178,7 @@ JSON
             .map(|line| line.body.as_str())
             .unwrap_or_default();
         assert!(error.contains("unsupported workspace findings export extension"));
-        assert!(error.contains("Next: workspace export findings findings.json"));
+        assert!(error.contains("Next: workspace export findings <path>.json"));
         assert!(!tmp.path().join("findings.sarif").exists());
     }
 
