@@ -2323,8 +2323,16 @@ fn context_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ));
     } else {
         lines.push(blank());
-        lines.push(muted(
-            "No context snapshot exists yet. Run context build to write .kuzushi/context-snapshot.json.",
+        lines.extend(empty_state_panel(
+            "no context snapshot yet",
+            &[
+                "context indexes the workspace into .kuzushi/context-snapshot.json.",
+                "every SAST module reads the snapshot for structure.",
+            ],
+            &[
+                ("context build", "write the full snapshot"),
+                ("context status", "inspect freshness if you think one exists"),
+            ],
         ));
     }
 
