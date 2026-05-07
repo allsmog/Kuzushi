@@ -3334,15 +3334,21 @@ fn table_header(values: &[&str], widths: &[usize]) -> Line<'static> {
 }
 
 fn table_row(values: &[&str], widths: &[usize]) -> Line<'static> {
+    // Same colour split as `aligned_row` so help/options/findings tables
+    // share the mockup tint:
+    //   col 0 → c-accent (identifier), middle → c-primary, last → c-muted
     let mut spans = Vec::new();
+    let last = values.len().saturating_sub(1);
     for (index, value) in values.iter().enumerate() {
         if index > 0 {
             spans.push(Span::raw("  "));
         }
         let style = if index == 0 {
             theme::accent()
+        } else if values.len() > 2 && index == last {
+            theme::muted()
         } else {
-            Style::default()
+            theme::primary()
         };
         spans.push(Span::styled(
             pad(value, widths.get(index).copied().unwrap_or(12)),
