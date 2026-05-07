@@ -18,10 +18,14 @@ describe("legacy TypeScript shell isolation", () => {
   it("fails actionably instead of starting Ink through src/cli.ts", async () => {
     const { runShellCommand } = await import("../../src/cli/commands/shell.js");
 
-    await expect(runShellCommand({ target: repoRoot })).rejects.toMatchObject({
-      exitCode: 2,
-      message: expect.stringContaining("TypeScript/Ink shell is retained as reference-only"),
-    });
+    try {
+      await runShellCommand({ target: repoRoot });
+      throw new Error("expected runShellCommand to reject");
+    } catch (error) {
+      expect(error).toMatchObject({ exitCode: 2 });
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("TypeScript/Ink shell is reference-only");
+    }
     await expect(runShellCommand({ target: repoRoot })).rejects.toThrow(
       /node bin\/kuzushi-rs\.mjs shell/,
     );
