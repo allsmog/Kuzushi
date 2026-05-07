@@ -395,10 +395,88 @@ pub trait AgentRuntime: Send + Sync {
     }
 }
 
+/// Per-step description emitted while a tool loop runs. Surfaced through
+/// [`LoopStepSink`] so long-running audits (e.g. `triage:deep`) can show
+/// progress instead of buffering until [`AgentLoopOutcome`] lands.
+#[derive(Debug, Clone)]
+pub struct LoopStepEvent {
+    pub step: u32,
+    pub kind: LoopStepKind,
+    pub tool_summary: Option<String>,
+    pub cost_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
+pub enum LoopStepKind {
+    ToolCalls(Vec<String>),
+    Final,
+}
+
+pub trait LoopStepSink {
+    fn emit(&mut self, ev: &LoopStepEvent);
+}
+
+impl<F> LoopStepSink for F
+where
+    F: FnMut(&LoopStepEvent),
+{
+    fn emit(&mut self, ev: &LoopStepEvent) {
+        (self)(ev)
+    }
+}
+
+/// Default no-op sink. Used by [`run_tool_loop`] to keep the pre-streaming
+/// signature backwards-compatible — callers that don't want progress
+/// emit nothing rather than allocate a closure.
+pub struct NoopLoopStepSink;
+
+impl LoopStepSink for NoopLoopStepSink {
+    fn emit(&mut self, _ev: &LoopStepEvent) {}
+}
+
+fn summarize_tool_call(call: &ToolCall) -> String {
+    match call.name.as_str() {
+        "read_source" => {
+            let file = call
+                .input
+                .get("file")
+                .and_then(Value::as_str)
+                .unwrap_or("?");
+            let start = call.input.get("start_line").and_then(Value::as_u64);
+            let end = call.input.get("end_line").and_then(Value::as_u64);
+            match (start, end) {
+                (Some(s), Some(e)) => format!("read_source({file}:{s}-{e})"),
+                (Some(s), None) => format!("read_source({file}:{s}-)"),
+                _ => format!("read_source({file})"),
+            }
+        }
+        "find_references" => {
+            let needle = call
+                .input
+                .get("name")
+                .or_else(|| call.input.get("pattern"))
+                .and_then(Value::as_str)
+                .unwrap_or("?");
+            format!("find_references({needle})")
+        }
+        other => other.to_string(),
+    }
+}
+
 pub fn run_tool_loop(
     runtime: &dyn AgentRuntime,
     request: &AgentToolLoopRequest,
     handler: &mut dyn ToolCallHandler,
+) -> Result<AgentLoopOutcome> {
+    let mut sink = NoopLoopStepSink;
+    run_tool_loop_with_sink(runtime, request, handler, &mut sink)
+}
+
+pub fn run_tool_loop_with_sink(
+    runtime: &dyn AgentRuntime,
+    request: &AgentToolLoopRequest,
+    handler: &mut dyn ToolCallHandler,
+    sink: &mut dyn LoopStepSink,
 ) -> Result<AgentLoopOutcome> {
     if !runtime.supports_tools() {
         anyhow::bail!("runtime does not support tool-augmented loops");
@@ -419,6 +497,13 @@ pub fn run_tool_loop(
                         "agent loop step {step}: runtime returned ToolCall with no calls"
                     );
                 }
+                let summaries: Vec<String> = calls.iter().map(summarize_tool_call).collect();
+                sink.emit(&LoopStepEvent {
+                    step,
+                    kind: LoopStepKind::ToolCalls(summaries.clone()),
+                    tool_summary: Some(summaries.join(", ")),
+                    cost_usd: None,
+                });
                 // Run every tool the model wanted in parallel-from-its
                 // perspective. The transcript records each call
                 // immediately followed by its result, in the order the
@@ -442,6 +527,12 @@ pub fn run_tool_loop(
                 if let Some(c) = step_cost {
                     cost_usd += c;
                 }
+                sink.emit(&LoopStepEvent {
+                    step,
+                    kind: LoopStepKind::Final,
+                    tool_summary: Some("(final)".to_string()),
+                    cost_usd: step_cost,
+                });
                 if !text.is_empty() {
                     transcript.push(LoopHistoryEntry::AssistantText(text.clone()));
                 }
@@ -662,6 +753,119 @@ mod tests {
         assert_eq!(outcome.text, "done");
         assert_eq!(outcome.steps_used, 2);
         assert!(!outcome.truncated);
+    }
+
+    #[test]
+    fn run_tool_loop_with_sink_emits_event_per_step_in_order() {
+        let steps = vec![
+            AgentLoopStep::ToolCall {
+                calls: vec![ToolCall {
+                    name: "read_source".to_string(),
+                    input: serde_json::json!({
+                        "file": "valid.c",
+                        "start_line": 1,
+                        "end_line": 20,
+                    }),
+                    call_id: "c1".to_string(),
+                }],
+            },
+            AgentLoopStep::ToolCall {
+                calls: vec![ToolCall {
+                    name: "find_references".to_string(),
+                    input: serde_json::json!({ "name": "memcpy" }),
+                    call_id: "c2".to_string(),
+                }],
+            },
+            AgentLoopStep::Final {
+                text: "verdict".to_string(),
+                structured: None,
+                cost_usd: Some(0.0123),
+            },
+        ];
+        let runtime = ScriptedRuntime::new(steps);
+        let request = AgentToolLoopRequest {
+            model: "anthropic:claude-sonnet-4-6".to_string(),
+            cwd: PathBuf::from("."),
+            system_prompt: String::new(),
+            prompt: String::new(),
+            tools: Vec::new(),
+            max_steps: 5,
+        };
+
+        let mut handler = |call: &ToolCall| -> Result<ToolResult> {
+            Ok(ToolResult {
+                call_id: call.call_id.clone(),
+                output: serde_json::json!({"ok": true}),
+                is_error: false,
+            })
+        };
+        let captured = Mutex::new(Vec::<LoopStepEvent>::new());
+        let mut sink = |ev: &LoopStepEvent| {
+            captured.lock().unwrap().push(ev.clone());
+        };
+        let outcome = run_tool_loop_with_sink(&runtime, &request, &mut handler, &mut sink).unwrap();
+
+        let events = captured.lock().unwrap().clone();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].step, 0);
+        assert_eq!(events[1].step, 1);
+        assert_eq!(events[2].step, 2);
+        assert!(matches!(events[0].kind, LoopStepKind::ToolCalls(_)));
+        assert!(matches!(events[1].kind, LoopStepKind::ToolCalls(_)));
+        assert!(matches!(events[2].kind, LoopStepKind::Final));
+        let summary0 = events[0].tool_summary.clone().unwrap();
+        assert!(summary0.contains("read_source(valid.c:1-20)"), "{summary0}");
+        let summary1 = events[1].tool_summary.clone().unwrap();
+        assert!(summary1.contains("find_references(memcpy)"), "{summary1}");
+        assert_eq!(events[2].tool_summary.as_deref(), Some("(final)"));
+        assert_eq!(events[2].cost_usd, Some(0.0123));
+        assert_eq!(outcome.steps_used, 3);
+        assert_eq!(outcome.text, "verdict");
+    }
+
+    #[test]
+    fn run_tool_loop_without_sink_still_runs_to_completion() {
+        let steps = vec![AgentLoopStep::Final {
+            text: "ok".to_string(),
+            structured: None,
+            cost_usd: None,
+        }];
+        let runtime = ScriptedRuntime::new(steps);
+        let request = AgentToolLoopRequest {
+            model: "anthropic:claude-sonnet-4-6".to_string(),
+            cwd: PathBuf::from("."),
+            system_prompt: String::new(),
+            prompt: String::new(),
+            tools: Vec::new(),
+            max_steps: 3,
+        };
+        let mut handler = |_call: &ToolCall| -> Result<ToolResult> {
+            unreachable!("no tool calls in this script")
+        };
+        let outcome = run_tool_loop(&runtime, &request, &mut handler).unwrap();
+        assert_eq!(outcome.text, "ok");
+        assert_eq!(outcome.steps_used, 1);
+        assert!(!outcome.truncated);
+    }
+
+    #[test]
+    fn summarize_tool_call_falls_back_to_bare_name_for_unknown_tools() {
+        let call = ToolCall {
+            name: "list_definitions".to_string(),
+            input: serde_json::json!({"file": "x.c"}),
+            call_id: "c0".to_string(),
+        };
+        assert_eq!(summarize_tool_call(&call), "list_definitions");
+    }
+
+    #[test]
+    fn summarize_tool_call_handles_partial_read_source_inputs() {
+        let call = ToolCall {
+            name: "read_source".to_string(),
+            input: serde_json::json!({"file": "y.c", "start_line": 5}),
+            call_id: "c0".to_string(),
+        };
+        assert_eq!(summarize_tool_call(&call), "read_source(y.c:5-)");
     }
 
     #[test]

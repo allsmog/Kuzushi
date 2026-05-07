@@ -6171,13 +6171,77 @@ fn run_triage_deep(
         system_prompt: None,
     };
 
-    let outcome = crate::deep_auditor::run_deep_audit_with_runtime(
+    // Per-model gate around the deep-audit tool loop. Each
+    // `next_step_blocking` call inside `run_tool_loop` acquires a
+    // permit at `Priority::Normal`, so a 12-step audit shares a
+    // per-model in-flight cap with anything else running on the same
+    // model. The gate is scoped to this single `triage:deep`
+    // invocation — process-wide sharing across concurrent tool
+    // dispatches is a follow-up.
+    let gate = std::sync::Arc::new(crate::concurrency::ModelGate::new());
+    gate.set_cap(&model, crate::concurrency::default_concurrency_for(&model));
+    let owned_gate_runtime = match tokio::runtime::Handle::try_current() {
+        Ok(_) => None,
+        Err(_) => tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok(),
+    };
+    let gate_handle = match (&owned_gate_runtime, tokio::runtime::Handle::try_current()) {
+        (Some(rt), _) => Some(rt.handle().clone()),
+        (None, Ok(handle)) => Some(handle),
+        (None, Err(_)) => None,
+    };
+    let gated = crate::runtime_gate::GatedRuntime::new(
         runtime,
-        limiter.as_ref(),
-        &cfg,
-        &finding,
-        model,
-    )?;
+        gate,
+        gate_handle,
+        crate::concurrency::Priority::Normal,
+        model.clone(),
+    );
+    let gated_runtime: &dyn AgentRuntime = &gated;
+
+    // `KUZUSHI_TRIAGE_DEEP_VERBOSE=1` is the operator-only knob that turns
+    // on per-step streaming without changing the tool's input shape, so
+    // experiments and CI runs stay byte-identical.
+    let verbose = std::env::var("KUZUSHI_TRIAGE_DEEP_VERBOSE")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    let outcome = if verbose {
+        let mut sink = |ev: &crate::runtime::LoopStepEvent| {
+            let summary = ev.tool_summary.as_deref().unwrap_or("");
+            let tool = match &ev.kind {
+                crate::runtime::LoopStepKind::ToolCalls(names) => {
+                    names.first().cloned().unwrap_or_default()
+                }
+                crate::runtime::LoopStepKind::Final => "final".to_string(),
+            };
+            let cost = ev
+                .cost_usd
+                .map(|c| format!("{c:.4}"))
+                .unwrap_or_else(|| "-".to_string());
+            eprintln!(
+                "[triage:deep step={} tool={} summary={} cost=${}]",
+                ev.step, tool, summary, cost
+            );
+        };
+        crate::deep_auditor::run_deep_audit_with_runtime_and_sink(
+            gated_runtime,
+            limiter.as_ref(),
+            &cfg,
+            &finding,
+            model,
+            &mut sink,
+        )?
+    } else {
+        crate::deep_auditor::run_deep_audit_with_runtime(
+            gated_runtime,
+            limiter.as_ref(),
+            &cfg,
+            &finding,
+            model,
+        )?
+    };
 
     if let Some(finding_id) = finding.id {
         if let Err(err) = store.save_triage(finding_id, &outcome.triage) {

@@ -21,6 +21,7 @@ pub mod pr_comment;
 pub mod recon;
 pub mod repository_inventory;
 pub mod runtime;
+pub mod runtime_gate;
 pub mod scan;
 pub mod secret_scan;
 pub mod semgrep_rule_synthesis;
