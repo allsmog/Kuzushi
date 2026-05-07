@@ -129,10 +129,11 @@ use kuzushi_core::{
     export_workspace_findings, format_finding_alias, is_supported_attachment_module,
     known_artifacts, list_attachments, load_persistent_threat_model, parse_finding_alias,
     reparse_source, resolve_finding_alias, save_persistent_threat_model, sorted_finding_aliases,
-    AgentQueryRequest, AgentRuntime, AttachmentRecord, Finding, FindingListFilter, FindingStore,
-    KnownArtifact, ModuleRegistry, OptionScope, OptionTarget, RuntimeKind, ScanCancellation,
-    ScanRunOptions, Severity, ToolOptionStore, V2Config, WorkspaceTarget,
-    SUPPORTED_ATTACHMENT_MODULES,
+    AgentQueryRequest, AgentRuntime, AgenticSastReport, AttachmentRecord,
+    CarliniThreatHuntReport, Finding, FindingListFilter, FindingStore, KnownArtifact,
+    ModuleRegistry, OptionScope, OptionTarget, ReconHost, ReconNote, ReconService, RuntimeKind,
+    ScanCancellation, ScanProgress, ScanRunOptions, Severity, ToolOptionStore, V2Config,
+    WorkspaceTarget, SUPPORTED_ATTACHMENT_MODULES,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
 use ratatui::backend::CrosstermBackend;
@@ -233,6 +234,19 @@ pub struct AgentChatView {
     pub running: bool,
     pub abort_requested: bool,
     pub error: Option<String>,
+}
+
+/// Cached structured snapshot of the most recent recon tool result. The TUI
+/// renderer prefers reading from this snapshot (when populated) rather than
+/// grepping the freeform log lines, so transcript truncation does not erase
+/// recon evidence.
+#[derive(Debug, Clone, Default)]
+pub struct ReconSnapshot {
+    pub hosts: Vec<ReconHost>,
+    pub services: Vec<ReconService>,
+    pub notes: Vec<ReconNote>,
+    pub last_tool: Option<String>,
+    pub last_target: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -475,6 +489,19 @@ pub struct ShellApp {
     pub kb_scroll: usize,
     pub last_char_at: Option<Instant>,
     pub spinner_tick: u64,
+    /// Structured snapshot of the most recent recon tool result. Renderer
+    /// prefers this over grepping `app.log` for the recon module's
+    /// "RECENT RECON ACTIVITY" panel, so transcript truncation cannot erase
+    /// recon evidence.
+    pub recon_snapshot: Option<ReconSnapshot>,
+    /// Structured snapshot of the most recent carlini-threat-hunt result.
+    pub carlini_snapshot: Option<CarliniThreatHuntReport>,
+    /// Structured snapshot of the most recent agentic-sast result.
+    pub agentic_sast_snapshot: Option<AgenticSastReport>,
+    /// Live scan progress (`done/total`, per-task breakdown) populated by
+    /// scan orchestrators. The TUI uses this to render real per-task
+    /// progress bars instead of binary running/done placeholders.
+    pub scan_progress: Option<ScanProgress>,
     scan_rx: Option<Receiver<ScanEvent>>,
     scan_cancel: Option<ScanCancellation>,
     agent_rx: Option<Receiver<AgentEvent>>,
@@ -534,6 +561,10 @@ impl ShellApp {
             kb_scroll: 0,
             last_char_at: None,
             spinner_tick: 0,
+            recon_snapshot: None,
+            carlini_snapshot: None,
+            agentic_sast_snapshot: None,
+            scan_progress: None,
             scan_rx: None,
             scan_cancel: None,
             agent_rx: None,
@@ -3645,6 +3676,7 @@ impl ShellApp {
                 if matches!(tool_name.as_str(), "context:build" | "context-lite:index") {
                     let _ = self.refresh_context_view();
                 }
+                self.cache_tool_snapshot(&tool_name, &result);
                 let rendered = result
                     .get("output")
                     .and_then(serde_json::Value::as_str)
@@ -3658,6 +3690,60 @@ impl ShellApp {
                 "error",
                 with_next_step(error.to_string(), "tools, options <tool>, or model <n>"),
             ),
+        }
+    }
+
+    /// Cache structured snapshot of a tool result for the renderer to read
+    /// instead of grepping the freeform `app.log` lines. Keeps recon /
+    /// carlini-threat-hunt / agentic-sast snapshots reachable across log
+    /// truncation.
+    pub(crate) fn cache_tool_snapshot(
+        &mut self,
+        tool_name: &str,
+        result: &serde_json::Value,
+    ) {
+        let Some(data) = result.get("data") else {
+            return;
+        };
+        if tool_name.starts_with("recon:") {
+            let hosts = data
+                .get("hosts")
+                .and_then(|value| serde_json::from_value::<Vec<ReconHost>>(value.clone()).ok())
+                .unwrap_or_default();
+            let services = data
+                .get("services")
+                .and_then(|value| serde_json::from_value::<Vec<ReconService>>(value.clone()).ok())
+                .unwrap_or_default();
+            let notes = data
+                .get("notes")
+                .and_then(|value| serde_json::from_value::<Vec<ReconNote>>(value.clone()).ok())
+                .unwrap_or_default();
+            let last_tool = data
+                .get("tool")
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string)
+                .unwrap_or_else(|| tool_name.to_string());
+            let last_target = data
+                .get("target")
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string);
+            self.recon_snapshot = Some(ReconSnapshot {
+                hosts,
+                services,
+                notes,
+                last_tool: Some(last_tool),
+                last_target,
+            });
+        } else if tool_name.starts_with("carlini-threat-hunt:") {
+            if let Ok(report) =
+                serde_json::from_value::<CarliniThreatHuntReport>(data.clone())
+            {
+                self.carlini_snapshot = Some(report);
+            }
+        } else if tool_name.starts_with("agentic-sast:") {
+            if let Ok(report) = serde_json::from_value::<AgenticSastReport>(data.clone()) {
+                self.agentic_sast_snapshot = Some(report);
+            }
         }
     }
 

@@ -1082,14 +1082,10 @@ fn module_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         _ => None,
     };
     if let Some(label) = activity_label {
-        let recent: Vec<(String, String)> = recent_module_log(app, module.metadata().id.as_str(), 8);
-        if !recent.is_empty() {
+        let activity = recent_module_activity_lines(app, module.metadata().id.as_str(), 8);
+        if !activity.is_empty() {
             lines.push(section_header_line(label, area.width));
-            for (prefix, body) in &recent {
-                for body_line in body.lines() {
-                    lines.push(transcript_line(prefix, body_line, false));
-                }
-            }
+            lines.extend(activity);
             lines.push(blank());
         }
     }
@@ -1122,6 +1118,187 @@ fn recent_module_log(app: &ShellApp, module_id: &str, take: usize) -> Vec<(Strin
         .collect();
     matches.reverse();
     matches
+}
+
+/// Render the "RECENT … ACTIVITY" rows for a given module, preferring
+/// structured cached snapshots over freeform `app.log` grep where possible.
+///
+/// The grep path (`recent_module_log`) is brittle — it depends on log line
+/// shape and disappears when the bounded `app.log` ring is truncated.
+/// Whenever a tool dispatcher has populated a `*_snapshot` field on the
+/// app (`recon_snapshot`, `carlini_snapshot`, `agentic_sast_snapshot`),
+/// we render directly from typed data here. The grep is the fallback when
+/// no snapshot has been cached yet.
+fn recent_module_activity_lines(
+    app: &ShellApp,
+    module_id: &str,
+    take: usize,
+) -> Vec<Line<'static>> {
+    match module_id {
+        "recon" => {
+            if let Some(snapshot) = app.recon_snapshot.as_ref() {
+                let lines = recon_snapshot_lines(snapshot, take);
+                if !lines.is_empty() {
+                    return lines;
+                }
+            }
+        }
+        "carlini-threat-hunt" => {
+            if let Some(report) = app.carlini_snapshot.as_ref() {
+                return carlini_snapshot_lines(report);
+            }
+        }
+        "agentic-sast" => {
+            if let Some(report) = app.agentic_sast_snapshot.as_ref() {
+                return agentic_sast_snapshot_lines(report);
+            }
+        }
+        _ => {}
+    }
+
+    // Fallback: existing log-grep path (brittle but unchanged from before
+    // the snapshot caching was introduced).
+    let recent = recent_module_log(app, module_id, take);
+    let mut out = Vec::new();
+    for (prefix, body) in &recent {
+        for body_line in body.lines() {
+            out.push(transcript_line(prefix, body_line, false));
+        }
+    }
+    out
+}
+
+/// Format a recon snapshot as one transcript line per host/service hit,
+/// matching the design mockup `design/mockups/recon.jsx::hit()`:
+///   `▸ host:port  service  banner`
+/// Up to `take` rows total. If services are empty, falls back to one row
+/// per host (so single-host fingerprint scans still surface the host).
+fn recon_snapshot_lines(snapshot: &super::app::ReconSnapshot, take: usize) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let host_label = |service: &kuzushi_core::ReconService| -> String {
+        snapshot
+            .hosts
+            .iter()
+            .find(|host| host.id == service.host_id)
+            .map(|host| {
+                host.hostname
+                    .clone()
+                    .unwrap_or_else(|| host.address.clone())
+            })
+            .unwrap_or_else(|| "unknown".to_string())
+    };
+
+    if !snapshot.services.is_empty() {
+        for service in snapshot.services.iter().take(take) {
+            let host = host_label(service);
+            let svc = service
+                .name
+                .clone()
+                .unwrap_or_else(|| service.proto.clone());
+            let banner = service
+                .banner
+                .clone()
+                .unwrap_or_else(|| service.state.clone());
+            lines.push(Line::from(vec![
+                Span::styled(" ▸ ", theme::warn()),
+                Span::styled(host, theme::primary()),
+                Span::styled(":", theme::subtle()),
+                Span::styled(format!("{}", service.port), theme::accent()),
+                Span::raw("  "),
+                Span::styled(pad(&svc, 14), theme::muted()),
+                Span::styled(banner, theme::primary()),
+            ]));
+        }
+    } else {
+        for host in snapshot.hosts.iter().take(take) {
+            let label = host
+                .hostname
+                .clone()
+                .unwrap_or_else(|| host.address.clone());
+            lines.push(Line::from(vec![
+                Span::styled(" ▸ ", theme::warn()),
+                Span::styled(label, theme::primary()),
+                Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
+                Span::styled(host.state.clone(), theme::muted()),
+            ]));
+        }
+    }
+    lines
+}
+
+/// Format a carlini-threat-hunt snapshot as a small transcript block:
+/// actor / finding counts plus cost. Top finding lines are added when
+/// they fit, mirroring the textual `output()` summary on the report.
+fn carlini_snapshot_lines(report: &kuzushi_core::CarliniThreatHuntReport) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    lines.push(transcript_line(
+        "result",
+        &format!(
+            "carlini-threat-hunt: {} finding{} from {} actor{} ({} run{})",
+            report.count,
+            if report.count == 1 { "" } else { "s" },
+            report.actors,
+            if report.actors == 1 { "" } else { "s" },
+            report.actor_runs,
+            if report.actor_runs == 1 { "" } else { "s" },
+        ),
+        false,
+    ));
+    lines.push(transcript_line(
+        "cost",
+        &format!("cost ${:.4}", report.cost_usd),
+        false,
+    ));
+    for finding in report.findings.iter().take(5) {
+        lines.push(transcript_line(
+            "finding",
+            &format!(
+                "{} {} {}:{}",
+                finding.severity.as_str(),
+                finding.rule_id,
+                finding.file_path,
+                finding.start_line,
+            ),
+            false,
+        ));
+    }
+    lines
+}
+
+/// Format an agentic-sast snapshot as a one-line summary plus up to
+/// five top finding rows. Mirrors the `AgenticSastReport::output` shape
+/// but as styled transcript lines.
+fn agentic_sast_snapshot_lines(report: &kuzushi_core::AgenticSastReport) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    lines.push(transcript_line(
+        "result",
+        &format!(
+            "agentic-sast: {} finding{} under {}",
+            report.count,
+            if report.count == 1 { "" } else { "s" },
+            report.target,
+        ),
+        false,
+    ));
+    lines.push(transcript_line(
+        "cost",
+        &format!("cost ${:.4}", report.cost_usd),
+        false,
+    ));
+    for finding in report.findings.iter().take(5) {
+        lines.push(transcript_line(
+            "finding",
+            &format!(
+                "{} {} {}:{}",
+                finding.severity.as_str(),
+                finding.rule_id,
+                finding.file_path,
+                finding.start_line,
+            ),
+            false,
+        ));
+    }
+    lines
 }
 
 fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -1177,7 +1354,45 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let show_per_task = sast_rows.iter().any(|r| r.selected)
         && app.focused_module.as_deref() == Some("sast")
         && (scan_running || scan_done);
-    if show_per_task {
+    let use_real_progress = show_per_task && app.scan_progress.is_some();
+    if use_real_progress {
+        // Snapshot-preferred branch: render real `done/total` from
+        // `ScanProgress.per_task` (stable BTreeMap order) instead of the
+        // binary running/done placeholder bars below.
+        let progress = app.scan_progress.as_ref().expect("checked above");
+        for (task_id, (done, total)) in progress.per_task.iter() {
+            let kind = if *total == 0 {
+                ProgressKind::Failing
+            } else if done >= total {
+                ProgressKind::Done
+            } else {
+                ProgressKind::Active
+            };
+            let status = if *total == 0 {
+                "queued".to_string()
+            } else if done >= total {
+                "done".to_string()
+            } else {
+                "running…".to_string()
+            };
+            lines.push(progress_bar_line(task_id, *done, *total, &status, kind));
+        }
+        lines.push(progress_bar_line(
+            "triage",
+            0,
+            findings.max(1),
+            if findings > 0 {
+                "queued after scan"
+            } else {
+                "waiting for findings"
+            },
+            if findings > 0 {
+                ProgressKind::Active
+            } else {
+                ProgressKind::Failing
+            },
+        ));
+    } else if show_per_task {
         for row in &sast_rows {
             if !row.selected {
                 continue;
