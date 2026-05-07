@@ -4867,6 +4867,10 @@ fn unknown_command_message(raw: &str) -> String {
         return "ask needs a question. Next: /ask <question>".to_string();
     }
 
+    if verb == "open" {
+        return "open needs a finding alias. Next: `findings` to list, then `open F-0001`".to_string();
+    }
+
     // Verbs that only exist as top-level CLI subcommands. The shell rejects
     // them, but the user is probably asking for the diagnostic, so point at
     // the right place rather than punting them into the agent flow.
@@ -7729,6 +7733,13 @@ JSON
         let log_count = app.log.len();
         let _ = app.open_store();
         assert_eq!(app.log.len(), log_count);
+    }
+
+    #[test]
+    fn bare_open_verb_suggests_findings_workflow() {
+        let message = unknown_command_message("open");
+        assert!(message.contains("findings"));
+        assert!(message.contains("open F-0001"));
     }
 
     #[test]
