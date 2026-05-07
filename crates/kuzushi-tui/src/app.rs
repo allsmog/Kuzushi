@@ -3684,6 +3684,15 @@ impl ShellApp {
 
     fn resolve_options_tool(&self, requested: Option<String>) -> Result<String> {
         if let Some(tool_name) = requested {
+            // `options .` mirrors `run .` — operate on the focused module's
+            // primary tool. The module-view footer hint advertises this
+            // ("help options . · prompts · tune · back") so it must work.
+            if tool_name == "." {
+                if let Some(default) = self.default_tool_for_focused_module() {
+                    return Ok(default);
+                }
+                anyhow::bail!("`options .` requires a focused module. Next: use <module>");
+            }
             let resolved = self.resolve_focused_tool_name(tool_name.clone());
             if self.registry.resolve_tool(&resolved).is_some() {
                 return Ok(resolved);
@@ -7700,6 +7709,28 @@ JSON
         let log_count = app.log.len();
         let _ = app.open_store();
         assert_eq!(app.log.len(), log_count);
+    }
+
+    #[test]
+    fn options_dot_resolves_to_focused_module_primary_tool() {
+        // The module-view footer advertises `help options . · prompts ·
+        // tune · back`, but `options .` errored with `unknown tool "."`
+        // because "." was looked up directly. Now it resolves to the
+        // focused module's primary tool, mirroring `run .`.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.focused_module = Some("codeql".to_string());
+        let resolved = app
+            .resolve_options_tool(Some(".".to_string()))
+            .expect("`options .` with codeql focused should resolve");
+        assert_eq!(resolved, "codeql:scan");
+
+        // Without a focused module the helper produces a useful error so
+        // the user knows to `use <module>` first.
+        app.focused_module = None;
+        let err = app
+            .resolve_options_tool(Some(".".to_string()))
+            .expect_err("`options .` without focus should fail");
+        assert!(err.to_string().contains("requires a focused module"));
     }
 
     #[test]
