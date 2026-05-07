@@ -345,6 +345,7 @@ fn shell_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ShellView::Story => story_lines(app, area),
         ShellView::Auth => auth_lines(app, area),
         ShellView::Cost => cost_lines(app, area),
+        ShellView::Patch(alias) => patch_lines(app, area, alias),
     }
 }
 
@@ -3116,6 +3117,185 @@ impl AuthProviderState {
     }
 }
 
+/// `/patch <alias>` view — RATIONALE / DIFF / TESTS / GUARDRAIL
+/// matching `design/mockups/patch.jsx`.  Pulls from
+/// `app.pending_patch` when the alias matches; otherwise renders an
+/// empty state advising how to stage a patch.
+fn patch_lines(app: &ShellApp, area: Rect, alias: &str) -> Vec<Line<'static>> {
+    let mut lines = context_strip(app, area);
+    lines.push(blank());
+
+    let Some(patch) = app.pending_patch.as_ref().filter(|p| p.alias == alias) else {
+        lines.push(divider(&format!("PATCH · {alias} · empty"), area.width));
+        lines.extend(empty_state_panel(
+            "no patch staged",
+            &[
+                "patches are produced by `patch:run` and staged under .kuzushi/runs/.",
+                "the operator approves with /patch apply or rejects with /patch reject.",
+            ],
+            &[
+                ("use patch", "focus the patch module"),
+                ("run patch:run --finding F-…", "stage a patch for a verified finding"),
+                ("findings", "browse persisted findings to pick one"),
+            ],
+        ));
+        return lines;
+    };
+
+    // RATIONALE
+    lines.push(divider(&format!("PATCH · {} · RATIONALE", patch.alias), area.width));
+    for line in wrap_text(&patch.rationale, area.width.saturating_sub(3) as usize) {
+        lines.push(indent(styled(&line, theme::primary()), 3));
+    }
+    if let Some(side) = &patch.side_effect {
+        lines.push(indent(
+            Line::from(vec![
+                Span::styled("side-effect: ", theme::muted()),
+                Span::styled(side.clone(), theme::primary()),
+            ]),
+            3,
+        ));
+    }
+    lines.push(blank());
+
+    // DIFF
+    let summary = patch_diff_summary(&patch.diff);
+    lines.push(divider(
+        &format!(
+            "DIFF · {files} file{plural} · +{adds} −{dels}",
+            files = summary.files,
+            plural = if summary.files == 1 { "" } else { "s" },
+            adds = summary.adds,
+            dels = summary.dels,
+        ),
+        area.width,
+    ));
+    for line in patch_diff_lines(&patch.diff, area.width) {
+        lines.push(line);
+    }
+    lines.push(blank());
+
+    // TESTS
+    if !patch.tests.is_empty() {
+        lines.push(divider(
+            &format!("TESTS · added · {}", patch.tests.len()),
+            area.width,
+        ));
+        for (name, blurb) in &patch.tests {
+            lines.push(Line::from(vec![
+                Span::raw("   "),
+                Span::styled(" ✓ ", theme::success()),
+                Span::styled(name.clone(), theme::primary()),
+                Span::raw("  "),
+                Span::styled(blurb.clone(), theme::muted()),
+            ]));
+        }
+        lines.push(blank());
+    }
+
+    // GUARDRAIL
+    if let Some(guard) = &patch.guardrail {
+        lines.push(divider("GUARDRAIL", area.width));
+        lines.push(Line::from(vec![
+            Span::raw("   "),
+            Span::styled(" ! ", theme::warn()),
+            Span::raw(" "),
+            Span::styled(guard.clone(), theme::primary()),
+            Span::styled(
+                " — patch is staged, NOT applied".to_string(),
+                theme::muted(),
+            ),
+        ]));
+        lines.push(command_list_line(
+            &[
+                "/patch apply",
+                "/patch reject",
+                "/patch regen --style defensive",
+            ],
+            area.width as usize,
+        ));
+        lines.push(blank());
+    }
+
+    if let Some(staged) = &patch.staged_at {
+        lines.push(Line::from(vec![
+            Span::styled(" staged at ", theme::muted()),
+            Span::styled(staged.clone(), theme::primary()),
+        ]));
+    }
+    lines
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct PatchDiffSummary {
+    files: usize,
+    adds: usize,
+    dels: usize,
+}
+
+/// Tally `+` / `-` line counts and `+++` file headers in a unified diff.
+fn patch_diff_summary(diff: &str) -> PatchDiffSummary {
+    let mut summary = PatchDiffSummary::default();
+    for line in diff.lines() {
+        if line.starts_with("+++") {
+            summary.files += 1;
+        } else if line.starts_with('+') && !line.starts_with("+++") {
+            summary.adds += 1;
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            summary.dels += 1;
+        }
+    }
+    if summary.files == 0 && (summary.adds > 0 || summary.dels > 0) {
+        summary.files = 1;
+    }
+    summary
+}
+
+/// Render a unified diff into styled `Line`s matching
+/// `design/mockups/patch.jsx::diff`:
+///   `+ added line`  in c-success
+///   `- deleted line` in c-danger
+///   `  ctx line`    in c-muted
+///   `@@ hunk @@`    in c-subtle
+///   `--- a/path`    file header in c-accent
+fn patch_diff_lines(diff: &str, width: u16) -> Vec<Line<'static>> {
+    let body_width = (width as usize).saturating_sub(7);
+    let mut out = Vec::new();
+    for raw in diff.lines() {
+        let line = if raw.starts_with("+++") || raw.starts_with("---") {
+            Line::from(vec![
+                Span::raw("   "),
+                Span::styled("── ", theme::subtle()),
+                Span::styled(fit(raw, body_width), theme::accent()),
+            ])
+        } else if let Some(rest) = raw.strip_prefix("@@") {
+            Line::from(vec![
+                Span::raw("   "),
+                Span::styled(format!("@@{rest}"), theme::subtle()),
+            ])
+        } else if let Some(rest) = raw.strip_prefix('+') {
+            Line::from(vec![
+                Span::raw("     "),
+                Span::styled("+ ", theme::success()),
+                Span::styled(fit(rest, body_width), theme::success()),
+            ])
+        } else if let Some(rest) = raw.strip_prefix('-') {
+            Line::from(vec![
+                Span::raw("     "),
+                Span::styled("- ", theme::danger()),
+                Span::styled(fit(rest, body_width), theme::danger()),
+            ])
+        } else {
+            Line::from(vec![
+                Span::raw("       "),
+                Span::styled(fit(raw, body_width), theme::muted()),
+            ])
+        };
+        out.push(line);
+    }
+    out
+}
+
 /// `/cost` view — budget bars + per-tool spend.  Mirrors
 /// `design/mockups/cost.jsx`.  Pulls real cost numbers from
 /// `app.session_cost_usd`, `app.last_tool_cost_usd`, and
@@ -5298,6 +5478,7 @@ fn view_status_segment(app: &ShellApp) -> String {
         ShellView::Story => "story".to_string(),
         ShellView::Auth => "auth".to_string(),
         ShellView::Cost => "cost".to_string(),
+        ShellView::Patch(alias) => format!("patch:{alias}"),
     }
 }
 
@@ -7456,6 +7637,7 @@ mod tests {
             (ShellView::Story, "SESSION STORY"),
             (ShellView::Auth, "PROVIDERS"),
             (ShellView::Cost, "BUDGETS"),
+            (ShellView::Patch("F-0001".to_string()), "PATCH"),
         ];
 
         for (view, expected) in cases {
@@ -8198,6 +8380,79 @@ mod tests {
         assert!(rendered.contains("abort scan"));
         assert!(!rendered.contains("[c]"), "stale bracket chrome: {rendered}");
         assert!(!rendered.contains("[a]"), "stale bracket chrome: {rendered}");
+    }
+
+    #[test]
+    fn patch_view_renders_rationale_diff_tests_and_guardrail_sections() {
+        // `design/mockups/patch.jsx` shows RATIONALE / DIFF / TESTS /
+        // GUARDRAIL.  Verify all four reach the buffer with diff lines
+        // styled per kind (add → success, del → danger, ctx → muted).
+        let backend = TestBackend::new(120, 48);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.pending_patch = Some(crate::app::PendingPatch {
+            alias: "F-0001".to_string(),
+            rationale: "replace format!() concatenation with sqlx::query!() macro".to_string(),
+            side_effect: Some("closes F-0001 (sqli)".to_string()),
+            diff: "--- a/apps/api/orders.rs\n+++ b/apps/api/orders.rs\n@@ -138,9 +138,12 @@\n     let q = format!(\"SELECT * FROM orders WHERE id={}\", id);\n-    let row = sqlx::query(&q)\n+    let row = sqlx::query!(\n+        \"SELECT id FROM orders WHERE id = $1\",\n+        id\n+    )\n     .fetch_one(db)\n     .await?;".to_string(),
+            tests: vec![
+                ("orders::tests::rejects_sqli_payload".to_string(), "1 OR 1=1 → BadId".to_string()),
+                ("orders::tests::happy_path_uuid".to_string(), "valid uuid → row".to_string()),
+            ],
+            guardrail: Some("approval.patches = human-required".to_string()),
+            staged_at: Some(".kuzushi/runs/r-2113/patch.diff".to_string()),
+        });
+        app.shell_view = ShellView::Patch("F-0001".to_string());
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        // All four sections.
+        assert!(rendered.contains("RATIONALE"));
+        assert!(rendered.contains("DIFF"));
+        assert!(rendered.contains("TESTS"));
+        assert!(rendered.contains("GUARDRAIL"));
+        // Rationale + side-effect.
+        assert!(rendered.contains("sqlx::query!()"));
+        assert!(rendered.contains("side-effect"));
+        // Diff content + summary.
+        assert!(rendered.contains("apps/api/orders.rs"));
+        assert!(rendered.contains("@@"));
+        assert!(rendered.contains("rejects_sqli_payload"));
+        // Diff summary in the divider — at least one file + add count.
+        assert!(rendered.contains("1 file"));
+        // Tests row.
+        assert!(rendered.contains("happy_path_uuid"));
+        // Guardrail action row.
+        assert!(rendered.contains("/patch apply"));
+        // Staged-at footer.
+        assert!(rendered.contains("staged at"));
+    }
+
+    #[test]
+    fn patch_view_empty_state_when_no_patch_pending() {
+        let backend = TestBackend::new(120, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Patch("F-0042".to_string());
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("PATCH · F-0042 · empty"));
+        assert!(rendered.contains("∅"));
+        assert!(rendered.contains("no patch staged"));
+        assert!(rendered.contains("patch:run"));
+    }
+
+    #[test]
+    fn patch_diff_summary_counts_files_adds_and_dels() {
+        let summary = patch_diff_summary(
+            "--- a/file1\n+++ b/file1\n@@ -1,3 +1,4 @@\n+added\n-removed\n ctx\n+added2",
+        );
+        assert_eq!(summary.files, 1);
+        assert_eq!(summary.adds, 2);
+        assert_eq!(summary.dels, 1);
     }
 
     #[test]

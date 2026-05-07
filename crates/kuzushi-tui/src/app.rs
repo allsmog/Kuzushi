@@ -53,6 +53,33 @@ impl ConfirmKind {
     }
 }
 
+/// A patch staged for operator approval.  Mirrors
+/// `design/mockups/patch.jsx`: rationale + unified diff + tests +
+/// guardrail rows.  Tools that produce patches populate this and set
+/// `app.shell_view = ShellView::Patch(alias)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingPatch {
+    /// Finding alias the patch addresses (e.g. `F-0001`).
+    pub alias: String,
+    /// One-line rationale: what changes, why, and any side-effects.
+    pub rationale: String,
+    /// Side-effect note (e.g. "closes F-0001 and F-0014").  Optional.
+    pub side_effect: Option<String>,
+    /// Unified-diff text (`@@ -a,b +c,d @@` headers + `+`/`-`/ctx
+    /// lines).  Multi-file diffs include `--- a/path` `+++ b/path`
+    /// markers; the renderer treats each `+++ ` line as a new file
+    /// header.
+    pub diff: String,
+    /// Tests added / updated by the patch.  `(name, blurb)`.
+    pub tests: Vec<(String, String)>,
+    /// Guardrail policy — usually `human-required` for
+    /// `approval.patches`.  None means the patch can apply without
+    /// prompt.
+    pub guardrail: Option<String>,
+    /// Where the patch was staged on disk (`.kuzushi/runs/<id>/patch.diff`).
+    pub staged_at: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingConfirm {
     pub kind: ConfirmKind,
@@ -617,6 +644,10 @@ pub enum ShellView {
     Auth,
     /// `/cost` budget bars + by-tool spend.  See `design/mockups/cost.jsx`.
     Cost,
+    /// `/patch <alias>` view — RATIONALE / DIFF / TESTS / GUARDRAIL
+    /// per `design/mockups/patch.jsx`.  String is the finding alias
+    /// the patch addresses.
+    Patch(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -654,6 +685,9 @@ pub struct ShellApp {
     /// `design/mockups/catalog.jsx` the cursor is the bright `▌` on a
     /// `c-sel` background, set in `catalog_module_row`.
     pub catalog_cursor: usize,
+    /// Patch staged for human approval — populated when a tool
+    /// produces a `pending_patch` artefact.  See `ShellView::Patch`.
+    pub pending_patch: Option<PendingPatch>,
     pub config: V2Config,
     pub registry: ModuleRegistry,
     pub option_store: ToolOptionStore,
@@ -725,6 +759,7 @@ impl ShellApp {
             prev_shell_view: None,
             catalog_expanded: false,
             catalog_cursor: 0,
+            pending_patch: None,
             config,
             registry: ModuleRegistry::with_v2_builtins(),
             option_store: ToolOptionStore::new(),
