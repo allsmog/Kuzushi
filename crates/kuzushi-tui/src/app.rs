@@ -648,7 +648,9 @@ impl ShellApp {
         };
         app.log("system", "kuzushi shell");
         app.log("startup", app.startup_summary_line());
-        app.log("first-run", app.first_finding_hint());
+        // The first-finding hint is rendered in the catalog body via
+        // `next_action_line` + `first_finding_hint`; keeping a duplicate
+        // copy in the transcript wasted one of only two visible log rows.
         app.log(
             "help",
             "type help for commands · ? <text> to ask · scan to start",
@@ -9248,11 +9250,18 @@ JSON
             .log
             .iter()
             .any(|line| line.prefix == "startup" && line.body.contains("module(s)")));
-        assert!(app.log.iter().any(|line| {
-            line.prefix == "first-run"
-                && line.body.contains("scan .")
-                && line.body.contains("findings")
-        }));
+        // P1-3: the first-finding hint is rendered in the catalog body,
+        // not duplicated into the 2-row transcript. Confirm the helper
+        // still produces the correct command so `next_action_line` has
+        // something to render.
+        assert_eq!(app.first_finding_scan_command(), "scan .");
+        let hint = app.first_finding_hint();
+        assert!(hint.contains("scan ."));
+        assert!(hint.contains("findings"));
+        assert!(
+            !app.log.iter().any(|line| line.prefix == "first-run"),
+            "transcript should no longer carry a first-run dup of the catalog hint"
+        );
     }
 
     #[test]
@@ -9261,12 +9270,10 @@ JSON
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let app = ShellApp::new(V2Config::default(), Some(&workspace));
         assert_eq!(app.first_finding_scan_command(), "scan");
-        assert!(app.log.iter().any(|line| {
-            line.prefix == "first-run"
-                && line.body.contains("scan")
-                && !line.body.contains("scan .")
-                && line.body.contains("findings")
-        }));
+        let hint = app.first_finding_hint();
+        assert!(hint.contains("scan"));
+        assert!(!hint.contains("scan ."));
+        assert!(hint.contains("findings"));
     }
 
     #[test]
