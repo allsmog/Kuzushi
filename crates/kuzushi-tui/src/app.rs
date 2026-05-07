@@ -4800,13 +4800,33 @@ fn unknown_command_message(raw: &str) -> String {
     let verb = normalized.split_whitespace().next().unwrap_or_default();
 
     if verb == "ask" {
-        "ask needs a question. Next: /ask <question>".to_string()
-    } else if trimmed.starts_with('/') {
+        return "ask needs a question. Next: /ask <question>".to_string();
+    }
+
+    // Verbs that only exist as top-level CLI subcommands. The shell rejects
+    // them, but the user is probably asking for the diagnostic, so point at
+    // the right place rather than punting them into the agent flow.
+    if let Some(cli_hint) = cli_only_verb_hint(verb) {
+        return format!("{trimmed:?} is a CLI subcommand, not an in-shell verb. Next: {cli_hint}");
+    }
+
+    if trimmed.starts_with('/') {
         format!("unknown command {trimmed:?}. Next: /help")
     } else {
         format!(
             "unknown command {trimmed:?}. Free-form chat is explicit only. Next: /ask <question> or help"
         )
+    }
+}
+
+fn cli_only_verb_hint(verb: &str) -> Option<&'static str> {
+    match verb {
+        "doctor" => Some("run `kuzushi doctor` from a shell, or `auth` here for credential status"),
+        "scan-ci" | "ci" => Some("run `kuzushi scan <target> --ci` from a shell"),
+        "pr-comment" => Some("run `kuzushi pr-comment` from a shell"),
+        "mcp" => Some("run `kuzushi mcp serve <backend>` from a shell"),
+        "version" | "--version" | "-V" => Some("run `kuzushi --version` from a shell"),
+        _ => None,
     }
 }
 
@@ -7591,6 +7611,23 @@ JSON
         assert!(app.log.iter().any(|line| {
             line.prefix == "cost" && line.body.contains("session estimate $0.0456")
         }));
+    }
+
+    #[test]
+    fn doctor_verb_points_to_cli_not_ask_agent() {
+        // P4-5: typing `doctor` previously hit
+        // `unknown command "doctor". Free-form chat is explicit only.
+        //  Next: /ask <question> or help`
+        // which sent operators into the agent path when they actually wanted
+        // the diagnostic. The hint now identifies the CLI verb.
+        let message = unknown_command_message("doctor");
+        assert!(message.contains("CLI subcommand"));
+        assert!(message.contains("kuzushi doctor"));
+        assert!(!message.contains("Free-form chat"));
+
+        // Plain unknown verb still uses the agent-path fallback.
+        let message = unknown_command_message("zzwombat");
+        assert!(message.contains("Free-form chat"));
     }
 
     #[test]
