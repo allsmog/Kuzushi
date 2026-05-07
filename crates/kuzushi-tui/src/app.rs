@@ -697,6 +697,61 @@ impl ShellApp {
         self.registry.modules().count()
     }
 
+    /// Module id under the catalog row cursor in render order
+    /// (OFFENSE → INTEL → GOVERNANCE → DEFENSE).  None when the
+    /// registry has no modules.  Used by `Enter` on the catalog to
+    /// translate the cursor into a `use <id>` dispatch.
+    pub fn catalog_cursor_module_id(&self) -> Option<String> {
+        const ORDER: &[&str] = &["OFFENSE", "INTEL", "GOVERNANCE", "DEFENSE"];
+        let mut grouped: std::collections::BTreeMap<&'static str, Vec<String>> =
+            std::collections::BTreeMap::new();
+        for module in self.registry.modules() {
+            let id = module.metadata().id.clone();
+            let kind = module.metadata().kind;
+            let category = match id.as_str() {
+                "semgrep"
+                | "sast"
+                | "codeql"
+                | "agentic-sast"
+                | "carlini-threat-hunt"
+                | "secret-scan"
+                | "iac-scan"
+                | "dep-hygiene"
+                | "taint-iris"
+                | "taint-iris-next"
+                | "variant"
+                | "ndiff"
+                | "x-ray"
+                | "chrome-rce"
+                | "prompt-armor"
+                | "vuln-scout"
+                | "vendor-assessment" => "OFFENSE",
+                "context" | "recon" | "threat-model" | "randori" => "INTEL",
+                "config" | "shinsa" | "tob" => "GOVERNANCE",
+                "triage" | "verify" | "patch" | "findings" => "DEFENSE",
+                _ => match kind {
+                    kuzushi_core::modules::ModuleKind::Offense => "OFFENSE",
+                    kuzushi_core::modules::ModuleKind::Intel => "INTEL",
+                    kuzushi_core::modules::ModuleKind::Governance => "GOVERNANCE",
+                    kuzushi_core::modules::ModuleKind::Defense => "DEFENSE",
+                    _ => "OFFENSE",
+                },
+            };
+            grouped.entry(category).or_default().push(id);
+        }
+        let mut ordered: Vec<String> = Vec::new();
+        for cat in ORDER {
+            if let Some(rows) = grouped.get(cat) {
+                ordered.extend(rows.iter().cloned());
+            }
+        }
+        if ordered.is_empty() {
+            None
+        } else {
+            Some(ordered[self.catalog_cursor.min(ordered.len() - 1)].clone())
+        }
+    }
+
     /// Move the catalog cursor by `delta` rows, wrapping at the edges.
     /// `delta == 1` is `j`, `delta == -1` is `k`.
     pub fn move_catalog_cursor(&mut self, delta: i32) {
