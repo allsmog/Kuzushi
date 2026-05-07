@@ -86,7 +86,14 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 
 ### `origin/claude/vercel-security-harness-comparison-YQKnA`
 
-- Status: pending inspection
+- Status: integrated by documentation/example subset in current working commit
+- Commits inspected: executor/gateway/history/TUI work from `7a04225f` through `aa387d11`, plus `1c758cb0 examples/sandbox-backend: reference Vercel + Kubernetes adapters`
+- Scope inspected: `git log --oneline --max-count=20 main..origin/claude/vercel-security-harness-comparison-YQKnA`, `git diff --name-status main...`, `git diff --stat main...`, and `git merge-tree --write-tree main origin/claude/vercel-security-harness-comparison-YQKnA`
+- Conflict preview: broad production conflicts in `Cargo.lock`, CLI main, `findings.rs`, `lib.rs`, `modules.rs`, `runtime.rs`, `kuzushi-openai`, and Ratatui app/renderer.
+- Decision: subset integration. The production executor/CLI/runtime changes are stale against current main's `kuzushi-sandbox` verification crate, extracted TUI structure, classifier/spend roles, and no-silent-fallback runtime contracts. Full merge would add uncached `ureq` dependencies and resurrect obsolete executor wiring.
+- Integrated: preserved the non-invasive sandbox backend cookbook and Vercel/Kubernetes reference adapter examples, with explicit status notes that current `main` does not wire the old `SandboxExecutor`/`--executor sandbox:<url>` path.
+- Skipped: old `Executor`/`SandboxExecutor` production module, gateway shortcut, metrics/status/init/audit CLI expansion, TUI rewrites, analysis-history schema changes, and scanner-via-executor routing. These either conflict with current main contracts or are superseded by current sandbox/verification and pipeline work.
+- Checks: `cargo fmt --all --check` passed; `cargo check --workspace` passed; `pnpm build` passed after symlinking the original checkout's existing `node_modules` into the temp clone for tool resolution
 
 ### `origin/claude/agentic-security-pipeline`
 
