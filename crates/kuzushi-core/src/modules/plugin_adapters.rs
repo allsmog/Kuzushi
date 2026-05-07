@@ -6,13 +6,15 @@ use serde_json::{json, Value};
 
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
 
+use super::generic_findings::{
+    normalize_agent_json_findings, persist_tool_findings, render_generic_findings_output,
+};
 use super::plugin_resolution::{resolve_required_plugin_root, PluginAdapterSpec};
 use super::{
     builtin_module, collect_agentic_repo_inventory, dag, model_option,
-    normalize_agent_json_findings, parse_json_object_from_agent_text, persist_tool_findings,
-    positive_usize_input, render_generic_findings_output, resolve_tool_model, resolve_tool_target,
-    string_array_or_csv_input, string_input_any, target_option, tool, tool_with_options,
-    BuiltinModule, ModuleKind, ModuleRegistry, ToolExecutionContext,
+    parse_json_object_from_agent_text, positive_usize_input, resolve_tool_model,
+    resolve_tool_target, string_array_or_csv_input, string_input_any, target_option, tool,
+    tool_with_options, BuiltinModule, ModuleKind, ModuleRegistry, ToolExecutionContext,
 };
 
 pub(super) fn register_modules(registry: &mut ModuleRegistry) {
