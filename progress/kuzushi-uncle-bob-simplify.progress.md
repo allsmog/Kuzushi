@@ -92,6 +92,23 @@ Status: continuing focused slices because `crates/kuzushi-core/src/modules.rs` r
   write `.git/index.lock` (`Operation not permitted`), so staging, commit, and
   push were not performed here.
 
+### UB-002 manual follow-up, iteration 5
+
+- Task attempted: extracted the PromptArmor module descriptor and executor
+  from `crates/kuzushi-core/src/modules.rs` into
+  `crates/kuzushi-core/src/modules/prompt_armor.rs`.
+- Files changed:
+  `crates/kuzushi-core/src/modules.rs`,
+  `crates/kuzushi-core/src/modules/prompt_armor.rs`, and this progress note.
+- Tests/checks run: `cargo fmt --all`; `cargo check -p kuzushi-core`;
+  `cargo test -p kuzushi-core modules`.
+- Result: gates passed; `prompt-armor:*` tool metadata, authorization gating,
+  plugin-backed runtime dispatch, persisted findings, and DAG registration
+  remain covered by the existing module tests.
+- Remaining work: continue decomposing `modules.rs` by cohesive module family;
+  it remains the largest production Rust file after this PromptArmor slice.
+- Blockers or repo facts that contradicted this prompt: none.
+
 ### UB-003 automation gate
 
 - Task attempted: ran the Uncle Bob simplification loop for Extract Rust TUI App State Transitions.
