@@ -1,0 +1,18 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+assertion_line: 265
+---
+mode:shell | target:none | catalog | 0 findings | 35 mods
+
+---------------------------------------------------- KB ATTACHMENTS ----------------------------------------------------
+module: context
+store: .kuzushi/v2/attachments.json
+supported: context, threat-model, carlini-threat-hunt, x-ray
+
+--------------------------------------------------- KNOWN ARTIFACTS ----------------------------------------------------
+No known Rust artifacts for this module.
+
+------------------------------------------------------- ATTACHED -------------------------------------------------------
+No attachments yet. Next: attach <repo-relative-path> or attach <url>
+
+Next: kb [module], attach <path-or-url>, detach <id>, reparse <id>

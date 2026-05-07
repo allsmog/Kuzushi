@@ -55,7 +55,13 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 
 ### `origin/claude/ratatui-design-views`
 
-- Status: pending inspection
+- Status: integrated in commit pending
+- Commits: 20 commits through `7bdcac53 feat(core+tui): ScanProgress + cached recon/carlini/agentic snapshots`
+- Scope: Rust Ratatui design view updates, TUI renderer helpers, structured recon/carlini/agentic snapshots, scan progress type, and plain fixture tests
+- Conflict preview: `git merge-tree --write-tree main origin/claude/ratatui-design-views` reported one content conflict in `crates/kuzushi-tui/src/app.rs`
+- Decision: full merge with semantic conflict resolution; kept current extracted `app/state_transitions.rs` key/tick/budget handlers, added branch snapshot fields/cache plumbing, adapted spinner rendering to current `spinner_phase`, preserved paste/mouse/resize-aware event loop, and kept strict plain output guidance including `First finding`
+- Offline build adjustment: dropped the new `insta` dev dependency because crates.io DNS is unavailable and converted snapshot tests to direct checked fixture comparison; refreshed stale fixture counts/costs against current main behavior
+- Checks: `cargo fmt --all --check` passed; `cargo check --workspace` passed; `cargo test -p kuzushi-tui` passed; `cargo test -p kuzushi-core` passed; `cargo test -p kuzushi-cli --test cutover_cli` passed
 
 ### `origin/claude/diagnose-rust-tui-ux-M8ycq`
 

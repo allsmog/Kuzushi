@@ -56,7 +56,10 @@ pub use attack_surface::{
     build_attack_surface_map, build_attack_surface_map_from_inventory, AttackSurface,
     AttackSurfaceKind, AttackSurfaceMap, AttackSurfaceSummary,
 };
-pub use carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hunt_report};
+pub use carlini_threat_hunt::{
+    run_carlini_threat_hunt, run_carlini_threat_hunt_report, CarliniThreatHuntPersistedRun,
+    CarliniThreatHuntReport,
+};
 pub use classifier_gate::{ClassifierConfig, LikelyVulnClassifier, QuantileEstimator, Score};
 pub use code_nav::{
     code_nav_tool_specs, code_nav_toolbox, find_references_tool, list_definitions_tool,
@@ -83,6 +86,7 @@ pub use diff_scope::{
     DiffContextKind, DiffFileStatus, DiffFindingStatus, DiffFindingTag, DiffRangeKind, DiffScope,
     DiffScopeSummary, WhiteboxDiffScopeReport,
 };
+pub use events::{CoreEvent, EventSink, InMemoryEventSink, ScanProgress};
 pub use findings::{
     compute_dedup_key, extract_cwe, format_finding_alias, normalize_cwe, parse_finding_alias,
     resolve_finding_alias, sorted_finding_aliases, stable_finding_alias, Finding,
@@ -98,7 +102,10 @@ pub use full_mode_multi::{
 pub use iac_scan::{
     scan_iac, IacScanFinding, IacScanKind, IacScanOptions, IacScanReport, IacScanScanner,
 };
-pub use modules::{BuiltinModule, ModuleMetadata, ModuleRegistry, ToolDescriptor};
+pub use modules::{
+    AgenticSastPersistedRun, AgenticSastReport, BuiltinModule, ModuleMetadata, ModuleRegistry,
+    ToolDescriptor,
+};
 pub use options::{OptionScope, OptionTarget, ToolOptionStore};
 pub use patch::run_patch_finding;
 pub use pr_comment::{build_pr_comment, PrCommentInput};
