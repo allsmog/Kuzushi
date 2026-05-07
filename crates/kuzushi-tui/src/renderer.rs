@@ -2525,11 +2525,21 @@ fn render_throttle_banner(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     let Some(throttle) = &app.advisory.throttle else {
         return;
     };
-    let text = fit(
-        &format!("⚠ rate limit · {} · {}", throttle.source, throttle.message),
-        area.width as usize,
-    );
-    frame.render_widget(Paragraph::new(Line::styled(text, theme::warn())), area);
+    // Chip-style banner per `design/mockups/rate-limited.jsx`:
+    //   ` RATE LIMIT  <source> · <message>`
+    // The chip itself stays warn-tinted so it pops; the source label is
+    // primary and the message muted so the eye lands on the chip first.
+    let source_budget = (area.width as usize).saturating_sub(15 + throttle.source.chars().count());
+    let message = fit(&throttle.message, source_budget.max(8));
+    let line = Line::from(vec![
+        Span::raw(" "),
+        Span::styled(" RATE LIMIT ", theme::warn()),
+        Span::raw("  "),
+        Span::styled(throttle.source.clone(), theme::primary()),
+        Span::styled(" · ", theme::subtle()),
+        Span::styled(message, theme::muted()),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 fn render_plan_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
@@ -2856,7 +2866,12 @@ fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     };
     let segments = prompt_segments(&prompt, &app.input, app.cursor, area.width as usize, " ");
     let line = Line::from(vec![
-        Span::styled(segments.prompt, theme::label()),
+        // Prompt prefix in c-muted per `design/mockups/_shared.jsx::footer`
+        // (`<span className="c-muted">{promptText}</span>`). The Ratatui
+        // shell was using c-label (bold blue) which fought with the cursor
+        // block for attention; the mockup intentionally lets the cursor be
+        // the focal point and keeps the static prefix dim.
+        Span::styled(segments.prompt, theme::muted()),
         Span::raw(segments.before_cursor),
         Span::styled(segments.cursor_text, theme::cursor_block()),
         Span::raw(segments.after_cursor),
@@ -6729,6 +6744,31 @@ mod tests {
         assert!(!rendered.contains("[space]"), "stale bracket: {rendered}");
         assert!(!rendered.contains("[y]"), "stale bracket: {rendered}");
         assert!(!rendered.contains("[n]"), "stale bracket: {rendered}");
+    }
+
+    #[test]
+    fn throttle_banner_uses_chip_style_per_mockup() {
+        // `design/mockups/rate-limited.jsx` paints the throttle banner as
+        // ` RATE LIMIT  <source> · <message>` with a warn-tinted chip
+        // prefix and a muted message tail.  The Ratatui shell was emitting
+        // `⚠ rate limit · <source> · <message>` in one warn span — the
+        // chip-style prefix is what the operator's eye locks onto.
+        let backend = TestBackend::new(120, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory.throttle = Some(crate::app::ThrottleAdvisory {
+            source: "anthropic".to_string(),
+            message: "429 retry-after 14s".to_string(),
+            since: std::time::Instant::now(),
+        });
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("RATE LIMIT"));
+        assert!(rendered.contains("anthropic"));
+        assert!(rendered.contains("429 retry-after"));
+        assert!(!rendered.contains("⚠ rate limit"), "stale prose banner: {rendered}");
     }
 
     #[test]
