@@ -4897,6 +4897,26 @@ fn unknown_command_message(raw: &str) -> String {
         return "load needs a module specifier. Next: `modules` for static registry; dynamic loading is unsupported in the Rust shell.".to_string();
     }
 
+    if matches!(verb, "set" | "setg") {
+        let scope = if verb == "setg" { "global" } else { "session" };
+        return format!(
+            "{verb} needs a key + value. Next: `options [tool]` to discover keys, then `{verb} <key> <value>` ({scope})"
+        );
+    }
+
+    if matches!(verb, "unset" | "unsetg") {
+        let scope = if verb == "unsetg" { "global" } else { "session" };
+        return format!(
+            "{verb} needs a key. Next: `options [tool]` to discover keys, then `{verb} <key>` ({scope})"
+        );
+    }
+
+    if matches!(verb, "attach" | "detach" | "reparse") {
+        return format!(
+            "{verb} needs an arg. Next: `kb` to see attachments and supported modules, then `{verb} <path-or-id>`"
+        );
+    }
+
     // Verbs that only exist as top-level CLI subcommands. The shell rejects
     // them, but the user is probably asking for the diagnostic, so point at
     // the right place rather than punting them into the agent flow.
