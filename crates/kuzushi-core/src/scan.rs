@@ -338,6 +338,22 @@ impl SemgrepScanner {
         target: &Path,
         executor: &dyn crate::executor::Executor,
     ) -> Result<Vec<Finding>> {
+        self.scan_via_executor_with_callback(target, executor, &mut |_| {})
+    }
+
+    /// Variant of [`scan_via_executor`] that streams stdout/stderr lines
+    /// through the operator's callback as they arrive (semgrep emits
+    /// per-rule progress on stderr; this surfaces it live in the shell).
+    /// Backends that don't support native streaming
+    /// ([`crate::executor::DockerExecutor`], [`crate::executor::SandboxExecutor`])
+    /// fall back to the trait default impl which replays lines once at
+    /// the end — still visible, just not real-time.
+    pub fn scan_via_executor_with_callback(
+        &self,
+        target: &Path,
+        executor: &dyn crate::executor::Executor,
+        on_log: &mut dyn FnMut(crate::executor::StreamLine),
+    ) -> Result<Vec<Finding>> {
         let mut command = vec![self.binary.clone(), "--json".to_string()];
         for config in &self.config {
             command.push("--config".to_string());
@@ -353,12 +369,9 @@ impl SemgrepScanner {
             env: std::collections::HashMap::new(),
             stdin: None,
         };
-        executor
-            .launch(request)
-            .with_context(|| format!("semgrep launch via {} executor", executor.name()))?;
         let result = executor
-            .collect(&run_id)
-            .with_context(|| format!("semgrep collect via {} executor", executor.name()))?;
+            .launch_streaming(request, on_log)
+            .with_context(|| format!("semgrep launch_streaming via {} executor", executor.name()))?;
         if !matches!(result.status, crate::executor::ExecutorStatus::Succeeded) {
             anyhow::bail!(
                 "semgrep via {} executor exited with {:?}: {}",

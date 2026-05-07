@@ -21,12 +21,13 @@
 
 use std::collections::BTreeMap;
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::Deserialize;
 
 /// Operations that participate in budgeting. Strings are stable: writing to
 /// the ledger uses [`Operation::as_db_str`] and reads round-trip through
@@ -42,6 +43,11 @@ pub enum Operation {
     /// after a triage call. Separated from [`Operation::Triage`] so
     /// `kuzushi metrics` can show how much the safety check actually costs.
     RefusalFollowup,
+    /// Per-call HTTP round-trip cost for the SandboxExecutor backend.
+    /// Operators with bursty workloads see this row in `kuzushi metrics`
+    /// and can spot when transport overhead becomes meaningful relative
+    /// to the actual scan / triage spend.
+    SandboxOverhead,
 }
 
 impl Operation {
@@ -53,6 +59,7 @@ impl Operation {
             Self::FullModeMulti => "full_mode_multi",
             Self::Patch => "patch",
             Self::RefusalFollowup => "refusal_followup",
+            Self::SandboxOverhead => "sandbox_overhead",
         }
     }
 
@@ -64,6 +71,7 @@ impl Operation {
             "full_mode_multi" => Some(Self::FullModeMulti),
             "patch" => Some(Self::Patch),
             "refusal_followup" => Some(Self::RefusalFollowup),
+            "sandbox_overhead" => Some(Self::SandboxOverhead),
             _ => None,
         }
     }
@@ -76,6 +84,7 @@ impl Operation {
             Self::FullModeMulti,
             Self::Patch,
             Self::RefusalFollowup,
+            Self::SandboxOverhead,
         ]
     }
 
@@ -89,6 +98,10 @@ impl Operation {
             Self::Patch => 0.050,
             Self::DeepAudit => 0.500,
             Self::FullModeMulti => 1.000,
+            // The HTTP round-trip itself isn't free at scale (egress,
+            // S3 listings, K8s API churn). $0.0005 is a placeholder
+            // that operators can override via cost-multipliers.toml.
+            Self::SandboxOverhead => 0.0005,
         }
     }
 }
@@ -98,7 +111,7 @@ impl Operation {
 /// without making operators write a config file: a haiku triage at
 /// $0.001 and a sonnet/4o triage at $0.010 are both reasonable
 /// approximations of real provider rates.
-fn model_cost_multiplier(model: &str) -> f64 {
+fn model_cost_multiplier_default(model: &str) -> f64 {
     let lower = model.to_ascii_lowercase();
     if lower.contains("haiku") || lower.contains("4o-mini") || lower.contains("gpt-5-nano") {
         0.10
@@ -113,6 +126,68 @@ fn model_cost_multiplier(model: &str) -> f64 {
     } else {
         1.00
     }
+}
+
+/// Operator-tunable override map loaded from
+/// `~/.kuzushi/v2/cost-multipliers.toml` (or `$KUZUSHI_COST_MULTIPLIERS`).
+/// File shape:
+///
+/// ```toml
+/// # Substring → multiplier. The longest matching substring wins so
+/// # `"4o-mini"` beats `"4o"` for an `openai:gpt-4o-mini` model.
+/// [substrings]
+/// "haiku"      = 0.05
+/// "4o-mini"    = 0.05
+/// "sonnet"     = 1.10
+/// "opus"       = 5.00
+/// ```
+#[derive(Debug, Clone, Default, Deserialize)]
+struct CostMultipliersFile {
+    #[serde(default)]
+    substrings: BTreeMap<String, f64>,
+}
+
+fn load_cost_multipliers_overrides() -> Option<CostMultipliersFile> {
+    let path = match env::var("KUZUSHI_COST_MULTIPLIERS") {
+        Ok(value) if !value.trim().is_empty() => PathBuf::from(value),
+        _ => {
+            let home = dirs::home_dir()?;
+            home.join(".kuzushi")
+                .join("v2")
+                .join("cost-multipliers.toml")
+        }
+    };
+    if !path.exists() {
+        return None;
+    }
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let parsed: CostMultipliersFile = toml::from_str(&raw).ok()?;
+    if parsed.substrings.is_empty() {
+        return None;
+    }
+    Some(parsed)
+}
+
+/// Public for callers that want to surface the effective multiplier in
+/// `kuzushi metrics --json` output.
+pub fn model_cost_multiplier(model: &str) -> f64 {
+    if let Some(overrides) = load_cost_multipliers_overrides() {
+        let lower = model.to_ascii_lowercase();
+        let mut best: Option<(usize, f64)> = None;
+        for (needle, value) in &overrides.substrings {
+            let needle_lower = needle.to_ascii_lowercase();
+            if lower.contains(&needle_lower) {
+                let len = needle_lower.len();
+                if best.map(|(b, _)| len > b).unwrap_or(true) {
+                    best = Some((len, *value));
+                }
+            }
+        }
+        if let Some((_, value)) = best {
+            return value;
+        }
+    }
+    model_cost_multiplier_default(model)
 }
 
 /// Estimate the deposit for a given operation against the configured model.
@@ -606,6 +681,42 @@ mod tests {
         let total = s.total_spent(Operation::Patch).unwrap();
         // Estimate stays committed — the budget is held, the row is unsettled.
         assert!((total - 40.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cost_multiplier_overrides_load_from_file() {
+        // Use a unique env var override so the test doesn't depend on
+        // (or stomp) the default ~/.kuzushi/v2/cost-multipliers.toml.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("multipliers.toml");
+        std::fs::write(
+            &path,
+            r#"
+[substrings]
+"4o-mini" = 0.05
+"4o" = 0.20
+"opus" = 6.00
+"#,
+        )
+        .unwrap();
+        let prev = env::var("KUZUSHI_COST_MULTIPLIERS").ok();
+        // SAFETY: env writes must be serialised — these tests run with
+        // --test-threads=1 by default for spend tests touching env.
+        unsafe {
+            env::set_var("KUZUSHI_COST_MULTIPLIERS", &path);
+        }
+        // Longest-substring wins: "4o-mini" (7 chars) beats "4o" (2 chars).
+        assert!((model_cost_multiplier("openai:gpt-4o-mini") - 0.05).abs() < 1e-9);
+        assert!((model_cost_multiplier("openai:gpt-4o") - 0.20).abs() < 1e-9);
+        assert!((model_cost_multiplier("anthropic:claude-opus-4-7") - 6.00).abs() < 1e-9);
+        // No match -> default heuristic still applies.
+        assert!((model_cost_multiplier("anthropic:claude-haiku-4-5") - 0.10).abs() < 1e-9);
+        unsafe {
+            match prev {
+                Some(value) => env::set_var("KUZUSHI_COST_MULTIPLIERS", value),
+                None => env::remove_var("KUZUSHI_COST_MULTIPLIERS"),
+            }
+        }
     }
 
     #[test]

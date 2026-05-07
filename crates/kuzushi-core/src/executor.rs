@@ -506,6 +506,11 @@ pub struct SandboxExecutor {
     client_id: String,
     /// Per-call HTTP timeout. Defaults to 60s; override for long scans.
     timeout: std::time::Duration,
+    /// Optional spend ledger that bills `Operation::SandboxOverhead`
+    /// for every launch/collect round-trip. Populate via
+    /// [`SandboxExecutor::with_spend`] when the operator wants the
+    /// transport cost surfaced in `kuzushi metrics`.
+    spend: Option<std::sync::Arc<crate::spend::SpendLimiter>>,
     results: Mutex<HashMap<String, ExecutorResult>>,
 }
 
@@ -522,8 +527,20 @@ impl SandboxExecutor {
             api_key: None,
             client_id: format!("kuzushi-{}", std::process::id()),
             timeout: std::time::Duration::from_secs(60),
+            spend: None,
             results: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Attach a spend ledger so each launch/collect round-trip charges
+    /// `Operation::SandboxOverhead`. The Arc is shared so multiple
+    /// executors against the same backend can split the bucket.
+    pub fn with_spend(
+        mut self,
+        limiter: std::sync::Arc<crate::spend::SpendLimiter>,
+    ) -> Self {
+        self.spend = Some(limiter);
+        self
     }
 
     pub fn with_api_key(mut self, key: impl Into<String>) -> Self {
@@ -629,44 +646,73 @@ fn parse_sandbox_status(raw: Option<&str>) -> ExecutorStatus {
     }
 }
 
+impl SandboxExecutor {
+    /// Wrapped deposit/refund pair for `Operation::SandboxOverhead`. No-op
+    /// when no spend ledger is wired. Failures are non-fatal: a budget
+    /// overrun on the overhead bucket should never block the actual
+    /// scan/triage round-trip.
+    fn charge_overhead<R>(&self, work: impl FnOnce() -> R) -> R {
+        let ticket = self.spend.as_ref().and_then(|limiter| {
+            limiter
+                .deposit(
+                    crate::spend::Operation::SandboxOverhead,
+                    crate::spend::Operation::SandboxOverhead.default_deposit_usd(),
+                )
+                .ok()
+        });
+        let result = work();
+        if let (Some(ticket), Some(limiter)) = (ticket, self.spend.as_ref()) {
+            let estimate = ticket.est_usd();
+            let _ = limiter.refund(ticket, estimate);
+        }
+        result
+    }
+}
+
 impl Executor for SandboxExecutor {
     fn launch(&self, request: ExecutorRequest) -> Result<String> {
-        let body = self.build_request_body(&request)?;
-        let url = format!("{}/runs", self.endpoint);
-        let raw = self.authed_post(&url, &body)?;
-        let response: SandboxLaunchResponse = serde_json::from_str(&raw).with_context(|| {
-            format!("sandbox launch returned non-JSON or unexpected shape: {raw:.300}")
-        })?;
-        // Trust the operator-supplied run_id when the server echoes it
-        // back (most idempotent backends do); otherwise prefer the
-        // server's id so two callers with identical run_ids don't
-        // overwrite each other's slot in `self.results`.
-        let id = response.run_id.unwrap_or_else(|| request.run_id.clone());
-        Ok(id)
+        self.charge_overhead(|| {
+            let body = self.build_request_body(&request)?;
+            let url = format!("{}/runs", self.endpoint);
+            let raw = self.authed_post(&url, &body)?;
+            let response: SandboxLaunchResponse =
+                serde_json::from_str(&raw).with_context(|| {
+                    format!("sandbox launch returned non-JSON or unexpected shape: {raw:.300}")
+                })?;
+            // Trust the operator-supplied run_id when the server echoes it
+            // back (most idempotent backends do); otherwise prefer the
+            // server's id so two callers with identical run_ids don't
+            // overwrite each other's slot in `self.results`.
+            let id = response.run_id.unwrap_or_else(|| request.run_id.clone());
+            Ok(id)
+        })
     }
 
     fn collect(&self, run_id: &str) -> Result<ExecutorResult> {
-        let url = format!("{}/runs/{run_id}", self.endpoint);
-        let raw = self.authed_get(&url)?;
-        let response: SandboxResultResponse = serde_json::from_str(&raw).with_context(|| {
-            format!("sandbox collect returned non-JSON or unexpected shape: {raw:.300}")
-        })?;
-        let result = ExecutorResult {
-            run_id: run_id.to_string(),
-            status: parse_sandbox_status(response.status.as_deref()),
-            stdout: response.stdout.unwrap_or_default(),
-            stderr: response.stderr.unwrap_or_default(),
-            exit_code: response.exit_code,
-            started_at: None,
-            completed_at: None,
-        };
-        // Cache the result so a follow-up `status(...)` call can answer
-        // without a second round-trip.
-        self.results
-            .lock()
-            .expect("SandboxExecutor results lock poisoned")
-            .insert(run_id.to_string(), result.clone());
-        Ok(result)
+        self.charge_overhead(|| {
+            let url = format!("{}/runs/{run_id}", self.endpoint);
+            let raw = self.authed_get(&url)?;
+            let response: SandboxResultResponse =
+                serde_json::from_str(&raw).with_context(|| {
+                    format!("sandbox collect returned non-JSON or unexpected shape: {raw:.300}")
+                })?;
+            let result = ExecutorResult {
+                run_id: run_id.to_string(),
+                status: parse_sandbox_status(response.status.as_deref()),
+                stdout: response.stdout.unwrap_or_default(),
+                stderr: response.stderr.unwrap_or_default(),
+                exit_code: response.exit_code,
+                started_at: None,
+                completed_at: None,
+            };
+            // Cache the result so a follow-up `status(...)` call can answer
+            // without a second round-trip.
+            self.results
+                .lock()
+                .expect("SandboxExecutor results lock poisoned")
+                .insert(run_id.to_string(), result.clone());
+            Ok(result)
+        })
     }
 
     fn status(&self, run_id: &str) -> Result<ExecutorStatus> {
@@ -696,6 +742,91 @@ impl Executor for SandboxExecutor {
 
     fn name(&self) -> &str {
         "sandbox"
+    }
+
+    /// Override the trait default to use the protocol's long-poll
+    /// streaming endpoint (`GET /runs/<id>/output?since=<offset>`) when
+    /// the backend supports it. Falls back to the trait default
+    /// (collect-then-replay) on any 404 or non-streaming response, so
+    /// older backends still work.
+    fn launch_streaming(
+        &self,
+        request: ExecutorRequest,
+        on_log: &mut dyn FnMut(StreamLine),
+    ) -> Result<ExecutorResult> {
+        let run_id = self.launch(request)?;
+        let mut offset: u64 = 0;
+        let mut idle_polls: u32 = 0;
+        let max_idle_polls: u32 = 60; // ~30s @ 500ms — exit if stuck
+        loop {
+            let url = format!(
+                "{}/runs/{run_id}/output?since={offset}",
+                self.endpoint
+            );
+            let raw = match self.authed_get(&url) {
+                Ok(value) => value,
+                // Streaming endpoint not supported -> fall back to one-shot collect.
+                Err(_) => {
+                    let result = self.collect(&run_id)?;
+                    for line in result.stdout.lines() {
+                        on_log(StreamLine::Stdout(line.to_string()));
+                    }
+                    for line in result.stderr.lines() {
+                        on_log(StreamLine::Stderr(line.to_string()));
+                    }
+                    return Ok(result);
+                }
+            };
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct OutputChunk {
+                #[serde(default)]
+                stdout: Vec<String>,
+                #[serde(default)]
+                stderr: Vec<String>,
+                #[serde(default)]
+                next_offset: Option<u64>,
+                #[serde(default)]
+                done: bool,
+            }
+            let chunk: OutputChunk = match serde_json::from_str(&raw) {
+                Ok(value) => value,
+                Err(_) => {
+                    // Server probably returned an unexpected shape (e.g.
+                    // a 200 from a backend without /output). Fall back.
+                    let result = self.collect(&run_id)?;
+                    for line in result.stdout.lines() {
+                        on_log(StreamLine::Stdout(line.to_string()));
+                    }
+                    for line in result.stderr.lines() {
+                        on_log(StreamLine::Stderr(line.to_string()));
+                    }
+                    return Ok(result);
+                }
+            };
+            let progressed = !chunk.stdout.is_empty() || !chunk.stderr.is_empty();
+            for line in chunk.stdout {
+                on_log(StreamLine::Stdout(line));
+            }
+            for line in chunk.stderr {
+                on_log(StreamLine::Stderr(line));
+            }
+            if let Some(next) = chunk.next_offset {
+                offset = next;
+            }
+            if chunk.done {
+                return self.collect(&run_id);
+            }
+            if !progressed {
+                idle_polls += 1;
+                if idle_polls >= max_idle_polls {
+                    return self.collect(&run_id);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            } else {
+                idle_polls = 0;
+            }
+        }
     }
 }
 
