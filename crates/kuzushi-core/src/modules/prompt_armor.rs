@@ -6,12 +6,12 @@ use serde_json::{json, Value};
 
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
 
+use super::plugin_resolution::{resolve_required_plugin_root, PluginAdapterSpec};
 use super::{
     builtin_module, collect_agentic_repo_inventory, dag, json_summary, model_option,
     normalize_agent_json_findings, opt, parse_json_object_from_agent_text, persist_tool_findings,
-    read_bool_any, resolve_input_path, resolve_required_plugin_root, resolve_tool_model,
-    resolve_tool_target, string_input_any, target_option, tool_with_options, BuiltinModule,
-    ModuleKind, OptionType, PluginAdapterSpec, ToolExecutionContext,
+    read_bool_any, resolve_input_path, resolve_tool_model, resolve_tool_target, string_input_any,
+    target_option, tool_with_options, BuiltinModule, ModuleKind, OptionType, ToolExecutionContext,
 };
 
 pub(super) fn module() -> BuiltinModule {
