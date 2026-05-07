@@ -931,11 +931,27 @@ fn streaming_cursor_line() -> Line<'static> {
 fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
-    lines.push(Line::from(vec![
-        Span::styled("filters ", theme::label()),
-        Span::styled("[all] ", theme::selection()),
-        Span::styled("[critical] [high] [medium] [low]", theme::muted()),
-    ]));
+    // Filter chip row, mirroring `design/mockups/findings.jsx::chip`:
+    //   filters [all:38]  critical:5  high:11  medium:14  low:8
+    // Active chip wears `[label:n]` brackets in c-accent; inactive chips
+    // drop the brackets and render in c-muted with the count after the
+    // colon. Counts come from the persisted finding set so operators can
+    // size the filter buckets at a glance.
+    let counts = SeverityCounts::from_findings(&app.findings);
+    let total = app.findings.len();
+    let mut chip_spans: Vec<Span<'static>> = Vec::new();
+    chip_spans.push(Span::styled("filters ", theme::label()));
+    chip_spans.push(Span::styled(format!("[all:{total}]"), theme::accent()));
+    for (label, n, style) in [
+        ("critical", counts.critical, theme::severity(Severity::Critical)),
+        ("high", counts.high, theme::severity(Severity::High)),
+        ("medium", counts.medium, theme::severity(Severity::Medium)),
+        ("low", counts.low, theme::severity(Severity::Low)),
+    ] {
+        chip_spans.push(Span::raw("  "));
+        chip_spans.push(Span::styled(format!("{label}:{n}"), style));
+    }
+    lines.push(Line::from(chip_spans));
     lines.push(blank());
 
     if app.findings.is_empty() {
@@ -4127,27 +4143,6 @@ fn join_segments(values: &[String]) -> String {
         .cloned()
         .collect::<Vec<_>>()
         .join(theme::STATUS_SEPARATOR)
-}
-
-fn justify(left: String, right: String, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    let left = fit(&left, width);
-    if right.is_empty() {
-        return left;
-    }
-    let right = fit(&right, width);
-    let left_len = left.chars().count();
-    let right_len = right.chars().count();
-    if left_len + right_len + 1 >= width {
-        return fit(&format!("{left} {}", right), width);
-    }
-    format!(
-        "{left}{}{}",
-        " ".repeat(width - left_len - right_len),
-        right
-    )
 }
 
 fn compact_target_path(value: &str) -> String {
