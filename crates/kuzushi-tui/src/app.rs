@@ -4871,6 +4871,24 @@ fn unknown_command_message(raw: &str) -> String {
         return "open needs a finding alias. Next: `findings` to list, then `open F-0001`".to_string();
     }
 
+    if verb == "since" {
+        return "since needs a git ref. Next: `since main` or `since HEAD~5`".to_string();
+    }
+
+    if verb == "replay" || verb == "trace" {
+        return format!(
+            "{verb} needs a runId. Next: `show runs` to list runs, then `{verb} <runId>`"
+        );
+    }
+
+    if verb == "use" {
+        return "use needs a module id. Next: `modules` to list, then `use <module>`".to_string();
+    }
+
+    if verb == "run" {
+        return "run needs a tool id. Next: `tools` to list, then `run <tool> [json-input]`".to_string();
+    }
+
     // Verbs that only exist as top-level CLI subcommands. The shell rejects
     // them, but the user is probably asking for the diagnostic, so point at
     // the right place rather than punting them into the agent flow.
@@ -7740,6 +7758,31 @@ JSON
         let message = unknown_command_message("open");
         assert!(message.contains("findings"));
         assert!(message.contains("open F-0001"));
+    }
+
+    #[test]
+    fn bare_arg_taking_verbs_suggest_their_real_syntax() {
+        // P-NEW-12: typing the verb without an argument used to fall through
+        // to the agent-path hint. Each verb now answers with its own
+        // discovery + invocation sentence.
+        let cases = [
+            ("since", "since main"),
+            ("replay", "show runs"),
+            ("trace", "show runs"),
+            ("use", "modules"),
+            ("run", "tools"),
+        ];
+        for (verb, marker) in cases {
+            let message = unknown_command_message(verb);
+            assert!(
+                message.contains(marker),
+                "{verb:?} hint missing {marker:?}: {message}"
+            );
+            assert!(
+                !message.contains("Free-form chat"),
+                "{verb:?} fell through to agent-path: {message}"
+            );
+        }
     }
 
     #[test]
