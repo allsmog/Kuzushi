@@ -5,8 +5,8 @@
  * the TTY), and reads the file back on exit. Returns null if the user
  * cancelled (non-zero exit), otherwise the file contents.
  *
- * Intentionally synchronous: Ink's React reconciler must not keep rendering
- * while the editor owns the TTY. This module just handles the mechanics.
+ * Intentionally synchronous: no shell renderer should keep writing while the
+ * editor owns the TTY. This module just handles the mechanics.
  */
 
 import { spawnSync } from "node:child_process";

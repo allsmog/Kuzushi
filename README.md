@@ -219,7 +219,7 @@ not silently succeed and they do not substitute a different model.
 
 See [docs/rust-migration-status.md](docs/rust-migration-status.md) for the
 module-by-module cutover ledger, intentional removals, artifact compatibility
-notes, and TypeScript/Ink retention audit.
+notes, and TypeScript retention audit.
 
 ## Development
 
@@ -253,7 +253,7 @@ The old TypeScript/Ink CLI is no longer the npm runtime path:
 - The `dev:ts` package script and `scripts/kuzushi-dev` source CLI helper are
   removed.
 - The source-only `src/cli.ts shell` route now exits with a Rust replacement
-  message instead of importing the retained TypeScript/Ink shell.
+  message; the TypeScript/Ink shell implementation has been deleted.
 - The old `dist/cli*` TypeScript CLI build outputs are excluded from the npm
   tarball.
 
@@ -263,8 +263,9 @@ Retained TypeScript is classified as one of:
   `kuzushi/testing`.
 - Reference implementation for migration parity: legacy `src/modules/`,
   `src/agents/`, scanner normalization, and report helpers.
-- Test-only or fixture UI code: Ink/React components, mock TUI scenarios, and
-  Vitest suites that preserve expected behavior while the Rust shell matures.
+- Non-visual UI support code: `UIStore`, CI/plain-text output helpers,
+  formatting helpers, and migration/reference fixtures. There is no retained
+  TypeScript/Ink interactive TUI.
 
 Do not add new runtime CLI behavior in TypeScript. New product execution paths
 belong in `crates/kuzushi-core`, `crates/kuzushi-cli`, `crates/kuzushi-tui`,

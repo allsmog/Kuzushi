@@ -439,8 +439,8 @@ export function truncateEnd(s: string, maxWidth: number, ellipsis = "\u2026"): s
 
 /**
  * Middle-truncate a path-like string, preserving the trailing basename.
- * `"src/ui/components/CopilotShell.tsx"` at width 22 becomes
- * `"src…/CopilotShell.tsx"`. For non-path strings, truncates in the middle.
+ * `"crates/kuzushi-tui/src/renderer.rs"` at width 22 keeps the basename.
+ * For non-path strings, truncates in the middle.
  */
 export function truncateMiddle(s: string, maxWidth: number, ellipsis = "\u2026"): string {
   const plain = s.replace(ANSI_RE, "");

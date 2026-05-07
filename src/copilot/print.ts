@@ -3,7 +3,7 @@
  *
  * Four levels — status (cyan [*]), good (green [+]), error (red [-]),
  * warn (yellow [!]) — plus plain `line`. An optional `onPrint` hook lets
- * callers tee every emitted line into the Ink UI, an audit log, or tests.
+ * callers tee every emitted line into shell output, an audit log, or tests.
  *
  * See lib/rex/ui/text/shell.rb in metasploit-framework for the origin.
  */

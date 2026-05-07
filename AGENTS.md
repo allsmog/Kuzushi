@@ -201,147 +201,79 @@ is expected to behave identically and should be filed as a parity bug.
 
 ---
 
-## Shell UX — Ink TUI surfaces (Phases A–C)
+## Shell UX - Rust Ratatui Surface
 
-The interactive shell (`kuzushi shell` or bare `kuzushi`) is the main
-operator surface. It uses React + Ink for rendering and a single
-`ShellState.shellView` dispatcher to switch between sub-screens.
+The interactive shell (`kuzushi shell` or bare `kuzushi`) is Rust-native. The
+operator-facing TUI lives in `crates/kuzushi-tui` and uses Ratatui plus
+Crossterm. The old TypeScript/Ink render tree, mock TUI harness, TSX
+components, and `src/copilot/shell.ts` are deleted. Do not add new interactive
+shell behavior under `src/ui`, `src/ui/components`, `src/copilot/shell.ts`, or
+any TypeScript/React/Ink path.
 
-### Shell views
+### Key Rust Files
 
-| View                 | Enter with                | What it renders                                     |
-| -------------------- | ------------------------- | --------------------------------------------------- |
-| `catalog`            | bare `kuzushi`            | Module catalog grouped by offense/intel/governance  |
-| `module`             | `/use <id>`               | Per-module home: tools table, last-run, preset      |
-| `findings`           | `/findings` or `/f`       | Unified findings list with filter chips + chains    |
-| `finding`            | `/open F-NNNN`            | Linear deep page: state strip, evidence, timeline   |
-| `tune`               | `/tune` or `/t`           | Six plain controls + optional "house rules" block   |
-| `threat-dfd`         | `/threats dfd` or `1`     | ASCII DFD grouped by trust zone                     |
-| `threat-stride`      | `/threats stride` or `2`  | Element × STRIDE heat matrix + impact × likelihood  |
-| `threat-stories`     | `/threats stories` or `3` | Attacker narrative cards + input-categories rail    |
-| `threat-scope`       | `/threats scope` or `4`   | Criticality buckets + out-of-scope + operator edits |
-| `threat-summary`     | `/threats summary` or `5` | Counts bar charts + drives + artifact paths         |
-| `module-run`         | tool start (auto)         | Live transcript: ⏺ header, ✓/→/○ steps, evidence, actors, findings |
-| `actor-detail`       | `1..4` from `module-run`  | Per-actor full transcript: ● Tool / ⎿ result / ✻ Thinking / ★ Finding |
-| `prompts-editor`     | `prompts` (focused module)| Per-module prompts table + edit/show/diff/reset/set verbs |
+- `crates/kuzushi-tui/src/app.rs` - `ShellApp`, `ShellView`, command handling,
+  background events, view state, and tests for shell behavior.
+- `crates/kuzushi-tui/src/app/state_transitions.rs` - extracted view
+  transitions, scrolling, key handling, mouse handling, and spinner cadence.
+- `crates/kuzushi-tui/src/commands.rs` - slash-command parser, aliases, and
+  grouped help metadata.
+- `crates/kuzushi-tui/src/renderer.rs` - Ratatui renderer and view-specific
+  layout tests.
+- `crates/kuzushi-tui/src/renderer/plain.rs` - non-TTY/scripted plain output.
+- `crates/kuzushi-tui/src/theme.rs` - semantic terminal styles.
 
-Press `1..5` at any threat view to cycle without retyping the verb.
-Press `1..4` in `module-run` to drill into the matching actor's transcript.
-`/back` steps up one level (`finding → findings → module → catalog`,
-`actor-detail → module-run → module`).
+### Shell Views
 
-### Operator verbs — full list
+`ShellView` is defined in Rust, not TypeScript. Current variants include:
+`Catalog`, `Module`, `ModuleRun`, `ActorDetail`, `Findings`, `Finding`,
+`PromptsEditor`, `Plan`, `Threat`, `Replay`, `Trace`, `Help`, `Config`,
+`Tools`, `Options`, `SastTasks`, `Context`, `Workspace`, `KnowledgeBase`,
+`AgentChat`, `History`, and `Story`.
 
-#### Module + view navigation
+### Operator Verbs
 
-| Command                 | What it does                                        |
-| ----------------------- | --------------------------------------------------- |
-| `/modules`              | List loaded modules                                 |
-| `/tools`                | List available tools                                |
-| `/use <module>`         | Focus on a module; prompt becomes `kuzushi/<id>>`   |
-| `/back`                 | Step back one view level                            |
-| `/findings` (`/f`)      | Open the unified findings list                      |
-| `/open <F-NNNN>`        | Open a finding in the linear deep page              |
-| `/tune` (`/t`)          | Open tune view for the focused module               |
-| `/threats [sub]`        | Threat-model views (see table above); bare = summary|
-| `/threats edit`         | Open the full `ThreatModelEditor` (expert)          |
-| `/since <ref>`          | Diff-aware view: findings scoped to git-changed files |
-| `/actor <n\|fp>`        | Drill into the per-actor transcript from `module-run` |
+The command source of truth is `SHELL_COMMAND_SPECS` in
+`crates/kuzushi-tui/src/commands.rs`. Do not maintain a second TypeScript
+router. Common verbs include:
 
-#### Natural-language planner (Phase A.1)
+- Navigation: `help`, `modules`, `tools`, `use <module>`, `back`.
+- Run/scan: `scan [target]`, `run <tool> [json]`, `ask <question>`.
+- Options/tasks: `options [tool]`, `set`, `setg`, `unset`, `tasks`,
+  `task <verb>`.
+- Context/KB: `context <verb>`, `workspace <verb>`, `kb`, `attach`, `detach`,
+  `reparse`.
+- Findings/evidence: `findings`, `open <id>`, `since <ref>`, `show aliases`,
+  `show runs`, `replay <runId>`, `trace <runId>`.
+- Auth/config/model/session: `auth`, `provider`, `backend`, `model`, `cost`,
+  `config`, `load`, `resume`, `history`, `clear`, `story`, `quit`.
 
-| Command                 | What it does                                        |
-| ----------------------- | --------------------------------------------------- |
-| `/plan <english>`       | Haiku translates intent → PlanCard with option diff |
-| `/yes` / `y` key        | Apply the pending plan                              |
-| `/no` / `n` / Esc       | Discard the pending plan                            |
+### Plain And CI Output
 
-#### Prompt editor (Phase A.2)
+Plain output for the Rust shell belongs in `crates/kuzushi-tui/src/renderer/plain.rs`.
+Retained TypeScript files under `src/ui` are non-visual helpers for migration,
+reference tests, summary/report formatting, and line-oriented scan output. They
+must not grow a second interactive TUI.
 
-| Command                 | What it does                                        |
-| ----------------------- | --------------------------------------------------- |
-| `/prompts`              | Open the per-module prompts editor (`prompts-editor` view) |
-| `/prompt edit <verb>`   | Open `$EDITOR` on per-module prompt override        |
-| `/prompt show <verb>`   | Show effective prompt + source (file/inline/default)|
-| `/prompt diff <verb>`   | Show the override file path for `git diff` vs builtin |
-| `/prompt reset <verb>`  | Delete the override file and revert to default      |
-| `/show prompts`         | Cross-module audit table of every `*_PROMPT` key    |
+### Adding A Shell View
 
-Bare verbs inside `kuzushi/<module>/prompts>`: `edit <name>` /
-`show <name>` / `diff <name>` / `reset <name>` / `set <name> "..."`.
+1. Add the view variant and state to `crates/kuzushi-tui/src/app.rs`.
+2. Add parser/help behavior in `crates/kuzushi-tui/src/commands.rs`.
+3. Add reducer/key handling in `crates/kuzushi-tui/src/app/state_transitions.rs`
+   when the view has custom navigation.
+4. Add Ratatui rendering in `crates/kuzushi-tui/src/renderer.rs`.
+5. Add or update plain/scripted output in
+   `crates/kuzushi-tui/src/renderer/plain.rs`.
+6. Add focused Rust tests in `crates/kuzushi-tui/src/app.rs`,
+   `crates/kuzushi-tui/src/renderer.rs`, or `crates/kuzushi-tui/tests/`.
 
-#### Replay / trace (Phase A.3)
+### Guardrails
 
-| Command                 | What it does                                        |
-| ----------------------- | --------------------------------------------------- |
-| `/show runs [repo]`     | List recent pipeline runs (id · status · cost)      |
-| `/replay <runId>`       | Re-render the summary of a past run                 |
-| `/trace <runId>`        | Stream the per-event JSONL audit log                |
-
-#### Short-ID aliases (Phase B.3)
-
-| Command                 | What it does                                        |
-| ----------------------- | --------------------------------------------------- |
-| `/show aliases [prefix]`| List F-NNNN / C-NN aliases for the current run      |
-
-Findings and chains get deterministic per-run aliases assigned from the
-severity-sorted list (F-0001 = highest-severity finding; C-01 = highest-
-severity chain). Operator-typed references (`/open F-0108`) resolve
-through the alias map, with raw-fingerprint prefix fallback.
-
-#### Failure-mode surfaces (Phase B.4)
-
-- **Two-stage Ctrl+C at idle prompt** — first press arms, second press
-  within 2s exits. Any other key disarms. In-flight work always aborts
-  on first Ctrl+C (no change from before).
-- **Rate-limit banner** — auto-renders above `StatusFooter` when
-  `state.throttle` is set by the adaptive concurrency registry.
-- **Cost-cap halt card** — `c` continues past budget, `a` aborts. Both
-  reuse `shell.onAbort` for the abort path.
-
-#### CI mode (Phase B.5)
-
-- `kuzushi scan ./repo --ci` — disables Ink, attaches
-  `src/ui/ci-stream.ts` for one-line-per-event output:
-  `[2026-04-20T14:20:12Z] stage: scan → done (8.3s)` etc.
-- `buildPrComment(summary, { repoName, runUrl })` — markdown
-  PR-comment formatter in `src/report-pr-comment.ts`. Pipe to
-  `gh pr comment -F -`.
-
-### On-disk artefacts operators can version-control
-
-| Path                                          | Produced by                    |
-| --------------------------------------------- | ------------------------------ |
-| `~/.kuzushi/config.json`                      | `/config`, setup wizard        |
-| `.kuzushi/threat-model.json`                  | `randori`; edited by operators |
-| `.kuzushi/house-rules/<moduleId>.md`          | `/tune`; free-text nudges      |
-| `.kuzushi/prompts/<moduleId>/<verb>.md`       | `/prompt edit <verb>`          |
-| `.kuzushi/runs/<runId>/summary.json`          | scan worker                    |
-| `.kuzushi/runs/<runId>/triage.jsonl`          | audit-worker                   |
-| `.kuzushi/runs/<runId>/verify.jsonl`          | audit-worker                   |
-| `.kuzushi/findings.sqlite3`                   | scan + shell persistence       |
-
-### Adding a new shell sub-view
-
-1. Add the view id to `ShellView` union in `src/ui/state.ts`.
-2. Add a case in `shell.ts`'s slash-command handler that routes to the
-   new `shellView` (probably via a `resolve<Name>View()` helper for
-   consistency — see `resolveThreatView`).
-3. Add a component under `src/ui/components/<Name>View.tsx` that reads
-   from `shell.*` via props.
-4. Add a case in `ShellViewPanel` (`src/ui/components/CopilotShell.tsx`).
-5. Add a one-line case in `src/ui/plain-renderer.ts` so the non-TTY
-   path prints *something* when the operator enters the view.
-6. If the view has cycle keybinds, add them to the `isThreatShellView`-
-   style helper near the input handler.
-
-### Testing conventions
-
-- Pure helpers (e.g. `computeStrideCell`, `computeFindingAliases`,
-  `buildPrComment`) get focused unit tests in `tests/ui/` or
-  `tests/copilot/`. Target ≥ 5 cases per helper.
-- Ink components render best via `ink-testing-library` when available;
-  strip ANSI and snapshot the visible text.
-- The shell test suite (`tests/copilot/shell.test.ts`) exercises the
-  slash-command router; add an assertion there when shipping a new
-  verb so the `/help` table and the handler stay in sync.
+- Do not add React, Ink, TSX, `src/ui/components`, `src/ui/primitives`,
+  `src/ui/App.tsx`, `src/ui/render.ts`, `src/ui/setup.ts`, or
+  `src/copilot/shell.ts`.
+- Do not make TypeScript the CLI runtime path. `bin.kuzushi` points to the
+  Rust wrapper, and `pnpm dev -- <args>` runs `cargo run -p kuzushi-cli --`.
+- Keep non-TTY output useful: no ANSI requirement, no box-drawing dependency,
+  no hidden interaction-only state.
+- Preserve mode parity rules above when adding shell-only behavior.

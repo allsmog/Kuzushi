@@ -1,17 +1,15 @@
 /**
- * error-format — Ink-free utilities that classify and structure errors for
- * the UI layer. Upgrades `ErrorCard`'s headline + trace rendering and surfaces
- * an actionable "Next Step" per category.
+ * error-format - renderer-free utilities that classify and structure errors
+ * for CLI output. Surfaces an actionable "Next Step" per category.
  *
  * Also hosts the canonical "unknown X" message builders so scattered
  * call sites (`shell.ts`, `core.ts`, `run.ts`, `core-dispatcher.ts`)
  * can share one wording + nearest-match suggestion logic. Pure functions,
- * Ink-free, test-friendly.
+ * renderer-free, test-friendly.
  *
- * Plus a `describeEmptyState` helper that produces the (title · reason ·
- * action) triple the `<EmptyState>` component renders. Keeping it pure so
- * the plain-renderer + headless CI path can reach the same copy without
- * importing Ink.
+ * Plus a `describeEmptyState` helper that produces the (title, reason, action)
+ * triple consumed by plain/headless output. Keeping it pure lets the
+ * plain-renderer and CI path share the same copy.
  */
 
 export type ErrorCategory =
@@ -220,7 +218,7 @@ export function formatUnknownVerb(name: string, knownVerbs?: ReadonlyArray<strin
   return `${head}${tail}`;
 }
 
-// Empty-state copy builder — consumed by <EmptyState> and plain-renderer.
+// Empty-state copy builder consumed by plain/headless renderers.
 
 export type EmptyStateKind =
   | "module-none-focused"
@@ -273,8 +271,8 @@ const THREAT_VIEW_TITLES: Record<string, string> = {
 
 /**
  * Resolve the three-line copy for a given empty-state kind + optional
- * context. Pure — no Ink, no color. UI components wrap the strings with
- * tokens; plain-renderer dumps them as-is.
+ * context. Pure: no renderer dependency and no color. Plain renderers dump
+ * the strings as-is.
  */
 export function describeEmptyState(
   kind: EmptyStateKind,

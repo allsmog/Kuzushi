@@ -3,10 +3,9 @@
  * with a phase observer that streams progress into `shell.contextBuild`,
  * then writes the resulting OperatorScanContext to `.kuzushi/scan-context.json`.
  *
- * The runner is intentionally thin: all UI is reactive, so observer events
- * just mutate the store and the Ink view re-renders on subscribe. Observer
- * events are funnelled through a micro-batcher that flushes at most every
- * 100 ms to keep re-renders bounded on monorepos where the grep sweep fires
+ * The runner is intentionally thin: observer events just mutate the store.
+ * Events are funnelled through a micro-batcher that flushes at most every
+ * 100 ms to keep subscribers bounded on monorepos where the grep sweep fires
  * hundreds of `grep-file-progress` events per second.
  */
 

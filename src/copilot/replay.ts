@@ -12,8 +12,8 @@
  *                             (`triage.jsonl` + `verify.jsonl`) in chronological
  *                             order, down to tool-call granularity
  *
- * This file never touches the Ink UI. The shell wraps the formatted output
- * as a history entry.
+ * This file never touches an interactive renderer. The shell wraps the
+ * formatted output as a history entry.
  */
 
 import { existsSync, readFileSync } from "node:fs";

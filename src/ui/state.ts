@@ -11,8 +11,8 @@ import type { ModuleCategory, ModuleRank } from "../modules/types.js";
 import type { VendorAssessmentHomeSlice } from "../modules/vendor-assessment/types.js";
 import type { ThreatModelPatchProposal } from "../threat-model-patch.js";
 
-// Re-export so the UI layer can `import type { ShellPlan } from "../state.js"`
-// without cross-cutting into `src/copilot/`.
+// Re-export so line-oriented TypeScript output helpers can import the plan
+// shape without cross-cutting into `src/copilot/`.
 export type { ShellPlan, ShellPlanChange } from "../copilot/nl-planner.js";
 
 import type { ConfigPatchEntry } from "../config.js";
@@ -518,9 +518,8 @@ export interface ShellHistoryEntry {
    * (latest at index 0). Shown beneath the `⏺` header as dim `⎿ <activity>`
    * lines until the tool resolves.
    *
-   * Each row carries a stable `id` so Ink/React can keep line identity
-   * across prepends; this avoids remount churn/flicker while progress
-   * pulses stream in.
+   * Each row carries a stable `id` so line-oriented renderers can preserve
+   * identity across prepends while progress pulses stream in.
    */
   liveActivities?: Array<{ id: string; text: string }>;
   /** Older live activity lines dropped from the bounded in-memory tail. */
@@ -609,22 +608,22 @@ export type ShellView =
   | "sast-tasks"
   // Threat model uses one view with shell.threatTab selecting the sub-surface.
   | "threats"
-  // Live Build — ContextBuildView renders the 5 phases of
+  // Live Build - Rust context-build view renders the 5 phases of
   // `gatherContextForRoot` (manifests → walk → path signals → grep sweep →
   // assemble) plus a pillar preview that fills in as signals land. Entered
   // via `/context build`; reads from `shell.contextBuild`.
   | "context-build"
   | "task-story"
-  // ModuleRunView — Claude-Code-style live transcript for the focused
-  // module's active tool run. Reads from `shell.moduleRun`.
+  // ModuleRun - Claude-Code-style live transcript for the focused module's
+  // active tool run. Reads from `shell.moduleRun`.
   | "module-run"
-  // ActorTranscriptView — full per-actor transcript drilled into from a
-  // ModuleRunView. Reads from `shell.agentActivity[shell.focusedActor]`.
+  // Actor detail - full per-actor transcript drilled into from ModuleRun.
+  // Reads from `shell.agentActivity[shell.focusedActor]`.
   | "actor-detail"
-  // PromptsEditorView — list + verbs (edit, show, diff, reset, set) for
+  // Prompts editor - list + verbs (edit, show, diff, reset, set) for
   // the focused module's prompt overrides.
   | "prompts-editor"
-  // KbView — the focused module's knowledge base (operator-attached files).
+  // Knowledge base - the focused module's operator-attached files.
   // Reads from `shell.kbState[shell.kb.moduleId]` (see `src/modules/_shared/
   // attachments/tools.ts:AttachmentsHomeSlice`). Entered via `/kb` or the
   // bare `attachments` verb inside a focused module.
@@ -660,7 +659,7 @@ export interface RunReadiness {
 
 /**
  * Phases of the deterministic `gatherContextForRoot` pipeline, mirrored in
- * `ContextBuildView`'s phase tracker. Kept in sync with
+ * the context-build view's phase tracker. Kept in sync with
  * `BuildPhaseId` in `src/agents/tasks/context-gatherer.ts`.
  */
 export type ContextBuildPhaseId = "manifests" | "walk" | "path-signals" | "grep" | "assemble";
@@ -678,9 +677,9 @@ export interface ContextBuildGrepDomainSlice {
 }
 
 /**
- * Live state for the `/context build` Ink view. A fresh instance is seeded
- * via `initContextBuildState()` when the command is invoked; phase observer
- * events then drive incremental updates until the run terminates.
+ * Live state for the `/context build` view. A fresh instance is seeded via
+ * `initContextBuildState()` when the command is invoked; phase observer events
+ * then drive incremental updates until the run terminates.
  */
 export interface ContextBuildState {
   /** 4-char id shown as "run 9a21" in the view header. */
@@ -1263,7 +1262,7 @@ export interface ShellState {
     /** Running total cost for this turn, in USD. */
     totalCostUsd: number;
   };
-  /** Callback to handle user input from the Ink component. */
+  /** Callback to handle user input from the shell surface. */
   onInput?: (input: string) => void;
   /** Callback to exit the shell. */
   onExit?: () => void;
@@ -1353,7 +1352,7 @@ export class UIStore {
    * Batch multiple state mutations into a single subscriber notification.
    *
    * This keeps high-churn worker paths (task/progress/result handlers)
-   * from forcing several Ink re-renders for one logical event.
+   * from forcing several subscriber notifications for one logical event.
    */
   batch<T>(fn: () => T): T {
     this.batchDepth += 1;

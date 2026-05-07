@@ -17,7 +17,7 @@
  *     file path when file-backed.
  *
  * Read + write are plain filesystem operations — no runtime dependency on
- * Datastore or the Ink UI layer, so the functions are easy to unit-test.
+ * Datastore or an interactive renderer, so the functions are easy to unit-test.
  */
 
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";

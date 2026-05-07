@@ -49,9 +49,8 @@ export interface CoreDispatcherOptions {
    * a scratch file pre-seeded with the current value of NAME and, on save,
    * writes the contents back to the active Datastore.
    *
-   * The host wires this (shell.ts), because suspending the Ink render surface
-   * during $EDITOR is a host-level concern. Returns the new value or null on
-   * cancel.
+   * The host wires this because suspending terminal output during $EDITOR is a
+   * host-level concern. Returns the new value or null on cancel.
    */
   openEditor?: (initial: string) => Promise<string | null>;
   /**
@@ -63,7 +62,7 @@ export interface CoreDispatcherOptions {
   /**
    * Optional REPL launcher — when present, `repl` drops into an interactive
    * Node REPL with framework objects bound. Host wires this so TTY suspension
-   * (Ink) stays a host-level concern.
+   * stays a host-level concern.
    */
   openRepl?: () => Promise<void>;
   /**
@@ -814,8 +813,8 @@ export class CoreDispatcher implements CommandDispatcher {
       if (!id) return { output: "Usage: jobs -i <id>" };
       const job = mgr.get(id);
       if (!job) return { output: `[-] Unknown job: ${id}` };
-      // One-shot snapshot of the buffered output — the prompt status line
-      // and the `log` event cover live-tailing in the Ink UI.
+      // One-shot snapshot of the buffered output. The prompt status line and
+      // the `log` event cover live-tailing in the active shell.
       const lines = [
         `[*] Job ${id} (${job.label}) — ${job.state}`,
         ...job.output.map((l) => `    ${l}`),

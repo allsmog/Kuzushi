@@ -64,7 +64,7 @@
     "benchmark:regression": "tsx benchmarks/regression-check.ts",
     "eval:kuzushi-whitebox-static": "node --import tsx evals/kuzushi-whitebox-static/run.ts",
     "perf": "tsx perf/harness.ts",
-    "check:circular": "madge --ts-config tsconfig.json --extensions ts,tsx --circular src/",
+    "check:circular": "madge --ts-config tsconfig.json --extensions ts --circular src/",
     "complexity": "node scripts/cyclomatic.mjs src --top 30 --min 20",
     "complexity:logic": "node scripts/cyclomatic.mjs src --top 30 --min 20 --logic-only",
     "codegen": "tsx scripts/codegen/index.ts",

@@ -97,10 +97,9 @@ export default defineConfig({
         "src/cli/errors.ts",
         "src/cli/pi-ai.ts",
         "src/cli/shared.ts",
-        // Copilot interactive shell / LLM orchestration (matches taint-analysis/** pattern)
+        // Copilot LLM orchestration (matches taint-analysis/** pattern)
         "src/copilot/core.ts",
         "src/copilot/run.ts",
-        "src/copilot/shell.ts",
         // Git integration shims (matches http-agent.ts pattern)
         "src/git/**",
         // Report renderers (matches report-{csv,json,jsonl}.ts pattern)
