@@ -11,8 +11,14 @@ use kuzushi_tui::{
 };
 
 const SNAPSHOT_WIDTH: usize = 120;
+const SNAPSHOT_LOG_TIME: u64 = 55_277;
 
-fn render_at_120(app: &ShellApp) -> String {
+fn render_at_120(app: &mut ShellApp) -> String {
+    for line in &mut app.log {
+        if line.time_secs != 0 {
+            line.time_secs = SNAPSHOT_LOG_TIME;
+        }
+    }
     render_plain_app(app, SNAPSHOT_WIDTH)
 }
 
@@ -63,50 +69,50 @@ fn _silence_unused() {
 
 #[test]
 fn catalog_view_default() {
-    let app = fresh_app();
-    assert_plain_snapshot("catalog_view_default", &render_at_120(&app));
+    let mut app = fresh_app();
+    assert_plain_snapshot("catalog_view_default", &render_at_120(&mut app));
 }
 
 #[test]
 fn threat_stories_view_with_canonical_fixture() {
     let mut app = fresh_app();
     app.shell_view = ShellView::Threat(ThreatView::Stories);
-    assert_plain_snapshot("threat_stories_canonical", &render_at_120(&app));
+    assert_plain_snapshot("threat_stories_canonical", &render_at_120(&mut app));
 }
 
 #[test]
 fn threat_scope_view_with_canonical_fixture() {
     let mut app = fresh_app();
     app.shell_view = ShellView::Threat(ThreatView::Scope);
-    assert_plain_snapshot("threat_scope_canonical", &render_at_120(&app));
+    assert_plain_snapshot("threat_scope_canonical", &render_at_120(&mut app));
 }
 
 #[test]
 fn threat_dfd_view_canonical_diagram() {
     let mut app = fresh_app();
     app.shell_view = ShellView::Threat(ThreatView::Dfd);
-    assert_plain_snapshot("threat_dfd_canonical", &render_at_120(&app));
+    assert_plain_snapshot("threat_dfd_canonical", &render_at_120(&mut app));
 }
 
 #[test]
 fn threat_stride_view_with_canonical_fixture() {
     let mut app = fresh_app();
     app.shell_view = ShellView::Threat(ThreatView::Stride);
-    assert_plain_snapshot("threat_stride_canonical", &render_at_120(&app));
+    assert_plain_snapshot("threat_stride_canonical", &render_at_120(&mut app));
 }
 
 #[test]
 fn threat_summary_view_with_canonical_fixture() {
     let mut app = fresh_app();
     app.shell_view = ShellView::Threat(ThreatView::Summary);
-    assert_plain_snapshot("threat_summary_canonical", &render_at_120(&app));
+    assert_plain_snapshot("threat_summary_canonical", &render_at_120(&mut app));
 }
 
 #[test]
 fn module_view_focused_on_sast() {
     let mut app = fresh_app();
     app.handle_command(ShellCommand::Use("sast".to_string()));
-    assert_plain_snapshot("module_view_sast", &render_at_120(&app));
+    assert_plain_snapshot("module_view_sast", &render_at_120(&mut app));
 }
 
 #[test]
@@ -120,14 +126,14 @@ fn module_view_focused_on_recon_with_recent_activity() {
     app.log("recon:subdomain", "discovered 7 subdomains");
     app.log("recon", "persisted 3 findings");
     app.handle_command(ShellCommand::Use("recon".to_string()));
-    assert_plain_snapshot("module_view_recon_active", &render_at_120(&app));
+    assert_plain_snapshot("module_view_recon_active", &render_at_120(&mut app));
 }
 
 #[test]
 fn sast_tasks_view_default() {
     let mut app = fresh_app();
     app.shell_view = ShellView::SastTasks;
-    assert_plain_snapshot("sast_tasks_default", &render_at_120(&app));
+    assert_plain_snapshot("sast_tasks_default", &render_at_120(&mut app));
 }
 
 #[test]
@@ -135,14 +141,14 @@ fn tune_view_for_focused_module() {
     let mut app = fresh_app();
     app.focused_module = Some("sast".to_string());
     app.shell_view = ShellView::Tune;
-    assert_plain_snapshot("tune_view_sast", &render_at_120(&app));
+    assert_plain_snapshot("tune_view_sast", &render_at_120(&mut app));
 }
 
 #[test]
 fn help_view_default() {
     let mut app = fresh_app();
     app.shell_view = ShellView::Help;
-    assert_plain_snapshot("help_view_default", &render_at_120(&app));
+    assert_plain_snapshot("help_view_default", &render_at_120(&mut app));
 }
 
 #[test]
@@ -173,7 +179,7 @@ fn findings_list_view_with_two_findings() {
     );
     app.findings = vec![critical, untriaged];
     app.shell_view = ShellView::Findings;
-    assert_plain_snapshot("findings_list_two_findings", &render_at_120(&app));
+    assert_plain_snapshot("findings_list_two_findings", &render_at_120(&mut app));
 }
 
 #[test]
@@ -204,35 +210,35 @@ fn module_run_view_with_findings_and_active_scan() {
         error: None,
     });
     app.shell_view = ShellView::ModuleRun;
-    assert_plain_snapshot("module_run_with_findings", &render_at_120(&app));
+    assert_plain_snapshot("module_run_with_findings", &render_at_120(&mut app));
 }
 
 #[test]
 fn workspace_view_default() {
     let mut app = fresh_app();
     app.shell_view = ShellView::Workspace;
-    assert_plain_snapshot("workspace_view_default", &render_at_120(&app));
+    assert_plain_snapshot("workspace_view_default", &render_at_120(&mut app));
 }
 
 #[test]
 fn knowledge_base_view_default() {
     let mut app = fresh_app();
     app.shell_view = ShellView::KnowledgeBase;
-    assert_plain_snapshot("knowledge_base_view_default", &render_at_120(&app));
+    assert_plain_snapshot("knowledge_base_view_default", &render_at_120(&mut app));
 }
 
 #[test]
 fn agent_chat_view_default() {
     let mut app = fresh_app();
     app.shell_view = ShellView::AgentChat;
-    assert_plain_snapshot("agent_chat_view_default", &render_at_120(&app));
+    assert_plain_snapshot("agent_chat_view_default", &render_at_120(&mut app));
 }
 
 #[test]
 fn story_view_default() {
     let mut app = fresh_app();
     app.shell_view = ShellView::Story;
-    assert_plain_snapshot("story_view_default", &render_at_120(&app));
+    assert_plain_snapshot("story_view_default", &render_at_120(&mut app));
 }
 
 #[test]
@@ -242,5 +248,5 @@ fn options_view_for_sast_scan() {
         tool_name: "sast:scan".to_string(),
         filter: OptionsFilter::Standard,
     });
-    assert_plain_snapshot("options_view_for_sast_scan", &render_at_120(&app));
+    assert_plain_snapshot("options_view_for_sast_scan", &render_at_120(&mut app));
 }

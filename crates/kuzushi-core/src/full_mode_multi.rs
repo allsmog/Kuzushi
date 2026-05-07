@@ -31,8 +31,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent_router::{AgentRole, RoutedRuntime};
 use crate::findings::{Finding, Severity};
-use crate::runtime::{AgentQueryRequest, AgentRuntime};
+use crate::runtime::AgentQueryRequest;
 use crate::spend::{Operation, SpendLimiter};
+use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 
 /// Default chunk budget in approximate tokens. Sized so a chunk fits in
 /// a single 200k-context call with room for the system prompt + output.
@@ -411,7 +412,16 @@ pub fn run(
             prompt,
         );
 
-        let result = runtime.query_blocking(request);
+        let result = query_required_structured_json(
+            runtime,
+            request,
+            StructuredJsonContract::new(
+                "full-mode-multi:chunk",
+                "FullModeFindingArray",
+                full_mode_findings_schema(),
+            ),
+            parse_chunk_value,
+        );
 
         let actual_cost = match &result {
             Ok(_) => cfg.deposit_usd_per_chunk, // bridge cost surfaces in Phase 5c+
@@ -424,10 +434,9 @@ pub fn run(
         }
 
         match result {
-            Ok(response) => {
+            Ok(chunk_findings) => {
                 cost += actual_cost;
                 dispatched += 1;
-                let chunk_findings = parse_chunk_response(&response.text, &response.structured);
                 all_findings.extend(chunk_findings);
             }
             Err(_error) => {
@@ -466,41 +475,28 @@ fn render_chunk_prompt(root: &Path, chunk: &ChunkPlan) -> Result<String> {
     Ok(body)
 }
 
-fn parse_chunk_response(text: &str, structured: &Option<serde_json::Value>) -> Vec<Finding> {
-    if let Some(value) = structured {
-        if let Ok(items) = serde_json::from_value::<Vec<ModelFinding>>(value.clone()) {
-            return items.into_iter().filter_map(model_to_finding).collect();
-        }
-    }
-    if let Some(array_text) = extract_json_array(text) {
-        if let Ok(items) = serde_json::from_str::<Vec<ModelFinding>>(&array_text) {
-            return items.into_iter().filter_map(model_to_finding).collect();
-        }
-    }
-    Vec::new()
+fn parse_chunk_value(value: serde_json::Value) -> Result<Vec<Finding>> {
+    let items = serde_json::from_value::<Vec<ModelFinding>>(value)
+        .context("full-mode-multi chunk output must be a JSON array of findings")?;
+    Ok(items.into_iter().filter_map(model_to_finding).collect())
 }
 
-fn extract_json_array(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    let stripped = if trimmed.starts_with("```") {
-        trimmed
-            .trim_start_matches("```json")
-            .trim_start_matches("```")
-            .trim_end_matches("```")
-            .trim()
-            .to_string()
-    } else {
-        trimmed.to_string()
-    };
-    if stripped.starts_with('[') {
-        return Some(stripped);
-    }
-    let start = stripped.find('[')?;
-    let end = stripped.rfind(']')?;
-    if end <= start {
-        return None;
-    }
-    Some(stripped[start..=end].to_string())
+fn full_mode_findings_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "required": ["rule", "file", "line", "severity", "message"],
+            "additionalProperties": true,
+            "properties": {
+                "rule": {"type": "string"},
+                "file": {"type": "string"},
+                "line": {"type": "integer"},
+                "severity": {"type": "string"},
+                "message": {"type": "string"}
+            }
+        }
+    })
 }
 
 fn model_to_finding(m: ModelFinding) -> Option<Finding> {
@@ -806,10 +802,13 @@ mod tests {
     }
 
     #[test]
-    fn malformed_responses_yield_no_findings_not_panic() {
+    fn malformed_responses_mark_chunk_failed_not_panic() {
         let body = "// padding\n".repeat(2_000);
         let tmp = make_workspace(&[("src/a.c", &body)]);
-        let runtime_inner = ScriptedRuntime::new(vec!["I don't know what to say".to_string()]);
+        let runtime_inner = ScriptedRuntime::new(vec![
+            "I don't know what to say".to_string(),
+            "Still no JSON".to_string(),
+        ]);
         let runtime = RoutedRuntime::new(
             runtime_inner as Arc<dyn AgentRuntime>,
             Arc::new(router_with_full_mode_role("anthropic:claude-haiku-4-5")),
@@ -821,7 +820,8 @@ mod tests {
         };
         let report = run(&runtime, None, &cfg).unwrap();
         assert_eq!(report.findings.len(), 0);
-        assert_eq!(report.chunks_dispatched, 1);
+        assert_eq!(report.chunks_failed, 1);
+        assert_eq!(report.chunks_dispatched, 0);
     }
 
     // -- Test runtime helpers ------------------------------------------------

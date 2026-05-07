@@ -5,14 +5,14 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
+use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 
 use super::generic_findings::{normalize_agent_json_findings, persist_tool_findings};
 use super::plugin_resolution::{resolve_required_plugin_root, PluginAdapterSpec};
 use super::{
     builtin_module, collect_agentic_repo_inventory, dag, json_summary, model_option, opt,
-    parse_json_object_from_agent_text, read_bool_any, resolve_input_path, resolve_tool_model,
-    resolve_tool_target, string_input_any, target_option, tool_with_options, BuiltinModule,
-    ModuleKind, OptionType, ToolExecutionContext,
+    read_bool_any, resolve_input_path, resolve_tool_model, resolve_tool_target, string_input_any,
+    target_option, tool_with_options, BuiltinModule, ModuleKind, OptionType, ToolExecutionContext,
 };
 
 pub(super) fn module() -> BuiltinModule {
@@ -143,15 +143,17 @@ fn runtime_tool(
     ))?;
     let model = resolve_tool_model(tool_name, &input, ctx)?;
     let inventory = collect_agentic_repo_inventory(&target, 100, 4096)?;
-    let response = runtime.query_blocking(AgentQueryRequest::new(
-        model,
-        target.clone(),
-        "You are Kuzushi's PromptArmor adapter. Return only JSON with findings and summary. Ground findings in source snippets when doing static analyze.".to_string(),
-        build_prompt(command, &plugin_root, &input, &inventory),
-    ))?;
-    let raw = response.structured.unwrap_or_else(|| {
-        parse_json_object_from_agent_text(&response.text).unwrap_or(json!({"findings": []}))
-    });
+    let raw = query_required_structured_json(
+        runtime,
+        AgentQueryRequest::new(
+            model,
+            target.clone(),
+            "You are Kuzushi's PromptArmor adapter. Return only JSON with findings and summary. Ground findings in source snippets when doing static analyze.".to_string(),
+            build_prompt(command, &plugin_root, &input, &inventory),
+        ),
+        StructuredJsonContract::new(tool_name, "PromptArmorFindings", findings_schema()),
+        require_json_object,
+    )?;
     let findings = normalize_agent_json_findings(raw, &target, "prompt-armor", 100)?;
     let persisted = persist_tool_findings("prompt-armor", &target, &findings, ctx)?;
     let output_dir = target.join(".prompt-armor");
@@ -173,6 +175,26 @@ fn runtime_tool(
         },
         "costUsd": 0.0,
     }))
+}
+
+fn require_json_object(value: Value) -> Result<Value> {
+    if value.is_object() {
+        Ok(value)
+    } else {
+        anyhow::bail!("prompt-armor structured output must be a JSON object")
+    }
+}
+
+fn findings_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["findings"],
+        "additionalProperties": true,
+        "properties": {
+            "summary": {"type": "string"},
+            "findings": {"type": "array", "items": {"type": "object"}}
+        }
+    })
 }
 
 fn build_prompt(

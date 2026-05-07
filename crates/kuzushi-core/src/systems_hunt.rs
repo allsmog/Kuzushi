@@ -12,7 +12,11 @@ use uuid::Uuid;
 use crate::findings::{Finding, Severity, StaticProofState};
 use crate::modules::ToolExecutionContext;
 use crate::runtime::SubagentRole;
-use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolPolicy};
+use crate::runtime::{AgentQueryRequest, AgentRuntime, AgentToolPolicy};
+use crate::structured_output::{
+    parse_or_repair_required_structured_json, query_required_structured_json,
+    StructuredJsonContract,
+};
 use crate::whitebox_static::{
     agent_tool_policy_for_input, mark_whitebox_static_findings, whitebox_static_profile_requested,
 };
@@ -389,7 +393,8 @@ pub fn run_systems_hunt_report(
         &options,
         agent_tool_policy.clone(),
     )?;
-    let response = runtime.query_blocking(
+    let raw = query_required_structured_json(
+        runtime,
         AgentQueryRequest::new(
             model,
             target.clone(),
@@ -397,9 +402,13 @@ pub fn run_systems_hunt_report(
             build_systems_hunt_prompt(&target, &context, &invariants, &triggers, &options)?,
         )
         .with_tool_policy(agent_tool_policy),
+        StructuredJsonContract::new(
+            "systems-hunt:systems-hunt",
+            "SystemsHuntFindings",
+            findings_schema(),
+        ),
+        require_json_object,
     )?;
-    let raw = parse_agent_json(response)
-        .context("systems-hunt expected pi-agent-core to return JSON with a findings array")?;
     let artifact_root = artifact_root(&target, &options.artifact_dir)?;
     let (mut findings, artifacts) = normalize_systems_hunt_findings(
         raw,
@@ -516,7 +525,8 @@ fn run_deep_semantic_cwe_select(
         &options,
     )?;
     let inventory = collect_inventory(&target, 80, 2048)?;
-    let response = runtime.query_blocking(
+    let raw = query_required_structured_json(
+        runtime,
         AgentQueryRequest::new(
             model,
             target.clone(),
@@ -527,9 +537,13 @@ fn run_deep_semantic_cwe_select(
         ),
         )
         .with_tool_policy(agent_tool_policy_for_input(input)?),
+        StructuredJsonContract::new(
+            "systems-hunt:deep-semantic-cwe-select",
+            "DeepSemanticCweSelection",
+            cwes_schema(),
+        ),
+        require_json_object,
     )?;
-    let raw = parse_agent_json(response)
-        .context("systems-hunt:deep-semantic-cwe-select expected JSON with a cwes array")?;
     Ok(DeepSemanticCweOutput {
         cwes: parse_cwe_selections(&raw)
             .into_iter()
@@ -571,7 +585,8 @@ fn run_deep_semantic_hunt_report(
     }
 
     let inventory = collect_inventory(&target, 80, 2048)?;
-    let response = runtime.query_blocking(
+    let raw = query_required_structured_json(
+        runtime,
         AgentQueryRequest::new(
             model,
             target.clone(),
@@ -586,9 +601,13 @@ fn run_deep_semantic_hunt_report(
         ),
         )
         .with_tool_policy(agent_tool_policy_for_input(input)?),
+        StructuredJsonContract::new(
+            "systems-hunt:deep-semantic-hunt",
+            "DeepSemanticFindings",
+            findings_schema(),
+        ),
+        require_json_object,
     )?;
-    let raw = parse_agent_json(response)
-        .context("systems-hunt:deep-semantic-hunt expected JSON with a findings array")?;
     let artifact_root = artifact_root(&target, &options.artifact_dir)?;
     let (mut findings, artifacts) =
         normalize_deep_semantic_findings(raw, &target, &artifact_root, options.max_findings)?;
@@ -739,13 +758,40 @@ fn query_systems_invariants(
         ),
     )
     .with_tool_policy(agent_tool_policy);
+    let request =
+        request.with_structured_output(crate::runtime::AgentStructuredOutput::json_schema(
+            "SystemsInvariants",
+            invariants_schema(),
+        ));
     let response = if role == SubagentRole::Generic {
-        runtime.query_blocking(request)?
+        runtime.query_blocking(request.clone())?
     } else {
-        runtime.spawn_subagent_blocking(role, request)?
+        runtime.spawn_subagent_blocking(role, request.clone())?
     };
-    let raw = parse_agent_json(response)
-        .context("systems-hunt:systems-invariant-extract expected JSON with an invariants array")?;
+    let raw = parse_or_repair_required_structured_json(
+        response,
+        StructuredJsonContract::new(
+            "systems-hunt:systems-invariant-extract",
+            "SystemsInvariants",
+            invariants_schema(),
+        ),
+        require_json_object,
+        |repair_prompt, output| {
+            let repair_request = AgentQueryRequest::new(
+                request.model.clone(),
+                request.cwd.clone(),
+                request.system_prompt.clone(),
+                repair_prompt,
+            )
+            .with_tool_policy(request.tool_policy.clone())
+            .with_structured_output(output);
+            if role == SubagentRole::Generic {
+                runtime.query_blocking(repair_request)
+            } else {
+                runtime.spawn_subagent_blocking(role, repair_request)
+            }
+        },
+    )?;
     Ok(SystemsInvariantOutput {
         invariants: parse_invariants(&raw),
     })
@@ -903,7 +949,8 @@ fn query_systems_triggers(
     options: &SystemsHuntInput,
     agent_tool_policy: AgentToolPolicy,
 ) -> Result<SystemsTriggerOutput> {
-    let response = runtime.query_blocking(
+    let raw = query_required_structured_json(
+        runtime,
         AgentQueryRequest::new(
             model.to_string(),
             target.to_path_buf(),
@@ -916,9 +963,13 @@ fn query_systems_triggers(
         ),
         )
         .with_tool_policy(agent_tool_policy),
+        StructuredJsonContract::new(
+            "systems-hunt:systems-trigger-synth",
+            "SystemsTriggers",
+            triggers_schema(),
+        ),
+        require_json_object,
     )?;
-    let raw = parse_agent_json(response)
-        .context("systems-hunt:systems-trigger-synth expected JSON with a triggers array")?;
     Ok(SystemsTriggerOutput {
         triggers: parse_triggers(&raw),
     })
@@ -1638,24 +1689,56 @@ fn invariants_from_input(input: &Value) -> Option<Result<SystemsInvariantOutput>
     }
 }
 
-fn parse_agent_json(response: AgentQueryResponse) -> Result<Value> {
-    if let Some(value) = response.structured {
-        return Ok(value);
+fn require_json_object(value: Value) -> Result<Value> {
+    if value.is_object() {
+        Ok(value)
+    } else {
+        anyhow::bail!("systems-hunt structured output must be a JSON object")
     }
-    parse_json_object_from_text(&response.text)
 }
 
-fn parse_json_object_from_text(text: &str) -> Result<Value> {
-    if let Ok(value) = serde_json::from_str::<Value>(text) {
-        return Ok(value);
-    }
-    let start = text
-        .find('{')
-        .context("agent response did not contain JSON")?;
-    let end = text
-        .rfind('}')
-        .context("agent response did not contain JSON")?;
-    serde_json::from_str(&text[start..=end]).context("agent response JSON was invalid")
+fn findings_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["findings"],
+        "additionalProperties": true,
+        "properties": {
+            "findings": {"type": "array", "items": {"type": "object"}}
+        }
+    })
+}
+
+fn cwes_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["cwes"],
+        "additionalProperties": true,
+        "properties": {
+            "cwes": {"type": "array", "items": {"type": "object"}}
+        }
+    })
+}
+
+fn invariants_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["invariants"],
+        "additionalProperties": true,
+        "properties": {
+            "invariants": {"type": "array", "items": {"type": "object"}}
+        }
+    })
+}
+
+fn triggers_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["triggers"],
+        "additionalProperties": true,
+        "properties": {
+            "triggers": {"type": "array", "items": {"type": "object"}}
+        }
+    })
 }
 
 fn resolve_model(
@@ -1922,7 +2005,7 @@ mod tests {
     use super::*;
     use crate::config::V2Config;
     use crate::findings::FindingStore;
-    use crate::runtime::TriageRequest;
+    use crate::runtime::{AgentQueryResponse, TriageRequest};
     use std::sync::Mutex;
     use tempfile::tempdir;
 

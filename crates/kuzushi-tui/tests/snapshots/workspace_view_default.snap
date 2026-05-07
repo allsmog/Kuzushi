@@ -14,4 +14,4 @@ last export: none
 
 No active workspace. Next: scan <target> or kuzushi shell --target .
 
-Next: workspace status, workspace export findings findings.json
+Next: workspace status, workspace export findings <path>.json, kuzushi pr-comment

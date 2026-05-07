@@ -13,5 +13,5 @@ sast | SAST Pipeline
  ⏵ sast:scan                      headless Run the full SAST pipeline for the current target.
 
  -- NEXT ---------------------------------------------------------------------------------------------------------------
- ⏵ tool run . or scan to launch the umbrella scanner
+ ⏵ tool scan runs configured scanners; run . dispatches sast:scan
  | help tasks | findings | use triage

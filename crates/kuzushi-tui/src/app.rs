@@ -1,4 +1,13 @@
+mod agent_chat;
+mod approval;
+mod catalog;
+mod log;
 pub(crate) mod state_transitions;
+
+pub use agent_chat::AgentChatView;
+pub use agent_chat::ChatTurn;
+pub use approval::{ConfirmKind, PendingConfirm, PendingPatch};
+pub use log::LogLine;
 
 use std::collections::BTreeSet;
 use std::env;
@@ -20,6 +29,10 @@ const FINDINGS_PAGE_ROWS: usize = 10;
 pub struct AdvisoryState {
     pub throttle: Option<ThrottleAdvisory>,
     pub budget_halt: Option<BudgetHalt>,
+    /// Pending operator approval for a tool dispatch that triggered a
+    /// confirm gate (network egress, fs:write outside `.kuzushi/`,
+    /// destructive verb).  See `design/mockups/confirm-dialog.jsx`.
+    pub pending_confirm: Option<PendingConfirm>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,12 +252,6 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 #[cfg(test)]
 pub(crate) use state_transitions::{HotkeyTrigger, ViewHotkeyAction};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LogLine {
-    pub prefix: String,
-    pub body: String,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScanPanelState {
     pub run_id: Option<String>,
@@ -318,15 +325,6 @@ pub struct WorkspaceView {
     pub findings_count: Option<usize>,
     pub last_export: Option<PathBuf>,
     pub status: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgentChatView {
-    pub question: String,
-    pub answer: Option<String>,
-    pub running: bool,
-    pub abort_requested: bool,
-    pub error: Option<String>,
 }
 
 /// Cached structured snapshot of the most recent recon tool result. The TUI
@@ -484,6 +482,15 @@ pub enum ShellView {
     AgentChat,
     History,
     Story,
+    /// `/auth` providers + model + spend surface.  See
+    /// `design/mockups/auth.jsx`.
+    Auth,
+    /// `/cost` budget bars + by-tool spend.  See `design/mockups/cost.jsx`.
+    Cost,
+    /// `/patch <alias>` view — RATIONALE / DIFF / TESTS / GUARDRAIL
+    /// per `design/mockups/patch.jsx`.  String is the finding alias
+    /// the patch addresses.
+    Patch(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -516,6 +523,14 @@ pub struct ShellApp {
     pub shell_view: ShellView,
     pub prev_shell_view: Option<ShellView>,
     pub catalog_expanded: bool,
+    /// Index of the catalog row the operator's cursor is on.  `j`/`k`
+    /// move the cursor; `Enter` runs `use <module>` for that row.  Per
+    /// `design/mockups/catalog.jsx` the cursor is the bright `▌` on a
+    /// `c-sel` background, set in `catalog_module_row`.
+    pub catalog_cursor: usize,
+    /// Patch staged for human approval — populated when a tool
+    /// produces a `pending_patch` artefact.  See `ShellView::Patch`.
+    pub pending_patch: Option<PendingPatch>,
     pub config: V2Config,
     pub registry: ModuleRegistry,
     pub option_store: ToolOptionStore,
@@ -589,6 +604,8 @@ impl ShellApp {
             shell_view: ShellView::Catalog,
             prev_shell_view: None,
             catalog_expanded: false,
+            catalog_cursor: 0,
+            pending_patch: None,
             config,
             registry: ModuleRegistry::with_v2_builtins(),
             option_store: ToolOptionStore::new(),
@@ -668,10 +685,7 @@ impl ShellApp {
     }
 
     pub fn log(&mut self, prefix: impl Into<String>, body: impl Into<String>) {
-        self.log.push(LogLine {
-            prefix: prefix.into(),
-            body: body.into(),
-        });
+        self.log.push(LogLine::new(prefix, body));
         if self.log.len() > 500 {
             let overflow = self.log.len() - 500;
             self.log.drain(0..overflow);
@@ -2184,17 +2198,16 @@ impl ShellApp {
             return;
         }
 
+        // Fold any previous turn into history before we mint the new
+        // turn — gives multi-turn parity with `agent-chat.jsx::bubble`.
+        let prior = self.agent_chat.as_ref().cloned().unwrap_or_default();
         let Some(model) = self.config.model.clone() else {
             self.shell_view = ShellView::AgentChat;
-            self.agent_chat = Some(AgentChatView {
-                question: question.to_string(),
-                answer: None,
-                running: false,
-                abort_requested: false,
-                error: Some(
-                    "ask requires an explicit model. Next: model, then choose a pi-agent-core provider/model".to_string(),
-                ),
-            });
+            let mut next = prior.fold_for_next_turn(question.to_string());
+            next.error = Some(
+                "ask requires an explicit model. Next: model, then choose a pi-agent-core provider/model".to_string(),
+            );
+            self.agent_chat = Some(next);
             self.log(
                 "error",
                 "ask requires an explicit model. Next: model, then choose a pi-agent-core provider/model",
@@ -2203,13 +2216,9 @@ impl ShellApp {
         };
         if let Err(message) = validate_shell_model_id(&model) {
             self.shell_view = ShellView::AgentChat;
-            self.agent_chat = Some(AgentChatView {
-                question: question.to_string(),
-                answer: None,
-                running: false,
-                abort_requested: false,
-                error: Some(message.clone()),
-            });
+            let mut next = prior.fold_for_next_turn(question.to_string());
+            next.error = Some(message.clone());
+            self.agent_chat = Some(next);
             self.log("error", message);
             return;
         }
@@ -2223,13 +2232,9 @@ impl ShellApp {
         let thinking_level = self.session_thinking_level.clone();
         let question = question.to_string();
         let (tx, rx) = mpsc::channel();
-        self.agent_chat = Some(AgentChatView {
-            question: question.clone(),
-            answer: None,
-            running: true,
-            abort_requested: false,
-            error: None,
-        });
+        let mut next = prior.fold_for_next_turn(question.clone());
+        next.running = true;
+        self.agent_chat = Some(next);
         self.agent_rx = Some(rx);
         self.shell_view = ShellView::AgentChat;
         self.log(
@@ -2971,7 +2976,9 @@ impl ShellApp {
     }
 
     fn show_auth_status(&mut self) {
-        self.shell_view = ShellView::Config;
+        // `/auth` now lands on the dedicated Auth surface
+        // (`design/mockups/auth.jsx`) instead of the generic Config panel.
+        self.shell_view = ShellView::Auth;
         let api_key_env = self.config.runtime.api_key_env.as_str();
         let env_status = if env::var_os(api_key_env).is_some() {
             "set"
@@ -3117,7 +3124,9 @@ impl ShellApp {
     }
 
     fn show_cost_status(&mut self) {
-        self.shell_view = ShellView::Config;
+        // `/cost` lands on the dedicated Cost surface
+        // (`design/mockups/cost.jsx`) — budget bars + by-tool spend.
+        self.shell_view = ShellView::Cost;
         let message = if let Some(last) = self.last_tool_cost_usd {
             format!(
                 "session estimate ${:.4}; last tool ${:.4}. Scanner-only work may report no LLM cost.",
@@ -8035,6 +8044,11 @@ JSON
         assert!(message.contains("kuzushi doctor"));
         assert!(!message.contains("Free-form chat"));
 
+        let message = unknown_command_message("pr-comment");
+        assert!(message.contains("CLI subcommand"));
+        assert!(message.contains("kuzushi pr-comment"));
+        assert!(!message.contains("Free-form chat"));
+
         // Plain unknown verb still uses the agent-path fallback.
         let message = unknown_command_message("zzwombat");
         assert!(message.contains("Free-form chat"));
@@ -10504,6 +10518,7 @@ JSON
             running: true,
             abort_requested: false,
             error: None,
+            history: Vec::new(),
         });
 
         app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
@@ -10530,6 +10545,7 @@ JSON
             running: true,
             abort_requested: true,
             error: None,
+            history: Vec::new(),
         });
 
         app.apply_agent_event(AgentEvent::Answered {
@@ -10584,6 +10600,29 @@ JSON
             line.prefix == "tool"
                 && line.body.contains("context:build abort requested")
                 && line.body.contains("not confirmed")
+        }));
+    }
+
+    #[test]
+    fn background_tool_failure_clears_running_state() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.tool_running = Some("randori:pasta".to_string());
+        app.tool_abort_requested = true;
+
+        app.apply_tool_event(ToolEvent::Failed {
+            tool_name: "randori:pasta".to_string(),
+            error: "randori:pasta could not satisfy structured JSON contract `ThreatModelDocument`"
+                .to_string(),
+        });
+
+        assert_eq!(app.running_tool_name(), None);
+        assert!(!app.tool_abort_requested());
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "error"
+                && line
+                    .body
+                    .contains("randori:pasta ended after abort request")
+                && line.body.contains("ThreatModelDocument")
         }));
     }
 

@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use crate::artifact_kb::ArtifactKnowledgePromptContext;
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
+use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 
 const REQUIRED_X_RAY_MD: &str = "x-ray.md";
 const REQUIRED_ENTRY_POINTS_MD: &str = "entry-points.md";
@@ -105,23 +106,18 @@ fn run_x_ray(
     )?;
     let input = parse_run_input(&input, ctx)?;
     let prompt = build_x_ray_prompt(&input);
-    let response = runtime.query_blocking(AgentQueryRequest::new(
-        input.model.clone(),
-        input.target.clone(),
-        X_RAY_SYSTEM_PROMPT.to_string(),
-        prompt,
-    ))?;
-
-    match parse_artifact_content_response(&response.structured, &response.text) {
-        Ok(content) => write_x_ray_artifacts(&input.target, content)?,
-        Err(parse_error) => {
-            if !required_artifacts_exist(&input.target) {
-                anyhow::bail!(
-                    "x-ray:run expected pi-agent-core to return JSON artifact content and no existing complete x-ray/ artifact set was found: {parse_error}"
-                );
-            }
-        }
-    }
+    let content = query_required_structured_json(
+        runtime,
+        AgentQueryRequest::new(
+            input.model.clone(),
+            input.target.clone(),
+            X_RAY_SYSTEM_PROMPT.to_string(),
+            prompt,
+        ),
+        StructuredJsonContract::new("x-ray:run", "XRayArtifactContent", x_ray_artifact_schema()),
+        XRayArtifactContent::from_value_owned,
+    )?;
+    write_x_ray_artifacts(&input.target, content)?;
 
     let data =
         read_x_ray_report_artifacts(&input.target, Some(&input.repo_name), "pi-agent-core", 0.0)?;
@@ -271,6 +267,25 @@ Return only JSON with string fields:
 {"xRayMarkdown":"...","entryPointsMarkdown":"...","invariantsMarkdown":"...","architectureSvg":"<svg ...>"}.
 Do not choose a model or runtime; use the model provided by the caller."#;
 
+fn x_ray_artifact_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": [
+            "xRayMarkdown",
+            "entryPointsMarkdown",
+            "invariantsMarkdown",
+            "architectureSvg"
+        ],
+        "additionalProperties": true,
+        "properties": {
+            "xRayMarkdown": {"type": "string"},
+            "entryPointsMarkdown": {"type": "string"},
+            "invariantsMarkdown": {"type": "string"},
+            "architectureSvg": {"type": "string"}
+        }
+    })
+}
+
 fn build_x_ray_prompt(input: &XRayRunInput) -> String {
     let budget_line = input
         .max_budget_usd
@@ -301,21 +316,11 @@ fn build_x_ray_prompt(input: &XRayRunInput) -> String {
     )
 }
 
-fn parse_artifact_content_response(
-    structured: &Option<Value>,
-    text: &str,
-) -> Result<XRayArtifactContent> {
-    if let Some(value) = structured {
-        if let Ok(content) = XRayArtifactContent::from_value(value) {
-            return Ok(content);
-        }
+impl XRayArtifactContent {
+    fn from_value_owned(value: Value) -> Result<Self> {
+        Self::from_value(&value)
     }
 
-    let value = parse_json_object_from_text(text)?;
-    XRayArtifactContent::from_value(&value)
-}
-
-impl XRayArtifactContent {
     fn from_value(value: &Value) -> Result<Self> {
         let x_ray_markdown = string_any(value, &["xRayMarkdown", "xRay", "x_ray", "x-ray.md"])
             .context("missing xRayMarkdown artifact content")?;
@@ -366,29 +371,6 @@ fn string_any(value: &Value, keys: &[&str]) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
-fn parse_json_object_from_text(text: &str) -> Result<Value> {
-    let trimmed = text.trim();
-    let candidate = trimmed
-        .strip_prefix("```json")
-        .or_else(|| trimmed.strip_prefix("```"))
-        .and_then(|without_prefix| without_prefix.strip_suffix("```"))
-        .map(str::trim)
-        .unwrap_or(trimmed);
-
-    if let Ok(value) = serde_json::from_str::<Value>(candidate) {
-        return Ok(value);
-    }
-
-    let start = candidate
-        .find('{')
-        .context("pi-agent-core response did not contain a JSON object")?;
-    let end = candidate
-        .rfind('}')
-        .context("pi-agent-core response did not contain a complete JSON object")?;
-    serde_json::from_str(&candidate[start..=end])
-        .context("Could not parse pi-agent-core JSON artifact response")
-}
-
 fn write_x_ray_artifacts(repo_root: &Path, content: XRayArtifactContent) -> Result<()> {
     let artifact_dir = repo_root.join("x-ray");
     fs::create_dir_all(&artifact_dir)
@@ -411,18 +393,6 @@ fn write_x_ray_artifacts(repo_root: &Path, content: XRayArtifactContent) -> Resu
     )
     .context("Could not write architecture.svg")?;
     Ok(())
-}
-
-fn required_artifacts_exist(repo_root: &Path) -> bool {
-    let artifact_dir = repo_root.join("x-ray");
-    [
-        REQUIRED_X_RAY_MD,
-        REQUIRED_ENTRY_POINTS_MD,
-        REQUIRED_INVARIANTS_MD,
-        REQUIRED_ARCHITECTURE_SVG,
-    ]
-    .iter()
-    .all(|name| artifact_dir.join(name).exists())
 }
 
 fn render_x_ray_run_summary(data: &XRayReportData) -> String {

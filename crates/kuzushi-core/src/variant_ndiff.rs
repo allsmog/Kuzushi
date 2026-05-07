@@ -10,8 +10,9 @@ use uuid::Uuid;
 
 use crate::findings::{Finding, Severity, StaticProofState, TriageVerdict};
 use crate::modules::ToolExecutionContext;
-use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime};
+use crate::runtime::{AgentQueryRequest, AgentRuntime};
 use crate::static_evidence::{StaticEvidenceNode, StaticEvidenceStore};
+use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 
 const DEFAULT_VENDOR_PATHS: &[&str] = &[
     "node_modules",
@@ -232,13 +233,17 @@ pub fn run_variant_lift_pattern(
     let runtime = require_runtime("variant:lift-pattern", runtime)?;
     let model = require_model("variant:lift-pattern", &input, ctx)?;
     let prompt = build_variant_lift_prompt(&finding);
-    let response = runtime.query_blocking(AgentQueryRequest::new(
-        model,
-        workspace.root().to_path_buf(),
-        VARIANT_SIGNATURE_SYSTEM_PROMPT.to_string(),
-        prompt,
-    ))?;
-    let signature = parse_agent_response("variant:lift-pattern", response)?;
+    let signature = query_required_structured_json(
+        runtime,
+        AgentQueryRequest::new(
+            model,
+            workspace.root().to_path_buf(),
+            VARIANT_SIGNATURE_SYSTEM_PROMPT.to_string(),
+            prompt,
+        ),
+        StructuredJsonContract::new("variant:lift-pattern", "VariantSignature", object_schema()),
+        require_json_object,
+    )?;
     let object = signature
         .as_object()
         .context("variant:lift-pattern output parse failed: expected a JSON object")?;
@@ -343,13 +348,17 @@ pub fn run_variant_hunt(
         .unwrap_or(true);
     let vendor_paths = vendor_paths_from_input(&input);
     let prompt = build_variant_hunt_prompt(&finding, include_vendored, &vendor_paths);
-    let response = runtime.query_blocking(AgentQueryRequest::new(
-        model,
-        target.clone(),
-        VARIANT_HUNT_SYSTEM_PROMPT.to_string(),
-        prompt,
-    ))?;
-    let raw = parse_agent_response("variant:hunt", response)?;
+    let raw = query_required_structured_json(
+        runtime,
+        AgentQueryRequest::new(
+            model,
+            target.clone(),
+            VARIANT_HUNT_SYSTEM_PROMPT.to_string(),
+            prompt,
+        ),
+        StructuredJsonContract::new("variant:hunt", "VariantFindings", findings_schema()),
+        require_json_object,
+    )?;
     let repo_name = repo_name(&target);
     let findings = normalize_variant_findings(raw, &target, &repo_name, &finding, max_findings)?;
     let persisted = persist_findings(&target, &findings, ctx)?;
@@ -503,13 +512,21 @@ pub fn run_ndiff_extract_fix_pattern(
     let target = resolve_tool_target(&input, ctx)
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let prompt = build_ndiff_fix_pattern_prompt(record.as_ref(), &patch_text);
-    let response = runtime.query_blocking(AgentQueryRequest::new(
-        model,
-        target,
-        NDIFF_FIX_PATTERN_SYSTEM_PROMPT.to_string(),
-        prompt,
-    ))?;
-    let pattern = parse_agent_response("ndiff:extract-fix-pattern", response)?;
+    let pattern = query_required_structured_json(
+        runtime,
+        AgentQueryRequest::new(
+            model,
+            target,
+            NDIFF_FIX_PATTERN_SYSTEM_PROMPT.to_string(),
+            prompt,
+        ),
+        StructuredJsonContract::new(
+            "ndiff:extract-fix-pattern",
+            "NdiffFixPattern",
+            object_schema(),
+        ),
+        require_json_object,
+    )?;
     let object = pattern
         .as_object()
         .context("ndiff:extract-fix-pattern output parse failed: expected a JSON object")?;
@@ -597,13 +614,21 @@ pub fn run_ndiff_hunt_variants(
         .unwrap_or("unknown")
         .to_string();
     let prompt = build_ndiff_hunt_prompt(&pattern, &advisory_id, include_vendored);
-    let response = runtime.query_blocking(AgentQueryRequest::new(
-        model,
-        target.clone(),
-        NDIFF_HUNT_SYSTEM_PROMPT.to_string(),
-        prompt,
-    ))?;
-    let raw = parse_agent_response("ndiff:hunt-variants", response)?;
+    let raw = query_required_structured_json(
+        runtime,
+        AgentQueryRequest::new(
+            model,
+            target.clone(),
+            NDIFF_HUNT_SYSTEM_PROMPT.to_string(),
+            prompt,
+        ),
+        StructuredJsonContract::new(
+            "ndiff:hunt-variants",
+            "NdiffVariantFindings",
+            findings_schema(),
+        ),
+        require_json_object,
+    )?;
     let repo_name = repo_name(&target);
     let findings = normalize_ndiff_findings(raw, &repo_name, &advisory_id, &pattern, max_findings)?;
     let persisted = persist_findings(&target, &findings, ctx)?;
@@ -1622,23 +1647,31 @@ fn require_model(tool: &str, input: &Value, ctx: &ToolExecutionContext<'_>) -> R
         })
 }
 
-fn parse_agent_response(tool: &str, response: AgentQueryResponse) -> Result<Value> {
-    if let Some(structured) = response.structured {
-        return Ok(structured);
+fn require_json_object(value: Value) -> Result<Value> {
+    if value.is_object() {
+        Ok(value)
+    } else {
+        anyhow::bail!("variant/ndiff structured output must be a JSON object")
     }
-    if let Ok(value) = serde_json::from_str::<Value>(&response.text) {
-        return Ok(value);
-    }
-    let start = response
-        .text
-        .find('{')
-        .with_context(|| format!("{tool} output parse failed: missing JSON object start"))?;
-    let end = response
-        .text
-        .rfind('}')
-        .with_context(|| format!("{tool} output parse failed: missing JSON object end"))?;
-    serde_json::from_str(&response.text[start..=end])
-        .with_context(|| format!("{tool} output parse failed: invalid JSON object"))
+}
+
+fn object_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": true
+    })
+}
+
+fn findings_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["variants"],
+        "additionalProperties": true,
+        "properties": {
+            "variants": {"type": "array", "items": {"type": "object"}},
+            "findings": {"type": "array", "items": {"type": "object"}}
+        }
+    })
 }
 
 fn resolve_tool_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
@@ -1827,7 +1860,7 @@ mod tests {
     use crate::config::V2Config;
     use crate::findings::{FindingStore, TriageOutcome};
     use crate::modules::ModuleRegistry;
-    use crate::runtime::TriageRequest;
+    use crate::runtime::{AgentQueryResponse, TriageRequest};
     use crate::workspace::WorkspaceTarget;
     use std::sync::Mutex;
     use tempfile::tempdir;

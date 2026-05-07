@@ -4,8 +4,8 @@ mod renderer;
 mod theme;
 
 pub use app::{
-    run_shell, run_shell_with_plain, OptionsFilter, OptionsView, ReconSnapshot, ScanPanelState,
-    ShellApp, ShellView, ThreatView,
+    run_shell, run_shell_with_plain, ChatTurn, OptionsFilter, OptionsView, ReconSnapshot,
+    ScanPanelState, ShellApp, ShellView, ThreatView,
 };
 pub use commands::{parse_command, ShellCommand};
 pub use kuzushi_core::ScanProgress;

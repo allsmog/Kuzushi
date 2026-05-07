@@ -24,6 +24,8 @@ pub struct AgentQueryRequest {
     pub prompt: String,
     #[serde(default)]
     pub tool_policy: AgentToolPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structured_output: Option<AgentStructuredOutput>,
 }
 
 impl AgentQueryRequest {
@@ -39,6 +41,7 @@ impl AgentQueryRequest {
             system_prompt: system_prompt.into(),
             prompt: prompt.into(),
             tool_policy: AgentToolPolicy::default(),
+            structured_output: None,
         }
     }
 
@@ -46,6 +49,48 @@ impl AgentQueryRequest {
         self.tool_policy = tool_policy;
         self
     }
+
+    pub fn with_structured_output(mut self, structured_output: AgentStructuredOutput) -> Self {
+        self.structured_output = Some(structured_output);
+        self
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentStructuredOutput {
+    pub name: String,
+    pub schema: Value,
+    #[serde(default)]
+    pub strict: bool,
+}
+
+impl AgentStructuredOutput {
+    pub fn json_schema(name: impl Into<String>, schema: Value) -> Self {
+        Self {
+            name: name.into(),
+            schema,
+            strict: true,
+        }
+    }
+}
+
+pub fn append_structured_output_contract(
+    system_prompt: &str,
+    structured_output: Option<&AgentStructuredOutput>,
+) -> String {
+    let Some(contract) = structured_output else {
+        return system_prompt.to_string();
+    };
+    let schema = serde_json::to_string_pretty(&contract.schema)
+        .unwrap_or_else(|_| contract.schema.to_string());
+    let strict = if contract.strict { "strict " } else { "" };
+    format!(
+        "{system_prompt}\n\nStructured output contract:\n\
+         Return only {strict}JSON for `{name}`. Do not include markdown fences, prose, or trailing commentary.\n\
+         Required JSON schema:\n{schema}",
+        name = contract.name,
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

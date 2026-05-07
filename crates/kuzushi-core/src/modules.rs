@@ -28,6 +28,7 @@ use crate::secret_scan::{scan_for_secrets, SecretScanOptions};
 use crate::static_proof_validator::{
     static_proof_claim_from_whitebox_schema, validate_static_proof_claim, StaticProofValidation,
 };
+use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 use crate::systems_hunt::{execute_systems_hunt_tool, run_systems_hunt_report};
 use crate::threat_model::execute_threat_model_tool;
 use crate::variant_ndiff::{
@@ -1171,7 +1172,8 @@ fn run_agentic_sast_report(
     let agent_tool_policy = agent_tool_policy_for_input(input)?;
 
     let inventory = collect_agentic_repo_inventory(&target, 80, 2048)?;
-    let response = runtime.query_blocking(
+    let first_raw = query_required_structured_json(
+        runtime,
         AgentQueryRequest::new(
             model.clone(),
             target.clone(),
@@ -1179,14 +1181,20 @@ fn run_agentic_sast_report(
             build_agentic_sast_prompt(&target, &options, &inventory, None, whitebox_static),
         )
         .with_tool_policy(agent_tool_policy.clone()),
+        StructuredJsonContract::new(
+            "agentic-sast:scan",
+            "AgenticSastFindings",
+            findings_array_schema(),
+        ),
+        require_json_object,
     )?;
-    let first_raw = parse_agentic_sast_response(response)?;
     let mut findings =
         normalize_agentic_sast_findings(first_raw, &target, options.max_findings, whitebox_static)?;
 
     if options.passes == 2 && !findings.is_empty() {
         let review_context = summarize_agentic_findings_for_review(&findings);
-        let review_response = runtime.query_blocking(
+        let review_raw = query_required_structured_json(
+            runtime,
             AgentQueryRequest::new(
                 model.clone(),
                 target.clone(),
@@ -1200,8 +1208,13 @@ fn run_agentic_sast_report(
                 ),
             )
             .with_tool_policy(agent_tool_policy.clone()),
+            StructuredJsonContract::new(
+                "agentic-sast:scan",
+                "AgenticSastFindings",
+                findings_array_schema(),
+            ),
+            require_json_object,
         )?;
-        let review_raw = parse_agentic_sast_response(review_response)?;
         let review_findings = normalize_agentic_sast_findings(
             review_raw,
             &target,
@@ -1228,13 +1241,23 @@ fn run_agentic_sast_report(
     })
 }
 
-fn parse_agentic_sast_response(response: AgentQueryResponse) -> Result<Value> {
-    match response.structured {
-        Some(value) => Ok(value),
-        None => parse_json_object_from_agent_text(&response.text).with_context(|| {
-            "agentic-sast:scan expected pi-agent-core to return JSON with a findings array"
-        }),
+fn require_json_object(value: Value) -> Result<Value> {
+    if value.is_object() {
+        Ok(value)
+    } else {
+        anyhow::bail!("structured output parse failed: expected a JSON object")
     }
+}
+
+fn findings_array_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["findings"],
+        "additionalProperties": true,
+        "properties": {
+            "findings": {"type": "array", "items": {"type": "object"}}
+        }
+    })
 }
 
 fn collect_agentic_repo_inventory(
@@ -1829,7 +1852,8 @@ fn run_taint_iris_report(
 
     let inventory = collect_agentic_repo_inventory(&target, 80, 2048)?;
     let codeql_db = resolve_taint_codeql_db_path(&target, ctx.workspace.map(WorkspaceTarget::root));
-    let response = runtime.query_blocking(
+    let raw = query_required_structured_json(
+        runtime,
         AgentQueryRequest::new(
             model.clone(),
             target.clone(),
@@ -1837,8 +1861,13 @@ fn run_taint_iris_report(
             build_taint_iris_prompt(&target, &cwes, &inventory, codeql_db.as_deref(), &options),
         )
         .with_tool_policy(agent_tool_policy_for_input(input)?),
+        StructuredJsonContract::new(
+            "taint-iris:hunt",
+            "TaintIrisFindings",
+            findings_array_schema(),
+        ),
+        require_json_object,
     )?;
-    let raw = parse_taint_iris_response(response)?;
     let mut findings = normalize_taint_iris_findings(raw, &target, options.max_findings)?;
     if whitebox_static_profile_requested(input)? {
         mark_whitebox_static_findings(&mut findings, StaticProofState::SourceSinkLinked)?;
@@ -1873,7 +1902,8 @@ fn run_taint_cwe_select_value(
         "pipeline:taint-cwe-select requires an explicit model in config.toml, KUZUSHI_MODEL, or tool input; Kuzushi will not choose a fallback model",
     )?;
     let inventory = collect_agentic_repo_inventory(target, 60, 1024)?;
-    let response = runtime.query_blocking(
+    let raw = query_required_structured_json(
+        runtime,
         AgentQueryRequest::new(
             model.to_string(),
             target.to_path_buf(),
@@ -1881,8 +1911,14 @@ fn run_taint_cwe_select_value(
             build_taint_cwe_select_prompt(target, &inventory),
         )
         .with_tool_policy(agent_tool_policy_for_input(input)?),
+        StructuredJsonContract::new(
+            "pipeline:taint-cwe-select",
+            "TaintCweSelection",
+            taint_cwe_selection_schema(),
+        ),
+        require_json_object,
     )?;
-    parse_taint_cwe_select_response(response)
+    parse_taint_cwe_select_raw(raw)
 }
 
 fn parse_taint_cwes_from_input(input: &Value) -> Result<Option<Vec<TaintCweSelection>>> {
@@ -1938,13 +1974,7 @@ fn parse_taint_cwes_value(value: &Value) -> Result<Vec<TaintCweSelection>> {
     }
 }
 
-fn parse_taint_cwe_select_response(response: AgentQueryResponse) -> Result<Vec<TaintCweSelection>> {
-    let raw = match response.structured {
-        Some(value) => value,
-        None => parse_json_object_from_agent_text(&response.text).with_context(|| {
-            "pipeline:taint-cwe-select expected pi-agent-core to return JSON with a cwes array"
-        })?,
-    };
+fn parse_taint_cwe_select_raw(raw: Value) -> Result<Vec<TaintCweSelection>> {
     let Value::Object(object) = raw else {
         anyhow::bail!("pipeline:taint-cwe-select output parse failed: expected a JSON object");
     };
@@ -1954,13 +1984,32 @@ fn parse_taint_cwe_select_response(response: AgentQueryResponse) -> Result<Vec<T
     parse_taint_cwes_value(value)
 }
 
-fn parse_taint_iris_response(response: AgentQueryResponse) -> Result<Value> {
-    match response.structured {
-        Some(value) => Ok(value),
-        None => parse_json_object_from_agent_text(&response.text).with_context(|| {
-            "taint-iris:hunt expected pi-agent-core to return JSON with a findings array"
-        }),
-    }
+fn taint_cwe_selection_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["cwes"],
+        "additionalProperties": true,
+        "properties": {
+            "cwes": {
+                "type": "array",
+                "items": {
+                    "oneOf": [
+                        {"type": "string"},
+                        {
+                            "type": "object",
+                            "required": ["id"],
+                            "additionalProperties": true,
+                            "properties": {
+                                "id": {"type": "string"},
+                                "name": {"type": "string"},
+                                "reason": {"type": "string"}
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    })
 }
 
 fn build_taint_cwe_select_prompt(target: &Path, inventory: &[(String, String)]) -> String {
@@ -5146,6 +5195,26 @@ const VERIFY_SYSTEM_PROMPT: &str = r#"You are Kuzushi's exploitability verificat
 Return only JSON with these fields:
 {"fingerprint":"...","exploitable":true|false,"poc_payload":string|null,"poc_description":"...","attack_vector":string|null,"preconditions":["..."],"confidence":0.0-1.0}."#;
 
+fn verification_result_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["fingerprint", "exploitable", "confidence"],
+        "additionalProperties": true,
+        "properties": {
+            "fingerprint": {"type": "string"},
+            "exploitable": {"type": "boolean"},
+            "pocPayload": {"type": ["string", "null"]},
+            "poc_payload": {"type": ["string", "null"]},
+            "pocDescription": {"type": "string"},
+            "poc_description": {"type": "string"},
+            "attackVector": {"type": ["string", "null"]},
+            "attack_vector": {"type": ["string", "null"]},
+            "preconditions": {"type": "array", "items": {"type": "string"}},
+            "confidence": {"type": "number"}
+        }
+    })
+}
+
 fn run_verify_finding(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
@@ -5181,19 +5250,21 @@ fn run_verify_finding(
     )?;
 
     let prompt = build_verify_prompt(&finding, &triage, input.prompt_template.as_deref())?;
-    let response = runtime.query_blocking(AgentQueryRequest::new(
-        model,
-        workspace.root().to_path_buf(),
-        VERIFY_SYSTEM_PROMPT.to_string(),
-        prompt,
-    ))?;
-    let raw = match response.structured {
-        Some(value) => value,
-        None => parse_json_object_from_agent_text(&response.text).with_context(|| {
-            "verify:finding expected pi-agent-core to return a JSON verification result"
-        })?,
-    };
-    let result = normalize_verification_result(raw, &finding.fingerprint)?;
+    let result = query_required_structured_json(
+        runtime,
+        AgentQueryRequest::new(
+            model,
+            workspace.root().to_path_buf(),
+            VERIFY_SYSTEM_PROMPT.to_string(),
+            prompt,
+        ),
+        StructuredJsonContract::new(
+            "verify:finding",
+            "VerificationResult",
+            verification_result_schema(),
+        ),
+        |raw| normalize_verification_result(raw, &finding.fingerprint),
+    )?;
     let exploitable = result
         .get("exploitable")
         .and_then(Value::as_bool)

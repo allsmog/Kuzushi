@@ -14,6 +14,10 @@ recon | Recon
  ⏵ recon:subdomain                headless Run subdomain reconnaissance.
  ⏵ recon:http-fingerprint         headless Fingerprint HTTP services and technology stacks.
 
+ -- STATS | this session -----------------------------------------------------------------------------------------------
+log entries        3 from `recon`
+tools bound        3
+
  -- RECENT RECON ACTIVITY ----------------------------------------------------------------------------------------------
  | recon:nmap discovered 5 hosts and 18 services for acme-checkout.com
  | recon:subdomain discovered 7 subdomains

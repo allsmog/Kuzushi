@@ -20,9 +20,9 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
-    AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolLoopRequest,
-    AgentToolPolicy, LoopHistoryEntry, RuntimeConfig, ToolCall, TriageOutcome, TriageRequest,
-    TriageVerdict, V2Config,
+    AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentStructuredOutput,
+    AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry, RuntimeConfig, ToolCall,
+    TriageOutcome, TriageRequest, TriageVerdict, V2Config,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -90,11 +90,13 @@ impl PiAgentCoreRuntime {
 #[async_trait]
 impl AgentRuntime for PiAgentCoreRuntime {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+        let structured_output = request.structured_output;
         let bridge_request = BridgeRequest {
             model: request.model,
             cwd: request.cwd.display().to_string(),
             system_prompt: request.system_prompt,
             prompt: request.prompt,
+            structured_output,
             api_key_env: self.api_key_env.clone(),
             api_key: self.api_key.clone(),
             base_url: self.base_url.clone(),
@@ -449,6 +451,7 @@ struct BridgeRequest {
     cwd: String,
     system_prompt: String,
     prompt: String,
+    structured_output: Option<AgentStructuredOutput>,
     api_key_env: String,
     api_key: Option<String>,
     base_url: Option<String>,

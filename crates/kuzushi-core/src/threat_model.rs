@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
+use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 
 const VALID_STAGES: &[&str] = &["s1", "s2", "s3", "s4"];
 const VALID_METHODOLOGIES: &[&str] = &["pasta", "stride", "dread"];
@@ -111,22 +112,25 @@ fn build_threat_model(
     let input = parse_build_input(&input, ctx, flavor)?;
     let previous_model = load_persistent_threat_model(&input.target);
     let prompt = build_agent_prompt(&input, previous_model.as_ref())?;
-    let response = runtime.query_blocking(AgentQueryRequest::new(
-        input.model.clone(),
-        input.target.clone(),
-        THREAT_MODEL_SYSTEM_PROMPT.to_string(),
-        prompt,
-    ))?;
-
-    let raw = match response.structured {
-        Some(value) => value,
-        None => parse_json_from_agent_text(&response.text).with_context(|| {
-            format!(
-                "{} expected pi-agent-core to return a JSON ThreatModelDocument",
-                flavor.tool_name()
-            )
-        })?,
-    };
+    let raw = query_required_structured_json(
+        runtime,
+        AgentQueryRequest::new(
+            input.model.clone(),
+            input.target.clone(),
+            THREAT_MODEL_SYSTEM_PROMPT.to_string(),
+            prompt,
+        ),
+        StructuredJsonContract::new(
+            flavor.tool_name(),
+            "ThreatModelDocument",
+            threat_model_document_schema(),
+        ),
+        |raw| {
+            let (document_candidate, _) = extract_document_and_findings(raw.clone())?;
+            normalize_document(document_candidate, &input.methodology)?;
+            Ok(raw)
+        },
+    )?;
     let (document_candidate, bridge_findings) = extract_document_and_findings(raw)?;
     let document = normalize_document(document_candidate, &input.methodology)?;
     let document = apply_methodology(document, &input.methodology)?;
@@ -363,6 +367,30 @@ const THREAT_MODEL_SYSTEM_PROMPT: &str = r#"You are Kuzushi's threat-modeling ag
 Return only JSON. Produce a normalized ThreatModelDocument with:
 {"version":"2.0","dfd":{"nodes":[],"flows":[],"trustBoundaries":[]},"threats":[],"summary":{"total":0,"bySeverity":{},"byCategory":{}}}
 Use camelCase field names from the schema. Do not include markdown."#;
+
+fn threat_model_document_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["version", "dfd", "threats", "summary"],
+        "additionalProperties": true,
+        "properties": {
+            "version": {"type": "string"},
+            "methodology": {"type": "string"},
+            "dfd": {
+                "type": "object",
+                "required": ["nodes", "flows", "trustBoundaries"],
+                "additionalProperties": true,
+                "properties": {
+                    "nodes": {"type": "array", "items": {"type": "object"}},
+                    "flows": {"type": "array", "items": {"type": "object"}},
+                    "trustBoundaries": {"type": "array", "items": {"type": "object"}}
+                }
+            },
+            "threats": {"type": "array", "items": {"type": "object"}},
+            "summary": {"type": "object"}
+        }
+    })
+}
 
 fn build_agent_prompt(input: &BuildInput, previous_model: Option<&Value>) -> Result<String> {
     let files = inventory_files(&input.target, input.max_elements.saturating_mul(4).max(40))?;
@@ -1138,32 +1166,6 @@ fn extract_document_and_findings(raw: Value) -> Result<(Value, Option<Vec<Value>
     Ok((raw, None))
 }
 
-fn parse_json_from_agent_text(text: &str) -> Result<Value> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        anyhow::bail!("pi-agent-core returned no threat model content");
-    }
-    let candidate = if let Some(stripped) = trimmed.strip_prefix("```") {
-        stripped
-            .trim_start_matches("json")
-            .trim()
-            .strip_suffix("```")
-            .unwrap_or(stripped)
-            .trim()
-    } else {
-        trimmed
-    };
-    match serde_json::from_str(candidate) {
-        Ok(value) => Ok(value),
-        Err(_) => {
-            let start = candidate.find('{').context("no JSON object start found")?;
-            let end = candidate.rfind('}').context("no JSON object end found")?;
-            serde_json::from_str(&candidate[start..=end])
-                .context("Could not parse JSON object from pi-agent-core response")
-        }
-    }
-}
-
 pub fn load_persistent_threat_model(root: &Path) -> Option<Value> {
     let path = root.join(".kuzushi").join("threat-model.json");
     let raw = fs::read_to_string(path).ok()?;
@@ -1632,24 +1634,34 @@ mod tests {
     use crate::findings::{TriageOutcome, TriageVerdict};
     use crate::modules::{ModuleRegistry, ToolExecutionContext};
     use crate::runtime::{AgentQueryResponse, TriageRequest};
+    use crate::structured_output::parse_json_value_from_agent_text;
     use crate::workspace::WorkspaceTarget;
 
     #[test]
     fn parses_text_json_with_markdown_fence() {
-        let parsed = parse_json_from_agent_text("```json\n{\"version\":\"2.0\"}\n```").unwrap();
+        let parsed =
+            parse_json_value_from_agent_text("```json\n{\"version\":\"2.0\"}\n```").unwrap();
         assert_eq!(parsed.get("version").and_then(Value::as_str), Some("2.0"));
     }
 
     struct MockThreatRuntime {
         requests: Mutex<Vec<AgentQueryRequest>>,
-        response: Value,
+        responses: Mutex<Vec<AgentQueryResponse>>,
     }
 
     impl MockThreatRuntime {
         fn new(response: Value) -> Self {
+            Self::responses(vec![AgentQueryResponse {
+                text: String::new(),
+                structured: Some(response),
+                ..Default::default()
+            }])
+        }
+
+        fn responses(responses: Vec<AgentQueryResponse>) -> Self {
             Self {
                 requests: Mutex::new(Vec::new()),
-                response,
+                responses: Mutex::new(responses),
             }
         }
 
@@ -1661,11 +1673,11 @@ mod tests {
     impl AgentRuntime for MockThreatRuntime {
         fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
             self.requests.lock().unwrap().push(request);
-            Ok(AgentQueryResponse {
-                text: String::new(),
-                structured: Some(self.response.clone()),
-                ..Default::default()
-            })
+            let mut responses = self.responses.lock().unwrap();
+            if responses.is_empty() {
+                anyhow::bail!("mock runtime had no queued threat-model response");
+            }
+            Ok(responses.remove(0))
         }
 
         fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
@@ -1806,7 +1818,145 @@ mod tests {
         let requests = runtime.requests();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].model, "openai:gpt-4.1");
+        assert_eq!(
+            requests[0]
+                .structured_output
+                .as_ref()
+                .map(|contract| contract.name.as_str()),
+            Some("ThreatModelDocument")
+        );
         assert!(requests[0].prompt.contains("Repository inventory"));
+    }
+
+    fn run_randori_pasta_with_runtime(root: &Path, runtime: &MockThreatRuntime) -> Result<Value> {
+        fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(root).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+        };
+        registry.execute_tool_with_runtime(
+            "randori:pasta",
+            json!({"outputDir": ".kuzushi/randori"}),
+            &ctx,
+            Some(runtime),
+        )
+    }
+
+    #[test]
+    fn randori_pasta_succeeds_when_runtime_returns_structured_document() {
+        let temp = tempfile::tempdir().unwrap();
+        let runtime = MockThreatRuntime::new(sample_document());
+
+        let result = run_randori_pasta_with_runtime(temp.path(), &runtime).unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            result
+                .pointer("/data/document/threats/0/id")
+                .and_then(Value::as_str),
+            Some("T-001")
+        );
+        let requests = runtime.requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].model, "openai:gpt-4.1");
+        assert_eq!(
+            requests[0]
+                .structured_output
+                .as_ref()
+                .map(|contract| contract.name.as_str()),
+            Some("ThreatModelDocument")
+        );
+    }
+
+    #[test]
+    fn randori_pasta_succeeds_when_runtime_returns_json_text() {
+        let temp = tempfile::tempdir().unwrap();
+        let runtime = MockThreatRuntime::responses(vec![AgentQueryResponse {
+            text: serde_json::to_string(&sample_document()).unwrap(),
+            structured: None,
+            ..Default::default()
+        }]);
+
+        let result = run_randori_pasta_with_runtime(temp.path(), &runtime).unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(runtime.requests().len(), 1);
+    }
+
+    #[test]
+    fn randori_pasta_repairs_once_after_non_json_then_valid_json() {
+        let temp = tempfile::tempdir().unwrap();
+        let runtime = MockThreatRuntime::responses(vec![
+            AgentQueryResponse {
+                text: "I found threats but not as JSON".to_string(),
+                structured: None,
+                ..Default::default()
+            },
+            AgentQueryResponse {
+                text: serde_json::to_string(&sample_document()).unwrap(),
+                structured: None,
+                ..Default::default()
+            },
+        ]);
+
+        let result = run_randori_pasta_with_runtime(temp.path(), &runtime).unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        let requests = runtime.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(requests
+            .iter()
+            .all(|request| request.model == "openai:gpt-4.1"));
+        assert!(requests.iter().all(|request| request
+            .structured_output
+            .as_ref()
+            .is_some_and(|contract| contract.name == "ThreatModelDocument")));
+        assert!(requests[1].prompt.contains("Raw invalid model response"));
+        assert!(requests[1]
+            .prompt
+            .contains("I found threats but not as JSON"));
+    }
+
+    #[test]
+    fn randori_pasta_fails_clearly_after_repair_also_invalid() {
+        let temp = tempfile::tempdir().unwrap();
+        let runtime = MockThreatRuntime::responses(vec![
+            AgentQueryResponse {
+                text: "not json".to_string(),
+                structured: None,
+                ..Default::default()
+            },
+            AgentQueryResponse {
+                text: "still not json".to_string(),
+                structured: None,
+                ..Default::default()
+            },
+        ]);
+
+        let err = run_randori_pasta_with_runtime(temp.path(), &runtime)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("randori:pasta"), "{err}");
+        assert!(err.contains("ThreatModelDocument"), "{err}");
+        assert!(err.contains("Initial parse/validation failure"), "{err}");
+        assert!(err.contains("Raw initial model response"), "{err}");
+        assert!(err.contains("not json"), "{err}");
+        assert!(err.contains("still not json"), "{err}");
+        let requests = runtime.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(requests
+            .iter()
+            .all(|request| request.model == "openai:gpt-4.1"));
     }
 
     #[test]

@@ -32,6 +32,7 @@ pub mod static_narrative;
 pub mod static_proof_validator;
 pub mod static_ranking;
 pub mod static_registry;
+pub(crate) mod structured_output;
 pub mod systems_hunt;
 pub mod threat_model;
 pub mod variant_ndiff;
@@ -118,9 +119,10 @@ pub use repository_inventory::{
     RepositoryInventory,
 };
 pub use runtime::{
-    run_tool_loop, AgentLoopOutcome, AgentLoopStep, AgentQueryRequest, AgentQueryResponse,
-    AgentRuntime, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry, ModelTier,
-    SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult, TriageRequest,
+    append_structured_output_contract, run_tool_loop, AgentLoopOutcome, AgentLoopStep,
+    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentStructuredOutput, AgentTool,
+    AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry, ModelTier, SubagentRole, ToolBox,
+    ToolCall, ToolCallHandler, ToolResult, TriageRequest,
 };
 pub use scan::{
     default_scan_engines, index_codeql_sarif_as_static_evidence, normalize_codeql_sarif,

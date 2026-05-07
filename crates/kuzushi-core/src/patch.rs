@@ -12,6 +12,7 @@ use crate::findings::{
 };
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
+use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 
 #[derive(Debug, Clone)]
 struct PatchFindingInput {
@@ -264,18 +265,29 @@ fn synthesize_patch(
     history: &[PatchAttempt],
 ) -> Result<PatchSynthesis> {
     let prompt = build_patch_prompt(repo_root, repo_name, finding, triage, history)?;
-    let response = runtime.query_blocking(AgentQueryRequest::new(
-        model.to_string(),
-        repo_root.to_path_buf(),
-        PATCH_SYSTEM_PROMPT.to_string(),
-        prompt,
-    ))?;
-    let raw = match response.structured {
-        Some(value) => value,
-        None => parse_json_object_from_agent_text(&response.text)
-            .context("patch:finding expected pi-agent-core to return JSON with diff/explanation")?,
-    };
-    parse_patch_synthesis(raw)
+    query_required_structured_json(
+        runtime,
+        AgentQueryRequest::new(
+            model.to_string(),
+            repo_root.to_path_buf(),
+            PATCH_SYSTEM_PROMPT.to_string(),
+            prompt,
+        ),
+        StructuredJsonContract::new("patch:finding", "PatchSynthesis", patch_synthesis_schema()),
+        parse_patch_synthesis,
+    )
+}
+
+fn patch_synthesis_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["diff", "explanation"],
+        "additionalProperties": false,
+        "properties": {
+            "diff": {"type": "string"},
+            "explanation": {"type": "string"}
+        }
+    })
 }
 
 fn build_patch_prompt(
@@ -350,25 +362,6 @@ fn parse_patch_synthesis(raw: Value) -> Result<PatchSynthesis> {
         .context("patch synthesis output parse failed: missing non-empty diff")?;
     let explanation = read_object_string(&object, &["explanation"]).unwrap_or_default();
     Ok(PatchSynthesis { diff, explanation })
-}
-
-fn parse_json_object_from_agent_text(text: &str) -> Result<Value> {
-    if let Ok(value) = serde_json::from_str::<Value>(text) {
-        return Ok(value);
-    }
-
-    let start = text
-        .find('{')
-        .context("patch output parse failed: missing JSON object start")?;
-    let end = text
-        .rfind('}')
-        .context("patch output parse failed: missing JSON object end")?;
-    if end < start {
-        anyhow::bail!("patch output parse failed: malformed JSON object");
-    }
-
-    serde_json::from_str(&text[start..=end])
-        .with_context(|| "patch output parse failed: invalid JSON object")
 }
 
 #[derive(Debug, Clone)]
