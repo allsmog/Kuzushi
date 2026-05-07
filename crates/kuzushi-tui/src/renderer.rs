@@ -3157,7 +3157,9 @@ fn module_table_widths(width: u16) -> Vec<usize> {
 }
 
 fn table_header(values: &[&str], widths: &[usize]) -> Line<'static> {
-    Line::styled(table_text(values, widths), theme::subtle())
+    // Mockup column headers wear `c-label` (bold blue), see e.g.
+    // `design/mockups/findings.jsx::heads` and `tools.jsx::heads`.
+    Line::styled(table_text(values, widths), theme::label())
 }
 
 fn table_row(values: &[&str], widths: &[usize]) -> Line<'static> {
@@ -3211,7 +3213,8 @@ fn aligned_header(values: &[&str], widths: &[usize]) -> Line<'static> {
             .iter()
             .zip(widths.iter())
             .map(|(value, width)| {
-                Span::styled(format!("{}  ", pad(value, *width)), theme::subtle())
+                // c-label header per `design/mockups/_shared.jsx` headers.
+                Span::styled(format!("{}  ", pad(value, *width)), theme::label())
             })
             .collect::<Vec<_>>(),
     )
