@@ -4,7 +4,7 @@ assertion_line: 239
 ---
 KUZUSHI  mode:run | target none | 1 findings (1 critical) | ctx missing | module catalog | model unconfigured | cost ...
 
-⠟ ./acme-checkout | running: agentic-sast tracing | 1 finding(s) | run run-abc1
+⠿ ./acme-checkout | running: agentic-sast tracing | 1 finding(s) | run run-abc1
 
 ---------------------------------------------------- SCAN PROGRESS -----------------------------------------------------
 ✓ context:build           ready
