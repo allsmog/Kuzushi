@@ -35,6 +35,30 @@ fn catalog_view_default() {
 }
 
 #[test]
+fn threat_stories_view_with_canonical_fixture() {
+    let mut app = fresh_app();
+    app.shell_view = ShellView::Threat(ThreatView::Stories);
+    insta::with_settings!({
+        prepend_module_to_snapshot => false,
+        omit_expression => true,
+    }, {
+        insta::assert_snapshot!("threat_stories_canonical", render_at_120(&app));
+    });
+}
+
+#[test]
+fn threat_scope_view_with_canonical_fixture() {
+    let mut app = fresh_app();
+    app.shell_view = ShellView::Threat(ThreatView::Scope);
+    insta::with_settings!({
+        prepend_module_to_snapshot => false,
+        omit_expression => true,
+    }, {
+        insta::assert_snapshot!("threat_scope_canonical", render_at_120(&app));
+    });
+}
+
+#[test]
 fn threat_dfd_view_canonical_diagram() {
     let mut app = fresh_app();
     app.shell_view = ShellView::Threat(ThreatView::Dfd);

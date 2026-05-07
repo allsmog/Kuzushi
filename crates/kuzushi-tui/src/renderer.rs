@@ -1557,34 +1557,88 @@ fn threat_lines(app: &ShellApp, area: Rect, view: ThreatView) -> Vec<Line<'stati
             }
         }
         ThreatView::Stories => {
-            lines.push(divider("STORIES", area.width));
-            lines.push(detail(
-                "A1",
-                "malicious input reaches a sink through an unvalidated handler",
+            let doc = current_threat_model_doc(app);
+            let stories = doc
+                .as_ref()
+                .and_then(stories_from_doc)
+                .unwrap_or_else(canonical_stories_fixture);
+            lines.push(section_header_line(
+                &format!("ATTACKER STORIES · {}", stories.len()),
+                area.width,
             ));
-            lines.push(detail(
-                "A2",
-                "dependency behavior changes scanner or runtime assumptions",
-            ));
-            lines.push(detail(
-                "A3",
-                "local secrets leak through logs, artifacts, or prompt context",
-            ));
+            for (id, severity, title, attack, location) in stories.into_iter().take(8) {
+                lines.push(Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled("▸ ", theme::warn()),
+                    Span::styled(pad(&id, 8), theme::accent()),
+                    Span::styled(
+                        pad(&severity.as_str().to_uppercase(), 9),
+                        theme::severity(severity),
+                    ),
+                    Span::styled(title, theme::primary()),
+                ]));
+                if !attack.is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::raw("              "),
+                        Span::styled("attack ", theme::subtle()),
+                        Span::styled(attack, theme::muted()),
+                    ]));
+                }
+                if !location.is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::raw("              "),
+                        Span::styled("loc    ", theme::subtle()),
+                        Span::styled(location, theme::muted()),
+                    ]));
+                }
+            }
         }
         ThreatView::Scope => {
-            lines.push(divider("SCOPE", area.width));
-            lines.push(detail(
-                "critical",
-                "auth, request parsing, code execution paths",
+            let doc = current_threat_model_doc(app);
+            let buckets = doc
+                .as_ref()
+                .and_then(scope_buckets_from_doc)
+                .unwrap_or_else(canonical_scope_buckets);
+            let total: usize = buckets.iter().map(|(_, _, items)| items.len()).sum();
+            lines.push(section_header_line(
+                &format!("SCOPE · {total} issues"),
+                area.width,
             ));
-            lines.push(detail(
-                "high",
-                "persistence, background jobs, external tools",
-            ));
-            lines.push(detail(
-                "out of scope",
-                "generated caches, vendored fixtures",
-            ));
+            for (severity, label, items) in &buckets {
+                if items.is_empty() {
+                    continue;
+                }
+                lines.push(Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled(
+                        format!("{} · {}", label.to_uppercase(), items.len()),
+                        theme::severity(*severity),
+                    ),
+                ]));
+                for item in items.iter().take(4) {
+                    lines.push(Line::from(vec![
+                        Span::raw("      "),
+                        Span::styled("• ", theme::subtle()),
+                        Span::styled(item.clone(), theme::muted()),
+                    ]));
+                }
+                if items.len() > 4 {
+                    lines.push(Line::from(vec![
+                        Span::raw("      "),
+                        Span::styled(format!("… {} more", items.len() - 4), theme::subtle()),
+                    ]));
+                }
+            }
+            lines.push(blank());
+            lines.push(Line::from(vec![
+                Span::raw("   "),
+                Span::styled("OUT OF SCOPE", theme::muted()),
+            ]));
+            lines.push(Line::from(vec![
+                Span::raw("      "),
+                Span::styled("• ", theme::subtle()),
+                Span::styled("generated caches, vendored fixtures", theme::muted()),
+            ]));
         }
         ThreatView::Summary => {
             let doc = current_threat_model_doc(app);
@@ -3599,6 +3653,168 @@ fn stride_rollup_from_doc(
     Some(rows)
 }
 
+/// `(id, severity, title, attack_vector, location)` — one attacker story.
+type StoryRow = (String, Severity, String, String, String);
+
+/// Extract attacker stories from the persisted threat model. Each `threats[]`
+/// entry becomes one story, sorted by impact severity (highest first).
+fn stories_from_doc(doc: &serde_json::Value) -> Option<Vec<StoryRow>> {
+    let threats = doc.get("threats")?.as_array()?;
+    if threats.is_empty() {
+        return None;
+    }
+    let mut rows: Vec<StoryRow> = threats
+        .iter()
+        .filter_map(|t| {
+            let id = t.get("id").and_then(|v| v.as_str())?.to_string();
+            let severity = t
+                .get("impact")
+                .and_then(|v| v.as_str())
+                .map(impact_to_severity)
+                .unwrap_or(Severity::Medium);
+            let title = t
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("untitled")
+                .to_string();
+            let attack = t
+                .get("attackVector")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let location = t
+                .get("affectedFiles")
+                .and_then(|v| v.as_array())
+                .and_then(|files| files.first())
+                .map(|f| {
+                    let path = f.get("filePath").and_then(|v| v.as_str()).unwrap_or("");
+                    let line = f.get("startLine").and_then(|v| v.as_u64()).unwrap_or(0);
+                    if path.is_empty() {
+                        String::new()
+                    } else if line == 0 {
+                        path.to_string()
+                    } else {
+                        format!("{path}:{line}")
+                    }
+                })
+                .unwrap_or_default();
+            Some((id, severity, title, attack, location))
+        })
+        .collect();
+    rows.sort_by_key(|(_, sev, _, _, _)| std::cmp::Reverse(severity_rank(*sev)));
+    Some(rows)
+}
+
+/// Fixture matching the canonical 4 attacker stories used when no real
+/// threat model is loaded.
+fn canonical_stories_fixture() -> Vec<StoryRow> {
+    vec![
+        (
+            "T-001".to_string(),
+            Severity::Critical,
+            "sql injection via order_id concatenation".to_string(),
+            "POST /orders/<id>".to_string(),
+            "apps/api/orders.rs:142".to_string(),
+        ),
+        (
+            "T-002".to_string(),
+            Severity::Critical,
+            "prompt injection sink reads user body".to_string(),
+            "user message → llm context".to_string(),
+            "apps/web/agents/concierge.ts:88".to_string(),
+        ),
+        (
+            "T-003".to_string(),
+            Severity::High,
+            "jwt verify accepts alg=none".to_string(),
+            "forged Authorization header".to_string(),
+            "apps/api/auth/jwt.rs:54".to_string(),
+        ),
+        (
+            "T-004".to_string(),
+            Severity::High,
+            "shell exec from cron payload".to_string(),
+            "scheduled job pulls untrusted task".to_string(),
+            "jobs/worker.py:213".to_string(),
+        ),
+    ]
+}
+
+/// `(severity, label, items)` — one criticality bucket of threat titles.
+type ScopeBucket = (Severity, &'static str, Vec<String>);
+
+/// Bucket threats from the persisted model by impact severity.
+fn scope_buckets_from_doc(doc: &serde_json::Value) -> Option<Vec<ScopeBucket>> {
+    let threats = doc.get("threats")?.as_array()?;
+    if threats.is_empty() {
+        return None;
+    }
+    let mut buckets: Vec<ScopeBucket> = vec![
+        (Severity::Critical, "critical", Vec::new()),
+        (Severity::High, "high", Vec::new()),
+        (Severity::Medium, "medium", Vec::new()),
+        (Severity::Low, "low", Vec::new()),
+    ];
+    for t in threats {
+        let severity = t
+            .get("impact")
+            .and_then(|v| v.as_str())
+            .map(impact_to_severity)
+            .unwrap_or(Severity::Medium);
+        let title = t
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("untitled")
+            .to_string();
+        if let Some((_, _, items)) = buckets.iter_mut().find(|(sev, _, _)| *sev == severity) {
+            items.push(title);
+        }
+    }
+    Some(buckets)
+}
+
+/// Fixture used when no real threat model is loaded — matches the canonical
+/// design content.
+fn canonical_scope_buckets() -> Vec<ScopeBucket> {
+    vec![
+        (
+            Severity::Critical,
+            "critical",
+            vec![
+                "sql injection via order_id concatenation".to_string(),
+                "prompt injection sink reads user body".to_string(),
+            ],
+        ),
+        (
+            Severity::High,
+            "high",
+            vec![
+                "jwt verify accepts alg=none".to_string(),
+                "shell exec from cron payload".to_string(),
+                "path traversal in /assets/<file>".to_string(),
+            ],
+        ),
+        (
+            Severity::Medium,
+            "medium",
+            vec![
+                "open redirect on /login?next=".to_string(),
+                "csrf token not bound to session".to_string(),
+                "unbounded regex on /search".to_string(),
+            ],
+        ),
+        (
+            Severity::Low,
+            "low",
+            vec![
+                "cors allows null origin".to_string(),
+                "cookie set without SameSite".to_string(),
+                "console.log of req.body in handler".to_string(),
+            ],
+        ),
+    ]
+}
+
 fn impact_to_severity(value: &str) -> Severity {
     match value.to_lowercase().as_str() {
         "critical" => Severity::Critical,
@@ -4571,6 +4787,87 @@ mod tests {
                 "unexpected streaming cursor while idle: {text:?}"
             );
         }
+    }
+
+    #[test]
+    fn stories_from_doc_sorts_threats_by_impact_severity() {
+        let doc = serde_json::json!({
+            "threats": [
+                {"id": "T-001", "title": "low risk",  "impact": "low",      "category": "spoofing",  "attackVector": "vec1"},
+                {"id": "T-002", "title": "critical bug", "impact": "critical","category": "tampering","attackVector": "vec2",
+                 "affectedFiles": [{"filePath": "src/api.rs", "startLine": 42}]},
+                {"id": "T-003", "title": "high issue", "impact": "high",     "category": "elevation_of_privilege"}
+            ]
+        });
+        let stories = stories_from_doc(&doc).expect("non-empty stories");
+        assert_eq!(stories.len(), 3);
+        assert_eq!(stories[0].0, "T-002");
+        assert_eq!(stories[0].1, Severity::Critical);
+        assert_eq!(stories[0].4, "src/api.rs:42");
+        assert_eq!(stories[1].0, "T-003");
+        assert_eq!(stories[1].1, Severity::High);
+        assert_eq!(stories[2].0, "T-001");
+    }
+
+    #[test]
+    fn scope_buckets_from_doc_groups_by_impact() {
+        let doc = serde_json::json!({
+            "threats": [
+                {"title": "a", "impact": "critical"},
+                {"title": "b", "impact": "high"},
+                {"title": "c", "impact": "high"},
+                {"title": "d", "impact": "medium"}
+            ]
+        });
+        let buckets = scope_buckets_from_doc(&doc).expect("non-empty");
+        assert_eq!(buckets[0].0, Severity::Critical);
+        assert_eq!(buckets[0].2.len(), 1);
+        assert_eq!(buckets[1].0, Severity::High);
+        assert_eq!(buckets[1].2.len(), 2);
+        assert_eq!(buckets[2].0, Severity::Medium);
+        assert_eq!(buckets[2].2.len(), 1);
+        assert_eq!(buckets[3].0, Severity::Low);
+        assert!(buckets[3].2.is_empty());
+    }
+
+    #[test]
+    fn threats_stories_view_renders_attacker_story_cards() {
+        let backend = TestBackend::new(120, 36);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Threat(ThreatView::Stories);
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("ATTACKER STORIES"));
+        assert!(rendered.contains("T-001"));
+        assert!(rendered.contains("CRITICAL"));
+        assert!(rendered.contains("attack"));
+        assert!(rendered.contains("loc"));
+        // Old placeholder gone
+        assert!(!rendered.contains("malicious input reaches a sink"));
+    }
+
+    #[test]
+    fn threats_scope_view_renders_criticality_buckets() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Threat(ThreatView::Scope);
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(
+            rendered.contains("SCOPE · 11 ISSUES"),
+            "expected SCOPE · 11 ISSUES in: {rendered}"
+        );
+        assert!(rendered.contains("CRITICAL · 2"));
+        assert!(rendered.contains("HIGH · 3"));
+        assert!(rendered.contains("OUT OF SCOPE"));
+        // Old placeholders gone
+        assert!(!rendered.contains("auth, request parsing"));
     }
 
     #[test]
