@@ -349,7 +349,7 @@ impl ShellApp {
             && self.is_scan_paused()
     }
 
-    pub(super) fn handle_key(&mut self, key: KeyEvent) {
+    pub fn handle_key(&mut self, key: KeyEvent) {
         if self.is_budget_halted() && key.modifiers.is_empty() {
             if let KeyCode::Char(ch) = key.code {
                 match ch.to_ascii_lowercase() {
@@ -656,6 +656,31 @@ impl ShellApp {
     }
 
     fn handle_generic_scroll_hotkey(&mut self, key: KeyEvent) -> bool {
+        // Catalog j/k drives the row cursor (`design/mockups/catalog.jsx`
+        // advertises `j/k row`), not the module-scroll.  Catalog scrolling
+        // already lives on PgUp/PgDn for very tall workspaces.
+        if matches!(self.shell_view, ShellView::Catalog) && self.catalog_expanded {
+            match key.code {
+                KeyCode::Char('j') => {
+                    self.move_catalog_cursor(1);
+                    return true;
+                }
+                KeyCode::Char('k') => {
+                    self.move_catalog_cursor(-1);
+                    return true;
+                }
+                KeyCode::Char('g') => {
+                    self.catalog_cursor = 0;
+                    return true;
+                }
+                KeyCode::Char('G') => {
+                    let total = self.catalog_module_count();
+                    self.catalog_cursor = total.saturating_sub(1);
+                    return true;
+                }
+                _ => {}
+            }
+        }
         if !self.is_scrollable_view() {
             return false;
         }

@@ -399,6 +399,24 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             .push(module);
     }
 
+    // Compute the row at which the catalog cursor sits.  Walk categories
+    // in render order and gather visible modules so the cursor index is
+    // stable across renders.  `j`/`k` in `state_transitions` clamp the
+    // cursor to the visible row count.
+    let mut visible_ids: Vec<String> = Vec::new();
+    for category in ["OFFENSE", "INTEL", "GOVERNANCE", "DEFENSE"] {
+        if let Some(rows) = grouped.get(category) {
+            for module in rows {
+                visible_ids.push(module.metadata().id.clone());
+            }
+        }
+    }
+    let cursor_id = if visible_ids.is_empty() {
+        None
+    } else {
+        Some(visible_ids[app.catalog_cursor.min(visible_ids.len() - 1)].clone())
+    };
+
     for category in ["OFFENSE", "INTEL", "GOVERNANCE", "DEFENSE"] {
         let Some(rows) = grouped.get(category) else {
             continue;
@@ -407,10 +425,17 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         let widths = module_table_widths(area.width);
         lines.push(category_divider(category, blurb, area.width));
         for module in rows {
+            let id = module.metadata().id.as_str();
+            // Row is highlighted when it's either the focused module
+            // (set by `use <id>`) or the j/k cursor row.  Both states
+            // share the `▌` accent + c-sel background per
+            // `design/mockups/catalog.jsx::modRow`.
+            let highlight = app.focused_module.as_deref() == Some(id)
+                || cursor_id.as_deref() == Some(id);
             lines.push(catalog_module_row(
                 &module.metadata().id,
                 &module.metadata().description,
-                app.focused_module.as_deref() == Some(module.metadata().id.as_str()),
+                highlight,
                 &widths,
             ));
         }
@@ -3696,10 +3721,11 @@ fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
             ("Ctrl+C", "exit"),
         ],
         ShellView::Catalog => vec![
+            ("j/k", "row"),
             ("PgUp/PgDn", "scroll"),
             ("use <id>", "focus module"),
             ("findings", "findings"),
-            ("help", "help"),
+            ("?", "help"),
         ],
         ShellView::Findings => {
             let mut bindings = Vec::new();
@@ -7609,6 +7635,55 @@ mod tests {
         assert!(rendered.contains("failed"));
         assert!(rendered.contains("18"));
         assert!(rendered.contains("replay <runId>"));
+    }
+
+    #[test]
+    fn catalog_j_k_moves_row_cursor_and_highlights_row() {
+        // `design/mockups/catalog.jsx` advertises `j/k row` and shows the
+        // focused row with `▌` accent + c-sel background.  Verify that
+        // pressing `j` moves the cursor and that the catalog renders the
+        // cursor row with the `▌` glyph (catalog_module_row's selection
+        // form starts the row with `▌ `).
+        use crossterm::event::{KeyEvent, KeyCode, KeyModifiers};
+
+        let backend = TestBackend::new(120, 36);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.handle_command(crate::commands::ShellCommand::Modules);
+
+        // Cursor starts at 0; `j` advances it.
+        let before = app.catalog_cursor;
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        assert_eq!(app.catalog_cursor, before + 1);
+
+        // `k` reverses; from row 1 back to 0.
+        app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()));
+        assert_eq!(app.catalog_cursor, before);
+
+        // Render after a `j` press; the catalog body should contain the
+        // cursor `▌` glyph at least once.
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(rendered.contains("▌"), "cursor glyph missing: {rendered}");
+    }
+
+    #[test]
+    fn catalog_g_and_uppercase_g_jump_cursor_to_bounds() {
+        use crossterm::event::{KeyEvent, KeyCode, KeyModifiers};
+
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.handle_command(crate::commands::ShellCommand::Modules);
+        let total = app.catalog_module_count();
+        assert!(total > 0);
+
+        // G jumps to last row.
+        app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
+        assert_eq!(app.catalog_cursor, total - 1);
+
+        // g jumps to first.
+        app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
+        assert_eq!(app.catalog_cursor, 0);
     }
 
     #[test]
