@@ -5354,7 +5354,9 @@ fn run_agent_worker(
     ))?;
     let answer = response.text.trim();
     if answer.is_empty() {
-        anyhow::bail!("agent returned no answer");
+        anyhow::bail!(
+            "agent returned an empty answer. The bridge accepted the request but produced no text — usually a credential issue (missing OAuth / API key) or a model that filtered the response. Next: `auth` to check credentials, then re-run."
+        );
     }
     Ok(answer.to_string())
 }
