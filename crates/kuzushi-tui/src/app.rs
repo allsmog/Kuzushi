@@ -4917,6 +4917,18 @@ fn unknown_command_message(raw: &str) -> String {
         );
     }
 
+    if verb == "task" {
+        return "task needs a sub-verb. Next: `tasks` to list, then `task block <id>` / `task allow <id>` / `task toggle [id]` / `task mode auto|manual|toggle` / `task reset`".to_string();
+    }
+
+    if verb == "threats" {
+        return "threats needs a sub-verb or number. Next: `threats summary|dfd|stride|stories|scope` (or 1..5), `threats edit`, `threats regen`, `threats apply`, `threats reject`, `threats ask <question>`".to_string();
+    }
+
+    if verb == "prompt" {
+        return "prompt needs a sub-verb. Next: `prompts` to open the editor, or `prompt edit <verb>` / `prompt show <verb>` / `prompt diff <verb>` / `prompt reset <verb>`".to_string();
+    }
+
     // Verbs that only exist as top-level CLI subcommands. The shell rejects
     // them, but the user is probably asking for the diagnostic, so point at
     // the right place rather than punting them into the agent flow.
