@@ -4889,6 +4889,14 @@ fn unknown_command_message(raw: &str) -> String {
         return "run needs a tool id. Next: `tools` to list, then `run <tool> [json-input]`".to_string();
     }
 
+    if verb == "plan" {
+        return "plan needs a natural-language goal. Next: `plan use Claude Sonnet 4.6 with high effort` (Haiku translates intent → option diff, review with /yes or /no)".to_string();
+    }
+
+    if verb == "load" {
+        return "load needs a module specifier. Next: `modules` for static registry; dynamic loading is unsupported in the Rust shell.".to_string();
+    }
+
     // Verbs that only exist as top-level CLI subcommands. The shell rejects
     // them, but the user is probably asking for the diagnostic, so point at
     // the right place rather than punting them into the agent flow.
