@@ -469,3 +469,253 @@ fn eq_ignore_case(a: &str, b: &str) -> bool {
 fn line_in_oracle_range(line: u32, e: &OracleEntry) -> bool {
     e.line_start > 0 && e.line_end >= e.line_start && line >= e.line_start && line <= e.line_end
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn finding_row(file: &str, line: u32, message: &str) -> FindingRow {
+        FindingRow {
+            fingerprint: format!("fp-{file}-{line}"),
+            rule_id: "test.rule".to_string(),
+            title: String::new(),
+            severity: "high".to_string(),
+            file_path: file.to_string(),
+            start_line: line,
+            end_line: Some(line),
+            message: message.to_string(),
+            tool: "semgrep".to_string(),
+            vuln_source: None,
+            static_proof_state: None,
+        }
+    }
+
+    #[test]
+    fn path_matches_exact_file() {
+        assert!(path_matches("crypto/skcipher.c", "crypto/skcipher.c"));
+        assert!(!path_matches("crypto/aead.c", "crypto/skcipher.c"));
+    }
+
+    #[test]
+    fn path_matches_directory_oracle() {
+        // Oracle pointing at a directory matches any file beneath it.
+        assert!(path_matches("crypto/skcipher.c", "crypto/"));
+        assert!(path_matches("crypto/aead.c", "crypto/"));
+        assert!(path_matches("crypto/sub/foo.c", "crypto/"));
+        assert!(!path_matches("lib/foo.c", "crypto/"));
+    }
+
+    #[test]
+    fn path_matches_normalises_dot_slash_prefix() {
+        assert!(path_matches("./crypto/skcipher.c", "crypto/skcipher.c"));
+        assert!(path_matches("crypto/skcipher.c", "./crypto/skcipher.c"));
+    }
+
+    #[test]
+    fn path_matches_suffix_when_finding_is_absolute_repo_path() {
+        // findings.json sometimes carries `<workspace>/crypto/foo.c`; the
+        // oracle is repo-relative.
+        assert!(path_matches(
+            "build/slices/linux/crypto/skcipher.c",
+            "crypto/skcipher.c"
+        ));
+    }
+
+    #[test]
+    fn cwe_extraction_pulls_from_message_and_rule() {
+        let re = Regex::new(r"CWE-(\d+)").unwrap();
+        let f = finding_row("foo.c", 1, "OOB write CWE-787 in handler");
+        let cwes = extract_cwes(&re, &f);
+        assert_eq!(cwes, vec!["CWE-787".to_string()]);
+
+        // Multiple CWEs across fields.
+        let mut f2 = finding_row("foo.c", 1, "CWE-787");
+        f2.rule_id = "checks.cwe-78.shell-injection".to_string();
+        f2.title = "command injection (CWE-78)".to_string();
+        let cwes2 = extract_cwes(&re, &f2);
+        assert!(cwes2.contains(&"CWE-78".to_string()));
+        assert!(cwes2.contains(&"CWE-787".to_string()));
+    }
+
+    #[test]
+    fn cwes_match_permissive_when_oracle_empty() {
+        assert!(cwes_match(&[], &[]));
+        assert!(cwes_match(&["CWE-78".to_string()], &[]));
+    }
+
+    #[test]
+    fn cwes_match_requires_overlap_when_oracle_set() {
+        assert!(cwes_match(
+            &["CWE-78".to_string()],
+            &["CWE-78".to_string()]
+        ));
+        assert!(!cwes_match(
+            &["CWE-79".to_string()],
+            &["CWE-78".to_string()]
+        ));
+        // Finding with no CWE fails when oracle wants one.
+        assert!(!cwes_match(&[], &["CWE-78".to_string()]));
+    }
+
+    #[test]
+    fn line_in_oracle_range_inclusive_bounds() {
+        let e = OracleEntry {
+            file: "foo.c".to_string(),
+            function: String::new(),
+            line_start: 100,
+            line_end: 110,
+            cwe: vec![],
+            kind: String::new(),
+            notes: String::new(),
+        };
+        assert!(line_in_oracle_range(100, &e));
+        assert!(line_in_oracle_range(110, &e));
+        assert!(line_in_oracle_range(105, &e));
+        assert!(!line_in_oracle_range(99, &e));
+        assert!(!line_in_oracle_range(111, &e));
+    }
+
+    #[test]
+    fn tolerance_priority_orders_strictest_highest() {
+        assert!(Tolerance::ExactLine.priority() > Tolerance::PmLines.priority());
+        assert!(Tolerance::PmLines.priority() > Tolerance::Function.priority());
+        assert!(Tolerance::Function.priority() > Tolerance::FileOnly.priority());
+    }
+
+    #[test]
+    fn score_emits_pm10_hit_when_finding_within_window_with_cwe() {
+        let oracle = Oracle {
+            cve: "CVE-TEST".to_string(),
+            slice: Some("test".to_string()),
+            name: None,
+            commit: None,
+            ground_truth: vec![OracleEntry {
+                file: "src/foo.c".to_string(),
+                function: String::new(),
+                line_start: 100,
+                line_end: 100,
+                cwe: vec!["CWE-78".to_string()],
+                kind: String::new(),
+                notes: String::new(),
+            }],
+            expected_min_recall: None,
+            notes: None,
+        };
+        // Finding at line 105 is within ±10 of oracle line 100 with the
+        // matching CWE-78 — should be a pm_lines hit.
+        let dump = FindingsDump {
+            count: 1,
+            findings: vec![finding_row(
+                "src/foo.c",
+                105,
+                "command injection CWE-78 via exec()",
+            )],
+        };
+        let cli = Cli {
+            oracle: PathBuf::from("/tmp/o.json"),
+            findings: PathBuf::from("/tmp/f.json"),
+            slice: "test".to_string(),
+            target: PathBuf::from("/tmp"),
+            wall_seconds: 0,
+            pretty: true,
+        };
+        let report = score(&cli, &oracle, &dump, Path::new("/tmp"));
+        assert_eq!(report.hits, 1, "expected ±10 hit: {report:?}");
+        assert_eq!(report.recall.pm_lines, 1.0);
+        assert_eq!(report.recall.exact_line, 0.0);
+    }
+
+    #[test]
+    fn score_demotes_to_file_only_when_cwe_mismatched() {
+        // Same line distance, but CWE doesn't match — should NOT count
+        // as a pm_lines hit, only file_only.
+        let oracle = Oracle {
+            cve: "CVE-TEST".to_string(),
+            slice: Some("test".to_string()),
+            name: None,
+            commit: None,
+            ground_truth: vec![OracleEntry {
+                file: "src/foo.c".to_string(),
+                function: String::new(),
+                line_start: 100,
+                line_end: 100,
+                cwe: vec!["CWE-78".to_string()],
+                kind: String::new(),
+                notes: String::new(),
+            }],
+            expected_min_recall: None,
+            notes: None,
+        };
+        let dump = FindingsDump {
+            count: 1,
+            findings: vec![finding_row("src/foo.c", 105, "XSS CWE-79 via reflected input")],
+        };
+        let cli = Cli {
+            oracle: PathBuf::from("/tmp/o.json"),
+            findings: PathBuf::from("/tmp/f.json"),
+            slice: "test".to_string(),
+            target: PathBuf::from("/tmp"),
+            wall_seconds: 0,
+            pretty: true,
+        };
+        let report = score(&cli, &oracle, &dump, Path::new("/tmp"));
+        assert_eq!(report.recall.pm_lines, 0.0);
+        assert_eq!(report.recall.file_only, 1.0);
+    }
+
+    #[test]
+    fn score_proof_state_breakdown_partitions_hits() {
+        let oracle = Oracle {
+            cve: "CVE-TEST".to_string(),
+            slice: Some("test".to_string()),
+            name: None,
+            commit: None,
+            ground_truth: vec![
+                OracleEntry {
+                    file: "src/a.c".to_string(),
+                    function: String::new(),
+                    line_start: 10,
+                    line_end: 10,
+                    cwe: vec!["CWE-78".to_string()],
+                    kind: String::new(),
+                    notes: String::new(),
+                },
+                OracleEntry {
+                    file: "src/b.c".to_string(),
+                    function: String::new(),
+                    line_start: 20,
+                    line_end: 20,
+                    cwe: vec!["CWE-78".to_string()],
+                    kind: String::new(),
+                    notes: String::new(),
+                },
+            ],
+            expected_min_recall: None,
+            notes: None,
+        };
+        let mut validated = finding_row("src/a.c", 10, "CWE-78 exec");
+        validated.static_proof_state = Some("validated".to_string());
+        validated.vuln_source = Some("ainalysis".to_string());
+        let llm_only = finding_row("src/b.c", 20, "CWE-78 exec");
+        // No static_proof_state set → llm_only bucket.
+        let dump = FindingsDump {
+            count: 2,
+            findings: vec![validated, llm_only],
+        };
+        let cli = Cli {
+            oracle: PathBuf::from("/tmp/o.json"),
+            findings: PathBuf::from("/tmp/f.json"),
+            slice: "test".to_string(),
+            target: PathBuf::from("/tmp"),
+            wall_seconds: 0,
+            pretty: true,
+        };
+        let report = score(&cli, &oracle, &dump, Path::new("/tmp"));
+        assert_eq!(report.hits, 2);
+        assert_eq!(report.proof_state_breakdown.validated, 1);
+        assert_eq!(report.proof_state_breakdown.llm_only, 1);
+        // vuln_source breakdown: ainalysis=1, unknown=1.
+        assert_eq!(report.vuln_source_breakdown.get("ainalysis"), Some(&1));
+        assert_eq!(report.vuln_source_breakdown.get("unknown"), Some(&1));
+    }
+}
