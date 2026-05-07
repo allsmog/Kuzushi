@@ -1850,6 +1850,11 @@ fn sast_tasks_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         &format!("{enabled}/{} enabled, {blocked} blocked", rows.len()),
     ));
     lines.push(blank());
+    lines.push(muted(&fit(
+        "legend: [x] enabled · [ ] disabled · [A] advanced (off by default; allow with /task allow <id>) · [B] blocked",
+        area.width as usize,
+    )));
+    lines.push(blank());
     lines.push(table_header(
         &["state", "id", "cost", "scan", "notes"],
         &sast_task_table_widths(area.width),
