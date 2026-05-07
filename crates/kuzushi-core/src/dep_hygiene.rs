@@ -315,40 +315,43 @@ fn severity_from_cvss(cvss: Option<&str>) -> Severity {
         return Severity::Medium;
     };
     let trimmed = s.trim();
-    if let Ok(score) = trimmed.parse::<f64>() {
-        return match score {
-            x if x >= 9.0 => Severity::Critical,
-            x if x >= 7.0 => Severity::High,
-            x if x >= 4.0 => Severity::Medium,
-            x if x > 0.0 => Severity::Low,
-            _ => Severity::Unknown,
-        };
+    if let Some(severity) = numeric_cvss_severity(trimmed) {
+        return severity;
     }
-    let upper = trimmed.to_ascii_uppercase();
+    textual_cvss_severity(trimmed)
+}
+
+fn numeric_cvss_severity(value: &str) -> Option<Severity> {
+    let score = value.parse::<f64>().ok()?;
+    Some(match score {
+        x if x >= 9.0 => Severity::Critical,
+        x if x >= 7.0 => Severity::High,
+        x if x >= 4.0 => Severity::Medium,
+        x if x > 0.0 => Severity::Low,
+        _ => Severity::Unknown,
+    })
+}
+
+fn textual_cvss_severity(value: &str) -> Severity {
+    let upper = value.to_ascii_uppercase();
     if upper.contains("CRITICAL") {
-        return Severity::Critical;
-    }
+        Severity::Critical
     // CVSS v3 vector form encodes impact metrics as /C:H/I:H/A:H. Any
     // high-impact letter on confidentiality, integrity, or availability is
     // a High signal — close enough for triage without a full CVSS parser.
-    if upper.contains("HIGH")
-        || upper.contains("C:H")
-        || upper.contains("I:H")
-        || upper.contains("A:H")
-    {
-        return Severity::High;
+    } else if contains_any(&upper, &["HIGH", "C:H", "I:H", "A:H"]) {
+        Severity::High
+    } else if upper.contains("MEDIUM") {
+        Severity::Medium
+    } else if contains_any(&upper, &["LOW", "C:L", "I:L", "A:L"]) {
+        Severity::Low
+    } else {
+        Severity::Medium
     }
-    if upper.contains("MEDIUM") {
-        return Severity::Medium;
-    }
-    if upper.contains("LOW")
-        || upper.contains("C:L")
-        || upper.contains("I:L")
-        || upper.contains("A:L")
-    {
-        return Severity::Low;
-    }
-    Severity::Medium
+}
+
+fn contains_any(value: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| value.contains(needle))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -989,6 +992,15 @@ mod tests {
         assert_eq!(
             severity_from_cvss(Some("CVSS:3.1/AV:N/AC:L/PR:N/C:H/I:H/A:H")),
             Severity::High
+        );
+        assert_eq!(severity_from_cvss(Some("medium")), Severity::Medium);
+        assert_eq!(
+            severity_from_cvss(Some("CVSS:3.1/AV:N/AC:L/C:L")),
+            Severity::Low
+        );
+        assert_eq!(
+            severity_from_cvss(Some("unscored vector")),
+            Severity::Medium
         );
     }
 

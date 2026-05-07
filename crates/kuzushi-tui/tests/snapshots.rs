@@ -152,6 +152,13 @@ fn help_view_default() {
 }
 
 #[test]
+fn findings_empty_view_default() {
+    let mut app = fresh_app();
+    app.shell_view = ShellView::Findings;
+    assert_plain_snapshot("findings_empty_view_default", &render_at_120(&mut app));
+}
+
+#[test]
 fn findings_list_view_with_two_findings() {
     let mut app = fresh_app();
     let mut critical = Finding::new_semgrep(

@@ -7,7 +7,8 @@ use uuid::Uuid;
 
 use crate::findings::{Finding, Severity};
 
-use super::{read_object_string, read_object_string_array, read_object_u64, ToolExecutionContext};
+use super::json_fields::{read_object_string, read_object_string_array, read_object_u64};
+use super::ToolExecutionContext;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

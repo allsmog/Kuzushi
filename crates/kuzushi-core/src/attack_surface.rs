@@ -1000,6 +1000,58 @@ mod tests {
     }
 
     #[test]
+    fn attack_surface_detects_python_and_go_security_boundaries() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("svc")).unwrap();
+        fs::write(
+            temp.path().join("svc/app.py"),
+            r#"
+              @login_required
+              def handler(request):
+                  yaml.load(request.body)
+                  cursor.execute("select * from users")
+                  subprocess.call(request.GET["cmd"], shell=True)
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("svc/main.go"),
+            r#"
+              package main
+              func handler() {
+                  authorize(user)
+                  json.NewDecoder(r.Body).Decode(&payload)
+                  db.Query("select * from users")
+                  exec.Command("sh", "-c", input)
+              }
+            "#,
+        )
+        .unwrap();
+
+        let map = build_attack_surface_map(temp.path()).unwrap();
+
+        assert!(map.surfaces.iter().any(|surface| {
+            surface.path.ends_with("app.py")
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
+                    == Some("python.command-exec")
+        }));
+        assert!(map.surfaces.iter().any(|surface| {
+            surface.path.ends_with("main.go")
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
+                    == Some("go.deserialization")
+        }));
+        assert_has_kind(&map, AttackSurfaceKind::AuthBoundary);
+        assert_has_kind(&map, AttackSurfaceKind::DbQueryBoundary);
+        assert_has_kind(&map, AttackSurfaceKind::CommandExecutionBoundary);
+    }
+
+    #[test]
     fn attack_surface_map_is_deterministic_and_summarized() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("src")).unwrap();

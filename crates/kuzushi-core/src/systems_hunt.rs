@@ -276,53 +276,87 @@ pub fn execute_systems_hunt_tool(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
+    let input = &input;
     match name {
-        "systems-hunt:systems-context-gatherer" => {
-            let target = resolve_target(&input, ctx)?;
-            let options = SystemsHuntInput::from_tool_input(&input)?;
-            let output = gather_systems_context(&target, &options)?;
-            Ok(json!({
-                "ok": true,
-                "output": format!("systems-hunt context: {} surface(s)", output.surfaces.len()),
-                "data": output,
-                "costUsd": 0.0,
-            }))
-        }
-        "systems-hunt:systems-invariant-extract" => {
-            let output = run_systems_invariant_extract(&input, ctx, runtime)?;
-            Ok(json!({
-                "ok": true,
-                "output": format!("systems-hunt invariants: {}", output.invariants.len()),
-                "data": output,
-                "costUsd": 0.0,
-            }))
-        }
-        "systems-hunt:systems-trigger-synth" => {
-            let output = run_systems_trigger_synth(&input, ctx, runtime)?;
-            Ok(json!({
-                "ok": true,
-                "output": format!("systems-hunt triggers: {}", output.triggers.len()),
-                "data": output,
-                "costUsd": 0.0,
-            }))
-        }
-        "systems-hunt:systems-hunt" => {
-            Ok(run_systems_hunt_report(&input, ctx, runtime)?.to_tool_json())
-        }
-        "systems-hunt:deep-semantic-cwe-select" => {
-            let output = run_deep_semantic_cwe_select(&input, ctx, runtime)?;
-            Ok(json!({
-                "ok": true,
-                "output": format!("deep-semantic cwes: {}", output.cwes.len()),
-                "data": output,
-                "costUsd": 0.0,
-            }))
-        }
-        "systems-hunt:deep-semantic-hunt" => {
-            Ok(run_deep_semantic_hunt_report(&input, ctx, runtime)?.to_tool_json())
-        }
+        "systems-hunt:systems-context-gatherer" => execute_context_gatherer(input, ctx),
+        "systems-hunt:systems-invariant-extract" => execute_invariant_extract(input, ctx, runtime),
+        "systems-hunt:systems-trigger-synth" => execute_trigger_synth(input, ctx, runtime),
+        "systems-hunt:systems-hunt" => execute_systems_report(input, ctx, runtime),
+        "systems-hunt:deep-semantic-cwe-select" => execute_deep_semantic_cwe(input, ctx, runtime),
+        "systems-hunt:deep-semantic-hunt" => execute_deep_semantic_report(input, ctx, runtime),
         other => anyhow::bail!("unknown systems-hunt tool {other:?}"),
     }
+}
+
+fn execute_context_gatherer(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let target = resolve_target(input, ctx)?;
+    let options = SystemsHuntInput::from_tool_input(input)?;
+    let output = gather_systems_context(&target, &options)?;
+    Ok(tool_json(
+        format!("systems-hunt context: {} surface(s)", output.surfaces.len()),
+        output,
+    ))
+}
+
+fn execute_invariant_extract(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    let output = run_systems_invariant_extract(input, ctx, runtime)?;
+    Ok(tool_json(
+        format!("systems-hunt invariants: {}", output.invariants.len()),
+        output,
+    ))
+}
+
+fn execute_trigger_synth(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    let output = run_systems_trigger_synth(input, ctx, runtime)?;
+    Ok(tool_json(
+        format!("systems-hunt triggers: {}", output.triggers.len()),
+        output,
+    ))
+}
+
+fn execute_systems_report(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    Ok(run_systems_hunt_report(input, ctx, runtime)?.to_tool_json())
+}
+
+fn execute_deep_semantic_cwe(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    let output = run_deep_semantic_cwe_select(input, ctx, runtime)?;
+    Ok(tool_json(
+        format!("deep-semantic cwes: {}", output.cwes.len()),
+        output,
+    ))
+}
+
+fn execute_deep_semantic_report(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    Ok(run_deep_semantic_hunt_report(input, ctx, runtime)?.to_tool_json())
+}
+
+fn tool_json<T: Serialize>(output: String, data: T) -> Value {
+    json!({
+        "ok": true,
+        "output": output,
+        "data": data,
+        "costUsd": 0.0,
+    })
 }
 
 /// Walk `target` with the (configurable) systems-hunt surface
@@ -439,17 +473,13 @@ fn run_systems_invariant_extract(
 ) -> Result<SystemsInvariantOutput> {
     let target = resolve_target(input, ctx)?;
     let options = SystemsHuntInput::from_tool_input(input)?;
-    let context = context_from_input(input).transpose()?.unwrap_or_else(|| {
-        gather_systems_context(&target, &options).unwrap_or_else(|_| empty_context())
-    });
-    if context.surfaces.is_empty() {
+    let context = systems_context_from_input_or_gather(input, &target, &options)?;
+    if systems_context_is_empty(&context) {
         return Ok(SystemsInvariantOutput {
             invariants: Vec::new(),
         });
     }
-    let runtime = runtime.context(
-        "systems-hunt:systems-invariant-extract requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
-    )?;
+    let runtime = required_systems_runtime(runtime, "systems-hunt:systems-invariant-extract")?;
     let model = resolve_model(
         "systems-hunt:systems-invariant-extract",
         input,
@@ -473,30 +503,24 @@ fn run_systems_trigger_synth(
 ) -> Result<SystemsTriggerOutput> {
     let target = resolve_target(input, ctx)?;
     let options = SystemsHuntInput::from_tool_input(input)?;
-    let context = context_from_input(input).transpose()?.unwrap_or_else(|| {
-        gather_systems_context(&target, &options).unwrap_or_else(|_| empty_context())
-    });
-    if context.surfaces.is_empty() {
+    let context = systems_context_from_input_or_gather(input, &target, &options)?;
+    if systems_context_is_empty(&context) {
         return Ok(SystemsTriggerOutput {
             triggers: Vec::new(),
         });
     }
-    let runtime = runtime.context(
-        "systems-hunt:systems-trigger-synth requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
-    )?;
+    let runtime = required_systems_runtime(runtime, "systems-hunt:systems-trigger-synth")?;
     let model = resolve_model("systems-hunt:systems-trigger-synth", input, ctx, &options)?;
     let agent_tool_policy = agent_tool_policy_for_input(input)?;
-    let invariant_output = match invariants_from_input(input).transpose()? {
-        Some(output) => output,
-        None => query_systems_invariants(
-            runtime,
-            &model,
-            &target,
-            &context,
-            &options,
-            agent_tool_policy.clone(),
-        )?,
-    };
+    let invariant_output = systems_invariants_from_input_or_query(
+        input,
+        runtime,
+        &model,
+        &target,
+        &context,
+        &options,
+        agent_tool_policy.clone(),
+    )?;
     query_systems_triggers(
         runtime,
         &model,
@@ -506,6 +530,46 @@ fn run_systems_trigger_synth(
         &options,
         agent_tool_policy,
     )
+}
+
+fn systems_context_from_input_or_gather(
+    input: &Value,
+    target: &Path,
+    options: &SystemsHuntInput,
+) -> Result<SystemsContextOutput> {
+    Ok(context_from_input(input).transpose()?.unwrap_or_else(|| {
+        gather_systems_context(target, options).unwrap_or_else(|_| empty_context())
+    }))
+}
+
+fn systems_context_is_empty(context: &SystemsContextOutput) -> bool {
+    context.surfaces.is_empty()
+}
+
+fn required_systems_runtime<'a>(
+    runtime: Option<&'a dyn AgentRuntime>,
+    tool: &str,
+) -> Result<&'a dyn AgentRuntime> {
+    runtime.with_context(|| format!(
+        "{tool} requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies."
+    ))
+}
+
+fn systems_invariants_from_input_or_query(
+    input: &Value,
+    runtime: &dyn AgentRuntime,
+    model: &str,
+    target: &Path,
+    context: &SystemsContextOutput,
+    options: &SystemsHuntInput,
+    agent_tool_policy: AgentToolPolicy,
+) -> Result<SystemsInvariantOutput> {
+    match invariants_from_input(input).transpose()? {
+        Some(output) => Ok(output),
+        None => {
+            query_systems_invariants(runtime, model, target, context, options, agent_tool_policy)
+        }
+    }
 }
 
 fn run_deep_semantic_cwe_select(
@@ -563,57 +627,17 @@ fn run_deep_semantic_hunt_report(
         "systems-hunt:deep-semantic-hunt requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
     )?;
     let model = resolve_model("systems-hunt:deep-semantic-hunt", input, ctx, &options)?;
-    let cwes = cwes_from_input(input)
-        .unwrap_or_else(|| {
-            run_deep_semantic_cwe_select(input, ctx, Some(runtime))
-                .map(|output| output.cwes)
-                .unwrap_or_default()
-        })
-        .into_iter()
-        .take(options.max_cwe_classes)
-        .collect::<Vec<_>>();
+    let cwes = selected_deep_semantic_cwes(input, ctx, runtime, &options)?;
 
     if cwes.is_empty() {
-        return Ok(SystemsHuntReport {
-            target: target.display().to_string(),
-            count: 0,
-            findings: Vec::new(),
-            persisted: persist_systems_findings(&target, &[], ctx)?,
-            artifacts: Vec::new(),
-            cost_usd: 0.0,
-        });
+        return empty_deep_semantic_hunt_report(&target, ctx);
     }
 
-    let inventory = collect_inventory(&target, 80, 2048)?;
-    let raw = query_required_structured_json(
-        runtime,
-        AgentQueryRequest::new(
-            model,
-            target.clone(),
-            DEEP_SEMANTIC_HUNT_SYSTEM_PROMPT.to_string(),
-            format!(
-            "Find verified variants of these native-code CWE classes. Return JSON with findings[].\n\nCWEs:\n{}\n\n{}",
-            cwes.iter()
-                .map(|cwe| format!("- {} {}: {}", cwe.id, cwe.name, cwe.reason))
-                .collect::<Vec<_>>()
-                .join("\n"),
-            format_inventory(&inventory)
-        ),
-        )
-        .with_tool_policy(agent_tool_policy_for_input(input)?),
-        StructuredJsonContract::new(
-            "systems-hunt:deep-semantic-hunt",
-            "DeepSemanticFindings",
-            findings_schema(),
-        ),
-        require_json_object,
-    )?;
+    let raw = query_deep_semantic_findings(runtime, model, input, &target, &cwes)?;
     let artifact_root = artifact_root(&target, &options.artifact_dir)?;
     let (mut findings, artifacts) =
         normalize_deep_semantic_findings(raw, &target, &artifact_root, options.max_findings)?;
-    if whitebox_static_profile_requested(input)? {
-        mark_whitebox_static_findings(&mut findings, StaticProofState::CodeCited)?;
-    }
+    apply_deep_semantic_whitebox_profile(input, &mut findings)?;
     let persisted = persist_systems_findings(&target, &findings, ctx)?;
 
     Ok(SystemsHuntReport {
@@ -624,6 +648,94 @@ fn run_deep_semantic_hunt_report(
         artifacts,
         cost_usd: 0.0,
     })
+}
+
+fn selected_deep_semantic_cwes(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: &dyn AgentRuntime,
+    options: &SystemsHuntInput,
+) -> Result<Vec<DeepSemanticCweSelection>> {
+    let cwes = match cwes_from_input(input) {
+        Some(cwes) => cwes,
+        None => fallback_deep_semantic_cwes(input, ctx, runtime),
+    };
+    Ok(cwes.into_iter().take(options.max_cwe_classes).collect())
+}
+
+fn fallback_deep_semantic_cwes(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: &dyn AgentRuntime,
+) -> Vec<DeepSemanticCweSelection> {
+    run_deep_semantic_cwe_select(input, ctx, Some(runtime))
+        .map(|output| output.cwes)
+        .unwrap_or_default()
+}
+
+fn empty_deep_semantic_hunt_report(
+    target: &Path,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<SystemsHuntReport> {
+    Ok(SystemsHuntReport {
+        target: target.display().to_string(),
+        count: 0,
+        findings: Vec::new(),
+        persisted: persist_systems_findings(target, &[], ctx)?,
+        artifacts: Vec::new(),
+        cost_usd: 0.0,
+    })
+}
+
+fn query_deep_semantic_findings(
+    runtime: &dyn AgentRuntime,
+    model: String,
+    input: &Value,
+    target: &Path,
+    cwes: &[DeepSemanticCweSelection],
+) -> Result<Value> {
+    let inventory = collect_inventory(target, 80, 2048)?;
+    query_required_structured_json(
+        runtime,
+        AgentQueryRequest::new(
+            model,
+            target.to_path_buf(),
+            DEEP_SEMANTIC_HUNT_SYSTEM_PROMPT.to_string(),
+            deep_semantic_hunt_prompt(cwes, &inventory),
+        )
+        .with_tool_policy(agent_tool_policy_for_input(input)?),
+        StructuredJsonContract::new(
+            "systems-hunt:deep-semantic-hunt",
+            "DeepSemanticFindings",
+            findings_schema(),
+        ),
+        require_json_object,
+    )
+}
+
+fn deep_semantic_hunt_prompt(
+    cwes: &[DeepSemanticCweSelection],
+    inventory: &[(String, String)],
+) -> String {
+    format!(
+        "Find verified variants of these native-code CWE classes. Return JSON with findings[].\n\nCWEs:\n{}\n\n{}",
+        format_deep_semantic_cwes(cwes),
+        format_inventory(inventory)
+    )
+}
+
+fn format_deep_semantic_cwes(cwes: &[DeepSemanticCweSelection]) -> String {
+    cwes.iter()
+        .map(|cwe| format!("- {} {}: {}", cwe.id, cwe.name, cwe.reason))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn apply_deep_semantic_whitebox_profile(input: &Value, findings: &mut [Finding]) -> Result<()> {
+    if whitebox_static_profile_requested(input)? {
+        mark_whitebox_static_findings(findings, StaticProofState::CodeCited)?;
+    }
+    Ok(())
 }
 
 fn gather_systems_context(
@@ -860,84 +972,144 @@ pub(crate) async fn score_with_index(
     use kuzushi_codeindex::IndexFacade;
 
     let mut facade = IndexFacade::with_available_backends().await;
-    if !facade
-        .live_backends()
-        .iter()
-        .any(|b| matches!(b, kuzushi_codeindex::Backend::Joern))
-    {
+    if !codeindex_has_joern_backend(&facade) {
         return surfaces;
     }
 
-    // Repo-wide FFI-boundary lookup once; result reused across
-    // surfaces to keep cost bounded.
-    let ffi_set: std::collections::BTreeSet<String> = match facade.ffi_boundaries().await {
-        Ok(value) => value
-            .get("boundaries")
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|item| item.get("file").and_then(Value::as_str).map(str::to_string))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        Err(_) => std::collections::BTreeSet::new(),
-    };
+    let ffi_set = indexed_ffi_files(&mut facade).await;
 
     let mut out = Vec::with_capacity(surfaces.len());
-    for mut surface in surfaces {
-        let is_rusty_or_native = surface.file_path.to_ascii_lowercase().ends_with(".rs")
-            || surface.file_path.to_ascii_lowercase().ends_with(".c")
-            || surface.file_path.to_ascii_lowercase().ends_with(".cpp")
-            || surface.file_path.to_ascii_lowercase().ends_with(".cc");
-
-        if is_rusty_or_native && surface.kind == "unsafe-region" {
-            if let Ok(value) = facade.unsafe_blocks(Some(&surface.file_path)).await {
-                if let Some(arr) = value.get("blocks").and_then(Value::as_array) {
-                    let n = arr.len();
-                    if n > 0 {
-                        let bump = (n.min(5) as i64) * 10;
-                        surface.score += bump;
-                        surface
-                            .reasons
-                            .insert(0, format!("codeindex: {n} unsafe block(s) (+{bump})"));
-                    }
-                }
-            }
-        }
-
-        if surface.kind == "ffi-boundary"
-            || surface.domains.iter().any(|d| d == "ffi")
-            || ffi_set.iter().any(|f| f == &surface.file_path)
-        {
-            surface.score += 8;
-            surface
-                .reasons
-                .insert(0, "codeindex: FFI boundary present (+8)".to_string());
-        }
-
-        // Sink-reachability check: only worth running for the
-        // dangerous-call-site signals classify_line surfaces.
-        if surface
-            .reasons
-            .iter()
-            .any(|r| r.contains("memcpy") || r.contains("strcat") || r.contains("strcpy"))
-        {
-            if let Ok(value) = facade
-                .taint_paths("argv|recv|read|fread", "memcpy|strcat|strcpy", Some(5))
-                .await
-            {
-                if value.get("paths").is_some() {
-                    surface.score += 15;
-                    surface
-                        .reasons
-                        .insert(0, "codeindex: taint path reachable (+15)".to_string());
-                }
-            }
-        }
-
-        out.push(surface);
+    for surface in surfaces {
+        out.push(index_score_surface(&mut facade, &ffi_set, surface).await);
     }
     out
+}
+
+fn codeindex_has_joern_backend(facade: &kuzushi_codeindex::IndexFacade) -> bool {
+    facade
+        .live_backends()
+        .iter()
+        .any(|backend| matches!(backend, kuzushi_codeindex::Backend::Joern))
+}
+
+async fn indexed_ffi_files(facade: &mut kuzushi_codeindex::IndexFacade) -> BTreeSet<String> {
+    facade
+        .ffi_boundaries()
+        .await
+        .map(|value| ffi_files_from_index_value(&value))
+        .unwrap_or_default()
+}
+
+fn ffi_files_from_index_value(value: &Value) -> BTreeSet<String> {
+    value
+        .get("boundaries")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get("file").and_then(Value::as_str).map(str::to_string))
+        .collect()
+}
+
+async fn index_score_surface(
+    facade: &mut kuzushi_codeindex::IndexFacade,
+    ffi_set: &BTreeSet<String>,
+    mut surface: RankedSystemsSurface,
+) -> RankedSystemsSurface {
+    apply_indexed_unsafe_score(facade, &mut surface).await;
+    apply_indexed_ffi_score(ffi_set, &mut surface);
+    apply_indexed_taint_score(facade, &mut surface).await;
+    surface
+}
+
+async fn apply_indexed_unsafe_score(
+    facade: &mut kuzushi_codeindex::IndexFacade,
+    surface: &mut RankedSystemsSurface,
+) {
+    if !is_native_unsafe_surface(surface) {
+        return;
+    }
+    let Ok(value) = facade.unsafe_blocks(Some(&surface.file_path)).await else {
+        return;
+    };
+    if let Some((n, bump)) = unsafe_block_bump(&value) {
+        surface.score += bump;
+        surface
+            .reasons
+            .insert(0, format!("codeindex: {n} unsafe block(s) (+{bump})"));
+    }
+}
+
+fn is_native_unsafe_surface(surface: &RankedSystemsSurface) -> bool {
+    surface.kind == "unsafe-region" && has_native_source_extension(&surface.file_path)
+}
+
+fn has_native_source_extension(file_path: &str) -> bool {
+    let extension = Path::new(file_path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    ["rs", "c", "cpp", "cc"].contains(&extension.as_str())
+}
+
+fn unsafe_block_bump(value: &Value) -> Option<(usize, i64)> {
+    let n = value.get("blocks").and_then(Value::as_array)?.len();
+    (n > 0).then_some((n, (n.min(5) as i64) * 10))
+}
+
+fn apply_indexed_ffi_score(ffi_set: &BTreeSet<String>, surface: &mut RankedSystemsSurface) {
+    if !has_indexed_ffi_signal(ffi_set, surface) {
+        return;
+    }
+    surface.score += 8;
+    surface
+        .reasons
+        .insert(0, "codeindex: FFI boundary present (+8)".to_string());
+}
+
+fn has_indexed_ffi_signal(ffi_set: &BTreeSet<String>, surface: &RankedSystemsSurface) -> bool {
+    [
+        surface.kind == "ffi-boundary",
+        surface.domains.iter().any(|domain| domain == "ffi"),
+        ffi_set.contains(&surface.file_path),
+    ]
+    .into_iter()
+    .any(|matched| matched)
+}
+
+async fn apply_indexed_taint_score(
+    facade: &mut kuzushi_codeindex::IndexFacade,
+    surface: &mut RankedSystemsSurface,
+) {
+    if !indexed_taint_path_found(facade, surface).await {
+        return;
+    }
+    surface.score += 15;
+    surface
+        .reasons
+        .insert(0, "codeindex: taint path reachable (+15)".to_string());
+}
+
+async fn indexed_taint_path_found(
+    facade: &mut kuzushi_codeindex::IndexFacade,
+    surface: &RankedSystemsSurface,
+) -> bool {
+    if !surface_warrants_taint_check(surface) {
+        return false;
+    }
+    facade
+        .taint_paths("argv|recv|read|fread", "memcpy|strcat|strcpy", Some(5))
+        .await
+        .map(|value| value.get("paths").is_some())
+        .unwrap_or(false)
+}
+
+fn surface_warrants_taint_check(surface: &RankedSystemsSurface) -> bool {
+    let needles = ["memcpy", "strcat", "strcpy"];
+    surface
+        .reasons
+        .iter()
+        .any(|reason| needles.iter().any(|needle| reason.contains(needle)))
 }
 
 fn query_systems_triggers(
@@ -2086,6 +2258,37 @@ mod tests {
                     ..Default::default()
                 });
             }
+            if system_prompt == DEEP_SEMANTIC_CWE_SYSTEM_PROMPT {
+                return Ok(AgentQueryResponse {
+                    text: String::new(),
+                    structured: Some(json!({
+                        "cwes": [{
+                            "id": "CWE-787",
+                            "name": "Out-of-bounds Write",
+                            "reason": "native memcpy appears in parser code"
+                        }]
+                    })),
+                    ..Default::default()
+                });
+            }
+            if system_prompt == DEEP_SEMANTIC_HUNT_SYSTEM_PROMPT {
+                return Ok(AgentQueryResponse {
+                    text: String::new(),
+                    structured: Some(json!({
+                        "findings": [{
+                            "title": "Packet length reaches fixed buffer",
+                            "cwe": "CWE-787",
+                            "severity": "high",
+                            "filePath": "src/parser.c",
+                            "startLine": 3,
+                            "message": "memcpy uses packet-controlled length for a 64-byte stack buffer",
+                            "reasoningChain": "packet length is attacker-controlled and no bound check is visible",
+                            "analysisPath": ["inspect parser", "compare len with buffer size"]
+                        }]
+                    })),
+                    ..Default::default()
+                });
+            }
             anyhow::bail!("unexpected prompt {system_prompt}")
         }
 
@@ -2152,6 +2355,177 @@ mod tests {
         assert_eq!(store.list_findings(10).unwrap().len(), 1);
         assert_eq!(report.artifacts.len(), 1);
         assert!(temp.path().join(&report.artifacts[0]).exists());
+    }
+
+    #[test]
+    fn execute_systems_hunt_tool_routes_context_and_unknown_names() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/parser.c"),
+            "void parse(char *packet, unsigned len) { memcpy(packet, packet, len); }\n",
+        )
+        .unwrap();
+        let workspace = crate::workspace::WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+        };
+
+        let output = execute_systems_hunt_tool(
+            "systems-hunt:systems-context-gatherer",
+            json!({}),
+            &ctx,
+            None,
+        )
+        .unwrap();
+        assert_eq!(output["ok"], json!(true));
+        assert!(output["output"].as_str().unwrap().contains("context"));
+        assert!(execute_systems_hunt_tool("systems-hunt:nope", json!({}), &ctx, None).is_err());
+    }
+
+    #[test]
+    fn systems_invariant_extract_returns_empty_without_runtime_for_empty_context() {
+        let temp = tempdir().unwrap();
+        let workspace = crate::workspace::WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+        };
+
+        let output =
+            run_systems_invariant_extract(&json!({"context": empty_context()}), &ctx, None)
+                .unwrap();
+
+        assert!(output.invariants.is_empty());
+        let err = match required_systems_runtime(None, "systems-hunt:test") {
+            Ok(_) => panic!("runtime should be required"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("systems-hunt:test requires"));
+    }
+
+    #[test]
+    fn runs_systems_trigger_synth_from_supplied_context_and_invariants() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/parser.c"),
+            "void parse(char *packet, uint16_t len) {\n  char buf[64];\n  memcpy(buf, packet, len);\n}\n",
+        )
+        .unwrap();
+        let workspace = crate::workspace::WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config {
+            model: Some("openai:gpt-4.1".to_string()),
+            ..V2Config::default()
+        };
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+        };
+        let runtime = FakeRuntime::new();
+        let context = gather_systems_context(
+            temp.path(),
+            &SystemsHuntInput::from_tool_input(&json!({})).unwrap(),
+        )
+        .unwrap();
+
+        let output = run_systems_trigger_synth(
+            &json!({
+                "context": context,
+                "invariants": [{
+                    "id": "inv-1",
+                    "surfaceId": "surface",
+                    "kind": "length-buffer-coupling",
+                    "summary": "length must fit buffer",
+                    "statement": "len is checked",
+                    "rationale": "memcpy uses len",
+                    "evidence": ["memcpy"],
+                    "attackerControlledFields": ["len"],
+                    "cheapVerifiable": true
+                }]
+            }),
+            &ctx,
+            Some(&runtime),
+        )
+        .unwrap();
+
+        assert_eq!(output.triggers.len(), 1);
+        assert_eq!(output.triggers[0].id, "trig-1");
+    }
+
+    #[test]
+    fn runs_deep_semantic_cwe_select_through_runtime() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/parser.c"),
+            "void parse(char *packet, uint16_t len) { memcpy(packet, packet, len); }\n",
+        )
+        .unwrap();
+        let workspace = crate::workspace::WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config {
+            model: Some("openai:gpt-4.1".to_string()),
+            ..V2Config::default()
+        };
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+        };
+        let runtime = FakeRuntime::new();
+
+        let output = run_deep_semantic_cwe_select(&json!({}), &ctx, Some(&runtime)).unwrap();
+
+        assert_eq!(output.cwes.len(), 1);
+        assert_eq!(output.cwes[0].id, "CWE-787");
+    }
+
+    #[test]
+    fn runs_deep_semantic_hunt_through_runtime_and_persists() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/parser.c"),
+            "void parse(char *packet, uint16_t len) {\n  char buf[64];\n  memcpy(buf, packet, len);\n}\n",
+        )
+        .unwrap();
+        let workspace = crate::workspace::WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let config = V2Config {
+            model: Some("openai:gpt-4.1".to_string()),
+            ..V2Config::default()
+        };
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+        let runtime = FakeRuntime::new();
+
+        let report = run_deep_semantic_hunt_report(
+            &json!({
+                "maxFindings": 1,
+                "cwes": [{
+                    "id": "CWE-787",
+                    "name": "Out-of-bounds Write",
+                    "reason": "operator selected"
+                }]
+            }),
+            &ctx,
+            Some(&runtime),
+        )
+        .unwrap();
+
+        assert_eq!(report.count, 1);
+        assert_eq!(report.findings[0].tool, "deep-semantic-hunt");
+        assert_eq!(store.list_findings(10).unwrap().len(), 1);
+        assert_eq!(report.artifacts.len(), 1);
     }
 
     #[test]

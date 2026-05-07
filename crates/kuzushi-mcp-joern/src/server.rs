@@ -36,21 +36,60 @@ pub struct CpgHandle {
 /// Run `joern-parse <repo>` and persist the resulting `cpg.bin.zip` under
 /// `~/.kuzushi/index/joern/<repo-hash>/<commit>/`.
 pub async fn parse_repo(repo: &Path) -> Result<CpgHandle> {
-    let canonical = std::fs::canonicalize(repo)
-        .with_context(|| format!("repo path not found: {}", repo.display()))?;
-    let fingerprint = kuzushi_mcp_common::cache::repo_hash(&canonical)?;
-    let commit = read_head_commit(&canonical).unwrap_or_else(|| "noref".to_string());
+    let job = JoernParseJob::new(repo)?;
+    tokio::fs::create_dir_all(&job.dest).await?;
+    run_joern_parse(&job.canonical, &job.output_file).await?;
+    Ok(job.handle())
+}
+
+struct JoernParseJob {
+    canonical: PathBuf,
+    commit: String,
+    repo_hash: String,
+    dest: PathBuf,
+    output_file: PathBuf,
+}
+
+impl JoernParseJob {
+    fn new(repo: &Path) -> Result<Self> {
+        let canonical = std::fs::canonicalize(repo)
+            .with_context(|| format!("repo path not found: {}", repo.display()))?;
+        let commit = read_head_commit(&canonical).unwrap_or_else(|| "noref".to_string());
+        let (repo_hash, dest) = joern_cpg_destination(&canonical, &commit)?;
+        let output_file = dest.join("cpg.bin.zip");
+        Ok(Self {
+            canonical,
+            commit,
+            repo_hash,
+            dest,
+            output_file,
+        })
+    }
+
+    fn handle(self) -> CpgHandle {
+        CpgHandle {
+            cpg_id: format!("{}:{}", self.repo_hash, self.commit),
+            repo_path: self.canonical,
+            cpg_file: self.output_file,
+            languages: vec![],
+        }
+    }
+}
+
+fn joern_cpg_destination(repo: &Path, commit: &str) -> Result<(String, PathBuf)> {
+    let fingerprint = kuzushi_mcp_common::cache::repo_hash(repo)?;
     let dest = kuzushi_mcp_common::cache::index_root()?
         .join("joern")
         .join(&fingerprint.hash)
-        .join(&commit);
-    tokio::fs::create_dir_all(&dest).await?;
+        .join(commit);
+    Ok((fingerprint.hash, dest))
+}
 
-    let output_file = dest.join("cpg.bin.zip");
+async fn run_joern_parse(repo: &Path, output_file: &Path) -> Result<()> {
     let output = Command::new("joern-parse")
-        .arg(canonical.as_os_str())
+        .arg(repo.as_os_str())
         .arg("--output")
-        .arg(&output_file)
+        .arg(output_file)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -62,13 +101,7 @@ pub async fn parse_repo(repo: &Path) -> Result<CpgHandle> {
             String::from_utf8_lossy(&output.stderr)
         );
     }
-
-    Ok(CpgHandle {
-        cpg_id: format!("{}:{}", fingerprint.hash, commit),
-        repo_path: canonical,
-        cpg_file: output_file,
-        languages: vec![],
-    })
+    Ok(())
 }
 
 fn read_head_commit(repo: &Path) -> Option<String> {

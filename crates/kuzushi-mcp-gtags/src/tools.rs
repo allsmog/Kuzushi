@@ -1,6 +1,7 @@
 //! gtags MCP tool implementations.
 
 use std::path::{Path, PathBuf};
+use std::process::Output;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -177,20 +178,57 @@ async fn run_global_x(repo: &Path, args: &[&str]) -> Result<Vec<Symbol>> {
         .output()
         .await
         .with_context(|| format!("failed to spawn `global {}`", args.join(" ")))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        // Treat "no matches" as empty rather than error.
-        if stderr.contains("not found")
-            || stderr.contains("no such")
-            || output.status.code() == Some(3)
-        {
-            return Ok(Vec::new());
-        }
-        anyhow::bail!("global exited with {}: {}", output.status, stderr.trim());
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = global_stdout_or_empty(output)?;
     let records = parse_global_x(&stdout);
     Ok(records_to_symbols(records, repo))
+}
+
+fn global_stdout_or_empty(output: Output) -> Result<String> {
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if global_status_means_no_matches(&output, &stderr) {
+        return Ok(String::new());
+    }
+    anyhow::bail!("global exited with {}: {}", output.status, stderr.trim());
+}
+
+fn global_status_means_no_matches(output: &Output, stderr: &str) -> bool {
+    stderr.contains("not found") || stderr.contains("no such") || output.status.code() == Some(3)
+}
+
+async fn run_gtags(repo: &Path) -> Result<()> {
+    let output = Command::new("gtags")
+        .arg("--quiet")
+        .current_dir(repo)
+        .output()
+        .await
+        .context("failed to spawn `gtags`")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "gtags exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
+}
+
+async fn run_global_lines(repo: &Path, args: &[&str], spawn_context: &str) -> Result<Vec<String>> {
+    let output = Command::new("global")
+        .args(args)
+        .current_dir(repo)
+        .output()
+        .await
+        .context(spawn_context.to_string())?;
+    let stdout = global_stdout_or_empty(output)?;
+    Ok(stdout
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect())
 }
 
 #[async_trait]
@@ -200,19 +238,7 @@ impl ToolHandler for IndexTool {
         ensure_binary_available()?;
         let repo = std::fs::canonicalize(&repo)
             .with_context(|| format!("repo path not found: {}", repo.display()))?;
-        let output = Command::new("gtags")
-            .arg("--quiet")
-            .current_dir(&repo)
-            .output()
-            .await
-            .context("failed to spawn `gtags`")?;
-        if !output.status.success() {
-            anyhow::bail!(
-                "gtags exited with {}: {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
+        run_gtags(&repo).await?;
         Ok(json!({
             "repoPath": repo,
             "indexed": true,
@@ -259,24 +285,8 @@ impl ToolHandler for FilesMatchingTool {
         let pattern = require_string(&args, "pattern")?.to_string();
         ensure_binary_available()?;
         let repo = optional_repo_path(&args).unwrap_or_else(|| PathBuf::from("."));
-        let output = Command::new("global")
-            .args(["-P", &pattern])
-            .current_dir(&repo)
-            .output()
-            .await
-            .context("failed to spawn `global -P`")?;
-        if !output.status.success() && output.status.code() != Some(3) {
-            anyhow::bail!(
-                "global exited with {}: {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        let files: Vec<String> = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect();
+        let files =
+            run_global_lines(&repo, &["-P", &pattern], "failed to spawn `global -P`").await?;
         Ok(json!({ "pattern": pattern, "files": files }))
     }
 }
@@ -287,24 +297,8 @@ impl ToolHandler for CompletionTool {
         let prefix = require_string(&args, "prefix")?.to_string();
         ensure_binary_available()?;
         let repo = optional_repo_path(&args).unwrap_or_else(|| PathBuf::from("."));
-        let output = Command::new("global")
-            .args(["-c", &prefix])
-            .current_dir(&repo)
-            .output()
-            .await
-            .context("failed to spawn `global -c`")?;
-        if !output.status.success() && output.status.code() != Some(3) {
-            anyhow::bail!(
-                "global exited with {}: {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        let completions: Vec<String> = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect();
+        let completions =
+            run_global_lines(&repo, &["-c", &prefix], "failed to spawn `global -c`").await?;
         Ok(json!({ "prefix": prefix, "completions": completions }))
     }
 }
@@ -361,5 +355,17 @@ mod tests {
         }
         let err = tool.call(json!({})).await.unwrap_err();
         assert!(err.to_string().contains("symbol"));
+    }
+
+    #[tokio::test]
+    async fn argument_validation_runs_before_binary_checks_for_gtags_tools() {
+        let index_err = IndexTool.call(json!({})).await.unwrap_err();
+        assert!(index_err.to_string().contains("repoPath"));
+
+        let files_err = FilesMatchingTool.call(json!({})).await.unwrap_err();
+        assert!(files_err.to_string().contains("pattern"));
+
+        let completion_err = CompletionTool.call(json!({})).await.unwrap_err();
+        assert!(completion_err.to_string().contains("prefix"));
     }
 }

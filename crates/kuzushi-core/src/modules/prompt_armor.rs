@@ -7,11 +7,12 @@ use serde_json::{json, Value};
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
 use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 
+use super::agentic_sast::collect_agentic_repo_inventory;
 use super::generic_findings::{normalize_agent_json_findings, persist_tool_findings};
+use super::input::{read_bool_any, resolve_input_path, string_input_any};
 use super::plugin_resolution::{resolve_required_plugin_root, PluginAdapterSpec};
 use super::{
-    builtin_module, collect_agentic_repo_inventory, dag, json_summary, model_option, opt,
-    read_bool_any, resolve_input_path, resolve_tool_model, resolve_tool_target, string_input_any,
+    builtin_module, dag, json_summary, model_option, opt, resolve_tool_model, resolve_tool_target,
     target_option, tool_with_options, BuiltinModule, ModuleKind, OptionType, ToolExecutionContext,
 };
 

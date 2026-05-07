@@ -13,5 +13,8 @@ sast | SAST Pipeline
  ⏵ sast:scan                      headless Run the full SAST pipeline for the current target.
 
  -- NEXT ---------------------------------------------------------------------------------------------------------------
+ | run . run . -> sast:scan (shell); terminal: kuzushi --target . run sast:scan --input '{}'
  ⏵ tool scan runs configured scanners; run . dispatches sast:scan
+ | needs target, scanner/task config
+ | output .kuzushi/v2/findings.sqlite3
  | help tasks | findings | use triage

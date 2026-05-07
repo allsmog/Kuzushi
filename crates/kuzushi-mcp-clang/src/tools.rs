@@ -30,18 +30,34 @@ impl ClangdHandle {
     async fn for_repo(&self, repo: &std::path::Path) -> Result<Arc<ClangdClient>> {
         let canonical = std::fs::canonicalize(repo)?;
         let mut guard = self.0.lock().await;
-        if let Some((existing, client)) = guard.as_ref() {
-            if existing == &canonical {
-                return Ok(client.clone());
-            }
-            // Different repo — best-effort shutdown of the prior client.
-            let _ = client.shutdown().await;
+        if let Some(client) = cached_clangd_client(&mut guard, &canonical).await {
+            return Ok(client);
         }
-        let client = Arc::new(ClangdClient::spawn(&canonical).await?);
-        client.initialize(&canonical).await?;
+        let client = start_clangd_client(&canonical).await?;
         *guard = Some((canonical, client.clone()));
         Ok(client)
     }
+}
+
+async fn cached_clangd_client(
+    guard: &mut Option<(PathBuf, Arc<ClangdClient>)>,
+    canonical: &std::path::Path,
+) -> Option<Arc<ClangdClient>> {
+    let Some((existing, client)) = guard.as_ref() else {
+        return None;
+    };
+    if existing == canonical {
+        return Some(client.clone());
+    }
+    // Different repo: best-effort shutdown of the prior client.
+    let _ = client.shutdown().await;
+    None
+}
+
+async fn start_clangd_client(canonical: &std::path::Path) -> Result<Arc<ClangdClient>> {
+    let client = Arc::new(ClangdClient::spawn(canonical).await?);
+    client.initialize(canonical).await?;
+    Ok(client)
 }
 
 pub fn build_registry() -> ToolRegistry {
@@ -309,6 +325,61 @@ fn require_u32(args: &Value, name: &str) -> Result<u32> {
         .ok_or_else(|| anyhow::anyhow!("missing required integer argument: {name}"))
 }
 
+struct FileRequest {
+    repo: PathBuf,
+    file: PathBuf,
+}
+
+impl FileRequest {
+    fn from_args(args: &Value) -> Result<Self> {
+        let repo = PathBuf::from(require_str(args, "repoPath")?);
+        let file = repo.join(require_str(args, "file")?);
+        Ok(Self { repo, file })
+    }
+
+    async fn client(&self, handle: &ClangdHandle) -> Result<Arc<ClangdClient>> {
+        handle.for_repo(&self.repo).await
+    }
+
+    fn text_document(&self) -> Value {
+        json!({ "textDocument": { "uri": format!("file://{}", self.file.display()) } })
+    }
+}
+
+struct PositionRequest {
+    file: FileRequest,
+    line: u32,
+    column: u32,
+}
+
+impl PositionRequest {
+    fn from_args(args: &Value) -> Result<Self> {
+        let file = FileRequest::from_args(args)?;
+        let line = require_u32(args, "line")?;
+        let column = require_u32(args, "column")?;
+        Ok(Self { file, line, column })
+    }
+
+    fn from_args_with_default_column(args: &Value, default_column: u32) -> Result<Self> {
+        let file = FileRequest::from_args(args)?;
+        let line = require_u32(args, "line")?;
+        let column = optional_u32(args, "column").unwrap_or(default_column);
+        Ok(Self { file, line, column })
+    }
+
+    async fn client(&self, handle: &ClangdHandle) -> Result<Arc<ClangdClient>> {
+        self.file.client(handle).await
+    }
+
+    fn params(&self) -> Value {
+        position_arg(&self.file.file, self.line, self.column)
+    }
+}
+
+fn optional_u32(args: &Value, name: &str) -> Option<u32> {
+    args.get(name).and_then(Value::as_u64).map(|n| n as u32)
+}
+
 #[async_trait]
 impl ToolHandler for CompileCommandsTool {
     async fn call(&self, args: Value) -> Result<Value> {
@@ -321,25 +392,27 @@ impl ToolHandler for CompileCommandsTool {
 async fn open_document(client: &ClangdClient, file: &std::path::Path) -> Result<()> {
     let uri = format!("file://{}", file.display());
     let text = tokio::fs::read_to_string(file).await.unwrap_or_default();
-    let language_id = match file.extension().and_then(|e| e.to_str()) {
-        Some("c") => "c",
-        Some("h") => "c",
-        Some("cc" | "cpp" | "cxx" | "hpp" | "hxx" | "hh") => "cpp",
-        _ => "cpp",
-    };
     client
         .notify(
             "textDocument/didOpen",
             json!({
                 "textDocument": {
                     "uri": uri,
-                    "languageId": language_id,
+                    "languageId": clang_language_id(file),
                     "version": 1,
                     "text": text,
                 }
             }),
         )
         .await
+}
+
+fn clang_language_id(file: &std::path::Path) -> &'static str {
+    match file.extension().and_then(|extension| extension.to_str()) {
+        Some("c" | "h") => "c",
+        Some("cc" | "cpp" | "cxx" | "hpp" | "hxx" | "hh") => "cpp",
+        _ => "cpp",
+    }
 }
 
 fn position_arg(file: &std::path::Path, line: u32, column: u32) -> Value {
@@ -354,20 +427,13 @@ fn position_arg(file: &std::path::Path, line: u32, column: u32) -> Value {
 impl ToolHandler for DefinitionTool {
     async fn call(&self, args: Value) -> Result<Value> {
         ensure_clangd()?;
-        let repo = PathBuf::from(require_str(&args, "repoPath")?);
-        let file = repo.join(require_str(&args, "file")?);
-        let line = require_u32(&args, "line")?;
-        let column = require_u32(&args, "column")?;
-        let client = self.handle.for_repo(&repo).await?;
-        open_document(&client, &file).await?;
+        let request = PositionRequest::from_args(&args)?;
+        let client = request.client(&self.handle).await?;
+        open_document(&client, &request.file.file).await?;
         let raw = client
-            .request("textDocument/definition", position_arg(&file, line, column))
+            .request("textDocument/definition", request.params())
             .await?;
-        let locations: Vec<Position> = parse_locations(&raw)
-            .into_iter()
-            .map(|(p, l, c)| Position::new(PathBuf::from(p), l).with_column(c))
-            .collect();
-        Ok(json!({ "locations": locations }))
+        Ok(json!({ "locations": position_locations(&raw) }))
     }
 }
 
@@ -375,23 +441,13 @@ impl ToolHandler for DefinitionTool {
 impl ToolHandler for ReferencesTool {
     async fn call(&self, args: Value) -> Result<Value> {
         ensure_clangd()?;
-        let repo = PathBuf::from(require_str(&args, "repoPath")?);
-        let file = repo.join(require_str(&args, "file")?);
-        let line = require_u32(&args, "line")?;
-        let column = require_u32(&args, "column")?;
-        let client = self.handle.for_repo(&repo).await?;
-        open_document(&client, &file).await?;
-        let mut params = position_arg(&file, line, column);
+        let request = PositionRequest::from_args(&args)?;
+        let client = request.client(&self.handle).await?;
+        open_document(&client, &request.file.file).await?;
+        let mut params = request.params();
         params["context"] = json!({ "includeDeclaration": true });
         let raw = client.request("textDocument/references", params).await?;
-        let locations: Vec<Range> = parse_locations(&raw)
-            .into_iter()
-            .map(|(p, l, c)| Range {
-                start: Position::new(PathBuf::from(&p), l).with_column(c),
-                end: Position::new(PathBuf::from(p), l).with_column(c),
-            })
-            .collect();
-        Ok(json!({ "locations": locations }))
+        Ok(json!({ "locations": range_locations(&raw) }))
     }
 }
 
@@ -399,14 +455,11 @@ impl ToolHandler for ReferencesTool {
 impl ToolHandler for TypeAtTool {
     async fn call(&self, args: Value) -> Result<Value> {
         ensure_clangd()?;
-        let repo = PathBuf::from(require_str(&args, "repoPath")?);
-        let file = repo.join(require_str(&args, "file")?);
-        let line = require_u32(&args, "line")?;
-        let column = require_u32(&args, "column")?;
-        let client = self.handle.for_repo(&repo).await?;
-        open_document(&client, &file).await?;
+        let request = PositionRequest::from_args(&args)?;
+        let client = request.client(&self.handle).await?;
+        open_document(&client, &request.file.file).await?;
         let raw = client
-            .request("textDocument/hover", position_arg(&file, line, column))
+            .request("textDocument/hover", request.params())
             .await?;
         Ok(json!({ "hover": raw }))
     }
@@ -416,18 +469,30 @@ impl ToolHandler for TypeAtTool {
 impl ToolHandler for AstTool {
     async fn call(&self, args: Value) -> Result<Value> {
         ensure_clangd()?;
-        let repo = PathBuf::from(require_str(&args, "repoPath")?);
-        let file = repo.join(require_str(&args, "file")?);
-        let line = require_u32(&args, "line")?;
-        let column = args.get("column").and_then(Value::as_u64).unwrap_or(1) as u32;
-        let client = self.handle.for_repo(&repo).await?;
-        open_document(&client, &file).await?;
+        let request = PositionRequest::from_args_with_default_column(&args, 1)?;
+        let client = request.client(&self.handle).await?;
+        open_document(&client, &request.file.file).await?;
         // clangd-specific extension; not part of LSP standard.
-        let raw = client
-            .request("textDocument/ast", position_arg(&file, line, column))
-            .await?;
+        let raw = client.request("textDocument/ast", request.params()).await?;
         Ok(json!({ "ast": raw }))
     }
+}
+
+fn position_locations(raw: &Value) -> Vec<Position> {
+    parse_locations(raw)
+        .into_iter()
+        .map(|(p, l, c)| Position::new(PathBuf::from(p), l).with_column(c))
+        .collect()
+}
+
+fn range_locations(raw: &Value) -> Vec<Range> {
+    parse_locations(raw)
+        .into_iter()
+        .map(|(p, l, c)| Range {
+            start: Position::new(PathBuf::from(&p), l).with_column(c),
+            end: Position::new(PathBuf::from(p), l).with_column(c),
+        })
+        .collect()
 }
 
 /// Run `textDocument/prepareCallHierarchy` to get a CallHierarchyItem at
@@ -453,50 +518,63 @@ async fn prepare_call_hierarchy(
 #[async_trait]
 impl ToolHandler for CallersTool {
     async fn call(&self, args: Value) -> Result<Value> {
-        ensure_clangd()?;
-        let repo = PathBuf::from(require_str(&args, "repoPath")?);
-        let file = repo.join(require_str(&args, "file")?);
-        let line = require_u32(&args, "line")?;
-        let column = require_u32(&args, "column")?;
-        let client = self.handle.for_repo(&repo).await?;
-        let items = prepare_call_hierarchy(&client, &file, line, column).await?;
-        let mut callers = Vec::new();
-        if let Some(arr) = items.as_array() {
-            for item in arr {
-                let resp = client
-                    .request("callHierarchy/incomingCalls", json!({ "item": item }))
-                    .await?;
-                if let Some(items) = resp.as_array() {
-                    callers.extend(items.iter().cloned());
-                }
-            }
-        }
-        Ok(json!({ "incomingCalls": callers }))
+        call_hierarchy_response(
+            &self.handle,
+            &args,
+            "callHierarchy/incomingCalls",
+            "incomingCalls",
+        )
+        .await
     }
 }
 
 #[async_trait]
 impl ToolHandler for CalleesTool {
     async fn call(&self, args: Value) -> Result<Value> {
-        ensure_clangd()?;
-        let repo = PathBuf::from(require_str(&args, "repoPath")?);
-        let file = repo.join(require_str(&args, "file")?);
-        let line = require_u32(&args, "line")?;
-        let column = require_u32(&args, "column")?;
-        let client = self.handle.for_repo(&repo).await?;
-        let items = prepare_call_hierarchy(&client, &file, line, column).await?;
-        let mut callees = Vec::new();
-        if let Some(arr) = items.as_array() {
-            for item in arr {
-                let resp = client
-                    .request("callHierarchy/outgoingCalls", json!({ "item": item }))
-                    .await?;
-                if let Some(items) = resp.as_array() {
-                    callees.extend(items.iter().cloned());
-                }
-            }
-        }
-        Ok(json!({ "outgoingCalls": callees }))
+        call_hierarchy_response(
+            &self.handle,
+            &args,
+            "callHierarchy/outgoingCalls",
+            "outgoingCalls",
+        )
+        .await
+    }
+}
+
+async fn call_hierarchy_response(
+    handle: &ClangdHandle,
+    args: &Value,
+    method: &str,
+    field_name: &str,
+) -> Result<Value> {
+    ensure_clangd()?;
+    let request = PositionRequest::from_args(args)?;
+    let client = request.client(handle).await?;
+    let items =
+        prepare_call_hierarchy(&client, &request.file.file, request.line, request.column).await?;
+    Ok(json!({ field_name: collect_call_hierarchy_calls(&client, method, &items).await? }))
+}
+
+async fn collect_call_hierarchy_calls(
+    client: &ClangdClient,
+    method: &str,
+    items: &Value,
+) -> Result<Vec<Value>> {
+    let mut calls = Vec::new();
+    for item in json_array(items) {
+        let response = client.request(method, json!({ "item": item })).await?;
+        extend_with_json_array(&mut calls, &response);
+    }
+    Ok(calls)
+}
+
+fn json_array(value: &Value) -> &[Value] {
+    value.as_array().map(Vec::as_slice).unwrap_or_default()
+}
+
+fn extend_with_json_array(target: &mut Vec<Value>, value: &Value) {
+    if let Some(items) = value.as_array() {
+        target.extend(items.iter().cloned());
     }
 }
 
@@ -504,18 +582,15 @@ impl ToolHandler for CalleesTool {
 impl ToolHandler for MacroExpandTool {
     async fn call(&self, args: Value) -> Result<Value> {
         ensure_clangd()?;
-        let repo = PathBuf::from(require_str(&args, "repoPath")?);
-        let file = repo.join(require_str(&args, "file")?);
-        let line = require_u32(&args, "line")?;
-        let column = require_u32(&args, "column")?;
-        let client = self.handle.for_repo(&repo).await?;
-        open_document(&client, &file).await?;
+        let request = PositionRequest::from_args(&args)?;
+        let client = request.client(&self.handle).await?;
+        open_document(&client, &request.file.file).await?;
         // clangd renders the macro expansion in the hover markdown
         // when the cursor is on a macro name. We surface the raw
         // hover plus a best-effort extraction of any code fence whose
         // body contains the expansion.
         let hover = client
-            .request("textDocument/hover", position_arg(&file, line, column))
+            .request("textDocument/hover", request.params())
             .await?;
         let expansion = extract_first_code_fence(&hover);
         Ok(json!({ "hover": hover, "expansion": expansion }))
@@ -526,17 +601,11 @@ impl ToolHandler for MacroExpandTool {
 impl ToolHandler for SemanticTokensTool {
     async fn call(&self, args: Value) -> Result<Value> {
         ensure_clangd()?;
-        let repo = PathBuf::from(require_str(&args, "repoPath")?);
-        let file = repo.join(require_str(&args, "file")?);
-        let client = self.handle.for_repo(&repo).await?;
-        open_document(&client, &file).await?;
+        let request = FileRequest::from_args(&args)?;
+        let client = request.client(&self.handle).await?;
+        open_document(&client, &request.file).await?;
         let raw = client
-            .request(
-                "textDocument/semanticTokens/full",
-                json!({
-                    "textDocument": { "uri": format!("file://{}", file.display()) }
-                }),
-            )
+            .request("textDocument/semanticTokens/full", request.text_document())
             .await?;
         Ok(json!({ "tokens": raw }))
     }
@@ -546,19 +615,13 @@ impl ToolHandler for SemanticTokensTool {
 impl ToolHandler for DiagnosticsTool {
     async fn call(&self, args: Value) -> Result<Value> {
         ensure_clangd()?;
-        let repo = PathBuf::from(require_str(&args, "repoPath")?);
-        let file = repo.join(require_str(&args, "file")?);
-        let client = self.handle.for_repo(&repo).await?;
-        open_document(&client, &file).await?;
+        let request = FileRequest::from_args(&args)?;
+        let client = request.client(&self.handle).await?;
+        open_document(&client, &request.file).await?;
         // LSP 3.17 pull diagnostics. clangd implements this when
         // launched with `--enable-config` (default in modern builds).
         let raw = client
-            .request(
-                "textDocument/diagnostic",
-                json!({
-                    "textDocument": { "uri": format!("file://{}", file.display()) }
-                }),
-            )
+            .request("textDocument/diagnostic", request.text_document())
             .await?;
         Ok(json!({ "diagnostics": raw }))
     }
@@ -671,6 +734,126 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().starts_with("BackendUnavailable:"));
+    }
+
+    #[tokio::test]
+    async fn position_tools_validate_required_arguments_before_opening_files() {
+        let handle = Arc::new(ClangdHandle::default());
+        for err in [
+            DefinitionTool {
+                handle: handle.clone(),
+            }
+            .call(json!({}))
+            .await
+            .unwrap_err(),
+            ReferencesTool {
+                handle: handle.clone(),
+            }
+            .call(json!({}))
+            .await
+            .unwrap_err(),
+            TypeAtTool {
+                handle: handle.clone(),
+            }
+            .call(json!({}))
+            .await
+            .unwrap_err(),
+            AstTool {
+                handle: handle.clone(),
+            }
+            .call(json!({}))
+            .await
+            .unwrap_err(),
+            MacroExpandTool {
+                handle: handle.clone(),
+            }
+            .call(json!({}))
+            .await
+            .unwrap_err(),
+        ] {
+            assert!(
+                err.to_string().starts_with("BackendUnavailable:")
+                    || err.to_string().contains("missing required argument")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn file_tools_validate_required_arguments_before_opening_files() {
+        let handle = Arc::new(ClangdHandle::default());
+        for err in [
+            SemanticTokensTool {
+                handle: handle.clone(),
+            }
+            .call(json!({}))
+            .await
+            .unwrap_err(),
+            DiagnosticsTool { handle }
+                .call(json!({}))
+                .await
+                .unwrap_err(),
+        ] {
+            assert!(
+                err.to_string().starts_with("BackendUnavailable:")
+                    || err.to_string().contains("missing required argument")
+            );
+        }
+    }
+
+    #[test]
+    fn position_request_requires_column_unless_defaulted() {
+        let args = json!({"repoPath":"/repo","file":"src/a.cc","line":7});
+        assert!(PositionRequest::from_args(&args).is_err());
+
+        let request = PositionRequest::from_args_with_default_column(&args, 1).unwrap();
+        assert_eq!(request.file.repo, PathBuf::from("/repo"));
+        assert_eq!(request.file.file, PathBuf::from("/repo/src/a.cc"));
+        assert_eq!(request.line, 7);
+        assert_eq!(request.column, 1);
+    }
+
+    #[test]
+    fn lsp_locations_are_projected_to_schema_shapes() {
+        let raw = json!([{
+            "uri":"file:///repo/a.c",
+            "range":{
+                "start":{"line":2,"character":4},
+                "end":{"line":2,"character":9}
+            }
+        }]);
+
+        let positions = position_locations(&raw);
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].line, 3);
+        assert_eq!(positions[0].column, Some(5));
+
+        let ranges = range_locations(&raw);
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].start.line, 3);
+        assert_eq!(ranges[0].end.column, Some(5));
+    }
+
+    #[test]
+    fn call_hierarchy_response_helpers_ignore_non_arrays() {
+        let mut calls = vec![json!({"name":"existing"})];
+        extend_with_json_array(&mut calls, &json!({"not":"array"}));
+        assert_eq!(calls.len(), 1);
+
+        extend_with_json_array(&mut calls, &json!([{"name":"next"}]));
+        assert_eq!(
+            calls,
+            vec![json!({"name":"existing"}), json!({"name":"next"})]
+        );
+        assert!(json_array(&json!({"not":"array"})).is_empty());
+    }
+
+    #[test]
+    fn clang_language_id_maps_c_and_cpp_extensions() {
+        assert_eq!(clang_language_id(std::path::Path::new("main.c")), "c");
+        assert_eq!(clang_language_id(std::path::Path::new("main.h")), "c");
+        assert_eq!(clang_language_id(std::path::Path::new("main.cpp")), "cpp");
+        assert_eq!(clang_language_id(std::path::Path::new("main.hh")), "cpp");
+        assert_eq!(clang_language_id(std::path::Path::new("README")), "cpp");
     }
 
     #[test]

@@ -77,6 +77,46 @@ registration stores module-owned `DagTool`s in `DagRegistry`, and workers call
   nodes must be added to that factory's module list so the scan CLI sees
   their tasks without needing full CopilotCore init.
 
+### Clean Code / Uncle Bob baseline
+
+Every code addition, refactor, merge, and conflict resolution should leave the
+touched area easier for a human to understand and change. Treat this as a
+standing review gate, not an optional cleanup phase.
+
+- Keep modules cohesive: one clear responsibility, one primary reason to
+  change. If a file starts coordinating unrelated concerns, extract named
+  helpers or submodules with narrow APIs.
+- Keep functions small enough to explain in one sentence. Prefer early returns,
+  explicit names, and simple data flow over deeply nested control flow.
+- Name concepts after the domain behavior they represent. Avoid vague names
+  like `handleStuff`, `processData`, `utils`, or `manager` when a more precise
+  tool, event, report, finding, scan, or approval concept exists.
+- Preserve behavior before improving structure. For merges, integrate the
+  useful branch behavior into the current architecture instead of accepting
+  whole-file overwrites or resurrecting stale paths.
+- Do not duplicate policy or parsing logic across scan, shell, and run modes.
+  Extract shared helpers when behavior must stay identical.
+- Keep side effects at the edges. Parsing, formatting, validation, and
+  decision logic should be testable without filesystem, network, terminal, or
+  model calls unless those effects are the feature under test.
+- Prefer explicit errors and honest states over silent fallback. This is
+  especially important for model/runtime selection, structured model output,
+  scan findings, approval gates, and persisted `.kuzushi` artifacts.
+- Add abstractions only when they remove real duplication or clarify a stable
+  boundary. Do not introduce trait-heavy frameworks or generic "service"
+  layers just to make code look abstract.
+- Keep tests close to the behavior being protected. When extracting code from a
+  large file, move or add focused tests for the extracted helper and keep the
+  existing integration/snapshot tests passing.
+- New production Rust code should target CRAP <= 15, measured with
+  `cargo-llvm-cov` plus `cargo-crap`. If you must touch an existing offender,
+  avoid increasing its CRAP score and prefer reducing it with focused extraction
+  or meaningful branch-covering tests.
+- Before committing, scan the touched files for long functions, mixed
+  responsibilities, unclear names, duplicated branches, stale comments, and
+  needless public API expansion. Fix the local problem while the context is
+  fresh.
+
 ### Model & runtime safety (no silent fallback)
 
 Kuzushi will **never silently switch agent runtime, provider, or model**

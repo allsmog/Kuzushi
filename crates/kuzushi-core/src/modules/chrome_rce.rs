@@ -8,10 +8,10 @@ use serde_json::{json, Value};
 use crate::findings::{Finding, Severity};
 
 use super::generic_findings::persist_tool_findings;
+use super::support::should_skip_path;
 use super::{
-    builtin_module, dag, max_findings_option, opt, resolve_tool_target, should_skip_path,
-    string_input_any, target_option, tool_with_options, BuiltinModule, ModuleKind, OptionType,
-    ToolExecutionContext,
+    builtin_module, dag, max_findings_option, opt, resolve_tool_target, string_input_any,
+    target_option, tool_with_options, BuiltinModule, ModuleKind, OptionType, ToolExecutionContext,
 };
 
 pub(super) fn module() -> BuiltinModule {

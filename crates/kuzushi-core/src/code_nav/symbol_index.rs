@@ -383,36 +383,58 @@ pub fn read_definition(root: &Path, input: &ReadDefinitionInput) -> Result<ReadD
 
 fn classify_hit(snippet: &str, symbol: &str) -> Option<String> {
     let t = snippet.trim_start();
-    // Pre-filter: only treat as a definition if the symbol appears at the
-    // expected position (function name immediately before `(`).
-    let needle = format!("{symbol}(");
-    if !t.contains(&needle) && !t.contains(&format!("{symbol} (")) {
-        // Could still be a struct/enum.
-        for kw in ["struct ", "enum ", "trait ", "class ", "type "] {
-            if t.starts_with(kw) && t[kw.len()..].trim_start().starts_with(symbol) {
-                return Some("struct".to_string());
-            }
-        }
-        return None;
+    if !contains_symbol_call(t, symbol) {
+        return classify_type_hit(t, symbol);
     }
-    if t.starts_with("fn ")
-        || t.starts_with("pub fn ")
-        || t.starts_with("async fn ")
-        || t.starts_with("pub async fn ")
-    {
-        return Some("function".to_string());
-    }
-    if t.starts_with("def ") || t.starts_with("async def ") {
-        return Some("function".to_string());
-    }
-    if t.starts_with("func ") {
-        return Some("function".to_string());
-    }
-    // Heuristic for C: line ends with `)` and may have `{` here or next line.
-    if t.contains(") {") || t.ends_with(')') {
-        return Some("function".to_string());
-    }
-    None
+    classify_callable_hit(t)
+}
+
+fn contains_symbol_call(snippet: &str, symbol: &str) -> bool {
+    let compact = format!("{symbol}(");
+    let spaced = format!("{symbol} (");
+    snippet.contains(&compact) || snippet.contains(&spaced)
+}
+
+fn classify_type_hit(snippet: &str, symbol: &str) -> Option<String> {
+    ["struct ", "enum ", "trait ", "class ", "type "]
+        .iter()
+        .any(|keyword| symbol_follows_keyword(snippet, keyword, symbol))
+        .then(|| "struct".to_string())
+}
+
+fn symbol_follows_keyword(snippet: &str, keyword: &str, symbol: &str) -> bool {
+    snippet
+        .strip_prefix(keyword)
+        .map(str::trim_start)
+        .is_some_and(|rest| rest.starts_with(symbol))
+}
+
+fn classify_callable_hit(snippet: &str) -> Option<String> {
+    [
+        is_rust_function_signature(snippet),
+        is_python_function_signature(snippet),
+        snippet.starts_with("func "),
+        is_c_like_function_signature(snippet),
+    ]
+    .into_iter()
+    .any(|matched| matched)
+    .then(|| "function".to_string())
+}
+
+fn is_rust_function_signature(snippet: &str) -> bool {
+    ["fn ", "pub fn ", "async fn ", "pub async fn "]
+        .iter()
+        .any(|prefix| snippet.starts_with(prefix))
+}
+
+fn is_python_function_signature(snippet: &str) -> bool {
+    ["def ", "async def "]
+        .iter()
+        .any(|prefix| snippet.starts_with(prefix))
+}
+
+fn is_c_like_function_signature(snippet: &str) -> bool {
+    snippet.contains(") {") || snippet.ends_with(')')
 }
 
 #[cfg(test)]
@@ -491,5 +513,69 @@ mod tests {
         assert!(names.contains(&"bar"));
         assert!(names.contains(&"baz"));
         assert!(names.contains(&"top_level"));
+    }
+
+    #[test]
+    fn list_go_and_java_definitions() {
+        let tmp = tempdir().unwrap();
+        write(
+            tmp.path(),
+            "a.go",
+            "type Server struct{}\nfunc NewServer() *Server { return nil }\nfunc (s *Server) Serve() {}\n",
+        );
+        write(
+            tmp.path(),
+            "A.java",
+            "public class A {\n  public void run() {}\n}\ninterface Worker {}\n",
+        );
+
+        let go = list_definitions(
+            tmp.path(),
+            &ListDefinitionsInput {
+                file: "a.go".to_string(),
+            },
+        )
+        .unwrap();
+        let go_names: Vec<&str> = go.definitions.iter().map(|d| d.name.as_str()).collect();
+        assert!(go_names.contains(&"Server"));
+        assert!(go_names.contains(&"NewServer"));
+        assert!(go_names.contains(&"Serve"));
+
+        let java = list_definitions(
+            tmp.path(),
+            &ListDefinitionsInput {
+                file: "A.java".to_string(),
+            },
+        )
+        .unwrap();
+        let java_names: Vec<&str> = java.definitions.iter().map(|d| d.name.as_str()).collect();
+        assert!(java_names.contains(&"A"));
+        assert!(java_names.contains(&"Worker"));
+    }
+
+    #[test]
+    fn classify_hit_accepts_definitions_and_rejects_call_sites() {
+        assert_eq!(
+            classify_hit("pub async fn target() {}", "target").as_deref(),
+            Some("function")
+        );
+        assert_eq!(
+            classify_hit("async def target():", "target").as_deref(),
+            Some("function")
+        );
+        assert_eq!(
+            classify_hit("func target() {}", "target").as_deref(),
+            Some("function")
+        );
+        assert_eq!(
+            classify_hit("int target(int x)", "target").as_deref(),
+            Some("function")
+        );
+        assert_eq!(
+            classify_hit("struct target {", "target").as_deref(),
+            Some("struct")
+        );
+        assert_eq!(classify_hit("let x = target();", "target"), None);
+        assert_eq!(classify_hit("fn other() {}", "target"), None);
     }
 }

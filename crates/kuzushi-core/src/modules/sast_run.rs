@@ -15,7 +15,7 @@ use crate::variant_ndiff::hunt_whitebox_static_variants;
 use crate::whitebox_suppressions::{evaluate_whitebox_suppressions, load_whitebox_suppressions};
 use crate::workspace::WorkspaceTarget;
 
-use super::now_unix;
+use super::support::now_unix;
 
 #[derive(Debug, Clone)]
 pub(super) struct SastRunIds {

@@ -24,5 +24,8 @@ tools bound        3
  | recon persisted 3 findings
 
  -- NEXT ---------------------------------------------------------------------------------------------------------------
+ | run . run . -> recon:nmap (shell); terminal: kuzushi --target . run recon:nmap --input '{}'
  ⏵ tool run nmap, subdomain, or http-fingerprint with a target
+ | needs target host or active workspace
+ | output recon notes and optional findings
  | help workspace | findings | use threat-model

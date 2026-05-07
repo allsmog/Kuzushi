@@ -1005,6 +1005,23 @@ mod tests {
     }
 
     #[test]
+    fn python_route_methods_extracts_declared_method_lists() {
+        assert_eq!(
+            python_route_methods("@app.route('/items', methods=['GET', 'POST'])").as_deref(),
+            Some("GET,POST")
+        );
+        assert_eq!(
+            python_route_methods("@bp.route('/item', methods=['delete', 'PATCH'])").as_deref(),
+            Some("PATCH,DELETE")
+        );
+        assert_eq!(python_route_methods("@app.get('/items')"), None);
+        assert_eq!(
+            python_route_methods("@app.route('/items', methods=[])"),
+            None
+        );
+    }
+
+    #[test]
     fn repository_inventory_detects_go_entrypoints_routes_and_vendor_paths() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("vendor/example")).unwrap();

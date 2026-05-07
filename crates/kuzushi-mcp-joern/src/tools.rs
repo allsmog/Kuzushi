@@ -383,6 +383,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn parse_and_method_at_report_backend_unavailable_when_joern_missing() {
+        if which("joern-parse").is_some() || which("joern").is_some() {
+            return;
+        }
+        let parse = ParseTool;
+        let err = parse
+            .call(json!({"repoPath": "/tmp/repo"}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().starts_with("BackendUnavailable:"));
+
+        let method_at = MethodAtTool;
+        let err = method_at
+            .call(json!({"file": "/tmp/repo/a.c", "line": 7}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().starts_with("BackendUnavailable:"));
+    }
+
+    #[tokio::test]
     async fn stubs_marker_struct_still_returns_not_yet_implemented() {
         // Kept for any future tool we register as a stub before wiring.
         let tool = NotYetImplemented("future.tool");
