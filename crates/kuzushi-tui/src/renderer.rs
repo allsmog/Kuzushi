@@ -625,6 +625,30 @@ fn recon_snapshot_lines(snapshot: &super::app::ReconSnapshot, take: usize) -> Ve
 /// Format a carlini-threat-hunt snapshot as a small transcript block:
 /// actor / finding counts plus cost. Top finding lines are added when
 /// they fit, mirroring the textual `output()` summary on the report.
+/// Transcript-style finding row with severity tint.  Mirrors the mockup
+/// finding row colour split (`design/mockups/findings.jsx::findingRow`):
+///
+///   `▸ <severity>  <rule-id>  <path>:<line>`
+///   warn glyph + severity-tinted severity + accent rule-id + muted location.
+fn transcript_finding_line(
+    severity: Severity,
+    rule_id: &str,
+    file_path: &str,
+    line: u32,
+) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(" ▸ ", theme::warn()),
+        Span::styled(
+            format!("{:9}", severity.as_str().to_uppercase()),
+            theme::severity(severity),
+        ),
+        Span::raw(" "),
+        Span::styled(rule_id.to_string(), theme::accent()),
+        Span::raw("  "),
+        Span::styled(format!("{file_path}:{line}"), theme::muted()),
+    ])
+}
+
 fn carlini_snapshot_lines(report: &kuzushi_core::CarliniThreatHuntReport) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     lines.push(transcript_line(
@@ -646,16 +670,11 @@ fn carlini_snapshot_lines(report: &kuzushi_core::CarliniThreatHuntReport) -> Vec
         false,
     ));
     for finding in report.findings.iter().take(5) {
-        lines.push(transcript_line(
-            "finding",
-            &format!(
-                "{} {} {}:{}",
-                finding.severity.as_str(),
-                finding.rule_id,
-                finding.file_path,
-                finding.start_line,
-            ),
-            false,
+        lines.push(transcript_finding_line(
+            finding.severity,
+            &finding.rule_id,
+            &finding.file_path,
+            finding.start_line,
         ));
     }
     lines
@@ -682,16 +701,11 @@ fn agentic_sast_snapshot_lines(report: &kuzushi_core::AgenticSastReport) -> Vec<
         false,
     ));
     for finding in report.findings.iter().take(5) {
-        lines.push(transcript_line(
-            "finding",
-            &format!(
-                "{} {} {}:{}",
-                finding.severity.as_str(),
-                finding.rule_id,
-                finding.file_path,
-                finding.start_line,
-            ),
-            false,
+        lines.push(transcript_finding_line(
+            finding.severity,
+            &finding.rule_id,
+            &finding.file_path,
+            finding.start_line,
         ));
     }
     lines
@@ -6744,6 +6758,42 @@ mod tests {
         assert!(!rendered.contains("[space]"), "stale bracket: {rendered}");
         assert!(!rendered.contains("[y]"), "stale bracket: {rendered}");
         assert!(!rendered.contains("[n]"), "stale bracket: {rendered}");
+    }
+
+    #[test]
+    fn transcript_finding_line_tints_severity_per_mockup() {
+        // `design/mockups/findings.jsx::findingRow` puts the severity in a
+        // severity-tinted span, the rule-id in c-accent, and the location
+        // in c-muted.  Verify `transcript_finding_line` builds the same
+        // four-color split (warn glyph, severity tint, accent rule-id,
+        // muted location).
+        let line = transcript_finding_line(
+            Severity::Critical,
+            "demo.rule",
+            "src/x.rs",
+            142,
+        );
+        let mut roles: Vec<&str> = Vec::new();
+        for span in &line.spans {
+            roles.push(if span.style == theme::warn() {
+                "warn"
+            } else if span.style == theme::severity(Severity::Critical) {
+                "sev-critical"
+            } else if span.style == theme::accent() {
+                "accent"
+            } else if span.style == theme::muted() {
+                "muted"
+            } else {
+                "other"
+            });
+        }
+        assert!(roles.contains(&"warn"), "warn glyph missing: {roles:?}");
+        assert!(
+            roles.contains(&"sev-critical"),
+            "critical severity tint missing: {roles:?}"
+        );
+        assert!(roles.contains(&"accent"), "accent rule-id missing: {roles:?}");
+        assert!(roles.contains(&"muted"), "muted location missing: {roles:?}");
     }
 
     #[test]
