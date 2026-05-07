@@ -159,7 +159,8 @@ is expected to behave identically and should be filed as a parity bug.
 - **Two-stage Ctrl+C, NL planner (`/plan`), prompt editor view, threat
   views, finding alias drill, replay/trace, cost-cap halt card, module-run
   transcript, actor-detail view, tune view** — interactive only. They
-  live behind `process.stdout.isTTY` paths in `shell.ts`.
+  live in the Rust Ratatui shell under `crates/kuzushi-tui`; plain/scripted
+  output belongs in `crates/kuzushi-tui/src/renderer/plain.rs`.
 - **`--ci` is scan-only.** Single-tool `kuzushi run` uses `--json` for
   machine-readable output; the shell is interactive by definition. Don't
   add `--ci` to `run`.

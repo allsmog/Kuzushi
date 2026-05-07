@@ -2,9 +2,18 @@
 
 # Kuzushi
 
-Kuzushi is an open-source AI cybersecurity copilot. The primary product path is
-the native Rust CLI and Ratatui shell; the npm package is a thin wrapper around
-that native binary.
+Kuzushi is a security-native code agent for repositories.
+
+It does not try to be another generic coding assistant. It scans real
+codebases, preserves evidence, ranks likely vulnerabilities, and helps teams
+move from suspicion to validation to remediation.
+
+Use Kuzushi when you need more than "AI says this looks wrong": you need a
+finding, the code path behind it, the current proof state, and a defensible
+next action.
+
+The primary operator path is the native Rust CLI and Ratatui shell. The npm
+`kuzushi` binary invokes that native CLI through `bin/kuzushi-rs.mjs`.
 
 ## Install
 
@@ -29,20 +38,17 @@ wrapper at a specific binary.
 ## Quick Start
 
 ```bash
-# Start the Rust terminal shell.
-kuzushi
-
 # Check config, local state, scanners, and the pi-agent-core bridge.
 kuzushi doctor --target .
 
-# Run the default native scan path against a repo.
-kuzushi scan .
+# Run the standard native scan path with deterministic CI-style progress.
+kuzushi scan . --mode standard --ci
 
-# Persisted findings can be reviewed headlessly.
-kuzushi findings --target .
+# Inspect persisted findings.
+kuzushi findings --target . --limit 10
 
-# Or execute one tool through the same Rust registry.
-kuzushi --target . run secret-scan:scan --input '{}'
+# Render a markdown PR/security review summary from persisted findings.
+kuzushi pr-comment --target . > kuzushi-report.md
 ```
 
 Fresh native state is stored under `.kuzushi/v2/`; scan-run summaries and
@@ -50,6 +56,17 @@ triage/verification JSONL remain under `.kuzushi/runs/<runId>/`.
 `kuzushi doctor --target .` runs a Rust preflight over config, writable state,
 findings DB openability, optional scanner binaries, and the pi-agent-core
 bridge without printing credential values.
+
+To see the workflow without real provider credentials or LLM spend, run the
+deterministic fixture:
+
+```bash
+examples/first-wow/run.sh
+```
+
+It scans a tiny vulnerable app through a demo-only Semgrep fixture, persists
+findings in a temporary copy of the app, prints `findings`, and writes a
+markdown PR comment report path.
 
 ## Native CLI
 
@@ -65,12 +82,15 @@ escapes, animation, or box drawing. `KUZUSHI_SCREEN_READER=1` and
 | Command | Purpose |
 | --- | --- |
 | `kuzushi shell [--target <repo>]` | Start the Ratatui shell. |
-| `kuzushi scan <repo> [--tasks a,b] [--triage] [--json]` | Run the Rust SAST umbrella executor and persist findings. |
+| `kuzushi scan <repo> [--mode standard\|whitebox-static] [--tasks a,b] [--triage] [--json] [--ci]` | Run the Rust SAST umbrella executor and persist findings. |
 | `kuzushi findings --target <repo> [--severity high,critical] [--verdict true_positive] [--name text] [--file-path path] [--limit 50] [--json]` | List persisted findings. |
+| `kuzushi pr-comment --target <repo> [--repo owner/name] [--run-url url] [--git-sha sha]` | Render persisted findings as a markdown PR/security review comment. |
 | `kuzushi modules [--json]` | List visible native modules. |
 | `kuzushi tools [--json]` | List visible executable tool descriptors. |
 | `kuzushi doctor [--target <repo>] [--json]` | Check config, local state, findings DB openability, scanner binaries, bridge readiness, and model/auth setup. |
 | `kuzushi run <module:tool> --input '<json>'` | Execute one tool through the Rust registry. Use global `--target` for workspace-backed tools. |
+| `kuzushi mcp <server>` | Run a local MCP server over stdio. |
+| `kuzushi auth` | Print auth diagnostics; interactive provider login is handled inside `kuzushi shell`. |
 | `kuzushi config show` | Print effective config. |
 | `kuzushi config init [--force]` | Write the default global config. |
 | `kuzushi config path` | Print the global config path. |
@@ -78,8 +98,11 @@ escapes, animation, or box drawing. `KUZUSHI_SCREEN_READER=1` and
 Examples:
 
 ```bash
-kuzushi scan . --tasks semgrep,secret-scan --json
+kuzushi doctor --target . --json
+kuzushi scan . --mode standard --tasks semgrep,secret-scan --json
 kuzushi scan . --tasks agentic-sast --triage --json
+kuzushi findings --target . --severity high,critical --limit 10
+kuzushi pr-comment --target . --repo allsmog/Kuzushi > kuzushi-report.md
 kuzushi --target . run semgrep:scan --input '{"config":"p/default"}'
 kuzushi --target . run findings:list --input '{"severity":["high"],"limit":10}'
 kuzushi --target . run triage:run --input '{"fingerprints":["abc123"]}'
@@ -243,6 +266,8 @@ Useful package scripts:
 | `pnpm test:rust` | Run `cargo test --workspace`. |
 | `pnpm test:e2e` | Run the native smoke test. |
 | `pnpm doctor` | Run source-checkout development diagnostics; use `kuzushi doctor` for Rust CLI preflight. |
+| `pnpm check:docs` | Guard public docs/workflows against stale Rust CLI command examples. |
+| `pnpm export:source [path]` | Create a clean source tarball from tracked files with local state excluded. |
 
 ## TypeScript Retention
 

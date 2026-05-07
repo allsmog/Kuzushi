@@ -1,7 +1,7 @@
 {
   "name": "kuzushi",
   "version": "0.24.0-alpha.0",
-  "description": "Kuzushi — AI cybersecurity copilot and security harness",
+  "description": "Kuzushi — security-native code agent for evidence-backed repository scans",
   "author": "Shayaun Nejad",
   "repository": {
     "type": "git",
@@ -34,6 +34,8 @@
   "scripts": {
     "setup": "bash scripts/bootstrap.sh",
     "doctor": "bash scripts/doctor.sh",
+    "check:docs": "node scripts/check-doc-command-drift.mjs",
+    "export:source": "bash scripts/export-clean-source.sh",
     "setup:benchmarks": "bash scripts/setup-benchmarks.sh",
     "prepare": "husky",
     "postinstall": "node scripts/check-native-bindings.mjs",

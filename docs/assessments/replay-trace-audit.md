@@ -3,6 +3,8 @@
 Status: 2026-04-30. Audits the on-disk artefacts under `.kuzushi/runs/<runId>/`,
 the `pipeline_runs` SQLite table, and the verbs that consume them
 (`/show runs`, `/replay`, `/trace`, `kuzushi runs list|show|compare`).
+Some sample payloads preserve legacy TypeScript scan arguments for audit
+context; they are not current Rust CLI examples.
 
 The goal is to answer: **can an operator reproduce, query, diff, and prune
 past runs from disk alone?**

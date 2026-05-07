@@ -15,7 +15,7 @@ export interface ShellCommandOptions {
 
 export async function runShellCommand(_opts: ShellCommandOptions): Promise<void> {
   throw new CliUsageError(
-    "The TypeScript/Ink shell has been removed and is no longer executable through src/cli.ts.\n" +
+    "The TypeScript/Ink shell is reference-only and is no longer executable through src/cli.ts.\n" +
       "  Use the Rust shell instead: pnpm dev -- shell, cargo run -p kuzushi-cli -- shell, or node bin/kuzushi-rs.mjs shell.",
   );
 }

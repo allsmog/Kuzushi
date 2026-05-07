@@ -1,5 +1,10 @@
 # Operator Onboarding Assessment
 
+Status: historical pre-Rust-cutover assessment. It is retained to explain
+which onboarding gaps drove the Rust CLI polish, but references to
+TypeScript/Ink files, setup wizards, or old scan presets are not current
+operator instructions.
+
 Goal: someone with the README open should be running their first useful scan
 in under 5 minutes.
 

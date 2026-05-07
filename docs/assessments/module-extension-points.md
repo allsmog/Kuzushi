@@ -1,5 +1,9 @@
 # Module Extension-Point Assessment
 
+Status: SDK/domain assessment. Any historical mention of deleted shell/TUI
+files is not current operator UI guidance; new interactive shell behavior
+belongs in `crates/kuzushi-tui`.
+
 Audit of the Kuzushi module SDK's extension surface from the perspective of a
 third-party module author. The goal: identify gaps that block plausible
 modules — i.e. concrete capabilities a competent author would reach for and

@@ -45,7 +45,9 @@ my-module/
 └── README.md
 ```
 
-The scaffolder (`kuzushi create-module <name>`) emits exactly this layout.
+The current Rust CLI does not ship a module scaffolder. Create this layout
+manually or copy an in-tree module fixture until a Rust-native scaffolder is
+added.
 
 ## 4. Manifest — `module.manifest.json`
 
@@ -376,24 +378,21 @@ describe("my-module", () => {
 permissive defaults and accepts per-field overrides. See
 `src/testing/index.ts` for the full helper list.
 
-## 14. Scaffolder
+## 14. Scaffolding status
 
-```bash
-kuzushi create-module my-module --template offense
-```
+The legacy TypeScript CLI had a `kuzushi create-module` scaffolder during SDK
+hardening. That command is not part of the current Rust operator CLI, so it
+must not appear in first-run instructions or CI examples.
 
-Templates: `offense` (scanner/recon framing), `defense` (monitor/honeypot),
-`intel` (lookup/feed). The scaffolder emits:
+Until a Rust-native scaffolder is implemented, create the layout from §3
+manually:
 
-- `module.manifest.json` — with `kuzushiSdkVersion` prefilled to the current
-  host version.
-- `package.json` — `peerDependencies.kuzushi` pinned to the host major.
+- `module.manifest.json` with `$schema`, `id`, `displayName`, `version`,
+  `description`, `category`, `entry`, and `kuzushiSdkVersion`.
+- `package.json` with `peerDependencies.kuzushi` pinned to the host major.
 - `src/index.ts` using `defineModule` + `defineTool`.
 - `src/index.test.ts` using `createMockToolContext` + `expectModuleShape`.
 - `README.md` with load and run examples.
-
-Flags: `--target-dir <path>`, `--force` (overwrite), `--rank <rank>`,
-`--schema-url <url>`.
 
 ## 15. MCP modules
 

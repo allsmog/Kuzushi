@@ -18,9 +18,10 @@
   surface.
 - The old `dist/cli*` TypeScript CLI outputs are excluded from the npm tarball.
 - Operator docs now describe only the Rust command surface:
-  `shell`, `scan`, `findings`, `modules`, `tools`, `run`, and `config`.
-  Unsupported TypeScript-era scan flags such as `--preset`, `--sarif`, `--ci`,
-  and CLI `--model` are not advertised for the Rust path.
+  `shell`, `scan`, `findings`, `config`, `auth`, `modules`, `tools`,
+  `doctor`, `run`, `mcp`, and `pr-comment`. Unsupported TypeScript-era scan
+  flags such as `--preset`, `--sarif`, and CLI `--model` are not advertised
+  for the Rust path.
 
 **Additive:**
 
@@ -107,8 +108,10 @@
 
 **Tooling:**
 
-- `kuzushi create-module` emits `kuzushiSdkVersion` + `$schema` in the
-  generated manifest and uses `defineModule` + `defineTool` in `src/index.ts`.
+- Historical note: the legacy TypeScript CLI scaffolder emitted
+  `kuzushiSdkVersion` + `$schema` in generated manifests and used
+  `defineModule` + `defineTool` in `src/index.ts`. The current Rust operator
+  CLI does not expose a `kuzushi create-module` command.
 - `kuzushi/testing` exports expanded: `createMockToolContext` covers every
   `ToolExecutionContext` field; new helpers `createMockEventScope`,
   `createFakeRuntime`, `assertToolResult`, `expectModuleShape`.

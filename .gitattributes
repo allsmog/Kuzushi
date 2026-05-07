@@ -17,3 +17,21 @@ pnpm-lock.yaml  linguist-generated=true
 *.gif           binary
 *.pdf           binary
 *.sqlite3       binary
+
+# Clean source exports should contain tracked source, not local state or native
+# build outputs from a maintainer workstation.
+.kuzushi/       export-ignore
+.ralph/         export-ignore
+.codex/         export-ignore
+.codex-active/  export-ignore
+.playwright-mcp/ export-ignore
+.serena/        export-ignore
+*.sqlite3       export-ignore
+*.sqlite3-wal   export-ignore
+*.sqlite3-shm   export-ignore
+.tmp-*.md       export-ignore
+kuzushi-*-prompt.md export-ignore
+native/         export-ignore
+target/         export-ignore
+node_modules/   export-ignore
+coverage/       export-ignore

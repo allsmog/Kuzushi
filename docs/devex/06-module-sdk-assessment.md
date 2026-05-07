@@ -4,6 +4,10 @@ Status: research-only (no `src/modules/**` edits).
 Date: 2026-04-21.
 Scope: the third-party author experience of the `kuzushi` / `kuzushi/modules` / `kuzushi/testing` SDK surface.
 
+Current Rust CLI note: this assessment mentions the legacy TypeScript
+`kuzushi create-module` scaffolder as historical audit context. The current
+Rust operator CLI does not expose that command.
+
 ## 1. Executive summary
 
 The Kuzushi module SDK has a coherent runtime contract (`CopilotModule`, `ModuleTool`, `ToolExecutionContext`) and a working loader pipeline for four module sources (builtin / file / package / MCP). However, the public surface is **not yet safe for third-party authors outside the `@kuzushi/*` github dependencies**:
