@@ -26,6 +26,7 @@ pub mod secret_scan;
 pub mod semgrep_rule_synthesis;
 pub mod source_span;
 pub mod spend;
+pub mod static_context;
 pub mod static_evidence;
 pub mod static_narrative;
 pub mod static_proof_validator;
@@ -138,6 +139,7 @@ pub use source_span::{extract_source_span, SourceSpan};
 pub use spend::{
     parse_budget_flag, Operation as SpendOperation, SpendError, SpendLimiter, SpendTicket,
 };
+pub use static_context::{assemble_static_context, StaticContextSources};
 pub use static_evidence::{
     index_semgrep_findings_as_static_evidence, static_content_hash, static_evidence_path,
     StaticEvidenceEdge, StaticEvidenceEdgeKind, StaticEvidenceIndexReport, StaticEvidenceNode,
