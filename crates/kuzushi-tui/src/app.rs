@@ -506,6 +506,8 @@ pub enum ShellView {
     /// `/auth` providers + model + spend surface.  See
     /// `design/mockups/auth.jsx`.
     Auth,
+    /// `/cost` budget bars + by-tool spend.  See `design/mockups/cost.jsx`.
+    Cost,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3057,7 +3059,9 @@ impl ShellApp {
     }
 
     fn show_cost_status(&mut self) {
-        self.shell_view = ShellView::Config;
+        // `/cost` lands on the dedicated Cost surface
+        // (`design/mockups/cost.jsx`) — budget bars + by-tool spend.
+        self.shell_view = ShellView::Cost;
         let message = if let Some(last) = self.last_tool_cost_usd {
             format!(
                 "session estimate ${:.4}; last tool ${:.4}. Scanner-only work may report no LLM cost.",
