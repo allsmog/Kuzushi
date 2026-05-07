@@ -4440,6 +4440,16 @@ impl ShellApp {
             if let Ok(report) = serde_json::from_value::<AgenticSastReport>(data.clone()) {
                 self.agentic_sast_snapshot = Some(report);
             }
+        } else if tool_name == "patch:run" || tool_name == "patch:finding" {
+            // `patch:run` / `patch:finding` produce a staged patch the
+            // operator must approve (`design/mockups/patch.jsx`).  Cache
+            // the structured payload into `pending_patch` and navigate
+            // to the Patch view so it surfaces immediately.
+            if let Some(patch) = parse_pending_patch(data) {
+                let alias = patch.alias.clone();
+                self.pending_patch = Some(patch);
+                self.shell_view = ShellView::Patch(alias);
+            }
         }
     }
 
@@ -5300,6 +5310,68 @@ pub(crate) fn bridge_command_status(config: &V2Config) -> &'static str {
     } else {
         "bundled/default"
     }
+}
+
+/// Parse a `patch:run` / `patch:finding` result into a `PendingPatch`.
+/// Tools should produce `data` shaped like:
+///   `{ alias, rationale, side_effect?, diff, tests: [{name, blurb}],
+///      guardrail?, staged_at? }`
+/// All fields except `alias` + `rationale` + `diff` are optional —
+/// missing fields collapse to None / empty.
+pub fn parse_pending_patch(data: &serde_json::Value) -> Option<PendingPatch> {
+    let alias = data
+        .get("alias")
+        .and_then(serde_json::Value::as_str)?
+        .to_string();
+    let rationale = data
+        .get("rationale")
+        .and_then(serde_json::Value::as_str)?
+        .to_string();
+    let diff = data
+        .get("diff")
+        .and_then(serde_json::Value::as_str)?
+        .to_string();
+    let side_effect = data
+        .get("side_effect")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string);
+    let tests = data
+        .get("tests")
+        .and_then(serde_json::Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|t| {
+                    let name = t
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)?
+                        .to_string();
+                    let blurb = t
+                        .get("blurb")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    Some((name, blurb))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let guardrail = data
+        .get("guardrail")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string);
+    let staged_at = data
+        .get("staged_at")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string);
+    Some(PendingPatch {
+        alias,
+        rationale,
+        side_effect,
+        diff,
+        tests,
+        guardrail,
+        staged_at,
+    })
 }
 
 fn extract_cost_usd(result: &serde_json::Value) -> Option<f64> {
@@ -10617,6 +10689,56 @@ JSON
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         assert_eq!(app.input, "set \"\"");
         assert_eq!(app.cursor, app.input.chars().count() - 1);
+    }
+
+    #[test]
+    fn cache_tool_snapshot_populates_pending_patch_for_patch_run() {
+        // patch:run / patch:finding tools produce a structured payload
+        // the operator must approve.  Verify cache_tool_snapshot parses
+        // the payload, sets `pending_patch`, and navigates to the Patch
+        // view automatically.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let result = serde_json::json!({
+            "data": {
+                "alias": "F-0001",
+                "rationale": "switch to sqlx::query!() macro",
+                "side_effect": "closes F-0014",
+                "diff": "--- a/x.rs\n+++ b/x.rs\n@@ -1 +1 @@\n-old\n+new\n",
+                "tests": [
+                    {"name": "rejects_sqli", "blurb": "1 OR 1=1 → BadId"},
+                    {"name": "happy_path", "blurb": "valid uuid"},
+                ],
+                "guardrail": "approval.patches = human-required",
+                "staged_at": ".kuzushi/runs/r-1/patch.diff",
+            }
+        });
+        app.cache_tool_snapshot("patch:run", &result);
+        let patch = app.pending_patch.as_ref().expect("pending patch");
+        assert_eq!(patch.alias, "F-0001");
+        assert!(patch.rationale.contains("sqlx::query!"));
+        assert_eq!(patch.tests.len(), 2);
+        assert_eq!(patch.guardrail.as_deref(), Some("approval.patches = human-required"));
+        assert_eq!(app.shell_view, ShellView::Patch("F-0001".to_string()));
+    }
+
+    #[test]
+    fn parse_pending_patch_skips_when_required_fields_missing() {
+        // alias + rationale + diff are required; missing any of them
+        // means the result wasn't a patch payload, so the parser
+        // returns None instead of fabricating a patch.
+        assert!(parse_pending_patch(&serde_json::json!({})).is_none());
+        assert!(parse_pending_patch(
+            &serde_json::json!({"alias": "F-1", "rationale": "x"})
+        )
+        .is_none());
+        assert!(parse_pending_patch(
+            &serde_json::json!({"alias": "F-1", "diff": "x"})
+        )
+        .is_none());
+        assert!(parse_pending_patch(
+            &serde_json::json!({"rationale": "x", "diff": "x"})
+        )
+        .is_none());
     }
 
     #[test]
