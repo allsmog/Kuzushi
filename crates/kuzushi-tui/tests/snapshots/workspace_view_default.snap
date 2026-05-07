@@ -1,0 +1,17 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+assertion_line: 253
+---
+mode:shell | target:none | catalog | 0 findings | 30 mods
+
+------------------------------------------------------ WORKSPACE -------------------------------------------------------
+status: no active workspace. Next: scan <target> or start shell with --target .
+target: none
+state: .kuzushi/v2
+findings db: .kuzushi/v2/findings.sqlite3
+findings: unknown
+last export: none
+
+No active workspace. Next: scan <target> or kuzushi shell --target .
+
+Next: workspace status, workspace export findings findings.json

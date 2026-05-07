@@ -4,7 +4,9 @@
 //! Update with `cargo insta review` after intentional UI changes.
 
 use kuzushi_core::{Finding, ScanCancellation, Severity, TriageOutcome, TriageVerdict, V2Config};
-use kuzushi_tui::{render_plain_app, ShellApp, ShellCommand, ShellView, ThreatView};
+use kuzushi_tui::{
+    render_plain_app, OptionsFilter, OptionsView, ShellApp, ShellCommand, ShellView, ThreatView,
+};
 
 const SNAPSHOT_WIDTH: usize = 120;
 
@@ -237,5 +239,71 @@ fn module_run_view_with_findings_and_active_scan() {
         ],
     }, {
         insta::assert_snapshot!("module_run_with_findings", render_at_120(&app));
+    });
+}
+
+#[test]
+fn workspace_view_default() {
+    let mut app = fresh_app();
+    app.shell_view = ShellView::Workspace;
+    insta::with_settings!({
+        prepend_module_to_snapshot => false,
+        omit_expression => true,
+    }, {
+        insta::assert_snapshot!("workspace_view_default", render_at_120(&app));
+    });
+}
+
+#[test]
+fn knowledge_base_view_default() {
+    let mut app = fresh_app();
+    app.shell_view = ShellView::KnowledgeBase;
+    insta::with_settings!({
+        prepend_module_to_snapshot => false,
+        omit_expression => true,
+    }, {
+        insta::assert_snapshot!("knowledge_base_view_default", render_at_120(&app));
+    });
+}
+
+#[test]
+fn agent_chat_view_default() {
+    let mut app = fresh_app();
+    app.shell_view = ShellView::AgentChat;
+    insta::with_settings!({
+        prepend_module_to_snapshot => false,
+        omit_expression => true,
+    }, {
+        insta::assert_snapshot!("agent_chat_view_default", render_at_120(&app));
+    });
+}
+
+#[test]
+fn story_view_default() {
+    let mut app = fresh_app();
+    app.shell_view = ShellView::Story;
+    insta::with_settings!({
+        prepend_module_to_snapshot => false,
+        omit_expression => true,
+    }, {
+        insta::assert_snapshot!("story_view_default", render_at_120(&app));
+    });
+}
+
+#[test]
+fn options_view_for_sast_scan() {
+    let mut app = fresh_app();
+    app.shell_view = ShellView::Options(OptionsView {
+        tool_name: "sast:scan".to_string(),
+        filter: OptionsFilter::Standard,
+    });
+    insta::with_settings!({
+        prepend_module_to_snapshot => false,
+        omit_expression => true,
+        filters => vec![
+            (r"\$\d+\.\d{4}", "$0.0000"),
+        ],
+    }, {
+        insta::assert_snapshot!("options_view_for_sast_scan", render_at_120(&app));
     });
 }

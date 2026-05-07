@@ -474,6 +474,7 @@ pub struct ShellApp {
     pub history_scroll: usize,
     pub kb_scroll: usize,
     pub last_char_at: Option<Instant>,
+    pub spinner_tick: u64,
     scan_rx: Option<Receiver<ScanEvent>>,
     scan_cancel: Option<ScanCancellation>,
     agent_rx: Option<Receiver<AgentEvent>>,
