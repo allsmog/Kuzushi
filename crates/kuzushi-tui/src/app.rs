@@ -540,6 +540,11 @@ pub struct ShellApp {
     pub shell_view: ShellView,
     pub prev_shell_view: Option<ShellView>,
     pub catalog_expanded: bool,
+    /// Index of the catalog row the operator's cursor is on.  `j`/`k`
+    /// move the cursor; `Enter` runs `use <module>` for that row.  Per
+    /// `design/mockups/catalog.jsx` the cursor is the bright `▌` on a
+    /// `c-sel` background, set in `catalog_module_row`.
+    pub catalog_cursor: usize,
     pub config: V2Config,
     pub registry: ModuleRegistry,
     pub option_store: ToolOptionStore,
@@ -610,6 +615,7 @@ impl ShellApp {
             shell_view: ShellView::Catalog,
             prev_shell_view: None,
             catalog_expanded: false,
+            catalog_cursor: 0,
             config,
             registry: ModuleRegistry::with_v2_builtins(),
             option_store: ToolOptionStore::new(),
@@ -683,6 +689,29 @@ impl ShellApp {
             app.refresh_findings(false);
         }
         app
+    }
+
+    /// Module count visible in the catalog grouped view.  Used by
+    /// `j`/`k` cursor handlers to clamp `catalog_cursor`.
+    pub fn catalog_module_count(&self) -> usize {
+        self.registry.modules().count()
+    }
+
+    /// Move the catalog cursor by `delta` rows, wrapping at the edges.
+    /// `delta == 1` is `j`, `delta == -1` is `k`.
+    pub fn move_catalog_cursor(&mut self, delta: i32) {
+        let total = self.catalog_module_count();
+        if total == 0 {
+            self.catalog_cursor = 0;
+            return;
+        }
+        let total = total as i32;
+        let mut next = self.catalog_cursor as i32 + delta;
+        while next < 0 {
+            next += total;
+        }
+        next %= total;
+        self.catalog_cursor = next as usize;
     }
 
     pub fn log(&mut self, prefix: impl Into<String>, body: impl Into<String>) {
