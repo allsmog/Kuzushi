@@ -63,7 +63,7 @@ if [[ -z "${KUZUSHI_NATIVE_BIN:-}" && ! -x "${REPO_DIR}/target/debug/kuzushi" ]]
 fi
 KUZUSHI_NATIVE_BIN="${KUZUSHI_NATIVE_BIN:-${REPO_DIR}/target/debug/kuzushi}" \
   node "${REPO_DIR}/bin/kuzushi-rs.mjs" --help >"${TEST_LOG_DIR}/wrapper-help.log" 2>&1
-grep -q "Kuzushi security copilot" "${TEST_LOG_DIR}/wrapper-help.log"
+grep -q "Kuzushi security-native code agent" "${TEST_LOG_DIR}/wrapper-help.log"
 grep -q "modules" "${TEST_LOG_DIR}/wrapper-help.log"
 
 "${KUZUSHI_CMD_ARR[@]}" --target "${TEST_APP_DIR}" config show >"${TEST_LOG_DIR}/config-show.log" 2>&1

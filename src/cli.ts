@@ -100,7 +100,7 @@ program.hook("preAction", (_thisCommand, actionCommand) => {
 
 program
   .command("shell", { isDefault: true })
-  .description("Interactive security copilot shell")
+  .description("Interactive security-native repository shell")
   .option("--workspace <id>", "Resume a workspace")
   .option("--load <modules>", "Additional modules to load (comma-separated)")
   .option(
