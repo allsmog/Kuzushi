@@ -420,6 +420,12 @@ impl ShellApp {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let plain_modifiers = !ctrl && !alt;
 
+        // Any non-Tab keystroke breaks the Tab-completion cycle. The cycle
+        // is rebuilt the next time Tab is pressed against the new input.
+        if !matches!(key.code, KeyCode::Tab) {
+            self.reset_completion_cycle();
+        }
+
         match key.code {
             KeyCode::Char('c') | KeyCode::Char('d') if ctrl => {
                 self.handle_quit_chord();
@@ -434,6 +440,17 @@ impl ShellApp {
             KeyCode::Char('h') if ctrl => self.backspace(),
             KeyCode::Char('p') if ctrl => self.history_prev(),
             KeyCode::Char('n') if ctrl => self.history_next(),
+            // Bash/Zsh muscle memory: Ctrl+L clears the conversation log
+            // while preserving the partially typed input. Always wins
+            // regardless of input state so we don't accidentally insert
+            // a literal `l` after a mid-command Ctrl+L.
+            KeyCode::Char('l') if ctrl => {
+                let saved_input = std::mem::take(&mut self.input);
+                let saved_cursor = self.cursor;
+                self.clear_conversation();
+                self.input = saved_input;
+                self.cursor = saved_cursor.min(self.input.chars().count());
+            }
             KeyCode::Left if ctrl || alt => self.move_cursor_word_left(),
             KeyCode::Right if ctrl || alt => self.move_cursor_word_right(),
             KeyCode::Backspace if ctrl || alt => self.delete_word_left(),
@@ -504,7 +521,7 @@ impl ShellApp {
                 self.submit_line(&raw);
             }
             KeyCode::Esc => {
-                self.clear_input();
+                self.esc_clear_or_restore();
             }
             _ => {}
         }
@@ -519,6 +536,26 @@ impl ShellApp {
             .chars()
             .filter(|ch| *ch != '\r')
             .collect();
+        // Multi-line pastes: keep the first line so the user can review and
+        // submit explicitly, then warn about the dropped tail. Submitting
+        // every \n-separated line as its own command is what bash/zsh do;
+        // the kuzushi shell is a single-command-per-Enter prompt and
+        // exposing the same behavior runs unintended commands (e.g. pasting
+        // a snippet that begins with `rm`).
+        if normalised.contains('\n') {
+            let first_line = normalised.lines().next().unwrap_or("");
+            let total = normalised.chars().count();
+            let kept = first_line.chars().count();
+            self.insert_str_at_cursor(first_line);
+            let dropped_lines = normalised.lines().count().saturating_sub(1);
+            self.log(
+                "paste",
+                format!(
+                    "kept first line ({kept}/{total} chars); dropped {dropped_lines} more line(s). Submit, then paste the next part."
+                ),
+            );
+            return;
+        }
         self.insert_str_at_cursor(&normalised);
     }
 
@@ -633,6 +670,7 @@ impl ShellApp {
     }
 
     fn page_down_current_view(&mut self) {
+        let step = VIEWPORT_PAGE_LINES;
         match self.shell_view {
             ShellView::Findings => {
                 if !self.findings.is_empty() {
@@ -640,45 +678,66 @@ impl ShellApp {
                         .min(self.findings.len().saturating_sub(1));
                 }
             }
-            _ if self.is_scrollable_view() => self.scroll_down(VIEWPORT_PAGE_LINES as u16),
+            ShellView::Help | ShellView::Quickstart => {
+                self.help_scroll = self.help_scroll.saturating_add(step);
+            }
+            ShellView::Tools => self.tools_scroll = self.tools_scroll.saturating_add(step),
+            ShellView::History => self.history_scroll = self.history_scroll.saturating_add(step),
+            ShellView::KnowledgeBase => self.kb_scroll = self.kb_scroll.saturating_add(step),
+            ShellView::Catalog if self.catalog_expanded => {
+                self.modules_scroll = self.modules_scroll.saturating_add(step);
+            }
+            _ if self.is_scrollable_view() => self.scroll_down(step as u16),
             _ => {}
         }
     }
 
     fn page_up_current_view(&mut self) {
+        let step = VIEWPORT_PAGE_LINES;
         match self.shell_view {
             ShellView::Findings => {
                 self.findings_cursor = self.findings_cursor.saturating_sub(FINDINGS_PAGE_ROWS);
             }
-            _ if self.is_scrollable_view() => self.scroll_up(VIEWPORT_PAGE_LINES as u16),
+            ShellView::Help | ShellView::Quickstart => {
+                self.help_scroll = self.help_scroll.saturating_sub(step);
+            }
+            ShellView::Tools => self.tools_scroll = self.tools_scroll.saturating_sub(step),
+            ShellView::History => self.history_scroll = self.history_scroll.saturating_sub(step),
+            ShellView::KnowledgeBase => self.kb_scroll = self.kb_scroll.saturating_sub(step),
+            ShellView::Catalog if self.catalog_expanded => {
+                self.modules_scroll = self.modules_scroll.saturating_sub(step);
+            }
+            _ if self.is_scrollable_view() => self.scroll_up(step as u16),
             _ => {}
         }
     }
 
     fn is_scrollable_view(&self) -> bool {
-        matches!(
-            self.shell_view,
+        match &self.shell_view {
+            ShellView::Catalog => self.catalog_expanded,
             ShellView::Help
-                | ShellView::Tools
-                | ShellView::Options(_)
-                | ShellView::Runs
-                | ShellView::Replay(_)
-                | ShellView::Trace(_)
-                | ShellView::SastTasks
-                | ShellView::Context
-                | ShellView::Workspace
-                | ShellView::KnowledgeBase
-                | ShellView::AgentChat
-                | ShellView::History
-                | ShellView::Story
-                | ShellView::Threat(_)
-                | ShellView::ThreatEditor
-                | ShellView::PromptsEditor
-                | ShellView::Tune
-                | ShellView::ActorDetail(_)
-                | ShellView::ModuleRun
-                | ShellView::Finding
-        )
+            | ShellView::Quickstart
+            | ShellView::Tools
+            | ShellView::Options(_)
+            | ShellView::Runs
+            | ShellView::Replay(_)
+            | ShellView::Trace(_)
+            | ShellView::SastTasks
+            | ShellView::Context
+            | ShellView::Workspace
+            | ShellView::KnowledgeBase
+            | ShellView::AgentChat
+            | ShellView::History
+            | ShellView::Story
+            | ShellView::Threat(_)
+            | ShellView::ThreatEditor
+            | ShellView::PromptsEditor
+            | ShellView::Tune
+            | ShellView::ActorDetail(_)
+            | ShellView::ModuleRun
+            | ShellView::Finding => true,
+            _ => false,
+        }
     }
 
     pub(super) fn go_back(&mut self) {
@@ -686,6 +745,7 @@ impl ShellApp {
             ShellView::Finding => ShellView::Findings,
             ShellView::Findings
             | ShellView::Help
+            | ShellView::Quickstart
             | ShellView::Config
             | ShellView::Tools
             | ShellView::Runs

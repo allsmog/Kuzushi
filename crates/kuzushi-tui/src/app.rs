@@ -473,6 +473,7 @@ pub enum ShellView {
     Replay(String),
     Trace(String),
     Help,
+    Quickstart,
     Config,
     Tools,
     Options(OptionsView),
@@ -494,12 +495,21 @@ pub enum ThreatView {
     Summary,
 }
 
+#[derive(Debug, Clone)]
+pub struct CompletionCycle {
+    pub prefix: String,
+    pub candidates: Vec<String>,
+    pub index: usize,
+}
+
 #[derive(Debug)]
 pub struct ShellApp {
     pub input: String,
     pub cursor: usize,
     pub history_index: Option<usize>,
     pub history_draft: String,
+    pub last_cleared_input: Option<String>,
+    pub completion_cycle: Option<CompletionCycle>,
     pub log: Vec<LogLine>,
     pub target: Option<PathBuf>,
     pub focused_module: Option<String>,
@@ -548,18 +558,10 @@ pub struct ShellApp {
     pub scroll_offset: u16,
     pub spinner_phase: u8,
     pub last_spinner_advance: Option<Instant>,
-    /// Structured snapshot of the most recent recon tool result. Renderer
-    /// prefers this over grepping `app.log` for the recon module's
-    /// "RECENT RECON ACTIVITY" panel, so transcript truncation cannot erase
-    /// recon evidence.
+    pub force_full_redraw: bool,
     pub recon_snapshot: Option<ReconSnapshot>,
-    /// Structured snapshot of the most recent carlini-threat-hunt result.
     pub carlini_snapshot: Option<CarliniThreatHuntReport>,
-    /// Structured snapshot of the most recent agentic-sast result.
     pub agentic_sast_snapshot: Option<AgenticSastReport>,
-    /// Live scan progress (`done/total`, per-task breakdown) populated by
-    /// scan orchestrators. The TUI uses this to render real per-task
-    /// progress bars instead of binary running/done placeholders.
     pub scan_progress: Option<ScanProgress>,
     scan_rx: Option<Receiver<ScanEvent>>,
     scan_cancel: Option<ScanCancellation>,
@@ -576,6 +578,8 @@ impl ShellApp {
             cursor: 0,
             history_index: None,
             history_draft: String::new(),
+            last_cleared_input: None,
+            completion_cycle: None,
             log: Vec::new(),
             target: target.map(|target| target.root().to_path_buf()),
             focused_module: None,
@@ -631,6 +635,7 @@ impl ShellApp {
             scroll_offset: 0,
             spinner_phase: 0,
             last_spinner_advance: None,
+            force_full_redraw: false,
             recon_snapshot: None,
             carlini_snapshot: None,
             agentic_sast_snapshot: None,
@@ -643,10 +648,12 @@ impl ShellApp {
         };
         app.log("system", "kuzushi shell");
         app.log("startup", app.startup_summary_line());
-        app.log("first-run", app.first_finding_hint());
+        // The first-finding hint is rendered in the catalog body via
+        // `next_action_line` + `first_finding_hint`; keeping a duplicate
+        // copy in the transcript wasted one of only two visible log rows.
         app.log(
             "help",
-            "/scan, /run <tool>, /ask <question>, ?text, /workspace, /context build, /tasks, /options [tool], /auth login openai-codex|anthropic, /provider, /backend, /model, /cost, /kb, /history, /clear, /load <specifier>, /findings, /modules, /tools, /quit",
+            "type help for commands · ? <text> to ask · scan to start",
         );
         if target.is_some() {
             app.refresh_findings(false);
@@ -675,6 +682,23 @@ impl ShellApp {
         self.input.clear();
         self.cursor = 0;
         self.history_index = None;
+    }
+
+    /// Esc behavior: clear an in-progress draft, stash it for one-shot undo.
+    /// If the draft is already empty, restore the most recently cleared
+    /// draft so a single mis-tapped Esc doesn't lose carefully-typed input.
+    pub fn esc_clear_or_restore(&mut self) {
+        if !self.input.is_empty() {
+            self.last_cleared_input = Some(std::mem::take(&mut self.input));
+            self.cursor = 0;
+            self.history_index = None;
+            return;
+        }
+        if let Some(stashed) = self.last_cleared_input.take() {
+            self.input = stashed;
+            self.cursor = self.char_count();
+            self.history_index = None;
+        }
     }
 
     pub fn take_input(&mut self) -> String {
@@ -1052,14 +1076,18 @@ impl ShellApp {
     }
 
     pub fn submit_line(&mut self, raw: &str) {
-        self.log(">", raw.to_string());
         let trimmed = raw.trim();
-        if !trimmed.is_empty() {
-            self.command_history.push(trimmed.to_string());
-            if self.command_history.len() > 200 {
-                let overflow = self.command_history.len() - 200;
-                self.command_history.drain(0..overflow);
-            }
+        // Empty / whitespace-only Enter is a no-op. Logging an empty `>`
+        // bullet just clutters the 2-row transcript with `· ` rows the
+        // operator never asked for.
+        if trimmed.is_empty() {
+            return;
+        }
+        self.log(">", raw.to_string());
+        self.command_history.push(trimmed.to_string());
+        if self.command_history.len() > 200 {
+            let overflow = self.command_history.len() - 200;
+            self.command_history.drain(0..overflow);
         }
         if matches!(self.shell_view, ShellView::PromptsEditor)
             && !trimmed.is_empty()
@@ -1195,9 +1223,49 @@ impl ShellApp {
     }
 
     fn apply_completion(&mut self) {
-        if let Some(candidate) = self.completion_candidates(&self.input).into_iter().next() {
-            self.set_input(candidate);
-        }
+        // First Tab: snapshot the operator's prefix and produce the candidate
+        // list. Subsequent Tabs advance through the list without recomputing,
+        // so cycling stays stable even after we've replaced `input` with a
+        // longer candidate that would otherwise filter the candidates down.
+        let active_cycle = self.completion_cycle.take();
+        let cycle = match active_cycle {
+            Some(cycle)
+                if !cycle.candidates.is_empty()
+                    && self
+                        .input
+                        .as_str()
+                        .eq(cycle.candidates[cycle.index].as_str()) =>
+            {
+                cycle
+            }
+            _ => {
+                let candidates = self.completion_candidates(&self.input);
+                if candidates.is_empty() {
+                    return;
+                }
+                CompletionCycle {
+                    prefix: self.input.clone(),
+                    candidates,
+                    index: usize::MAX, // pre-increment in next step lands on 0
+                }
+            }
+        };
+        let next_index = if cycle.index == usize::MAX {
+            0
+        } else {
+            (cycle.index + 1) % cycle.candidates.len()
+        };
+        let candidate = cycle.candidates[next_index].clone();
+        self.set_input(candidate);
+        self.completion_cycle = Some(CompletionCycle {
+            prefix: cycle.prefix,
+            candidates: cycle.candidates,
+            index: next_index,
+        });
+    }
+
+    pub(crate) fn reset_completion_cycle(&mut self) {
+        self.completion_cycle = None;
     }
 
     /// Inline ghost-text suggestion shown after the cursor when the cursor sits
@@ -2146,7 +2214,7 @@ impl ShellApp {
         );
     }
 
-    fn clear_conversation(&mut self) {
+    pub(crate) fn clear_conversation(&mut self) {
         self.log.clear();
         self.selected_finding = None;
         self.agent_chat = None;
@@ -2606,24 +2674,11 @@ impl ShellApp {
     }
 
     pub fn show_quickstart(&mut self) {
-        self.shell_view = ShellView::Help;
+        self.shell_view = ShellView::Quickstart;
+        // Two log lines (not eight) for the operator-facing transcript.
+        // The full guide is rendered in the Quickstart view, which gets the
+        // full body area instead of the 2-row transcript strip.
         let scan_command = self.first_finding_scan_command();
-        let lines = [
-            "Welcome to kuzushi! Quickstart:",
-            if self.target.is_some() {
-                "  1. scan                    - run configured scanners on the active target"
-            } else {
-                "  1. scan .                  - run configured scanners on this directory"
-            },
-            "  2. findings                - browse persisted findings",
-            "  3. context build           - write .kuzushi/context-snapshot.json",
-            "  4. model                   - choose an explicit provider/model for ask/triage",
-            "  5. ask <question>          - ask after a model is configured",
-            "Press Ctrl+O to toggle the live event timeline.",
-        ];
-        for line in lines {
-            self.log("quickstart", line);
-        }
         self.log(
             "quickstart",
             format!("Exact first-finding path: {scan_command} -> findings"),
@@ -2744,7 +2799,14 @@ impl ShellApp {
             None => None,
         };
 
-        if force_module || (!force_global && self.focused_module.is_some()) {
+        // Default behavior with no global model yet: set the global model
+        // even if a module is focused. Otherwise `?question` traps the user
+        // because the agent path reads `config.model`, not the per-module
+        // option. Operators can still scope per-module explicitly with
+        // `model module <choice>`.
+        let scope_to_module = force_module
+            || (!force_global && self.focused_module.is_some() && self.config.model.is_some());
+        if scope_to_module {
             let Some(module_id) = self.focused_module.clone() else {
                 self.log(
                     "error",
@@ -2818,10 +2880,12 @@ impl ShellApp {
             );
         }
         if self.focused_module.is_some() {
-            self.log(
-                "model",
-                "focused module detected: model <n> sets this module; use model global <n> for global ask/defaults",
-            );
+            let hint = if self.config.model.is_none() {
+                "focused module detected, but no global model yet — model <n> sets the global model so `ask` works. Use `model module <n>` to scope per-module."
+            } else {
+                "focused module detected: model <n> sets this module; use `model global <n>` for global ask/defaults."
+            };
+            self.log("model", hint);
         }
     }
 
@@ -2885,6 +2949,13 @@ impl ShellApp {
         if raw_mode_was_disabled {
             let _ = enable_raw_mode();
         }
+        let mut stdout = io::stdout();
+        let _ = execute!(stdout, Clear(ClearType::All), MoveTo(0, 0));
+        // The bridge wrote to the inherited stdio while we were paused;
+        // ratatui's diff buffer no longer matches the screen. Force the
+        // run loop to invalidate its buffer + repaint so the OAuth output
+        // doesn't bleed into the next frame.
+        self.force_full_redraw = true;
 
         match status {
             Ok(status) if status.success() => self.log(
@@ -3062,7 +3133,7 @@ impl ShellApp {
                 self.shell_view = ShellView::Workspace;
                 self.log(
                     "error",
-                    format!("{error}. Next: workspace export findings findings.json"),
+                    format!("{error}. Next: workspace export findings <path>.json"),
                 );
             }
         }
@@ -3102,7 +3173,7 @@ impl ShellApp {
                     findings_count,
                     last_export,
                     status: format!(
-                        "workspace ready; {count_label} finding(s). Next: workspace export findings findings.json"
+                        "workspace ready; {count_label} finding(s). Next: workspace export findings <path>.json"
                     ),
                 }
             }
@@ -3617,6 +3688,15 @@ impl ShellApp {
 
     fn resolve_options_tool(&self, requested: Option<String>) -> Result<String> {
         if let Some(tool_name) = requested {
+            // `options .` mirrors `run .` — operate on the focused module's
+            // primary tool. The module-view footer hint advertises this
+            // ("help options . · prompts · tune · back") so it must work.
+            if tool_name == "." {
+                if let Some(default) = self.default_tool_for_focused_module() {
+                    return Ok(default);
+                }
+                anyhow::bail!("`options .` requires a focused module. Next: use <module>");
+            }
             let resolved = self.resolve_focused_tool_name(tool_name.clone());
             if self.registry.resolve_tool(&resolved).is_some() {
                 return Ok(resolved);
@@ -4304,7 +4384,17 @@ impl ShellApp {
 
     fn open_store(&mut self) -> Result<FindingStore> {
         let workspace = self.current_workspace()?;
-        self.target = Some(workspace.root().to_path_buf());
+        let resolved = workspace.root().to_path_buf();
+        // Surface the implicit target assignment so the operator isn't
+        // surprised by `target none` flipping to a real path the moment
+        // they type `findings`. We log on the first transition only.
+        if self.target.as_deref() != Some(resolved.as_path()) {
+            self.log(
+                "target",
+                format!("set to {} (implied from cwd)", resolved.display()),
+            );
+        }
+        self.target = Some(resolved);
         FindingStore::open(workspace.findings_db_path())
     }
 
@@ -4774,13 +4864,111 @@ fn unknown_command_message(raw: &str) -> String {
     let verb = normalized.split_whitespace().next().unwrap_or_default();
 
     if verb == "ask" {
-        "ask needs a question. Next: /ask <question>".to_string()
-    } else if trimmed.starts_with('/') {
+        return "ask needs a question. Next: /ask <question>".to_string();
+    }
+
+    if verb == "open" {
+        return "open needs a finding alias. Next: `findings` to list, then `open F-0001`".to_string();
+    }
+
+    if verb == "since" {
+        return "since needs a git ref. Next: `since main` or `since HEAD~5`".to_string();
+    }
+
+    if verb == "replay" || verb == "trace" {
+        return format!(
+            "{verb} needs a runId. Next: `show runs` to list runs, then `{verb} <runId>`"
+        );
+    }
+
+    if verb == "use" {
+        return "use needs a module id. Next: `modules` to list, then `use <module>`".to_string();
+    }
+
+    if verb == "run" {
+        return "run needs a tool id. Next: `tools` to list, then `run <tool> [json-input]`".to_string();
+    }
+
+    if verb == "plan" {
+        return "plan needs a natural-language goal. Next: `plan use Claude Sonnet 4.6 with high effort` (Haiku translates intent → option diff, review with /yes or /no)".to_string();
+    }
+
+    if verb == "load" {
+        return "load needs a module specifier. Next: `modules` for static registry; dynamic loading is unsupported in the Rust shell.".to_string();
+    }
+
+    if matches!(verb, "set" | "setg") {
+        let scope = if verb == "setg" { "global" } else { "session" };
+        return format!(
+            "{verb} needs a key + value. Next: `options [tool]` to discover keys, then `{verb} <key> <value>` ({scope})"
+        );
+    }
+
+    if matches!(verb, "unset" | "unsetg") {
+        let scope = if verb == "unsetg" { "global" } else { "session" };
+        return format!(
+            "{verb} needs a key. Next: `options [tool]` to discover keys, then `{verb} <key>` ({scope})"
+        );
+    }
+
+    if matches!(verb, "attach" | "detach" | "reparse") {
+        return format!(
+            "{verb} needs an arg. Next: `kb` to see attachments and supported modules, then `{verb} <path-or-id>`"
+        );
+    }
+
+    if verb == "task" {
+        return "task needs a sub-verb. Next: `tasks` to list, then `task block <id>` / `task allow <id>` / `task toggle [id]` / `task mode auto|manual|toggle` / `task reset`".to_string();
+    }
+
+    if verb == "threats" {
+        return "threats needs a sub-verb or number. Next: `threats summary|dfd|stride|stories|scope` (or 1..5), `threats edit`, `threats regen`, `threats apply`, `threats reject`, `threats ask <question>`".to_string();
+    }
+
+    if verb == "prompt" {
+        return "prompt needs a sub-verb. Next: `prompts` to open the editor, or `prompt edit <verb>` / `prompt show <verb>` / `prompt diff <verb>` / `prompt reset <verb>`".to_string();
+    }
+
+    // Verbs that only exist as top-level CLI subcommands. The shell rejects
+    // them, but the user is probably asking for the diagnostic, so point at
+    // the right place rather than punting them into the agent flow.
+    if let Some(cli_hint) = cli_only_verb_hint(verb) {
+        return format!("{trimmed:?} is a CLI subcommand, not an in-shell verb. Next: {cli_hint}");
+    }
+
+    // `findings F-0001` / `finding F-0001` are common typos for `open F-0001`.
+    // The user clearly knows what alias they want; they just picked the
+    // wrong verb. Point them at the right one instead of punting to /ask.
+    if matches!(verb, "findings" | "finding") {
+        let rest = normalized
+            .split_whitespace()
+            .nth(1)
+            .filter(|arg| arg.to_ascii_uppercase().starts_with("F-"));
+        if let Some(alias) = rest {
+            return format!(
+                "{verb:?} doesn't take arguments. Next: `open {}` to view the finding."
+                , alias.to_ascii_uppercase()
+            );
+        }
+    }
+
+    if trimmed.starts_with('/') {
         format!("unknown command {trimmed:?}. Next: /help")
     } else {
         format!(
             "unknown command {trimmed:?}. Free-form chat is explicit only. Next: /ask <question> or help"
         )
+    }
+}
+
+fn cli_only_verb_hint(verb: &str) -> Option<&'static str> {
+    match verb {
+        "doctor" => Some("run `kuzushi doctor` from a shell, or `auth` here for credential status"),
+        "scan-ci" | "ci" => Some("run `kuzushi scan <target> --ci` from a shell"),
+        "pr-comment" => Some("run `kuzushi pr-comment` from a shell"),
+        "mcp" => Some("run `kuzushi mcp serve <backend>` from a shell"),
+        "version" | "--version" | "-V" => Some("run `kuzushi --version` from a shell"),
+        _ => None,
     }
 }
 
@@ -4963,6 +5151,15 @@ pub fn run_shell_with_plain(
             let drain_changed = app.drain_background_events();
             let view_changed = app.sync_view_change();
             if tick_changed || drain_changed || view_changed {
+                needs_redraw = true;
+            }
+            if app.force_full_redraw {
+                // A subprocess wrote to our terminal while we were paused
+                // (e.g. OAuth bridge). Drop ratatui's diff buffer so the next
+                // draw repaints every cell, otherwise stale bridge output
+                // leaks through the cell-diff renderer.
+                terminal.clear()?;
+                app.force_full_redraw = false;
                 needs_redraw = true;
             }
             if needs_redraw {
@@ -5157,7 +5354,9 @@ fn run_agent_worker(
     ))?;
     let answer = response.text.trim();
     if answer.is_empty() {
-        anyhow::bail!("agent returned no answer");
+        anyhow::bail!(
+            "agent returned an empty answer. The bridge accepted the request but produced no text — usually a credential issue (missing OAuth / API key) or a model that filtered the response. Next: `auth` to check credentials, then re-run."
+        );
     }
     Ok(answer.to_string())
 }
@@ -7043,7 +7242,7 @@ JSON
             .map(|line| line.body.as_str())
             .unwrap_or_default();
         assert!(error.contains("unsupported workspace findings export extension"));
-        assert!(error.contains("Next: workspace export findings findings.json"));
+        assert!(error.contains("Next: workspace export findings <path>.json"));
         assert!(!tmp.path().join("findings.sarif").exists());
     }
 
@@ -7559,6 +7758,274 @@ JSON
     }
 
     #[test]
+    fn doctor_verb_points_to_cli_not_ask_agent() {
+        // P4-5: typing `doctor` previously hit
+        // `unknown command "doctor". Free-form chat is explicit only.
+        //  Next: /ask <question> or help`
+        // which sent operators into the agent path when they actually wanted
+        // the diagnostic. The hint now identifies the CLI verb.
+        let message = unknown_command_message("doctor");
+        assert!(message.contains("CLI subcommand"));
+        assert!(message.contains("kuzushi doctor"));
+        assert!(!message.contains("Free-form chat"));
+
+        // Plain unknown verb still uses the agent-path fallback.
+        let message = unknown_command_message("zzwombat");
+        assert!(message.contains("Free-form chat"));
+    }
+
+    #[test]
+    fn implicit_target_assignment_emits_log_line() {
+        // P2-3: typing `findings` with no target silently flipped target
+        // from None to cwd. Now that flip emits a transcript line so the
+        // operator sees the new value before they wonder why the header
+        // changed.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        assert!(app.target.is_none());
+        let _ = app.open_store();
+        assert!(app.target.is_some());
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "target" && line.body.contains("(implied from cwd)")
+        }));
+
+        // Re-opening the same workspace doesn't re-log — only the first
+        // transition is interesting.
+        let log_count = app.log.len();
+        let _ = app.open_store();
+        assert_eq!(app.log.len(), log_count);
+    }
+
+    #[test]
+    fn bare_open_verb_suggests_findings_workflow() {
+        let message = unknown_command_message("open");
+        assert!(message.contains("findings"));
+        assert!(message.contains("open F-0001"));
+    }
+
+    #[test]
+    fn bare_arg_taking_verbs_suggest_their_real_syntax() {
+        // P-NEW-12: typing the verb without an argument used to fall through
+        // to the agent-path hint. Each verb now answers with its own
+        // discovery + invocation sentence.
+        let cases = [
+            ("since", "since main"),
+            ("replay", "show runs"),
+            ("trace", "show runs"),
+            ("use", "modules"),
+            ("run", "tools"),
+        ];
+        for (verb, marker) in cases {
+            let message = unknown_command_message(verb);
+            assert!(
+                message.contains(marker),
+                "{verb:?} hint missing {marker:?}: {message}"
+            );
+            assert!(
+                !message.contains("Free-form chat"),
+                "{verb:?} fell through to agent-path: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn findings_alias_typo_suggests_open() {
+        // P-NEW-4: `findings F-0001` is a natural way to ask "show me this
+        // finding" but it actually meant `open F-0001`. The unknown-command
+        // hint now spots the alias and tells the operator the right verb.
+        let message = unknown_command_message("findings F-0001");
+        assert!(message.contains("`open F-0001`"));
+        assert!(!message.contains("Free-form chat"));
+
+        let message = unknown_command_message("finding f-007");
+        assert!(message.contains("`open F-007`"));
+
+        // Plain `findings` (no F-XXXX) is a real verb so the helper should
+        // never see it; verify the typo path only fires on alias args.
+        let message = unknown_command_message("findings random");
+        assert!(message.contains("Free-form chat"));
+    }
+
+    #[test]
+    fn ctrl_l_clears_conversation_and_preserves_input() {
+        // Industry-standard muscle memory (bash/zsh): Ctrl+L clears the
+        // screen while keeping any partially typed command intact.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.log("scan", "noise from earlier work");
+        let log_count_before = app.log.len();
+        assert!(log_count_before > 1);
+
+        // Mid-command Ctrl+L: log clears, input survives, no stray 'l'.
+        app.set_input("scan ./repo");
+        let cursor_before = app.cursor;
+        app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+        assert_eq!(app.input, "scan ./repo");
+        assert_eq!(app.cursor, cursor_before);
+        assert!(app.log.len() < log_count_before);
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.body.contains("Conversation cleared")));
+    }
+
+    #[test]
+    fn empty_input_enter_does_not_log_or_grow_history() {
+        // P-NEW-3: pressing Enter on an empty / whitespace-only prompt used
+        // to push a `>` bullet with no body into the transcript and waste
+        // a precious row in the 2-row strip. The submit is now a no-op:
+        // no log, no history entry.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let log_count = app.log.len();
+        let history_count = app.command_history.len();
+
+        app.submit_line("");
+        app.submit_line("    ");
+        app.submit_line("\t \t");
+
+        assert_eq!(app.log.len(), log_count);
+        assert_eq!(app.command_history.len(), history_count);
+    }
+
+    #[test]
+    fn options_dot_resolves_to_focused_module_primary_tool() {
+        // The module-view footer advertises `help options . · prompts ·
+        // tune · back`, but `options .` errored with `unknown tool "."`
+        // because "." was looked up directly. Now it resolves to the
+        // focused module's primary tool, mirroring `run .`.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.focused_module = Some("codeql".to_string());
+        let resolved = app
+            .resolve_options_tool(Some(".".to_string()))
+            .expect("`options .` with codeql focused should resolve");
+        assert_eq!(resolved, "codeql:scan");
+
+        // Without a focused module the helper produces a useful error so
+        // the user knows to `use <module>` first.
+        app.focused_module = None;
+        let err = app
+            .resolve_options_tool(Some(".".to_string()))
+            .expect_err("`options .` without focus should fail");
+        assert!(err.to_string().contains("requires a focused module"));
+    }
+
+    #[test]
+    fn tab_cycles_through_completion_candidates() {
+        // P3-3: Tab used to commit only the first candidate and then no-op
+        // forever. With 35 modules, cycling is the only way to discover the
+        // catalog from the keyboard. Verify Tab walks the candidate list
+        // and wraps around, and that any non-Tab key resets the cycle so a
+        // fresh keystroke on the next Tab generates new candidates.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_input("use s");
+
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+        let first = app.input.clone();
+        assert!(first.starts_with("use s"), "expected use s* candidate, got {first:?}");
+
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+        let second = app.input.clone();
+        assert_ne!(first, second, "second Tab should advance to a different module");
+        assert!(second.starts_with("use s"));
+
+        // Many modules begin with "s" (sast, secret-scan, semgrep, shinsa,
+        // smoke, systems-hunt). After enough Tabs we should wrap to the
+        // first candidate again.
+        let mut seen = vec![first.clone(), second.clone()];
+        for _ in 0..50 {
+            app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+            seen.push(app.input.clone());
+            if app.input == first && seen.len() > 2 {
+                break;
+            }
+        }
+        assert!(
+            seen.iter().filter(|s| **s == first).count() >= 2,
+            "expected to wrap back to first candidate; saw {seen:?}"
+        );
+
+        // A regular character resets the cycle so the next Tab uses the new
+        // prefix instead of continuing from the old candidate list.
+        app.set_input("use c");
+        app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()));
+        assert!(app.completion_cycle.is_none());
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+        assert!(
+            app.input.starts_with("use co"),
+            "Tab after 'use co' should pick a co* candidate, got {:?}",
+            app.input
+        );
+    }
+
+    #[test]
+    fn esc_stashes_input_and_one_more_esc_restores_it() {
+        // P3-2: previously Esc wiped the input with no recovery, so a long
+        // command typed and then Esc'd was lost forever (Up arrow restores
+        // history, not the most recent draft). Now Esc stashes the draft and
+        // a second Esc on an empty prompt restores it.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_input("scan ./very/specific/path with --since main --include-worktree");
+        let original = app.input.clone();
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+        assert!(app.input.is_empty(), "first Esc clears the input");
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+        assert_eq!(app.input, original, "second Esc restores the draft");
+        assert_eq!(app.cursor, original.chars().count());
+
+        // Restoring consumed the stash; a third Esc cycle starts fresh.
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+        assert!(app.input.is_empty(), "third Esc clears again");
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+        assert_eq!(
+            app.input, original,
+            "fourth Esc restores the new stash (which was the second clear)"
+        );
+    }
+
+    #[test]
+    fn model_choice_with_focused_module_and_no_global_sets_global_first() {
+        // P5-2: previously `model 5` while focused on a module set the
+        // per-module option only and left config.model None, trapping the
+        // operator behind "ask requires an explicit model" the moment they
+        // typed `?question`. Now the first `model <n>` becomes global so
+        // the agent path has something to dispatch with; subsequent
+        // `model <n>` calls scope per-module.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.focused_module = Some("sast".to_string());
+        assert!(app.config.model.is_none());
+
+        app.handle_command(ShellCommand::Model(Some("5".to_string())));
+        assert_eq!(
+            app.config.model.as_deref(),
+            Some("anthropic:claude-sonnet-4-6"),
+            "first model selection with focused module must set global so /ask works"
+        );
+
+        // After a global is set, the next `model <n>` scopes per-module so
+        // operators can override per-tool without losing the global default.
+        app.handle_command(ShellCommand::Model(Some("6".to_string())));
+        assert_eq!(
+            app.config.model.as_deref(),
+            Some("anthropic:claude-sonnet-4-6"),
+            "second model selection must NOT clobber the global"
+        );
+        let module_values = app
+            .option_store
+            .values_for(
+                OptionScope::Session,
+                &OptionTarget::Module("sast".to_string()),
+            )
+            .expect("expected per-module options after second selection");
+        let module_model = module_values
+            .get("model")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        assert_eq!(
+            module_model.as_deref(),
+            Some("anthropic:claude-opus-4-7"),
+            "second selection must scope to the focused module"
+        );
+    }
+
+    #[test]
     fn config_view_onboards_with_keyboard_model_selection() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.shell_view = ShellView::Config;
@@ -7700,7 +8167,11 @@ JSON
         assert!(output.contains("COMMAND RESULT"));
         assert!(output.contains("command: /back"));
         assert!(output.contains("> /back"));
-        assert!(output.contains("kuzushi shell"));
+        // Catalog body now reads "KUZUSHI · CATALOG · N modules" (plain
+        // renderer rewrites `·` to `|`). Confirm the operator still gets a
+        // clear signal that they're back at the root catalog screen.
+        assert!(output.contains("KUZUSHI | CATALOG"));
+        assert!(output.contains("modules"));
         assert_plain_output_strict_80(&output);
     }
 
@@ -8958,17 +9429,27 @@ JSON
     }
 
     #[test]
-    fn quickstart_emits_guided_help_lines() {
+    fn quickstart_opens_dedicated_view_with_concise_log() {
+        // Previously Quickstart switched to Help and dumped 8 log lines into a
+        // 2-row transcript, so 6 of them were unreadable. Now it switches to
+        // ShellView::Quickstart (which renders the full guide in the body
+        // area) and only logs the single first-finding path entry.
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.handle_command(ShellCommand::Quickstart);
-        assert_eq!(app.shell_view, ShellView::Help);
-        assert!(app
+        let baseline_quickstart_lines = app
             .log
             .iter()
-            .any(|line| line.prefix == "quickstart" && line.body.contains("scan .")));
-        assert!(app.log.iter().any(|line| {
-            line.prefix == "quickstart" && line.body.contains("scan . -> findings")
-        }));
+            .filter(|line| line.prefix == "quickstart")
+            .count();
+        app.handle_command(ShellCommand::Quickstart);
+        assert_eq!(app.shell_view, ShellView::Quickstart);
+        let new_lines: Vec<_> = app
+            .log
+            .iter()
+            .filter(|line| line.prefix == "quickstart")
+            .skip(baseline_quickstart_lines)
+            .collect();
+        assert_eq!(new_lines.len(), 1, "expected exactly one transcript line");
+        assert!(new_lines[0].body.contains("scan . -> findings"));
     }
 
     #[test]
@@ -8978,11 +9459,18 @@ JSON
             .log
             .iter()
             .any(|line| line.prefix == "startup" && line.body.contains("module(s)")));
-        assert!(app.log.iter().any(|line| {
-            line.prefix == "first-run"
-                && line.body.contains("scan .")
-                && line.body.contains("findings")
-        }));
+        // P1-3: the first-finding hint is rendered in the catalog body,
+        // not duplicated into the 2-row transcript. Confirm the helper
+        // still produces the correct command so `next_action_line` has
+        // something to render.
+        assert_eq!(app.first_finding_scan_command(), "scan .");
+        let hint = app.first_finding_hint();
+        assert!(hint.contains("scan ."));
+        assert!(hint.contains("findings"));
+        assert!(
+            !app.log.iter().any(|line| line.prefix == "first-run"),
+            "transcript should no longer carry a first-run dup of the catalog hint"
+        );
     }
 
     #[test]
@@ -8991,12 +9479,10 @@ JSON
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let app = ShellApp::new(V2Config::default(), Some(&workspace));
         assert_eq!(app.first_finding_scan_command(), "scan");
-        assert!(app.log.iter().any(|line| {
-            line.prefix == "first-run"
-                && line.body.contains("scan")
-                && !line.body.contains("scan .")
-                && line.body.contains("findings")
-        }));
+        let hint = app.first_finding_hint();
+        assert!(hint.contains("scan"));
+        assert!(!hint.contains("scan ."));
+        assert!(hint.contains("findings"));
     }
 
     #[test]
@@ -9016,18 +9502,37 @@ JSON
     }
 
     #[test]
-    fn bracketed_paste_inserts_text_without_submit() {
+    fn bracketed_paste_single_line_inserts_text_without_submit() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::empty()));
         app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::empty()));
-        // A pasted blob (with embedded newline) is inserted verbatim — Enter is NOT
-        // synthesized, so the line stays in the buffer until the operator submits.
-        app.handle_paste(" world\nmore");
-        assert_eq!(app.input, "hi world\nmore");
+        // Single-line pastes insert verbatim — Enter is NOT synthesized.
+        app.handle_paste(" world");
+        assert_eq!(app.input, "hi world");
         assert_eq!(app.cursor, app.input.chars().count());
         // Pressing Enter after a paste submits the line normally.
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
         assert!(app.input.is_empty());
+    }
+
+    #[test]
+    fn multi_line_paste_keeps_first_line_and_warns() {
+        // Pasting 3 lines should not auto-submit each one — the shell is a
+        // single-command-per-Enter prompt and submitting `rm` from a pasted
+        // snippet would be catastrophic. Keep the first line, warn the user,
+        // let them review and submit explicitly.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.handle_paste("first\r\nsecond\nthird");
+        assert_eq!(app.input, "first");
+        assert_eq!(app.cursor, "first".chars().count());
+        let advisory = app
+            .log
+            .iter()
+            .rev()
+            .find(|line| line.prefix == "paste")
+            .expect("expected a paste advisory log line");
+        assert!(advisory.body.contains("kept first line"));
+        assert!(advisory.body.contains("dropped 2"));
     }
 
     #[test]
@@ -9124,13 +9629,24 @@ JSON
 
     #[test]
     fn page_keys_scroll_view_offset() {
+        // Help has its own dedicated scroll field — PageDown/PageUp must
+        // advance/retract it so `viewport_lines(..., app.help_scroll)` actually
+        // shows the next page. Other views with their own scroll fields
+        // (Tools, History, KnowledgeBase, Catalog when expanded) work the
+        // same way; views without dedicated fields fall back to scroll_offset.
         let mut app = ShellApp::new(V2Config::default(), None);
         app.shell_view = ShellView::Help;
         app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
-        assert_eq!(app.scroll_offset, 10);
+        assert_eq!(app.help_scroll, 10);
         app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
-        assert_eq!(app.scroll_offset, 20);
+        assert_eq!(app.help_scroll, 20);
         app.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::empty()));
+        assert_eq!(app.help_scroll, 10);
+
+        // Views without a dedicated scroll field still use scroll_offset.
+        app.shell_view = ShellView::Tune;
+        app.scroll_offset = 0;
+        app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
         assert_eq!(app.scroll_offset, 10);
     }
 

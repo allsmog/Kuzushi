@@ -217,6 +217,9 @@ fn shell_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ShellView::Replay(run_id) => replay_lines(app, area, run_id),
         ShellView::Trace(run_id) => trace_lines(app, area, run_id),
         ShellView::Help => viewport_lines(help_lines(app, area), area.height, app.help_scroll),
+        ShellView::Quickstart => {
+            viewport_lines(quickstart_lines(app, area), area.height, app.help_scroll)
+        }
         ShellView::Config => config_lines(app, area),
         ShellView::Tools => viewport_lines(tools_lines(app, area), area.height, app.tools_scroll),
         ShellView::Options(view) => options_lines(app, area, view),
@@ -300,10 +303,15 @@ fn routing_mode_segment(app: &ShellApp) -> String {
 fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
+    // Drop the trailing "· kuzushi shell" segment — the user is in the
+    // shell already (the prompt and the top-row mode label both say so),
+    // and the muted suffix burned cells the catalog title needed for
+    // breathing room. Modules count is the more useful sub-title.
+    let module_count = app.registry.modules().count();
     lines.push(Line::from(vec![
         Span::styled("KUZUSHI · CATALOG", theme::heading()),
         Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
-        Span::styled("kuzushi shell", theme::muted()),
+        Span::styled(format!("{module_count} modules"), theme::muted()),
     ]));
     lines.push(blank());
 
@@ -353,10 +361,17 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         })
         .or_else(|| modules.first())
     {
+        // Reserve space for the leading `▸ NEXT ` glyph + the literal
+        // `Run <id> against the active target — ` prefix so the truncation
+        // budget tracks the user's actual terminal width instead of an
+        // 88-column historical default.
+        let prefix = format!("Run {} against the active target — ", module.metadata().id);
+        let budget = (area.width as usize)
+            .saturating_sub(prefix.chars().count() + 8)
+            .max(40);
         let hint = format!(
-            "Run {} against the active target — {}",
-            module.metadata().id,
-            short_sentence(&module.metadata().description, 88)
+            "{prefix}{}",
+            short_sentence(&module.metadata().description, budget)
         );
         lines.push(next_action_line(&hint, area.width as usize));
         lines.push(blank());
@@ -805,7 +820,11 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
                 ProgressKind::Failing
             },
         ));
-    } else {
+    } else if app.focused_module.as_deref() == Some("sast") || scan.is_some() {
+        // SAST pipeline placeholder — context:build → sast:scan → triage:run.
+        // Only render this when the focused module is `sast` or there's an
+        // actual scan running; otherwise the fixed three-row pipeline is
+        // misleading for non-SAST modules (chrome-rce, threat-model, etc.).
         lines.push(pipeline_row(
             if active_stage.contains("context") {
                 "⏵"
@@ -839,11 +858,26 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
                 "waiting for findings"
             },
         ));
+    } else {
+        let module = app.focused_module.as_deref().unwrap_or("tool");
+        lines.push(pipeline_row(
+            "○",
+            module,
+            "no scan in flight; `run .` dispatches the module's primary tool",
+        ));
     }
 
     if let Some(error) = scan.and_then(|scan| scan.error.as_ref()) {
         lines.push(blank());
-        lines.push(transcript_line("error", error, false));
+        // Word-wrap so the actionable next-step suggestion (e.g.
+        // `pipx install semgrep` or `brew install semgrep`) doesn't get
+        // truncated at the cell width. Continuation rows reuse the
+        // transcript "…" glyph so the prefix doesn't repeat.
+        let body_width = (area.width as usize).saturating_sub(6).max(20);
+        let wrapped = wrap_text(error, body_width);
+        for (index, segment) in wrapped.iter().enumerate() {
+            lines.push(transcript_line("error", segment, index > 0));
+        }
     }
 
     if !app.findings.is_empty() {
@@ -911,9 +945,12 @@ fn findings_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     if app.findings.is_empty() {
         lines.push(muted("No findings yet."));
-        lines.push(muted(
-            "Next: scan, scan <target>, or context build before scanning.",
-        ));
+        let hint = if app.context_view.exists {
+            "Next: scan — runs configured scanners against the active target."
+        } else {
+            "Next: scan after `context build` so scanners have structure to walk."
+        };
+        lines.push(muted(hint));
         return lines;
     }
 
@@ -1344,10 +1381,11 @@ fn prompts_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         lines.push(Line::styled(
             fit(
                 &format!(
-                    "{marker} {} {} {}",
-                    pad(verb, 12),
-                    pad("builtin", 10),
-                    fit(&path, value_width(area, 28))
+                    "{marker} {}",
+                    table_text(
+                        &[verb, "builtin", &path],
+                        &[12, 10, value_width(area, 28)],
+                    )
                 ),
                 area.width as usize,
             ),
@@ -1405,19 +1443,26 @@ fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
     lines.push(divider("RUNS", area.width));
     if let Some(scan) = &app.scan {
-        lines.push(header(&["run", "status", "findings", "target"]));
-        lines.push(row(&[
-            scan.run_id
-                .as_deref()
-                .map(short)
-                .unwrap_or_else(|| "pending".to_string()),
-            scan_status(scan),
-            scan.findings_count.to_string(),
-            fit(&scan.target.display().to_string(), value_width(area, 34)),
-        ]));
+        let widths = [10usize, 18, 10, value_width(area, 40)];
+        lines.push(aligned_header(
+            &["run", "status", "findings", "target"],
+            &widths,
+        ));
+        lines.push(aligned_row(
+            &[
+                scan.run_id
+                    .as_deref()
+                    .map(short)
+                    .unwrap_or_else(|| "pending".to_string()),
+                scan_status(scan),
+                scan.findings_count.to_string(),
+                scan.target.display().to_string(),
+            ],
+            &widths,
+        ));
     } else {
         lines.push(muted(
-            "No scan run is active in this shell session. Next: scan <target> or show runs.",
+            "No scan run is active in this shell session. Next: `scan` to start one, or `replay <runId>` for a past run on disk.",
         ));
     }
     lines
@@ -1428,14 +1473,16 @@ fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> 
     lines.push(blank());
     lines.push(divider("REPLAY", area.width));
     lines.push(detail("run", run_id));
-    lines.push(detail(
-        "summary",
-        &format!(".kuzushi/runs/{run_id}/summary.json"),
-    ));
-    lines.push(detail(
-        "triage",
-        &format!(".kuzushi/runs/{run_id}/triage.jsonl"),
-    ));
+    let summary_path = run_artifact_path(app, run_id, "summary.json");
+    let triage_path = run_artifact_path(app, run_id, "triage.jsonl");
+    lines.push(run_artifact_detail("summary", &summary_path));
+    lines.push(run_artifact_detail("triage", &triage_path));
+    if !summary_path.exists() {
+        lines.push(blank());
+        lines.push(muted(
+            "(run artefacts not on disk; check `show runs` for valid runIds)",
+        ));
+    }
     lines.extend(alias_reference_lines(app, area));
     lines
 }
@@ -1445,16 +1492,33 @@ fn trace_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> {
     lines.push(blank());
     lines.push(divider("TRACE", area.width));
     lines.push(detail("run", run_id));
-    lines.push(detail(
-        "triage",
-        &format!(".kuzushi/runs/{run_id}/triage.jsonl"),
-    ));
-    lines.push(detail(
-        "verify",
-        &format!(".kuzushi/runs/{run_id}/verify.jsonl"),
-    ));
+    let triage_path = run_artifact_path(app, run_id, "triage.jsonl");
+    let verify_path = run_artifact_path(app, run_id, "verify.jsonl");
+    lines.push(run_artifact_detail("triage", &triage_path));
+    lines.push(run_artifact_detail("verify", &verify_path));
+    if !triage_path.exists() && !verify_path.exists() {
+        lines.push(blank());
+        lines.push(muted(
+            "(run artefacts not on disk; check `show runs` for valid runIds)",
+        ));
+    }
     lines.extend(alias_reference_lines(app, area));
     lines
+}
+
+fn run_artifact_path(app: &ShellApp, run_id: &str, leaf: &str) -> std::path::PathBuf {
+    let runs_root = app
+        .target
+        .as_deref()
+        .map(|target| target.join(".kuzushi/runs"))
+        .unwrap_or_else(|| std::path::PathBuf::from(".kuzushi/runs"));
+    runs_root.join(run_id).join(leaf)
+}
+
+fn run_artifact_detail(label: &str, path: &std::path::Path) -> Line<'static> {
+    let display = path.display().to_string();
+    let suffix = if path.exists() { "" } else { " (missing)" };
+    detail(label, &format!("{display}{suffix}"))
 }
 
 fn alias_reference_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -1516,6 +1580,60 @@ fn help_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             }
         }
     }
+    lines
+}
+
+fn quickstart_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let mut lines = context_strip(app, area);
+    lines.push(blank());
+    lines.push(divider("QUICKSTART", area.width));
+    lines.push(blank());
+    lines.push(Line::styled(
+        "Welcome to kuzushi. Five steps to your first finding:",
+        theme::heading(),
+    ));
+    lines.push(blank());
+    let scan_step = if app.target.is_some() {
+        "scan                       run configured scanners on the active target"
+    } else {
+        "scan .                     run configured scanners on this directory"
+    };
+    let steps = [
+        ("1", scan_step),
+        ("2", "findings                   browse persisted findings"),
+        ("3", "context build              write .kuzushi/context-snapshot.json"),
+        (
+            "4",
+            "model                      choose an explicit provider/model for ask/triage",
+        ),
+        (
+            "5",
+            "ask <question>             ask after a model is configured",
+        ),
+    ];
+    for (num, step) in steps {
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {num}. "), theme::accent()),
+            Span::styled(step.to_string(), theme::primary()),
+        ]));
+    }
+    lines.push(blank());
+    lines.push(muted(&fit(
+        "Tip: Ctrl+O toggles the live event timeline.",
+        area.width as usize,
+    )));
+    lines.push(muted(&fit(
+        &format!(
+            "First-finding path: `{}` then `findings`.",
+            app.first_finding_scan_command()
+        ),
+        area.width as usize,
+    )));
+    lines.push(blank());
+    lines.push(muted(&fit(
+        "Type `help` for the full command reference, or `back` to return.",
+        area.width as usize,
+    )));
     lines
 }
 
@@ -1621,20 +1739,24 @@ fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
     lines.push(blank());
     lines.push(divider("MODELS", area.width));
-    lines.push(header(&["", "#", "model", "effort", "auth"]));
+    let widths = [2usize, 2, 28, 6, value_width(area, 28)];
+    lines.push(aligned_header(&["", "#", "model", "effort", "auth"], &widths));
     for (index, choice) in crate::app::model_choices().iter().enumerate() {
         let marker = if index == app.selected_model_index {
             ">"
         } else {
             " "
         };
-        lines.push(row(&[
-            marker.to_string(),
-            choice.index.to_string(),
-            fit(choice.id, 28),
-            choice.thinking_level.to_string(),
-            fit(&model_auth_status(choice), value_width(area, 28)),
-        ]));
+        lines.push(aligned_row(
+            &[
+                marker.to_string(),
+                choice.index.to_string(),
+                choice.id.to_string(),
+                choice.thinking_level.to_string(),
+                model_auth_status(choice),
+            ],
+            &widths,
+        ));
     }
     lines.push(blank());
     lines.push(muted(&fit(
@@ -1679,13 +1801,17 @@ fn tools_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("TOOLS", area.width));
-    lines.push(header(&["tool", "headless", "description"]));
+    let widths = [28usize, 8, value_width(area, 38)];
+    lines.push(aligned_header(&["tool", "headless", "description"], &widths));
     for tool in app.registry.tools() {
-        lines.push(row(&[
-            fit(&tool.name, 24),
-            tool.headless.to_string(),
-            fit(&tool.description, value_width(area, 40)),
-        ]));
+        lines.push(aligned_row(
+            &[
+                tool.name.clone(),
+                tool.headless.to_string(),
+                tool.description.clone(),
+            ],
+            &widths,
+        ));
     }
     lines
 }
@@ -1788,6 +1914,11 @@ fn sast_tasks_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         "selected",
         &format!("{enabled}/{} enabled, {blocked} blocked", rows.len()),
     ));
+    lines.push(blank());
+    lines.push(muted(&fit(
+        "legend: [x] enabled · [ ] disabled · [A] advanced (off by default; allow with /task allow <id>) · [B] blocked",
+        area.width as usize,
+    )));
     lines.push(blank());
     lines.push(table_header(
         &["state", "id", "cost", "scan", "notes"],
@@ -1942,7 +2073,7 @@ fn workspace_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     lines.push(blank());
     lines.push(muted(&fit(
-        "workspace status · workspace export findings findings.json · findings export findings.json",
+        "workspace status · workspace export findings <path>.json · findings export <path>.json",
         area.width as usize,
     )));
     lines
@@ -2467,9 +2598,7 @@ fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
             } else {
                 "ctx: missing".to_string()
             },
-            app.focused_module
-                .clone()
-                .unwrap_or_else(|| "catalog".to_string()),
+            view_status_segment(app),
         ])
     };
 
@@ -2530,7 +2659,7 @@ fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
             .unwrap_or_else(|| "kuzushi/module> ".to_string()),
         RoutingMode::Shell => "kuzushi> ".to_string(),
     };
-    let segments = prompt_segments(&prompt, &app.input, area.width as usize, " ");
+    let segments = prompt_segments(&prompt, &app.input, app.cursor, area.width as usize, " ");
     let line = Line::from(vec![
         Span::styled(segments.prompt, theme::label()),
         Span::raw(segments.before_cursor),
@@ -2546,30 +2675,33 @@ fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         .as_ref()
         .map(|path| compact_target_path(&path.display().to_string()))
         .unwrap_or_else(|| "none".to_string());
-    let module = if matches!(app.shell_view, ShellView::AgentChat) {
-        "agent".to_string()
-    } else {
-        app.focused_module
-            .clone()
-            .unwrap_or_else(|| "catalog".to_string())
-    };
+    // Top header "module" segment mirrors the bottom status's view label so
+    // operators see the same word in both. Previously "module catalog" /
+    // "module agent" mismatched the bottom strip and read like tautologies
+    // ("agent" isn't a module, the catalog is the screen they're already on).
+    let module = view_status_segment(app);
     let ctx = if app.context_view.exists {
         "✓ present"
     } else {
         "missing"
     };
     let model = app.config.model.as_deref().unwrap_or("unconfigured");
-    let cost = format!("${:.4}", app.session_cost_usd);
+    let mut segments = vec![
+        routing_mode_segment(app),
+        format!("target {target}"),
+        findings_count_summary(&app.findings),
+        format!("ctx {ctx}"),
+        format!("view {module}"),
+        format!("model {model}"),
+    ];
+    // Only show cost once a tool has actually charged for something.
+    // `cost $0.0000` at startup eats ~13 cells for no information and
+    // pushes `model unconfigured` off the right edge of 120-col terminals.
+    if app.session_cost_usd > 0.0 {
+        segments.push(format!("cost {}", format_session_cost(app.session_cost_usd)));
+    }
     let rest = fit(
-        &join_segments(&[
-            routing_mode_segment(app),
-            format!("target {target}"),
-            findings_count_summary(&app.findings),
-            format!("ctx {ctx}"),
-            format!("module {module}"),
-            format!("model {model}"),
-            format!("cost {cost}"),
-        ]),
+        &join_segments(&segments),
         area.width.saturating_sub(9) as usize,
     );
 
@@ -2644,6 +2776,7 @@ fn transcript_body_style(prefix: &str) -> Style {
 fn keybindings_text(app: &ShellApp, width: usize) -> String {
     let bindings = keybindings(app);
     let mut shown = Vec::new();
+    let mut overflow = false;
     for (key, label) in bindings {
         let next = format!("[{key}] {label}");
         let candidate = if shown.is_empty() {
@@ -2652,10 +2785,15 @@ fn keybindings_text(app: &ShellApp, width: usize) -> String {
             format!("{}  ·  {next}", shown.join("  ·  "))
         };
         if candidate.chars().count() > width.saturating_sub(8) && !shown.is_empty() {
-            shown.push("+more".to_string());
+            overflow = true;
             break;
         }
         shown.push(next);
+    }
+    // Replace the silent `+more` with an actionable pointer so an operator
+    // on a 50-column terminal knows the rest of the keys live in `help`.
+    if overflow {
+        shown.push("[help] more".to_string());
     }
     fit(&shown.join("  ·  "), width)
 }
@@ -2896,15 +3034,6 @@ fn table_text(values: &[&str], widths: &[usize]) -> String {
         .join("  ")
 }
 
-fn header(values: &[&str]) -> Line<'static> {
-    Line::from(
-        values
-            .iter()
-            .map(|value| Span::styled(format!("{}  ", pad(value, 14)), theme::subtle()))
-            .collect::<Vec<_>>(),
-    )
-}
-
 fn row(values: &[String]) -> Line<'static> {
     Line::from(
         values
@@ -2917,6 +3046,36 @@ fn row(values: &[String]) -> Line<'static> {
                     Style::default()
                 };
                 Span::styled(format!("{}  ", value), style)
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn aligned_header(values: &[&str], widths: &[usize]) -> Line<'static> {
+    Line::from(
+        values
+            .iter()
+            .zip(widths.iter())
+            .map(|(value, width)| {
+                Span::styled(format!("{}  ", pad(value, *width)), theme::subtle())
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn aligned_row(values: &[String], widths: &[usize]) -> Line<'static> {
+    Line::from(
+        values
+            .iter()
+            .zip(widths.iter())
+            .enumerate()
+            .map(|(index, (value, width))| {
+                let style = if index == 0 {
+                    theme::accent()
+                } else {
+                    Style::default()
+                };
+                Span::styled(format!("{}  ", pad(&fit(value, *width), *width)), style)
             })
             .collect::<Vec<_>>(),
     )
@@ -3736,6 +3895,55 @@ fn run_state_style(scan: Option<&ScanPanelState>) -> Style {
     }
 }
 
+fn view_status_segment(app: &ShellApp) -> String {
+    match &app.shell_view {
+        ShellView::Catalog => app
+            .focused_module
+            .clone()
+            .unwrap_or_else(|| "catalog".to_string()),
+        ShellView::Module => app
+            .focused_module
+            .clone()
+            .unwrap_or_else(|| "module".to_string()),
+        ShellView::ModuleRun => app
+            .focused_module
+            .as_ref()
+            .map(|module| format!("{module}/run"))
+            .unwrap_or_else(|| "run".to_string()),
+        ShellView::Findings => "findings".to_string(),
+        ShellView::Finding => "finding".to_string(),
+        ShellView::Tune => "tune".to_string(),
+        ShellView::Threat(view) => format!(
+            "threats:{}",
+            match view {
+                ThreatView::Dfd => "dfd",
+                ThreatView::Stride => "stride",
+                ThreatView::Stories => "stories",
+                ThreatView::Scope => "scope",
+                ThreatView::Summary => "summary",
+            }
+        ),
+        ShellView::ThreatEditor => "threats:edit".to_string(),
+        ShellView::PromptsEditor => "prompts".to_string(),
+        ShellView::ActorDetail(index) => format!("actor:{}", index + 1),
+        ShellView::Runs => "runs".to_string(),
+        ShellView::Replay(_) => "replay".to_string(),
+        ShellView::Trace(_) => "trace".to_string(),
+        ShellView::Help => "help".to_string(),
+        ShellView::Quickstart => "quickstart".to_string(),
+        ShellView::Config => "config".to_string(),
+        ShellView::Tools => "tools".to_string(),
+        ShellView::Options(view) => format!("options[{}]", view.tool_name),
+        ShellView::SastTasks => "tasks".to_string(),
+        ShellView::Context => "context".to_string(),
+        ShellView::Workspace => "workspace".to_string(),
+        ShellView::KnowledgeBase => "kb".to_string(),
+        ShellView::AgentChat => "agent".to_string(),
+        ShellView::History => "history".to_string(),
+        ShellView::Story => "story".to_string(),
+    }
+}
+
 fn findings_summary(findings: &[Finding]) -> String {
     let counts = SeverityCounts::from_findings(findings);
     let mut parts = vec![format!("{} findings", findings.len())];
@@ -3815,6 +4023,19 @@ fn short(value: &str) -> String {
 fn short_sentence(value: &str, max_chars: usize) -> String {
     let first = value.split('.').next().unwrap_or(value).trim();
     fit(first, max_chars)
+}
+
+/// Compact dollar-amount format for the header. Sub-cent values keep four
+/// decimals (e.g. "$0.0042"); larger values drop to two so a long-running
+/// session doesn't read "$12.4567" and waste header cells.
+fn format_session_cost(usd: f64) -> String {
+    if usd < 0.01 {
+        format!("${usd:.4}")
+    } else if usd < 100.0 {
+        format!("${usd:.2}")
+    } else {
+        format!("${usd:.0}")
+    }
 }
 
 fn fit(value: &str, max_chars: usize) -> String {
@@ -3994,6 +4215,7 @@ struct PromptSegments {
 fn prompt_segments(
     prompt: &str,
     input: &str,
+    cursor_index: usize,
     columns: usize,
     cursor_glyph: &str,
 ) -> PromptSegments {
@@ -4003,7 +4225,7 @@ fn prompt_segments(
     let editor_width = width.saturating_sub(fitted_prompt.chars().count()).max(1);
 
     let input_chars = input.chars().collect::<Vec<_>>();
-    let cursor = input_chars.len();
+    let cursor = cursor_index.min(input_chars.len());
     let mut visual_chars = input_chars.clone();
     let cursor_text = if cursor < visual_chars.len() {
         visual_chars[cursor].to_string()
@@ -4111,7 +4333,12 @@ mod tests {
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
 
-        assert!(rendered.contains("kuzushi shell"));
+        // Catalog title no longer repeats "kuzushi shell" (the prompt + the
+        // top header already identify the shell). Verify the new
+        // "KUZUSHI · CATALOG · N modules" signal is present, and the prompt
+        // sigil + keybind chips still render.
+        assert!(rendered.contains("KUZUSHI · CATALOG"));
+        assert!(rendered.contains("modules"));
         assert!(rendered.contains("kuzushi>"));
         assert!(rendered.contains("[Tab] complete"));
         assert!(rendered.contains("[modules]"));
@@ -4235,7 +4462,7 @@ mod tests {
     fn renders_actionable_empty_states_at_80_columns() {
         for (view, expected) in [
             (ShellView::Findings, "Next: scan"),
-            (ShellView::Runs, "Next: scan <target>"),
+            (ShellView::Runs, "Next: `scan`"),
             (ShellView::Workspace, "Next: scan <target>"),
         ] {
             let backend = TestBackend::new(80, 18);
@@ -5197,7 +5424,7 @@ mod tests {
             )),
             findings_count: Some(2),
             last_export: Some(std::path::PathBuf::from("/tmp/findings.json")),
-            status: "workspace ready; 2 finding(s). Next: workspace export findings findings.json"
+            status: "workspace ready; 2 finding(s). Next: workspace export findings <path>.json"
                 .to_string(),
         };
         app.shell_view = ShellView::Workspace;
@@ -5323,7 +5550,7 @@ mod tests {
             )),
             findings_count: Some(2),
             last_export: None,
-            status: "workspace ready; 2 finding(s). Next: workspace export findings findings.json"
+            status: "workspace ready; 2 finding(s). Next: workspace export findings <path>.json"
                 .to_string(),
         };
         app.shell_view = ShellView::Workspace;
@@ -5331,7 +5558,7 @@ mod tests {
         let rendered = render_plain_app(&app, 52);
 
         assert!(rendered.contains("workspace ready; 2 finding(s)."));
-        assert!(rendered.contains("workspace export findings findings.json"));
+        assert!(rendered.contains("workspace export findings <path>.json"));
         assert!(!rendered.contains("workspace export findings..."));
         assert_strict_plain_width(&rendered, 52);
     }
@@ -5857,6 +6084,140 @@ mod tests {
                 "plain line exceeded {width} columns: {line:?}"
             );
         }
+    }
+
+    #[test]
+    fn keybindings_overflow_points_at_help() {
+        // P3-6: at narrow terminal widths the keybind footer used to drop
+        // remaining keys under a silent `+more` token. Operators had no way
+        // to discover the hidden bindings. Now the overflow chip tells
+        // them where to look.
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = ShellApp::new(V2Config::default(), None);
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(
+            rendered.contains("[help] more"),
+            "narrow keybind footer must point at help: {rendered}"
+        );
+        assert!(
+            !rendered.contains("+more"),
+            "silent +more chip must be replaced"
+        );
+    }
+
+    #[test]
+    fn header_hides_cost_at_zero_and_compacts_at_higher_amounts() {
+        // P4-7: at session_cost_usd == 0 the header used to render
+        // `cost $0.0000` (12 chars) which pushed `model unconfigured` off
+        // the right edge of 120-column terminals. Verify it's hidden until
+        // a tool charges, and that the format compacts above $0.01.
+        assert_eq!(format_session_cost(0.0042), "$0.0042");
+        assert_eq!(format_session_cost(0.42), "$0.42");
+        assert_eq!(format_session_cost(12.345), "$12.35");
+        assert_eq!(format_session_cost(245.6), "$246");
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.session_cost_usd = 0.0;
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(
+            !rendered.contains("cost $0.0000"),
+            "header still rendered zero-cost noise: {rendered}"
+        );
+
+        // Once a real cost is reported we expect the cost segment back.
+        app.session_cost_usd = 0.42;
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(rendered.contains("cost $0.42"));
+    }
+
+    #[test]
+    fn module_run_error_wraps_on_word_boundaries() {
+        // P4-4: previously the SCAN PROGRESS panel rendered the scan error
+        // as a single line that was truncated mid-word, hiding the
+        // actionable install command. Verify the renderer now uses
+        // wrap_text so the next-step suggestion survives the wrap.
+        use std::path::PathBuf;
+        let backend = TestBackend::new(72, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::ModuleRun;
+        app.scan = Some(ScanPanelState {
+            run_id: Some("abc1234".to_string()),
+            target: PathBuf::from("./repo"),
+            stage: "failed".to_string(),
+            findings_count: 0,
+            running: false,
+            abort_requested: false,
+            error: Some(
+                "semgrep: could not find scanner binary \"semgrep\". Install Semgrep \
+                 (for example `pipx install semgrep` or `brew install semgrep`)."
+                    .to_string(),
+            ),
+        });
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(rendered.contains("pipx install semgrep"));
+        assert!(rendered.contains("brew install semgrep"));
+    }
+
+    #[test]
+    fn prompt_segments_highlight_follows_app_cursor() {
+        // Cursor at the END of the input — the cursor cell is the trailing
+        // glyph, before_cursor contains the whole input.
+        let segments = prompt_segments("kuzushi> ", "abcdef", 6, 40, " ");
+        assert_eq!(segments.before_cursor, "abcdef");
+        assert_eq!(segments.cursor_text, " ");
+        assert_eq!(segments.after_cursor, "");
+
+        // Cursor in the middle — the cursor cell is the char it sits on.
+        let segments = prompt_segments("kuzushi> ", "abcdef", 4, 40, " ");
+        assert_eq!(segments.before_cursor, "abcd");
+        assert_eq!(segments.cursor_text, "e");
+        assert_eq!(segments.after_cursor, "f");
+
+        // Cursor at the start — first char becomes the cursor cell.
+        let segments = prompt_segments("kuzushi> ", "abcdef", 0, 40, " ");
+        assert_eq!(segments.before_cursor, "");
+        assert_eq!(segments.cursor_text, "a");
+        assert_eq!(segments.after_cursor, "bcdef");
+
+        // Cursor past the end is clamped to len so we don't panic on stale
+        // indices coming from history-restore races.
+        let segments = prompt_segments("kuzushi> ", "abc", 99, 40, " ");
+        assert_eq!(segments.before_cursor, "abc");
+        assert_eq!(segments.cursor_text, " ");
+    }
+
+    #[test]
+    fn view_status_segment_reflects_actual_view_not_focused_module() {
+        // P1-2: previously the bottom status footer always read "catalog"
+        // while the user was on Help / Tools / Findings. Verify the helper
+        // returns the real view label so the status reflects what the user
+        // actually sees.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::Help;
+        assert_eq!(view_status_segment(&app), "help");
+
+        app.shell_view = ShellView::Tools;
+        assert_eq!(view_status_segment(&app), "tools");
+
+        app.shell_view = ShellView::Findings;
+        assert_eq!(view_status_segment(&app), "findings");
+
+        app.shell_view = ShellView::Threat(ThreatView::Stride);
+        assert_eq!(view_status_segment(&app), "threats:stride");
+
+        // Module view still surfaces the focused module so operators can
+        // see which module they're driving.
+        app.focused_module = Some("semgrep".to_string());
+        app.shell_view = ShellView::Module;
+        assert_eq!(view_status_segment(&app), "semgrep");
     }
 
     fn line_text(line: &Line<'_>) -> String {
