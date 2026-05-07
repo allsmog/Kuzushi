@@ -76,7 +76,19 @@ fn rust_cli_help_is_the_documented_primary_surface() {
     assert!(out.contains("Usage: kuzushi"));
     assert!(out.contains("--plain"));
     for command in [
-        "shell", "scan", "findings", "finding", "config", "modules", "tools", "doctor", "run",
+        "shell",
+        "scan",
+        "findings",
+        "finding",
+        "runs",
+        "suppress",
+        "suppressions",
+        "permissions",
+        "config",
+        "modules",
+        "tools",
+        "doctor",
+        "run",
     ] {
         assert!(out.contains(command), "missing command {command} in help");
     }
@@ -101,6 +113,91 @@ fn cli_run_dot_is_rejected_as_shell_only_shorthand() {
     assert!(stderr.contains("`kuzushi run .` is shell-only"), "{stderr}");
     assert!(stderr.contains("use <module>"), "{stderr}");
     assert!(stderr.contains("context:build"), "{stderr}");
+}
+
+#[test]
+fn runs_list_has_empty_state_and_permissions_has_json_policy() {
+    let tmp = tempfile::tempdir().unwrap();
+    let runs = stdout(
+        kuzushi()
+            .args(["runs", "list", "--target"])
+            .arg(tmp.path())
+            .output()
+            .unwrap(),
+    );
+    assert!(runs.contains("no run artifacts found"), "{runs}");
+    assert!(runs.contains("kuzushi scan"), "{runs}");
+
+    let permissions = stdout(
+        kuzushi()
+            .args(["permissions", "--target"])
+            .arg(tmp.path())
+            .arg("--json")
+            .output()
+            .unwrap(),
+    );
+    let parsed: Value = serde_json::from_str(&permissions).unwrap();
+    assert_eq!(
+        parsed["policy"]["modelFallback"],
+        "forbidden without explicit operator consent"
+    );
+    assert_eq!(
+        parsed["policy"]["headlessRun"],
+        "explicit tool name required; no focused-module shorthand"
+    );
+}
+
+#[test]
+fn suppress_command_records_expiring_evidence_backed_suppression() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(
+        tmp.path().join("src/server.js"),
+        "const express = require('express');\nres.send(req.query.name);\n",
+    )
+    .unwrap();
+    let store = FindingStore::open(tmp.path().join(".kuzushi/v2/findings.sqlite3")).unwrap();
+    store
+        .insert_scan_run("scan-test", tmp.path(), "complete")
+        .unwrap();
+    let finding = Finding::new_tool(
+        "semgrep",
+        "javascript.express.xss",
+        "src/server.js",
+        2,
+        Some(2),
+        Severity::High,
+        "CWE-79 reflected XSS reaches response",
+    )
+    .with_static_proof_state(StaticProofState::StaticallyRejected);
+    store.insert_finding("scan-test", &finding).unwrap();
+
+    let out = stdout(
+        kuzushi()
+            .arg("suppress")
+            .arg(&finding.fingerprint)
+            .args(["--target"])
+            .arg(tmp.path())
+            .args([
+                "--reason",
+                "operator confirmed escaping upstream",
+                "--author",
+                "security@example.test",
+                "--days",
+                "7",
+                "--json",
+            ])
+            .output()
+            .unwrap(),
+    );
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(parsed["reason"], "operator confirmed escaping upstream");
+    assert_eq!(parsed["author"], "security@example.test");
+    assert_eq!(parsed["scope"]["filePath"], "src/server.js");
+    assert!(tmp
+        .path()
+        .join(".kuzushi/v2/whitebox-suppressions.json")
+        .exists());
 }
 
 #[test]

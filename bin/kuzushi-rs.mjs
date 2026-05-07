@@ -19,7 +19,7 @@ const candidates = [
 const binary = candidates.find((candidate) => existsSync(candidate));
 if (!binary) {
   process.stderr.write(
-    "Could not find the Kuzushi native binary. Build it with `cargo build -p kuzushi-cli` or set KUZUSHI_NATIVE_BIN.\n",
+    "Could not find the Kuzushi native binary. Expected native/<platform>-<arch>/kuzushi or a Cargo build output. Run `pnpm build:native`, run `cargo build -p kuzushi-cli`, or set KUZUSHI_NATIVE_BIN. Then check readiness with `kuzushi doctor --target .`.\n",
   );
   process.exit(127);
 }

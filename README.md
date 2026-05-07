@@ -57,8 +57,8 @@ kuzushi finding F-0001 --target .
 kuzushi pr-comment --target . > kuzushi-report.md
 ```
 
-Fresh native state is stored under `.kuzushi/v2/`; scan-run summaries and
-triage/verification JSONL remain under `.kuzushi/runs/<runId>/`.
+Fresh native state is stored under `.kuzushi/v2/`; scan, shell, and headless
+run summaries remain under `.kuzushi/runs/<runId>/`.
 `kuzushi doctor --target .` runs a Rust preflight over config, writable state,
 findings DB openability, optional scanner binaries, and the pi-agent-core
 bridge without printing credential values.
@@ -94,6 +94,10 @@ inside the TUI and your terminal still gives you a selection modifier.
 | `kuzushi scan <repo> [--mode standard\|whitebox-static] [--tasks a,b] [--triage] [--json] [--ci]` | Run the Rust SAST umbrella executor and persist findings. |
 | `kuzushi findings --target <repo> [--severity high,critical] [--verdict true_positive] [--name text] [--file-path path] [--limit 50] [--json]` | List persisted findings. |
 | `kuzushi finding <F-0001\|fingerprint-prefix> --target <repo> [--json]` | Inspect one finding's evidence, proof state, validation summary, patch result, and next action. |
+| `kuzushi runs list\|show <runId>\|trace <runId> --target <repo>` | Inspect replayable summaries, result artifacts, and trace JSONL under `.kuzushi/runs/<runId>/`. |
+| `kuzushi suppress <F-0001> --target <repo> --reason <text> [--days 90]` | Record an expiring, evidence-backed suppression; findings remain visible in audit/report output. |
+| `kuzushi suppressions --target <repo>` | List suppression memory and the audit store path. |
+| `kuzushi permissions [--target <repo>]` | Show the current model fallback, approval, headless-run, and sandbox policy summary. |
 | `kuzushi pr-comment --target <repo> [--repo owner/name] [--run-url url] [--git-sha sha]` | Render persisted findings as a markdown PR/security review comment. |
 | `kuzushi modules [--json]` | List visible native modules. |
 | `kuzushi tools [--json]` | List visible executable tool descriptors. |
@@ -113,6 +117,8 @@ kuzushi scan . --mode standard --tasks semgrep,secret-scan --json
 kuzushi scan . --tasks agentic-sast --triage --json
 kuzushi findings --target . --severity high,critical --limit 10
 kuzushi finding F-0001 --target .
+kuzushi runs list --target .
+kuzushi permissions --target .
 kuzushi pr-comment --target . --repo allsmog/Kuzushi > kuzushi-report.md
 kuzushi --target . run context:build --input '{}'
 kuzushi --target . run semgrep:scan --input '{"config":"p/default"}'
@@ -154,9 +160,9 @@ Piped shell output automatically uses the same strict plain renderer as
 | `/kb [module]`, `attachments`, `attach <path-or-url>`, `detach <id>`, `reparse <id>` | Manage local `.kuzushi/v2/` KB attachments; URL attachments are metadata-only. |
 | `/workspace`, `workspace export findings <path>`, `findings export <path>` | Show workspace state and export findings as JSON or JSONL. |
 | `/findings`, `/open <alias-or-fingerprint>`, `/show aliases [prefix]` | Load findings and open deterministic aliases such as `F-0001`. |
-| `/show runs`, `/replay <runId>`, `/trace <runId>`, `/since <git-ref>` | Inspect scan-run artifacts and diff-scoped findings. |
+| `/show runs`, `/replay <runId>`, `/trace <runId>`, `/since <git-ref>` | Inspect replayable run artifacts and diff-scoped findings. |
 | `/threats [dfd\|stride\|stories\|scope\|summary\|1..5]`, `/threats regen`, `/threats ask <question>` | Switch threat-model views or request a reviewable threat-model patch. |
-| `/auth`, `/auth login <provider>`, `/provider`, `/backend`, `/model [choice]`, `/cost`, `/config` | Show credential status without secrets, select explicit models, and report known cost/config state. |
+| `/auth`, `/auth login <provider>`, `/provider`, `/backend`, `/model [choice]`, `/cost`, `/config`, `/permissions` | Show credential status without secrets, select explicit models, and report known cost/config/approval state. |
 | `/history`, `/clear`, `/load <specifier>`, `/pause`, `/resume [runId]`, `/story` | Session utilities and precise replacement messages for unsupported legacy live-control paths. |
 | `/prompts`, `/prompt <verb>`, `/tune`, `/actor <n>`, `/plan <english>` | Prompt, tuning, transcript, and planner surfaces. |
 | `/quit`, `exit`, `/exit`, `/exitj` | Exit. |

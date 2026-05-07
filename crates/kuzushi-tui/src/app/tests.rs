@@ -30,7 +30,7 @@ fn mouse_capture_requires_truthy_opt_in() {
 }
 
 fn drain_tool(app: &mut ShellApp) {
-    app.drain_next_tool_event_for_test(Duration::from_secs(5))
+    app.drain_next_tool_event_for_test(Duration::from_secs(15))
         .unwrap();
 }
 

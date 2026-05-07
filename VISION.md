@@ -1,6 +1,9 @@
 # Kuzushi — Security-Native AI Operating Environment
 
-Kuzushi is not a scanner. It is a security-native AI operating environment that combines offensive security, defensive operations, and compliance governance into a single interactive platform — powered by LLM agents, backed by a persistent workspace, and delivered through a rich terminal UI.
+Status: aspirational product vision, not current operator usage. For the
+shipping Rust CLI/TUI workflow, start with `README.md`.
+
+Kuzushi is not only a scanner. It is a security-native AI operating environment that combines offensive security, defensive operations, and compliance governance into a single interactive platform — powered by explicit model-backed tools, backed by a persistent workspace, and delivered through the native Rust CLI/TUI.
 
 The difference is "VS Code with extensions" vs. "Burp Suite." Both can do web security testing. One was built for it.
 
@@ -25,28 +28,28 @@ All three modes share the same core: ModuleRegistry, WorkspaceManager, MessageBu
               │  (default)    │  │  Mode   │  │              │
               │               │  │         │  │              │
               │ Interactive   │  │ Headless│  │ Headless     │
-              │ Ink REPL      │  │ Pipeline│  │ Single-op    │
+              │ Ratatui shell │  │ Pipeline│  │ Single-op    │
               │ NL + commands │  │ CI/CD   │  │ Pipe-able    │
-              │ Workspace     │  │ SARIF   │  │ JSON stdout  │
-              │ Full modules  │  │ Ink UI  │  │ Exit codes   │
+              │ Workspace     │  │ JSON    │  │ JSON stdout  │
+              │ Full modules  │  │ Plain CI│  │ Exit codes   │
               └───────────────┘  └─────────┘  └──────────────┘
 ```
 
 ### Shell (default: `kuzushi`)
 
-The interactive copilot. Conversational, persistent workspace, full module composition. Natural language + structured commands. Rendered through Ink.
+The interactive operator shell. Persistent workspace, full module composition, explicit agent routes, and structured commands. Rendered through the Rust Ratatui TUI.
 
 ### Scan (`kuzushi scan <repo>`)
 
-The headless pipeline workhorse. Runs the full SAST DAG (semgrep, codeql, 30+ agentic detectors, triage, verify, PoC, patch). CI/CD-native with SARIF, JSON, quality gates, exit codes. Rendered through Ink with plain-text fallback.
+The headless pipeline workhorse. Runs the SAST executor (Semgrep, CodeQL, selected agentic detectors, triage, verification, and patch flows when configured). CI/CD-native JSON and deterministic progress output are current; unsupported legacy flags are not part of the Rust path.
 
 ### Run (`kuzushi run <module:action>`)
 
 Direct module tool invocation. Non-interactive, scriptable, unix-composable. The bridge between shell and automation.
 
 ```bash
-kuzushi run sast:scan ./repo --json > findings.json
-kuzushi run randori:pasta --json | jq '.data.document.threats'
+kuzushi --target ./repo run sast:scan --input '{}' > findings.json
+kuzushi --target ./repo run randori:pasta --input '{}' | jq '.data.document.threats'
 ```
 
 ## Module Library
@@ -211,7 +214,7 @@ Claude Code is a general-purpose dev tool that can call security plugins. Kuzush
 `kuzushi run <module:action>` — headless tool invocation with JSON output and exit codes.
 
 ### Phase 3: Shell Mode (done)
-`kuzushi` default command — Ink-rendered interactive shell with module/tool dispatch.
+`kuzushi` default command — Rust Ratatui interactive shell with module/tool dispatch.
 
 ### Phase 4: Workspace & Knowledge Graph
 SQLite workspace tables, WorkspaceManager, knowledge graph, cross-session persistence.

@@ -17,10 +17,4 @@
 //! This is a Rust port of `src/fuzz/sandbox.ts` from the TypeScript
 //! tree, with the same backend selection logic and mount semantics.
 
-pub mod backend;
-pub mod exec;
-
-pub use backend::{detect_backend, which, SandboxBackend};
-pub use exec::{
-    sandbox_exec, ExitOutcome, MountSpec, SandboxError, SandboxExecOptions, SandboxExecResult,
-};
+include!("__lib_impl.inc");
