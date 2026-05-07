@@ -341,10 +341,19 @@ fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         if app.findings.is_empty() {
             lines.push(muted(&fit(&app.first_finding_hint(), area.width as usize)));
         }
-        lines.push(muted(&fit(
-            "Quickstart: quickstart · Context: context build · Runtime: model",
-            area.width as usize,
-        )));
+        // Three labelled CTAs on one row; each label muted, each command
+        // accent, with subtle ` · ` separators — mirrors the mockup's
+        // colour split for command CTAs in `auth.jsx::m`.
+        lines.push(Line::from(vec![
+            Span::styled("Quickstart: ", theme::muted()),
+            Span::styled("quickstart", theme::accent()),
+            Span::styled(" · ", theme::subtle()),
+            Span::styled("Context: ", theme::muted()),
+            Span::styled("context build", theme::accent()),
+            Span::styled(" · ", theme::subtle()),
+            Span::styled("Runtime: ", theme::muted()),
+            Span::styled("model", theme::accent()),
+        ]));
         lines.push(muted(
             "Type help, modules, use <module>, scan, or run <tool> [json].",
         ));
@@ -1186,9 +1195,12 @@ fn tune_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             ));
         }
     }
-    lines.push(muted(
-        "Up/Down move | Enter activate | show/set/reset direct | back",
-    ));
+    lines.push(keybind_hint_line(&[
+        ("Up/Down", "move"),
+        ("Enter", "activate"),
+        ("show/set/reset", "direct"),
+        ("back", "home"),
+    ]));
     lines
 }
 
