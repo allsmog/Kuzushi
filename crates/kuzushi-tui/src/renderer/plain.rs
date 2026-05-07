@@ -567,12 +567,17 @@ fn plain_model_widths(width: usize) -> Vec<usize> {
 }
 
 fn plain_section_divider(title: &str, width: usize) -> String {
+    // Mirror the styled `divider` from renderer.rs in plain text:
+    //   ` ── TITLE ──────────────────...───`
+    // Per `design/mockups/_shared.jsx::sectionHeader`. Use ASCII hyphen
+    // for the rule so non-Unicode terminals/log scrapers don't choke on
+    // the box-drawing char.
     let safe_width = width.max(8);
-    let title = format!(" {title} ");
-    let remaining = safe_width.saturating_sub(title.chars().count());
-    let left = remaining / 2;
-    let right = remaining.saturating_sub(left);
-    format!("{}{}{}", "-".repeat(left), title, "-".repeat(right))
+    let lead = "-- ";
+    let label = format!("{title} ");
+    let used = 1 + lead.chars().count() + label.chars().count();
+    let fill = safe_width.saturating_sub(used).max(1);
+    format!(" {}{}{}", lead, label, "-".repeat(fill))
 }
 
 fn line_to_unstyled_text(line: Line<'static>) -> String {
