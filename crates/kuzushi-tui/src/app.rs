@@ -2369,6 +2369,19 @@ impl ShellApp {
             .unwrap_or(false)
     }
 
+    pub(crate) fn running_tool_name(&self) -> Option<&str> {
+        self.tool_running.as_deref()
+    }
+
+    pub(crate) fn tool_abort_requested(&self) -> bool {
+        self.tool_abort_requested
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_running_tool_for_test(&mut self, tool_name: &str) {
+        self.tool_running = Some(tool_name.to_string());
+    }
+
     #[cfg(test)]
     pub(crate) fn set_scan_cancel_for_test(&mut self, cancel: ScanCancellation) {
         self.scan_cancel = Some(cancel);
@@ -3299,6 +3312,7 @@ impl ShellApp {
             input,
             workspace,
             "indexing repository context",
+            None,
         );
     }
 
@@ -4030,135 +4044,17 @@ impl ShellApp {
                 return;
             }
         };
-        if matches!(tool_name.as_str(), "context:build" | "context-lite:index") {
-            self.shell_view = ShellView::ModuleRun;
-            self.start_background_tool(
-                tool_name,
-                input,
-                workspace.expect("current_workspace returned Some workspace"),
-                "indexing repository context",
-            );
-            return;
-        }
-        let store = if tool_name.starts_with("findings:")
-            || tool_name.starts_with("systems-hunt:")
-            || tool_name.starts_with("chrome-rce:")
-            || matches!(
-                tool_name.as_str(),
-                "triage:run"
-                    | "verify:finding"
-                    | "verify:exploit"
-                    | "patch:finding"
-                    | "agentic-sast:scan"
-                    | "carlini-threat-hunt:run"
-                    | "vuln-scout:audit"
-                    | "tob:audit"
-                    | "shinsa:scan"
-                    | "shinsa:quick-check"
-                    | "shinsa:nist-scan"
-                    | "shinsa:nist-quick-check"
-                    | "prompt-armor:scan"
-                    | "prompt-armor:analyze"
-                    | "prompt-armor:attack"
-                    | "variant:lift-pattern"
-                    | "variant:hunt"
-                    | "ndiff:hunt-variants"
-                    | "taint-iris:hunt"
-                    | "taint-iris-next:hunt"
-                    | "sast:scan"
-                    | "semgrep:scan"
-                    | "codeql:scan"
-                    | "iac-scan:scan"
-            ) {
-            match workspace
-                .as_ref()
-                .map(|workspace| FindingStore::open(workspace.findings_db_path()))
-                .transpose()
-            {
-                Ok(store) => store,
-                Err(error) => {
-                    self.log(
-                        "error",
-                        with_next_step(error.to_string(), "workspace status or scan <target>"),
-                    );
-                    return;
-                }
-            }
-        } else {
-            None
-        };
-        self.shell_view = ShellView::ModuleRun;
-        self.log("tool", format!("running {tool_name}"));
-
         let tool_thinking_level =
             thinking_level_from_input(&input).or_else(|| self.session_thinking_level.clone());
-        let runtime = if matches!(
-            tool_name.as_str(),
-            "triage:run"
-                | "verify:finding"
-                | "patch:finding"
-                | "agentic-sast:scan"
-                | "carlini-threat-hunt:run"
-                | "vendor-assessment:assess"
-                | "vuln-scout:audit"
-                | "tob:audit"
-                | "shinsa:scan"
-                | "shinsa:quick-check"
-                | "shinsa:nist-scan"
-                | "shinsa:nist-quick-check"
-                | "prompt-armor:scan"
-                | "prompt-armor:analyze"
-                | "prompt-armor:attack"
-                | "variant:lift-pattern"
-                | "variant:hunt"
-                | "ndiff:extract-fix-pattern"
-                | "ndiff:hunt-variants"
-                | "systems-hunt:systems-invariant-extract"
-                | "systems-hunt:systems-trigger-synth"
-                | "systems-hunt:systems-hunt"
-                | "systems-hunt:deep-semantic-cwe-select"
-                | "systems-hunt:deep-semantic-hunt"
-                | "taint-iris:hunt"
-                | "taint-iris-next:hunt"
-                | "sast:scan"
-                | "threat-model:build"
-                | "randori:pasta"
-                | "x-ray:run"
-                | "x-ray:x-ray"
-        ) {
-            match PiAgentCoreRuntime::from_config(
-                &self.config,
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            ) {
-                Ok(runtime) => Some(runtime.with_thinking_level(tool_thinking_level)),
-                Err(error) => {
-                    self.log(
-                        "error",
-                        with_next_step(error.to_string(), "model <n> or config"),
-                    );
-                    return;
-                }
-            }
-        } else {
-            None
-        };
-        let ctx = ToolExecutionContext {
-            config: &self.config,
-            workspace: workspace.as_ref(),
-            findings_store: store.as_ref(),
-        };
-        match self.registry.execute_tool_with_runtime(
-            &tool_name,
+        let status = tool_run_status(&tool_name);
+        self.shell_view = ShellView::ModuleRun;
+        self.start_background_tool(
+            tool_name,
             input,
-            &ctx,
-            runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
-        ) {
-            Ok(result) => self.apply_tool_result(&tool_name, result),
-            Err(error) => self.log(
-                "error",
-                with_next_step(error.to_string(), "tools, options <tool>, or model <n>"),
-            ),
-        }
+            workspace.expect("current_workspace returned Some workspace"),
+            status,
+            tool_thinking_level,
+        );
     }
 
     fn start_background_tool(
@@ -4167,6 +4063,7 @@ impl ShellApp {
         input: serde_json::Value,
         workspace: WorkspaceTarget,
         status: &'static str,
+        thinking_level: Option<String>,
     ) {
         if let Some(active) = self.tool_running.as_deref() {
             self.log(
@@ -4195,7 +4092,15 @@ impl ShellApp {
         );
 
         thread::spawn(move || {
-            background_tool_worker(registry, config, workspace, tool_name, input, tx)
+            background_tool_worker(
+                registry,
+                config,
+                workspace,
+                tool_name,
+                input,
+                thinking_level,
+                tx,
+            )
         });
     }
 
@@ -5506,9 +5411,17 @@ fn background_tool_worker(
     workspace: WorkspaceTarget,
     tool_name: String,
     input: serde_json::Value,
+    thinking_level: Option<String>,
     tx: Sender<ToolEvent>,
 ) {
-    let result = run_background_tool(registry, config, &workspace, &tool_name, input);
+    let result = run_background_tool(
+        registry,
+        config,
+        &workspace,
+        &tool_name,
+        input,
+        thinking_level,
+    );
     let event = match result {
         Ok(result) => ToolEvent::Finished { tool_name, result },
         Err(error) => ToolEvent::Failed {
@@ -5525,13 +5438,120 @@ fn run_background_tool(
     workspace: &WorkspaceTarget,
     tool_name: &str,
     input: serde_json::Value,
+    thinking_level: Option<String>,
 ) -> Result<serde_json::Value> {
+    let store = if tool_requires_findings_store(tool_name) {
+        Some(FindingStore::open(workspace.findings_db_path())?)
+    } else {
+        None
+    };
+    let runtime = if tool_uses_agent_runtime(tool_name) {
+        Some(
+            PiAgentCoreRuntime::from_config(
+                &config,
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            )?
+            .with_thinking_level(thinking_level),
+        )
+    } else {
+        None
+    };
     let ctx = ToolExecutionContext {
         config: &config,
         workspace: Some(workspace),
-        findings_store: None,
+        findings_store: store.as_ref(),
     };
-    registry.execute_tool(tool_name, input, &ctx)
+    registry.execute_tool_with_runtime(
+        tool_name,
+        input,
+        &ctx,
+        runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
+    )
+}
+
+fn tool_requires_findings_store(tool_name: &str) -> bool {
+    tool_name.starts_with("findings:")
+        || tool_name.starts_with("systems-hunt:")
+        || tool_name.starts_with("chrome-rce:")
+        || matches!(
+            tool_name,
+            "triage:run"
+                | "verify:finding"
+                | "verify:exploit"
+                | "patch:finding"
+                | "agentic-sast:scan"
+                | "carlini-threat-hunt:run"
+                | "vuln-scout:audit"
+                | "tob:audit"
+                | "shinsa:scan"
+                | "shinsa:quick-check"
+                | "shinsa:nist-scan"
+                | "shinsa:nist-quick-check"
+                | "prompt-armor:scan"
+                | "prompt-armor:analyze"
+                | "prompt-armor:attack"
+                | "variant:lift-pattern"
+                | "variant:hunt"
+                | "ndiff:hunt-variants"
+                | "taint-iris:hunt"
+                | "taint-iris-next:hunt"
+                | "sast:scan"
+                | "semgrep:scan"
+                | "codeql:scan"
+                | "iac-scan:scan"
+        )
+}
+
+fn tool_uses_agent_runtime(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "triage:run"
+            | "verify:finding"
+            | "patch:finding"
+            | "agentic-sast:scan"
+            | "carlini-threat-hunt:run"
+            | "vendor-assessment:assess"
+            | "vuln-scout:audit"
+            | "tob:audit"
+            | "shinsa:scan"
+            | "shinsa:quick-check"
+            | "shinsa:nist-scan"
+            | "shinsa:nist-quick-check"
+            | "prompt-armor:scan"
+            | "prompt-armor:analyze"
+            | "prompt-armor:attack"
+            | "variant:lift-pattern"
+            | "variant:hunt"
+            | "ndiff:extract-fix-pattern"
+            | "ndiff:hunt-variants"
+            | "systems-hunt:systems-invariant-extract"
+            | "systems-hunt:systems-trigger-synth"
+            | "systems-hunt:systems-hunt"
+            | "systems-hunt:deep-semantic-cwe-select"
+            | "systems-hunt:deep-semantic-hunt"
+            | "taint-iris:hunt"
+            | "taint-iris-next:hunt"
+            | "sast:scan"
+            | "threat-model:build"
+            | "randori:pasta"
+            | "x-ray:run"
+            | "x-ray:x-ray"
+    )
+}
+
+fn tool_run_status(tool_name: &str) -> &'static str {
+    match tool_name {
+        "context:build" | "context-lite:index" => "indexing repository context",
+        "semgrep:scan" | "codeql:scan" | "iac-scan:scan" | "secret-scan:scan" => "running scanner",
+        "sast:scan" => "running SAST pipeline",
+        "findings:list" => "reading persisted findings",
+        "recon:http-fingerprint" | "recon:nmap" => "collecting recon evidence",
+        "triage:run" => "asking model to triage persisted findings",
+        "verify:finding" | "verify:exploit" => "validating finding evidence",
+        "patch:finding" => "preparing remediation patch",
+        _ if tool_uses_agent_runtime(tool_name) => "asking model-backed tool",
+        _ => "running tool",
+    }
 }
 
 fn agent_worker(
@@ -7257,6 +7277,7 @@ JSON
             tool: None,
             input: None,
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app
@@ -8557,6 +8578,7 @@ JSON
                 binary.display()
             )),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app.log.iter().any(|line| {
@@ -8587,6 +8609,7 @@ JSON
                 binary.display()
             )),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app.log.iter().any(|line| {
@@ -8623,6 +8646,7 @@ JSON
             tool: None,
             input: None,
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app.log.iter().any(|line| {
@@ -8646,6 +8670,7 @@ JSON
                 binary.display()
             )),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app
@@ -8674,6 +8699,7 @@ JSON
                 binary.display()
             )),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app
@@ -8700,6 +8726,7 @@ JSON
             tool: None,
             input: Some(r#"{"kind":"terraform"}"#.to_string()),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app
@@ -8741,6 +8768,7 @@ JSON
                 r#"{"taskMode":"manual","tasks":["dep-hygiene","secret-scan"]}"#.to_string(),
             ),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app
@@ -8776,6 +8804,7 @@ JSON
         app.handle_command(parse_command(
             r#"run . {"taskMode":"manual","tasks":["dep-hygiene","secret-scan"]}"#,
         ));
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app.focused_module.is_none());
@@ -8816,6 +8845,7 @@ JSON
             tool: None,
             input: Some(r#"{"maxFindings":5}"#.to_string()),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app.log.iter().any(|line| {
@@ -8856,6 +8886,7 @@ JSON
                 r#"{{"fingerprint":"{fingerprint}","maxFindings":5}}"#
             )),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app.log.iter().any(|line| {
@@ -8896,6 +8927,7 @@ JSON
                     .to_string(),
             ),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app.log.iter().any(|line| {
@@ -8933,6 +8965,7 @@ JSON
             tool: None,
             input: Some(r#"{"maxFindings":5}"#.to_string()),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app.log.iter().any(|line| {
@@ -8981,6 +9014,7 @@ JSON
                     .to_string(),
             ),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app
@@ -9023,6 +9057,7 @@ JSON
             tool: None,
             input: Some(r#"{"maxActors":1,"runsPerActor":1}"#.to_string()),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app.log.iter().any(|line| {
@@ -9061,6 +9096,7 @@ JSON
             tool: Some("systems-hunt:systems-hunt".to_string()),
             input: Some(r#"{"maxFindings":5}"#.to_string()),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app.log.iter().any(|line| {
@@ -9107,6 +9143,7 @@ JSON
             tool: Some("findings:list".to_string()),
             input: Some(r#"{"severity":["high"],"verdict":["tp"],"name":"sql"}"#.to_string()),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app.log.iter().any(|line| {
@@ -9151,6 +9188,7 @@ JSON
             tool: None,
             input: Some(format!(r#"{{"fingerprint":"{}"}}"#, finding.fingerprint)),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app
@@ -9215,6 +9253,7 @@ JSON
             tool: None,
             input: Some(format!(r#"{{"fingerprint":"{}"}}"#, finding.fingerprint)),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app
@@ -9280,6 +9319,7 @@ JSON
                 finding.fingerprint
             )),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app
@@ -9322,6 +9362,7 @@ JSON
             tool: None,
             input: Some(r#"{"outputDir":".kuzushi/tm"}"#.to_string()),
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app.log.iter().any(|line| {
@@ -9357,6 +9398,7 @@ JSON
             tool: Some("x-ray:run".to_string()),
             input: None,
         });
+        drain_tool(&mut app);
 
         assert_eq!(app.shell_view, ShellView::ModuleRun);
         assert!(app

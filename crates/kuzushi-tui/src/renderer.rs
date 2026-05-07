@@ -273,6 +273,7 @@ enum RoutingMode {
 
 fn routing_mode(app: &ShellApp) -> RoutingMode {
     if app.scan.as_ref().is_some_and(|scan| scan.running)
+        || app.running_tool_name().is_some()
         || matches!(app.shell_view, ShellView::ModuleRun)
     {
         RoutingMode::Run
@@ -723,6 +724,7 @@ fn agentic_sast_snapshot_lines(report: &kuzushi_core::AgenticSastReport) -> Vec<
 fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     let scan = app.scan.as_ref();
+    let running_tool = app.running_tool_name();
     let target = scan
         .map(|scan| compact_target_path(&scan.target.display().to_string()))
         .or_else(|| {
@@ -731,7 +733,10 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
                 .map(|path| compact_target_path(&path.display().to_string()))
         })
         .unwrap_or_else(|| "target:none".to_string());
-    let stage = scan.map(scan_status).unwrap_or_else(|| "idle".to_string());
+    let stage = scan
+        .map(scan_status)
+        .or_else(|| running_tool.map(|_| "running".to_string()))
+        .unwrap_or_else(|| "idle".to_string());
     let findings = scan
         .map(|scan| scan.findings_count)
         .unwrap_or(app.findings.len());
@@ -741,6 +746,8 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         .unwrap_or_else(|| {
             if scan.is_some() {
                 "run pending".to_string()
+            } else if let Some(tool_name) = running_tool {
+                tool_name.to_string()
             } else {
                 "tool run".to_string()
             }
@@ -749,8 +756,8 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
     lines.push(Line::from(vec![
         Span::styled(
-            run_state_glyph(scan, app.spinner_phase as usize),
-            run_state_style(scan),
+            run_state_glyph(scan, running_tool.is_some(), app.spinner_phase as usize),
+            run_state_style(scan, running_tool.is_some()),
         ),
         Span::raw(" "),
         Span::styled(target, theme::label()),
@@ -767,7 +774,6 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let scan_running = scan.is_some_and(|s| s.running);
     let scan_done =
         scan.is_some() && !scan_running && scan.and_then(|s| s.error.as_ref()).is_none();
-    lines.push(divider("SCAN PROGRESS", area.width));
 
     let sast_rows = app.sast_task_rows();
     let show_per_task = sast_rows.iter().any(|r| r.selected)
@@ -775,6 +781,7 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         && (scan_running || scan_done);
     let use_real_progress = show_per_task && app.scan_progress.is_some();
     if use_real_progress {
+        lines.push(divider("SCAN PROGRESS", area.width));
         // Snapshot-preferred branch: render real `done/total` from
         // `ScanProgress.per_task` (stable BTreeMap order) instead of the
         // binary running/done placeholder bars below.
@@ -812,6 +819,7 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             },
         ));
     } else if show_per_task {
+        lines.push(divider("SCAN PROGRESS", area.width));
         for row in &sast_rows {
             if !row.selected {
                 continue;
@@ -841,6 +849,7 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             },
         ));
     } else if app.focused_module.as_deref() == Some("sast") || scan.is_some() {
+        lines.push(divider("SCAN PROGRESS", area.width));
         // SAST pipeline placeholder — context:build → sast:scan → triage:run.
         // Only render this when the focused module is `sast` or there's an
         // actual scan running; otherwise the fixed three-row pipeline is
@@ -878,12 +887,37 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
                 "waiting for findings"
             },
         ));
+    } else if app.focused_module.as_deref() == Some("context") {
+        lines.push(divider("CONTEXT BUILD", area.width));
+        if let Some(tool_name) = running_tool {
+            lines.push(pipeline_row(
+                "⏵",
+                tool_name,
+                "indexing repository context; result will update this view",
+            ));
+        } else if app.context_view.exists {
+            lines.push(pipeline_row("✓", "context:build", &app.context_view.status));
+            if let Some(path) = app.context_view.snapshot_path.as_ref() {
+                lines.push(pipeline_row("◆", "snapshot", &path.display().to_string()));
+            }
+        } else {
+            lines.push(pipeline_row(
+                "○",
+                "context:build",
+                "no snapshot yet; `run .` builds .kuzushi/context-snapshot.json",
+            ));
+        }
     } else {
         let module = app.focused_module.as_deref().unwrap_or("tool");
+        lines.push(divider("TOOL RUN", area.width));
         lines.push(pipeline_row(
-            "○",
+            if running_tool.is_some() { "⏵" } else { "○" },
             module,
-            "no scan in flight; `run .` dispatches the module's primary tool",
+            if running_tool.is_some() {
+                "running primary tool; result will update the transcript"
+            } else {
+                "`run .` dispatches the module's primary tool"
+            },
         ));
     }
 
@@ -934,7 +968,7 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let body_budget = area.height.saturating_sub(lines.len() as u16) as usize;
     let transcript = transcript_lines(app, body_budget.saturating_sub(1).max(0));
     lines.extend(transcript);
-    if scan_running && body_budget > 0 {
+    if (scan_running || running_tool.is_some()) && body_budget > 0 {
         lines.push(streaming_cursor_line());
     }
     lines
@@ -2056,6 +2090,9 @@ fn sast_tasks_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 fn context_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     let view = &app.context_view;
+    let context_tool_running = app
+        .running_tool_name()
+        .filter(|tool| matches!(*tool, "context:build" | "context-lite:index"));
 
     lines.push(blank());
     lines.push(divider("CONTEXT", area.width));
@@ -2071,9 +2108,29 @@ fn context_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         "state",
         if view.exists { "present" } else { "missing" },
     ));
-    lines.push(detail("status", &fit(&view.status, value_width(area, 10))));
+    if let Some(tool_name) = context_tool_running {
+        lines.push(detail(
+            "status",
+            &fit(
+                &format!(
+                    "{} {tool_name} indexing repository context",
+                    app.spinner_glyph()
+                ),
+                value_width(area, 10),
+            ),
+        ));
+    } else {
+        lines.push(detail("status", &fit(&view.status, value_width(area, 10))));
+    }
 
-    if view.exists {
+    if let Some(tool_name) = context_tool_running {
+        lines.push(blank());
+        lines.push(pipeline_row(
+            "⏵",
+            tool_name,
+            "building snapshot; this view updates when the worker finishes",
+        ));
+    } else if view.exists {
         lines.push(detail(
             "target",
             view.target.as_deref().unwrap_or("unknown"),
@@ -2783,6 +2840,19 @@ fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
                 .map(scan_status)
                 .unwrap_or_else(|| "idle".to_string()),
         ])
+    } else if let Some(tool_name) = app.running_tool_name() {
+        join_segments(&[
+            routing_mode_segment(app),
+            app.config
+                .model
+                .clone()
+                .unwrap_or_else(|| "unconfigured".to_string()),
+            if app.tool_abort_requested() {
+                format!("{tool_name}: abort requested")
+            } else {
+                format!("{tool_name}: active")
+            },
+        ])
     } else if app.agent_chat.as_ref().is_some_and(|agent| agent.running) {
         join_segments(&[
             routing_mode_segment(app),
@@ -2962,7 +3032,11 @@ fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     }
 
     let prompt = match routing_mode(app) {
-        RoutingMode::Run => "kuzushi/run> ".to_string(),
+        RoutingMode::Run => app
+            .focused_module
+            .as_ref()
+            .map(|module| format!("kuzushi/{module}/run> "))
+            .unwrap_or_else(|| "kuzushi/run> ".to_string()),
         RoutingMode::Agent => "kuzushi/agent> ".to_string(),
         RoutingMode::Plan => "kuzushi/plan> ".to_string(),
         RoutingMode::Module => app
@@ -3047,6 +3121,15 @@ fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     // view
     push_segment(&mut spans, "view", view.clone(), theme::accent());
+
+    if let Some(tool_name) = app.running_tool_name() {
+        push_segment(
+            &mut spans,
+            "run",
+            format!("{} {tool_name}", app.spinner_glyph()),
+            theme::warn(),
+        );
+    }
 
     // model
     push_segment(&mut spans, "model", model.to_string(), theme::primary());
@@ -3202,6 +3285,21 @@ fn keybindings(app: &ShellApp) -> Vec<(&'static str, &'static str)> {
             ("back", "home"),
             ("history", "events"),
             ("model", "runtime"),
+        ];
+    }
+    if app.running_tool_name().is_some() {
+        return vec![
+            (
+                "Ctrl+C",
+                if app.tool_abort_requested() {
+                    "arm exit"
+                } else {
+                    "request abort"
+                },
+            ),
+            ("findings", "list"),
+            ("back", "home"),
+            ("history", "events"),
         ];
     }
 
@@ -4424,22 +4522,24 @@ fn scan_status(scan: &ScanPanelState) -> String {
 /// for determinism.
 const SPINNER_FRAMES: &[&str] = &["⠿", "⠾", "⠷", "⠯", "⠟", "⠻"];
 
-fn run_state_glyph(scan: Option<&ScanPanelState>, tick: usize) -> &'static str {
+fn run_state_glyph(scan: Option<&ScanPanelState>, tool_running: bool, tick: usize) -> &'static str {
     match scan {
         Some(scan) if scan.running && scan.abort_requested => "✗",
         Some(scan) if scan.running => SPINNER_FRAMES[tick % SPINNER_FRAMES.len()],
         Some(scan) if scan.error.is_some() => "✗",
         Some(_) => "✓",
+        None if tool_running => SPINNER_FRAMES[tick % SPINNER_FRAMES.len()],
         None => "●",
     }
 }
 
-fn run_state_style(scan: Option<&ScanPanelState>) -> Style {
+fn run_state_style(scan: Option<&ScanPanelState>, tool_running: bool) -> Style {
     match scan {
         Some(scan) if scan.running && scan.abort_requested => theme::warn(),
         Some(scan) if scan.running => theme::warn(),
         Some(scan) if scan.error.is_some() => theme::danger(),
         Some(_) => theme::success(),
+        None if tool_running => theme::warn(),
         None => theme::accent(),
     }
 }
@@ -5238,7 +5338,7 @@ mod tests {
             error: None,
         };
         let frames: Vec<&str> = (0..12)
-            .map(|tick| run_state_glyph(Some(&scan), tick))
+            .map(|tick| run_state_glyph(Some(&scan), false, tick))
             .collect();
         // First 6 ticks cover all 6 frames
         let unique: std::collections::BTreeSet<&&str> = frames.iter().take(6).collect();
@@ -5260,8 +5360,9 @@ mod tests {
     #[test]
     fn spinner_shows_static_glyph_when_scan_idle_or_done() {
         // Idle: no scan -> ●
-        assert_eq!(run_state_glyph(None, 0), "●");
-        assert_eq!(run_state_glyph(None, 99), "●");
+        assert_eq!(run_state_glyph(None, false, 0), "●");
+        assert_eq!(run_state_glyph(None, false, 99), "●");
+        assert_eq!(run_state_glyph(None, true, 0), SPINNER_FRAMES[0]);
         // Done: scan present, not running, no error -> ✓
         let done = crate::app::ScanPanelState {
             run_id: None,
@@ -5272,7 +5373,7 @@ mod tests {
             abort_requested: false,
             error: None,
         };
-        assert_eq!(run_state_glyph(Some(&done), 4), "✓");
+        assert_eq!(run_state_glyph(Some(&done), false, 4), "✓");
     }
 
     #[test]
@@ -5831,7 +5932,31 @@ mod tests {
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains("tool run"));
+        assert!(rendered.contains("CONTEXT BUILD"));
+        assert!(!rendered.contains("SCAN PROGRESS"));
         assert!(!rendered.contains("run pending"));
+    }
+
+    #[test]
+    fn active_tool_run_uses_live_tool_chrome_not_scan_chrome() {
+        let backend = TestBackend::new(96, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.focused_module = Some("recon".to_string());
+        app.set_running_tool_for_test("recon:nmap");
+        app.shell_view = ShellView::ModuleRun;
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("TOOL RUN"));
+        assert!(rendered.contains("recon:nmap"));
+        assert!(
+            SPINNER_FRAMES.iter().any(|frame| rendered.contains(frame)),
+            "expected active spinner frame in: {rendered}"
+        );
+        assert!(!rendered.contains("SCAN PROGRESS"));
+        assert!(!rendered.contains("no scan in flight"));
     }
 
     #[test]
@@ -5944,6 +6069,26 @@ mod tests {
         assert!(rendered.contains("Rust"));
         assert!(rendered.contains("context regen repo"));
         assert!(!rendered.contains("┌"));
+    }
+
+    #[test]
+    fn active_context_build_view_shows_live_feedback() {
+        let backend = TestBackend::new(96, 22);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.focused_module = Some("context".to_string());
+        app.shell_view = ShellView::Context;
+        app.set_running_tool_for_test("context:build");
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("mode:run"));
+        assert!(rendered.contains("context:build"));
+        assert!(rendered.contains("indexing repository context"));
+        assert!(rendered.contains("request abort"));
+        assert!(rendered.contains("kuzushi/context/run>"));
+        assert!(!rendered.contains("SCAN PROGRESS"));
     }
 
     #[test]
@@ -6593,6 +6738,12 @@ mod tests {
                 });
                 app.shell_view = ShellView::ModuleRun;
                 (app, "mode:run", "kuzushi/run>")
+            },
+            {
+                let mut app = ShellApp::new(V2Config::default(), None);
+                app.focused_module = Some("context".to_string());
+                app.shell_view = ShellView::ModuleRun;
+                (app, "mode:run", "kuzushi/context/run>")
             },
         ];
 
