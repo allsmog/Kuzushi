@@ -501,6 +501,7 @@ pub struct ShellApp {
     pub cursor: usize,
     pub history_index: Option<usize>,
     pub history_draft: String,
+    pub last_cleared_input: Option<String>,
     pub log: Vec<LogLine>,
     pub target: Option<PathBuf>,
     pub focused_module: Option<String>,
@@ -569,6 +570,7 @@ impl ShellApp {
             cursor: 0,
             history_index: None,
             history_draft: String::new(),
+            last_cleared_input: None,
             log: Vec::new(),
             target: target.map(|target| target.root().to_path_buf()),
             focused_module: None,
@@ -669,6 +671,23 @@ impl ShellApp {
         self.input.clear();
         self.cursor = 0;
         self.history_index = None;
+    }
+
+    /// Esc behavior: clear an in-progress draft, stash it for one-shot undo.
+    /// If the draft is already empty, restore the most recently cleared
+    /// draft so a single mis-tapped Esc doesn't lose carefully-typed input.
+    pub fn esc_clear_or_restore(&mut self) {
+        if !self.input.is_empty() {
+            self.last_cleared_input = Some(std::mem::take(&mut self.input));
+            self.cursor = 0;
+            self.history_index = None;
+            return;
+        }
+        if let Some(stashed) = self.last_cleared_input.take() {
+            self.input = stashed;
+            self.cursor = self.char_count();
+            self.history_index = None;
+        }
     }
 
     pub fn take_input(&mut self) -> String {
@@ -7562,6 +7581,31 @@ JSON
         assert!(app.log.iter().any(|line| {
             line.prefix == "cost" && line.body.contains("session estimate $0.0456")
         }));
+    }
+
+    #[test]
+    fn esc_stashes_input_and_one_more_esc_restores_it() {
+        // P3-2: previously Esc wiped the input with no recovery, so a long
+        // command typed and then Esc'd was lost forever (Up arrow restores
+        // history, not the most recent draft). Now Esc stashes the draft and
+        // a second Esc on an empty prompt restores it.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_input("scan ./very/specific/path with --since main --include-worktree");
+        let original = app.input.clone();
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+        assert!(app.input.is_empty(), "first Esc clears the input");
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+        assert_eq!(app.input, original, "second Esc restores the draft");
+        assert_eq!(app.cursor, original.chars().count());
+
+        // Restoring consumed the stash; a third Esc cycle starts fresh.
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+        assert!(app.input.is_empty(), "third Esc clears again");
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+        assert_eq!(
+            app.input, original,
+            "fourth Esc restores the new stash (which was the second clear)"
+        );
     }
 
     #[test]
