@@ -86,7 +86,7 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 
 ### `origin/claude/vercel-security-harness-comparison-YQKnA`
 
-- Status: integrated by documentation/example subset in current working commit
+- Status: integrated by documentation/example subset in commit `219e1ae0` (`merge: integrate useful vercel-security-harness-comparison-YQKnA changes`)
 - Commits inspected: executor/gateway/history/TUI work from `7a04225f` through `aa387d11`, plus `1c758cb0 examples/sandbox-backend: reference Vercel + Kubernetes adapters`
 - Scope inspected: `git log --oneline --max-count=20 main..origin/claude/vercel-security-harness-comparison-YQKnA`, `git diff --name-status main...`, `git diff --stat main...`, and `git merge-tree --write-tree main origin/claude/vercel-security-harness-comparison-YQKnA`
 - Conflict preview: broad production conflicts in `Cargo.lock`, CLI main, `findings.rs`, `lib.rs`, `modules.rs`, `runtime.rs`, `kuzushi-openai`, and Ratatui app/renderer.
@@ -97,7 +97,13 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 
 ### `origin/claude/agentic-security-pipeline`
 
-- Status: pending inspection
+- Status: skipped as obsolete/superseded in current working commit
+- Commits inspected: branch-local agentic pipeline commits from `a1bca700` through `e57e0e6c`, including classifier-gate Stage 1.5, triage/deep audit tools, tool-loop streaming, GatedRuntime, OAuth/live audit experiments, libFuzzer verify work, MCP/code-index docs, and old Rust TUI updates.
+- Scope inspected: `git log --oneline --max-count=20 main..origin/claude/agentic-security-pipeline`, `git diff --name-status main...`, `git diff --stat main...`, `git merge-tree --write-tree main origin/claude/agentic-security-pipeline`, plus exact two-dot diffs against current `main`.
+- Conflict preview: conflicts in progress docs, CLI main/tests, `agent_router`, `deep_auditor`, `findings`, `lib`, `runtime`, `static_ranking`, `systems_hunt`, `kuzushi-openai`, and TUI files; two-dot diff would delete current extracted TUI files, design artifacts, `static_context`, sandbox backend docs/examples, Uncle Bob progress files, and current module splits.
+- Decision: skip branch as obsolete/superseded. Current main already contains the durable pieces under newer contracts: MCP/code-index crates, `kuzushi-sandbox`, empirical verify, deep-audit/full-mode/classifier modules, spend/concurrency roles, Rust Ratatui extracted structure, and the static-context/eval/reporting subset integrated earlier. The branch's remaining unique items are stale names (`triage:deep`, `audit:full-mode`), live OAuth experiment tests, old pi-agent-core file layout, old TUI monolith rewrites, and docs for APIs not present in current main.
+- Skipped: full merge and cherry-picks. No production files changed for this branch; this ledger commit records the explicit skip with evidence.
+- Checks: no code changes for this branch; previous integration checks remain the relevant gates before final.
 
 ## Final Result
 
