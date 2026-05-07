@@ -1076,14 +1076,18 @@ impl ShellApp {
     }
 
     pub fn submit_line(&mut self, raw: &str) {
-        self.log(">", raw.to_string());
         let trimmed = raw.trim();
-        if !trimmed.is_empty() {
-            self.command_history.push(trimmed.to_string());
-            if self.command_history.len() > 200 {
-                let overflow = self.command_history.len() - 200;
-                self.command_history.drain(0..overflow);
-            }
+        // Empty / whitespace-only Enter is a no-op. Logging an empty `>`
+        // bullet just clutters the 2-row transcript with `· ` rows the
+        // operator never asked for.
+        if trimmed.is_empty() {
+            return;
+        }
+        self.log(">", raw.to_string());
+        self.command_history.push(trimmed.to_string());
+        if self.command_history.len() > 200 {
+            let overflow = self.command_history.len() - 200;
+            self.command_history.drain(0..overflow);
         }
         if matches!(self.shell_view, ShellView::PromptsEditor)
             && !trimmed.is_empty()
@@ -7709,6 +7713,24 @@ JSON
         let log_count = app.log.len();
         let _ = app.open_store();
         assert_eq!(app.log.len(), log_count);
+    }
+
+    #[test]
+    fn empty_input_enter_does_not_log_or_grow_history() {
+        // P-NEW-3: pressing Enter on an empty / whitespace-only prompt used
+        // to push a `>` bullet with no body into the transcript and waste
+        // a precious row in the 2-row strip. The submit is now a no-op:
+        // no log, no history entry.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let log_count = app.log.len();
+        let history_count = app.command_history.len();
+
+        app.submit_line("");
+        app.submit_line("    ");
+        app.submit_line("\t \t");
+
+        assert_eq!(app.log.len(), log_count);
+        assert_eq!(app.command_history.len(), history_count);
     }
 
     #[test]
