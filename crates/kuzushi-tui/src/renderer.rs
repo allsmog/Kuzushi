@@ -781,7 +781,7 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         let progress = app.scan_progress.as_ref().expect("checked above");
         for (task_id, (done, total)) in progress.per_task.iter() {
             let kind = if *total == 0 {
-                ProgressKind::Failing
+                ProgressKind::Queued
             } else if done >= total {
                 ProgressKind::Done
             } else {
@@ -808,7 +808,7 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             if findings > 0 {
                 ProgressKind::Active
             } else {
-                ProgressKind::Failing
+                ProgressKind::Queued
             },
         ));
     } else if show_per_task {
@@ -3665,6 +3665,7 @@ fn catalog_next_hint(app: &ShellApp) -> String {
 pub(crate) enum ProgressKind {
     Done,
     Active,
+    Queued,
     Failing,
 }
 
@@ -3673,12 +3674,24 @@ impl ProgressKind {
         match self {
             ProgressKind::Done => theme::success(),
             ProgressKind::Active => theme::warn(),
+            // Queued bars stay subtle in the mockup
+            // (`design/mockups/sast-running.jsx::bar` passes c-subtle for
+            // the "queued" status); `Failing` should be reserved for true
+            // errors so a deferred task isn't painted danger-red.
+            ProgressKind::Queued => theme::subtle(),
             ProgressKind::Failing => theme::danger(),
         }
     }
 
     fn status_style(self) -> Style {
-        self.fill_style()
+        match self {
+            ProgressKind::Done => theme::success(),
+            ProgressKind::Active => theme::warn(),
+            // Pre-flight queued status reads better in muted than subtle —
+            // `c-subtle` empty cells need a slightly stronger label.
+            ProgressKind::Queued => theme::muted(),
+            ProgressKind::Failing => theme::danger(),
+        }
     }
 }
 
