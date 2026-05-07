@@ -446,6 +446,7 @@ pub struct ShellApp {
     pub scroll_offset: u16,
     pub spinner_phase: u8,
     pub last_spinner_advance: Option<Instant>,
+    pub force_full_redraw: bool,
     scan_rx: Option<Receiver<ScanEvent>>,
     scan_cancel: Option<ScanCancellation>,
     agent_rx: Option<Receiver<AgentEvent>>,
@@ -511,6 +512,7 @@ impl ShellApp {
             scroll_offset: 0,
             spinner_phase: 0,
             last_spinner_advance: None,
+            force_full_redraw: false,
             scan_rx: None,
             scan_cancel: None,
             agent_rx: None,
@@ -522,7 +524,7 @@ impl ShellApp {
         app.log("first-run", app.first_finding_hint());
         app.log(
             "help",
-            "/scan, /run <tool>, /ask <question>, ?text, /workspace, /context build, /tasks, /options [tool], /auth login openai-codex|anthropic, /provider, /backend, /model, /cost, /kb, /history, /clear, /load <specifier>, /findings, /modules, /tools, /quit",
+            "type help for commands · ? <text> to ask · scan to start",
         );
         if target.is_some() {
             app.refresh_findings(false);
@@ -2620,6 +2622,13 @@ impl ShellApp {
         if raw_mode_was_disabled {
             let _ = enable_raw_mode();
         }
+        let mut stdout = io::stdout();
+        let _ = execute!(stdout, Clear(ClearType::All), MoveTo(0, 0));
+        // The bridge wrote to the inherited stdio while we were paused;
+        // ratatui's diff buffer no longer matches the screen. Force the
+        // run loop to invalidate its buffer + repaint so the OAuth output
+        // doesn't bleed into the next frame.
+        self.force_full_redraw = true;
 
         match status {
             Ok(status) if status.success() => self.log(
@@ -4649,6 +4658,15 @@ pub fn run_shell_with_plain(
             let drain_changed = app.drain_background_events();
             let view_changed = app.sync_view_change();
             if tick_changed || drain_changed || view_changed {
+                needs_redraw = true;
+            }
+            if app.force_full_redraw {
+                // A subprocess wrote to our terminal while we were paused
+                // (e.g. OAuth bridge). Drop ratatui's diff buffer so the next
+                // draw repaints every cell, otherwise stale bridge output
+                // leaks through the cell-diff renderer.
+                terminal.clear()?;
+                app.force_full_redraw = false;
                 needs_redraw = true;
             }
             if needs_redraw {
@@ -8808,13 +8826,24 @@ JSON
 
     #[test]
     fn page_keys_scroll_view_offset() {
+        // Help has its own dedicated scroll field — PageDown/PageUp must
+        // advance/retract it so `viewport_lines(..., app.help_scroll)` actually
+        // shows the next page. Other views with their own scroll fields
+        // (Tools, History, KnowledgeBase, Catalog when expanded) work the
+        // same way; views without dedicated fields fall back to scroll_offset.
         let mut app = ShellApp::new(V2Config::default(), None);
         app.shell_view = ShellView::Help;
         app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
-        assert_eq!(app.scroll_offset, 10);
+        assert_eq!(app.help_scroll, 10);
         app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
-        assert_eq!(app.scroll_offset, 20);
+        assert_eq!(app.help_scroll, 20);
         app.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::empty()));
+        assert_eq!(app.help_scroll, 10);
+
+        // Views without a dedicated scroll field still use scroll_offset.
+        app.shell_view = ShellView::Tune;
+        app.scroll_offset = 0;
+        app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
         assert_eq!(app.scroll_offset, 10);
     }
 
