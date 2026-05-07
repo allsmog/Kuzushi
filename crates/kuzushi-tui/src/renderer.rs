@@ -835,7 +835,9 @@ fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             if findings > 0 {
                 ProgressKind::Active
             } else {
-                ProgressKind::Failing
+                // No findings yet → queued, not failing (failing would
+                // misread as an error in the placeholder pipeline).
+                ProgressKind::Queued
             },
         ));
     } else if app.focused_module.as_deref() == Some("sast") || scan.is_some() {
