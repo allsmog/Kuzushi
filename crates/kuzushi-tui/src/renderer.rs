@@ -3017,15 +3017,6 @@ fn table_text(values: &[&str], widths: &[usize]) -> String {
         .join("  ")
 }
 
-fn header(values: &[&str]) -> Line<'static> {
-    Line::from(
-        values
-            .iter()
-            .map(|value| Span::styled(format!("{}  ", pad(value, 14)), theme::subtle()))
-            .collect::<Vec<_>>(),
-    )
-}
-
 fn row(values: &[String]) -> Line<'static> {
     Line::from(
         values
