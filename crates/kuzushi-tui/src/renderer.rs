@@ -4264,11 +4264,23 @@ fn module_playbook_lines(module_id: &str, width: u16) -> Vec<Line<'static>> {
         ),
     };
     lines.push(transcript_line("tool", &fit(run, width as usize), false));
-    lines.push(transcript_line(
-        "help",
-        &fit(inspect, width as usize),
-        false,
-    ));
+    // The `help` line is a `cmd · cmd · cmd` list — accent each command
+    // and tint separators subtle, matching `command_list_line`.  Keep
+    // the leading ` · ` glyph + `help ` label so the prefix still scans
+    // as transcript context (the divider above is `── NEXT ──`, the row
+    // is "help  <commands>").
+    let commands: Vec<&str> = inspect.split(" · ").collect();
+    let mut spans: Vec<Span<'static>> = vec![
+        Span::styled(" · ", theme::muted()),
+        Span::styled("help ", theme::subtle()),
+    ];
+    for (i, cmd) in commands.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" · ", theme::subtle()));
+        }
+        spans.push(Span::styled((*cmd).to_string(), theme::accent()));
+    }
+    lines.push(Line::from(spans));
     lines
 }
 
