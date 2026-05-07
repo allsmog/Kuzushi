@@ -1784,13 +1784,17 @@ fn tools_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("TOOLS", area.width));
-    lines.push(header(&["tool", "headless", "description"]));
+    let widths = [28usize, 8, value_width(area, 38)];
+    lines.push(aligned_header(&["tool", "headless", "description"], &widths));
     for tool in app.registry.tools() {
-        lines.push(row(&[
-            fit(&tool.name, 24),
-            tool.headless.to_string(),
-            fit(&tool.description, value_width(area, 40)),
-        ]));
+        lines.push(aligned_row(
+            &[
+                tool.name.clone(),
+                tool.headless.to_string(),
+                tool.description.clone(),
+            ],
+            &widths,
+        ));
     }
     lines
 }
