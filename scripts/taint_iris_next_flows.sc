@@ -41,14 +41,23 @@ import scala.util.Try
   val queries = parseQueries(rawQueries)
 
   System.err.println(s"[taint-iris-next] loaded ${queries.size} CWE queries")
+  // Hard caps to keep `reachableByFlows` tractable on large CPGs (e.g.
+  // postgres at 187MB CPG matches tens of thousands of `length` /
+  // `palloc` calls, and the cross-product flow analysis is exponential).
+  // We only need a few high-quality flows per CWE for the agent to
+  // reason about — Joern's flow ranker generally surfaces the
+  // shortest/most-direct paths first.
+  val maxSourcesPerCwe = 200
+  val maxSinksPerCwe = 200
+  val maxFlowsPerCwe = 25
   for (q <- queries) {
-    val sources = Try(cpg.call.code(q.sourceRegex).l).getOrElse(Nil)
-    val sinks = Try(cpg.call.code(q.sinkRegex).l).getOrElse(Nil)
-    System.err.println(s"[taint-iris-next] ${q.cwe}: ${sources.size} sources, ${sinks.size} sinks")
+    val sources = Try(cpg.call.code(q.sourceRegex).take(maxSourcesPerCwe).l).getOrElse(Nil)
+    val sinks = Try(cpg.call.code(q.sinkRegex).take(maxSinksPerCwe).l).getOrElse(Nil)
+    System.err.println(s"[taint-iris-next] ${q.cwe}: ${sources.size} sources (capped at $maxSourcesPerCwe), ${sinks.size} sinks (capped at $maxSinksPerCwe)")
     if (sources.nonEmpty && sinks.nonEmpty) {
-      val flows = Try(sinks.reachableByFlows(sources).l).getOrElse(Nil)
+      val flows = Try(sinks.reachableByFlows(sources).take(maxFlowsPerCwe).l).getOrElse(Nil)
       System.err.println(s"[taint-iris-next] ${q.cwe}: ${flows.size} flows")
-      for (flow <- flows.take(50)) {
+      for (flow <- flows) {
         emitFlow(q, flow)
       }
     }

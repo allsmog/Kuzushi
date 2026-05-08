@@ -23,10 +23,17 @@ pub(in crate::modules) fn extract_taint_iris_next_evidence(
     let mut warnings = plan.backend.warnings.clone();
 
     // When the backend selector picked joern (CPG present + binary on PATH),
-    // run a real `reachableByFlows` query and replace the heuristic linker
-    // with the resulting paths. The rg-derived candidates stay so the
-    // catalog still has structural breadth; joern adds high-confidence
-    // endpoints with `evidence_level: "path"` and a reaching-flow rationale.
+    // run a real `reachableByFlows` query and trust its verdict.
+    // Operationally this means: empty Joern flows → empty linked_stories,
+    // not a fallback to the heuristic same-file linker. The whole point of
+    // selecting joern is replacing the proximity heuristic with real data
+    // flow; if the CPG says no source reaches any sink, that *is* the
+    // signal we want to surface to the agent.
+    //
+    // The heuristic linker is only used when joern itself can't run
+    // (binary missing mid-run, query timed out, parse error) — in those
+    // cases we surface a warning so the operator knows the result is
+    // best-effort.
     let mut backend_path_count = 0usize;
     let linked_stories = if plan.backend.selected == "joern" {
         match super::run_joern_flows(plan) {
@@ -34,15 +41,12 @@ pub(in crate::modules) fn extract_taint_iris_next_evidence(
                 backend_path_count = flows.len();
                 let mut joern_candidates = super::joern_flows_to_candidates(&flows);
                 candidates.append(&mut joern_candidates);
-                let stories = super::joern_flows_to_linked_stories(&flows);
-                if stories.is_empty() {
+                if flows.is_empty() {
                     warnings.push(
-                        "joern reachableByFlows produced no source-to-sink paths; falling back to heuristic linker for breadth".to_string(),
+                        "joern reachableByFlows found no source-to-sink paths; reporting empty linked stories rather than synthesising heuristic ones".to_string(),
                     );
-                    build_taint_iris_next_linked_stories(&candidates)
-                } else {
-                    stories
                 }
+                super::joern_flows_to_linked_stories(&flows)
             }
             Ok(None) => {
                 warnings.push(
