@@ -92,9 +92,10 @@ pub(crate) use settings::{
 };
 pub use shellapp::ShellApp;
 pub use view_state::{
-    ActorDetailFilter, AdvisoryState, BudgetHalt, CompletionCycle, ContextSnapshotView,
-    ExploitChain, KnowledgeBaseView, OptionsFilter, OptionsView, PlanChange, PlanProposal,
-    PromptsAction, ReconSnapshot, ScanPanelState, ShellView, ThreatPatch, ThreatView,
+    ActivitySession, ActorDetailFilter, AdvisoryState, BudgetHalt, CompletionCycle,
+    ContextSnapshotView, DagTaskRow, DagTaskState, ExploitChain, KnowledgeBaseView, OptionsFilter,
+    OptionsView, PaneFocus, PlanChange, PlanProposal, PromptsAction, ReconSnapshot,
+    RecordedTraceEvent, ScanPanelState, ShellView, SubsystemAggregate, ThreatPatch, ThreatView,
     ThrottleAdvisory, TuneAction, WorkspaceView,
 };
 pub(crate) use view_state::{SastTaskMode, SastTaskRow};

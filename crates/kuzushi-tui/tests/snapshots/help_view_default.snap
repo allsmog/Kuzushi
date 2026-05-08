@@ -95,6 +95,8 @@ replay <run> - render a run summary
   aliases / examples: /replay <run>
 trace <run> - stream run events
   aliases / examples: /trace <run>
+activity - live module-progress dashboard
+  aliases / examples: /activity, progress, /progress, /a
 since <ref> - scope findings to a git ref
   aliases / examples: /since <ref>
 threats [1-5] - threat model views

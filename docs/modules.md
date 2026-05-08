@@ -251,6 +251,77 @@ precedence and falls back to `context.config.model`.
 Anything that looks like `model = X ?? "anthropic:claude-..."` is the
 silent-fallback pattern the audit removed and must not return.
 
+### 7.1. Rust-side: `ctx.trace` (live module-progress feed)
+
+Rust-native modules — anything in `crates/kuzushi-core/src/modules/**` — get
+an additional optional handle on `ToolExecutionContext`:
+
+```rust
+pub struct ToolExecutionContext<'a> {
+    pub config: &'a V2Config,
+    pub workspace: Option<&'a WorkspaceTarget>,
+    pub findings_store: Option<&'a FindingStore>,
+    pub trace: Option<&'a TraceHandle>,  // <- new
+}
+```
+
+When the shell starts a tool or scan it constructs a `TraceHandle` that
+wraps a `BroadcastSink` (file + mpsc channel). The dispatch wrapper in
+`src/modules/registry/with_v2_builtins/execution.rs` auto-stamps the
+handle with the calling tool's `module_id` derived from the qualified tool
+name (`semgrep:scan` → `semgrep`), so producer code only needs:
+
+```rust
+if let Some(trace) = ctx.trace {
+    let _ = trace
+        .step("tool", "scan", format!("semgrep start · target={}", target.display()))
+        .emit();
+}
+// ... do work ...
+if let Some(trace) = ctx.trace {
+    let _ = trace
+        .step("done", "scan", format!("semgrep complete · {} findings", findings.len()))
+        .emit();
+}
+```
+
+**API:**
+
+| Method | Purpose |
+|---|---|
+| `trace.step(kind, verb, label)` | Build a `TraceStepBuilder`. Auto-stamps `module_id` and increments the per-run `n` counter. |
+| `.with_latency_ms(ms)` / `.with_cost_usd(c)` / `.with_severity(s)` | Optional metadata. `severity == "danger"` flips the row to `Failing`. |
+| `.emit() -> usize` | Records the step and returns its `n` so callers can pass it to `child(n)`. |
+| `trace.child(parent_step)` | Returns a clone of the handle that auto-fills `parent_step` on subsequent `step(...)` calls. |
+| `trace.for_module(module_id)` | Override the auto-stamped module (e.g. for sub-actor stamping). |
+
+Drop-without-emit is supported: `TraceStepBuilder` records on `Drop` if
+`.emit()` wasn't called, so the simplest pattern is just to ignore the
+returned `usize`.
+
+**Suggested phase verbs** (use the same vocabulary as TS `reportActivity`
+so cross-module categorization stays consistent):
+
+| Kind | When |
+|---|---|
+| `tool` | Top-level tool start/complete boundary. |
+| `done` | Final step. Promotes the row to `Done` in the left pane. |
+| `reasoning` | LLM/agent reasoning phase (e.g. `evidence-collect`, `cwe-select`). |
+| `tool-start` / `tool-progress` / `tool-complete` | Sub-tool calls inside an agentic run. Use with `child(parent)`. |
+| `refused` / `failing` | Severity = `danger`; flips the row to Failing in the dashboard. |
+
+**Hidden modules** (`pipeline:*`, `systems-hunt:*`, `context-lite:index`)
+collapse into one aggregated `subsystems` row in the Activity view. Their
+events also still flow through but are filtered out of the right-pane
+feed unless the operator presses `V` (verbose).
+
+`ctx.trace` is `None` for `kuzushi run` and evals — the `if let Some(...)`
+guard short-circuits cleanly.
+
+See `src/run_artifacts/trace_handle.rs` for the implementation and
+`crates/kuzushi-tui/tests/activity_dag_fixture.rs` for end-to-end
+integration tests showing how to drive the view from a fake DAG.
+
 ## 8. `reportActivity` vs `reportOutput`
 
 Use `reportActivity` for **structured phase labels** — they land in the
