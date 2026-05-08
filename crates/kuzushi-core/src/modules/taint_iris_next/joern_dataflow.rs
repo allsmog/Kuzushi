@@ -319,6 +319,17 @@ pub(in crate::modules) fn joern_flows_to_linked_stories(
 ) -> Vec<TaintIrisNextLinkedStory> {
     flows
         .iter()
+        // Drop flows that originate or pass through non-production paths
+        // (test harnesses, fixtures, tutorial code). See
+        // taint_iris_next_line_matches.rs::is_taint_iris_next_non_production_path
+        // for the rationale and the recognised path components.
+        .filter(|flow| {
+            !is_taint_iris_next_non_production_path(&flow.file_path)
+                && !flow
+                    .steps
+                    .iter()
+                    .any(|step| is_taint_iris_next_non_production_path(&step.file))
+        })
         .map(|flow| {
             let source_id = format!("{}:source:{}:{}", flow.cwe, flow.file_path, flow.source_line);
             let sink_id = format!("{}:sink:{}:{}", flow.cwe, flow.file_path, flow.sink_line);
@@ -363,6 +374,9 @@ pub(in crate::modules) fn joern_flows_to_candidates(
 ) -> Vec<TaintIrisNextCandidate> {
     let mut out = Vec::new();
     for flow in flows {
+        if is_taint_iris_next_non_production_path(&flow.file_path) {
+            continue;
+        }
         out.push(joern_endpoint_candidate(
             flow,
             flow.source_line,
