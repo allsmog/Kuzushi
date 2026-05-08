@@ -4,7 +4,8 @@ use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
 use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 use crate::whitebox_static::{
-    agent_tool_policy_for_input, mark_whitebox_static_findings, whitebox_static_profile_requested,
+    default_whitebox_static_agent_tool_policy, mark_whitebox_static_findings,
+    whitebox_static_profile_requested,
 };
 pub(crate) use actors_from_document::*;
 use anyhow::{Context, Result};
@@ -43,6 +44,8 @@ mod resolve_threat_model_document;
 mod run_carlini_threat_hunt;
 mod threat_search_text;
 pub(in crate::carlini_threat_hunt) use build_actor_fingerprint::*;
+#[cfg(test)]
+mod query_carlini_actor_tests;
 #[cfg(test)]
 mod tests;
 

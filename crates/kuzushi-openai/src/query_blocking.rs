@@ -14,6 +14,9 @@ use crate::{
 impl AgentRuntime for PiAgentCoreRuntime {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         let structured_output = request.structured_output;
+        let thinking_level = request
+            .thinking_level
+            .or_else(|| self.thinking_level.clone());
         let bridge_request = BridgeRequest {
             model: request.model,
             cwd: request.cwd.display().to_string(),
@@ -23,7 +26,7 @@ impl AgentRuntime for PiAgentCoreRuntime {
             api_key_env: self.api_key_env.clone(),
             api_key: self.api_key.clone(),
             base_url: self.base_url.clone(),
-            thinking_level: self.thinking_level.clone(),
+            thinking_level,
             tool_policy: request.tool_policy,
         };
 

@@ -18,6 +18,8 @@ pub struct AgentQueryRequest {
     pub tool_policy: AgentToolPolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_output: Option<AgentStructuredOutput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<String>,
 }
 
 impl AgentQueryRequest {
@@ -34,6 +36,7 @@ impl AgentQueryRequest {
             prompt: prompt.into(),
             tool_policy: AgentToolPolicy::default(),
             structured_output: None,
+            thinking_level: None,
         }
     }
 
@@ -44,6 +47,11 @@ impl AgentQueryRequest {
 
     pub fn with_structured_output(mut self, structured_output: AgentStructuredOutput) -> Self {
         self.structured_output = Some(structured_output);
+        self
+    }
+
+    pub fn with_thinking_level(mut self, thinking_level: impl Into<String>) -> Self {
+        self.thinking_level = Some(thinking_level.into());
         self
     }
 }
