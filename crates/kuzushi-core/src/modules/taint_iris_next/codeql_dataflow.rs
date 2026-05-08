@@ -144,17 +144,28 @@ pub(in crate::modules) fn run_codeql_flows(
         return Ok(None);
     };
 
-    // Pick a query suite per language. The default suite is
-    // `<lang>-security-and-quality.qls` which ships every taint-style
-    // query plus diagnostics; operators can override per run via
-    // KUZUSHI_CODEQL_QUERY_SUITE.
-    let suite = std::env::var("KUZUSHI_CODEQL_QUERY_SUITE")
+    // Pick what to run. Order of preference:
+    //  1. Per-target catalog CWEs -> resolve to specific .ql files inside
+    //     the pack so we only run queries the agent considers relevant
+    //     to this codebase. Cuts a 179-query suite down to ~12-20 queries
+    //     on a typical postgres run.
+    //  2. KUZUSHI_CODEQL_QUERY_SUITE env override (a path or `<lang>-...qls`).
+    //  3. The default `<lang>-security-and-quality.qls` for the dominant
+    //     language.
+    let env_override = std::env::var("KUZUSHI_CODEQL_QUERY_SUITE")
         .ok()
         .and_then(|s| {
             let trimmed = s.trim().to_string();
             (!trimmed.is_empty()).then_some(trimmed)
-        })
-        .unwrap_or_else(|| codeql_default_query_suite(&plan.languages));
+        });
+    let catalog_queries = codeql_queries_from_catalog(&plan.catalog, &plan.languages);
+    let queries: Vec<String> = if let Some(override_value) = env_override {
+        vec![override_value]
+    } else if !catalog_queries.is_empty() {
+        catalog_queries
+    } else {
+        vec![codeql_default_query_suite(&plan.languages)]
+    };
 
     // Default: no wall-clock timeout. CodeQL's cpp-security-and-quality
     // suite has 179 queries covering 79 CWEs and routinely takes hours
@@ -170,7 +181,8 @@ pub(in crate::modules) fn run_codeql_flows(
     let sarif_file = tempfile::NamedTempFile::new()
         .context("could not create codeql sarif tempfile")?;
 
-    let output = Command::new(&launcher)
+    let mut command = Command::new(&launcher);
+    command
         .arg("database")
         .arg("analyze")
         .arg("--format=sarif-latest")
@@ -178,8 +190,11 @@ pub(in crate::modules) fn run_codeql_flows(
         .arg(sarif_file.path())
         .arg("--ram=4096")
         .arg("--threads=4")
-        .arg(db_path.as_path())
-        .arg(&suite)
+        .arg(db_path.as_path());
+    for query in &queries {
+        command.arg(query);
+    }
+    let output = command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -201,6 +216,65 @@ pub(in crate::modules) fn run_codeql_flows(
     let sarif = std::fs::read_to_string(sarif_file.path())
         .context("could not read codeql SARIF output")?;
     Ok(Some(parse_sarif_flows(&sarif)))
+}
+
+/// Translate the per-target catalog into specific CodeQL query selectors.
+///
+/// CodeQL accepts query selectors like `codeql/cpp-queries:Security/CWE/CWE-089`
+/// as positional args. Each selector resolves to all `.ql` files in that
+/// folder. Per-target catalog generation already produces a list of CWEs
+/// that the agent considers relevant to this codebase (postgres got
+/// 12 CWEs: 89, 120, 190, 22, 78, 426, 295, 502, 416, 209, 918, 77 — out
+/// of the 79 CodeQL covers in the cpp suite). Running just the relevant
+/// folders cuts a 179-query suite down to ~25-50 queries that finish
+/// many times faster while still surfacing every CWE the catalog cares
+/// about.
+///
+/// Languages without a CodeQL `<lang>-queries` pack return an empty list
+/// so callers fall back to the per-language `<lang>-security-and-quality`
+/// suite.
+fn codeql_queries_from_catalog(
+    catalog: &[TaintIrisNextRankedCatalogEntry],
+    languages: &[String],
+) -> Vec<String> {
+    let pack = match codeql_query_pack_for_languages(languages) {
+        Some(pack) => pack,
+        None => return Vec::new(),
+    };
+    let mut seen = BTreeSet::new();
+    let mut selectors = Vec::new();
+    for entry in catalog {
+        let Some(folder) = codeql_cwe_folder(&entry.cwe) else {
+            continue;
+        };
+        let key = format!("{pack}:Security/CWE/{folder}");
+        if seen.insert(key.clone()) {
+            selectors.push(key);
+        }
+    }
+    selectors
+}
+
+fn codeql_query_pack_for_languages(languages: &[String]) -> Option<&'static str> {
+    for lang in languages {
+        match lang.as_str() {
+            "c" | "cpp" => return Some("codeql/cpp-queries"),
+            "python" => return Some("codeql/python-queries"),
+            "javascript" | "typescript" => return Some("codeql/javascript-queries"),
+            "java" | "kotlin" => return Some("codeql/java-queries"),
+            "go" => return Some("codeql/go-queries"),
+            "ruby" => return Some("codeql/ruby-queries"),
+            "csharp" => return Some("codeql/csharp-queries"),
+            _ => continue,
+        }
+    }
+    None
+}
+
+fn codeql_cwe_folder(cwe: &str) -> Option<String> {
+    let stripped = cwe.strip_prefix("CWE-")?;
+    let number: u32 = stripped.parse().ok()?;
+    Some(format!("CWE-{:03}", number))
 }
 
 /// Convert detected languages into the default CodeQL query suite.
@@ -638,6 +712,108 @@ mod tests {
         assert_eq!(flows[0].steps[1].line, 99);
         assert_eq!(flows[0].source_line, 10);
         assert_eq!(flows[0].sink_line, 99);
+    }
+
+    #[test]
+    fn codeql_queries_from_catalog_resolves_per_target_cwes_for_cpp() {
+        let catalog = vec![
+            TaintIrisNextRankedCatalogEntry {
+                cwe: "CWE-89".to_string(),
+                name: "SQL Injection".to_string(),
+                taint_class: "sql-injection".to_string(),
+                languages: vec!["c".to_string()],
+                source_signals: vec![],
+                sink_signals: vec![],
+                sanitizer_signals: vec![],
+                structural_queries: vec![],
+                score: 80,
+                reasons: vec![],
+            },
+            TaintIrisNextRankedCatalogEntry {
+                cwe: "CWE-190".to_string(),
+                name: "Integer Overflow".to_string(),
+                taint_class: "integer-overflow".to_string(),
+                languages: vec!["c".to_string()],
+                source_signals: vec![],
+                sink_signals: vec![],
+                sanitizer_signals: vec![],
+                structural_queries: vec![],
+                score: 70,
+                reasons: vec![],
+            },
+        ];
+        let selectors = codeql_queries_from_catalog(&catalog, &["c".to_string()]);
+        assert_eq!(
+            selectors,
+            vec![
+                "codeql/cpp-queries:Security/CWE/CWE-089".to_string(),
+                "codeql/cpp-queries:Security/CWE/CWE-190".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn codeql_queries_from_catalog_dedupes_and_picks_python_pack() {
+        let catalog = vec![
+            TaintIrisNextRankedCatalogEntry {
+                cwe: "CWE-89".to_string(),
+                name: "SQL Injection".to_string(),
+                taint_class: "sql-injection".to_string(),
+                languages: vec!["python".to_string()],
+                source_signals: vec![],
+                sink_signals: vec![],
+                sanitizer_signals: vec![],
+                structural_queries: vec![],
+                score: 80,
+                reasons: vec![],
+            },
+            TaintIrisNextRankedCatalogEntry {
+                cwe: "CWE-89".to_string(),
+                name: "SQL Injection".to_string(),
+                taint_class: "sql-injection".to_string(),
+                languages: vec!["python".to_string()],
+                source_signals: vec![],
+                sink_signals: vec![],
+                sanitizer_signals: vec![],
+                structural_queries: vec![],
+                score: 60,
+                reasons: vec![],
+            },
+        ];
+        let selectors =
+            codeql_queries_from_catalog(&catalog, &["python".to_string()]);
+        assert_eq!(
+            selectors,
+            vec!["codeql/python-queries:Security/CWE/CWE-089".to_string()]
+        );
+    }
+
+    #[test]
+    fn codeql_queries_from_catalog_returns_empty_for_unknown_language() {
+        let catalog = vec![TaintIrisNextRankedCatalogEntry {
+            cwe: "CWE-89".to_string(),
+            name: "SQL Injection".to_string(),
+            taint_class: "sql-injection".to_string(),
+            languages: vec!["fortran".to_string()],
+            source_signals: vec![],
+            sink_signals: vec![],
+            sanitizer_signals: vec![],
+            structural_queries: vec![],
+            score: 80,
+            reasons: vec![],
+        }];
+        let selectors =
+            codeql_queries_from_catalog(&catalog, &["fortran".to_string()]);
+        assert!(selectors.is_empty());
+    }
+
+    #[test]
+    fn codeql_cwe_folder_pads_three_digits() {
+        assert_eq!(codeql_cwe_folder("CWE-89"), Some("CWE-089".to_string()));
+        assert_eq!(codeql_cwe_folder("CWE-1078"), Some("CWE-1078".to_string()));
+        assert_eq!(codeql_cwe_folder("CWE-22"), Some("CWE-022".to_string()));
+        assert!(codeql_cwe_folder("not-a-cwe").is_none());
+        assert!(codeql_cwe_folder("CWE-abc").is_none());
     }
 
     #[test]
