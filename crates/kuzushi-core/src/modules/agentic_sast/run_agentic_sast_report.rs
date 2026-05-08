@@ -12,13 +12,53 @@ pub(in crate::modules) fn run_agentic_sast_report(
 ) -> Result<AgenticSastReport> {
     let runtime = required_agentic_sast_runtime(runtime)?;
     let run = AgenticSastRun::from_input(input, ctx)?;
+    let parent_step = ctx.trace.and_then(|trace| {
+        Some(
+            trace
+                .step(
+                    "tool",
+                    "scan",
+                    format!(
+                        "agentic-sast start · target={} inventory={}",
+                        run.target.display(),
+                        run.inventory.len()
+                    ),
+                )
+                .emit(),
+        )
+    });
+    if let (Some(trace), Some(parent)) = (ctx.trace, parent_step) {
+        let _ = trace
+            .child(parent)
+            .step("reasoning", "scan", "inventory · prompt-build · agent-call")
+            .emit();
+    }
     let mut findings = query_agentic_sast_findings(runtime, &run, None)?;
+    if let (Some(trace), Some(parent)) = (ctx.trace, parent_step) {
+        let _ = trace
+            .child(parent)
+            .step(
+                "reasoning",
+                "scan",
+                format!("static-validation · {} candidate findings", findings.len()),
+            )
+            .emit();
+    }
     findings = maybe_review_agentic_sast_findings(runtime, &run, findings)?;
     if run.whitebox_static {
         mark_whitebox_static_findings(&mut findings, StaticProofState::CodeCited)?;
     }
 
     let persisted = persist_agentic_sast_findings(&run.target, &findings, ctx)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "scan",
+                format!("agentic-sast complete · {} findings", findings.len()),
+            )
+            .emit();
+    }
     Ok(AgenticSastReport {
         target: run.target.display().to_string(),
         count: findings.len(),
