@@ -53,12 +53,27 @@ Persists to <target>/.kuzushi/taint-iris-next-catalog.json; subsequent \
 taint-iris-next:hunt runs prefer it over the static built-in catalog.",
                 vec![target_option(), model_option()],
             ),
+            tool_with_options(
+                "taint-iris-next:codeql-db",
+                "Build the CodeQL database for the target codebase. The agent \
+inspects manifests/build files, picks the correct CodeQL language and \
+build command (e.g. `./configure ... && make` for postgres), then runs \
+`codeql database create` with tracing. Persists to \
+<target>/.kuzushi/codeql-db so subsequent taint-iris-next:hunt runs \
+with backend=codeql can immediately consume it.",
+                vec![target_option(), model_option()],
+            ),
         ],
         vec![
             dag("taint-iris-next:hunt", "findings", &["context:build"]),
             dag(
                 "taint-iris-next:catalog",
                 "catalog",
+                &["context:build"],
+            ),
+            dag(
+                "taint-iris-next:codeql-db",
+                "codeql-db",
                 &["context:build"],
             ),
         ],
