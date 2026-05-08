@@ -82,9 +82,8 @@ a whole.
 
 ## Retirement Decision
 
-`src/prompts/` has been moved to
-`reference/ts-runtime-island/src/prompts` as a historical migration fixture.
-The gaps above are intentionally not preserved through TypeScript runtime
-imports. If the Rust product needs this behavior, port it as a small explicit
-Rust prompt library with tests rather than reintroducing the TypeScript prompt
-subsystem into the runtime path.
+`src/prompts/` has been deleted with the retired TypeScript runtime island. The
+gaps above are intentionally not preserved through TypeScript runtime imports.
+If the Rust product needs this behavior, port it as a small explicit Rust prompt
+library with tests rather than reintroducing the TypeScript prompt subsystem
+into the runtime path.

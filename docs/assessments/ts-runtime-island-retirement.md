@@ -52,39 +52,37 @@ Implementation result: the public TypeScript source under `src/` is now the
 narrow SDK surface (`src/index.ts`, `src/modules/index.ts`,
 `src/testing/index.ts`, schemas, module authoring helpers, host handles, and
 test mocks). The original 17 directories and the TS-only reverse-import caller
-graph were moved to `reference/ts-runtime-island/src/**`. Product code must not
-import that fixture path.
+graph were deleted from the product repository. No reference fixture copy is
+retained.
 
 ## Directory Decisions
 
 Status meanings:
 
 - `PORTED`: the runtime behavior is covered by a Rust path with tests.
-- `MOVED-TO-FIXTURE`: the TS source is retained only under an explicit
-  reference/fixture path and is not imported by product TypeScript code.
 - `INTENTIONALLY-DROPPED`: the behavior is deliberately not carried into the
   Rust product path; the reason is documented here.
-- `DELETED`: no runtime, fixture, or public API need remains.
+- `DELETED`: no runtime, reference fixture, or public API need remains.
 
 | Directory | Public files reached | Direct product callers | Decision | Notes |
 | --- | ---: | ---: | --- | --- |
-| `src/strategies` | 15 | 5 | `MOVED-TO-FIXTURE` | TS strategy orchestration is a migration reference. Rust static ranking and scan modules own the product path. |
-| `src/governance` | 0 | 1 | `MOVED-TO-FIXTURE` | Rust spend, whitebox-static, and shell approval code own current product behavior. |
+| `src/strategies` | 15 | 5 | `DELETED` | TS strategy orchestration was retired. Rust static ranking and scan modules own the product path. |
+| `src/governance` | 0 | 1 | `DELETED` | Rust spend, whitebox-static, and shell approval code own current product behavior. |
 | `src/jobs` | 0 | 4 | `INTENTIONALLY-DROPPED` | TS background job manager belongs to the retired dispatcher island. No public Rust equivalent is promised yet. |
 | `src/hooks` | 3 | 3 | `INTENTIONALLY-DROPPED` | TS pipeline hooks are retired with the TS bus/orchestrator. Rust approval/runtime policy should remain explicit. |
-| `src/intel` | 1 | 2 | `MOVED-TO-FIXTURE` | Rust `ndiff` rows cover current CVE fetch/pattern behavior; old TS store/feed code is reference-only. |
-| `src/scoring` | 4 | 11 | `MOVED-TO-FIXTURE` | Rust finding detail/static ranking own product scoring. TS composite scoring remains reference material. |
-| `src/monorepo` | 3 | 5 | `MOVED-TO-FIXTURE` | Rust repository inventory/static context cover the current scan path; TS monorepo scan is retired. |
+| `src/intel` | 1 | 2 | `DELETED` | Rust `ndiff` rows cover current CVE fetch/pattern behavior; old TS store/feed code is retired. |
+| `src/scoring` | 4 | 11 | `DELETED` | Rust finding detail/static ranking own product scoring. TS composite scoring is retired. |
+| `src/monorepo` | 3 | 5 | `DELETED` | Rust repository inventory/static context cover the current scan path; TS monorepo scan is retired. |
 | `src/sessions` | 0 | 2 | `INTENTIONALLY-DROPPED` | TS dispatcher sessions are not a current Rust product promise. |
-| `src/migrations` | 12 | 1 | `MOVED-TO-FIXTURE` | Rust findings/workspace schema owns product persistence. TS SQLite migrations remain historical schema fixtures only. |
+| `src/migrations` | 12 | 1 | `DELETED` | Rust findings/workspace schema owns product persistence. TS SQLite migrations are no longer retained. |
 | `src/scheduler` | 3 | 5 | `INTENTIONALLY-DROPPED` | Scheduled TS runs are not part of the Rust CLI/TUI product surface yet. |
-| `src/analysis-support` | 4 | 9 | `MOVED-TO-FIXTURE` | Rust code index/repository inventory cover the current product path; TS indexing helpers are reference-only. |
+| `src/analysis-support` | 4 | 9 | `DELETED` | Rust code index/repository inventory cover the current product path; TS indexing helpers are retired. |
 | `src/crypto-behavioral` | 4 | 3 | `INTENTIONALLY-DROPPED` | No current Rust product workflow promises TS crypto behavioral harness generation. |
 | `src/poc-executor` | 4 | 7 | `INTENTIONALLY-DROPPED` | Rust sandbox/verify primitives remain; TS Docker PoC executor is retired. |
-| `src/prompts` | 19 | 26 | `MOVED-TO-FIXTURE` | Rust prompt overrides and per-tool prompt builders own runtime behavior. TS prompt subsystem remains reference-only unless explicitly ported. |
-| `src/discovery` | 13 | 12 | `MOVED-TO-FIXTURE` | Rust `context:build` and repository inventory own current discovery behavior. |
-| `src/scanners` | 15 | 97 | `MOVED-TO-FIXTURE` | Rust `scan`, `semgrep`, `codeql`, secret/IaC, and agentic scan paths own runtime scanner behavior. TS helpers remain parity fixtures. |
-| `src/knowledge` | 18 | 7 | `MOVED-TO-FIXTURE` | Rust artifact/workspace surfaces are current. TS knowledge registry remains reference-only. |
+| `src/prompts` | 19 | 26 | `DELETED` | Rust prompt overrides and per-tool prompt builders own runtime behavior. TS prompt subsystem is retired unless explicitly ported later. |
+| `src/discovery` | 13 | 12 | `DELETED` | Rust `context:build` and repository inventory own current discovery behavior. |
+| `src/scanners` | 15 | 97 | `DELETED` | Rust `scan`, `semgrep`, `codeql`, secret/IaC, and agentic scan paths own runtime scanner behavior. TS helpers are not retained. |
+| `src/knowledge` | 18 | 7 | `DELETED` | Rust artifact/workspace surfaces are current. TS knowledge registry is retired. |
 
 ## Scanner Gap Decisions
 
@@ -105,21 +103,21 @@ this retirement pass as follows:
 
 | Gap | Decision | Reason |
 | --- | --- | --- |
-| Template rendering with filters/loops/conditionals/sanitization | `MOVED-TO-FIXTURE` | Runtime prompt overrides in Rust are raw operator files. Reintroducing a template language would be new product scope and should be designed in Rust. |
+| Template rendering with filters/loops/conditionals/sanitization | `DELETED` | Runtime prompt overrides in Rust are raw operator files. Reintroducing a template language would be new product scope and should be designed in Rust. |
 | Layered prompt tool-policy resolution | `INTENTIONALLY-DROPPED` as TS prompt behavior | Rust uses explicit `AgentToolPolicy`, whitebox-static policy, and approval/sandbox surfaces. Tool policy must not silently merge from TS prompt metadata. |
-| Language-specific tuning/few-shot assembly | `MOVED-TO-FIXTURE` | The TS profiles are useful reference data. Rust agentic prompts currently use bounded repo inventory/snippets; any few-shot layer should be ported deliberately. |
-| Prompt module reports and stability tests | `MOVED-TO-FIXTURE` | These are prompt-quality fixtures, not current Rust runtime behavior. |
+| Language-specific tuning/few-shot assembly | `DELETED` | Rust agentic prompts currently use bounded repo inventory/snippets; any few-shot layer should be ported deliberately. |
+| Prompt module reports and stability tests | `DELETED` | These were prompt-quality fixtures, not current Rust runtime behavior. |
 
 ## Required Code Shape
 
 Retirement is complete only when:
 
 1. The original 17 `src/<subsystem>` paths no longer exist as product source.
-2. Any retained TypeScript reference material lives under an explicit fixture or
-   reference path that is excluded from `tsconfig.json`.
-3. Product TypeScript source does not import retired fixture/reference paths.
-4. Public docs do not present fixture/reference paths as current operator
-   implementation targets.
+2. No retired TypeScript runtime reference copy exists under
+   `reference/ts-runtime-island`.
+3. Product TypeScript source does not import retired runtime paths.
+4. Public docs do not present retired paths as current operator implementation
+   targets.
 5. `src/modules/index.ts` preserves module-authoring exports and either keeps
    built-in factory symbols as documented compatibility stubs or removes them
    with an explicit migration note.

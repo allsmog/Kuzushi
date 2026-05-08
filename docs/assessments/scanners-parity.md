@@ -78,8 +78,7 @@ cross-cutting scanner helper below.
 
 ## Retirement Decision
 
-`src/scanners/` has been moved to
-`reference/ts-runtime-island/src/scanners` as a historical migration fixture.
-The gaps above are intentionally not preserved through TypeScript runtime
-imports. If product requirements still need them, they should be implemented in
-the Rust scanner/finding layers with focused Rust tests.
+`src/scanners/` has been deleted with the retired TypeScript runtime island. The
+gaps above are intentionally not preserved through TypeScript runtime imports.
+If product requirements still need them, they should be implemented in the Rust
+scanner/finding layers with focused Rust tests.

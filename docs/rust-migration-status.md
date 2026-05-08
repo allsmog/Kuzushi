@@ -60,35 +60,34 @@ audited files reachable from public roots, and a 440-file reverse-import
 closure. The largest retention point was `src/modules/index.ts`; it now keeps
 module-authoring exports and compatibility stubs for retired built-in TS
 factories instead of importing the old implementation graph.
-The broader TS-only caller graph was moved with the 17 directories to
-`reference/ts-runtime-island/src/**`; only the narrow public SDK remains under
-`src/`.
+The broader TS-only caller graph was deleted with the 17 directories; only the
+narrow public SDK remains under `src/`.
 
 | Original directory | Final status | Replacement / disposition |
 | --- | --- | --- |
-| `src/strategies` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/strategies`; Rust scan/ranking code owns current behavior. |
-| `src/governance` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/governance`; Rust spend, whitebox-static, and approval surfaces own current behavior. |
+| `src/strategies` | `DELETED` | Rust scan/ranking code owns current behavior. |
+| `src/governance` | `DELETED` | Rust spend, whitebox-static, and approval surfaces own current behavior. |
 | `src/jobs` | `INTENTIONALLY-DROPPED` | TS dispatcher background jobs are retired. |
 | `src/hooks` | `INTENTIONALLY-DROPPED` | TS pipeline hooks are retired with the TS bus/orchestrator. |
-| `src/intel` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/intel`; Rust `ndiff` rows cover current CVE/pattern behavior. |
-| `src/scoring` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/scoring`; Rust finding detail/static ranking own product scoring. |
-| `src/monorepo` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/monorepo`; Rust repository inventory/static context cover current scan behavior. |
+| `src/intel` | `DELETED` | Rust `ndiff` rows cover current CVE/pattern behavior. |
+| `src/scoring` | `DELETED` | Rust finding detail/static ranking own product scoring. |
+| `src/monorepo` | `DELETED` | Rust repository inventory/static context cover current scan behavior. |
 | `src/sessions` | `INTENTIONALLY-DROPPED` | TS dispatcher sessions are retired. |
-| `src/migrations` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/migrations`; Rust findings/workspace schema owns product persistence. |
+| `src/migrations` | `DELETED` | Rust findings/workspace schema owns product persistence. |
 | `src/scheduler` | `INTENTIONALLY-DROPPED` | TS scheduled-run orchestration is not a current Rust product promise. |
-| `src/analysis-support` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/analysis-support`; Rust code index/repository inventory own current behavior. |
+| `src/analysis-support` | `DELETED` | Rust code index/repository inventory own current behavior. |
 | `src/crypto-behavioral` | `INTENTIONALLY-DROPPED` | TS crypto behavioral harness generation is retired. |
 | `src/poc-executor` | `INTENTIONALLY-DROPPED` | Rust sandbox/verify primitives remain; the TS Docker PoC executor is retired. |
-| `src/prompts` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/prompts`; Rust prompt overrides and per-tool prompt builders own runtime behavior. |
-| `src/discovery` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/discovery`; Rust `context:build` and repository inventory own current discovery behavior. |
-| `src/scanners` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/scanners`; Rust scanner modules own runtime scanner behavior. |
-| `src/knowledge` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/knowledge`; Rust artifact/workspace surfaces own current behavior. |
+| `src/prompts` | `DELETED` | Rust prompt overrides and per-tool prompt builders own runtime behavior. |
+| `src/discovery` | `DELETED` | Rust `context:build` and repository inventory own current discovery behavior. |
+| `src/scanners` | `DELETED` | Rust scanner modules own runtime scanner behavior. |
+| `src/knowledge` | `DELETED` | Rust artifact/workspace surfaces own current behavior. |
 
 Scanner and prompt gap decisions are recorded in
 `docs/assessments/ts-runtime-island-retirement.md`. The guardrail
 `pnpm check:retired-ts-runtime` fails if an original retired directory is
-reintroduced under `src/`, product code imports the fixture copy, or public docs
-present retired paths as current implementation targets.
+reintroduced under `src/`, `reference/ts-runtime-island` reappears, or public
+docs present retired paths as current implementation targets.
 
 ## Historical Final Cutover Docs, Help, And TypeScript/Ink Deletion Audit
 
@@ -133,7 +132,7 @@ present retired paths as current implementation targets.
 | Retained area | Classification | Why it remains |
 | --- | --- | --- |
 | `src/index.ts`, `src/modules/index.ts`, `src/testing/index.ts`, and their narrow helper graph | Published TypeScript SDK surface. | Third-party module authors still get schemas, `defineModule`/`defineTool`, registry/specifier helpers, host-handle types, and test mocks. Retired built-in TS factories are compatibility stubs. |
-| `reference/ts-runtime-island/src/**` | Historical migration fixture. | This is the moved TypeScript runtime island. Product code must not import it; `pnpm check:retired-ts-runtime` enforces that boundary. |
+| Retired TypeScript runtime island | Deleted code. | The retired TS runtime island was deleted rather than retained as a fixture; `pnpm check:retired-ts-runtime` fails if it returns. |
 | `dist/`, `kuzushi/modules`, `kuzushi/testing` exports | Non-CLI library/API surface. | Third-party module authors and tests consume only the narrowed SDK surface after the retirement pass. |
 
 ### Cutover verification coverage
