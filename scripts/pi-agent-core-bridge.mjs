@@ -534,7 +534,11 @@ async function runAgent(AgentCtor, model, request) {
     text = extractTextFromState(agent);
   }
 
-  return { text: text.trim(), usage: aggregateAgentUsage(agent) };
+  return {
+    text: text.trim(),
+    usage: aggregateAgentUsage(agent),
+    errorMessage: agent?.state?.errorMessage ?? undefined,
+  };
 }
 
 function appendStructuredOutputContract(systemPrompt, contract) {
@@ -991,7 +995,22 @@ async function main() {
 
   const [provider, modelId] = parseModelSpec(request.model);
   const model = getModel(provider, modelId);
-  const { text, usage } = await runAgent(AgentCtor, model, request);
+  const { text, usage, errorMessage } = await runAgent(AgentCtor, model, request);
+
+  // pi-agent-core swallows transport errors (auth 401, rate-limit 429,
+  // upstream 5xx, network) and lands on `state.errorMessage` instead of
+  // throwing. Surfacing that as `ok: false` here keeps callers from
+  // mistaking an empty assistant turn for a deliberate "no result" — the
+  // canonical symptom we hit was that a rotated OAuth token produced
+  // {ok:true, text:"", cost_usd:0}, which downstream taint-iris-next
+  // happily treated as a parse failure (and triggered its deterministic
+  // fallback) instead of a fixable auth problem.
+  if (!text && (errorMessage || (!usage?.inputTokens && !usage?.outputTokens))) {
+    const reason =
+      errorMessage ?? "agent produced no assistant turn and no token usage";
+    process.stdout.write(JSON.stringify({ ok: false, error: reason }));
+    return;
+  }
 
   process.stdout.write(
     JSON.stringify({
