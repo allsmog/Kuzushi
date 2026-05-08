@@ -32,6 +32,7 @@ impl ShellApp {
             );
         }
         self.log("error", actionable);
+        self.set_refused_activity("sast:scan", "scan failed");
     }
 
     pub(crate) fn apply_scan_cancelled(&mut self, run_id: String) {
@@ -59,5 +60,6 @@ impl ShellApp {
             &self.scan_target_label(),
         );
         self.log("scan", format!("cancelled {}", short_fingerprint(&run_id)));
+        self.set_paused_activity("sast:scan", "scan cancelled");
     }
 }

@@ -1,4 +1,6 @@
-use crate::findings::{sorted_finding_aliases, Finding, Severity};
+use crate::findings::{
+    finding_location, severity_badge, severity_icon, sorted_finding_aliases, Finding, Severity,
+};
 pub(crate) use render_verdict_counts::*;
 pub(crate) use severity_badge::*;
 use std::collections::HashSet;

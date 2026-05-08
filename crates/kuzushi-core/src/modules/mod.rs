@@ -40,8 +40,11 @@ pub(in crate::modules) use unsafe_clone_runtime_ref::*;
 pub(in crate::modules) use verify::*;
 pub(in crate::modules) use workspace_module::*;
 mod agentic_sast;
+mod application;
+mod builtins;
 mod chrome_rce;
 mod context;
+mod contracts;
 mod descriptor;
 mod execution_context;
 mod generic_findings;
@@ -82,9 +85,9 @@ mod unsafe_clone_runtime_ref;
 mod workspace_module;
 
 pub use agentic_sast::{AgenticSastPersistedRun, AgenticSastReport};
-pub use descriptor::{
+pub use contracts::ToolExecutionContext;
+pub use contracts::{
     BuiltinModule, DagNodeDescriptor, ModuleKind, ModuleMetadata, OptionSpec, OptionType,
     ToolDescriptor,
 };
-pub use execution_context::ToolExecutionContext;
 pub use registry::ModuleRegistry;

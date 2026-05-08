@@ -2,16 +2,29 @@ pub use crate::attack_surface::{
     build_attack_surface_map, build_attack_surface_map_from_inventory, AttackSurface,
     AttackSurfaceKind, AttackSurfaceMap, AttackSurfaceSummary,
 };
+pub use crate::capabilities::classifier_gate::{
+    ClassifierConfig, LikelyVulnClassifier, QuantileEstimator, Score,
+};
+pub use crate::capabilities::deep_auditor::{
+    run_deep_auditor, save_evidence, DeepAuditConfig, DeepAuditOutcome, EvidenceCitation,
+    VulnAnalysis,
+};
+pub use crate::capabilities::full_mode_multi::{
+    cost_summary as full_mode_cost_summary, plan as full_mode_plan, report_to_tool_json,
+    run as run_full_mode_multi, ChunkPlan, CostSummary, FileBucket, FullModeConfig,
+    FullModeLanguage, FullModePlan, FullModeReport,
+};
+pub use crate::capabilities::semgrep_rule_synthesis::{
+    synthesize_candidate_semgrep_rules, SemgrepCandidateRule, SemgrepRuleFixture,
+    SemgrepRuleSynthesisReport, SemgrepRuleValidation,
+};
+pub use crate::capabilities::systems_hunt::{
+    execute_systems_hunt_tool, gather_surfaces, run_systems_hunt_report, RankedSystemsSurface,
+    SystemsContextMetadata, SystemsContextOutput, SystemsHuntReport,
+};
 pub use crate::carlini_threat_hunt::{
     run_carlini_threat_hunt, run_carlini_threat_hunt_report, CarliniThreatHuntPersistedRun,
     CarliniThreatHuntReport,
-};
-pub use crate::classifier_gate::{
-    ClassifierConfig, LikelyVulnClassifier, QuantileEstimator, Score,
-};
-pub use crate::deep_auditor::{
-    run_deep_auditor, save_evidence, DeepAuditConfig, DeepAuditOutcome, EvidenceCitation,
-    VulnAnalysis,
 };
 pub use crate::dep_hygiene::{
     analyze_manifest as analyze_dep_hygiene_manifest, check_dependency_hygiene,
@@ -22,11 +35,6 @@ pub use crate::diff_scope::{
     build_whitebox_diff_scope_report, git_diff_files, ChangedFile, ChangedLineRange, DiffContext,
     DiffContextKind, DiffFileStatus, DiffFindingStatus, DiffFindingTag, DiffRangeKind, DiffScope,
     DiffScopeSummary, WhiteboxDiffScopeReport,
-};
-pub use crate::full_mode_multi::{
-    cost_summary as full_mode_cost_summary, plan as full_mode_plan, report_to_tool_json,
-    run as run_full_mode_multi, ChunkPlan, CostSummary, FileBucket, FullModeConfig,
-    FullModeLanguage, FullModePlan, FullModeReport,
 };
 pub use crate::iac_scan::{
     scan_iac, IacScanFinding, IacScanKind, IacScanOptions, IacScanReport, IacScanScanner,
@@ -43,14 +51,6 @@ pub use crate::scan::{
 pub use crate::secret_scan::{
     scan_for_secrets, SecretScanFinding, SecretScanOptions, SecretScanReport, SecretScanScanner,
     SecretSeverity,
-};
-pub use crate::semgrep_rule_synthesis::{
-    synthesize_candidate_semgrep_rules, SemgrepCandidateRule, SemgrepRuleFixture,
-    SemgrepRuleSynthesisReport, SemgrepRuleValidation,
-};
-pub use crate::systems_hunt::{
-    execute_systems_hunt_tool, gather_surfaces, run_systems_hunt_report, RankedSystemsSurface,
-    SystemsContextMetadata, SystemsContextOutput, SystemsHuntReport,
 };
 pub use crate::threat_model::{
     execute_threat_model_tool, load_persistent_threat_model, save_persistent_threat_model,

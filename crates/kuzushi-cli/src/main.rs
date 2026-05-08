@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 
+mod application;
 mod auth_bridge;
 mod auth_oauth;
 mod auth_ping;
@@ -14,12 +15,14 @@ mod findings;
 mod mcp;
 mod permissions;
 mod pr_comment;
+mod presentation;
 mod runs;
 mod runs_output;
 mod scan;
 mod scan_budget;
 mod scan_ci;
 mod scan_output;
+mod support;
 mod suppressions;
 mod terminal;
 #[cfg(test)]

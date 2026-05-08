@@ -27,6 +27,11 @@ impl ShellApp {
             "scan",
             format!("starting {}", request.target_root.display()),
         );
+        self.set_live_activity(LiveActivity::new(
+            LiveActivityPhase::Searching,
+            "sast:scan",
+            format!("scanning {}", request.target_root.display()),
+        ));
 
         thread::spawn(move || {
             scan_worker(

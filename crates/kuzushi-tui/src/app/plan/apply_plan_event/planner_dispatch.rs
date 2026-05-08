@@ -44,6 +44,11 @@ impl ShellApp {
         self.planner_running = true;
         self.plan_abort_requested = false;
         self.log("plan", format!("planning: {goal_owned}"));
+        self.set_live_activity(LiveActivity::new(
+            LiveActivityPhase::Thinking,
+            "plan",
+            "asking model for a structured proposal",
+        ));
 
         thread::spawn(move || planner_worker(config, model, thinking_level, cwd, goal_owned, tx));
     }

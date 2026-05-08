@@ -19,6 +19,7 @@ impl ShellApp {
                     );
                 }
                 self.apply_tool_result(&tool_name, result);
+                self.set_completed_activity(tool_name.clone(), "tool result applied");
                 self.advance_chain_after_tool(&tool_name);
             }
             ToolEvent::Failed { tool_name, error } => {
@@ -32,6 +33,10 @@ impl ShellApp {
                 } else {
                     self.log("error", message);
                 }
+                self.set_refused_activity(
+                    tool_name.clone(),
+                    "tool failed before producing a usable result",
+                );
                 self.abort_pending_chain(&tool_name);
             }
         }

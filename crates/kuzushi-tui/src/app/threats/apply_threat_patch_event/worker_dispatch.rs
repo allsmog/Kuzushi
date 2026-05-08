@@ -100,7 +100,13 @@ impl ShellApp {
         self.threat_rx = Some(rx);
         self.threat_worker_running = true;
         self.threat_abort_requested = false;
-        self.log("threats", message.into());
+        let message = message.into();
+        self.log("threats", message.clone());
+        self.set_live_activity(LiveActivity::new(
+            LiveActivityPhase::Thinking,
+            "threat model",
+            message,
+        ));
         tx
     }
 }

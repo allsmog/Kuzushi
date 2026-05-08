@@ -1,10 +1,16 @@
 use super::*;
 
 pub(crate) fn prereq_prompt_card_height(app: &ShellApp, area: Rect) -> u16 {
-    if area.height < 6 || app.pending_prereq_prompt.is_none() {
+    let Some(prompt) = app.pending_prereq_prompt.as_ref() else {
+        return 0;
+    };
+    if area.height < 8 {
         return 0;
     }
-    4.min(area.height.saturating_sub(8) as u16).max(3)
+    prereq_prompt_lines(prompt, area.width)
+        .len()
+        .min(area.height.saturating_sub(8) as usize)
+        .max(5) as u16
 }
 
 pub(crate) fn render_prereq_prompt_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
@@ -17,47 +23,97 @@ pub(crate) fn render_prereq_prompt_card(frame: &mut Frame<'_>, area: Rect, app: 
     render_lines(frame, area, prereq_prompt_lines(prompt, area.width));
 }
 
-fn prereq_prompt_lines(prompt: &PendingPrereqPrompt, width: u16) -> Vec<Line<'static>> {
+pub(crate) fn prereq_prompt_lines(prompt: &PendingPrereqPrompt, width: u16) -> Vec<Line<'static>> {
+    let mut lines = prereq_prompt_header_lines(prompt);
+    lines.extend(prereq_prompt_step_lines(prompt, width));
+    lines.push(prereq_prompt_actions_line(prompt));
+    lines
+}
+
+fn prereq_prompt_header_lines(prompt: &PendingPrereqPrompt) -> Vec<Line<'static>> {
     vec![
         Line::from(vec![
             Span::raw(" "),
-            Span::styled("PREREQUISITE EXISTS", theme::accent()),
+            Span::styled("PREREQUISITE PLAN", theme::accent()),
+            Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
+            Span::styled(prompt.final_tool.clone(), theme::primary()),
         ]),
         Line::from(vec![
             Span::raw("  "),
-            Span::styled("artifact ", theme::muted()),
             Span::styled(
-                fit(
-                    &prompt.current_artifact_label,
-                    width.saturating_sub(14) as usize,
-                ),
-                theme::primary(),
-            ),
-            Span::raw("   "),
-            Span::styled("path ", theme::muted()),
-            Span::styled(
-                fit(
-                    &prompt.current_artifact_path.display().to_string(),
-                    width.saturating_sub(40) as usize,
-                ),
+                "review required before prerequisites or final tool start",
                 theme::muted(),
             ),
         ]),
-        Line::from(vec![
-            Span::raw("  "),
-            Span::styled("for      ", theme::muted()),
-            Span::styled(prompt.final_tool.clone(), theme::primary()),
-            Span::raw("   "),
-            Span::styled("regen via ", theme::muted()),
-            Span::styled(prompt.current_tool.clone(), theme::primary()),
-        ]),
-        Line::from(vec![
-            Span::raw("  "),
-            Span::styled("r", theme::success()),
-            Span::raw(" reuse existing   "),
-            Span::styled("g", theme::warn()),
-            Span::raw(" regenerate   "),
-            Span::styled("(y/n also accepted)", theme::muted()),
-        ]),
     ]
+}
+
+fn prereq_prompt_step_lines(prompt: &PendingPrereqPrompt, width: u16) -> Vec<Line<'static>> {
+    prompt
+        .steps
+        .iter()
+        .flat_map(|step| {
+            let mut lines = vec![prereq_step_line(step, width)];
+            lines.extend(prereq_step_detail_lines(step, width));
+            lines
+        })
+        .collect()
+}
+
+fn prereq_prompt_actions_line(prompt: &PendingPrereqPrompt) -> Line<'static> {
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled("recommended ", theme::muted()),
+        Span::styled(prompt.recommended_action.label(), theme::success()),
+        Span::raw("   "),
+        Span::styled("a", theme::success()),
+        Span::raw(" approve   "),
+        Span::styled("r", theme::primary()),
+        Span::raw(" reuse cached   "),
+        Span::styled("g", theme::warn()),
+        Span::raw(" regenerate   "),
+        Span::styled("c", theme::danger()),
+        Span::raw(" cancel"),
+    ])
+}
+
+fn prereq_step_line(step: &PrereqPlanStep, width: u16) -> Line<'static> {
+    let state_style = match step.artifact_state {
+        PrereqArtifactState::Cached => theme::success(),
+        PrereqArtifactState::Missing => theme::warn(),
+    };
+    let label_width = width.saturating_sub(48) as usize;
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled(step.artifact_state.label(), state_style),
+        Span::raw(" "),
+        Span::styled(fit(&step.artifact_label, label_width), theme::primary()),
+        Span::styled(" via ", theme::muted()),
+        Span::styled(step.tool.clone(), theme::label()),
+    ])
+}
+
+fn prereq_step_detail_lines(step: &PrereqPlanStep, width: u16) -> Vec<Line<'static>> {
+    let write_targets = step
+        .writes
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    [
+        format!("writes {write_targets}"),
+        format!("risk {}", step.risk),
+        format!("cost {}", step.cost_hint),
+    ]
+    .into_iter()
+    .map(|detail| {
+        Line::from(vec![
+            Span::raw("    "),
+            Span::styled(
+                fit(&detail, width.saturating_sub(4) as usize),
+                theme::muted(),
+            ),
+        ])
+    })
+    .collect()
 }

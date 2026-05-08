@@ -57,5 +57,6 @@ impl ShellApp {
                 findings_count
             ),
         );
+        self.set_completed_activity("sast:scan", format!("{findings_count} finding(s)"));
     }
 }

@@ -18,6 +18,7 @@ impl ShellApp {
             "plan",
             "pi-agent-core response arrived after abort request; discarded",
         );
+        self.set_paused_activity("plan", "proposal discarded after abort request");
         true
     }
 
@@ -34,9 +35,11 @@ impl ShellApp {
                 self.plan_cursor = 0;
                 self.plan_skipped.clear();
                 self.pending_plan = Some(plan);
+                self.set_completed_activity("plan", "proposal ready for review");
             }
             PlanEvent::Failed { error } => {
                 self.log("error", format!("planner failed: {error}"));
+                self.set_refused_activity("plan", "planner failed");
             }
         }
     }

@@ -4,11 +4,11 @@ pub(in crate::modules) fn require_taint_iris_next_model(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<String> {
-    optional_nonempty_string(input, "model")?
-        .or_else(|| ctx.config.model.clone())
-        .context(
-            "taint-iris-next:hunt requires an explicit model in config.toml, KUZUSHI_MODEL, or tool input; Kuzushi will not choose a fallback model",
-        )
+    crate::runtime::resolve_explicit_model(
+        "taint-iris-next:hunt",
+        optional_nonempty_string(input, "model")?,
+        ctx.config.model.as_deref(),
+    )
 }
 
 pub(in crate::modules) fn taint_iris_next_hunt_status(

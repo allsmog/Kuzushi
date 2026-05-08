@@ -2,7 +2,7 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn open_store(&mut self) -> Result<FindingStore> {
-        let workspace = self.current_workspace()?;
+        let (workspace, store) = open_finding_store_for_target(self.target.as_ref())?;
         let resolved = workspace.root().to_path_buf();
         // Surface the implicit target assignment so the operator isn't
         // surprised by `target none` flipping to a real path the moment
@@ -14,20 +14,10 @@ impl ShellApp {
             );
         }
         self.target = Some(resolved);
-        FindingStore::open(workspace.findings_db_path())
+        Ok(store)
     }
 
     pub(crate) fn current_workspace(&self) -> Result<WorkspaceTarget> {
-        let target = self.target.clone().unwrap_or_else(|| PathBuf::from("."));
-        WorkspaceTarget::new(target)
-    }
-
-    pub(crate) fn explicit_workspace(&self) -> Result<WorkspaceTarget> {
-        let Some(target) = self.target.clone() else {
-            anyhow::bail!(
-                "workspace export requires an active workspace. Next: scan <target> or start shell with --target ."
-            );
-        };
-        WorkspaceTarget::new(target)
+        workspace_for_target(self.target.as_ref())
     }
 }

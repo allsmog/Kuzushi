@@ -11,6 +11,7 @@ pub(crate) use command_router::*;
 pub(crate) use ctrl_c_arm_window::*;
 pub(crate) use findings::*;
 pub(crate) use line_editor::*;
+pub(crate) use live_activity::*;
 pub(crate) use log::*;
 pub(crate) use options::*;
 pub(crate) use plan::*;
@@ -19,6 +20,7 @@ pub(crate) use prompts::*;
 pub(crate) use runtime::*;
 pub(crate) use sast_tasks::*;
 pub(crate) use scan::*;
+pub(crate) use services::*;
 pub(crate) use session::*;
 pub(crate) use settings::*;
 pub(crate) use shell_lifecycle::*;
@@ -38,6 +40,7 @@ mod catalog;
 mod command_router;
 mod findings;
 mod line_editor;
+mod live_activity;
 mod log;
 mod options;
 mod plan;
@@ -62,11 +65,14 @@ use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 mod prompts;
+mod reducers;
 mod runtime;
 mod sast_tasks;
 mod scan;
+mod services;
 mod session;
 mod settings;
+mod state;
 pub(crate) mod state_transitions;
 mod threats;
 mod tool_runner;
@@ -83,8 +89,12 @@ mod with_next_step;
 pub use agent_chat::AgentChatView;
 pub use agent_chat::ChatTurn;
 pub use approval::{ConfirmKind, PendingConfirm, PendingPatch};
+pub use live_activity::{LiveActivity, LiveActivityPhase};
 pub use log::LogLine;
-pub use prereq_chain::{PendingPrereqPrompt, PrereqChain};
+pub use prereq_chain::{
+    PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqPlanAction, PrereqPlanStep,
+    PrereqStep,
+};
 pub use runtime::{run_shell, run_shell_with_plain};
 pub(crate) use settings::{
     bridge_command_status, model_choices, oauth_provider_status, runtime_backend_label,

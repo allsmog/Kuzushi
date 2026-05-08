@@ -117,6 +117,44 @@ standing review gate, not an optional cleanup phase.
   needless public API expansion. Fix the local problem while the context is
   fresh.
 
+### Domain-Driven Design baseline for Rust work
+
+Use Domain-Driven Design to clarify Kuzushi's Rust security-agent domain, not
+to add enterprise ceremony. Apply it when a boundary is already stable or when
+logic is duplicated across CLI, TUI, reports, persistence, and tool execution.
+
+- Keep Rust bounded contexts explicit: findings, scan, verification, modules,
+  runtime governance, workspace, config/doctor/auth, reporting, and TUI shell
+  application services.
+- Prefer folders that make ownership obvious: `domain` for pure concepts and
+  invariants, `application` for orchestration/use cases, `persistence` or
+  `infrastructure` for IO/adapters, and `presentation` for labels, reports,
+  aliases, and terminal-facing projections.
+- Preserve stable public contracts while moving code. Compatibility `pub use`
+  shims are acceptable during migrations; remove them only after downstream
+  imports and tests are updated.
+- Keep domain types free of terminal, filesystem, database, process, network,
+  and model-provider side effects unless the effect is the domain concept under
+  test.
+- Centralize security invariants where users depend on them: finding identity,
+  severity, evidence, proof state, verification result, scan/run artifacts,
+  module/tool naming, and explicit model/no-fallback policy.
+- Do not invent repositories, services, traits, or factories for trivial
+  helpers. Add a DDD boundary only when it reduces real coupling, protects an
+  invariant, or stops duplicated behavior.
+- Specialist engines (`systems_hunt`, `carlini_threat_hunt`, `threat_model`,
+  `x_ray`, `recon`, `repository_inventory`, `static_*`, `whitebox_*`, etc.)
+  should stay internally coherent. Wrap them with thin adapters before
+  rewriting their internals.
+- TUI code should consume application services or presentation DTOs instead of
+  opening stores or reimplementing findings/workspace/report logic directly.
+- DDD refactors must preserve current CLI behavior, `.kuzushi` formats and
+  paths, scan/shell/run parity, module/tool contracts, and model/runtime
+  no-silent-fallback semantics.
+- Every DDD migration should be phased, test-backed, and CRAP-aware: changed or
+  newly introduced Rust functions must stay under CRAP 15, or the commit must
+  document a narrow blocker and avoid making the score worse.
+
 ### Model & runtime safety (no silent fallback)
 
 Kuzushi will **never silently switch agent runtime, provider, or model**

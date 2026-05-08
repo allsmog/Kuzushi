@@ -6,14 +6,45 @@ pub struct PrereqStep {
     pub tool: String,
     pub artifact_path: PathBuf,
     pub artifact_label: String,
+    pub writes: Vec<PathBuf>,
+    pub model_backed: bool,
+    pub expensive: bool,
+    pub risk: String,
+    pub cost_hint: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingPrereqPrompt {
-    pub current_tool: String,
-    pub current_artifact_path: PathBuf,
-    pub current_artifact_label: String,
     pub final_tool: String,
+    pub steps: Vec<PrereqPlanStep>,
+    pub recommended_action: PrereqPlanAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrereqPlanStep {
+    pub tool: String,
+    pub artifact_path: PathBuf,
+    pub artifact_label: String,
+    pub artifact_state: PrereqArtifactState,
+    pub writes: Vec<PathBuf>,
+    pub model_backed: bool,
+    pub expensive: bool,
+    pub risk: String,
+    pub cost_hint: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrereqArtifactState {
+    Cached,
+    Missing,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrereqPlanAction {
+    Approve,
+    Reuse,
+    Regenerate,
+    Cancel,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +55,8 @@ pub struct PrereqChain {
     pub final_thinking_level: Option<String>,
     pub running_step: Option<String>,
     pub final_dispatched: bool,
+    pub approved: bool,
+    pub regenerate_existing: bool,
 }
 
 impl PrereqChain {
@@ -40,6 +73,8 @@ impl PrereqChain {
             final_thinking_level,
             running_step: None,
             final_dispatched: false,
+            approved: false,
+            regenerate_existing: false,
         }
     }
 
@@ -53,6 +88,97 @@ impl PrereqChain {
         } else {
             Some(self.remaining.remove(0))
         }
+    }
+
+    pub fn plan(&self) -> PendingPrereqPrompt {
+        PendingPrereqPrompt {
+            final_tool: self.final_tool.clone(),
+            steps: self
+                .remaining
+                .iter()
+                .map(PrereqPlanStep::from_step)
+                .collect(),
+            recommended_action: recommended_action(&self.remaining),
+        }
+    }
+
+    pub fn should_run_step(&self, step: &PrereqStep) -> bool {
+        self.regenerate_existing || !step.artifact_path.exists()
+    }
+}
+
+impl PrereqStep {
+    fn new(
+        tool: &str,
+        artifact_path: PathBuf,
+        artifact_label: &str,
+        model_backed: bool,
+        expensive: bool,
+        risk: &str,
+        cost_hint: &str,
+    ) -> Self {
+        Self {
+            tool: tool.to_string(),
+            writes: vec![artifact_path.clone()],
+            artifact_path,
+            artifact_label: artifact_label.to_string(),
+            model_backed,
+            expensive,
+            risk: risk.to_string(),
+            cost_hint: cost_hint.to_string(),
+        }
+    }
+}
+
+impl PrereqPlanStep {
+    fn from_step(step: &PrereqStep) -> Self {
+        Self {
+            tool: step.tool.clone(),
+            artifact_path: step.artifact_path.clone(),
+            artifact_label: step.artifact_label.clone(),
+            artifact_state: artifact_state(&step.artifact_path),
+            writes: step.writes.clone(),
+            model_backed: step.model_backed,
+            expensive: step.expensive,
+            risk: step.risk.clone(),
+            cost_hint: step.cost_hint.clone(),
+        }
+    }
+}
+
+impl PrereqArtifactState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Cached => "cached",
+            Self::Missing => "missing",
+        }
+    }
+}
+
+impl PrereqPlanAction {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Approve => "approve",
+            Self::Reuse => "reuse",
+            Self::Regenerate => "regenerate",
+            Self::Cancel => "cancel",
+        }
+    }
+}
+
+fn artifact_state(path: &Path) -> PrereqArtifactState {
+    if path.exists() {
+        PrereqArtifactState::Cached
+    } else {
+        PrereqArtifactState::Missing
+    }
+}
+
+fn recommended_action(steps: &[PrereqStep]) -> PrereqPlanAction {
+    if steps.iter().all(|step| step.artifact_path.exists()) {
+        PrereqPlanAction::Reuse
+    } else {
+        PrereqPlanAction::Approve
     }
 }
 
@@ -68,19 +194,27 @@ pub fn prereq_steps_for(tool: &str, target: &Path) -> Vec<PrereqStep> {
 }
 
 fn context_step(kuzushi_dir: &Path) -> PrereqStep {
-    PrereqStep {
-        tool: "context:build".to_string(),
-        artifact_path: kuzushi_dir.join("context-snapshot.json"),
-        artifact_label: "context snapshot".to_string(),
-    }
+    PrereqStep::new(
+        "context:build",
+        kuzushi_dir.join("context-snapshot.json"),
+        "context snapshot",
+        false,
+        false,
+        "local repository indexing; filesystem read plus .kuzushi artifact write",
+        "no model cost expected",
+    )
 }
 
 fn threat_model_step(kuzushi_dir: &Path) -> PrereqStep {
-    PrereqStep {
-        tool: "threat-model:build".to_string(),
-        artifact_path: kuzushi_dir.join("threat-model.json"),
-        artifact_label: "threat model".to_string(),
-    }
+    PrereqStep::new(
+        "threat-model:build",
+        kuzushi_dir.join("threat-model.json"),
+        "threat model",
+        true,
+        true,
+        "model-backed analysis; may spend tokens and writes a .kuzushi artifact",
+        "token cost unknown until the provider returns usage",
+    )
 }
 
 #[cfg(test)]

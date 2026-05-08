@@ -49,7 +49,8 @@ fn idle_status_footer_left(app: &ShellApp) -> String {
 }
 
 fn status_footer_activity(app: &ShellApp) -> Option<FooterActivity> {
-    scan_footer_activity(app)
+    live_footer_activity(app)
+        .or_else(|| scan_footer_activity(app))
         .or_else(|| tool_footer_activity(app))
         .or_else(|| agent_footer_activity(app))
         .or_else(|| planner_footer_activity(app))
@@ -58,6 +59,13 @@ fn status_footer_activity(app: &ShellApp) -> Option<FooterActivity> {
 
 struct FooterActivity {
     label: String,
+}
+
+fn live_footer_activity(app: &ShellApp) -> Option<FooterActivity> {
+    let activity = app.live_activity.as_ref()?;
+    activity.phase.active().then(|| FooterActivity {
+        label: activity.short_label(),
+    })
 }
 
 fn scan_footer_activity(app: &ShellApp) -> Option<FooterActivity> {

@@ -645,7 +645,7 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
         };
-        let report = crate::full_mode_multi::FullModeReport {
+        let report = crate::capabilities::full_mode_multi::FullModeReport {
             findings: vec![Finding::new_tool(
                 "full-mode",
                 "demo.rule",
@@ -655,7 +655,7 @@ OUT
                 Severity::High,
                 "demo finding",
             )],
-            plan: crate::full_mode_multi::FullModePlan {
+            plan: crate::capabilities::full_mode_multi::FullModePlan {
                 chunks: Vec::new(),
                 total_files: 1,
                 total_bytes: 10,
@@ -777,6 +777,77 @@ OUT
         );
         let stored = store.list_findings(FindingListFilter::MAX_LIMIT).unwrap();
         assert!(stored.iter().any(|finding| finding.tool == "chrome-rce"));
+    }
+
+    #[test]
+    fn chrome_rce_scan_rejects_non_directory_target() {
+        let temp = tempdir().unwrap();
+        let file_target = temp.path().join("handle.cc");
+        fs::write(&file_target, "not a directory\n").unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let err = registry
+            .execute_tool(
+                "chrome-rce:scan",
+                json!({"target": file_target.display().to_string()}),
+                &ctx,
+            )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("target is not a directory"));
+    }
+
+    #[test]
+    fn chrome_rce_review_trigger_skips_without_diff_base() {
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = registry
+            .execute_tool("chrome-rce:review-trigger", json!({}), &ctx)
+            .unwrap();
+
+        assert_eq!(
+            result.pointer("/data/count").and_then(Value::as_u64),
+            Some(0)
+        );
+        assert!(result
+            .get("output")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("skipped"));
+    }
+
+    #[test]
+    fn chrome_rce_unknown_tool_errors_actionably() {
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let err = chrome_rce::execute_tool("chrome-rce:unknown", json!({}), &ctx).unwrap_err();
+
+        assert!(err.to_string().contains("unknown chrome-rce tool"));
     }
 
     #[cfg(unix)]

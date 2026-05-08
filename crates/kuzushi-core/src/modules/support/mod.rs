@@ -49,13 +49,6 @@ pub(in crate::modules) fn should_skip_path(name: &str) -> bool {
     )
 }
 
-pub(in crate::modules) fn unix_millis() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or_default()
-}
-
 pub(in crate::modules) fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

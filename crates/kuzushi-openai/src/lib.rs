@@ -2,7 +2,10 @@
 /// Messages API shape. The first message is always the user's initial
 /// prompt; subsequent messages alternate assistant/user as the loop ran.
 pub mod anthropic_oauth;
+pub mod auth;
+pub mod bridge;
 pub mod oauth;
+pub mod runtime;
 
 mod anthropic_messages;
 mod bridge_payloads;

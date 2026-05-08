@@ -22,8 +22,10 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+pub mod application;
 mod apply_env_overrides;
 mod config_model;
+pub mod domain;
 mod load_config_for_target;
 #[cfg(test)]
 mod tests;

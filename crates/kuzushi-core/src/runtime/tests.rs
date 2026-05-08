@@ -56,6 +56,29 @@ mod tests {
     }
 
     #[test]
+    fn governance_requires_explicit_model_without_fallback() {
+        let error = resolve_explicit_model("triage:run", None, None)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("triage:run requires an explicit model"));
+        assert!(error.contains("will not choose a fallback model"));
+    }
+
+    #[test]
+    fn governance_validates_provider_model_syntax() {
+        assert!(validate_model_spec("openai:gpt-5.5").is_ok());
+        assert!(validate_model_spec("gpt-5.5")
+            .unwrap_err()
+            .to_string()
+            .contains("provider:model"));
+        assert!(validate_model_spec("openai:")
+            .unwrap_err()
+            .to_string()
+            .contains("both provider and model id"));
+    }
+
+    #[test]
     fn driver_returns_final_in_one_step() {
         let runtime = ScriptedRuntime::new(vec![AgentLoopStep::Final {
             text: "done".to_string(),

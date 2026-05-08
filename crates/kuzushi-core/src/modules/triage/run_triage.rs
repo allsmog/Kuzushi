@@ -78,9 +78,8 @@ pub(in crate::modules) fn resolve_triage_model(
     runtime: &dyn AgentRuntime,
     tier: ModelTier,
 ) -> Result<String> {
-    let model_configured = ctx.config.model.clone().context(
-        "triage:run requires an explicit model in config.toml or KUZUSHI_MODEL; Kuzushi will not choose a fallback model",
-    )?;
+    let model_configured =
+        crate::runtime::require_configured_model("triage:run", ctx.config.model.as_deref())?;
     Ok(runtime.model_for_tier(tier, &model_configured))
 }
 

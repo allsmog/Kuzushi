@@ -31,14 +31,16 @@ pub(in crate::modules) fn run_taint_cwe_select_value(
     let runtime = runtime.context(
         "pipeline:taint-cwe-select requires the pi-agent-core runtime unless cwes are supplied explicitly",
     )?;
-    let model = model.context(
-        "pipeline:taint-cwe-select requires an explicit model in config.toml, KUZUSHI_MODEL, or tool input; Kuzushi will not choose a fallback model",
+    let model = crate::runtime::resolve_explicit_model(
+        "pipeline:taint-cwe-select",
+        model.map(str::to_string),
+        None,
     )?;
     let inventory = collect_agentic_repo_inventory(target, 60, 1024)?;
     let raw = query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
-            model.to_string(),
+            model,
             target.to_path_buf(),
             TAINT_CWE_SELECT_SYSTEM_PROMPT.to_string(),
             build_taint_cwe_select_prompt(target, &inventory),

@@ -10,32 +10,103 @@ impl ShellApp {
         thinking_level: Option<String>,
     ) {
         let chain = PrereqChain::new(steps, final_tool, final_input, thinking_level);
+        self.pending_chain = Some(chain);
+        self.present_or_auto_accept_prereq_plan(workspace);
+    }
+
+    pub(crate) fn present_or_auto_accept_prereq_plan(&mut self, workspace: WorkspaceTarget) {
+        if self.trusted_workflow_auto_accept {
+            self.log(
+                "system",
+                "trusted workflow auto-accepted prerequisite plan via KUZUSHI_TRUSTED_WORKFLOW_AUTO_ACCEPT",
+            );
+            self.accept_prereq_plan(PrereqPlanAction::Approve, workspace);
+            return;
+        }
+        self.pending_prereq_prompt = self.pending_chain.as_ref().map(PrereqChain::plan);
+        if let Some(plan) = self.pending_prereq_prompt.clone() {
+            let message = prereq_plan_log_line(&plan);
+            self.log("system", message);
+            self.set_waiting_activity(
+                plan.final_tool.clone(),
+                "prerequisite plan waiting for approve/reuse/regenerate/cancel",
+            );
+        }
+    }
+
+    pub(crate) fn resolve_prereq_plan(&mut self, action: PrereqPlanAction) {
+        let Ok(workspace) = self.current_workspace() else {
+            self.pending_chain = None;
+            self.pending_prereq_prompt = None;
+            self.log(
+                "error",
+                "cannot resolve prerequisites without an active workspace",
+            );
+            return;
+        };
+        match action {
+            PrereqPlanAction::Cancel => self.cancel_prereq_plan(),
+            PrereqPlanAction::Approve | PrereqPlanAction::Reuse | PrereqPlanAction::Regenerate => {
+                self.accept_prereq_plan(action, workspace);
+            }
+        }
+    }
+
+    pub(crate) fn accept_prereq_plan(
+        &mut self,
+        action: PrereqPlanAction,
+        workspace: WorkspaceTarget,
+    ) {
+        self.pending_prereq_prompt = None;
+        let Some(final_tool) = self.mark_prereq_plan_accepted(action) else {
+            return;
+        };
         self.log(
             "system",
             format!(
-                "{}: resolving prerequisites - {}",
-                chain.final_tool,
-                chain
-                    .remaining
-                    .iter()
-                    .map(|step| step.tool.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" -> ")
+                "{final_tool} prerequisite plan accepted: {}",
+                action.label()
             ),
         );
-        self.pending_chain = Some(chain);
         self.advance_chain(workspace);
     }
 
+    pub(crate) fn cancel_prereq_plan(&mut self) {
+        let Some(chain) = self.pending_chain.take() else {
+            self.pending_prereq_prompt = None;
+            return;
+        };
+        self.pending_prereq_prompt = None;
+        self.log(
+            "system",
+            format!("{} prerequisite plan cancelled", chain.final_tool),
+        );
+        self.set_refused_activity(
+            chain.final_tool,
+            "operator cancelled prerequisite plan before dispatch",
+        );
+    }
+
     pub(crate) fn advance_chain(&mut self, workspace: WorkspaceTarget) {
-        let Some(step) = self.next_prereq_step() else {
+        if self.pending_chain_approved() {
+            self.advance_approved_chain(workspace);
+        }
+    }
+
+    fn advance_approved_chain(&mut self, workspace: WorkspaceTarget) {
+        let Some(step) = self.next_runnable_prereq_step() else {
             self.dispatch_final_chain_tool(workspace);
             return;
         };
-        if step.artifact_path.exists() {
-            self.prompt_for_existing_prereq(step);
-        } else {
-            self.dispatch_prereq_step(step, workspace);
+        self.dispatch_prereq_step(step, workspace);
+    }
+
+    fn next_runnable_prereq_step(&mut self) -> Option<PrereqStep> {
+        loop {
+            let step = self.next_prereq_step()?;
+            if !self.consume_reusable_prereq_step(&step) {
+                return Some(step);
+            }
         }
     }
 
@@ -100,6 +171,47 @@ impl ShellApp {
         self.pending_chain.as_ref()?.next_step().cloned()
     }
 
+    fn pending_chain_approved(&self) -> bool {
+        self.pending_chain
+            .as_ref()
+            .is_some_and(|chain| chain.approved)
+    }
+
+    fn mark_prereq_plan_accepted(&mut self, action: PrereqPlanAction) -> Option<String> {
+        let chain = self.pending_chain.as_mut()?;
+        chain.approved = true;
+        chain.regenerate_existing = action == PrereqPlanAction::Regenerate;
+        Some(chain.final_tool.clone())
+    }
+
+    fn should_reuse_prereq_step(&self, step: &PrereqStep) -> bool {
+        self.pending_chain
+            .as_ref()
+            .is_some_and(|chain| !chain.should_run_step(step))
+    }
+
+    fn consume_reusable_prereq_step(&mut self, step: &PrereqStep) -> bool {
+        if !self.should_reuse_prereq_step(step) {
+            return false;
+        }
+        self.drop_and_log_reused_prereq_step(step);
+        true
+    }
+
+    fn drop_and_log_reused_prereq_step(&mut self, step: &PrereqStep) {
+        if let Some(chain) = self.pending_chain.as_mut() {
+            let _ = chain.drop_first();
+        }
+        self.log(
+            "system",
+            format!(
+                "reusing cached {} at {}",
+                step.artifact_label,
+                step.artifact_path.display()
+            ),
+        );
+    }
+
     fn dispatch_prereq_step(&mut self, step: PrereqStep, workspace: WorkspaceTarget) {
         let final_tool = self
             .pending_chain
@@ -116,17 +228,24 @@ impl ShellApp {
         self.log(
             "system",
             format!(
-                "{} required by {final_tool} - running automatically",
-                step.tool
+                "{} required by {final_tool} - running after prerequisite approval; writes {}",
+                step.tool,
+                step.writes
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
         );
         let status = tool_run_status(&step.tool);
-        self.start_background_tool(
+        let activity = live_activity_for_prereq_step(&step, &final_tool);
+        self.start_background_tool_with_activity(
             step.tool,
             serde_json::json!({}),
             workspace,
             status,
             thinking,
+            Some(activity),
         );
     }
 
@@ -144,4 +263,12 @@ impl ShellApp {
         let status = tool_run_status(&tool);
         self.start_background_tool(tool, input, workspace, status, thinking);
     }
+}
+
+fn prereq_plan_log_line(plan: &PendingPrereqPrompt) -> String {
+    format!(
+        "{} needs {} prerequisite(s); review approve/reuse/regenerate/cancel before any prerequisite starts",
+        plan.final_tool,
+        plan.steps.len()
+    )
 }

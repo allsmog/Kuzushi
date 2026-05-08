@@ -14,7 +14,12 @@ impl ModuleRunSummary {
             .unwrap_or_else(|| "target:none".to_string());
         let stage = scan
             .map(scan_status)
-            .or_else(|| running_tool.as_ref().map(|_| "running".to_string()))
+            .or_else(|| {
+                app.live_activity
+                    .as_ref()
+                    .map(|activity| activity.phase.label().to_string())
+            })
+            .or_else(|| running_tool.as_ref().map(|_| "running tool".to_string()))
             .unwrap_or_else(|| "idle".to_string());
         let findings = scan
             .map(|scan| scan.findings_count)
@@ -73,6 +78,7 @@ pub(crate) fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
         &summary,
         app.spinner_phase as usize,
     );
+    append_live_activity(&mut lines, app, area);
     append_progress_section(&mut lines, app, area, &summary);
     append_scan_error(&mut lines, area, &summary);
     append_findings_preview(&mut lines, app, area);
@@ -86,6 +92,19 @@ pub(crate) fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
         lines.push(streaming_cursor_line());
     }
     lines
+}
+
+fn append_live_activity(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) {
+    let Some(activity) = app.live_activity.as_ref() else {
+        return;
+    };
+    lines.push(divider("LIVE ACTIVITY", area.width));
+    lines.push(Line::from(vec![
+        Span::raw("   "),
+        Span::styled(pad(activity.phase.label(), 18), theme::warn()),
+        Span::styled(pad(&activity.subject, 24), theme::label()),
+        Span::styled(activity.detail.clone(), theme::muted()),
+    ]));
 }
 
 pub(in crate::renderer::views) fn append_run_status(

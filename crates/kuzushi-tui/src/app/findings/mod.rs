@@ -10,7 +10,6 @@ use kuzushi_core::{
     format_finding_alias, parse_finding_alias, resolve_finding_alias, sorted_finding_aliases,
     Finding, FindingStore, WorkspaceTarget,
 };
-use std::path::PathBuf;
 mod show_aliases;
 pub use format_chain_alias::format_alias_table;
 pub use format_chain_alias::format_chain_alias;

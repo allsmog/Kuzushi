@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use crate::findings::Severity;
+    use crate::findings::{Finding, FindingStore, Severity};
+    use std::fs;
 
     #[test]
     fn resolves_v2_state_paths_under_project() {
@@ -63,6 +64,36 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
         assert_eq!(exported["count"], serde_json::json!(1));
         assert_eq!(exported["findings"][0]["rule_id"], "fixture/sql");
+    }
+
+    #[test]
+    fn workspace_status_reports_persisted_finding_count() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .insert_scan_run("run-1", workspace.root(), "completed")
+            .unwrap();
+        store
+            .insert_finding(
+                "run-1",
+                &Finding::new_tool(
+                    "fixture",
+                    "fixture/sql",
+                    "src/app.ts",
+                    10,
+                    None,
+                    Severity::High,
+                    "request data reaches SQL",
+                ),
+            )
+            .unwrap();
+
+        let status = workspace_status_for_target(Some(workspace.root()), None);
+
+        assert_eq!(status.findings_count, Some(1));
+        assert_eq!(status.root.as_deref(), Some(workspace.root()));
+        assert!(status.status.contains("workspace ready; 1 finding"));
     }
 
     #[test]

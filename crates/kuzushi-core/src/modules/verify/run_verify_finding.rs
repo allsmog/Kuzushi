@@ -30,9 +30,8 @@ pub(in crate::modules) fn run_verify_finding(
     let runtime = runtime.context(
         "verify:finding requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
     )?;
-    let model = ctx.config.model.clone().context(
-        "verify:finding requires an explicit model in config.toml or KUZUSHI_MODEL; Kuzushi will not choose a fallback model",
-    )?;
+    let model =
+        crate::runtime::require_configured_model("verify:finding", ctx.config.model.as_deref())?;
 
     let prompt = build_verify_prompt(&finding, &triage, input.prompt_template.as_deref())?;
     let result = query_required_structured_json(

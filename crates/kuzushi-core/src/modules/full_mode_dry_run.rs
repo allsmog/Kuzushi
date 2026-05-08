@@ -70,10 +70,10 @@ pub(crate) fn non_empty_full_mode_scope_files(
 }
 
 pub(crate) fn full_mode_dry_run_response(
-    cfg: &crate::full_mode_multi::FullModeConfig,
+    cfg: &crate::capabilities::full_mode_multi::FullModeConfig,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
-    let plan = crate::full_mode_multi::plan(cfg)?;
+    let plan = crate::capabilities::full_mode_multi::plan(cfg)?;
     let model_hint = ctx.config.model.as_deref();
     let cost = crate::full_mode_cost_summary(&plan, model_hint);
     Ok(json!({

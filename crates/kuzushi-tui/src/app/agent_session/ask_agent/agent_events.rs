@@ -26,9 +26,11 @@ impl ShellApp {
                 "agent",
                 "pi-agent-core response arrived after abort request; ignored",
             );
+            self.set_paused_activity("agent", "response ignored after abort request");
             return;
         }
         self.log("answer", text.clone());
+        self.set_completed_activity("agent", "answer received");
         self.write_agent_trace_success(&text, &state);
     }
 
@@ -44,9 +46,11 @@ impl ShellApp {
                 "agent",
                 format!("pi-agent-core ended after abort request: {error}"),
             );
+            self.set_paused_activity("agent", "worker ended after abort request");
             return;
         }
         self.log("error", error.clone());
+        self.set_refused_activity("agent", "model request failed");
         self.write_agent_trace_failure(&error, &state);
     }
 

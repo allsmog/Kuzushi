@@ -38,6 +38,10 @@ impl ShellApp {
             "scan",
             "abort requested; waiting for scanner subprocess to stop (not claiming it was killed)",
         );
+        self.set_paused_activity(
+            "sast:scan",
+            "abort requested; waiting for scanner subprocess",
+        );
         true
     }
 
@@ -52,6 +56,10 @@ impl ShellApp {
         self.log(
             "tool",
             format!("{tool_name} abort requested; waiting for the current filesystem step to finish (process kill not confirmed)"),
+        );
+        self.set_paused_activity(
+            tool_name,
+            "abort requested; waiting for current filesystem step",
         );
         true
     }
@@ -68,6 +76,7 @@ impl ShellApp {
             "agent",
             "abort requested; waiting for pi-agent-core to return (process kill not confirmed)",
         );
+        self.set_paused_activity("agent", "abort requested; waiting for pi-agent-core");
         true
     }
 
@@ -80,6 +89,7 @@ impl ShellApp {
             "plan",
             "abort requested; waiting for pi-agent-core planner to return (process kill not confirmed)",
         );
+        self.set_paused_activity("plan", "abort requested; waiting for pi-agent-core planner");
         true
     }
 
@@ -91,6 +101,10 @@ impl ShellApp {
         self.log(
             "threats",
             "abort requested; waiting for pi-agent-core threat worker to return (process kill not confirmed)",
+        );
+        self.set_paused_activity(
+            "threat model",
+            "abort requested; waiting for pi-agent-core threat worker",
         );
         true
     }

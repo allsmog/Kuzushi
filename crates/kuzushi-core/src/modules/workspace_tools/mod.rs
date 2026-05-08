@@ -1,20 +1,23 @@
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
-use crate::workspace::{export_workspace_findings, WorkspaceExportFormat};
+use crate::workspace::{
+    export_workspace_findings, workspace_status_for_target, WorkspaceExportFormat,
+};
 
 use super::input::{resolve_input_path, string_input_any};
 use super::ToolExecutionContext;
 
 pub(in crate::modules) fn workspace_status_output(ctx: &ToolExecutionContext<'_>) -> String {
-    match ctx.workspace {
-        Some(workspace) => format!(
+    let status = workspace_status_for_target(ctx.workspace.map(|workspace| workspace.root()), None);
+    match (status.root, status.state_dir, status.findings_db) {
+        (Some(root), Some(state_dir), Some(findings_db)) => format!(
             "workspace status\n  Root:      {}\n  State:     {}\n  Findings:  {}",
-            workspace.root().display(),
-            workspace.state_dir().display(),
-            workspace.findings_db_path().display()
+            root.display(),
+            state_dir.display(),
+            findings_db.display()
         ),
-        None => "workspace status unavailable: no active workspace. Next: pass --target <repo> or start the shell with --target .".to_string(),
+        _ => "workspace status unavailable: no active workspace. Next: pass --target <repo> or start the shell with --target .".to_string(),
     }
 }
 

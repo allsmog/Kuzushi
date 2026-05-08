@@ -5,22 +5,46 @@ impl ShellApp {
         if self.blocked_by_running_tool() {
             return;
         }
-
-        let Some(tool_name) = self.resolve_run_tool_name(tool) else {
+        let Some(request) = self.prepare_run_tool_request(tool, input) else {
             return;
+        };
+        self.dispatch_run_tool(
+            request.tool_name,
+            request.input,
+            request.workspace,
+            request.thinking_level,
+        );
+    }
+
+    fn prepare_run_tool_request(
+        &mut self,
+        tool: Option<String>,
+        input: Option<String>,
+    ) -> Option<RunToolRequest> {
+        let Some(tool_name) = self.resolve_run_tool_name(tool) else {
+            return None;
         };
         let Some(input) = self.parse_and_prepare_run_input(&tool_name, input) else {
-            return;
+            return None;
         };
-        if self.request_run_confirmation(&tool_name, &input) {
-            return;
+        if self.run_launch_deferred(&tool_name, &input) {
+            return None;
         }
         let Some(workspace) = self.run_tool_workspace() else {
-            return;
+            return None;
         };
-        let tool_thinking_level =
-            thinking_level_from_input(&input).or_else(|| self.session_thinking_level.clone());
-        self.dispatch_run_tool(tool_name, input, workspace, tool_thinking_level);
+        Some(RunToolRequest {
+            thinking_level: thinking_level_from_input(&input)
+                .or_else(|| self.session_thinking_level.clone()),
+            tool_name,
+            input,
+            workspace,
+        })
+    }
+
+    fn run_launch_deferred(&mut self, tool_name: &str, input: &serde_json::Value) -> bool {
+        self.blocked_by_pending_threat_review(tool_name)
+            || self.request_run_confirmation(tool_name, input)
     }
 
     fn dispatch_run_tool(
@@ -42,7 +66,7 @@ impl ShellApp {
     }
 
     fn blocked_by_running_tool(&mut self) -> bool {
-        let Some(tool_name) = self.tool_running.as_deref() else {
+        let Some(tool_name) = self.tool_running.clone() else {
             return false;
         };
         self.log(
@@ -50,6 +74,28 @@ impl ShellApp {
             format!(
                 "{tool_name} is still running; wait for its result before starting another tool"
             ),
+        );
+        self.set_waiting_activity(
+            tool_name,
+            "another tool was requested while this run is still active",
+        );
+        true
+    }
+
+    fn blocked_by_pending_threat_review(&mut self, tool_name: &str) -> bool {
+        if !threat_dependent_tool(tool_name) || self.pending_threat_patch.is_none() {
+            return false;
+        }
+        self.shell_view = ShellView::Threat(ThreatView::Summary);
+        self.log(
+            "threats",
+            format!(
+                "{tool_name} needs the current approved threat model; apply or reject the pending threat changes first"
+            ),
+        );
+        self.set_waiting_activity(
+            tool_name.to_string(),
+            "pending threat-model changes must be approved or rejected before launch",
         );
         true
     }
@@ -136,4 +182,15 @@ impl ShellApp {
             }
         }
     }
+}
+
+fn threat_dependent_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "carlini-threat-hunt:run")
+}
+
+struct RunToolRequest {
+    tool_name: String,
+    input: serde_json::Value,
+    workspace: WorkspaceTarget,
+    thinking_level: Option<String>,
 }

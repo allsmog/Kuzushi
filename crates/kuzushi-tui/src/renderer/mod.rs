@@ -12,8 +12,10 @@ use crate::theme;
 pub(in crate::renderer) use chrome::*;
 use kuzushi_core::modules::{ModuleKind, OptionSpec, OptionType};
 use kuzushi_core::{
-    proof_state_label, runtime_validation_label, sorted_finding_aliases, stable_finding_alias,
-    AttachmentKind, Finding, Severity, SUPPORTED_ATTACHMENT_MODULES,
+    finding_confidence_label, finding_cwe_label, finding_evidence_preview, finding_location,
+    finding_source_label, finding_verdict_label, proof_state_label, runtime_validation_label,
+    sorted_finding_aliases, stable_finding_alias, AttachmentKind, Finding, Severity,
+    SUPPORTED_ATTACHMENT_MODULES,
 };
 pub(in crate::renderer) use plain::*;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
