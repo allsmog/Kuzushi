@@ -1558,9 +1558,9 @@ Legacy command classifications:
   - None for Stage 1 after the merge/push completed from the normal repo worktree.
 
 KUZUSHI_BRIDGE_GAPS_PHASE_DONE
-### Iteration 41 - Xint Tier 0 (cargo audit)
+### Iteration 41 - Reference scanner Tier 0 (cargo audit)
 
-- Task attempted: incorporate the first Xint Code differentiator (ground-truth supply-chain scanner output) into the Rust port by adding `CargoAuditScanner` next to the existing text-parse `DepHygieneScanner`. Scope-limited to Rust crates per operator instruction.
+- Task attempted: incorporate the first reference-scanner differentiator (ground-truth supply-chain scanner output) into the Rust port by adding `CargoAuditScanner` next to the existing text-parse `DepHygieneScanner`. Scope-limited to Rust crates per operator instruction.
 - Files changed:
   - `crates/kuzushi-core/src/dep_hygiene.rs` — added `CargoAuditScanner` (`ScanEngine` impl), `parse_cargo_audit_output`, and `severity_from_cvss` with both numeric-score and CVSS-vector heuristics. Lockfile-gated and binary-availability-gated so it is a no-op when `Cargo.lock` is absent or `cargo-audit` is not on PATH.
   - `crates/kuzushi-core/src/scan.rs` — registered `CargoAuditScanner` in `default_scan_engines()` and added `cargo-audit` / `cargo-audit:scan` to `scan_engines_for_tasks` plus the supported-tasks error string.
@@ -1576,7 +1576,7 @@ KUZUSHI_BRIDGE_GAPS_PHASE_DONE
 - Blockers or repo facts that contradicted this prompt:
   - Three pre-existing `modules::tests` failures on `origin/main` (`dispatches_chrome_rce_review_trigger_with_git_diff`, `dispatches_patch_finding_through_runtime_and_persists_result`, `sast_scan_runs_verify_patch_and_writes_run_artifacts`) reproduce on a clean `git worktree add origin/main` checkout. They are environmental (git signing-config namespace warning), unrelated to Tier 0.
 
-### Iteration 42 - Xint Tier 3 foundation (spawn_subagent)
+### Iteration 42 - Reference scanner Tier 3 foundation (spawn_subagent)
 
 - Task attempted: incorporate the RoboDuck sub-agent decomposition primitive into the Rust `AgentRuntime` trait so future agentic modules (verify, taint, systems-hunt specialists) can spawn role-scoped sub-agents without provider-side changes. The full systems-hunt branching (Plan Tier 3) is deferred; this iteration ships only the foundational trait extension so it can be merged independently.
 - Files changed:
@@ -1593,9 +1593,9 @@ KUZUSHI_BRIDGE_GAPS_PHASE_DONE
 - Blockers or repo facts that contradicted this prompt:
   - Same three pre-existing environmental `modules::tests` failures as Iteration 41; reproduced on a clean `origin/main` worktree at `c77e414`.
 
-### Iteration 43 - Xint code-index MCP servers (joern + clang + gtags)
+### Iteration 43 - Code-index MCP servers (joern + clang + gtags)
 
-- Task attempted: deliver a clean factoring of Xint's pre-indexed code DB by shipping three local MCP servers (joern, clang AST, gtags) with a unified facade so other Kuzushi modules — and external MCP clients — can call into them. Replaces the Tier 1 tree-sitter crate from the previous plan; that direction is now superseded.
+- Task attempted: deliver a clean factoring of a pre-indexed code DB by shipping three local MCP servers (joern, clang AST, gtags) with a unified facade so other Kuzushi modules — and external MCP clients — can call into them. Replaces the Tier 1 tree-sitter crate from the previous plan; that direction is now superseded.
 - Files changed:
   - `Cargo.toml` (workspace) — added five new members; added `io-std` to tokio's feature set so the stdio MCP servers can use `tokio::io::{stdin, stdout}`.
   - `crates/kuzushi-mcp-common/` (new crate, ~1200 LoC) — JSON-RPC 2.0 over stdio (newline-delimited JSON), `ToolRegistry` with async `ToolHandler` trait, shared schemas (`Position`, `Range`, `Symbol`, `SymbolKind`, `Method`, `Path`, `EdgeKind`, `FileSpan`), per-repo cache layout under `~/.kuzushi/index/` keyed by hand-rolled SHA-256 of canonical path + git remote, doctor binary-probe helpers (`which`, `probe`, `probe_all` returning a `HealthSummary`).

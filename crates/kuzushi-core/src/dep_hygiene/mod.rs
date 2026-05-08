@@ -1,6 +1,6 @@
 /// Ground-truth Rust supply-chain scanner backed by `cargo audit --json`.
 ///
-/// Mirrors the Xint Code design instinct of preferring deterministic scanner
+/// Mirrors the security-scanner design instinct of preferring deterministic scanner
 /// output over LLM-rediscovered manifest patterns. Runs only when the target
 /// has a `Cargo.lock` and the `cargo-audit` binary is on PATH; otherwise
 /// returns no findings (the legacy text-parse path in `DepHygieneScanner`

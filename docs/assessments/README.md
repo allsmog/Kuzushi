@@ -15,11 +15,10 @@ can act on, push back on, or shelve.
 | [`replay-trace-audit.md`](./replay-trace-audit.md)     | What's persisted, queryable, reproducible from `.kuzushi/runs`|
 | [`rust-tui-ux-audit.md`](./rust-tui-ux-audit.md)       | Rust Ratatui shell UX, plain mode, help/keybind drift         |
 | [`ux-dx-gaps.md`](./ux-dx-gaps.md)                     | Shell TUI friction, `/help` drift, missing back-paths         |
-| [`xint-comparison.md`](./xint-comparison.md)           | Capability comparison vs. Theori's Xint (commercial) and RoboDuck (AIxCC OSS) |
 
 ### Status
 
-The five docs above are the surviving research output from an 8-agent
+The six docs above are the surviving research output from an 8-agent
 sweep. Three additional sweeps (module ecosystem extension points,
 scan/shell/run mode parity, operator onboarding) did not produce
 deliverables in this batch and should be re-run.

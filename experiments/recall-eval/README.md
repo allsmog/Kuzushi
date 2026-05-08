@@ -1,8 +1,7 @@
-# Xint-recall eval harness
+# Recall eval harness
 
-Goal: run upgraded Kuzushi against pre-patch slices of the codebases where
-Theori's [Xint Code](https://theori.io/blog/announcing-xint-code) found public
-0-day bugs, and measure recall vs. an oracle.
+Goal: run upgraded Kuzushi against pre-patch slices of codebases with public
+0-day disclosures, and measure recall vs. an oracle.
 
 ## Targets
 
@@ -13,14 +12,14 @@ Theori's [Xint Code](https://theori.io/blog/announcing-xint-code) found public
 | redis    | ZeroDay Cloud 2025 0day              | Public detail sparse; oracle is best-effort           |
 | mariadb  | ZeroDay Cloud 2025 0day              | Public detail sparse; oracle is best-effort           |
 
-Only Copy Fail has a clean public root cause (xint.io blog). The other three
+Only Copy Fail has a clean public root cause. The other three
 oracles ship with `expected_min_recall: 0.0` and are intended to be edited as
 disclosure quality improves.
 
 ## Layout
 
 ```
-experiments/xint-eval/
+experiments/recall-eval/
   oracles/<slice>.json     ground truth
   scope/<slice>.txt        sparse-checkout subdirs (one per line, glob OK)
   slices/<slice>/          git submodule, pinned to pre-patch SHA

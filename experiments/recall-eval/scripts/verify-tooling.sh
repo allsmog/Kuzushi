@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-flight checks for the xint-recall eval harness.
+# Pre-flight checks for the recall eval harness.
 # Exit non-zero if anything required is missing.
 
 set -uo pipefail
@@ -70,7 +70,7 @@ for name in linux postgres redis mariadb; do
     else bad "$name has empty commit field — re-run fetch-slices.sh with KUZUSHI_SLICE_SHA_${name^^}=<sha>"
     fi
   else
-    note "$name slice not populated. Run: experiments/xint-eval/scripts/fetch-slices.sh"
+    note "$name slice not populated. Run: experiments/recall-eval/scripts/fetch-slices.sh"
   fi
 done
 

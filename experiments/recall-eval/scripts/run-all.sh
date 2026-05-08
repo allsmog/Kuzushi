@@ -10,7 +10,7 @@ SLICES=(linux postgres redis mariadb)
 TS=$(date -u +%Y%m%dT%H%M%S)
 REPORT_DIR="$EVAL_DIR/reports/$TS"
 mkdir -p "$REPORT_DIR"
-SESSION="xint-eval-$TS"
+SESSION="recall-eval-$TS"
 
 # Sanity: kuzushi-eval scorer must exist (Phase 0 scaffolding).
 if [[ ! -x "$REPO_ROOT/target/release/kuzushi-eval" ]]; then
@@ -33,7 +33,7 @@ cmd_for_slice() {
     "$EVAL_DIR/scripts/run-slice.sh" "$s" "$REPORT_DIR" "$s"
 }
 
-echo "[xint-eval] tmux session=$SESSION report=$REPORT_DIR"
+echo "[recall-eval] tmux session=$SESSION report=$REPORT_DIR"
 
 tmux new-session -d -s "$SESSION" -n "$first" "$(cmd_for_slice "$first")"
 tmux set-option -t "$SESSION" remain-on-exit on
@@ -47,11 +47,11 @@ done
 tmux new-window -t "$SESSION" -n monitor \
   "watch -n 5 ls $REPORT_DIR; bash"
 
-echo "[xint-eval] attach with: tmux attach -t $SESSION"
-echo "[xint-eval] panes will remain after exit; close with: tmux kill-session -t $SESSION"
+echo "[recall-eval] attach with: tmux attach -t $SESSION"
+echo "[recall-eval] panes will remain after exit; close with: tmux kill-session -t $SESSION"
 
 # Wait for all per-slice panes to die, leaving the monitor pane alone.
-echo "[xint-eval] waiting for slice panes to complete…"
+echo "[recall-eval] waiting for slice panes to complete…"
 while true; do
   alive=0
   for s in "${SLICES[@]}"; do
@@ -63,7 +63,7 @@ while true; do
   sleep 30
 done
 
-echo "[xint-eval] all slice panes complete; running aggregate scorer"
+echo "[recall-eval] all slice panes complete; running aggregate scorer"
 "$EVAL_DIR/scripts/score.sh" "$REPORT_DIR"
 
-echo "[xint-eval] summary: $REPORT_DIR/summary.md"
+echo "[recall-eval] summary: $REPORT_DIR/summary.md"

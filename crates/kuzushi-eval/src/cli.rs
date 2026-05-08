@@ -10,7 +10,7 @@ pub(crate) const PM_LINES_FUNCTION_FALLBACK: i64 = 50;
     about = "Score Kuzushi findings against an oracle"
 )]
 pub(crate) struct Cli {
-    /// Oracle JSON file (e.g. experiments/xint-eval/oracles/linux-cve-2026-31431.json).
+    /// Oracle JSON file (e.g. experiments/recall-eval/oracles/linux-cve-2026-31431.json).
     #[arg(long)]
     pub(crate) oracle: PathBuf,
 

@@ -78,11 +78,11 @@ git branch -r --no-merged main | sed 's/^ *//' | rg '^origin/claude/'
 - Status: integrated by subset in commit `ce925dd3` (`merge: integrate useful check-ratatui-tui-Jj2eH changes`)
 - Commits inspected: `87fe9ecf` eval defaults/scorer tests, `f858bad9` vuln_source/static-context scorer reporting, `36f2c829` tree-sitter backend, `b0054a67` deep-audit static-evidence context, `49e0fe31` diff-scope cleanup, plus older already-overlapping merge history
 - Scope inspected: `git log --oneline --max-count=20 main..origin/claude/check-ratatui-tui-Jj2eH`, `git diff --name-status main...`, `git diff --stat main...`, and `git merge-tree --write-tree main origin/claude/check-ratatui-tui-Jj2eH`
-- Conflict preview: broad conflicts across `Cargo.lock`, CLI main/tests, core config/diff-scope/findings/lib/runtime, OpenAI runtime, xint scripts/docs, and bridge script. The branch has multiple merge bases and stale broad history.
+- Conflict preview: broad conflicts across `Cargo.lock`, CLI main/tests, core config/diff-scope/findings/lib/runtime, OpenAI runtime, recall-eval scripts/docs, and bridge script. The branch has multiple merge bases and stale broad history.
 - Decision: subset integration. Full merge would reintroduce stale core/runtime/harness edits and add new tree-sitter dependencies that are not needed for the current regex code-nav path and cannot be fetched reliably in this sandbox.
 - Integrated: `kuzushi-eval` proof-state and `vuln_source` hit breakdowns with `staticProofState`/`vulnSource` JSON aliases and focused unit tests; new `static_context` prompt assembler using current `static_evidence`, `static_narrative`, `static_ranking`, and `static_registry` APIs; default-on deep-auditor prompt injection with opt-out config and tests; public re-export for downstream smoke use.
 - Skipped: tree-sitter backend/dependency additions; stale diff-scope deletion and broad runtime/script/test changes already represented or superseded by current main.
-- Checks: `cargo fmt --all --check` passed; `cargo check --workspace` passed; `cargo test -p kuzushi-core` passed; `cargo test -p kuzushi-eval` passed; `cargo test -p kuzushi-cli --test xint_recall_cli` passed
+- Checks: `cargo fmt --all --check` passed; `cargo check --workspace` passed; `cargo test -p kuzushi-core` passed; `cargo test -p kuzushi-eval` passed; `cargo test -p kuzushi-cli --test recall_cli` passed
 
 ### `origin/claude/vercel-security-harness-comparison-YQKnA`
 

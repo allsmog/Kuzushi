@@ -1,6 +1,6 @@
 //! End-to-end recall regression suite.
 //!
-//! For each oracle under `experiments/xint-eval/oracles/`, this test:
+//! For each oracle under `experiments/recall-eval/oracles/`, this test:
 //!
 //! 1. Creates a synthetic mini-slice whose layout mirrors the oracle's
 //!    file references (so path matching is exercised, not stubbed).
@@ -11,7 +11,7 @@
 //!    (`pm_lines:10` with CWE).
 //!
 //! This is the CI-cheap regression net described in Phase 11. The real
-//! eval (live LLM, real slices) lives in `experiments/xint-eval/` and
+//! eval (live LLM, real slices) lives in `experiments/recall-eval/` and
 //! runs out-of-band.
 
 use std::fs;
@@ -54,7 +54,7 @@ fn kuzushi_eval_bin() -> PathBuf {
 fn load_oracle(slice: &str) -> (PathBuf, Value) {
     let oracle_dir = workspace_root()
         .join("experiments")
-        .join("xint-eval")
+        .join("recall-eval")
         .join("oracles");
     let mut found: Option<PathBuf> = None;
     for entry in fs::read_dir(&oracle_dir).unwrap() {
