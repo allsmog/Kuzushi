@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { appendFileSync } from "node:fs";
 import process from "node:process";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
@@ -27,22 +28,21 @@ async function readStdin() {
 async function runQueryGraph(request) {
   const mcp = await mcpToolsForRequest(request);
   try {
-    const graph = queryGraphForRequest(request, mcp.tools);
+    const system = querySystemPromptForRequest(request);
+    const graph = queryGraphForRequest(request, mcp.tools, system);
     const result = await graph.invoke({
       messages: [new HumanMessage(request.prompt ?? "")],
     });
-    return queryResultFromMessage(result.messages.at(-1));
+    const message = result.messages.at(-1);
+    debugDumpBridgeCall("query", request, mcp.tools, system, message);
+    return queryResultFromMessage(message);
   } finally {
     await mcp.close();
   }
 }
 
-function queryGraphForRequest(request, tools) {
+function queryGraphForRequest(request, tools, system) {
   const model = modelForRequest(request);
-  const system = appendStructuredOutputContract(
-    request.systemPrompt ?? request.system_prompt,
-    request.structuredOutput ?? request.structured_output,
-  );
   const boundModel = tools.length ? model.bindTools(tools) : model;
   return new StateGraph(MessagesAnnotation)
     .addNode("model", callModelNode(boundModel, request, system))
@@ -51,6 +51,13 @@ function queryGraphForRequest(request, tools) {
     .addConditionalEdges("model", shouldContinue)
     .addEdge("tools", "model")
     .compile();
+}
+
+function querySystemPromptForRequest(request) {
+  return appendStructuredOutputContract(
+    request.systemPrompt ?? request.system_prompt,
+    request.structuredOutput ?? request.structured_output,
+  );
 }
 
 function callModelNode(model, request, system) {
@@ -127,7 +134,35 @@ async function handleNextStep(request) {
     systemMessageForRequest(request, system),
     ...messagesForNextStep(request),
   ]);
+  debugDumpBridgeCall("next-step", request, tools, system, response);
   return nextStepResultFromResponse(response);
+}
+
+function debugDumpBridgeCall(kind, request, tools, systemPrompt, response) {
+  const path = process.env.KUZUSHI_BRIDGE_DEBUG_DUMP;
+  if (!path) return;
+  try {
+    const text = messageText(response);
+    const dump = {
+      ts: Date.now(),
+      kind,
+      model: request.model,
+      thinkingLevel: request.thinkingLevel ?? request.thinking_level,
+      toolCount: tools.length,
+      toolNames: tools.map((tool) => tool.name).filter(Boolean),
+      promptLen: (request.prompt ?? "").length,
+      promptHead: (request.prompt ?? "").slice(0, 1500),
+      messageCount: (request.messages ?? []).length,
+      systemPromptLen: String(systemPrompt ?? "").length,
+      systemPromptHead: String(systemPrompt ?? "").slice(0, 800),
+      responseLen: text.length,
+      responseHead: text.slice(0, 4000),
+      responseTail: text.slice(-500),
+      stopReason: response?.response_metadata?.finish_reason,
+      responseToolNames: (response?.tool_calls ?? []).map((call) => call.name).filter(Boolean),
+    };
+    appendFileSync(path, `${JSON.stringify(dump)}\n`);
+  } catch {}
 }
 
 function nextStepResultFromResponse(response) {
