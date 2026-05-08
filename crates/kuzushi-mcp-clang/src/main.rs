@@ -1,6 +1,24 @@
-//! `kuzushi-mcp-clang` — MCP server bridging clangd LSP.
-//!
-//! When clangd is missing from PATH, every tool returns a structured
-//! `BackendUnavailable` error and `health` reports `ready: false`.
+use kuzushi_mcp_common::{serve_stdio, ServerInfo};
 
-include!("__main_impl.inc");
+mod prelude;
+use prelude::*;
+mod siblings;
+pub(crate) use siblings::*;
+mod clangd;
+mod compile_db;
+mod tools;
+
+const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    if env::args().any(|a| a == "--health") {
+        let summary = tools::health_summary().await;
+        println!("{}", serde_json::to_string_pretty(&summary)?);
+        return Ok(());
+    }
+
+    let info = ServerInfo::new("kuzushi-mcp-clang", PKG_VERSION);
+    let registry = tools::build_registry();
+    serve_stdio(info, registry).await
+}

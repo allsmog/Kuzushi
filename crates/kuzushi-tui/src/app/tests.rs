@@ -1,3 +1,6 @@
+use super::prelude::*;
+use super::*;
+
 use super::approval::{confirm_gate_for_tool, parse_pending_patch};
 use super::artifacts::{append_trace_step, write_run_summary};
 use super::command_router::unknown_command_message;
@@ -5,6 +8,7 @@ use super::findings::{
     format_alias_table, format_chain_alias, parse_chain_alias, sorted_chain_aliases,
 };
 use super::settings::auth_login_status_message;
+use super::state_transitions::{HotkeyTrigger, ViewHotkeyAction};
 use super::view_state::ChainSeverity;
 use super::*;
 use crate::commands::{

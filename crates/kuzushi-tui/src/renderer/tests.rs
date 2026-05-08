@@ -1,3 +1,6 @@
+use super::prelude::*;
+use super::*;
+
 use kuzushi_core::{
     Finding, OptionScope, OptionTarget, ScanCancellation, Severity, StaticProofState,
     TriageOutcome, TriageVerdict, V2Config,
@@ -1581,7 +1584,6 @@ fn renders_help_aliases_and_examples_from_command_specs() {
     ] {
         assert!(
             shell_command_specs()
-                .iter()
                 .any(|spec| spec.category == category && spec.aliases.contains(&alias)),
             "sample alias {alias:?} is not registered for {category:?}"
         );
