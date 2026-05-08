@@ -61,11 +61,12 @@ function runProject({ name, cmd, args }) {
       let buf = "";
       stream.on("data", (chunk) => {
         buf += chunk.toString("utf8");
-        let idx;
-        while ((idx = buf.indexOf("\n")) !== -1) {
+        let idx = buf.indexOf("\n");
+        while (idx !== -1) {
           const line = buf.slice(0, idx);
           dest.write(`${label(name)} ${line}\n`);
           buf = buf.slice(idx + 1);
+          idx = buf.indexOf("\n");
         }
       });
       stream.on("end", () => {

@@ -11,13 +11,9 @@
 
 import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../agent-runtime/types.js";
-import type { OutputKind as DagOutputKind } from "../agents/types.js";
 import type { MessageBus } from "../bus/types.js";
 import type { PrintSink } from "../copilot/print.js";
-import type { KnowledgeModule, KnowledgeRegistry } from "../knowledge/types.js";
-import type { ToolPolicy } from "../prompts/tool-policy.js";
-import type { Finding, TriageAgentConfig } from "../scanners/types.js";
-import type { KuzushiConfig, SecurityProfile } from "../types.js";
+import type { KuzushiConfig, SecurityProfile } from "../public-types.js";
 import type {
   HostInfo,
   HostUiHandle,
@@ -54,6 +50,34 @@ export type { JSONSchema } from "./schema.js";
 
 /** High-level classification for module capabilities. */
 export type ModuleCategory = "offense" | "defense" | "governance" | "intel";
+
+export interface Finding {
+  fingerprint?: string;
+  filePath?: string;
+  ruleId?: string;
+  severity?: string;
+  message?: string;
+  [key: string]: unknown;
+}
+
+export interface KnowledgeModule {
+  id: string;
+  [key: string]: unknown;
+}
+
+export interface KnowledgeRegistry {
+  [key: string]: unknown;
+}
+
+export interface ToolPolicy {
+  allowedTools?: readonly string[];
+  disallowedTools?: readonly string[];
+  [key: string]: unknown;
+}
+
+export interface TriageAgentConfig {
+  [key: string]: unknown;
+}
 
 // Module ranking + provenance metadata (msfconsole-inspired)
 
@@ -149,7 +173,7 @@ export type CopilotModuleRequirement =
 /**
  * Canonical output categories for DAG nodes.
  */
-export type OutputKind = DagOutputKind;
+export type OutputKind = "findings" | "threat-model" | "verdict" | "report" | "custom";
 
 /**
  * Kinds of per-agent activity a DagTool (or ModuleTool that fans out sub-

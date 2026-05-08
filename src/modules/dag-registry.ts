@@ -1,7 +1,19 @@
-import type { DagNodeImpl } from "../agents/types.js";
 import { canonicalDagId, normalizeDagIds } from "./dag-ids.js";
 import type { CopilotModule, DagTool, ExecutionContext, ModuleTool, OutputKind } from "./types.js";
 import { isDagTool } from "./types.js";
+
+interface DagNodeImpl {
+  id: string;
+  displayName: string;
+  outputKind: OutputKind;
+  dependsOn: string[];
+  condition?: DagTool["dag"]["condition"];
+  promptMode?: DagTool["dag"]["promptMode"];
+  toolPolicy?: DagTool["dag"]["toolPolicy"];
+  triageAgentConfig?: DagTool["dag"]["triageAgentConfig"];
+  init?(config: Record<string, unknown>): Promise<void>;
+  run(input: unknown, ctx: unknown): Promise<unknown>;
+}
 
 /** Summary info returned by DagRegistry.list(). */
 export interface DagInfo {
@@ -193,9 +205,10 @@ function dagToolFromNode(node: DagNodeImpl): DagTool {
     async execute() {
       throw new Error(`DAG node "${name}" cannot be invoked through execute().`);
     },
-    async run(input, ctx) {
-      const { buildDagRunContextFromExecutionContext } = await import("./hidden-dag-node.js");
-      return node.run(input, buildDagRunContextFromExecutionContext(ctx));
+    async run() {
+      throw new Error(
+        `Legacy DagNodeImpl "${name}" cannot run through the public TypeScript SDK after the Rust cutover; author a module-owned DagTool instead.`,
+      );
     },
   };
 }

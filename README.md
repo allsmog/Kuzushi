@@ -278,7 +278,7 @@ Useful package scripts:
 | `pnpm test:rust` | Run `cargo test --workspace`. |
 | `pnpm test:e2e` | Run the native smoke test. |
 | `pnpm doctor` | Run source-checkout development diagnostics; use `kuzushi doctor` for Rust CLI preflight. |
-| `pnpm check:docs` | Guard public docs/workflows against stale Rust CLI command examples. |
+| `pnpm check:docs` | Guard public docs/workflows against stale Rust CLI command examples and retired TS runtime imports. |
 | `pnpm export:source [path]` | Create a clean source tarball from tracked files with local state excluded. |
 
 ## TypeScript Retention

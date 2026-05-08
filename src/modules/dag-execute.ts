@@ -1,45 +1,5 @@
-import { isRecord } from "../utils.js";
-import type { CopilotModule, DagTool, ExecutionContext, ModuleTool, ToolResult } from "./types.js";
+import type { CopilotModule, DagTool, ModuleTool, ToolResult } from "./types.js";
 import { isDagTool } from "./types.js";
-
-const PIPELINE_CONTROL_INPUT_KEYS = new Set([
-  "target",
-  "tasks",
-  "taskMode",
-  "disabledTasks",
-  "severity",
-  "excludePatterns",
-  "fresh",
-  "resume",
-]);
-
-function extractTaskConfigFromInput(tool: DagTool, input: unknown): Record<string, unknown> {
-  if (!isRecord(input)) return {};
-  const properties = isRecord(tool.inputSchema["properties"]) ? tool.inputSchema["properties"] : {};
-  const allowedKeys = new Set(Object.keys(properties));
-  const taskConfig: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(input)) {
-    if (!allowedKeys.has(key) || PIPELINE_CONTROL_INPUT_KEYS.has(key)) continue;
-    if (value !== undefined) taskConfig[key] = value;
-  }
-
-  return taskConfig;
-}
-
-function buildTaskConfigOverrides(
-  tool: DagTool,
-  taskIds: string[],
-  input: unknown,
-  ctx: ExecutionContext,
-): Record<string, Record<string, unknown>> | undefined {
-  const perTask = {
-    ...extractTaskConfigFromInput(tool, input),
-    ...(ctx.toolModel ? { model: ctx.toolModel } : {}),
-  };
-  if (Object.keys(perTask).length === 0) return undefined;
-  return Object.fromEntries(taskIds.map((taskId) => [taskId, perTask]));
-}
 
 /**
  * Install a working `execute()` on a DagTool so shell / `kuzushi run` paths
@@ -52,30 +12,13 @@ export function wrapDagToolExecute(
   options?: { registrationId?: string; extraTaskIds?: ReadonlyArray<string> },
 ): void {
   const registrationId = options?.registrationId ?? tool.name;
-  const extraTaskIds =
-    options?.extraTaskIds ??
-    (tool.dag.chainBefore && tool.dag.chainBefore.length > 0 ? tool.dag.chainBefore : []);
-  const taskIds = [...extraTaskIds, registrationId];
   const summaryLabel = tool.displayName ?? mod.displayName ?? mod.id;
 
-  (tool as { execute: ModuleTool["execute"] }).execute = async (
-    input: unknown,
-    ctx: ExecutionContext,
-  ): Promise<ToolResult> => {
-    const { runSingleTaskPipeline } = await import("./sast/pipeline-runner.js");
-    const taskConfig = buildTaskConfigOverrides(tool, taskIds, input, ctx);
-    const configOverrides =
-      tool.runLifecycle?.pipelineContext === "none"
-        ? {
-            enableContextGathering: false,
-            enableContextEnrichment: false,
-          }
-        : undefined;
-    return runSingleTaskPipeline(taskIds, input, ctx, {
-      summaryLabel,
-      ...(taskConfig ? { taskConfig } : {}),
-      ...(configOverrides ? { configOverrides } : {}),
-    });
+  (tool as { execute: ModuleTool["execute"] }).execute = async (): Promise<ToolResult> => {
+    return {
+      ok: false,
+      output: `${summaryLabel} (${registrationId}) is a module-owned DAG tool. TypeScript single-task pipeline execution was retired with the TS runtime island; use the Rust CLI/TUI scan path or call the tool's DagTool.run() from a DAG host.`,
+    };
   };
 }
 

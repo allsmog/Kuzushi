@@ -1,9 +1,3 @@
-import type {
-  AttachmentDocument,
-  AttachmentStatus,
-  KindSpec,
-} from "../_shared/attachments/index.js";
-
 export type VendorAssessmentDocumentKind =
   | "questionnaire"
   | "diagram"
@@ -14,17 +8,30 @@ export type VendorAssessmentDocumentKind =
   | "other";
 
 /** Re-export of the shared status enum so callers don't have to import twice. */
-export type VendorAssessmentDocumentStatus = AttachmentStatus;
+export type VendorAssessmentDocumentStatus = "missing" | "loaded" | "warning" | "error";
+
+export interface VendorAssessmentDocument {
+  id: string;
+  title: string;
+  kind: VendorAssessmentDocumentKind;
+  status: VendorAssessmentDocumentStatus;
+  source: string;
+  warnings: string[];
+  [key: string]: unknown;
+}
 
 /**
- * Vendor-assessment documents are now an alias of the shared
- * `AttachmentDocument<K>` shape. Persisted layout is unchanged because the
- * fields are identical — vendor just picks the kind enum.
+ * Vendor-assessment documents use the same persisted layout as the retired
+ * shared attachment helper, but the public SDK keeps the type local so the
+ * TypeScript runtime fixture is not imported by product code.
  */
-export type VendorAssessmentDocument = AttachmentDocument<VendorAssessmentDocumentKind>;
 
 /** Convenience re-export — vendor's KindSpec lives in `documents.ts`. */
-export type VendorAssessmentKindSpec = KindSpec<VendorAssessmentDocumentKind>;
+export interface VendorAssessmentKindSpec {
+  kind: VendorAssessmentDocumentKind;
+  label: string;
+  [key: string]: unknown;
+}
 
 export interface VendorAssessmentScope {
   vendorName?: string;

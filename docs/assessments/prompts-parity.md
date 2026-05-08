@@ -80,9 +80,11 @@ a whole.
    `crates/kuzushi-core/src/systems_hunt.rs:1150`). The parity claim is
    therefore per-tool, not subsystem-wide.
 
-## Recommendation
+## Retirement Decision
 
-Keep `src/prompts/` as a reference fixture while the remaining TypeScript
-caller graph exists. If the Rust product needs this behavior, port it as a
-small explicit prompt library with tests rather than reintroducing the
-TypeScript prompt subsystem into the runtime path.
+`src/prompts/` has been moved to
+`reference/ts-runtime-island/src/prompts` as a historical migration fixture.
+The gaps above are intentionally not preserved through TypeScript runtime
+imports. If the Rust product needs this behavior, port it as a small explicit
+Rust prompt library with tests rather than reintroducing the TypeScript prompt
+subsystem into the runtime path.
