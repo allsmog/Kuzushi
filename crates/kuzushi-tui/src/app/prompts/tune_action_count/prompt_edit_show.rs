@@ -45,28 +45,54 @@ impl ShellApp {
             );
             return;
         };
-        match std::fs::read_to_string(&path) {
-            Ok(text) if text.trim().is_empty() => {
-                self.log(
-                    "prompt",
-                    format!("override {} is empty (using default)", path.display()),
-                );
-            }
-            Ok(text) => {
-                self.log(
-                    "prompt",
-                    format!("override {} ({} bytes):", path.display(), text.len()),
-                );
-                for line in text.lines().take(40) {
-                    self.log("prompt", line.to_string());
-                }
-            }
-            Err(_) => {
-                self.log(
-                    "prompt",
-                    format!("no override at {}; using built-in default", path.display()),
-                );
-            }
+        match prompt_override_text(&path) {
+            PromptOverrideText::Missing => self.log_missing_prompt_override(&path),
+            PromptOverrideText::Empty => self.log_empty_prompt_override(&path),
+            PromptOverrideText::Present(text) => self.log_prompt_override_text(&path, &text),
         }
+    }
+
+    fn log_missing_prompt_override(&mut self, path: &std::path::Path) {
+        self.log(
+            "prompt",
+            format!("no override at {}; using built-in default", path.display()),
+        );
+    }
+
+    fn log_empty_prompt_override(&mut self, path: &std::path::Path) {
+        self.log(
+            "prompt",
+            format!("override {} is empty (using default)", path.display()),
+        );
+    }
+
+    fn log_prompt_override_text(&mut self, path: &std::path::Path, text: &str) {
+        self.log(
+            "prompt",
+            format!("override {} ({} bytes):", path.display(), text.len()),
+        );
+        for line in text.lines().take(40) {
+            self.log("prompt", line.to_string());
+        }
+    }
+}
+
+enum PromptOverrideText {
+    Missing,
+    Empty,
+    Present(String),
+}
+
+fn prompt_override_text(path: &std::path::Path) -> PromptOverrideText {
+    std::fs::read_to_string(path)
+        .map(prompt_override_text_from_string)
+        .unwrap_or(PromptOverrideText::Missing)
+}
+
+fn prompt_override_text_from_string(text: String) -> PromptOverrideText {
+    if text.trim().is_empty() {
+        PromptOverrideText::Empty
+    } else {
+        PromptOverrideText::Present(text)
     }
 }

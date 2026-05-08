@@ -80,25 +80,29 @@ impl FindingStore {
         )?;
         let mut rows = stmt.query(params![finding_id])?;
         if let Some(row) = rows.next()? {
-            let notes_json: String = row.get(8)?;
-            let notes: Vec<String> = serde_json::from_str(&notes_json).unwrap_or_default();
-            let proof_verdict_str: String = row.get(1)?;
-            let backend_str: String = row.get(2)?;
-            return Ok(Some(PersistedVerification {
-                proof_level: row.get::<_, i64>(0)? as u8,
-                proof_verdict: PersistedProofVerdict::from_str(&proof_verdict_str)
-                    .unwrap_or(PersistedProofVerdict::NotReproduced),
-                backend: PersistedSandboxBackend::from_str(&backend_str)
-                    .unwrap_or(PersistedSandboxBackend::Plain),
-                language: row.get::<_, Option<String>>(3)?,
-                harness_path: row.get::<_, Option<String>>(4)?,
-                crash_evidence: row.get::<_, Option<String>>(5)?,
-                duration_ms: row.get::<_, i64>(6)? as u64,
-                cost_usd: row.get(7)?,
-                notes,
-                created_at: row.get(9)?,
-            }));
+            return latest_verification_from_row(row).map(Some);
         }
         Ok(None)
     }
+}
+
+fn latest_verification_from_row(row: &rusqlite::Row<'_>) -> Result<PersistedVerification> {
+    let notes_json: String = row.get(8)?;
+    let notes: Vec<String> = serde_json::from_str(&notes_json).unwrap_or_default();
+    let proof_verdict_str: String = row.get(1)?;
+    let backend_str: String = row.get(2)?;
+    Ok(PersistedVerification {
+        proof_level: row.get::<_, i64>(0)? as u8,
+        proof_verdict: PersistedProofVerdict::from_str(&proof_verdict_str)
+            .unwrap_or(PersistedProofVerdict::NotReproduced),
+        backend: PersistedSandboxBackend::from_str(&backend_str)
+            .unwrap_or(PersistedSandboxBackend::Plain),
+        language: row.get::<_, Option<String>>(3)?,
+        harness_path: row.get::<_, Option<String>>(4)?,
+        crash_evidence: row.get::<_, Option<String>>(5)?,
+        duration_ms: row.get::<_, i64>(6)? as u64,
+        cost_usd: row.get(7)?,
+        notes,
+        created_at: row.get(9)?,
+    })
 }

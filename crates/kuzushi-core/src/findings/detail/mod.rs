@@ -1,14 +1,13 @@
-pub(in crate::findings) use super::prelude::*;
 pub(in crate::findings) use super::*;
 
-mod siblings;
-pub(crate) use siblings::*;
-mod items_1;
-mod items_3;
-mod items_4;
-mod new;
-mod prelude;
+pub(in crate::findings) use proof_ladder::*;
+pub(in crate::findings) use proof_state_label::*;
+mod proof_ladder;
+mod proof_ladder_labels;
+mod proof_state_label;
+mod report_rendering;
+mod report_types;
 
-pub use items_1::{FindingDetailReport, FindingNextAction, ProofLadderState};
-pub use items_3::{proof_state_label, runtime_validation_label};
-pub use items_4::proof_ladder_state;
+pub use proof_ladder::proof_ladder_state;
+pub use proof_state_label::{proof_state_label, runtime_validation_label};
+pub use report_types::{FindingDetailReport, FindingNextAction, ProofLadderState};

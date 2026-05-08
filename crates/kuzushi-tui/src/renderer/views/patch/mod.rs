@@ -1,9 +1,9 @@
-pub(in crate::renderer) use super::prelude::*;
+use super::*;
 pub(in crate::renderer) use super::*;
 
-mod siblings;
-pub(crate) use siblings::*;
-mod items_2;
+pub(in crate::renderer) use patch_diff_summary::*;
+pub(in crate::renderer) use patch_lines::*;
+mod patch_diff_summary;
 /// Tally `+` / `-` line counts and `+++` file headers in a unified diff.
 
 /// Render a unified diff into styled `Line`s matching

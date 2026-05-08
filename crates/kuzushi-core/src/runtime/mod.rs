@@ -49,34 +49,37 @@
 /// Drive a tool-augmented loop to completion (or `max_steps`). The driver
 /// is the canonical loop body — runtime impls only handle one step at a
 /// time, so they don't need to know about `ToolBox` or history shape.
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
-mod items_1;
-mod items_2;
-mod items_3;
-mod items_4;
+use crate::findings::{Finding, TriageOutcome};
+use anyhow::{Context, Result};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+mod agent_query_contract;
+mod query_blocking;
+mod response_and_role_types;
+mod run;
 mod run_tool_loop;
 #[cfg(test)]
 mod tests;
 
-pub use items_1::append_structured_output_contract;
-pub use items_1::AgentQueryRequest;
-pub use items_1::AgentStructuredOutput;
-pub use items_1::AgentToolPolicy;
-pub use items_1::TriageRequest;
-pub use items_2::AgentQueryResponse;
-pub use items_2::ModelTier;
-pub use items_2::SubagentRole;
-pub use items_3::AgentLoopStep;
-pub use items_3::AgentTool;
-pub use items_3::AgentToolLoopRequest;
-pub use items_3::ToolBox;
-pub use items_3::ToolCall;
-pub use items_3::ToolCallHandler;
-pub use items_3::ToolResult;
-pub use items_4::AgentLoopOutcome;
-pub use items_4::AgentRuntime;
-pub use items_4::LoopHistoryEntry;
+pub use agent_query_contract::append_structured_output_contract;
+pub use agent_query_contract::AgentQueryRequest;
+pub use agent_query_contract::AgentStructuredOutput;
+pub use agent_query_contract::AgentToolPolicy;
+pub use agent_query_contract::TriageRequest;
+pub use query_blocking::AgentLoopOutcome;
+pub use query_blocking::AgentRuntime;
+pub use query_blocking::LoopHistoryEntry;
+pub use response_and_role_types::AgentQueryResponse;
+pub use response_and_role_types::ModelTier;
+pub use response_and_role_types::SubagentRole;
+pub use run::AgentLoopStep;
+pub use run::AgentTool;
+pub use run::AgentToolLoopRequest;
+pub use run::ToolBox;
+pub use run::ToolCall;
+pub use run::ToolCallHandler;
+pub use run::ToolResult;
 pub use run_tool_loop::run_tool_loop;

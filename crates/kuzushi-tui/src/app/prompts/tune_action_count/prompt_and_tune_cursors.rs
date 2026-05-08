@@ -49,18 +49,20 @@ impl ShellApp {
         let Some(name) = self.current_prompt_verb_name() else {
             return;
         };
-        match action {
-            PromptsAction::Show => self.handle_prompt_verb(&format!("show {name}")),
-            PromptsAction::Edit => self.handle_prompt_verb(&format!("edit {name}")),
-            PromptsAction::Diff => self.handle_prompt_verb(&format!("diff {name}")),
-            PromptsAction::Reset => self.handle_prompt_verb(&format!("reset {name}")),
-            PromptsAction::Set => {
-                let prefill = format!("set {name} \"\"");
-                self.cursor = prefill.chars().count() - 1;
-                self.input = prefill;
-                self.history_index = None;
-            }
+        if action == PromptsAction::Set {
+            self.prefill_prompt_set_action(name);
+            return;
         }
+        if let Some(command) = prompt_action_command(action, name) {
+            self.handle_prompt_verb(&command);
+        }
+    }
+
+    fn prefill_prompt_set_action(&mut self, name: &str) {
+        let prefill = format!("set {name} \"\"");
+        self.cursor = prefill.chars().count() - 1;
+        self.input = prefill;
+        self.history_index = None;
     }
 
     pub fn move_tune_cursor(&mut self, delta: i32) {
@@ -89,3 +91,16 @@ impl ShellApp {
         }
     }
 }
+
+fn prompt_action_command(action: PromptsAction, name: &str) -> Option<String> {
+    PROMPT_ACTION_PREFIXES
+        .iter()
+        .find_map(|(candidate, prefix)| (*candidate == action).then(|| format!("{prefix} {name}")))
+}
+
+const PROMPT_ACTION_PREFIXES: &[(PromptsAction, &str)] = &[
+    (PromptsAction::Show, "show"),
+    (PromptsAction::Edit, "edit"),
+    (PromptsAction::Diff, "diff"),
+    (PromptsAction::Reset, "reset"),
+];

@@ -1,8 +1,6 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use serde_json::json;
-
     #[test]
     fn detects_curated_secret_shapes_and_redacts_evidence() {
         let temp = tempfile::tempdir().unwrap();

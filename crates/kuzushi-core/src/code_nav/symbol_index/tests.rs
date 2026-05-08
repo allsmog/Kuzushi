@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
+    use super::super::read_definition::classification::classify_hit;
     use super::super::*;
+    use std::{fs, path::Path};
     use tempfile::tempdir;
 
     fn write(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {

@@ -1,6 +1,9 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use kuzushi_mcp_common::doctor::which;
+    use kuzushi_mcp_common::tool::ToolHandler;
+    use serde_json::{json, Value};
 
     #[test]
     fn registry_includes_all_planned_tools() {

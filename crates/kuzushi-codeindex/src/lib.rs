@@ -5,17 +5,15 @@
 pub mod client;
 pub mod router;
 
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
-mod indexfacade;
-mod items_2;
-mod new;
+mod backend_calls;
+mod index_facade;
 #[cfg(test)]
 mod tests;
 
+pub use backend_calls::FilePosition;
 pub use client::{ClientError, McpClient};
-pub use indexfacade::IndexFacade;
-pub use items_2::FilePosition;
+pub use index_facade::IndexFacade;
 pub use router::{Backend, BackendCapability, Query, RoutingTable};
+
+#[cfg(test)]
+pub(crate) use backend_calls::{callees_call, callers_call, definition_call, symbol_matches};

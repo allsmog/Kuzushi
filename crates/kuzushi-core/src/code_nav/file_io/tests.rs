@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use std::{fs, path::Path};
     use tempfile::tempdir;
 
     fn write_lines(dir: &Path, name: &str, n: usize) -> std::path::PathBuf {

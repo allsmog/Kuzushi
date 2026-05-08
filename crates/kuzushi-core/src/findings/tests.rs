@@ -2,6 +2,7 @@
 mod tests {
     use super::super::*;
     use serde_json::json;
+    use std::path::Path;
 
     #[test]
     fn extract_cwe_finds_first_cwe_in_message() {

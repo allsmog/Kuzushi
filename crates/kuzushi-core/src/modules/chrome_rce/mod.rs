@@ -1,12 +1,14 @@
-use super::prelude::*;
 use super::*;
 
-mod siblings;
-pub(in crate::modules) use siblings::*;
-mod items_1;
-mod items_2;
-mod items_3;
-mod prelude;
+pub(in crate::modules) use changed_files::*;
+pub(in crate::modules) use collect_findings::*;
+mod changed_files;
+mod collect_findings;
+mod module;
+use crate::findings::{Finding, Severity};
+use std::fs;
+use std::path::Path;
+use std::process::Command;
 #[cfg(test)]
 mod tests;
-pub(in crate::modules) use items_1::{execute_tool, module};
+pub(in crate::modules) use module::{execute_tool, module};

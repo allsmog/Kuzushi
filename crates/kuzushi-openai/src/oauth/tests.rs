@@ -1,6 +1,9 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use kuzushi_core::AnthropicOauthConfig;
+    use std::fs;
+    use std::path::{Path, PathBuf};
     use tempfile::tempdir;
 
     fn write_file(dir: &Path, name: &str, body: &str) -> PathBuf {

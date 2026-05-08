@@ -1,5 +1,3 @@
-use super::*;
-
 pub(in crate::modules::taint_iris_next) fn normalize_taint_next_language(value: &str) -> String {
     match value.trim().to_ascii_lowercase().as_str() {
         "js" | "javascript" => "javascript",

@@ -53,24 +53,42 @@ pub(crate) fn fit_prompt(prompt: &str, max_columns: usize) -> String {
     if prompt.chars().count() <= max_columns {
         return prompt.to_string();
     }
-    if max_columns <= 4 {
-        return prompt.chars().take(max_columns).collect();
-    }
+    fit_truncated_prompt(prompt, max_columns)
+}
 
-    let suffix = if prompt.ends_with("> ") { "> " } else { "" };
-    let suffix_width = suffix.chars().count();
-    let body_columns = max_columns.saturating_sub(suffix_width);
-    if body_columns <= 3 {
+fn fit_truncated_prompt(prompt: &str, max_columns: usize) -> String {
+    let suffix = prompt_truncation_suffix(prompt);
+    let Some(body_columns) = prompt_body_columns(max_columns, suffix) else {
         return prompt.chars().take(max_columns).collect();
-    }
+    };
     format!(
         "{}...{}",
-        prompt
-            .chars()
-            .take(body_columns.saturating_sub(3))
-            .collect::<String>(),
+        truncated_prompt_body(prompt, body_columns),
         suffix
     )
+}
+
+fn prompt_truncation_suffix(prompt: &str) -> &str {
+    if prompt.ends_with("> ") {
+        "> "
+    } else {
+        ""
+    }
+}
+
+fn prompt_body_columns(max_columns: usize, suffix: &str) -> Option<usize> {
+    if max_columns <= 4 {
+        return None;
+    }
+    let body_columns = max_columns.saturating_sub(suffix.chars().count());
+    (body_columns > 3).then_some(body_columns)
+}
+
+fn truncated_prompt_body(prompt: &str, body_columns: usize) -> String {
+    prompt
+        .chars()
+        .take(body_columns.saturating_sub(3))
+        .collect()
 }
 
 pub(crate) fn prompt_window_start(line_len: usize, cursor_index: usize, width: usize) -> usize {

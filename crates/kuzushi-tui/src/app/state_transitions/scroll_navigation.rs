@@ -1,3 +1,4 @@
+use super::page_scroll::{page_scroll_kind, PageScrollKind};
 use super::*;
 
 impl ShellApp {
@@ -42,44 +43,68 @@ impl ShellApp {
 
     pub(super) fn page_down_current_view(&mut self) {
         let step = VIEWPORT_PAGE_LINES;
-        match self.shell_view {
-            ShellView::Findings => {
-                if !self.findings.is_empty() {
-                    self.findings_cursor = (self.findings_cursor + FINDINGS_PAGE_ROWS)
-                        .min(self.findings.len().saturating_sub(1));
-                }
-            }
-            ShellView::Help | ShellView::Quickstart => {
-                self.help_scroll = self.help_scroll.saturating_add(step);
-            }
-            ShellView::Tools => self.tools_scroll = self.tools_scroll.saturating_add(step),
-            ShellView::History => self.history_scroll = self.history_scroll.saturating_add(step),
-            ShellView::KnowledgeBase => self.kb_scroll = self.kb_scroll.saturating_add(step),
-            ShellView::Catalog if self.catalog_expanded => {
-                self.modules_scroll = self.modules_scroll.saturating_add(step);
-            }
-            _ if self.is_scrollable_view() => self.scroll_down(step as u16),
-            _ => {}
+        if self.page_findings_down() {
+            return;
+        }
+        if let Some(kind) = page_scroll_kind(&self.shell_view, self.catalog_expanded) {
+            self.add_page_scroll(kind, step);
+            return;
+        }
+        if self.is_scrollable_view() {
+            self.scroll_down(step as u16);
         }
     }
 
     pub(super) fn page_up_current_view(&mut self) {
         let step = VIEWPORT_PAGE_LINES;
-        match self.shell_view {
-            ShellView::Findings => {
-                self.findings_cursor = self.findings_cursor.saturating_sub(FINDINGS_PAGE_ROWS);
-            }
-            ShellView::Help | ShellView::Quickstart => {
-                self.help_scroll = self.help_scroll.saturating_sub(step);
-            }
-            ShellView::Tools => self.tools_scroll = self.tools_scroll.saturating_sub(step),
-            ShellView::History => self.history_scroll = self.history_scroll.saturating_sub(step),
-            ShellView::KnowledgeBase => self.kb_scroll = self.kb_scroll.saturating_sub(step),
-            ShellView::Catalog if self.catalog_expanded => {
-                self.modules_scroll = self.modules_scroll.saturating_sub(step);
-            }
-            _ if self.is_scrollable_view() => self.scroll_up(step as u16),
-            _ => {}
+        if self.page_findings_up() {
+            return;
+        }
+        if let Some(kind) = page_scroll_kind(&self.shell_view, self.catalog_expanded) {
+            self.subtract_page_scroll(kind, step);
+            return;
+        }
+        if self.is_scrollable_view() {
+            self.scroll_up(step as u16);
+        }
+    }
+
+    fn page_findings_down(&mut self) -> bool {
+        if self.shell_view != ShellView::Findings {
+            return false;
+        }
+        if !self.findings.is_empty() {
+            self.findings_cursor = (self.findings_cursor + FINDINGS_PAGE_ROWS)
+                .min(self.findings.len().saturating_sub(1));
+        }
+        true
+    }
+
+    fn page_findings_up(&mut self) -> bool {
+        if self.shell_view != ShellView::Findings {
+            return false;
+        }
+        self.findings_cursor = self.findings_cursor.saturating_sub(FINDINGS_PAGE_ROWS);
+        true
+    }
+
+    fn add_page_scroll(&mut self, kind: PageScrollKind, step: usize) {
+        let scroll = self.page_scroll_mut(kind);
+        *scroll = scroll.saturating_add(step);
+    }
+
+    fn subtract_page_scroll(&mut self, kind: PageScrollKind, step: usize) {
+        let scroll = self.page_scroll_mut(kind);
+        *scroll = scroll.saturating_sub(step);
+    }
+
+    fn page_scroll_mut(&mut self, kind: PageScrollKind) -> &mut usize {
+        match kind {
+            PageScrollKind::Help => &mut self.help_scroll,
+            PageScrollKind::Tools => &mut self.tools_scroll,
+            PageScrollKind::History => &mut self.history_scroll,
+            PageScrollKind::KnowledgeBase => &mut self.kb_scroll,
+            PageScrollKind::Modules => &mut self.modules_scroll,
         }
     }
 

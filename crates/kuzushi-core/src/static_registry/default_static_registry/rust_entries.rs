@@ -1,0 +1,48 @@
+use super::*;
+
+pub(crate) const RUST_REGISTRY_ENTRIES: &[StaticRegistryEntry] = &[
+    StaticRegistryEntry {
+        id: "rust.source-std-env-args",
+        version: STATIC_REGISTRY_VERSION,
+        language: "Rust",
+        framework: None,
+        kind: StaticRegistryKind::Source,
+        pattern_kind: StaticRegistryPatternKind::TextContains,
+        pattern: "std::env::args",
+        cwe: &["CWE-20"],
+        rationale: "CLI arguments are externally controlled process input.",
+    },
+    StaticRegistryEntry {
+        id: "rust.sink-process-command",
+        version: STATIC_REGISTRY_VERSION,
+        language: "Rust",
+        framework: None,
+        kind: StaticRegistryKind::Sink,
+        pattern_kind: StaticRegistryPatternKind::TextContains,
+        pattern: "std::process::Command",
+        cwe: &["CWE-78"],
+        rationale: "Process command construction is security-sensitive when arguments include untrusted data.",
+    },
+    StaticRegistryEntry {
+        id: "rust.sanitizer-ammonia-clean",
+        version: STATIC_REGISTRY_VERSION,
+        language: "Rust",
+        framework: None,
+        kind: StaticRegistryKind::Sanitizer,
+        pattern_kind: StaticRegistryPatternKind::TextContains,
+        pattern: "ammonia::clean",
+        cwe: &["CWE-79"],
+        rationale: "ammonia HTML sanitization can neutralize markup when used at the correct output boundary.",
+    },
+    StaticRegistryEntry {
+        id: "rust.guard-require-user",
+        version: STATIC_REGISTRY_VERSION,
+        language: "Rust",
+        framework: None,
+        kind: StaticRegistryKind::Guard,
+        pattern_kind: StaticRegistryPatternKind::TextContains,
+        pattern: "require_user",
+        cwe: &["CWE-862"],
+        rationale: "Explicit user guards can gate privileged handlers.",
+    },
+];

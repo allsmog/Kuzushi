@@ -1,4 +1,3 @@
-use super::prelude::*;
 use super::*;
 
 pub(crate) fn analyze_package_json(file_path: &Path, raw: &str) -> Vec<DepHygieneFinding> {

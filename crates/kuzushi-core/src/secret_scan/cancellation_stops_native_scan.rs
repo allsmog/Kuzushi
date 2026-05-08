@@ -1,5 +1,6 @@
-use super::prelude::*;
 use super::*;
+use crate::ScanCancellation;
+use std::fs;
 
 #[test]
 pub(crate) fn cancellation_stops_native_scan() {

@@ -1,4 +1,3 @@
-use super::prelude::*;
 use super::*;
 
 pub(in crate::modules) fn run_pipeline_task_selector(
@@ -71,7 +70,7 @@ mod tests {
 
         assert!(!registry
             .modules()
-            .any(|module| module.metadata().id == "pipeline"));
+            .any(|registered_module| registered_module.metadata().id == "pipeline"));
         let selector = registry
             .execute_tool(
                 "pipeline:task-selector",

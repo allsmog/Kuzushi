@@ -1144,16 +1144,12 @@ OUT
         let result = registry
             .execute_tool("catalog:modules", Value::Null, &ctx)
             .unwrap();
-        assert!(result
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|module| { module.get("id").and_then(Value::as_str) == Some("semgrep") }));
-        assert!(!result
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|module| { module.get("id").and_then(Value::as_str) == Some("context-lite") }));
+        assert!(result.as_array().unwrap().iter().any(|catalog_entry| {
+            catalog_entry.get("id").and_then(Value::as_str) == Some("semgrep")
+        }));
+        assert!(!result.as_array().unwrap().iter().any(|catalog_entry| {
+            catalog_entry.get("id").and_then(Value::as_str) == Some("context-lite")
+        }));
     }
 
     #[test]

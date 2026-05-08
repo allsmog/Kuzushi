@@ -1,4 +1,3 @@
-use super::prelude::*;
 use super::*;
 
 pub(crate) fn inspect_go_line(

@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use kuzushi_mcp_common::tool::ToolHandler;
+    use serde_json::json;
 
     #[tokio::test]
     async fn registry_includes_all_seven_tools() {

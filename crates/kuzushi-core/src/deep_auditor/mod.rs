@@ -20,22 +20,32 @@
 /// Persist evidence citations into the optional `findings_evidence`
 /// table. Best-effort — failures log but don't propagate, since the
 /// audit verdict itself is the primary artefact.
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
-mod items_1;
-mod items_2;
-mod items_3;
-mod items_4;
+use crate::agent_router::{AgentRole, RoutedRuntime};
+use crate::code_nav::{code_nav_tool_specs, code_nav_toolbox, CodeNavConfig};
+use crate::findings::{Finding, TriageOutcome, TriageVerdict};
+use crate::runtime::{
+    run_tool_loop, AgentLoopOutcome, AgentRuntime, AgentToolLoopRequest, LoopHistoryEntry,
+};
+use crate::spend::{Operation, SpendLimiter};
+use anyhow::{Context, Result};
+pub(crate) use build_triage_outcome::*;
+pub(crate) use deep_audit_contract::*;
+pub(crate) use parse_vuln_analysis::*;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::path::Path;
+mod build_triage_outcome;
+mod deep_audit_contract;
+mod parse_vuln_analysis;
+mod run_deep_auditor;
 #[cfg(test)]
 mod tests;
 
-pub use items_1::DeepAuditConfig;
-pub use items_1::DeepAuditOutcome;
-pub use items_1::EvidenceCitation;
-pub use items_1::VulnAnalysis;
-pub use items_1::DEFAULT_DEPOSIT_USD;
-pub use items_1::DEFAULT_MAX_STEPS;
-pub use items_2::run_deep_auditor;
-pub use items_4::save_evidence;
+pub use build_triage_outcome::save_evidence;
+pub use deep_audit_contract::DeepAuditConfig;
+pub use deep_audit_contract::DeepAuditOutcome;
+pub use deep_audit_contract::EvidenceCitation;
+pub use deep_audit_contract::VulnAnalysis;
+pub use deep_audit_contract::DEFAULT_DEPOSIT_USD;
+pub use deep_audit_contract::DEFAULT_MAX_STEPS;
+pub use run_deep_auditor::run_deep_auditor;

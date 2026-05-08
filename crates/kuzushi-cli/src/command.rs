@@ -1,5 +1,12 @@
-use super::prelude::*;
-use super::*;
+use clap::Subcommand;
+use std::path::PathBuf;
+
+mod pr_comment_args;
+mod subcommands;
+pub(crate) use pr_comment_args::PrCommentArgs;
+pub(crate) use subcommands::{
+    AuthCommand, ConfigCommand, McpBackend, McpCommand, RunsCommand, ScanModeArg,
+};
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
@@ -139,23 +146,5 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: McpCommand,
     },
-    /// Render a markdown PR comment summarising persisted findings.
-    PrComment {
-        #[arg(long)]
-        target: Option<PathBuf>,
-        #[arg(long)]
-        repo: Option<String>,
-        #[arg(long)]
-        run_url: Option<String>,
-        #[arg(long, default_value_t = 10)]
-        top_n: usize,
-        #[arg(long, value_delimiter = ',')]
-        changed_files: Vec<String>,
-        #[arg(long)]
-        run_id: Option<String>,
-        #[arg(long)]
-        model: Option<String>,
-        #[arg(long)]
-        git_sha: Option<String>,
-    },
+    PrComment(PrCommentArgs),
 }

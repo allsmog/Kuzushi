@@ -1,4 +1,3 @@
-use super::prelude::*;
 use super::*;
 
 pub(crate) fn module_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {

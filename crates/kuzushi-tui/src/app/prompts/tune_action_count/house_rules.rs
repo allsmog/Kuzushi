@@ -38,14 +38,16 @@ impl ShellApp {
     }
 
     pub(crate) fn tune_show(&mut self) {
-        match self.read_house_rules() {
-            Some(text) if !text.trim().is_empty() => {
-                self.log("tune", "house rules:".to_string());
-                for line in text.lines().take(40) {
-                    self.log("tune", line.to_string());
-                }
-            }
-            _ => self.log("tune", "no house rules set"),
+        match non_empty_house_rules(self.read_house_rules()) {
+            Some(text) => self.log_house_rules(&text),
+            None => self.log("tune", "no house rules set"),
+        }
+    }
+
+    fn log_house_rules(&mut self, text: &str) {
+        self.log("tune", "house rules:".to_string());
+        for line in text.lines().take(40) {
+            self.log("tune", line.to_string());
         }
     }
 
@@ -106,4 +108,8 @@ impl ShellApp {
             ),
         }
     }
+}
+
+fn non_empty_house_rules(text: Option<String>) -> Option<String> {
+    text.filter(|value| !value.trim().is_empty())
 }

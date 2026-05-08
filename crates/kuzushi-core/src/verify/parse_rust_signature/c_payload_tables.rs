@@ -1,5 +1,3 @@
-use super::*;
-
 pub(in crate::verify) const C_SINGLE_ARG_PAYLOADS: &[(&[&str], &str)] = &[
     (
         &[

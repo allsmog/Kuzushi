@@ -2,6 +2,7 @@
 mod tests {
     use super::super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn cap_limits_in_flight_to_configured_value() {

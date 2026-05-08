@@ -28,48 +28,55 @@
 
 /// Merge two `VulnSource` values: keep the existing if both are set,
 /// since tool merging already records the new channel via the tool list.
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
+use anyhow::{Context, Result};
+pub(in crate::findings) use now_isoish::*;
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
+pub(in crate::findings) use store_rows::*;
 mod detail;
 mod reporting;
 
-mod items_1;
-mod items_2;
-mod items_3;
-mod items_4;
-mod items_5;
-mod items_6;
-mod items_7;
+mod extract_cwe;
+mod finding_record;
+mod finding_store;
+mod from_semgrep;
 mod now_isoish;
 mod open;
+mod patch_status;
+mod persisted_results;
+mod static_proof_state;
+mod store_rows;
 #[cfg(test)]
 mod tests;
+mod triage_outcome;
 
 pub use detail::{
     proof_ladder_state, proof_state_label, runtime_validation_label, FindingDetailReport,
     FindingNextAction, ProofLadderState,
 };
-pub use items_1::Severity;
-pub use items_1::VulnSource;
-pub use items_2::compute_dedup_key;
-pub use items_2::normalize_cwe;
-pub use items_2::Finding;
-pub use items_3::extract_cwe;
-pub use items_4::PatchStatus;
-pub use items_4::StaticProofState;
-pub use items_4::TriageOutcome;
-pub use items_5::PatchAttempt;
-pub use items_5::PatchResult;
-pub use items_5::PersistedProofVerdict;
-pub use items_5::PersistedVerification;
-pub use items_5::TriageVerdict;
-pub use items_6::FindingStore;
-pub use items_6::PersistedSandboxBackend;
-pub(in crate::findings) use items_7::merge_tool_list;
-pub(in crate::findings) use items_7::merge_vuln_source;
+pub use extract_cwe::extract_cwe;
+pub use finding_record::compute_dedup_key;
+pub use finding_record::normalize_cwe;
+pub use finding_record::Finding;
+pub use finding_store::FindingStore;
+pub use finding_store::PersistedSandboxBackend;
+pub use from_semgrep::Severity;
+pub use from_semgrep::VulnSource;
+pub use patch_status::PatchStatus;
+pub use persisted_results::PatchAttempt;
+pub use persisted_results::PatchResult;
+pub use persisted_results::PersistedProofVerdict;
+pub use persisted_results::PersistedVerification;
+pub use persisted_results::TriageVerdict;
 pub use reporting::{
     format_finding_alias, parse_finding_alias, resolve_finding_alias, sorted_finding_aliases,
     stable_finding_alias, FindingListFilter, FindingListReport, FindingVerdictFilter,
 };
+pub use static_proof_state::StaticProofState;
+pub(in crate::findings) use store_rows::merge_tool_list;
+pub(in crate::findings) use store_rows::merge_vuln_source;
+pub use triage_outcome::TriageOutcome;

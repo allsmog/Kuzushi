@@ -1,5 +1,3 @@
-use super::*;
-
 pub(in crate::verify) const RUST_SINGLE_ARG_PAYLOADS: &[(&[&str], &str)] = &[
     (&["&[u8]", "&Vec<u8>"], "&payload"),
     (&["Vec<u8>"], "payload.clone()"),

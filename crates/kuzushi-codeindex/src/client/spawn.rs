@@ -1,5 +1,15 @@
-use super::prelude::*;
-use super::*;
+use anyhow::{Context, Result};
+use serde_json::{json, Value};
+use std::process::Stdio;
+use std::sync::atomic::{AtomicI64, Ordering};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::Mutex;
+
+use super::{
+    ensure_server_line_read, json_line, json_rpc_request_body, parse_json_line,
+    response_result_for_id, tool_call_params, tool_call_result, write_json_line, McpClient,
+};
 
 impl McpClient {
     /// Spawn a server binary by name. Caller is responsible for ensuring
@@ -69,13 +79,12 @@ impl McpClient {
     }
 
     pub(crate) async fn read_response_for_id(&self, id: i64) -> Result<Value> {
-        loop {
-            if let Some(result) = self.read_response_candidate(id).await? {
-                return Ok(result);
-            }
-            // Notifications and responses to other ids are ignored; we
-            // serialise calls so this should be rare in practice.
+        if let Some(result) = self.read_response_candidate(id).await? {
+            return Ok(result);
         }
+        // Notifications and responses to other ids are ignored; we
+        // serialise calls so this should be rare in practice.
+        Box::pin(self.read_response_for_id(id)).await
     }
 
     pub(crate) async fn read_response_candidate(&self, id: i64) -> Result<Option<Value>> {

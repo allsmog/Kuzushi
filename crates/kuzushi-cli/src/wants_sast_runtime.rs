@@ -1,6 +1,3 @@
-use super::prelude::*;
-use super::*;
-
 pub(crate) fn wants_sast_runtime(input: &serde_json::Value) -> bool {
     let whitebox_static = kuzushi_core::whitebox_static_enabled(input).unwrap_or(false);
     let triage_runtime = input

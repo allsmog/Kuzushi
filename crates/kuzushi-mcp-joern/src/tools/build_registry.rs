@@ -1,4 +1,10 @@
-use super::*;
+use kuzushi_mcp_common::tool::{Tool, ToolRegistry};
+use serde_json::json;
+
+use super::tool_types::{
+    CalleesOfTool, CallersOfTool, CpgSizeTool, FfiBoundariesTool, HealthTool, MethodAtTool,
+    ParseTool, QueryTool, ReachingDefTool, TaintPathsTool, UnsafeBlocksTool,
+};
 
 pub fn build_registry() -> ToolRegistry {
     ToolRegistry::new()

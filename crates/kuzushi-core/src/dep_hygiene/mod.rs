@@ -10,27 +10,34 @@
 ///
 /// Public for testing and for any future direct-pipe callers (e.g. CI feeding
 /// pre-captured advisories into the findings store without re-running cargo).
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
+use crate::findings::{Finding, Severity};
+use crate::scan::{ScanCancellation, ScanEngine};
+pub(crate) use analyze_package_json::*;
+pub(crate) use analyze_pyproject_toml::*;
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+pub(crate) use textual_cvss_severity::*;
 mod analyze_package_json;
 mod analyze_pep508;
 mod analyze_pyproject_toml;
-mod items_1;
-mod items_2;
-mod items_3;
-mod items_4;
-pub use analyze_pep508::*;
+mod dep_hygiene_scanners;
+mod id;
+mod output;
+mod textual_cvss_severity;
+pub(in crate::dep_hygiene) use analyze_pep508::*;
 #[cfg(test)]
 mod tests;
 
-pub use items_1::DepHygieneFinding;
-pub use items_1::DepHygieneReport;
-pub use items_2::CargoAuditScanner;
-pub use items_2::DepHygieneScanner;
-pub use items_2::DepHygieneSeverity;
-pub use items_3::parse_cargo_audit_output;
-pub use items_4::analyze_manifest;
-pub use items_4::check_dependency_hygiene;
-pub use items_4::ManifestKind;
+pub use dep_hygiene_scanners::CargoAuditScanner;
+pub use dep_hygiene_scanners::DepHygieneScanner;
+pub use dep_hygiene_scanners::DepHygieneSeverity;
+pub use id::parse_cargo_audit_output;
+pub use output::DepHygieneFinding;
+pub use output::DepHygieneReport;
+pub use textual_cvss_severity::analyze_manifest;
+pub use textual_cvss_severity::check_dependency_hygiene;
+pub use textual_cvss_severity::ManifestKind;

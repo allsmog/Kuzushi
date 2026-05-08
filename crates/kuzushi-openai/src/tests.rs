@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use kuzushi_core::{Finding, RuntimeConfig, RuntimeKind, Severity};
+    use kuzushi_core::{
+        AgentRuntime, Finding, RuntimeConfig, RuntimeKind, Severity, TriageRequest,
+    };
 
     #[test]
     fn uses_configured_bridge_command() {

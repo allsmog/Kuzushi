@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use std::path::PathBuf;
 
     /// Known SHA-256 of the empty string — sanity check the hand-rolled hash.
     #[test]

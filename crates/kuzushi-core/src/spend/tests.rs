@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use std::collections::BTreeMap;
 
     fn fresh() -> SpendLimiter {
         SpendLimiter::open_in_memory().unwrap()

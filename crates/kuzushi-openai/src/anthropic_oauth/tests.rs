@@ -1,6 +1,12 @@
 #[cfg(test)]
 mod tests {
+    use super::super::response::{anthropic_model_for_tier, estimate_cost_usd};
     use super::super::*;
+    use kuzushi_core::{
+        AgentQueryRequest, AgentQueryResponse, AgentRuntime, ModelTier, TriageOutcome,
+        TriageRequest, TriageVerdict,
+    };
+    use serde_json::json;
 
     #[test]
     fn options_from_token_strips_whitespace() {

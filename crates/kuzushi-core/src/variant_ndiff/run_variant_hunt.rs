@@ -1,4 +1,3 @@
-use super::prelude::*;
 use super::*;
 
 pub fn run_variant_hunt(
@@ -32,24 +31,8 @@ pub fn run_variant_hunt(
             ),
         }));
     };
-    let Some(triage) = finding.triage.as_ref() else {
-        return Ok(json!({
-            "ok": false,
-            "output": format!(
-                "variant:hunt expects a confirmed TP; finding \"{}\" has no triage verdict. Run triage:run first.",
-                fingerprint
-            ),
-        }));
-    };
-    if triage.verdict != TriageVerdict::TruePositive {
-        return Ok(json!({
-            "ok": false,
-            "output": format!(
-                "variant:hunt expects a confirmed TP; finding \"{}\" has verdict \"{}\".",
-                fingerprint,
-                triage.verdict.as_str()
-            ),
-        }));
+    if let Some(response) = variant_hunt_subject_rejection(&fingerprint, &finding) {
+        return Ok(response);
     }
     let runtime = require_runtime("variant:hunt", runtime)?;
     let model = require_model("variant:hunt", &input, ctx)?;
@@ -96,4 +79,26 @@ pub fn run_variant_hunt(
         },
         "costUsd": 0.0,
     }))
+}
+
+fn variant_hunt_subject_rejection(fingerprint: &str, finding: &Finding) -> Option<Value> {
+    let Some(triage) = finding.triage.as_ref() else {
+        return Some(json!({
+            "ok": false,
+            "output": format!(
+                "variant:hunt expects a confirmed TP; finding \"{}\" has no triage verdict. Run triage:run first.",
+                fingerprint
+            ),
+        }));
+    };
+    (triage.verdict != TriageVerdict::TruePositive).then(|| {
+        json!({
+            "ok": false,
+            "output": format!(
+                "variant:hunt expects a confirmed TP; finding \"{}\" has verdict \"{}\".",
+                fingerprint,
+                triage.verdict.as_str()
+            ),
+        })
+    })
 }

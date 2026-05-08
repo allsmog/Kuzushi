@@ -1,4 +1,4 @@
-pub(crate) use super::prelude::*;
+use super::*;
 pub(crate) use super::*;
 
 /// Stable key for a `<tool> <target>` allowlist/denylist entry.
@@ -28,13 +28,14 @@ pub(crate) use super::*;
 ///      guardrail?, staged_at? }`
 /// All fields except `alias` + `rationale` + `diff` are optional —
 /// missing fields collapse to None / empty.
-mod siblings;
-pub(crate) use siblings::*;
-mod items_1;
-mod items_2;
-mod items_3;
-pub use items_1::ConfirmKind;
-pub use items_1::PendingConfirm;
-pub use items_1::PendingPatch;
-pub use items_2::confirm_gate_for_tool;
-pub use items_3::parse_pending_patch;
+pub(crate) use confirm_gate_for_tool::*;
+pub(crate) use contains_destructive_shell_fragment::*;
+pub(crate) use label::*;
+mod confirm_gate_for_tool;
+mod contains_destructive_shell_fragment;
+mod label;
+pub use confirm_gate_for_tool::confirm_gate_for_tool;
+pub use contains_destructive_shell_fragment::parse_pending_patch;
+pub use label::ConfirmKind;
+pub use label::PendingConfirm;
+pub use label::PendingPatch;

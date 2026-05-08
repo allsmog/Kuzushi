@@ -1,12 +1,9 @@
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
-mod items_1;
-mod items_3;
+mod protocol;
 mod spawn;
 #[cfg(test)]
 mod tests;
+mod types;
 
-pub use items_1::ClientError;
-pub use items_1::McpClient;
+pub use types::{ClientError, McpClient};
+
+pub(crate) use protocol::*;

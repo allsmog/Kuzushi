@@ -1,8 +1,10 @@
 pub(in crate::renderer) use super::*;
 
-mod siblings;
-pub(crate) use siblings::*;
-mod items_2;
+pub(in crate::renderer) use justify_prefer_right::*;
+pub(in crate::renderer) use keybindings::*;
+pub(in crate::renderer) use push_view_keybindings::*;
+pub(in crate::renderer) use render_status_footer::*;
+mod justify_prefer_right;
 mod keybindings;
 mod push_view_keybindings;
 /// Render the bottom keybind row to match `design/mockups/_shared.jsx::footer`:

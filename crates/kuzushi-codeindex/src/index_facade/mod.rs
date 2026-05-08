@@ -1,0 +1,26 @@
+use anyhow::Result;
+use kuzushi_mcp_common::schema::Symbol;
+use serde_json::Value;
+use std::path::Path;
+
+use crate::backend_calls::{
+    callees_call, callers_call, definition_call, log_backend_failure, references_call,
+    symbol_matches, BackendToolCall,
+};
+use crate::client::McpClient;
+use crate::router::{Backend, Query, RoutingTable};
+use crate::FilePosition;
+
+mod backend_routing;
+mod clang_queries;
+mod construction;
+mod joern_queries;
+mod symbol_queries;
+
+#[derive(Default)]
+pub struct IndexFacade {
+    pub gtags: Option<McpClient>,
+    pub clang: Option<McpClient>,
+    pub joern: Option<McpClient>,
+    pub(crate) routing: RoutingTable,
+}

@@ -1,4 +1,4 @@
-pub(in crate::renderer) use super::prelude::*;
+use super::*;
 pub(in crate::renderer) use super::*;
 
 /// Build the providers table for `auth_lines`.  Keeps the data source
@@ -13,18 +13,21 @@ pub(in crate::renderer) use super::*;
 /// Render a single 30-cell budget bar matching
 /// `design/mockups/cost.jsx::bar`.  Bar is severity-tinted by spend
 /// percentage (success < 85% < warn < 100% < danger).
-mod siblings;
-pub(crate) use siblings::*;
+pub(in crate::renderer) use auth_lines::*;
+pub(in crate::renderer) use auth_provider_rows::*;
+pub(in crate::renderer) use config_lines::*;
+pub(in crate::renderer) use cost_lines::*;
+pub(in crate::renderer) use model_auth_status::*;
+mod auth_lines;
+mod auth_provider_rows;
 mod config_lines;
-mod items_2;
-mod items_3;
-mod items_4;
-mod items_5;
+mod cost_lines;
+mod model_auth_status;
+pub(crate) use auth_lines::auth_lines;
+pub(crate) use auth_lines::AuthProviderRow;
+pub(crate) use auth_lines::AuthProviderState;
+pub(crate) use auth_provider_rows::auth_provider_line;
+pub(crate) use auth_provider_rows::auth_provider_rows;
 pub(crate) use config_lines::config_lines;
-pub(crate) use items_3::auth_lines;
-pub(crate) use items_3::AuthProviderRow;
-pub(crate) use items_3::AuthProviderState;
-pub(crate) use items_4::auth_provider_line;
-pub(crate) use items_4::auth_provider_rows;
-pub(crate) use items_5::cost_budget_bar;
-pub(crate) use items_5::cost_lines;
+pub(crate) use cost_lines::cost_budget_bar;
+pub(crate) use cost_lines::cost_lines;

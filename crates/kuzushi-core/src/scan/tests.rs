@@ -4,6 +4,8 @@ mod tests {
     use crate::static_evidence::{StaticEvidenceEdgeKind, StaticEvidenceNodeKind};
     use std::fs;
     use std::sync::Mutex;
+    use std::thread;
+    use std::time::Duration;
 
     static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
 

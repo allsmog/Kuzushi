@@ -1,4 +1,4 @@
-pub(in crate::renderer) use super::prelude::*;
+use super::*;
 pub(in crate::renderer) use super::*;
 
 /// Returns `(option-name, formatted-value)` for every tool-scoped
@@ -46,24 +46,28 @@ pub(in crate::renderer) use super::*;
 /// One-row streaming cursor block — a single styled cell at the end of the
 /// transcript that mirrors the design's `<span className="cursor">` from the
 /// running mockups (sast-running.jsx, carlini-running.jsx, agentic-sast-running.jsx).
-mod prelude;
-pub(in crate::renderer) use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
-mod items_1;
-mod items_2;
-mod items_3;
-mod items_4;
-mod items_5;
-mod items_6;
-mod items_7;
-mod items_8;
+use crate::app::SastTaskRow;
+pub(in crate::renderer) use append_findings_preview::*;
+pub(in crate::renderer) use append_progress_section::*;
+pub(in crate::renderer) use append_sast_pipeline_progress::*;
+pub(in crate::renderer) use carlini_snapshot_lines::*;
+pub(in crate::renderer) use from_app::*;
+pub(in crate::renderer) use module_lines::*;
+pub(in crate::renderer) use module_stored_options::*;
+pub(in crate::renderer) use recent_module_activity_lines::*;
+mod append_findings_preview;
+mod append_progress_section;
+mod append_sast_pipeline_progress;
+mod carlini_snapshot_lines;
+mod from_app;
 mod module_lines;
-pub(crate) use items_3::recent_module_activity_lines;
-pub(crate) use items_3::recon_snapshot_lines;
-pub(crate) use items_3::transcript_finding_line;
-pub(crate) use items_4::agentic_sast_snapshot_lines;
-pub(crate) use items_4::carlini_snapshot_lines;
-pub(crate) use items_5::module_run_lines;
-pub(crate) use items_8::streaming_cursor_line;
+mod module_stored_options;
+mod recent_module_activity_lines;
+pub(crate) use append_findings_preview::streaming_cursor_line;
+pub(crate) use carlini_snapshot_lines::agentic_sast_snapshot_lines;
+pub(crate) use carlini_snapshot_lines::carlini_snapshot_lines;
+pub(crate) use from_app::module_run_lines;
 pub(crate) use module_lines::module_lines;
+pub(crate) use recent_module_activity_lines::recent_module_activity_lines;
+pub(crate) use recent_module_activity_lines::recon_snapshot_lines;
+pub(crate) use recent_module_activity_lines::transcript_finding_line;

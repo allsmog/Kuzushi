@@ -1,4 +1,3 @@
-use super::prelude::*;
 use super::*;
 
 pub(super) fn normalize_dfd_type(kind: &str) -> &'static str {

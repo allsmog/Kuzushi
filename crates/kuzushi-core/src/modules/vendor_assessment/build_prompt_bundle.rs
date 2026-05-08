@@ -1,0 +1,83 @@
+use super::*;
+
+pub(in crate::modules) fn build_prompt_bundle(scope: &Value) -> Vec<(String, String)> {
+    let pretty_scope = serde_json::to_string_pretty(scope).unwrap_or_else(|_| "{}".to_string());
+    vec![
+        (
+            "overview.md".to_string(),
+            format!(
+                "Assess this vendor scope for enterprise security risk. Ground all conclusions in attached document text when present.\n\nScope:\n{pretty_scope}"
+            ),
+        ),
+        (
+            "evidence-review.md".to_string(),
+            "Extract concrete controls, gaps, integrations, data classes, and contractual commitments from the attached evidence.".to_string(),
+        ),
+        (
+            "follow-up-questions.md".to_string(),
+            "List high-signal follow-up questions for missing security evidence.".to_string(),
+        ),
+    ]
+}
+
+pub(in crate::modules) fn scope_has_text(scope: &Value) -> bool {
+    scope
+        .get("documents")
+        .and_then(Value::as_array)
+        .is_some_and(|documents| {
+            documents.iter().any(|doc| {
+                doc.get("text")
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| !text.trim().is_empty())
+            })
+        })
+}
+
+pub(in crate::modules) fn build_fallback_report(
+    run_id: &str,
+    scope: &Value,
+    run_root: &Path,
+    document_backed: bool,
+) -> Value {
+    let docs = scope
+        .get("documents")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    json!({
+        "runId": run_id,
+        "overallRisk": if document_backed { "needs-review" } else { "intake" },
+        "confidence": if document_backed { "medium" } else { "low" },
+        "summary": if document_backed {
+            "Assessment synthesized from attached vendor evidence."
+        } else {
+            "No parsed evidence was attached; collect documents before making a risk decision."
+        },
+        "documents": docs,
+        "domains": [],
+        "mitigations": [],
+        "artifacts": {
+            "scopePath": run_root.join("scope.json").display().to_string(),
+            "reportPath": run_root.join("report.md").display().to_string(),
+            "reportJsonPath": run_root.join("report.json").display().to_string(),
+            "promptsDir": run_root.join("prompts").display().to_string(),
+        },
+    })
+}
+
+pub(in crate::modules) fn merge_report_object(report: &mut Value, object: Map<String, Value>) {
+    if let Value::Object(report_object) = report {
+        for key in [
+            "overallRisk",
+            "confidence",
+            "summary",
+            "domains",
+            "mitigations",
+            "documents",
+        ] {
+            if let Some(value) = object.get(key).cloned() {
+                report_object.insert(key.to_string(), value);
+            }
+        }
+    }
+}

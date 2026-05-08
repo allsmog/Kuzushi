@@ -1,3 +1,6 @@
+use super::confirmation_keys::{confirm_key_action, ConfirmKeyAction};
+use super::control_keys::control_key_handler;
+use super::pending_plan_keys::pending_plan_key_handler;
 use super::*;
 
 impl ShellApp {
@@ -31,28 +34,22 @@ impl ShellApp {
     }
 
     pub(super) fn handle_confirm_key(&mut self, key: KeyEvent) -> bool {
-        if self.advisory.pending_confirm.is_none() || !key.modifiers.is_empty() {
+        if !self.confirm_key_ready(key) {
             return false;
         }
-        let KeyCode::Char(ch) = key.code else {
+        let Some(action) = confirm_key_action(key.code) else {
             return false;
         };
-        match ch {
-            'y' => {
-                self.resolve_confirm(true, false);
-            }
-            'Y' => {
-                self.resolve_confirm(true, true);
-            }
-            'n' => {
-                self.resolve_confirm(false, false);
-            }
-            'N' => {
-                self.resolve_confirm(false, true);
-            }
-            _ => return false,
-        }
+        self.apply_confirm_key_action(action);
         true
+    }
+
+    fn confirm_key_ready(&self, key: KeyEvent) -> bool {
+        self.advisory.pending_confirm.is_some() && key.modifiers.is_empty()
+    }
+
+    fn apply_confirm_key_action(&mut self, action: ConfirmKeyAction) {
+        self.resolve_confirm(action.outcome, action.remember);
     }
 
     pub(super) fn handle_budget_key(&mut self, key: KeyEvent) -> bool {
@@ -68,30 +65,6 @@ impl ShellApp {
             _ => return false,
         }
         true
-    }
-
-    pub(super) fn handle_pending_plan_key(&mut self, key: KeyEvent) -> bool {
-        if self.pending_plan.is_none() || !self.input.is_empty() || !key.modifiers.is_empty() {
-            return false;
-        }
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => self.apply_pending_plan(),
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.discard_pending_plan(),
-            KeyCode::Char(' ') => self.toggle_plan_change_skip(),
-            KeyCode::Char('j') | KeyCode::Down => self.move_plan_cursor(1),
-            KeyCode::Char('k') | KeyCode::Up => self.move_plan_cursor(-1),
-            KeyCode::Char('g') => self.plan_cursor = 0,
-            KeyCode::Char('G') => self.move_plan_cursor_to_end(),
-            _ => return false,
-        }
-        true
-    }
-
-    pub(super) fn move_plan_cursor_to_end(&mut self) {
-        let total = self.plan_change_count();
-        if total > 0 {
-            self.plan_cursor = total - 1;
-        }
     }
 
     pub(super) fn update_quit_chord_arm(&mut self, key: KeyEvent) {
@@ -124,21 +97,10 @@ impl ShellApp {
         if !modifiers.ctrl {
             return false;
         }
-        match key.code {
-            KeyCode::Char('c') | KeyCode::Char('d') => self.handle_quit_chord(),
-            KeyCode::Char('a') => self.move_cursor_home(),
-            KeyCode::Char('e') => self.move_cursor_end(),
-            KeyCode::Char('b') => self.move_cursor_left(),
-            KeyCode::Char('f') => self.move_cursor_right(),
-            KeyCode::Char('w') => self.delete_word_left(),
-            KeyCode::Char('u') => self.kill_to_start(),
-            KeyCode::Char('k') => self.kill_to_end(),
-            KeyCode::Char('h') => self.backspace(),
-            KeyCode::Char('p') => self.history_prev(),
-            KeyCode::Char('n') => self.history_next(),
-            KeyCode::Char('l') => self.clear_conversation_preserving_input(),
-            _ => return false,
-        }
+        let Some(handler) = control_key_handler(key.code) else {
+            return false;
+        };
+        handler(self);
         true
     }
 }

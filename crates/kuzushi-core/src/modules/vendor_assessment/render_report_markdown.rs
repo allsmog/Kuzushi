@@ -1,4 +1,3 @@
-use super::prelude::*;
 use super::*;
 
 pub(in crate::modules) fn render_report_markdown(report: &Value) -> String {

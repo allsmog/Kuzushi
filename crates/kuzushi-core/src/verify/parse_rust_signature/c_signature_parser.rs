@@ -18,30 +18,11 @@ pub(crate) struct CSignature {
 pub(crate) fn parse_c_signature(signature: &str) -> Option<CSignature> {
     let trimmed = signature.trim().trim_end_matches('{').trim();
     // Bail on obvious non-functions.
-    if trimmed.is_empty()
-        || trimmed.starts_with("//")
-        || trimmed.starts_with('#')
-        || trimmed.starts_with("/*")
-    {
+    if obvious_non_c_signature(trimmed) {
         return None;
     }
     let arg_open = trimmed.find('(')?;
-    let mut depth = 0_i32;
-    let mut arg_close = None;
-    for (i, ch) in trimmed[arg_open..].char_indices() {
-        match ch {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    arg_close = Some(arg_open + i);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    let arg_close = arg_close?;
+    let arg_close = matching_c_arg_close(trimmed, arg_open)?;
 
     // Extract return type + name from the head (everything up to
     // `arg_open`). We split on whitespace plus `*`/`&` and consider
@@ -72,6 +53,32 @@ pub(crate) fn parse_c_signature(signature: &str) -> Option<CSignature> {
         args,
         return_type,
     })
+}
+
+fn obvious_non_c_signature(trimmed: &str) -> bool {
+    trimmed.is_empty()
+        || trimmed.starts_with("//")
+        || trimmed.starts_with('#')
+        || trimmed.starts_with("/*")
+}
+
+fn matching_c_arg_close(trimmed: &str, arg_open: usize) -> Option<usize> {
+    let mut depth = 0_i32;
+    for (i, ch) in trimmed[arg_open..].char_indices() {
+        if close_c_arg_depth(&mut depth, ch) {
+            return Some(arg_open + i);
+        }
+    }
+    None
+}
+
+fn close_c_arg_depth(depth: &mut i32, ch: char) -> bool {
+    match ch {
+        '(' => *depth += 1,
+        ')' => *depth -= 1,
+        _ => {}
+    }
+    ch == ')' && *depth == 0
 }
 
 /// Split the head of a C function signature into `(return_type, name)`.

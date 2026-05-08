@@ -1,4 +1,4 @@
-pub(crate) use super::prelude::*;
+use super::*;
 pub(crate) use super::*;
 
 pub(super) fn short_label(text: &str, max: usize) -> String {

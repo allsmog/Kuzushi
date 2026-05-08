@@ -1,4 +1,3 @@
-use super::prelude::*;
 use super::*;
 use kuzushi_core::Severity;
 use ratatui::prelude::{Color, Modifier, Style};

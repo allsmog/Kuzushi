@@ -1,4 +1,5 @@
-use super::prelude::*;
+use super::actor_prompt_flows::append_actor_flows;
+use super::actor_prompt_threats::append_actor_threats;
 use super::*;
 
 pub(crate) fn build_actor_prompt(
@@ -8,24 +9,56 @@ pub(crate) fn build_actor_prompt(
     inventory: &[(String, String)],
     actor_fingerprint: &str,
 ) -> String {
-    let mut lines = vec![
-        format!(
-            "IMPORTANT: Only examine files under {}. Do not read, grep, or navigate outside this directory.",
-            target.display()
-        ),
-        String::new(),
-    ];
-    if let Some(block) = options
-        .attachments_block
-        .as_deref()
-        .filter(|block| !block.trim().is_empty())
-    {
+    let mut lines = actor_prompt_header(target, hunt, options, actor_fingerprint);
+    append_actor_flows(&mut lines, hunt);
+    append_actor_threats(&mut lines, hunt, options);
+    append_actor_mission(&mut lines, options);
+    append_actor_inventory(&mut lines, inventory);
+    lines.push("Return exactly one JSON object and no prose. Use {\"findings\":[]} when there are no concrete exploitable findings.".to_string());
+    lines.join("\n")
+}
+
+fn actor_prompt_header(
+    target: &Path,
+    hunt: &ActorHunt,
+    options: &CarliniInput,
+    actor_fingerprint: &str,
+) -> Vec<String> {
+    let mut lines = vec![actor_prompt_target_rule(target), String::new()];
+    append_actor_attachments(&mut lines, options);
+    append_actor_context(&mut lines, options);
+    lines.extend(actor_identity_lines(hunt, actor_fingerprint));
+    lines
+}
+
+fn actor_prompt_target_rule(target: &Path) -> String {
+    format!(
+        "IMPORTANT: Only examine files under {}. Do not read, grep, or navigate outside this directory.",
+        target.display()
+    )
+}
+
+fn append_actor_attachments(lines: &mut Vec<String>, options: &CarliniInput) {
+    if let Some(block) = non_empty_attachment_block(options) {
         lines.push(block.to_string());
         lines.push(String::new());
     }
+}
+
+fn non_empty_attachment_block(options: &CarliniInput) -> Option<&str> {
+    options
+        .attachments_block
+        .as_deref()
+        .filter(|block| !block.trim().is_empty())
+}
+
+fn append_actor_context(lines: &mut Vec<String>, options: &CarliniInput) {
     lines.push(options.kb_context.render_prompt_block());
     lines.push(String::new());
-    lines.extend([
+}
+
+fn actor_identity_lines(hunt: &ActorHunt, actor_fingerprint: &str) -> [String; 8] {
+    [
         format!(
             "You are performing an authorized CTF-style security assessment. You are simulating: {}",
             hunt.actor.name
@@ -37,67 +70,10 @@ pub(crate) fn build_actor_prompt(
         "Use the linked flows and threat leads to reason about actor reachability before reporting.".to_string(),
         String::new(),
         "Linked data flows from the graph threat model:".to_string(),
-    ]);
-    if hunt.flows.is_empty() {
-        lines.push("- (none linked)".to_string());
-    } else {
-        for flow in hunt.flows.iter().take(12) {
-            let details = [
-                flow.protocol
-                    .as_ref()
-                    .filter(|value| !value.is_empty())
-                    .map(|value| format!("protocol={value}")),
-                flow.data_classification
-                    .as_ref()
-                    .filter(|value| !value.is_empty())
-                    .map(|value| format!("classification={value}")),
-                (!flow.trust_boundary_ids.is_empty())
-                    .then(|| format!("crosses={}", flow.trust_boundary_ids.join(", "))),
-            ]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" ; ");
-            lines.push(format!(
-                "- {}: {} -> {} - {}{}",
-                flow.id,
-                flow.source_id,
-                flow.target_id,
-                flow.description,
-                if details.is_empty() {
-                    String::new()
-                } else {
-                    format!(" ({details})")
-                }
-            ));
-        }
-    }
-    if options.debug_inline_threats || options.prompt_context == "actor-flows-threat-titles" {
-        lines.push(String::new());
-        lines.push("Linked threat leads:".to_string());
-        if hunt.threats.is_empty() {
-            lines.push("- (none linked)".to_string());
-        }
-        for threat in hunt.threats.iter().take(20) {
-            let id = object_string_value(threat, &["id"]).unwrap_or_else(|| "unknown".to_string());
-            let impact =
-                object_string_value(threat, &["impact"]).unwrap_or_else(|| "medium".to_string());
-            let category =
-                object_string_value(threat, &["category"]).unwrap_or_else(|| "unknown".to_string());
-            let title = object_string_value(threat, &["title"]).unwrap_or_else(|| id.clone());
-            lines.push(format!(
-                "- {id}: [{}/{category}] {title}",
-                impact.to_ascii_uppercase()
-            ));
-            if options.debug_inline_threats {
-                if let Some(attack_vector) =
-                    object_string_value(threat, &["attackVector", "attack_vector"])
-                {
-                    lines.push(format!("  Attack vector: {attack_vector}"));
-                }
-            }
-        }
-    }
+    ]
+}
+
+fn append_actor_mission(lines: &mut Vec<String>, options: &CarliniInput) {
     lines.push(String::new());
     if let Some(override_prompt) = &options.prompt_override {
         lines.push(override_prompt.trim().to_string());
@@ -108,6 +84,9 @@ pub(crate) fn build_actor_prompt(
             "Only report findings with concrete evidence of exploitability.".to_string(),
         ]);
     }
+}
+
+fn append_actor_inventory(lines: &mut Vec<String>, inventory: &[(String, String)]) {
     lines.push(String::new());
     lines.push("Repository inventory and snippets:".to_string());
     if inventory.is_empty() {
@@ -117,6 +96,4 @@ pub(crate) fn build_actor_prompt(
         lines.push(format!("\n--- {path} ---\n{snippet}"));
     }
     lines.push(String::new());
-    lines.push("Return exactly one JSON object and no prose. Use {\"findings\":[]} when there are no concrete exploitable findings.".to_string());
-    lines.join("\n")
 }

@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use std::{env, fs};
 
     #[test]
     fn loads_defaults_without_files() {

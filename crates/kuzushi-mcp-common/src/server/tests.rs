@@ -1,9 +1,10 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use crate::tool::{Tool, ToolHandler};
+    use crate::tool::{Tool, ToolHandler, ToolRegistry};
     use anyhow::Result;
     use async_trait::async_trait;
+    use serde_json::{json, Value};
     use std::io::Cursor;
 
     struct EchoHandler;
