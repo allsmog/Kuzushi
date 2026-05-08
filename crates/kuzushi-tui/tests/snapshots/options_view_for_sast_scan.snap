@@ -6,7 +6,7 @@ mode:shell | target:none | catalog | 0 findings | 35 mods
 
  -- OPTIONS ------------------------------------------------------------------------------------------------------------
 tool: sast:scan
-view: standard
+view: options
 
 option            value         default     req      type    description                                                
 mode              -             standard    no       enum    Analysis mode or preset. Choices: standard|whitebox-static.

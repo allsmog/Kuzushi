@@ -1,0 +1,57 @@
+#[cfg(test)]
+mod tests {
+    use super::super::*;
+
+    #[test]
+    fn builds_visible_and_hidden_modules() {
+        let visible = builtin_module(
+            "demo",
+            "Demo",
+            ModuleKind::Defense,
+            "Visible module",
+            vec![tool("demo:run", "Run demo.")],
+            vec![dag("demo:run", "findings", &["context:build"])],
+        );
+        assert_eq!(visible.metadata().id, "demo");
+        assert!(!visible.is_hidden());
+        assert_eq!(visible.tools()[0].name, "demo:run");
+        assert_eq!(visible.dag_nodes()[0].depends_on, vec!["context:build"]);
+
+        let hidden = hidden_module(
+            "internal-demo",
+            "Internal Demo",
+            ModuleKind::Internal,
+            "Hidden module",
+            vec![],
+            vec![],
+        );
+        assert!(hidden.is_hidden());
+    }
+
+    #[test]
+    fn option_builders_set_contract_flags_without_exposing_mutation() {
+        let option = opt("mode", OptionType::Enum, "Mode.")
+            .required()
+            .advanced()
+            .evasion()
+            .default(json!("auto"))
+            .choices(&["auto", "manual"]);
+
+        assert_eq!(option.name, "mode");
+        assert!(option.required);
+        assert!(option.advanced);
+        assert!(option.evasion);
+        assert_eq!(option.default, Some(json!("auto")));
+        assert_eq!(option.choices, vec!["auto", "manual"]);
+    }
+
+    #[test]
+    fn common_option_helpers_keep_expected_names_and_types() {
+        assert_eq!(target_option().option_type, OptionType::Path);
+        assert_eq!(model_option().name, "model");
+        assert!(model_option().advanced);
+        assert_eq!(max_findings_option(7).default, Some(json!(7)));
+        assert!(fingerprint_option().required);
+        assert_eq!(binary_option("Binary path.").option_type, OptionType::Path);
+    }
+}
