@@ -81,6 +81,9 @@ impl RunSummary {
     }
 }
 
+// schema v2: adds module_id / verb / parent_step / severity / started_at_ms
+// for the live module-progress view. All new fields are optional so older
+// trace.jsonl files round-trip without rewrites.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct RunTraceStep {
@@ -91,4 +94,14 @@ pub struct RunTraceStep {
     pub latency_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verb: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_step: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at_ms: Option<u64>,
 }

@@ -58,7 +58,7 @@ pub(crate) fn runs_trace_output(trace_path: &Path, body: &str, json: bool) -> Re
         let steps = parse_trace_json_lines(trace_path, body)?;
         return Ok(format!("{}\n", serde_json::to_string_pretty(&steps)?));
     }
-    Ok(body.to_string())
+    Ok(runs_trace_plain(trace_path, body)?)
 }
 
 pub(crate) fn parse_trace_json_lines(
@@ -70,6 +70,62 @@ pub(crate) fn parse_trace_json_lines(
         .map(serde_json::from_str::<serde_json::Value>)
         .collect::<std::result::Result<Vec<_>, _>>()
         .with_context(|| format!("Could not parse {}", trace_path.display()))
+}
+
+pub(crate) fn runs_trace_plain(trace_path: &Path, body: &str) -> Result<String> {
+    let steps = parse_trace_json_lines(trace_path, body)?;
+    if steps.is_empty() {
+        return Ok(String::new());
+    }
+    let mut lines = Vec::with_capacity(steps.len());
+    for step in &steps {
+        lines.push(format_trace_step_row(step));
+    }
+    lines.push(String::new());
+    Ok(lines.join("\n"))
+}
+
+fn format_trace_step_row(step: &serde_json::Value) -> String {
+    let n = step.get("n").and_then(serde_json::Value::as_u64).unwrap_or(0);
+    let kind = step
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("step");
+    let label = step
+        .get("label")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("(no label)");
+    let module_verb = match (
+        step.get("module_id").and_then(serde_json::Value::as_str),
+        step.get("verb").and_then(serde_json::Value::as_str),
+    ) {
+        (Some(module), Some(verb)) => format!("[{module}:{verb}]"),
+        (Some(module), None) => format!("[{module}]"),
+        _ => "[-]".to_string(),
+    };
+    let parent = step
+        .get("parent_step")
+        .and_then(serde_json::Value::as_u64)
+        .map(|p| format!(" parent={p}"))
+        .unwrap_or_default();
+    let latency = step
+        .get("latency_ms")
+        .and_then(serde_json::Value::as_u64)
+        .map(|ms| format!(" {ms}ms"))
+        .unwrap_or_default();
+    let cost = step
+        .get("cost_usd")
+        .and_then(serde_json::Value::as_f64)
+        .map(|c| format!(" ${c:.4}"))
+        .unwrap_or_default();
+    let severity = step
+        .get("severity")
+        .and_then(serde_json::Value::as_str)
+        .map(|s| format!(" sev={s}"))
+        .unwrap_or_default();
+    format!(
+        "{n:>3}  {kind:<10}  {module_verb:<26}  {label}{parent}{latency}{cost}{severity}"
+    )
 }
 
 pub(crate) fn run_summary_plain(summary: &RunSummary) -> String {
