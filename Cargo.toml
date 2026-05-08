@@ -5,6 +5,7 @@ members = [
   "crates/kuzushi-core",
   "crates/kuzushi-eval",
   "crates/kuzushi-mcp-clang",
+  "crates/kuzushi-mcp-codeql",
   "crates/kuzushi-mcp-common",
   "crates/kuzushi-mcp-gtags",
   "crates/kuzushi-mcp-joern",
