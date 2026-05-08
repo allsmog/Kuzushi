@@ -22,6 +22,8 @@ mod log;
 mod options;
 #[path = "plan/implementation.inc"]
 mod plan;
+#[path = "prereq_chain/implementation.inc"]
+mod prereq_chain;
 #[path = "prompts/implementation.inc"]
 mod prompts;
 #[path = "runtime/implementation.inc"]
@@ -50,6 +52,7 @@ mod workspace_context;
 pub use agent_chat::AgentChatView;
 pub use agent_chat::ChatTurn;
 pub use approval::{ConfirmKind, PendingConfirm, PendingPatch};
+pub use prereq_chain::{PendingPrereqPrompt, PrereqChain};
 pub use log::LogLine;
 #[cfg(test)]
 use runtime::{mouse_capture_setting_enabled, render_plain_scripted_session};
@@ -142,6 +145,15 @@ pub struct ShellApp {
     pub ctrl_c_armed_at: Option<Instant>,
     pub session_budget_usd: Option<f64>,
     pub advisory: AdvisoryState,
+    /// Active multi-step prerequisite chain (e.g. context:build →
+    /// threat-model:build → carlini-threat-hunt:run).  Populated by
+    /// `run_tool` when the requested tool has prereqs and cleared once
+    /// the final tool dispatches.
+    pub pending_chain: Option<PrereqChain>,
+    /// Operator-facing reuse-or-regenerate prompt for an existing
+    /// prereq artifact.  Mutually exclusive with the dispatch
+    /// path: while this is `Some`, the chain is paused.
+    pub pending_prereq_prompt: Option<PendingPrereqPrompt>,
     pub pending_plan: Option<PlanProposal>,
     pub plan_cursor: usize,
     pub plan_skipped: BTreeSet<usize>,
@@ -227,6 +239,8 @@ impl ShellApp {
             ctrl_c_armed_at: None,
             session_budget_usd: parse_budget_env(),
             advisory: AdvisoryState::default(),
+            pending_chain: None,
+            pending_prereq_prompt: None,
             pending_plan: None,
             plan_cursor: 0,
             plan_skipped: BTreeSet::new(),

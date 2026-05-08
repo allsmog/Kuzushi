@@ -403,9 +403,30 @@ impl ShellApp {
     }
 
     fn handle_modal_key(&mut self, key: KeyEvent) -> bool {
-        self.handle_confirm_key(key)
+        self.handle_prereq_prompt_key(key)
+            || self.handle_confirm_key(key)
             || self.handle_budget_key(key)
             || self.handle_pending_plan_key(key)
+    }
+
+    fn handle_prereq_prompt_key(&mut self, key: KeyEvent) -> bool {
+        if self.pending_prereq_prompt.is_none() || !key.modifiers.is_empty() {
+            return false;
+        }
+        let KeyCode::Char(ch) = key.code else {
+            return false;
+        };
+        match ch {
+            'r' | 'R' | 'y' | 'Y' => {
+                self.resolve_prereq_prompt(true);
+                true
+            }
+            'g' | 'G' | 'n' | 'N' => {
+                self.resolve_prereq_prompt(false);
+                true
+            }
+            _ => false,
+        }
     }
 
     fn handle_confirm_key(&mut self, key: KeyEvent) -> bool {
