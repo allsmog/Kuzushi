@@ -7,6 +7,7 @@ impl ShellApp {
         changed |= self.drain_agent_events();
         changed |= self.drain_plan_events();
         changed |= self.drain_threat_events();
+        changed |= self.drain_trace_events();
         changed
     }
 
@@ -105,4 +106,47 @@ impl ShellApp {
         }
         changed
     }
+
+    pub(crate) fn drain_trace_events(&mut self) -> bool {
+        let mut steps = Vec::new();
+        if let Some(rx) = &self.trace_rx {
+            while let Ok(step) = rx.try_recv() {
+                steps.push(step);
+            }
+        }
+        let changed = !steps.is_empty();
+        if changed {
+            let session = self
+                .activity
+                .get_or_insert_with(|| ActivitySession::new(default_activity_run_id()));
+            for step in steps {
+                session.apply_step(step);
+            }
+        }
+        // Tear down the receiver only when the producer is gone AND the
+        // tool/scan that owned it has finished — otherwise a slow tick could
+        // drop the channel mid-run. We check both `tool_running` and the
+        // scan's running flag.
+        let scan_running = self.scan.as_ref().is_some_and(|scan| scan.running);
+        if !scan_running && self.tool_running.is_none() && steps_drained_recently_idle(self) {
+            self.trace_rx = None;
+        }
+        changed
+    }
+}
+
+fn default_activity_run_id() -> String {
+    format!(
+        "manual-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    )
+}
+
+fn steps_drained_recently_idle(_app: &ShellApp) -> bool {
+    // Simple policy: keep the receiver around only while a run is active. If
+    // we ever want to support detached late events we can extend this.
+    true
 }

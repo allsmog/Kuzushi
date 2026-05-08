@@ -18,6 +18,7 @@ mod tests {
             config,
             workspace: Some(workspace),
             findings_store: None,
+            trace: None,
         }
     }
 
@@ -287,6 +288,7 @@ HTTP
             config: &config,
             workspace: None,
             findings_store: None,
+            trace: None,
         };
         let error = execute_recon_tool(
             "recon:http-fingerprint",

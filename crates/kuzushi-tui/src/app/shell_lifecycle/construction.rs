@@ -85,6 +85,8 @@ impl ShellApp {
             agent_rx: None,
             plan_rx: None,
             threat_rx: None,
+            trace_rx: None,
+            activity: None,
         };
         app.log("system", "kuzushi shell");
         app.log("startup", app.startup_summary_line());

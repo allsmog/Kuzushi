@@ -111,6 +111,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
         let options = CarliniInput::from_tool_input(&json!({}), &ctx, workspace.root()).unwrap();
         let prompt = build_actor_prompt(

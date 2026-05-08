@@ -62,6 +62,25 @@ impl ModuleRegistry {
         ctx: &ToolExecutionContext<'_>,
         runtime: Option<&dyn AgentRuntime>,
     ) -> Result<Value> {
+        // Stamp the trace handle with the module id derived from the tool name
+        // so producers don't need to thread it themselves. `ctx.trace` is None
+        // in non-shell contexts (kuzushi run, evals) — the stamping no-ops.
+        let scoped_trace = ctx
+            .trace
+            .map(|handle| handle.for_module(module_id_from_tool_name(name)));
+        let scoped_ctx;
+        let ctx: &ToolExecutionContext<'_> = if let Some(handle) = scoped_trace.as_ref() {
+            scoped_ctx = ToolExecutionContext {
+                config: ctx.config,
+                workspace: ctx.workspace,
+                findings_store: ctx.findings_store,
+                trace: Some(handle),
+            };
+            &scoped_ctx
+        } else {
+            ctx
+        };
+
         if let Some(result) = self.dispatch_catalog_tool(name) {
             return result;
         }
@@ -91,4 +110,11 @@ impl ModuleRegistry {
         }
         anyhow::bail!("registered tool or DAG node {name:?} has no Rust executor mapping")
     }
+}
+
+/// Derive a module id from a qualified tool name (`semgrep:scan` -> `semgrep`).
+/// Returns the full name when the colon is missing so unprefixed entries still
+/// flow through with a stable label.
+pub fn module_id_from_tool_name(name: &str) -> &str {
+    name.split_once(':').map(|(prefix, _)| prefix).unwrap_or(name)
 }

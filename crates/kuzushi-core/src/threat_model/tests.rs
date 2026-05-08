@@ -190,6 +190,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let result = registry
@@ -261,6 +262,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
         registry.execute_tool_with_runtime(
             "randori:pasta",
@@ -388,6 +390,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let err = registry
@@ -451,6 +454,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let result = registry
@@ -514,6 +518,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let result = registry
@@ -541,6 +546,7 @@ mod tests {
             config: &config,
             workspace: None,
             findings_store: None,
+            trace: None,
         };
         let result = registry
             .execute_tool("threat-model:methodologies", json!({}), &ctx)

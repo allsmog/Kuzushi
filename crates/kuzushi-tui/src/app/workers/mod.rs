@@ -8,7 +8,7 @@ pub(crate) use cancel_scan_worker_if_requested::*;
 use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::{
     default_scan_engines, AgentQueryRequest, AgentRuntime, Finding, FindingStore, ModuleRegistry,
-    ScanCancellation, ScanEngine, ScanRunOptions, Severity, V2Config, WorkspaceTarget,
+    ScanCancellation, ScanEngine, ScanRunOptions, Severity, TraceHandle, V2Config, WorkspaceTarget,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
 pub(crate) use parse_plan_json::*;

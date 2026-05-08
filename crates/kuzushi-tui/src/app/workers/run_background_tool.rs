@@ -7,6 +7,7 @@ pub(crate) fn run_background_tool(
     tool_name: &str,
     input: serde_json::Value,
     thinking_level: Option<String>,
+    trace_handle: Option<TraceHandle>,
 ) -> Result<serde_json::Value> {
     let store = if tool_requires_findings_store(tool_name) {
         Some(FindingStore::open(workspace.findings_db_path())?)
@@ -28,6 +29,7 @@ pub(crate) fn run_background_tool(
         config: &config,
         workspace: Some(workspace),
         findings_store: store.as_ref(),
+        trace: trace_handle.as_ref(),
     };
     registry.execute_tool_with_runtime(
         tool_name,

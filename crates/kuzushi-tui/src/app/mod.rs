@@ -54,8 +54,8 @@ use self::workspace_context::{default_context_snapshot_view, default_workspace_v
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kuzushi_core::modules::ModuleKind;
 use kuzushi_core::{
-    AgenticSastReport, CarliniThreatHuntReport, Finding, ModuleRegistry, ScanCancellation,
-    ScanProgress, ToolOptionStore, V2Config, WorkspaceTarget,
+    AgenticSastReport, CarliniThreatHuntReport, Finding, ModuleRegistry, RunTraceStep,
+    ScanCancellation, ScanProgress, ToolOptionStore, V2Config, WorkspaceTarget,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;

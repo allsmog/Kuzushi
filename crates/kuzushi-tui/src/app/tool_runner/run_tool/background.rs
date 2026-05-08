@@ -37,8 +37,16 @@ impl ShellApp {
             &RunTraceStep::new(1, "tool", format!("{tool_name} started")),
         );
         let (tx, rx) = mpsc::channel();
+        let (trace_tx, trace_rx) = mpsc::channel::<RunTraceStep>();
+        let inner_sink: Arc<dyn TraceSink> =
+            Arc::new(JsonlSink::new(target.clone(), run_id.clone()));
+        let broadcast_sink: Arc<dyn TraceSink> =
+            Arc::new(BroadcastSink::new(inner_sink, trace_tx));
+        let trace_handle = TraceHandle::new(broadcast_sink);
         self.target = Some(target.clone());
         self.tool_rx = Some(rx);
+        self.trace_rx = Some(trace_rx);
+        self.activity = Some(ActivitySession::new(run_id.clone()));
         self.tool_running = Some(tool_name.clone());
         self.tool_run_id = Some(run_id.clone());
         self.tool_abort_requested = false;
@@ -58,6 +66,7 @@ impl ShellApp {
                 input,
                 thinking_level,
                 tx,
+                Some(trace_handle),
             )
         });
     }
