@@ -8,6 +8,7 @@ pub(crate) use collect_s2_databases::*;
 pub(crate) use collect_s3_dfd_elements::*;
 pub(crate) use execute_threat_model_tool::*;
 pub(crate) use insert_node::*;
+pub(crate) use inventory_files::*;
 pub(crate) use nonempty_string_array::*;
 pub(crate) use normalize_document::*;
 pub(crate) use parse_build_input::*;
@@ -30,6 +31,7 @@ mod collect_s2_databases;
 mod collect_s3_dfd_elements;
 mod execute_threat_model_tool;
 mod insert_node;
+mod inventory_files;
 mod nonempty_string_array;
 mod normalize_dfd_type;
 mod normalize_document;
@@ -43,6 +45,8 @@ mod read_threat_model;
 mod stage_selection;
 mod threat_model_document_schema;
 pub(in crate::threat_model) use normalize_dfd_type::*;
+#[cfg(test)]
+mod normalize_document_tests;
 #[cfg(test)]
 mod tests;
 

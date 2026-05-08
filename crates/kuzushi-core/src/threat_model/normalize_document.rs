@@ -47,10 +47,19 @@ pub(crate) fn normalize_dfd(dfd: &mut Value) {
         .cloned()
         .unwrap_or_default()
         .into_iter()
-        .filter(|node| {
-            node.get("type")
+        .filter_map(|mut node| {
+            let raw = node
+                .get("type")
                 .and_then(Value::as_str)
-                .is_none_or(|kind| normalize_dfd_type(kind) != "data-flow")
+                .unwrap_or("process");
+            let canonical = normalize_dfd_type(raw);
+            if canonical == "data-flow" {
+                return None;
+            }
+            if let Some(object) = node.as_object_mut() {
+                object.insert("type".to_string(), Value::String(canonical.to_string()));
+            }
+            Some(node)
         })
         .collect::<Vec<_>>();
     let flows = object

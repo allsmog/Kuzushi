@@ -37,6 +37,26 @@ fn drain_tool(app: &mut ShellApp) {
         .unwrap();
 }
 
+/// Drive a prerequisite chain to completion: while a chain is active,
+/// drain background tool events and auto-reuse any pending reuse-or-
+/// regenerate prompts.  Used by tests that exercise tools whose chain
+/// includes deterministic prereqs (e.g. carlini → context:build →
+/// threat-model:build).
+#[allow(dead_code)]
+fn drain_chain_with_auto_reuse(app: &mut ShellApp) {
+    loop {
+        if app.pending_prereq_prompt.is_some() {
+            app.resolve_prereq_prompt(true);
+            continue;
+        }
+        if app.tool_running.is_none() && app.pending_chain.is_none() {
+            return;
+        }
+        app.drain_next_tool_event_for_test(Duration::from_secs(15))
+            .unwrap();
+    }
+}
+
 #[cfg(unix)]
 fn fake_semgrep_binary(dir: &PathBuf) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
@@ -2667,7 +2687,7 @@ fn run_command_dispatches_carlini_threat_hunt_through_pi_agent_core_bridge_and_p
         tool: None,
         input: Some(r#"{"maxActors":1,"runsPerActor":1}"#.to_string()),
     });
-    drain_tool(&mut app);
+    drain_chain_with_auto_reuse(&mut app);
 
     assert_eq!(app.shell_view, ShellView::ModuleRun);
     assert!(app.log.iter().any(|line| {
@@ -2973,7 +2993,7 @@ fn run_command_dispatches_threat_model_build_through_pi_agent_core_bridge() {
         tool: None,
         input: Some(r#"{"outputDir":".kuzushi/tm"}"#.to_string()),
     });
-    drain_tool(&mut app);
+    drain_chain_with_auto_reuse(&mut app);
 
     assert_eq!(app.shell_view, ShellView::ModuleRun);
     assert!(app.log.iter().any(|line| {

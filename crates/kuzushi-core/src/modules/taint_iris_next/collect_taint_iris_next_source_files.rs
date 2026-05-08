@@ -93,19 +93,30 @@ pub(in crate::modules) fn detect_taint_iris_next_languages(root: &Path) -> Resul
 }
 
 pub(in crate::modules) fn language_for_path(path: &Path) -> String {
-    match path.extension().and_then(|ext| ext.to_str()).unwrap_or("") {
-        "js" | "jsx" => "javascript",
-        "ts" | "tsx" => "typescript",
-        "py" => "python",
-        "rb" => "ruby",
-        "php" => "php",
-        "java" => "java",
-        "go" => "go",
-        "rs" => "rust",
-        "c" | "h" => "c",
-        "cc" | "cpp" | "cxx" | "hpp" | "hh" => "cpp",
-        "cs" => "csharp",
-        _ => "unknown",
-    }
-    .to_string()
+    let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+    language_name_for_extension(extension).to_string()
+}
+
+fn language_name_for_extension(extension: &str) -> &'static str {
+    language_kind_table()
+        .iter()
+        .find(|(extensions, _)| extensions.contains(&extension))
+        .map(|(_, language)| *language)
+        .unwrap_or("unknown")
+}
+
+fn language_kind_table() -> &'static [(&'static [&'static str], &'static str)] {
+    &[
+        (&["js", "jsx"], "javascript"),
+        (&["ts", "tsx"], "typescript"),
+        (&["py"], "python"),
+        (&["rb"], "ruby"),
+        (&["php"], "php"),
+        (&["java"], "java"),
+        (&["go"], "go"),
+        (&["rs"], "rust"),
+        (&["c", "h"], "c"),
+        (&["cc", "cpp", "cxx", "hpp", "hh"], "cpp"),
+        (&["cs"], "csharp"),
+    ]
 }

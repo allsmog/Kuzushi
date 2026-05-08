@@ -5,6 +5,7 @@ pub(crate) use inspect_entrypoints::*;
 pub(crate) use inspect_manifest_frameworks::*;
 pub(crate) use inspect_python_route_line::*;
 pub(crate) use inspect_source_frameworks::*;
+pub(crate) use language_for_path::*;
 pub(crate) use repository_inventory::*;
 pub(crate) use route_item::*;
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,7 @@ mod inspect_entrypoints;
 mod inspect_manifest_frameworks;
 mod inspect_python_route_line;
 mod inspect_source_frameworks;
+mod language_for_path;
 mod repository_inventory;
 mod route_item;
 #[cfg(test)]

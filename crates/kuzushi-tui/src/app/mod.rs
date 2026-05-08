@@ -14,6 +14,7 @@ pub(crate) use line_editor::*;
 pub(crate) use log::*;
 pub(crate) use options::*;
 pub(crate) use plan::*;
+pub(crate) use prereq_chain::*;
 pub(crate) use prompts::*;
 pub(crate) use runtime::*;
 pub(crate) use sast_tasks::*;
@@ -40,6 +41,7 @@ mod line_editor;
 mod log;
 mod options;
 mod plan;
+mod prereq_chain;
 #[cfg(test)]
 use self::runtime::{mouse_capture_setting_enabled, render_plain_scripted_session};
 use self::settings::{parse_budget_env, preferred_model_choice_index, thinking_level_from_input};
@@ -82,6 +84,7 @@ pub use agent_chat::AgentChatView;
 pub use agent_chat::ChatTurn;
 pub use approval::{ConfirmKind, PendingConfirm, PendingPatch};
 pub use log::LogLine;
+pub use prereq_chain::{PendingPrereqPrompt, PrereqChain};
 pub use runtime::{run_shell, run_shell_with_plain};
 pub(crate) use settings::{
     bridge_command_status, model_choices, oauth_provider_status, runtime_backend_label,

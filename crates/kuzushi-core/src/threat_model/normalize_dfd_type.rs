@@ -1,8 +1,10 @@
 use super::*;
 
 pub(super) fn normalize_dfd_type(kind: &str) -> &'static str {
+    // camelCase becomes lower-case without separators here, so accept the
+    // flattened forms emitted by LLMs as well as kebab/snake case.
     match kind.to_lowercase().replace('_', "-").as_str() {
-        "external-entity" | "external" => "external-entity",
+        "external-entity" | "externalentity" | "external" => "external-entity",
         "data-store" | "datastore" => "data-store",
         "data-flow" | "dataflow" => "data-flow",
         _ => "process",

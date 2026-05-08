@@ -20,6 +20,22 @@ impl ShellApp {
         };
         let tool_thinking_level =
             thinking_level_from_input(&input).or_else(|| self.session_thinking_level.clone());
+        self.dispatch_run_tool(tool_name, input, workspace, tool_thinking_level);
+    }
+
+    fn dispatch_run_tool(
+        &mut self,
+        tool_name: String,
+        input: serde_json::Value,
+        workspace: WorkspaceTarget,
+        tool_thinking_level: Option<String>,
+    ) {
+        let prereqs = prereq_steps_for(&tool_name, workspace.root());
+        if !prereqs.is_empty() {
+            self.shell_view = ShellView::ModuleRun;
+            self.start_prereq_chain(prereqs, tool_name, input, workspace, tool_thinking_level);
+            return;
+        }
         let status = tool_run_status(&tool_name);
         self.shell_view = ShellView::ModuleRun;
         self.start_background_tool(tool_name, input, workspace, status, tool_thinking_level);

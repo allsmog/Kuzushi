@@ -41,6 +41,7 @@ pub(crate) struct RenderSectionSlot {
 }
 
 #[derive(Clone, Copy)]
+#[repr(usize)]
 pub(crate) enum RenderSection {
     Throttle,
     Status,
@@ -49,23 +50,29 @@ pub(crate) enum RenderSection {
     Plan,
     ThreatPatch,
     Confirm,
+    PrereqPrompt,
     Transcript,
 }
 
 impl RenderSection {
     pub(crate) fn render(self, frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
-        match self {
-            Self::Throttle => render_throttle_banner(frame, area, app),
-            Self::Status => render_status_footer(frame, area, app),
-            Self::Keybind => render_keybind_footer(frame, area, app),
-            Self::Budget => render_cost_cap_halt(frame, area, app),
-            Self::Plan => render_plan_card(frame, area, app),
-            Self::ThreatPatch => render_threat_patch_card(frame, area, app),
-            Self::Confirm => render_confirm_card(frame, area, app),
-            Self::Transcript => render_transcript(frame, area, app),
-        }
+        RENDER_SECTION_HANDLERS[self as usize](frame, area, app);
     }
 }
+
+type RenderSectionHandler = fn(&mut Frame<'_>, Rect, &ShellApp);
+
+const RENDER_SECTION_HANDLERS: &[RenderSectionHandler] = &[
+    render_throttle_banner,
+    render_status_footer,
+    render_keybind_footer,
+    render_cost_cap_halt,
+    render_plan_card,
+    render_threat_patch_card,
+    render_confirm_card,
+    render_prereq_prompt_card,
+    render_transcript,
+];
 
 pub(crate) fn render_sections(app: &ShellApp, area: Rect) -> Vec<RenderSectionSlot> {
     [
@@ -79,6 +86,10 @@ pub(crate) fn render_sections(app: &ShellApp, area: Rect) -> Vec<RenderSectionSl
             threat_patch_card_height(app, area),
         ),
         section_slot(RenderSection::Confirm, confirm_card_height(app, area)),
+        section_slot(
+            RenderSection::PrereqPrompt,
+            prereq_prompt_card_height(app, area),
+        ),
         section_slot(RenderSection::Transcript, transcript_height(app, area)),
     ]
     .into_iter()

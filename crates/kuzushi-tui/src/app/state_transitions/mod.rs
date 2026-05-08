@@ -17,6 +17,7 @@ mod key_dispatch;
 mod keybinding_types;
 mod page_scroll;
 mod pending_plan_keys;
+mod prereq_prompt_keys;
 mod quit_chord;
 mod scroll_navigation;
 mod text_input;

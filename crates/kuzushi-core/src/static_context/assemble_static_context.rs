@@ -74,19 +74,31 @@ pub fn assemble_static_context(
 }
 
 pub(crate) fn infer_language(path: &str) -> String {
-    let ext = path
+    let extension = path
         .rsplit('.')
         .next()
         .map(str::to_ascii_lowercase)
         .unwrap_or_default();
-    match ext.as_str() {
-        "c" | "h" => "c".to_string(),
-        "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" => "cpp".to_string(),
-        "rs" => "rust".to_string(),
-        "go" => "go".to_string(),
-        "py" => "python".to_string(),
-        "java" => "java".to_string(),
-        "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" => "TypeScript".to_string(),
-        _ => "unknown".to_string(),
-    }
+    static_context_language(&extension)
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn static_context_language(extension: &str) -> Option<&'static str> {
+    static_context_language_table()
+        .iter()
+        .find(|(extensions, _)| extensions.contains(&extension))
+        .map(|(_, language)| *language)
+}
+
+fn static_context_language_table() -> &'static [(&'static [&'static str], &'static str)] {
+    &[
+        (&["c", "h"], "c"),
+        (&["cc", "cpp", "cxx", "hh", "hpp", "hxx"], "cpp"),
+        (&["rs"], "rust"),
+        (&["go"], "go"),
+        (&["py"], "python"),
+        (&["java"], "java"),
+        (&["js", "jsx", "mjs", "cjs", "ts", "tsx"], "TypeScript"),
+    ]
 }

@@ -28,6 +28,10 @@ impl ShellApp {
     }
 
     pub(super) fn handle_modal_key(&mut self, key: KeyEvent) -> bool {
+        self.handle_prereq_prompt_key(key) || self.handle_shared_modal_key(key)
+    }
+
+    fn handle_shared_modal_key(&mut self, key: KeyEvent) -> bool {
         self.handle_confirm_key(key)
             || self.handle_budget_key(key)
             || self.handle_pending_plan_key(key)

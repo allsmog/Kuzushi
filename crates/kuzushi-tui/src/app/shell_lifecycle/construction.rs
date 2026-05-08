@@ -46,6 +46,8 @@ impl ShellApp {
             ctrl_c_armed_at: None,
             session_budget_usd: parse_budget_env(),
             advisory: AdvisoryState::default(),
+            pending_chain: None,
+            pending_prereq_prompt: None,
             pending_plan: None,
             plan_cursor: 0,
             plan_skipped: BTreeSet::new(),
