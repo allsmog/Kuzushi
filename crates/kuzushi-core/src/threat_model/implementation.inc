@@ -1055,10 +1055,19 @@ fn normalize_dfd(dfd: &mut Value) {
         .cloned()
         .unwrap_or_default()
         .into_iter()
-        .filter(|node| {
-            node.get("type")
+        .filter_map(|mut node| {
+            let raw = node
+                .get("type")
                 .and_then(Value::as_str)
-                .is_none_or(|kind| normalize_dfd_type(kind) != "data-flow")
+                .unwrap_or("process");
+            let canonical = normalize_dfd_type(raw);
+            if canonical == "data-flow" {
+                return None;
+            }
+            if let Some(object) = node.as_object_mut() {
+                object.insert("type".to_string(), Value::String(canonical.to_string()));
+            }
+            Some(node)
         })
         .collect::<Vec<_>>();
     let flows = object
@@ -1576,8 +1585,11 @@ fn component_kind_to_dfd_type(kind: &str) -> &'static str {
 }
 
 fn normalize_dfd_type(kind: &str) -> &'static str {
+    // LLMs emit both kebab-case ("external-entity") and camelCase
+    // ("externalEntity"); to_lowercase() flattens the camelCase form to
+    // "externalentity" so we accept that variant explicitly.
     match kind.to_lowercase().replace('_', "-").as_str() {
-        "external-entity" | "external" => "external-entity",
+        "external-entity" | "externalentity" | "external" => "external-entity",
         "data-store" | "datastore" => "data-store",
         "data-flow" | "dataflow" => "data-flow",
         _ => "process",
@@ -1716,6 +1728,30 @@ mod tests {
         assert_eq!(component_kind_to_dfd_type("session store"), "data-store");
         assert_eq!(component_kind_to_dfd_type("payment flow"), "data-flow");
         assert_eq!(component_kind_to_dfd_type("api service"), "process");
+    }
+
+    #[test]
+    fn normalize_dfd_canonicalises_camelcase_node_types() {
+        let mut dfd = json!({
+            "nodes": [
+                {"id": "n1", "type": "externalEntity", "name": "Client"},
+                {"id": "n2", "type": "dataStore",      "name": "Tablespace"},
+                {"id": "n3", "type": "process",        "name": "Server"},
+                {"id": "f1", "type": "data-flow",      "name": "Should be dropped"},
+            ],
+            "flows": [],
+            "trustBoundaries": [],
+        });
+        normalize_dfd(&mut dfd);
+        let nodes = dfd
+            .get("nodes")
+            .and_then(Value::as_array)
+            .expect("nodes array");
+        let types: Vec<&str> = nodes
+            .iter()
+            .map(|n| n.get("type").and_then(Value::as_str).unwrap_or(""))
+            .collect();
+        assert_eq!(types, vec!["external-entity", "data-store", "process"]);
     }
 
     #[test]
