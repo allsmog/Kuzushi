@@ -88,9 +88,7 @@ for (const file of roots.flatMap(walk)) {
 if (failures.length > 0) {
   console.error("Stale Kuzushi public command examples found:");
   for (const failure of failures) {
-    console.error(
-      `- ${failure.file}:${failure.line} ${failure.pattern}: ${failure.text}`,
-    );
+    console.error(`- ${failure.file}:${failure.line} ${failure.pattern}: ${failure.text}`);
   }
   console.error(
     "\nFix the command, or label the surrounding section as legacy/historical/unsupported if it is not current operator guidance.",

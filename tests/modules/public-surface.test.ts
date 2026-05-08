@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 // `kuzushi/modules` re-exports are wired. Everything asserted here must
 // remain stable across minor releases (see docs/devex/06-module-sdk-assessment.md §6).
 import {
+  createCoreSastModule,
   defineModule,
   defineTool,
   ModuleLoadError,
@@ -33,5 +34,10 @@ describe("kuzushi/modules public barrel", () => {
       type: "package",
       name: "@kuzushi/x",
     });
+  });
+
+  it("keeps retired built-in factory symbols as migration stubs", () => {
+    expect(typeof createCoreSastModule).toBe("function");
+    expect(() => createCoreSastModule()).toThrow(/retired from the public SDK/);
   });
 });

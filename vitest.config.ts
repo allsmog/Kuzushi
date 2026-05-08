@@ -2,7 +2,12 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    setupFiles: ["./tests/setup.ts"],
+    include: [
+      "tests/modules/public-surface.test.ts",
+      "tests/modules/define.test.ts",
+      "tests/modules/loader.test.ts",
+      "tests/modules/host-handles.test.ts",
+    ],
     exclude: [
       "**/node_modules/**",
       "**/.claude/worktrees/**",

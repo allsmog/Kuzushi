@@ -1,5 +1,3 @@
-import { normalizeTaskCapabilityIds } from "../capabilities.js";
-
 export interface DagIdResolver {
   resolveName(id: string): string;
 }
@@ -16,6 +14,13 @@ export function normalizeDagIds(ids: string[], resolver?: DagIdResolver): string
   }
 
   return normalizedIds;
+}
+
+function normalizeTaskCapabilityIds(ids: string[]): string[] {
+  return ids
+    .flatMap((id) => id.split(","))
+    .map((id) => id.trim())
+    .filter(Boolean);
 }
 
 export function canonicalDagId(id: string): string {

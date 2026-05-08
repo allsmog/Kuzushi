@@ -573,33 +573,27 @@ fn npm_package_runtime_surface_is_rust_only() {
 }
 
 #[test]
-fn legacy_ink_shell_is_reference_only_in_source_cli() {
-    let shell_source = fs::read_to_string(repo_root().join("src/cli/commands/shell.ts")).unwrap();
-
-    assert!(shell_source.contains("reference-only"));
-    for forbidden in [
-        "copilot/shell",
-        "startShell",
-        "configureAgentRuntime",
-        "loadConfig",
-        "from \"ink\"",
-        "from \"react\"",
+fn legacy_ink_shell_is_deleted_from_source_cli() {
+    for removed_path in [
+        "src/cli/commands/shell.ts",
+        "src/copilot/shell.ts",
+        "src/ui/App.tsx",
+        "src/ui/components",
+        "src/ui/primitives",
+        "reference/ts-runtime-island",
     ] {
+        let path = repo_root().join(removed_path);
         assert!(
-            !shell_source.contains(forbidden),
-            "source CLI shell must not import legacy runtime surface {forbidden}"
+            !path.exists(),
+            "{removed_path} must not exist after TS runtime retirement"
         );
     }
-
-    let ui_readme = fs::read_to_string(repo_root().join("src/ui/README.md")).unwrap();
-    assert!(ui_readme.contains("TypeScript/Ink TUI has been removed"));
-    assert!(ui_readme.contains("crates/kuzushi-tui"));
-    assert!(ui_readme.contains("shared, non-visual TypeScript helpers"));
 
     let migration_status =
         fs::read_to_string(repo_root().join("docs/rust-migration-status.md")).unwrap();
     assert!(migration_status.contains("src/cli.ts shell"));
     assert!(migration_status.contains("fails with a Rust replacement message"));
+    assert!(migration_status.contains("retired TS runtime island was deleted"));
 }
 
 #[test]

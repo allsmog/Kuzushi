@@ -44,7 +44,6 @@ function attemptRebuild(modName) {
       logErr(`${modName} still fails to load after ${cmd} rebuild — ${retry.message}`);
     } else if (result.error?.code === "ENOENT") {
       logErr(`${cmd} not found, trying next option...`);
-      continue;
     }
   }
   return false;
