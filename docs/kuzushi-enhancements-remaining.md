@@ -1,5 +1,8 @@
 # Kuzushi enhancements — remaining work
 
+Historical/retired planning note. This file predates the Rust cutover cleanup
+and is retained as reference material, not current operator guidance.
+
 Branch: `claude/kuzushi-enhancements-307jX`.
 Plan file: `/root/.claude/plans/take-a-look-at-logical-nova.md`.
 

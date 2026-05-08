@@ -29,7 +29,7 @@ import type {
   WorkspaceHandle,
 } from "../modules/host-handles.js";
 import type { ExecutionContext } from "../modules/types.js";
-import type { KuzushiConfig } from "../types.js";
+import type { KuzushiConfig } from "../public-types.js";
 import { createMockOptionStore } from "./mocks/datastore.js";
 import { createMockEventScope } from "./mocks/event-scope.js";
 import { createRecordingLogger } from "./mocks/logger.js";

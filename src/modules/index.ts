@@ -7,8 +7,8 @@
  * imported from deeper paths (and may move without a major bump).
  */
 
-// Built-in module factories (consumed by src/copilot/core.ts).
-export { createCoreSastModule } from "./core-sast.js";
+import type { CopilotModule } from "./types.js";
+
 export type { DefineDagToolSpec, DefineModuleSpec, DefineToolSpec } from "./define.js";
 // Authoring helpers — the recommended way to build a module.
 export { defineDagTool, defineModule, defineTool } from "./define.js";
@@ -32,11 +32,9 @@ export type {
   WorkspaceServiceStore,
   WorkspaceVulnStore,
 } from "./host-handles.js";
-export { createNDayDiffHunterModule } from "./n-day-diff-hunter.js";
 // Registry + specifier parsing — re-export so third parties can do static
 // analysis of their own module specifiers without importing deep paths.
 export { ModuleRegistry, parseModuleSpecifier } from "./registry.js";
-export { createSecretScanModule } from "./secret-scan/secret-scan.js";
 export type {
   RankedTaintIrisNextCweCatalogEntry,
   TaintIrisNextAgentCweSelection,
@@ -54,8 +52,6 @@ export {
   TAINT_IRIS_NEXT_CWE_CATALOG_BY_ID,
   validateAgentCweSelections,
 } from "./taint-iris-next/cwe-reference.js";
-export { createTaintIrisNextModule } from "./taint-iris-next/taint-iris-next.js";
-export { createThreatModelModule } from "./threat-model/threat-model.js";
 // Core types — these are the shape third parties implement.
 export type {
   CopilotModule,
@@ -78,7 +74,6 @@ export type {
   ToolResult,
 } from "./types.js";
 export { requireDag } from "./types.js";
-export { createVariantHunterModule } from "./variant-hunter.js";
 export type {
   VendorAssessmentDocument,
   VendorAssessmentDocumentKind,
@@ -87,5 +82,41 @@ export type {
   VendorAssessmentReportJson,
   VendorAssessmentScope,
 } from "./vendor-assessment/types.js";
-export { createVendorAssessmentModule } from "./vendor-assessment/vendor-assessment.js";
-export { createXRayModule } from "./x-ray/x-ray.js";
+
+function retiredBuiltinFactory(name: string): CopilotModule {
+  throw new Error(
+    `${name} was a TypeScript built-in module factory and is retired from the public SDK after the Rust cutover. Use the Rust CLI/TUI built-ins, or author a third-party module with defineModule/defineTool.`,
+  );
+}
+
+export function createCoreSastModule(): CopilotModule {
+  return retiredBuiltinFactory("createCoreSastModule");
+}
+
+export function createNDayDiffHunterModule(): CopilotModule {
+  return retiredBuiltinFactory("createNDayDiffHunterModule");
+}
+
+export function createSecretScanModule(): CopilotModule {
+  return retiredBuiltinFactory("createSecretScanModule");
+}
+
+export function createTaintIrisNextModule(): CopilotModule {
+  return retiredBuiltinFactory("createTaintIrisNextModule");
+}
+
+export function createThreatModelModule(): CopilotModule {
+  return retiredBuiltinFactory("createThreatModelModule");
+}
+
+export function createVariantHunterModule(): CopilotModule {
+  return retiredBuiltinFactory("createVariantHunterModule");
+}
+
+export function createVendorAssessmentModule(): CopilotModule {
+  return retiredBuiltinFactory("createVendorAssessmentModule");
+}
+
+export function createXRayModule(): CopilotModule {
+  return retiredBuiltinFactory("createXRayModule");
+}

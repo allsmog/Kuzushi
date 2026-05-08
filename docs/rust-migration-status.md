@@ -48,7 +48,48 @@ tests for the relevant dispatch modes.
 | `vuln-scout:audit`, `tob:audit`, `tob:skills`, `shinsa:*`, `prompt-armor:*` | `src/modules/vuln-scout/vuln-scout.ts`; `src/modules/tob/tob.ts`; `src/modules/shinsa/shinsa.ts`; `src/modules/prompt-armor/prompt-armor.ts`; resolver helpers in `src/agents/tasks/*/resolve-*.ts`. | TS wrapped Claude Code plugin packages for whitebox pentest, ToB security skills, Shinsa compliance, and PromptArmor red-team workflows; tools resolved local plugin roots lazily and returned graceful missing-plugin errors. PromptArmor network-capable commands required explicit authorization. | Generic plugin/pi-agent-core adapters in `crates/kuzushi-core/src/modules.rs` (`run_plugin_finding_adapter`, `run_shinsa_assessment`, `execute_prompt_armor_tool`); CLI/shell runtime gating in `crates/kuzushi-cli/src/main.rs` and `crates/kuzushi-tui/src/app.rs`. | Rust requires an explicit plugin root via tool input or module-specific environment variable, requires explicit model/runtime for agentic plugin adapters, sends bounded repo snippets through pi-agent-core, normalizes returned findings, persists findings when a store is available, writes Shinsa artifacts, lists ToB/Shinsa plugin metadata, and keeps PromptArmor scan/attack authorization gates. PromptArmor config/diff/report have deterministic Rust file executors. | Preserves public `target`, `model`, `maxFindings`, `skills`, Shinsa `controls`/`family`/`severity`/`outputDir`, and PromptArmor command-specific fields. Outputs preserve tool envelopes, findings arrays, artifact paths, plugin root metadata, and cost field. | Persists plugin findings to `.kuzushi/v2/findings.sqlite3`; Shinsa writes `<target>/shinsa-output/shinsa-state.json` and `compliance-report.md`; PromptArmor writes `.prompt-armor/` config/report artifacts. | Agentic plugin adapters require explicit model plus `PiAgentCoreRuntime`; no fallback model is selected. Missing plugin roots fail with install/configure guidance. | DAG descriptors remain registered for applicable tools; direct scan DAG node dispatch reaches the same registry executor. These plugin-backed tools are opt-in rather than default SAST engines. | Supported through Ratatui shell focused-module `/run`; runtime-backed tools initialize pi-agent-core through shell gating. | Supported through `kuzushi --target <repo> run <tool>`; runtime-backed tools initialize pi-agent-core through run-mode gating. | Rust runtime/persistence/failure coverage: `crates/kuzushi-core/src/modules.rs` tests `dispatches_plugin_backed_adapters_through_runtime_and_persists`, `plugin_adapters_missing_dependency_fail_actionably`, and `prompt_armor_network_tools_require_authorization`. | Module-specific plugin roots via `pluginRoot`/`pluginPath` or env vars (`KUZUSHI_VULN_SCOUT_PLUGIN`, `KUZUSHI_TOB_SKILLS_DIR`, `KUZUSHI_SHINSA_PLUGIN`, `KUZUSHI_PROMPT_ARMOR_PLUGIN`); pi-agent-core bridge plus provider credentials for agentic execution. | complete |
 | hidden `pipeline:task-selector`, `pipeline:approval-before-verification`, `pipeline:taint-cwe-select` | `src/modules/pipeline/pipeline.ts`; TS task implementations in `src/agents/tasks/task-selector.ts`, `approval-gate.ts`, and taint selector files. | TS hosted hidden orchestrator DAG nodes for task selection, approval gates, and taint CWE selection so every pipeline participant had a module owner. | `run_pipeline_task_selector`, `run_pipeline_approval_gate`, and `run_taint_cwe_select` in `crates/kuzushi-core/src/modules.rs`. | Rust keeps `pipeline` hidden from visible module lists, dispatches deterministic task selection and approval gate nodes, and preserves the pi-agent-core-backed taint CWE selector. | Preserves task list/disabled-task behavior and approval boolean semantics for internal DAG dispatch. | No user-facing artifacts. | Task selection and approval use no provider. Taint CWE selection requires explicit model/runtime when no explicit CWEs are supplied. | Hidden DAG descriptors are registered and dispatchable through `ModuleRegistry::execute_tool_with_runtime`. | Hidden by design; not surfaced in shell module lists. | Hidden by design; direct dispatch is tested for internal use. | Rust visibility/dispatch coverage: `crates/kuzushi-core/src/modules.rs` tests `hidden_pipeline_nodes_dispatch_without_visibility` and `dispatches_hidden_taint_cwe_selector_through_runtime_without_listing_it_as_visible_tool`. | pi-agent-core bridge only for taint CWE selection when needed. | complete |
 
-## Final Cutover Docs, Help, And TypeScript/Ink Deletion Audit
+## Orphaned TypeScript Subsystems Audit
+
+The retirement pass is complete for the original 17 `src/` subdirectories.
+The reverse-import closure is documented in
+`docs/assessments/ts-runtime-island-retirement.md`.
+
+The robust import graph found 563 source/bridge files, 162 files under the
+audited directories, 422 files reachable from public TypeScript roots, 118
+audited files reachable from public roots, and a 440-file reverse-import
+closure. The largest retention point was `src/modules/index.ts`; it now keeps
+module-authoring exports and compatibility stubs for retired built-in TS
+factories instead of importing the old implementation graph.
+The broader TS-only caller graph was deleted with the 17 directories; only the
+narrow public SDK remains under `src/`.
+
+| Original directory | Final status | Replacement / disposition |
+| --- | --- | --- |
+| `src/strategies` | `DELETED` | Rust scan/ranking code owns current behavior. |
+| `src/governance` | `DELETED` | Rust spend, whitebox-static, and approval surfaces own current behavior. |
+| `src/jobs` | `INTENTIONALLY-DROPPED` | TS dispatcher background jobs are retired. |
+| `src/hooks` | `INTENTIONALLY-DROPPED` | TS pipeline hooks are retired with the TS bus/orchestrator. |
+| `src/intel` | `DELETED` | Rust `ndiff` rows cover current CVE/pattern behavior. |
+| `src/scoring` | `DELETED` | Rust finding detail/static ranking own product scoring. |
+| `src/monorepo` | `DELETED` | Rust repository inventory/static context cover current scan behavior. |
+| `src/sessions` | `INTENTIONALLY-DROPPED` | TS dispatcher sessions are retired. |
+| `src/migrations` | `DELETED` | Rust findings/workspace schema owns product persistence. |
+| `src/scheduler` | `INTENTIONALLY-DROPPED` | TS scheduled-run orchestration is not a current Rust product promise. |
+| `src/analysis-support` | `DELETED` | Rust code index/repository inventory own current behavior. |
+| `src/crypto-behavioral` | `INTENTIONALLY-DROPPED` | TS crypto behavioral harness generation is retired. |
+| `src/poc-executor` | `INTENTIONALLY-DROPPED` | Rust sandbox/verify primitives remain; the TS Docker PoC executor is retired. |
+| `src/prompts` | `DELETED` | Rust prompt overrides and per-tool prompt builders own runtime behavior. |
+| `src/discovery` | `DELETED` | Rust `context:build` and repository inventory own current discovery behavior. |
+| `src/scanners` | `DELETED` | Rust scanner modules own runtime scanner behavior. |
+| `src/knowledge` | `DELETED` | Rust artifact/workspace surfaces own current behavior. |
+
+Scanner and prompt gap decisions are recorded in
+`docs/assessments/ts-runtime-island-retirement.md`. The guardrail
+`pnpm check:retired-ts-runtime` fails if an original retired directory is
+reintroduced under `src/`, `reference/ts-runtime-island` reappears, or public
+docs present retired paths as current implementation targets.
+
+## Historical Final Cutover Docs, Help, And TypeScript/Ink Deletion Audit
 
 ### Package and help truth
 
@@ -90,10 +131,9 @@ tests for the relevant dispatch modes.
 
 | Retained area | Classification | Why it remains |
 | --- | --- | --- |
-| `src/modules/`, `src/agents/`, scanner/report helpers | Reference-only during cutover plus published library source where exported. | These files preserve behavior, schemas, prompts, and parity fixtures while the Rust module rows remain traceable. They are not invoked by `bin.kuzushi`. |
-| `src/ui/state.ts`, `src/ui/plain-renderer.ts`, `src/ui/ci-stream.ts`, `src/ui/output.ts`, and related formatting/notification helpers | Non-visual support code. | TypeScript scan/reference paths and report workers still use the `UIStore` contract and line-oriented output helpers. They do not import React/Ink or render an interactive TUI. |
-| `src/copilot/` non-shell helpers | Reference/library support. | Prompt editing, replay formatting, dispatcher helpers, options, and run helpers still serve tests or non-TUI TypeScript surfaces. The interactive shell file is gone. |
-| `dist/`, `kuzushi/modules`, `kuzushi/testing` exports | Non-CLI library/API surface. | Third-party module authors and tests still consume these APIs during the cutover. |
+| `src/index.ts`, `src/modules/index.ts`, `src/testing/index.ts`, and their narrow helper graph | Published TypeScript SDK surface. | Third-party module authors still get schemas, `defineModule`/`defineTool`, registry/specifier helpers, host-handle types, and test mocks. Retired built-in TS factories are compatibility stubs. |
+| Retired TypeScript runtime island | Deleted code. | The retired TS runtime island was deleted rather than retained as a fixture; `pnpm check:retired-ts-runtime` fails if it returns. |
+| `dist/`, `kuzushi/modules`, `kuzushi/testing` exports | Non-CLI library/API surface. | Third-party module authors and tests consume only the narrowed SDK surface after the retirement pass. |
 
 ### Cutover verification coverage
 

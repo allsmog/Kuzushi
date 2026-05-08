@@ -19,20 +19,35 @@ pub(super) fn append_collapsed_catalog(app: &ShellApp, area: Rect, lines: &mut V
     if app.findings.is_empty() {
         lines.push(muted(&fit(&app.first_finding_hint(), area.width as usize)));
     }
-    lines.push(Line::from(vec![
-        Span::styled("Start here: ", theme::muted()),
-        Span::styled("kuzushi doctor --target .", theme::accent()),
-        Span::styled(" -> ", theme::subtle()),
-        Span::styled("context build", theme::accent()),
-        Span::styled(" -> ", theme::subtle()),
-        Span::styled(app.first_finding_scan_command(), theme::accent()),
-        Span::styled(" -> ", theme::subtle()),
-        Span::styled("findings", theme::accent()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("Report: ", theme::muted()),
-        Span::styled("kuzushi pr-comment", theme::accent()),
-    ]));
+    if area.width < 96 {
+        lines.push(Line::from(vec![
+            Span::styled("Start here: ", theme::muted()),
+            Span::styled("kuzushi doctor --target .", theme::accent()),
+            Span::styled(" -> ", theme::subtle()),
+            Span::styled("context build", theme::accent()),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("Then: ", theme::muted()),
+            Span::styled(app.first_finding_scan_command(), theme::accent()),
+            Span::styled(" -> ", theme::subtle()),
+            Span::styled("findings", theme::accent()),
+            Span::styled(" -> ", theme::subtle()),
+            Span::styled("pr-comment", theme::accent()),
+        ]));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled("Start here: ", theme::muted()),
+            Span::styled("kuzushi doctor --target .", theme::accent()),
+            Span::styled(" -> ", theme::subtle()),
+            Span::styled("context build", theme::accent()),
+            Span::styled(" -> ", theme::subtle()),
+            Span::styled(app.first_finding_scan_command(), theme::accent()),
+            Span::styled(" -> ", theme::subtle()),
+            Span::styled("findings", theme::accent()),
+            Span::styled(" -> ", theme::subtle()),
+            Span::styled("pr-comment", theme::accent()),
+        ]));
+    }
     lines.push(Line::from(vec![
         Span::styled("Quickstart: ", theme::muted()),
         Span::styled("quickstart", theme::accent()),

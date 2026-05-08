@@ -1,5 +1,27 @@
-import type { ThreatModelDocument } from "../../agents/tasks/threat-modeling/types.js";
-import type { RepoContext } from "../../types.js";
+interface ThreatModelDocument {
+  threats?: Array<{
+    title?: string;
+    description?: string;
+    attackVector?: string;
+    relatedCwe?: string[];
+    missingMitigations?: string[];
+    preconditions?: string[];
+    cwe?: string | string[];
+    cwes?: string[];
+    [key: string]: unknown;
+  }>;
+  [key: string]: unknown;
+}
+
+interface RepoContext {
+  languages?: string[];
+  frameworks?: string[];
+  authPatterns?: string[];
+  sanitizationLibs?: string[];
+  ormOrDb?: string[];
+  entryPoints?: string[];
+  [key: string]: unknown;
+}
 
 export interface TaintIrisNextBackendHints {
   codeql?: string;
@@ -573,18 +595,19 @@ export function rankCatalogEntries(
   const languageSet = collectLanguageSet(options.context, options.languages ?? []);
   const threatCwes = collectThreatCwes(options.threatModel);
   const corpus = buildRelevanceCorpus(options.context, options.threatModel);
-  const hasSqlDb = options.context?.ormOrDb.some((db) =>
+  const hasSqlDb = (options.context?.ormOrDb ?? []).some((db) =>
     /sql|postgres|mysql|sqlite|oracle/iu.test(db),
   );
   const hasWeb = options.context
-    ? options.context.frameworks.length > 0 || options.context.entryPoints.length > 0
+    ? (options.context.frameworks ?? []).length > 0 ||
+      (options.context.entryPoints ?? []).length > 0
     : false;
   const sparsePythonContext =
     languageSet.has("python") &&
     (!options.context ||
-      options.context.frameworks.length +
-        options.context.ormOrDb.length +
-        options.context.entryPoints.length <
+      (options.context.frameworks ?? []).length +
+        (options.context.ormOrDb ?? []).length +
+        (options.context.entryPoints ?? []).length <
         2);
 
   return entries
@@ -811,11 +834,11 @@ function buildRelevanceCorpus(
   ];
   for (const threat of threatModel?.threats ?? []) {
     parts.push(
-      threat.title,
-      threat.description,
-      threat.attackVector,
-      ...threat.missingMitigations,
-      ...threat.preconditions,
+      threat.title ?? "",
+      threat.description ?? "",
+      threat.attackVector ?? "",
+      ...(threat.missingMitigations ?? []),
+      ...(threat.preconditions ?? []),
     );
   }
   return parts.join(" ").toLowerCase();
