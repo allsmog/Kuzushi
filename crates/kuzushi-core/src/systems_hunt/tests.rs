@@ -169,6 +169,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
         let runtime = FakeRuntime::new();
 
@@ -198,6 +199,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let output = execute_systems_hunt_tool(
@@ -221,6 +223,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let output =
@@ -253,6 +256,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
         let runtime = FakeRuntime::new();
         let context = gather_systems_context(
@@ -303,6 +307,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
         let runtime = FakeRuntime::new();
 
@@ -331,6 +336,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
         let runtime = FakeRuntime::new();
 
@@ -369,6 +375,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
         let runtime = FakeRuntime::new();
 

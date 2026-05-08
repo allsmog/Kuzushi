@@ -34,7 +34,8 @@ pub use crate::repository_inventory::{
 };
 pub use crate::run_artifacts::{
     append_run_trace_step, list_run_summaries, load_run_summary, new_run_id, run_dir, runs_root,
-    write_run_artifact_json, write_run_summary, RunArtifact, RunSummary, RunTraceStep,
+    write_run_artifact_json, write_run_summary, BroadcastSink, JsonlSink, RunArtifact, RunSummary,
+    RunTraceStep, TraceHandle, TraceSink, TraceStepBuilder,
 };
 pub use crate::runtime::{
     append_structured_output_contract, run_tool_loop, AgentLoopOutcome, AgentLoopStep,

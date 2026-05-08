@@ -381,6 +381,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
         let registry = ModuleRegistry::with_v2_builtins();
         let runtime = MockRuntime::new();
@@ -457,6 +458,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
         let result = run_variant_hunt(
             json!({"fingerprint": fingerprint}),
@@ -515,6 +517,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
         let registry = ModuleRegistry::with_v2_builtins();
         let runtime = MockRuntime::new();
@@ -567,6 +570,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
         let err = run_ndiff_hunt_variants(
             json!({"pattern": {"fixShape":"guard","vulnerableShape":"unguarded"}}),

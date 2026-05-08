@@ -13,6 +13,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let updated = scope(

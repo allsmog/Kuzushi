@@ -87,4 +87,12 @@ pub struct ShellApp {
     pub(crate) agent_rx: Option<Receiver<AgentEvent>>,
     pub(crate) plan_rx: Option<Receiver<PlanEvent>>,
     pub(crate) threat_rx: Option<Receiver<ThreatPatchEvent>>,
+    /// Live trace step stream from the active tool/scan run. Populated when a
+    /// `BroadcastSink` is attached at run start; drained each tick into
+    /// `app.activity` so the Activity view can render the latest events.
+    pub(crate) trace_rx: Option<Receiver<RunTraceStep>>,
+    /// In-memory snapshot of DAG status + recent reasoning events feeding the
+    /// Activity view. `Some` while a run is active or recently finished;
+    /// reset by `R` in the Activity view.
+    pub activity: Option<ActivitySession>,
 }

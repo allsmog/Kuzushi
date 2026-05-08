@@ -38,6 +38,7 @@ pub(crate) fn run_tool_command(tool: String, input: String, target: Option<PathB
         config: &config,
         workspace: workspace.as_ref(),
         findings_store: store.as_ref(),
+        trace: None,
     };
     let result = registry.execute_tool_with_runtime(
         &tool,

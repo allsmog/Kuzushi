@@ -84,6 +84,7 @@ mod tests {
             config,
             workspace: Some(workspace),
             findings_store: None,
+            trace: None,
         }
     }
 

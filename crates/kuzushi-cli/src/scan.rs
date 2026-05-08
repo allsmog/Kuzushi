@@ -35,6 +35,7 @@ pub(crate) async fn scan_command(
         config: &config,
         workspace: Some(&workspace),
         findings_store: Some(&store),
+        trace: None,
     };
 
     let started = std::time::Instant::now();

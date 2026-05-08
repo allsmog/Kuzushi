@@ -81,6 +81,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let resolved = resolve_tool_target(
@@ -101,6 +102,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let resolved = resolve_tool_target(&Value::Null, &ctx).unwrap();
