@@ -120,6 +120,24 @@ impl ShellApp {
             ViewHotkeyAction::ResumeScan => {
                 self.handle_command(ShellCommand::Resume(None));
             }
+            ViewHotkeyAction::ActivityTabPaneFocus => {
+                if let Some(session) = self.activity.as_mut() {
+                    session.toggle_pane_focus();
+                }
+            }
+            ViewHotkeyAction::ActivityToggleVerbose => {
+                if let Some(session) = self.activity.as_mut() {
+                    session.toggle_verbose_subsystems();
+                }
+            }
+            ViewHotkeyAction::ActivityTogglePause => {
+                if let Some(session) = self.activity.as_mut() {
+                    session.toggle_paused();
+                }
+            }
+            ViewHotkeyAction::ActivityReset => {
+                self.activity = None;
+            }
             _ => return false,
         }
         true

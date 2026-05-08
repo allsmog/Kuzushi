@@ -56,6 +56,7 @@ fn returns_to_catalog(view: &ShellView) -> bool {
             | ShellView::Runs
             | ShellView::Replay(_)
             | ShellView::Trace(_)
+            | ShellView::Activity
             | ShellView::History
             | ShellView::Story
             | ShellView::Auth

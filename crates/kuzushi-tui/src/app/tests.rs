@@ -4529,6 +4529,79 @@ fn plan_cursor_navigation_and_skip_toggle() {
     assert!(app.plan_skipped.is_empty());
 }
 
+#[test]
+fn activity_command_opens_view_and_creates_session() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    assert!(matches!(app.shell_view, ShellView::Catalog));
+    assert!(app.activity.is_none());
+
+    app.handle_command(ShellCommand::Activity);
+
+    assert!(matches!(app.shell_view, ShellView::Activity));
+    assert!(
+        app.activity.is_some(),
+        "/activity should mint a session if none exists"
+    );
+}
+
+#[test]
+fn activity_view_pause_verbose_reset_keys() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.handle_command(ShellCommand::Activity);
+
+    // Pause toggle.
+    app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()));
+    assert!(app.activity.as_ref().unwrap().paused);
+    app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()));
+    assert!(!app.activity.as_ref().unwrap().paused);
+
+    // Verbose toggle.
+    app.handle_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::empty()));
+    assert!(app.activity.as_ref().unwrap().verbose_subsystems);
+
+    // Reset drops the session.
+    app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::empty()));
+    assert!(app.activity.is_none());
+}
+
+#[test]
+fn activity_view_renders_dag_rows_and_feed_events() {
+    use kuzushi_core::RunTraceStep;
+
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.handle_command(ShellCommand::Activity);
+    let session = app.activity.as_mut().unwrap();
+    session.apply_step(
+        RunTraceStep::new(1, "tool", "started")
+            .with_module_id("semgrep")
+            .with_verb("scan"),
+    );
+    session.apply_step(
+        RunTraceStep::new(2, "reasoning", "verdict=likely-tp")
+            .with_module_id("triage")
+            .with_verb("run"),
+    );
+    session.apply_step(
+        RunTraceStep::new(3, "tool", "task-selector ran")
+            .with_module_id("pipeline")
+            .with_verb("task-selector"),
+    );
+
+    // Use the lower-level renderer directly since we already have an open
+    // Activity view + populated session.
+    let output = crate::renderer::render_plain_app(&app, 100);
+    assert!(output.contains("[semgrep:scan]"));
+    assert!(output.contains("[triage:run]"));
+    assert!(
+        output.contains("subsystems"),
+        "hidden pipeline:* events should collapse into the subsystems aggregate, output was: {output}"
+    );
+    assert!(
+        !output.contains("[pipeline:task-selector]"),
+        "hidden module events should be filtered from the feed by default"
+    );
+}
+
 fn assert_plain_output_strict_80(output: &str) {
     assert!(
         !output.contains('\u{1b}'),

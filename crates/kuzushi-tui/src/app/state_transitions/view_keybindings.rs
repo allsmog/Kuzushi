@@ -1,6 +1,6 @@
 use super::view_keybinding_groups::{
-    actor_detail_keybindings, findings_keybindings, prompts_editor_keybindings, threat_keybindings,
-    tune_keybindings,
+    activity_keybindings, actor_detail_keybindings, findings_keybindings,
+    prompts_editor_keybindings, threat_keybindings, tune_keybindings,
 };
 use super::view_keybinding_helpers::{bind, pause_scan_keybindings, resume_scan_keybindings};
 use super::*;
@@ -14,6 +14,7 @@ impl ShellApp {
             ShellView::ActorDetail(_) => actor_detail_keybindings(),
             ShellView::PromptsEditor => prompts_editor_keybindings(),
             ShellView::Tune => tune_keybindings(),
+            ShellView::Activity => activity_keybindings(),
             _ => Vec::new(),
         }
     }

@@ -112,6 +112,7 @@ fn parse_session_command(verb: &str) -> Option<ShellCommand> {
         "pause" => Some(ShellCommand::Pause),
         "story" => Some(ShellCommand::Story),
         "quickstart" => Some(ShellCommand::Quickstart),
+        "activity" | "progress" | "a" => Some(ShellCommand::Activity),
         _ => None,
     }
 }

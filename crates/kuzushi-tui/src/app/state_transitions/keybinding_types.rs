@@ -56,6 +56,10 @@ pub(crate) enum ViewHotkeyAction {
     PromptsAction(PromptsAction),
     ActorDetailFilterCycle,
     ActorDetailFilterReset,
+    ActivityTabPaneFocus,
+    ActivityToggleVerbose,
+    ActivityTogglePause,
+    ActivityReset,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
