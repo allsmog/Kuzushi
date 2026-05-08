@@ -10,6 +10,9 @@ pub(in crate::modules) fn choose_taint_iris_next_backend(
     ]
     .into_iter()
     .find(|path| path.exists());
+    let joern_cpg = joern_cpg_path(repo_root);
+    let joern_cpg_present = joern_cpg.exists();
+    let joern_runnable = joern_cpg_present && super::joern_available();
     let mut warnings = Vec::new();
     let selected = match requested {
         "codeql" if codeql_db.is_some() => "codeql",
@@ -20,7 +23,28 @@ pub(in crate::modules) fn choose_taint_iris_next_backend(
             );
             "structural"
         }
-        "semgrep" | "joern" | "language" => {
+        "joern" if joern_runnable => "joern",
+        "joern" if !joern_cpg_present => {
+            warnings.push(format!(
+                "backend=joern requested, but no CPG was found at {}; build with `joern-parse <target> --output {}` then rerun. Using structural evidence.",
+                joern_cpg.display(),
+                joern_cpg.display(),
+            ));
+            "structural"
+        }
+        "joern" => {
+            warnings.push(
+                "backend=joern requested, but the joern launcher was not found on PATH (set KUZUSHI_JOERN_BIN or install Joern). Using structural evidence."
+                    .to_string(),
+            );
+            "structural"
+        }
+        // `auto` quietly upgrades to joern when both the binary and a CPG
+        // are ready; otherwise it falls through to structural without
+        // warning so default operators don't see noise about a backend
+        // they didn't ask for.
+        "auto" if joern_runnable => "joern",
+        "semgrep" | "language" => {
             warnings.push(format!(
                 "backend={requested} is not a Rust execution backend in this cutover; using structural evidence"
             ));

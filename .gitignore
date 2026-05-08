@@ -39,3 +39,4 @@ kuzushi-*-prompt.md
 
 # Agent scratch audit docs
 .tmp-*.md
+/workspace/
