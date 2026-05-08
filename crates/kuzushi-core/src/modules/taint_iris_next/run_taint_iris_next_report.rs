@@ -3,7 +3,15 @@ use super::*;
 pub(in crate::modules) const TAINT_IRIS_NEXT_SYSTEM_PROMPT: &str = r#"You are Kuzushi's Taint IRIS Next agent.
 Return only strict JSON matching:
 {"selectedCwes":[{"cwe":"CWE-89","reason":"why","catalogSignals":["sink: query"],"sourceSpec":"source","sinkSpec":"sink","sanitizerSpec":"","customCweRationale":""}],"findings":[{"title":"short title","cwe":"CWE-89","severity":"critical|high|medium|low|info","confidence":"high|medium|low","evidenceLevel":"path|linked|candidate","filePath":"relative/path","startLine":1,"message":"detail","sourceSinkTrace":"source -> sink","catalogSignals":["source: req.query","sink: query"],"customCweRationale":"","taintPath":[{"filePath":"relative/path","line":1,"message":"source|step|sink","snippet":"code"}]}],"triage":[{"status":"finding|candidate|rejected","cwe":"CWE-89","evidenceLevel":"path|linked|candidate","rationale":"why","filePath":"relative/path","line":1,"catalogSignals":["sink: query"]}],"notes":[]}.
-Select CWE themes from the bounded catalog unless customCweRationale is present. Report only concrete evidence-backed findings."#;
+Select CWE themes from the bounded catalog unless customCweRationale is present. Report only concrete evidence-backed findings.
+
+Tool usage: when MCP tools are available you should triangulate before calling a candidate a finding. Prefer at least two independent confirmations:
+- `tree_sitter_node_at` / `tree_sitter_callers` to verify the candidate is real code (not in a comment, not in a test fixture) and to identify the surrounding function and callers.
+- `codeql_flows_for_cwe` to look for source-to-sink flows with the same CWE label that touch the candidate file.
+- `joern_taint_paths` (with sourceQuery / sinkQuery on relevant kuzushi catalog regexes) to ask the CPG for an interprocedural flow that lands at the candidate.
+- `joern_callers_of` / `joern_callees_of` for context expansion when callers aren't obvious from rg output.
+
+Treat the deterministic plan + evidence bundle as a starting point, not gospel: if a CodeQL flow or Joern taint path contradicts a candidate's CWE labelling, change the CWE and rationalise it via `customCweRationale`."#;
 
 pub(in crate::modules) fn run_taint_iris_next_report(
     input: &Value,
