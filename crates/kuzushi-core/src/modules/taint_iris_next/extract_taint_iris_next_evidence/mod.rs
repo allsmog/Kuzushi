@@ -18,8 +18,20 @@ pub(in crate::modules) fn extract_taint_iris_next_evidence(
     // so we never parse files for CWEs we'd reject anyway, and *before*
     // linked-story construction so noise candidates can't pair into
     // bogus source-to-sink stories.
-    let mut candidates =
+    let narrowed_candidates =
         narrow_taint_iris_next_candidates_syntactically(&plan.scan_root, raw_candidates);
+    // Drop candidates whose file path is obviously non-production code
+    // (test/, tutorial/, fixtures/, etc.). Filtering at the candidate
+    // level — not just at the linked-story level — keeps the agent
+    // prompt's `candidates` block clean too, so the agent can't
+    // speculate on tutorial/test paths even when the heuristic linker
+    // produces zero stories. Operators who explicitly want to scan
+    // non-production code can flip the catalog or pass a
+    // `targetSubdir` constrained at a non-production path.
+    let mut candidates: Vec<TaintIrisNextCandidate> = narrowed_candidates
+        .into_iter()
+        .filter(|candidate| !is_taint_iris_next_non_production_path(&candidate.file_path))
+        .collect();
     let mut warnings = plan.backend.warnings.clone();
 
     // When the backend selector picked joern (CPG present + binary on PATH),

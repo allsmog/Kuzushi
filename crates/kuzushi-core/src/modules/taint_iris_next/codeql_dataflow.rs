@@ -158,7 +158,8 @@ pub(in crate::modules) fn run_codeql_flows(
             let trimmed = s.trim().to_string();
             (!trimmed.is_empty()).then_some(trimmed)
         });
-    let catalog_queries = codeql_queries_from_catalog(&plan.catalog, &plan.languages);
+    let catalog_queries =
+        filter_existing_codeql_selectors(codeql_queries_from_catalog(&plan.catalog, &plan.languages));
     let queries: Vec<String> = if let Some(override_value) = env_override {
         vec![override_value]
     } else if !catalog_queries.is_empty() {
@@ -253,6 +254,60 @@ fn codeql_queries_from_catalog(
         }
     }
     selectors
+}
+
+/// Drop selectors whose CWE folder doesn't exist in the installed pack.
+/// CodeQL treats missing selectors as fatal errors and aborts the whole
+/// analyze, so e.g. a catalog containing CWE-77 (which cpp-queries
+/// doesn't ship — only CWE-78 is available) would kill the run unless
+/// we filter it here. Separated from `codeql_queries_from_catalog` so
+/// the pure resolution stays testable without filesystem dependence.
+fn filter_existing_codeql_selectors(selectors: Vec<String>) -> Vec<String> {
+    selectors
+        .into_iter()
+        .filter(|selector| codeql_selector_path_exists(selector))
+        .collect()
+}
+
+fn codeql_selector_path_exists(selector: &str) -> bool {
+    let Some((pack, relative)) = selector.split_once(':') else {
+        return true;
+    };
+    let Some(pack_root) = codeql_pack_root(pack) else {
+        return true; // pack not on disk — leave the selector for codeql to surface its own error
+    };
+    pack_root.join(relative).exists()
+}
+
+/// Locate the on-disk root of a CodeQL pack so we can filter selectors
+/// by what actually ships. Walks the standard locations the codeql
+/// bundle uses; falls back to `None` (treat every CWE folder as
+/// potentially valid) when the pack root can't be determined.
+fn codeql_pack_root(pack: &str) -> Option<PathBuf> {
+    let pack_dir_name = pack.strip_prefix("codeql/").unwrap_or(pack);
+    for base in [
+        "/opt/codeql/codeql/qlpacks/codeql",
+        "/usr/local/codeql/qlpacks/codeql",
+        "/usr/local/share/codeql/qlpacks/codeql",
+    ] {
+        let candidate = PathBuf::from(base).join(pack_dir_name);
+        if candidate.is_dir() {
+            // Pack roots are versioned: codeql/cpp-queries/<version>/.
+            // Pick the most-recent version directory.
+            if let Ok(entries) = std::fs::read_dir(&candidate) {
+                let mut versions: Vec<_> = entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .filter(|path| path.is_dir())
+                    .collect();
+                versions.sort();
+                if let Some(latest) = versions.into_iter().next_back() {
+                    return Some(latest);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn codeql_query_pack_for_languages(languages: &[String]) -> Option<&'static str> {
