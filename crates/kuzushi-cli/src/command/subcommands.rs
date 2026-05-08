@@ -67,6 +67,9 @@ pub(crate) enum McpBackend {
     /// Pure-Rust, sub-10ms per call so the agent can invoke it freely
     /// during a hunt to verify candidates.
     TreeSitter,
+    /// CodeQL CWE-folder selectors over a built database. Slow per
+    /// call today (DB reload) but produces real reaching flows.
+    Codeql,
 }
 
 impl McpBackend {
@@ -76,6 +79,7 @@ impl McpBackend {
             Self::Clang => "kuzushi-mcp-clang",
             Self::Joern => "kuzushi-mcp-joern",
             Self::TreeSitter => "kuzushi-mcp-treesitter",
+            Self::Codeql => "kuzushi-mcp-codeql",
         }
     }
 }

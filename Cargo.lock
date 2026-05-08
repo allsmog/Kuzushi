@@ -933,6 +933,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "kuzushi-mcp-codeql"
+version = "0.24.0-alpha.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "kuzushi-mcp-common",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "kuzushi-mcp-common"
 version = "0.24.0-alpha.0"
 dependencies = [

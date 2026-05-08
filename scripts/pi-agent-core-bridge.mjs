@@ -444,16 +444,264 @@ function createWhiteboxReadOnlyTools(cwd) {
   };
 }
 
-function buildAgentTools(request) {
+async function buildAgentTools(request) {
   const policy = normalizeAgentToolPolicy(request);
-  if (policy.profile !== WHITEBOX_STATIC_TOOL_PROFILE) return [];
-  const available = createWhiteboxReadOnlyTools(request.cwd);
-  return policy.tools.map((tool) => {
-    const canonicalName = WHITEBOX_STATIC_READ_ONLY_TOOLS.find(
-      (allowed) => allowed.toLowerCase() === tool.toLowerCase(),
+  const tools = [];
+  if (policy.profile === WHITEBOX_STATIC_TOOL_PROFILE) {
+    const available = createWhiteboxReadOnlyTools(request.cwd);
+    for (const tool of policy.tools) {
+      const canonicalName = WHITEBOX_STATIC_READ_ONLY_TOOLS.find(
+        (allowed) => allowed.toLowerCase() === tool.toLowerCase(),
+      );
+      tools.push(available[canonicalName]);
+    }
+  }
+  for (const mcpTool of await buildMcpAgentTools(request)) {
+    tools.push(mcpTool);
+  }
+  return tools;
+}
+
+const KUZUSHI_MCP_SERVERS = [
+  {
+    profile: "tree-sitter",
+    binary: process.env.KUZUSHI_MCP_TREESITTER_BIN || "kuzushi-mcp-treesitter",
+  },
+  {
+    profile: "joern",
+    binary: process.env.KUZUSHI_MCP_JOERN_BIN || "kuzushi-mcp-joern",
+  },
+  {
+    profile: "codeql",
+    binary: process.env.KUZUSHI_MCP_CODEQL_BIN || "kuzushi-mcp-codeql",
+  },
+];
+
+const MCP_AGENT_TOOLS_FLAG = ["KUZUSHI_AGENT_MCPS"];
+
+/// Spawn each MCP server kuzushi knows about and wrap every tool the
+/// server advertises as a pi-agent-core agent tool. The agent then
+/// invokes them like any other tool — under the hood, each call is a
+/// JSON-RPC request to the server's stdin.
+///
+/// Gated on KUZUSHI_AGENT_MCPS=1 so the existing whitebox-static
+/// profile (which only exposes Read/Glob/Grep/LS) keeps working
+/// unchanged for runs that don't want the heavier tool surface.
+///
+/// Anthropic OAuth (sk-ant-oat01-*) only accepts the Claude Code tool
+/// allow-list (Read/Write/Edit/Bash/Grep/Glob/...). Custom tool names
+/// silently stall the response stream rather than returning an error,
+/// so we refuse to advertise MCP tools when a Claude Code OAuth token
+/// is the active credential. Use a regular API key for MCP-as-agent.
+async function buildMcpAgentTools(request) {
+  if (!agentMcpsEnabled(request)) return [];
+  if (anthropicOAuthCredentialPresent()) {
+    process.stderr.write(
+      "[kuzushi-bridge] MCP-as-agent disabled: Anthropic OAuth tokens only " +
+        "accept the Claude Code tool allow-list. Set ANTHROPIC_API_KEY to " +
+        "use kuzushi-mcp-{treesitter,joern,codeql} as agent tools.\n",
     );
-    return available[canonicalName];
+    return [];
+  }
+  const out = [];
+  for (const spec of KUZUSHI_MCP_SERVERS) {
+    const handle = await ensureMcpServer(spec);
+    if (!handle) continue;
+    for (const tool of handle.tools) {
+      out.push(wrapMcpToolForAgent(handle, tool));
+    }
+  }
+  if (process.env.KUZUSHI_BRIDGE_VERBOSE === "1") {
+    process.stderr.write(
+      `[kuzushi-bridge] mcp tool surface: ${out
+        .map((tool) => tool.name)
+        .join(", ") || "(none)"}\n`,
+    );
+  }
+  return out;
+}
+
+function anthropicOAuthCredentialPresent() {
+  try {
+    const bag = readOauthCredentials();
+    const creds = bag?.anthropic;
+    return Boolean(creds && typeof creds.access === "string" && creds.access.length > 0);
+  } catch {
+    return false;
+  }
+}
+
+function agentMcpsEnabled(request) {
+  if (
+    request &&
+    typeof request.toolPolicy === "object" &&
+    request.toolPolicy &&
+    request.toolPolicy.mcps === true
+  ) {
+    return true;
+  }
+  for (const flag of MCP_AGENT_TOOLS_FLAG) {
+    const value = process.env[flag];
+    if (value === "1" || value === "true") return true;
+  }
+  return false;
+}
+
+const mcpServerHandles = new Map();
+
+async function ensureMcpServer(spec) {
+  const cached = mcpServerHandles.get(spec.profile);
+  if (cached) {
+    const handle = await cached;
+    return handle && handle.alive ? handle : null;
+  }
+  const promise = spawnMcpServer(spec);
+  mcpServerHandles.set(spec.profile, promise);
+  const handle = await promise;
+  if (!handle) mcpServerHandles.delete(spec.profile);
+  return handle;
+}
+
+async function spawnMcpServer(spec) {
+  let child;
+  try {
+    child = spawn(spec.binary, [], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: process.env,
+    });
+  } catch (error) {
+    process.stderr.write(
+      `[kuzushi-bridge] could not spawn MCP server ${spec.binary}: ${error.message ?? error}\n`,
+    );
+    return null;
+  }
+  const handle = {
+    profile: spec.profile,
+    binary: spec.binary,
+    child,
+    alive: true,
+    nextId: 1,
+    pending: new Map(),
+    buffer: "",
+    tools: [],
+  };
+  child.on("error", (error) => {
+    process.stderr.write(
+      `[kuzushi-bridge] MCP server ${spec.binary} errored: ${error.message ?? error}\n`,
+    );
+    handle.alive = false;
   });
+  child.on("exit", () => {
+    handle.alive = false;
+    for (const [, resolver] of handle.pending) {
+      resolver.reject(new Error(`MCP server ${spec.binary} exited`));
+    }
+    handle.pending.clear();
+  });
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => receiveMcpStdout(handle, chunk));
+  // Drain stderr but only forward when KUZUSHI_BRIDGE_VERBOSE is set.
+  // Without draining, the child's stderr pipe fills, the OS blocks the
+  // child's writes, and JSON-RPC stalls (notably joern's JVM startup is
+  // chatty enough to deadlock a 64KB pipe in seconds).
+  const verbose = process.env.KUZUSHI_BRIDGE_VERBOSE === "1";
+  child.stderr.on("data", (chunk) => {
+    if (verbose) {
+      process.stderr.write(`[mcp:${spec.profile}] ${String(chunk).trimEnd()}\n`);
+    }
+  });
+  try {
+    await sendMcpRequest(handle, "initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "kuzushi-bridge", version: "0" },
+    });
+    const list = await sendMcpRequest(handle, "tools/list", undefined);
+    if (list && Array.isArray(list.tools)) {
+      handle.tools = list.tools;
+    }
+  } catch (error) {
+    process.stderr.write(
+      `[kuzushi-bridge] MCP server ${spec.binary} init failed: ${error.message ?? error}\n`,
+    );
+    handle.alive = false;
+  }
+  return handle;
+}
+
+function sendMcpRequest(handle, method, params) {
+  return new Promise((resolve, reject) => {
+    if (!handle.alive) {
+      reject(new Error(`MCP server ${handle.binary} is not alive`));
+      return;
+    }
+    const id = handle.nextId++;
+    handle.pending.set(id, { resolve, reject });
+    const body = { jsonrpc: "2.0", id, method };
+    if (params !== undefined) body.params = params;
+    handle.child.stdin.write(JSON.stringify(body) + "\n");
+  });
+}
+
+function receiveMcpStdout(handle, chunk) {
+  handle.buffer += chunk;
+  let newlineIdx;
+  while ((newlineIdx = handle.buffer.indexOf("\n")) >= 0) {
+    const line = handle.buffer.slice(0, newlineIdx).trim();
+    handle.buffer = handle.buffer.slice(newlineIdx + 1);
+    if (!line) continue;
+    let payload;
+    try {
+      payload = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (payload && typeof payload.id === "number") {
+      const resolver = handle.pending.get(payload.id);
+      if (!resolver) continue;
+      handle.pending.delete(payload.id);
+      if (payload.error) {
+        resolver.reject(
+          new Error(
+            `MCP error: ${payload.error.message ?? JSON.stringify(payload.error)}`,
+          ),
+        );
+      } else {
+        resolver.resolve(payload.result);
+      }
+    }
+  }
+}
+
+function wrapMcpToolForAgent(handle, mcpTool) {
+  // pi-agent-core tools use camelCase names; MCP tool names often
+  // contain colons (e.g. tree_sitter:node_at). Sanitise to a safe
+  // identifier the agent can call back.
+  const safeName = mcpTool.name.replace(/[^a-zA-Z0-9_]/g, "_");
+  const description = `[mcp:${handle.profile}] ${mcpTool.description}`;
+  return {
+    name: safeName,
+    label: safeName,
+    description,
+    parameters: mcpTool.inputSchema ?? mcpTool.input_schema ?? {
+      type: "object",
+      additionalProperties: true,
+    },
+    execute: async (_toolCallId, params) => {
+      const result = await sendMcpRequest(handle, "tools/call", {
+        name: mcpTool.name,
+        arguments: params ?? {},
+      });
+      const text =
+        Array.isArray(result?.content) && result.content[0] && result.content[0].text
+          ? String(result.content[0].text)
+          : JSON.stringify(result, null, 2);
+      return {
+        content: [{ type: "text", text }],
+        details: result,
+      };
+    },
+  };
 }
 
 function subscribeText(agent, onText) {
@@ -468,7 +716,7 @@ function subscribeText(agent, onText) {
 }
 
 async function runAgent(AgentCtor, model, request) {
-  const agentTools = buildAgentTools(request);
+  const agentTools = await buildAgentTools(request);
   const allowedToolNames = new Set(agentTools.map((tool) => tool.name.toLowerCase()));
   const systemPrompt = appendStructuredOutputContract(
     request.systemPrompt ?? request.system_prompt ?? "",
