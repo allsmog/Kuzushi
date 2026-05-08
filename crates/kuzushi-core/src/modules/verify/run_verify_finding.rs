@@ -12,6 +12,15 @@ pub(in crate::modules) fn run_verify_finding(
         .findings_store
         .context("verify:finding requires a findings store for the active workspace")?;
     let input = VerifyFindingInput::from_tool_input(&input, workspace.root())?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "finding",
+                format!("verify start · fp={}", input.fingerprint),
+            )
+            .emit();
+    }
     let Some(finding) = store.get_finding_by_reference(&input.fingerprint)? else {
         return Ok(json!({
             "ok": false,
@@ -27,6 +36,18 @@ pub(in crate::modules) fn run_verify_finding(
             ),
         }));
     };
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "reasoning",
+                "finding",
+                format!(
+                    "evidence-pull · severity={:?} verdict={:?}",
+                    finding.severity, triage.verdict,
+                ),
+            )
+            .emit();
+    }
     let runtime = runtime.context(
         "verify:finding requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
     )?;
@@ -59,6 +80,14 @@ pub(in crate::modules) fn run_verify_finding(
     } else {
         "not-exploitable"
     };
+    if let Some(trace) = ctx.trace {
+        let mut step =
+            trace.step("done", "finding", format!("verify · {verdict}"));
+        if exploitable {
+            step = step.with_severity("warn");
+        }
+        let _ = step.emit();
+    }
     let mut lines = vec![
         "[+] verify:finding complete".to_string(),
         format!("      {verdict}"),
