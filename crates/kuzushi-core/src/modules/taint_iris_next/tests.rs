@@ -410,4 +410,124 @@ mod tests {
             .filter(|out| out.status.success())
             .map(|_| ())
     }
+
+    /// Stand-in agent that returns valid JSON with `selectedCwes: []` and
+    /// `findings: []` plus an explanatory `notes` block — i.e. the case
+    /// where the model deliberately rejects all linked-story candidates.
+    /// Used to pin the "no fallback override on a clean reject" behavior.
+    struct DeliberateEmptyAgent {
+        queries: Mutex<Vec<AgentQueryRequest>>,
+    }
+
+    impl DeliberateEmptyAgent {
+        fn new() -> Self {
+            Self {
+                queries: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl AgentRuntime for DeliberateEmptyAgent {
+        fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            self.queries.lock().unwrap().push(request);
+            Ok(AgentQueryResponse {
+                cost_usd: TAINT_NEXT_TEST_CALL_COST_USD,
+                input_tokens: 800,
+                output_tokens: 200,
+                text: String::new(),
+                structured: Some(json!({
+                    "selectedCwes": [],
+                    "findings": [],
+                    "triage": [],
+                    "notes": [
+                        "All linked stories are in test fixtures or migration scripts with hardcoded SQL.",
+                        "No defensible source->sink path meets the linked evidence threshold."
+                    ]
+                })),
+            })
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            Ok(TriageOutcome::default())
+        }
+    }
+
+    /// Regression: when the agent returns valid JSON with empty selections,
+    /// we must NOT substitute a deterministic "no-selection-fallback"
+    /// finding. The previous behavior overrode an explicit agent rejection
+    /// (e.g. opus-4-7 on a clean Postgres app) with a heuristic guess from
+    /// the structural linked-story matcher, surfacing low-confidence noise
+    /// the operator already paid the model to dismiss.
+    #[test]
+    fn deliberate_empty_agent_response_is_respected_without_fallback() {
+        let temp = tempdir().unwrap();
+        write_js_taint_fixture(temp.path());
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let mut config = V2Config::default();
+        config.model = Some("anthropic:claude-opus-4-7".to_string());
+        let runtime = DeliberateEmptyAgent::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+
+        let result = run_taint_iris_next_report(
+            &json!({
+                "mode": "hunt",
+                "maxCatalogEntries": 3,
+                "maxAgentFindings": 5,
+                "minEvidenceLevel": "candidate"
+            }),
+            &ctx,
+            Some(&runtime),
+        )
+        .unwrap()
+        .to_tool_json();
+
+        assert_eq!(
+            result.pointer("/data/agentStatus").and_then(Value::as_str),
+            Some("no-selection"),
+            "deliberate empty must surface as no-selection, not no-selection-fallback"
+        );
+        assert_eq!(
+            result
+                .pointer("/data/findings")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(0),
+            "no findings should be persisted when the agent rejected everything"
+        );
+        assert_eq!(
+            result
+                .pointer("/data/reviewCandidates")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(0),
+            "no review candidates should be synthesised on a deliberate empty"
+        );
+        assert_eq!(
+            result.get("costUsd").and_then(Value::as_f64),
+            Some(TAINT_NEXT_TEST_CALL_COST_USD),
+            "cost from the rejected query must still be reported"
+        );
+        // Findings DB stays clean — opus's "no" should not register a low-confidence row.
+        assert_eq!(store.list_findings(10).unwrap().len(), 0);
+        // The "agent selected no CWEs" warning still fires for transparency.
+        let warnings: Vec<String> = result
+            .pointer("/data/warnings")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(
+            warnings.iter().any(|w| w.contains("agent selected no CWEs")),
+            "expected an explanatory warning, got {warnings:?}"
+        );
+    }
 }
