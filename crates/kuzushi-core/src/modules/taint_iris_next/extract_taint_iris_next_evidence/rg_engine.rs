@@ -26,7 +26,11 @@ pub(in crate::modules) fn rg_available() -> bool {
 pub(super) fn collect_structural_candidates_via_rg(
     plan: &TaintIrisNextPlan,
 ) -> Result<Vec<TaintIrisNextCandidate>> {
-    let files = collect_taint_iris_next_source_files(&plan.scan_root, 500, 128 * 1024)?;
+    // No max_files cap: rg fans the catalog patterns out across the entire
+    // walked file list with SIMD substring search, so capping the walker
+    // would just skip files alphabetically without recovering any
+    // performance worth the recall loss.
+    let files = collect_taint_iris_next_source_files(&plan.scan_root, None, 128 * 1024)?;
     if files.is_empty() {
         return Ok(Vec::new());
     }

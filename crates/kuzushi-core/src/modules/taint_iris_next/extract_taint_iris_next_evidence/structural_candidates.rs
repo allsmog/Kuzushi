@@ -20,7 +20,12 @@ pub(super) fn collect_structural_candidates(
 fn collect_structural_candidates_inproc(
     plan: &TaintIrisNextPlan,
 ) -> Result<Vec<TaintIrisNextCandidate>> {
-    let files = collect_taint_iris_next_source_files(&plan.scan_root, 500, 128 * 1024)?;
+    // No max_files cap: rg's substring search and the per-CWE candidate cap
+    // already bound the work; capping the walker would silently skip files
+    // alphabetically and miss whole subtrees on big repos (e.g. a 7655-file
+    // postgres clone hit only 31 distinct files at the old 500-file cap,
+    // missing src/backend/parser/ entirely).
+    let files = collect_taint_iris_next_source_files(&plan.scan_root, None, 128 * 1024)?;
     let mut state = CandidateCollectionState::default();
 
     for source_file in files {
