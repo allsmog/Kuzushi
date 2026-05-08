@@ -110,6 +110,7 @@ pub(in crate::modules) fn dispatch_agentic_security_tool(
         "taint-iris:hunt" => Some(run_taint_iris_tool(input, ctx, runtime)),
         "taint-iris-next:hunt" => Some(run_taint_iris_next_tool(input, ctx, runtime)),
         "taint-iris-next:catalog" => Some(run_taint_iris_next_catalog_tool(input, ctx, runtime)),
+        "taint-iris-next:codeql-db" => Some(run_taint_iris_next_codeql_db_tool(input, ctx, runtime)),
         _ => None,
     }
 }
