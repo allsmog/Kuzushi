@@ -692,6 +692,9 @@ function tryOpenBrowser(url) {
   const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
   try {
     const child = spawn(command, args, { stdio: "ignore", detached: true });
+    child.on("error", () => {
+      /* xdg-open / open / cmd missing — URL was printed for manual use. */
+    });
     child.unref();
   } catch {
     /* URL is printed for manual use. */

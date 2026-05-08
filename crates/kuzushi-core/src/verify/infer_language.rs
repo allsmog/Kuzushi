@@ -12,20 +12,37 @@ pub(crate) enum Lang {
 }
 
 pub(crate) fn infer_language(path: &str) -> Lang {
-    let ext = std::path::Path::new(path)
+    let extension = std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    match ext.as_str() {
-        "rs" => Lang::Rust,
-        "c" | "h" => Lang::C,
-        "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" => Lang::Cpp,
-        "py" | "pyi" => Lang::Python,
-        "js" | "mjs" | "cjs" => Lang::JavaScript,
-        "ts" | "tsx" | "mts" | "cts" => Lang::TypeScript,
-        "" => Lang::Other("unknown".to_string()),
-        other => Lang::Other(other.to_string()),
+    known_language(&extension).unwrap_or_else(|| unknown_language(extension))
+}
+
+fn known_language(extension: &str) -> Option<Lang> {
+    language_kind_table()
+        .iter()
+        .find(|(extensions, _)| extensions.contains(&extension))
+        .map(|(_, language)| language.clone())
+}
+
+fn language_kind_table() -> &'static [(&'static [&'static str], Lang)] {
+    &[
+        (&["rs"], Lang::Rust),
+        (&["c", "h"], Lang::C),
+        (&["cc", "cpp", "cxx", "hh", "hpp", "hxx"], Lang::Cpp),
+        (&["py", "pyi"], Lang::Python),
+        (&["js", "mjs", "cjs"], Lang::JavaScript),
+        (&["ts", "tsx", "mts", "cts"], Lang::TypeScript),
+    ]
+}
+
+fn unknown_language(extension: String) -> Lang {
+    if extension.is_empty() {
+        Lang::Other("unknown".to_string())
+    } else {
+        Lang::Other(extension)
     }
 }
 

@@ -19,6 +19,7 @@ impl ShellApp {
                     );
                 }
                 self.apply_tool_result(&tool_name, result);
+                self.advance_chain_after_tool(&tool_name);
             }
             ToolEvent::Failed { tool_name, error } => {
                 record_tool_run_failed(target.as_deref(), run_id.as_deref(), &tool_name, &error);
@@ -31,6 +32,7 @@ impl ShellApp {
                 } else {
                     self.log("error", message);
                 }
+                self.abort_pending_chain(&tool_name);
             }
         }
     }

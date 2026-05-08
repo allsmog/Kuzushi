@@ -48,6 +48,8 @@ pub struct ShellApp {
     pub ctrl_c_armed_at: Option<Instant>,
     pub session_budget_usd: Option<f64>,
     pub advisory: AdvisoryState,
+    pub pending_chain: Option<PrereqChain>,
+    pub pending_prereq_prompt: Option<PendingPrereqPrompt>,
     pub pending_plan: Option<PlanProposal>,
     pub plan_cursor: usize,
     pub plan_skipped: BTreeSet<usize>,
