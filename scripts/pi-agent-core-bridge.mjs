@@ -127,6 +127,37 @@ function extractTextFromState(agent) {
   return "";
 }
 
+/**
+ * Sum the per-turn `usage` blocks pi-agent-core attaches to assistant
+ * messages. The library records cost in dollars under `usage.cost.total`
+ * and token counts as `usage.input` / `usage.output` (plus cache fields).
+ * Multi-turn agent loops can have several assistant messages, so we sum
+ * across all of them rather than reading only the last one.
+ */
+function aggregateAgentUsage(agent) {
+  const messages = agent?.state?.messages;
+  if (!Array.isArray(messages)) return undefined;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let costUsd = 0;
+  let touched = false;
+  for (const message of messages) {
+    if (message?.role !== "assistant" && message?.type !== "assistant") continue;
+    const usage = message?.usage;
+    if (!usage || typeof usage !== "object") continue;
+    touched = true;
+    inputTokens += Number(usage.input ?? usage.input_tokens ?? 0) || 0;
+    outputTokens += Number(usage.output ?? usage.output_tokens ?? 0) || 0;
+    const cost = usage.cost;
+    if (cost && typeof cost === "object") {
+      const total = Number(cost.total ?? 0);
+      if (Number.isFinite(total)) costUsd += total;
+    }
+  }
+  if (!touched) return undefined;
+  return { inputTokens, outputTokens, costUsd };
+}
+
 function maybeParseJson(text) {
   if (!text) return undefined;
   const trimmed = text.trim();
@@ -503,7 +534,7 @@ async function runAgent(AgentCtor, model, request) {
     text = extractTextFromState(agent);
   }
 
-  return text.trim();
+  return { text: text.trim(), usage: aggregateAgentUsage(agent) };
 }
 
 function appendStructuredOutputContract(systemPrompt, contract) {
@@ -960,13 +991,16 @@ async function main() {
 
   const [provider, modelId] = parseModelSpec(request.model);
   const model = getModel(provider, modelId);
-  const text = await runAgent(AgentCtor, model, request);
+  const { text, usage } = await runAgent(AgentCtor, model, request);
 
   process.stdout.write(
     JSON.stringify({
       ok: true,
       text,
       structured: maybeParseJson(text),
+      cost_usd: usage?.costUsd ?? 0,
+      input_tokens: usage?.inputTokens ?? 0,
+      output_tokens: usage?.outputTokens ?? 0,
     }),
   );
 }
