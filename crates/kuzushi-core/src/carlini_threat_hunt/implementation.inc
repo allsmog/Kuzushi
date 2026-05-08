@@ -13,7 +13,8 @@ use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
 use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 use crate::whitebox_static::{
-    agent_tool_policy_for_input, mark_whitebox_static_findings, whitebox_static_profile_requested,
+    default_whitebox_static_agent_tool_policy, mark_whitebox_static_findings,
+    whitebox_static_profile_requested,
 };
 
 const MODULE_ID: &str = "carlini-threat-hunt";
@@ -207,15 +208,22 @@ fn query_carlini_actor(
     actor_fingerprint: &str,
 ) -> Result<Value> {
     let prompt = build_actor_prompt(target, actor_hunt, options, inventory, actor_fingerprint);
+    // Carlini hunts vulnerabilities by reading code, so it needs the
+    // read-only repo tools (Read/Glob/Grep/LS) the bridge gates behind the
+    // whitebox-static profile, and high reasoning effort or the agent
+    // returns `{"findings":[]}` without ever invoking a tool. Operators can
+    // still override either via tool input.
+    let request = AgentQueryRequest::new(
+        model.to_string(),
+        target.to_path_buf(),
+        SYSTEM_PROMPT.to_string(),
+        prompt,
+    )
+    .with_tool_policy(default_whitebox_static_agent_tool_policy())
+    .with_thinking_level(carlini_thinking_level(input));
     query_required_structured_json(
         runtime,
-        AgentQueryRequest::new(
-            model.to_string(),
-            target.to_path_buf(),
-            SYSTEM_PROMPT.to_string(),
-            prompt,
-        )
-        .with_tool_policy(agent_tool_policy_for_input(input)?),
+        request,
         StructuredJsonContract::new(
             "carlini-threat-hunt:run",
             "CarliniThreatFindings",
@@ -223,6 +231,18 @@ fn query_carlini_actor(
         ),
         require_json_object,
     )
+}
+
+fn carlini_thinking_level(input: &Value) -> String {
+    for key in ["thinkingLevel", "reasoningEffort", "effort"] {
+        if let Some(value) = input.get(key).and_then(Value::as_str) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+    "high".to_string()
 }
 
 fn record_unique_carlini_findings(state: &mut CarliniActorRunState, findings: Vec<Finding>) {
@@ -1504,5 +1524,25 @@ mod tests {
         assert!(prompt.contains("Local artifact KB context"));
         assert!(prompt.contains("Authenticated user actor flow"));
         assert_eq!(options.kb_context.snippets[0].module_id, "x-ray");
+    }
+
+    #[test]
+    fn carlini_thinking_level_defaults_to_high_and_honours_operator_override() {
+        assert_eq!(carlini_thinking_level(&json!({})), "high");
+        assert_eq!(
+            carlini_thinking_level(&json!({"thinkingLevel": "medium"})),
+            "medium"
+        );
+        assert_eq!(
+            carlini_thinking_level(&json!({"reasoningEffort": "low"})),
+            "low"
+        );
+        assert_eq!(carlini_thinking_level(&json!({"effort": "xhigh"})), "xhigh");
+        // Empty string falls through to default; whitespace is trimmed.
+        assert_eq!(carlini_thinking_level(&json!({"thinkingLevel": ""})), "high");
+        assert_eq!(
+            carlini_thinking_level(&json!({"thinkingLevel": "  high  "})),
+            "high"
+        );
     }
 }

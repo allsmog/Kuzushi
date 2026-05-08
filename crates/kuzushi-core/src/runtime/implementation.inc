@@ -26,6 +26,12 @@ pub struct AgentQueryRequest {
     pub tool_policy: AgentToolPolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_output: Option<AgentStructuredOutput>,
+    /// Per-request reasoning effort override ("low" | "medium" | "high" | "xhigh").
+    /// `None` falls back to the runtime-level setting (env or runtime default).
+    /// Tools that need substantial code analysis (e.g. carlini-threat-hunt)
+    /// should set this; the bridge defaults to "low" for cheap calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<String>,
 }
 
 impl AgentQueryRequest {
@@ -42,6 +48,7 @@ impl AgentQueryRequest {
             prompt: prompt.into(),
             tool_policy: AgentToolPolicy::default(),
             structured_output: None,
+            thinking_level: None,
         }
     }
 
@@ -52,6 +59,11 @@ impl AgentQueryRequest {
 
     pub fn with_structured_output(mut self, structured_output: AgentStructuredOutput) -> Self {
         self.structured_output = Some(structured_output);
+        self
+    }
+
+    pub fn with_thinking_level(mut self, thinking_level: impl Into<String>) -> Self {
+        self.thinking_level = Some(thinking_level.into());
         self
     }
 }
