@@ -68,6 +68,9 @@ impl CandidateCollectionState {
         lower: &str,
         query: &TaintIrisNextStructuralQuery,
     ) {
+        if !query_applies_to_language(query, &source_file.language) {
+            return;
+        }
         let query_key = format!("{}:{}:{}", query.cwe, query.role, query.pattern);
         let files_for_query = self.per_query_files.entry(query_key).or_default();
         if files_for_query.len() >= plan.caps.max_files_per_query
@@ -151,4 +154,86 @@ fn candidate_confidence(query: &TaintIrisNextStructuralQuery) -> String {
         "low"
     }
     .to_string()
+}
+
+/// Whether a structural query (carrying its catalog entry's `languages`) is
+/// allowed to fire against a file of the given detected language.
+///
+/// The catalog explicitly scopes some CWEs — most notably CWE-190 (Integer
+/// Overflow) restricted to `["c","cpp","go","rust"]`. Without this gate,
+/// CWE-190's source signals (`length`, `size`, `count`, `offset`) and sink
+/// signals (`malloc`, `resize`, `capacity`, `copy`, `slice`) match every
+/// JS/TS file with `Array.length` and `.slice()` calls — which are
+/// memory-safe in those languages — generating heuristic linked stories
+/// that the agent then either has to reject (opus) or hallucinates findings
+/// for (haiku). Same shape of false positive applies to CWE-94 patterns
+/// against C/C++/Rust files, etc.
+///
+/// Rules:
+///   - `languages == []` or contains `"any"` → unscoped, fires everywhere.
+///   - `languages` lists specific languages → only fire when the file's
+///     detected language is in that list.
+///   - File language `"unknown"` → never fires for scoped queries (avoids
+///     matching arbitrary text in non-source files like markdown).
+fn query_applies_to_language(
+    query: &TaintIrisNextStructuralQuery,
+    file_language: &str,
+) -> bool {
+    if query.languages.is_empty() {
+        return true;
+    }
+    if query.languages.iter().any(|language| language == "any") {
+        return true;
+    }
+    query
+        .languages
+        .iter()
+        .any(|language| language == file_language)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn query_with_languages(languages: &[&str]) -> TaintIrisNextStructuralQuery {
+        TaintIrisNextStructuralQuery {
+            id: "q".to_string(),
+            cwe: "CWE-190".to_string(),
+            taint_class: "integer-overflow".to_string(),
+            role: "source".to_string(),
+            pattern: "count".to_string(),
+            languages: languages.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn cwe_190_skips_typescript_so_array_slice_is_not_a_candidate() {
+        let query = query_with_languages(&["c", "cpp", "go", "rust"]);
+        assert!(!query_applies_to_language(&query, "typescript"));
+        assert!(!query_applies_to_language(&query, "javascript"));
+        assert!(!query_applies_to_language(&query, "python"));
+        assert!(query_applies_to_language(&query, "c"));
+        assert!(query_applies_to_language(&query, "rust"));
+    }
+
+    #[test]
+    fn any_scope_matches_every_language_including_unknown() {
+        let any = query_with_languages(&["any"]);
+        assert!(query_applies_to_language(&any, "typescript"));
+        assert!(query_applies_to_language(&any, "unknown"));
+        assert!(query_applies_to_language(&any, ""));
+    }
+
+    #[test]
+    fn empty_scope_is_treated_as_any_for_legacy_catalog_entries() {
+        let unscoped = query_with_languages(&[]);
+        assert!(query_applies_to_language(&unscoped, "typescript"));
+        assert!(query_applies_to_language(&unscoped, "rust"));
+    }
+
+    #[test]
+    fn unknown_file_language_is_blocked_for_scoped_queries() {
+        let scoped = query_with_languages(&["c", "rust"]);
+        assert!(!query_applies_to_language(&scoped, "unknown"));
+    }
 }
