@@ -13,6 +13,77 @@ pub(in crate::renderer) fn confirm_card_height(app: &ShellApp, area: Rect) -> u1
     6.min(area.height.saturating_sub(8) as u16).max(3)
 }
 
+pub(in crate::renderer) fn prereq_prompt_card_height(app: &ShellApp, area: Rect) -> u16 {
+    if area.height < 6 {
+        return 0;
+    }
+    if app.pending_prereq_prompt.is_none() {
+        return 0;
+    }
+    // Header + tool/artifact + final tool + key row = 4 rows.
+    4.min(area.height.saturating_sub(8) as u16).max(3)
+}
+
+pub(in crate::renderer) fn render_prereq_prompt_card(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+) {
+    if area.height == 0 {
+        return;
+    }
+    let Some(prompt) = app.pending_prereq_prompt.as_ref() else {
+        return;
+    };
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled("◆ ", theme::accent()),
+        Span::styled("PREREQUISITE EXISTS", theme::accent()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled("artifact ", theme::muted()),
+        Span::styled(
+            fit(
+                &prompt.current_artifact_label,
+                (area.width as usize).saturating_sub(14),
+            ),
+            theme::primary(),
+        ),
+        Span::raw("   "),
+        Span::styled("path ", theme::muted()),
+        Span::styled(
+            fit(
+                &prompt.current_artifact_path.display().to_string(),
+                (area.width as usize).saturating_sub(40),
+            ),
+            theme::muted(),
+        ),
+    ]));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled("for      ", theme::muted()),
+        Span::styled(prompt.final_tool.clone(), theme::primary()),
+        Span::raw("   "),
+        Span::styled("regen via ", theme::muted()),
+        Span::styled(prompt.current_tool.clone(), theme::primary()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled("r", theme::success()),
+        Span::raw(" "),
+        Span::styled("reuse existing", theme::muted()),
+        Span::raw("   "),
+        Span::styled("g", theme::warn()),
+        Span::raw(" "),
+        Span::styled("regenerate", theme::muted()),
+        Span::raw("   "),
+        Span::styled("(y/n also accepted)", theme::muted()),
+    ]));
+    render_lines(frame, area, lines);
+}
+
 pub(in crate::renderer) fn render_confirm_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if area.height == 0 {
         return;

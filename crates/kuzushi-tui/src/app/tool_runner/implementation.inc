@@ -9,6 +9,7 @@ use kuzushi_core::{
 
 use super::approval::{confirm_gate_for_tool, parse_pending_patch};
 use super::options::closest_option_names;
+use super::prereq_chain::{prereq_steps_for, PendingPrereqPrompt, PrereqChain, PrereqStep};
 use super::workers::{background_tool_worker, tool_run_status};
 use super::{
     thinking_level_from_input, with_next_step, ReconSnapshot, ShellApp, ShellView, ToolEvent,
@@ -105,15 +106,201 @@ impl ShellApp {
         };
         let tool_thinking_level =
             thinking_level_from_input(&input).or_else(|| self.session_thinking_level.clone());
+        let workspace = workspace.expect("current_workspace returned Some workspace");
+
+        // Build the static prerequisite chain for this tool (e.g. carlini
+        // requires context:build then threat-model:build).  When non-empty
+        // we route the dispatch through `start_prereq_chain` so missing
+        // artifacts auto-run and existing artifacts trigger a reuse-or-
+        // regenerate prompt before continuing.
+        let target_root = workspace.root().to_path_buf();
+        let prereqs = prereq_steps_for(&tool_name, &target_root);
+        if !prereqs.is_empty() {
+            self.shell_view = ShellView::ModuleRun;
+            self.start_prereq_chain(
+                prereqs,
+                tool_name,
+                input,
+                workspace,
+                tool_thinking_level,
+            );
+            return;
+        }
+
         let status = tool_run_status(&tool_name);
         self.shell_view = ShellView::ModuleRun;
         self.start_background_tool(
             tool_name,
             input,
-            workspace.expect("current_workspace returned Some workspace"),
+            workspace,
             status,
             tool_thinking_level,
         );
+    }
+
+    /// Begin a prerequisite chain.  We walk the steps in order.  For each
+    /// step:
+    ///   - If the artifact already exists, pause for an operator
+    ///     reuse-or-regenerate decision.
+    ///   - Else dispatch the step's tool through
+    ///     `start_background_tool`, then advance once it finishes (handled
+    ///     in `apply_tool_event`).
+    pub(super) fn start_prereq_chain(
+        &mut self,
+        steps: Vec<PrereqStep>,
+        final_tool: String,
+        final_input: serde_json::Value,
+        workspace: WorkspaceTarget,
+        thinking_level: Option<String>,
+    ) {
+        let chain = PrereqChain::new(steps, final_tool, final_input, thinking_level);
+        self.log(
+            "system",
+            format!(
+                "{}: resolving prerequisites — {}",
+                chain.final_tool,
+                chain
+                    .remaining
+                    .iter()
+                    .map(|s| s.tool.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" → ")
+            ),
+        );
+        self.pending_chain = Some(chain);
+        self.advance_chain(workspace);
+    }
+
+    /// Advance the chain after a step finishes (or after a reuse decision).
+    /// Walks remaining steps, pausing on the first existing artifact for
+    /// operator input.  When the queue is empty, dispatches the final tool.
+    pub(super) fn advance_chain(&mut self, workspace: WorkspaceTarget) {
+        loop {
+            // Snapshot decision-relevant state out of `self.pending_chain`
+            // so we can mutate `self` (logging, dispatch) without holding
+            // an outstanding borrow.
+            let Some(chain) = self.pending_chain.as_ref() else {
+                return;
+            };
+            let final_tool = chain.final_tool.clone();
+            let final_input = chain.final_input.clone();
+            let final_thinking = chain.final_thinking_level.clone();
+            let finals_dispatched = chain.finals_dispatched;
+            let next_step = chain.next_step().cloned();
+
+            let Some(step) = next_step else {
+                if finals_dispatched {
+                    // Final tool already dispatched; nothing to advance.
+                    return;
+                }
+                // Mark finals_dispatched before dispatching so the
+                // post-dispatch event handler recognises completion via
+                // `was_final_dispatch`.
+                if let Some(chain) = self.pending_chain.as_mut() {
+                    chain.finals_dispatched = true;
+                }
+                let status = tool_run_status(&final_tool);
+                self.start_background_tool(
+                    final_tool,
+                    final_input,
+                    workspace,
+                    status,
+                    final_thinking,
+                );
+                return;
+            };
+
+            if step.artifact_path.exists() {
+                self.pending_prereq_prompt = Some(PendingPrereqPrompt {
+                    current_tool: step.tool.clone(),
+                    current_artifact_path: step.artifact_path.clone(),
+                    current_artifact_label: step.artifact_label.clone(),
+                    final_tool: final_tool.clone(),
+                });
+                self.log(
+                    "system",
+                    format!(
+                        "existing {} at {} — reuse [r] or regenerate [g]?",
+                        step.artifact_label,
+                        step.artifact_path.display()
+                    ),
+                );
+                return;
+            }
+
+            // Artifact missing — dispatch the prereq tool and stop the
+            // loop; we'll resume in `apply_tool_event` once it finishes.
+            if let Some(chain) = self.pending_chain.as_mut() {
+                chain.running_step = Some(step.tool.clone());
+            }
+            let dispatched_tool = step.tool.clone();
+            self.log(
+                "system",
+                format!(
+                    "{dispatched_tool} required by {final_tool} — running automatically"
+                ),
+            );
+            let status = tool_run_status(&dispatched_tool);
+            self.start_background_tool(
+                dispatched_tool,
+                serde_json::json!({}),
+                workspace,
+                status,
+                final_thinking,
+            );
+            return;
+        }
+    }
+
+    /// Operator answered the reuse/regenerate prompt.
+    /// `reuse=true` → skip the current step (the artifact stays as-is).
+    /// `reuse=false` → run the step's tool to regenerate the artifact.
+    pub fn resolve_prereq_prompt(&mut self, reuse: bool) {
+        let Some(prompt) = self.pending_prereq_prompt.take() else {
+            return;
+        };
+        let dropped = match self.pending_chain.as_mut() {
+            Some(chain) => chain.drop_first(),
+            None => None,
+        };
+        let Some(step) = dropped else {
+            return;
+        };
+        debug_assert_eq!(step.tool, prompt.current_tool);
+        let workspace = match self.current_workspace() {
+            Ok(workspace) => workspace,
+            Err(error) => {
+                self.log("error", error.to_string());
+                self.pending_chain = None;
+                return;
+            }
+        };
+        if reuse {
+            self.log(
+                "system",
+                format!(
+                    "✓ reusing existing {} at {}",
+                    step.artifact_label,
+                    step.artifact_path.display()
+                ),
+            );
+            self.advance_chain(workspace);
+        } else {
+            self.log(
+                "system",
+                format!(
+                    "↻ regenerating {} via {}",
+                    step.artifact_label, step.tool
+                ),
+            );
+            // Delete the cached artifact and re-queue the step so
+            // advance_chain falls through to the dispatch branch.
+            let _ = std::fs::remove_file(&step.artifact_path);
+            if let Some(chain) = self.pending_chain.as_mut() {
+                chain.remaining.insert(0, step);
+            }
+            self.advance_chain(workspace);
+        }
     }
 
     pub(super) fn start_background_tool(
@@ -195,6 +382,7 @@ impl ShellApp {
                     );
                 }
                 self.apply_tool_result(&tool_name, result);
+                self.advance_chain_after_step(&tool_name);
             }
             ToolEvent::Failed { tool_name, error } => {
                 record_tool_run_failed(target.as_deref(), run_id.as_deref(), &tool_name, &error);
@@ -207,8 +395,49 @@ impl ShellApp {
                 } else {
                     self.log("error", message);
                 }
+                // Abort the chain on prereq failure — the operator must
+                // see the underlying error and choose how to proceed.
+                if let Some(chain) = self.pending_chain.take() {
+                    self.log(
+                        "system",
+                        format!(
+                            "{} prerequisite chain aborted after {tool_name} failed",
+                            chain.final_tool
+                        ),
+                    );
+                }
+                self.pending_prereq_prompt = None;
             }
         }
+    }
+
+    /// If `tool_name` was the current chain step, drop it from the queue
+    /// and advance.  No-op when no chain is active or the finished tool
+    /// is unrelated to the chain.
+    fn advance_chain_after_step(&mut self, tool_name: &str) {
+        let Some(chain) = self.pending_chain.as_mut() else {
+            return;
+        };
+        let was_chain_step = chain.running_step.as_deref() == Some(tool_name);
+        let was_final_dispatch = chain.finals_dispatched && chain.final_tool == tool_name;
+        if was_chain_step {
+            let _ = chain.drop_first();
+            chain.running_step = None;
+        } else if was_final_dispatch {
+            self.pending_chain = None;
+            return;
+        } else {
+            return;
+        }
+        let workspace = match self.current_workspace() {
+            Ok(workspace) => workspace,
+            Err(error) => {
+                self.log("error", error.to_string());
+                self.pending_chain = None;
+                return;
+            }
+        };
+        self.advance_chain(workspace);
     }
 
     pub(super) fn apply_tool_result(&mut self, tool_name: &str, result: serde_json::Value) {

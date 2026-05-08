@@ -57,6 +57,7 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     let plan_height = plan_card_height(app, area);
     let threat_patch_height = threat_patch_card_height(app, area);
     let confirm_height = confirm_card_height(app, area);
+    let prereq_prompt_height = prereq_prompt_card_height(app, area);
     let fixed_height = prompt_height
         + transcript_height
         + keybind_height
@@ -65,7 +66,8 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         + budget_height
         + plan_height
         + threat_patch_height
-        + confirm_height;
+        + confirm_height
+        + prereq_prompt_height;
     let max_view_height = area.height.saturating_sub(fixed_height).max(1);
     let view_area = Rect {
         height: max_view_height,
@@ -95,6 +97,9 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     }
     if confirm_height > 0 {
         constraints.push(Constraint::Length(confirm_height));
+    }
+    if prereq_prompt_height > 0 {
+        constraints.push(Constraint::Length(prereq_prompt_height));
     }
     if transcript_height > 0 {
         constraints.push(Constraint::Length(transcript_height));
@@ -137,6 +142,10 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     }
     if confirm_height > 0 {
         render_confirm_card(frame, chunks[index], app);
+        index += 1;
+    }
+    if prereq_prompt_height > 0 {
+        render_prereq_prompt_card(frame, chunks[index], app);
         index += 1;
     }
     if transcript_height > 0 {
