@@ -1,6 +1,7 @@
 use super::*;
 pub(in crate::renderer) use super::*;
 
+pub(in crate::renderer) use activity::*;
 pub(in crate::renderer) use catalog::*;
 pub(in crate::renderer) use chat::*;
 pub(in crate::renderer) use editor::*;
@@ -15,6 +16,7 @@ pub(in crate::renderer) use system::*;
 pub(in crate::renderer) use threat::*;
 pub(in crate::renderer) use viewport_lines::*;
 pub(in crate::renderer) use workspace::*;
+mod activity;
 mod catalog;
 mod chat;
 mod editor;
@@ -30,6 +32,7 @@ mod workspace;
 
 mod shell_view_lines;
 mod viewport_lines;
+pub(super) use activity::*;
 pub(super) use catalog::*;
 pub(super) use chat::*;
 pub(super) use editor::*;

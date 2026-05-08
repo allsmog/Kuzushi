@@ -92,6 +92,7 @@ pub(super) fn threat_view_status(app: &ShellApp) -> Option<String> {
         ShellView::Runs => Some("runs".to_string()),
         ShellView::Replay(_) => Some("replay".to_string()),
         ShellView::Trace(_) => Some("trace".to_string()),
+        ShellView::Activity => Some("activity".to_string()),
         _ => None,
     }
 }
