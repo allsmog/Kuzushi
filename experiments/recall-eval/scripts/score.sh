@@ -19,7 +19,7 @@ ts=$(basename "$REPORT_DIR")
 git_sha=$(git -C "$(git rev-parse --show-toplevel)" rev-parse --short HEAD 2>/dev/null || echo unknown)
 
 {
-  echo "# xint-eval summary — $ts"
+  echo "# recall-eval summary — $ts"
   echo
   echo "Kuzushi commit: \`$git_sha\`"
   echo
@@ -72,7 +72,7 @@ done
 # Append one row per run to HISTORY.md
 if [[ ! -f "$HISTORY" ]]; then
   {
-    echo "# xint-eval HISTORY"
+    echo "# recall-eval HISTORY"
     echo
     echo "| timestamp | kuzushi_sha | findings | hits | recall | precision | usd |"
     echo "|---|---|---:|---:|---:|---:|---:|"

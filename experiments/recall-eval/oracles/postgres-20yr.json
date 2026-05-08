@@ -1,9 +1,9 @@
 {
-  "cve": "PG-XINT-2026-001",
+  "cve": "PG-RECALL-2026-001",
   "slice": "postgres",
   "name": "Postgres 20-year data-exfil + RCE",
   "commit": "",
-  "commit_note": "Pre-patch SHA TBD. Theori's research paper at https://go.xint.io/xint_oss_research_paper_gate has the detail; populate after download.",
+  "commit_note": "Pre-patch SHA TBD. Public research material has the detail; populate after download.",
   "ground_truth": [
     {
       "file": "src/backend/utils/adt/",

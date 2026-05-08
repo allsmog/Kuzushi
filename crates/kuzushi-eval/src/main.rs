@@ -1,4 +1,4 @@
-// kuzushi-eval — recall scorer for the xint-eval harness.
+// kuzushi-eval — recall scorer for the recall-eval harness.
 //
 // Reads an oracle JSON (ground-truth bug locations) and a findings JSON dump
 // (`kuzushi findings --target … --json`), and emits a match report under four

@@ -1,4 +1,4 @@
-# xint-eval HISTORY
+# recall-eval HISTORY
 
 One row per harness run. `score.sh` appends to this file; the table
 below shows the recall delta as architectural phases land.
@@ -11,21 +11,21 @@ the four pre-patch slices. To produce one:
 1. `cp ~/.kuzushi/oauth-credentials.json` already populated, or
    `export ANTHROPIC_API_KEY=…`.
 2. Pre-patch SHAs pinned via `KUZUSHI_SLICE_SHA_{LINUX,POSTGRES,REDIS,MARIADB}`.
-3. `experiments/xint-eval/scripts/fetch-slices.sh` populated the submodules.
-4. `experiments/xint-eval/scripts/verify-tooling.sh` passes.
-5. `experiments/xint-eval/scripts/run-all.sh` ran to completion.
+3. `experiments/recall-eval/scripts/fetch-slices.sh` populated the submodules.
+4. `experiments/recall-eval/scripts/verify-tooling.sh` passes.
+5. `experiments/recall-eval/scripts/run-all.sh` ran to completion.
 
 ## Self-test (no LLM cost)
 
-`experiments/xint-eval/scripts/self-test.sh` exercises the same chain
-against the synthetic mini-slices used by `tests/xint_recall_cli.rs`.
+`experiments/recall-eval/scripts/self-test.sh` exercises the same chain
+against the synthetic mini-slices used by `tests/recall_cli.rs`.
 It produces a "scaffolded" row that confirms the pipeline is wired
 end-to-end without spending a single token. Run it after any
 architectural change that touches:
 
 * `Finding` schema or the scorer's tolerance modes;
 * `kuzushi findings --json` output shape;
-* `experiments/xint-eval/oracles/*.json` files.
+* `experiments/recall-eval/oracles/*.json` files.
 
 ## Rows
 

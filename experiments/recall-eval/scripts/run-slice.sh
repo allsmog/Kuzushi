@@ -2,7 +2,7 @@
 # Run kuzushi against a single slice and persist results into the report dir.
 #
 # Usage: run-slice.sh <slice-name> [<report-dir>]
-# If <report-dir> is omitted, a timestamped dir under experiments/xint-eval/reports/
+# If <report-dir> is omitted, a timestamped dir under experiments/recall-eval/reports/
 # is created.
 
 set -euo pipefail
@@ -17,7 +17,7 @@ ORACLE_GLOB="$EVAL_DIR/oracles/*-${SLICE}-*.json $EVAL_DIR/oracles/${SLICE}*.jso
 
 if [[ ! -d "$TARGET" ]]; then
   echo "run-slice: slice $SLICE not populated at $TARGET" >&2
-  echo "  run: experiments/xint-eval/scripts/fetch-slices.sh" >&2
+  echo "  run: experiments/recall-eval/scripts/fetch-slices.sh" >&2
   exit 2
 fi
 

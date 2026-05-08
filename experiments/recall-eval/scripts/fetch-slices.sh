@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Populate experiments/xint-eval/slices/<name> as git submodules pinned to
+# Populate experiments/recall-eval/slices/<name> as git submodules pinned to
 # pre-patch SHAs, with sparse-checkout limited to scope/<name>.txt.
 #
 # Pre-patch SHAs default to environment variables so operators can pin without
@@ -33,7 +33,7 @@ cd "$(git rev-parse --show-toplevel)"
 for name in "${!REPOS[@]}"; do
   url="${REPOS[$name]}"
   sha="${SHAS[$name]}"
-  rel="experiments/xint-eval/slices/$name"
+  rel="experiments/recall-eval/slices/$name"
   scope_file="$SCOPE_DIR/$name.txt"
 
   if [[ ! -f "$scope_file" ]]; then
@@ -72,7 +72,7 @@ name = "$name"
 commit = "$resolved"
 tree = "$tree"
 fetched_at = "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-sparse_checkout_source = "experiments/xint-eval/scope/$name.txt"
+sparse_checkout_source = "experiments/recall-eval/scope/$name.txt"
 EOF
 
   popd >/dev/null
