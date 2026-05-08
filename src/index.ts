@@ -5,6 +5,16 @@
  * public API surface and may change without notice.
  */
 
+export type {
+  CryptoBehavioralRun,
+  DynamicAnalysisRun,
+  KuzushiConfig,
+  PatchResult,
+  PocHarnessResult,
+  ScanOpts,
+  TriageResult,
+  VerificationResult,
+} from "./public-types.js";
 export {
   CryptoBehavioralRunSchema,
   DynamicAnalysisRunSchema,
@@ -18,13 +28,3 @@ export {
   VerdictSchema,
   VerificationResultSchema,
 } from "./schemas.js";
-export type {
-  CryptoBehavioralRun,
-  DynamicAnalysisRun,
-  KuzushiConfig,
-  PatchResult,
-  PocHarnessResult,
-  ScanOpts,
-  TriageResult,
-  VerificationResult,
-} from "./types.js";

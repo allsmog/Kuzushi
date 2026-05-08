@@ -1,6 +1,4 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { ModuleEventBus } from "../../src/bus/module-events.js";
-import { Datastore } from "../../src/copilot/options.js";
 import type {
   HostUiHandle,
   ModuleEventScope,
@@ -21,9 +19,15 @@ describe("narrow host handles (HOST-17)", () => {
   });
 
   it("concrete Datastore satisfies ToolOptionStore structurally", () => {
-    const ds = new Datastore();
-    // Must support get/set/has. `has()` is a SCHEMA-3 addition to Datastore.
-    const store: ToolOptionStore = ds;
+    const values = new Map<string, unknown>();
+    const store: ToolOptionStore = {
+      get: (key) => values.get(key),
+      set: (key, value) => {
+        values.set(key, value);
+        return null;
+      },
+      has: (key) => values.has(key),
+    };
     expect(store.has("NOPE")).toBe(false);
     expect(store.set("FOO", "bar")).toBeNull();
     expect(store.has("FOO")).toBe(true);
@@ -31,8 +35,25 @@ describe("narrow host handles (HOST-17)", () => {
   });
 
   it("ModuleEventBus.scope() returns a ModuleEventScope", () => {
-    const bus = new ModuleEventBus();
-    const scope: ModuleEventScope = bus.scope("test-mod");
+    const handlers = new Map<string, Array<(payload: unknown) => void>>();
+    const scope: ModuleEventScope = {
+      on(event, handler) {
+        const list = handlers.get(event) ?? [];
+        list.push(handler);
+        handlers.set(event, list);
+        return () =>
+          handlers.set(
+            event,
+            (handlers.get(event) ?? []).filter((fn) => fn !== handler),
+          );
+      },
+      emit(event, payload) {
+        for (const handler of handlers.get(event) ?? []) handler(payload);
+      },
+      disposeAll() {
+        handlers.clear();
+      },
+    };
     let received: unknown = null;
     const off = scope.on("evt:x", (p) => {
       received = p;

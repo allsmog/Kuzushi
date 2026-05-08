@@ -477,7 +477,16 @@ fn npm_package_runtime_surface_is_rust_only() {
 
 #[test]
 fn legacy_ink_shell_is_reference_only_in_source_cli() {
-    let shell_source = fs::read_to_string(repo_root().join("src/cli/commands/shell.ts")).unwrap();
+    let shell_path = repo_root().join("src/cli/commands/shell.ts");
+    assert!(
+        !shell_path.exists(),
+        "source CLI shell must not exist under product src after TS runtime retirement"
+    );
+
+    let shell_source = fs::read_to_string(
+        repo_root().join("reference/ts-runtime-island/src/cli/commands/shell.ts"),
+    )
+    .unwrap();
 
     assert!(shell_source.contains("reference-only"));
     for forbidden in [
@@ -494,7 +503,9 @@ fn legacy_ink_shell_is_reference_only_in_source_cli() {
         );
     }
 
-    let ui_readme = fs::read_to_string(repo_root().join("src/ui/README.md")).unwrap();
+    let ui_readme =
+        fs::read_to_string(repo_root().join("reference/ts-runtime-island/src/ui/README.md"))
+            .unwrap();
     assert!(ui_readme.contains("TypeScript/Ink TUI has been removed"));
     assert!(ui_readme.contains("crates/kuzushi-tui"));
     assert!(ui_readme.contains("shared, non-visual TypeScript helpers"));

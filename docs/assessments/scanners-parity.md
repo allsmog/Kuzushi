@@ -76,9 +76,10 @@ cross-cutting scanner helper below.
    parity row asserts the TS rescore windowing, batch cost optimization, or
    keep/drop filtering behavior.
 
-## Recommendation
+## Retirement Decision
 
-Keep `src/scanners/` as a migration fixture until the caller graph is retired.
-Port only the specific gaps above if product requirements still need them in
-the Rust path. Do not delete this directory while it still has direct callers
-from `src/agents`, `src/bus`, `src/modules`, and reporting helpers.
+`src/scanners/` has been moved to
+`reference/ts-runtime-island/src/scanners` as a historical migration fixture.
+The gaps above are intentionally not preserved through TypeScript runtime
+imports. If product requirements still need them, they should be implemented in
+the Rust scanner/finding layers with focused Rust tests.

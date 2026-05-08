@@ -8,7 +8,6 @@
  * Module tools are namespaced as "moduleId:toolAction" (e.g. "blackbox:recon").
  */
 
-import type { KnowledgeRegistry } from "../knowledge/types.js";
 import { toErrorMessage } from "../utils.js";
 import { installDagToolExecuteWrappers } from "./dag-execute.js";
 import type { DagRegistry } from "./dag-registry.js";
@@ -17,6 +16,7 @@ import { ModuleLoadError } from "./errors.js";
 import {
   type CopilotModule,
   isDagTool,
+  type KnowledgeRegistry,
   type ModuleContext,
   type ModuleInfo,
   type ModuleManifest,

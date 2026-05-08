@@ -50,47 +50,45 @@ tests for the relevant dispatch modes.
 
 ## Orphaned TypeScript Subsystems Audit
 
-This audit covers the 17 `src/` subdirectories that are not reachable from the
-published TypeScript library entry points (`src/index.ts`,
-`src/modules/index.ts`, `src/testing/index.ts`) or the Node bridge
-(`scripts/pi-agent-core-bridge.mjs`). The import counts below are direct
-TypeScript caller files outside the audited subdirectory. Library-export
-reachability is zero for all rows.
+The retirement pass is complete for the original 17 `src/` subdirectories.
+The reverse-import closure is documented in
+`docs/assessments/ts-runtime-island-retirement.md`.
 
-Deletion gate result: no source directories were deleted in this pass. None of
-the audited directories has zero internal `src/` callers, and none has a Rust
-replacement that fully supersedes the TypeScript behavior while its callers
-remain in protected areas for this audit (`src/agents`, `src/bus`,
-`src/copilot`, `src/cli`, `src/modules`, `src/workspace`, or `src/ui`).
-Removing any directory without also changing those callers would break
-`pnpm typecheck`; changing those callers would exceed this audit's scope. The
-rows marked `PORT` are the parity backlog. The rows marked `KEEP-AS-FIXTURE`
-are retained as migration reference fixtures until their callers are retired
-or their behavior is deliberately ported.
+The robust import graph found 563 source/bridge files, 162 files under the
+audited directories, 422 files reachable from public TypeScript roots, 118
+audited files reachable from public roots, and a 440-file reverse-import
+closure. The largest retention point was `src/modules/index.ts`; it now keeps
+module-authoring exports and compatibility stubs for retired built-in TS
+factories instead of importing the old implementation graph.
+The broader TS-only caller graph was moved with the 17 directories to
+`reference/ts-runtime-island/src/**`; only the narrow public SDK remains under
+`src/`.
 
-| Subsystem | Files / LOC | Internal `src/` callers | Test imports | Rust equivalent | Parity asserted in this ledger | Recommended action |
-| --- | ---: | --- | ---: | --- | --- | --- |
-| `src/strategies` | 15 / 1930 | 5: `src/bus/events.ts`, `src/bus/orchestrator/types.ts`, `src/bus/orchestrator.ts`, `src/modules/hidden-dag-node.ts`, `src/scanners/semgrep.ts` | 3 | Partial: `crates/kuzushi-core/src/static_registry.rs`, `crates/kuzushi-core/src/static_ranking.rs`, `crates/kuzushi-core/src/modules.rs` | No | PORT |
-| `src/governance` | 3 / 359 | 1: `src/copilot/core.ts` | 3 | Partial: `crates/kuzushi-core/src/spend.rs`, `crates/kuzushi-core/src/whitebox_static.rs`, `crates/kuzushi-core/src/modules/pipeline.rs`, `crates/kuzushi-tui/src/app/approval.rs` | No | PORT |
-| `src/jobs` | 1 / 197 | 4: `src/copilot/dispatcher/core-dispatcher.ts`, `src/copilot/dispatcher/driver.ts`, `src/copilot/dispatcher/types.ts`, `src/scheduler/core.ts` | 6 | None | No | PORT |
-| `src/hooks` | 3 / 159 | 3: `src/bus/orchestrator/types.ts`, `src/bus/orchestrator.ts`, `src/bus/workers/triage-worker.ts` | 0 | Partial: `crates/kuzushi-tui/src/app/approval.rs`, `crates/kuzushi-core/src/runtime.rs` | No | PORT |
-| `src/intel` | 3 / 649 | 2: `src/cli.ts`, `src/modules/n-day-diff-hunter.ts` | 3 | Partial/current for n-day CVE fetch: `crates/kuzushi-core/src/variant_ndiff.rs` | Yes: `variant:lift-pattern`, `variant:hunt`, `ndiff:fetch-cve`, `ndiff:extract-fix-pattern`, `ndiff:hunt-variants` | KEEP-AS-FIXTURE |
-| `src/scoring` | 4 / 995 | 11: `src/bus/events.ts`, `src/bus/orchestrator/types.ts`, `src/bus/orchestrator.ts`, `src/bus/workers/triage-worker.ts`, `src/bus/workers/verification-worker.ts`, `src/config.ts`, `src/report-markdown.ts`, `src/report.ts`, `src/store.ts`, `src/types.ts`, `src/ui/state.ts` | 1 | Partial: `crates/kuzushi-core/src/static_ranking.rs`, `crates/kuzushi-core/src/findings.rs`, `crates/kuzushi-core/src/findings/detail.rs` | No | PORT |
-| `src/monorepo` | 8 / 2111 | 5: `src/bus/events.ts`, `src/bus/workers/taint-analysis-artifact-worker.ts`, `src/cli/commands/monorepo-scan.ts`, `src/cli/commands/scan-pipeline.ts`, `src/discovery/workspace-clustering.ts` | 1 | Partial: `crates/kuzushi-core/src/repository_inventory.rs`, `crates/kuzushi-core/src/attack_surface.rs`, `crates/kuzushi-core/src/static_context.rs` | No | PORT |
-| `src/sessions` | 1 / 100 | 2: `src/copilot/dispatcher/session-repl.ts`, `src/copilot/dispatcher/workspace-dispatcher.ts` | 2 | Partial: `crates/kuzushi-tui/src/app.rs`, `crates/kuzushi-tui/src/app/session.rs` | No | PORT |
-| `src/migrations` | 37 / 2212 | 1: `src/store/schema.ts` | 20 | Partial/current for Rust findings DB only: `crates/kuzushi-core/src/findings.rs`, `crates/kuzushi-core/src/workspace.rs` | No | KEEP-AS-FIXTURE |
-| `src/scheduler` | 5 / 695 | 5: `src/agent-runtime/pi-ai.ts`, `src/bus/workers/report-worker.ts`, `src/cli/commands/scan-pipeline.ts`, `src/copilot/dispatcher/core-dispatcher.ts`, `src/copilot/run.ts` | 1 | Partial: `crates/kuzushi-core/src/concurrency.rs`, `crates/kuzushi-core/src/spend.rs` | No | PORT |
-| `src/analysis-support` | 4 / 872 | 9: `src/agents/tasks/app-model-build.ts`, `src/agents/tasks/call-graph-assist.ts`, `src/agents/tasks/code-graph/build.ts`, `src/agents/tasks/scenario-guidance.ts`, `src/agents/tasks/systems-hunt/context.ts`, `src/agents/tasks/systems-hunt/helpers.ts`, `src/agents/tasks/taint-analysis/grounding.ts`, `src/agents/tasks/taint-analysis/preflight.ts`, `src/incremental.ts` | 7 | Partial: `crates/kuzushi-codeindex/src/lib.rs`, `crates/kuzushi-core/src/repository_inventory.rs`, `crates/kuzushi-core/src/static_context.rs` | No | PORT |
-| `src/crypto-behavioral` | 4 / 801 | 3: `src/agents/tasks/crypto-behavioral-test.ts`, `src/store/crypto-behavioral.ts`, `src/types.ts` | 2 | None | No | PORT |
-| `src/poc-executor` | 4 / 303 | 7: `src/agents/tasks/crypto-behavioral-test.ts`, `src/bus/index.ts`, `src/bus/workers/dynamic-analysis-worker.ts`, `src/bus/workers/poc-executor-worker.ts`, `src/bus/workers/poc-harness-worker.ts`, `src/bus/workers/verification-worker.ts`, `src/patch.ts` | 3 | Partial lower-level sandbox primitive: `crates/kuzushi-sandbox/src/lib.rs`, `crates/kuzushi-sandbox/src/exec.rs`, `crates/kuzushi-core/src/verify.rs` | No | PORT |
-| `src/prompts` | 21 / 5763 | 26: `src/agents/tasks/code-config-detect.ts`, `src/agents/tasks/command-injection.ts`, `src/agents/tasks/context-enricher.ts`, `src/agents/tasks/deserialization-detection.ts`, `src/agents/tasks/graphql-security.ts`, `src/agents/tasks/nosql-injection.ts`, `src/agents/tasks/prototype-pollution.ts`, `src/agents/tasks/race-condition.ts`, `src/agents/tasks/runtime-overrides.ts`, `src/agents/tasks/secrets-crypto-detect.ts`, `src/agents/tasks/sharp-edges-detect.ts`, `src/agents/tasks/ssrf-detection.ts`, `src/agents/tasks/supply-chain.ts`, `src/agents/tasks/template-injection.ts`, `src/agents/tasks/tob-audit/tob-audit.ts`, `src/agents/tasks/vuln-scout/vuln-scout.ts`, `src/agents/tasks/xxe-detection.ts`, `src/agents/types.ts`, `src/bus/workers/triage-worker.ts`, `src/bus/workers/verification-worker.ts`, `src/modules/carlini-threat-hunt/carlini-threat-hunt.ts`, `src/modules/types.ts`, `src/multi-agent-triage.ts`, `src/scanners/run-agentic.ts`, `src/triage.ts`, `src/verify.ts` | 7 | Partial: `crates/kuzushi-tui/src/app/prompts.rs`, `crates/kuzushi-core/src/modules/agentic_sast.rs`, `crates/kuzushi-core/src/carlini_threat_hunt.rs`, `crates/kuzushi-core/src/systems_hunt.rs`, `crates/kuzushi-core/src/threat_model.rs` | Partial: module rows that cite prompt fields, but no prompt subsystem row | PORT |
-| `src/discovery` | 13 / 2823 | 12: `src/cli/commands/monorepo-scan.ts`, `src/cli/commands/scan.ts`, `src/config.ts`, `src/modules/sast/shared.ts`, `src/monorepo/architectural-analysis.ts`, `src/monorepo/attack-surface.ts`, `src/monorepo/budget-controller.ts`, `src/monorepo/context-index.ts`, `src/monorepo/dependency-graph.ts`, `src/monorepo/types.ts`, `src/report-monorepo.ts`, `src/types.ts` | 12 | Partial: `crates/kuzushi-core/src/modules.rs` (`context:build`), `crates/kuzushi-core/src/repository_inventory.rs`, `crates/kuzushi-core/src/attack_surface.rs` | Partial: `context:build` | PORT |
-| `src/scanners` | 18 / 4227 | 97: `src/agents/scanner-adapter.ts`, `src/agents/tasks/auth-logic-detect.ts`, `src/agents/tasks/call-graph-assist.ts`, `src/agents/tasks/chain-analysis.ts`, `src/agents/tasks/code-config-detect.ts`, `src/agents/tasks/code-graph/enrich.ts`, `src/agents/tasks/command-injection.ts`, `src/agents/tasks/crypto-behavioral-test.ts`, `src/agents/tasks/deep-semantic/hunt.ts`, `src/agents/tasks/deserialization-detection.ts`, `src/agents/tasks/detection-task-utils.ts`, `src/agents/tasks/diff-review.ts`, `src/agents/tasks/graphql-security.ts`, `src/agents/tasks/invariant-analysis/check.ts`, `src/agents/tasks/nosql-injection.ts`, `src/agents/tasks/plugin-finding-scanner.ts`, `src/agents/tasks/prototype-pollution.ts`, `src/agents/tasks/race-condition.ts`, `src/agents/tasks/reachability-check.ts`, `src/agents/tasks/secrets-crypto-detect.ts`, `src/agents/tasks/sharp-edges-detect.ts`, `src/agents/tasks/ssrf-detection.ts`, `src/agents/tasks/supply-chain.ts`, `src/agents/tasks/systems-hunt/artifacts.ts`, `src/agents/tasks/systems-hunt/hunt.ts`, `src/agents/tasks/taint-analysis/analyze.ts`, `src/agents/tasks/taint-analysis/cross-service/analyze.ts`, `src/agents/tasks/taint-analysis/cross-service/stitch.ts`, `src/agents/tasks/taint-analysis/cross-service/types.ts`, `src/agents/tasks/taint-analysis/diff-scope.ts`, `src/agents/tasks/taint-analysis/preflight.ts`, `src/agents/tasks/taint-iris/iris.ts`, `src/agents/tasks/template-injection.ts`, `src/agents/tasks/threat-modeling/randori-runner.ts`, `src/agents/tasks/threat-modeling/randori.ts`, `src/agents/tasks/tob-audit/tob-audit.ts`, `src/agents/tasks/variant-analysis.ts`, `src/agents/tasks/vuln-scout/vuln-scout.ts`, `src/agents/tasks/xxe-detection.ts`, `src/agents/types.ts`, `src/bus/events.ts`, `src/bus/orchestrator/cheap-verify.ts`, `src/bus/orchestrator/scan-findings-store.ts`, `src/bus/orchestrator/triage-dispatcher.ts`, `src/bus/orchestrator/types.ts`, `src/bus/orchestrator/verify-gate.ts`, `src/bus/orchestrator.ts`, `src/bus/task-findings.ts`, `src/bus/workers/dynamic-analysis-worker.ts`, `src/bus/workers/scan-worker.ts`, `src/bus/workers/taint-analysis-refinement-worker.ts`, `src/bus/workers/triage-worker.ts`, `src/bus/workers/variant-analysis-worker.ts`, `src/capabilities.ts`, `src/cli/commands/monorepo-scan.ts`, `src/config.ts`, `src/crypto-behavioral/harness-generator.ts`, `src/crypto-behavioral/harness-prompts.ts`, `src/findings/taint-path.ts`, `src/hooks/chain.ts`, `src/hooks/types.ts`, `src/modules/agentic-sast/agentic-sast.ts`, `src/modules/carlini-threat-hunt/carlini-threat-hunt.ts`, `src/modules/chrome-rce/chrome-rce.ts`, `src/modules/chrome-rce/rules/review-trigger.ts`, `src/modules/codeql/codeql.ts`, `src/modules/n-day-diff-hunter.ts`, `src/modules/sast/findings-bridge.ts`, `src/modules/scanner-adapter.ts`, `src/modules/secret-scan/scan.ts`, `src/modules/semgrep/semgrep.ts`, `src/modules/taint-iris/taint-iris.ts`, `src/modules/taint-iris-next/agent.ts`, `src/modules/taint-iris-next/extractors.ts`, `src/modules/taint-iris-next/types.ts`, `src/modules/types.ts`, `src/modules/variant-hunter.ts`, `src/monorepo/cross-module-tracing.ts`, `src/multi-agent-triage.ts`, `src/poc-harness.ts`, `src/prompts/context.ts`, `src/report.ts`, `src/scanner-cache.ts`, `src/scoring/composite-confidence.ts`, `src/scoring/run-metrics.ts`, `src/store.ts`, `src/strategies/auto-rule.ts`, `src/strategies/dataflow/index.ts`, `src/strategies/execution/index.ts`, `src/strategies/merge.ts`, `src/strategies/multi-strategy-task.ts`, `src/strategies/reasoning/index.ts`, `src/strategies/syntactic/index.ts`, `src/strategies/types.ts`, `src/triage.ts`, `src/types.ts`, `src/verify.ts` | 50 | Current for core scanners: `crates/kuzushi-core/src/scan.rs`, `crates/kuzushi-core/src/secret_scan.rs`, `crates/kuzushi-core/src/iac_scan.rs`, `crates/kuzushi-core/src/modules/agentic_sast.rs`, `crates/kuzushi-core/src/systems_hunt.rs` | Partial: `sast:scan`, `agentic-sast:scan`, `semgrep:scan`, `codeql:scan`, `secret-scan`, `iac-scan`, related SAST rows | PORT |
-| `src/knowledge` | 18 / 1765 | 7: `src/agents/types.ts`, `src/bus/index.ts`, `src/bus/workers/scan-worker.ts`, `src/bus/workers/triage-worker.ts`, `src/bus/workers/verification-worker.ts`, `src/modules/registry.ts`, `src/modules/types.ts` | 1 | Partial: `crates/kuzushi-core/src/artifact_kb.rs`, `crates/kuzushi-tui/src/renderer/views/workspace.rs`, `crates/kuzushi-tui/src/renderer/plain.rs` | Partial: `context:build` intentionally removed Artifact KB indexing; `x-ray` intentionally removed Artifact KB indexing | PORT |
+| Original directory | Final status | Replacement / disposition |
+| --- | --- | --- |
+| `src/strategies` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/strategies`; Rust scan/ranking code owns current behavior. |
+| `src/governance` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/governance`; Rust spend, whitebox-static, and approval surfaces own current behavior. |
+| `src/jobs` | `INTENTIONALLY-DROPPED` | TS dispatcher background jobs are retired. |
+| `src/hooks` | `INTENTIONALLY-DROPPED` | TS pipeline hooks are retired with the TS bus/orchestrator. |
+| `src/intel` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/intel`; Rust `ndiff` rows cover current CVE/pattern behavior. |
+| `src/scoring` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/scoring`; Rust finding detail/static ranking own product scoring. |
+| `src/monorepo` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/monorepo`; Rust repository inventory/static context cover current scan behavior. |
+| `src/sessions` | `INTENTIONALLY-DROPPED` | TS dispatcher sessions are retired. |
+| `src/migrations` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/migrations`; Rust findings/workspace schema owns product persistence. |
+| `src/scheduler` | `INTENTIONALLY-DROPPED` | TS scheduled-run orchestration is not a current Rust product promise. |
+| `src/analysis-support` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/analysis-support`; Rust code index/repository inventory own current behavior. |
+| `src/crypto-behavioral` | `INTENTIONALLY-DROPPED` | TS crypto behavioral harness generation is retired. |
+| `src/poc-executor` | `INTENTIONALLY-DROPPED` | Rust sandbox/verify primitives remain; the TS Docker PoC executor is retired. |
+| `src/prompts` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/prompts`; Rust prompt overrides and per-tool prompt builders own runtime behavior. |
+| `src/discovery` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/discovery`; Rust `context:build` and repository inventory own current discovery behavior. |
+| `src/scanners` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/scanners`; Rust scanner modules own runtime scanner behavior. |
+| `src/knowledge` | `MOVED-TO-FIXTURE` | `reference/ts-runtime-island/src/knowledge`; Rust artifact/workspace surfaces own current behavior. |
 
-Additional parity details for the two contentious subsystems are tracked in
-`docs/assessments/scanners-parity.md` and
-`docs/assessments/prompts-parity.md`.
+Scanner and prompt gap decisions are recorded in
+`docs/assessments/ts-runtime-island-retirement.md`. The guardrail
+`pnpm check:retired-ts-runtime` fails if an original retired directory is
+reintroduced under `src/`, product code imports the fixture copy, or public docs
+present retired paths as current implementation targets.
 
 ## Historical Final Cutover Docs, Help, And TypeScript/Ink Deletion Audit
 
@@ -134,10 +132,9 @@ Additional parity details for the two contentious subsystems are tracked in
 
 | Retained area | Classification | Why it remains |
 | --- | --- | --- |
-| `src/modules/`, `src/agents/`, scanner/report helpers | Reference-only during cutover plus published library source where exported. | These files preserve behavior, schemas, prompts, and parity fixtures while the Rust module rows remain traceable. They are not invoked by `bin.kuzushi`. |
-| `src/ui/state.ts`, `src/ui/plain-renderer.ts`, `src/ui/ci-stream.ts`, `src/ui/output.ts`, and related formatting/notification helpers | Non-visual support code. | TypeScript scan/reference paths and report workers still use the `UIStore` contract and line-oriented output helpers. They do not import React/Ink or render an interactive TUI. |
-| `src/copilot/` non-shell helpers | Reference/library support. | Prompt editing, replay formatting, dispatcher helpers, options, and run helpers still serve tests or non-TUI TypeScript surfaces. The interactive shell file is gone. |
-| `dist/`, `kuzushi/modules`, `kuzushi/testing` exports | Non-CLI library/API surface. | Third-party module authors and tests still consume these APIs during the cutover. |
+| `src/index.ts`, `src/modules/index.ts`, `src/testing/index.ts`, and their narrow helper graph | Published TypeScript SDK surface. | Third-party module authors still get schemas, `defineModule`/`defineTool`, registry/specifier helpers, host-handle types, and test mocks. Retired built-in TS factories are compatibility stubs. |
+| `reference/ts-runtime-island/src/**` | Historical migration fixture. | This is the moved TypeScript runtime island. Product code must not import it; `pnpm check:retired-ts-runtime` enforces that boundary. |
+| `dist/`, `kuzushi/modules`, `kuzushi/testing` exports | Non-CLI library/API surface. | Third-party module authors and tests consume only the narrowed SDK surface after the retirement pass. |
 
 ### Cutover verification coverage
 
