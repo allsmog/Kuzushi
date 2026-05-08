@@ -13,6 +13,23 @@ pub(crate) fn build_threat_model(
         )
     })?;
     let input = parse_build_input(&input, ctx, flavor)?;
+    let verb = match flavor {
+        BuildFlavor::ThreatModel => "build",
+        BuildFlavor::RandoriPasta => "pasta",
+    };
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                verb,
+                format!(
+                    "{} start · methodology={}",
+                    flavor.tool_name(),
+                    input.methodology
+                ),
+            )
+            .emit();
+    }
     let previous_model = load_persistent_threat_model(&input.target);
     let prompt = build_agent_prompt(&input, previous_model.as_ref())?;
     let raw = query_required_structured_json(
@@ -102,6 +119,20 @@ pub(crate) fn build_threat_model(
         "  Cost:     $0.0000".to_string(),
     ]);
     append_top_threats(&mut lines, &document);
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                verb,
+                format!(
+                    "{} complete · {threats} threats · {nodes} nodes",
+                    flavor.tool_name(),
+                    threats = threat_count,
+                    nodes = node_count
+                ),
+            )
+            .emit();
+    }
 
     Ok(json!({
         "ok": threat_count > 0 || node_count > 0 || flow_count > 0,

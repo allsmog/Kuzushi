@@ -21,9 +21,27 @@ pub fn run_carlini_threat_hunt_report(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<CarliniThreatHuntReport> {
     let target = resolve_carlini_target(input, ctx)?;
+    let parent_step = ctx.trace.map(|trace| {
+        trace
+            .step(
+                "tool",
+                "run",
+                format!("carlini-threat-hunt:run start · target={}", target.display()),
+            )
+            .emit()
+    });
     let document = resolve_threat_model_document(input, &target)?;
     let actors = actors_from_document(&document);
     if actors.all_actors.is_empty() {
+        if let Some(trace) = ctx.trace {
+            let _ = trace
+                .step(
+                    "done",
+                    "run",
+                    "carlini-threat-hunt:run complete · no actors in threat model",
+                )
+                .emit();
+        }
         return empty_carlini_threat_hunt_report(&target, ctx);
     }
 
@@ -31,12 +49,38 @@ pub fn run_carlini_threat_hunt_report(
     let runtime = require_carlini_runtime(runtime)?;
     let model = require_carlini_model(&options)?;
     let capped = capped_actor_hunts(actors, options.max_actors);
+    if let (Some(trace), Some(parent)) = (ctx.trace, parent_step) {
+        let _ = trace
+            .child(parent)
+            .step(
+                "reasoning",
+                "run",
+                format!(
+                    "actor-spawn · {} actors · {} runs/actor",
+                    capped.len(),
+                    options.runs_per_actor
+                ),
+            )
+            .emit();
+    }
     let inventory = collect_repo_inventory(&target, 80, 2048)?;
     let total_runs = capped.len() * options.runs_per_actor;
     let mut findings = run_carlini_actor_hunts(
         runtime, input, &target, &options, &model, &inventory, &capped,
     )?;
     finalize_carlini_findings(input, &mut findings, options.max_findings)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "run",
+                format!(
+                    "carlini-threat-hunt:run complete · {} findings",
+                    findings.len()
+                ),
+            )
+            .emit();
+    }
     carlini_threat_hunt_report(target, ctx, options, capped.len(), total_runs, findings)
 }
 

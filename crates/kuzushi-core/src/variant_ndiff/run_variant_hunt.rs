@@ -14,6 +14,15 @@ pub fn run_variant_hunt(
             }))
         }
     };
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "hunt",
+                format!("variant:hunt start · fp={fingerprint}"),
+            )
+            .emit();
+    }
     let target = resolve_tool_target(&input, ctx)?;
     let workspace = ctx.workspace.context(
         "variant:hunt needs an active workspace. Pass --target <repo> or start the shell with --target.",
@@ -63,6 +72,15 @@ pub fn run_variant_hunt(
         include_vendored,
         findings.as_slice(),
     );
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "hunt",
+                format!("variant:hunt complete · {} variants", findings.len()),
+            )
+            .emit();
+    }
 
     Ok(json!({
         "ok": true,

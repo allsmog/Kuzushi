@@ -9,6 +9,15 @@ pub(crate) fn run_x_ray(
         "x-ray:run requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
     )?;
     let input = parse_run_input(&input, ctx)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "run",
+                format!("x-ray:run start · target={}", input.target.display()),
+            )
+            .emit();
+    }
     let prompt = build_x_ray_prompt(&input);
     let content = query_required_structured_json(
         runtime,
@@ -25,6 +34,9 @@ pub(crate) fn run_x_ray(
 
     let data =
         read_x_ray_report_artifacts(&input.target, Some(&input.repo_name), "pi-agent-core", 0.0)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace.step("done", "run", "x-ray:run complete").emit();
+    }
     let mut data_json = json!(data);
     data_json["kbContext"] = json!(&input.kb_context);
     Ok(json!({

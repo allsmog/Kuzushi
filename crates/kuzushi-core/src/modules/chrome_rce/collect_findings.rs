@@ -106,6 +106,11 @@ pub(in crate::modules) fn review_trigger(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step("tool", "review-trigger", "chrome-rce:review-trigger start")
+            .emit();
+    }
     let Some(diff_base) = string_input_any(&input, &["diffBase", "diff_base"]) else {
         return Ok(json!({
             "ok": true,
@@ -123,6 +128,18 @@ pub(in crate::modules) fn review_trigger(
         .filter_map(|file| hot_path_finding(file))
         .collect::<Vec<_>>();
     let persisted = persist_tool_findings("chrome-rce", &target, &findings, ctx)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "review-trigger",
+                format!(
+                    "chrome-rce:review-trigger complete · {} hot paths",
+                    findings.len()
+                ),
+            )
+            .emit();
+    }
     Ok(json!({
         "ok": true,
         "output": format!(

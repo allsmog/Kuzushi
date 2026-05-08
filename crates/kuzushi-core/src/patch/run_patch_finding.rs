@@ -12,6 +12,15 @@ pub fn run_patch_finding(
         .findings_store
         .context("patch:finding requires a findings store for the active workspace")?;
     let input = PatchFindingInput::from_tool_input(&input)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "finding",
+                format!("patch:finding start · fp={}", input.fingerprint),
+            )
+            .emit();
+    }
     let Some(finding) = store.get_finding_by_reference(&input.fingerprint)? else {
         return Ok(json!({
             "ok": false,
@@ -122,6 +131,15 @@ pub fn run_patch_finding(
     };
     store.insert_patch_result(&result)?;
 
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "finding",
+                format!("patch:finding complete · status={:?}", result.status),
+            )
+            .emit();
+    }
     Ok(patch_result_to_tool_json(
         &finding.fingerprint,
         &result,
