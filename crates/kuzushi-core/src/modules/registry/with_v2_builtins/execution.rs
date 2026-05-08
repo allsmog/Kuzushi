@@ -118,3 +118,37 @@ impl ModuleRegistry {
 pub fn module_id_from_tool_name(name: &str) -> &str {
     name.split_once(':').map(|(prefix, _)| prefix).unwrap_or(name)
 }
+
+#[cfg(test)]
+mod module_id_derivation_tests {
+    use super::module_id_from_tool_name;
+
+    #[test]
+    fn module_id_strips_first_colon() {
+        assert_eq!(module_id_from_tool_name("semgrep:scan"), "semgrep");
+        assert_eq!(module_id_from_tool_name("triage:run"), "triage");
+        assert_eq!(
+            module_id_from_tool_name("agentic-sast:scan"),
+            "agentic-sast"
+        );
+    }
+
+    #[test]
+    fn module_id_handles_unprefixed() {
+        assert_eq!(module_id_from_tool_name("smoke"), "smoke");
+    }
+
+    #[test]
+    fn module_id_only_strips_first_segment() {
+        // Hidden internal nodes like `pipeline:taint-cwe-select` should still
+        // collapse to their module id.
+        assert_eq!(
+            module_id_from_tool_name("pipeline:taint-cwe-select"),
+            "pipeline"
+        );
+        assert_eq!(
+            module_id_from_tool_name("systems-hunt:systems-trigger-synth"),
+            "systems-hunt"
+        );
+    }
+}

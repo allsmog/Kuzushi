@@ -8,17 +8,65 @@ pub(in crate::modules) fn run_triage(
     let workspace = require_triage_workspace(ctx)?;
     let store = require_triage_store(ctx)?;
     let input = TriageRunInput::from_tool_input(&input, workspace.root())?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step("tool", "run", format!("triage start (batch={})", input.batch_size))
+            .emit();
+    }
     let (findings, missing_fingerprints) = select_triage_findings(store, &input)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "run",
+                format!(
+                    "load-finding · {found} candidates ({missing} missing)",
+                    found = findings.len(),
+                    missing = missing_fingerprints.len(),
+                ),
+            )
+            .emit();
+    }
     if findings.is_empty() {
+        if let Some(trace) = ctx.trace {
+            let _ = trace.step("done", "run", "no findings to triage").emit();
+        }
         return Ok(empty_triage_response(&input, missing_fingerprints));
     }
 
     let runtime = require_triage_runtime(runtime)?;
     let stage2_model = resolve_triage_model(ctx, runtime, input.stage2_tier)?;
     let mut stage1 = prefilter_triage_findings(findings, input.prefilter_threshold);
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "reasoning",
+                "run",
+                format!(
+                    "evidence-collect · stage1 kept {kept}/{total} (threshold {threshold})",
+                    kept = stage1.kept_count,
+                    total = stage1.total,
+                    threshold = input.prefilter_threshold,
+                ),
+            )
+            .emit();
+    }
     let config = TriageExecutionConfig::new(workspace.root().to_path_buf(), stage2_model);
     let kept = std::mem::take(&mut stage1.kept);
     let stats = run_triage_stage2(store, runtime, &input, &config, kept)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "run",
+                format!(
+                    "verdict-write · tp={} fp={} review={} byDesign={}",
+                    stats.tp, stats.fp, stats.needs_review, stats.by_design,
+                ),
+            )
+            .with_cost_usd(stats.total_cost)
+            .emit();
+    }
     Ok(triage_response(
         &input,
         &config,
