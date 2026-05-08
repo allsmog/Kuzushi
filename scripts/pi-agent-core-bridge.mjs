@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import {
+  appendFileSync,
   chmodSync,
   closeSync,
   existsSync,
@@ -17,6 +18,22 @@ import {
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+
+/// Bridge stderr is piped through Rust via Stdio::piped() and only
+/// flushed on process exit, so anything we write there is invisible
+/// during a live run. Honor KUZUSHI_BRIDGE_LOG=<path> as a side-channel
+/// for operators who want to follow MCP traffic in real time.
+const BRIDGE_LOG_PATH = process.env.KUZUSHI_BRIDGE_LOG;
+function bridgeLog(message) {
+  process.stderr.write(message);
+  if (BRIDGE_LOG_PATH) {
+    try {
+      appendFileSync(BRIDGE_LOG_PATH, message);
+    } catch {
+      /* best-effort */
+    }
+  }
+}
 
 /**
  * Cross-process exclusive lock around an OAuth credentials read-modify-write.
@@ -484,51 +501,33 @@ const MCP_AGENT_TOOLS_FLAG = ["KUZUSHI_AGENT_MCPS"];
 /// invokes them like any other tool — under the hood, each call is a
 /// JSON-RPC request to the server's stdin.
 ///
-/// Gated on KUZUSHI_AGENT_MCPS=1 so the existing whitebox-static
-/// profile (which only exposes Read/Glob/Grep/LS) keeps working
-/// unchanged for runs that don't want the heavier tool surface.
+/// Gated on KUZUSHI_AGENT_MCPS=1 (or `request.toolPolicy.mcps === true`)
+/// so the existing whitebox-static profile (which only exposes
+/// Read/Glob/Grep/LS) keeps working unchanged for runs that don't want
+/// the heavier tool surface.
 ///
-/// Anthropic OAuth (sk-ant-oat01-*) only accepts the Claude Code tool
-/// allow-list (Read/Write/Edit/Bash/Grep/Glob/...). Custom tool names
-/// silently stall the response stream rather than returning an error,
-/// so we refuse to advertise MCP tools when a Claude Code OAuth token
-/// is the active credential. Use a regular API key for MCP-as-agent.
+/// Verified live: Anthropic OAuth (`sk-ant-oat01-*`, the Claude Code
+/// session token) accepts MCP-style tool names like
+/// `tree_sitter_node_at` and returns proper `tool_use` blocks — see
+/// scripts/oauth-mcp-probe.mjs.
 async function buildMcpAgentTools(request) {
   if (!agentMcpsEnabled(request)) return [];
-  if (anthropicOAuthCredentialPresent()) {
-    process.stderr.write(
-      "[kuzushi-bridge] MCP-as-agent disabled: Anthropic OAuth tokens only " +
-        "accept the Claude Code tool allow-list. Set ANTHROPIC_API_KEY to " +
-        "use kuzushi-mcp-{treesitter,joern,codeql} as agent tools.\n",
-    );
-    return [];
-  }
   const out = [];
   for (const spec of KUZUSHI_MCP_SERVERS) {
-    const handle = await ensureMcpServer(spec);
+    const handle = await ensureMcpServer(spec, request);
     if (!handle) continue;
     for (const tool of handle.tools) {
       out.push(wrapMcpToolForAgent(handle, tool));
     }
   }
   if (process.env.KUZUSHI_BRIDGE_VERBOSE === "1") {
-    process.stderr.write(
-      `[kuzushi-bridge] mcp tool surface: ${out
+    bridgeLog(
+      `[kuzushi-bridge] mcp tool surface (cwd=${request?.cwd ?? "(inherit)"}): ${out
         .map((tool) => tool.name)
         .join(", ") || "(none)"}\n`,
     );
   }
   return out;
-}
-
-function anthropicOAuthCredentialPresent() {
-  try {
-    const bag = readOauthCredentials();
-    const creds = bag?.anthropic;
-    return Boolean(creds && typeof creds.access === "string" && creds.access.length > 0);
-  } catch {
-    return false;
-  }
 }
 
 function agentMcpsEnabled(request) {
@@ -549,28 +548,47 @@ function agentMcpsEnabled(request) {
 
 const mcpServerHandles = new Map();
 
-async function ensureMcpServer(spec) {
-  const cached = mcpServerHandles.get(spec.profile);
+async function ensureMcpServer(spec, request) {
+  // Cache key includes cwd so the same kuzushi process serving back-to-back
+  // hunts on different targets gets a fresh MCP child rooted in the new
+  // target directory. Otherwise the agent's relative-path tool calls
+  // (`file: "main.c"`) would resolve against the previous target.
+  const cwd = mcpCwdFor(request);
+  const cacheKey = `${spec.profile} ${cwd}`;
+  const cached = mcpServerHandles.get(cacheKey);
   if (cached) {
     const handle = await cached;
-    return handle && handle.alive ? handle : null;
+    if (handle && handle.alive) return handle;
+    mcpServerHandles.delete(cacheKey);
   }
-  const promise = spawnMcpServer(spec);
-  mcpServerHandles.set(spec.profile, promise);
+  const promise = spawnMcpServer(spec, cwd);
+  mcpServerHandles.set(cacheKey, promise);
   const handle = await promise;
-  if (!handle) mcpServerHandles.delete(spec.profile);
+  if (!handle) mcpServerHandles.delete(cacheKey);
   return handle;
 }
 
-async function spawnMcpServer(spec) {
+function mcpCwdFor(request) {
+  const candidate = request?.cwd;
+  if (typeof candidate !== "string" || candidate.length === 0) return process.cwd();
+  try {
+    if (statSync(candidate).isDirectory()) return candidate;
+  } catch {
+    /* fallthrough */
+  }
+  return process.cwd();
+}
+
+async function spawnMcpServer(spec, cwd) {
   let child;
   try {
     child = spawn(spec.binary, [], {
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
+      cwd: cwd ?? process.cwd(),
     });
   } catch (error) {
-    process.stderr.write(
+    bridgeLog(
       `[kuzushi-bridge] could not spawn MCP server ${spec.binary}: ${error.message ?? error}\n`,
     );
     return null;
@@ -586,7 +604,7 @@ async function spawnMcpServer(spec) {
     tools: [],
   };
   child.on("error", (error) => {
-    process.stderr.write(
+    bridgeLog(
       `[kuzushi-bridge] MCP server ${spec.binary} errored: ${error.message ?? error}\n`,
     );
     handle.alive = false;
@@ -607,7 +625,7 @@ async function spawnMcpServer(spec) {
   const verbose = process.env.KUZUSHI_BRIDGE_VERBOSE === "1";
   child.stderr.on("data", (chunk) => {
     if (verbose) {
-      process.stderr.write(`[mcp:${spec.profile}] ${String(chunk).trimEnd()}\n`);
+      bridgeLog(`[mcp:${spec.profile}] ${String(chunk).trimEnd()}\n`);
     }
   });
   try {
@@ -621,7 +639,7 @@ async function spawnMcpServer(spec) {
       handle.tools = list.tools;
     }
   } catch (error) {
-    process.stderr.write(
+    bridgeLog(
       `[kuzushi-bridge] MCP server ${spec.binary} init failed: ${error.message ?? error}\n`,
     );
     handle.alive = false;
@@ -688,14 +706,44 @@ function wrapMcpToolForAgent(handle, mcpTool) {
       additionalProperties: true,
     },
     execute: async (_toolCallId, params) => {
-      const result = await sendMcpRequest(handle, "tools/call", {
+      const startedAt = Date.now();
+      const verbose = process.env.KUZUSHI_BRIDGE_VERBOSE === "1";
+      if (verbose) {
+        bridgeLog(
+          `[mcp:${handle.profile}] -> ${mcpTool.name} ${JSON.stringify(params).slice(0, 200)}\n`,
+        );
+      }
+      const timeoutMs = Number(process.env.KUZUSHI_MCP_TOOL_TIMEOUT_MS ?? 60000);
+      const callP = sendMcpRequest(handle, "tools/call", {
         name: mcpTool.name,
         arguments: params ?? {},
       });
+      let timer;
+      const timeoutP = new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`MCP tool ${mcpTool.name} timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      });
+      let result;
+      try {
+        result = await Promise.race([callP, timeoutP]);
+      } catch (err) {
+        const text = `MCP tool ${mcpTool.name} failed: ${err?.message ?? err}`;
+        if (verbose) bridgeLog(`[mcp:${handle.profile}] !! ${text}\n`);
+        return { content: [{ type: "text", text }], details: { error: text } };
+      } finally {
+        clearTimeout(timer);
+      }
       const text =
         Array.isArray(result?.content) && result.content[0] && result.content[0].text
           ? String(result.content[0].text)
           : JSON.stringify(result, null, 2);
+      if (verbose) {
+        bridgeLog(
+          `[mcp:${handle.profile}] <- ${mcpTool.name} ${Date.now() - startedAt}ms ${text.length}B\n`,
+        );
+      }
       return {
         content: [{ type: "text", text }],
         details: result,
@@ -738,11 +786,11 @@ async function runAgent(AgentCtor, model, request) {
     beforeToolCall: async ({ toolCall }) => {
       const name = toolCall?.name ?? "";
       if (isForbiddenWhiteboxTool(name)) {
-        return { block: true, reason: `whitebox-static blocks execution/write tool ${name}` };
+        return { block: true, reason: `bridge blocks execution/write tool ${name}` };
       }
-      if (allowedToolNames.size > 0 && !allowedToolNames.has(String(name).toLowerCase())) {
-        return { block: true, reason: `whitebox-static only allows read-only repo tools` };
-      }
+      // Don't block on allow-list mismatch — parallel-batched tool_use
+      // blocks could otherwise stall the agent loop if any one name
+      // doesn't normalize cleanly against allowedToolNames.
       return undefined;
     },
     getApiKey: async (provider) =>
@@ -757,6 +805,16 @@ async function runAgent(AgentCtor, model, request) {
   subscribeText(agent, (delta) => {
     text += delta;
   });
+  if (process.env.KUZUSHI_BRIDGE_VERBOSE === "1") {
+    agent.subscribe?.((event) => {
+      if (event?.type === "agent_end") bridgeLog(`[bridge] agent_end\n`);
+      else if (event?.type === "turn_end") bridgeLog(`[bridge] turn_end stop=${event?.message?.stopReason ?? "?"}\n`);
+      else if (event?.type === "turn_start") bridgeLog(`[bridge] turn_start\n`);
+      else if (event?.type === "tool_start") bridgeLog(`[bridge] tool_start ${event?.toolCall?.name ?? "?"}\n`);
+      else if (event?.type === "tool_end") bridgeLog(`[bridge] tool_end\n`);
+      else if (event?.type === "error") bridgeLog(`[bridge] error: ${event?.message ?? JSON.stringify(event).slice(0,200)}\n`);
+    });
+  }
 
   if (typeof agent.prompt === "function") {
     const result = await agent.prompt(request.prompt);
@@ -1272,12 +1330,37 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  process.stdout.write(
-    JSON.stringify({
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    }),
-  );
-  process.exitCode = 1;
-});
+function shutdownMcpServers() {
+  for (const promiseOrHandle of mcpServerHandles.values()) {
+    Promise.resolve(promiseOrHandle)
+      .then((handle) => {
+        if (!handle) return;
+        try {
+          handle.child?.stdin?.end?.();
+        } catch {}
+        try {
+          handle.child?.kill?.();
+        } catch {}
+      })
+      .catch(() => undefined);
+  }
+}
+
+main()
+  .catch((error) => {
+    process.stdout.write(
+      JSON.stringify({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    // MCP child processes keep libuv handles open after main() resolves,
+    // so node won't exit on its own. Tear them down explicitly.
+    shutdownMcpServers();
+    // After teardown, give libuv one tick to flush stdout, then exit so
+    // the parent (kuzushi-cli) sees EOF and unblocks wait_with_output.
+    setImmediate(() => process.exit(process.exitCode ?? 0));
+  });
