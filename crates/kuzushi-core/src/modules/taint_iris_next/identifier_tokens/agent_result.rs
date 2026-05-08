@@ -5,6 +5,7 @@ pub(in crate::modules::taint_iris_next) fn normalized_taint_iris_next_agent_resu
     evidence: &TaintIrisNextEvidenceResult,
     raw: Value,
     retry_count: usize,
+    cost_usd: f64,
 ) -> Result<TaintIrisNextAgentResult> {
     let Value::Object(object) = raw.clone() else {
         anyhow::bail!("taint-iris-next:hunt expected agent output to be a JSON object");
@@ -44,6 +45,7 @@ pub(in crate::modules::taint_iris_next) fn normalized_taint_iris_next_agent_resu
         &mut warnings,
         &raw,
         retry_count,
+        cost_usd,
     ) {
         return Ok(result);
     }
@@ -69,7 +71,7 @@ pub(in crate::modules::taint_iris_next) fn normalized_taint_iris_next_agent_resu
         parse_error: None,
         result_text_excerpt: None,
         warnings,
-        cost_usd: 0.0,
+        cost_usd,
     })
 }
 
@@ -81,6 +83,7 @@ pub(in crate::modules::taint_iris_next) fn no_selection_taint_iris_next_result(
     warnings: &mut Vec<String>,
     raw: &Value,
     retry_count: usize,
+    cost_usd: f64,
 ) -> Option<TaintIrisNextAgentResult> {
     if !selections.is_empty() || !findings.is_empty() || evidence.linked_stories.is_empty() {
         return None;
@@ -108,6 +111,6 @@ pub(in crate::modules::taint_iris_next) fn no_selection_taint_iris_next_result(
         parse_error: None,
         result_text_excerpt: None,
         warnings: warnings.clone(),
-        cost_usd: 0.0,
+        cost_usd,
     })
 }

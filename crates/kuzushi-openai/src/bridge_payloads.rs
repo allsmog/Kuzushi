@@ -36,7 +36,9 @@ pub(crate) struct NextStepBridgeResponse {
     pub(crate) text: Option<String>,
     #[serde(default)]
     pub(crate) structured: Option<Value>,
-    #[serde(default)]
+    /// Bridge emits `cost_usd` in snake_case. Accept either form so cost
+    /// surfaces correctly through the next-step tool loop too.
+    #[serde(default, alias = "cost_usd")]
     pub(crate) cost_usd: Option<f64>,
     #[serde(default)]
     pub(crate) call: Option<NextStepBridgeCall>,
@@ -76,4 +78,14 @@ pub(crate) struct BridgeResponse {
     pub(crate) text: Option<String>,
     pub(crate) structured: Option<Value>,
     pub(crate) error: Option<String>,
+    /// Bridge emits snake_case for usage fields (`cost_usd`, `input_tokens`,
+    /// `output_tokens`) so we accept either form via aliases. Without these
+    /// the field silently deserializes to `None` and downstream cost reporting
+    /// quietly says $0.00 even after a real model call.
+    #[serde(default, alias = "cost_usd")]
+    pub(crate) cost_usd: Option<f64>,
+    #[serde(default, alias = "input_tokens")]
+    pub(crate) input_tokens: Option<u64>,
+    #[serde(default, alias = "output_tokens")]
+    pub(crate) output_tokens: Option<u64>,
 }

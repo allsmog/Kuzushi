@@ -10,6 +10,10 @@ use crate::{
     run_bridge, triage_prompt, BridgeRequest, PiAgentCoreRuntime, TRIAGE_SYSTEM_PROMPT,
 };
 
+fn clamp_token_count_u32(value: u64) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
+}
+
 #[async_trait]
 impl AgentRuntime for PiAgentCoreRuntime {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
@@ -43,6 +47,9 @@ impl AgentRuntime for PiAgentCoreRuntime {
         Ok(AgentQueryResponse {
             text: response.text.unwrap_or_default(),
             structured: response.structured,
+            cost_usd: response.cost_usd.unwrap_or(0.0),
+            input_tokens: clamp_token_count_u32(response.input_tokens.unwrap_or(0)),
+            output_tokens: clamp_token_count_u32(response.output_tokens.unwrap_or(0)),
             ..Default::default()
         })
     }

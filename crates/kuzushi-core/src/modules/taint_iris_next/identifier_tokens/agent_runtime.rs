@@ -8,7 +8,7 @@ pub(in crate::modules::taint_iris_next) fn run_taint_iris_next_agent(
     model: &str,
     agent_tool_policy: AgentToolPolicy,
 ) -> Result<TaintIrisNextAgentResult> {
-    let (raw, retry_count) = match query_taint_iris_next_agent(
+    let (raw, retry_count, cost_usd) = match query_taint_iris_next_agent(
         plan,
         evidence,
         agent_prompt,
@@ -17,13 +17,20 @@ pub(in crate::modules::taint_iris_next) fn run_taint_iris_next_agent(
         agent_tool_policy,
     ) {
         Ok(parsed) => parsed,
-        Err(error) => {
+        Err(QueryAgentError { error, cost_usd }) => {
             return Ok(invalid_taint_iris_next_agent_result(
-                plan, evidence, error, 1,
+                plan, evidence, error, 1, cost_usd,
             ))
         }
     };
-    normalized_taint_iris_next_agent_result(plan, evidence, raw, retry_count)
+    normalized_taint_iris_next_agent_result(plan, evidence, raw, retry_count, cost_usd)
+}
+
+/// Carries the partial cost incurred before a query failed so callers can
+/// still report token spend that has already been billed.
+pub(in crate::modules::taint_iris_next) struct QueryAgentError {
+    pub(in crate::modules::taint_iris_next) error: anyhow::Error,
+    pub(in crate::modules::taint_iris_next) cost_usd: f64,
 }
 
 pub(in crate::modules::taint_iris_next) fn query_taint_iris_next_agent(
@@ -33,16 +40,21 @@ pub(in crate::modules::taint_iris_next) fn query_taint_iris_next_agent(
     runtime: &dyn AgentRuntime,
     model: &str,
     agent_tool_policy: AgentToolPolicy,
-) -> Result<(Value, usize)> {
+) -> std::result::Result<(Value, usize, f64), QueryAgentError> {
     let response = run_taint_iris_next_agent_prompt(
         plan,
         runtime,
         model,
         agent_prompt.to_string(),
         agent_tool_policy.clone(),
-    )?;
+    )
+    .map_err(|error| QueryAgentError {
+        error,
+        cost_usd: 0.0,
+    })?;
+    let first_cost = response.cost_usd;
     match parse_taint_iris_next_agent_response(response) {
-        Ok(raw) => Ok((raw, 0)),
+        Ok(raw) => Ok((raw, 0, first_cost)),
         Err(_) => {
             let repair = run_taint_iris_next_agent_prompt(
                 plan,
@@ -50,8 +62,19 @@ pub(in crate::modules::taint_iris_next) fn query_taint_iris_next_agent(
                 model,
                 build_taint_iris_next_repair_prompt(plan, evidence),
                 agent_tool_policy,
-            )?;
-            parse_taint_iris_next_agent_response(repair).map(|raw| (raw, 1))
+            )
+            .map_err(|error| QueryAgentError {
+                error,
+                cost_usd: first_cost,
+            })?;
+            let repair_cost = repair.cost_usd;
+            let total_cost = first_cost + repair_cost;
+            parse_taint_iris_next_agent_response(repair)
+                .map(|raw| (raw, 1, total_cost))
+                .map_err(|error| QueryAgentError {
+                    error,
+                    cost_usd: total_cost,
+                })
         }
     }
 }
@@ -79,6 +102,7 @@ pub(in crate::modules::taint_iris_next) fn invalid_taint_iris_next_agent_result(
     evidence: &TaintIrisNextEvidenceResult,
     error: anyhow::Error,
     retry_count: usize,
+    cost_usd: f64,
 ) -> TaintIrisNextAgentResult {
     let (findings, selections, triage) = deterministic_taint_iris_next_fallback(plan, evidence);
     let warnings = vec![
@@ -103,6 +127,6 @@ pub(in crate::modules::taint_iris_next) fn invalid_taint_iris_next_agent_result(
         parse_error: Some(error.to_string()),
         result_text_excerpt: None,
         warnings,
-        cost_usd: 0.0,
+        cost_usd,
     }
 }

@@ -46,10 +46,19 @@ mod tests {
         assert_eq!(cwe_priority("CWE-999"), 1);
     }
 
+    /// Cost the test runtime reports for every query — exercises the cost
+    /// propagation path through `query_taint_iris_next_agent` and the result
+    /// builders so we catch regressions where cost gets dropped on the way to
+    /// `TaintIrisNextAgentResult.cost_usd`.
+    pub(super) const TAINT_NEXT_TEST_CALL_COST_USD: f64 = 0.00123;
+
     impl AgentRuntime for TaintNextRuntime {
         fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
             self.queries.lock().unwrap().push(request);
             Ok(AgentQueryResponse {
+                cost_usd: TAINT_NEXT_TEST_CALL_COST_USD,
+                input_tokens: 500,
+                output_tokens: 120,
                 text: String::new(),
                 structured: Some(json!({
                     "selectedCwes": [{
@@ -279,6 +288,19 @@ mod tests {
             .pointer("/data/persisted/runId")
             .and_then(Value::as_str)
             .is_some());
+        // Regression: cost from `AgentQueryResponse` must reach the report
+        // surface. We previously dropped it inside `query_taint_iris_next_agent`
+        // and produced `costUsd: 0.0` even after a real model call.
+        assert_eq!(
+            result.get("costUsd").and_then(Value::as_f64),
+            Some(TAINT_NEXT_TEST_CALL_COST_USD)
+        );
+        assert_eq!(
+            result
+                .pointer("/data/stats/totalCostUsd")
+                .and_then(Value::as_f64),
+            Some(TAINT_NEXT_TEST_CALL_COST_USD)
+        );
         let stored = store.list_findings(10).unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].tool, "taint-iris-next");
