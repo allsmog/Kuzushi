@@ -11,7 +11,15 @@ pub(in crate::modules::taint_iris_next) use rg_engine::rg_available;
 pub(in crate::modules) fn extract_taint_iris_next_evidence(
     plan: &TaintIrisNextPlan,
 ) -> Result<TaintIrisNextEvidenceResult> {
-    let candidates = structural_candidates::collect_structural_candidates(plan)?;
+    let raw_candidates = structural_candidates::collect_structural_candidates(plan)?;
+    // Syntactic narrowing: drop candidates whose match landed in a comment
+    // or string literal. Languages without a tree-sitter grammar pass
+    // through unchanged. This happens *after* the catalog language gate
+    // so we never parse files for CWEs we'd reject anyway, and *before*
+    // linked-story construction so noise candidates can't pair into
+    // bogus source-to-sink stories.
+    let candidates =
+        narrow_taint_iris_next_candidates_syntactically(&plan.scan_root, raw_candidates);
     let linked_stories = build_taint_iris_next_linked_stories(&candidates);
     let linked_by_candidate = result_summary::linked_story_ids_by_candidate(&linked_stories);
     let mut evidence =
