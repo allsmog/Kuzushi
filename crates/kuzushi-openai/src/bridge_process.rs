@@ -70,14 +70,55 @@ fn write_bridge_request<T: Serialize>(
     Ok(())
 }
 
-pub(crate) fn default_bridge_command(source_root: &Path) -> Vec<String> {
-    let source_bridge = source_root.join("scripts").join("pi-agent-core-bridge.mjs");
-    if source_bridge.exists() {
-        return vec!["node".to_string(), source_bridge.display().to_string()];
+pub fn default_bridge_command(source_root: &Path) -> Vec<String> {
+    if let Some(path) = locate_bridge_script(source_root) {
+        return vec!["node".to_string(), path.display().to_string()];
     }
 
     vec![
         "node".to_string(),
         "scripts/pi-agent-core-bridge.mjs".to_string(),
     ]
+}
+
+/// Resolve the absolute path to `scripts/pi-agent-core-bridge.mjs`.
+///
+/// Resolution order — first hit wins:
+///   1. `KUZUSHI_BRIDGE_PATH` env var (explicit override).
+///   2. `<source_root>/scripts/pi-agent-core-bridge.mjs` — works when the
+///      caller still has access to the repo root.
+///   3. Walk up from `current_exe()` looking for the script. This covers the
+///      common case where the user has changed cwd into a target repo before
+///      running `kuzushi`, since the binary still knows where it lives.
+///
+/// Returning `None` lets callers fall back to a relative path (preserves the
+/// historical behavior for code that always launches kuzushi from its repo
+/// root, including some test setups).
+fn locate_bridge_script(source_root: &Path) -> Option<std::path::PathBuf> {
+    if let Some(path) = std::env::var_os("KUZUSHI_BRIDGE_PATH") {
+        let candidate = std::path::PathBuf::from(path);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    let candidate = source_root.join("scripts").join("pi-agent-core-bridge.mjs");
+    if candidate.exists() {
+        return Some(candidate);
+    }
+    bridge_relative_to_exe()
+}
+
+fn bridge_relative_to_exe() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let mut dir = exe.parent()?.to_path_buf();
+    for _ in 0..6 {
+        let candidate = dir.join("scripts").join("pi-agent-core-bridge.mjs");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    None
 }

@@ -64,6 +64,12 @@ pub fn prereq_steps_for(tool: &str, target: &Path) -> Vec<PrereqStep> {
     if tool == "threat-model:build" {
         return vec![context_step(&kuzushi_dir)];
     }
+    if matches!(
+        tool,
+        "taint-iris-next:hunt" | "taint-iris:hunt" | "agentic-sast:scan" | "sast:scan"
+    ) {
+        return vec![context_step(&kuzushi_dir)];
+    }
     Vec::new()
 }
 
@@ -105,5 +111,22 @@ mod tests {
     fn unknown_tool_has_no_prereqs() {
         let steps = prereq_steps_for("findings:list", Path::new("/tmp/repo"));
         assert!(steps.is_empty());
+    }
+
+    #[test]
+    fn taint_iris_next_chain_includes_context() {
+        let steps = prereq_steps_for("taint-iris-next:hunt", Path::new("/tmp/repo"));
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].tool, "context:build");
+        assert!(steps[0]
+            .artifact_path
+            .ends_with(".kuzushi/context-snapshot.json"));
+    }
+
+    #[test]
+    fn sast_pipeline_chain_includes_context() {
+        let steps = prereq_steps_for("sast:scan", Path::new("/tmp/repo"));
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].tool, "context:build");
     }
 }
