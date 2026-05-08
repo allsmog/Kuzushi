@@ -97,6 +97,7 @@ function shouldContinue(state) {
 function queryResultFromMessage(message) {
   const text = messageText(message);
   const usage = usageFromMessage(message);
+  const stopReason = message?.response_metadata?.finish_reason;
   return {
     ok: true,
     text,
@@ -104,9 +105,13 @@ function queryResultFromMessage(message) {
     cost_usd: usage.costUsd,
     input_tokens: usage.inputTokens,
     output_tokens: usage.outputTokens,
-    truncated: false,
-    stopReason: message?.response_metadata?.finish_reason,
+    truncated: isTruncatedStopReason(stopReason),
+    stopReason,
   };
+}
+
+function isTruncatedStopReason(reason) {
+  return ["length", "max_tokens", "max_tokens_reached"].includes(String(reason ?? ""));
 }
 
 function messagesForNextStep(request) {
