@@ -24,7 +24,7 @@ const retiredDirs = [
   "src/knowledge",
 ];
 
-const fixtureRoot = "reference/ts-runtime-island";
+const deletedReferenceRoot = "reference/ts-runtime-island";
 const sourceRoots = ["src", "scripts/pi-agent-core-bridge.mjs"];
 const docRoots = [
   "README.md",
@@ -63,20 +63,25 @@ const failures = [];
 
 for (const dir of retiredDirs) {
   if (existsSync(path.join(repo, dir))) {
-    failures.push(`${dir} still exists under src; move it to ${fixtureRoot}/ or delete it.`);
+    failures.push(`${dir} still exists under src; port it to Rust or delete it.`);
   }
+}
+
+if (existsSync(path.join(repo, deletedReferenceRoot))) {
+  failures.push(
+    `${deletedReferenceRoot} still exists; retired TypeScript runtime files must be deleted.`,
+  );
 }
 
 const sourceFiles = sourceRoots.flatMap((root) => walk(root, sourceExtensions));
 for (const file of sourceFiles) {
   const rel = relative(file);
-  if (rel.startsWith(`${fixtureRoot}/`)) continue;
   const text = readFileSync(file, "utf8");
   for (const specifier of importSpecifiers(text)) {
     const resolved = resolveImport(rel, specifier, sourceFiles);
     if (!resolved) continue;
-    if (resolved.startsWith(`${fixtureRoot}/`)) {
-      failures.push(`${rel} imports retired TS fixture ${resolved}`);
+    if (retiredDirs.some((dir) => resolved.startsWith(`${dir}/`))) {
+      failures.push(`${rel} imports retired TypeScript runtime file ${resolved}`);
     }
   }
 }
@@ -88,12 +93,12 @@ for (const file of docRoots.flatMap((root) => walk(root, textExtensions))) {
   const lines = text.split(/\r?\n/);
   const fileIsHistorical = isHistorical(lines.slice(0, 12).join("\n"));
   lines.forEach((line, index) => {
-    for (const retiredDir of retiredDirs) {
-      if (!line.includes(retiredDir)) continue;
+    for (const retiredPath of [...retiredDirs, deletedReferenceRoot]) {
+      if (!line.includes(retiredPath)) continue;
       const context = lines.slice(Math.max(0, index - 4), index + 5).join("\n");
       if (fileIsHistorical || isHistorical(context)) continue;
       failures.push(
-        `${rel}:${index + 1} references ${retiredDir} without marking the context as historical/retired/reference-only.`,
+        `${rel}:${index + 1} references ${retiredPath} without marking the context as historical/retired/deleted.`,
       );
     }
   });
@@ -171,7 +176,7 @@ function resolveImport(from, specifier, sourceFiles) {
 }
 
 function isHistorical(text) {
-  return /\b(retired|historical|legacy|reference-only|fixture|migration fixture|deleted|not current|unsupported|former TypeScript)\b/i.test(
+  return /\b(retired|historical|legacy|deleted|not current|unsupported|former TypeScript)\b/i.test(
     text,
   );
 }
