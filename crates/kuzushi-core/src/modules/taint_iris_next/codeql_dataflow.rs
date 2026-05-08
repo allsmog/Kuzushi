@@ -443,6 +443,19 @@ pub(in crate::modules) fn codeql_flows_to_linked_stories(
 ) -> Vec<TaintIrisNextLinkedStory> {
     flows
         .iter()
+        // Drop flows whose source or sink is rooted in a non-production
+        // path (test harnesses, tutorials, fixtures). Same rationale as
+        // the heuristic linker — postgres ships `src/tutorial/funcs.c`
+        // as didactic example code that never runs in the production
+        // server, so a CodeQL CWE-190 path through it is not an
+        // exploitable finding even though the dataflow is real.
+        .filter(|flow| {
+            !is_taint_iris_next_non_production_path(&flow.file_path)
+                && !flow
+                    .steps
+                    .iter()
+                    .any(|step| is_taint_iris_next_non_production_path(&step.file))
+        })
         .map(|flow| {
             let source_id =
                 format!("{}:source:{}:{}", flow.cwe, flow.file_path, flow.source_line);
@@ -496,6 +509,9 @@ pub(in crate::modules) fn codeql_flows_to_candidates(
 ) -> Vec<TaintIrisNextCandidate> {
     let mut out = Vec::new();
     for flow in flows {
+        if is_taint_iris_next_non_production_path(&flow.file_path) {
+            continue;
+        }
         out.push(codeql_endpoint_candidate(
             flow,
             flow.source_line,
