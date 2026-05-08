@@ -3,7 +3,10 @@ use super::*;
 mod evidence_projection;
 mod labeled_specs;
 mod result_summary;
+mod rg_engine;
 mod structural_candidates;
+
+pub(in crate::modules::taint_iris_next) use rg_engine::rg_available;
 
 pub(in crate::modules) fn extract_taint_iris_next_evidence(
     plan: &TaintIrisNextPlan,
