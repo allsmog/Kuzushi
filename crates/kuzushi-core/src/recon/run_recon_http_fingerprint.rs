@@ -9,6 +9,15 @@ pub(crate) fn run_recon_http_fingerprint(
         "recon:http-fingerprint needs an active workspace. Pass --target <repo> or start the shell with --target.",
     )?;
     let options = HttpFingerprintInput::from_tool_input(input)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "http-fingerprint",
+                format!("recon:http-fingerprint start · target={}", options.target),
+            )
+            .emit();
+    }
     let fingerprinter = ReconHttpFingerprinter::from_input(&options);
     let fingerprint = fingerprinter.fingerprint(cancel)?;
     let endpoint = split_host_port(&options.target);
@@ -67,6 +76,21 @@ pub(crate) fn run_recon_http_fingerprint(
         }),
     )?;
 
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "http-fingerprint",
+                format!(
+                    "recon:http-fingerprint complete · status={}",
+                    fingerprint
+                        .status
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "-".to_string())
+                ),
+            )
+            .emit();
+    }
     Ok(ReconReport {
         tool: "recon:http-fingerprint".to_string(),
         target: options.target,

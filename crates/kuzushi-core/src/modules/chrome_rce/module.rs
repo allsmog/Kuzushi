@@ -52,9 +52,27 @@ pub(in crate::modules) fn scan(input: Value, ctx: &ToolExecutionContext<'_>) -> 
             target.display()
         );
     }
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "scan",
+                format!("chrome-rce:scan start · target={}", target.display()),
+            )
+            .emit();
+    }
     let mut findings = Vec::new();
     collect_findings(&target, &target, &mut findings)?;
     let persisted = persist_tool_findings("chrome-rce", &target, &findings, ctx)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "scan",
+                format!("chrome-rce:scan complete · {} findings", findings.len()),
+            )
+            .emit();
+    }
     Ok(json!({
         "ok": true,
         "output": format!(

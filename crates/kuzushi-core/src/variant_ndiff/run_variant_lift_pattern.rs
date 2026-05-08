@@ -14,6 +14,15 @@ pub fn run_variant_lift_pattern(
             }))
         }
     };
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "lift-pattern",
+                format!("variant:lift-pattern start · fp={fingerprint}"),
+            )
+            .emit();
+    }
     let workspace = ctx.workspace.context(
         "variant:lift-pattern needs an active workspace. Pass --target <repo> or start the shell with --target.",
     )?;
@@ -77,6 +86,11 @@ pub fn run_variant_lift_pattern(
     ]
     .join("\n");
 
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step("done", "lift-pattern", "variant:lift-pattern complete")
+            .emit();
+    }
     Ok(json!({
         "ok": true,
         "output": output,

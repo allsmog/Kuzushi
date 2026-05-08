@@ -9,10 +9,34 @@ pub(in crate::modules) fn run_taint_iris_report(
     let options = TaintIrisInput::from_tool_input(input, &target)?;
     let runtime = require_taint_iris_runtime(runtime)?;
     let model = require_taint_iris_model(input, ctx)?;
+    let parent_step = ctx.trace.map(|trace| {
+        trace
+            .step(
+                "tool",
+                "hunt",
+                format!("taint-iris:hunt start · target={}", target.display()),
+            )
+            .emit()
+    });
 
     let cwes = selected_taint_iris_cwes(input, &target, runtime, &model, options.max_cwes)?;
+    if let (Some(trace), Some(parent)) = (ctx.trace, parent_step) {
+        let _ = trace
+            .child(parent)
+            .step(
+                "reasoning",
+                "hunt",
+                format!("cwe-select · {} CWE classes selected", cwes.len()),
+            )
+            .emit();
+    }
 
     if cwes.is_empty() {
+        if let Some(trace) = ctx.trace {
+            let _ = trace
+                .step("done", "hunt", "taint-iris:hunt complete · no CWEs selected")
+                .emit();
+        }
         return empty_taint_iris_report(&target, cwes, ctx);
     }
 
@@ -22,6 +46,15 @@ pub(in crate::modules) fn run_taint_iris_report(
         mark_whitebox_static_findings(&mut findings, StaticProofState::SourceSinkLinked)?;
     }
     let persisted = persist_taint_iris_findings(&target, &findings, ctx)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "hunt",
+                format!("taint-iris:hunt complete · {} findings", findings.len()),
+            )
+            .emit();
+    }
 
     Ok(taint_iris_report(&target, cwes, findings, persisted, None))
 }

@@ -12,6 +12,15 @@ pub(in crate::modules) fn run_taint_iris_next_report(
 ) -> Result<TaintIrisNextReport> {
     let target = taint_iris_next_target(input, ctx)?;
     let options = TaintIrisNextInput::from_tool_input(input)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "hunt",
+                format!("taint-iris-next:hunt start · target={}", target.display()),
+            )
+            .emit();
+    }
     let plan = build_taint_iris_next_plan(&target, options)?;
 
     if !taint_iris_next_has_required_context(&plan) {
@@ -82,6 +91,18 @@ pub(in crate::modules) fn run_taint_iris_next_hunt(
     let output = render_taint_iris_next_output(&plan, &evidence, Some(&agent));
     let status = taint_iris_next_hunt_status(&agent);
     let data = taint_iris_next_hunt_data(&plan, &evidence, status, &agent_prompt, &agent);
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "hunt",
+                format!(
+                    "taint-iris-next:hunt complete · {} findings",
+                    agent.findings.len()
+                ),
+            )
+            .emit();
+    }
 
     Ok(taint_iris_next_hunt_report(
         &plan, &agent, status, persisted, output, data,

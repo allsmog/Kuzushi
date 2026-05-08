@@ -42,6 +42,11 @@ pub fn run_ndiff_hunt_variants(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step("tool", "hunt-variants", "ndiff:hunt-variants start")
+            .emit();
+    }
     let pattern = match input.get("pattern").and_then(Value::as_object) {
         Some(pattern) => pattern.clone(),
         None => {
@@ -94,6 +99,18 @@ pub fn run_ndiff_hunt_variants(
     let persisted = persist_findings(&target, &findings, ctx)?;
     let output =
         render_ndiff_hunt_output(&advisory_id, findings.len(), include_vendored, &findings);
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "hunt-variants",
+                format!(
+                    "ndiff:hunt-variants complete · {} variants",
+                    findings.len()
+                ),
+            )
+            .emit();
+    }
 
     Ok(json!({
         "ok": true,

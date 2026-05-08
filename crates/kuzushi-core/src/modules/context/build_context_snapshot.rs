@@ -7,6 +7,15 @@ pub(in crate::modules) fn build_context_snapshot(
     let workspace = ctx
         .workspace
         .context("context:build requires a workspace target")?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "build",
+                format!("context:build start · target={}", workspace.root().display()),
+            )
+            .emit();
+    }
     let sample_limit = input
         .get("sampleLimit")
         .or_else(|| input.get("limit"))
@@ -106,6 +115,15 @@ pub(in crate::modules) fn build_context_snapshot(
         workspace.root().display(),
         snapshot_path.display()
     );
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "build",
+                format!("context:build complete · {} files indexed", files_indexed),
+            )
+            .emit();
+    }
 
     Ok(json!({
         "ok": true,

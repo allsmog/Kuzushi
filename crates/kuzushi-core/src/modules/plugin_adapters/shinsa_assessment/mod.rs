@@ -13,6 +13,16 @@ pub(in crate::modules) fn run_shinsa_assessment(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
+    let verb = tool_name.split_once(':').map(|(_, v)| v).unwrap_or("scan");
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                verb,
+                format!("{tool_name} start · target={}", target.display()),
+            )
+            .emit();
+    }
     let plugin_root = resolve_required_plugin_root(&input, shinsa_plugin_spec(tool_name))?;
     let runtime = runtime.context(format!(
         "{tool_name} requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies."
@@ -41,6 +51,15 @@ pub(in crate::modules) fn run_shinsa_assessment(
     let artifacts =
         artifacts::write_shinsa_artifacts(&target, &output_dir, mode, findings.len(), &raw)?;
 
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                verb,
+                format!("{tool_name} complete · {} findings", findings.len()),
+            )
+            .emit();
+    }
     Ok(response::shinsa_response(
         tool_name,
         &target,

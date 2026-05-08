@@ -33,6 +33,11 @@ pub(in crate::modules) fn runtime_tool(
         }));
     }
     let target = resolve_tool_target(&input, ctx)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step("tool", command, format!("{tool_name} start"))
+            .emit();
+    }
     let spec = PluginAdapterSpec {
         tool_name,
         tool_slug: "prompt-armor",
@@ -64,6 +69,15 @@ pub(in crate::modules) fn runtime_tool(
     let output_dir = target.join(".prompt-armor");
     fs::create_dir_all(&output_dir)
         .with_context(|| format!("Could not create {}", output_dir.display()))?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                command,
+                format!("{tool_name} complete · {} findings", findings.len()),
+            )
+            .emit();
+    }
     Ok(json!({
         "ok": true,
         "output": format!(

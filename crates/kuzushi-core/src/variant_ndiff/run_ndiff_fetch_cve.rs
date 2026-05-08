@@ -42,6 +42,11 @@ pub fn run_ndiff_extract_fix_pattern(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step("tool", "extract-fix-pattern", "ndiff:extract-fix-pattern start")
+            .emit();
+    }
     let source = match resolve_ndiff_fix_pattern_source(&input)? {
         NdiffFixPatternSourceResolution::Ready(source) => source,
         NdiffFixPatternSourceResolution::Rejected(response) => return Ok(response),
@@ -66,7 +71,13 @@ pub fn run_ndiff_extract_fix_pattern(
         ),
         require_json_object,
     )?;
-    ndiff_fix_pattern_response(source, pattern)
+    let response = ndiff_fix_pattern_response(source, pattern);
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step("done", "extract-fix-pattern", "ndiff:extract-fix-pattern complete")
+            .emit();
+    }
+    response
 }
 
 pub(crate) struct NdiffFixPatternSource {
