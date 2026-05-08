@@ -46,6 +46,17 @@ pub(in crate::modules) fn build_taint_iris_next_linked_stories(
         .iter()
         .filter(|candidate| candidate.role == "source")
     {
+        // Drop sources that live in obviously non-production paths
+        // (test harnesses, tutorials, examples, fixtures). The heuristic
+        // linker has no notion of "is this code reachable from a real
+        // attacker?" — a `palloc(VARSIZE_ANY_EXHDR(t))` in
+        // src/tutorial/funcs.c is not exploitable because tutorial code
+        // never ships in the production binary. Filtering at the source
+        // side discards every linked story that would have rooted there
+        // without us having to re-check inside the inner loop.
+        if is_taint_iris_next_non_production_path(&source.file_path) {
+            continue;
+        }
         for sink in candidates
             .iter()
             .filter(|candidate| candidate.role == "sink" && candidate.cwe == source.cwe)
@@ -95,6 +106,62 @@ pub(in crate::modules) fn build_taint_iris_next_linked_stories(
     stories
 }
 
+/// Recognise file paths that are obviously non-production code so the
+/// heuristic linker doesn't pair source/sink candidates rooted there.
+/// Match is case-insensitive against any path component, so it works
+/// across operating-system separators and across language conventions
+/// (e.g. `src/test/`, `tests/`, `__tests__/`, `test_*.py`).
+///
+/// Operators who *do* want to scan non-production code (e.g. to find
+/// vulns in CI fixtures shipped with a release artifact) can flip the
+/// `includeNonProductionPaths` tool input — see
+/// `is_non_production_paths_filter_enabled`.
+pub(in crate::modules) fn is_taint_iris_next_non_production_path(file_path: &str) -> bool {
+    let normalized = file_path.replace('\\', "/").to_ascii_lowercase();
+    for component in normalized.split('/') {
+        if matches!(
+            component,
+            "test"
+                | "tests"
+                | "__tests__"
+                | "testing"
+                | "tutorial"
+                | "tutorials"
+                | "example"
+                | "examples"
+                | "demo"
+                | "demos"
+                | "spec"
+                | "specs"
+                | "mock"
+                | "mocks"
+                | "fixture"
+                | "fixtures"
+                | "e2e"
+                | "regress"
+                | "benchmarks"
+                | "bench"
+                | "fuzz"
+                | "fuzzing"
+                | "doctest"
+        ) {
+            return true;
+        }
+    }
+    // File-name level patterns: `*_test.go`, `*.test.ts`, `*.spec.js`,
+    // `test_*.py`. These are language conventions for test harnesses
+    // that won't ship to production.
+    let last_component = normalized.rsplit('/').next().unwrap_or(&normalized);
+    last_component.contains(".test.")
+        || last_component.contains(".spec.")
+        || last_component.starts_with("test_")
+        || last_component.ends_with("_test.go")
+        || last_component.ends_with("_test.py")
+        || last_component.ends_with("_tests.rs")
+        || last_component.ends_with("test.java")
+        || last_component.ends_with("tests.java")
+}
+
 pub(in crate::modules) fn shared_taint_iris_next_tokens(left: &str, right: &str) -> Vec<String> {
     let left_tokens = identifier_tokens(left);
     let right_tokens = identifier_tokens(right);
@@ -104,4 +171,82 @@ pub(in crate::modules) fn shared_taint_iris_next_tokens(left: &str, right: &str)
         .take(8)
         .cloned()
         .collect()
+}
+
+#[cfg(test)]
+mod non_production_path_tests {
+    use super::*;
+
+    #[test]
+    fn drops_postgres_test_module_paths() {
+        assert!(is_taint_iris_next_non_production_path(
+            "src/test/modules/test_predtest/test_predtest.c"
+        ));
+        assert!(is_taint_iris_next_non_production_path(
+            "src/test/regress/pg_regress.c"
+        ));
+        assert!(is_taint_iris_next_non_production_path(
+            "src/tutorial/funcs.c"
+        ));
+        assert!(is_taint_iris_next_non_production_path(
+            "src/test/modules/oauth_validator/t/oauth_server.py"
+        ));
+    }
+
+    #[test]
+    fn keeps_real_postgres_backend_paths() {
+        assert!(!is_taint_iris_next_non_production_path(
+            "src/backend/executor/nodeTidscan.c"
+        ));
+        assert!(!is_taint_iris_next_non_production_path(
+            "src/backend/access/transam/multixact.c"
+        ));
+        assert!(!is_taint_iris_next_non_production_path(
+            "contrib/pg_trgm/trgm_op.c"
+        ));
+        assert!(!is_taint_iris_next_non_production_path(
+            "src/include/utils/builtins.h"
+        ));
+    }
+
+    #[test]
+    fn drops_javascript_test_conventions() {
+        assert!(is_taint_iris_next_non_production_path(
+            "frontend/tests/utils/privateApi.ts"
+        ));
+        assert!(is_taint_iris_next_non_production_path(
+            "src/utils.test.ts"
+        ));
+        assert!(is_taint_iris_next_non_production_path(
+            "src/utils.spec.js"
+        ));
+        assert!(is_taint_iris_next_non_production_path(
+            "frontend/__tests__/login.tsx"
+        ));
+    }
+
+    #[test]
+    fn drops_python_and_go_test_filename_conventions() {
+        assert!(is_taint_iris_next_non_production_path("server/test_users.py"));
+        assert!(is_taint_iris_next_non_production_path(
+            "internal/users_test.go"
+        ));
+    }
+
+    #[test]
+    fn handles_windows_separators() {
+        assert!(is_taint_iris_next_non_production_path(
+            "src\\test\\modules\\test_predtest\\test_predtest.c"
+        ));
+    }
+
+    #[test]
+    fn fixture_and_demo_dirs_are_dropped() {
+        assert!(is_taint_iris_next_non_production_path(
+            "evals/fixtures/demo-repo/src/routes/users.ts"
+        ));
+        assert!(is_taint_iris_next_non_production_path(
+            "examples/sandbox-backend/server.js"
+        ));
+    }
 }
