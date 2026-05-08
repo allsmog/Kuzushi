@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { appendFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import process from "node:process";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
@@ -139,6 +140,7 @@ async function handleNextStep(request) {
 }
 
 function debugDumpBridgeCall(kind, request, tools, systemPrompt, response) {
+  debugDumpFullPrompt(kind, request, systemPrompt);
   const path = process.env.KUZUSHI_BRIDGE_DEBUG_DUMP;
   if (!path) return;
   try {
@@ -163,6 +165,38 @@ function debugDumpBridgeCall(kind, request, tools, systemPrompt, response) {
     };
     appendFileSync(path, `${JSON.stringify(dump)}\n`);
   } catch {}
+}
+
+function debugDumpFullPrompt(kind, request, systemPrompt) {
+  const root = process.env.KUZUSHI_BRIDGE_DEBUG_FULL_PROMPT;
+  if (!root) return;
+  try {
+    mkdirSync(root, { recursive: true });
+    const filename = `prompt-${Date.now()}-${process.pid}-${kind}.txt`;
+    writeFileSync(path.join(root, filename), fullPromptDebugBody(request, systemPrompt));
+  } catch {}
+}
+
+function fullPromptDebugBody(request, systemPrompt) {
+  const messages = request.messages ?? [];
+  if (messages.length) {
+    return [
+      "[system]",
+      String(systemPrompt ?? ""),
+      "",
+      "[messages]",
+      JSON.stringify(messages, null, 2),
+      "",
+    ].join("\n");
+  }
+  return [
+    "[system]",
+    String(systemPrompt ?? ""),
+    "",
+    "[prompt]",
+    String(request.prompt ?? ""),
+    "",
+  ].join("\n");
 }
 
 function nextStepResultFromResponse(response) {
