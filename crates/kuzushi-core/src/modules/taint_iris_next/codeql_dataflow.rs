@@ -1,7 +1,69 @@
 use super::*;
+use std::io::Read;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Child, Command};
 use std::sync::OnceLock;
+
+/// Wait for a child process to exit. When `timeout_secs == 0` we block
+/// indefinitely (semantic: "no timeout, however long the analysis
+/// takes"). When non-zero we poll every 2s and kill on deadline.
+pub(in crate::modules) fn wait_with_optional_timeout(
+    child: &mut Child,
+    timeout_secs: u64,
+) -> anyhow::Result<std::process::Output> {
+    if timeout_secs == 0 {
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+        let status = child
+            .wait()
+            .context("could not wait for child process")?;
+        let stdout = read_optional_pipe(stdout);
+        let stderr = read_optional_pipe(stderr);
+        return Ok(std::process::Output {
+            status,
+            stdout,
+            stderr,
+        });
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    anyhow::bail!(
+                        "child exceeded {timeout_secs}s timeout; set the relevant *_TIMEOUT_SECS=0 to disable"
+                    );
+                }
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                anyhow::bail!("could not poll child process: {error}");
+            }
+        }
+    }
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let status = child.wait().context("could not finalise child")?;
+    Ok(std::process::Output {
+        status,
+        stdout: read_optional_pipe(stdout),
+        stderr: read_optional_pipe(stderr),
+    })
+}
+
+fn read_optional_pipe<R: std::io::Read>(pipe: Option<R>) -> Vec<u8> {
+    let Some(mut pipe) = pipe else {
+        return Vec::new();
+    };
+    let mut buf = Vec::new();
+    let _ = pipe.read_to_end(&mut buf);
+    buf
+}
 
 /// True iff a usable `codeql` CLI is on PATH (or under `/opt/codeql/`).
 pub(in crate::modules) fn codeql_available() -> bool {
@@ -94,15 +156,21 @@ pub(in crate::modules) fn run_codeql_flows(
         })
         .unwrap_or_else(|| codeql_default_query_suite(&plan.languages));
 
+    // Default: no wall-clock timeout. CodeQL's cpp-security-and-quality
+    // suite has 179 queries covering 79 CWEs and routinely takes hours
+    // on a postgres-scale DB; an aggressive timeout silently corrupts
+    // results by aborting mid-suite. Operators who need a deadline can
+    // set KUZUSHI_CODEQL_TIMEOUT_SECS to a positive number; setting it
+    // to 0 (or leaving it unset) means "wait forever."
     let timeout_secs: u64 = std::env::var("KUZUSHI_CODEQL_TIMEOUT_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(1800);
+        .unwrap_or(0);
 
     let sarif_file = tempfile::NamedTempFile::new()
         .context("could not create codeql sarif tempfile")?;
 
-    let mut child = Command::new(&launcher)
+    let output = Command::new(&launcher)
         .arg("database")
         .arg("analyze")
         .arg("--format=sarif-latest")
@@ -116,33 +184,8 @@ pub(in crate::modules) fn run_codeql_flows(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .with_context(|| format!("could not invoke codeql at {}", launcher.display()))?;
-
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) => {
-                if std::time::Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    anyhow::bail!(
-                        "codeql analyze exceeded {timeout_secs}s timeout; override with KUZUSHI_CODEQL_TIMEOUT_SECS"
-                    );
-                }
-                std::thread::sleep(std::time::Duration::from_secs(2));
-            }
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(anyhow::anyhow!(error).context("could not poll codeql subprocess"));
-            }
-        }
-    }
-
-    let output = child
-        .wait_with_output()
-        .context("could not collect codeql output after exit")?;
+        .with_context(|| format!("could not invoke codeql at {}", launcher.display()))
+        .and_then(|mut child| wait_with_optional_timeout(&mut child, timeout_secs))?;
 
     if !output.status.success() {
         anyhow::bail!(

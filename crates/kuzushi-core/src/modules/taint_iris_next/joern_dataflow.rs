@@ -117,18 +117,18 @@ pub(in crate::modules) fn run_joern_flows(
     std::fs::write(queries_file.path(), &queries)
         .context("could not write joern queries tempfile")?;
 
-    // Joern's `reachableByFlows` is exponential in the worst case, and a
-    // 187MB postgres CPG with broad regex like `length` matches tens of
-    // thousands of nodes. We cap inside the Scala script (max sources /
-    // sinks / flows per CWE), but still wrap the whole subprocess in a
-    // wall-clock budget so a pathological pattern can't hang the run.
-    // Operators with bigger CPGs can override via KUZUSHI_JOERN_TIMEOUT_SECS.
+    // Default: no wall-clock timeout. `reachableByFlows` is exponential
+    // in the worst case but the in-script caps (200 sources / 200 sinks
+    // / 25 flows per CWE) bound the work to something tractable on
+    // realistic CPGs. Operators who explicitly want a deadline set
+    // KUZUSHI_JOERN_TIMEOUT_SECS to a positive number; 0 (the default)
+    // means "wait forever".
     let timeout_secs: u64 = std::env::var("KUZUSHI_JOERN_TIMEOUT_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(600);
+        .unwrap_or(0);
 
-    let mut child = Command::new(&launcher)
+    let child = Command::new(&launcher)
         .arg("--script")
         .arg(&script)
         .arg("--param")
@@ -141,31 +141,8 @@ pub(in crate::modules) fn run_joern_flows(
         .spawn()
         .with_context(|| format!("could not invoke joern at {}", launcher.display()))?;
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) => {
-                if std::time::Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    anyhow::bail!(
-                        "joern dataflow exceeded {timeout_secs}s timeout; either narrow the catalog or increase KUZUSHI_JOERN_TIMEOUT_SECS"
-                    );
-                }
-                std::thread::sleep(std::time::Duration::from_millis(500));
-            }
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(anyhow::anyhow!(error).context("could not poll joern subprocess"));
-            }
-        }
-    }
-
-    let output = child
-        .wait_with_output()
-        .context("could not collect joern output after exit")?;
+    let mut child = child;
+    let output = wait_with_optional_timeout(&mut child, timeout_secs)?;
 
     if !output.status.success() {
         anyhow::bail!(
