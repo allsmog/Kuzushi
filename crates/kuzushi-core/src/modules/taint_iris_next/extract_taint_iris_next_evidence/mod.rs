@@ -35,7 +35,33 @@ pub(in crate::modules) fn extract_taint_iris_next_evidence(
     // cases we surface a warning so the operator knows the result is
     // best-effort.
     let mut backend_path_count = 0usize;
-    let linked_stories = if plan.backend.selected == "joern" {
+    let linked_stories = if plan.backend.selected == "codeql" {
+        match super::run_codeql_flows(plan) {
+            Ok(Some(flows)) => {
+                backend_path_count = flows.len();
+                let mut codeql_candidates = super::codeql_flows_to_candidates(&flows);
+                candidates.append(&mut codeql_candidates);
+                if flows.is_empty() {
+                    warnings.push(
+                        "codeql analyze produced no security results; reporting empty linked stories rather than synthesising heuristic ones".to_string(),
+                    );
+                }
+                super::codeql_flows_to_linked_stories(&flows)
+            }
+            Ok(None) => {
+                warnings.push(
+                    "codeql was selected but the launcher or DB disappeared between plan and run; using heuristic linker".to_string(),
+                );
+                build_taint_iris_next_linked_stories(&candidates)
+            }
+            Err(error) => {
+                warnings.push(format!(
+                    "codeql analyze failed ({error}); falling back to heuristic linker"
+                ));
+                build_taint_iris_next_linked_stories(&candidates)
+            }
+        }
+    } else if plan.backend.selected == "joern" {
         match super::run_joern_flows(plan) {
             Ok(Some(flows)) => {
                 backend_path_count = flows.len();

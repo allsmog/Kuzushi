@@ -40,12 +40,28 @@ pub(crate) fn taint_iris_next_module() -> BuiltinModule {
         "Taint IRIS Next",
         ModuleKind::Defense,
         "Bounded IRIS-style taint analysis with deterministic evidence extraction and agent review.",
-        vec![tool_with_options(
-            "taint-iris-next:hunt",
-            "Run the next-generation bounded taint hunting pipeline.",
-            vec![target_option(), max_findings_option(20), model_option()],
-        )],
-        vec![dag("taint-iris-next:hunt", "findings", &["context:build"])],
+        vec![
+            tool_with_options(
+                "taint-iris-next:hunt",
+                "Run the next-generation bounded taint hunting pipeline.",
+                vec![target_option(), max_findings_option(20), model_option()],
+            ),
+            tool_with_options(
+                "taint-iris-next:catalog",
+                "Generate a target-specific CWE catalog tailored to this codebase. \
+Persists to <target>/.kuzushi/taint-iris-next-catalog.json; subsequent \
+taint-iris-next:hunt runs prefer it over the static built-in catalog.",
+                vec![target_option(), model_option()],
+            ),
+        ],
+        vec![
+            dag("taint-iris-next:hunt", "findings", &["context:build"]),
+            dag(
+                "taint-iris-next:catalog",
+                "catalog",
+                &["context:build"],
+            ),
+        ],
     )
 }
 

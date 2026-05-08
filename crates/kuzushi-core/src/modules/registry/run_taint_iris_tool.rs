@@ -16,6 +16,14 @@ pub(in crate::modules) fn run_taint_iris_next_tool(
     Ok(run_taint_iris_next_report(input, ctx, runtime)?.to_tool_json())
 }
 
+pub(in crate::modules) fn run_taint_iris_next_catalog_tool(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    Ok(run_taint_iris_next_catalog_report(input, ctx, runtime)?.to_tool_json())
+}
+
 pub(in crate::modules) fn dispatch_systems_hunt_tool(
     name: &str,
     input: &Value,

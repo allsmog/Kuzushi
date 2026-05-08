@@ -109,6 +109,7 @@ pub(in crate::modules) fn dispatch_agentic_security_tool(
         "pipeline:taint-cwe-select" => Some(run_taint_cwe_select(input.clone(), ctx, runtime)),
         "taint-iris:hunt" => Some(run_taint_iris_tool(input, ctx, runtime)),
         "taint-iris-next:hunt" => Some(run_taint_iris_next_tool(input, ctx, runtime)),
+        "taint-iris-next:catalog" => Some(run_taint_iris_next_catalog_tool(input, ctx, runtime)),
         _ => None,
     }
 }
