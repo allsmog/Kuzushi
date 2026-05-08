@@ -1,4 +1,3 @@
-use super::prelude::*;
 use super::*;
 
 impl SemgrepScanner {
@@ -35,7 +34,7 @@ impl SemgrepScanner {
         normalize_semgrep_json(&stdout)
     }
 
-    pub(crate) fn run_semgrep_process(
+    fn run_semgrep_process(
         &self,
         target: &Path,
         cancel: &ScanCancellation,
@@ -67,51 +66,25 @@ impl SemgrepScanner {
             }
         })?;
         let process_group_id = child_process_group_id(&child);
-
-        let stdout = child
-            .stdout
-            .take()
-            .context("Could not capture semgrep stdout")?;
-        let stderr = child
-            .stderr
-            .take()
-            .context("Could not capture semgrep stderr")?;
-        let stdout_reader = thread::spawn(move || read_pipe(stdout));
-        let stderr_reader = thread::spawn(move || read_pipe(stderr));
-
+        let readers = capture_scanner_process_pipes(&mut child, "semgrep")?;
         let child = cancel.register_child(child, process_group_id)?;
-
-        let status = loop {
-            if cancel.is_cancelled() {
-                child.kill_and_wait()?;
-                break None;
-            }
-
-            if let Some(status) = child.try_wait()? {
-                break Some(status);
-            }
-            thread::sleep(Duration::from_millis(75));
-        };
-
-        let stdout = stdout_reader
-            .join()
-            .map_err(|_| anyhow::anyhow!("semgrep stdout reader panicked"))??;
-        let stderr = stderr_reader
-            .join()
-            .map_err(|_| anyhow::anyhow!("semgrep stderr reader panicked"))??;
+        let status = wait_for_scanner_process(&child, cancel)?;
+        let output = join_scanner_process_readers(readers, "semgrep")?;
 
         let Some(status) = status else {
             anyhow::bail!("semgrep scan cancelled");
         };
 
-        if !status.success() && stdout.is_empty() {
+        if !status.success() && output.stdout.is_empty() {
             anyhow::bail!(
                 "semgrep failed with status {}: {}",
                 status,
-                String::from_utf8_lossy(&stderr)
+                String::from_utf8_lossy(&output.stderr)
             );
         }
 
-        Ok(ProcessOutput { stdout })
+        Ok(ProcessOutput {
+            stdout: output.stdout,
+        })
     }
 }

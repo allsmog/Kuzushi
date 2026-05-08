@@ -7,19 +7,31 @@
 // Phase 0 ships without tree-sitter, so the `function` tolerance falls back to
 // pm_lines:50. Phase 5 will rewire it to the real enclosing-function lookup.
 
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
-mod items_1;
-mod items_2;
-mod items_3;
-mod items_4;
-mod items_5;
-mod items_6;
+mod breakdowns;
+mod cli;
+mod input;
+mod oracle_matching;
+mod path_cwe;
+mod report;
+mod runner;
+mod scoring;
+mod tolerance;
+
+pub(crate) use breakdowns::*;
+pub(crate) use cli::*;
+pub(crate) use input::*;
+pub(crate) use oracle_matching::*;
+pub(crate) use path_cwe::*;
+pub(crate) use report::*;
+pub(crate) use scoring::*;
+pub(crate) use tolerance::*;
+
+#[cfg(test)]
+pub(crate) use runner::{load_match_report, render_match_report};
+
 #[cfg(test)]
 mod tests;
 
 fn main() -> anyhow::Result<()> {
-    items_2::main()
+    runner::run_cli()
 }

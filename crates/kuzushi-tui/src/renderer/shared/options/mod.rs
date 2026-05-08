@@ -1,12 +1,17 @@
 pub(in crate::renderer) use super::*;
 
 pub(crate) fn options_filter_label(filter: crate::app::OptionsFilter) -> &'static str {
-    match filter {
-        crate::app::OptionsFilter::Standard => "options",
-        crate::app::OptionsFilter::Advanced => "advanced options",
-        crate::app::OptionsFilter::Missing => "missing options",
-    }
+    OPTION_FILTER_LABELS
+        .iter()
+        .find_map(|(candidate, label)| (*candidate == filter).then_some(*label))
+        .unwrap_or("options")
 }
+
+const OPTION_FILTER_LABELS: &[(crate::app::OptionsFilter, &str)] = &[
+    (crate::app::OptionsFilter::Standard, "options"),
+    (crate::app::OptionsFilter::Advanced, "advanced options"),
+    (crate::app::OptionsFilter::Missing, "missing options"),
+];
 
 pub(crate) fn option_visible(
     spec: &OptionSpec,

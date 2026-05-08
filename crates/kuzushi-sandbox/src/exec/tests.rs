@@ -1,6 +1,9 @@
 #[cfg(test)]
 mod tests {
+    use super::super::output::cap_output;
     use super::super::*;
+    use crate::backend::SandboxBackend;
+    use std::path::PathBuf;
 
     fn opts(cmd: &[&str]) -> SandboxExecOptions {
         SandboxExecOptions::new(cmd.iter().map(|s| s.to_string()).collect())

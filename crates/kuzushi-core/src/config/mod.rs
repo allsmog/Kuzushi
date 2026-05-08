@@ -14,22 +14,26 @@
 ///
 /// **No secret data is ever stored in this struct.** It only carries a
 /// path and toggle flags. Tokens live in the file and the bridge process.
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
-mod items_1;
-mod items_2;
-mod items_3;
+use anyhow::{Context, Result};
+pub(crate) use apply_env_overrides::*;
+pub(crate) use config_model::*;
+pub(crate) use load_config_for_target::*;
+use serde::{Deserialize, Serialize};
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+mod apply_env_overrides;
+mod config_model;
+mod load_config_for_target;
 #[cfg(test)]
 mod tests;
 
-pub use items_1::AnthropicOauthConfig;
-pub use items_1::ConfigPaths;
-pub use items_1::RuntimeConfig;
-pub use items_1::RuntimeKind;
-pub use items_1::V2Config;
-pub use items_2::load_anthropic_oauth_config;
-pub use items_2::load_config;
-pub use items_2::load_config_for_target;
-pub use items_2::write_default_config;
+pub use config_model::AnthropicOauthConfig;
+pub use config_model::ConfigPaths;
+pub use config_model::RuntimeConfig;
+pub use config_model::RuntimeKind;
+pub use config_model::V2Config;
+pub use load_config_for_target::load_anthropic_oauth_config;
+pub use load_config_for_target::load_config;
+pub use load_config_for_target::load_config_for_target;
+pub use load_config_for_target::write_default_config;

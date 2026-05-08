@@ -50,17 +50,18 @@ pub(in crate::renderer) use super::*;
 /// `divider`) so the 12+ call sites don't all churn — if the two ever
 /// diverge again the design intent stays explicit at each site.  Auto-
 /// uppercases the label to mirror the prior heading-style convention.
-mod siblings;
-pub(crate) use siblings::*;
-mod items_1;
-mod items_2;
+pub(in crate::renderer) use detail::*;
+pub(in crate::renderer) use empty_state_panel::*;
+pub(in crate::renderer) use section_header_line::*;
+mod detail;
+mod empty_state_panel;
 mod section_header_line;
-pub(crate) use items_1::blank;
-pub(crate) use items_1::category_divider;
-pub(crate) use items_1::detail;
-pub(crate) use items_1::divider;
-pub(crate) use items_1::keybind_hint_line;
-pub(crate) use items_2::empty_state_panel;
-pub(crate) use items_2::indent;
-pub(crate) use items_2::next_action_line;
+pub(crate) use detail::blank;
+pub(crate) use detail::category_divider;
+pub(crate) use detail::detail;
+pub(crate) use detail::divider;
+pub(crate) use detail::keybind_hint_line;
+pub(crate) use empty_state_panel::empty_state_panel;
+pub(crate) use empty_state_panel::indent;
+pub(crate) use empty_state_panel::next_action_line;
 pub(crate) use section_header_line::section_header_line;

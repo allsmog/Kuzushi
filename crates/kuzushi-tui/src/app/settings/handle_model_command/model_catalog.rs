@@ -4,34 +4,32 @@ impl ShellApp {
     pub(crate) fn show_model_catalog(&mut self) {
         self.shell_view = ShellView::Config;
         self.sync_selected_model_index();
-        let active = self
-            .config
-            .model
-            .clone()
-            .unwrap_or_else(|| "unconfigured".to_string());
+        self.log_model_catalog_status();
+        self.log_model_catalog_choices();
+        self.log_model_catalog_scope_hint();
+    }
+
+    fn log_model_catalog_status(&mut self) {
+        let active = active_model_label(&self.config);
         let effort = self.session_thinking_level.as_deref().unwrap_or("default");
         self.log(
             "model",
             format!("active {active} / {effort}. Select with: model <n> [low|medium|high|xhigh]"),
         );
+    }
+
+    fn log_model_catalog_choices(&mut self) {
         for choice in MODEL_CHOICES {
-            self.log(
-                "model",
-                format!(
-                    "{}. {}  {}  {}  auth {}",
-                    choice.index, choice.id, choice.thinking_level, choice.label, choice.auth
-                ),
-            );
+            self.log("model", model_catalog_choice_line(choice));
         }
-        if self.focused_module.is_some() {
-            let hint = if self.config.model.is_none() {
-                "focused module detected, but no global model yet — model <n> sets the global model so `ask` works. Use `model module <n>` to scope per-module."
-            } else {
-                "focused module detected: model <n> sets this module; use `model global <n>` for global ask/defaults."
-            };
+    }
+
+    fn log_model_catalog_scope_hint(&mut self) {
+        if let Some(hint) = model_catalog_scope_hint(&self.focused_module, &self.config) {
             self.log("model", hint);
         }
     }
+
     pub(crate) fn provider_label(&self) -> String {
         self.config
             .model
@@ -72,4 +70,30 @@ impl ShellApp {
             ),
         );
     }
+}
+
+fn active_model_label(config: &V2Config) -> String {
+    config
+        .model
+        .clone()
+        .unwrap_or_else(|| "unconfigured".to_string())
+}
+
+fn model_catalog_choice_line(choice: &ModelChoice) -> String {
+    format!(
+        "{}. {}  {}  {}  auth {}",
+        choice.index, choice.id, choice.thinking_level, choice.label, choice.auth
+    )
+}
+
+fn model_catalog_scope_hint(
+    focused_module: &Option<String>,
+    config: &V2Config,
+) -> Option<&'static str> {
+    focused_module.as_ref()?;
+    Some(if config.model.is_none() {
+        "focused module detected, but no global model yet — model <n> sets the global model so `ask` works. Use `model module <n>` to scope per-module."
+    } else {
+        "focused module detected: model <n> sets this module; use `model global <n>` for global ask/defaults."
+    })
 }

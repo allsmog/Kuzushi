@@ -13,18 +13,27 @@
 
 /// Infer language from extension. Mirrors `code_nav::symbol_index::detect_language`
 /// but kept local to avoid a public-API coupling.
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
-mod items_1;
-mod items_2;
-mod items_4;
+use crate::findings::{Finding, StaticProofState};
+use crate::static_evidence::{
+    StaticEvidenceEdge, StaticEvidenceNode, StaticEvidenceNodeKind, StaticEvidenceStore,
+};
+use crate::static_narrative::{build_static_narrative_report, StaticFindingNarrative};
+use crate::static_ranking::{rank_static_findings, StaticRankedFinding};
+use crate::static_registry::{
+    match_static_registry, StaticRegistryKind, StaticRegistryMatch, StaticRegistryQuery,
+};
+pub(crate) use group_registry_by_kind::*;
+pub(crate) use match_registry_for::*;
+pub(crate) use render_markdown::*;
+use std::path::Path;
+mod assemble_static_context;
+mod group_registry_by_kind;
+mod match_registry_for;
 mod render_markdown;
 #[cfg(test)]
 mod tests;
 
-pub use items_1::assemble_static_context;
-pub use items_1::StaticContextSources;
-pub use items_1::SUBGRAPH_LINE_WINDOW;
-pub use items_1::SUBGRAPH_NODE_CAP;
+pub use assemble_static_context::assemble_static_context;
+pub use assemble_static_context::StaticContextSources;
+pub use assemble_static_context::SUBGRAPH_LINE_WINDOW;
+pub use assemble_static_context::SUBGRAPH_NODE_CAP;

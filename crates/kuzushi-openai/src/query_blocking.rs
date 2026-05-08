@@ -1,5 +1,14 @@
-use super::prelude::*;
-use super::*;
+use anyhow::Result;
+use async_trait::async_trait;
+use kuzushi_core::{
+    AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolLoopRequest,
+    LoopHistoryEntry, TriageOutcome, TriageRequest, TriageVerdict,
+};
+
+use crate::{
+    clamp_outcome, fallback_triage_outcome, next_step_blocking as run_next_step_blocking,
+    run_bridge, triage_prompt, BridgeRequest, PiAgentCoreRuntime, TRIAGE_SYSTEM_PROMPT,
+};
 
 #[async_trait]
 impl AgentRuntime for PiAgentCoreRuntime {
@@ -43,31 +52,7 @@ impl AgentRuntime for PiAgentCoreRuntime {
             TRIAGE_SYSTEM_PROMPT.to_string(),
             prompt,
         ))?;
-
-        if let Some(structured) = response.structured {
-            if let Ok(outcome) = serde_json::from_value::<TriageOutcome>(structured.clone()) {
-                return Ok(clamp_outcome(outcome));
-            }
-        }
-
-        if !response.text.is_empty() {
-            if let Ok(outcome) = serde_json::from_str::<TriageOutcome>(&response.text) {
-                return Ok(clamp_outcome(outcome));
-            }
-            return Ok(TriageOutcome {
-                verdict: TriageVerdict::NeedsReview,
-                confidence: 0.25,
-                rationale: response.text,
-                ..Default::default()
-            });
-        }
-
-        Ok(TriageOutcome {
-            verdict: TriageVerdict::NeedsReview,
-            confidence: 0.0,
-            rationale: "pi-agent-core bridge returned no triage content".to_string(),
-            ..Default::default()
-        })
+        Ok(triage_outcome_from_response(response))
     }
 
     fn supports_tools(&self) -> bool {
@@ -82,59 +67,41 @@ impl AgentRuntime for PiAgentCoreRuntime {
         request: &AgentToolLoopRequest,
         history: &[LoopHistoryEntry],
     ) -> Result<AgentLoopStep> {
-        let messages = build_messages_for_anthropic(&request.prompt, history);
-        let bridge_request = NextStepBridgeRequest {
-            envelope_type: "next-step",
-            model: request.model.clone(),
-            cwd: request.cwd.display().to_string(),
-            system_prompt: request.system_prompt.clone(),
-            messages,
-            tools: request
-                .tools
-                .iter()
-                .map(|t| BridgeTool {
-                    name: t.name.clone(),
-                    description: t.description.clone(),
-                    input_schema: t.input_schema.clone(),
-                })
-                .collect(),
-            max_tokens: 4096,
-            api_key_env: self.api_key_env.clone(),
-            api_key: self.api_key.clone(),
-            base_url: self.base_url.clone(),
-        };
+        run_next_step_blocking(self, request, history)
+    }
+}
 
-        let response = run_next_step_bridge(&self.command, &bridge_request)?;
-        if !response.ok {
-            anyhow::bail!(
-                "pi-agent-core next-step bridge failed: {}",
-                response
-                    .error
-                    .unwrap_or_else(|| "unknown error".to_string())
-            );
-        }
-        match response.step.as_deref() {
-            Some("tool_call") => {
-                let call = response
-                    .call
-                    .context("next-step: tool_call missing call body")?;
-                Ok(AgentLoopStep::ToolCall {
-                    call: ToolCall {
-                        name: call.name,
-                        input: call.input,
-                        call_id: call.call_id,
-                    },
-                })
-            }
-            Some("final") => Ok(AgentLoopStep::Final {
-                text: response.text.unwrap_or_default(),
-                structured: response.structured,
-                cost_usd: response.cost_usd,
-            }),
-            other => anyhow::bail!(
-                "next-step bridge returned unexpected step: {:?}",
-                other.unwrap_or("(missing)")
-            ),
-        }
+fn triage_outcome_from_response(response: AgentQueryResponse) -> TriageOutcome {
+    structured_triage_outcome(response.structured)
+        .or_else(|| text_triage_outcome(response.text))
+        .unwrap_or_else(empty_triage_outcome)
+}
+
+fn structured_triage_outcome(structured: Option<serde_json::Value>) -> Option<TriageOutcome> {
+    let structured = structured?;
+    serde_json::from_value::<TriageOutcome>(structured)
+        .ok()
+        .map(clamp_outcome)
+}
+
+fn text_triage_outcome(text: String) -> Option<TriageOutcome> {
+    if text.is_empty() {
+        return None;
+    }
+    Some(parsed_text_triage_outcome(&text).unwrap_or_else(|| fallback_triage_outcome(text)))
+}
+
+fn parsed_text_triage_outcome(text: &str) -> Option<TriageOutcome> {
+    serde_json::from_str::<TriageOutcome>(text)
+        .ok()
+        .map(clamp_outcome)
+}
+
+fn empty_triage_outcome() -> TriageOutcome {
+    TriageOutcome {
+        verdict: TriageVerdict::NeedsReview,
+        confidence: 0.0,
+        rationale: "pi-agent-core bridge returned no triage content".to_string(),
+        ..Default::default()
     }
 }

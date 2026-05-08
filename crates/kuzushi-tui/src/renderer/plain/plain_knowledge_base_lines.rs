@@ -1,4 +1,3 @@
-use super::prelude::*;
 use super::*;
 
 pub(crate) fn plain_knowledge_base_lines(app: &ShellApp, width: usize) -> Vec<String> {

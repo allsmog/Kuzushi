@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use std::path::Path;
 
     #[tokio::test]
     async fn empty_facade_reports_no_live_backends() {

@@ -1,4 +1,3 @@
-use super::prelude::*;
 use super::*;
 
 pub(crate) fn analyze_github_actions(target: &Path, path: &Path, raw: &str) -> Vec<IacScanFinding> {

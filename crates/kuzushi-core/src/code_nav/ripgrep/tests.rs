@@ -2,6 +2,7 @@
 mod tests {
     use super::super::*;
     use std::fs;
+    use std::process::{Command, Stdio};
     use tempfile::tempdir;
 
     fn rg_available() -> bool {

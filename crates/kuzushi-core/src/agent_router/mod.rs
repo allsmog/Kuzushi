@@ -11,19 +11,30 @@
 /// Wraps an existing [`AgentRuntime`] and substitutes the model based on
 /// the agent role. Implements `AgentRuntime` itself so legacy callers see
 /// a transparent passthrough.
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
-mod items_1;
-mod items_2;
-mod items_3;
-mod new;
+use crate::config::ConfigPaths;
+use crate::findings::TriageOutcome;
+use crate::options::{OptionScope, OptionTarget, ToolOptionStore};
+use crate::runtime::{
+    AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolLoopRequest,
+    LoopHistoryEntry, TriageRequest,
+};
+use anyhow::{Context, Result};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+mod as_key;
 mod query_blocking;
+mod route_types;
+mod routed_runtime_dispatch;
+mod router_state;
 #[cfg(test)]
 mod tests;
 
-pub use items_1::AgentRole;
-pub use items_2::AgentRouter;
-pub use items_2::ModelRoute;
-pub use items_3::RoutedRuntime;
+pub use as_key::AgentRole;
+pub use route_types::AgentRouter;
+pub use route_types::ModelRoute;
+pub use router_state::RoutedRuntime;

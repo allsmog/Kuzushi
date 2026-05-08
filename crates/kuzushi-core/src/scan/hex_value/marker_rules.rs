@@ -1,5 +1,3 @@
-use super::*;
-
 pub(in crate::scan) struct CodeqlMarkerRule {
     pub(in crate::scan) language: &'static str,
     pub(in crate::scan) markers: &'static [&'static str],

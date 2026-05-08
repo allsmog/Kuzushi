@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use serde_json::{json, Value};
 
     /// Spawning a non-existent binary errors actionably.
     #[tokio::test]

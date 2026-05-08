@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use regex::Regex;
+    use std::path::{Path, PathBuf};
 
     fn finding_row(file: &str, line: u32, message: &str) -> FindingRow {
         FindingRow {

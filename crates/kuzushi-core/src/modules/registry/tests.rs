@@ -199,7 +199,7 @@ mod tests {
             assert!(
                 registry
                     .modules()
-                    .any(|module| module.metadata().id == expected),
+                    .any(|registered_module| registered_module.metadata().id == expected),
                 "expected visible module {expected}"
             );
         }
@@ -208,13 +208,16 @@ mod tests {
             assert!(
                 registry
                     .all_modules()
-                    .any(|module| module.metadata().id == expected && module.is_hidden()),
+                    .any(
+                        |registered_module| registered_module.metadata().id == expected
+                            && registered_module.is_hidden()
+                    ),
                 "expected hidden internal module {expected}"
             );
             assert!(
                 !registry
                     .modules()
-                    .any(|module| module.metadata().id == expected),
+                    .any(|registered_module| registered_module.metadata().id == expected),
                 "hidden module {expected} should not be user-visible"
             );
         }
@@ -224,7 +227,7 @@ mod tests {
             assert!(
                 registry
                     .all_modules()
-                    .any(|module| module.metadata().id == module_id),
+                    .any(|registered_module| registered_module.metadata().id == module_id),
                 "tool {} should use a registered module prefix",
                 tool.name
             );
@@ -232,7 +235,7 @@ mod tests {
 
         let recon = registry
             .all_modules()
-            .find(|module| module.metadata().id == "recon")
+            .find(|registered_module| registered_module.metadata().id == "recon")
             .unwrap();
         assert!(recon
             .dag_nodes()

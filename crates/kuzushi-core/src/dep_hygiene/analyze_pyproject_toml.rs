@@ -1,4 +1,3 @@
-use super::prelude::*;
 use super::*;
 
 pub(crate) fn analyze_pyproject_toml(file_path: &Path, raw: &str) -> Vec<DepHygieneFinding> {

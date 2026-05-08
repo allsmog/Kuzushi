@@ -3,17 +3,19 @@
 
 /// Where the `rg` binary lives. Override via `KUZUSHI_RIPGREP_BIN` for
 /// tests or non-standard installations.
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
+use super::canonicalise::canonicalise_within;
+use anyhow::{Context, Result};
+pub(in crate::code_nav) use ripgrep_binary::*;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+use std::process::{Command, Stdio};
 mod find_references;
-mod items_1;
+mod ripgrep_binary;
 #[cfg(test)]
 mod tests;
 
 pub use find_references::find_references;
-pub use items_1::FindReferencesInput;
-pub use items_1::FindReferencesOutput;
-pub use items_1::ReferenceHit;
-pub use items_1::MAX_REFERENCES;
+pub use ripgrep_binary::FindReferencesInput;
+pub use ripgrep_binary::FindReferencesOutput;
+pub use ripgrep_binary::ReferenceHit;
+pub use ripgrep_binary::MAX_REFERENCES;

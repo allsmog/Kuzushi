@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use std::fs;
 
     #[test]
     fn writes_summary_artifact_and_trace_under_run_dir() {

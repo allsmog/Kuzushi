@@ -45,29 +45,38 @@
 /// `pub fn parse_packet(input: &[u8], n: usize) -> Result<u32>` into a
 /// `RustSignature`. Returns `None` when the input doesn't look like a
 /// `fn` declaration our caller can use.
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
+use crate::findings::{
+    Finding, PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification,
+};
+use anyhow::{Context, Result};
+pub(in crate::verify) use build_rust_trigger::*;
+pub(in crate::verify) use compile_failure_outcome::*;
+pub(crate) use infer_language::*;
+use kuzushi_sandbox::{
+    detect_backend, sandbox_exec, MountSpec, SandboxBackend, SandboxExecOptions,
+};
+pub(crate) use rust_source_appears_self_contained::*;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
 mod classification;
 
-mod items_1;
-mod items_2;
-mod items_3;
-mod items_4;
-mod items_5;
-mod items_6;
+mod build_rust_trigger;
+mod compile_failure_outcome;
+mod infer_language;
 mod parse_rust_signature;
+mod rust_source_appears_self_contained;
+mod unsupported;
+mod verification_outcome;
 pub use parse_rust_signature::*;
-pub(in crate::verify) use parse_rust_signature::*;
 #[cfg(test)]
 mod tests;
 
 pub use classification::classify_run_result;
-pub use items_1::ProofVerdict;
-pub use items_1::VerificationOutcome;
-pub use items_2::verify_finding;
-pub use items_2::VerifyOptions;
-pub(crate) use items_3::infer_language;
-pub(crate) use items_3::Lang;
-pub(crate) use items_6::RustSignature;
+pub(crate) use infer_language::infer_language;
+pub(crate) use infer_language::Lang;
+pub(crate) use rust_source_appears_self_contained::RustSignature;
+pub use unsupported::verify_finding;
+pub use unsupported::VerifyOptions;
+pub use verification_outcome::ProofVerdict;
+pub use verification_outcome::VerificationOutcome;

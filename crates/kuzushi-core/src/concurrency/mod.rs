@@ -1,3 +1,5 @@
+pub(crate) use band::*;
+pub(crate) use drop::*;
 /// Stage priority bands. Set via [`with_priority`] before calling routed
 /// agent functions. Higher variants preempt lower in the wait queue.
 
@@ -19,19 +21,20 @@
 
 /// Permit returned by [`ModelGate::acquire`]. Releases on drop and wakes
 /// the next priority-queue head.
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
-mod items_1;
-mod items_3;
-mod new;
+use std::collections::BTreeMap;
+use std::collections::VecDeque;
+use std::sync::Arc;
+use std::sync::Mutex;
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
+mod band;
+mod drop;
+mod model_gate;
 #[cfg(test)]
 mod tests;
 
-pub use items_1::current_priority;
-pub use items_1::default_concurrency_for;
-pub use items_1::with_priority;
-pub use items_1::ModelGate;
-pub use items_1::Priority;
-pub use items_3::PriorityPermit;
+pub use band::current_priority;
+pub use band::default_concurrency_for;
+pub use band::with_priority;
+pub use band::ModelGate;
+pub use band::Priority;
+pub use drop::PriorityPermit;

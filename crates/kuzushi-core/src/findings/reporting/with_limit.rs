@@ -1,4 +1,3 @@
-use super::prelude::*;
 use super::*;
 
 impl FindingListFilter {
@@ -25,18 +24,7 @@ impl FindingListFilter {
         filter.name = normalized_optional_string(input, "name")?;
         filter.file_path = normalized_optional_string(input, "filePath")?
             .or(normalized_optional_string(input, "file_path")?);
-        filter.limit = match input.get("limit") {
-            Some(Value::Number(number)) => number
-                .as_u64()
-                .with_context(|| "findings:list limit must be a non-negative integer")?
-                .min(Self::MAX_LIMIT as u64) as usize,
-            Some(Value::String(value)) => value
-                .parse::<usize>()
-                .with_context(|| "findings:list limit must be a non-negative integer")?
-                .min(Self::MAX_LIMIT),
-            Some(_) => anyhow::bail!("findings:list limit must be a number"),
-            None => filter.limit,
-        };
+        filter.limit = parsed_limit(input.get("limit"), filter.limit)?;
 
         Ok(filter)
     }
@@ -125,5 +113,26 @@ impl FindingListFilter {
         }
 
         true
+    }
+}
+
+fn parsed_limit(value: Option<&Value>, current: usize) -> Result<usize> {
+    match value {
+        Some(value) => parse_limit_value(value),
+        None => Ok(current),
+    }
+}
+
+fn parse_limit_value(value: &Value) -> Result<usize> {
+    match value {
+        Value::Number(number) => number
+            .as_u64()
+            .with_context(|| "findings:list limit must be a non-negative integer")
+            .map(|value| value.min(FindingListFilter::MAX_LIMIT as u64) as usize),
+        Value::String(value) => value
+            .parse::<usize>()
+            .with_context(|| "findings:list limit must be a non-negative integer")
+            .map(|value| value.min(FindingListFilter::MAX_LIMIT)),
+        _ => anyhow::bail!("findings:list limit must be a number"),
     }
 }

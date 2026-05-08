@@ -1,6 +1,29 @@
 #[cfg(test)]
 mod tests {
-    use super::super::*;
+    use crate::auth_bridge::{
+        bridge_ping_error, bridge_ping_summary, parse_bridge_stdout, run_auth_ping_bridge,
+    };
+    use crate::auth_oauth::{anthropic_oauth_readiness_message, auth_ping_model};
+    use crate::auth_ping::AuthPingLog;
+    use crate::command::{ConfigCommand, McpBackend};
+    use crate::config_commands::{config_command, ensure_config_init_allowed};
+    use crate::mcp::{mcp_health_spawn_error, mcp_spawn_error};
+    use crate::runs_output::{
+        parse_trace_json_lines, run_summary_plain, runs_list_output, runs_show_output,
+        runs_trace_output,
+    };
+    use crate::scan::{scan_scope_body, scan_task_mode, scan_worktree_suffix};
+    use crate::scan_ci::{ci_line, format_duration, scan_started_body};
+    use crate::scan_output::scan_json_output;
+    use crate::suppressions::{suppressions_command_output, suppressions_plain_lines};
+    use crate::terminal::{
+        plain_output_requested, shell_startup_progress_messages, should_emit_shell_startup_progress,
+    };
+    use crate::tool_requirements::{
+        tool_defaults_to_workspace, tool_needs_finding_store, tool_needs_runtime,
+    };
+    use kuzushi_core::{RunSummary, WorkspaceTarget};
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn ci_line_uses_relative_timestamp_and_prefix() {

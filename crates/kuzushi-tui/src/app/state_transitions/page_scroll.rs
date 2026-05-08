@@ -1,0 +1,27 @@
+use super::*;
+
+#[derive(Clone, Copy)]
+pub(super) enum PageScrollKind {
+    Help,
+    Tools,
+    History,
+    KnowledgeBase,
+    Modules,
+}
+
+pub(super) fn page_scroll_kind(view: &ShellView, catalog_expanded: bool) -> Option<PageScrollKind> {
+    if matches!(view, ShellView::Catalog) && catalog_expanded {
+        return Some(PageScrollKind::Modules);
+    }
+    PAGE_SCROLL_KINDS
+        .iter()
+        .find_map(|(candidate, kind)| (candidate == view).then_some(*kind))
+}
+
+const PAGE_SCROLL_KINDS: &[(ShellView, PageScrollKind)] = &[
+    (ShellView::Help, PageScrollKind::Help),
+    (ShellView::Quickstart, PageScrollKind::Help),
+    (ShellView::Tools, PageScrollKind::Tools),
+    (ShellView::History, PageScrollKind::History),
+    (ShellView::KnowledgeBase, PageScrollKind::KnowledgeBase),
+];

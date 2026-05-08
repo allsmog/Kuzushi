@@ -1,4 +1,4 @@
-pub(in crate::renderer) use super::prelude::*;
+use super::*;
 pub(in crate::renderer) use super::*;
 
 pub(crate) fn options_lines(

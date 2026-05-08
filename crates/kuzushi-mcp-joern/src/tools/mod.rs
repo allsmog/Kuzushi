@@ -1,24 +1,23 @@
-use super::prelude::*;
-use super::*;
-
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
+mod availability;
 mod build_registry;
-mod items_1;
-mod items_2;
-mod items_3;
-mod items_4;
-/// Build a placeholder descriptor used by tools that don't have their
-/// implementation wired yet. Currently unused (all five planned tools
-/// are now live) but kept as a reusable helper for the next round of
-/// additions.
-
-/// Sentinel handler kept for any future stubs we register before
-/// implementing. No tool is currently registered as a stub.
+mod function_handlers;
+mod graph_handlers;
+mod health;
+mod method_at;
+mod parse_query_handlers;
+mod stub;
+mod tool_types;
 
 #[cfg(test)]
 mod tests;
 pub use build_registry::build_registry;
-pub use items_1::health_summary;
+pub use health::health_summary;
+
+#[cfg(test)]
+pub(crate) use availability::parse_raw_json_or_string;
+#[cfg(test)]
+pub(crate) use method_at::{method_at_json, method_at_request, MethodAtRequest};
+#[cfg(test)]
+pub(crate) use parse_query_handlers::{function_query_json, parse_repo_path};
+#[cfg(test)]
+pub(crate) use tool_types::*;

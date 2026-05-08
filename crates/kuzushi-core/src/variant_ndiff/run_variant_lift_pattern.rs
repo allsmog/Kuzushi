@@ -1,4 +1,3 @@
-use super::prelude::*;
 use super::*;
 
 pub fn run_variant_lift_pattern(

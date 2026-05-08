@@ -1,7 +1,10 @@
 pub(in crate::renderer) use super::*;
 
-mod siblings;
-pub(crate) use siblings::*;
+pub(in crate::renderer) use cards::*;
+pub(in crate::renderer) use footer::*;
+pub(in crate::renderer) use prompt::*;
+pub(in crate::renderer) use status::*;
+pub(in crate::renderer) use transcript::*;
 mod cards;
 mod footer;
 mod prompt;

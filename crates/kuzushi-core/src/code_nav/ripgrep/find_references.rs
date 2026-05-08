@@ -1,8 +1,25 @@
-use super::prelude::*;
 use super::*;
 
 pub fn find_references(root: &Path, input: &FindReferencesInput) -> Result<FindReferencesOutput> {
-    let symbol = input.symbol.trim();
+    let symbol = validated_symbol(&input.symbol)?;
+    let scope_path = reference_scope_path(root, input)?;
+    let output = run_ripgrep_reference_search(&scope_path, symbol, input.language.as_deref())?;
+    validate_ripgrep_reference_output(&output)?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let (hits, total) = parse_reference_hits(&stdout, &canonical_root);
+    let truncated = total > MAX_REFERENCES;
+    Ok(FindReferencesOutput {
+        symbol: input.symbol.clone(),
+        hits,
+        total_hits: total,
+        truncated,
+    })
+}
+
+pub(crate) fn validated_symbol(symbol: &str) -> Result<&str> {
+    let symbol = symbol.trim();
     anyhow::ensure!(
         !symbol.is_empty(),
         "find_references: symbol must be non-empty"
@@ -11,16 +28,27 @@ pub fn find_references(root: &Path, input: &FindReferencesInput) -> Result<FindR
         !symbol.contains('\n') && !symbol.contains('\0'),
         "find_references: symbol may not contain newlines or null bytes"
     );
+    Ok(symbol)
+}
 
-    // Resolve scope under root for the canonicalisation guard.
-    let scope_path = match input.scope.as_deref() {
+pub(crate) fn reference_scope_path(
+    root: &Path,
+    input: &FindReferencesInput,
+) -> Result<std::path::PathBuf> {
+    match input.scope.as_deref() {
         Some(scope) if !scope.trim().is_empty() => canonicalise_within(root, scope)
-            .with_context(|| format!("find_references: scope {scope:?}"))?,
+            .with_context(|| format!("find_references: scope {scope:?}")),
         _ => root
             .canonicalize()
-            .with_context(|| format!("find_references: bad root {}", root.display()))?,
-    };
+            .with_context(|| format!("find_references: bad root {}", root.display())),
+    }
+}
 
+pub(crate) fn run_ripgrep_reference_search(
+    scope_path: &Path,
+    symbol: &str,
+    language: Option<&str>,
+) -> Result<std::process::Output> {
     let mut cmd = Command::new(ripgrep_binary());
     cmd.arg("--no-messages")
         .arg("--with-filename")
@@ -33,34 +61,37 @@ pub fn find_references(root: &Path, input: &FindReferencesInput) -> Result<FindR
         .arg("--no-heading")
         .arg("--color")
         .arg("never");
-    if let Some(lang) = input.language.as_deref() {
+    if let Some(lang) = language {
         let trimmed = lang.trim();
         if !trimmed.is_empty() {
-            // rg --type accepts predefined names; if the model passes an
-            // unknown one we let rg fail with a structured error.
             cmd.arg("--type").arg(trimmed);
         }
     }
     cmd.arg("--").arg(symbol).arg(&scope_path);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-    let output = cmd.output().with_context(|| {
+    cmd.output().with_context(|| {
         format!(
             "find_references: could not invoke {} — install ripgrep or set KUZUSHI_RIPGREP_BIN",
             ripgrep_binary()
         )
-    })?;
+    })
+}
+
+pub(crate) fn validate_ripgrep_reference_output(output: &std::process::Output) -> Result<()> {
     if !output.status.success() && output.stdout.is_empty() {
-        // exit 1 = no matches → not an error. Anything else with stderr is.
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !stderr.trim().is_empty() && !output.status.code().is_some_and(|c| c == 1) {
             anyhow::bail!("find_references: rg failed: {}", stderr.trim());
         }
     }
+    Ok(())
+}
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-
+pub(crate) fn parse_reference_hits(
+    stdout: &str,
+    canonical_root: &Path,
+) -> (Vec<ReferenceHit>, usize) {
     let mut hits: Vec<ReferenceHit> = Vec::new();
     let mut total = 0usize;
     for line in stdout.lines() {
@@ -88,12 +119,5 @@ pub fn find_references(root: &Path, input: &FindReferencesInput) -> Result<FindR
             snippet: snippet.trim().to_string(),
         });
     }
-
-    let truncated = total > MAX_REFERENCES;
-    Ok(FindReferencesOutput {
-        symbol: input.symbol.clone(),
-        hits,
-        total_hits: total,
-        truncated,
-    })
+    (hits, total)
 }

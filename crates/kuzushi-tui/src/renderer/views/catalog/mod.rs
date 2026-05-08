@@ -1,9 +1,7 @@
-pub(in crate::renderer) use super::prelude::*;
+use super::*;
 pub(in crate::renderer) use super::*;
 
-mod siblings;
-pub(crate) use siblings::*;
+pub(in crate::renderer) use catalog_lines::*;
 mod catalog_lines;
-mod items_1;
-mod prelude;
 pub(crate) use catalog_lines::catalog_lines;
+use std::collections::BTreeMap;

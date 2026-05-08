@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use std::path::PathBuf;
 
     /// Captured `global -x` output for a hypothetical lookup of
     /// `recv_msg`. Three records, the third with a snippet containing

@@ -23,31 +23,40 @@
 /// for v1 we report bands.
 
 /// Map a [`FullModeReport`] to a JSON Value suitable for tool output.
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
-mod items_1;
-mod items_2;
-mod items_3;
-mod items_5;
-mod items_6;
+use crate::agent_router::{AgentRole, RoutedRuntime};
+use crate::findings::{Finding, Severity};
+use crate::runtime::AgentQueryRequest;
+use crate::spend::{Operation, SpendLimiter, SpendTicket};
+use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
+use anyhow::{Context, Result};
+pub(crate) use full_mode_model::*;
+pub(crate) use plan::*;
+pub(crate) use render_chunk_prompt::*;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Path, PathBuf};
+pub(crate) use walk_files::*;
+mod full_mode_model;
+mod plan;
+mod render_chunk_prompt;
+mod report_to_tool_json;
 mod run;
 #[cfg(test)]
 mod tests;
+mod walk_files;
 
-pub use items_1::ChunkPlan;
-pub use items_1::FileBucket;
-pub use items_1::FullModeConfig;
-pub use items_1::FullModeLanguage;
-pub use items_1::FullModePlan;
-pub use items_1::FullModeReport;
-pub use items_1::BYTES_PER_TOKEN;
-pub use items_1::DEFAULT_DEPOSIT_USD_PER_CHUNK;
-pub use items_1::DEFAULT_MAX_TOKENS_PER_CHUNK;
-pub use items_1::MAX_FILE_BYTES;
-pub use items_2::plan;
-pub use items_5::cost_summary;
-pub use items_6::report_to_tool_json;
-pub use items_6::CostSummary;
+pub use full_mode_model::ChunkPlan;
+pub use full_mode_model::FileBucket;
+pub use full_mode_model::FullModeConfig;
+pub use full_mode_model::FullModeLanguage;
+pub use full_mode_model::FullModePlan;
+pub use full_mode_model::FullModeReport;
+pub use full_mode_model::BYTES_PER_TOKEN;
+pub use full_mode_model::DEFAULT_DEPOSIT_USD_PER_CHUNK;
+pub use full_mode_model::DEFAULT_MAX_TOKENS_PER_CHUNK;
+pub use full_mode_model::MAX_FILE_BYTES;
+pub use plan::plan;
+pub use render_chunk_prompt::cost_summary;
+pub use report_to_tool_json::report_to_tool_json;
+pub use report_to_tool_json::CostSummary;
 pub use run::run;

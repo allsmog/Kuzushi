@@ -1,4 +1,3 @@
-use super::prelude::*;
 use super::*;
 
 pub(crate) fn threat_view_label(view: ThreatView) -> &'static str {

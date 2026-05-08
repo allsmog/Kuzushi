@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use super::super::id::severity_from_cvss;
     use super::super::*;
 
     const PACKAGE_JSON: &str =

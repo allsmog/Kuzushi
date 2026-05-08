@@ -1,3 +1,7 @@
+use super::super::{
+    auth_login_status_message, normalize_auth_provider, pause_raw_mode_for_auth_login,
+    repaint_after_auth_login, restore_raw_mode_after_auth_login, spawn_auth_login_process,
+};
 use super::*;
 
 impl ShellApp {

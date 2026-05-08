@@ -1,10 +1,20 @@
-pub(in crate::renderer) use super::prelude::*;
+use super::*;
 pub(in crate::renderer) use super::*;
 
-mod prelude;
-pub(in crate::renderer) use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
+pub(in crate::renderer) use catalog::*;
+pub(in crate::renderer) use chat::*;
+pub(in crate::renderer) use editor::*;
+pub(in crate::renderer) use findings::*;
+pub(in crate::renderer) use help::*;
+pub(in crate::renderer) use module::*;
+pub(in crate::renderer) use options::*;
+pub(in crate::renderer) use patch::*;
+pub(in crate::renderer) use runs::*;
+pub(in crate::renderer) use shell_view_lines::*;
+pub(in crate::renderer) use system::*;
+pub(in crate::renderer) use threat::*;
+pub(in crate::renderer) use viewport_lines::*;
+pub(in crate::renderer) use workspace::*;
 mod catalog;
 mod chat;
 mod editor;
@@ -18,8 +28,8 @@ mod system;
 mod threat;
 mod workspace;
 
-mod items_1;
-mod items_2;
+mod shell_view_lines;
+mod viewport_lines;
 pub(super) use catalog::*;
 pub(super) use chat::*;
 pub(super) use editor::*;

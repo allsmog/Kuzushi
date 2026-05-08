@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use super::super::build_actor_fingerprint::looks_like_prompt_path;
     use super::super::*;
     use crate::artifact_kb::{ArtifactKnowledgeRecord, ArtifactKnowledgeStore};
     use crate::config::V2Config;

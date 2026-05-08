@@ -4,18 +4,26 @@
 pub mod anthropic_oauth;
 pub mod oauth;
 
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
-mod items_1;
-mod items_2;
-mod items_3;
-mod items_4;
+mod anthropic_messages;
+mod bridge_payloads;
+mod bridge_process;
+mod bridge_triage;
+mod next_step_bridge;
 mod query_blocking;
+mod runtime_config;
 #[cfg(test)]
 mod tests;
 
 pub use anthropic_oauth::{AnthropicOAuthRuntime, AnthropicOAuthRuntimeOptions};
-pub use items_1::PiAgentCoreRuntime;
 pub use oauth::{probe as probe_anthropic_oauth, OauthReadiness};
+pub use runtime_config::PiAgentCoreRuntime;
+
+pub(crate) use anthropic_messages::build_messages_for_anthropic;
+pub(crate) use bridge_payloads::{
+    BridgeRequest, BridgeResponse, BridgeTool, NextStepBridgeRequest, NextStepBridgeResponse,
+};
+pub(crate) use bridge_process::{default_bridge_command, run_bridge, run_next_step_bridge};
+pub(crate) use bridge_triage::{
+    clamp_outcome, fallback_triage_outcome, triage_prompt, TRIAGE_SYSTEM_PROMPT,
+};
+pub(crate) use next_step_bridge::next_step_blocking;

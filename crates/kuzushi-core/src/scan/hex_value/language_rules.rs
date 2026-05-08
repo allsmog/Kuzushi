@@ -1,5 +1,3 @@
-use super::*;
-
 pub(in crate::scan) struct CodeqlLanguageRule {
     language: &'static str,
     contains: &'static [&'static str],

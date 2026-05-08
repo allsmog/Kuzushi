@@ -4,15 +4,16 @@
 
 /// Read a slice of `input.file` relative to `root`. Returns 1-indexed
 /// inclusive line ranges so the model can navigate as it reads.
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
-mod items_1;
+use super::canonicalise::canonicalise_within;
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
+mod read_source;
 #[cfg(test)]
 mod tests;
 
-pub use items_1::read_source;
-pub use items_1::ReadSourceInput;
-pub use items_1::ReadSourceOutput;
-pub use items_1::MAX_READ_BYTES;
+pub use read_source::read_source;
+pub use read_source::ReadSourceInput;
+pub use read_source::ReadSourceOutput;
+pub use read_source::MAX_READ_BYTES;

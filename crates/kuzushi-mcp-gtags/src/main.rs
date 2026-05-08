@@ -1,9 +1,7 @@
+use anyhow::Result;
 use kuzushi_mcp_common::{serve_stdio, ServerInfo};
+use std::env;
 
-mod prelude;
-use prelude::*;
-mod siblings;
-pub(crate) use siblings::*;
 mod parser;
 mod tools;
 

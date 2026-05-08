@@ -1,5 +1,17 @@
-use super::prelude::*;
-use super::*;
+use serde::{Deserialize, Serialize};
+
+use super::Position;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeKind {
+    Call,
+    ReachingDef,
+    DataDependence,
+    ControlFlow,
+    Includes,
+    References,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
