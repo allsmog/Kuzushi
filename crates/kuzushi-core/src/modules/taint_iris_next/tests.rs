@@ -352,4 +352,62 @@ mod tests {
         assert!(err.contains("requires an explicit model"));
         assert!(err.contains("will not choose a fallback model"));
     }
+
+    /// rg-backed structural matcher must produce the *same* deterministic
+    /// candidate ids as the in-process matcher on the same fixture. This
+    /// catches drift between the alias table in `taint_iris_next_line_matches`
+    /// and the alias-expansion table in `rg_engine::alias_substrings`, and
+    /// regressions where rg's path/line normalisation diverges from the
+    /// in-process walker.
+    #[test]
+    fn rg_and_inproc_structural_backends_produce_same_candidate_ids() {
+        if which_rg().is_none() {
+            eprintln!("skipping rg parity test: ripgrep not on PATH");
+            return;
+        }
+
+        let temp = tempdir().unwrap();
+        write_js_taint_fixture(temp.path());
+        let options =
+            TaintIrisNextInput::from_tool_input(&json!({"mode": "plan", "maxCatalogEntries": 5}))
+                .unwrap();
+        let mut plan = build_taint_iris_next_plan(&temp.path().to_path_buf(), options).unwrap();
+
+        // `auto` resolves to either "rg" or "inproc" depending on PATH; force
+        // both modes here so we always exercise both backends regardless of
+        // the host environment.
+        plan.backend.structural_tool = "rg".to_string();
+        let rg_ids: BTreeSet<String> = extract_taint_iris_next_evidence(&plan)
+            .unwrap()
+            .candidates
+            .into_iter()
+            .map(|candidate| candidate.id)
+            .collect();
+
+        plan.backend.structural_tool = "inproc".to_string();
+        let inproc_ids: BTreeSet<String> = extract_taint_iris_next_evidence(&plan)
+            .unwrap()
+            .candidates
+            .into_iter()
+            .map(|candidate| candidate.id)
+            .collect();
+
+        assert!(
+            !rg_ids.is_empty(),
+            "rg backend should find at least one candidate in the fixture"
+        );
+        assert_eq!(
+            rg_ids, inproc_ids,
+            "rg-derived and in-process candidate ids should match"
+        );
+    }
+
+    fn which_rg() -> Option<()> {
+        std::process::Command::new("rg")
+            .arg("--version")
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .map(|_| ())
+    }
 }

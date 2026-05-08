@@ -33,8 +33,20 @@ pub(in crate::modules) fn choose_taint_iris_next_backend(
         selected: selected.to_string(),
         codeql_db_path: codeql_db.as_ref().map(|path| path.display().to_string()),
         corroborate_with_codeql: codeql_db.as_ref().map(|_| true),
-        structural_tool: "rg".to_string(),
+        structural_tool: detect_structural_tool().to_string(),
         warnings,
+    }
+}
+
+/// Reports the actual structural matcher Kuzushi will use, not a hardcoded
+/// label. Returns `"rg"` when ripgrep is on PATH, otherwise `"inproc"` for
+/// the pure-Rust line walker. Surfaced in run results so operators can tell
+/// at a glance whether rg accelerated the candidate collection.
+fn detect_structural_tool() -> &'static str {
+    if super::rg_available() {
+        "rg"
+    } else {
+        "inproc"
     }
 }
 

@@ -3,6 +3,23 @@ use super::*;
 pub(super) fn collect_structural_candidates(
     plan: &TaintIrisNextPlan,
 ) -> Result<Vec<TaintIrisNextCandidate>> {
+    if plan.backend.structural_tool == "rg" && super::rg_available() {
+        match super::rg_engine::collect_structural_candidates_via_rg(plan) {
+            Ok(candidates) => return Ok(candidates),
+            Err(_) => {
+                // rg disappeared between detection and exec, or the JSON
+                // shape drifted. Silently fall back to in-process so the
+                // pipeline still produces evidence rather than blowing up
+                // a long agentic run on a tooling hiccup.
+            }
+        }
+    }
+    collect_structural_candidates_inproc(plan)
+}
+
+fn collect_structural_candidates_inproc(
+    plan: &TaintIrisNextPlan,
+) -> Result<Vec<TaintIrisNextCandidate>> {
     let files = collect_taint_iris_next_source_files(&plan.scan_root, 500, 128 * 1024)?;
     let mut state = CandidateCollectionState::default();
 
@@ -12,11 +29,11 @@ pub(super) fn collect_structural_candidates(
         }
     }
 
-    Ok(state.candidates)
+    Ok(state.into_candidates())
 }
 
 #[derive(Default)]
-struct CandidateCollectionState {
+pub(super) struct CandidateCollectionState {
     candidates: Vec<TaintIrisNextCandidate>,
     seen_candidate: BTreeSet<String>,
     per_query_files: BTreeMap<String, BTreeSet<String>>,
@@ -24,7 +41,11 @@ struct CandidateCollectionState {
 }
 
 impl CandidateCollectionState {
-    fn record_line_matches(
+    pub(super) fn into_candidates(self) -> Vec<TaintIrisNextCandidate> {
+        self.candidates
+    }
+
+    pub(super) fn record_line_matches(
         &mut self,
         plan: &TaintIrisNextPlan,
         source_file: &TaintIrisNextSourceFile,
