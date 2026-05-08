@@ -176,7 +176,7 @@ fn response_result_for_id(binary: &str, resp: &Value, id: i64) -> Result<Option<
         return Ok(None);
     }
     if let Some(err) = resp.get("error") {
-        anyhow::bail!("{}: {err}", binary);
+        anyhow::bail!("{binary}: {err}");
     }
     Ok(Some(resp.get("result").cloned().unwrap_or(Value::Null)))
 }

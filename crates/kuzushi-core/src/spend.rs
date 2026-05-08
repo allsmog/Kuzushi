@@ -34,6 +34,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Operation {
     Triage,
+    AutoHunt,
     ClassifierGate,
     DeepAudit,
     FullModeMulti,
@@ -44,6 +45,7 @@ impl Operation {
     pub fn as_db_str(self) -> &'static str {
         match self {
             Self::Triage => "triage",
+            Self::AutoHunt => "auto_hunt",
             Self::ClassifierGate => "classifier_gate",
             Self::DeepAudit => "deep_audit",
             Self::FullModeMulti => "full_mode_multi",
@@ -54,6 +56,7 @@ impl Operation {
     pub fn from_db_str(value: &str) -> Option<Self> {
         match value {
             "triage" => Some(Self::Triage),
+            "auto_hunt" => Some(Self::AutoHunt),
             "classifier_gate" => Some(Self::ClassifierGate),
             "deep_audit" => Some(Self::DeepAudit),
             "full_mode_multi" => Some(Self::FullModeMulti),
@@ -65,6 +68,7 @@ impl Operation {
     pub const fn all() -> &'static [Self] {
         &[
             Self::Triage,
+            Self::AutoHunt,
             Self::ClassifierGate,
             Self::DeepAudit,
             Self::FullModeMulti,

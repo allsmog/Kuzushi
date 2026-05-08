@@ -31,19 +31,19 @@ use super::triage::run_triage;
 use super::verify::{run_verify_exploit, run_verify_finding};
 use super::workspace_tools::{export_workspace_findings_tool, workspace_status_output};
 use super::{
-    agentic_sast_module, binary_analysis_module, carlini_threat_hunt_module, catalog_module,
-    chrome_rce, classifier_gate_module, config_module, context, deep_audit_module,
+    agentic_sast_module, auto_hunt_module, binary_analysis_module, carlini_threat_hunt_module,
+    catalog_module, chrome_rce, classifier_gate_module, config_module, context, deep_audit_module,
     dep_hygiene_module, findings_module, full_mode_module, native_scanners, ndiff_module,
     patch_module, pipeline_module, plugin_adapters, prompt_armor, randori_module, recon_module,
-    resolve_tool_target, router_module, router_show_tool, run_classifier_score_tool,
-    run_deep_audit_tool, run_full_mode_hunt_tool, run_smoke_next_step_tool, sast_module,
-    secret_scan_module, smoke_module, systems_hunt_module, taint_iris_module,
-    taint_iris_next_module, threat_model_module, triage_module, variant_module, vendor_assessment,
-    verify_module, workspace_module, x_ray_module, BuiltinModule, ToolDescriptor,
-    ToolExecutionContext,
+    resolve_tool_target, router_module, router_show_tool, run_auto_hunt_tool,
+    run_classifier_score_tool, run_deep_audit_tool, run_full_mode_hunt_tool,
+    run_smoke_next_step_tool, sast_module, secret_scan_module, smoke_module, systems_hunt_module,
+    taint_iris_module, taint_iris_next_module, threat_model_module, triage_module, variant_module,
+    vendor_assessment, verify_module, workspace_module, x_ray_module, BuiltinModule,
+    ToolDescriptor, ToolExecutionContext,
 };
 
-type ToolDispatchResult = Option<Result<Value>>;
+pub(super) type ToolDispatchResult = Option<Result<Value>>;
 
 #[derive(Debug, Default, Clone)]
 pub struct ModuleRegistry {
@@ -66,6 +66,7 @@ impl ModuleRegistry {
         context::register_context_modules(&mut registry);
         registry.register(sast_module());
         native_scanners::register_modules(&mut registry);
+        registry.register(auto_hunt_module());
         registry.register(agentic_sast_module());
         registry.register(carlini_threat_hunt_module());
         registry.register(taint_iris_module());
@@ -186,7 +187,7 @@ impl ModuleRegistry {
         if let Some(result) = dispatch_native_security_tool(name, &input, ctx, runtime) {
             return result;
         }
-        if let Some(result) = dispatch_agentic_security_tool(name, &input, ctx, runtime) {
+        if let Some(result) = dispatch_agentic_security_tool(self, name, &input, ctx, runtime) {
             return result;
         }
         if let Some(result) = dispatch_systems_hunt_tool(name, &input, ctx, runtime) {
@@ -215,7 +216,7 @@ impl ModuleRegistry {
 }
 
 impl ModuleRegistry {
-    fn dispatch_catalog_tool(&self, name: &str) -> ToolDispatchResult {
+    pub(super) fn dispatch_catalog_tool(&self, name: &str) -> ToolDispatchResult {
         match name {
             "catalog:modules" => Some(Ok(json!(self
                 .modules()
@@ -304,12 +305,14 @@ fn run_binary_analysis_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Re
 }
 
 fn dispatch_agentic_security_tool(
+    registry: &ModuleRegistry,
     name: &str,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> ToolDispatchResult {
     match name {
+        "auto-hunt:run" => Some(run_auto_hunt_tool(input.clone(), ctx, runtime, registry)),
         "agentic-sast:scan" => Some(run_agentic_sast_tool(input, ctx, runtime)),
         "variant:lift-pattern" => Some(run_variant_lift_pattern(input.clone(), ctx, runtime)),
         "variant:hunt" => Some(run_variant_hunt(input.clone(), ctx, runtime)),
@@ -645,6 +648,7 @@ mod tests {
 
         for expected in [
             "agentic-sast",
+            "auto-hunt",
             "binary-analysis",
             "carlini-threat-hunt",
             "chrome-rce",
@@ -718,6 +722,17 @@ mod tests {
             .any(|node| node.id == "recon:http-fingerprint"
                 && node.output_kind == "context"
                 && node.depends_on == vec!["context:build".to_string()]));
+
+        let auto_hunt = registry
+            .all_modules()
+            .find(|module| module.metadata().id == "auto-hunt")
+            .unwrap();
+        assert!(auto_hunt
+            .dag_nodes()
+            .iter()
+            .any(|node| node.id == "auto-hunt:run"
+                && node.output_kind == "findings"
+                && node.depends_on == vec!["context:build".to_string()]));
     }
 
     #[test]
@@ -725,6 +740,7 @@ mod tests {
         let registry = ModuleRegistry::with_v2_builtins();
         for expected in [
             "context:build",
+            "auto-hunt:run",
             "sast:scan",
             "x-ray:run",
             "carlini-threat-hunt:run",

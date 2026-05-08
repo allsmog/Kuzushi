@@ -5,6 +5,7 @@ use crate::findings::FindingStore;
 use crate::runtime::AgentRuntime;
 
 mod agentic_sast;
+mod auto_hunt;
 mod chrome_rce;
 mod context;
 mod descriptor;
@@ -30,6 +31,7 @@ mod verify;
 mod workspace_tools;
 
 pub use agentic_sast::{AgenticSastPersistedRun, AgenticSastReport};
+pub(crate) use auto_hunt::{auto_hunt_module, run_auto_hunt_tool};
 pub use descriptor::{
     BuiltinModule, DagNodeDescriptor, ModuleKind, ModuleMetadata, OptionSpec, OptionType,
     ToolDescriptor,

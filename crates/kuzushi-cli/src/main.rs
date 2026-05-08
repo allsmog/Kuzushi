@@ -128,6 +128,8 @@ enum Command {
         tool: String,
         #[arg(long, default_value = "{}")]
         input: String,
+        #[arg(long)]
+        json: bool,
     },
     /// Run a local MCP server (joern, clang, or gtags) over stdio.
     Mcp {
@@ -309,7 +311,7 @@ async fn main() -> Result<()> {
         Command::Modules { json } => modules_command(json),
         Command::Tools { json } => tools_command(json),
         Command::Doctor { target, json } => doctor_command(target.or(cli.target), json),
-        Command::Run { tool, input } => run_tool_command(tool, input, cli.target),
+        Command::Run { tool, input, json } => run_tool_command(tool, input, cli.target, json),
         Command::Mcp { command } => mcp_command(command).await,
         Command::PrComment {
             target,
@@ -1605,7 +1607,12 @@ fn print_doctor_json(report: &DoctorReport) -> Result<()> {
     Ok(())
 }
 
-fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Result<()> {
+fn run_tool_command(
+    tool: String,
+    input: String,
+    target: Option<PathBuf>,
+    json: bool,
+) -> Result<()> {
     reject_shell_only_run_dot(&tool)?;
     let workspace = run_tool_workspace(&tool, target.as_deref())?;
     let config = load_config_for_target(workspace.as_ref().map(WorkspaceTarget::root))?;
@@ -1635,8 +1642,20 @@ fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Res
         &ctx,
         runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
     )?;
+    let output = run_tool_output(&tool, output, json);
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
+}
+
+fn run_tool_output(tool: &str, output: serde_json::Value, json: bool) -> serde_json::Value {
+    if !json {
+        return output;
+    }
+    match tool {
+        "catalog:tools" => serde_json::json!({ "ok": true, "data": { "tools": output } }),
+        "catalog:modules" => serde_json::json!({ "ok": true, "data": { "modules": output } }),
+        _ => output,
+    }
 }
 
 fn reject_shell_only_run_dot(tool: &str) -> Result<()> {

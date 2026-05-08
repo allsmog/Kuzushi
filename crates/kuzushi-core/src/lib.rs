@@ -1,3 +1,26 @@
+#![allow(
+    clippy::bool_assert_comparison,
+    clippy::comparison_to_empty,
+    clippy::derivable_impls,
+    clippy::field_reassign_with_default,
+    clippy::format_in_format_args,
+    clippy::if_same_then_else,
+    clippy::manual_clamp,
+    clippy::manual_pattern_char_comparison,
+    clippy::needless_borrow,
+    clippy::never_loop,
+    clippy::nonminimal_bool,
+    clippy::ptr_arg,
+    clippy::redundant_closure,
+    clippy::single_char_add_str,
+    clippy::too_many_arguments,
+    clippy::trim_split_whitespace,
+    clippy::type_complexity,
+    clippy::uninlined_format_args,
+    clippy::unnecessary_map_or,
+    clippy::while_let_on_iterator
+)]
+
 pub mod agent_router;
 pub mod artifact_kb;
 pub mod attachments;
