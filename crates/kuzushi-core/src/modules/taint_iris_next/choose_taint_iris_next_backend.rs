@@ -4,21 +4,24 @@ pub(in crate::modules) fn choose_taint_iris_next_backend(
     requested: &str,
     repo_root: &Path,
 ) -> TaintIrisNextBackendChoice {
-    let codeql_db = [
-        repo_root.join(".kuzushi").join("codeql-db"),
-        repo_root.join(".codeql").join("db"),
-    ]
-    .into_iter()
-    .find(|path| path.exists());
+    let codeql_db = super::codeql_db_path(repo_root);
+    let codeql_runnable = codeql_db.is_some() && super::codeql_available();
     let joern_cpg = joern_cpg_path(repo_root);
     let joern_cpg_present = joern_cpg.exists();
     let joern_runnable = joern_cpg_present && super::joern_available();
     let mut warnings = Vec::new();
     let selected = match requested {
-        "codeql" if codeql_db.is_some() => "codeql",
+        "codeql" if codeql_runnable => "codeql",
+        "codeql" if codeql_db.is_none() => {
+            warnings.push(
+                "backend=codeql requested, but no existing CodeQL DB was found; build with `codeql database create --language=<lang> --source-root=<repo> <repo>/.kuzushi/codeql-db` then rerun. Using structural evidence."
+                    .to_string(),
+            );
+            "structural"
+        }
         "codeql" => {
             warnings.push(
-                "backend=codeql requested, but no existing CodeQL DB was found; using structural evidence"
+                "backend=codeql requested, but the codeql launcher was not found on PATH (set KUZUSHI_CODEQL_BIN or install the CodeQL CLI bundle). Using structural evidence."
                     .to_string(),
             );
             "structural"
@@ -39,10 +42,13 @@ pub(in crate::modules) fn choose_taint_iris_next_backend(
             );
             "structural"
         }
-        // `auto` quietly upgrades to joern when both the binary and a CPG
-        // are ready; otherwise it falls through to structural without
-        // warning so default operators don't see noise about a backend
-        // they didn't ask for.
+        // `auto` prefers codeql > joern > structural when each tier's
+        // tooling is available. CodeQL ranks first because it ships
+        // mature security query packs that already encode source/sink
+        // semantics, so we don't have to round-trip catalog patterns
+        // through `cpg.call.code(...)` regex matching. Fallback flow:
+        // codeql -> joern -> structural. No warning when auto upgrades.
+        "auto" if codeql_runnable => "codeql",
         "auto" if joern_runnable => "joern",
         "semgrep" | "language" => {
             warnings.push(format!(

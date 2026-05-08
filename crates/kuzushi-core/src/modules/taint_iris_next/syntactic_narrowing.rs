@@ -130,6 +130,11 @@ fn grammar_id_for(language: &str) -> Option<&'static str> {
         "ruby" => Some("ruby"),
         "php" => Some("php"),
         "go" => Some("go"),
+        // tree-sitter-c parses both C (.c/.h) and is a reasonable fallback
+        // for C++ here — we don't pull tree-sitter-cpp because the C
+        // grammar already covers comments and string literals correctly,
+        // which is all the narrowing pass uses to filter noise.
+        "c" | "cpp" => Some("c"),
         _ => None,
     }
 }
@@ -143,6 +148,7 @@ fn language_for(grammar_id: &'static str) -> Language {
         "ruby" => tree_sitter_ruby::LANGUAGE.into(),
         "php" => tree_sitter_php::LANGUAGE_PHP.into(),
         "go" => tree_sitter_go::LANGUAGE.into(),
+        "c" => tree_sitter_c::LANGUAGE.into(),
         other => panic!("grammar_id_for/language_for drift: unsupported grammar {other:?}"),
     }
 }
@@ -346,6 +352,33 @@ mod tests {
             2,
             "real call/member expressions should be kept"
         );
+    }
+
+    #[test]
+    fn drops_candidate_inside_c_block_comment_and_string_literal() {
+        let temp = tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("tidscan.c"),
+            "/* numAllocTids = list_length() in this palloc-related comment */\n\
+const char *banner = \"palloc test message\";\n\
+int main(void) { palloc(8); return 0; }\n",
+        )
+        .unwrap();
+        let candidates = vec![
+            // line 1: pattern lives inside a /* ... */ block comment — drop
+            candidate_at("tidscan.c", 1, "c", "palloc"),
+            // line 2: pattern lives inside a "..." string literal — drop
+            candidate_at("tidscan.c", 2, "c", "palloc"),
+            // line 3: real call expression — keep
+            candidate_at("tidscan.c", 3, "c", "palloc"),
+        ];
+        let kept = narrow_taint_iris_next_candidates_syntactically(temp.path(), candidates);
+        assert_eq!(
+            kept.len(),
+            1,
+            "only the real palloc() call should survive, got {kept:?}"
+        );
+        assert_eq!(kept[0].line, 3);
     }
 
     #[test]

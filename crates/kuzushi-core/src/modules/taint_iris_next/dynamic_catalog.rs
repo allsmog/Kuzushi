@@ -1,0 +1,508 @@
+use super::*;
+use serde::Deserialize;
+use std::path::PathBuf;
+
+/// Path where a target-specific catalog is persisted, if generated.
+pub(in crate::modules) fn taint_iris_next_target_catalog_path(repo_root: &Path) -> PathBuf {
+    repo_root.join(".kuzushi").join("taint-iris-next-catalog.json")
+}
+
+/// Try to load a target-specific catalog from disk. Returns `None` when
+/// no catalog has been generated yet — callers fall back to the static
+/// `TAINT_IRIS_NEXT_CATALOG`.
+pub(in crate::modules) fn load_taint_iris_next_target_catalog(
+    repo_root: &Path,
+) -> Option<Vec<TaintIrisNextRankedCatalogEntry>> {
+    let path = taint_iris_next_target_catalog_path(repo_root);
+    let raw = fs::read_to_string(&path).ok()?;
+    parse_target_catalog_payload(&raw).ok()
+}
+
+/// Result of running the `taint-iris-next:catalog` tool. Persists the
+/// catalog and surfaces a tool-shaped JSON for the caller.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(in crate::modules) struct TaintIrisNextCatalogReport {
+    pub(in crate::modules) target: String,
+    pub(in crate::modules) status: String,
+    pub(in crate::modules) catalog_path: String,
+    pub(in crate::modules) entries: Vec<TaintIrisNextRankedCatalogEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(in crate::modules) raw_agent_output: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(in crate::modules) parse_error: Option<String>,
+    #[serde(skip)]
+    pub(in crate::modules) cost_usd: f64,
+    #[serde(skip)]
+    pub(in crate::modules) ok: bool,
+}
+
+impl TaintIrisNextCatalogReport {
+    pub(in crate::modules) fn to_tool_json(&self) -> Value {
+        json!({
+            "ok": self.ok,
+            "output": render_catalog_summary(self),
+            "data": serde_json::to_value(self).unwrap_or(Value::Null),
+            "costUsd": self.cost_usd,
+        })
+    }
+}
+
+fn render_catalog_summary(report: &TaintIrisNextCatalogReport) -> String {
+    let mut lines = vec![
+        format!("taint-iris-next:catalog — {}", report.status),
+        format!("target: {}", report.target),
+        format!("path:   {}", report.catalog_path),
+        format!("entries: {}", report.entries.len()),
+        String::new(),
+    ];
+    for entry in report.entries.iter().take(15) {
+        lines.push(format!(
+            "- {}: {} [{}] languages={} score={}",
+            entry.cwe,
+            entry.name,
+            entry.taint_class,
+            entry.languages.join(","),
+            entry.score
+        ));
+        if !entry.source_signals.is_empty() {
+            lines.push(format!(
+                "    sources: {}",
+                entry.source_signals.iter().take(6).cloned().collect::<Vec<_>>().join("; ")
+            ));
+        }
+        if !entry.sink_signals.is_empty() {
+            lines.push(format!(
+                "    sinks:   {}",
+                entry.sink_signals.iter().take(6).cloned().collect::<Vec<_>>().join("; ")
+            ));
+        }
+    }
+    if report.entries.len() > 15 {
+        lines.push(format!("...and {} more", report.entries.len() - 15));
+    }
+    lines.join("\n")
+}
+
+/// Generate a target-specific catalog by asking the agent to produce CWE
+/// entries tailored to the codebase. Persists the result and returns
+/// the report.
+pub(in crate::modules) fn run_taint_iris_next_catalog_report(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<TaintIrisNextCatalogReport> {
+    let target = resolve_tool_target(input, ctx)?;
+    if !target.is_dir() {
+        anyhow::bail!(
+            "taint-iris-next:catalog target is not a directory: {}",
+            target.display()
+        );
+    }
+    let runtime = require_taint_iris_next_runtime(runtime)?;
+    let model = require_taint_iris_next_model(input, ctx)?;
+
+    // Reuse the existing plan-building primitives so language detection,
+    // context loading and threat-model loading are identical to what the
+    // hunt would see — the agent gets the same view of the codebase.
+    let context = load_taint_iris_next_context(&target);
+    let threat_model = load_taint_iris_next_threat_model(&target);
+    let mut languages = taint_iris_next_context_languages(context.value.as_ref());
+    languages.extend(detect_taint_iris_next_languages(&target)?);
+    languages = languages
+        .into_iter()
+        .map(|language| normalize_taint_next_language(&language))
+        .filter(|language| !language.is_empty())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+
+    let context_keywords = taint_iris_next_context_keywords(context.value.as_ref(), &target)?;
+    let prompt = build_catalog_prompt(
+        &target,
+        &languages,
+        &context_keywords,
+        context.value.as_ref(),
+        threat_model.value.as_ref(),
+    );
+
+    let request = AgentQueryRequest::new(
+        model.clone(),
+        target.clone(),
+        TAINT_IRIS_NEXT_CATALOG_SYSTEM_PROMPT.to_string(),
+        prompt,
+    );
+    let response = runtime.query_blocking(request)?;
+    let cost_usd = response.cost_usd;
+    let raw_value = match response.structured.clone() {
+        Some(value @ Value::Object(_)) => Some(value),
+        Some(value @ Value::Array(_)) => Some(value),
+        _ => parse_json_object_from_agent_text(&response.text)
+            .ok()
+            .or_else(|| serde_json::from_str::<Value>(response.text.trim()).ok()),
+    };
+
+    let (entries, parse_error) = match raw_value
+        .as_ref()
+        .and_then(extract_catalog_array)
+        .map(|array| normalize_catalog_entries(&array, &languages))
+    {
+        Some(Ok(entries)) if !entries.is_empty() => (entries, None),
+        Some(Ok(_)) => (
+            Vec::new(),
+            Some("agent returned an empty catalog array".to_string()),
+        ),
+        Some(Err(error)) => (Vec::new(), Some(format!("normalize: {error}"))),
+        None => (
+            Vec::new(),
+            Some("agent did not return a recognisable JSON catalog".to_string()),
+        ),
+    };
+
+    let catalog_path = taint_iris_next_target_catalog_path(&target);
+    let status = if entries.is_empty() {
+        "agent-output-invalid".to_string()
+    } else {
+        if let Err(error) = persist_target_catalog(&catalog_path, &entries) {
+            return Ok(TaintIrisNextCatalogReport {
+                target: target.display().to_string(),
+                status: format!("persist-failed: {error}"),
+                catalog_path: catalog_path.display().to_string(),
+                entries,
+                raw_agent_output: raw_value,
+                parse_error,
+                cost_usd,
+                ok: false,
+            });
+        }
+        "generated".to_string()
+    };
+    let ok = !entries.is_empty();
+
+    Ok(TaintIrisNextCatalogReport {
+        target: target.display().to_string(),
+        status,
+        catalog_path: catalog_path.display().to_string(),
+        entries,
+        raw_agent_output: raw_value,
+        parse_error,
+        cost_usd,
+        ok,
+    })
+}
+
+/// System prompt that frames the catalog generation task.
+pub(in crate::modules) const TAINT_IRIS_NEXT_CATALOG_SYSTEM_PROMPT: &str =
+    "You are Kuzushi's Taint IRIS Next catalog architect. \
+Given a target codebase profile, produce a JSON catalog of CWE-themed \
+taint-analysis entries that are *specific to this codebase's domain, \
+languages, and frameworks*. Each entry must be defensible: source \
+signals must be observable identifiers/calls in this codebase, sink \
+signals must be observable risky operations in this codebase, and \
+sanitizer signals must reflect this codebase's actual mitigations. \
+Reply only with strict JSON of the shape: \
+{\"catalog\":[{\"cwe\":\"CWE-89\",\"name\":\"SQL Injection\",\
+\"taintClass\":\"sql-injection\",\"languages\":[\"c\",\"any\"],\
+\"sourceSignals\":[\"...\"],\"sinkSignals\":[\"...\"],\
+\"sanitizerSignals\":[\"...\"],\"structuralQueries\":[\"...\"],\
+\"score\":75,\"reasons\":[\"why this CWE matters here\"]}]}. \
+Aim for 6-12 entries. Sources/sinks should be substring patterns that \
+ripgrep can match against call expressions in this codebase (e.g. \
+`PG_GETARG_TEXT_PP`, `palloc`, `appendStringInfo`, `BlessTupleDesc`), \
+not generic English words. Score 0-100 reflects how relevant the CWE \
+is for this codebase. Use \"any\" in languages when the CWE applies \
+broadly, or restrict to languages actually present.";
+
+fn build_catalog_prompt(
+    target: &Path,
+    languages: &[String],
+    context_keywords: &str,
+    context: Option<&Value>,
+    threat_model: Option<&Value>,
+) -> String {
+    let context_excerpt = context
+        .and_then(|value| serde_json::to_string_pretty(value).ok())
+        .map(|text| {
+            // The context snapshot can be large; truncate so the catalog
+            // prompt doesn't blow past the model's context budget.
+            if text.len() > 12_000 {
+                format!("{}\n... (truncated; {} bytes)", &text[..12_000], text.len())
+            } else {
+                text
+            }
+        })
+        .unwrap_or_else(|| "<no context snapshot>".to_string());
+
+    let threat_excerpt = threat_model
+        .and_then(|value| serde_json::to_string_pretty(value).ok())
+        .map(|text| {
+            if text.len() > 4_000 {
+                format!("{}\n... (truncated)", &text[..4_000])
+            } else {
+                text
+            }
+        })
+        .unwrap_or_else(|| "<no threat model>".to_string());
+
+    let lang_list = if languages.is_empty() {
+        "<unknown>".to_string()
+    } else {
+        languages.join(", ")
+    };
+
+    let keyword_excerpt = if context_keywords.len() > 4_000 {
+        format!("{}\n... (truncated)", &context_keywords[..4_000])
+    } else {
+        context_keywords.to_string()
+    };
+
+    [
+        "## Target".to_string(),
+        format!("path: {}", target.display()),
+        format!("languages: {lang_list}"),
+        String::new(),
+        "## Context Snapshot".to_string(),
+        context_excerpt,
+        String::new(),
+        "## Threat Model".to_string(),
+        threat_excerpt,
+        String::new(),
+        "## Manifest / Configuration Keywords".to_string(),
+        keyword_excerpt,
+        String::new(),
+        "## Output Contract".to_string(),
+        "Return strict JSON: { \"catalog\": [...] }. Do not include \
+markdown fences, prose, or trailing commentary. Each catalog entry \
+must list source/sink/sanitizer signals that are concretely useful \
+substrings against THIS codebase's call expressions — generic English \
+words like `count`, `length`, `update` are too noisy. Prefer named \
+APIs, function-call substrings, library symbols, or framework-specific \
+patterns visible in the context above."
+            .to_string(),
+    ]
+    .join("\n")
+}
+
+#[derive(Debug, Deserialize)]
+struct CatalogPayload {
+    #[serde(default)]
+    catalog: Vec<CatalogEntryPayload>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogEntryPayload {
+    cwe: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default, alias = "taint_class")]
+    taint_class: String,
+    #[serde(default)]
+    languages: Vec<String>,
+    #[serde(default, alias = "source_signals")]
+    source_signals: Vec<String>,
+    #[serde(default, alias = "sink_signals")]
+    sink_signals: Vec<String>,
+    #[serde(default, alias = "sanitizer_signals")]
+    sanitizer_signals: Vec<String>,
+    #[serde(default, alias = "structural_queries")]
+    structural_queries: Vec<String>,
+    #[serde(default)]
+    score: i32,
+    #[serde(default)]
+    reasons: Vec<String>,
+}
+
+fn extract_catalog_array(value: &Value) -> Option<Vec<Value>> {
+    if let Some(array) = value.get("catalog").and_then(Value::as_array) {
+        return Some(array.clone());
+    }
+    if let Some(array) = value.as_array() {
+        return Some(array.clone());
+    }
+    None
+}
+
+fn normalize_catalog_entries(
+    array: &[Value],
+    fallback_languages: &[String],
+) -> Result<Vec<TaintIrisNextRankedCatalogEntry>> {
+    let mut out = Vec::new();
+    for raw in array {
+        let payload: CatalogEntryPayload = serde_json::from_value(raw.clone())?;
+        let cwe_normalized = normalize_taint_next_cwe(&payload.cwe);
+        if !cwe_normalized.starts_with("CWE-") {
+            continue;
+        }
+        let name = if payload.name.trim().is_empty() {
+            cwe_normalized.clone()
+        } else {
+            payload.name.trim().to_string()
+        };
+        let taint_class = if payload.taint_class.trim().is_empty() {
+            "agent-defined".to_string()
+        } else {
+            payload.taint_class.trim().to_lowercase()
+        };
+        let languages = if payload.languages.is_empty() {
+            fallback_languages.to_vec()
+        } else {
+            payload
+                .languages
+                .iter()
+                .map(|language| normalize_taint_next_language(language))
+                .filter(|language| !language.is_empty())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        };
+        out.push(TaintIrisNextRankedCatalogEntry {
+            cwe: cwe_normalized,
+            name,
+            taint_class,
+            languages,
+            source_signals: dedup_nonempty(payload.source_signals),
+            sink_signals: dedup_nonempty(payload.sink_signals),
+            sanitizer_signals: dedup_nonempty(payload.sanitizer_signals),
+            structural_queries: dedup_nonempty(payload.structural_queries),
+            score: payload.score.clamp(0, 1000),
+            reasons: dedup_nonempty(payload.reasons),
+        });
+    }
+    Ok(out)
+}
+
+fn dedup_nonempty(values: Vec<String>) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::with_capacity(values.len());
+    for value in values {
+        let trimmed = value.trim().to_string();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if seen.insert(trimmed.clone()) {
+            out.push(trimmed);
+        }
+    }
+    out
+}
+
+fn parse_target_catalog_payload(raw: &str) -> Result<Vec<TaintIrisNextRankedCatalogEntry>> {
+    // Accept either {"catalog":[...]} for round-tripping the agent shape
+    // or a bare [...] array for hand-edited files.
+    let value: Value = serde_json::from_str(raw).context("invalid JSON in target catalog")?;
+    let array = extract_catalog_array(&value)
+        .ok_or_else(|| anyhow::anyhow!("target catalog has no `catalog` array or root array"))?;
+    let entries = normalize_catalog_entries(&array, &[])?;
+    if entries.is_empty() {
+        anyhow::bail!("target catalog parsed but contained no usable entries");
+    }
+    Ok(entries)
+}
+
+fn persist_target_catalog(
+    path: &Path,
+    entries: &[TaintIrisNextRankedCatalogEntry],
+) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("could not mkdir -p {}", parent.display()))?;
+    }
+    let payload = serde_json::json!({ "catalog": entries });
+    let pretty = serde_json::to_string_pretty(&payload)
+        .context("could not serialize target catalog to JSON")?;
+    std::fs::write(path, pretty)
+        .with_context(|| format!("could not write {}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn extract_catalog_array_accepts_object_or_array() {
+        let object = json!({"catalog": [{"cwe": "CWE-89"}]});
+        assert!(extract_catalog_array(&object).is_some_and(|a| a.len() == 1));
+        let array = json!([{"cwe": "CWE-89"}]);
+        assert!(extract_catalog_array(&array).is_some_and(|a| a.len() == 1));
+        let neither = json!({"foo": 1});
+        assert!(extract_catalog_array(&neither).is_none());
+    }
+
+    #[test]
+    fn normalize_catalog_entries_drops_invalid_and_clamps_score() {
+        let array = json!([
+            {
+                "cwe": "cwe-89",
+                "name": "  SQL Injection  ",
+                "taintClass": "  SQL-Injection  ",
+                "languages": ["c", "C"],
+                "sourceSignals": ["PG_GETARG_TEXT_PP", "  ", "PG_GETARG_TEXT_PP"],
+                "sinkSignals": ["palloc"],
+                "sanitizerSignals": [],
+                "structuralQueries": [],
+                "score": 9999,
+                "reasons": ["foo"]
+            },
+            { "cwe": "not-a-cwe" },
+            { "cwe": "CWE-22", "name": "Path Traversal" }
+        ]);
+        let array = array.as_array().unwrap();
+        let entries = normalize_catalog_entries(array, &["c".to_string()]).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].cwe, "CWE-89");
+        assert_eq!(entries[0].name, "SQL Injection");
+        assert_eq!(entries[0].taint_class, "sql-injection");
+        assert_eq!(entries[0].languages, vec!["c".to_string()]);
+        assert_eq!(entries[0].source_signals, vec!["PG_GETARG_TEXT_PP"]);
+        assert_eq!(entries[0].score, 1000);
+    }
+
+    #[test]
+    fn parse_target_catalog_payload_round_trips_what_we_persist() {
+        let entries = vec![TaintIrisNextRankedCatalogEntry {
+            cwe: "CWE-89".to_string(),
+            name: "SQL Injection".to_string(),
+            taint_class: "sql-injection".to_string(),
+            languages: vec!["c".to_string()],
+            source_signals: vec!["PG_GETARG_TEXT_PP".to_string()],
+            sink_signals: vec!["palloc".to_string()],
+            sanitizer_signals: vec![],
+            structural_queries: vec![],
+            score: 80,
+            reasons: vec!["postgres backend".to_string()],
+        }];
+        let payload = serde_json::json!({ "catalog": entries });
+        let raw = serde_json::to_string(&payload).unwrap();
+        let parsed = parse_target_catalog_payload(&raw).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].cwe, "CWE-89");
+        assert_eq!(parsed[0].score, 80);
+    }
+
+    #[test]
+    fn persist_then_load_round_trip() {
+        let temp = tempdir().unwrap();
+        let target = temp.path();
+        std::fs::create_dir_all(target.join(".kuzushi")).unwrap();
+        let entries = vec![TaintIrisNextRankedCatalogEntry {
+            cwe: "CWE-22".to_string(),
+            name: "Path Traversal".to_string(),
+            taint_class: "path-traversal".to_string(),
+            languages: vec!["any".to_string()],
+            source_signals: vec!["filename".to_string()],
+            sink_signals: vec!["fopen".to_string()],
+            sanitizer_signals: vec![],
+            structural_queries: vec![],
+            score: 50,
+            reasons: vec![],
+        }];
+        let path = taint_iris_next_target_catalog_path(target);
+        persist_target_catalog(&path, &entries).unwrap();
+        let loaded = load_taint_iris_next_target_catalog(target).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].cwe, "CWE-22");
+    }
+}
