@@ -6,8 +6,8 @@ pub(crate) fn run_deep_audit_tool(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
     use crate::agent_router::{AgentRouter, RoutedRuntime};
+    use crate::capabilities::deep_auditor::{run_deep_auditor, save_evidence, DeepAuditConfig};
     use crate::config::ConfigPaths;
-    use crate::deep_auditor::{run_deep_auditor, save_evidence, DeepAuditConfig};
     use crate::spend::SpendLimiter;
     use std::sync::Arc;
 

@@ -21,7 +21,7 @@ pub(crate) fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         return lines;
     }
 
-    if !app.catalog_expanded {
+    if collapsed_catalog_active(app, area.width) {
         collapsed_state::append_collapsed_catalog(app, area, &mut lines);
         return lines;
     }
@@ -95,4 +95,12 @@ pub(crate) fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     lines
+}
+
+fn compact_catalog_width(width: u16) -> bool {
+    width < 96
+}
+
+fn collapsed_catalog_active(app: &ShellApp, width: u16) -> bool {
+    !app.catalog_expanded && compact_catalog_width(width)
 }

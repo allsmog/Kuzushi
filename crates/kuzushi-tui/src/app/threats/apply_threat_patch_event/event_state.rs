@@ -9,6 +9,7 @@ impl ShellApp {
                 "threats",
                 "pi-agent-core response arrived after abort request; discarded",
             );
+            self.set_paused_activity("threat model", "response discarded after abort request");
             return;
         }
         match event {
@@ -21,12 +22,15 @@ impl ShellApp {
                     ),
                 );
                 self.pending_threat_patch = Some(patch);
+                self.set_completed_activity("threat model", "patch ready for review");
             }
             ThreatPatchEvent::Answer { text } => {
                 self.log("threats", text);
+                self.set_completed_activity("threat model", "answer received");
             }
             ThreatPatchEvent::Failed { error } => {
                 self.log("error", format!("threats worker failed: {error}"));
+                self.set_refused_activity("threat model", "worker failed");
             }
         }
     }

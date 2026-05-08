@@ -59,9 +59,7 @@ pub(crate) fn first_env(names: &[&str]) -> Option<String> {
 
 pub(crate) fn validate_config(config: &V2Config) -> Result<()> {
     if let Some(model) = &config.model {
-        if !model.contains(':') {
-            anyhow::bail!("model must use provider:model syntax, got {model:?}");
-        }
+        crate::runtime::validate_model_spec(model)?;
     }
 
     if config.runtime.api_key_env.trim().is_empty() {

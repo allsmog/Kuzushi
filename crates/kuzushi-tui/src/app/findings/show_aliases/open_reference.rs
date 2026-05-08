@@ -9,14 +9,14 @@ impl ShellApp {
         let Some(reference) = self.resolve_open_finding_reference(reference) else {
             return;
         };
-        let store = match self.open_store() {
-            Ok(store) => store,
+        let result = match finding_by_reference_for_target(self.target.as_ref(), &reference) {
+            Ok(result) => Ok(result),
             Err(error) => {
                 self.log("error", error.to_string());
                 return;
             }
         };
-        self.apply_open_finding_result(&reference, store.get_finding_by_reference(&reference));
+        self.apply_open_finding_result(&reference, result);
     }
 
     fn open_chain_alias(&mut self, reference: &str) -> bool {

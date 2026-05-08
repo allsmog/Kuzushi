@@ -23,6 +23,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use uuid::Uuid;
+pub mod application;
+pub mod domain;
+pub mod infrastructure;
 mod subprocess;
 
 mod codeql_physical_location;

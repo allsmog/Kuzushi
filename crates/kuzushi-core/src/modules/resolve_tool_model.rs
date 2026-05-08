@@ -5,13 +5,11 @@ pub(crate) fn resolve_tool_model(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<String> {
-    string_input_any(input, &["model"])
-        .or_else(|| ctx.config.model.clone())
-        .with_context(|| {
-            format!(
-                "{tool_name} requires an explicit model in config.toml, KUZUSHI_MODEL, or tool input; Kuzushi will not choose a fallback model"
-            )
-        })
+    crate::runtime::resolve_explicit_model(
+        tool_name,
+        string_input_any(input, &["model"]),
+        ctx.config.model.as_deref(),
+    )
 }
 
 pub(crate) fn catalog_module() -> BuiltinModule {

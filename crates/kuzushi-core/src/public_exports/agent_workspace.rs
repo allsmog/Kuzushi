@@ -43,5 +43,6 @@ pub use crate::runtime::{
     ToolCall, ToolCallHandler, ToolResult, TriageRequest,
 };
 pub use crate::workspace::{
-    export_workspace_findings, WorkspaceExportFormat, WorkspaceFindingsExport, WorkspaceTarget,
+    export_workspace_findings, workspace_status_for_target, WorkspaceExportFormat,
+    WorkspaceFindingsExport, WorkspaceStatus, WorkspaceTarget,
 };

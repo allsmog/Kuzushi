@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use super::super::persistence::merge_tool_list;
     use super::super::*;
     use serde_json::json;
     use std::path::Path;
@@ -29,6 +30,18 @@ mod tests {
     }
 
     #[test]
+    fn extract_cwe_accepts_common_separator_variants() {
+        assert_eq!(
+            extract_cwe("rule", "CWE 89 SQL injection", "msg"),
+            Some("CWE-89".to_string())
+        );
+        assert_eq!(
+            extract_cwe("rule", "title", "maps to CWE_787"),
+            Some("CWE-787".to_string())
+        );
+    }
+
+    #[test]
     fn normalize_cwe_collapses_variants() {
         assert_eq!(normalize_cwe("CWE-787"), "787");
         assert_eq!(normalize_cwe("cwe_787"), "787");
@@ -43,6 +56,29 @@ mod tests {
         let c = compute_dedup_key("src/foo.c", 60, Some("CWE-787"));
         assert_eq!(a, b, "lines 42 and 47 share the bucket 42/16=2");
         assert_ne!(a, c, "line 60 is in bucket 60/16=3");
+    }
+
+    #[test]
+    fn finding_projection_centralizes_common_labels() {
+        let finding = Finding::new_tool(
+            "semgrep",
+            "rules/cwe-89",
+            "src/app.ts",
+            10,
+            Some(12),
+            Severity::High,
+            "SQL injection\nEvidence: request query reaches raw SQL",
+        );
+
+        let projection = project_finding(&finding, Some("F-0001".to_string()));
+
+        assert_eq!(projection.alias.as_deref(), Some("F-0001"));
+        assert_eq!(projection.location, "src/app.ts:10-12");
+        assert_eq!(projection.verdict_label, "untriaged");
+        assert_eq!(projection.confidence_label, "-");
+        assert_eq!(projection.cwe_label, "CWE-89");
+        assert_eq!(projection.evidence_preview, "request query reaches raw SQL");
+        assert_eq!(severity_badge(projection.severity), "🟧 HIGH");
     }
 
     #[test]

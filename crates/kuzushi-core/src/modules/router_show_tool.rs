@@ -54,7 +54,7 @@ pub(crate) fn run_full_mode_hunt_tool(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    use crate::full_mode_multi::{report_to_tool_json, run as run_full_mode_multi};
+    use crate::capabilities::full_mode_multi::{report_to_tool_json, run as run_full_mode_multi};
 
     let cfg = full_mode_config_from_input(&input, ctx)?;
     if cfg.dry_run {
@@ -72,8 +72,8 @@ pub(crate) fn run_full_mode_hunt_tool(
 pub(crate) fn full_mode_config_from_input(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
-) -> Result<crate::full_mode_multi::FullModeConfig> {
-    Ok(crate::full_mode_multi::FullModeConfig {
+) -> Result<crate::capabilities::full_mode_multi::FullModeConfig> {
+    Ok(crate::capabilities::full_mode_multi::FullModeConfig {
         workspace_root: resolve_tool_target(input, ctx)?,
         max_tokens_per_chunk: full_mode_max_tokens(input),
         deposit_usd_per_chunk: full_mode_deposit(input),
@@ -86,15 +86,15 @@ pub(crate) fn full_mode_config_from_input(
 
 pub(crate) fn full_mode_language(
     input: &Value,
-) -> Result<crate::full_mode_multi::FullModeLanguage> {
+) -> Result<crate::capabilities::full_mode_multi::FullModeLanguage> {
     match input
         .get("language")
         .and_then(Value::as_str)
         .map(str::to_ascii_lowercase)
         .as_deref()
     {
-        Some("c") | None => Ok(crate::full_mode_multi::FullModeLanguage::C),
-        Some("unknown") => Ok(crate::full_mode_multi::FullModeLanguage::Unknown),
+        Some("c") | None => Ok(crate::capabilities::full_mode_multi::FullModeLanguage::C),
+        Some("unknown") => Ok(crate::capabilities::full_mode_multi::FullModeLanguage::Unknown),
         Some(other) => anyhow::bail!("full-mode:hunt: unknown language {other:?}"),
     }
 }

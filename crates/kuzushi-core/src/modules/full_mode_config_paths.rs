@@ -20,7 +20,7 @@ pub(crate) fn full_mode_spend_limiter(
 
 pub(crate) fn persist_full_mode_report(
     ctx: &ToolExecutionContext<'_>,
-    report: &crate::full_mode_multi::FullModeReport,
+    report: &crate::capabilities::full_mode_multi::FullModeReport,
 ) -> Result<()> {
     let Some(workspace) = ctx.workspace else {
         return Ok(());
@@ -41,7 +41,7 @@ pub(crate) fn run_classifier_score_tool(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
     use crate::agent_router::{AgentRouter, RoutedRuntime};
-    use crate::classifier_gate::{ClassifierConfig, LikelyVulnClassifier};
+    use crate::capabilities::classifier_gate::{ClassifierConfig, LikelyVulnClassifier};
     use crate::config::ConfigPaths;
     use std::sync::Arc;
 

@@ -46,6 +46,8 @@ impl ShellApp {
             ctrl_c_armed_at: None,
             session_budget_usd: parse_budget_env(),
             advisory: AdvisoryState::default(),
+            live_activity: None,
+            trusted_workflow_auto_accept: trusted_workflow_auto_accept_from_env(),
             pending_chain: None,
             pending_prereq_prompt: None,
             pending_plan: None,
@@ -100,4 +102,15 @@ impl ShellApp {
         }
         app
     }
+}
+
+fn trusted_workflow_auto_accept_from_env() -> bool {
+    std::env::var("KUZUSHI_TRUSTED_WORKFLOW_AUTO_ACCEPT")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
 }

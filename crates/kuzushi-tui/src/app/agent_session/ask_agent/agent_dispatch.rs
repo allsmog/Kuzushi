@@ -77,6 +77,11 @@ impl ShellApp {
                     .unwrap_or_default()
             ),
         );
+        self.set_live_activity(LiveActivity::new(
+            LiveActivityPhase::Thinking,
+            "agent",
+            format!("asking {model}"),
+        ));
 
         // Emit a `plan` step capturing the question that just dispatched
         // — gives the trace view a leading row even before the LLM

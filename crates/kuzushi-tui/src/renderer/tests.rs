@@ -57,6 +57,44 @@ fn catalog_first_run_state_names_real_first_finding_commands() {
 }
 
 #[test]
+fn catalog_default_is_grouped_at_normal_width() {
+    let backend = TestBackend::new(120, 60);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let app = ShellApp::new(V2Config::default(), None);
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("KUZUSHI · CATALOG"));
+    assert!(rendered.contains("▸ NEXT"));
+    assert!(rendered.contains("OFFENSE"));
+    assert!(rendered.contains("INTEL"));
+    assert!(rendered.contains("GOVERNANCE"));
+    assert!(rendered.contains("DEFENSE"));
+    assert!(rendered.contains("sast"));
+    assert!(!rendered.contains("Start here"));
+    assert!(!rendered.contains("[!] no target selected"));
+}
+
+#[test]
+fn catalog_default_keeps_quickstart_fallback_on_tight_width() {
+    let backend = TestBackend::new(80, 16);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let app = ShellApp::new(V2Config::default(), None);
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("KUZUSHI · CATALOG"));
+    assert!(rendered.contains("Start here"));
+    assert!(rendered.contains("context build"));
+    assert!(rendered.contains("scan ."));
+    assert!(rendered.contains("findings"));
+    assert!(!rendered.contains("OFFENSE"));
+    assert!(!rendered.contains("agentic-sast"));
+}
+
+#[test]
 fn quickstart_follows_doctor_context_scan_findings_report_path() {
     let backend = TestBackend::new(80, 22);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -967,7 +1005,55 @@ fn stride_rollup_from_doc_normalizes_underscored_categories() {
 }
 
 #[test]
-fn threats_summary_view_combines_stride_rollup_and_observations() {
+fn threats_summary_view_is_review_first_without_fake_observations() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = kuzushi_core::WorkspaceTarget::new(tmp.path()).unwrap();
+    kuzushi_core::save_persistent_threat_model(
+        tmp.path(),
+        &serde_json::json!({
+            "version": "2.0",
+            "summary": {"text": "checkout threat model"},
+            "dfd": {
+                "nodes": [
+                    {"id": "actor-user", "type": "external-entity", "name": "User"},
+                    {"id": "web", "type": "process", "name": "Web"},
+                    {"id": "db", "type": "data-store", "name": "DB"}
+                ],
+                "flows": [{"id": "flow-1", "sourceId": "actor-user", "targetId": "web"}],
+                "trustBoundaries": [{"id": "tb-1", "name": "edge"}]
+            },
+            "threats": [{"id": "T-1", "category": "spoofing", "title": "stolen token"}],
+            "assumptions": ["session cookies are in scope"],
+            "missingInputs": ["production network diagram"]
+        }),
+        true,
+    )
+    .unwrap();
+    let backend = TestBackend::new(132, 36);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.shell_view = ShellView::Threat(ThreatView::Summary);
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("THREAT MODEL REVIEW"));
+    assert!(rendered.contains("checkout threat model"));
+    assert!(rendered.contains("3 assets"));
+    assert!(rendered.contains("1 actor"));
+    assert!(rendered.contains("1 data flow"));
+    assert!(rendered.contains("1 trust boundary"));
+    assert!(rendered.contains("session cookies are in scope"));
+    assert!(rendered.contains("production network diagram"));
+    assert!(rendered.contains("none pending"));
+    assert!(rendered.contains("not exploit proof"));
+    assert!(rendered.contains("threat-model.json"));
+    assert!(!rendered.contains("admin.acme-checkout.com"));
+    assert!(!rendered.contains("shares the jwt secret"));
+}
+
+#[test]
+fn threats_summary_unknown_state_does_not_invent_data() {
     let backend = TestBackend::new(120, 32);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -976,13 +1062,11 @@ fn threats_summary_view_combines_stride_rollup_and_observations() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(
-        rendered.contains("THREAT MODEL · 8 ISSUES"),
-        "expected design summary header in: {rendered}"
-    );
-    assert!(rendered.contains("Spoofing"));
-    assert!(rendered.contains("admin.acme-checkout.com"));
-    assert!(rendered.contains("threat-model.json"));
+    assert!(rendered.contains("THREAT MODEL REVIEW"));
+    assert!(rendered.contains("unknown - no persisted threat model found"));
+    assert!(rendered.contains("assets"));
+    assert!(rendered.contains("unknown"));
+    assert!(!rendered.contains("admin.acme-checkout.com"));
 }
 
 #[test]
@@ -2295,6 +2379,106 @@ fn plan_card_keybind_row_drops_bracket_chrome() {
     assert!(!rendered.contains("[space]"), "stale bracket: {rendered}");
     assert!(!rendered.contains("[y]"), "stale bracket: {rendered}");
     assert!(!rendered.contains("[n]"), "stale bracket: {rendered}");
+}
+
+#[test]
+fn prereq_plan_card_shows_cached_missing_writes_risk_cost_and_actions() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(tmp.path().join(".kuzushi")).unwrap();
+    std::fs::write(tmp.path().join(".kuzushi/context-snapshot.json"), "{}\n").unwrap();
+    let backend = TestBackend::new(132, 34);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let chain = PrereqChain::new(
+        prereq_steps_for("carlini-threat-hunt:run", tmp.path()),
+        "carlini-threat-hunt:run".to_string(),
+        serde_json::json!({}),
+        None,
+    );
+    app.pending_prereq_prompt = Some(chain.plan());
+    app.shell_view = ShellView::ModuleRun;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("PREREQUISITE PLAN"));
+    assert!(rendered.contains("carlini-threat-hunt:run"));
+    assert!(rendered.contains("cached"));
+    assert!(rendered.contains("missing"));
+    assert!(rendered.contains("context snapshot"));
+    assert!(rendered.contains("threat model"));
+    assert!(rendered.contains("writes"));
+    assert!(rendered.contains(".kuzushi"));
+    assert!(rendered.contains("model-backed analysis"));
+    assert!(rendered.contains("token cost unknown"));
+    assert!(rendered.contains("a approve"));
+    assert!(rendered.contains("r reuse cached"));
+    assert!(rendered.contains("g regenerate"));
+    assert!(rendered.contains("c cancel"));
+}
+
+#[test]
+fn plain_prereq_plan_has_no_ansi_or_box_drawing() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(tmp.path().join(".kuzushi")).unwrap();
+    std::fs::write(tmp.path().join(".kuzushi/context-snapshot.json"), "{}\n").unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let chain = PrereqChain::new(
+        prereq_steps_for("carlini-threat-hunt:run", tmp.path()),
+        "carlini-threat-hunt:run".to_string(),
+        serde_json::json!({}),
+        None,
+    );
+    app.pending_prereq_prompt = Some(chain.plan());
+
+    let rendered = render_plain_app(&app, 80);
+
+    assert!(rendered.contains("PREREQUISITE PLAN"));
+    assert!(rendered.contains("cached context snapshot"));
+    assert!(rendered.contains("missing threat model"));
+    assert!(rendered.contains("actions: approve | reuse cached | regenerate | cancel"));
+    assert!(rendered.contains(".kuzushi"));
+    assert_strict_plain_80(&rendered);
+}
+
+#[test]
+fn module_run_renders_live_activity_in_body_and_status_strip() {
+    let backend = TestBackend::new(120, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::ModuleRun;
+    app.live_activity = Some(LiveActivity::new(
+        LiveActivityPhase::Thinking,
+        "triage:run",
+        "asking model to triage persisted findings",
+    ));
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("LIVE ACTIVITY"));
+    assert!(rendered.contains("thinking"));
+    assert!(rendered.contains("triage:run"));
+    assert!(rendered.contains("activity"));
+    assert!(!rendered.contains("tool: active"));
+}
+
+#[test]
+fn plain_live_activity_has_no_ansi_or_box_drawing() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.live_activity = Some(LiveActivity::new(
+        LiveActivityPhase::WritingArtifact,
+        "threat-model:build",
+        "writes .kuzushi/threat-model.json",
+    ));
+
+    let rendered = render_plain_app(&app, 80);
+
+    assert!(rendered.contains("LIVE ACTIVITY"));
+    assert!(rendered.contains("phase: writing artifact"));
+    assert!(rendered.contains("subject: threat-model:build"));
+    assert!(rendered.contains("detail: writes .kuzushi/threat-model.json"));
+    assert_strict_plain_80(&rendered);
 }
 
 #[test]

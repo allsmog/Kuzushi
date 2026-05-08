@@ -1,15 +1,18 @@
-use crate::findings::{Finding, FindingListFilter, FindingStore};
-use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use std::fs;
-use std::path::{Path, PathBuf};
-mod export_workspace_findings;
+mod application;
+pub mod artifact_kb;
+pub mod attack_surface;
+pub mod diff_scope;
+mod domain;
+pub mod inventory;
+pub mod source_span;
+
 #[cfg(test)]
 mod tests;
-mod workspace_target;
 
-pub use export_workspace_findings::export_workspace_findings;
-pub use workspace_target::WorkspaceExportFormat;
-pub use workspace_target::WorkspaceFindingsExport;
-pub use workspace_target::WorkspaceTarget;
+pub use application::{export_workspace_findings, workspace_status_for_target, WorkspaceStatus};
+pub use artifact_kb::*;
+pub use attack_surface::*;
+pub use diff_scope::*;
+pub use domain::{WorkspaceExportFormat, WorkspaceFindingsExport, WorkspaceTarget};
+pub use inventory::*;
+pub use source_span::*;

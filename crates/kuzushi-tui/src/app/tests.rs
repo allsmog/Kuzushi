@@ -57,6 +57,230 @@ fn drain_chain_with_auto_reuse(app: &mut ShellApp) {
     }
 }
 
+#[test]
+fn missing_model_backed_prereqs_block_without_auto_accept_or_model_fallback() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir(tmp.path().join("src")).unwrap();
+    fs::write(tmp.path().join("src/app.ts"), "res.send(req.query.name)\n").unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.handle_command(ShellCommand::Use("carlini-threat-hunt".to_string()));
+    app.handle_command(ShellCommand::RunTool {
+        tool: None,
+        input: Some(r#"{"maxActors":1,"runsPerActor":1}"#.to_string()),
+    });
+
+    let plan = app.pending_prereq_prompt.as_ref().unwrap();
+    assert_eq!(app.tool_running.as_deref(), None);
+    assert_eq!(app.config.model, None);
+    assert_eq!(plan.final_tool, "carlini-threat-hunt:run");
+    assert!(plan.steps.iter().any(|step| step.model_backed
+        && step.artifact_state == PrereqArtifactState::Missing
+        && step.cost_hint.contains("token cost unknown")));
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "system" && line.body.contains("review approve/reuse/regenerate/cancel")
+    }));
+    assert!(!app
+        .log
+        .iter()
+        .any(|line| line.body.contains("running automatically")));
+}
+
+#[test]
+fn prereq_plan_cancel_aborts_chain_before_dispatch() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.start_prereq_chain(
+        prereq_steps_for("threat-model:build", tmp.path()),
+        "threat-model:build".to_string(),
+        serde_json::json!({}),
+        workspace,
+        None,
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()));
+
+    assert!(app.pending_chain.is_none());
+    assert!(app.pending_prereq_prompt.is_none());
+    assert_eq!(app.tool_running.as_deref(), None);
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "system" && line.body.contains("prerequisite plan cancelled")
+    }));
+}
+
+#[test]
+fn cached_prereq_reuse_skips_prereq_and_dispatches_final_tool() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir(tmp.path().join(".kuzushi")).unwrap();
+    fs::write(tmp.path().join(".kuzushi/context-snapshot.json"), "{}\n").unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.start_prereq_chain(
+        prereq_steps_for("threat-model:build", tmp.path()),
+        "findings:list".to_string(),
+        serde_json::json!({}),
+        workspace,
+        None,
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::empty()));
+
+    assert_eq!(app.tool_running.as_deref(), Some("findings:list"));
+    assert!(app.pending_prereq_prompt.is_none());
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "system" && line.body.contains("reusing cached context snapshot")
+    }));
+    drain_tool(&mut app);
+}
+
+#[test]
+fn cached_prereq_regenerate_runs_prereq_after_approval() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir(tmp.path().join(".kuzushi")).unwrap();
+    fs::write(tmp.path().join(".kuzushi/context-snapshot.json"), "{}\n").unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.start_prereq_chain(
+        prereq_steps_for("threat-model:build", tmp.path()),
+        "findings:list".to_string(),
+        serde_json::json!({}),
+        workspace,
+        None,
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
+
+    assert_eq!(app.tool_running.as_deref(), Some("context:build"));
+    assert!(app.pending_prereq_prompt.is_none());
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "system" && line.body.contains("running after prerequisite approval")
+    }));
+    drain_tool(&mut app);
+    if app.tool_running.is_some() {
+        drain_tool(&mut app);
+    }
+}
+
+#[test]
+fn trusted_workflow_auto_accept_explicitly_starts_missing_prereq() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.trusted_workflow_auto_accept = true;
+
+    app.start_prereq_chain(
+        prereq_steps_for("threat-model:build", tmp.path()),
+        "findings:list".to_string(),
+        serde_json::json!({}),
+        workspace,
+        None,
+    );
+
+    assert_eq!(app.tool_running.as_deref(), Some("context:build"));
+    assert!(app.pending_prereq_prompt.is_none());
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "system" && line.body.contains("trusted workflow auto-accepted")
+    }));
+    drain_tool(&mut app);
+    if app.tool_running.is_some() {
+        drain_tool(&mut app);
+    }
+}
+
+#[test]
+fn live_activity_phase_labels_cover_long_running_states() {
+    let phases = [
+        LiveActivityPhase::Thinking,
+        LiveActivityPhase::Reading,
+        LiveActivityPhase::Searching,
+        LiveActivityPhase::RunningTool,
+        LiveActivityPhase::WritingArtifact,
+        LiveActivityPhase::Waiting,
+        LiveActivityPhase::Paused,
+        LiveActivityPhase::Refused,
+        LiveActivityPhase::Completed,
+    ];
+    let labels = phases.iter().map(|phase| phase.label()).collect::<Vec<_>>();
+
+    assert_eq!(
+        labels,
+        vec![
+            "thinking",
+            "reading",
+            "searching",
+            "running tool",
+            "writing artifact",
+            "waiting",
+            "paused",
+            "refused",
+            "completed"
+        ]
+    );
+}
+
+#[test]
+fn background_tool_sets_structured_live_activity_and_transcript_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.start_background_tool(
+        "findings:list".to_string(),
+        serde_json::json!({}),
+        workspace,
+        tool_run_status("findings:list"),
+        None,
+    );
+
+    let activity = app.live_activity.as_ref().unwrap();
+    assert_eq!(activity.phase, LiveActivityPhase::Reading);
+    assert_eq!(activity.subject, "findings:list");
+    assert!(app
+        .log
+        .iter()
+        .any(|line| { line.prefix == "activity" && line.body.contains("reading: findings:list") }));
+    drain_tool(&mut app);
+    assert!(app
+        .live_activity
+        .as_ref()
+        .is_some_and(|activity| activity.phase == LiveActivityPhase::Completed));
+}
+
+#[test]
+fn threat_dependent_run_waits_for_pending_threat_review_decision() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_pending_threat_patch(ThreatPatch {
+        goal: "review trust boundary".to_string(),
+        summary: "tighten trust boundary".to_string(),
+        patch: serde_json::json!({"assumptions":["admin flow in scope"]}),
+        unsupported: Vec::new(),
+    });
+
+    app.handle_command(ShellCommand::Use("carlini-threat-hunt".to_string()));
+    app.handle_command(ShellCommand::RunTool {
+        tool: None,
+        input: Some(r#"{"maxActors":1}"#.to_string()),
+    });
+
+    assert_eq!(app.tool_running.as_deref(), None);
+    assert!(app.pending_chain.is_none());
+    assert!(matches!(
+        app.shell_view,
+        ShellView::Threat(ThreatView::Summary)
+    ));
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "threats" && line.body.contains("apply or reject the pending threat")
+    }));
+    assert!(app
+        .live_activity
+        .as_ref()
+        .is_some_and(|activity| activity.phase == LiveActivityPhase::Waiting));
+}
+
 #[cfg(unix)]
 fn fake_semgrep_binary(dir: &PathBuf) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;

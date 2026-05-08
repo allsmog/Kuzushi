@@ -48,6 +48,8 @@ pub struct ShellApp {
     pub ctrl_c_armed_at: Option<Instant>,
     pub session_budget_usd: Option<f64>,
     pub advisory: AdvisoryState,
+    pub live_activity: Option<LiveActivity>,
+    pub trusted_workflow_auto_accept: bool,
     pub pending_chain: Option<PrereqChain>,
     pub pending_prereq_prompt: Option<PendingPrereqPrompt>,
     pub pending_plan: Option<PlanProposal>,

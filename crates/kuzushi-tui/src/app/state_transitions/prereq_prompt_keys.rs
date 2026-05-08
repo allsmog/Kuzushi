@@ -5,25 +5,29 @@ impl ShellApp {
         if self.pending_prereq_prompt.is_none() || !key.modifiers.is_empty() {
             return false;
         }
-        let Some(reuse) = prereq_prompt_reuse_decision(key.code) else {
+        let Some(action) = prereq_prompt_action(key.code) else {
             return false;
         };
-        self.resolve_prereq_prompt(reuse);
+        self.resolve_prereq_plan(action);
         true
     }
 }
 
-fn prereq_prompt_reuse_decision(code: KeyCode) -> Option<bool> {
+fn prereq_prompt_action(code: KeyCode) -> Option<PrereqPlanAction> {
+    if matches!(code, KeyCode::Enter) {
+        return Some(PrereqPlanAction::Approve);
+    }
+    if matches!(code, KeyCode::Esc) {
+        return Some(PrereqPlanAction::Cancel);
+    }
     let KeyCode::Char(ch) = code else {
         return None;
     };
-    reuse_key(ch).or_else(|| regenerate_key(ch))
-}
-
-fn reuse_key(ch: char) -> Option<bool> {
-    ['r', 'R', 'y', 'Y'].contains(&ch).then_some(true)
-}
-
-fn regenerate_key(ch: char) -> Option<bool> {
-    ['g', 'G', 'n', 'N'].contains(&ch).then_some(false)
+    match ch.to_ascii_lowercase() {
+        'a' | 'y' => Some(PrereqPlanAction::Approve),
+        'r' => Some(PrereqPlanAction::Reuse),
+        'g' => Some(PrereqPlanAction::Regenerate),
+        'c' | 'n' => Some(PrereqPlanAction::Cancel),
+        _ => None,
+    }
 }

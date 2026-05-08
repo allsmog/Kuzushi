@@ -93,26 +93,7 @@ impl ShellApp {
     }
 
     pub(in crate::app::line_editor) fn finding_completion_values(&self) -> Vec<String> {
-        let mut findings = self.findings.clone();
-        if findings.is_empty() {
-            if let Some(target) = self.target.as_ref() {
-                if let Ok(workspace) = WorkspaceTarget::new(target) {
-                    if let Ok(store) = FindingStore::open(workspace.findings_db_path()) {
-                        if let Ok(stored) = store.list_findings(200) {
-                            findings = stored;
-                        }
-                    }
-                }
-            }
-        }
-
-        let mut values = Vec::new();
-        for (alias, finding) in sorted_finding_aliases(&findings) {
-            values.push(alias);
-            values.push(short_fingerprint(&finding.fingerprint));
-            values.push(finding.fingerprint.clone());
-        }
-        values
+        finding_completion_values_for_target(self.target.as_ref(), &self.findings)
     }
 
     pub(in crate::app::line_editor) fn run_id_completion_values(&self) -> Vec<String> {

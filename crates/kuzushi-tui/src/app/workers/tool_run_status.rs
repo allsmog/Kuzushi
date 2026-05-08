@@ -3,8 +3,10 @@ use super::*;
 pub(crate) fn tool_run_status(tool_name: &str) -> &'static str {
     match tool_name {
         "context:build" | "context-lite:index" => "indexing repository context",
-        "semgrep:scan" | "codeql:scan" | "iac-scan:scan" | "secret-scan:scan" => "running scanner",
-        "sast:scan" => "running SAST pipeline",
+        "semgrep:scan" | "codeql:scan" | "iac-scan:scan" | "secret-scan:scan" => {
+            "searching with scanner"
+        }
+        "sast:scan" => "searching SAST pipeline",
         "findings:list" => "reading persisted findings",
         "recon:http-fingerprint" | "recon:nmap" => "collecting recon evidence",
         "triage:run" => "asking model to triage persisted findings",

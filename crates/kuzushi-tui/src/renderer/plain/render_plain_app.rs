@@ -42,6 +42,8 @@ pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
         }
     };
 
+    lines = prepend_plain_activity_lines(app, width, lines);
+
     lines = finalize_width_safe_plain_lines(lines, width);
     trim_plain_lines(lines)
 }
@@ -91,4 +93,65 @@ pub(crate) fn plain_log_lines(line: &LogLine) -> Vec<String> {
         }
     }
     lines
+}
+
+fn plain_prereq_plan_lines(plan: &PendingPrereqPrompt, width: usize) -> Vec<String> {
+    let mut lines = vec![
+        plain_section_divider("PREREQUISITE PLAN", width),
+        format!("final tool: {}", plan.final_tool),
+        "review required before prerequisites or final tool start".to_string(),
+    ];
+    for step in &plan.steps {
+        lines.extend(plain_prereq_step_lines(step));
+    }
+    lines.push(format!(
+        "actions: approve | reuse cached | regenerate | cancel (recommended: {})",
+        plan.recommended_action.label()
+    ));
+    lines
+}
+
+fn prepend_plain_activity_lines(app: &ShellApp, width: usize, lines: Vec<String>) -> Vec<String> {
+    let mut prefix = Vec::new();
+    if let Some(activity) = app.live_activity.as_ref() {
+        prefix.extend(plain_live_activity_lines(activity, width));
+        prefix.push(String::new());
+    }
+    if let Some(plan) = app.pending_prereq_prompt.as_ref() {
+        prefix.extend(plain_prereq_plan_lines(plan, width));
+        prefix.push(String::new());
+    }
+    if prefix.is_empty() {
+        return lines;
+    }
+    prefix.into_iter().chain(lines).collect()
+}
+
+fn plain_live_activity_lines(activity: &LiveActivity, width: usize) -> Vec<String> {
+    vec![
+        plain_section_divider("LIVE ACTIVITY", width),
+        format!("phase: {}", activity.phase.label()),
+        format!("subject: {}", activity.subject),
+        format!("detail: {}", activity.detail),
+    ]
+}
+
+fn plain_prereq_step_lines(step: &PrereqPlanStep) -> Vec<String> {
+    let writes = step
+        .writes
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    vec![
+        format!(
+            "- {} {} via {}",
+            step.artifact_state.label(),
+            step.artifact_label,
+            step.tool
+        ),
+        format!("  writes: {writes}"),
+        format!("  risk: {}", step.risk),
+        format!("  cost: {}", step.cost_hint),
+    ]
 }

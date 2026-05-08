@@ -95,7 +95,9 @@ pub(crate) fn transcript_glyph(prefix: &str, continuation: bool) -> (&'static st
         ">" => ("●", theme::accent(), false),
         "tool" | "scan" | "run" | "resume" | "pause" => ("⏵", theme::primary(), true),
         "ok" | "success" | "done" => ("✓", theme::success(), true),
-        "result" | "answer" | "agent" | "plan" | "threats" => ("◆", theme::accent(), true),
+        "result" | "answer" | "agent" | "plan" | "threats" | "activity" => {
+            ("◆", theme::accent(), true)
+        }
         "finding" | "open" | "title" | "triage" | "aliases" => ("▸", theme::warn(), true),
         "error" => ("✗", theme::danger(), true),
         "system" | "startup" | "first-run" | "help" | "view" | "module" | "prompt" | "tune"
@@ -111,7 +113,7 @@ pub(crate) fn transcript_body_style(prefix: &str) -> Style {
     match prefix {
         "error" => theme::danger(),
         "finding" | "open" => theme::warn(),
-        "result" | "answer" | "agent" => theme::primary(),
+        "result" | "answer" | "agent" | "activity" => theme::primary(),
         _ => Style::default(),
     }
 }

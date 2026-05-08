@@ -9,6 +9,25 @@ impl ShellApp {
         status: &'static str,
         thinking_level: Option<String>,
     ) {
+        self.start_background_tool_with_activity(
+            tool_name,
+            input,
+            workspace,
+            status,
+            thinking_level,
+            None,
+        );
+    }
+
+    pub(crate) fn start_background_tool_with_activity(
+        &mut self,
+        tool_name: String,
+        input: serde_json::Value,
+        workspace: WorkspaceTarget,
+        status: &'static str,
+        thinking_level: Option<String>,
+        activity: Option<LiveActivity>,
+    ) {
         if let Some(active) = self.tool_running.as_deref() {
             self.log(
                 "tool",
@@ -47,6 +66,9 @@ impl ShellApp {
             format!(
                 "running {tool_name} in background; {status} under {target_label} · run {run_id}"
             ),
+        );
+        self.set_live_activity(
+            activity.unwrap_or_else(|| live_activity_for_tool(&tool_name, status)),
         );
 
         thread::spawn(move || {

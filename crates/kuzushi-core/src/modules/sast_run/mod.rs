@@ -1,14 +1,14 @@
 use super::*;
 
 use self::support::now_unix;
-use crate::diff_scope::build_whitebox_diff_scope_report;
+use crate::capabilities::semgrep_rule_synthesis::synthesize_candidate_semgrep_rules;
+use crate::capabilities::variant_ndiff::hunt_whitebox_static_variants;
+use crate::evidence::narrative::build_static_narrative_report;
+use crate::evidence::ranking::{rank_static_findings_with_threats, StaticRankedFinding};
+use crate::evidence::static_evidence::StaticEvidenceStore;
 use crate::findings::{Finding, FindingListFilter, FindingStore, TriageVerdict};
-use crate::semgrep_rule_synthesis::synthesize_candidate_semgrep_rules;
-use crate::static_evidence::StaticEvidenceStore;
-use crate::static_narrative::build_static_narrative_report;
-use crate::static_ranking::{rank_static_findings_with_threats, StaticRankedFinding};
-use crate::variant_ndiff::hunt_whitebox_static_variants;
-use crate::whitebox_suppressions::{evaluate_whitebox_suppressions, load_whitebox_suppressions};
+use crate::proof::suppressions::{evaluate_whitebox_suppressions, load_whitebox_suppressions};
+use crate::workspace::diff_scope::build_whitebox_diff_scope_report;
 use crate::workspace::WorkspaceTarget;
 pub(in crate::modules) use all::*;
 use anyhow::{Context, Result};

@@ -1,14 +1,16 @@
 pub use crate::findings::{
-    compute_dedup_key, extract_cwe, format_finding_alias, normalize_cwe, parse_finding_alias,
-    proof_ladder_state, proof_state_label, resolve_finding_alias, runtime_validation_label,
-    sorted_finding_aliases, stable_finding_alias, Finding, FindingDetailReport, FindingListFilter,
-    FindingListReport, FindingNextAction, FindingStore, FindingVerdictFilter, PatchAttempt,
-    PatchResult, PatchStatus, PersistedProofVerdict, PersistedSandboxBackend,
-    PersistedVerification, ProofLadderState, Severity, StaticProofState, TriageOutcome,
-    TriageVerdict, VulnSource,
+    compute_dedup_key, extract_cwe, finding_confidence_label, finding_cwe_label,
+    finding_evidence_preview, finding_location, finding_source_label, finding_verdict_label,
+    format_finding_alias, normalize_cwe, parse_finding_alias, project_finding, proof_ladder_state,
+    proof_state_label, resolve_finding_alias, runtime_validation_label, severity_badge,
+    severity_icon, sorted_finding_aliases, stable_finding_alias, Finding, FindingDetailReport,
+    FindingListFilter, FindingListReport, FindingNextAction, FindingProjection, FindingStore,
+    FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus, PersistedProofVerdict,
+    PersistedSandboxBackend, PersistedVerification, ProofLadderState, Severity, StaticProofState,
+    TriageOutcome, TriageVerdict, VulnSource,
 };
-pub use crate::patch::run_patch_finding;
 pub use crate::pr_comment::{build_pr_comment, PrCommentInput};
+pub use crate::remediation::patch::run_patch_finding;
 pub use crate::source_span::{extract_source_span, SourceSpan};
 pub use crate::spend::{
     parse_budget_flag, Operation as SpendOperation, SpendError, SpendLimiter, SpendTicket,
@@ -39,7 +41,7 @@ pub use crate::static_registry::{
     StaticRegistryKind, StaticRegistryMatch, StaticRegistryPatternKind, StaticRegistryQuery,
     STATIC_REGISTRY_VERSION,
 };
-pub use crate::verify::{verify_finding, ProofVerdict, VerificationOutcome, VerifyOptions};
+pub use crate::verification::{verify_finding, ProofVerdict, VerificationOutcome, VerifyOptions};
 pub use crate::whitebox_static::{
     agent_tool_policy_for_input, analysis_mode_from_input, apply_whitebox_static_sast_policy,
     default_whitebox_static_agent_tool_policy, mark_whitebox_static_findings,

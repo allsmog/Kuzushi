@@ -88,11 +88,11 @@ pub(in crate::modules) fn agentic_sast_model(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<String> {
-    optional_nonempty_string(input, "model")?
-        .or_else(|| ctx.config.model.clone())
-        .context(
-            "agentic-sast:scan requires an explicit model in config.toml, KUZUSHI_MODEL, or tool input; Kuzushi will not choose a fallback model",
-        )
+    crate::runtime::resolve_explicit_model(
+        "agentic-sast:scan",
+        optional_nonempty_string(input, "model")?,
+        ctx.config.model.as_deref(),
+    )
 }
 
 pub(in crate::modules) fn agentic_sast_system_prompt(whitebox_static: bool) -> String {

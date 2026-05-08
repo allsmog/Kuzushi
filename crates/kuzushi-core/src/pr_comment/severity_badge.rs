@@ -1,14 +1,5 @@
 use super::*;
 
-pub(crate) fn severity_badge(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Critical => "🟥 CRIT",
-        Severity::High => "🟧 HIGH",
-        Severity::Medium => "🟨 MED",
-        _ => "⬜ LOW",
-    }
-}
-
 pub(crate) fn escape_md(text: &str) -> String {
     text.replace('|', "\\|").replace('\n', " ")
 }

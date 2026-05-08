@@ -46,50 +46,107 @@ pub(in crate::modules) fn execute_tool(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    match name {
-        "vendor-assessment:attach" => attach(input, ctx),
-        "vendor-assessment:scope" => scope(input, ctx),
-        "vendor-assessment:prompts" => prompts(input, ctx),
-        "vendor-assessment:assess" => assess(input, ctx, runtime),
-        _ => anyhow::bail!("unknown vendor-assessment tool {name:?}"),
-    }
+    let handler = vendor_assessment_handler(name)?;
+    handler(input, ctx, runtime)
 }
 
-pub(in crate::modules) fn root(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
+type VendorAssessmentHandler = for<'a, 'b> fn(
+    Value,
+    &'a ToolExecutionContext<'b>,
+    Option<&'a dyn AgentRuntime>,
+) -> Result<Value>;
+
+fn vendor_assessment_handler(name: &str) -> Result<VendorAssessmentHandler> {
+    VENDOR_ASSESSMENT_HANDLERS
+        .iter()
+        .find_map(|(tool_name, handler)| (*tool_name == name).then_some(*handler))
+        .ok_or_else(|| anyhow::anyhow!("unknown vendor-assessment tool {name:?}"))
+}
+
+const VENDOR_ASSESSMENT_HANDLERS: &[(&str, VendorAssessmentHandler)] = &[
+    ("vendor-assessment:attach", attach_handler),
+    ("vendor-assessment:scope", scope_handler),
+    ("vendor-assessment:prompts", prompts_handler),
+    ("vendor-assessment:assess", assess_tool),
+];
+
+fn attach_handler(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    _runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    attach_tool(input, ctx)
+}
+
+fn scope_handler(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    _runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    scope_tool(input, ctx)
+}
+
+fn prompts_handler(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    _runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    prompts_tool(input, ctx)
+}
+
+fn attach_tool(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let root = root(&input, ctx)?;
+    let source = string_input_any(&input, &["source", "path", "url", "target"])
+        .context("vendor-assessment:attach requires source, path, url, or target")?;
+    vendor_assessment_capability::attach(
+        &root,
+        vendor_assessment_capability::AttachmentInput {
+            source,
+            kind: string_input_any(&input, &["kind"]).unwrap_or_else(|| "other".to_string()),
+            title: string_input_any(&input, &["title"]),
+            scope_update: scope_update_from_input(&input),
+        },
+    )
+}
+
+fn scope_tool(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let root = root(&input, ctx)?;
+    let clear = read_bool_any(&input, &["clear"])?.unwrap_or(false);
+    vendor_assessment_capability::scope(&root, scope_update_from_input(&input), clear)
+}
+
+fn prompts_tool(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let root = root(&input, ctx)?;
+    let run_id = string_input_any(&input, &["runId", "run_id"]);
+    vendor_assessment_capability::prompts(&root, scope_update_from_input(&input), run_id)
+}
+
+fn assess_tool(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    let root = root(&input, ctx)?;
+    vendor_assessment_capability::assess(&root, scope_update_from_input(&input), runtime, || {
+        resolve_tool_model("vendor-assessment:assess", &input, ctx)
+    })
+}
+
+fn root(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     if let Some(workspace) = ctx.workspace {
         return Ok(workspace.root().to_path_buf());
     }
     resolve_tool_target(input, ctx)
 }
 
-pub(in crate::modules) fn scope_path(root: &Path) -> PathBuf {
-    root.join(".kuzushi")
-        .join("vendor-assessment")
-        .join("scope.json")
-}
-
-pub(in crate::modules) fn runs_dir(root: &Path) -> PathBuf {
-    root.join(".kuzushi").join("vendor-assessment").join("runs")
-}
-
-pub(in crate::modules) fn load_scope(root: &Path) -> Result<Value> {
-    let path = scope_path(root);
-    if !path.exists() {
-        return Ok(empty_scope());
+fn scope_update_from_input(input: &Value) -> vendor_assessment_capability::ScopeUpdate {
+    vendor_assessment_capability::ScopeUpdate {
+        vendor_name: string_input_any(input, &["vendorName", "vendor"]),
+        product_name: string_input_any(input, &["productName"]),
+        primary_domain: string_input_any(input, &["primaryDomain", "domain"]),
+        use_case: string_input_any(input, &["useCase"]),
+        profile: string_input_any(input, &["profile"]),
+        data_classes: string_array_or_csv_input(input, &["dataClasses"]),
+        integrations: string_array_or_csv_input(input, &["integrations"]),
     }
-    let raw = fs::read_to_string(&path)
-        .with_context(|| format!("Could not read vendor assessment scope {}", path.display()))?;
-    serde_json::from_str(&raw)
-        .with_context(|| format!("Could not parse vendor assessment scope {}", path.display()))
-}
-
-pub(in crate::modules) fn save_scope(root: &Path, scope: &Value) -> Result<PathBuf> {
-    let path = scope_path(root);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("Could not create {}", parent.display()))?;
-    }
-    fs::write(&path, format!("{}\n", serde_json::to_string_pretty(scope)?))
-        .with_context(|| format!("Could not write {}", path.display()))?;
-    Ok(path)
 }
