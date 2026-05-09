@@ -198,11 +198,29 @@ impl<'a> AgentRuntime for TracedRuntime<'a> {
 /// First non-empty line of a response, capped at 80 chars. Drops trailing
 /// whitespace and collapses internal newlines so feed lines stay short.
 fn preview_text(text: &str) -> String {
-    preview_str(
-        text.lines()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or(""),
-    )
+    // LLMs frequently respond with markdown-fenced JSON
+    // (```json\n{...}\n```). Naive first-line preview shows just the
+    // fence ("```json") or its successor ("{"); both are zero-signal.
+    // Strip leading fence + whitespace and collapse the remainder
+    // onto a single line so the operator sees the actual content
+    // (e.g. {"findings":[{"severity":"high",...}]}).
+    let mut body = text.trim_start();
+    if let Some(rest) = body.strip_prefix("```") {
+        let rest = rest.trim_start_matches(|c: char| {
+            c.is_ascii_alphanumeric() || c == '-' || c == '_'
+        });
+        body = rest.trim_start_matches(['\n', '\r']);
+    } else if let Some(rest) = body.strip_prefix("~~~") {
+        let rest = rest.trim_start_matches(|c: char| {
+            c.is_ascii_alphanumeric() || c == '-' || c == '_'
+        });
+        body = rest.trim_start_matches(['\n', '\r']);
+    }
+    let collapsed: String = body
+        .chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .collect();
+    preview_str(collapsed.split_whitespace().collect::<Vec<_>>().join(" ").as_str())
 }
 
 fn preview_str(value: &str) -> String {

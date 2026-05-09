@@ -29,11 +29,16 @@ impl ShellApp {
                     row.last_label = "scan failed".to_string();
                 }
             }
-            // No module_id / verb -> apply_step's
-            // `if let Some(verb) = step.verb` branch is skipped, so no
-            // task row is minted; the event still lands in the feed.
+            // No verb -> apply_step's `else if let Some(verb)` branch is
+            // skipped, so no task row is minted; the event still lands
+            // in the feed. `module_id = "scan"` swaps the bare
+            // `[refused]` tag for the more semantic `[scan]`. The label
+            // surfaces a short version of the actionable error so the
+            // operator can glance at the feed and see *why* the scan
+            // failed without scrolling to the transcript.
             session.apply_step(
-                kuzushi_core::RunTraceStep::new(0, "refused", "scan failed")
+                kuzushi_core::RunTraceStep::new(0, "refused", short_label(&actionable, 80))
+                    .with_module_id("scan")
                     .with_severity("danger"),
             );
         }
