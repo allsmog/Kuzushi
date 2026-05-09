@@ -8,7 +8,7 @@ pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
         bind_char('g', "j/k/g/G", "top", ViewHotkeyAction::ViewScrollTop),
         bind_char('G', "j/k/g/G", "bottom", ViewHotkeyAction::ViewScrollBottom),
         bind(
-            HotkeyTrigger::Char('\t'),
+            HotkeyTrigger::Tab,
             "Tab",
             "toggle pane",
             ViewHotkeyAction::ActivityTabPaneFocus,
@@ -30,6 +30,12 @@ pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
         bind_char(
             'c',
             "c",
+            "cancel run",
+            ViewHotkeyAction::ActivityCancelRunning,
+        ),
+        bind(
+            HotkeyTrigger::Esc,
+            "Esc",
             "cancel run",
             ViewHotkeyAction::ActivityCancelRunning,
         ),

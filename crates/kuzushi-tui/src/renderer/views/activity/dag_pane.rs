@@ -12,7 +12,12 @@ pub(crate) fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant) -> Stri
         DagTaskState::Queued => "·",
         DagTaskState::Failing => "!",
     };
-    let task_label = fit(&row.task_id, width.saturating_sub(20).max(8));
+    // Right-side columns reserve: " " (1) + elapsed (8) + "  " (2) +
+    // status (up to 7 chars: "failing") = 18 chars; pad to 22 for a
+    // 4-char buffer so "failing" never gets ellipsized.
+    let right_reserve: usize = 22;
+    let task_pad = width.saturating_sub(right_reserve + 3).max(8);
+    let task_label = fit(&row.task_id, task_pad);
     let elapsed = elapsed_label(row, now);
     let status = match row.state {
         DagTaskState::Done => "done",
@@ -20,12 +25,12 @@ pub(crate) fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant) -> Stri
         DagTaskState::Queued => "queued",
         DagTaskState::Failing => "failing",
     };
-    // Pad columns: ` <symbol> <task pad-32> <elapsed pad-8>  <status>`
+    // Pad columns: ` <symbol> <task pad> <elapsed pad-8>  <status pad-7>`
     let body = format!(
-        " {symbol} {task:<task_pad$} {elapsed:>8}  {status}",
+        " {symbol} {task:<task_pad$} {elapsed:>8}  {status:<7}",
         symbol = symbol,
         task = task_label,
-        task_pad = width.saturating_sub(20).max(8),
+        task_pad = task_pad,
         elapsed = elapsed,
         status = status,
     );
