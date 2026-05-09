@@ -135,34 +135,10 @@ fn pick_free_port() -> Result<u16> {
 }
 
 fn joern_launcher_path() -> Result<std::path::PathBuf> {
-    if let Some(env_path) = std::env::var_os("KUZUSHI_JOERN_BIN") {
-        let candidate = std::path::PathBuf::from(env_path);
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-    }
-    for candidate in [
-        std::path::PathBuf::from("/opt/joern/joern-cli/joern"),
-        std::path::PathBuf::from("/usr/local/bin/joern"),
-        std::path::PathBuf::from("/usr/bin/joern"),
-    ] {
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-    }
-    // Last resort: walk $PATH manually (the `which` crate isn't a
-    // dependency here and we don't want to add one for a one-call
-    // fallback).
-    if let Some(path_var) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&path_var) {
-            let candidate = dir.join("joern");
-            if candidate.is_file() {
-                return Ok(candidate);
-            }
-        }
-    }
-    anyhow::bail!(
-        "could not locate the joern launcher; install via https://docs.joern.io/installation \
-         or set KUZUSHI_JOERN_BIN=<path-to-joern>"
-    )
+    crate::tools::availability::locate_joern_binary("joern").ok_or_else(|| {
+        anyhow::anyhow!(
+            "could not locate the joern launcher; install via https://docs.joern.io/installation \
+             or set KUZUSHI_JOERN_BIN=<path-to-joern>"
+        )
+    })
 }
