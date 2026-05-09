@@ -77,6 +77,20 @@ pub(in crate::modules) fn build_taint_iris_next_plan(
     // ordering, but we make sure the attack-surface contribution can
     // tip a tied entry.
     let catalog = boost_catalog_with_attack_surface_hints(catalog, &attack_surface_hints);
+    // Threat-model fallback: when the operator's `cwe_focus` includes
+    // CWEs the post-boost catalog has no entries for, synthesise a
+    // phantom entry per missing CWE whose source/sink signals come
+    // straight from the threat-model `attackSurface`. This lets a
+    // human-curated threat model surface real per-target patterns
+    // (`my_handler`, `do_dangerous_thing`) into the rg projection
+    // pipeline even when the static catalog had no row for that CWE.
+    // No-op when the catalog already covers the focus or the threat
+    // model has no attackSurface block.
+    let catalog = supplement_catalog_with_attack_surface_phantoms(
+        catalog,
+        &attack_surface_hints,
+        &options.cwe_focus,
+    );
     let structural_queries = build_taint_iris_next_structural_queries(&catalog);
     let prompt_catalog = render_taint_iris_next_catalog(&catalog);
     let backend = choose_taint_iris_next_backend(&options.backend, &repo_root);
@@ -208,6 +222,198 @@ fn boost_catalog_with_attack_surface_hints(
     }
     catalog.sort_by(|a, b| b.score.cmp(&a.score));
     catalog
+}
+
+/// Synthesise a phantom `TaintIrisNextRankedCatalogEntry` per CWE in
+/// `cwe_focus` that the post-rank/post-boost catalog has no entry
+/// for, drawing source/sink signals from the threat-model
+/// `attackSurface`. The downstream `build_taint_iris_next_structural_queries`
+/// + rg engine pick these up and produce role-tagged candidates without
+/// further plumbing — the catalog signals, after all, are exactly the
+/// shape rg wants.
+///
+/// No-op when:
+/// - `cwe_focus` is empty (no operator-supplied focus to backfill)
+/// - `hints` is empty (no threat-model attack surface to draw from)
+/// - every focus CWE already has at least one catalog entry
+fn supplement_catalog_with_attack_surface_phantoms(
+    mut catalog: Vec<TaintIrisNextRankedCatalogEntry>,
+    hints: &TaintIrisNextAttackSurfaceHints,
+    cwe_focus: &[String],
+) -> Vec<TaintIrisNextRankedCatalogEntry> {
+    if cwe_focus.is_empty() || hints.is_empty() {
+        return catalog;
+    }
+    let represented: std::collections::BTreeSet<String> = catalog
+        .iter()
+        .map(|entry| entry.cwe.to_ascii_uppercase())
+        .collect();
+    let source_signals: Vec<String> = {
+        let mut out = hints.entry_points.clone();
+        out.sort();
+        out.dedup();
+        out
+    };
+    let sink_signals: Vec<String> = {
+        let mut out: Vec<String> = hints
+            .external_sinks
+            .iter()
+            .chain(hints.role_gates.iter())
+            .cloned()
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    };
+    if source_signals.is_empty() && sink_signals.is_empty() {
+        return catalog;
+    }
+    for cwe in cwe_focus {
+        let normalised = cwe.to_ascii_uppercase();
+        if represented.contains(&normalised) {
+            continue;
+        }
+        catalog.push(TaintIrisNextRankedCatalogEntry {
+            cwe: normalised.clone(),
+            name: format!("Threat-Model Attack Surface ({normalised})"),
+            taint_class: phantom_taint_class_for_cwe(&normalised).to_string(),
+            languages: Vec::new(),
+            source_signals: source_signals.clone(),
+            sink_signals: sink_signals.clone(),
+            sanitizer_signals: Vec::new(),
+            structural_queries: Vec::new(),
+            score: 50,
+            reasons: vec![
+                "Synthesised from threat-model attackSurface; no static catalog entry covered this focus CWE.".to_string(),
+            ],
+        });
+    }
+    catalog.sort_by(|a, b| b.score.cmp(&a.score));
+    catalog
+}
+
+/// Map CWE → catalog-aligned `taintClass` for the phantom-entry path.
+/// Aligns with `taint_class_for_discovered_cwe` in
+/// `extract_taint_iris_next_evidence/mod.rs`. Kept inline rather than
+/// imported because the discovery and threat-model paths call it
+/// independently and the mapping is small enough that one shared
+/// definition isn't load-bearing.
+fn phantom_taint_class_for_cwe(cwe: &str) -> &'static str {
+    match cwe {
+        "CWE-78" | "CWE-77" => "command-injection",
+        "CWE-94" => "code-injection",
+        "CWE-426" => "search-path",
+        "CWE-269" | "CWE-250" => "privesc",
+        "CWE-732" => "permission",
+        "CWE-862" => "missing-authorization",
+        "CWE-89" => "sql-injection",
+        "CWE-79" => "xss",
+        "CWE-22" => "path-traversal",
+        "CWE-918" => "ssrf",
+        "CWE-502" => "deserialization",
+        _ => "threat-model",
+    }
+}
+
+#[cfg(test)]
+mod attack_surface_phantom_tests {
+    use super::*;
+
+    fn entry(cwe: &str, score: i32) -> TaintIrisNextRankedCatalogEntry {
+        TaintIrisNextRankedCatalogEntry {
+            cwe: cwe.to_string(),
+            name: cwe.to_string(),
+            taint_class: "test".to_string(),
+            languages: Vec::new(),
+            source_signals: Vec::new(),
+            sink_signals: Vec::new(),
+            sanitizer_signals: Vec::new(),
+            structural_queries: Vec::new(),
+            score,
+            reasons: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn synthesises_phantom_for_unrepresented_focus_cwe() {
+        let catalog = vec![entry("CWE-78", 100)];
+        let hints = TaintIrisNextAttackSurfaceHints {
+            entry_points: vec!["my_handler".to_string()],
+            external_sinks: vec!["dlopen".to_string()],
+            role_gates: Vec::new(),
+        };
+        let cwe_focus = vec!["CWE-78".to_string(), "CWE-94".to_string()];
+        let out =
+            supplement_catalog_with_attack_surface_phantoms(catalog, &hints, &cwe_focus);
+        // CWE-78 was already represented; CWE-94 needed a phantom.
+        let cwes: Vec<&str> = out.iter().map(|e| e.cwe.as_str()).collect();
+        assert!(cwes.contains(&"CWE-94"));
+        let phantom = out.iter().find(|e| e.cwe == "CWE-94").unwrap();
+        assert!(phantom.source_signals.contains(&"my_handler".to_string()));
+        assert!(phantom.sink_signals.contains(&"dlopen".to_string()));
+        assert_eq!(phantom.taint_class, "code-injection");
+    }
+
+    #[test]
+    fn skips_focus_cwes_already_in_catalog() {
+        let catalog = vec![entry("CWE-78", 100), entry("CWE-94", 50)];
+        let hints = TaintIrisNextAttackSurfaceHints {
+            entry_points: vec!["my_handler".to_string()],
+            external_sinks: Vec::new(),
+            role_gates: Vec::new(),
+        };
+        let cwe_focus = vec!["CWE-78".to_string(), "CWE-94".to_string()];
+        let out = supplement_catalog_with_attack_surface_phantoms(
+            catalog.clone(),
+            &hints,
+            &cwe_focus,
+        );
+        // No new entries — both focus CWEs already represented.
+        assert_eq!(out.len(), catalog.len());
+    }
+
+    #[test]
+    fn no_op_when_focus_empty_or_hints_empty() {
+        let catalog = vec![entry("CWE-78", 100)];
+        let hints = TaintIrisNextAttackSurfaceHints {
+            entry_points: vec!["x".to_string()],
+            external_sinks: Vec::new(),
+            role_gates: Vec::new(),
+        };
+        let with_empty_focus =
+            supplement_catalog_with_attack_surface_phantoms(catalog.clone(), &hints, &[]);
+        assert_eq!(with_empty_focus.len(), 1);
+
+        let empty_hints = TaintIrisNextAttackSurfaceHints::default();
+        let with_empty_hints = supplement_catalog_with_attack_surface_phantoms(
+            catalog.clone(),
+            &empty_hints,
+            &["CWE-94".to_string()],
+        );
+        assert_eq!(with_empty_hints.len(), 1);
+    }
+
+    #[test]
+    fn role_gates_fold_into_sink_signals() {
+        // Threat-model role-gates (`has_privs_of_role`,
+        // `superuser`) are sinks for CWE-269/CWE-250-style hunts —
+        // they should land in `sink_signals` so the rg pass projects
+        // them as sink-role candidates.
+        let catalog = Vec::new();
+        let hints = TaintIrisNextAttackSurfaceHints {
+            entry_points: Vec::new(),
+            external_sinks: vec!["dlopen".to_string()],
+            role_gates: vec!["has_privs_of_role".to_string()],
+        };
+        let cwe_focus = vec!["CWE-269".to_string()];
+        let out =
+            supplement_catalog_with_attack_surface_phantoms(catalog, &hints, &cwe_focus);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].sink_signals.contains(&"dlopen".to_string()));
+        assert!(out[0]
+            .sink_signals
+            .contains(&"has_privs_of_role".to_string()));
+    }
 }
 
 pub(in crate::modules) struct TaintIrisNextArtifactLoad {
