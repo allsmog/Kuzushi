@@ -68,12 +68,25 @@ fn elapsed_label(row: &DagTaskRow, now: Instant) -> String {
         None => return "-".to_string(),
     };
     let end = row.completed_at.unwrap_or(now);
-    let secs = end.saturating_duration_since(started).as_secs_f64();
+    let elapsed = end.saturating_duration_since(started);
+    let secs = elapsed.as_secs_f64();
     if secs >= 60.0 {
         format!("{:.0}m{:02.0}s", (secs / 60.0).floor(), secs % 60.0)
     } else if secs >= 10.0 {
         format!("{secs:>4.1}s")
-    } else {
+    } else if secs >= 1.0 {
         format!("{secs:>4.2}s")
+    } else {
+        // Sub-second tools (native scanners, tiny LLM calls) render as
+        // milliseconds. `0.00s` was misleading — operator couldn't tell
+        // whether the tool actually ran or was a no-op.
+        let ms = elapsed.as_millis();
+        if ms == 0 {
+            "  <1ms".to_string()
+        } else if ms < 1000 {
+            format!("{ms:>4}ms")
+        } else {
+            format!("{secs:>4.2}s")
+        }
     }
 }
