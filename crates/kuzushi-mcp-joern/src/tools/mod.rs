@@ -1,4 +1,4 @@
-mod availability;
+pub(crate) mod availability;
 mod build_registry;
 mod function_handlers;
 mod graph_handlers;

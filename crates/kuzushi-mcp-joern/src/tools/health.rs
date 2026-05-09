@@ -1,6 +1,6 @@
+use super::availability::locate_joern_binary;
 use kuzushi_mcp_common::doctor::{probe_all, HealthSummary};
 use serde_json::{json, Value};
-use std::path::PathBuf;
 use std::time::Duration;
 
 pub(crate) const PROBES: &[(&str, &[&str])] = &[
@@ -30,9 +30,9 @@ pub async fn extended_health() -> Value {
     let configured_url =
         std::env::var("JOERN_SERVER_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
     let server_running = probe_server(&configured_url).await;
-    let joern_path = which_on_path("joern");
-    let joern_parse_path = which_on_path("joern-parse");
-    let java_path = which_on_path("java");
+    let joern_path = locate_joern_binary("joern");
+    let joern_parse_path = locate_joern_binary("joern-parse");
+    let java_path = locate_joern_binary("java");
     let cpg_hint = std::env::var("KUZUSHI_JOERN_CPG").ok();
     let ready = joern_path.is_some() || joern_parse_path.is_some();
     json!({
@@ -57,27 +57,4 @@ async fn probe_server(url: &str) -> bool {
         return false;
     };
     matches!(client.get(url).send().await, Ok(_))
-}
-
-fn which_on_path(name: &str) -> Option<PathBuf> {
-    if let Some(env_path) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&env_path) {
-            let candidate = dir.join(name);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-    for hardcoded in [
-        format!("/opt/joern/joern-cli/{name}"),
-        format!("/opt/joern/joern-cli/bin/{name}"),
-        format!("/usr/local/bin/{name}"),
-        format!("/usr/bin/{name}"),
-    ] {
-        let p = PathBuf::from(hardcoded);
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    None
 }
