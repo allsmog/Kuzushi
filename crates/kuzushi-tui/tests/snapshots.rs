@@ -257,3 +257,77 @@ fn options_view_for_sast_scan() {
     });
     assert_plain_snapshot("options_view_for_sast_scan", &render_at_120(&mut app));
 }
+
+#[test]
+fn activity_view_default_split_pane() {
+    use kuzushi_core::RunTraceStep;
+    use kuzushi_tui::ActivitySession;
+
+    let mut app = fresh_app();
+    // Seed a deterministic ActivitySession so the snapshot doesn't drift
+    // with wall-clock-derived run ids and timestamps.
+    let mut session = ActivitySession::new("r-snapshot");
+    let stable_ts = 1_700_000_000_000u64;
+    let seeds: &[(usize, &str, &str, &str, &str, Option<usize>)] = &[
+        (1, "tool", "context", "build", "context:build start", None),
+        (
+            2,
+            "done",
+            "context",
+            "build",
+            "context:build complete · 412 files",
+            None,
+        ),
+        (3, "tool", "semgrep", "scan", "semgrep start", None),
+        (
+            4,
+            "done",
+            "semgrep",
+            "scan",
+            "semgrep complete · 14 findings",
+            None,
+        ),
+        (5, "tool", "triage", "run", "triage start", None),
+        (
+            6,
+            "reasoning",
+            "triage",
+            "run",
+            "evidence-collect · stage1 kept 14/14",
+            Some(5),
+        ),
+        (
+            7,
+            "reasoning",
+            "triage",
+            "run",
+            "verdict=likely-tp severity=high",
+            Some(5),
+        ),
+        (
+            8,
+            "tool",
+            "pipeline",
+            "task-selector",
+            "task-selector ran",
+            None,
+        ),
+    ];
+    for (n, kind, module, verb, label, parent) in seeds {
+        let mut step = RunTraceStep::new(*n, *kind, *label)
+            .with_module_id(*module)
+            .with_verb(*verb)
+            .with_started_at_ms(stable_ts);
+        if let Some(p) = parent {
+            step = step.with_parent_step(*p);
+        }
+        session.apply_step(step);
+    }
+    app.activity = Some(session);
+    app.shell_view = ShellView::Activity;
+
+    assert_plain_snapshot(
+        "activity_view_default_split_pane",
+        &render_at_120(&mut app),
+    );
+}

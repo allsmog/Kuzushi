@@ -310,6 +310,46 @@ so cross-module categorization stays consistent):
 | `tool-start` / `tool-progress` / `tool-complete` | Sub-tool calls inside an agentic run. Use with `child(parent)`. |
 | `refused` / `failing` | Severity = `danger`; flips the row to Failing in the dashboard. |
 
+### 7.2. Per-LLM-call tracing via `TracedRuntime` + `parent_scope`
+
+Beyond the explicit `ctx.trace.step(...)` boundaries above, **every LLM
+call is auto-traced**. The dispatch wrapper at
+`src/modules/registry/with_v2_builtins/execution.rs` wraps the incoming
+`AgentRuntime` in a `TracedRuntime` (defined in
+`src/runtime/traced_runtime.rs`) whenever `ctx.trace.is_some()`. Each
+call to `runtime.query_blocking`, `runtime.next_step_blocking`,
+`runtime.triage_finding_blocking`, or `runtime.spawn_subagent_blocking`
+emits a `kind="reasoning"` (or `tool-progress` / `done` for loop
+iterations) step with `latency_ms` and `cost_usd` populated from the
+provider response. Producers don't have to thread the trace handle into
+their LLM call sites.
+
+To group several LLM calls under a labelled phase header, push a
+**parent_scope** RAII guard before the LLM region:
+
+```rust
+let phase = ctx
+    .trace
+    .map(|t| t.step("reasoning", "run", "evidence-collect").emit());
+let _scope = match (ctx.trace, phase) {
+    (Some(trace), Some(parent)) => Some(trace.parent_scope(parent)),
+    _ => None,
+};
+let result = run_triage_stage2(store, runtime, &input, &config, kept)?;
+drop(_scope);
+```
+
+Inside `_scope`, every step emitted by `TracedRuntime` (or by the
+producer itself) carries `parent_step = Some(phase)`, so the renderer
+indents the row under the phase header in the right pane. The scope is
+per-thread; nested scopes form a stack and pop in LIFO order on drop.
+
+Producers that already follow this pattern as canonical references:
+`triage:run`, `verify:finding`, `agentic-sast:scan`, `taint-iris:hunt`,
+`taint-iris-next:hunt`, `carlini-threat-hunt:run`, `patch:finding`,
+`threat-model:build`, `x-ray:run`, `run_plugin_finding_adapter` (used
+by `vuln-scout:audit` / `tob:audit`), `shinsa:scan`, `prompt-armor:*`.
+
 **Hidden modules** (`pipeline:*`, `systems-hunt:*`, `context-lite:index`)
 collapse into one aggregated `subsystems` row in the Activity view. Their
 events also still flow through but are filtered out of the right-pane

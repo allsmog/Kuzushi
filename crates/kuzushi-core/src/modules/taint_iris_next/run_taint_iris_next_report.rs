@@ -74,6 +74,18 @@ pub(in crate::modules) fn run_taint_iris_next_hunt(
 ) -> Result<TaintIrisNextReport> {
     let runtime = require_taint_iris_next_runtime(runtime)?;
     let model = require_taint_iris_next_model(input, ctx)?;
+    // Phase scope so the agent's source/sink/taint-trace LLM round-trips
+    // surface as children of `taint-trace` in the feed.
+    let _trace_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step(
+                "reasoning",
+                "hunt",
+                "source-discovery · sink-discovery · taint-trace",
+            )
+            .emit();
+        trace.parent_scope(phase)
+    });
     let mut agent = run_taint_iris_next_agent(
         &plan,
         &evidence,
@@ -82,6 +94,7 @@ pub(in crate::modules) fn run_taint_iris_next_hunt(
         &model,
         agent_tool_policy_for_input(input)?,
     )?;
+    drop(_trace_scope);
     let mut findings = agent.findings.clone();
     if whitebox_static_profile_requested(input)? {
         mark_whitebox_static_findings(&mut findings, StaticProofState::SourceSinkLinked)?;
