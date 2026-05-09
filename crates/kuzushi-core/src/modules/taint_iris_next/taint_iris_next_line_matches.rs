@@ -40,8 +40,13 @@ pub(in crate::modules) fn taint_iris_next_kind_for_role(role: &str) -> &'static 
 
 pub(in crate::modules) fn build_taint_iris_next_linked_stories(
     candidates: &[TaintIrisNextCandidate],
+    cwe_focus: &[String],
 ) -> Vec<TaintIrisNextLinkedStory> {
     let mut stories = Vec::new();
+    let focus_allow: std::collections::BTreeSet<String> = cwe_focus
+        .iter()
+        .map(|cwe| cwe.to_ascii_uppercase())
+        .collect();
     for source in candidates
         .iter()
         .filter(|candidate| candidate.role == "source")
@@ -57,44 +62,12 @@ pub(in crate::modules) fn build_taint_iris_next_linked_stories(
         if is_taint_iris_next_non_production_path(&source.file_path) {
             continue;
         }
-        for sink in candidates
-            .iter()
-            .filter(|candidate| candidate.role == "sink" && candidate.cwe == source.cwe)
-        {
-            if sink.file_path != source.file_path {
-                continue;
+        for sink in candidates.iter().filter(|candidate| candidate.role == "sink") {
+            if let Some(story) =
+                pair_taint_iris_next_candidates(source, sink, &focus_allow)
+            {
+                stories.push(story);
             }
-            let distance = sink.line.abs_diff(source.line);
-            if distance > 80 {
-                continue;
-            }
-            let shared_tokens = shared_taint_iris_next_tokens(&source.snippet, &sink.snippet);
-            stories.push(TaintIrisNextLinkedStory {
-                id: format!("linked-{}-{}", source.id, sink.id),
-                cwe: source.cwe.clone(),
-                taint_class: source.taint_class.clone(),
-                track: source.track.clone(),
-                evidence_level: "linked".to_string(),
-                file_path: source.file_path.clone(),
-                language: source.language.clone(),
-                source_candidate_id: source.id.clone(),
-                sink_candidate_id: sink.id.clone(),
-                source_line: source.line,
-                sink_line: sink.line,
-                shared_tokens: shared_tokens.clone(),
-                rationale: format!(
-                    "{} source at line {} is near {} sink at line {}{}",
-                    source.catalog_signal,
-                    source.line,
-                    sink.catalog_signal,
-                    sink.line,
-                    if shared_tokens.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" with shared tokens {}", shared_tokens.join(", "))
-                    }
-                ),
-            });
         }
     }
     stories.sort_by(|left, right| {
@@ -104,6 +77,100 @@ pub(in crate::modules) fn build_taint_iris_next_linked_stories(
             .then_with(|| left.sink_line.cmp(&right.sink_line))
     });
     stories
+}
+
+/// Decide whether a (source, sink) candidate pair forms a heuristic
+/// linked story. Two pairing rules, picked by candidate provenance:
+///
+/// - **Discovery × Discovery (cross-file, within `cwe_focus`):** when
+///   both candidates were synthesised by the framework-canonical
+///   discovery sweep AND share the same `taint_class` AND both CWEs
+///   are in the operator's focus set, pair them across files. This is
+///   the path that surfaces e.g. a `PG_FUNCTION_INFO_V1` entry point
+///   in `genfile.c` paired with `dlopen` in `dfmgr.c` for a CWE-94
+///   hunt; same-file would never pair them. Discovery markers are
+///   framework-canonical (PG/Flask/Express/POSIX), so the cross-file
+///   rule generalises beyond postgres without us hardcoding patterns.
+///
+/// - **Otherwise (rg / structural / mixed):** preserve the original
+///   rule — same CWE, same file, within 80 lines. rg matches on
+///   substring patterns and produces noisier candidates, so the tight
+///   spatial bound keeps the heuristic honest. The CWE-89 demo-repo
+///   regression case is structural+structural, unaffected.
+fn pair_taint_iris_next_candidates(
+    source: &TaintIrisNextCandidate,
+    sink: &TaintIrisNextCandidate,
+    focus_allow: &std::collections::BTreeSet<String>,
+) -> Option<TaintIrisNextLinkedStory> {
+    let is_discovery_pair = source.source == "discovery" && sink.source == "discovery";
+    let cross_file_eligible = is_discovery_pair
+        && !focus_allow.is_empty()
+        && focus_allow.contains(&source.cwe.to_ascii_uppercase())
+        && focus_allow.contains(&sink.cwe.to_ascii_uppercase())
+        && source.taint_class == sink.taint_class;
+
+    if !cross_file_eligible {
+        if sink.cwe != source.cwe {
+            return None;
+        }
+        if sink.file_path != source.file_path {
+            return None;
+        }
+        if sink.line.abs_diff(source.line) > 80 {
+            return None;
+        }
+    }
+
+    let shared_tokens = shared_taint_iris_next_tokens(&source.snippet, &sink.snippet);
+    let same_file = sink.file_path == source.file_path;
+    let rationale = if cross_file_eligible && !same_file {
+        format!(
+            "(cross-file discovery, focus={focus}) {src_signal} source at {src_path}:{src_line} reaches {snk_signal} sink at {snk_path}:{snk_line}{tokens}",
+            focus = sink.cwe,
+            src_signal = source.catalog_signal,
+            src_path = source.file_path,
+            src_line = source.line,
+            snk_signal = sink.catalog_signal,
+            snk_path = sink.file_path,
+            snk_line = sink.line,
+            tokens = if shared_tokens.is_empty() {
+                String::new()
+            } else {
+                format!(" with shared tokens {}", shared_tokens.join(", "))
+            },
+        )
+    } else {
+        format!(
+            "{} source at line {} is near {} sink at line {}{}",
+            source.catalog_signal,
+            source.line,
+            sink.catalog_signal,
+            sink.line,
+            if shared_tokens.is_empty() {
+                String::new()
+            } else {
+                format!(" with shared tokens {}", shared_tokens.join(", "))
+            }
+        )
+    };
+    // Story CWE follows the sink because, in cross-CWE discovery
+    // pairing, the sink is the load-bearing class (a `dlopen` sink is
+    // CWE-94 regardless of which entry-point reached it).
+    Some(TaintIrisNextLinkedStory {
+        id: format!("linked-{}-{}", source.id, sink.id),
+        cwe: sink.cwe.clone(),
+        taint_class: sink.taint_class.clone(),
+        track: source.track.clone(),
+        evidence_level: "linked".to_string(),
+        file_path: source.file_path.clone(),
+        language: source.language.clone(),
+        source_candidate_id: source.id.clone(),
+        sink_candidate_id: sink.id.clone(),
+        source_line: source.line,
+        sink_line: sink.line,
+        shared_tokens,
+        rationale,
+    })
 }
 
 /// Recognise file paths that are obviously non-production code so the
@@ -248,5 +315,227 @@ mod non_production_path_tests {
         assert!(is_taint_iris_next_non_production_path(
             "examples/sandbox-backend/server.js"
         ));
+    }
+}
+
+#[cfg(test)]
+mod linker_tests {
+    use super::*;
+
+    fn candidate(
+        id: &str,
+        role: &str,
+        cwe: &str,
+        taint_class: &str,
+        file_path: &str,
+        line: u32,
+        source: &str,
+    ) -> TaintIrisNextCandidate {
+        TaintIrisNextCandidate {
+            id: id.to_string(),
+            cwe: cwe.to_string(),
+            taint_class: taint_class.to_string(),
+            track: "taint".to_string(),
+            role: role.to_string(),
+            kind: "test".to_string(),
+            pattern: "test".to_string(),
+            file_path: file_path.to_string(),
+            line,
+            snippet: format!("[test:{role}] dummy"),
+            language: "c".to_string(),
+            confidence: "medium".to_string(),
+            catalog_signal: format!("{role}: dummy"),
+            source: source.to_string(),
+        }
+    }
+
+    #[test]
+    fn pairs_discovery_source_and_sink_across_files_when_within_focus() {
+        // Postgres-shaped scenario: PG_FUNCTION_INFO_V1 entry point in
+        // genfile.c projected as CWE-94 source (Thread A), `dlopen` in
+        // dfmgr.c as CWE-94 sink. Different files; today's same-file
+        // rule would reject; the cross-file discovery rule pairs them.
+        let candidates = vec![
+            candidate(
+                "src1",
+                "source",
+                "CWE-94",
+                "code-injection",
+                "src/backend/utils/adt/genfile.c",
+                100,
+                "discovery",
+            ),
+            candidate(
+                "snk1",
+                "sink",
+                "CWE-94",
+                "code-injection",
+                "src/backend/utils/fmgr/dfmgr.c",
+                244,
+                "discovery",
+            ),
+        ];
+        let cwe_focus = vec!["CWE-94".to_string()];
+        let stories = build_taint_iris_next_linked_stories(&candidates, &cwe_focus);
+        assert_eq!(stories.len(), 1);
+        let story = &stories[0];
+        assert_eq!(story.evidence_level, "linked");
+        assert_eq!(story.cwe, "CWE-94");
+        assert!(story.rationale.contains("cross-file discovery"));
+    }
+
+    #[test]
+    fn rejects_cross_file_pair_when_focus_is_empty() {
+        // Without explicit focus, the linker stays strict — the
+        // cross-file discovery rule only fires when the operator opts
+        // into it via cweFocus.
+        let candidates = vec![
+            candidate(
+                "src1",
+                "source",
+                "CWE-94",
+                "code-injection",
+                "f1.c",
+                10,
+                "discovery",
+            ),
+            candidate(
+                "snk1",
+                "sink",
+                "CWE-94",
+                "code-injection",
+                "f2.c",
+                20,
+                "discovery",
+            ),
+        ];
+        let stories = build_taint_iris_next_linked_stories(&candidates, &[]);
+        assert!(stories.is_empty());
+    }
+
+    #[test]
+    fn rejects_cross_file_pair_when_taint_class_differs() {
+        // CWE-78 (command-injection) source paired with CWE-94
+        // (code-injection) sink shouldn't form a cross-file story —
+        // even though both are in the focus set, the taint-class
+        // mismatch indicates the source isn't the right shape for the
+        // sink.
+        let candidates = vec![
+            candidate(
+                "src1",
+                "source",
+                "CWE-78",
+                "command-injection",
+                "f1.c",
+                10,
+                "discovery",
+            ),
+            candidate(
+                "snk1",
+                "sink",
+                "CWE-94",
+                "code-injection",
+                "f2.c",
+                20,
+                "discovery",
+            ),
+        ];
+        let cwe_focus = vec!["CWE-78".to_string(), "CWE-94".to_string()];
+        let stories = build_taint_iris_next_linked_stories(&candidates, &cwe_focus);
+        assert!(stories.is_empty());
+    }
+
+    #[test]
+    fn keeps_strict_rule_for_structural_candidates() {
+        // The CWE-89 demo-repo regression case: rg-derived
+        // structural+structural source/sink in the same file within
+        // 80 lines must still pair, and a cross-file structural pair
+        // (the noise we're avoiding) must NOT pair even when cwe_focus
+        // would otherwise allow it.
+        let same_file_candidates = vec![
+            candidate(
+                "src1",
+                "source",
+                "CWE-89",
+                "sql-injection",
+                "routes/users.ts",
+                10,
+                "structural",
+            ),
+            candidate(
+                "snk1",
+                "sink",
+                "CWE-89",
+                "sql-injection",
+                "routes/users.ts",
+                15,
+                "structural",
+            ),
+        ];
+        let stories = build_taint_iris_next_linked_stories(
+            &same_file_candidates,
+            &["CWE-89".to_string()],
+        );
+        assert_eq!(stories.len(), 1, "structural same-file pair must link");
+
+        let cross_file_candidates = vec![
+            candidate(
+                "src2",
+                "source",
+                "CWE-89",
+                "sql-injection",
+                "routes/users.ts",
+                10,
+                "structural",
+            ),
+            candidate(
+                "snk2",
+                "sink",
+                "CWE-89",
+                "sql-injection",
+                "routes/admin.ts",
+                15,
+                "structural",
+            ),
+        ];
+        let stories = build_taint_iris_next_linked_stories(
+            &cross_file_candidates,
+            &["CWE-89".to_string()],
+        );
+        assert!(
+            stories.is_empty(),
+            "structural cross-file pair must NOT link even within focus"
+        );
+    }
+
+    #[test]
+    fn keeps_strict_rule_for_mixed_provenance() {
+        // discovery source + structural sink (or vice versa) falls
+        // back to the strict rule — the cross-file rule requires both
+        // sides to be discovery-tagged so we trust the framework-
+        // canonical marker semantics on both ends.
+        let candidates = vec![
+            candidate(
+                "src1",
+                "source",
+                "CWE-94",
+                "code-injection",
+                "f1.c",
+                10,
+                "discovery",
+            ),
+            candidate(
+                "snk1",
+                "sink",
+                "CWE-94",
+                "code-injection",
+                "f2.c",
+                20,
+                "structural",
+            ),
+        ];
+        let cwe_focus = vec!["CWE-94".to_string()];
+        let stories = build_taint_iris_next_linked_stories(&candidates, &cwe_focus);
+        assert!(stories.is_empty());
     }
 }
