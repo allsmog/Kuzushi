@@ -6,18 +6,34 @@
 //! for SARIF output, parses the thread-flow paths, and returns a small
 //! JSON summary the agent can reason about.
 //!
-//! Caveat: `codeql database analyze` reloads the DB each call (tens of
-//! seconds to minutes per query). For agent-fast (<1s) per-call latency
-//! we'd need to keep a `codeql execute server` resident — that's the
-//! follow-up. Today's MCP is functional but slow per call; the agent
-//! should use it sparingly for verification, not bulk enumeration.
+//! Latency strategy: we keep two layers of caching to amortise the
+//! ~60s-per-CWE pack-compile cost on cold runs.
+//!
+//! 1. CodeQL's own on-disk pack cache (`--common-caches=$HOME/.codeql`,
+//!    or `KUZUSHI_CODEQL_CACHE_DIR` if set). Persists across MCP server
+//!    restarts. First call to each CWE folder on a given language is
+//!    still slow because that's when the pack is compiled.
+//! 2. An in-process result memo keyed on `(db, selector, limit)`. The
+//!    agent often re-queries the same CWE folder when iterating on
+//!    findings during a single hunt; the second call returns instantly.
+//!    Keyed on the canonical absolute DB path so a typo or symlink swap
+//!    doesn't poison the cache.
+//!
+//! Optional: if `KUZUSHI_CODEQL_PREWARM` is set, on MCP server startup
+//! we spawn a background task that compiles the common CWE folders
+//! (CWE-022, CWE-078, CWE-079, CWE-089, CWE-120, CWE-190, CWE-416, CWE-918)
+//! for the C/C++ pack so the first agent call is also a cache hit.
+//! See `prewarm.rs`.
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_mcp_common::{Tool, ToolHandler, ToolRegistry};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+use std::sync::OnceLock;
 
 pub(crate) fn build_registry() -> ToolRegistry {
     ToolRegistry::new()
@@ -145,33 +161,85 @@ impl ToolHandler for QueryHandler {
     }
 }
 
+/// (db_canonical, selector, limit) → memoised flow set, populated on the
+/// first call of each combo and reused for the rest of the MCP server's
+/// lifetime. The memo is bounded by the agent's appetite for distinct
+/// queries (~10 per hunt in practice), so we don't bother with eviction.
+fn flow_memo() -> &'static Mutex<HashMap<(PathBuf, String, usize), Vec<Value>>> {
+    static MEMO: OnceLock<Mutex<HashMap<(PathBuf, String, usize), Vec<Value>>>> =
+        OnceLock::new();
+    MEMO.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn memo_key(db: &Path, selector: &str, limit: usize) -> (PathBuf, String, usize) {
+    let canonical = std::fs::canonicalize(db).unwrap_or_else(|_| db.to_path_buf());
+    (canonical, selector.to_string(), limit)
+}
+
+fn lookup_memo(db: &Path, selector: &str, limit: usize) -> Option<Vec<Value>> {
+    let memo = flow_memo().lock().ok()?;
+    memo.get(&memo_key(db, selector, limit)).cloned()
+}
+
+fn store_memo(db: &Path, selector: &str, limit: usize, flows: &[Value]) {
+    if let Ok(mut memo) = flow_memo().lock() {
+        memo.insert(memo_key(db, selector, limit), flows.to_vec());
+    }
+}
+
+/// Resolve the CodeQL pack cache directory. CodeQL defaults to
+/// `$HOME/.codeql` and creates it on demand; we honor an explicit
+/// override via `KUZUSHI_CODEQL_CACHE_DIR` so operators with shared
+/// cache volumes (CI, multi-tenant boxes) can point all kuzushi
+/// invocations at the same disk.
+pub(crate) fn codeql_cache_dir() -> Option<PathBuf> {
+    if let Some(value) = std::env::var_os("KUZUSHI_CODEQL_CACHE_DIR") {
+        let candidate = PathBuf::from(value);
+        if !candidate.as_os_str().is_empty() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 async fn run_codeql_and_parse(
     db: &Path,
     selector: &str,
     limit: usize,
 ) -> Result<Vec<Value>> {
+    if let Some(cached) = lookup_memo(db, selector, limit) {
+        return Ok(cached);
+    }
     let codeql = locate_codeql_binary().context("could not find the codeql binary")?;
     let sarif = tempfile::NamedTempFile::new()?;
-    let status = Command::new(&codeql)
+    let mut command = Command::new(&codeql);
+    command
         .arg("database")
         .arg("analyze")
         .arg("--format=sarif-latest")
         .arg("--output")
         .arg(sarif.path())
         .arg("--ram=4096")
-        .arg("--threads=4")
+        .arg("--threads=4");
+    if let Some(cache) = codeql_cache_dir() {
+        command.arg(format!("--common-caches={}", cache.display()));
+    }
+    command
         .arg(db)
         .arg(selector)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    let status = command
         .status()
         .with_context(|| format!("could not invoke {}", codeql.display()))?;
     if !status.success() {
         anyhow::bail!("codeql database analyze exited with {status}");
     }
     let raw = std::fs::read_to_string(sarif.path()).context("could not read SARIF output")?;
-    Ok(parse_sarif(&raw, limit))
+    let flows = parse_sarif(&raw, limit);
+    store_memo(db, selector, limit, &flows);
+    Ok(flows)
 }
 
 fn parse_sarif(raw: &str, limit: usize) -> Vec<Value> {
@@ -261,6 +329,60 @@ fn sarif_step(location: &Value) -> Option<Value> {
         .trim()
         .to_string();
     Some(json!({"file": file, "line": line, "code": snippet}))
+}
+
+/// Compile common CWE query folders for each installed language pack so
+/// the agent's first `flows_for_cwe` call hits the codeql pack cache
+/// instead of paying a 60s+ cold compile. Runs as a detached background
+/// task; failures are logged to stderr and ignored — pre-warm is an
+/// optimisation, not a correctness gate.
+pub(crate) async fn spawn_prewarm() {
+    const COMMON_CWES: &[&str] = &[
+        "CWE-022", "CWE-078", "CWE-079", "CWE-089", "CWE-120", "CWE-190", "CWE-416", "CWE-918",
+    ];
+    const PACKS: &[&str] = &[
+        "codeql/cpp-queries",
+        "codeql/python-queries",
+        "codeql/javascript-queries",
+        "codeql/java-queries",
+        "codeql/go-queries",
+    ];
+    let Some(codeql) = locate_codeql_binary() else {
+        eprintln!("[kuzushi-mcp-codeql] prewarm skipped: codeql binary not found");
+        return;
+    };
+    eprintln!("[kuzushi-mcp-codeql] prewarm: compiling {} pack/CWE pairs in background", PACKS.len() * COMMON_CWES.len());
+    for pack in PACKS {
+        for cwe in COMMON_CWES {
+            let selector = format!("{pack}:Security/CWE/{cwe}");
+            let mut command = Command::new(&codeql);
+            command
+                .arg("query")
+                .arg("compile")
+                .arg(&selector);
+            if let Some(cache) = codeql_cache_dir() {
+                command.arg(format!("--common-caches={}", cache.display()));
+            }
+            let outcome = command
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            match outcome {
+                Ok(status) if status.success() => {
+                    eprintln!("[kuzushi-mcp-codeql] prewarm ok: {selector}");
+                }
+                Ok(status) => {
+                    eprintln!("[kuzushi-mcp-codeql] prewarm skipped (exit {status}): {selector}");
+                }
+                Err(err) => {
+                    eprintln!("[kuzushi-mcp-codeql] prewarm error: {selector}: {err}");
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    }
+    eprintln!("[kuzushi-mcp-codeql] prewarm: complete");
 }
 
 fn locate_codeql_binary() -> Option<PathBuf> {
