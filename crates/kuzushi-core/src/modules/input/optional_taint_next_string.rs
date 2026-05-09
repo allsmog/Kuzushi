@@ -1,52 +1,6 @@
 use super::*;
 
-pub(in crate::modules) fn optional_taint_next_string(
-    input: &Value,
-    keys: &[&str],
-) -> Result<Option<String>> {
-    for key in keys {
-        if let Some(value) = input.get(*key) {
-            return match value {
-                Value::String(text) => Ok(Some(text.trim().to_string()).filter(|s| !s.is_empty())),
-                _ => anyhow::bail!("taint-iris-next:hunt {key} must be a string"),
-            };
-        }
-    }
-    Ok(None)
-}
-
-pub(in crate::modules) fn positive_usize_input(
-    input: &Value,
-    keys: &[&str],
-    label: &str,
-) -> Result<Option<usize>> {
-    let Some(value) = keys.iter().find_map(|key| input.get(*key)) else {
-        return Ok(None);
-    };
-    match value {
-        Value::Number(number) => {
-            let value = number
-                .as_u64()
-                .with_context(|| format!("{label} must be a positive integer"))?;
-            if value == 0 {
-                anyhow::bail!("{label} must be a positive integer");
-            }
-            Ok(Some(value as usize))
-        }
-        Value::String(value) => {
-            let parsed = value
-                .trim()
-                .parse::<usize>()
-                .with_context(|| format!("{label} must be a positive integer"))?;
-            if parsed == 0 {
-                anyhow::bail!("{label} must be a positive integer");
-            }
-            Ok(Some(parsed))
-        }
-        _ => anyhow::bail!("{label} must be a positive integer"),
-    }
-}
-
+#[cfg(test)]
 pub(in crate::modules) fn positive_f64_input(
     input: &Value,
     keys: &[&str],

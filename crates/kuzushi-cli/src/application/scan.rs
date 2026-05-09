@@ -1,7 +1,6 @@
 use crate::command::ScanModeArg;
+use crate::presentation::{emit_scan_ci_start, emit_scan_output, scan_result_or_report_ci_error};
 use crate::scan_budget::apply_scan_budget_caps;
-use crate::scan_ci::emit_scan_ci_start;
-use crate::scan_output::{emit_scan_output, scan_result_or_report_ci_error};
 use crate::wants_sast_runtime::wants_sast_runtime;
 use anyhow::{Context, Result};
 use kuzushi_core::modules::ToolExecutionContext;

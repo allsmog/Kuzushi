@@ -1,0 +1,37 @@
+use super::*;
+
+mod agent_findings;
+mod agent_prompt;
+mod agent_response;
+mod agent_result;
+mod agent_runtime;
+mod agent_triage;
+mod base_data;
+mod deterministic_fallback;
+mod evidence_scoring;
+mod json_fields;
+mod normalization;
+mod render_agent_summary;
+mod render_evidence_summary;
+mod render_header_lines;
+mod render_output;
+mod selected_cwes;
+mod token_indexing;
+
+pub(in crate::capabilities::taint_iris_next) use agent_findings::*;
+pub(in crate::capabilities::taint_iris_next) use agent_prompt::*;
+pub(in crate::capabilities::taint_iris_next) use agent_response::*;
+pub(in crate::capabilities::taint_iris_next) use agent_result::*;
+pub(in crate::capabilities::taint_iris_next) use agent_runtime::*;
+pub(in crate::capabilities::taint_iris_next) use agent_triage::*;
+pub(in crate::capabilities::taint_iris_next) use base_data::*;
+pub(in crate::capabilities::taint_iris_next) use deterministic_fallback::*;
+pub(in crate::capabilities::taint_iris_next) use evidence_scoring::*;
+pub(in crate::capabilities::taint_iris_next) use json_fields::*;
+pub(in crate::capabilities::taint_iris_next) use normalization::*;
+pub(in crate::capabilities::taint_iris_next) use render_agent_summary::*;
+pub(in crate::capabilities::taint_iris_next) use render_evidence_summary::*;
+pub(in crate::capabilities::taint_iris_next) use render_header_lines::*;
+pub(in crate::capabilities::taint_iris_next) use render_output::*;
+pub(in crate::capabilities::taint_iris_next) use selected_cwes::*;
+pub(in crate::capabilities::taint_iris_next) use token_indexing::*;

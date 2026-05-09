@@ -2,6 +2,7 @@ use super::domain::*;
 use serde::Serialize;
 
 mod detail;
+pub mod pr_comment;
 mod reporting;
 
 pub use detail::{

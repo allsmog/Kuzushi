@@ -1,0 +1,122 @@
+use super::*;
+
+pub(crate) fn taint_cwe_selection_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["cwes"],
+        "additionalProperties": true,
+        "properties": {
+            "cwes": {
+                "type": "array",
+                "items": {
+                    "oneOf": [
+                        {"type": "string"},
+                        {
+                            "type": "object",
+                            "required": ["id"],
+                            "additionalProperties": true,
+                            "properties": {
+                                "id": {"type": "string"},
+                                "name": {"type": "string"},
+                                "reason": {"type": "string"}
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    })
+}
+
+pub(crate) fn build_taint_cwe_select_prompt(
+    target: &Path,
+    inventory: &[(String, String)],
+) -> String {
+    let mut prompt = vec![
+        "Select the CWE classes that deserve IRIS-style taint analysis for this repository."
+            .to_string(),
+        format!("Target: {}", target.display()),
+        "Prefer source-to-sink classes such as injection, traversal, SSRF, deserialization, and unsafe code execution when the snippets support them.".to_string(),
+        String::new(),
+        "Repository inventory and snippets:".to_string(),
+    ];
+    if inventory.is_empty() {
+        prompt.push("(no readable source snippets found)".to_string());
+    }
+    for (path, snippet) in inventory {
+        prompt.push(format!("\n--- {path} ---\n{snippet}"));
+    }
+    prompt.join("\n")
+}
+
+pub(crate) fn build_taint_iris_prompt(
+    target: &Path,
+    cwes: &[TaintCweSelection],
+    inventory: &[(String, String)],
+    codeql_db: Option<&Path>,
+    options: &TaintIrisInput,
+) -> String {
+    let mut prompt = vec![
+        "Run bounded IRIS-style taint analysis over this repository.".to_string(),
+        format!("Target: {}", target.display()),
+        "Trace attacker-controlled sources to dangerous sinks. Use CodeQL reasoning where possible, but only report vulnerabilities supported by source evidence.".to_string(),
+        String::new(),
+        "CWE classes to analyze:".to_string(),
+    ];
+    for cwe in cwes {
+        prompt.push(format!("- {}: {} ({})", cwe.id, cwe.name, cwe.reason));
+    }
+    prompt.push(String::new());
+    match codeql_db {
+        Some(path) => prompt.push(format!(
+            "A CodeQL database appears to be available at {}. Generated query artifacts, if any, should stay under .kuzushi/runs/<run-id>/taint-iris.",
+            path.display()
+        )),
+        None => prompt.push(
+            "No CodeQL database was found under .kuzushi/codeql-db or .codeql/db; use grep/manual source tracing inside the target only."
+                .to_string(),
+        ),
+    }
+    if let Some(max_budget_usd) = options.max_budget_usd {
+        prompt.push(format!(
+            "Operator budget cap: ${max_budget_usd:.2}. Keep the analysis focused."
+        ));
+    }
+    if let Some(prompt_override) = options.prompt_override.as_deref() {
+        prompt.push(String::new());
+        prompt.push("Operator prompt override:".to_string());
+        prompt.push(prompt_override.to_string());
+    }
+    prompt.push(String::new());
+    prompt.push("Repository inventory and snippets:".to_string());
+    if inventory.is_empty() {
+        prompt.push("(no readable source snippets found)".to_string());
+    }
+    for (path, snippet) in inventory {
+        prompt.push(format!("\n--- {path} ---\n{snippet}"));
+    }
+    prompt.join("\n")
+}
+
+pub(crate) fn resolve_taint_codeql_db_path(
+    target: &Path,
+    workspace_root: Option<&Path>,
+) -> Option<PathBuf> {
+    let mut roots = vec![target.to_path_buf()];
+    if let Some(workspace_root) = workspace_root {
+        roots.push(workspace_root.to_path_buf());
+    }
+    roots.sort();
+    roots.dedup();
+    for root in roots {
+        for candidate in [
+            root.join(".kuzushi").join("codeql-db"),
+            root.join(".codeql").join("db"),
+        ] {
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}

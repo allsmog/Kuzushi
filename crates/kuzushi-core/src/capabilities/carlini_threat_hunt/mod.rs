@@ -7,49 +7,25 @@ use crate::proof::whitebox_policy::{
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
 use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 use crate::workspace::artifact_kb::ArtifactKnowledgePromptContext;
-pub(crate) use actors_from_document::*;
 use anyhow::{Context, Result};
-pub(crate) use build_actor_prompt::*;
-pub(crate) use capped_actor_hunts::*;
-pub(crate) use flows_for_actor::*;
-pub(crate) use normalize_findings::*;
-pub(crate) use output::*;
-pub(crate) use query_carlini_actor::*;
-pub(crate) use render_attachments::*;
-pub(crate) use resolve_target::*;
-pub(crate) use resolve_threat_actor_ids::*;
-pub(crate) use resolve_threat_model_document::*;
-pub(crate) use run_carlini_threat_hunt::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-pub(crate) use threat_search_text::*;
 use uuid::Uuid;
-mod actor_prompt_flows;
-mod actor_prompt_threats;
-mod actors_from_document;
-mod build_actor_fingerprint;
-mod build_actor_prompt;
-mod capped_actor_hunts;
-mod flows_for_actor;
-mod normalize_findings;
-mod output;
-mod query_carlini_actor;
-mod render_attachments;
-mod resolve_target;
-mod resolve_threat_actor_ids;
-mod resolve_threat_model_document;
-mod run_carlini_threat_hunt;
-mod threat_search_text;
-pub(in crate::capabilities::carlini_threat_hunt) use build_actor_fingerprint::*;
+
+mod adapters;
+mod application;
+mod domain;
 #[cfg(test)]
 mod query_carlini_actor_tests;
 #[cfg(test)]
 mod tests;
 
-pub use output::CarliniThreatHuntPersistedRun;
-pub use query_carlini_actor::CarliniThreatHuntReport;
-pub use run_carlini_threat_hunt::run_carlini_threat_hunt;
-pub use run_carlini_threat_hunt::run_carlini_threat_hunt_report;
+pub(crate) use adapters::*;
+pub(crate) use application::*;
+pub(crate) use domain::*;
+
+pub use application::{run_carlini_threat_hunt, run_carlini_threat_hunt_report};
+pub use domain::{CarliniThreatHuntPersistedRun, CarliniThreatHuntReport};

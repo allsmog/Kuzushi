@@ -6,7 +6,6 @@ mod parse_sast_severity_filter;
 use crate::findings::Severity;
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::fs;
 use std::path::{Path, PathBuf};
 mod string_input_any;
 #[cfg(test)]

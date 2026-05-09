@@ -1,11 +1,11 @@
 use super::target_or_default;
+use crate::application::findings::{finding_command, findings_command};
+use crate::application::permissions::permissions_command;
+use crate::application::pr_comment::pr_comment_command;
+use crate::application::runs::runs_command;
+use crate::application::suppressions::{suppress_command, suppressions_command};
 use crate::command::Command;
 use crate::doctor::doctor_command;
-use crate::findings::{finding_command, findings_command};
-use crate::permissions::permissions_command;
-use crate::pr_comment::pr_comment_command;
-use crate::runs::runs_command;
-use crate::suppressions::{suppress_command, suppressions_command};
 use anyhow::Result;
 use kuzushi_core::FindingListFilter;
 use std::path::PathBuf;

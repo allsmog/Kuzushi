@@ -93,32 +93,5 @@ pub(in crate::modules) fn optional_nonempty_string(
 }
 
 pub(in crate::modules) fn resolve_prompt_override(value: &str, cwd: &Path) -> Result<String> {
-    resolve_prompt_override_for_key(value, cwd, "TRIAGE_PROMPT")
-}
-
-pub(in crate::modules) fn resolve_prompt_override_for_key(
-    value: &str,
-    cwd: &Path,
-    key: &str,
-) -> Result<String> {
-    if !looks_like_prompt_path(value) {
-        return Ok(value.to_string());
-    }
-    let path = Path::new(value);
-    let path = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        cwd.join(path)
-    };
-    fs::read_to_string(&path)
-        .with_context(|| format!("Could not read {key} from {}", path.display()))
-}
-
-pub(in crate::modules) fn looks_like_prompt_path(value: &str) -> bool {
-    value.starts_with("./")
-        || value.starts_with("../")
-        || value.starts_with('/')
-        || value.ends_with(".md")
-        || value.ends_with(".txt")
-        || value.ends_with(".prompt")
+    crate::options::resolve_prompt_override_for_key(value, cwd, "TRIAGE_PROMPT")
 }

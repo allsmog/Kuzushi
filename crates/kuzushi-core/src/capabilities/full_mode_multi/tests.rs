@@ -3,8 +3,12 @@ mod tests {
     use super::super::*;
     use crate::agent_router::{AgentRouter, RoutedRuntime};
     use crate::config::ConfigPaths;
-    use crate::findings::TriageOutcome;
-    use crate::runtime::{AgentQueryResponse, AgentRuntime, TriageRequest};
+    use crate::findings::{Severity, TriageOutcome};
+    use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageRequest};
+    use crate::spend::{Operation, SpendLimiter};
+    use anyhow::Result;
+    use std::fs;
+    use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
 

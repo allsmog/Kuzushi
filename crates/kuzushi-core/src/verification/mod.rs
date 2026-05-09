@@ -59,6 +59,7 @@ pub(crate) use rust_source_appears_self_contained::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+pub(crate) mod adapters;
 pub mod application;
 mod classification;
 pub mod domain;

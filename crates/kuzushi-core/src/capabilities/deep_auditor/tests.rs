@@ -1,11 +1,15 @@
 #[cfg(test)]
 mod tests {
+    use super::super::application::{build_triage_outcome, parse_vuln_analysis};
     use super::super::*;
-    use crate::agent_router::{AgentRouter, RoutedRuntime};
-    use crate::findings::Severity;
+    use crate::agent_router::{AgentRole, AgentRouter, RoutedRuntime};
+    use crate::findings::{Finding, Severity, TriageOutcome, TriageVerdict};
     use crate::runtime::{
-        AgentLoopStep, AgentQueryRequest, AgentQueryResponse, ToolCall, TriageRequest,
+        AgentLoopOutcome, AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime,
+        AgentToolLoopRequest, LoopHistoryEntry, ToolCall, TriageRequest,
     };
+    use crate::spend::{Operation, SpendLimiter};
+    use anyhow::Result;
     use std::sync::{Arc, Mutex};
 
     /// Mock runtime that walks a scripted sequence of steps. Tests use it

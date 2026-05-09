@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod tests {
-    use super::super::build_actor_fingerprint::looks_like_prompt_path;
     use super::super::*;
     use crate::config::V2Config;
     use crate::modules::ToolExecutionContext;

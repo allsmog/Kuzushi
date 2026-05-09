@@ -8,12 +8,9 @@ use super::input::string_input_any;
 #[derive(Debug, Clone, Copy)]
 pub(super) struct PluginAdapterSpec<'a> {
     pub(super) tool_name: &'a str,
-    pub(super) tool_slug: &'static str,
     pub(super) package_name: &'static str,
     pub(super) env_var: &'static str,
     pub(super) install_hint: &'static str,
-    pub(super) prompt_title: &'static str,
-    pub(super) allow_skill_filter: bool,
 }
 
 pub(super) fn resolve_required_plugin_root(

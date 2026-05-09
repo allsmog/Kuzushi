@@ -1,5 +1,5 @@
 use super::*;
-use crate::capabilities::chrome_rce::{changed_files, collect_findings, hot_path_finding};
+use crate::capabilities::chrome_rce::{run_review_trigger, run_scan, ChromeRcePersistence};
 
 pub(in crate::modules) fn module() -> BuiltinModule {
     builtin_module(
@@ -57,51 +57,8 @@ const CHROME_RCE_HANDLERS: &[(&str, ChromeRceHandler)] = &[
 ];
 
 pub(in crate::modules) fn scan(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
-    let target = require_scan_target(&input, ctx)?;
-    scan_target(&target, ctx)
-}
-
-fn scan_target(target: &std::path::Path, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
-    let mut findings = Vec::new();
-    collect_findings(target, target, &mut findings)?;
-    let persisted = persist_tool_findings("chrome-rce", target, &findings, ctx)?;
-    Ok(scan_response(target, findings, persisted))
-}
-
-fn require_scan_target(
-    input: &Value,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<std::path::PathBuf> {
     let target = resolve_tool_target(&input, ctx)?;
-    if !target.is_dir() {
-        anyhow::bail!(
-            "chrome-rce:scan target is not a directory: {}",
-            target.display()
-        );
-    }
-    Ok(target)
-}
-
-fn scan_response(
-    target: &std::path::Path,
-    findings: Vec<crate::findings::Finding>,
-    persisted: impl serde::Serialize,
-) -> Value {
-    json!({
-        "ok": true,
-        "output": format!(
-            "chrome-rce:scan found {} finding{} under {}",
-            findings.len(),
-            if findings.len() == 1 { "" } else { "s" },
-            target.display()
-        ),
-        "data": {
-            "target": target.display().to_string(),
-            "count": findings.len(),
-            "findings": findings,
-            "persisted": persisted,
-        },
-    })
+    run_scan(&target, chrome_rce_persistence(ctx))
 }
 
 pub(in crate::modules) fn review_trigger(
@@ -109,70 +66,13 @@ pub(in crate::modules) fn review_trigger(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
-    review_trigger_for_target(&target, &input, ctx)
+    let diff_base = string_input_any(&input, &["diffBase", "diff_base"]);
+    run_review_trigger(&target, diff_base.as_deref(), chrome_rce_persistence(ctx))
 }
 
-fn review_trigger_for_target(
-    target: &std::path::Path,
-    input: &Value,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    let Some(diff_base) = string_input_any(&input, &["diffBase", "diff_base"]) else {
-        return Ok(skipped_review_response(&target));
-    };
-    review_trigger_with_diff_base(target, &diff_base, ctx)
-}
-
-fn review_trigger_with_diff_base(
-    target: &std::path::Path,
-    diff_base: &str,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    let changed = changed_files(target, diff_base)?;
-    let findings = changed
-        .iter()
-        .filter_map(|file| hot_path_finding(file))
-        .collect::<Vec<_>>();
-    let persisted = persist_tool_findings("chrome-rce", target, &findings, ctx)?;
-    Ok(review_response(
-        target, diff_base, changed, findings, persisted,
-    ))
-}
-
-fn skipped_review_response(target: &std::path::Path) -> Value {
-    json!({
-        "ok": true,
-        "output": "chrome-rce:review-trigger skipped: pass diffBase to enable PR hot-path review.",
-        "data": {
-            "target": target.display().to_string(),
-            "count": 0,
-            "findings": [],
-        },
-    })
-}
-
-fn review_response(
-    target: &std::path::Path,
-    diff_base: &str,
-    changed: Vec<String>,
-    findings: Vec<crate::findings::Finding>,
-    persisted: impl serde::Serialize,
-) -> Value {
-    json!({
-        "ok": true,
-        "output": format!(
-            "chrome-rce:review-trigger matched {} hot path{} vs {}",
-            findings.len(),
-            if findings.len() == 1 { "" } else { "s" },
-            diff_base
-        ),
-        "data": {
-            "target": target.display().to_string(),
-            "diffBase": diff_base,
-            "changedFiles": changed,
-            "count": findings.len(),
-            "findings": findings,
-            "persisted": persisted,
-        },
-    })
+fn chrome_rce_persistence<'ctx>(ctx: &ToolExecutionContext<'ctx>) -> ChromeRcePersistence<'ctx> {
+    ChromeRcePersistence {
+        workspace: ctx.workspace,
+        findings_store: ctx.findings_store,
+    }
 }
