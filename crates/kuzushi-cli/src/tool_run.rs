@@ -6,11 +6,12 @@ use anyhow::{Context, Result};
 use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::{
     append_run_trace_step, load_config_for_target, new_run_id, write_run_artifact_json,
-    write_run_summary, AgentRuntime, FindingStore, ModuleRegistry, RunSummary, RunTraceStep,
-    WorkspaceTarget,
+    write_run_summary, AgentRuntime, FindingStore, JsonlSink, ModuleRegistry, RunSummary,
+    RunTraceStep, TraceHandle, TraceSink, WorkspaceTarget,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 pub(crate) fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Result<()> {
     reject_shell_only_run_dot(&tool)?;
@@ -34,11 +35,23 @@ pub(crate) fn run_tool_command(tool: String, input: String, target: Option<PathB
     } else {
         None
     };
+    // Build a TraceHandle that writes producer-side trace events to the
+    // same trace.jsonl as the CLI framing. No mpsc receiver here (no UI is
+    // listening) — this is the file-only path. The dispatch wrapper still
+    // wraps the runtime in TracedRuntime so every LLM call is recorded.
+    let trace_handle = match (workspace.as_ref(), run_id.as_deref()) {
+        (Some(ws), Some(rid)) => {
+            let sink: Arc<dyn TraceSink> =
+                Arc::new(JsonlSink::new(ws.root().to_path_buf(), rid.to_string()));
+            Some(TraceHandle::new(sink))
+        }
+        _ => None,
+    };
     let ctx = ToolExecutionContext {
         config: &config,
         workspace: workspace.as_ref(),
         findings_store: store.as_ref(),
-        trace: None,
+        trace: trace_handle.as_ref(),
     };
     let result = registry.execute_tool_with_runtime(
         &tool,

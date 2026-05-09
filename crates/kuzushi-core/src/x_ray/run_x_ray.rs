@@ -19,6 +19,14 @@ pub(crate) fn run_x_ray(
             .emit();
     }
     let prompt = build_x_ray_prompt(&input);
+    // Phase scope so the x-ray agent's LLM call surfaces as a child of
+    // `inventory · agent-pass` in the feed.
+    let _agent_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step("reasoning", "run", "inventory · agent-pass")
+            .emit();
+        trace.parent_scope(phase)
+    });
     let content = query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
@@ -30,6 +38,7 @@ pub(crate) fn run_x_ray(
         StructuredJsonContract::new("x-ray:run", "XRayArtifactContent", x_ray_artifact_schema()),
         XRayArtifactContent::from_value_owned,
     )?;
+    drop(_agent_scope);
     write_x_ray_artifacts(&input.target, content)?;
 
     let data =

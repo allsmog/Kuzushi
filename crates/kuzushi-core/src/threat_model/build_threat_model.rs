@@ -32,6 +32,19 @@ pub(crate) fn build_threat_model(
     }
     let previous_model = load_persistent_threat_model(&input.target);
     let prompt = build_agent_prompt(&input, previous_model.as_ref())?;
+    // Phase scope so the threat-model agent's LLM round-trip surfaces under
+    // dfd-collect / stride-classify / actor-stories rather than as a loose
+    // top-level event.
+    let _llm_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step(
+                "reasoning",
+                verb,
+                "dfd-collect · stride-classify · actor-stories",
+            )
+            .emit();
+        trace.parent_scope(phase)
+    });
     let raw = query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
@@ -51,6 +64,7 @@ pub(crate) fn build_threat_model(
             Ok(raw)
         },
     )?;
+    drop(_llm_scope);
     let (document_candidate, bridge_findings) = extract_document_and_findings(raw)?;
     let document = normalize_document(document_candidate, &input.methodology)?;
     let document = apply_methodology(document, &input.methodology)?;

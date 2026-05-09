@@ -323,6 +323,51 @@ When adding a new producer module, follow the pattern in
 `crates/kuzushi-core/src/modules/agentic_sast/run_agentic_sast_report.rs::run_agentic_sast_report`
 (parent_step + child sub-steps).
 
+### Live Module Progress — auto-tracing every LLM call
+
+Producers don't have to manually log per-LLM-call events. The dispatch
+wrapper (`src/modules/registry/with_v2_builtins/execution.rs`) wraps the
+incoming `AgentRuntime` in a `TracedRuntime` (from
+`src/runtime/traced_runtime.rs`) whenever `ctx.trace.is_some()`. Every
+`runtime.query_blocking`, `next_step_blocking`,
+`triage_finding_blocking`, or `spawn_subagent_blocking` call auto-emits
+a `reasoning`/`tool-progress`/`done` step with `latency_ms` and
+`cost_usd` populated from the provider response.
+
+To group several LLM calls under a labelled phase header, wrap the
+LLM region with a `TraceHandle::parent_scope(n)` RAII guard:
+
+```rust
+let phase = ctx
+    .trace
+    .map(|t| t.step("reasoning", "run", "evidence-collect").emit());
+let _scope = match (ctx.trace, phase) {
+    (Some(trace), Some(parent)) => Some(trace.parent_scope(parent)),
+    _ => None,
+};
+// every runtime.query_blocking(...) inside this block now emits a
+// child step under `phase` in the right-pane feed
+let result = run_triage_stage2(store, runtime, &input, &config, kept)?;
+drop(_scope);
+```
+
+Canonical references: `triage:run`, `verify:finding`,
+`agentic-sast:scan`, `taint-iris:hunt`, `taint-iris-next:hunt`,
+`carlini-threat-hunt:run`, `patch:finding`, `threat-model:build`,
+`x-ray:run`, `run_plugin_finding_adapter`, `shinsa:scan`,
+`prompt-armor:*`.
+
+### Activity view auto-open
+
+`ShellApp.auto_open_activity` defaults to `true`. Both
+`start_background_tool` and `start_scan` set
+`shell_view = ShellView::Activity` when the toggle is on. Operators can
+opt out by exporting `KUZUSHI_AUTO_OPEN_ACTIVITY=false` before launching
+the shell — the value is read in `ShellApp::new`. The view honours
+independent pane scroll: `Tab` toggles focus between DAG/feed, `j`/`k`
+operates on the focused pane, and manually scrolling the feed pauses
+auto-tail until `p` (resume) or scroll-to-bottom.
+
 ### Plain And CI Output
 
 Plain output for the Rust shell belongs in `crates/kuzushi-tui/src/renderer/plain.rs`.

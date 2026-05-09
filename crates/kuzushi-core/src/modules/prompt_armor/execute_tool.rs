@@ -53,6 +53,14 @@ pub(in crate::modules) fn runtime_tool(
     ))?;
     let model = resolve_tool_model(tool_name, &input, ctx)?;
     let inventory = collect_agentic_repo_inventory(&target, 100, 4096)?;
+    // Phase scope so the prompt-armor LLM round-trip surfaces under
+    // `seed-gen · attack-loop · judge` in the feed.
+    let _attack_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step("reasoning", command, "seed-gen · attack-loop · judge")
+            .emit();
+        trace.parent_scope(phase)
+    });
     let raw = query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
@@ -64,6 +72,7 @@ pub(in crate::modules) fn runtime_tool(
         StructuredJsonContract::new(tool_name, "PromptArmorFindings", findings_schema()),
         require_json_object,
     )?;
+    drop(_attack_scope);
     let findings = normalize_agent_json_findings(raw, &target, "prompt-armor", 100)?;
     let persisted = persist_tool_findings("prompt-armor", &target, &findings, ctx)?;
     let output_dir = target.join(".prompt-armor");

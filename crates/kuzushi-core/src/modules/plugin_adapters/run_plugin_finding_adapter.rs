@@ -35,6 +35,15 @@ pub(in crate::modules) fn run_plugin_finding_adapter(
             .unwrap_or(50)
             .min(200);
     let inventory = collect_agentic_repo_inventory(&target, 100, 4096)?;
+    // Phase scope so the plugin's LLM round-trip surfaces under
+    // `skill-pick · audit-loop` (or seed-gen · attack-loop · judge for
+    // prompt-armor; similar shape for shinsa) in the feed.
+    let _audit_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step("reasoning", verb, "skill-pick · audit-loop")
+            .emit();
+        trace.parent_scope(phase)
+    });
     let raw = query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
@@ -49,6 +58,7 @@ pub(in crate::modules) fn run_plugin_finding_adapter(
         StructuredJsonContract::new(spec.tool_name, "PluginAdapterFindings", findings_schema()),
         require_json_object,
     )?;
+    drop(_audit_scope);
     let findings = normalize_agent_json_findings(raw, &target, spec.tool_slug, max_findings)?;
     let persisted = persist_tool_findings(spec.tool_slug, &target, &findings, ctx)?;
     if let Some(trace) = ctx.trace {
