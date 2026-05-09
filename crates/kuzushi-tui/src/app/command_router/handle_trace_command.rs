@@ -27,7 +27,12 @@ pub(crate) fn handle_activity_command(app: &mut ShellApp, command: &ShellCommand
                         .unwrap_or(0)
                 )
             });
-        app.activity = Some(ActivitySession::new(run_id));
+        let mut session = ActivitySession::new(run_id);
+        // Seed with all DAG-participating tasks so manual `/activity`
+        // openers see the same Queued layout the scan-mode auto-open
+        // produces.
+        session.seed_from_registry(&app.registry);
+        app.activity = Some(session);
     }
     app.shell_view = ShellView::Activity;
     app.log("activity", "live module-progress dashboard");

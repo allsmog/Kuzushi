@@ -42,6 +42,13 @@ pub fn run_variant_lift_pattern(
     let runtime = require_runtime("variant:lift-pattern", runtime)?;
     let model = require_model("variant:lift-pattern", &input, ctx)?;
     let prompt = build_variant_lift_prompt(&finding);
+    // Phase scope so the LLM call indents under `lift-pattern` in the feed.
+    let _llm_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step("reasoning", "lift-pattern", "lift-pattern")
+            .emit();
+        trace.parent_scope(phase)
+    });
     let signature = query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
@@ -53,6 +60,7 @@ pub fn run_variant_lift_pattern(
         StructuredJsonContract::new("variant:lift-pattern", "VariantSignature", object_schema()),
         require_json_object,
     )?;
+    drop(_llm_scope);
     let object = signature
         .as_object()
         .context("variant:lift-pattern output parse failed: expected a JSON object")?;

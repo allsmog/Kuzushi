@@ -186,8 +186,125 @@ fn pane_focus_routes_jk_to_focused_scroll_offset() {
     assert_eq!(session.feed_scroll, 7);
     assert_eq!(session.task_scroll, 3, "DAG must not move");
     assert!(
-        session.paused,
-        "manually scrolling the feed pauses auto-tail"
+        !session.feed_auto_tail,
+        "manually scrolling the feed unpins live auto-tail"
+    );
+    assert!(
+        !session.paused,
+        "manual scroll no longer flips paused (decoupled in R4.D)"
+    );
+}
+
+#[test]
+fn pause_toggle_preserves_pinned_feed_scroll() {
+    use kuzushi_tui::ActivitySession;
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.handle_command(ShellCommand::Activity);
+    let session: &mut ActivitySession = app.activity.as_mut().unwrap();
+    for i in 0..40 {
+        session.apply_step(
+            RunTraceStep::new(i, "tool", format!("event {i}"))
+                .with_module_id("triage")
+                .with_verb("run"),
+        );
+    }
+    session.pane_focus = kuzushi_tui::PaneFocus::Right;
+    drop(session);
+
+    // Operator scrolls up by 5 — pins position, unpins auto-tail.
+    app.scroll_down(5);
+    let session = app.activity.as_ref().unwrap();
+    assert_eq!(session.feed_scroll, 5);
+    assert!(!session.feed_auto_tail);
+
+    // Toggle pause on, then off — feed_scroll and feed_auto_tail must be
+    // preserved (R4.D contract).
+    let session = app.activity.as_mut().unwrap();
+    session.toggle_paused();
+    session.toggle_paused();
+    assert_eq!(
+        session.feed_scroll, 5,
+        "pause toggle must not reset pinned position"
+    );
+    assert!(
+        !session.feed_auto_tail,
+        "pause toggle must not re-engage auto-tail"
+    );
+
+    // G (scroll-to-bottom) restores auto-tail.
+    drop(session);
+    app.scroll_to_bottom();
+    let session = app.activity.as_ref().unwrap();
+    assert!(
+        session.feed_auto_tail,
+        "G should reset live auto-tail"
+    );
+}
+
+#[test]
+fn seed_from_registry_pre_populates_dag_pane() {
+    use kuzushi_core::ModuleRegistry;
+    use kuzushi_tui::ActivitySession;
+    let registry = ModuleRegistry::with_v2_builtins();
+    let mut session = ActivitySession::new("scan-pending");
+    assert!(session.tasks.is_empty());
+
+    session.seed_from_registry(&registry);
+
+    assert!(
+        !session.tasks.is_empty(),
+        "registry seed should produce queued rows"
+    );
+    // Spot-check a known DAG node.
+    assert!(
+        session.tasks.contains_key("context:build"),
+        "context:build should be in the seeded tasks: {:?}",
+        session.tasks.keys().collect::<Vec<_>>()
+    );
+    // Hidden modules should not produce rows but should bump the
+    // subsystem aggregate's queued total.
+    assert!(
+        !session.tasks.keys().any(|k| k.starts_with("pipeline:")),
+        "hidden pipeline:* nodes should not get DAG rows"
+    );
+    assert!(
+        session.subsystem_aggregate.total_count > 0,
+        "hidden module count should land in subsystem aggregate"
+    );
+}
+
+#[test]
+fn cancel_hotkey_in_activity_emits_visible_signal() {
+    use kuzushi_tui::{ShellApp, ShellCommand, ShellView};
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.handle_command(ShellCommand::RunTool {
+        tool: Some("findings:list".to_string()),
+        input: None,
+    });
+    assert!(matches!(app.shell_view, ShellView::Activity));
+
+    // Press 'c' on the Activity view.
+    app.handle_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('c'),
+        crossterm::event::KeyModifiers::empty(),
+    ));
+
+    // The hotkey is wired iff one of the cancel paths logs:
+    //   - tool path: "abort requested" (request_tool_abort)
+    //   - scan path: "abort requested" (request_scan_abort)
+    //   - no-op fallback: "no running tool or scan to cancel"
+    let log_has_signal = app.log.iter().any(|line| {
+        line.body.contains("abort requested")
+            || line.body.contains("no running tool or scan")
+    });
+    assert!(
+        log_has_signal,
+        "c hotkey should produce a visible signal in the transcript; \
+         got log: {:?}",
+        app.log
+            .iter()
+            .map(|l| format!("{}: {}", l.prefix, l.body))
+            .collect::<Vec<_>>()
     );
 }
 

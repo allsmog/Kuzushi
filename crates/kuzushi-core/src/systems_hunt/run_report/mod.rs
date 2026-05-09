@@ -18,6 +18,14 @@ pub fn run_systems_hunt_report(
     let runtime = required_systems_runtime(runtime, "systems-hunt")?;
     let model = resolve_model("systems-hunt", input, ctx, &options)?;
     let agent_tool_policy = agent_tool_policy_for_input(input)?;
+    // Phase scope: invariants + triggers + final hunt are three sequential
+    // LLM rounds; group them under a single header in the verbose feed.
+    let _llm_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step("reasoning", "systems-hunt", "invariants · triggers · hunt")
+            .emit();
+        trace.parent_scope(phase)
+    });
     let raw = query_systems_hunt_findings(
         runtime,
         &model,
@@ -26,6 +34,7 @@ pub fn run_systems_hunt_report(
         &options,
         agent_tool_policy,
     )?;
+    drop(_llm_scope);
     finalize_systems_hunt_report(raw, input, ctx, &target, &context, &options)
 }
 

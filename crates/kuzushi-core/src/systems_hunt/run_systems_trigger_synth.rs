@@ -16,6 +16,14 @@ pub(crate) fn run_systems_trigger_synth(
     let runtime = required_systems_runtime(runtime, "systems-hunt:systems-trigger-synth")?;
     let model = resolve_model("systems-hunt:systems-trigger-synth", input, ctx, &options)?;
     let agent_tool_policy = agent_tool_policy_for_input(input)?;
+    // Phase scope so the invariant + trigger LLM rounds appear under
+    // `trigger-synth` when the verbose toggle reveals hidden modules.
+    let _llm_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step("reasoning", "systems-trigger-synth", "invariant + trigger synthesis")
+            .emit();
+        trace.parent_scope(phase)
+    });
     let invariant_output = systems_invariants_from_input_or_query(
         input,
         runtime,
