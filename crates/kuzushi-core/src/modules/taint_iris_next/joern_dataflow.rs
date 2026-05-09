@@ -117,12 +117,14 @@ pub(in crate::modules) fn run_joern_flows(
     std::fs::write(queries_file.path(), &queries)
         .context("could not write joern queries tempfile")?;
 
-    // Default: no wall-clock timeout. `reachableByFlows` is exponential
-    // in the worst case but the in-script caps (200 sources / 200 sinks
-    // / 25 flows per CWE) bound the work to something tractable on
-    // realistic CPGs. Operators who explicitly want a deadline set
-    // KUZUSHI_JOERN_TIMEOUT_SECS to a positive number; 0 (the default)
-    // means "wait forever".
+    // Two-level timeout strategy. The script-level
+    // KUZUSHI_JOERN_TIMEOUT_SECS bounds the whole joern invocation
+    // (default 0 = wait forever). The script itself enforces a
+    // per-CWE budget via KUZUSHI_JOERN_PER_CWE_TIMEOUT_MS (default
+    // 60000ms) so one catastrophically broad CWE pattern doesn't
+    // deadlock the hunt; that env var is read by the Scala script
+    // and propagates naturally through `Command::env_clear`-free
+    // spawn below.
     let timeout_secs: u64 = std::env::var("KUZUSHI_JOERN_TIMEOUT_SECS")
         .ok()
         .and_then(|s| s.parse().ok())

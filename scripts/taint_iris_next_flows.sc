@@ -29,6 +29,7 @@ import io.shiftleft.semanticcpg.language._
 import io.shiftleft.codepropertygraph.generated.nodes.Call
 import io.joern.dataflowengineoss.language._
 import scala.util.Try
+import java.util.concurrent.{Callable, Executors, TimeUnit, TimeoutException}
 
 @main def main(cpgFile: String, queriesFile: String): Unit = {
   importCpg(cpgFile)
@@ -50,17 +51,55 @@ import scala.util.Try
   val maxSourcesPerCwe = 200
   val maxSinksPerCwe = 200
   val maxFlowsPerCwe = 25
-  for (q <- queries) {
-    val sources = Try(cpg.call.code(q.sourceRegex).take(maxSourcesPerCwe).l).getOrElse(Nil)
-    val sinks = Try(cpg.call.code(q.sinkRegex).take(maxSinksPerCwe).l).getOrElse(Nil)
-    System.err.println(s"[taint-iris-next] ${q.cwe}: ${sources.size} sources (capped at $maxSourcesPerCwe), ${sinks.size} sinks (capped at $maxSinksPerCwe)")
-    if (sources.nonEmpty && sinks.nonEmpty) {
-      val flows = Try(sinks.reachableByFlows(sources).take(maxFlowsPerCwe).l).getOrElse(Nil)
-      System.err.println(s"[taint-iris-next] ${q.cwe}: ${flows.size} flows")
-      for (flow <- flows) {
-        emitFlow(q, flow)
+  // Per-CWE wall-clock budget. `reachableByFlows` is exponential and one
+  // catastrophically broad CWE pattern (CWE-209 `ereport`, CWE-416
+  // `palloc`/`pfree`) can deadlock the entire script even with the
+  // size caps above. Default 60s; operators set
+  // KUZUSHI_JOERN_PER_CWE_TIMEOUT_MS=<N> to widen or 0 to disable
+  // (use 0 with caution — a single hang locks the whole hunt).
+  val perCweTimeoutMs: Long = Option(System.getenv("KUZUSHI_JOERN_PER_CWE_TIMEOUT_MS"))
+    .flatMap(s => Try(s.toLong).toOption)
+    .getOrElse(60000L)
+  // One reusable single-thread executor. We can't reliably interrupt
+  // joern's iterator-based traversals (Thread.interrupted() isn't
+  // checked inside `reachableByFlows`), so a cancelled task may keep
+  // running in the background; bounding to one thread caps peak
+  // memory pressure at one zombie task.
+  val executor = Executors.newSingleThreadExecutor()
+  try {
+    for (q <- queries) {
+      val sources = Try(cpg.call.code(q.sourceRegex).take(maxSourcesPerCwe).l).getOrElse(Nil)
+      val sinks = Try(cpg.call.code(q.sinkRegex).take(maxSinksPerCwe).l).getOrElse(Nil)
+      System.err.println(s"[taint-iris-next] ${q.cwe}: ${sources.size} sources (capped at $maxSourcesPerCwe), ${sinks.size} sinks (capped at $maxSinksPerCwe)")
+      if (sources.nonEmpty && sinks.nonEmpty) {
+        val task: Callable[List[io.joern.dataflowengineoss.language.Path]] = () =>
+          sinks.reachableByFlows(sources).take(maxFlowsPerCwe).l
+        val future = executor.submit(task)
+        val flowsOpt =
+          if (perCweTimeoutMs <= 0L) Try(future.get()).toOption
+          else
+            try Some(future.get(perCweTimeoutMs, TimeUnit.MILLISECONDS))
+            catch {
+              case _: TimeoutException =>
+                future.cancel(true)
+                System.err.println(s"[taint-iris-next] ${q.cwe}: TIMEOUT after ${perCweTimeoutMs}ms with ${sources.size} sources x ${sinks.size} sinks; skipping")
+                None
+              case t: Throwable =>
+                System.err.println(s"[taint-iris-next] ${q.cwe}: ERROR ${t.getClass.getSimpleName}: ${t.getMessage}; skipping")
+                None
+            }
+        val flows = flowsOpt.getOrElse(Nil)
+        System.err.println(s"[taint-iris-next] ${q.cwe}: ${flows.size} flows")
+        for (flow <- flows) {
+          emitFlow(q, flow)
+        }
       }
     }
+  } finally {
+    // shutdownNow returns Runnables that were queued but never started; we
+    // don't run them. The currently-executing task is interrupted but may
+    // not honor it — that's why we restrict to one worker.
+    executor.shutdownNow()
   }
 }
 
