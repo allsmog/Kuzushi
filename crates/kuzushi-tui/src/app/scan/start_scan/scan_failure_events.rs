@@ -13,6 +13,30 @@ impl ShellApp {
             scan.abort_requested = false;
             scan.error = Some(actionable.clone());
         }
+        // Mark every Active row as Failing so the dashboard reflects the
+        // scan-wide failure visually. We do NOT emit a synthetic
+        // `scan:run` row here because the per-scanner rows already show
+        // the failure; an extra row would just clutter the DAG pane.
+        // Push one feed event with no module_id so it lands without
+        // creating a new task entry.
+        if let Some(session) = self.activity.as_mut() {
+            let now = std::time::Instant::now();
+            for row in session.tasks.values_mut() {
+                if matches!(row.state, crate::app::DagTaskState::Active) {
+                    row.state = crate::app::DagTaskState::Failing;
+                    row.completed_at = Some(now);
+                    row.severity = Some("danger".to_string());
+                    row.last_label = "scan failed".to_string();
+                }
+            }
+            // No module_id / verb -> apply_step's
+            // `if let Some(verb) = step.verb` branch is skipped, so no
+            // task row is minted; the event still lands in the feed.
+            session.apply_step(
+                kuzushi_core::RunTraceStep::new(0, "refused", "scan failed")
+                    .with_severity("danger"),
+            );
+        }
         if let Some(run_id) = &run_id {
             append_trace_step(
                 self.target.as_deref(),

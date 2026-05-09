@@ -3214,6 +3214,8 @@ fn key_event_for_trigger(trigger: HotkeyTrigger) -> KeyEvent {
     let code = match trigger {
         HotkeyTrigger::Char(ch) => KeyCode::Char(ch),
         HotkeyTrigger::Enter => KeyCode::Enter,
+        HotkeyTrigger::Tab => KeyCode::Tab,
+        HotkeyTrigger::Esc => KeyCode::Esc,
         HotkeyTrigger::PageUp => KeyCode::PageUp,
         HotkeyTrigger::PageDown => KeyCode::PageDown,
         HotkeyTrigger::Up => KeyCode::Up,

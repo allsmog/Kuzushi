@@ -125,8 +125,24 @@ impl ActivitySession {
     /// Apply one trace step, updating the matching DAG row (or the subsystem
     /// aggregate for hidden modules) and pushing the event onto the ring
     /// buffer. Hidden modules are routed via `is_hidden_module_id`.
+    ///
+    /// Row mutation rules:
+    /// - `kind == "tool"` and `kind == "done"` (or `"tool-complete"`) update
+    ///   the matching DAG row and may mint a new row if the seeded topology
+    ///   doesn't already contain it (rare: only happens when a producer
+    ///   emits a tool boundary outside the registry).
+    /// - All other kinds (`reasoning`, `tool-progress`, `tool-start`,
+    ///   `refused` without module_id, etc.) are sub-step events that flow
+    ///   into the right-pane feed but never create a new DAG row. This
+    ///   keeps `TracedRuntime`'s per-LLM emissions from cluttering the
+    ///   left pane with phantom `<module>:query` / `<module>:next-step`
+    ///   rows that never finish.
     pub fn apply_step(&mut self, step: RunTraceStep) {
         let module_id = step.module_id.as_deref().unwrap_or("").to_string();
+        let mints_row = matches!(
+            step.kind.as_str(),
+            "tool" | "done" | "tool-complete" | "refused"
+        );
         if !module_id.is_empty() && is_hidden_module_id(&module_id) {
             self.subsystem_aggregate.active_count = self
                 .subsystem_aggregate
@@ -139,32 +155,42 @@ impl ActivitySession {
             self.subsystem_aggregate.last_label = step.label.clone();
         } else if let Some(verb) = step.verb.as_deref() {
             let task_id = format!("{module_id}:{verb}");
-            let row = self
-                .tasks
-                .entry(task_id.clone())
-                .or_insert_with(|| DagTaskRow::queued(task_id.clone(), module_id.clone(), Vec::new()));
-            row.steps_done = row.steps_done.saturating_add(1);
-            row.last_label = step.label.clone();
-            if let Some(cost) = step.cost_usd {
-                row.cost_usd += cost;
-            }
-            row.severity = step.severity.clone();
-            // Severity-aware state transition. "danger" pushes Failing; other
-            // first-step events flip Queued -> Active. A step labelled "done"
-            // (kind == "done" or "tool-complete") promotes Active -> Done.
-            row.state = match (step.severity.as_deref(), step.kind.as_str(), row.state) {
-                (Some("danger"), _, _) => DagTaskState::Failing,
-                (_, "done" | "tool-complete", _) => DagTaskState::Done,
-                (_, _, DagTaskState::Queued) => DagTaskState::Active,
-                (_, _, current) => current,
+            // Only `tool`/`done`/`tool-complete`/`refused` events mint new
+            // rows. Sub-step events (reasoning/tool-progress) update an
+            // existing row's last_label/steps_done if one exists, otherwise
+            // skip the row update entirely.
+            let row = if mints_row {
+                Some(
+                    self.tasks
+                        .entry(task_id.clone())
+                        .or_insert_with(|| {
+                            DagTaskRow::queued(task_id.clone(), module_id.clone(), Vec::new())
+                        }),
+                )
+            } else {
+                self.tasks.get_mut(&task_id)
             };
-            if row.started_at.is_none() {
-                row.started_at = Some(Instant::now());
-            }
-            if matches!(row.state, DagTaskState::Done | DagTaskState::Failing)
-                && row.completed_at.is_none()
-            {
-                row.completed_at = Some(Instant::now());
+            if let Some(row) = row {
+                row.steps_done = row.steps_done.saturating_add(1);
+                row.last_label = step.label.clone();
+                if let Some(cost) = step.cost_usd {
+                    row.cost_usd += cost;
+                }
+                row.severity = step.severity.clone();
+                row.state = match (step.severity.as_deref(), step.kind.as_str(), row.state) {
+                    (Some("danger"), _, _) => DagTaskState::Failing,
+                    (_, "done" | "tool-complete", _) => DagTaskState::Done,
+                    (_, _, DagTaskState::Queued) => DagTaskState::Active,
+                    (_, _, current) => current,
+                };
+                if row.started_at.is_none() {
+                    row.started_at = Some(Instant::now());
+                }
+                if matches!(row.state, DagTaskState::Done | DagTaskState::Failing)
+                    && row.completed_at.is_none()
+                {
+                    row.completed_at = Some(Instant::now());
+                }
             }
         }
 

@@ -30,6 +30,18 @@ impl ShellApp {
             scan.abort_requested = false;
             scan.error = None;
         }
+        // Promote any still-Active row to Done; queued rows that never
+        // ran (e.g. scanners that weren't enabled) stay Queued so the
+        // operator can see what was skipped.
+        if let Some(session) = self.activity.as_mut() {
+            let now = std::time::Instant::now();
+            for row in session.tasks.values_mut() {
+                if matches!(row.state, crate::app::DagTaskState::Active) {
+                    row.state = crate::app::DagTaskState::Done;
+                    row.completed_at = Some(now);
+                }
+            }
+        }
         let target_label = self.scan_target_label();
         append_trace_step(
             self.target.as_deref(),
