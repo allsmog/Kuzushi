@@ -73,13 +73,18 @@ pub(in crate::modules) fn run_taint_iris_next_hunt(
 ) -> Result<TaintIrisNextReport> {
     let runtime = require_taint_iris_next_runtime(runtime)?;
     let model = require_taint_iris_next_model(input, ctx)?;
+    // taint-iris-next always opts the policy into the kuzushi MCP-as-agent
+    // surface (tree-sitter / joern / codeql). The bridge still respects the
+    // KUZUSHI_AGENT_MCPS env override for ad-hoc runs of other modules,
+    // but here we don't want the operator to have to remember to set it.
+    let agent_tool_policy = agent_tool_policy_for_input(input)?.with_mcps(true);
     let mut agent = run_taint_iris_next_agent(
         &plan,
         &evidence,
         &agent_prompt,
         runtime,
         &model,
-        agent_tool_policy_for_input(input)?,
+        agent_tool_policy,
     )?;
     let mut findings = agent.findings.clone();
     if whitebox_static_profile_requested(input)? {
