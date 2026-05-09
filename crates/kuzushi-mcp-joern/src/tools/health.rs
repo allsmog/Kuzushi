@@ -1,5 +1,6 @@
 use kuzushi_mcp_common::doctor::{probe_all, HealthSummary};
 use serde_json::{json, Value};
+use std::path::PathBuf;
 use std::time::Duration;
 
 pub(crate) const PROBES: &[(&str, &[&str])] = &[
@@ -8,34 +9,44 @@ pub(crate) const PROBES: &[(&str, &[&str])] = &[
     ("java", &["-version"]),
 ];
 
+/// Slow + thorough: actually invokes `joern --version` etc. and
+/// reports versions. Used by the standalone `kuzushi-mcp-joern --health`
+/// CLI mode where startup latency is acceptable.
 pub async fn health_summary() -> HealthSummary {
     probe_all(PROBES).await
 }
 
-/// Health response for the `joern.health` MCP tool. Combines the
-/// binary-availability probes above with a live HTTP probe of the
-/// joern REST server. Without the HTTP probe the tool used to claim
-/// `ready: true` whenever the binaries existed, even when no server
-/// was running — and the agent would dutifully call `joern.taint_paths`
-/// only to get back `joern --server unreachable`.
+/// Fast health for the `joern.health` MCP tool. The previous
+/// implementation called `probe_all` which subprocess-execs each
+/// binary with `--version`; on cold disk that's a JVM warm-up per
+/// probe (~30s for `joern --version`) and tripped the agent's
+/// per-tool timeout. The agent only needs three things to make a
+/// decision: are the binaries on PATH, is a server already up, will
+/// auto-spawn cover the gap. Resolve the first via PATH lookup
+/// (microseconds), the second via a single 2s HTTP probe, and answer
+/// the third with a static note. Operators who want full version
+/// strings can still run `kuzushi-mcp-joern --health` from the CLI.
 pub async fn extended_health() -> Value {
-    let summary = health_summary().await;
     let configured_url =
         std::env::var("JOERN_SERVER_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
     let server_running = probe_server(&configured_url).await;
-    let mut out = serde_json::to_value(&summary).unwrap_or(json!({}));
-    if let Some(map) = out.as_object_mut() {
-        map.insert("joernServerUrl".into(), json!(configured_url));
-        map.insert("joernServerRunning".into(), json!(server_running));
-        map.insert(
-            "autoSpawn".into(),
-            json!(
-                "Will be auto-spawned on first taint/query call if not reachable. \
-                 Set KUZUSHI_JOERN_CPG=<path-to-cpg.bin> to importCpg the project."
-            ),
-        );
-    }
-    out
+    let joern_path = which_on_path("joern");
+    let joern_parse_path = which_on_path("joern-parse");
+    let java_path = which_on_path("java");
+    let cpg_hint = std::env::var("KUZUSHI_JOERN_CPG").ok();
+    let ready = joern_path.is_some() || joern_parse_path.is_some();
+    json!({
+        "ready": ready,
+        "binaries": {
+            "joern": joern_path.as_ref().map(|p| p.display().to_string()),
+            "joernParse": joern_parse_path.as_ref().map(|p| p.display().to_string()),
+            "java": java_path.as_ref().map(|p| p.display().to_string()),
+        },
+        "joernServerUrl": configured_url,
+        "joernServerRunning": server_running,
+        "kuzushiJoernCpg": cpg_hint,
+        "autoSpawn": "Will be auto-spawned on first taint/query call if no server is running. Set KUZUSHI_JOERN_CPG=<path-to-cpg.bin> to importCpg the project at spawn time."
+    })
 }
 
 async fn probe_server(url: &str) -> bool {
@@ -46,4 +57,27 @@ async fn probe_server(url: &str) -> bool {
         return false;
     };
     matches!(client.get(url).send().await, Ok(_))
+}
+
+fn which_on_path(name: &str) -> Option<PathBuf> {
+    if let Some(env_path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&env_path) {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    for hardcoded in [
+        format!("/opt/joern/joern-cli/{name}"),
+        format!("/opt/joern/joern-cli/bin/{name}"),
+        format!("/usr/local/bin/{name}"),
+        format!("/usr/bin/{name}"),
+    ] {
+        let p = PathBuf::from(hardcoded);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
 }
