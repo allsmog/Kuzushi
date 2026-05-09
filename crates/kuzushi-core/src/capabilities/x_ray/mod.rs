@@ -1,34 +1,12 @@
-use crate::modules::ToolExecutionContext;
-use crate::runtime::{AgentQueryRequest, AgentRuntime};
-use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
-use crate::workspace::artifact_kb::ArtifactKnowledgePromptContext;
-use anyhow::{Context, Result};
-pub(crate) use execute_x_ray_tool::*;
-pub(crate) use from_value_owned::*;
-pub(crate) use parse_entry_point_summary_counts::*;
-pub(crate) use parse_run_input::*;
-pub(crate) use parse_verdict::*;
-pub(crate) use run_x_ray::*;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use std::collections::BTreeSet;
-use std::fs;
-use std::path::{Path, PathBuf};
-mod execute_x_ray_tool;
-mod from_value_owned;
-mod is_likely_entry_label;
-mod parse_entry_point_summary_counts;
-mod parse_run_input;
-mod parse_verdict;
-mod run_x_ray;
-pub(in crate::capabilities::x_ray) use is_likely_entry_label::*;
+mod adapters;
+mod application;
+mod domain;
+
 #[cfg(test)]
 mod tests;
 
-pub use execute_x_ray_tool::execute_x_ray_tool;
-pub use execute_x_ray_tool::XRayArtifactPaths;
-pub use execute_x_ray_tool::XRayEntryPointCounts;
-pub use execute_x_ray_tool::XRayInvariantCounts;
-pub use execute_x_ray_tool::XRayReportData;
-pub use execute_x_ray_tool::XRayVerdict;
-pub use run_x_ray::read_x_ray_report_artifacts;
+pub use adapters::execute_x_ray_tool;
+pub use application::read_x_ray_report_artifacts;
+pub use domain::{
+    XRayArtifactPaths, XRayEntryPointCounts, XRayInvariantCounts, XRayReportData, XRayVerdict,
+};

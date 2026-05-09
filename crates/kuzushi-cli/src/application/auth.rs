@@ -1,5 +1,5 @@
 #![allow(unused_imports)]
 
-pub(crate) use crate::auth_bridge::*;
-pub(crate) use crate::auth_oauth::*;
-pub(crate) use crate::auth_ping::*;
+pub(crate) use crate::adapters::auth_bridge::*;
+pub(crate) use crate::adapters::auth_oauth::*;
+pub(crate) use crate::adapters::auth_ping::*;

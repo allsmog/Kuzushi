@@ -1,7 +1,7 @@
+use crate::application::scan::scan_command;
 use crate::command::Command;
 use crate::mcp::mcp_command;
-use crate::scan::scan_command;
-use crate::terminal::{shell_startup_progress_messages, should_emit_shell_startup_progress};
+use crate::presentation::{shell_startup_progress_messages, should_emit_shell_startup_progress};
 use anyhow::{Context, Result};
 use kuzushi_core::{load_config_for_target, WorkspaceTarget};
 use kuzushi_tui::run_shell_with_plain;

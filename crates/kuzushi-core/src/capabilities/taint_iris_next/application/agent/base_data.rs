@@ -1,0 +1,40 @@
+use super::*;
+
+pub(in crate::capabilities::taint_iris_next) fn taint_iris_next_base_data(
+    plan: &TaintIrisNextPlan,
+    evidence: &TaintIrisNextEvidenceResult,
+    status: &str,
+    agent_prompt: &str,
+) -> Value {
+    json!({
+        "status": status,
+        "attribution": "IRIS-inspired adaptation; not the original IRIS implementation.",
+        "references": ["IRIS: LLM-Assisted Static Analysis for Detecting Security Vulnerabilities"],
+        "target": plan.target.display().to_string(),
+        "mode": plan.mode.as_str(),
+        "backend": plan.backend,
+        "caps": plan.caps,
+        "maxBudgetUsd": plan.max_budget_usd,
+        "languages": plan.languages,
+        "contextStatus": plan.context_status,
+        "threatModelStatus": plan.threat_model_status,
+        "repoContext": plan.repo_context.clone(),
+        "threatModel": plan.threat_model.clone(),
+        "cweCatalog": plan.catalog,
+        "promptCatalog": plan.prompt_catalog,
+        "structuralQueries": plan.structural_queries,
+        "evidence": evidence.evidence,
+        "candidates": evidence.candidates,
+        "linkedStories": evidence.linked_stories,
+        "labeledSpecs": evidence.labeled_specs,
+        "outcome": evidence.outcome,
+        "candidateCounts": evidence.candidate_counts,
+        "labeledSpecCounts": evidence.labeled_spec_counts,
+        "linkedStoryCount": evidence.linked_story_count,
+        "backendPathCount": evidence.backend_path_count,
+        "structuralEngine": evidence.structural_engine,
+        "triageSummary": evidence.triage_summary,
+        "evidenceResult": evidence,
+        "agentPrompt": agent_prompt,
+    })
+}

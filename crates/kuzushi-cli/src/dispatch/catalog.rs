@@ -1,7 +1,7 @@
-use crate::auth_ping::auth_command;
-use crate::catalog_commands::{modules_command, tools_command};
+use crate::application::auth::auth_command;
+use crate::application::catalog::{modules_command, tools_command};
+use crate::application::config::config_command;
 use crate::command::Command;
-use crate::config_commands::config_command;
 use anyhow::Result;
 use std::path::PathBuf;
 

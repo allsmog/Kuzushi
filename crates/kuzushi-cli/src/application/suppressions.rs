@@ -1,4 +1,4 @@
-use crate::findings::resolve_persisted_finding;
+use crate::application::findings::resolve_persisted_finding;
 use anyhow::Result;
 use kuzushi_core::{
     build_whitebox_suppression_for_finding, load_whitebox_suppressions,

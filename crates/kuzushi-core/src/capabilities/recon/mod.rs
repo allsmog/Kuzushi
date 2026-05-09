@@ -1,53 +1,24 @@
-use crate::modules::ToolExecutionContext;
-use crate::scan::ScanCancellation;
-use crate::workspace::WorkspaceTarget;
-use anyhow::{Context, Result};
-pub(crate) use from_input::*;
-pub(crate) use from_input_3::*;
-pub(crate) use host_from_url::*;
-pub(crate) use infer_http_technologies::*;
-pub(crate) use parse_nmap_grepable::*;
-pub(crate) use parse_wayback_subdomains::*;
-pub(crate) use recon_host::*;
-pub(crate) use row_to_host::*;
-pub(crate) use run_recon_http_fingerprint::*;
-pub(crate) use run_recon_nmap::*;
-pub(crate) use run_recon_subdomain::*;
-use rusqlite::{params, Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::io::Read;
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
-use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
-use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-pub(crate) use subdomain_http_inputs::*;
-use uuid::Uuid;
-pub(crate) use wait_for_process::*;
-mod from_input;
-mod from_input_3;
-mod host_from_url;
-mod infer_http_technologies;
-mod open;
-mod output;
-mod parse_nmap_grepable;
-mod parse_wayback_subdomains;
-mod recon_host;
-mod row_to_host;
-mod run_recon_http_fingerprint;
-mod run_recon_nmap;
-mod run_recon_subdomain;
-mod subdomain_http_inputs;
+mod adapters;
+mod application;
+mod domain;
+mod persistence;
+
+pub use adapters::execute_recon_tool;
+pub use domain::{ReconHost, ReconNote, ReconService};
+pub use persistence::ReconWorkspaceStore;
+
+#[cfg(test)]
+pub(crate) use adapters::{ReconHttpFingerprinter, ReconNmapScanner};
+#[cfg(test)]
+pub(crate) use domain::{
+    parse_crtsh_subdomains, parse_http_fingerprint, parse_nmap_grepable, parse_wayback_subdomains,
+};
+#[cfg(test)]
+pub(crate) use serde_json::Value;
+#[cfg(test)]
+pub(crate) use std::path::Path;
+#[cfg(test)]
+pub(crate) use {crate::scan::ScanCancellation, crate::workspace::WorkspaceTarget};
+
 #[cfg(test)]
 mod tests;
-mod wait_for_process;
-
-pub use infer_http_technologies::ReconWorkspaceStore;
-pub use output::execute_recon_tool;
-pub use recon_host::ReconHost;
-pub use recon_host::ReconNote;
-pub use recon_host::ReconService;

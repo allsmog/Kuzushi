@@ -3,8 +3,10 @@ mod tests {
     use super::super::*;
     use crate::agent_router::{AgentRouter, RoutedRuntime};
     use crate::config::ConfigPaths;
-    use crate::findings::Severity;
-    use crate::runtime::{AgentQueryResponse, TriageRequest};
+    use crate::findings::{Finding, Severity, TriageOutcome, TriageVerdict};
+    use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageRequest};
+    use anyhow::Result;
+    use std::path::Path;
     use std::sync::Arc;
 
     /// Mock runtime that returns a canned classifier score for every query.

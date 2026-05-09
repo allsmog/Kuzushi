@@ -11,103 +11,28 @@ pub(in crate::modules) fn run_verify_finding(
     let store = ctx
         .findings_store
         .context("verify:finding requires a findings store for the active workspace")?;
-    let input = VerifyFindingInput::from_tool_input(&input, workspace.root())?;
-    let Some(finding) = store.get_finding_by_reference(&input.fingerprint)? else {
-        return Ok(json!({
-            "ok": false,
-            "output": format!("[-] No finding with fingerprint '{}'.", input.fingerprint),
-        }));
-    };
-    let Some(triage) = finding.triage.clone() else {
-        return Ok(json!({
-            "ok": false,
-            "output": format!(
-                "[-] Finding '{}' has no triage verdict. Run triage:run first.",
-                finding.fingerprint
-            ),
-        }));
-    };
-    let runtime = runtime.context(
-        "verify:finding requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
-    )?;
-    let model =
-        crate::runtime::require_configured_model("verify:finding", ctx.config.model.as_deref())?;
 
-    let prompt = build_verify_prompt(&finding, &triage, input.prompt_template.as_deref())?;
-    let result = query_required_structured_json(
-        runtime,
-        AgentQueryRequest::new(
-            model,
-            workspace.root().to_path_buf(),
-            VERIFY_SYSTEM_PROMPT.to_string(),
-            prompt,
-        ),
-        StructuredJsonContract::new(
-            "verify:finding",
-            "VerificationResult",
-            verification_result_schema(),
-        ),
-        |raw| normalize_verification_result(raw, &finding.fingerprint),
-    )?;
-    let exploitable = result
-        .get("exploitable")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let verdict = if exploitable {
-        "VULNERABLE"
-    } else {
-        "not-exploitable"
-    };
-    let mut lines = vec![
-        "[+] verify:finding complete".to_string(),
-        format!("      {verdict}"),
-    ];
-    if let Some(vector) = result
-        .get("attackVector")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-    {
-        lines.push(format!("      vector: {vector}"));
-    }
-    lines.push("      cost=$0.0000".to_string());
-
-    Ok(json!({
-        "ok": true,
-        "output": lines.join("\n"),
-        "data": result,
-        "costUsd": 0.0,
-    }))
+    crate::verification::adapters::run_verify_finding_tool(
+        crate::verification::adapters::VerifyFindingToolRequest {
+            input,
+            workspace_root: workspace.root(),
+            store,
+            runtime,
+            configured_model: ctx.config.model.as_deref(),
+        },
+    )
 }
 
 pub(in crate::modules) fn run_verify_exploit(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
-    let workspace = ctx.workspace.context(
+    ctx.workspace.context(
         "verify:exploit needs an active workspace. Pass --target <repo> or start the shell with --target.",
     )?;
     let store = ctx
         .findings_store
         .context("verify:exploit requires a findings store for the active workspace")?;
 
-    let input = VerifyExploitInput::from_tool_input(&input)?;
-    let Some(finding) = store.get_finding_by_reference(&input.fingerprint)? else {
-        return Ok(json!({
-            "ok": false,
-            "output": format!("[-] No finding with fingerprint '{}'.", input.fingerprint),
-        }));
-    };
-
-    let outcome = run_empirical_verify(&finding, &input)?;
-    let persisted_id = persist_verify_exploit_outcome(store, &finding, &outcome);
-    let response = verify_exploit_response(&finding, &outcome, persisted_id);
-    let _ = workspace;
-    Ok(response)
-}
-
-#[derive(Debug, Clone)]
-pub(in crate::modules) struct VerifyExploitInput {
-    pub(in crate::modules) fingerprint: String,
-    pub(in crate::modules) trust_plain_backend: bool,
-    pub(in crate::modules) timeout_ms: u64,
+    crate::verification::adapters::run_verify_exploit_tool(input, store)
 }

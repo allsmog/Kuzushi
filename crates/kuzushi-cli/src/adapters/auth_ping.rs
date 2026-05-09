@@ -1,0 +1,132 @@
+use super::auth_bridge::{
+    auth_ping_bridge_command, auth_ping_envelope, bridge_ping_error, bridge_ping_summary,
+    run_auth_ping_bridge,
+};
+use super::auth_oauth::{
+    auth_ping_model, record_anthropic_env_presence, record_anthropic_oauth_readiness,
+};
+use crate::command::AuthCommand;
+use anyhow::Result;
+use kuzushi_core::{load_config_for_target, WorkspaceTarget};
+use std::path::PathBuf;
+
+pub(crate) fn auth_command(command: AuthCommand, target: Option<PathBuf>) -> Result<()> {
+    match command {
+        AuthCommand::Ping { provider, model } => auth_ping(&provider, model, target),
+    }
+}
+
+pub(crate) fn auth_ping(
+    provider: &str,
+    model_override: Option<String>,
+    target: Option<PathBuf>,
+) -> Result<()> {
+    let workspace = auth_ping_workspace(target)?;
+    let config = auth_ping_config(workspace.as_ref())?;
+    let mut log = AuthPingLog::default();
+    run_auth_ping_checks(provider, model_override, &config, &mut log)
+}
+
+pub(crate) fn auth_ping_workspace(target: Option<PathBuf>) -> Result<Option<WorkspaceTarget>> {
+    target.as_deref().map(WorkspaceTarget::new).transpose()
+}
+
+pub(crate) fn auth_ping_config(
+    workspace: Option<&WorkspaceTarget>,
+) -> Result<kuzushi_core::V2Config> {
+    load_config_for_target(workspace.map(WorkspaceTarget::root))
+}
+
+pub(crate) fn run_auth_ping_checks(
+    provider: &str,
+    model_override: Option<String>,
+    config: &kuzushi_core::V2Config,
+    log: &mut AuthPingLog,
+) -> Result<()> {
+    eprintln!("[auth ping] provider = {provider}");
+    probe_auth_credentials(provider, config, log)?;
+
+    let model = auth_ping_model(model_override, config);
+    log.record(true, format!("ping model = {model}"));
+
+    let bridge_command = required_auth_ping_bridge_command(config, log);
+    let envelope = auth_ping_envelope(config, model);
+    let parsed = run_auth_ping_bridge(&bridge_command, &envelope, log)?;
+    record_auth_ping_result(&parsed, log);
+    log.exit_if_failed();
+    eprintln!("\x1b[32mauth ping: OK\x1b[0m");
+    Ok(())
+}
+
+pub(crate) fn required_auth_ping_bridge_command(
+    config: &kuzushi_core::V2Config,
+    log: &mut AuthPingLog,
+) -> Vec<String> {
+    let command = auth_ping_bridge_command(config);
+    if command.is_empty() {
+        log.record(false, "bridge command is empty");
+        std::process::exit(1);
+    }
+    command
+}
+
+pub(crate) fn record_auth_ping_result(parsed: &serde_json::Value, log: &mut AuthPingLog) {
+    if let Some(error) = bridge_ping_error(parsed) {
+        log.record(false, format!("bridge ping failed: {error}"));
+        std::process::exit(1);
+    }
+    log.record(true, bridge_ping_summary(parsed));
+}
+
+pub(crate) struct AuthPingLog {
+    pub(crate) all_ok: bool,
+}
+
+impl Default for AuthPingLog {
+    fn default() -> Self {
+        Self { all_ok: true }
+    }
+}
+
+impl AuthPingLog {
+    pub(crate) fn record(&mut self, ok: bool, msg: impl Into<String>) {
+        let msg = msg.into();
+        if ok {
+            eprintln!("  \x1b[32m✓\x1b[0m {msg}");
+        } else {
+            eprintln!("  \x1b[31m✗\x1b[0m {msg}");
+            self.all_ok = false;
+        }
+    }
+
+    pub(crate) fn exit_if_failed(&self) {
+        if !self.all_ok {
+            std::process::exit(1);
+        }
+    }
+}
+
+pub(crate) fn probe_auth_credentials(
+    provider: &str,
+    config: &kuzushi_core::V2Config,
+    log: &mut AuthPingLog,
+) -> Result<()> {
+    if provider == "anthropic" {
+        probe_anthropic_credentials(config, log)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn probe_anthropic_credentials(
+    config: &kuzushi_core::V2Config,
+    log: &mut AuthPingLog,
+) -> Result<()> {
+    if let Some(oauth_cfg) = &config.runtime.anthropic_oauth {
+        let readiness = kuzushi_openai::probe_anthropic_oauth(oauth_cfg)?;
+        record_anthropic_oauth_readiness(readiness, log);
+    } else {
+        log.record(true, "oauth not configured; will check env / api key");
+    }
+    record_anthropic_env_presence(log);
+    Ok(())
+}

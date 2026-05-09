@@ -1,11 +1,11 @@
-use crate::findings::{Finding, Severity};
-use anyhow::{Context, Result};
-pub(crate) use changed_files::*;
-pub(crate) use collect_findings::*;
-use std::fs;
-use std::path::Path;
-use std::process::Command;
-mod changed_files;
-mod collect_findings;
+mod adapters;
+mod application;
+mod domain;
+
+pub(crate) use application::{run_review_trigger, run_scan, ChromeRcePersistence};
+
+#[cfg(test)]
+pub(crate) use domain::hot_path_finding;
+
 #[cfg(test)]
 mod tests;

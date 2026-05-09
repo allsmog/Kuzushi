@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use crate::options::looks_like_prompt_path;
     use serde_json::json;
 
     #[test]

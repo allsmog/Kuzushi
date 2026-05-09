@@ -1,8 +1,11 @@
 #[cfg(test)]
 mod tests {
+    use super::super::domain::semgrep_language_for_path;
     use super::super::*;
-    use crate::evidence::static_evidence::{StaticEvidenceNode, StaticEvidenceNodeKind};
-    use crate::findings::{Severity, StaticProofState};
+    use crate::evidence::static_evidence::{
+        StaticEvidenceNode, StaticEvidenceNodeKind, StaticEvidenceStore,
+    };
+    use crate::findings::{Finding, Severity, StaticProofState};
 
     #[test]
     fn semgrep_rule_synthesis_validates_disabled_candidate_from_confirmed_finding() {

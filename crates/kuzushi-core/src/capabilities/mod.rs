@@ -1,17 +1,22 @@
+pub mod agentic_sast;
 pub mod carlini_threat_hunt;
 pub mod chrome_rce;
 pub mod classifier_gate;
 pub mod deep_auditor;
 pub mod full_mode_multi;
+pub mod plugin_adapters;
 pub mod prompt_armor;
 pub mod recon;
 pub mod semgrep_rule_synthesis;
 pub mod systems_hunt;
+pub mod taint_iris;
+pub mod taint_iris_next;
 pub mod threat_model;
 pub mod variant_ndiff;
 pub mod vendor_assessment;
 pub mod x_ray;
 
+pub use agentic_sast::*;
 pub use carlini_threat_hunt::*;
 pub use classifier_gate::*;
 pub use deep_auditor::*;

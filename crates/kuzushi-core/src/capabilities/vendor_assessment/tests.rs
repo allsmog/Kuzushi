@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use serde_json::json;
 
     #[test]
     fn scope_sets_persists_and_clears_vendor_assessment_scope() {

@@ -1,10 +1,19 @@
 #[cfg(test)]
 mod tests {
+    use super::super::domain::{
+        is_likely_entry_label, REQUIRED_ARCHITECTURE_SVG, REQUIRED_ENTRY_POINTS_MD,
+        REQUIRED_INVARIANTS_MD, REQUIRED_X_RAY_MD,
+    };
     use super::super::*;
     use crate::artifact_kb::{ArtifactKnowledgeRecord, ArtifactKnowledgeStore};
     use crate::config::V2Config;
-    use crate::runtime::{AgentQueryResponse, TriageRequest};
+    use crate::modules::ToolExecutionContext;
+    use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageRequest};
     use crate::{TriageOutcome, TriageVerdict, WorkspaceTarget};
+    use anyhow::Result;
+    use serde_json::{json, Value};
+    use std::fs;
+    use std::path::Path;
     use std::sync::Mutex;
     use tempfile::tempdir;
 
@@ -223,5 +232,59 @@ mod tests {
 
         let err = read_x_ray_report_artifacts(tmp.path(), None, "rust", 0.0).unwrap_err();
         assert!(err.to_string().contains("missing required artifact"));
+    }
+
+    #[test]
+    fn read_accepts_explicit_target_path() {
+        let tmp = tempdir().unwrap();
+        write_fixture(tmp.path());
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let config = V2Config::default();
+
+        let output = execute_x_ray_tool(
+            "x-ray:read",
+            json!({"target": tmp.path().display().to_string()}),
+            &context(&config, &workspace),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(output.get("ok").and_then(Value::as_bool), Some(true));
+    }
+
+    #[test]
+    fn read_rejects_explicit_file_target() {
+        let tmp = tempdir().unwrap();
+        let target_file = tmp.path().join("not-a-dir.txt");
+        fs::write(&target_file, "not a directory").unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let config = V2Config::default();
+
+        let err = execute_x_ray_tool(
+            "x-ray:read",
+            json!({"target": target_file.display().to_string()}),
+            &context(&config, &workspace),
+            None,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("Target must be a directory"));
+    }
+
+    #[test]
+    fn read_rejects_missing_explicit_target() {
+        let tmp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let config = V2Config::default();
+
+        let err = execute_x_ray_tool(
+            "x-ray:read",
+            json!({"target": tmp.path().join("missing").display().to_string()}),
+            &context(&config, &workspace),
+            None,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("Could not resolve target"));
     }
 }
