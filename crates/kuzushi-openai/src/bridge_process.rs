@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -31,10 +31,40 @@ where
         .spawn()
         .with_context(|| format!("could not start {label} {}", command[0]))?;
 
+    // Drain bridge stderr on a background thread. Without this, anything
+    // node writes to its own stderr stays buffered in the OS pipe until
+    // the bridge exits — which makes `KUZUSHI_BRIDGE_VERBOSE=1` and the
+    // [mcp:*] tool-call traces invisible during the run. When set, we
+    // forward each stderr line to the parent's stderr verbatim; when
+    // unset we still drain (otherwise heavy MCP traffic would fill the
+    // pipe and stall the child) but throw the bytes away.
+    let stderr_thread = child.stderr.take().map(|mut stderr| {
+        let verbose = std::env::var("KUZUSHI_BRIDGE_VERBOSE")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false);
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            loop {
+                match stderr.read(&mut buf) {
+                    Ok(0) => return,
+                    Ok(n) => {
+                        if verbose {
+                            let _ = std::io::stderr().write_all(&buf[..n]);
+                        }
+                    }
+                    Err(_) => return,
+                }
+            }
+        })
+    });
+
     write_bridge_request(&mut child, request, label)?;
     let output = child
         .wait_with_output()
         .with_context(|| format!("could not read {label} output"))?;
+    if let Some(handle) = stderr_thread {
+        let _ = handle.join();
+    }
     if !output.status.success() {
         if !output.stdout.is_empty() {
             if let Ok(response) = serde_json::from_slice::<R>(&output.stdout) {
@@ -121,4 +151,66 @@ fn bridge_relative_to_exe() -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Serialize)]
+    struct EchoRequest {
+        marker: String,
+    }
+
+    #[derive(Deserialize, Debug)]
+    struct EchoResponse {
+        ok: bool,
+        echoed: Value,
+    }
+
+    use serde_json::Value;
+
+    fn fake_bridge_node(script: &str) -> Vec<String> {
+        vec!["node".to_string(), "-e".to_string(), script.to_string()]
+    }
+
+    #[test]
+    fn round_trips_request_and_response() {
+        // Tiny node "bridge" that reads one JSON object from stdin and
+        // echoes it back wrapped in an `ok:true` envelope.
+        let script = r#"
+            let buf = "";
+            process.stdin.on("data", (d) => { buf += d.toString(); });
+            process.stdin.on("end", () => {
+                process.stdout.write(JSON.stringify({ ok: true, echoed: JSON.parse(buf) }));
+            });
+        "#;
+        let response: EchoResponse =
+            run_json_bridge(&fake_bridge_node(script), &EchoRequest { marker: "abc".into() }, "fake bridge")
+                .expect("round-trip succeeded");
+        assert!(response.ok);
+        assert_eq!(response.echoed["marker"], Value::String("abc".into()));
+    }
+
+    #[test]
+    fn does_not_deadlock_when_bridge_emits_heavy_stderr() {
+        // Without a stderr drain thread, anything past ~64KB on stderr
+        // would block the child's writes and we'd hang. Writing 256KB
+        // before stdout proves the drain works.
+        let script = r#"
+            const heavy = "x".repeat(256 * 1024);
+            process.stderr.write(heavy);
+            let buf = "";
+            process.stdin.on("data", (d) => { buf += d.toString(); });
+            process.stdin.on("end", () => {
+                process.stdout.write(JSON.stringify({ ok: true, echoed: JSON.parse(buf) }));
+            });
+        "#;
+        let response: EchoResponse =
+            run_json_bridge(&fake_bridge_node(script), &EchoRequest { marker: "heavy".into() }, "fake bridge heavy")
+                .expect("round-trip with heavy stderr succeeded");
+        assert!(response.ok);
+        assert_eq!(response.echoed["marker"], Value::String("heavy".into()));
+    }
 }
