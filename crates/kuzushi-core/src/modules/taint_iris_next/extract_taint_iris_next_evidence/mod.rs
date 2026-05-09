@@ -76,13 +76,13 @@ pub(in crate::modules) fn extract_taint_iris_next_evidence(
                 warnings.push(
                     "codeql was selected but the launcher or DB disappeared between plan and run; using heuristic linker".to_string(),
                 );
-                build_taint_iris_next_linked_stories(&candidates)
+                build_taint_iris_next_linked_stories(&candidates, &plan.cwe_focus)
             }
             Err(error) => {
                 warnings.push(format!(
                     "codeql analyze failed ({error}); falling back to heuristic linker"
                 ));
-                build_taint_iris_next_linked_stories(&candidates)
+                build_taint_iris_next_linked_stories(&candidates, &plan.cwe_focus)
             }
         }
     } else if plan.backend.selected == "joern" {
@@ -102,17 +102,17 @@ pub(in crate::modules) fn extract_taint_iris_next_evidence(
                 warnings.push(
                     "joern was selected but the launcher or CPG disappeared between plan and run; using heuristic linker".to_string(),
                 );
-                build_taint_iris_next_linked_stories(&candidates)
+                build_taint_iris_next_linked_stories(&candidates, &plan.cwe_focus)
             }
             Err(error) => {
                 warnings.push(format!(
                     "joern dataflow query failed ({error}); falling back to heuristic linker"
                 ));
-                build_taint_iris_next_linked_stories(&candidates)
+                build_taint_iris_next_linked_stories(&candidates, &plan.cwe_focus)
             }
         }
     } else {
-        build_taint_iris_next_linked_stories(&candidates)
+        build_taint_iris_next_linked_stories(&candidates, &plan.cwe_focus)
     };
 
     let linked_by_candidate = result_summary::linked_story_ids_by_candidate(&linked_stories);
@@ -171,9 +171,17 @@ const DISCOVERY_MAX_ENTRY_POINT_CANDIDATES: usize = 40;
 /// so downstream consumers can tell them apart from rg / joern /
 /// codeql derived rows.
 ///
-/// Honors the operator's `cweFocus` filter so a privesc/RCE-scoped
-/// hunt doesn't get its prompt diluted with CWE-862 entry points it
-/// already filtered the catalog against.
+/// Sinks keep their marker-table intrinsic CWE (`dlopen` → CWE-94 by
+/// construction). Entry points are different: a `PG_FUNCTION_INFO_V1`
+/// / `@app.route` / `app.get|post` decorator is the user-controlled
+/// boundary for **whatever** sink a downstream caller hits — it's a
+/// CWE-78 source as much as a CWE-862 source. So when the operator
+/// supplies a non-empty `cwe_focus`, project each entry point as one
+/// `source` candidate per CWE in the focus set; the heuristic linker
+/// can then pair across CWEs without us hardcoding per-ecosystem
+/// source patterns. When `cwe_focus` is empty, fall back to the
+/// marker-table CWE so an unfocused hunt still gets framework-canonical
+/// CWE-862 entry points without explosion.
 fn candidates_from_discovered_signals(
     signals: &DiscoveredSignals,
     cwe_focus: &[String],
@@ -186,44 +194,97 @@ fn candidates_from_discovered_signals(
         .map(|cwe| cwe.to_ascii_uppercase())
         .collect();
     let mut out: Vec<TaintIrisNextCandidate> = Vec::new();
-    for (signal, role, kind, max_per_role) in signals
-        .sinks
-        .iter()
-        .map(|s| (s, "sink", "call", DISCOVERY_MAX_SINK_CANDIDATES))
-        .chain(
-            signals.entry_points.iter().map(|e| {
-                (e, "source", "entry-point", DISCOVERY_MAX_ENTRY_POINT_CANDIDATES)
-            }),
-        )
-    {
+
+    // Sinks: pin to marker-table CWE. The marker table is per-CWE by
+    // construction (`dlopen` is always CWE-94 / `system` is always
+    // CWE-78), so cross-projection would be lossy here.
+    let mut sink_count = 0usize;
+    for signal in &signals.sinks {
         if !allow.is_empty() && !allow.contains(&signal.cwe.to_ascii_uppercase()) {
             continue;
         }
-        let same_role_count = out.iter().filter(|c| c.role == role).count();
-        if same_role_count >= max_per_role {
-            continue;
+        if sink_count >= DISCOVERY_MAX_SINK_CANDIDATES {
+            break;
         }
-        out.push(TaintIrisNextCandidate {
-            id: format!(
-                "{}:{role}:discovered:{}:{}:{}",
-                signal.cwe, signal.file, signal.line, signal.name
-            ),
-            cwe: signal.cwe.clone(),
-            taint_class: taint_class_for_discovered_cwe(&signal.cwe).to_string(),
-            track: "taint".to_string(),
-            role: role.to_string(),
-            kind: kind.to_string(),
-            pattern: signal.name.clone(),
-            file_path: signal.file.clone(),
-            line: signal.line,
-            snippet: format!("[discovery:{}] {}", signal.marker, signal.name),
-            language: signal.language.clone(),
-            confidence: "medium".to_string(),
-            catalog_signal: format!("{role}: {} ({})", signal.name, signal.marker),
-            source: "discovery".to_string(),
-        });
+        out.push(make_discovery_candidate(signal, "sink", "call", &signal.cwe));
+        sink_count += 1;
+    }
+
+    // Entry points: when `cwe_focus` is non-empty, project across the
+    // focus set so e.g. a postgres SQL-callable function lands as a
+    // CWE-94 source for a downstream `dlopen` sink, not just CWE-862.
+    // Cap is partitioned across the focus list so a 1041-entry-point
+    // postgres sweep × 8 focus CWEs doesn't drown the prompt.
+    let entry_point_target_cwes: Vec<String> = if cwe_focus.is_empty() {
+        Vec::new()
+    } else {
+        cwe_focus.iter().map(|cwe| cwe.to_ascii_uppercase()).collect()
+    };
+    let per_cwe_cap = if entry_point_target_cwes.is_empty() {
+        DISCOVERY_MAX_ENTRY_POINT_CANDIDATES
+    } else {
+        (DISCOVERY_MAX_ENTRY_POINT_CANDIDATES / entry_point_target_cwes.len()).max(1)
+    };
+    let mut entry_point_count_by_cwe: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    let mut total_entry_points = 0usize;
+    'entry_loop: for signal in &signals.entry_points {
+        let target_cwes: Vec<String> = if entry_point_target_cwes.is_empty() {
+            if !allow.is_empty() && !allow.contains(&signal.cwe.to_ascii_uppercase()) {
+                continue;
+            }
+            vec![signal.cwe.clone()]
+        } else {
+            entry_point_target_cwes.clone()
+        };
+        for target_cwe in target_cwes {
+            if total_entry_points >= DISCOVERY_MAX_ENTRY_POINT_CANDIDATES {
+                break 'entry_loop;
+            }
+            let count = entry_point_count_by_cwe
+                .entry(target_cwe.clone())
+                .or_insert(0);
+            if *count >= per_cwe_cap {
+                continue;
+            }
+            *count += 1;
+            total_entry_points += 1;
+            out.push(make_discovery_candidate(
+                signal,
+                "source",
+                "entry-point",
+                &target_cwe,
+            ));
+        }
     }
     out
+}
+
+fn make_discovery_candidate(
+    signal: &DiscoveredSignal,
+    role: &'static str,
+    kind: &'static str,
+    target_cwe: &str,
+) -> TaintIrisNextCandidate {
+    TaintIrisNextCandidate {
+        id: format!(
+            "{}:{role}:discovered:{}:{}:{}",
+            target_cwe, signal.file, signal.line, signal.name
+        ),
+        cwe: target_cwe.to_string(),
+        taint_class: taint_class_for_discovered_cwe(target_cwe).to_string(),
+        track: "taint".to_string(),
+        role: role.to_string(),
+        kind: kind.to_string(),
+        pattern: signal.name.clone(),
+        file_path: signal.file.clone(),
+        line: signal.line,
+        snippet: format!("[discovery:{}] {}", signal.marker, signal.name),
+        language: signal.language.clone(),
+        confidence: "medium".to_string(),
+        catalog_signal: format!("{role}: {} ({})", signal.name, signal.marker),
+        source: "discovery".to_string(),
+    }
 }
 
 /// Map the small set of CWEs the discovery sweep emits to the same
@@ -338,5 +399,95 @@ mod tests {
         };
         let candidates = candidates_from_discovered_signals(&signals, &[]);
         assert_eq!(candidates.len(), DISCOVERY_MAX_SINK_CANDIDATES);
+    }
+
+    #[test]
+    fn entry_points_project_across_cwe_focus() {
+        // A discovered entry point is the user-controlled boundary —
+        // for an RCE/privesc-scoped hunt it should anchor source-role
+        // candidates for every focus CWE, not just the marker-table's
+        // intrinsic CWE-862.
+        let signals = DiscoveredSignals {
+            discovered_at_unix: 0,
+            sources: Vec::new(),
+            sinks: Vec::new(),
+            entry_points: vec![
+                signal(
+                    "pg_read_server_files",
+                    "CWE-862",
+                    "entrypoint",
+                    "src/backend/utils/adt/genfile.c",
+                    100,
+                ),
+                signal(
+                    "pg_signal_backend",
+                    "CWE-862",
+                    "entrypoint",
+                    "src/backend/utils/adt/misc.c",
+                    50,
+                ),
+            ],
+            discoverers: vec!["test".to_string()],
+        };
+        let cwe_focus = vec!["CWE-78".to_string(), "CWE-94".to_string()];
+        let candidates = candidates_from_discovered_signals(&signals, &cwe_focus);
+        // 2 entry points × 2 focus CWEs = 4 source candidates.
+        assert_eq!(candidates.len(), 4);
+        assert!(candidates.iter().all(|c| c.role == "source"));
+        let cwes: std::collections::BTreeSet<&str> =
+            candidates.iter().map(|c| c.cwe.as_str()).collect();
+        assert!(cwes.contains("CWE-78"));
+        assert!(cwes.contains("CWE-94"));
+        // No CWE-862 anymore — the operator focused away from it.
+        assert!(!cwes.contains("CWE-862"));
+        // taint_class must follow the projected CWE so the linker can
+        // pair source.taint_class == sink.taint_class.
+        let cwe78 = candidates.iter().find(|c| c.cwe == "CWE-78").unwrap();
+        assert_eq!(cwe78.taint_class, "command-injection");
+        let cwe94 = candidates.iter().find(|c| c.cwe == "CWE-94").unwrap();
+        assert_eq!(cwe94.taint_class, "code-injection");
+    }
+
+    #[test]
+    fn entry_point_projection_partitions_cap_across_focus() {
+        // 1000 entry points × 8 focus CWEs would balloon to 8000
+        // candidates without the per-CWE cap. Verify the partition
+        // keeps the total bounded by DISCOVERY_MAX_ENTRY_POINT_CANDIDATES.
+        let mut entry_points = Vec::new();
+        for line in 0..200 {
+            entry_points.push(signal(
+                "pg_function",
+                "CWE-862",
+                "entrypoint",
+                "f.c",
+                line as u32,
+            ));
+        }
+        let signals = DiscoveredSignals {
+            discovered_at_unix: 0,
+            sources: Vec::new(),
+            sinks: Vec::new(),
+            entry_points,
+            discoverers: vec!["test".to_string()],
+        };
+        let cwe_focus = vec![
+            "CWE-78".to_string(),
+            "CWE-94".to_string(),
+            "CWE-426".to_string(),
+            "CWE-269".to_string(),
+        ];
+        let candidates = candidates_from_discovered_signals(&signals, &cwe_focus);
+        assert!(candidates.len() <= DISCOVERY_MAX_ENTRY_POINT_CANDIDATES);
+        // Each focus CWE should land roughly the same share so no one
+        // CWE drowns the prompt at the expense of the others.
+        let per_cwe_cap = DISCOVERY_MAX_ENTRY_POINT_CANDIDATES / cwe_focus.len();
+        let mut counts: std::collections::BTreeMap<&str, usize> =
+            std::collections::BTreeMap::new();
+        for c in &candidates {
+            *counts.entry(c.cwe.as_str()).or_insert(0) += 1;
+        }
+        for (_, n) in &counts {
+            assert!(*n <= per_cwe_cap);
+        }
     }
 }
