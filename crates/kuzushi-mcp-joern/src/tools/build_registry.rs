@@ -85,24 +85,32 @@ pub fn build_registry() -> ToolRegistry {
         .register(
             Tool {
                 name: "joern.taint_paths".into(),
-                description: "Taint paths from a source method's parameter to a sink call. \
-                              Wraps `cpg.method.name(<source>).parameter.reachableByFlows(cpg.call.name(<sink>))`. \
-                              `source` is a method-name regex (matches against `cpg.method.name(...)`); \
-                              `sink` is a call-name regex (matches against `cpg.call.name(...)`). \
-                              Both fields accept Java regex syntax — alternation works (`PG_GETARG_TEXT_PP|PG_GETARG_CSTRING`), \
-                              `.*` for substring, escaping for parens. Returns a list of paths, each a sequence of CPG nodes.".into(),
+                description: "Taint paths from a source to a sink. The query unions two source \
+                              traversals so the same regex finds both call-style sources \
+                              (postgres `PG_GETARG_TEXT_PP`, JS `req.query`, etc.) and \
+                              method-parameter sources (`argv` of `main`, request handler \
+                              parameters): `(cpg.call.name(<source>) ++ cpg.method.name(<source>).parameter)`. \
+                              The sink is a call-name regex. Returns an envelope: \
+                              `{sourceCounts: {calls, methodParams}, sinkCount, flowCount, flows}` \
+                              so the caller can tell \"the source pattern matched nothing\" \
+                              (sourceCounts.calls=0 and methodParams=0) from \"sources exist \
+                              but no flow reaches the sink\" (counts > 0 and flowCount=0). \
+                              Both fields accept Java regex syntax — alternation works \
+                              (`PG_GETARG_TEXT_PP|PG_GETARG_CSTRING`), `.*` for substring, \
+                              escaping for parens.".into(),
                 input_schema: json!({
                     "type": "object",
                     "required": ["source", "sink"],
                     "properties": {
-                        "source": {"type": "string", "description": "Method-name regex for taint sources, e.g. \"PG_GETARG_TEXT_PP\" or \"PG_GETARG_TEXT_PP|PG_GETARG_CSTRING|VARDATA_ANY\"."},
+                        "source": {"type": "string", "description": "Regex for taint sources. Matched against both `cpg.call.name(...)` and `cpg.method.name(...).parameter` so postgres macro-call sources (`PG_GETARG_TEXT_PP`) and method-parameter sources (`argv`) both work without the caller having to pick the CPG node kind."},
                         "sink": {"type": "string", "description": "Call-name regex for taint sinks, e.g. \"snprintf\" or \"snprintf|memcpy|strcpy\"."},
                         "maxPaths": {"type": "integer", "minimum": 1, "default": 50}
                     },
                     "examples": [
                         {"source": "PG_GETARG_TEXT_PP", "sink": "snprintf"},
                         {"source": "PG_GETARG_TEXT_PP|PG_GETARG_CSTRING", "sink": "memcpy|strcpy|sprintf", "maxPaths": 10},
-                        {"source": "argv", "sink": "system|exec.*"}
+                        {"source": "argv", "sink": "system|exec.*"},
+                        {"source": "GetConfigOption|namespace_search_path", "sink": "LookupFuncName|RangeVarGetRelid"}
                     ]
                 }),
             },

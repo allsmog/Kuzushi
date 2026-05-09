@@ -32,6 +32,36 @@ mod tests {
     }
 
     #[test]
+    fn taint_paths_unions_call_and_method_parameter_sources() {
+        // The single most important regression: the prior builder
+        // treated `source` as a method-name regex only, so call-style
+        // sources (postgres `PG_GETARG_TEXT_PP`, JS `req.query`)
+        // matched no nodes and reachableByFlows silently returned an
+        // empty list. The new builder must union both kinds and
+        // surface a per-traversal node count so the agent can tell
+        // "source matched nothing" from "source matched but no flow
+        // reaches the sink".
+        let q = taint_paths("PG_GETARG_TEXT_PP", "snprintf", 25);
+        assert!(
+            q.contains("cpg.call.name(\"PG_GETARG_TEXT_PP\")"),
+            "expected call-name source traversal in: {q}"
+        );
+        assert!(
+            q.contains("cpg.method.name(\"PG_GETARG_TEXT_PP\").parameter"),
+            "expected method-parameter source traversal in: {q}"
+        );
+        assert!(
+            q.contains("reachableByFlows(srcs)"),
+            "expected the unioned `srcs` traversal to be the reachableByFlows input in: {q}"
+        );
+        // Output envelope must report counts so the agent can
+        // distinguish "no source" from "no flow".
+        assert!(q.contains("sourceCounts"));
+        assert!(q.contains("sinkCount"));
+        assert!(q.contains("flowCount"));
+    }
+
+    #[test]
     fn reaching_def_quotes_var_file_and_line() {
         let q = reaching_def("/r/a.c", 42, "buf");
         assert!(q.contains("\"buf\""));

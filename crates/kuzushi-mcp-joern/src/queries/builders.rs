@@ -28,8 +28,30 @@ pub fn callees_of(fn_name: &str) -> String {
 }
 
 pub fn taint_paths(source_pattern: &str, sink_pattern: &str, max_paths: usize) -> String {
+    // Source nodes union: matches against both call expressions
+    // (e.g. postgres `PG_GETARG_TEXT_PP(0)` lands as a call in the
+    // CPG, not a method) and method parameters (the original
+    // request/argv-style sources). Without the call branch, regex
+    // sources like `PG_GETARG_TEXT_PP` against
+    // `cpg.method.name(...).parameter` matched no nodes and
+    // `reachableByFlows` silently returned an empty list — which is
+    // why every postgres CWE-78 / CWE-94 / CWE-426 hunt landed at
+    // "candidate, no joern flow" in spite of the structural pass
+    // surfacing real call sites.
+    //
+    // We also tag both branches so the response carries a node count
+    // per traversal; downstream callers can distinguish "the source
+    // pattern matched nothing" from "the source matched but no flow
+    // reaches the sink".
     format!(
-        "def src = cpg.method.name(\"{src}\"); def snk = cpg.call.name(\"{snk}\"); snk.reachableByFlows(src.parameter).take({max}).l",
+        "def srcCalls = cpg.call.name(\"{src}\"); \
+         def srcParams = cpg.method.name(\"{src}\").parameter; \
+         def srcs = (srcCalls.cast[io.shiftleft.codepropertygraph.generated.nodes.CfgNode] ++ srcParams.cast[io.shiftleft.codepropertygraph.generated.nodes.CfgNode]).dedup; \
+         def snk = cpg.call.name(\"{snk}\"); \
+         val sourceCounts = Map(\"calls\" -> srcCalls.size, \"methodParams\" -> srcParams.size); \
+         val sinkCount = snk.size; \
+         val flows = snk.reachableByFlows(srcs).take({max}).l; \
+         Map(\"sourceCounts\" -> sourceCounts, \"sinkCount\" -> sinkCount, \"flowCount\" -> flows.size, \"flows\" -> flows)",
         src = escape_scala_string(source_pattern),
         snk = escape_scala_string(sink_pattern),
         max = max_paths
