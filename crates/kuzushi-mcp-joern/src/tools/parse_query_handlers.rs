@@ -7,13 +7,13 @@ use crate::queries;
 use crate::server::{parse_repo, run_query};
 
 use super::availability::{ensure_joern_available, parse_raw_json_or_string, require_str};
-use super::health::health_summary;
+use super::health::extended_health;
 use super::tool_types::{CallersOfTool, HealthTool, ParseTool, QueryTool};
 
 #[async_trait]
 impl ToolHandler for HealthTool {
     async fn call(&self, _args: Value) -> Result<Value> {
-        Ok(serde_json::to_value(health_summary().await)?)
+        Ok(extended_health().await)
     }
 }
 
