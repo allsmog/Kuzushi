@@ -75,9 +75,19 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
     // Aggregate cost across all DAG rows. Mirrors the
     // `cost: $X.XX` segment in design/mockups/_shared.jsx::statusStrip.
     let cost: f64 = session.tasks.values().map(|row| row.cost_usd).sum();
+    // Trim long synthetic run ids ("tool-1778354160-e1b1d602a576") to
+    // the trailing 8 chars. Shipped run ids are typically short
+    // (`r-...`) so this only kicks in for the auto-minted single-tool
+    // ids — keeps the 80-col header from overflowing.
+    let run_id = if session.run_id.len() > 12 {
+        let tail: String = session.run_id.chars().rev().take(8).collect();
+        format!("…{}", tail.chars().rev().collect::<String>())
+    } else {
+        session.run_id.clone()
+    };
     let header = format!(
         "ACTIVITY  run {run}  ·  {done}/{total} done  ·  {running} running  ·  cost ${cost:.4}{paused}{verbose}",
-        run = session.run_id,
+        run = run_id,
         done = done,
         total = total,
         running = running,
@@ -230,8 +240,9 @@ fn render_focus_footer(frame: &mut Frame<'_>, area: Rect, session: &ActivitySess
     };
     // Keybind row formatted like design/mockups/_shared.jsx::footer (lines
     // 119-127): bracketed key in c-accent followed by hint in c-muted, with
-    // a single space between pairs.
-    let key_hints: &[(&str, &str)] = &[
+    // a single space between pairs. At narrow widths (<100 cols) drop
+    // the trailing low-priority hints so the footer doesn't truncate.
+    let full_hints: &[(&str, &str)] = &[
         ("j/k", "scroll"),
         ("Tab", "pane"),
         ("V", "verbose"),
@@ -240,6 +251,12 @@ fn render_focus_footer(frame: &mut Frame<'_>, area: Rect, session: &ActivitySess
         ("Enter", "focus"),
         ("c", "cancel"),
     ];
+    let key_hints: &[(&str, &str)] = if area.width < 100 {
+        // Top 5 most-used: drop "reset" + "focus".
+        &full_hints[..5.min(full_hints.len())]
+    } else {
+        full_hints
+    };
     let mut key_spans: Vec<Span<'static>> = vec![Span::raw(" ")];
     for (i, (key, hint)) in key_hints.iter().enumerate() {
         if i > 0 {
@@ -248,6 +265,14 @@ fn render_focus_footer(frame: &mut Frame<'_>, area: Rect, session: &ActivitySess
         key_spans.push(Span::styled(format!("[{key}"), theme::accent()));
         key_spans.push(Span::raw(" "));
         key_spans.push(Span::styled(format!("{hint}]"), theme::muted()));
+    }
+    // Always include `c cancel` so operators have an abort hint even at
+    // narrow widths.
+    if area.width < 100 {
+        key_spans.push(Span::raw(" "));
+        key_spans.push(Span::styled("[c".to_string(), theme::accent()));
+        key_spans.push(Span::raw(" "));
+        key_spans.push(Span::styled("cancel]".to_string(), theme::muted()));
     }
     let lines = vec![
         Line::from(vec![Span::styled(body, theme::label())]),
