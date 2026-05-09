@@ -6,6 +6,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Build the right-pane feed line text for a recorded trace event. Returns an
 /// empty string when the event should be hidden (subsystem event without
 /// verbose toggle).
+///
+/// Format mirrors `design/mockups/_shared.jsx::logLine`: each line gets a
+/// kind glyph (⏵ run, ✓ ok, ✗ err, ◆ agent, … flow, ▸ find, · log) so the
+/// operator can scan the feed by event class without reading every label.
 pub(crate) fn feed_event_text(
     event: &RecordedTraceEvent,
     verbose_subsystems: bool,
@@ -34,14 +38,43 @@ pub(crate) fn feed_event_text(
     } else {
         " "
     };
+    let glyph = feed_event_glyph(event);
     let body = format!(
-        "{ts} {indent}{tag} {label}",
+        "{ts} {indent}{glyph} {tag} {label}",
         ts = timestamp,
         indent = indent,
+        glyph = glyph,
         tag = module_verb,
         label = event.step.label
     );
     Some(fit(&body, width))
+}
+
+/// Glyph map matching `design/mockups/_shared.jsx::logLine` (lines 73-82):
+///
+/// | kind            | glyph | role         |
+/// |-----------------|-------|--------------|
+/// | tool / start    | ⏵     | run dispatch |
+/// | done / complete | ✓     | ok           |
+/// | refused / fail  | ✗     | err          |
+/// | reasoning       | …     | flow         |
+/// | tool-progress   | …     | flow         |
+/// | tool-start      | ⏵     | run dispatch |
+/// | tool-complete   | ✓     | ok           |
+/// | finding         | ▸     | find         |
+/// | (other)         | ·     | log          |
+pub(crate) fn feed_event_glyph(event: &RecordedTraceEvent) -> &'static str {
+    match event.step.severity.as_deref() {
+        Some("danger") => "✗",
+        _ => match event.step.kind.as_str() {
+            "tool" | "tool-start" => "⏵",
+            "done" | "tool-complete" => "✓",
+            "refused" => "✗",
+            "reasoning" | "tool-progress" => "…",
+            "finding" | "find" => "▸",
+            _ => "·",
+        },
+    }
 }
 
 pub(crate) fn feed_event_style(event: &RecordedTraceEvent) -> ratatui::style::Style {
@@ -49,11 +82,12 @@ pub(crate) fn feed_event_style(event: &RecordedTraceEvent) -> ratatui::style::St
         Some("danger") => theme::danger(),
         Some("warn") => theme::warn(),
         _ => match event.step.kind.as_str() {
-            "tool" | "tool-start" | "tool-complete" => theme::accent(),
-            "reasoning" => theme::label(),
-            "done" => theme::success(),
+            "tool" | "tool-start" => theme::primary(),
+            "done" | "tool-complete" => theme::success(),
+            "reasoning" | "tool-progress" => theme::muted(),
             "refused" => theme::danger(),
-            _ => theme::primary(),
+            "finding" | "find" => theme::warn(),
+            _ => theme::subtle(),
         },
     }
 }

@@ -72,12 +72,16 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
         .values()
         .filter(|row| matches!(row.state, DagTaskState::Active))
         .count();
+    // Aggregate cost across all DAG rows. Mirrors the
+    // `cost: $X.XX` segment in design/mockups/_shared.jsx::statusStrip.
+    let cost: f64 = session.tasks.values().map(|row| row.cost_usd).sum();
     let header = format!(
-        "ACTIVITY  run {run}  ·  {done}/{total} done  ·  {running} running{paused}{verbose}",
+        "ACTIVITY  run {run}  ·  {done}/{total} done  ·  {running} running  ·  cost ${cost:.4}{paused}{verbose}",
         run = session.run_id,
         done = done,
         total = total,
         running = running,
+        cost = cost,
         paused = if session.paused { "  ·  ⏸ paused" } else { "" },
         verbose = if session.verbose_subsystems {
             "  ·  V verbose"
@@ -122,10 +126,13 @@ fn render_dag_pane_widget(frame: &mut Frame<'_>, area: Rect, session: &ActivityS
     } else {
         theme::label()
     };
+    // `── DAG ──...` divider style mirrors design/mockups/_shared.jsx
+    // `sectionHeader` (lines 94-100): leading "── ", labelled segment in
+    // c-label, trailing fill in c-subtle.
     let block = Block::default()
         .borders(Borders::RIGHT)
         .border_style(theme::subtle())
-        .title(Span::styled(" DAG ", title_style));
+        .title(Span::styled("── DAG ──", title_style));
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
@@ -185,7 +192,7 @@ fn render_feed_pane_widget(frame: &mut Frame<'_>, area: Rect, session: &Activity
     };
     let block = Block::default()
         .borders(Borders::NONE)
-        .title(Span::styled(" FEED ", title_style));
+        .title(Span::styled("── FEED ──", title_style));
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
@@ -219,16 +226,32 @@ fn render_focus_footer(frame: &mut Frame<'_>, area: Rect, session: &ActivitySess
             format!(" ▸ FOCUS  {task_id}  (not yet recorded)")
         }
     } else {
-        " ▸ FOCUS  hover j/k to inspect a task · Tab pane · V verbose · p pause · R reset · Enter focus"
-            .to_string()
+        " ▸ FOCUS  hover [j/k] to inspect a task".to_string()
     };
-    let keys = Line::from(vec![Span::styled(
-        " j/k scroll · Tab pane · V verbose · p pause · R reset · Enter focus".to_string(),
-        theme::muted(),
-    )]);
+    // Keybind row formatted like design/mockups/_shared.jsx::footer (lines
+    // 119-127): bracketed key in c-accent followed by hint in c-muted, with
+    // a single space between pairs.
+    let key_hints: &[(&str, &str)] = &[
+        ("j/k", "scroll"),
+        ("Tab", "pane"),
+        ("V", "verbose"),
+        ("p", "pause"),
+        ("R", "reset"),
+        ("Enter", "focus"),
+        ("c", "cancel"),
+    ];
+    let mut key_spans: Vec<Span<'static>> = vec![Span::raw(" ")];
+    for (i, (key, hint)) in key_hints.iter().enumerate() {
+        if i > 0 {
+            key_spans.push(Span::raw(" "));
+        }
+        key_spans.push(Span::styled(format!("[{key}"), theme::accent()));
+        key_spans.push(Span::raw(" "));
+        key_spans.push(Span::styled(format!("{hint}]"), theme::muted()));
+    }
     let lines = vec![
         Line::from(vec![Span::styled(body, theme::label())]),
-        keys,
+        Line::from(key_spans),
     ];
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(para, area);
