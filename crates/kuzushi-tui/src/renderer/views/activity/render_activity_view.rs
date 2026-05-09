@@ -151,10 +151,31 @@ fn render_feed_pane_widget(frame: &mut Frame<'_>, area: Rect, session: &Activity
         }
     }
     if lines.is_empty() {
-        lines.push(Line::from(vec![Span::styled(
-            " (waiting for trace events…)".to_string(),
-            theme::muted(),
-        )]));
+        // Distinguish "nothing has happened yet" from "events exist but are
+        // all hidden subsystem activity (operator can press V)". Counts the
+        // events the verbose filter is suppressing so the message is honest
+        // about what the feed isn't showing.
+        let hidden_count = session
+            .events
+            .iter()
+            .filter(|event| {
+                event
+                    .step
+                    .module_id
+                    .as_deref()
+                    .map(crate::app::is_hidden_module_id)
+                    .unwrap_or(false)
+            })
+            .count();
+        let placeholder = if hidden_count > 0 && !session.verbose_subsystems {
+            format!(
+                " ({hidden_count} hidden subsystem event{plural} — press V to show)",
+                plural = if hidden_count == 1 { "" } else { "s" }
+            )
+        } else {
+            " (waiting for trace events…)".to_string()
+        };
+        lines.push(Line::from(vec![Span::styled(placeholder, theme::muted())]));
     }
 
     let title_style = if matches!(session.pane_focus, PaneFocus::Right) {

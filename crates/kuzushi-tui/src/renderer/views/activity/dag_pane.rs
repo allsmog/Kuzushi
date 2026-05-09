@@ -1,6 +1,24 @@
 use super::*;
 use crate::app::{ActivitySession, DagTaskRow, DagTaskState};
+use std::sync::OnceLock;
 use std::time::Instant;
+
+/// Braille spinner used to animate `Active` DAG rows so the operator can
+/// distinguish a running tool from a stuck one. Frame index is derived
+/// from wall-clock elapsed since process start, advancing every ~100ms.
+const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+static SPINNER_EPOCH: OnceLock<Instant> = OnceLock::new();
+
+fn spinner_frame(now: Instant) -> &'static str {
+    let epoch = SPINNER_EPOCH.get_or_init(Instant::now);
+    let ms = now
+        .checked_duration_since(*epoch)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let idx = ((ms / 100) as usize) % SPINNER_FRAMES.len();
+    SPINNER_FRAMES[idx]
+}
 
 /// Render one DAG task row as plain text (no styling). The renderer turns each
 /// String into a styled span downstream so we keep the column-width math here
@@ -8,7 +26,7 @@ use std::time::Instant;
 pub(crate) fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant) -> String {
     let symbol = match row.state {
         DagTaskState::Done => "✓",
-        DagTaskState::Active => "▸",
+        DagTaskState::Active => spinner_frame(now),
         DagTaskState::Queued => "·",
         DagTaskState::Failing => "!",
     };
