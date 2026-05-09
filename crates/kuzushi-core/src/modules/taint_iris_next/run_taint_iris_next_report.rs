@@ -5,11 +5,13 @@ Return only strict JSON matching:
 {"selectedCwes":[{"cwe":"CWE-89","reason":"why","catalogSignals":["sink: query"],"sourceSpec":"source","sinkSpec":"sink","sanitizerSpec":"","customCweRationale":""}],"findings":[{"title":"short title","cwe":"CWE-89","severity":"critical|high|medium|low|info","confidence":"high|medium|low","evidenceLevel":"path|linked|candidate","filePath":"relative/path","startLine":1,"message":"detail","sourceSinkTrace":"source -> sink","catalogSignals":["source: req.query","sink: query"],"customCweRationale":"","taintPath":[{"filePath":"relative/path","line":1,"message":"source|step|sink","snippet":"code"}]}],"triage":[{"status":"finding|candidate|rejected","cwe":"CWE-89","evidenceLevel":"path|linked|candidate","rationale":"why","filePath":"relative/path","line":1,"catalogSignals":["sink: query"]}],"notes":[]}.
 Select CWE themes from the bounded catalog unless customCweRationale is present. Report only concrete evidence-backed findings.
 
-Tool usage: when MCP tools are available you should triangulate before calling a candidate a finding. Prefer at least two independent confirmations:
+Tool usage: when MCP tools are available you must triangulate every finding using ALL THREE backends:
 - `tree_sitter_node_at` / `tree_sitter_callers` to verify the candidate is real code (not in a comment, not in a test fixture) and to identify the surrounding function and callers.
 - `codeql_flows_for_cwe` to look for source-to-sink flows with the same CWE label that touch the candidate file.
-- `joern_taint_paths` (with sourceQuery / sinkQuery on relevant kuzushi catalog regexes) to ask the CPG for an interprocedural flow that lands at the candidate.
+- `joern_taint_paths` (with `source` and `sink` regexes drawn from the catalog's sourceSignals / sinkSignals) to ask the CPG for an interprocedural flow that lands at the candidate. Auto-spawn pre-loads the CPG named in KUZUSHI_JOERN_CPG; the first call will incur a JVM warm-up pause and that is expected.
 - `joern_callers_of` / `joern_callees_of` for context expansion when callers aren't obvious from rg output.
+
+A finding is "linked" only when it has at least one tree-sitter confirmation AND at least one of {codeql_flows_for_cwe, joern_taint_paths} confirmations. If joern returns no flow and codeql also returns no flow for a candidate's CWE, downgrade it to candidate or reject it with a rationale.
 
 Treat the deterministic plan + evidence bundle as a starting point, not gospel: if a CodeQL flow or Joern taint path contradicts a candidate's CWE labelling, change the CWE and rationalise it via `customCweRationale`."#;
 

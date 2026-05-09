@@ -104,3 +104,24 @@ pub(in crate::modules) fn bridge_log_path_option() -> OptionSpec {
     )
     .advanced()
 }
+
+/// Filter the ranked CWE catalog down to a comma-separated allow-list
+/// of CWE identifiers (`CWE-78,CWE-94,CWE-426,...`). When set, both the
+/// deterministic structural pass (which seeds candidates from each
+/// catalog entry's `structuralQueries`) and the agent prompt are
+/// scoped to those CWEs only. Useful for "hunt for privesc + RCE on
+/// postgres without pulling in the SQLi / path-traversal noise" type
+/// of session. Entry matching is done on the `cwe` field exactly
+/// (case-insensitive); unknown CWEs are silently dropped so a typo
+/// doesn't fail the run loud, just narrows the scope.
+pub(in crate::modules) fn cwe_focus_option() -> OptionSpec {
+    opt(
+        "cweFocus",
+        OptionType::StringList,
+        "Comma-separated CWE allow-list to focus the hunt on. Filters \
+         the ranked catalog (and therefore the structural seeds) to the \
+         listed entries and tells the agent to prioritise them. Example: \
+         \"CWE-78,CWE-94,CWE-426,CWE-269\" to hunt for privesc + RCE. \
+         Empty / unset means \"use the full catalog\".",
+    )
+}
