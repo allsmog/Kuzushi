@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
@@ -5,6 +6,37 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{append_run_trace_step, RunTraceStep};
+
+thread_local! {
+    /// Per-thread parent-step stack. Producers push via
+    /// `TraceHandle::parent_scope(n)` to scope subsequent runtime
+    /// instrumentation under a labelled phase header. The wrapping
+    /// `TracedRuntime` reads the top of stack when emitting child events.
+    static PARENT_STACK: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
+
+/// RAII guard returned by `TraceHandle::parent_scope`. Pops the parent stack
+/// on drop so callers can't accidentally leak nesting across calls.
+pub struct ParentScope {
+    _private: (),
+}
+
+impl Drop for ParentScope {
+    fn drop(&mut self) {
+        PARENT_STACK.with(|stack| {
+            stack.borrow_mut().pop();
+        });
+    }
+}
+
+/// Top of the per-thread parent stack, if any. Returns `None` when no
+/// `parent_scope` is active. Used by both `TraceHandle::step` (for steps
+/// emitted by producers without an explicit `child(n)`) and by
+/// `TracedRuntime` to thread runtime calls under the producer's current
+/// phase header.
+pub fn current_parent_step() -> Option<usize> {
+    PARENT_STACK.with(|stack| stack.borrow().last().copied())
+}
 
 pub trait TraceSink: Send + Sync {
     fn record(&self, step: &RunTraceStep);
@@ -63,13 +95,35 @@ impl TraceHandle {
         if let Some(module_id) = &self.module_id {
             step.module_id = Some(module_id.as_ref().to_string());
         }
-        if let Some(parent_step) = self.parent_step {
+        // Explicit child handle wins; otherwise fall back to thread-local
+        // parent stack populated by `parent_scope` guards.
+        let parent = self.parent_step.or_else(current_parent_step);
+        if let Some(parent_step) = parent {
             step.parent_step = Some(parent_step);
         }
         TraceStepBuilder {
             handle: self,
             step: Some(step),
         }
+    }
+
+    /// Push `parent` onto the per-thread parent stack and return an RAII
+    /// guard that pops it on drop. Subsequent step emissions through this
+    /// handle (and any `TracedRuntime` instrumentation on the same thread)
+    /// will set `parent_step` to `parent` while the guard is alive.
+    ///
+    /// The producer pattern is:
+    /// ```ignore
+    /// let phase = trace.step("reasoning", "run", "evidence-collect").emit();
+    /// let _scope = trace.parent_scope(phase);
+    /// // every runtime.query_blocking(...) call inside this block now
+    /// // emits a child step under `phase`.
+    /// ```
+    pub fn parent_scope(&self, parent: usize) -> ParentScope {
+        PARENT_STACK.with(|stack| {
+            stack.borrow_mut().push(parent);
+        });
+        ParentScope { _private: () }
     }
 }
 

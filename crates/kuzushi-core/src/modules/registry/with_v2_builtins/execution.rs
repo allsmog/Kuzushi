@@ -81,6 +81,21 @@ impl ModuleRegistry {
             ctx
         };
 
+        // Wrap the runtime in TracedRuntime so every LLM call (query,
+        // next_step, triage, subagent) auto-emits a trace step. The wrapped
+        // runtime is `'tool`-lifetime and stays in scope for the entire
+        // dispatch; tools call it via `&dyn AgentRuntime` like before.
+        let traced_runtime;
+        let runtime: Option<&dyn AgentRuntime> =
+            match (runtime, scoped_trace.as_ref()) {
+                (Some(rt), Some(handle)) => {
+                    traced_runtime =
+                        crate::runtime::TracedRuntime::new(rt, handle.clone());
+                    Some(&traced_runtime as &dyn AgentRuntime)
+                }
+                _ => runtime,
+            };
+
         if let Some(result) = self.dispatch_catalog_tool(name) {
             return result;
         }

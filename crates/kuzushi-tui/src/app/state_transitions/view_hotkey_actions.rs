@@ -138,6 +138,21 @@ impl ShellApp {
             ViewHotkeyAction::ActivityReset => {
                 self.activity = None;
             }
+            ViewHotkeyAction::ActivityFocusSelected => {
+                if let Some(session) = self.activity.as_mut() {
+                    if !session.tasks.is_empty() {
+                        let cursor = session
+                            .task_scroll
+                            .min(session.tasks.len().saturating_sub(1));
+                        let task_id = session
+                            .tasks
+                            .values()
+                            .nth(cursor)
+                            .map(|row| row.task_id.clone());
+                        session.focus_task = task_id;
+                    }
+                }
+            }
             _ => return false,
         }
         true

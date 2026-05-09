@@ -21,6 +21,12 @@ pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
         ),
         bind_char('p', "p", "pause", ViewHotkeyAction::ActivityTogglePause),
         bind_char('R', "R", "reset", ViewHotkeyAction::ActivityReset),
+        bind(
+            HotkeyTrigger::Enter,
+            "Enter",
+            "focus task",
+            ViewHotkeyAction::ActivityFocusSelected,
+        ),
     ]
 }
 

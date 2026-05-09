@@ -95,4 +95,8 @@ pub struct ShellApp {
     /// Activity view. `Some` while a run is active or recently finished;
     /// reset by `R` in the Activity view.
     pub activity: Option<ActivitySession>,
+    /// When true (default), the Activity view auto-opens at scan/tool start.
+    /// Operators can opt out via `setg ui.auto_open_activity false` (parsed
+    /// in `ShellApp::new`).
+    pub auto_open_activity: bool,
 }

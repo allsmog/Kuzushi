@@ -22,7 +22,16 @@ impl ShellApp {
         self.scan_cancel = Some(cancel.clone());
         self.findings.clear();
         self.selected_finding = None;
-        self.shell_view = ShellView::ModuleRun;
+        // Mint an Activity session so trace events from the scan worker
+        // have somewhere to land. The drain pump (drain_trace_events) also
+        // creates one lazily, but seeding it here keeps the run-id consistent
+        // with the scan's eventual run id once the worker assigns one.
+        self.activity = Some(ActivitySession::new("scan-pending"));
+        self.shell_view = if self.auto_open_activity {
+            ShellView::Activity
+        } else {
+            ShellView::ModuleRun
+        };
         self.log(
             "scan",
             format!("starting {}", request.target_root.display()),

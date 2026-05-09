@@ -37,8 +37,8 @@ pub(in crate::modules) fn run_triage(
     let runtime = require_triage_runtime(runtime)?;
     let stage2_model = resolve_triage_model(ctx, runtime, input.stage2_tier)?;
     let mut stage1 = prefilter_triage_findings(findings, input.prefilter_threshold);
-    if let Some(trace) = ctx.trace {
-        let _ = trace
+    let evidence_phase = ctx.trace.map(|trace| {
+        trace
             .step(
                 "reasoning",
                 "run",
@@ -49,11 +49,23 @@ pub(in crate::modules) fn run_triage(
                     threshold = input.prefilter_threshold,
                 ),
             )
-            .emit();
-    }
+            .emit()
+    });
     let config = TriageExecutionConfig::new(workspace.root().to_path_buf(), stage2_model);
     let kept = std::mem::take(&mut stage1.kept);
+    // Open a phase scope so every LLM call inside run_triage_stage2 lands
+    // under the `evidence-collect` / `llm-classify` header in the feed.
+    let _llm_scope = match (ctx.trace, evidence_phase) {
+        (Some(trace), Some(parent)) => {
+            // Emit a label for the LLM phase, then push it as parent so each
+            // runtime.query/triage_finding invocation appears indented under it.
+            let phase_n = trace.step("reasoning", "run", "llm-classify").emit();
+            Some(trace.parent_scope(phase_n))
+        }
+        _ => None,
+    };
     let stats = run_triage_stage2(store, runtime, &input, &config, kept)?;
+    drop(_llm_scope);
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(

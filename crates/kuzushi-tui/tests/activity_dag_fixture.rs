@@ -118,6 +118,80 @@ fn parent_step_indents_child_event_in_feed() {
 }
 
 #[test]
+fn auto_open_flips_view_on_tool_start() {
+    use kuzushi_tui::{ShellApp, ShellCommand, ShellView};
+    let mut app = ShellApp::new(V2Config::default(), None);
+    assert!(app.auto_open_activity, "default should be on");
+    assert!(matches!(app.shell_view, ShellView::Catalog));
+
+    // Issue a /run command for a tool whose dispatcher we know — the
+    // background_tool_worker will fail without a real workspace, but we only
+    // care that start_background_tool flips the view before the worker thread
+    // runs.
+    app.handle_command(ShellCommand::RunTool {
+        tool: Some("findings:list".to_string()),
+        input: None,
+    });
+
+    assert!(
+        matches!(app.shell_view, ShellView::Activity),
+        "shell_view should auto-flip to Activity on tool start"
+    );
+}
+
+#[test]
+fn auto_open_disabled_does_not_open_activity() {
+    use kuzushi_tui::{ShellApp, ShellCommand, ShellView};
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.auto_open_activity = false;
+
+    app.handle_command(ShellCommand::RunTool {
+        tool: Some("findings:list".to_string()),
+        input: None,
+    });
+
+    assert!(
+        !matches!(app.shell_view, ShellView::Activity),
+        "Activity should not auto-open when the toggle is off; got {:?}",
+        app.shell_view
+    );
+}
+
+#[test]
+fn pane_focus_routes_jk_to_focused_scroll_offset() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.handle_command(ShellCommand::Activity);
+    {
+        let session = app.activity.as_mut().unwrap();
+        // Seed enough events that scrolling makes sense.
+        for i in 0..50 {
+            session.apply_step(
+                RunTraceStep::new(i, "tool", format!("event {i}"))
+                    .with_module_id("semgrep")
+                    .with_verb("scan"),
+            );
+        }
+    }
+    // pane_focus defaults to Left (DAG)
+    app.scroll_down(3);
+    let session = app.activity.as_ref().unwrap();
+    assert_eq!(session.task_scroll, 3);
+    assert_eq!(session.feed_scroll, 0, "feed must not move");
+
+    // Tab to right pane and scroll
+    drop(session);
+    app.activity.as_mut().unwrap().toggle_pane_focus();
+    app.scroll_down(7);
+    let session = app.activity.as_ref().unwrap();
+    assert_eq!(session.feed_scroll, 7);
+    assert_eq!(session.task_scroll, 3, "DAG must not move");
+    assert!(
+        session.paused,
+        "manually scrolling the feed pauses auto-tail"
+    );
+}
+
+#[test]
 fn verbose_subsystems_toggle_reveals_hidden_module_events() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let tmp = tempfile::tempdir().unwrap();
