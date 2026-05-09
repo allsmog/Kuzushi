@@ -578,6 +578,7 @@ mod tests {
         for expected in [
             "mcps",
             "cweFocus",
+            "discoverSignals",
             "joernCpg",
             "joernPerCweTimeoutMs",
             "codeqlPrewarm",
@@ -591,6 +592,58 @@ mod tests {
                 "expected option {expected} on taint-iris-next:hunt; got {names:?}"
             );
         }
+    }
+
+    #[test]
+    fn collect_taint_iris_next_attack_surface_hints_extracts_entrypoints_sinks_and_role_gates() {
+        use crate::modules::taint_iris_next::collect_taint_iris_next_attack_surface_hints;
+        // Realistic shape produced by threat-model:build under the new prompt.
+        let doc = json!({
+            "attackSurface": {
+                "entryPoints": [
+                    {"name": "pg_read_server_files", "trustZone": "untrusted-sql", "evidence": "src/backend/utils/adt/genfile.c"},
+                    {"name": "dblink_connect", "trustZone": "untrusted-sql"},
+                    "raw_string_entry"  // tolerate string-valued entries too
+                ],
+                "externalSinks": [
+                    {"name": "dlopen", "category": "dlopen"},
+                    {"name": "system", "category": "exec"}
+                ],
+                "roleGates": [
+                    {"check": "has_privs_of_role", "guarded": "pg_signal_backend"}
+                ],
+                "trustedCallers": [{"role": "pg_read_server_files", "purpose": "doc"}]
+            }
+        });
+        let hints = collect_taint_iris_next_attack_surface_hints(Some(&doc));
+        assert!(hints.entry_points.contains(&"pg_read_server_files".to_string()));
+        assert!(hints.entry_points.contains(&"dblink_connect".to_string()));
+        assert!(hints.entry_points.contains(&"raw_string_entry".to_string()));
+        assert!(hints.external_sinks.contains(&"dlopen".to_string()));
+        assert!(hints.external_sinks.contains(&"system".to_string()));
+        assert!(hints.role_gates.contains(&"has_privs_of_role".to_string()));
+        assert!(hints.role_gates.contains(&"pg_signal_backend".to_string()));
+        assert!(!hints.is_empty());
+    }
+
+    #[test]
+    fn collect_taint_iris_next_attack_surface_hints_tolerates_missing_or_partial_field() {
+        use crate::modules::taint_iris_next::collect_taint_iris_next_attack_surface_hints;
+        // Threat model exists but no attackSurface key.
+        assert!(collect_taint_iris_next_attack_surface_hints(Some(&json!({"threats": []})))
+            .is_empty());
+        // attackSurface present but no recognised sub-fields.
+        assert!(collect_taint_iris_next_attack_surface_hints(Some(&json!({"attackSurface": {}})))
+            .is_empty());
+        // Threat model entirely absent.
+        assert!(collect_taint_iris_next_attack_surface_hints(None).is_empty());
+        // Partial: only entryPoints populated.
+        let hints = collect_taint_iris_next_attack_surface_hints(Some(&json!({
+            "attackSurface": {"entryPoints": [{"name": "exec_simple_query"}]}
+        })));
+        assert_eq!(hints.entry_points, vec!["exec_simple_query".to_string()]);
+        assert!(hints.external_sinks.is_empty());
+        assert!(hints.role_gates.is_empty());
     }
 
     #[test]
