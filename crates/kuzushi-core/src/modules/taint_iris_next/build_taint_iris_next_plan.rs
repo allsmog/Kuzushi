@@ -77,18 +77,20 @@ pub(in crate::modules) fn build_taint_iris_next_plan(
     // ordering, but we make sure the attack-surface contribution can
     // tip a tied entry.
     let catalog = boost_catalog_with_attack_surface_hints(catalog, &attack_surface_hints);
-    // Threat-model fallback: when the operator's `cwe_focus` includes
+    // Phantom-entry fallback: when the operator's `cwe_focus` includes
     // CWEs the post-boost catalog has no entries for, synthesise a
     // phantom entry per missing CWE whose source/sink signals come
-    // straight from the threat-model `attackSurface`. This lets a
-    // human-curated threat model surface real per-target patterns
-    // (`my_handler`, `do_dangerous_thing`) into the rg projection
-    // pipeline even when the static catalog had no row for that CWE.
-    // No-op when the catalog already covers the focus or the threat
-    // model has no attackSurface block.
-    let catalog = supplement_catalog_with_attack_surface_phantoms(
+    // from (1) threat-model `attackSurface` when present, falling back
+    // to (2) the static-marker discovery sweep's per-CWE primitives
+    // (e.g. dlopen / load_external_function for CWE-94, system / popen
+    // for CWE-78). This keeps the agent's `selectedCwes` validator from
+    // rejecting an honest claim like "I see CWE-94 candidates from
+    // discovery" when the static catalog ships no CWE-94 entry for
+    // this language. Both fallbacks are framework-agnostic.
+    let catalog = supplement_catalog_with_phantom_focus_entries(
         catalog,
         &attack_surface_hints,
+        &discovered_signals,
         &options.cwe_focus,
     );
     let structural_queries = build_taint_iris_next_structural_queries(&catalog);
@@ -226,35 +228,56 @@ fn boost_catalog_with_attack_surface_hints(
 
 /// Synthesise a phantom `TaintIrisNextRankedCatalogEntry` per CWE in
 /// `cwe_focus` that the post-rank/post-boost catalog has no entry
-/// for, drawing source/sink signals from the threat-model
-/// `attackSurface`. The downstream `build_taint_iris_next_structural_queries`
-/// + rg engine pick these up and produce role-tagged candidates without
-/// further plumbing — the catalog signals, after all, are exactly the
-/// shape rg wants.
+/// for. Source/sink signals come from two complementary sources:
+///
+/// 1. **Threat-model `attackSurface`** (preferred when populated) —
+///    `entryPoints[].name` → source signals, `externalSinks[].name`
+///    + `roleGates[].guarded` → sink signals. Lets a human-curated
+///    threat model surface per-target patterns (`my_handler`,
+///    `do_dangerous_thing`) into the rg projection pipeline.
+///
+/// 2. **Discovery sweep** (fallback when no threat model exists) —
+///    framework-canonical discovery markers
+///    (`source_sink_discovery::MARKERS`) for the target's languages.
+///    Discovered `entry_points` are projected as sources for the
+///    focus CWE, and discovered `sinks` are projected when their
+///    intrinsic CWE matches the focus. Without this fallback, the
+///    agent's `selectedCwes` validator rejects honest claims like
+///    "CWE-94 candidates exist from discovery" on codebases (e.g.
+///    postgres) that ship no static CWE-94 catalog entry for C and
+///    no threat-model.
+///
+/// The downstream `build_taint_iris_next_structural_queries` + rg
+/// engine pick the phantom signals up and produce role-tagged
+/// candidates without further plumbing — the catalog signals are
+/// exactly the shape rg wants.
 ///
 /// No-op when:
 /// - `cwe_focus` is empty (no operator-supplied focus to backfill)
-/// - `hints` is empty (no threat-model attack surface to draw from)
 /// - every focus CWE already has at least one catalog entry
-fn supplement_catalog_with_attack_surface_phantoms(
+/// - both threat-model hints AND discovery are empty (nothing to
+///   draw from)
+fn supplement_catalog_with_phantom_focus_entries(
     mut catalog: Vec<TaintIrisNextRankedCatalogEntry>,
     hints: &TaintIrisNextAttackSurfaceHints,
+    discovered: &DiscoveredSignals,
     cwe_focus: &[String],
 ) -> Vec<TaintIrisNextRankedCatalogEntry> {
-    if cwe_focus.is_empty() || hints.is_empty() {
+    if cwe_focus.is_empty() {
         return catalog;
     }
     let represented: std::collections::BTreeSet<String> = catalog
         .iter()
         .map(|entry| entry.cwe.to_ascii_uppercase())
         .collect();
-    let source_signals: Vec<String> = {
+
+    let threat_model_source_signals: Vec<String> = {
         let mut out = hints.entry_points.clone();
         out.sort();
         out.dedup();
         out
     };
-    let sink_signals: Vec<String> = {
+    let threat_model_sink_signals: Vec<String> = {
         let mut out: Vec<String> = hints
             .external_sinks
             .iter()
@@ -265,27 +288,74 @@ fn supplement_catalog_with_attack_surface_phantoms(
         out.dedup();
         out
     };
-    if source_signals.is_empty() && sink_signals.is_empty() {
-        return catalog;
+    // Pre-compute the discovery's entry-point names (universal sources
+    // for any focus CWE — see Thread A's projection rationale) and a
+    // per-CWE sink-name index from the discovery output.
+    let discovery_entry_points: Vec<String> = {
+        let mut out: Vec<String> = discovered
+            .entry_points
+            .iter()
+            .map(|signal| signal.name.clone())
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    };
+    let mut discovery_sinks_by_cwe: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for signal in &discovered.sinks {
+        let entry = discovery_sinks_by_cwe
+            .entry(signal.cwe.to_ascii_uppercase())
+            .or_default();
+        entry.push(signal.name.clone());
     }
+    for entry in discovery_sinks_by_cwe.values_mut() {
+        entry.sort();
+        entry.dedup();
+    }
+
     for cwe in cwe_focus {
         let normalised = cwe.to_ascii_uppercase();
         if represented.contains(&normalised) {
             continue;
         }
+        // Prefer threat-model when populated; fall back to discovery.
+        let (source_signals, sink_signals, provenance) = if !hints.is_empty()
+            && (!threat_model_source_signals.is_empty()
+                || !threat_model_sink_signals.is_empty())
+        {
+            (
+                threat_model_source_signals.clone(),
+                threat_model_sink_signals.clone(),
+                "Threat-Model Attack Surface",
+            )
+        } else {
+            let discovery_sinks = discovery_sinks_by_cwe
+                .get(&normalised)
+                .cloned()
+                .unwrap_or_default();
+            (
+                discovery_entry_points.clone(),
+                discovery_sinks,
+                "Discovery Sweep",
+            )
+        };
+        if source_signals.is_empty() && sink_signals.is_empty() {
+            continue;
+        }
         catalog.push(TaintIrisNextRankedCatalogEntry {
             cwe: normalised.clone(),
-            name: format!("Threat-Model Attack Surface ({normalised})"),
+            name: format!("{provenance} ({normalised})"),
             taint_class: phantom_taint_class_for_cwe(&normalised).to_string(),
             languages: Vec::new(),
-            source_signals: source_signals.clone(),
-            sink_signals: sink_signals.clone(),
+            source_signals,
+            sink_signals,
             sanitizer_signals: Vec::new(),
             structural_queries: Vec::new(),
             score: 50,
-            reasons: vec![
-                "Synthesised from threat-model attackSurface; no static catalog entry covered this focus CWE.".to_string(),
-            ],
+            reasons: vec![format!(
+                "Synthesised from {provenance}; no static catalog entry covered this focus CWE.",
+            )],
         });
     }
     catalog.sort_by(|a, b| b.score.cmp(&a.score));
@@ -316,7 +386,7 @@ fn phantom_taint_class_for_cwe(cwe: &str) -> &'static str {
 }
 
 #[cfg(test)]
-mod attack_surface_phantom_tests {
+mod phantom_focus_entry_tests {
     use super::*;
 
     fn entry(cwe: &str, score: i32) -> TaintIrisNextRankedCatalogEntry {
@@ -334,8 +404,24 @@ mod attack_surface_phantom_tests {
         }
     }
 
+    fn no_signals() -> DiscoveredSignals {
+        DiscoveredSignals::default()
+    }
+
+    fn discovery_signal(name: &str, cwe: &str) -> DiscoveredSignal {
+        DiscoveredSignal {
+            name: name.to_string(),
+            cwe: cwe.to_string(),
+            kind: "test".to_string(),
+            language: "c".to_string(),
+            marker: "test".to_string(),
+            file: "f.c".to_string(),
+            line: 1,
+        }
+    }
+
     #[test]
-    fn synthesises_phantom_for_unrepresented_focus_cwe() {
+    fn synthesises_phantom_for_unrepresented_focus_cwe_from_threat_model() {
         let catalog = vec![entry("CWE-78", 100)];
         let hints = TaintIrisNextAttackSurfaceHints {
             entry_points: vec!["my_handler".to_string()],
@@ -343,8 +429,12 @@ mod attack_surface_phantom_tests {
             role_gates: Vec::new(),
         };
         let cwe_focus = vec!["CWE-78".to_string(), "CWE-94".to_string()];
-        let out =
-            supplement_catalog_with_attack_surface_phantoms(catalog, &hints, &cwe_focus);
+        let out = supplement_catalog_with_phantom_focus_entries(
+            catalog,
+            &hints,
+            &no_signals(),
+            &cwe_focus,
+        );
         // CWE-78 was already represented; CWE-94 needed a phantom.
         let cwes: Vec<&str> = out.iter().map(|e| e.cwe.as_str()).collect();
         assert!(cwes.contains(&"CWE-94"));
@@ -352,6 +442,75 @@ mod attack_surface_phantom_tests {
         assert!(phantom.source_signals.contains(&"my_handler".to_string()));
         assert!(phantom.sink_signals.contains(&"dlopen".to_string()));
         assert_eq!(phantom.taint_class, "code-injection");
+        assert!(phantom.name.contains("Threat-Model"));
+    }
+
+    #[test]
+    fn falls_back_to_discovery_when_no_threat_model() {
+        // Postgres-shaped scenario: no threat-model.json at all,
+        // but discovery surfaced entry-points + dlopen sinks.
+        // Without the discovery fallback, the agent's `selectedCwes`
+        // validator rejected an honest CWE-94 selection because the
+        // static catalog has no CWE-94 entry for C codebases.
+        let catalog = vec![entry("CWE-78", 100)];
+        let empty_hints = TaintIrisNextAttackSurfaceHints::default();
+        let discovery = DiscoveredSignals {
+            discovered_at_unix: 0,
+            sources: Vec::new(),
+            sinks: vec![
+                discovery_signal("dlopen", "CWE-94"),
+                discovery_signal("load_external_function", "CWE-94"),
+            ],
+            entry_points: vec![discovery_signal("pg_read_server_files", "CWE-862")],
+            discoverers: vec!["test".to_string()],
+        };
+        let cwe_focus = vec!["CWE-78".to_string(), "CWE-94".to_string()];
+        let out = supplement_catalog_with_phantom_focus_entries(
+            catalog,
+            &empty_hints,
+            &discovery,
+            &cwe_focus,
+        );
+        let phantom = out.iter().find(|e| e.cwe == "CWE-94").unwrap();
+        assert!(phantom.name.contains("Discovery"));
+        assert!(phantom.source_signals.contains(&"pg_read_server_files".to_string()));
+        assert!(phantom.sink_signals.contains(&"dlopen".to_string()));
+        assert!(phantom
+            .sink_signals
+            .contains(&"load_external_function".to_string()));
+    }
+
+    #[test]
+    fn threat_model_takes_precedence_over_discovery() {
+        // When both feeds populated, prefer the threat-model: a human
+        // (or a high-quality LLM-built model) typically has tighter
+        // semantics than the static discovery markers.
+        let catalog = vec![entry("CWE-78", 100)];
+        let hints = TaintIrisNextAttackSurfaceHints {
+            entry_points: vec!["threat_model_handler".to_string()],
+            external_sinks: vec!["threat_model_sink".to_string()],
+            role_gates: Vec::new(),
+        };
+        let discovery = DiscoveredSignals {
+            discovered_at_unix: 0,
+            sources: Vec::new(),
+            sinks: vec![discovery_signal("dlopen", "CWE-94")],
+            entry_points: vec![discovery_signal("pg_fn", "CWE-862")],
+            discoverers: vec!["test".to_string()],
+        };
+        let cwe_focus = vec!["CWE-94".to_string()];
+        let out = supplement_catalog_with_phantom_focus_entries(
+            catalog,
+            &hints,
+            &discovery,
+            &cwe_focus,
+        );
+        let phantom = out.iter().find(|e| e.cwe == "CWE-94").unwrap();
+        assert!(phantom.name.contains("Threat-Model"));
+        assert!(phantom
+            .source_signals
+            .contains(&"threat_model_handler".to_string()));
+        assert!(!phantom.source_signals.contains(&"pg_fn".to_string()));
     }
 
     #[test]
@@ -363,9 +522,10 @@ mod attack_surface_phantom_tests {
             role_gates: Vec::new(),
         };
         let cwe_focus = vec!["CWE-78".to_string(), "CWE-94".to_string()];
-        let out = supplement_catalog_with_attack_surface_phantoms(
+        let out = supplement_catalog_with_phantom_focus_entries(
             catalog.clone(),
             &hints,
+            &no_signals(),
             &cwe_focus,
         );
         // No new entries — both focus CWEs already represented.
@@ -373,32 +533,35 @@ mod attack_surface_phantom_tests {
     }
 
     #[test]
-    fn no_op_when_focus_empty_or_hints_empty() {
+    fn no_op_when_focus_empty_or_all_feeds_empty() {
         let catalog = vec![entry("CWE-78", 100)];
         let hints = TaintIrisNextAttackSurfaceHints {
             entry_points: vec!["x".to_string()],
             external_sinks: Vec::new(),
             role_gates: Vec::new(),
         };
-        let with_empty_focus =
-            supplement_catalog_with_attack_surface_phantoms(catalog.clone(), &hints, &[]);
+        let with_empty_focus = supplement_catalog_with_phantom_focus_entries(
+            catalog.clone(),
+            &hints,
+            &no_signals(),
+            &[],
+        );
         assert_eq!(with_empty_focus.len(), 1);
 
+        // No threat-model AND no discovery: no phantom even when
+        // focus has unrepresented CWEs.
         let empty_hints = TaintIrisNextAttackSurfaceHints::default();
-        let with_empty_hints = supplement_catalog_with_attack_surface_phantoms(
+        let with_no_feeds = supplement_catalog_with_phantom_focus_entries(
             catalog.clone(),
             &empty_hints,
+            &no_signals(),
             &["CWE-94".to_string()],
         );
-        assert_eq!(with_empty_hints.len(), 1);
+        assert_eq!(with_no_feeds.len(), 1);
     }
 
     #[test]
     fn role_gates_fold_into_sink_signals() {
-        // Threat-model role-gates (`has_privs_of_role`,
-        // `superuser`) are sinks for CWE-269/CWE-250-style hunts —
-        // they should land in `sink_signals` so the rg pass projects
-        // them as sink-role candidates.
         let catalog = Vec::new();
         let hints = TaintIrisNextAttackSurfaceHints {
             entry_points: Vec::new(),
@@ -406,8 +569,12 @@ mod attack_surface_phantom_tests {
             role_gates: vec!["has_privs_of_role".to_string()],
         };
         let cwe_focus = vec!["CWE-269".to_string()];
-        let out =
-            supplement_catalog_with_attack_surface_phantoms(catalog, &hints, &cwe_focus);
+        let out = supplement_catalog_with_phantom_focus_entries(
+            catalog,
+            &hints,
+            &no_signals(),
+            &cwe_focus,
+        );
         assert_eq!(out.len(), 1);
         assert!(out[0].sink_signals.contains(&"dlopen".to_string()));
         assert!(out[0]
