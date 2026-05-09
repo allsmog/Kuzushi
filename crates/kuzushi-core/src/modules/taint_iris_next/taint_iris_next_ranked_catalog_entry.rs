@@ -65,6 +65,11 @@ pub(in crate::modules) struct TaintIrisNextPlan {
     pub(in crate::modules) prompt_catalog: String,
     pub(in crate::modules) backend: TaintIrisNextBackendChoice,
     pub(in crate::modules) max_budget_usd: Option<f64>,
+    /// Operator-supplied CWE allow-list propagated from
+    /// `TaintIrisNextInput::cwe_focus`. Empty when no filter was
+    /// requested. Surfaced into the agent prompt so the model knows
+    /// which CWE classes the catalog has been narrowed to.
+    pub(in crate::modules) cwe_focus: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

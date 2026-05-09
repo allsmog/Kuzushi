@@ -36,6 +36,24 @@ pub(in crate::modules) fn build_taint_iris_next_plan(
             .take(options.caps.max_catalog_entries)
             .collect::<Vec<_>>(),
     };
+    // Apply the operator's cweFocus shell-option filter. When the
+    // allow-list is non-empty, drop catalog entries whose CWE isn't in
+    // it so the structural seeds + agent prompt stay scoped to the
+    // requested classes (e.g. CWE-78 / CWE-94 / CWE-426 for a privesc +
+    // RCE hunt). Empty allow-list = keep everything.
+    let catalog = if options.cwe_focus.is_empty() {
+        catalog
+    } else {
+        let allow: std::collections::BTreeSet<String> = options
+            .cwe_focus
+            .iter()
+            .map(|cwe| cwe.to_ascii_uppercase())
+            .collect();
+        catalog
+            .into_iter()
+            .filter(|entry| allow.contains(&entry.cwe.to_ascii_uppercase()))
+            .collect()
+    };
     let structural_queries = build_taint_iris_next_structural_queries(&catalog);
     let prompt_catalog = render_taint_iris_next_catalog(&catalog);
     let backend = choose_taint_iris_next_backend(&options.backend, &repo_root);
@@ -56,6 +74,7 @@ pub(in crate::modules) fn build_taint_iris_next_plan(
         prompt_catalog,
         backend,
         max_budget_usd: options.max_budget_usd,
+        cwe_focus: options.cwe_focus,
     })
 }
 

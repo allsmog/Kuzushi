@@ -577,6 +577,7 @@ mod tests {
         let names: Vec<&str> = hunt.options.iter().map(|o| o.name.as_str()).collect();
         for expected in [
             "mcps",
+            "cweFocus",
             "joernCpg",
             "joernPerCweTimeoutMs",
             "codeqlPrewarm",
@@ -590,5 +591,32 @@ mod tests {
                 "expected option {expected} on taint-iris-next:hunt; got {names:?}"
             );
         }
+    }
+
+    #[test]
+    fn parse_taint_iris_next_cwe_focus_normalises_separators_and_prefixes() {
+        use crate::modules::taint_iris_next::parse_taint_iris_next_cwe_focus;
+
+        // Comma-separated string with mixed prefix/no-prefix and case.
+        let parsed =
+            parse_taint_iris_next_cwe_focus(&json!({"cweFocus": "CWE-78, cwe-94, 426 269"}));
+        assert_eq!(parsed, vec!["CWE-269", "CWE-426", "CWE-78", "CWE-94"]);
+
+        // JSON array form.
+        let parsed = parse_taint_iris_next_cwe_focus(&json!({
+            "cweFocus": ["CWE-22", "CWE-22", "cwe-22"]
+        }));
+        assert_eq!(parsed, vec!["CWE-22"], "duplicates collapse to one");
+
+        // Snake-case alias still resolves so an operator using
+        // `set taint-iris-next:hunt cwe_focus ...` still gets through.
+        let parsed = parse_taint_iris_next_cwe_focus(&json!({"cwe_focus": "CWE-78"}));
+        assert_eq!(parsed, vec!["CWE-78"]);
+
+        // Empty / missing => empty vec (callers treat as no filter).
+        let parsed = parse_taint_iris_next_cwe_focus(&json!({}));
+        assert!(parsed.is_empty());
+        let parsed = parse_taint_iris_next_cwe_focus(&json!({"cweFocus": ""}));
+        assert!(parsed.is_empty());
     }
 }

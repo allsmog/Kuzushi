@@ -42,12 +42,22 @@ pub(in crate::modules::taint_iris_next) fn build_taint_iris_next_agent_prompt(
         String::new(),
         plan.prompt_catalog.clone(),
         String::new(),
+    ];
+    if !plan.cwe_focus.is_empty() {
+        lines.push("## CWE Focus".to_string());
+        lines.push(format!(
+            "The operator restricted this hunt to {}. Choose only from these CWEs (the catalog has already been filtered to match) and use customCweRationale only if you discover a clearly different vulnerability class.",
+            plan.cwe_focus.join(", ")
+        ));
+        lines.push(String::new());
+    }
+    lines.extend(vec![
         "## Candidate And Spec Counts".to_string(),
         format!("candidateCounts: {}", json!(evidence.candidate_counts)),
         format!("labeledSpecCounts: {}", json!(evidence.labeled_spec_counts)),
         String::new(),
         "## Evidence Bundles".to_string(),
-    ];
+    ]);
     for item in evidence.evidence.iter().take(40) {
         lines.push(format!(
             "- {} {} {}:{} [{}] {}",

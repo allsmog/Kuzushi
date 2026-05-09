@@ -49,6 +49,7 @@ pub(crate) fn taint_iris_next_module() -> BuiltinModule {
                     max_findings_option(20),
                     model_option(),
                     mcps_option(),
+                    cwe_focus_option(),
                     joern_cpg_option(),
                     joern_per_cwe_timeout_ms_option(),
                     codeql_prewarm_option(),

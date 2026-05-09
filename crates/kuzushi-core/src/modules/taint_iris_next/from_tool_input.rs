@@ -6,6 +6,7 @@ impl TaintIrisNextInput {
         let backend = taint_iris_next_backend(input)?;
         let languages = taint_iris_next_languages(input)?;
         let caps = taint_iris_next_caps(input)?;
+        let cwe_focus = parse_taint_iris_next_cwe_focus(input);
         Ok(Self {
             mode,
             backend,
@@ -16,6 +17,7 @@ impl TaintIrisNextInput {
                 &["maxBudgetUsd", "max_budget_usd"],
                 "taint-iris-next:hunt maxBudgetUsd",
             )?,
+            cwe_focus,
         })
     }
 }
