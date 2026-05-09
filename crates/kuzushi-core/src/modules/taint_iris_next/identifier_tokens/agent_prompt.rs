@@ -51,6 +51,7 @@ pub(in crate::modules::taint_iris_next) fn build_taint_iris_next_agent_prompt(
         ));
         lines.push(String::new());
     }
+    append_discovered_signals_section(&mut lines, &plan.discovered_signals);
     lines.extend(vec![
         "## Candidate And Spec Counts".to_string(),
         format!("candidateCounts: {}", json!(evidence.candidate_counts)),
@@ -83,4 +84,67 @@ pub(in crate::modules::taint_iris_next) fn build_taint_iris_next_agent_prompt(
     ));
     lines.push("- Cite catalogSignals for every selected CWE and every finding.".to_string());
     lines.join("\n")
+}
+
+/// Render a "## Discovered Signals" section for the agent prompt.
+/// Lists, per CWE, the entry-points / sources / sinks the discovery
+/// pass found in the actual codebase. The model gets concrete names
+/// it can pass to `joern.taint_paths` and `tree_sitter:callers`
+/// without having to guess. We cap the per-CWE list aggressively (8
+/// entries) so the prompt stays compact even on a postgres-scale
+/// discovery sweep — the artifact at .kuzushi/discovered-signals.json
+/// has the full set when the agent wants to drill deeper.
+fn append_discovered_signals_section(
+    lines: &mut Vec<String>,
+    signals: &DiscoveredSignals,
+) {
+    if signals.entry_points.is_empty()
+        && signals.sources.is_empty()
+        && signals.sinks.is_empty()
+    {
+        return;
+    }
+    lines.push("## Discovered Signals".to_string());
+    lines.push(format!(
+        "Per-target regex sweep found {} entry-point(s), {} source(s), and {} sink(s) in the codebase. Use these names directly with `joern.taint_paths`, `tree_sitter:callers`, and `codeql:flows_for_cwe` — they are real call/method names this repo actually contains, not catalog guesses.",
+        signals.entry_points.len(),
+        signals.sources.len(),
+        signals.sinks.len()
+    ));
+    if !signals.entry_points.is_empty() {
+        lines.push(String::new());
+        lines.push("### Entry points".to_string());
+        for entry in signals.entry_points.iter().take(20) {
+            lines.push(format!(
+                "- {} ({}) {}:{}    [{}]",
+                entry.name, entry.cwe, entry.file, entry.line, entry.marker
+            ));
+        }
+    }
+    if !signals.sinks.is_empty() {
+        lines.push(String::new());
+        lines.push("### Privesc / RCE sinks".to_string());
+        let mut by_cwe: std::collections::BTreeMap<&str, Vec<&DiscoveredSignal>> =
+            std::collections::BTreeMap::new();
+        for sink in &signals.sinks {
+            by_cwe
+                .entry(sink.cwe.as_str())
+                .or_default()
+                .push(sink);
+        }
+        for (cwe, entries) in by_cwe {
+            let names: std::collections::BTreeSet<&str> =
+                entries.iter().map(|e| e.name.as_str()).collect();
+            let head: Vec<&str> = names.into_iter().take(8).collect();
+            let example = entries.first().map(|e| format!("{}:{}", e.file, e.line));
+            lines.push(format!(
+                "- {cwe}: {}{}",
+                head.join(", "),
+                example
+                    .map(|loc| format!(" (e.g. {loc})"))
+                    .unwrap_or_default(),
+            ));
+        }
+    }
+    lines.push(String::new());
 }

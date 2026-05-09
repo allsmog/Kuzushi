@@ -70,6 +70,13 @@ pub(in crate::modules) struct TaintIrisNextPlan {
     /// requested. Surfaced into the agent prompt so the model knows
     /// which CWE classes the catalog has been narrowed to.
     pub(in crate::modules) cwe_focus: Vec<String>,
+    /// Per-target source/sink + entry-point primitives discovered by
+    /// `source_sink_discovery::run`. Empty when discovery was disabled
+    /// or no markers matched. Used as a ranking signal during catalog
+    /// rerank and surfaced into the agent prompt so the model can
+    /// ground its CWE picks in primitives that actually exist in the
+    /// codebase rather than the static catalog's a-priori guess.
+    pub(in crate::modules) discovered_signals: DiscoveredSignals,
 }
 
 #[derive(Debug, Clone, Serialize)]

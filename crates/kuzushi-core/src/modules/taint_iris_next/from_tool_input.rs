@@ -7,6 +7,14 @@ impl TaintIrisNextInput {
         let languages = taint_iris_next_languages(input)?;
         let caps = taint_iris_next_caps(input)?;
         let cwe_focus = parse_taint_iris_next_cwe_focus(input);
+        // Default ON. The operator opts out via either a JSON-bool
+        // false on `discoverSignals` (the camelCase shell option) or
+        // its snake-case alias. Loose parsing matches the rest of the
+        // module's option helpers — read_bool_option accepts
+        // true/false/1/0/yes/no/on/off.
+        let discover_signals = read_bool_option(input, "discoverSignals")
+            .or_else(|| read_bool_option(input, "discover_signals"))
+            .unwrap_or(true);
         Ok(Self {
             mode,
             backend,
@@ -18,6 +26,7 @@ impl TaintIrisNextInput {
                 "taint-iris-next:hunt maxBudgetUsd",
             )?,
             cwe_focus,
+            discover_signals,
         })
     }
 }

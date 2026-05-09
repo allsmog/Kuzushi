@@ -16,6 +16,13 @@ kuzushi-codeindex = { path = "../kuzushi-codeindex" }
 kuzushi-mcp-common = { path = "../kuzushi-mcp-common" }
 kuzushi-sandbox = { path = "../kuzushi-sandbox" }
 libc.workspace = true
+# Regex powers the per-target source/sink discovery sweep
+# (`source_sink_discovery::run`) which scans the source tree for
+# language-specific entry-point markers and privesc/RCE primitives
+# without spawning tree-sitter or joern. Already a transitive
+# dependency via tree-sitter; declare it explicitly so the discovery
+# crate isn't relying on an indirect feature.
+regex = "1"
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
