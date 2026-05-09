@@ -530,4 +530,65 @@ mod tests {
             "expected an explanatory warning, got {warnings:?}"
         );
     }
+
+    #[test]
+    fn read_bool_option_accepts_json_bool_string_and_int_forms() {
+        use crate::modules::taint_iris_next::read_bool_option;
+        let raw = json!({
+            "yes": true,
+            "no": false,
+            "trueStr": "true",
+            "yesStr": "Yes",
+            "onStr": "ON",
+            "oneStr": "1",
+            "falseStr": "FALSE",
+            "offStr": "off",
+            "zeroStr": "0",
+            "intOne": 1,
+            "intZero": 0,
+            "intNonZero": 7,
+            "garbage": "maybe",
+        });
+        assert_eq!(read_bool_option(&raw, "yes"), Some(true));
+        assert_eq!(read_bool_option(&raw, "no"), Some(false));
+        assert_eq!(read_bool_option(&raw, "trueStr"), Some(true));
+        assert_eq!(read_bool_option(&raw, "yesStr"), Some(true));
+        assert_eq!(read_bool_option(&raw, "onStr"), Some(true));
+        assert_eq!(read_bool_option(&raw, "oneStr"), Some(true));
+        assert_eq!(read_bool_option(&raw, "falseStr"), Some(false));
+        assert_eq!(read_bool_option(&raw, "offStr"), Some(false));
+        assert_eq!(read_bool_option(&raw, "zeroStr"), Some(false));
+        assert_eq!(read_bool_option(&raw, "intOne"), Some(true));
+        assert_eq!(read_bool_option(&raw, "intZero"), Some(false));
+        assert_eq!(read_bool_option(&raw, "intNonZero"), Some(true));
+        assert_eq!(read_bool_option(&raw, "garbage"), None);
+        assert_eq!(read_bool_option(&raw, "missing"), None);
+    }
+
+    #[test]
+    fn taint_iris_next_hunt_descriptor_lists_all_mcp_options() {
+        use crate::modules::carlini_threat_hunt_module::taint_iris_next_module;
+        let module = taint_iris_next_module();
+        let hunt = module
+            .tools
+            .iter()
+            .find(|t| t.name == "taint-iris-next:hunt")
+            .expect("hunt tool should be present");
+        let names: Vec<&str> = hunt.options.iter().map(|o| o.name.as_str()).collect();
+        for expected in [
+            "mcps",
+            "joernCpg",
+            "joernPerCweTimeoutMs",
+            "codeqlPrewarm",
+            "codeqlCacheDir",
+            "mcpToolTimeoutMs",
+            "bridgeVerbose",
+            "bridgeLogPath",
+        ] {
+            assert!(
+                names.contains(&expected),
+                "expected option {expected} on taint-iris-next:hunt; got {names:?}"
+            );
+        }
+    }
 }

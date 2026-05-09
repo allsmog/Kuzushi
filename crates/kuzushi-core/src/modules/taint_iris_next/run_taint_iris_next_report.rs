@@ -73,11 +73,19 @@ pub(in crate::modules) fn run_taint_iris_next_hunt(
 ) -> Result<TaintIrisNextReport> {
     let runtime = require_taint_iris_next_runtime(runtime)?;
     let model = require_taint_iris_next_model(input, ctx)?;
-    // taint-iris-next always opts the policy into the kuzushi MCP-as-agent
-    // surface (tree-sitter / joern / codeql). The bridge still respects the
-    // KUZUSHI_AGENT_MCPS env override for ad-hoc runs of other modules,
-    // but here we don't want the operator to have to remember to set it.
-    let agent_tool_policy = agent_tool_policy_for_input(input)?.with_mcps(true);
+    // Apply the shell-tunable MCP knobs: read each option from the input
+    // (operators set them via `set taint-iris-next:hunt <key> <value>`)
+    // and translate to the env vars the bridge + MCP servers honour.
+    // env mutation is process-local so it only affects this kuzushi run.
+    apply_taint_iris_next_mcp_options(input);
+    // taint-iris-next opts the policy into the kuzushi MCP-as-agent
+    // surface (tree-sitter / joern / codeql) by default. Operators can
+    // turn it off per-run with `set taint-iris-next:hunt mcps false`,
+    // or off globally with `setg`. The bridge still honours
+    // KUZUSHI_AGENT_MCPS=1 as an env override for ad-hoc runs of other
+    // modules.
+    let mcps_enabled = read_bool_option(input, "mcps").unwrap_or(true);
+    let agent_tool_policy = agent_tool_policy_for_input(input)?.with_mcps(mcps_enabled);
     let mut agent = run_taint_iris_next_agent(
         &plan,
         &evidence,
@@ -157,4 +165,75 @@ pub(in crate::modules) fn require_taint_iris_next_runtime<'a>(
     runtime.context(
         "taint-iris-next:hunt requires the pi-agent-core runtime in hunt mode. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
     )
+}
+
+/// Translate the taint-iris-next:hunt module options that mirror env
+/// vars (joern CPG path, per-CWE timeout, codeql cache, bridge
+/// verbosity, etc.) into actual environment variables on the current
+/// process so the bridge + MCP child processes pick them up. Process
+/// env mutation is local to this kuzushi invocation, so it doesn't
+/// leak between hunts. Already-set env vars take precedence: an
+/// operator who exports `KUZUSHI_BRIDGE_VERBOSE=1` in their shell
+/// can rely on that without it being clobbered by an unset `set` value.
+pub(in crate::modules) fn apply_taint_iris_next_mcp_options(input: &Value) {
+    apply_path_option_env(input, "joernCpg", "KUZUSHI_JOERN_CPG");
+    apply_int_option_env(input, "joernPerCweTimeoutMs", "KUZUSHI_JOERN_PER_CWE_TIMEOUT_MS");
+    apply_bool_option_env(input, "codeqlPrewarm", "KUZUSHI_CODEQL_PREWARM");
+    apply_path_option_env(input, "codeqlCacheDir", "KUZUSHI_CODEQL_CACHE_DIR");
+    apply_int_option_env(input, "mcpToolTimeoutMs", "KUZUSHI_MCP_TOOL_TIMEOUT_MS");
+    apply_bool_option_env(input, "bridgeVerbose", "KUZUSHI_BRIDGE_VERBOSE");
+    apply_path_option_env(input, "bridgeLogPath", "KUZUSHI_BRIDGE_LOG");
+}
+
+pub(in crate::modules) fn read_bool_option(input: &Value, key: &str) -> Option<bool> {
+    let raw = input.get(key)?;
+    if let Some(b) = raw.as_bool() {
+        return Some(b);
+    }
+    if let Some(s) = raw.as_str() {
+        match s.trim().to_lowercase().as_str() {
+            "true" | "1" | "yes" | "on" => return Some(true),
+            "false" | "0" | "no" | "off" => return Some(false),
+            _ => {}
+        }
+    }
+    if let Some(n) = raw.as_i64() {
+        return Some(n != 0);
+    }
+    None
+}
+
+fn apply_bool_option_env(input: &Value, key: &str, env: &str) {
+    if std::env::var_os(env).is_some() {
+        return;
+    }
+    if let Some(value) = read_bool_option(input, key) {
+        std::env::set_var(env, if value { "1" } else { "0" });
+    }
+}
+
+fn apply_int_option_env(input: &Value, key: &str, env: &str) {
+    if std::env::var_os(env).is_some() {
+        return;
+    }
+    if let Some(n) = input.get(key).and_then(Value::as_i64) {
+        std::env::set_var(env, n.to_string());
+    } else if let Some(s) = input.get(key).and_then(Value::as_str) {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            std::env::set_var(env, trimmed);
+        }
+    }
+}
+
+fn apply_path_option_env(input: &Value, key: &str, env: &str) {
+    if std::env::var_os(env).is_some() {
+        return;
+    }
+    if let Some(s) = input.get(key).and_then(Value::as_str) {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            std::env::set_var(env, trimmed);
+        }
+    }
 }
