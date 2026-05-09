@@ -30,27 +30,21 @@ pub(crate) fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant) -> Stri
         DagTaskState::Queued => "·",
         DagTaskState::Failing => "!",
     };
-    // Right-side columns reserve: " " (1) + elapsed (8) + "  " (2) +
-    // status (up to 7 chars: "failing") = 18 chars; pad to 22 for a
-    // 4-char buffer so "failing" never gets ellipsized.
-    let right_reserve: usize = 22;
+    // Right-side reserve: " " (1) + elapsed (8) = 9. The redundant
+    // status word ("running"/"done"/...) was dropped — the colored
+    // symbol prefix already conveys state (✓ green, spinner amber,
+    // · muted, ! red) and at narrow widths the extra column cost
+    // ~9 task-label chars on a 37-wide pane.
+    let right_reserve: usize = 9;
     let task_pad = width.saturating_sub(right_reserve + 3).max(8);
     let task_label = fit(&row.task_id, task_pad);
     let elapsed = elapsed_label(row, now);
-    let status = match row.state {
-        DagTaskState::Done => "done",
-        DagTaskState::Active => "running",
-        DagTaskState::Queued => "queued",
-        DagTaskState::Failing => "failing",
-    };
-    // Pad columns: ` <symbol> <task pad> <elapsed pad-8>  <status pad-7>`
     let body = format!(
-        " {symbol} {task:<task_pad$} {elapsed:>8}  {status:<7}",
+        " {symbol} {task:<task_pad$} {elapsed:>8}",
         symbol = symbol,
         task = task_label,
         task_pad = task_pad,
         elapsed = elapsed,
-        status = status,
     );
     fit(&body, width)
 }
