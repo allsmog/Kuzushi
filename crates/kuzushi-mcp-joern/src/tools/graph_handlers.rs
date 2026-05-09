@@ -61,11 +61,19 @@ impl ToolHandler for TaintPathsTool {
         let source = require_str(&args, "source")?.to_string();
         let sink = require_str(&args, "sink")?.to_string();
         let max_paths = optional_max_paths(&args);
-        let raw = run_query(&queries::taint_paths(&source, &sink, max_paths)).await?;
+        let max_call_depth = optional_max_call_depth(&args);
+        let raw = run_query(&queries::taint_paths(
+            &source,
+            &sink,
+            max_paths,
+            max_call_depth,
+        ))
+        .await?;
         Ok(json!({
             "source": source,
             "sink": sink,
             "maxPaths": max_paths,
+            "maxCallDepth": max_call_depth,
             "paths": parse_raw_json_or_string(raw),
         }))
     }
@@ -76,6 +84,13 @@ fn optional_max_paths(args: &Value) -> usize {
         .or_else(|| args.get("max_paths"))
         .and_then(Value::as_u64)
         .unwrap_or(50) as usize
+}
+
+fn optional_max_call_depth(args: &Value) -> Option<u32> {
+    args.get("maxCallDepth")
+        .or_else(|| args.get("max_call_depth"))
+        .and_then(Value::as_u64)
+        .map(|v| v as u32)
 }
 
 #[async_trait]
