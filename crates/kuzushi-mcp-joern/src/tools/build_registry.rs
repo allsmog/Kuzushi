@@ -91,26 +91,34 @@ pub fn build_registry() -> ToolRegistry {
                               method-parameter sources (`argv` of `main`, request handler \
                               parameters): `(cpg.call.name(<source>) ++ cpg.method.name(<source>).parameter)`. \
                               The sink is a call-name regex. Returns an envelope: \
-                              `{sourceCounts: {calls, methodParams}, sinkCount, flowCount, flows}` \
+                              `{sourceCounts: {calls, methodParams}, sinkCount, maxCallDepth, flowCount, flows}` \
                               so the caller can tell \"the source pattern matched nothing\" \
                               (sourceCounts.calls=0 and methodParams=0) from \"sources exist \
                               but no flow reaches the sink\" (counts > 0 and flowCount=0). \
                               Both fields accept Java regex syntax — alternation works \
                               (`PG_GETARG_TEXT_PP|PG_GETARG_CSTRING`), `.*` for substring, \
-                              escaping for parens.".into(),
+                              escaping for parens. \
+                              **Retry tip:** if `flowCount=0` while `sourceCounts.calls > 0` \
+                              (or `methodParams > 0`) AND `sinkCount > 0`, retry once with \
+                              `maxCallDepth: 24` (or `32` for very large CPGs). The default \
+                              depth is 12 — postgres-scale codebases routinely need deeper \
+                              interprocedural reach to connect entry-point sources to \
+                              fmgr-dispatched sinks.".into(),
                 input_schema: json!({
                     "type": "object",
                     "required": ["source", "sink"],
                     "properties": {
                         "source": {"type": "string", "description": "Regex for taint sources. Matched against both `cpg.call.name(...)` and `cpg.method.name(...).parameter` so postgres macro-call sources (`PG_GETARG_TEXT_PP`) and method-parameter sources (`argv`) both work without the caller having to pick the CPG node kind."},
                         "sink": {"type": "string", "description": "Call-name regex for taint sinks, e.g. \"snprintf\" or \"snprintf|memcpy|strcpy\"."},
-                        "maxPaths": {"type": "integer", "minimum": 1, "default": 50}
+                        "maxPaths": {"type": "integer", "minimum": 1, "default": 50},
+                        "maxCallDepth": {"type": "integer", "minimum": 1, "maximum": 32, "default": 12, "description": "Joern interprocedural call-graph depth. Default 12 matches joern's implicit cutoff. Bump to 24 on retry when sources and sinks both resolve but flowCount=0 — large codebases (postgres, chromium, kernel) routinely need deeper reach to connect cross-component flows."}
                     },
                     "examples": [
                         {"source": "PG_GETARG_TEXT_PP", "sink": "snprintf"},
                         {"source": "PG_GETARG_TEXT_PP|PG_GETARG_CSTRING", "sink": "memcpy|strcpy|sprintf", "maxPaths": 10},
                         {"source": "argv", "sink": "system|exec.*"},
-                        {"source": "GetConfigOption|namespace_search_path", "sink": "LookupFuncName|RangeVarGetRelid"}
+                        {"source": "GetConfigOption|namespace_search_path", "sink": "LookupFuncName|RangeVarGetRelid"},
+                        {"source": "PG_GETARG_TEXT_PP", "sink": "dlopen|load_external_function", "maxCallDepth": 24}
                     ]
                 }),
             },
