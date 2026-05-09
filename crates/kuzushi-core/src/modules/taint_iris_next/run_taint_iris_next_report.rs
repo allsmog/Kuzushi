@@ -80,6 +80,14 @@ pub(in crate::modules) fn run_taint_iris_next_hunt(
     // and translate to the env vars the bridge + MCP servers honour.
     // env mutation is process-local so it only affects this kuzushi run.
     apply_taint_iris_next_mcp_options(input);
+    // Backend-aware default for the per-tool MCP timeout: when joern is
+    // the selected backend and neither the operator nor the env has set
+    // a value, push the default to 180s. Joern dataflow on a 187 MB
+    // postgres CPG routinely needs ~90s per `taint_paths` call once
+    // `maxCallDepth` is cranked, and the global 60s default in the
+    // bridge had two of four postgres queries time out before joern
+    // could finish.
+    apply_taint_iris_next_joern_timeout_default(input, &plan.backend.selected);
     // taint-iris-next opts the policy into the kuzushi MCP-as-agent
     // surface (tree-sitter / joern / codeql) by default. Operators can
     // turn it off per-run with `set taint-iris-next:hunt mcps false`,
@@ -185,6 +193,113 @@ pub(in crate::modules) fn apply_taint_iris_next_mcp_options(input: &Value) {
     apply_int_option_env(input, "mcpToolTimeoutMs", "KUZUSHI_MCP_TOOL_TIMEOUT_MS");
     apply_bool_option_env(input, "bridgeVerbose", "KUZUSHI_BRIDGE_VERBOSE");
     apply_path_option_env(input, "bridgeLogPath", "KUZUSHI_BRIDGE_LOG");
+}
+
+/// Joern dataflow on a postgres-scale (187 MB) CPG routinely takes
+/// 60-150s per `taint_paths` call once `maxCallDepth` is cranked above
+/// the default 12. The bridge's global 60s `KUZUSHI_MCP_TOOL_TIMEOUT_MS`
+/// default was tripping out two of every four agent calls before joern
+/// could finish — surfacing as agent-visible timeouts rather than as
+/// real "no path" verdicts. Bump the default to 180000 ms only when
+/// joern is the selected backend, so smaller backends (rg, codeql)
+/// keep the snappier 60s ceiling.
+///
+/// Three precedence levels, highest first:
+/// 1. operator-set `set taint-iris-next:hunt mcpToolTimeoutMs <N>` (already
+///    applied by `apply_taint_iris_next_mcp_options` above).
+/// 2. shell-exported `KUZUSHI_MCP_TOOL_TIMEOUT_MS=<N>` env var.
+/// 3. backend-aware default: 180000 for joern, otherwise leave unset
+///    (the bridge's own default applies).
+const JOERN_DEFAULT_MCP_TOOL_TIMEOUT_MS: &str = "180000";
+
+pub(in crate::modules) fn apply_taint_iris_next_joern_timeout_default(
+    input: &Value,
+    selected_backend: &str,
+) {
+    if selected_backend != "joern" {
+        return;
+    }
+    if std::env::var_os("KUZUSHI_MCP_TOOL_TIMEOUT_MS").is_some() {
+        return;
+    }
+    if input.get("mcpToolTimeoutMs").is_some() || input.get("mcp_tool_timeout_ms").is_some() {
+        return;
+    }
+    std::env::set_var(
+        "KUZUSHI_MCP_TOOL_TIMEOUT_MS",
+        JOERN_DEFAULT_MCP_TOOL_TIMEOUT_MS,
+    );
+}
+
+#[cfg(test)]
+mod joern_timeout_default_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Serialise around the shared process env so concurrent tests
+    /// don't race on `KUZUSHI_MCP_TOOL_TIMEOUT_MS`. `Mutex` is
+    /// sufficient — each test acquires before mutating.
+    fn env_lock() -> &'static std::sync::Mutex<()> {
+        use std::sync::OnceLock;
+        static LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    fn clear_env() {
+        std::env::remove_var("KUZUSHI_MCP_TOOL_TIMEOUT_MS");
+    }
+
+    #[test]
+    fn defaults_to_180s_when_joern_selected_and_unset() {
+        let _guard = env_lock().lock().unwrap();
+        clear_env();
+        apply_taint_iris_next_joern_timeout_default(&json!({}), "joern");
+        assert_eq!(
+            std::env::var("KUZUSHI_MCP_TOOL_TIMEOUT_MS").as_deref(),
+            Ok("180000"),
+        );
+        clear_env();
+    }
+
+    #[test]
+    fn does_not_override_other_backends() {
+        let _guard = env_lock().lock().unwrap();
+        clear_env();
+        apply_taint_iris_next_joern_timeout_default(&json!({}), "structural");
+        assert!(std::env::var_os("KUZUSHI_MCP_TOOL_TIMEOUT_MS").is_none());
+        apply_taint_iris_next_joern_timeout_default(&json!({}), "codeql");
+        assert!(std::env::var_os("KUZUSHI_MCP_TOOL_TIMEOUT_MS").is_none());
+    }
+
+    #[test]
+    fn respects_existing_env_value() {
+        let _guard = env_lock().lock().unwrap();
+        clear_env();
+        std::env::set_var("KUZUSHI_MCP_TOOL_TIMEOUT_MS", "30000");
+        apply_taint_iris_next_joern_timeout_default(&json!({}), "joern");
+        assert_eq!(
+            std::env::var("KUZUSHI_MCP_TOOL_TIMEOUT_MS").as_deref(),
+            Ok("30000"),
+            "operator's exported env value must not be clobbered",
+        );
+        clear_env();
+    }
+
+    #[test]
+    fn respects_operator_set_input() {
+        let _guard = env_lock().lock().unwrap();
+        clear_env();
+        // Operator's `set ... mcpToolTimeoutMs 90000` is applied by
+        // `apply_taint_iris_next_mcp_options` before we run; confirm
+        // we don't override that downstream call.
+        apply_taint_iris_next_joern_timeout_default(
+            &json!({ "mcpToolTimeoutMs": 90000 }),
+            "joern",
+        );
+        // Default helper must NOT have set the env: the operator's
+        // value goes through the regular apply path.
+        assert!(std::env::var_os("KUZUSHI_MCP_TOOL_TIMEOUT_MS").is_none());
+    }
 }
 
 pub(in crate::modules) fn read_bool_option(input: &Value, key: &str) -> Option<bool> {
