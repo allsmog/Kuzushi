@@ -47,6 +47,9 @@ impl ShellApp {
         self.tool_rx = Some(rx);
         self.trace_rx = Some(trace_rx);
         self.activity = Some(ActivitySession::new(run_id.clone()));
+        if self.auto_open_activity {
+            self.shell_view = ShellView::Activity;
+        }
         self.tool_running = Some(tool_name.clone());
         self.tool_run_id = Some(run_id.clone());
         self.tool_abort_requested = false;

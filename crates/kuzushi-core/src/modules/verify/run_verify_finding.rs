@@ -36,8 +36,8 @@ pub(in crate::modules) fn run_verify_finding(
             ),
         }));
     };
-    if let Some(trace) = ctx.trace {
-        let _ = trace
+    let evidence_phase = ctx.trace.map(|trace| {
+        trace
             .step(
                 "reasoning",
                 "finding",
@@ -46,8 +46,8 @@ pub(in crate::modules) fn run_verify_finding(
                     finding.severity, triage.verdict,
                 ),
             )
-            .emit();
-    }
+            .emit()
+    });
     let runtime = runtime.context(
         "verify:finding requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
     )?;
@@ -56,6 +56,16 @@ pub(in crate::modules) fn run_verify_finding(
     )?;
 
     let prompt = build_verify_prompt(&finding, &triage, input.prompt_template.as_deref())?;
+    // Open a phase scope so the LLM's exploit-attempt query lands as a child
+    // of `evidence-pull` in the feed.
+    let _llm_scope = match (ctx.trace, evidence_phase) {
+        (Some(trace), Some(parent)) => {
+            let phase_n = trace.step("reasoning", "finding", "exploit-attempt").emit();
+            let _ = parent;
+            Some(trace.parent_scope(phase_n))
+        }
+        _ => None,
+    };
     let result = query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
@@ -71,6 +81,7 @@ pub(in crate::modules) fn run_verify_finding(
         ),
         |raw| normalize_verification_result(raw, &finding.fingerprint),
     )?;
+    drop(_llm_scope);
     let exploitable = result
         .get("exploitable")
         .and_then(Value::as_bool)

@@ -63,6 +63,7 @@ mod run;
 mod run_tool_loop;
 #[cfg(test)]
 mod tests;
+mod traced_runtime;
 
 pub use agent_query_contract::append_structured_output_contract;
 pub use agent_query_contract::AgentQueryRequest;
@@ -83,3 +84,4 @@ pub use run::ToolCall;
 pub use run::ToolCallHandler;
 pub use run::ToolResult;
 pub use run_tool_loop::run_tool_loop;
+pub use traced_runtime::TracedRuntime;

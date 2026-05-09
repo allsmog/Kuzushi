@@ -1,5 +1,20 @@
 use super::*;
 
+/// Operator preference for the Activity view's auto-open behaviour at
+/// scan/tool start. Default ON. Override via the env var
+/// `KUZUSHI_AUTO_OPEN_ACTIVITY=false` (the option-store-backed `setg`
+/// path runs after `ShellApp::new`, so a startup-time env knob is the
+/// simplest way to disable it before the first tool launches).
+fn read_auto_open_activity_pref() -> bool {
+    match std::env::var("KUZUSHI_AUTO_OPEN_ACTIVITY") {
+        Ok(value) => !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
+        Err(_) => true,
+    }
+}
+
 impl ShellApp {
     pub fn new(config: V2Config, target: Option<&WorkspaceTarget>) -> Self {
         let selected_model_index = preferred_model_choice_index(&config);
@@ -87,6 +102,7 @@ impl ShellApp {
             threat_rx: None,
             trace_rx: None,
             activity: None,
+            auto_open_activity: read_auto_open_activity_pref(),
         };
         app.log("system", "kuzushi shell");
         app.log("startup", app.startup_summary_line());

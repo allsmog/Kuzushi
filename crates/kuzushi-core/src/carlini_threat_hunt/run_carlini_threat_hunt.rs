@@ -65,9 +65,24 @@ pub fn run_carlini_threat_hunt_report(
     }
     let inventory = collect_repo_inventory(&target, 80, 2048)?;
     let total_runs = capped.len() * options.runs_per_actor;
+    // Push a scope so each per-actor LLM round-trip lands under the
+    // actor-spawn header in the feed. Per-actor children would require
+    // threading the per-actor parent_step into run_carlini_actor_hunts;
+    // for now the scope means every LLM call surfaces under the run.
+    let _actor_scope = match (ctx.trace, parent_step) {
+        (Some(trace), Some(parent)) => {
+            let phase = trace
+                .child(parent)
+                .step("reasoning", "run", "compose · tool-call · defender-critic")
+                .emit();
+            Some(trace.parent_scope(phase))
+        }
+        _ => None,
+    };
     let mut findings = run_carlini_actor_hunts(
         runtime, input, &target, &options, &model, &inventory, &capped,
     )?;
+    drop(_actor_scope);
     finalize_carlini_findings(input, &mut findings, options.max_findings)?;
     if let Some(trace) = ctx.trace {
         let _ = trace
