@@ -200,23 +200,29 @@ pub(in crate::modules) fn apply_taint_iris_next_mcp_options(input: &Value) {
 /// the default 12. The bridge's global 60s `KUZUSHI_MCP_TOOL_TIMEOUT_MS`
 /// default was tripping out two of every four agent calls before joern
 /// could finish — surfacing as agent-visible timeouts rather than as
-/// real "no path" verdicts. Bump the default to 180000 ms only when
-/// joern is the selected backend, so smaller backends (rg, codeql)
+/// real "no path" verdicts.
+///
+/// The agent reaches joern via the MCP surface independently of the
+/// structural backend the deterministic pre-pass picked. So bump the
+/// default whenever joern is **reachable from the agent**, which on a
+/// hunt means: the operator passed a CPG path, OR joern is on PATH /
+/// at a known install location, OR the structural backend itself
+/// picked joern. Other-backend-only runs (rg / codeql with no CPG)
 /// keep the snappier 60s ceiling.
 ///
 /// Three precedence levels, highest first:
 /// 1. operator-set `set taint-iris-next:hunt mcpToolTimeoutMs <N>` (already
 ///    applied by `apply_taint_iris_next_mcp_options` above).
 /// 2. shell-exported `KUZUSHI_MCP_TOOL_TIMEOUT_MS=<N>` env var.
-/// 3. backend-aware default: 180000 for joern, otherwise leave unset
-///    (the bridge's own default applies).
+/// 3. joern-aware default: 180000 when joern is reachable from the
+///    agent, otherwise leave unset (the bridge's own default applies).
 const JOERN_DEFAULT_MCP_TOOL_TIMEOUT_MS: &str = "180000";
 
 pub(in crate::modules) fn apply_taint_iris_next_joern_timeout_default(
     input: &Value,
     selected_backend: &str,
 ) {
-    if selected_backend != "joern" {
+    if !joern_reachable_from_agent(input, selected_backend) {
         return;
     }
     if std::env::var_os("KUZUSHI_MCP_TOOL_TIMEOUT_MS").is_some() {
@@ -231,14 +237,70 @@ pub(in crate::modules) fn apply_taint_iris_next_joern_timeout_default(
     );
 }
 
+/// Joern is "reachable from the agent" when any of:
+/// - The structural backend selector picked joern (rare — needs CPG +
+///   binary at plan time).
+/// - The operator supplied a CPG path (`joernCpg` input or
+///   `KUZUSHI_JOERN_CPG` env), so joern auto-spawn will engage on the
+///   first agent MCP call.
+/// - The joern binary is locatable on the host (PATH +
+///   `KUZUSHI_JOERN_BIN` + standard install fallbacks). Mirrors the
+///   lookup in `kuzushi-mcp-joern::tools::availability::locate_joern_binary`.
+fn joern_reachable_from_agent(input: &Value, selected_backend: &str) -> bool {
+    if selected_backend == "joern" {
+        return true;
+    }
+    if input.get("joernCpg").and_then(Value::as_str).is_some()
+        || input.get("joern_cpg").and_then(Value::as_str).is_some()
+    {
+        return true;
+    }
+    if std::env::var_os("KUZUSHI_JOERN_CPG").is_some() {
+        return true;
+    }
+    locate_joern_for_taint_iris_next("joern").is_some()
+        || locate_joern_for_taint_iris_next("joern-parse").is_some()
+}
+
+fn locate_joern_for_taint_iris_next(name: &str) -> Option<std::path::PathBuf> {
+    if let Some(path_env) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path_env) {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    if name == "joern" {
+        if let Some(env_path) = std::env::var_os("KUZUSHI_JOERN_BIN") {
+            let candidate = std::path::PathBuf::from(env_path);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    for hardcoded in [
+        format!("/opt/joern/joern-cli/{name}"),
+        format!("/opt/joern/joern-cli/bin/{name}"),
+        format!("/usr/local/bin/{name}"),
+        format!("/usr/bin/{name}"),
+    ] {
+        let p = std::path::PathBuf::from(hardcoded);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod joern_timeout_default_tests {
     use super::*;
     use serde_json::json;
 
     /// Serialise around the shared process env so concurrent tests
-    /// don't race on `KUZUSHI_MCP_TOOL_TIMEOUT_MS`. `Mutex` is
-    /// sufficient — each test acquires before mutating.
+    /// don't race on `KUZUSHI_MCP_TOOL_TIMEOUT_MS` or `PATH`. `Mutex`
+    /// is sufficient — each test acquires before mutating.
     fn env_lock() -> &'static std::sync::Mutex<()> {
         use std::sync::OnceLock;
         static LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
@@ -247,6 +309,30 @@ mod joern_timeout_default_tests {
 
     fn clear_env() {
         std::env::remove_var("KUZUSHI_MCP_TOOL_TIMEOUT_MS");
+        std::env::remove_var("KUZUSHI_JOERN_CPG");
+        std::env::remove_var("KUZUSHI_JOERN_BIN");
+    }
+
+    /// Override $PATH so binary-fallback lookups in
+    /// `joern_reachable_from_agent` can't latch onto a real
+    /// `/opt/joern/joern-cli/joern` install during test runs. We can't
+    /// modify the hardcoded `/opt/joern/...` checks themselves, so the
+    /// "joern not reachable" tests have to skip whenever the host
+    /// actually has joern installed at one of those paths.
+    fn host_has_real_joern() -> bool {
+        for p in [
+            "/opt/joern/joern-cli/joern",
+            "/opt/joern/joern-cli/bin/joern",
+            "/usr/local/bin/joern",
+            "/usr/bin/joern",
+            "/opt/joern/joern-cli/joern-parse",
+            "/opt/joern/joern-cli/bin/joern-parse",
+        ] {
+            if std::path::Path::new(p).is_file() {
+                return true;
+            }
+        }
+        false
     }
 
     #[test]
@@ -262,13 +348,36 @@ mod joern_timeout_default_tests {
     }
 
     #[test]
-    fn does_not_override_other_backends() {
+    fn defaults_to_180s_when_joern_cpg_supplied() {
+        // Postgres-shaped invocation: `backend: structural` (rg pre-pass)
+        // but operator also supplied `joernCpg` so the agent will reach
+        // joern via MCP. The 60s default tripped two of four agent
+        // queries on the postgres CPG; bump it to 180s so we get real
+        // verdicts back.
         let _guard = env_lock().lock().unwrap();
         clear_env();
+        apply_taint_iris_next_joern_timeout_default(
+            &json!({ "joernCpg": "/tmp/cpg.bin" }),
+            "structural",
+        );
+        assert_eq!(
+            std::env::var("KUZUSHI_MCP_TOOL_TIMEOUT_MS").as_deref(),
+            Ok("180000"),
+        );
+        clear_env();
+    }
+
+    #[test]
+    fn defaults_to_180s_when_kuzushi_joern_cpg_env_set() {
+        let _guard = env_lock().lock().unwrap();
+        clear_env();
+        std::env::set_var("KUZUSHI_JOERN_CPG", "/tmp/cpg.bin");
         apply_taint_iris_next_joern_timeout_default(&json!({}), "structural");
-        assert!(std::env::var_os("KUZUSHI_MCP_TOOL_TIMEOUT_MS").is_none());
-        apply_taint_iris_next_joern_timeout_default(&json!({}), "codeql");
-        assert!(std::env::var_os("KUZUSHI_MCP_TOOL_TIMEOUT_MS").is_none());
+        assert_eq!(
+            std::env::var("KUZUSHI_MCP_TOOL_TIMEOUT_MS").as_deref(),
+            Ok("180000"),
+        );
+        clear_env();
     }
 
     #[test]
@@ -289,15 +398,29 @@ mod joern_timeout_default_tests {
     fn respects_operator_set_input() {
         let _guard = env_lock().lock().unwrap();
         clear_env();
-        // Operator's `set ... mcpToolTimeoutMs 90000` is applied by
-        // `apply_taint_iris_next_mcp_options` before we run; confirm
-        // we don't override that downstream call.
         apply_taint_iris_next_joern_timeout_default(
             &json!({ "mcpToolTimeoutMs": 90000 }),
             "joern",
         );
         // Default helper must NOT have set the env: the operator's
-        // value goes through the regular apply path.
+        // value goes through `apply_taint_iris_next_mcp_options`.
+        assert!(std::env::var_os("KUZUSHI_MCP_TOOL_TIMEOUT_MS").is_none());
+    }
+
+    #[test]
+    fn does_not_override_when_joern_unreachable_and_no_cpg() {
+        // Skip when the host actually has joern installed — the
+        // hardcoded fallback lookup will find it and the gate flips
+        // open, which is the right production behaviour but defeats
+        // this test's premise.
+        if host_has_real_joern() {
+            return;
+        }
+        let _guard = env_lock().lock().unwrap();
+        clear_env();
+        apply_taint_iris_next_joern_timeout_default(&json!({}), "structural");
+        assert!(std::env::var_os("KUZUSHI_MCP_TOOL_TIMEOUT_MS").is_none());
+        apply_taint_iris_next_joern_timeout_default(&json!({}), "codeql");
         assert!(std::env::var_os("KUZUSHI_MCP_TOOL_TIMEOUT_MS").is_none());
     }
 }
