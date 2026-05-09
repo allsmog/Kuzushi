@@ -17,6 +17,12 @@ pub(crate) fn run_deep_semantic_cwe_select(
         &options,
     )?;
     let inventory = collect_inventory(&target, 80, 2048)?;
+    let _llm_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step("reasoning", "deep-semantic-cwe-select", "cwe-select")
+            .emit();
+        trace.parent_scope(phase)
+    });
     let raw = query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
@@ -36,6 +42,7 @@ pub(crate) fn run_deep_semantic_cwe_select(
         ),
         require_json_object,
     )?;
+    drop(_llm_scope);
     Ok(DeepSemanticCweOutput {
         cwes: parse_cwe_selections(&raw)
             .into_iter()
@@ -61,7 +68,14 @@ pub(crate) fn run_deep_semantic_hunt_report(
         return empty_deep_semantic_hunt_report(&target, ctx);
     }
 
+    let _llm_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step("reasoning", "deep-semantic-hunt", "deep-semantic-hunt")
+            .emit();
+        trace.parent_scope(phase)
+    });
     let raw = query_deep_semantic_findings(runtime, model, input, &target, &cwes)?;
+    drop(_llm_scope);
     let artifact_root = artifact_root(&target, &options.artifact_dir)?;
     let (mut findings, artifacts) =
         normalize_deep_semantic_findings(raw, &target, &artifact_root, options.max_findings)?;

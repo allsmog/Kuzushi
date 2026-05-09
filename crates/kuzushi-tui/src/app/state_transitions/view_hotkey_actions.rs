@@ -153,6 +153,18 @@ impl ShellApp {
                     }
                 }
             }
+            ViewHotkeyAction::ActivityCancelRunning => {
+                // Try scan first, then single-tool. Both are no-ops if nothing
+                // is running, so the order doesn't matter much; scan abort
+                // first matches the operator mental model when both fire.
+                let aborted = self.request_scan_abort() || self.request_tool_abort();
+                if !aborted {
+                    self.log(
+                        "activity",
+                        "no running tool or scan to cancel",
+                    );
+                }
+            }
             _ => return false,
         }
         true

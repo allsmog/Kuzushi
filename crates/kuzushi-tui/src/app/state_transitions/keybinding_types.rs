@@ -61,6 +61,7 @@ pub(crate) enum ViewHotkeyAction {
     ActivityTogglePause,
     ActivityReset,
     ActivityFocusSelected,
+    ActivityCancelRunning,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

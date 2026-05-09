@@ -168,12 +168,15 @@ fn render_feed_pane_widget(frame: &mut Frame<'_>, area: Rect, session: &Activity
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    let scroll = if session.paused {
-        clamp_scroll(session.feed_scroll, lines.len(), inner_area.height as usize)
-    } else {
+    let scroll = if session.feed_auto_tail {
         // Auto-tail: scroll so the last `inner_height` lines are visible.
         let height = inner_area.height as usize;
         lines.len().saturating_sub(height)
+    } else {
+        // Operator pinned a position via manual scroll; honour it regardless
+        // of whether the run is paused. `G` (scroll-to-bottom) resets
+        // `feed_auto_tail = true` to return to live tailing.
+        clamp_scroll(session.feed_scroll, lines.len(), inner_area.height as usize)
     };
     let para = Paragraph::new(lines)
         .scroll((scroll as u16, 0))

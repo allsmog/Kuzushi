@@ -30,6 +30,12 @@ fn query_systems_invariants_for_context(
 ) -> Result<SystemsInvariantOutput> {
     let runtime = required_systems_runtime(runtime, "systems-hunt:systems-invariant-extract")?;
     let request = systems_invariant_query_request(input, ctx, &options)?;
+    let _llm_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step("reasoning", "systems-invariant-extract", "invariant-extract")
+            .emit();
+        trace.parent_scope(phase)
+    });
     query_systems_invariants(
         runtime,
         &request.model,

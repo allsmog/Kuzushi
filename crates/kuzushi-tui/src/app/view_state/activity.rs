@@ -1,4 +1,4 @@
-use kuzushi_core::RunTraceStep;
+use kuzushi_core::{ModuleRegistry, RunTraceStep};
 use std::collections::{BTreeMap, VecDeque};
 use std::time::Instant;
 
@@ -97,6 +97,11 @@ pub struct ActivitySession {
     pub paused: bool,
     pub feed_scroll: usize,
     pub task_scroll: usize,
+    /// True while the feed renderer should auto-scroll to the latest event.
+    /// Becomes false the moment the operator manually scrolls the feed; reset
+    /// to true on `G` (scroll-to-bottom). Decoupled from `paused` so toggling
+    /// pause doesn't unpin a manually-scrolled position.
+    pub feed_auto_tail: bool,
 }
 
 impl ActivitySession {
@@ -113,6 +118,7 @@ impl ActivitySession {
             paused: false,
             feed_scroll: 0,
             task_scroll: 0,
+            feed_auto_tail: true,
         }
     }
 
@@ -174,6 +180,41 @@ impl ActivitySession {
 
     pub fn toggle_pane_focus(&mut self) {
         self.pane_focus = self.pane_focus.toggle();
+    }
+
+    /// Pre-populate `tasks` with `Queued` rows for every visible DAG node in
+    /// the registry, plus seed `subsystem_aggregate.total_count` from hidden
+    /// modules. Used at scan start so the DAG pane has rows from the first
+    /// frame instead of "(no DAG tasks yet)" while we wait for the first
+    /// trace event. Idempotent: existing rows aren't overwritten, so calling
+    /// this after some events have already arrived preserves their state.
+    pub fn seed_from_registry(&mut self, registry: &ModuleRegistry) {
+        let mut hidden_total = 0usize;
+        for module in registry.all_modules() {
+            let hidden = module.is_hidden();
+            for node in module.dag_nodes() {
+                if hidden {
+                    hidden_total += 1;
+                    continue;
+                }
+                let task_id = node.id.clone();
+                let module_id = task_id
+                    .split_once(':')
+                    .map(|(prefix, _)| prefix)
+                    .unwrap_or(task_id.as_str())
+                    .to_string();
+                self.tasks.entry(task_id.clone()).or_insert_with(|| {
+                    DagTaskRow::queued(task_id, module_id, node.depends_on.clone())
+                });
+            }
+        }
+        // Don't clobber an aggregate that has already accumulated activity;
+        // only seed the queued total when the aggregate is fresh.
+        if self.subsystem_aggregate.total_count == 0
+            && self.subsystem_aggregate.active_count == 0
+        {
+            self.subsystem_aggregate.total_count = hidden_total;
+        }
     }
 
     pub fn toggle_verbose_subsystems(&mut self) {

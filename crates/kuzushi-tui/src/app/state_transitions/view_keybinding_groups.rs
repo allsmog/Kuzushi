@@ -27,6 +27,12 @@ pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
             "focus task",
             ViewHotkeyAction::ActivityFocusSelected,
         ),
+        bind_char(
+            'c',
+            "c",
+            "cancel run",
+            ViewHotkeyAction::ActivityCancelRunning,
+        ),
     ]
 }
 

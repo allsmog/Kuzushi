@@ -43,7 +43,12 @@ impl ShellApp {
             if let Some(session) = self.activity.as_mut() {
                 match session.pane_focus {
                     PaneFocus::Left => session.task_scroll = usize::MAX,
-                    PaneFocus::Right => session.feed_scroll = usize::MAX,
+                    PaneFocus::Right => {
+                        session.feed_scroll = usize::MAX;
+                        // G on the feed pane unpins manual scroll so the
+                        // operator returns to live auto-tail.
+                        session.feed_auto_tail = true;
+                    }
                 }
             }
             return;
@@ -72,11 +77,11 @@ impl ShellApp {
                 }
             }
             PaneFocus::Right => {
-                // Scrolling the feed manually freezes auto-tail until
-                // the operator presses `p` (or scrolls to bottom). The
-                // renderer reads `paused` to decide whether to honour
-                // feed_scroll or auto-tail.
-                session.paused = true;
+                // Manual feed scroll unpins live auto-tail so the operator
+                // stays at the position they navigated to. `feed_auto_tail`
+                // is reset by `G` (scroll-to-bottom). `paused` is decoupled
+                // — toggling pause does not unpin the position.
+                session.feed_auto_tail = false;
                 if amount.is_negative() {
                     session.feed_scroll = session
                         .feed_scroll

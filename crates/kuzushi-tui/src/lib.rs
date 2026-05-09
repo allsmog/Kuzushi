@@ -8,7 +8,7 @@ mod theme;
 
 pub use app::{
     run_shell, run_shell_with_plain, ActivitySession, ChatTurn, OptionsFilter, OptionsView,
-    ReconSnapshot, ScanPanelState, ShellApp, ShellView, ThreatView,
+    PaneFocus, ReconSnapshot, ScanPanelState, ShellApp, ShellView, ThreatView,
 };
 pub use commands::{parse_command, ShellCommand};
 pub use kuzushi_core::ScanProgress;
