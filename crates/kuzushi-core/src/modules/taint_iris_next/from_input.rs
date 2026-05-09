@@ -52,6 +52,11 @@ pub(in crate::modules) struct TaintIrisNextInput {
     /// case and prefixed with "CWE-" so `78`, `cwe-78`, and `CWE-78`
     /// all match the same catalog entry.
     pub(in crate::modules) cwe_focus: Vec<String>,
+    /// Run the per-target source/sink discovery pass at plan time
+    /// (`source_sink_discovery::run`). Defaults to true; an operator
+    /// can disable for fast/clean runs via
+    /// `set taint-iris-next:hunt discoverSignals false`.
+    pub(in crate::modules) discover_signals: bool,
 }
 
 /// Parse a JSON value (string, array of strings, or comma/space

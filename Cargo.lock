@@ -889,6 +889,7 @@ dependencies = [
  "kuzushi-mcp-common",
  "kuzushi-sandbox",
  "libc",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",

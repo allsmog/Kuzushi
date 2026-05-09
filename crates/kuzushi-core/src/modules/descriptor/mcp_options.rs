@@ -125,3 +125,23 @@ pub(in crate::modules) fn cwe_focus_option() -> OptionSpec {
          Empty / unset means \"use the full catalog\".",
     )
 }
+
+/// Toggle the per-target source/sink discovery pass that scans the
+/// codebase for canonical entry-point markers (PG_FUNCTION_INFO_V1,
+/// `@app.route`, `app.get(...)`) and privesc/RCE primitives (`dlopen`,
+/// `load_external_function`, `SetUserId`, `system(`, `eval(`...).
+/// Discovery is regex-only and pure-Rust — cheap on any reasonable
+/// repo — and feeds catalog ranking + the agent prompt with names that
+/// actually exist in the code, not just the static catalog's a-priori
+/// guess. Persists to `<target>/.kuzushi/discovered-signals.json`.
+pub(in crate::modules) fn discover_signals_option() -> OptionSpec {
+    opt(
+        "discoverSignals",
+        OptionType::Bool,
+        "Run the per-target source/sink discovery pass at plan time. \
+         Default true; turn off for fast/clean runs that should rely on \
+         the static catalog only.",
+    )
+    .default(json!(true))
+    .advanced()
+}
