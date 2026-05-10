@@ -80,15 +80,31 @@ struct MarkerSpec {
 
 const MARKERS: &[MarkerSpec] = &[
     // ----- entry points ---------------------------------------------------
-    // PostgreSQL SQL-callable function declaration: every fn referenced by
-    // PG_FUNCTION_INFO_V1 is reachable from `SELECT my_fn(...)`. For a
-    // privesc/RCE hunt these are the canonical sources of taint.
+    // PostgreSQL SQL-callable function declaration (legacy macro form):
+    // every fn referenced by PG_FUNCTION_INFO_V1 is reachable from
+    // `SELECT my_fn(...)`.
     MarkerSpec {
         pattern: r"PG_FUNCTION_INFO_V1\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)",
         cwe: "CWE-862",
         kind: "entrypoint",
         languages: &["c", "cpp"],
         marker: "PG_FUNCTION_INFO_V1",
+    },
+    // PostgreSQL SQL-callable function definition (modern style, PG 11+).
+    // Functions are registered via `pg_proc.dat` data files and the C side
+    // declares `Datum name(PG_FUNCTION_ARGS) { ... }`. Without this marker
+    // every modern postgres backend function (`pg_read_binary_file`,
+    // `pg_stat_file`, `pg_signal_backend`, `pg_promote`, `pg_reload_conf`)
+    // is invisible to the discovery sweep — and the static catalog has
+    // no language-specific source list to substitute. The legacy
+    // PG_FUNCTION_INFO_V1 marker only fires on contrib modules that
+    // haven't migrated.
+    MarkerSpec {
+        pattern: r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*PG_FUNCTION_ARGS\s*\)",
+        cwe: "CWE-862",
+        kind: "entrypoint",
+        languages: &["c", "cpp"],
+        marker: "PG_FUNCTION_ARGS",
     },
     // Python web entry points (Flask/FastAPI/blueprint) — the `@.../route`
     // shape covers app, bp, api, router, etc.
@@ -220,6 +236,21 @@ pub(in crate::modules) fn run_taint_iris_next_source_sink_discovery(
                     if name.is_empty() {
                         continue;
                     }
+                    // Filter out matches that are obviously macro
+                    // parameters or typedefs masquerading as function
+                    // names. The PG_FUNCTION_ARGS regex captures the
+                    // text immediately before `(PG_FUNCTION_ARGS)` —
+                    // which is usually a real SQL-callable C function,
+                    // but `#define CMPFUNC(NAME, ...) Datum
+                    // NAME(PG_FUNCTION_ARGS) {` makes the macro
+                    // parameter `NAME` look like a function. Real PG
+                    // functions are conventionally lowercase
+                    // snake_case (`pg_signal_backend`, `lo_import`)
+                    // or at minimum mixed case with a meaningful
+                    // length; `NAME`, `FN`, `OP` are noise.
+                    if is_likely_entry_point_name_noise(spec.marker, &name) {
+                        continue;
+                    }
                     let bucket_key = (spec.marker.to_string(), name.clone());
                     let bucket = buckets.entry(bucket_key).or_default();
                     if bucket.len() >= max_per_marker {
@@ -263,6 +294,34 @@ pub(in crate::modules) fn run_taint_iris_next_source_sink_discovery(
         entry_points,
         discoverers: vec!["tree-sitter-markers".to_string()],
     }
+}
+
+/// Filter out matches that are obviously not real entry-point names.
+/// Real SQL-callable PG functions are conventionally `pg_*` /
+/// `lo_*` / `lower_snake_case` with at least 5 chars and at least one
+/// lowercase letter. Macro placeholders like `NAME`, typedefs like
+/// `OPCODE`, and short generic identifiers like `FN` / `OP` are noise
+/// — they show up because macros like `#define CMPFUNC(NAME, ...) ...
+/// NAME(PG_FUNCTION_ARGS) {` capture the macro parameter, not a real
+/// function. The filter only applies to the modern `PG_FUNCTION_ARGS`
+/// marker; the legacy `PG_FUNCTION_INFO_V1(name)` shape is precise
+/// enough on its own (the macro is an explicit registration, no
+/// placeholder shadow). Other markers (route decorators, sink names)
+/// pass through unchanged.
+fn is_likely_entry_point_name_noise(marker: &str, name: &str) -> bool {
+    if marker != "PG_FUNCTION_ARGS" {
+        return false;
+    }
+    // Names shorter than 5 chars are almost always macro params.
+    if name.len() < 5 {
+        return true;
+    }
+    // All-uppercase = typedef / macro placeholder convention.
+    let has_lowercase = name.chars().any(|c| c.is_ascii_lowercase());
+    if !has_lowercase {
+        return true;
+    }
+    false
 }
 
 /// Persist the result alongside the rest of the kuzushi state under
@@ -310,19 +369,131 @@ mod tests {
             "src/backend/utils/adt/genfile.c",
         )];
         let result = run_taint_iris_next_source_sink_discovery(&files, 16);
-        assert_eq!(
-            result
-                .entry_points
-                .iter()
-                .map(|e| e.name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["pg_read_server_files"],
-            "PG_FUNCTION_INFO_V1 should land as a CWE-862 entry point"
+        // Both markers fire on the same fn — the legacy macro line 6
+        // and the modern function-definition line 2. Both produce
+        // CWE-862 entries with the same name; downstream dedup happens
+        // at the candidate projection layer (file+line is unique).
+        let by_marker: std::collections::BTreeMap<&str, &str> = result
+            .entry_points
+            .iter()
+            .map(|e| (e.marker.as_str(), e.name.as_str()))
+            .collect();
+        assert_eq!(by_marker.get("PG_FUNCTION_INFO_V1"), Some(&"pg_read_server_files"));
+        assert_eq!(by_marker.get("PG_FUNCTION_ARGS"), Some(&"pg_read_server_files"));
+        let cwes: std::collections::BTreeSet<&str> =
+            result.entry_points.iter().map(|e| e.cwe.as_str()).collect();
+        assert_eq!(cwes, std::collections::BTreeSet::from(["CWE-862"]));
+    }
+
+    #[test]
+    fn discovers_modern_postgres_pg_function_args_entrypoints() {
+        // Postgres 11+ functions register via pg_proc.dat instead of
+        // PG_FUNCTION_INFO_V1, so the C side has only the function
+        // definition. Discovery must catch these too — without this
+        // every modern backend fn (`pg_signal_backend`, `pg_promote`,
+        // `pg_read_binary_file`, ...) was invisible to the sweep.
+        let files = vec![fixture(
+            "c",
+            &[
+                "Datum",
+                "pg_signal_backend(PG_FUNCTION_ARGS)",
+                "{",
+                "    int64 pid = PG_GETARG_INT64(0);",
+                "}",
+                "Datum",
+                "pg_read_binary_file_off_len(PG_FUNCTION_ARGS)",
+                "{",
+                "    text *filename = PG_GETARG_TEXT_PP(0);",
+                "}",
+            ],
+            "src/backend/utils/adt/misc.c",
+        )];
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16);
+        let names: Vec<&str> = result
+            .entry_points
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+        assert!(names.contains(&"pg_signal_backend"), "got {names:?}");
+        assert!(names.contains(&"pg_read_binary_file_off_len"), "got {names:?}");
+    }
+
+    #[test]
+    fn rejects_macro_parameter_placeholders_as_entry_points() {
+        // The `PG_FUNCTION_ARGS` regex captures any identifier
+        // immediately preceding `(PG_FUNCTION_ARGS)`. Postgres has
+        // macro definitions like:
+        //   #define CMPFUNC(NAME, COND) Datum NAME(PG_FUNCTION_ARGS) ...
+        // where `NAME` is a macro PARAMETER, not a function. Without
+        // filtering, the discovery sweep emits `NAME` as a CWE-862
+        // entry point; the structural pass then rg-greps the entire
+        // codebase for the literal token `NAME` and floods the agent
+        // with false-positive sources from typedef tables, header
+        // comments, etc.
+        let files = vec![fixture(
+            "c",
+            &[
+                "#define CMPFUNC( NAME, CONDITION )    \\",
+                "Datum                                  \\",
+                "NAME(PG_FUNCTION_ARGS) {",
+                "    return 0;",
+                "}",
+                "real_function_name(PG_FUNCTION_ARGS)",
+                "{",
+                "    return 0;",
+                "}",
+                // Short and ALL_CAPS placeholders that should also be
+                // rejected.
+                "FN(PG_FUNCTION_ARGS)",
+                "OPCODE(PG_FUNCTION_ARGS)",
+            ],
+            "src/backend/utils/adt/tsquery_op.c",
+        )];
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16);
+        let names: Vec<&str> = result
+            .entry_points
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+        assert!(
+            names.contains(&"real_function_name"),
+            "real lowercase function name must pass: {names:?}"
         );
-        let entry = &result.entry_points[0];
-        assert_eq!(entry.cwe, "CWE-862");
-        assert_eq!(entry.marker, "PG_FUNCTION_INFO_V1");
-        assert_eq!(entry.line, 6);
+        assert!(
+            !names.contains(&"NAME"),
+            "all-uppercase macro placeholder must be filtered: {names:?}"
+        );
+        assert!(
+            !names.contains(&"FN"),
+            "short identifier must be filtered: {names:?}"
+        );
+        assert!(
+            !names.contains(&"OPCODE"),
+            "all-uppercase typedef-shaped name must be filtered: {names:?}"
+        );
+    }
+
+    #[test]
+    fn legacy_pg_function_info_v1_keeps_short_or_uppercase_names() {
+        // The legacy macro is an explicit registration — if someone
+        // wrote `PG_FUNCTION_INFO_V1(FN)` they meant it. Don't apply
+        // the noise filter to the legacy marker.
+        let files = vec![fixture(
+            "c",
+            &[
+                "PG_FUNCTION_INFO_V1(FN);",
+                "PG_FUNCTION_INFO_V1(real_fn);",
+            ],
+            "src/legacy.c",
+        )];
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16);
+        let names: Vec<&str> = result
+            .entry_points
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+        assert!(names.contains(&"FN"), "legacy marker shouldn't filter: {names:?}");
+        assert!(names.contains(&"real_fn"));
     }
 
     #[test]
