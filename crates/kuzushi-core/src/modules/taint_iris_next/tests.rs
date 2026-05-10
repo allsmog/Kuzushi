@@ -579,6 +579,7 @@ mod tests {
             "mcps",
             "cweFocus",
             "discoverSignals",
+            "allowDeterministicFallback",
             "joernCpg",
             "joernPerCweTimeoutMs",
             "codeqlPrewarm",
@@ -671,5 +672,153 @@ mod tests {
         assert!(parsed.is_empty());
         let parsed = parse_taint_iris_next_cwe_focus(&json!({"cweFocus": ""}));
         assert!(parsed.is_empty());
+    }
+
+    /// Stub agent that always returns plain text instead of JSON,
+    /// triggering the parse-error path that previously projected
+    /// linked stories as findings unconditionally.
+    struct InvalidJsonAgent;
+
+    impl AgentRuntime for InvalidJsonAgent {
+        fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            Ok(AgentQueryResponse {
+                cost_usd: TAINT_NEXT_TEST_CALL_COST_USD,
+                input_tokens: 800,
+                output_tokens: 200,
+                text: "this is not JSON".to_string(),
+                structured: None,
+            })
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            Ok(TriageOutcome::default())
+        }
+    }
+
+    #[test]
+    fn agent_failure_emits_zero_findings_without_consent() {
+        let temp = tempdir().unwrap();
+        write_js_taint_fixture(temp.path());
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let mut config = V2Config::default();
+        config.model = Some("anthropic:claude-opus-4-7".to_string());
+        let runtime = InvalidJsonAgent;
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+        let result = run_taint_iris_next_report(
+            &json!({
+                "mode": "hunt",
+                "maxCatalogEntries": 3,
+                "maxAgentFindings": 5,
+                "minEvidenceLevel": "candidate"
+            }),
+            &ctx,
+            Some(&runtime),
+        )
+        .unwrap()
+        .to_tool_json();
+
+        assert_eq!(
+            result.pointer("/data/agentStatus").and_then(Value::as_str),
+            Some("invalid-json"),
+        );
+        // No silent deterministic fallback: zero findings without
+        // operator consent.
+        assert_eq!(
+            result
+                .pointer("/data/findings")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(0),
+            "agent failure must NOT silently project linked stories as findings",
+        );
+        assert_eq!(
+            result
+                .pointer("/data/reviewCandidates")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(0),
+        );
+        // Warning surface mentions the opt-in for operators who want
+        // the legacy behaviour.
+        let warnings_str: String = result
+            .pointer("/data/warnings")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            })
+            .unwrap_or_default();
+        assert!(
+            warnings_str.contains("allowDeterministicFallback"),
+            "warnings should advertise the consent option, got: {warnings_str}"
+        );
+    }
+
+    #[test]
+    fn agent_failure_emits_review_candidates_with_consent() {
+        let temp = tempdir().unwrap();
+        write_js_taint_fixture(temp.path());
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let mut config = V2Config::default();
+        config.model = Some("anthropic:claude-opus-4-7".to_string());
+        let runtime = InvalidJsonAgent;
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+        let result = run_taint_iris_next_report(
+            &json!({
+                "mode": "hunt",
+                "maxCatalogEntries": 3,
+                "maxAgentFindings": 5,
+                "minEvidenceLevel": "candidate",
+                "allowDeterministicFallback": true,
+            }),
+            &ctx,
+            Some(&runtime),
+        )
+        .unwrap()
+        .to_tool_json();
+
+        assert_eq!(
+            result.pointer("/data/agentStatus").and_then(Value::as_str),
+            Some("invalid-json"),
+        );
+        // With explicit consent, the warning surface tells the
+        // operator the deterministic fallback engaged (vs the
+        // consent-off branch which advertises the opt-in).
+        let warnings_str: String = result
+            .pointer("/data/warnings")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            })
+            .unwrap_or_default();
+        assert!(
+            warnings_str.contains("allowDeterministicFallback=true")
+                || warnings_str.contains("deterministic linked finding candidate"),
+            "with allowDeterministicFallback=true, warnings should mention the engaged fallback, got: {warnings_str}"
+        );
+        // Review candidates may be empty when the fixture had zero
+        // linked stories — what we care about is that the consent
+        // branch ran (no "Set allowDeterministicFallback=true to
+        // opt in" hint, which only appears in the consent-off
+        // branch).
+        assert!(
+            !warnings_str.contains("Set allowDeterministicFallback=true to opt in"),
+            "consent-on branch must not advertise the opt-in, got: {warnings_str}"
+        );
     }
 }

@@ -15,6 +15,26 @@ impl TaintIrisNextInput {
         let discover_signals = read_bool_option(input, "discoverSignals")
             .or_else(|| read_bool_option(input, "discover_signals"))
             .unwrap_or(true);
+        // Default OFF. Per CLAUDE.md §"Model & runtime safety", we
+        // never silently project linked stories as findings when the
+        // agent fails. Operators who want that legacy behaviour opt
+        // in via `set taint-iris-next:hunt allowDeterministicFallback
+        // true` (UI / shell option) or
+        // `KUZUSHI_TAINT_IRIS_NEXT_ALLOW_DETERMINISTIC_FALLBACK=1`
+        // (env var, useful for CI scripts where the option-store
+        // isn't around).
+        let allow_deterministic_fallback = read_bool_option(input, "allowDeterministicFallback")
+            .or_else(|| read_bool_option(input, "allow_deterministic_fallback"))
+            .or_else(|| {
+                std::env::var("KUZUSHI_TAINT_IRIS_NEXT_ALLOW_DETERMINISTIC_FALLBACK")
+                    .ok()
+                    .and_then(|raw| match raw.trim().to_lowercase().as_str() {
+                        "true" | "1" | "yes" | "on" => Some(true),
+                        "false" | "0" | "no" | "off" => Some(false),
+                        _ => None,
+                    })
+            })
+            .unwrap_or(false);
         Ok(Self {
             mode,
             backend,
@@ -27,6 +47,7 @@ impl TaintIrisNextInput {
             )?,
             cwe_focus,
             discover_signals,
+            allow_deterministic_fallback,
         })
     }
 }

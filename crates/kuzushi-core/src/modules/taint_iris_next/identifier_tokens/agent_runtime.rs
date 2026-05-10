@@ -104,21 +104,55 @@ pub(in crate::modules::taint_iris_next) fn invalid_taint_iris_next_agent_result(
     retry_count: usize,
     cost_usd: f64,
 ) -> TaintIrisNextAgentResult {
-    let (findings, selections, triage) = deterministic_taint_iris_next_fallback(plan, evidence);
+    // Per CLAUDE.md §"Model & runtime safety", we never silently
+    // project linked stories as findings when the agent fails.
+    // Operators who explicitly opt in via
+    // `set taint-iris-next:hunt allowDeterministicFallback true`
+    // (or KUZUSHI_TAINT_IRIS_NEXT_ALLOW_DETERMINISTIC_FALLBACK=1)
+    // get the legacy behaviour; the default is honest failure with
+    // zero findings and a clear parse-error warning.
+    if plan.allow_deterministic_fallback {
+        let (findings, selections, triage) =
+            deterministic_taint_iris_next_fallback(plan, evidence);
+        let warnings = vec![
+            "agent returned no structured JSON output".to_string(),
+            format!("parse error: {error}"),
+            format!(
+                "agent output invalid; allowDeterministicFallback=true → returning {} deterministic linked finding candidate(s) for review",
+                findings.len()
+            ),
+        ];
+        return TaintIrisNextAgentResult {
+            agent_status: "invalid-json".to_string(),
+            selected_cwes: selections,
+            findings: findings.clone(),
+            review_candidates: findings,
+            triage,
+            triage_summary: summarize_taint_iris_next_triage(&[]),
+            outcome: "agent-output-invalid".to_string(),
+            raw_output: Value::Null,
+            structured_output_valid: false,
+            structured_output_retry_count: retry_count,
+            parse_error: Some(error.to_string()),
+            result_text_excerpt: None,
+            warnings,
+            cost_usd,
+        };
+    }
     let warnings = vec![
         "agent returned no structured JSON output".to_string(),
         format!("parse error: {error}"),
         format!(
-            "agent output invalid; returning {} deterministic linked finding candidate(s) for review",
-            findings.len()
+            "agent failed; emitting 0 findings ({} linked stories remain in structural evidence for review). Set allowDeterministicFallback=true to opt in to the legacy linked-story → finding projection on agent failure.",
+            evidence.linked_story_count
         ),
     ];
     TaintIrisNextAgentResult {
         agent_status: "invalid-json".to_string(),
-        selected_cwes: selections,
-        findings: findings.clone(),
-        review_candidates: findings,
-        triage,
+        selected_cwes: Vec::new(),
+        findings: Vec::new(),
+        review_candidates: Vec::new(),
+        triage: Vec::new(),
         triage_summary: summarize_taint_iris_next_triage(&[]),
         outcome: "agent-output-invalid".to_string(),
         raw_output: Value::Null,
