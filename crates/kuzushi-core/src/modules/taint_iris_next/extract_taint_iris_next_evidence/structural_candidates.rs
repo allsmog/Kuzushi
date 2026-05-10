@@ -37,12 +37,22 @@ fn collect_structural_candidates_inproc(
     Ok(state.into_candidates())
 }
 
+/// Per-file-per-CWE candidate cap. With a global per-CWE cap of e.g.
+/// 80, a single hot file (postgres `contrib/ltree/_ltree_op.c` has
+/// 50+ PG_GETARG_TEXT_PP hits) used to swallow the entire CWE budget
+/// alphabetically before the rg walker reached canonical surfaces
+/// like `src/backend/utils/adt/genfile.c`. Cap per-file so every file
+/// gets a few representative candidates and the budget spreads
+/// across the codebase.
+const STRUCTURAL_MAX_CANDIDATES_PER_FILE_PER_CWE: usize = 6;
+
 #[derive(Default)]
 pub(super) struct CandidateCollectionState {
     candidates: Vec<TaintIrisNextCandidate>,
     seen_candidate: BTreeSet<String>,
     per_query_files: BTreeMap<String, BTreeSet<String>>,
     per_cwe_candidates: BTreeMap<String, usize>,
+    per_file_per_cwe_candidates: BTreeMap<(String, String), usize>,
 }
 
 impl CandidateCollectionState {
@@ -95,6 +105,24 @@ impl CandidateCollectionState {
             return;
         }
 
+        // Diversify by file: with a global per-CWE cap of e.g. 80, a
+        // single hot file (postgres `_ltree_op.c` has 50+
+        // PG_GETARG_TEXT_PP hits) used to swallow the entire CWE
+        // budget alphabetically before the rg walker reached
+        // canonical surfaces like `genfile.c`. Cap per-file so every
+        // file gets a few representative candidates.
+        let per_file_key = (
+            source_file.relative_path.clone(),
+            query.cwe.clone(),
+        );
+        let per_file_count = self
+            .per_file_per_cwe_candidates
+            .entry(per_file_key)
+            .or_default();
+        if *per_file_count >= STRUCTURAL_MAX_CANDIDATES_PER_FILE_PER_CWE {
+            return;
+        }
+
         let id = candidate_id(query, source_file, line_number);
         if !self.seen_candidate.insert(id.clone()) {
             return;
@@ -102,6 +130,7 @@ impl CandidateCollectionState {
 
         files_for_query.insert(source_file.relative_path.clone());
         *cwe_count += 1;
+        *per_file_count += 1;
         self.candidates
             .push(build_candidate(id, query, source_file, line_number, line));
     }

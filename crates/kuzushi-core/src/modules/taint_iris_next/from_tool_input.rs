@@ -97,8 +97,8 @@ fn taint_iris_next_caps(input: &Value) -> Result<TaintIrisNextCaps> {
             &["maxCandidatesPerCwe", "max_candidates_per_cwe"],
             "taint-iris-next:hunt maxCandidatesPerCwe",
         )?
-        .unwrap_or(24)
-        .min(200),
+        .unwrap_or(2000)
+        .min(10000),
         max_evidence_per_cwe: positive_usize_input(
             input,
             &["maxEvidencePerCwe", "max_evidence_per_cwe"],
@@ -111,7 +111,7 @@ fn taint_iris_next_caps(input: &Value) -> Result<TaintIrisNextCaps> {
             &["maxFilesPerQuery", "max_files_per_query"],
             "taint-iris-next:hunt maxFilesPerQuery",
         )?
-        .unwrap_or(25)
+        .unwrap_or(120)
         .min(500),
         max_specs_per_cwe: positive_usize_input(
             input,
