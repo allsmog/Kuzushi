@@ -57,6 +57,16 @@ pub(in crate::modules) struct TaintIrisNextInput {
     /// can disable for fast/clean runs via
     /// `set taint-iris-next:hunt discoverSignals false`.
     pub(in crate::modules) discover_signals: bool,
+    /// Allow the deterministic linked-story → finding fallback when
+    /// the agent fails to return valid JSON (parse error, transport
+    /// 401/5xx, output truncated). Defaults to **false** so a hunt
+    /// failure is reported honestly as zero findings + warnings,
+    /// per CLAUDE.md §"Model & runtime safety". Operators who want
+    /// the legacy behaviour (project linked stories as findings on
+    /// agent failure for offline review) opt in via
+    /// `set taint-iris-next:hunt allowDeterministicFallback true`
+    /// or `KUZUSHI_TAINT_IRIS_NEXT_ALLOW_DETERMINISTIC_FALLBACK=1`.
+    pub(in crate::modules) allow_deterministic_fallback: bool,
 }
 
 /// Parse a JSON value (string, array of strings, or comma/space

@@ -115,6 +115,7 @@ pub(in crate::modules) fn build_taint_iris_next_plan(
         max_budget_usd: options.max_budget_usd,
         cwe_focus: options.cwe_focus,
         discovered_signals,
+        allow_deterministic_fallback: options.allow_deterministic_fallback,
     })
 }
 
