@@ -292,15 +292,30 @@ fn supplement_catalog_with_phantom_focus_entries(
     // Pre-compute the discovery's entry-point names (universal sources
     // for any focus CWE — see Thread A's projection rationale) and a
     // per-CWE sink-name index from the discovery output.
+    //
+    // Cap the entry-point list before it lands in the phantom catalog:
+    // a postgres tree exposes ~5000 PG_FUNCTION_ARGS-style entry
+    // points, and shipping all of them as `source_signals` would push
+    // the structural query seed count from ~200 to ~4000 and turn the
+    // rg pass into a many-minute walk. The first 50 alphabetically is
+    // good enough — the agent prompt lists the full set separately
+    // under "## Discovered Signals" so high-relevance names aren't
+    // lost from the model's view, only from the rg seed pass.
+    const PHANTOM_DISCOVERY_SOURCE_CAP: usize = 50;
     let discovery_entry_points: Vec<String> = {
-        let mut out: Vec<String> = discovered
+        let mut deduped: std::collections::BTreeSet<String> = discovered
             .entry_points
             .iter()
             .map(|signal| signal.name.clone())
             .collect();
-        out.sort();
-        out.dedup();
-        out
+        let mut ranked: Vec<(String, i32)> = deduped
+            .iter()
+            .map(|name| (name.clone(), phantom_entry_point_relevance(name)))
+            .collect();
+        deduped.clear();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        ranked.truncate(PHANTOM_DISCOVERY_SOURCE_CAP);
+        ranked.into_iter().map(|(name, _)| name).collect()
     };
     let mut discovery_sinks_by_cwe: std::collections::BTreeMap<String, Vec<String>> =
         std::collections::BTreeMap::new();
@@ -361,6 +376,47 @@ fn supplement_catalog_with_phantom_focus_entries(
     }
     catalog.sort_by(|a, b| b.score.cmp(&a.score));
     catalog
+}
+
+/// Local copy of the entry-point relevance heuristic that
+/// `extract_taint_iris_next_evidence::entry_point_relevance_score`
+/// uses for candidate sampling. Duplicated here (rather than promoted
+/// to a shared module) because both paths call it independently and
+/// the table is small enough that a single shared definition isn't
+/// load-bearing. Keep them aligned: privesc / file / process / admin
+/// tokens score positively; selectivity-estimator suffixes score
+/// negatively.
+fn phantom_entry_point_relevance(name: &str) -> i32 {
+    let lower = name.to_ascii_lowercase();
+    let mut score: i32 = 0;
+    for token in [
+        "exec", "system", "shell", "command", "run_program", "popen", "spawn",
+        "load_library", "load_file", "load_external", "load_module",
+        "dlopen", "dlsym", "import",
+        "read_file", "read_binary", "read_server", "read_text",
+        "write_file", "stat_file", "ls_dir", "ls_log", "ls_wal",
+        "signal_backend", "signal_proc", "kill_backend",
+        "reload_conf", "reload_config", "alter_system",
+        "promote", "terminate", "cancel_backend", "set_user", "setuid",
+        "admin", "super", "sudo", "privesc",
+        "set_session", "switch_user", "become",
+        "upload", "download",
+        "evaluate", "eval", "compile", "parse_script",
+        "lo_import", "lo_export",
+    ] {
+        if lower.contains(token) {
+            score = score.saturating_add(20);
+        }
+    }
+    for negative in [
+        "_joinsel", "_sel", "_cmp", "_hash", "_in", "_out", "_recv", "_send",
+        "_eq", "_lt", "_gt", "_le", "_ge", "_ne",
+    ] {
+        if lower.ends_with(negative) {
+            score = score.saturating_sub(10);
+        }
+    }
+    score
 }
 
 /// Map CWE → catalog-aligned `taintClass` for the phantom-entry path.

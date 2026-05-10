@@ -107,7 +107,8 @@ fn pair_taint_iris_next_candidates(
         && !focus_allow.is_empty()
         && focus_allow.contains(&source.cwe.to_ascii_uppercase())
         && focus_allow.contains(&sink.cwe.to_ascii_uppercase())
-        && source.taint_class == sink.taint_class;
+        && source.taint_class == sink.taint_class
+        && shares_subsystem(&source.file_path, &sink.file_path);
 
     if !cross_file_eligible {
         if sink.cwe != source.cwe {
@@ -171,6 +172,44 @@ fn pair_taint_iris_next_candidates(
         shared_tokens,
         rationale,
     })
+}
+
+/// Locality filter: only pair cross-file discovery candidates when
+/// they share a subsystem prefix. Without this, a postgres
+/// `_ltxtq_exec` (in `contrib/ltree/`) gets paired with a
+/// `dlopen` (in `src/port/win32dlopen.c`) just because both are
+/// discovery-tagged with the same `taint_class` — token overlap
+/// across unrelated translation units that the agent rightly rejects
+/// as not-a-real-flow.
+///
+/// The rule: pair only when source and sink either
+/// (a) share the same top-level directory (`src/`, `contrib/`,
+///     `lib/`, `frontend/`, `backend/`), AND
+/// (b) share the same second-level directory (`contrib/ltree/`,
+///     `src/backend/utils/`).
+///
+/// Identical-file matches always pass (the original same-file rule's
+/// callers don't go through this path, but defensive). Path traversal
+/// is OS-agnostic — normalise `\` → `/` first.
+fn shares_subsystem(source_path: &str, sink_path: &str) -> bool {
+    if source_path == sink_path {
+        return true;
+    }
+    let source_components: Vec<&str> = source_path
+        .split(|c: char| c == '/' || c == '\\')
+        .filter(|s| !s.is_empty())
+        .collect();
+    let sink_components: Vec<&str> = sink_path
+        .split(|c: char| c == '/' || c == '\\')
+        .filter(|s| !s.is_empty())
+        .collect();
+    let depth = source_components.len().min(sink_components.len()).min(2);
+    if depth < 2 {
+        // Files at root (or one level deep) — accept the pair; no
+        // subsystem signal to filter by.
+        return true;
+    }
+    source_components[..depth] == sink_components[..depth]
 }
 
 /// Recognise file paths that are obviously non-production code so the
@@ -411,6 +450,44 @@ mod linker_tests {
         ];
         let stories = build_taint_iris_next_linked_stories(&candidates, &[]);
         assert!(stories.is_empty());
+    }
+
+    #[test]
+    fn rejects_cross_subsystem_discovery_pair() {
+        // Postgres false-positive shape: an `_ltxtq_exec` source from
+        // contrib/ltree paired with a `dlopen` sink in
+        // src/port/win32dlopen.c. They share taint_class and CWE
+        // (both CWE-94 / code-injection), but they live in
+        // unrelated subsystems so a real flow between them would
+        // need an unrealistic call-graph chain. The locality filter
+        // suppresses this pair so the agent's prompt isn't drowned in
+        // token-overlap noise.
+        let candidates = vec![
+            candidate(
+                "src1",
+                "source",
+                "CWE-94",
+                "code-injection",
+                "contrib/ltree/_ltree_op.c",
+                179,
+                "discovery",
+            ),
+            candidate(
+                "snk1",
+                "sink",
+                "CWE-94",
+                "code-injection",
+                "src/port/win32dlopen.c",
+                27,
+                "discovery",
+            ),
+        ];
+        let cwe_focus = vec!["CWE-94".to_string()];
+        let stories = build_taint_iris_next_linked_stories(&candidates, &cwe_focus);
+        assert!(
+            stories.is_empty(),
+            "cross-subsystem (contrib/ltree vs src/port) pair must NOT link"
+        );
     }
 
     #[test]

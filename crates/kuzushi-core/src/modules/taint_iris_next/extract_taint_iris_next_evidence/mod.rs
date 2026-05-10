@@ -216,6 +216,18 @@ fn candidates_from_discovered_signals(
     // CWE-94 source for a downstream `dlopen` sink, not just CWE-862.
     // Cap is partitioned across the focus list so a 1041-entry-point
     // postgres sweep × 8 focus CWEs doesn't drown the prompt.
+    //
+    // Sampling-bias note: the source list arrives in walk order, which
+    // is alphabetical-by-file. On postgres that means the first 5
+    // entry points are `_int_contained` / `_int_contains` from
+    // `contrib/intarray/_int_op.c` — the LEAST interesting privesc
+    // sources in the entire tree. Re-rank by relevance to the focus
+    // CWEs first so privesc-shaped names (`pg_read_*`,
+    // `pg_signal_*`, `load_*`, `exec_*`, `*_admin`, `*_super`, ...)
+    // land at the top of the cap. Generic enough for any framework:
+    // the same tokens flag interesting handlers in Express
+    // (`/admin`, `/exec`), Flask (`upload_file`, `read_*`), Java
+    // (`*Service.exec`, `Admin*`), etc.
     let entry_point_target_cwes: Vec<String> = if cwe_focus.is_empty() {
         Vec::new()
     } else {
@@ -226,10 +238,16 @@ fn candidates_from_discovered_signals(
     } else {
         (DISCOVERY_MAX_ENTRY_POINT_CANDIDATES / entry_point_target_cwes.len()).max(1)
     };
+    let mut ranked_entry_points: Vec<(&DiscoveredSignal, i32)> = signals
+        .entry_points
+        .iter()
+        .map(|signal| (signal, entry_point_relevance_score(&signal.name)))
+        .collect();
+    ranked_entry_points.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.name.cmp(&b.0.name)));
     let mut entry_point_count_by_cwe: std::collections::BTreeMap<String, usize> =
         std::collections::BTreeMap::new();
     let mut total_entry_points = 0usize;
-    'entry_loop: for signal in &signals.entry_points {
+    'entry_loop: for (signal, _score) in &ranked_entry_points {
         let target_cwes: Vec<String> = if entry_point_target_cwes.is_empty() {
             if !allow.is_empty() && !allow.contains(&signal.cwe.to_ascii_uppercase()) {
                 continue;
@@ -259,6 +277,50 @@ fn candidates_from_discovered_signals(
         }
     }
     out
+}
+
+/// Relevance score for an entry-point name when no operator-supplied
+/// scoring exists. Higher = more interesting. Tokens are
+/// framework-agnostic: privesc/file/process/admin verbs that appear
+/// across PG (`pg_read_*`, `pg_signal_backend`), Express
+/// (`/admin/exec`), Flask (`upload_file`), Java (`AdminService.exec`),
+/// etc. Reading by token, not full name, lets `pg_read_binary_file`
+/// score for both `read` and `file`.
+fn entry_point_relevance_score(name: &str) -> i32 {
+    let lower = name.to_ascii_lowercase();
+    let mut score: i32 = 0;
+    for token in [
+        "exec", "system", "shell", "command", "run_program", "popen", "spawn",
+        "load_library", "load_file", "load_external", "load_module",
+        "dlopen", "dlsym", "import",
+        "read_file", "read_binary", "read_server", "read_text",
+        "write_file", "stat_file", "ls_dir", "ls_log", "ls_wal",
+        "signal_backend", "signal_proc", "kill_backend",
+        "reload_conf", "reload_config", "alter_system",
+        "promote", "terminate", "cancel_backend", "set_user", "setuid",
+        "admin", "super", "sudo", "privesc",
+        "set_session", "switch_user", "become",
+        "upload", "download",
+        "evaluate", "eval", "compile", "parse_script",
+        "lo_import", "lo_export",
+    ] {
+        if lower.contains(token) {
+            score = score.saturating_add(20);
+        }
+    }
+    // Negative bias against names that are clearly internal-only
+    // (selectivity estimators, joinsel/restrictsel, _cmp, _hash) so
+    // a postgres tree doesn't bury its real entry points behind
+    // `_int_contained_joinsel`.
+    for negative in [
+        "_joinsel", "_sel", "_cmp", "_hash", "_in", "_out", "_recv", "_send",
+        "_eq", "_lt", "_gt", "_le", "_ge", "_ne",
+    ] {
+        if lower.ends_with(negative) {
+            score = score.saturating_sub(10);
+        }
+    }
+    score
 }
 
 fn make_discovery_candidate(
@@ -490,5 +552,81 @@ mod tests {
         for (_, n) in &counts {
             assert!(*n <= per_cwe_cap);
         }
+    }
+
+    #[test]
+    fn relevance_scoring_prefers_privesc_names_over_alphabetical_first() {
+        // Postgres-shaped scenario: 1041 entry points where the first
+        // 5 alphabetically are intarray operators (`_int_contained`)
+        // and the interesting privesc primitives (`pg_read_*`,
+        // `pg_signal_*`) are buried at position 600+. Without
+        // relevance-aware sampling, the cap (40 / 8 focus = 5 per CWE)
+        // surfaces only the irrelevant alphabetical-first entries.
+        let entry_points = vec![
+            signal("_int_contained", "CWE-862", "entrypoint", "f1.c", 1),
+            signal("_int_contained_joinsel", "CWE-862", "entrypoint", "f1.c", 2),
+            signal("_int_contains", "CWE-862", "entrypoint", "f1.c", 3),
+            signal("_int_contains_joinsel", "CWE-862", "entrypoint", "f1.c", 4),
+            signal("_int_eq", "CWE-862", "entrypoint", "f1.c", 5),
+            signal("pg_read_server_files", "CWE-862", "entrypoint", "f2.c", 100),
+            signal("pg_signal_backend", "CWE-862", "entrypoint", "f3.c", 200),
+            signal("pg_reload_conf", "CWE-862", "entrypoint", "f3.c", 300),
+        ];
+        let signals = DiscoveredSignals {
+            discovered_at_unix: 0,
+            sources: Vec::new(),
+            sinks: Vec::new(),
+            entry_points,
+            discoverers: vec!["test".to_string()],
+        };
+        // Single focus CWE so the cap (40) is large enough to admit
+        // every entry — what we're testing is the ORDER, not the cap.
+        // To force a truly tight cap, use 8 focus CWEs (5 per CWE).
+        let cwe_focus = vec![
+            "CWE-78".to_string(),
+            "CWE-94".to_string(),
+            "CWE-77".to_string(),
+            "CWE-426".to_string(),
+            "CWE-269".to_string(),
+            "CWE-250".to_string(),
+            "CWE-732".to_string(),
+            "CWE-862".to_string(),
+        ];
+        let candidates = candidates_from_discovered_signals(&signals, &cwe_focus);
+        // Group by CWE-94 only; cap is 5 per CWE.
+        let cwe94_names: Vec<&str> = candidates
+            .iter()
+            .filter(|c| c.cwe == "CWE-94")
+            .map(|c| c.pattern.as_str())
+            .collect();
+        assert!(
+            cwe94_names.contains(&"pg_read_server_files"),
+            "privesc-shaped name must beat alphabetical _int_contained when both exist; got CWE-94 candidates: {cwe94_names:?}"
+        );
+        assert!(
+            cwe94_names.contains(&"pg_signal_backend"),
+            "got CWE-94 candidates: {cwe94_names:?}"
+        );
+        // The intarray *_joinsel suffix is suppressed (negative bias).
+        assert!(
+            !cwe94_names.contains(&"_int_contained_joinsel"),
+            "_joinsel suffix should be filtered out; got: {cwe94_names:?}"
+        );
+    }
+
+    #[test]
+    fn entry_point_relevance_score_token_coverage() {
+        // Privesc / file / process tokens score positively.
+        assert!(entry_point_relevance_score("pg_read_server_files") > 0);
+        assert!(entry_point_relevance_score("pg_signal_backend") > 0);
+        assert!(entry_point_relevance_score("load_external_function") > 0);
+        assert!(entry_point_relevance_score("admin_exec") > 0);
+        // Internal-only / selectivity-estimator suffixes score
+        // negatively so they don't crowd out real handlers.
+        assert!(entry_point_relevance_score("_int_contained_joinsel") < 0);
+        assert!(entry_point_relevance_score("array_eq") < 0);
+        assert!(entry_point_relevance_score("citext_cmp") < 0);
+        // Neutral names score 0 — no positive or negative tokens.
+        assert_eq!(entry_point_relevance_score("regular_function_name"), 0);
     }
 }
