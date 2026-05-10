@@ -12,6 +12,18 @@ pub(in crate::modules) fn extract_taint_iris_next_evidence(
     plan: &TaintIrisNextPlan,
 ) -> Result<TaintIrisNextEvidenceResult> {
     let raw_candidates = structural_candidates::collect_structural_candidates(plan)?;
+    // Fold the per-target source/sink discovery sweep into the raw
+    // candidate stream BEFORE syntactic narrowing so discovery's
+    // marker-regex matches go through the same comment/string-literal
+    // filter as rg-derived candidates. Without this, comment hits like
+    // `* random calls to C library routines like system(3);` (in
+    // postgres `fd.c:17`) sneak through the discovery sweep as bogus
+    // CWE-78 sinks and the cross-file linker happily pairs them into
+    // 605 false-positive linked stories.
+    let discovered_candidates =
+        candidates_from_discovered_signals(&plan.discovered_signals, &plan.cwe_focus);
+    let mut combined_raw = raw_candidates;
+    combined_raw.extend(discovered_candidates);
     // Syntactic narrowing: drop candidates whose match landed in a comment
     // or string literal. Languages without a tree-sitter grammar pass
     // through unchanged. This happens *after* the catalog language gate
@@ -19,7 +31,7 @@ pub(in crate::modules) fn extract_taint_iris_next_evidence(
     // linked-story construction so noise candidates can't pair into
     // bogus source-to-sink stories.
     let narrowed_candidates =
-        narrow_taint_iris_next_candidates_syntactically(&plan.scan_root, raw_candidates);
+        narrow_taint_iris_next_candidates_syntactically(&plan.scan_root, combined_raw);
     // Drop candidates whose file path is obviously non-production code
     // (test/, tutorial/, fixtures/, etc.). Filtering at the candidate
     // level — not just at the linked-story level — keeps the agent
@@ -28,22 +40,11 @@ pub(in crate::modules) fn extract_taint_iris_next_evidence(
     // produces zero stories. Operators who explicitly want to scan
     // non-production code can flip the catalog or pass a
     // `targetSubdir` constrained at a non-production path.
-    let mut candidates: Vec<TaintIrisNextCandidate> = narrowed_candidates
+    let candidates: Vec<TaintIrisNextCandidate> = narrowed_candidates
         .into_iter()
         .filter(|candidate| !is_taint_iris_next_non_production_path(&candidate.file_path))
         .collect();
-    // Fold the per-target source/sink discovery sweep into the
-    // candidate list so the agent investigates real primitives
-    // (`dlopen`, `load_external_function`, `SetUserId`,
-    // `PG_FUNCTION_INFO_V1` entry points, …) instead of only whatever
-    // the static catalog happened to seed via rg matches. Without this
-    // step the discovery output is informational only — it shows up
-    // in the prompt's "## Discovered Signals" section but the agent
-    // doesn't pivot to it because there are no candidate rows to
-    // anchor on.
-    let discovered_candidates =
-        candidates_from_discovered_signals(&plan.discovered_signals, &plan.cwe_focus);
-    candidates.extend(discovered_candidates);
+    let mut candidates = candidates;
     let mut warnings = plan.backend.warnings.clone();
 
     // When the backend selector picked joern (CPG present + binary on PATH),
