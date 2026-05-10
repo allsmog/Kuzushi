@@ -51,17 +51,48 @@ pub(super) fn collect_structural_candidates_via_rg(
 
     let hits = run_rg(&plan.scan_root, &substrings, &absolute_paths)?;
     let mut state = super::structural_candidates::CandidateCollectionState::default();
+    // Group hits by file and process round-robin across files. The raw
+    // rg output is alphabetical: a single hot file like postgres'
+    // `contrib/ltree/_ltree_op.c` (50+ PG_GETARG_TEXT_PP hits) used
+    // to exhaust the per-CWE candidate budget before the walker
+    // reached canonical surfaces like `src/backend/utils/adt/genfile.c`
+    // (alphabetical position ~857 of 1590 .c files). Round-robin
+    // ensures every file matched by rg gets at least one hit
+    // processed before any file is revisited — so the structural
+    // pass sees broad coverage even when there's a hot file early
+    // in the walk order.
+    let mut hits_by_file: BTreeMap<String, Vec<RgHit>> = BTreeMap::new();
     for hit in hits {
-        let Some(source_file) = by_relative_path.get(&hit.relative_path).copied() else {
+        if !by_relative_path.contains_key(&hit.relative_path) {
             continue;
-        };
-        let line_index = hit.line_no.saturating_sub(1) as usize;
-        state.record_line_matches(plan, source_file, line_index, &hit.line);
+        }
+        hits_by_file
+            .entry(hit.relative_path.clone())
+            .or_default()
+            .push(hit);
+    }
+    let mut round = 0usize;
+    loop {
+        let mut produced_in_round = false;
+        for hits_for_file in hits_by_file.values_mut() {
+            if let Some(hit) = hits_for_file.get(round).cloned() {
+                let Some(source_file) = by_relative_path.get(&hit.relative_path).copied() else {
+                    continue;
+                };
+                let line_index = hit.line_no.saturating_sub(1) as usize;
+                state.record_line_matches(plan, source_file, line_index, &hit.line);
+                produced_in_round = true;
+            }
+        }
+        if !produced_in_round {
+            break;
+        }
+        round += 1;
     }
     Ok(state.into_candidates())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct RgHit {
     relative_path: String,
     line_no: u64,
