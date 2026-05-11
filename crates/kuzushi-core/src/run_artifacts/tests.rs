@@ -4,6 +4,62 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn trace_step_v2_round_trip_preserves_new_fields() {
+        let step = RunTraceStep::new(7, "tool", "semgrep started")
+            .with_latency_ms(Some(143))
+            .with_cost_usd(Some(0.0021))
+            .with_module_id("semgrep")
+            .with_verb("scan")
+            .with_parent_step(3)
+            .with_severity("warn")
+            .with_started_at_ms(1_700_000_000_000);
+
+        let json = serde_json::to_string(&step).unwrap();
+        let parsed: RunTraceStep = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed, step);
+        assert!(json.contains("\"module_id\":\"semgrep\""));
+        assert!(json.contains("\"parent_step\":3"));
+        assert!(json.contains("\"started_at_ms\":1700000000000"));
+    }
+
+    #[test]
+    fn trace_step_v1_forward_compat_leaves_new_fields_none() {
+        let v1 = "{\"n\":1,\"kind\":\"tool\",\"label\":\"context:build started\"}";
+        let parsed: RunTraceStep = serde_json::from_str(v1).unwrap();
+
+        assert_eq!(parsed.n, 1);
+        assert_eq!(parsed.kind, "tool");
+        assert_eq!(parsed.label, "context:build started");
+        assert!(parsed.module_id.is_none());
+        assert!(parsed.verb.is_none());
+        assert!(parsed.parent_step.is_none());
+        assert!(parsed.severity.is_none());
+        assert!(parsed.started_at_ms.is_none());
+    }
+
+    #[test]
+    fn trace_step_v2_omits_unset_optional_fields_from_serialized_form() {
+        let step = RunTraceStep::new(1, "tool", "context:build started");
+        let json = serde_json::to_string(&step).unwrap();
+
+        assert!(!json.contains("module_id"));
+        assert!(!json.contains("verb"));
+        assert!(!json.contains("parent_step"));
+        assert!(!json.contains("severity"));
+        assert!(!json.contains("started_at_ms"));
+    }
+
+    #[test]
+    fn trace_step_can_derive_module_and_verb_from_tool_name() {
+        let step =
+            RunTraceStep::new(1, "tool", "semgrep:scan started").with_tool_name("semgrep:scan");
+
+        assert_eq!(step.module_id.as_deref(), Some("semgrep"));
+        assert_eq!(step.verb.as_deref(), Some("scan"));
+    }
+
+    #[test]
     fn writes_summary_artifact_and_trace_under_run_dir() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = new_run_id("tool");

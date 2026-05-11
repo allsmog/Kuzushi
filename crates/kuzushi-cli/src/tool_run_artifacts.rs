@@ -26,7 +26,8 @@ pub(crate) fn finish_cli_tool_run(
     let _ = append_run_trace_step(
         target,
         run_id,
-        &RunTraceStep::new(2, "tool", format!("{tool} complete"))
+        &RunTraceStep::new(2, "done", format!("{tool} complete"))
+            .with_tool_name(tool)
             .with_cost_usd(run_output_cost_usd(output)),
     );
     let _ = write_run_summary(target, &summary);
@@ -43,7 +44,9 @@ pub(crate) fn fail_cli_tool_run(target: &Path, run_id: &str, tool: &str, error: 
     let _ = append_run_trace_step(
         target,
         run_id,
-        &RunTraceStep::new(2, "tool", format!("{tool} failed")),
+        &RunTraceStep::new(2, "refused", format!("{tool} failed"))
+            .with_tool_name(tool)
+            .with_severity("danger"),
     );
     let _ = write_run_summary(target, &summary);
 }
