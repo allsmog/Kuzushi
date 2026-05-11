@@ -665,6 +665,7 @@ OUT
             chunks_failed: 0,
             cost_usd: 0.0,
             dry_run: false,
+            first_chunk_error: None,
         };
 
         persist_full_mode_report(&ctx, &report).unwrap();

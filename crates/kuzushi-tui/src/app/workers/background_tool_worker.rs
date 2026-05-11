@@ -76,7 +76,13 @@ pub(crate) fn background_tool_worker(
         Ok(result) => ToolEvent::Finished { tool_name, result },
         Err(error) => ToolEvent::Failed {
             tool_name,
-            error: error.to_string(),
+            // `{:#}` walks the full anyhow chain so operators see the
+            // underlying provider/bridge cause (e.g. "Anthropic API 429
+            // Too Many Requests"), not just the topmost wrap
+            // ("agent loop step 0 failed"). Without this, debugging
+            // model-side failures from the shell requires digging into
+            // `.kuzushi/runs/<id>/trace.jsonl` or rerunning under `kuzushi run`.
+            error: format!("{error:#}"),
         },
     };
     let _ = tx.send(event);

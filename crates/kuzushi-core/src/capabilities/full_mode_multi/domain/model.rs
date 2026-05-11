@@ -103,6 +103,13 @@ pub struct FullModeReport {
     pub chunks_failed: u32,
     pub cost_usd: f64,
     pub dry_run: bool,
+    /// Anyhow chain of the first failed chunk, if any. The dispatcher
+    /// keeps only the first one — once one chunk fails, subsequent
+    /// failures usually share the same root cause (auth, rate limit,
+    /// missing bridge dep), so streaming every chunk's error wastes
+    /// operator attention. `None` when all chunks succeeded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_chunk_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

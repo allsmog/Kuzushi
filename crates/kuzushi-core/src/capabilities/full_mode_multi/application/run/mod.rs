@@ -35,6 +35,7 @@ fn dispatch_full_mode_chunks(
     let mut dispatched = 0u32;
     let mut failed = 0u32;
     let mut cost = 0.0f64;
+    let mut first_chunk_error: Option<String> = None;
 
     for chunk in &plan.chunks {
         let chunk_result =
@@ -45,6 +46,9 @@ fn dispatch_full_mode_chunks(
             all_findings.extend(chunk_result.findings);
         } else {
             failed += 1;
+            if first_chunk_error.is_none() {
+                first_chunk_error = chunk_result.error;
+            }
         }
     }
 
@@ -55,5 +59,6 @@ fn dispatch_full_mode_chunks(
         chunks_failed: failed,
         cost_usd: cost,
         dry_run: false,
+        first_chunk_error,
     })
 }

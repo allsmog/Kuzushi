@@ -15,6 +15,7 @@ pub(super) fn dry_run_report(plan: FullModePlan) -> FullModeReport {
         chunks_failed: 0,
         cost_usd: 0.0,
         dry_run: true,
+        first_chunk_error: None,
     }
 }
 

@@ -70,39 +70,3 @@ pub(crate) fn tool_requires_findings_store(tool_name: &str) -> bool {
         )
 }
 
-pub(crate) fn tool_uses_agent_runtime(tool_name: &str) -> bool {
-    matches!(
-        tool_name,
-        "triage:run"
-            | "verify:finding"
-            | "patch:finding"
-            | "agentic-sast:scan"
-            | "carlini-threat-hunt:run"
-            | "vendor-assessment:assess"
-            | "vuln-scout:audit"
-            | "tob:audit"
-            | "shinsa:scan"
-            | "shinsa:quick-check"
-            | "shinsa:nist-scan"
-            | "shinsa:nist-quick-check"
-            | "prompt-armor:scan"
-            | "prompt-armor:analyze"
-            | "prompt-armor:attack"
-            | "variant:lift-pattern"
-            | "variant:hunt"
-            | "ndiff:extract-fix-pattern"
-            | "ndiff:hunt-variants"
-            | "systems-hunt:systems-invariant-extract"
-            | "systems-hunt:systems-trigger-synth"
-            | "systems-hunt:systems-hunt"
-            | "systems-hunt:deep-semantic-cwe-select"
-            | "systems-hunt:deep-semantic-hunt"
-            | "taint-iris:hunt"
-            | "taint-iris-next:hunt"
-            | "sast:scan"
-            | "threat-model:build"
-            | "randori:pasta"
-            | "x-ray:run"
-            | "x-ray:x-ray"
-    )
-}

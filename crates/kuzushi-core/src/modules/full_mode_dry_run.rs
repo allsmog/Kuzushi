@@ -24,8 +24,28 @@ pub(crate) fn full_mode_scope_path(
     input
         .get("scopeFile")
         .and_then(Value::as_str)
-        .map(std::path::PathBuf::from)
+        .map(|raw| resolve_scope_file_against_workspace(raw, ctx))
         .or_else(|| full_mode_since_scope_path(ctx))
+}
+
+/// The `scopeFile` option is documented as "repo-relative" but the value
+/// arrives as a raw string. If it's already absolute we honour it as-is; if
+/// it's relative we resolve it against the workspace root so the meaning
+/// matches the help text regardless of which cwd the caller happens to be
+/// in (TUI, `kuzushi run`, or scan worker). Without this, the same option
+/// silently scans every file when invoked from a different cwd.
+fn resolve_scope_file_against_workspace(
+    raw: &str,
+    ctx: &ToolExecutionContext<'_>,
+) -> std::path::PathBuf {
+    let path = std::path::PathBuf::from(raw);
+    if path.is_absolute() {
+        return path;
+    }
+    match ctx.workspace {
+        Some(workspace) => workspace.root().join(&path),
+        None => path,
+    }
 }
 
 pub(crate) fn full_mode_since_scope_path(
@@ -42,7 +62,24 @@ pub(crate) fn read_full_mode_scope_file(
     path: &std::path::Path,
 ) -> Result<Option<Vec<std::path::PathBuf>>> {
     if !path.exists() {
-        return Ok(None);
+        // Operator-provided `scopeFile` paths that don't exist used to
+        // silently degrade to "scan everything," which was confusing when
+        // someone misspelled the path or pointed the TUI at the wrong
+        // cwd. Fail loudly so the operator sees the typo before paying
+        // for an unwanted whole-codebase scan. The `since.txt` default
+        // path is excluded — we still allow it to be absent without
+        // raising, since most operators never produce a since.txt.
+        let looks_like_since_default = path
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            == Some("since.txt");
+        if looks_like_since_default {
+            return Ok(None);
+        }
+        anyhow::bail!(
+            "scopeFile {} does not exist; check spelling or pass an absolute path",
+            path.display()
+        );
     }
     let body = std::fs::read_to_string(path)
         .with_context(|| format!("could not read scope file {}", path.display()))?;
