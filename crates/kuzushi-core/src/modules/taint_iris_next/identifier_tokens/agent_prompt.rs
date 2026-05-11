@@ -266,6 +266,33 @@ pub(in crate::modules::taint_iris_next) fn append_sanitizer_bodies_section(
     plan: &TaintIrisNextPlan,
     evidence: &TaintIrisNextEvidenceResult,
 ) {
+    // Collect candidate function names from two sources:
+    // 1. The catalog's `sanitizer_signals` for the focused CWEs — these
+    //    are the names the static / per-target catalog deems
+    //    sanitizer-relevant for this hunt.
+    // 2. Function names that appear as text inside any linked-story
+    //    rationale or candidate `catalog_signal` with role=sanitizer.
+    // Without this filter, the extractor catches every postgres
+    // `check_*` / `verify_*` function (amcheck consistency checkers,
+    // tree-builders, parser helpers) and bloats the prompt to 30KB+
+    // with code unrelated to the candidate flows.
+    let mut sanitizer_names: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    for entry in &plan.catalog {
+        for name in &entry.sanitizer_signals {
+            sanitize_function_name_for_body_lookup(name, &mut sanitizer_names);
+        }
+    }
+    // Pull sanitizer names referenced in evidence bundles (the rg
+    // pass surfaced them as sanitizer-role hits).
+    for ev in &evidence.evidence {
+        if ev.role == "sanitizer" {
+            sanitize_function_name_for_body_lookup(&ev.pattern, &mut sanitizer_names);
+        }
+    }
+    if sanitizer_names.is_empty() {
+        return;
+    }
     let mut files_to_scan: std::collections::BTreeSet<String> =
         std::collections::BTreeSet::new();
     for story in evidence.linked_stories.iter() {
@@ -278,12 +305,30 @@ pub(in crate::modules::taint_iris_next) fn append_sanitizer_bodies_section(
         return;
     }
     let mut bodies: Vec<(String, String, u32, String)> = Vec::new();
-    for relative_path in files_to_scan.iter().take(20) {
+    let mut seen_bodies: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    for relative_path in files_to_scan.iter().take(40) {
         let abs = plan.scan_root.join(relative_path);
         let Ok(content) = std::fs::read_to_string(&abs) else {
             continue;
         };
         for (name, start_line, body) in extract_sanitizer_function_bodies(&content) {
+            // Filter: only include if the body's function name OR a
+            // close lexical variant appears in the catalog/evidence
+            // sanitizer set.
+            if !sanitizer_names.contains(&name)
+                && !sanitizer_names
+                    .iter()
+                    .any(|s| name.contains(s) || s.contains(&name))
+            {
+                continue;
+            }
+            // Dedup across files (e.g. multiple postgres copies of
+            // canonicalize_path in different binaries).
+            let dedup_key = format!("{name}:{}", body.len());
+            if !seen_bodies.insert(dedup_key) {
+                continue;
+            }
             bodies.push((
                 relative_path.clone(),
                 name,
@@ -304,14 +349,15 @@ pub(in crate::modules::taint_iris_next) fn append_sanitizer_bodies_section(
     lines.push(String::new());
     lines.push("## Sanitizer Function Bodies (audit for bypass)".to_string());
     lines.push(
-        "Functions in linked-story files whose names suggest sanitization. \
-         Bugs hide INSIDE these — `check_locality = false` skip-branches, \
-         pre-concatenation-only validation, prefix whitelists vs canonical \
-         paths, etc. Read each body and check whether every flow to a sink \
-         goes through the sanitizer AND whether the sanitizer is applied to \
-         the FINAL value used at the sink. If a sanitizer's body contains \
-         a skip-branch that bypasses the check on a 'trusted' input, the \
-         flow that hits the skip-branch is exploitable — promote to finding."
+        "Functions in linked-story files whose names match the catalog's \
+         sanitizer signals for the focused CWE(s). Bugs hide INSIDE these — \
+         `check_locality = false` skip-branches, pre-concatenation-only \
+         validation, prefix whitelists vs canonical paths, etc. Read each \
+         body and check whether every flow to a sink goes through the \
+         sanitizer AND whether the sanitizer is applied to the FINAL value \
+         used at the sink. If a sanitizer's body contains a skip-branch \
+         that bypasses the check on a 'trusted' input, the flow that hits \
+         the skip-branch is exploitable — promote to finding."
             .to_string(),
     );
     for (path, name, start_line, body) in &bodies {
@@ -322,6 +368,31 @@ pub(in crate::modules::taint_iris_next) fn append_sanitizer_bodies_section(
         lines.push("```".to_string());
     }
     lines.push(String::new());
+}
+
+/// Normalise a catalog sanitizer pattern string into the bare
+/// function name we'd see in a definition line. The catalog often
+/// stores patterns with trailing `(` (e.g. `quote_literal(`) or
+/// argument hints (e.g. `superuser()`). Strip those down to the
+/// identifier so the body-extractor can match by exact name.
+fn sanitize_function_name_for_body_lookup(
+    pattern: &str,
+    out: &mut std::collections::BTreeSet<String>,
+) {
+    let trimmed = pattern.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    // Strip parens and arguments: `superuser()` -> `superuser`.
+    let stripped = trimmed.split('(').next().unwrap_or(trimmed);
+    // Drop spaces / non-identifier suffixes.
+    let identifier: String = stripped
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
+    if !identifier.is_empty() && identifier.len() >= 4 {
+        out.insert(identifier);
+    }
 }
 
 /// Extract function bodies whose names look like sanitizers. Returns
