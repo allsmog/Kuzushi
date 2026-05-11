@@ -77,11 +77,6 @@ pub(in crate::modules) struct TaintIrisNextPlan {
     /// ground its CWE picks in primitives that actually exist in the
     /// codebase rather than the static catalog's a-priori guess.
     pub(in crate::modules) discovered_signals: DiscoveredSignals,
-    /// Operator opt-in (default false) for the deterministic
-    /// linked-story → finding fallback when the agent's structured
-    /// output is invalid. Propagated from
-    /// `TaintIrisNextInput::allow_deterministic_fallback`.
-    pub(in crate::modules) allow_deterministic_fallback: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

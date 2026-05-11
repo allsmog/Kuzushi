@@ -146,24 +146,3 @@ pub(in crate::modules) fn discover_signals_option() -> OptionSpec {
     .advanced()
 }
 
-/// Operator opt-in for the deterministic linked-story → finding
-/// fallback when the agent fails to return valid JSON (parse error,
-/// transport 401/5xx, output truncated). Default false: agent failure
-/// surfaces honestly as zero findings + warnings, per CLAUDE.md
-/// §"Model & runtime safety". Set to true when running offline / for
-/// review batches where you want the heuristic linker's stories
-/// projected as `review_candidates` even without agent triage.
-pub(in crate::modules) fn allow_deterministic_fallback_option() -> OptionSpec {
-    opt(
-        "allowDeterministicFallback",
-        OptionType::Bool,
-        "Allow the deterministic linked-story → finding fallback when \
-         the agent fails to return valid JSON. Default false (honest \
-         failure: 0 findings + parse-error warning). Turn on for \
-         offline / review batches where heuristic stories are useful \
-         even without agent triage. Mirrors \
-         KUZUSHI_TAINT_IRIS_NEXT_ALLOW_DETERMINISTIC_FALLBACK env var.",
-    )
-    .default(json!(false))
-    .advanced()
-}

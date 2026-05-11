@@ -51,7 +51,6 @@ pub(crate) fn taint_iris_next_module() -> BuiltinModule {
                     mcps_option(),
                     cwe_focus_option(),
                     discover_signals_option(),
-                    allow_deterministic_fallback_option(),
                     joern_cpg_option(),
                     joern_per_cwe_timeout_ms_option(),
                     codeql_prewarm_option(),

@@ -27,20 +27,7 @@ mod tests {
     }
 
     #[test]
-    fn deterministic_taint_iris_next_severity_and_priority_cover_known_cwes() {
-        assert_eq!(
-            deterministic_taint_iris_next_severity("CWE-78"),
-            Severity::High
-        );
-        assert_eq!(
-            deterministic_taint_iris_next_severity("CWE-502"),
-            Severity::Medium
-        );
-        assert_eq!(
-            deterministic_taint_iris_next_severity("CWE-999"),
-            Severity::Low
-        );
-
+    fn cwe_priority_covers_known_classes() {
         assert_eq!(cwe_priority("CWE-89"), 3);
         assert_eq!(cwe_priority("CWE-918"), 2);
         assert_eq!(cwe_priority("CWE-999"), 1);
@@ -579,7 +566,6 @@ mod tests {
             "mcps",
             "cweFocus",
             "discoverSignals",
-            "allowDeterministicFallback",
             "joernCpg",
             "joernPerCweTimeoutMs",
             "codeqlPrewarm",
@@ -696,7 +682,14 @@ mod tests {
     }
 
     #[test]
-    fn agent_failure_emits_zero_findings_without_consent() {
+    fn agent_failure_emits_zero_findings_unconditionally() {
+        // Contract: agent failure (parse error / 401 / transport
+        // failure) ALWAYS yields zero findings + a clear parse-error
+        // warning. There is no consent option, no opt-in, no
+        // deterministic linked-story → finding promotion. The
+        // linked stories themselves remain in
+        // `data.linkedStoryCount` for offline review; only the
+        // finding-level promotion is unconditionally suppressed.
         let temp = tempdir().unwrap();
         write_js_taint_fixture(temp.path());
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
@@ -726,15 +719,13 @@ mod tests {
             result.pointer("/data/agentStatus").and_then(Value::as_str),
             Some("invalid-json"),
         );
-        // No silent deterministic fallback: zero findings without
-        // operator consent.
         assert_eq!(
             result
                 .pointer("/data/findings")
                 .and_then(Value::as_array)
                 .map(Vec::len),
             Some(0),
-            "agent failure must NOT silently project linked stories as findings",
+            "agent failure must NEVER project linked stories as findings",
         );
         assert_eq!(
             result
@@ -743,8 +734,8 @@ mod tests {
                 .map(Vec::len),
             Some(0),
         );
-        // Warning surface mentions the opt-in for operators who want
-        // the legacy behaviour.
+        // The warning surface should NOT mention any opt-in flag —
+        // there isn't one any more.
         let warnings_str: String = result
             .pointer("/data/warnings")
             .and_then(Value::as_array)
@@ -756,69 +747,14 @@ mod tests {
             })
             .unwrap_or_default();
         assert!(
-            warnings_str.contains("allowDeterministicFallback"),
-            "warnings should advertise the consent option, got: {warnings_str}"
+            !warnings_str.contains("allowDeterministicFallback"),
+            "removed option must not be advertised, got: {warnings_str}"
         );
-    }
-
-    #[test]
-    fn agent_failure_emits_review_candidates_with_consent() {
-        let temp = tempdir().unwrap();
-        write_js_taint_fixture(temp.path());
-        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
-        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-        let mut config = V2Config::default();
-        config.model = Some("anthropic:claude-opus-4-7".to_string());
-        let runtime = InvalidJsonAgent;
-        let ctx = ToolExecutionContext {
-            config: &config,
-            workspace: Some(&workspace),
-            findings_store: Some(&store),
-        };
-        let result = run_taint_iris_next_report(
-            &json!({
-                "mode": "hunt",
-                "maxCatalogEntries": 3,
-                "maxAgentFindings": 5,
-                "minEvidenceLevel": "candidate",
-                "allowDeterministicFallback": true,
-            }),
-            &ctx,
-            Some(&runtime),
-        )
-        .unwrap()
-        .to_tool_json();
-
-        assert_eq!(
-            result.pointer("/data/agentStatus").and_then(Value::as_str),
-            Some("invalid-json"),
-        );
-        // With explicit consent, the warning surface tells the
-        // operator the deterministic fallback engaged (vs the
-        // consent-off branch which advertises the opt-in).
-        let warnings_str: String = result
-            .pointer("/data/warnings")
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_str)
-                    .collect::<Vec<_>>()
-                    .join(" | ")
-            })
-            .unwrap_or_default();
+        // The warning should still mention linked stories so the
+        // operator knows raw evidence is available offline.
         assert!(
-            warnings_str.contains("allowDeterministicFallback=true")
-                || warnings_str.contains("deterministic linked finding candidate"),
-            "with allowDeterministicFallback=true, warnings should mention the engaged fallback, got: {warnings_str}"
-        );
-        // Review candidates may be empty when the fixture had zero
-        // linked stories — what we care about is that the consent
-        // branch ran (no "Set allowDeterministicFallback=true to
-        // opt in" hint, which only appears in the consent-off
-        // branch).
-        assert!(
-            !warnings_str.contains("Set allowDeterministicFallback=true to opt in"),
-            "consent-on branch must not advertise the opt-in, got: {warnings_str}"
+            warnings_str.contains("linked stories"),
+            "warnings should mention linked stories for offline review, got: {warnings_str}"
         );
     }
 }

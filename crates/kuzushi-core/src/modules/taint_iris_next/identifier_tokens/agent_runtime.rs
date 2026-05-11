@@ -98,52 +98,26 @@ pub(in crate::modules::taint_iris_next) fn run_taint_iris_next_agent_prompt(
 }
 
 pub(in crate::modules::taint_iris_next) fn invalid_taint_iris_next_agent_result(
-    plan: &TaintIrisNextPlan,
+    _plan: &TaintIrisNextPlan,
     evidence: &TaintIrisNextEvidenceResult,
     error: anyhow::Error,
     retry_count: usize,
     cost_usd: f64,
 ) -> TaintIrisNextAgentResult {
-    // Per CLAUDE.md §"Model & runtime safety", we never silently
-    // project linked stories as findings when the agent fails.
-    // Operators who explicitly opt in via
-    // `set taint-iris-next:hunt allowDeterministicFallback true`
-    // (or KUZUSHI_TAINT_IRIS_NEXT_ALLOW_DETERMINISTIC_FALLBACK=1)
-    // get the legacy behaviour; the default is honest failure with
-    // zero findings and a clear parse-error warning.
-    if plan.allow_deterministic_fallback {
-        let (findings, selections, triage) =
-            deterministic_taint_iris_next_fallback(plan, evidence);
-        let warnings = vec![
-            "agent returned no structured JSON output".to_string(),
-            format!("parse error: {error}"),
-            format!(
-                "agent output invalid; allowDeterministicFallback=true → returning {} deterministic linked finding candidate(s) for review",
-                findings.len()
-            ),
-        ];
-        return TaintIrisNextAgentResult {
-            agent_status: "invalid-json".to_string(),
-            selected_cwes: selections,
-            findings: findings.clone(),
-            review_candidates: findings,
-            triage,
-            triage_summary: summarize_taint_iris_next_triage(&[]),
-            outcome: "agent-output-invalid".to_string(),
-            raw_output: Value::Null,
-            structured_output_valid: false,
-            structured_output_retry_count: retry_count,
-            parse_error: Some(error.to_string()),
-            result_text_excerpt: None,
-            warnings,
-            cost_usd,
-        };
-    }
+    // Per CLAUDE.md §"Model & runtime safety", we never project
+    // linked stories as findings when the agent fails — neither
+    // silently nor with consent. There used to be an
+    // `allowDeterministicFallback` opt-in that engaged a heuristic
+    // promotion path; it was removed in commit `<head>` because
+    // operator intent for security tooling is "honest failure" in
+    // every case. The linked stories themselves remain in the
+    // structural evidence (`evidence_result.linked_stories`) for
+    // offline review — only the FINDING-level promotion is gone.
     let warnings = vec![
         "agent returned no structured JSON output".to_string(),
         format!("parse error: {error}"),
         format!(
-            "agent failed; emitting 0 findings ({} linked stories remain in structural evidence for review). Set allowDeterministicFallback=true to opt in to the legacy linked-story → finding projection on agent failure.",
+            "agent failed; emitting 0 findings ({} linked stories remain in structural evidence for review)",
             evidence.linked_story_count
         ),
     ];
