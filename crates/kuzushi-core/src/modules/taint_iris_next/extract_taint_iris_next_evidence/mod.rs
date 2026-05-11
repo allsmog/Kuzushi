@@ -116,6 +116,38 @@ pub(in crate::modules) fn extract_taint_iris_next_evidence(
         build_taint_iris_next_linked_stories(&candidates, &plan.cwe_focus)
     };
 
+    // CodeQL corroboration pass: when `corroborate_with_codeql` is on
+    // and the backend isn't already codeql, ALSO run codeql against
+    // the focus CWEs and fold its high-confidence flows into the
+    // linked-story set as evidence_level: "path". CodeQL's
+    // built-in cpp-queries/CWE-* queries do flow-sensitive size and
+    // range analysis that the rg pre-pass and joern's reachableByFlows
+    // can't match — running it deterministically in the pre-agent
+    // pipeline means the agent doesn't have to discover it via an MCP
+    // call (the previous behaviour was 0 codeql calls per hunt because
+    // the agent one-shot the prompt without exploration).
+    let (linked_stories, mut candidates) = (linked_stories, candidates);
+    let mut linked_stories = linked_stories;
+    if plan.backend.selected != "codeql"
+        && plan.backend.corroborate_with_codeql.unwrap_or(false)
+    {
+        match super::run_codeql_flows(plan) {
+            Ok(Some(corroboration)) if !corroboration.is_empty() => {
+                backend_path_count += corroboration.len();
+                let mut codeql_candidates = super::codeql_flows_to_candidates(&corroboration);
+                candidates.append(&mut codeql_candidates);
+                let mut codeql_stories = super::codeql_flows_to_linked_stories(&corroboration);
+                linked_stories.append(&mut codeql_stories);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                warnings.push(format!(
+                    "codeql corroboration pass failed ({error}); proceeding with rg/joern evidence only"
+                ));
+            }
+        }
+    }
+
     let linked_by_candidate = result_summary::linked_story_ids_by_candidate(&linked_stories);
     let mut evidence =
         evidence_projection::project_candidate_evidence(&candidates, &linked_by_candidate);
