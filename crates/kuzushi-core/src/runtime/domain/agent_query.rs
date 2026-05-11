@@ -107,4 +107,6 @@ pub struct AgentToolPolicy {
     pub profile: String,
     #[serde(default)]
     pub tools: Vec<String>,
+    #[serde(default)]
+    pub mcps: bool,
 }

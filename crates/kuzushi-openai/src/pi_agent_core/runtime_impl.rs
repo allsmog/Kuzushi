@@ -45,9 +45,11 @@ impl AgentRuntime for PiAgentCoreRuntime {
         Ok(AgentQueryResponse {
             text: response.text.unwrap_or_default(),
             structured: response.structured,
+            cost_usd: response.cost_usd.unwrap_or_default(),
+            input_tokens: response.input_tokens.unwrap_or_default() as u32,
+            output_tokens: response.output_tokens.unwrap_or_default() as u32,
             truncated: response.truncated,
             stop_reason: response.stop_reason,
-            ..Default::default()
         })
     }
 

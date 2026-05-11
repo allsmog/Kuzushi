@@ -44,6 +44,7 @@ pub(crate) fn build_taint_iris_next_plan(
         prompt_catalog,
         backend,
         max_budget_usd: options.max_budget_usd,
+        allow_deterministic_fallback: options.allow_deterministic_fallback,
     })
 }
 

@@ -19,6 +19,18 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
+const BRIDGE_LOG_PATH = process.env.KUZUSHI_BRIDGE_LOG;
+
+function bridgeLog(message) {
+  process.stderr.write(message);
+  if (!BRIDGE_LOG_PATH) return;
+  try {
+    appendFileSync(BRIDGE_LOG_PATH, message);
+  } catch {
+    /* diagnostic only */
+  }
+}
+
 /**
  * Cross-process exclusive lock around an OAuth credentials read-modify-write.
  *
@@ -126,6 +138,27 @@ function extractTextFromState(agent) {
     }
   }
   return "";
+}
+
+function aggregateAgentUsage(agent) {
+  const messages = agent?.state?.messages;
+  if (!Array.isArray(messages)) return undefined;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let costUsd = 0;
+  let touched = false;
+  for (const message of messages) {
+    if (message?.role !== "assistant" && message?.type !== "assistant") continue;
+    const usage = message?.usage;
+    if (!usage || typeof usage !== "object") continue;
+    touched = true;
+    inputTokens += Number(usage.input ?? usage.input_tokens ?? 0) || 0;
+    outputTokens += Number(usage.output ?? usage.output_tokens ?? 0) || 0;
+    const total = Number(usage.cost?.total ?? 0);
+    if (Number.isFinite(total)) costUsd += total;
+  }
+  if (!touched) return undefined;
+  return { inputTokens, outputTokens, costUsd };
 }
 
 function maybeParseJson(text) {
@@ -414,16 +447,256 @@ function createWhiteboxReadOnlyTools(cwd) {
   };
 }
 
-function buildAgentTools(request) {
+async function buildAgentTools(request) {
   const policy = normalizeAgentToolPolicy(request);
-  if (policy.profile !== WHITEBOX_STATIC_TOOL_PROFILE) return [];
-  const available = createWhiteboxReadOnlyTools(request.cwd);
-  return policy.tools.map((tool) => {
-    const canonicalName = WHITEBOX_STATIC_READ_ONLY_TOOLS.find(
-      (allowed) => allowed.toLowerCase() === tool.toLowerCase(),
+  const tools = [];
+  if (policy.profile === WHITEBOX_STATIC_TOOL_PROFILE) {
+    const available = createWhiteboxReadOnlyTools(request.cwd);
+    for (const tool of policy.tools) {
+      const canonicalName = WHITEBOX_STATIC_READ_ONLY_TOOLS.find(
+        (allowed) => allowed.toLowerCase() === tool.toLowerCase(),
+      );
+      tools.push(available[canonicalName]);
+    }
+  }
+  for (const mcpTool of await buildMcpAgentTools(request)) {
+    tools.push(mcpTool);
+  }
+  return tools;
+}
+
+const KUZUSHI_MCP_SERVERS = [
+  {
+    profile: "tree-sitter",
+    binary: process.env.KUZUSHI_MCP_TREESITTER_BIN || "kuzushi-mcp-treesitter",
+  },
+  {
+    profile: "joern",
+    binary: process.env.KUZUSHI_MCP_JOERN_BIN || "kuzushi-mcp-joern",
+  },
+  {
+    profile: "codeql",
+    binary: process.env.KUZUSHI_MCP_CODEQL_BIN || "kuzushi-mcp-codeql",
+  },
+];
+
+const mcpServerHandles = new Map();
+
+async function buildMcpAgentTools(request) {
+  if (!agentMcpsEnabled(request)) return [];
+  const tools = [];
+  for (const spec of KUZUSHI_MCP_SERVERS) {
+    const handle = await ensureMcpServer(spec, request);
+    if (!handle) continue;
+    for (const tool of handle.tools) {
+      tools.push(wrapMcpToolForAgent(handle, tool));
+    }
+  }
+  if (process.env.KUZUSHI_BRIDGE_VERBOSE === "1") {
+    bridgeLog(
+      `[kuzushi-bridge] MCP tools: ${tools.map((tool) => tool.name).join(", ") || "(none)"}\n`,
     );
-    return available[canonicalName];
+  }
+  return tools;
+}
+
+function agentMcpsEnabled(request) {
+  if (request?.toolPolicy && request.toolPolicy.mcps === true) return true;
+  const value = process.env.KUZUSHI_AGENT_MCPS;
+  return value === "1" || value === "true";
+}
+
+async function ensureMcpServer(spec, request) {
+  const cwd = mcpCwdFor(request);
+  const cacheKey = `${spec.profile}:${cwd}`;
+  const cached = mcpServerHandles.get(cacheKey);
+  if (cached) {
+    const handle = await cached;
+    if (handle?.alive) return handle;
+    mcpServerHandles.delete(cacheKey);
+  }
+
+  const promise = spawnMcpServer(spec, cwd);
+  mcpServerHandles.set(cacheKey, promise);
+  const handle = await promise;
+  if (!handle) mcpServerHandles.delete(cacheKey);
+  return handle;
+}
+
+function mcpCwdFor(request) {
+  const candidate = request?.cwd;
+  if (typeof candidate !== "string" || candidate.length === 0) return process.cwd();
+  try {
+    if (statSync(candidate).isDirectory()) return candidate;
+  } catch {
+    /* fall through */
+  }
+  return process.cwd();
+}
+
+async function spawnMcpServer(spec, cwd) {
+  let child;
+  try {
+    child = spawn(spec.binary, [], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: process.env,
+      cwd: cwd ?? process.cwd(),
+    });
+  } catch (error) {
+    bridgeLog(
+      `[kuzushi-bridge] could not spawn MCP server ${spec.binary}: ${error.message ?? error}\n`,
+    );
+    return null;
+  }
+
+  const handle = {
+    profile: spec.profile,
+    binary: spec.binary,
+    child,
+    alive: true,
+    nextId: 1,
+    pending: new Map(),
+    buffer: "",
+    tools: [],
+  };
+  child.on("error", (error) => {
+    bridgeLog(
+      `[kuzushi-bridge] MCP server ${spec.binary} errored: ${error.message ?? error}\n`,
+    );
+    handle.alive = false;
   });
+  child.on("exit", () => {
+    handle.alive = false;
+    for (const [, resolver] of handle.pending) {
+      resolver.reject(new Error(`MCP server ${spec.binary} exited`));
+    }
+    handle.pending.clear();
+  });
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => receiveMcpStdout(handle, chunk));
+  child.stderr.on("data", (chunk) => {
+    if (process.env.KUZUSHI_BRIDGE_VERBOSE === "1") {
+      bridgeLog(`[mcp:${spec.profile}] ${String(chunk).trimEnd()}\n`);
+    }
+  });
+
+  try {
+    await sendMcpRequest(handle, "initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "kuzushi-bridge", version: "0" },
+    });
+    const list = await sendMcpRequest(handle, "tools/list", undefined);
+    if (Array.isArray(list?.tools)) {
+      handle.tools = list.tools;
+    }
+  } catch (error) {
+    bridgeLog(
+      `[kuzushi-bridge] MCP server ${spec.binary} init failed: ${error.message ?? error}\n`,
+    );
+    handle.alive = false;
+  }
+  return handle;
+}
+
+function sendMcpRequest(handle, method, params) {
+  return new Promise((resolve, reject) => {
+    if (!handle.alive) {
+      reject(new Error(`MCP server ${handle.binary} is not alive`));
+      return;
+    }
+    const id = handle.nextId++;
+    handle.pending.set(id, { resolve, reject });
+    const body = { jsonrpc: "2.0", id, method };
+    if (params !== undefined) body.params = params;
+    handle.child.stdin.write(`${JSON.stringify(body)}\n`);
+  });
+}
+
+function receiveMcpStdout(handle, chunk) {
+  handle.buffer += chunk;
+  let newlineIndex;
+  while ((newlineIndex = handle.buffer.indexOf("\n")) >= 0) {
+    const line = handle.buffer.slice(0, newlineIndex).trim();
+    handle.buffer = handle.buffer.slice(newlineIndex + 1);
+    if (!line) continue;
+    let payload;
+    try {
+      payload = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof payload?.id !== "number") continue;
+    const resolver = handle.pending.get(payload.id);
+    if (!resolver) continue;
+    handle.pending.delete(payload.id);
+    if (payload.error) {
+      resolver.reject(
+        new Error(`MCP error: ${payload.error.message ?? JSON.stringify(payload.error)}`),
+      );
+    } else {
+      resolver.resolve(payload.result);
+    }
+  }
+}
+
+function wrapMcpToolForAgent(handle, mcpTool) {
+  const safeName = mcpTool.name.replace(/[^a-zA-Z0-9_]/g, "_");
+  return {
+    name: safeName,
+    label: safeName,
+    description: `[mcp:${handle.profile}] ${mcpTool.description}`,
+    parameters: mcpTool.inputSchema ?? mcpTool.input_schema ?? {
+      type: "object",
+      additionalProperties: true,
+    },
+    execute: async (_toolCallId, params) => {
+      const startedAt = Date.now();
+      const verbose = process.env.KUZUSHI_BRIDGE_VERBOSE === "1";
+      if (verbose) {
+        bridgeLog(
+          `[mcp:${handle.profile}] -> ${mcpTool.name} ${JSON.stringify(params ?? {}).slice(0, 200)}\n`,
+        );
+      }
+      const timeoutMs = Number(process.env.KUZUSHI_MCP_TOOL_TIMEOUT_MS ?? 60_000);
+      const call = sendMcpRequest(handle, "tools/call", {
+        name: mcpTool.name,
+        arguments: params ?? {},
+      });
+      let timer;
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`MCP tool ${mcpTool.name} timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      });
+
+      let result;
+      try {
+        result = await Promise.race([call, timeout]);
+      } catch (error) {
+        const text = `MCP tool ${mcpTool.name} failed: ${error?.message ?? error}`;
+        if (verbose) bridgeLog(`[mcp:${handle.profile}] !! ${text}\n`);
+        return { content: [{ type: "text", text }], details: { error: text } };
+      } finally {
+        clearTimeout(timer);
+      }
+
+      const text =
+        Array.isArray(result?.content) && result.content[0]?.text
+          ? String(result.content[0].text)
+          : JSON.stringify(result, null, 2);
+      if (verbose) {
+        bridgeLog(
+          `[mcp:${handle.profile}] <- ${mcpTool.name} ${Date.now() - startedAt}ms ${text.length}B\n`,
+        );
+      }
+      return {
+        content: [{ type: "text", text }],
+        details: result,
+      };
+    },
+  };
 }
 
 function subscribeText(agent, onText) {
@@ -471,8 +744,7 @@ function makeStreamFnWithMaxTokens(maxOutputTokens) {
 }
 
 async function runAgent(AgentCtor, model, request) {
-  const agentTools = buildAgentTools(request);
-  const allowedToolNames = new Set(agentTools.map((tool) => tool.name.toLowerCase()));
+  const agentTools = await buildAgentTools(request);
   const systemPrompt = appendStructuredOutputContract(
     request.systemPrompt ?? request.system_prompt ?? "",
     request.structuredOutput ?? request.structured_output ?? request.outputFormat,
@@ -498,9 +770,6 @@ async function runAgent(AgentCtor, model, request) {
       if (isForbiddenWhiteboxTool(name)) {
         return { block: true, reason: `whitebox-static blocks execution/write tool ${name}` };
       }
-      if (allowedToolNames.size > 0 && !allowedToolNames.has(String(name).toLowerCase())) {
-        return { block: true, reason: `whitebox-static only allows read-only repo tools` };
-      }
       return undefined;
     },
     getApiKey: async (provider) =>
@@ -525,6 +794,20 @@ async function runAgent(AgentCtor, model, request) {
       truncated = true;
     }
   });
+  if (process.env.KUZUSHI_BRIDGE_VERBOSE === "1") {
+    agent.subscribe?.((event) => {
+      if (event?.type === "agent_end") bridgeLog("[bridge] agent_end\n");
+      else if (event?.type === "turn_end") {
+        bridgeLog(`[bridge] turn_end stop=${event?.message?.stopReason ?? "?"}\n`);
+      } else if (event?.type === "turn_start") bridgeLog("[bridge] turn_start\n");
+      else if (event?.type === "tool_start") {
+        bridgeLog(`[bridge] tool_start ${event?.toolCall?.name ?? "?"}\n`);
+      } else if (event?.type === "tool_end") bridgeLog("[bridge] tool_end\n");
+      else if (event?.type === "error") {
+        bridgeLog(`[bridge] error: ${event?.message ?? JSON.stringify(event).slice(0, 200)}\n`);
+      }
+    });
+  }
 
   if (typeof agent.prompt === "function") {
     const result = await agent.prompt(request.prompt);
@@ -561,7 +844,13 @@ async function runAgent(AgentCtor, model, request) {
   });
   writeFullPromptDump(request);
 
-  return { text, truncated, stopReason: lastStopReason };
+  return {
+    text,
+    usage: aggregateAgentUsage(agent),
+    errorMessage: agent?.state?.errorMessage ?? undefined,
+    truncated,
+    stopReason: lastStopReason,
+  };
 }
 
 function writeDebugDump({ model, agentTools, thinkingLevel, request, systemPrompt, text }) {
@@ -1067,25 +1356,63 @@ async function main() {
 
   const [provider, modelId] = parseModelSpec(request.model);
   const model = getModel(provider, modelId);
-  const { text, truncated, stopReason } = await runAgent(AgentCtor, model, request);
+  const { text, usage, errorMessage, truncated, stopReason } = await runAgent(
+    AgentCtor,
+    model,
+    request,
+  );
+
+  if (!text && (errorMessage || (!usage?.inputTokens && !usage?.outputTokens))) {
+    const reason = errorMessage ?? "agent produced no assistant turn and no token usage";
+    process.stdout.write(JSON.stringify({ ok: false, error: reason }));
+    return;
+  }
 
   process.stdout.write(
     JSON.stringify({
       ok: true,
       text,
       structured: maybeParseJson(text),
+      cost_usd: usage?.costUsd ?? 0,
+      input_tokens: usage?.inputTokens ?? 0,
+      output_tokens: usage?.outputTokens ?? 0,
       truncated,
       stopReason,
     }),
   );
 }
 
-main().catch((error) => {
-  process.stdout.write(
-    JSON.stringify({
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    }),
-  );
-  process.exitCode = 1;
-});
+function shutdownMcpServers() {
+  for (const promiseOrHandle of mcpServerHandles.values()) {
+    Promise.resolve(promiseOrHandle)
+      .then((handle) => {
+        if (!handle) return;
+        try {
+          handle.child?.stdin?.end?.();
+        } catch {
+          /* ignore */
+        }
+        try {
+          handle.child?.kill?.();
+        } catch {
+          /* ignore */
+        }
+      })
+      .catch(() => undefined);
+  }
+}
+
+main()
+  .catch((error) => {
+    process.stdout.write(
+      JSON.stringify({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    shutdownMcpServers();
+    setImmediate(() => process.exit(process.exitCode ?? 0));
+  });

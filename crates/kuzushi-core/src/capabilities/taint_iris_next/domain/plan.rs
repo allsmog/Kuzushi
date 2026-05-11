@@ -65,6 +65,7 @@ pub(crate) struct TaintIrisNextPlan {
     pub(crate) prompt_catalog: String,
     pub(crate) backend: TaintIrisNextBackendChoice,
     pub(crate) max_budget_usd: Option<f64>,
+    pub(crate) allow_deterministic_fallback: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
