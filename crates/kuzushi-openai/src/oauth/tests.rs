@@ -75,6 +75,46 @@ mod tests {
     }
 
     #[test]
+    fn probe_reports_ready_with_empty_refresh_when_access_unexpired() {
+        // Long-lived bearer tokens (e.g. remote-session OAuth) carry no
+        // refresh field. As long as `access` is non-empty and `expires` is
+        // in the future, the bridge uses `access` directly — refresh is
+        // only consulted on expiry. The probe must mirror that.
+        let tmp = tempdir().unwrap();
+        let far_future_ms = current_unix_ms() + 30 * 24 * 3600 * 1000;
+        let path = write_file(
+            tmp.path(),
+            "creds.json",
+            &format!(
+                r#"{{"anthropic":{{"refresh":"","access":"a","expires":{far_future_ms}}}}}"#
+            ),
+        );
+        match probe_path(&path).unwrap() {
+            OauthReadiness::Ready { expires_at_ms } => {
+                assert_eq!(expires_at_ms, far_future_ms);
+            }
+            other => panic!("expected Ready, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn probe_reports_invalid_when_expired_and_no_refresh() {
+        let tmp = tempdir().unwrap();
+        let path = write_file(
+            tmp.path(),
+            "creds.json",
+            r#"{"anthropic":{"refresh":"","access":"a","expires":1}}"#,
+        );
+        match probe_path(&path).unwrap() {
+            OauthReadiness::Invalid { reason, .. } => {
+                assert!(reason.contains("expired"));
+                assert!(reason.contains("refresh"));
+            }
+            other => panic!("expected Invalid, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn probe_reports_expired_when_past() {
         let tmp = tempdir().unwrap();
         let path = write_file(
