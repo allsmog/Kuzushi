@@ -78,6 +78,38 @@ async function readStdin() {
   return data;
 }
 
+/**
+ * Claude Code remote-session OAuth tokens are rate-limited on the
+ * Sonnet / Opus tier unless the system prompt opens with the Claude Code
+ * identity string. Haiku is unaffected. Without this prefix the API
+ * returns a sub-second `429 rate_limit_error` whose message is literally
+ * `"Error"` — easy to misread as a real quota signal.
+ *
+ * Prepend the identity string transparently whenever the bridge is about
+ * to use an Anthropic OAuth bag. If the caller's system prompt already
+ * starts with the line, leave it as-is so we don't double-prefix.
+ */
+const CLAUDE_CODE_IDENTITY_LINE =
+  "You are Claude Code, Anthropic's official CLI for Claude.";
+
+function applyClaudeCodeIdentityPrefix(systemPrompt) {
+  const body = typeof systemPrompt === "string" ? systemPrompt : "";
+  if (body.startsWith(CLAUDE_CODE_IDENTITY_LINE)) return body;
+  if (!body.trim()) return CLAUDE_CODE_IDENTITY_LINE;
+  return `${CLAUDE_CODE_IDENTITY_LINE}\n\n${body}`;
+}
+
+/**
+ * Returns true if the bridge is about to authenticate to Anthropic via an
+ * OAuth bearer (file bag or env token). Mirrors the precedence used by
+ * `getApiKey` so the runAgent path agrees with handleNextStep/handlePing.
+ */
+async function anthropicOauthIsActive(request) {
+  if ((await getFreshOAuthAccessTokenForProvider("anthropic")) ?? null) return true;
+  if (providerAuthToken("anthropic")) return true;
+  return false;
+}
+
 function providerEnvName(provider) {
   return `${provider.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`;
 }
@@ -439,10 +471,13 @@ function subscribeText(agent, onText) {
 async function runAgent(AgentCtor, model, request) {
   const agentTools = buildAgentTools(request);
   const allowedToolNames = new Set(agentTools.map((tool) => tool.name.toLowerCase()));
-  const systemPrompt = appendStructuredOutputContract(
+  let systemPrompt = appendStructuredOutputContract(
     request.systemPrompt ?? request.system_prompt ?? "",
     request.structuredOutput ?? request.structured_output ?? request.outputFormat,
   );
+  if (model?.provider === "anthropic" && (await anthropicOauthIsActive(request))) {
+    systemPrompt = applyClaudeCodeIdentityPrefix(systemPrompt);
+  }
   const thinkingLevel =
     normalizeThinkingLevel(request.thinkingLevel) ??
     normalizeThinkingLevel(process.env.KUZUSHI_THINKING_LEVEL) ??
@@ -759,6 +794,12 @@ async function handlePing(request) {
     max_tokens: 1,
     messages: [{ role: "user", content: "ok" }],
   };
+  // Claude Code OAuth bags rate-limit Sonnet/Opus unless the system prompt
+  // opens with the Claude Code identity line; haiku is unaffected but it
+  // costs us nothing to include it here too.
+  if (oauthToken || envOauth) {
+    body.system = CLAUDE_CODE_IDENTITY_LINE;
+  }
   const t0 = Date.now();
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -834,9 +875,13 @@ async function handleNextStep(request) {
     headers["x-api-key"] = apiKey;
   }
 
+  let systemPrompt = request.systemPrompt ?? request.system_prompt ?? "";
+  if (oauthToken || envOauth) {
+    systemPrompt = applyClaudeCodeIdentityPrefix(systemPrompt);
+  }
   const body = {
     model: modelId,
-    system: request.systemPrompt ?? request.system_prompt ?? "",
+    system: systemPrompt,
     messages: request.messages ?? [],
     tools: (request.tools ?? []).map((t) => ({
       name: t.name,
