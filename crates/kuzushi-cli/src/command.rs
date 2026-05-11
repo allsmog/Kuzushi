@@ -18,12 +18,12 @@ pub(crate) enum Command {
     /// Run configured scanners and persist findings.
     Scan {
         target: PathBuf,
-        #[arg(long, value_enum, default_value_t = ScanModeArg::Standard)]
-        mode: ScanModeArg,
+        #[arg(long, value_enum)]
+        mode: Option<ScanModeArg>,
         #[arg(long, value_delimiter = ',')]
         tasks: Vec<String>,
-        #[arg(long)]
-        triage: bool,
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        triage: Option<bool>,
         #[arg(long)]
         json: bool,
         /// Emit one line per pipeline event in a deterministic, grep-friendly format.
@@ -140,6 +140,9 @@ pub(crate) enum Command {
         tool: String,
         #[arg(long, default_value = "{}")]
         input: String,
+        /// Override a canonical tool option. Repeat as `--option key=value`.
+        #[arg(long = "option")]
+        options: Vec<String>,
     },
     /// Run a local MCP server (joern, clang, or gtags) over stdio.
     Mcp {

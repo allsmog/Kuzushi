@@ -46,6 +46,52 @@ mod tests {
         assert_eq!(cwe_priority("CWE-999"), 1);
     }
 
+    #[test]
+    fn runtime_options_are_derived_from_canonical_tool_input_not_process_env() {
+        let options = taint_iris_next_runtime_options(
+            &json!({
+                "joernCpg": ".kuzushi/cpg.bin",
+                "joernPerCweTimeoutMs": 120000,
+                "codeqlPrewarm": true,
+                "codeqlCacheDir": ".kuzushi/codeql-cache",
+                "mcpToolTimeoutMs": 90000,
+                "bridgeVerbose": true,
+                "bridgeLogPath": ".kuzushi/bridge.log"
+            }),
+            "structural",
+        )
+        .expect("runtime options should be emitted");
+
+        assert_eq!(
+            options.mcp_environment["KUZUSHI_JOERN_CPG"],
+            ".kuzushi/cpg.bin"
+        );
+        assert_eq!(
+            options.mcp_environment["KUZUSHI_JOERN_PER_CWE_TIMEOUT_MS"],
+            "120000"
+        );
+        assert_eq!(options.mcp_environment["KUZUSHI_CODEQL_PREWARM"], "1");
+        assert_eq!(
+            options.mcp_environment["KUZUSHI_CODEQL_CACHE_DIR"],
+            ".kuzushi/codeql-cache"
+        );
+        assert_eq!(options.mcp_tool_timeout_ms, Some(90_000));
+        assert_eq!(options.bridge_verbose, Some(true));
+        assert_eq!(
+            options.bridge_log_path.as_deref(),
+            Some(".kuzushi/bridge.log")
+        );
+    }
+
+    #[test]
+    fn joern_backend_sets_request_scoped_mcp_timeout_default() {
+        let options =
+            taint_iris_next_runtime_options(&json!({}), "joern").expect("joern needs timeout");
+
+        assert_eq!(options.mcp_tool_timeout_ms, Some(180_000));
+        assert!(options.mcp_environment.is_empty());
+    }
+
     impl AgentRuntime for TaintNextRuntime {
         fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
             self.queries.lock().unwrap().push(request);

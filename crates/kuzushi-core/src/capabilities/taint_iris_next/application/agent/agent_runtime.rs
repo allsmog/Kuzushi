@@ -7,6 +7,7 @@ pub(in crate::capabilities::taint_iris_next) fn run_taint_iris_next_agent(
     runtime: &dyn AgentRuntime,
     model: &str,
     agent_tool_policy: AgentToolPolicy,
+    runtime_options: Option<AgentRuntimeOptions>,
 ) -> Result<TaintIrisNextAgentResult> {
     let (raw, retry_count, cost_usd) = match query_taint_iris_next_agent(
         plan,
@@ -15,6 +16,7 @@ pub(in crate::capabilities::taint_iris_next) fn run_taint_iris_next_agent(
         runtime,
         model,
         agent_tool_policy,
+        runtime_options,
     ) {
         Ok(parsed) => parsed,
         Err(QueryAgentError { error, cost_usd }) => {
@@ -38,6 +40,7 @@ pub(in crate::capabilities::taint_iris_next) fn query_taint_iris_next_agent(
     runtime: &dyn AgentRuntime,
     model: &str,
     agent_tool_policy: AgentToolPolicy,
+    runtime_options: Option<AgentRuntimeOptions>,
 ) -> std::result::Result<(Value, usize, f64), QueryAgentError> {
     let response = run_taint_iris_next_agent_prompt(
         plan,
@@ -45,6 +48,7 @@ pub(in crate::capabilities::taint_iris_next) fn query_taint_iris_next_agent(
         model,
         agent_prompt.to_string(),
         agent_tool_policy.clone(),
+        runtime_options.clone(),
     )
     .map_err(|error| QueryAgentError {
         error,
@@ -60,6 +64,7 @@ pub(in crate::capabilities::taint_iris_next) fn query_taint_iris_next_agent(
                 model,
                 build_taint_iris_next_repair_prompt(plan, evidence),
                 agent_tool_policy,
+                runtime_options,
             )
             .map_err(|error| QueryAgentError {
                 error,
@@ -82,16 +87,19 @@ pub(in crate::capabilities::taint_iris_next) fn run_taint_iris_next_agent_prompt
     model: &str,
     prompt: String,
     agent_tool_policy: AgentToolPolicy,
+    runtime_options: Option<AgentRuntimeOptions>,
 ) -> Result<AgentQueryResponse> {
-    runtime.query_blocking(
-        AgentQueryRequest::new(
-            model.to_string(),
-            plan.repo_root.clone(),
-            TAINT_IRIS_NEXT_SYSTEM_PROMPT.to_string(),
-            prompt,
-        )
-        .with_tool_policy(agent_tool_policy),
+    let mut request = AgentQueryRequest::new(
+        model.to_string(),
+        plan.repo_root.clone(),
+        TAINT_IRIS_NEXT_SYSTEM_PROMPT.to_string(),
+        prompt,
     )
+    .with_tool_policy(agent_tool_policy);
+    if let Some(runtime_options) = runtime_options {
+        request = request.with_runtime_options(runtime_options);
+    }
+    runtime.query_blocking(request)
 }
 
 pub(in crate::capabilities::taint_iris_next) fn invalid_taint_iris_next_agent_result(

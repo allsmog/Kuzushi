@@ -7,12 +7,17 @@ use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::{
     append_run_trace_step, load_config_for_target, new_run_id, write_run_artifact_json,
     write_run_summary, AgentRuntime, FindingStore, ModuleRegistry, RunSummary, RunTraceStep,
-    WorkspaceTarget,
+    ToolOptionStore, WorkspaceTarget,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
 use std::path::{Path, PathBuf};
 
-pub(crate) fn run_tool_command(tool: String, input: String, target: Option<PathBuf>) -> Result<()> {
+pub(crate) fn run_tool_command(
+    tool: String,
+    input: String,
+    options: Vec<String>,
+    target: Option<PathBuf>,
+) -> Result<()> {
     reject_shell_only_run_dot(&tool)?;
     let workspace = run_tool_workspace(&tool, target.as_deref())?;
     let config = load_config_for_target(workspace.as_ref().map(WorkspaceTarget::root))?;
@@ -21,8 +26,10 @@ pub(crate) fn run_tool_command(tool: String, input: String, target: Option<PathB
         .filter(|_| tool_needs_finding_store(&tool))
         .map(|workspace| FindingStore::open(workspace.findings_db_path()))
         .transpose()?;
-    let input = serde_json::from_str(&input).context("--input must be JSON")?;
     let registry = ModuleRegistry::with_v2_builtins();
+    let input = serde_json::from_str(&input).context("--input must be JSON")?;
+    let option_store = run_option_store(workspace.as_ref(), &tool, &options)?;
+    let input = registry.prepare_tool_input(&tool, input, Some(&option_store))?;
     let run_id = workspace
         .as_ref()
         .map(|workspace| start_cli_tool_run(workspace.root(), &tool, &input));
@@ -61,6 +68,48 @@ pub(crate) fn run_tool_command(tool: String, input: String, target: Option<PathB
     };
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
+}
+
+pub(crate) fn run_option_store(
+    workspace: Option<&WorkspaceTarget>,
+    tool: &str,
+    options: &[String],
+) -> Result<ToolOptionStore> {
+    let paths = kuzushi_core::ConfigPaths::from_target(workspace.map(WorkspaceTarget::root))?;
+    let mut store = ToolOptionStore::load_persistent(
+        &paths.global_options_path(),
+        paths.project_options_path().as_deref(),
+    )?;
+    for option in options {
+        apply_option_override(&mut store, tool, option)?;
+    }
+    Ok(store)
+}
+
+pub(crate) fn apply_option_override(
+    store: &mut ToolOptionStore,
+    tool: &str,
+    option: &str,
+) -> Result<()> {
+    let (name, value) = parse_option_override(option)?;
+    store.set_value(
+        kuzushi_core::OptionScope::Session,
+        kuzushi_core::OptionTarget::Tool(tool.to_string()),
+        name,
+        serde_json::Value::String(value),
+    );
+    Ok(())
+}
+
+pub(crate) fn parse_option_override(raw: &str) -> Result<(String, String)> {
+    let Some((name, value)) = raw.split_once('=') else {
+        anyhow::bail!("--option must be key=value, got {raw:?}");
+    };
+    let name = name.trim();
+    if name.is_empty() {
+        anyhow::bail!("--option key must not be empty");
+    }
+    Ok((name.to_string(), value.trim().to_string()))
 }
 
 pub(crate) fn start_cli_tool_run(target: &Path, tool: &str, input: &serde_json::Value) -> String {

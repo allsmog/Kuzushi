@@ -16,6 +16,7 @@ pub(in crate::modules) fn joern_cpg_option() -> OptionSpec {
         OptionType::Path,
         "Path to a Joern CPG (`cpg.bin`) for the Joern MCP server.",
     )
+    .aliases(&["joern_cpg"])
     .advanced()
 }
 
@@ -25,6 +26,7 @@ pub(in crate::modules) fn joern_per_cwe_timeout_ms_option() -> OptionSpec {
         OptionType::Int,
         "Wall-clock budget in milliseconds for each Joern CWE flow query.",
     )
+    .aliases(&["joern_per_cwe_timeout_ms"])
     .default(json!(60000))
     .advanced()
 }
@@ -35,6 +37,7 @@ pub(in crate::modules) fn codeql_prewarm_option() -> OptionSpec {
         OptionType::Bool,
         "Pre-compile common CodeQL CWE query folders at MCP server startup.",
     )
+    .aliases(&["codeql_prewarm"])
     .default(json!(false))
     .advanced()
 }
@@ -45,6 +48,7 @@ pub(in crate::modules) fn codeql_cache_dir_option() -> OptionSpec {
         OptionType::Path,
         "Override CodeQL's pack cache directory for the MCP CodeQL server.",
     )
+    .aliases(&["codeql_cache_dir"])
     .advanced()
 }
 
@@ -54,6 +58,7 @@ pub(in crate::modules) fn mcp_tool_timeout_ms_option() -> OptionSpec {
         OptionType::Int,
         "Wall-clock cap in milliseconds for each MCP tool call from the bridge.",
     )
+    .aliases(&["mcp_tool_timeout_ms"])
     .default(json!(60000))
     .advanced()
 }
@@ -64,6 +69,7 @@ pub(in crate::modules) fn bridge_verbose_option() -> OptionSpec {
         OptionType::Bool,
         "Forward bridge and MCP child logs to stderr in real time.",
     )
+    .aliases(&["bridge_verbose"])
     .default(json!(false))
     .advanced()
 }
@@ -74,6 +80,7 @@ pub(in crate::modules) fn bridge_log_path_option() -> OptionSpec {
         OptionType::Path,
         "Append bridge and MCP child logs to this path.",
     )
+    .aliases(&["bridge_log_path"])
     .advanced()
 }
 
@@ -83,6 +90,7 @@ pub(in crate::modules) fn allow_deterministic_fallback_option() -> OptionSpec {
         OptionType::Bool,
         "Allow deterministic linked-story projection when the agent fails to return valid JSON.",
     )
+    .aliases(&["allow_deterministic_fallback"])
     .default(json!(false))
     .advanced()
 }

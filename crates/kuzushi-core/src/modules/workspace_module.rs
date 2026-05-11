@@ -20,6 +20,7 @@ pub(crate) fn workspace_module() -> BuiltinModule {
                         OptionType::Path,
                         "Output path for exported findings. Relative paths resolve under the workspace root.",
                     )
+                    .aliases(&["path"])
                     .required(),
                     opt("format", OptionType::Enum, "Export format.")
                         .choices(&["json", "jsonl"]),
@@ -44,18 +45,21 @@ pub(crate) fn sast_module() -> BuiltinModule {
                     .choices(&["standard", "whitebox-static"])
                     .default(json!("standard")),
                 opt("taskMode", OptionType::Enum, "Task-selection mode.")
+                    .aliases(&["task_mode"])
                     .choices(&["auto", "manual"])
                     .default(json!("auto")),
                 opt(
                     "tasks",
                     OptionType::StringList,
                     "Manual task allowlist. Use /tasks to edit.",
-                ),
+                )
+                .aliases(&["taskIds", "task_ids"]),
                 opt(
                     "disabledTasks",
                     OptionType::StringList,
                     "Auto-mode task denylist. Use /tasks to edit.",
-                ),
+                )
+                .aliases(&["disabled_tasks"]),
                 opt(
                     "severity",
                     OptionType::StringList,
@@ -66,12 +70,14 @@ pub(crate) fn sast_module() -> BuiltinModule {
                     OptionType::String,
                     "Git revision for whitebox-static PR diff scope.",
                 )
+                .aliases(&["diff_base"])
                 .advanced(),
                 opt(
                     "triage",
                     OptionType::Bool,
                     "Run model-backed triage after static scanners.",
                 )
+                .aliases(&["aiTriage", "ai_triage"])
                 .default(json!(false)),
                 opt(
                     "verify",
@@ -85,7 +91,96 @@ pub(crate) fn sast_module() -> BuiltinModule {
                     OptionType::Bool,
                     "Generate patches for verified true positives.",
                 )
+                .aliases(&["auto_patch"])
                 .default(json!(false))
+                .advanced(),
+                opt("maxIterations", OptionType::Int, "Maximum patch attempts.")
+                    .aliases(&["max_iterations"])
+                    .default(json!(3))
+                    .advanced(),
+                opt(
+                    "buildCmd",
+                    OptionType::String,
+                    "Build command used for patch validation.",
+                )
+                .aliases(&["build_cmd"])
+                .advanced(),
+                opt(
+                    "testCmd",
+                    OptionType::String,
+                    "Test command used for patch validation.",
+                )
+                .aliases(&["test_cmd"])
+                .advanced(),
+                opt(
+                    "backend",
+                    OptionType::Enum,
+                    "Taint IRIS Next backend selector.",
+                )
+                .choices(&[
+                    "auto",
+                    "structural",
+                    "semgrep",
+                    "codeql",
+                    "joern",
+                    "language",
+                ])
+                .advanced(),
+                opt(
+                    "languages",
+                    OptionType::StringList,
+                    "Language filters for agentic SAST tasks.",
+                )
+                .advanced(),
+                opt(
+                    "maxCatalogEntries",
+                    OptionType::Int,
+                    "Maximum taint catalog entries.",
+                )
+                .aliases(&["maxCwes", "max_catalog_entries", "max_cwes"])
+                .advanced(),
+                opt(
+                    "maxCandidatesPerCwe",
+                    OptionType::Int,
+                    "Maximum taint candidates per CWE.",
+                )
+                .aliases(&["max_candidates_per_cwe"])
+                .advanced(),
+                opt(
+                    "maxEvidencePerCwe",
+                    OptionType::Int,
+                    "Maximum taint evidence items per CWE.",
+                )
+                .aliases(&["max_evidence_per_cwe"])
+                .advanced(),
+                opt(
+                    "maxFilesPerQuery",
+                    OptionType::Int,
+                    "Maximum files per taint query.",
+                )
+                .aliases(&["max_files_per_query"])
+                .advanced(),
+                opt(
+                    "maxSpecsPerCwe",
+                    OptionType::Int,
+                    "Maximum taint specs per CWE.",
+                )
+                .aliases(&["max_specs_per_cwe"])
+                .advanced(),
+                opt(
+                    "maxAgentFindings",
+                    OptionType::Int,
+                    "Maximum agent findings.",
+                )
+                .aliases(&["max_agent_findings"])
+                .advanced(),
+                opt(
+                    "minEvidenceLevel",
+                    OptionType::Enum,
+                    "Minimum taint evidence level.",
+                )
+                .aliases(&["min_evidence_level"])
+                .choices(&["path", "linked", "candidate"])
                 .advanced(),
                 model_option(),
             ],
@@ -107,6 +202,19 @@ pub(crate) fn agentic_sast_module() -> BuiltinModule {
                 target_option(),
                 max_findings_option(40),
                 opt("passes", OptionType::Int, "Agentic review pass count.").default(json!(1)),
+                opt(
+                    "severity",
+                    OptionType::StringList,
+                    "Agentic severities to include.",
+                )
+                .advanced(),
+                opt(
+                    "excludePatterns",
+                    OptionType::StringList,
+                    "Repo-relative patterns to exclude from agentic analysis.",
+                )
+                .aliases(&["exclude_patterns"])
+                .advanced(),
                 model_option(),
             ],
         )],

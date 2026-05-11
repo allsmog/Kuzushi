@@ -9,7 +9,46 @@ pub(crate) fn carlini_threat_hunt_module() -> BuiltinModule {
         vec![tool_with_options(
             "carlini-threat-hunt:run",
             "Run threat-model-scoped offensive hunting agents.",
-            vec![target_option(), max_findings_option(20), model_option()],
+            vec![
+                target_option(),
+                max_findings_option(20),
+                opt(
+                    "maxActors",
+                    OptionType::Int,
+                    "Maximum threat-model actors to hunt.",
+                )
+                .aliases(&["max_actors"])
+                .default(json!(5))
+                .advanced(),
+                opt("runsPerActor", OptionType::Int, "Runs per selected actor.")
+                    .aliases(&["runs_per_actor"])
+                    .default(json!(1))
+                    .advanced(),
+                opt(
+                    "promptContext",
+                    OptionType::Enum,
+                    "Actor prompt context variant.",
+                )
+                .aliases(&["prompt_context"])
+                .choices(&["actor-flows", "actor-flows-threat-titles"])
+                .default(json!("actor-flows"))
+                .advanced(),
+                opt(
+                    "debugInlineThreats",
+                    OptionType::Bool,
+                    "Inline raw threat-model details in actor prompts.",
+                )
+                .aliases(&["debug_inline_threats"])
+                .default(json!(false))
+                .advanced(),
+                opt(
+                    "CARLINI_THREAT_HUNT_PROMPT",
+                    OptionType::String,
+                    "Prompt text or path override for Carlini threat hunt.",
+                )
+                .advanced(),
+                model_option(),
+            ],
         )],
         vec![dag(
             "carlini-threat-hunt:run",
@@ -28,7 +67,28 @@ pub(crate) fn taint_iris_module() -> BuiltinModule {
         vec![tool_with_options(
             "taint-iris:hunt",
             "Run IRIS-style taint hunting over the current target.",
-            vec![target_option(), max_findings_option(20), model_option()],
+            vec![
+                target_option(),
+                max_findings_option(20),
+                opt("maxCwes", OptionType::Int, "Maximum CWEs to select.")
+                    .aliases(&["max_cwes"])
+                    .advanced(),
+                opt(
+                    "maxBudgetUsd",
+                    OptionType::Float,
+                    "Maximum runtime budget for this hunt.",
+                )
+                .aliases(&["max_budget_usd"])
+                .advanced(),
+                opt(
+                    "TAINT_IRIS_PROMPT",
+                    OptionType::String,
+                    "Prompt text or path override for taint IRIS.",
+                )
+                .advanced(),
+                opt("cwe", OptionType::StringList, "Explicit CWE(s) to hunt.").advanced(),
+                model_option(),
+            ],
         )],
         vec![dag("taint-iris:hunt", "findings", &["context:build"])],
     )
@@ -47,6 +107,66 @@ pub(crate) fn taint_iris_next_module() -> BuiltinModule {
                 target_option(),
                 max_findings_option(20),
                 model_option(),
+                opt("mode", OptionType::Enum, "Taint IRIS Next run mode.")
+                    .choices(&["plan", "hunt"])
+                    .default(json!("plan")),
+                opt("backend", OptionType::Enum, "Evidence backend selector.")
+                    .choices(&["auto", "structural", "semgrep", "codeql", "joern", "language"])
+                    .default(json!("auto"))
+                    .advanced(),
+                opt(
+                    "languages",
+                    OptionType::StringList,
+                    "Language filters for catalog ranking.",
+                )
+                .advanced(),
+                opt(
+                    "maxBudgetUsd",
+                    OptionType::Float,
+                    "Maximum runtime budget for this hunt.",
+                )
+                .aliases(&["max_budget_usd"])
+                .advanced(),
+                opt("maxCatalogEntries", OptionType::Int, "Maximum catalog entries.")
+                    .aliases(&["maxCwes", "max_catalog_entries", "max_cwes"])
+                    .default(json!(24))
+                    .advanced(),
+                opt(
+                    "maxCandidatesPerCwe",
+                    OptionType::Int,
+                    "Maximum candidates per CWE.",
+                )
+                .aliases(&["max_candidates_per_cwe"])
+                .default(json!(24))
+                .advanced(),
+                opt("maxEvidencePerCwe", OptionType::Int, "Maximum evidence items per CWE.")
+                    .aliases(&["max_evidence_per_cwe"])
+                    .default(json!(12))
+                    .advanced(),
+                opt("maxFilesPerQuery", OptionType::Int, "Maximum files per query.")
+                    .aliases(&["max_files_per_query"])
+                    .default(json!(25))
+                    .advanced(),
+                opt("maxSpecsPerCwe", OptionType::Int, "Maximum specs per CWE.")
+                    .aliases(&["max_specs_per_cwe"])
+                    .default(json!(16))
+                    .advanced(),
+                opt("maxAgentFindings", OptionType::Int, "Maximum agent findings.")
+                    .aliases(&["max_agent_findings"])
+                    .advanced(),
+                opt(
+                    "codeqlAnalyzeTimeoutMs",
+                    OptionType::Int,
+                    "CodeQL analyze timeout in milliseconds.",
+                )
+                .aliases(&["codeql_analyze_timeout_ms"])
+                .default(json!(180000))
+                .advanced(),
+                opt("minEvidenceLevel", OptionType::Enum, "Minimum evidence level.")
+                    .aliases(&["min_evidence_level"])
+                    .choices(&["path", "linked", "candidate"])
+                    .default(json!("linked"))
+                    .advanced(),
                 mcps_option(),
                 allow_deterministic_fallback_option(),
                 joern_cpg_option(),

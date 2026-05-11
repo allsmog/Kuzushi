@@ -101,6 +101,7 @@ pub(in crate::modules) fn target_option() -> OptionSpec {
         OptionType::Path,
         "Repository or workspace path; defaults to the active workspace when supported.",
     )
+    .aliases(&["cwd"])
 }
 
 pub(in crate::modules) fn model_option() -> OptionSpec {

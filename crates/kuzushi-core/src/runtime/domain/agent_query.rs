@@ -22,6 +22,8 @@ pub struct AgentQueryRequest {
     pub thinking_level: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_options: Option<AgentRuntimeOptions>,
 }
 
 impl AgentQueryRequest {
@@ -40,6 +42,7 @@ impl AgentQueryRequest {
             structured_output: None,
             thinking_level: None,
             max_output_tokens: None,
+            runtime_options: None,
         }
     }
 
@@ -61,6 +64,33 @@ impl AgentQueryRequest {
     pub fn with_max_output_tokens(mut self, tokens: u32) -> Self {
         self.max_output_tokens = Some(tokens);
         self
+    }
+
+    pub fn with_runtime_options(mut self, runtime_options: AgentRuntimeOptions) -> Self {
+        self.runtime_options = Some(runtime_options);
+        self
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRuntimeOptions {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub mcp_environment: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_tool_timeout_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bridge_verbose: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bridge_log_path: Option<String>,
+}
+
+impl AgentRuntimeOptions {
+    pub fn is_empty(&self) -> bool {
+        self.mcp_environment.is_empty()
+            && self.mcp_tool_timeout_ms.is_none()
+            && self.bridge_verbose.is_none()
+            && self.bridge_log_path.is_none()
     }
 }
 

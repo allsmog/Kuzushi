@@ -20,6 +20,7 @@ pub(in crate::modules) fn context_module() -> BuiltinModule {
                     OptionType::Int,
                     "Maximum source files to sample in the context snapshot.",
                 )
+                .aliases(&["limit", "sample_limit"])
                 .default(json!(200)),
                 opt("discovery", OptionType::Enum, "Repository discovery mode.")
                     .choices(&["auto", "flat", "modules"])

@@ -40,6 +40,8 @@ pub struct AgentToolLoopRequest {
     /// stops here and surfaces the partial transcript even if the model
     /// hasn't returned a final.
     pub max_steps: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_options: Option<AgentRuntimeOptions>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

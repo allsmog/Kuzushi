@@ -27,15 +27,9 @@ pub(in crate::modules) fn parse_triage_cost_cap_usd(input: &Value) -> Result<Opt
         .or_else(|| input.get("cost_cap_usd"))
     {
         Some(Value::Number(n)) => Ok(n.as_f64()),
-        None => Ok(cost_cap_from_env()),
+        None => Ok(None),
         Some(_) => anyhow::bail!("triage:run costCapUsd must be a number"),
     }
-}
-
-pub(in crate::modules) fn cost_cap_from_env() -> Option<f64> {
-    std::env::var("KUZUSHI_COST_CAP_USD")
-        .ok()
-        .and_then(|s| s.trim().parse::<f64>().ok())
 }
 
 pub(in crate::modules) fn parse_triage_prefilter_threshold(input: &Value) -> i64 {

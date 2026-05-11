@@ -13,6 +13,8 @@ mod tests {
             evasion: false,
             default: None,
             choices: Vec::new(),
+            aliases: Vec::new(),
+            deprecated_aliases: Vec::new(),
         }
     }
 

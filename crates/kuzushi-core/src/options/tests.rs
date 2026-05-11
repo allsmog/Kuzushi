@@ -93,6 +93,93 @@ mod tests {
     }
 
     #[test]
+    fn persistent_store_loads_only_global_and_workspace_scopes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let global_path = tmp.path().join("home/.kuzushi/v2/options.json");
+        let workspace_path = tmp.path().join("repo/.kuzushi/v2/options.json");
+
+        let mut global = ToolOptionStore::new();
+        global.set_value(
+            OptionScope::Global,
+            OptionTarget::Tool("sast:scan".to_string()),
+            "triage",
+            json!(true),
+        );
+        global.set_value(
+            OptionScope::Workspace,
+            OptionTarget::Tool("sast:scan".to_string()),
+            "triage",
+            json!(false),
+        );
+        global.save_to_path(&global_path).unwrap();
+
+        let mut workspace = ToolOptionStore::new();
+        workspace.set_value(
+            OptionScope::Workspace,
+            OptionTarget::Tool("sast:scan".to_string()),
+            "verify",
+            json!(true),
+        );
+        workspace.set_value(
+            OptionScope::Session,
+            OptionTarget::Tool("sast:scan".to_string()),
+            "autoPatch",
+            json!(true),
+        );
+        workspace.save_to_path(&workspace_path).unwrap();
+
+        let loaded = ToolOptionStore::load_persistent(&global_path, Some(&workspace_path)).unwrap();
+        let input = loaded.effective_tool_input("sast:scan", json!({})).unwrap();
+
+        assert_eq!(input["triage"], json!(true));
+        assert_eq!(input["verify"], json!(true));
+        assert_eq!(input.get("autoPatch"), None);
+    }
+
+    #[test]
+    fn persistent_store_saves_global_and_workspace_scopes_separately() {
+        let tmp = tempfile::tempdir().unwrap();
+        let global_path = tmp.path().join("home/.kuzushi/v2/options.json");
+        let workspace_path = tmp.path().join("repo/.kuzushi/v2/options.json");
+        let mut store = ToolOptionStore::new();
+        store.set_value(
+            OptionScope::Global,
+            OptionTarget::All,
+            "triage",
+            json!(true),
+        );
+        store.set_value(
+            OptionScope::Workspace,
+            OptionTarget::Tool("sast:scan".to_string()),
+            "verify",
+            json!(true),
+        );
+        store.set_value(
+            OptionScope::Session,
+            OptionTarget::Tool("sast:scan".to_string()),
+            "autoPatch",
+            json!(true),
+        );
+
+        store
+            .save_persistent(&global_path, Some(&workspace_path))
+            .unwrap();
+        let global = ToolOptionStore::load_from_path(&global_path).unwrap();
+        let workspace = ToolOptionStore::load_from_path(&workspace_path).unwrap();
+
+        assert_eq!(
+            global.effective_tool_input("sast:scan", json!({})).unwrap(),
+            json!({"triage": true})
+        );
+        assert_eq!(
+            workspace
+                .effective_tool_input("sast:scan", json!({}))
+                .unwrap(),
+            json!({"verify": true})
+        );
+    }
+
+    #[test]
     fn rejects_non_object_explicit_input_when_stored_options_would_merge() {
         let mut store = ToolOptionStore::new();
         store.set_value(

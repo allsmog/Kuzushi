@@ -44,6 +44,7 @@ pub enum OptionType {
     Path,
     Enum,
     StringList,
+    Json,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -60,6 +61,10 @@ pub struct OptionSpec {
     pub default: Option<Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub choices: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deprecated_aliases: Vec<String>,
 }
 
 impl OptionSpec {
@@ -73,6 +78,8 @@ impl OptionSpec {
             evasion: false,
             default: None,
             choices: Vec::new(),
+            aliases: Vec::new(),
+            deprecated_aliases: Vec::new(),
         }
     }
 
@@ -99,6 +106,28 @@ impl OptionSpec {
     pub(in crate::modules) fn choices(mut self, choices: &[&str]) -> Self {
         self.choices = choices.iter().map(|choice| (*choice).to_string()).collect();
         self
+    }
+
+    pub(in crate::modules) fn aliases(mut self, aliases: &[&str]) -> Self {
+        self.aliases = aliases.iter().map(|alias| (*alias).to_string()).collect();
+        self
+    }
+
+    pub(in crate::modules) fn deprecated_aliases(mut self, aliases: &[&str]) -> Self {
+        self.deprecated_aliases = aliases.iter().map(|alias| (*alias).to_string()).collect();
+        self
+    }
+
+    pub fn matches_name_or_alias(&self, name: &str) -> bool {
+        self.name.eq_ignore_ascii_case(name)
+            || self
+                .aliases
+                .iter()
+                .any(|alias| alias.eq_ignore_ascii_case(name))
+            || self
+                .deprecated_aliases
+                .iter()
+                .any(|alias| alias.eq_ignore_ascii_case(name))
     }
 }
 

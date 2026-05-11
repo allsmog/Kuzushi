@@ -33,7 +33,7 @@ pub(in crate::modules) fn vuln_scout_module() -> BuiltinModule {
         vec![tool_with_options(
             "vuln-scout:audit",
             "Run the Vuln Scout audit plugin.",
-            vec![target_option(), model_option()],
+            vec![target_option(), plugin_root_option(), model_option()],
         )],
         vec![dag("vuln-scout:audit", "findings", &["context:build"])],
     )
@@ -49,10 +49,30 @@ pub(in crate::modules) fn tob_module() -> BuiltinModule {
             tool_with_options(
                 "tob:audit",
                 "Run a Trail of Bits skills audit.",
-                vec![target_option(), model_option()],
+                vec![
+                    target_option(),
+                    plugin_root_option(),
+                    opt(
+                        "skills",
+                        OptionType::StringList,
+                        "Trail of Bits skill subset.",
+                    )
+                    .advanced(),
+                    model_option(),
+                ],
             ),
             tool("tob:skills", "List available Trail of Bits skill modules."),
         ],
         vec![dag("tob:audit", "findings", &["context:build"])],
     )
+}
+
+pub(in crate::modules) fn plugin_root_option() -> OptionSpec {
+    opt(
+        "pluginRoot",
+        OptionType::Path,
+        "Installed plugin root path.",
+    )
+    .aliases(&["pluginPath", "plugin_root", "plugin_path"])
+    .advanced()
 }

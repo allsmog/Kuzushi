@@ -2,7 +2,9 @@ use crate::capabilities::agentic_sast::{agentic_severity, is_agentic_context_fil
 use crate::capabilities::taint_iris::{sanitize_rule_segment, summarize_taint_path};
 use crate::findings::{Finding, Severity, StaticProofState};
 use crate::modules::ToolExecutionContext;
-use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolPolicy};
+use crate::runtime::{
+    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions, AgentToolPolicy,
+};
 use crate::whitebox_static::{
     agent_tool_policy_for_input, mark_whitebox_static_findings, whitebox_static_profile_requested,
 };

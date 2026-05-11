@@ -15,6 +15,7 @@ use super::triage::{clamp_outcome, fallback_triage_outcome, triage_prompt, TRIAG
 impl AgentRuntime for PiAgentCoreRuntime {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         let structured_output = request.structured_output;
+        let runtime_options = request.runtime_options;
         let thinking_level = request
             .thinking_level
             .or_else(|| self.thinking_level.clone());
@@ -30,6 +31,7 @@ impl AgentRuntime for PiAgentCoreRuntime {
             thinking_level,
             max_output_tokens: request.max_output_tokens,
             tool_policy: request.tool_policy,
+            runtime_options,
         };
 
         let response = run_bridge(&self.command, &bridge_request)?;

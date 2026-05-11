@@ -1,5 +1,5 @@
-use crate::wants_sast_runtime::wants_sast_runtime;
 use anyhow::Result;
+use kuzushi_core::modules::wants_sast_runtime;
 use kuzushi_core::WorkspaceTarget;
 use std::path::Path;
 

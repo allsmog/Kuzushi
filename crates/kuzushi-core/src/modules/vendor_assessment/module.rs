@@ -14,6 +14,15 @@ pub(in crate::modules) fn module() -> BuiltinModule {
                     opt("source", OptionType::String, "Evidence source path or URL."),
                     opt("path", OptionType::Path, "Evidence document path."),
                     opt("url", OptionType::String, "Evidence document URL."),
+                    opt(
+                        "target",
+                        OptionType::String,
+                        "Legacy evidence source alias.",
+                    )
+                    .deprecated_aliases(&["input"])
+                    .advanced(),
+                    opt("kind", OptionType::String, "Evidence kind.").advanced(),
+                    opt("title", OptionType::String, "Evidence title.").advanced(),
                 ],
             ),
             tool_with_options(
@@ -21,7 +30,34 @@ pub(in crate::modules) fn module() -> BuiltinModule {
                 "Set or inspect assessment scope.",
                 vec![
                     opt("vendorName", OptionType::String, "Vendor name."),
-                    opt("productName", OptionType::String, "Product name."),
+                    opt("productName", OptionType::String, "Product name.")
+                        .aliases(&["product_name"]),
+                    opt("vendor", OptionType::String, "Legacy vendor name alias.")
+                        .deprecated_aliases(&["vendor_name"])
+                        .advanced(),
+                    opt(
+                        "primaryDomain",
+                        OptionType::String,
+                        "Primary vendor domain.",
+                    )
+                    .aliases(&["domain", "primary_domain"])
+                    .advanced(),
+                    opt("useCase", OptionType::String, "Vendor use case.")
+                        .aliases(&["use_case"])
+                        .advanced(),
+                    opt(
+                        "dataClasses",
+                        OptionType::StringList,
+                        "Data classes in scope.",
+                    )
+                    .aliases(&["data_classes"])
+                    .advanced(),
+                    opt(
+                        "integrations",
+                        OptionType::StringList,
+                        "Vendor integrations.",
+                    )
+                    .advanced(),
                     opt("profile", OptionType::String, "Assessment profile.")
                         .default(json!("enterprise-ai")),
                 ],
@@ -33,7 +69,12 @@ pub(in crate::modules) fn module() -> BuiltinModule {
             tool_with_options(
                 "vendor-assessment:assess",
                 "Run vendor assessment.",
-                vec![model_option()],
+                vec![
+                    model_option(),
+                    opt("runId", OptionType::String, "Assessment run id.")
+                        .aliases(&["run_id"])
+                        .advanced(),
+                ],
             ),
         ],
         vec![],

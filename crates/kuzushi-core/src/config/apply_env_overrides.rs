@@ -31,9 +31,6 @@ pub(crate) fn apply_env_overrides(config: &mut V2Config) {
             config.runtime.agent_bridge_command = Some(parts);
         }
     }
-
-    // KUZUSHI_ANTHROPIC_OAUTH=1 enables the OAuth declaration with defaults.
-    // KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS=<path> sets the credentials file.
     let env_enable = first_env(&["KUZUSHI_ANTHROPIC_OAUTH"])
         .map(|value| matches!(value.trim(), "1" | "true" | "yes"))
         .unwrap_or(false);
@@ -69,6 +66,15 @@ pub(crate) fn validate_config(config: &V2Config) -> Result<()> {
     if let Some(command) = &config.runtime.agent_bridge_command {
         if command.is_empty() || command[0].trim().is_empty() {
             anyhow::bail!("runtime.agent_bridge_command must start with an executable");
+        }
+    }
+
+    if let Some(thinking_level) = &config.runtime.thinking_level {
+        if !matches!(
+            thinking_level.trim().to_ascii_lowercase().as_str(),
+            "low" | "medium" | "high" | "xhigh"
+        ) {
+            anyhow::bail!("runtime.thinking_level must be one of low|medium|high|xhigh");
         }
     }
 

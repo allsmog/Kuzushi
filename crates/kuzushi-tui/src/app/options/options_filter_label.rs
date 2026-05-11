@@ -11,7 +11,7 @@ pub(crate) fn options_filter_label(filter: OptionsFilter) -> &'static str {
 pub(crate) fn find_option_spec<'a>(tool: &'a ToolDescriptor, name: &str) -> Option<&'a OptionSpec> {
     tool.options
         .iter()
-        .find(|spec| spec.name.eq_ignore_ascii_case(name))
+        .find(|spec| spec.matches_name_or_alias(name))
 }
 
 pub(crate) fn coerce_raw_option_value(spec: &OptionSpec, raw: &str) -> Result<serde_json::Value> {
@@ -24,6 +24,7 @@ pub(crate) fn coerce_raw_option_value(spec: &OptionSpec, raw: &str) -> Result<se
         OptionType::Int => coerce_raw_int_option(raw),
         OptionType::Float => coerce_raw_float_option(raw),
         OptionType::Enum => coerce_raw_enum_option(spec, raw),
+        OptionType::Json => serde_json::from_str(raw).with_context(|| "must be valid JSON"),
     }
 }
 

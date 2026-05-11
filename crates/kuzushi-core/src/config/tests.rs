@@ -54,6 +54,7 @@ model = "openai:gpt-4.1"
 [runtime]
 api_key_env = "KUZUSHI_OPENAI_KEY"
 base_url = "https://api.example.test/v1"
+thinking_level = "high"
 "#,
         )
         .unwrap();
@@ -70,6 +71,7 @@ base_url = "https://api.example.test/v1"
             config.runtime.base_url.as_deref(),
             Some("https://api.example.test/v1")
         );
+        assert_eq!(config.runtime.thinking_level.as_deref(), Some("high"));
     }
 
     #[test]
@@ -166,5 +168,27 @@ allow_env_token = true
         })
         .unwrap_err();
         assert!(err.to_string().contains("provider:model"));
+    }
+
+    #[test]
+    fn rejects_invalid_runtime_thinking_level() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v2/config.toml"),
+            r#"
+[runtime]
+thinking_level = "extreme"
+"#,
+        )
+        .unwrap();
+
+        let err = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("runtime.thinking_level"));
     }
 }

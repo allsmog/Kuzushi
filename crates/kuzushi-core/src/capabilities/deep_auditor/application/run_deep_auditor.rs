@@ -52,6 +52,7 @@ pub fn run_deep_auditor(
         prompt: user_prompt,
         tools: code_nav_tool_specs(),
         max_steps: cfg.max_steps.max(1),
+        runtime_options: None,
     };
 
     let mut toolbox = code_nav_toolbox(CodeNavConfig::new(&cfg.workspace_root));

@@ -3,6 +3,7 @@ use super::*;
 impl ShellApp {
     pub fn new(config: V2Config, target: Option<&WorkspaceTarget>) -> Self {
         let selected_model_index = preferred_model_choice_index(&config);
+        let (option_store, option_store_error) = persistent_option_store(target);
         let mut app = Self {
             input: String::new(),
             cursor: 0,
@@ -22,7 +23,7 @@ impl ShellApp {
             confirm_denylist: std::collections::BTreeSet::new(),
             config,
             registry: ModuleRegistry::with_v2_builtins(),
-            option_store: ToolOptionStore::new(),
+            option_store,
             command_history: Vec::new(),
             session_cost_usd: 0.0,
             last_tool_cost_usd: None,
@@ -90,6 +91,9 @@ impl ShellApp {
         };
         app.log("system", "kuzushi shell");
         app.log("startup", app.startup_summary_line());
+        if let Some(error) = option_store_error {
+            app.log("options", error);
+        }
         // The first-finding hint is rendered in the catalog body via
         // `next_action_line` + `first_finding_hint`; keeping a duplicate
         // copy in the transcript wasted one of only two visible log rows.
@@ -101,6 +105,20 @@ impl ShellApp {
             app.refresh_findings(false);
         }
         app
+    }
+}
+
+fn persistent_option_store(target: Option<&WorkspaceTarget>) -> (ToolOptionStore, Option<String>) {
+    let paths = match kuzushi_core::ConfigPaths::from_target(target.map(WorkspaceTarget::root)) {
+        Ok(paths) => paths,
+        Err(error) => return (ToolOptionStore::new(), Some(error.to_string())),
+    };
+    match ToolOptionStore::load_persistent(
+        &paths.global_options_path(),
+        paths.project_options_path().as_deref(),
+    ) {
+        Ok(store) => (store, None),
+        Err(error) => (ToolOptionStore::new(), Some(error.to_string())),
     }
 }
 

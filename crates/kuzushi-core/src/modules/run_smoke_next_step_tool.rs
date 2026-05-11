@@ -34,6 +34,7 @@ pub(crate) fn run_smoke_next_step_tool(
             }),
         }],
         max_steps: 4,
+        runtime_options: None,
     };
 
     let mut toolbox = smoke_toolbox();

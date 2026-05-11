@@ -10,18 +10,62 @@ pub(crate) fn triage_module() -> BuiltinModule {
             "triage:run",
             "Triage findings with pi-agent-core.",
             vec![
-                opt("scanId", OptionType::String, "Scan run id to triage."),
+                opt("scanId", OptionType::String, "Scan run id to triage.").aliases(&["scan_id"]),
                 opt(
                     "fingerprint",
                     OptionType::String,
                     "Single finding fingerprint to triage.",
                 ),
                 opt(
+                    "fingerprints",
+                    OptionType::StringList,
+                    "Finding fingerprints to triage.",
+                )
+                .advanced(),
+                opt(
                     "batchSize",
                     OptionType::Int,
                     "Maximum findings per runtime batch.",
                 )
+                .aliases(&["batch_size"])
                 .default(json!(20)),
+                opt(
+                    "concurrency",
+                    OptionType::Int,
+                    "Maximum concurrent triage requests.",
+                )
+                .default(json!(8))
+                .advanced(),
+                opt(
+                    "costCapUsd",
+                    OptionType::Float,
+                    "Maximum triage spend for this run.",
+                )
+                .aliases(&["cost_cap_usd"])
+                .advanced(),
+                opt(
+                    "prefilterThreshold",
+                    OptionType::Int,
+                    "Stage-1 heuristic score threshold.",
+                )
+                .aliases(&["prefilter_threshold"])
+                .default(json!(0))
+                .advanced(),
+                opt(
+                    "stage2Tier",
+                    OptionType::Enum,
+                    "Stage-2 model routing tier.",
+                )
+                .aliases(&["stage2_tier"])
+                .choices(&["cheap", "mid", "deep"])
+                .default(json!("cheap"))
+                .advanced(),
+                opt(
+                    "TRIAGE_PROMPT",
+                    OptionType::String,
+                    "Prompt text or path override for triage.",
+                )
+                .advanced(),
                 model_option(),
             ],
         )],
@@ -62,18 +106,22 @@ pub(crate) fn patch_module() -> BuiltinModule {
             "Generate a patch for a finding.",
             vec![
                 fingerprint_option(),
-                opt("maxIterations", OptionType::Int, "Maximum patch attempts.").default(json!(3)),
+                opt("maxIterations", OptionType::Int, "Maximum patch attempts.")
+                    .aliases(&["max_iterations"])
+                    .default(json!(3)),
                 opt(
                     "buildCmd",
                     OptionType::String,
                     "Build command used for patch validation.",
                 )
+                .aliases(&["build_cmd"])
                 .advanced(),
                 opt(
                     "testCmd",
                     OptionType::String,
                     "Test command used for patch validation.",
                 )
+                .aliases(&["test_cmd"])
                 .advanced(),
             ],
         )],
@@ -97,7 +145,19 @@ pub(crate) fn findings_module() -> BuiltinModule {
                     OptionType::String,
                     "Substring filter for finding titles.",
                 ),
-                opt("filePath", OptionType::Path, "File path filter."),
+                opt("filePath", OptionType::Path, "File path filter.").aliases(&["file_path"]),
+                opt(
+                    "severity",
+                    OptionType::StringList,
+                    "Severity filter: critical, high, medium, low, info.",
+                ),
+                opt("verdict", OptionType::StringList, "Triage verdict filter."),
+                opt(
+                    "vulnSource",
+                    OptionType::StringList,
+                    "Discovery channel filter.",
+                )
+                .aliases(&["vuln_source"]),
             ],
         )],
         vec![],

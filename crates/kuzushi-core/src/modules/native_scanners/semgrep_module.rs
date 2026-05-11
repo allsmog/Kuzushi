@@ -13,6 +13,7 @@ pub(in crate::modules) fn semgrep_module() -> BuiltinModule {
                 target_option(),
                 binary_option("Semgrep binary path."),
                 opt("config", OptionType::String, "Semgrep config name or path.")
+                    .aliases(&["configFlag", "config_flag"])
                     .default(json!("auto")),
             ],
         )],
@@ -32,7 +33,9 @@ pub(in crate::modules) fn codeql_module() -> BuiltinModule {
             vec![
                 target_option(),
                 binary_option("CodeQL binary path."),
-                opt("dbPath", OptionType::Path, "Existing CodeQL database path.").advanced(),
+                opt("dbPath", OptionType::Path, "Existing CodeQL database path.")
+                    .aliases(&["db_path"])
+                    .advanced(),
                 opt("language", OptionType::Enum, "CodeQL language to analyze.").choices(&[
                     "javascript",
                     "python",
@@ -56,6 +59,7 @@ pub(in crate::modules) fn codeql_module() -> BuiltinModule {
                     OptionType::Bool,
                     "Analyze all detected CodeQL languages.",
                 )
+                .aliases(&["multi_language"])
                 .default(json!(false)),
             ],
         )],
@@ -91,6 +95,7 @@ pub(in crate::modules) fn iac_scan_module() -> BuiltinModule {
                     OptionType::Int,
                     "Maximum file size to scan.",
                 )
+                .aliases(&["max_file_bytes"])
                 .default(json!(524288)),
             ],
         )],

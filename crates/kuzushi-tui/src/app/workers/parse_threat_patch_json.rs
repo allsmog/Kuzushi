@@ -75,9 +75,21 @@ pub(crate) fn scan_worker(
     db_path: PathBuf,
     tx: Sender<ScanEvent>,
     cancel: ScanCancellation,
-    options: ScanRunOptions,
+    input: serde_json::Value,
+    registry: ModuleRegistry,
+    config: V2Config,
+    thinking_level: Option<String>,
 ) {
-    if let Err(error) = run_scan_worker(target, db_path, &tx, &cancel, &options) {
+    if let Err(error) = run_scan_worker(
+        target,
+        db_path,
+        &tx,
+        &cancel,
+        input,
+        registry,
+        config,
+        thinking_level,
+    ) {
         let _ = tx.send(ScanEvent::Failed {
             error: error.to_string(),
         });
@@ -89,18 +101,79 @@ pub(crate) fn run_scan_worker(
     db_path: PathBuf,
     tx: &Sender<ScanEvent>,
     cancel: &ScanCancellation,
-    options: &ScanRunOptions,
+    input: serde_json::Value,
+    registry: ModuleRegistry,
+    config: V2Config,
+    thinking_level: Option<String>,
 ) -> Result<()> {
-    let session = start_scan_worker_session(target, db_path, tx)?;
-    run_scan_worker_session(session, tx, cancel, options)
+    if cancel.is_cancelled() {
+        anyhow::bail!("scan cancelled");
+    }
+    run_registry_scan_worker(
+        target,
+        db_path,
+        tx,
+        cancel,
+        input,
+        registry,
+        config,
+        thinking_level,
+    )
 }
 
-pub(crate) fn run_scan_worker_session(
-    session: ScanWorkerSession,
+pub(crate) fn run_registry_scan_worker(
+    target: PathBuf,
+    db_path: PathBuf,
     tx: &Sender<ScanEvent>,
     cancel: &ScanCancellation,
-    options: &ScanRunOptions,
+    input: serde_json::Value,
+    registry: ModuleRegistry,
+    config: V2Config,
+    thinking_level: Option<String>,
 ) -> Result<()> {
-    let scanners = scan_worker_engines(options)?;
-    run_scan_worker_scanners(session, tx, cancel, options, scanners)
+    let workspace = prepare_scan_worker_workspace(target)?;
+    let store = FindingStore::open(db_path)?;
+    let runtime = if kuzushi_core::modules::wants_sast_runtime(&input) {
+        Some(
+            PiAgentCoreRuntime::from_config(
+                &config,
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            )?
+            .with_thinking_level(thinking_level),
+        )
+    } else {
+        None
+    };
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: Some(&store),
+    };
+    let _ = tx.send(ScanEvent::Stage("running sast:scan".to_string()));
+    let result = registry.execute_tool_with_runtime(
+        "sast:scan",
+        input,
+        &ctx,
+        runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
+    )?;
+    if cancel.is_cancelled() {
+        anyhow::bail!("scan cancelled");
+    }
+    send_registry_scan_finished(tx, result)
+}
+
+fn send_registry_scan_finished(tx: &Sender<ScanEvent>, result: serde_json::Value) -> Result<()> {
+    let run_id = result
+        .pointer("/data/runId")
+        .and_then(serde_json::Value::as_str)
+        .context("sast:scan result did not include data.runId")?;
+    let findings_count = result
+        .pointer("/data/findingsCount")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let _ = tx.send(ScanEvent::Finished {
+        run_id: run_id.to_string(),
+        findings_count,
+    });
+    Ok(())
 }

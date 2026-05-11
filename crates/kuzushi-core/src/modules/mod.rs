@@ -78,6 +78,7 @@ mod tests;
 mod threat_model_module;
 mod triage_module;
 mod unsafe_clone_runtime_ref;
+mod wants_sast_runtime;
 mod workspace_module;
 
 pub use agentic_sast::{AgenticSastPersistedRun, AgenticSastReport};
@@ -87,3 +88,4 @@ pub use contracts::{
     ToolDescriptor,
 };
 pub use registry::ModuleRegistry;
+pub use wants_sast_runtime::wants_sast_runtime;

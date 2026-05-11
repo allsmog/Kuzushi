@@ -6,9 +6,10 @@ mod tests {
     use crate::adapters::auth_oauth::{anthropic_oauth_readiness_message, auth_ping_model};
     use crate::adapters::auth_ping::AuthPingLog;
     use crate::application::config::{config_command, ensure_config_init_allowed};
-    use crate::application::scan::{scan_scope_body, scan_task_mode, scan_worktree_suffix};
+    use crate::application::run_tool::{apply_option_override, parse_option_override};
+    use crate::application::scan::{scan_scope_body, scan_tool_input, scan_worktree_suffix};
     use crate::application::suppressions::{suppressions_command_output, suppressions_plain_lines};
-    use crate::command::{ConfigCommand, McpBackend};
+    use crate::command::{ConfigCommand, McpBackend, ScanModeArg};
     use crate::mcp::{mcp_health_spawn_error, mcp_spawn_error};
     use crate::presentation::{
         ci_line, format_duration, plain_output_requested, scan_json_output, scan_started_body,
@@ -21,7 +22,7 @@ mod tests {
     use crate::tool_requirements::{
         tool_defaults_to_workspace, tool_needs_finding_store, tool_needs_runtime,
     };
-    use kuzushi_core::{RunSummary, WorkspaceTarget};
+    use kuzushi_core::{RunSummary, ToolOptionStore, WorkspaceTarget};
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -358,8 +359,16 @@ mod tests {
     fn scan_helpers_format_scope_tasks_and_json_summary() {
         let scope = scan_scope_body(&[PathBuf::from("src/lib.rs"), PathBuf::from("Cargo.toml")]);
         assert_eq!(scope, "src/lib.rs\nCargo.toml\n");
-        assert_eq!(scan_task_mode(&[]), "auto");
-        assert_eq!(scan_task_mode(&["sast".to_string()]), "manual");
+        assert_eq!(scan_tool_input(None, &[], None), serde_json::json!({}));
+        assert_eq!(
+            scan_tool_input(Some(ScanModeArg::Fast), &["sast".to_string()], Some(true)),
+            serde_json::json!({
+                "mode": "fast",
+                "taskMode": "manual",
+                "tasks": ["sast"],
+                "triage": true
+            })
+        );
         assert_eq!(scan_worktree_suffix(true), "(+worktree)");
         assert_eq!(scan_worktree_suffix(false), "");
 
@@ -385,6 +394,36 @@ mod tests {
         let summary = scan_json_output(&workspace, &data);
         assert_eq!(summary["findingsCount"], serde_json::json!(2));
         assert!(summary["db"].as_str().unwrap().contains(".kuzushi"));
+    }
+
+    #[test]
+    fn run_option_overrides_are_session_scoped_and_preserve_explicit_input_precedence() {
+        assert_eq!(
+            parse_option_override(" triage = yes ").unwrap(),
+            ("triage".to_string(), "yes".to_string())
+        );
+        assert!(parse_option_override("missing-equals").is_err());
+        assert!(parse_option_override("=value").is_err());
+
+        let mut store = ToolOptionStore::new();
+        apply_option_override(&mut store, "sast:scan", "triage=yes").unwrap();
+        apply_option_override(&mut store, "sast:scan", "disabled_tasks=semgrep,codeql").unwrap();
+
+        let registry = kuzushi_core::ModuleRegistry::with_v2_builtins();
+        let prepared = registry
+            .prepare_tool_input(
+                "sast:scan",
+                serde_json::json!({"triage": false}),
+                Some(&store),
+            )
+            .unwrap();
+
+        assert_eq!(prepared["triage"], serde_json::json!(false));
+        assert_eq!(
+            prepared["disabledTasks"],
+            serde_json::json!(["semgrep", "codeql"])
+        );
+        assert_eq!(prepared.get("disabled_tasks"), None);
     }
 
     #[test]

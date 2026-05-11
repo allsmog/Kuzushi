@@ -19,16 +19,51 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-const BRIDGE_LOG_PATH = process.env.KUZUSHI_BRIDGE_LOG;
+let bridgeLogPath = process.env.KUZUSHI_BRIDGE_LOG;
+let bridgeVerbose = process.env.KUZUSHI_BRIDGE_VERBOSE === "1";
 
 function bridgeLog(message) {
   process.stderr.write(message);
-  if (!BRIDGE_LOG_PATH) return;
+  if (!bridgeLogPath) return;
   try {
-    appendFileSync(BRIDGE_LOG_PATH, message);
+    appendFileSync(bridgeLogPath, message);
   } catch {
     /* diagnostic only */
   }
+}
+
+function runtimeOptions(request) {
+  const options = request?.runtimeOptions ?? request?.runtime_options;
+  return options && typeof options === "object" ? options : {};
+}
+
+function applyRuntimeOptions(request) {
+  const options = runtimeOptions(request);
+  const logPath = options.bridgeLogPath ?? options.bridge_log_path;
+  if (typeof logPath === "string" && logPath.trim()) {
+    bridgeLogPath = logPath.trim();
+  }
+  const verbose = options.bridgeVerbose ?? options.bridge_verbose;
+  if (typeof verbose === "boolean") bridgeVerbose = verbose;
+}
+
+function mcpEnvironment(request) {
+  const raw = runtimeOptions(request).mcpEnvironment ?? runtimeOptions(request).mcp_environment;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const env = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof key !== "string" || typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (key && trimmed) env[key] = trimmed;
+  }
+  return env;
+}
+
+function mcpToolTimeoutMs(request) {
+  const raw = runtimeOptions(request).mcpToolTimeoutMs ?? runtimeOptions(request).mcp_tool_timeout_ms;
+  const value = Number(raw ?? process.env.KUZUSHI_MCP_TOOL_TIMEOUT_MS ?? 60_000);
+  if (!Number.isFinite(value) || value <= 0) return 60_000;
+  return Math.floor(value);
 }
 
 /**
@@ -492,7 +527,7 @@ async function buildMcpAgentTools(request) {
       tools.push(wrapMcpToolForAgent(handle, tool));
     }
   }
-  if (process.env.KUZUSHI_BRIDGE_VERBOSE === "1") {
+  if (bridgeVerbose) {
     bridgeLog(
       `[kuzushi-bridge] MCP tools: ${tools.map((tool) => tool.name).join(", ") || "(none)"}\n`,
     );
@@ -516,7 +551,7 @@ async function ensureMcpServer(spec, request) {
     mcpServerHandles.delete(cacheKey);
   }
 
-  const promise = spawnMcpServer(spec, cwd);
+  const promise = spawnMcpServer(spec, cwd, request);
   mcpServerHandles.set(cacheKey, promise);
   const handle = await promise;
   if (!handle) mcpServerHandles.delete(cacheKey);
@@ -534,12 +569,12 @@ function mcpCwdFor(request) {
   return process.cwd();
 }
 
-async function spawnMcpServer(spec, cwd) {
+async function spawnMcpServer(spec, cwd, request) {
   let child;
   try {
     child = spawn(spec.binary, [], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: { ...process.env, ...mcpEnvironment(request) },
       cwd: cwd ?? process.cwd(),
     });
   } catch (error) {
@@ -554,6 +589,7 @@ async function spawnMcpServer(spec, cwd) {
     binary: spec.binary,
     child,
     alive: true,
+    timeoutMs: mcpToolTimeoutMs(request),
     nextId: 1,
     pending: new Map(),
     buffer: "",
@@ -575,7 +611,7 @@ async function spawnMcpServer(spec, cwd) {
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk) => receiveMcpStdout(handle, chunk));
   child.stderr.on("data", (chunk) => {
-    if (process.env.KUZUSHI_BRIDGE_VERBOSE === "1") {
+    if (bridgeVerbose) {
       bridgeLog(`[mcp:${spec.profile}] ${String(chunk).trimEnd()}\n`);
     }
   });
@@ -652,13 +688,13 @@ function wrapMcpToolForAgent(handle, mcpTool) {
     },
     execute: async (_toolCallId, params) => {
       const startedAt = Date.now();
-      const verbose = process.env.KUZUSHI_BRIDGE_VERBOSE === "1";
+      const verbose = bridgeVerbose;
       if (verbose) {
         bridgeLog(
           `[mcp:${handle.profile}] -> ${mcpTool.name} ${JSON.stringify(params ?? {}).slice(0, 200)}\n`,
         );
       }
-      const timeoutMs = Number(process.env.KUZUSHI_MCP_TOOL_TIMEOUT_MS ?? 60_000);
+      const timeoutMs = handle.timeoutMs;
       const call = sendMcpRequest(handle, "tools/call", {
         name: mcpTool.name,
         arguments: params ?? {},
@@ -751,8 +787,6 @@ async function runAgent(AgentCtor, model, request) {
   );
   const thinkingLevel =
     normalizeThinkingLevel(request.thinkingLevel) ??
-    normalizeThinkingLevel(process.env.KUZUSHI_THINKING_LEVEL) ??
-    normalizeThinkingLevel(process.env.KUZUSHI_REASONING_EFFORT) ??
     "low";
   const maxOutputTokens = sanitizeMaxOutputTokens(request);
   const streamFn = maxOutputTokens ? makeStreamFnWithMaxTokens(maxOutputTokens) : undefined;
@@ -794,7 +828,7 @@ async function runAgent(AgentCtor, model, request) {
       truncated = true;
     }
   });
-  if (process.env.KUZUSHI_BRIDGE_VERBOSE === "1") {
+  if (bridgeVerbose) {
     agent.subscribe?.((event) => {
       if (event?.type === "agent_end") bridgeLog("[bridge] agent_end\n");
       else if (event?.type === "turn_end") {
@@ -1334,6 +1368,7 @@ async function main() {
   }
 
   const request = JSON.parse(await readStdin());
+  applyRuntimeOptions(request);
 
   // Route on envelope type. Default = legacy single-shot via pi-agent-core.
   if (request.type === "next-step") {

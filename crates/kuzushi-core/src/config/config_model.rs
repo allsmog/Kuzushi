@@ -27,6 +27,8 @@ pub struct RuntimeConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_bridge_command: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub anthropic_oauth: Option<AnthropicOauthConfig>,
 }
 
@@ -37,6 +39,7 @@ impl Default for RuntimeConfig {
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             agent_bridge_command: None,
+            thinking_level: None,
             anthropic_oauth: None,
         }
     }
@@ -84,10 +87,23 @@ impl ConfigPaths {
             .join("config.toml")
     }
 
+    pub fn global_options_path(&self) -> PathBuf {
+        self.home_dir
+            .join(".kuzushi")
+            .join("v2")
+            .join("options.json")
+    }
+
     pub fn project_config_path(&self) -> Option<PathBuf> {
         self.target_dir
             .as_ref()
             .map(|target| target.join(".kuzushi").join("v2").join("config.toml"))
+    }
+
+    pub fn project_options_path(&self) -> Option<PathBuf> {
+        self.target_dir
+            .as_ref()
+            .map(|target| target.join(".kuzushi").join("v2").join("options.json"))
     }
 }
 
