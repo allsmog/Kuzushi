@@ -173,6 +173,90 @@ pub(in crate::modules::taint_iris_next) fn build_taint_iris_next_agent_prompt(
          patterns.".to_string(),
     );
     lines.push(String::new());
+    lines.push(
+        "## Mandatory Call-Site + Entry-Point Audit (apply BEFORE every verdict)".to_string(),
+    );
+    lines.push(
+        "Reading a memcpy / palloc / system / dlopen site in isolation is \
+         not enough to decide promote vs reject. The deterministic pipeline \
+         hands you joern-confirmed source→sink flows but joern alone does \
+         not tell you whether the flow is **reachable from an attacker-\
+         supplied entry point**. Without that, a 'caller-contract' \
+         rejection is speculation and a promotion is hand-waving. The \
+         following audit is REQUIRED for every candidate you are about to \
+         either promote or reject:".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "1. **Identify the enclosing function.** For every candidate \
+            (source line, sink line, or both), call `tree_sitter:node_at` \
+            on the candidate line to confirm it sits inside a function \
+            definition, and capture the function name. The deterministic \
+            pipeline pre-inlines source-enclosing and sink-enclosing \
+            bodies under '## Sanitizer Function Bodies' — use those when \
+            present, fall back to a fresh tree-sitter call for sites that \
+            didn't make the inline slot budget.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "2. **Walk callers back to an entry point.** Call \
+            `joern.callers_of` on the enclosing function (limit=10, \
+            maxDepth=6 by default). For each immediate caller, recurse \
+            until you hit one of:\n\
+            - A SQL-callable entry point: a `PG_FUNCTION_INFO_V1(...)` \
+              registration or a `Datum name(PG_FUNCTION_ARGS) { ... }` \
+              definition. These are reachable from any SQL session.\n\
+            - A network handler / web route: anything pattern-matching \
+              `@app.route`, `app.{get,post,...}`, `router.{...}`, or a \
+              language-specific HTTP handler.\n\
+            - A CLI / argv handler: a `main(int argc, char **argv)` that \
+              the caller chain reaches without role/superuser gating.\n\
+            - A protocol parser entry: `RecvBackup`, `ProcessStartupPacket`, \
+              `pq_getmessage`, OpenSSL `BIO_read`, libxml2 `xmlReadFile`, \
+              etc. — any externally-fed bytes-in / message-in primitive.\n\
+            Cap recursion at depth 6; if you hit the cap without finding \
+            an entry point, treat the candidate as unreachable from \
+            attacker-controlled input (downgrade to candidate, not \
+            rejected — reviewer audit).".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "3. **For each caller, inspect what it passes.** Use \
+            `tree_sitter:node_at` on the call site to read the actual \
+            argument expressions. A 'caller-contract' rejection \
+            (\"caller must allocate enough\") is ONLY valid when EVERY \
+            entry-point-reachable caller passes a compile-time-constant \
+            size (e.g. `pullf_read_fixed(src, 4, hash)` with a fixed-size \
+            local buffer for a 4-byte SHA tag). If ANY entry-point-\
+            reachable caller passes an attacker-influenced length \
+            (`packet_len`, `n & 0xff`, `header.size`, `msg[0]`, anything \
+            joern's reachableByFlows tagged), the candidate IS exploitable \
+            — promote with a customCweRationale citing the specific caller \
+            line and argument.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "4. **Treat inline VULN- / FIXME- / XXX- / TODO- comments as \
+            priority breadcrumbs.** Use `tree_sitter:query` with \
+            `(comment) @comment` against the candidate's file and \
+            inspect comments within ±10 lines of the sink. Comments \
+            shaped like `//VULN-`, `//FIXME(bounds)`, `//XXX: skipped \
+            check`, `/* TODO: validate len */` are explicit human \
+            signals that a guard was disabled or never written. Treat \
+            them as PROMOTE-priority evidence and verify the missing \
+            check via the call-site walk above. Do not silently ignore \
+            these.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "5. **Cite the audit in your verdict.** Every `findings[]` entry \
+            and every `triage[]` rejection MUST include the call-chain \
+            you walked (or note 'depth cap reached, no entry point'), the \
+            argument shapes you observed at the boundary, and any \
+            VULN-/FIXME- breadcrumbs you found or confirmed absent. \
+            Verdicts without this audit trail are not defensible.".to_string(),
+    );
+    lines.push(String::new());
     lines.push("## Contract".to_string());
     lines.push(
         "- Return strict JSON matching { selectedCwes, findings, triage, notes }.".to_string(),
@@ -872,6 +956,133 @@ prepare_room(MBuf *dst, int len)
         assert!(
             body.contains("realloc_mbuf"),
             "body should include the function body content: {body}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod mandatory_audit_section_tests {
+    use super::*;
+
+    fn minimal_plan() -> TaintIrisNextPlan {
+        TaintIrisNextPlan {
+            target: std::path::PathBuf::from("/tmp/x"),
+            scan_root: std::path::PathBuf::from("/tmp/x"),
+            repo_root: std::path::PathBuf::from("/tmp/x"),
+            mode: TaintIrisNextMode::Hunt,
+            caps: TaintIrisNextCaps {
+                max_catalog_entries: 12,
+                max_candidates_per_cwe: 8,
+                max_evidence_per_cwe: 8,
+                max_files_per_query: 200,
+                max_specs_per_cwe: 8,
+                max_agent_findings: 20,
+                codeql_analyze_timeout_ms: 600_000,
+                min_evidence_level: "linked".to_string(),
+            },
+            languages: vec!["c".to_string()],
+            context_status: TaintIrisNextArtifactStatus {
+                ok: false,
+                path: None,
+                reason: "test".to_string(),
+            },
+            threat_model_status: TaintIrisNextArtifactStatus {
+                ok: false,
+                path: None,
+                reason: "test".to_string(),
+            },
+            repo_context: None,
+            threat_model: None,
+            catalog: Vec::new(),
+            structural_queries: Vec::new(),
+            prompt_catalog: String::new(),
+            backend: TaintIrisNextBackendChoice {
+                requested: "structural".to_string(),
+                selected: "structural".to_string(),
+                codeql_db_path: None,
+                corroborate_with_codeql: None,
+                structural_tool: "rg".to_string(),
+                warnings: Vec::new(),
+            },
+            max_budget_usd: None,
+            cwe_focus: Vec::new(),
+            discovered_signals: DiscoveredSignals::default(),
+        }
+    }
+
+    fn empty_evidence() -> TaintIrisNextEvidenceResult {
+        TaintIrisNextEvidenceResult {
+            backend: "structural".to_string(),
+            tool: "rg".to_string(),
+            evidence: Vec::new(),
+            candidates: Vec::new(),
+            linked_stories: Vec::new(),
+            labeled_specs: Vec::new(),
+            query_count: 0,
+            candidate_counts: Default::default(),
+            labeled_spec_counts: Default::default(),
+            linked_story_count: 0,
+            backend_path_count: 0,
+            structural_engine: "rg".to_string(),
+            triage_summary: serde_json::json!({}),
+            outcome: "test".to_string(),
+            warnings: Vec::new(),
+            artifacts: serde_json::json!({}),
+        }
+    }
+
+    #[test]
+    fn prompt_demands_call_site_walk_and_entry_point_resolution() {
+        let prompt = build_taint_iris_next_agent_prompt(&minimal_plan(), &empty_evidence());
+        // Thread D: a verdict on a candidate must be backed by a
+        // call-site → entry-point audit. These phrases are the
+        // load-bearing instructions; the test locks them in so a
+        // future refactor doesn't silently drop them.
+        assert!(
+            prompt.contains("Mandatory Call-Site + Entry-Point Audit"),
+            "prompt must include the mandatory audit section"
+        );
+        assert!(
+            prompt.contains("joern.callers_of"),
+            "audit section must instruct the agent to use joern.callers_of"
+        );
+        assert!(
+            prompt.contains("PG_FUNCTION_INFO_V1") || prompt.contains("PG_FUNCTION_ARGS"),
+            "audit section must enumerate known entry-point shapes"
+        );
+        assert!(
+            prompt.contains("caller-contract"),
+            "audit section must explicitly cover the 'caller-contract' rejection pitfall"
+        );
+        assert!(
+            prompt.contains("VULN-") && prompt.contains("FIXME-"),
+            "audit section must teach the agent to treat VULN-/FIXME- comments as breadcrumbs"
+        );
+        assert!(
+            prompt.contains("Cite the audit in your verdict"),
+            "audit section must demand the call-chain be cited in every verdict"
+        );
+    }
+
+    #[test]
+    fn audit_section_lands_after_false_positives_and_before_contract() {
+        let prompt = build_taint_iris_next_agent_prompt(&minimal_plan(), &empty_evidence());
+        let fp_idx = prompt
+            .find("## False-Positive Patterns")
+            .expect("false-positive section must exist");
+        let audit_idx = prompt
+            .find("## Mandatory Call-Site + Entry-Point Audit")
+            .expect("audit section must exist");
+        let contract_idx = prompt
+            .find("## Contract")
+            .expect("contract section must exist");
+        assert!(
+            fp_idx < audit_idx,
+            "audit must come after false-positive patterns so the agent has them in mind"
+        );
+        assert!(
+            audit_idx < contract_idx,
+            "audit must come before the contract so the contract sees it as a prerequisite"
         );
     }
 }
