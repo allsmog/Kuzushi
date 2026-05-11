@@ -3,13 +3,28 @@
 Audit of the three Kuzushi execution modes (`scan`, `shell`, `run`) for
 features that work in one mode and silently degrade or vanish in another.
 
-CLAUDE.md states all three modes "converge on `CopilotCore.executeTool(...)`
-and the `CopilotModule` / `ModuleTool` / `DagTool` contracts." That is true
-for **shell** and **run**, but **scan** dispatches DAG tasks through
-`registerAllWorkers` + `bus.publish("pipeline:start", ...)` and only invokes
-`core.executeTool` indirectly via the bus workers. This assessment covers
-both the per-tool execution path (shell + run direct, scan via worker) and
-the surrounding lifecycle.
+Current Rust execution converges on the native registry boundary:
+`ModuleRegistry::prepare_tool_input(...)` followed by
+`ModuleRegistry::execute_tool_with_runtime(...)`. `scan` compiles flags into
+canonical `sast:scan` input, the shell prepares focused-tool and scan input
+from its `ToolOptionStore`, and `run` prepares explicit tool input plus
+repeatable `--option key=value` overrides.
+
+The TypeScript audit matrix below is retained as historical context for the
+old migration work. The current Rust control-surface parity is:
+
+| Control surface | scan | shell | run | Notes |
+| --- | :--: | :---: | :-: | --- |
+| Canonical input preparation | ✓ | ✓ | ✓ | All three call `ModuleRegistry::prepare_tool_input` before dispatch. |
+| Strict option validation and alias canonicalization | ✓ | ✓ | ✓ | Unknown keys fail unless declared as aliases/deprecated aliases in the descriptor. |
+| Stored tool options | ✓ | ✓ | ✓ | Global and workspace stores load from `~/.kuzushi/v2/options.json` and `<target>/.kuzushi/v2/options.json`. |
+| Session option overrides | N/A | ✓ | ✓ | Shell `set` is session-scoped; `run --option` creates one-shot session overrides. |
+| Explicit input precedence | ✓ | ✓ | ✓ | Explicit JSON input overlays global, workspace, and session options. |
+| `sast:scan` umbrella dispatch | ✓ | ✓ | ✓ | CLI `scan`, shell `scan`, and `run sast:scan` reach the same registry executor. |
+| Runtime/operator config | ✓ | ✓ | ✓ | `runtime.thinking_level` and `[operator]` budget/approval fields are config, not product env vars. |
+
+For the detailed operator contract, see
+[../operator-control-surfaces.md](../operator-control-surfaces.md).
 
 ## Capability matrix
 
