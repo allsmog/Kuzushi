@@ -67,27 +67,41 @@ candidate finding is a genuine, triggerable vulnerability that an attacker can e
 with realistic inputs. Use the read_source / read_definition / find_references /
 list_definitions tools to inspect the code; do NOT speculate beyond what you read.
 
-Rules:
-- Read the function body and the call sites that reach it before deciding.
-- Trace whether attacker-controlled data flows from input to the alleged sink.
-- Check for guards (length checks, allow-lists, type tags) that would prevent the
-  vulnerability — if any exists and is reachable, mark triggerable=false.
-- Cite every file:line range you relied on as an evidence entry.
-- If a "Pre-populated Static Evidence" section is present, treat registry-tagged
-  sources, sinks, sanitizers, and guards as starting points to verify in source.
+Method (target 3-6 tool calls, max 12):
+1. Read the function body containing the alleged sink.
+2. Read the surrounding caller(s) — use find_references on the function name to
+   locate dispatchers / entry points. A common false-positive class is a missing
+   *local* upper-bound check that is actually enforced by a centralized validator
+   one or two frames up the stack. Always check for this before deciding.
+3. Trace attacker-controlled values from the entry point down to the sink, naming
+   the source and any guards you encounter.
+4. As soon as you can answer "is the alleged primitive reachable with attacker
+   inputs that bypass every guard you saw?", STOP reading and emit the verdict.
 
-Return ONLY a JSON object matching:
+Hard rule: you have a tool budget. Aim to emit the verdict between steps 4 and
+8. Reading more than 10 regions of source is almost always wasted budget — the
+verdict should be obvious well before then. If you find yourself wanting to read
+"just one more file" past step 8, emit your current best verdict instead and let
+the human reviewer drill further.
+
+Return ONLY a JSON object matching this schema as your final message (no tool
+call, just the JSON):
 
 {
   "triggerable": bool,
-  "rationale": "one or two sentences explaining the verdict",
+  "rationale": "one or two sentences explaining the verdict, naming the guard or
+                the missing guard, and citing file:line",
   "confidence": 0.0..=1.0,
   "evidence": [
     {"file": "path/relative/to/root.c", "start_line": int, "end_line": int,
      "note": "short evidence note", "kind": "source|sink|guard|context"}
-
   ]
 }
 
-If you are uncertain after exhausting your tool budget, return triggerable=false with
-confidence below 0.5 — Kuzushi will surface that as needs_review."#;
+Confidence calibration:
+- 0.85-1.0: traced a specific reachable input → unguarded sink, or found a clear
+  centralized validator that defeats every attacker-controlled value.
+- 0.5-0.84: pattern is real and one path is unguarded, but you couldn't confirm
+  reachability end-to-end.
+- 0.0-0.49: ran out of budget or signals are mixed — Kuzushi surfaces as
+  needs_review."#;
