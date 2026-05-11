@@ -18,12 +18,25 @@ pub(in crate::capabilities::taint_iris_next) fn run_taint_iris_next_agent(
     ) {
         Ok(parsed) => parsed,
         Err(error) => {
+            if deterministic_fallback_disabled() {
+                return Err(anyhow::anyhow!(
+                    "taint-iris-next agent output invalid and deterministic fallback is disabled \
+                     (set KUZUSHI_TAINT_IRIS_NEXT_NO_FALLBACK=0 to re-enable fallback): {error}"
+                ));
+            }
             return Ok(invalid_taint_iris_next_agent_result(
                 plan, evidence, error, 1,
             ))
         }
     };
     normalized_taint_iris_next_agent_result(plan, evidence, raw, retry_count)
+}
+
+fn deterministic_fallback_disabled() -> bool {
+    matches!(
+        std::env::var("KUZUSHI_TAINT_IRIS_NEXT_NO_FALLBACK").ok().as_deref(),
+        Some("1" | "true" | "TRUE" | "yes" | "YES")
+    )
 }
 
 pub(in crate::capabilities::taint_iris_next) fn query_taint_iris_next_agent(
