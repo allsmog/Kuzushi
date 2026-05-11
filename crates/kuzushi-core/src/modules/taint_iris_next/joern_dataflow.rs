@@ -518,6 +518,7 @@ mod tests {
             sink_signals: sinks.iter().map(|s| s.to_string()).collect(),
             sanitizer_signals: vec![],
             structural_queries: vec![],
+            regex_markers: vec![],
             reasons: vec![],
         }
     }

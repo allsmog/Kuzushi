@@ -63,7 +63,13 @@ pub(in crate::modules) fn build_taint_iris_next_plan(
     // KUZUSHI_DISCOVER_SIGNALS=0). The result is folded into the
     // ranking pass below and surfaced into the agent prompt; it does
     // NOT replace the catalog, just supplements it.
-    let discovered_signals = run_taint_iris_next_discovery_for_plan(&repo_root, &options);
+    // Lift the catalog's per-entry `regex_markers` (C2/C3) into the
+    // discovery sweep. Codebase-shape markers (pgcrypto's `pullf_*`,
+    // libxml2's `xmlParse*`, ...) travel via the LLM-built catalog
+    // rather than via a code change to the static `MARKERS` table.
+    let catalog_markers = catalog_regex_markers_for_discovery(&catalog);
+    let discovered_signals =
+        run_taint_iris_next_discovery_for_plan(&repo_root, &options, &catalog_markers);
     persist_taint_iris_next_discovered_signals(&repo_root, &discovered_signals);
 
     // Re-rank (or re-filter) the catalog using discovered signals as a
@@ -123,9 +129,15 @@ pub(in crate::modules) fn build_taint_iris_next_plan(
 /// uses (so we don't slurp the entire postgres tree twice on a hunt;
 /// the costs are tracked together). Bails early to an empty signal set
 /// when discovery is explicitly disabled or the file walker fails.
+///
+/// `extra_markers` carries codebase-shape markers lifted from the
+/// LLM-built catalog's `regex_markers` field. Empty when no catalog is
+/// present, when the LLM emitted no markers, or when the operator is
+/// running against the static-fallback catalog.
 fn run_taint_iris_next_discovery_for_plan(
     repo_root: &Path,
     options: &TaintIrisNextInput,
+    extra_markers: &[OwnedMarkerSpec],
 ) -> DiscoveredSignals {
     if !options.discover_signals {
         return DiscoveredSignals::default();
@@ -140,7 +152,57 @@ fn run_taint_iris_next_discovery_for_plan(
         Ok(files) => files,
         Err(_) => return DiscoveredSignals::default(),
     };
-    run_taint_iris_next_source_sink_discovery(&files, 16)
+    run_taint_iris_next_source_sink_discovery(&files, 16, extra_markers)
+}
+
+/// Hard cap on the total number of LLM-curated regex markers fed into a
+/// single discovery sweep. Each entry in the catalog can contribute up
+/// to its own marker count, but the merged stream stops at this cap.
+/// Defensive guard against an LLM that emits hundreds of markers per
+/// entry — discovery is O(files × markers × file_size), so an unbounded
+/// merge would blow the rg-pass runtime on a postgres-scale codebase.
+const CATALOG_MARKER_CAP: usize = 64;
+
+/// Flatten the catalog's `regex_markers` into the `OwnedMarkerSpec`
+/// list discovery expects. The catalog's per-entry `cwe` is propagated
+/// onto each `OwnedMarkerSpec` (the payload carries no CWE of its own).
+/// Iteration order follows the catalog's existing score-descending
+/// ordering so the highest-scored CWE's markers land first if we hit
+/// the cap.
+pub(in crate::modules) fn catalog_regex_markers_for_discovery(
+    catalog: &[TaintIrisNextRankedCatalogEntry],
+) -> Vec<OwnedMarkerSpec> {
+    let mut out = Vec::new();
+    for entry in catalog {
+        for marker in &entry.regex_markers {
+            if out.len() >= CATALOG_MARKER_CAP {
+                return out;
+            }
+            // Default languages: when the marker doesn't specify them,
+            // inherit the entry's languages. Empty fall-back is "any C"
+            // — discovery's per-marker language filter is permissive
+            // when the marker list is empty? No — it requires a match.
+            // Inherit the entry's full language list as the default
+            // (empty-language markers would otherwise never fire).
+            let languages = if marker.languages.is_empty() {
+                entry.languages.clone()
+            } else {
+                marker.languages.clone()
+            };
+            out.push(OwnedMarkerSpec {
+                pattern: marker.pattern.clone(),
+                cwe: entry.cwe.clone(),
+                kind: marker.kind.clone(),
+                languages,
+                marker: if marker.marker.is_empty() {
+                    format!("catalog.{}", entry.cwe.to_ascii_lowercase())
+                } else {
+                    marker.marker.clone()
+                },
+            });
+        }
+    }
+    out
 }
 
 /// Add a small score boost (+15 per overlap, capped at +60) to ranked
@@ -471,6 +533,7 @@ fn supplement_catalog_with_phantom_focus_entries(
             sink_signals,
             sanitizer_signals: Vec::new(),
             structural_queries: Vec::new(),
+            regex_markers: Vec::new(),
             score: 50,
             reasons: vec![format!(
                 "Synthesised from {provenance}; no static catalog entry covered this focus CWE.",
@@ -559,6 +622,7 @@ mod phantom_focus_entry_tests {
             sink_signals: Vec::new(),
             sanitizer_signals: Vec::new(),
             structural_queries: Vec::new(),
+            regex_markers: Vec::new(),
             score,
             reasons: Vec::new(),
         }
@@ -796,6 +860,7 @@ mod boost_with_discovered_signals_tests {
             sink_signals: sinks.into_iter().map(String::from).collect(),
             sanitizer_signals: Vec::new(),
             structural_queries: Vec::new(),
+            regex_markers: Vec::new(),
             score: 0,
             reasons: Vec::new(),
         }
@@ -947,6 +1012,123 @@ mod boost_with_discovered_signals_tests {
         );
         assert!(cwe120.source_signals.contains(&"mbuf_append".to_string()));
         assert!(cwe120.source_signals.contains(&"mbuf_avail".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod catalog_regex_markers_for_discovery_tests {
+    use super::*;
+
+    fn regex_marker(pattern: &str, kind: &str, languages: Vec<&str>, marker: &str)
+        -> TaintIrisNextRegexMarker {
+        TaintIrisNextRegexMarker {
+            pattern: pattern.to_string(),
+            kind: kind.to_string(),
+            languages: languages.into_iter().map(String::from).collect(),
+            marker: marker.to_string(),
+        }
+    }
+
+    fn entry_with_markers(
+        cwe: &str,
+        languages: Vec<&str>,
+        markers: Vec<TaintIrisNextRegexMarker>,
+    ) -> TaintIrisNextRankedCatalogEntry {
+        TaintIrisNextRankedCatalogEntry {
+            cwe: cwe.to_string(),
+            name: cwe.to_string(),
+            taint_class: "test".to_string(),
+            languages: languages.into_iter().map(String::from).collect(),
+            source_signals: Vec::new(),
+            sink_signals: Vec::new(),
+            sanitizer_signals: Vec::new(),
+            structural_queries: Vec::new(),
+            regex_markers: markers,
+            score: 0,
+            reasons: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn lifts_catalog_markers_with_cwe_propagated() {
+        let catalog = vec![entry_with_markers(
+            "CWE-120",
+            vec!["c"],
+            vec![regex_marker(
+                r"\b(pullf_[a-z_]+)\s*\(",
+                "source",
+                vec!["c"],
+                "buffer.parser-read",
+            )],
+        )];
+        let out = catalog_regex_markers_for_discovery(&catalog);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].cwe, "CWE-120");
+        assert_eq!(out[0].kind, "source");
+        assert_eq!(out[0].marker, "buffer.parser-read");
+        assert_eq!(out[0].languages, vec!["c".to_string()]);
+    }
+
+    #[test]
+    fn marker_languages_default_to_entry_languages_when_absent() {
+        let catalog = vec![entry_with_markers(
+            "CWE-120",
+            vec!["c", "cpp"],
+            vec![regex_marker(
+                r"\bfoo\(",
+                "source",
+                vec![],
+                "no-lang-on-marker",
+            )],
+        )];
+        let out = catalog_regex_markers_for_discovery(&catalog);
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0].languages,
+            vec!["c".to_string(), "cpp".to_string()],
+            "marker should inherit entry's languages when its own list is empty"
+        );
+    }
+
+    #[test]
+    fn empty_marker_tag_falls_back_to_catalog_tag() {
+        let catalog = vec![entry_with_markers(
+            "CWE-120",
+            vec!["c"],
+            vec![regex_marker(r"\bfoo\(", "source", vec!["c"], "")],
+        )];
+        let out = catalog_regex_markers_for_discovery(&catalog);
+        assert_eq!(out[0].marker, "catalog.cwe-120");
+    }
+
+    #[test]
+    fn caps_total_marker_count_at_global_limit() {
+        // Synthesize one entry with 100 markers — discovery should
+        // truncate at CATALOG_MARKER_CAP (64) to bound rg-pass runtime.
+        let many: Vec<_> = (0..100)
+            .map(|i| {
+                regex_marker(
+                    &format!(r"\bfn_{i}\("),
+                    "source",
+                    vec!["c"],
+                    "test",
+                )
+            })
+            .collect();
+        let catalog = vec![entry_with_markers("CWE-120", vec!["c"], many)];
+        let out = catalog_regex_markers_for_discovery(&catalog);
+        assert_eq!(out.len(), CATALOG_MARKER_CAP);
+    }
+
+    #[test]
+    fn empty_catalog_returns_empty_vec() {
+        assert!(catalog_regex_markers_for_discovery(&[]).is_empty());
+    }
+
+    #[test]
+    fn entries_without_markers_contribute_nothing() {
+        let catalog = vec![entry_with_markers("CWE-120", vec!["c"], vec![])];
+        assert!(catalog_regex_markers_for_discovery(&catalog).is_empty());
     }
 }
 

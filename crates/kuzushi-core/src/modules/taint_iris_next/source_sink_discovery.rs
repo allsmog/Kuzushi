@@ -190,45 +190,55 @@ const MARKERS: &[MarkerSpec] = &[
         languages: &["python"],
         marker: "python.exec",
     },
-    // ----- CWE-120 buffer-overflow source markers ------------------------
-    // Parser-layer reads. These are C / C++ codebases' "I just pulled N
-    // bytes from a wire / blob" primitives — anything that returns a
-    // length the caller then feeds to memcpy/strcpy/sprintf. The pattern
-    // names are framework-canonical (pgcrypto pullf/mbuf, libpq pq_get*,
-    // crypto MPI readers), not specific to any one codebase, so they
-    // generalise to other postgres extensions doing wire parsing.
-    MarkerSpec {
-        pattern: r"\b((?:pullf|mbuf)_[a-z_]+)\s*\(",
-        cwe: "CWE-120",
-        kind: "source",
-        languages: &["c", "cpp"],
-        marker: "buffer.parser-read",
-    },
-    MarkerSpec {
-        pattern: r"\b(pq_get[a-z_]+|pq_copymsgbytes)\s*\(",
-        cwe: "CWE-120",
-        kind: "source",
-        languages: &["c", "cpp"],
-        marker: "wire.parser-read",
-    },
-    MarkerSpec {
-        pattern: r"\b([a-z_]+_mpi_(?:read|alloc))\s*\(",
-        cwe: "CWE-120",
-        kind: "source",
-        languages: &["c", "cpp"],
-        marker: "crypto.mpi-read",
-    },
+    // ----- CWE-120 parser-layer source markers ---------------------------
+    //
+    // Codebase-shape parser-read patterns (pgcrypto's `pullf_*` / `mbuf_*`,
+    // crypto MPI readers, etc.) used to live here, but moved to the
+    // LLM-curated catalog in C5. The `:catalog` tool emits per-target
+    // `regexMarkers` (see `dynamic_catalog::TAINT_IRIS_NEXT_CATALOG_SYSTEM_PROMPT`)
+    // which the plan builder lifts into discovery's `extra_markers` slice
+    // via `catalog_regex_markers_for_discovery`. The static table stays
+    // for *framework-canonical* primitives — names that are stable across
+    // every C/Python/JS codebase using a given framework — not for
+    // codebase-specific naming conventions.
 ];
 
+/// Runtime-owned counterpart to `MarkerSpec`. The static `MARKERS`
+/// table can't carry LLM-emitted strings because of lifetime
+/// constraints, so the LLM-curated catalog produces `OwnedMarkerSpec`
+/// instances that get merged with the static table at discovery start.
+#[derive(Debug, Clone)]
+pub(in crate::modules) struct OwnedMarkerSpec {
+    pub(in crate::modules) pattern: String,
+    pub(in crate::modules) cwe: String,
+    pub(in crate::modules) kind: String,
+    pub(in crate::modules) languages: Vec<String>,
+    pub(in crate::modules) marker: String,
+}
+
+impl From<&MarkerSpec> for OwnedMarkerSpec {
+    fn from(spec: &MarkerSpec) -> Self {
+        OwnedMarkerSpec {
+            pattern: spec.pattern.to_string(),
+            cwe: spec.cwe.to_string(),
+            kind: spec.kind.to_string(),
+            languages: spec.languages.iter().map(|lang| lang.to_string()).collect(),
+            marker: spec.marker.to_string(),
+        }
+    }
+}
+
 /// Cached compiled regexes so a postgres run with ~30k source files
-/// doesn't pay the regex compile cost per file.
-fn compiled_markers() -> Vec<(regex::Regex, &'static MarkerSpec)> {
-    MARKERS
+/// doesn't pay the regex compile cost per file. Drops entries whose
+/// pattern fails to compile — invalid LLM-emitted regex never causes a
+/// run-level error, just a silent skip.
+fn compile_owned_markers(specs: &[OwnedMarkerSpec]) -> Vec<(regex::Regex, OwnedMarkerSpec)> {
+    specs
         .iter()
         .filter_map(|spec| {
-            regex::Regex::new(spec.pattern)
+            regex::Regex::new(&spec.pattern)
                 .ok()
-                .map(|regex| (regex, spec))
+                .map(|regex| (regex, spec.clone()))
         })
         .collect()
 }
@@ -240,16 +250,26 @@ fn compiled_markers() -> Vec<(regex::Regex, &'static MarkerSpec)> {
 /// kind) pair — large codebases (e.g. postgres has 30k+ palloc calls)
 /// would otherwise blow up the JSON artifact and the prompt; we only
 /// need a representative handful for the agent to anchor on.
+///
+/// `extra_markers` carries LLM-curated codebase-shape markers from the
+/// `:catalog` tool's `regexMarkers` field. They're appended to the
+/// static `MARKERS` table for this run, giving discovery a per-target
+/// surface without a code change. Pass `&[]` when no catalog markers
+/// are available (legacy callers, tests).
 pub(in crate::modules) fn run_taint_iris_next_source_sink_discovery(
     files: &[TaintIrisNextSourceFile],
     max_per_marker: usize,
+    extra_markers: &[OwnedMarkerSpec],
 ) -> DiscoveredSignals {
-    let markers = compiled_markers();
+    let mut all_markers: Vec<OwnedMarkerSpec> =
+        MARKERS.iter().map(OwnedMarkerSpec::from).collect();
+    all_markers.extend(extra_markers.iter().cloned());
+    let markers = compile_owned_markers(&all_markers);
     let mut buckets: BTreeMap<(String, String), Vec<DiscoveredSignal>> = BTreeMap::new();
 
     for file in files {
         for (regex, spec) in &markers {
-            if !spec.languages.contains(&file.language.as_str()) {
+            if !spec.languages.iter().any(|lang| lang == &file.language) {
                 continue;
             }
             for (line_no, line) in file.lines.iter().enumerate() {
@@ -276,20 +296,20 @@ pub(in crate::modules) fn run_taint_iris_next_source_sink_discovery(
                     // snake_case (`pg_signal_backend`, `lo_import`)
                     // or at minimum mixed case with a meaningful
                     // length; `NAME`, `FN`, `OP` are noise.
-                    if is_likely_entry_point_name_noise(spec.marker, &name) {
+                    if is_likely_entry_point_name_noise(&spec.marker, &name) {
                         continue;
                     }
-                    let bucket_key = (spec.marker.to_string(), name.clone());
+                    let bucket_key = (spec.marker.clone(), name.clone());
                     let bucket = buckets.entry(bucket_key).or_default();
                     if bucket.len() >= max_per_marker {
                         continue;
                     }
                     bucket.push(DiscoveredSignal {
                         name,
-                        cwe: spec.cwe.to_string(),
-                        kind: spec.kind.to_string(),
+                        cwe: spec.cwe.clone(),
+                        kind: spec.kind.clone(),
                         language: file.language.clone(),
-                        marker: spec.marker.to_string(),
+                        marker: spec.marker.clone(),
                         file: file.relative_path.clone(),
                         line: (line_no + 1) as u32,
                     });
@@ -337,33 +357,15 @@ pub(in crate::modules) fn run_taint_iris_next_source_sink_discovery(
 /// placeholder shadow). Other markers (route decorators, sink names)
 /// pass through unchanged.
 fn is_likely_entry_point_name_noise(marker: &str, name: &str) -> bool {
-    // Parser-source markers (`buffer.parser-read`, `wire.parser-read`,
-    // `crypto.mpi-read`) capture identifiers preceding `(` in C source.
-    // The same regex matches typedef-shaped names like `mbuf_t` or
-    // struct-init macros like `MBuf` (alignment-padded constructors in
-    // pgcrypto's header). Require length >= 8 and at least one
-    // lowercase letter — real parser fns are conventionally
-    // `pullf_read_max`, `pgp_mpi_read`, `pq_getmsgbytes`. Single-word
-    // captures like `MBuf` and short typedef names get filtered.
-    if marker == "buffer.parser-read"
-        || marker == "wire.parser-read"
-        || marker == "crypto.mpi-read"
-    {
-        if name.len() < 8 {
-            return true;
-        }
-        let has_lowercase = name.chars().any(|c| c.is_ascii_lowercase());
-        if !has_lowercase {
-            return true;
-        }
-        // First char must be lowercase or underscore (not a type name).
-        if let Some(first) = name.chars().next() {
-            if first.is_ascii_uppercase() {
-                return true;
-            }
-        }
-        return false;
-    }
+    // Note: parser-source markers (`buffer.parser-read`, `wire.parser-read`,
+    // `crypto.mpi-read`) used to live in the static MARKERS table with
+    // a dedicated noise filter here. They moved to the LLM-curated
+    // catalog in C5 — if a future operator wants per-marker noise
+    // rules they can be elicited from the catalog prompt and added as
+    // a `noiseFilter` field on `TaintIrisNextRegexMarker`. For now,
+    // catalog-supplied markers bypass codebase-specific noise filters;
+    // operators iterate on the regex pattern itself if they observe
+    // false captures.
     if marker != "PG_FUNCTION_ARGS" {
         return false;
     }
@@ -423,7 +425,7 @@ mod tests {
             ],
             "src/backend/utils/adt/genfile.c",
         )];
-        let result = run_taint_iris_next_source_sink_discovery(&files, 16);
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16, &[]);
         // Both markers fire on the same fn — the legacy macro line 6
         // and the modern function-definition line 2. Both produce
         // CWE-862 entries with the same name; downstream dedup happens
@@ -463,7 +465,7 @@ mod tests {
             ],
             "src/backend/utils/adt/misc.c",
         )];
-        let result = run_taint_iris_next_source_sink_discovery(&files, 16);
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16, &[]);
         let names: Vec<&str> = result
             .entry_points
             .iter()
@@ -504,7 +506,7 @@ mod tests {
             ],
             "src/backend/utils/adt/tsquery_op.c",
         )];
-        let result = run_taint_iris_next_source_sink_discovery(&files, 16);
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16, &[]);
         let names: Vec<&str> = result
             .entry_points
             .iter()
@@ -541,7 +543,7 @@ mod tests {
             ],
             "src/legacy.c",
         )];
-        let result = run_taint_iris_next_source_sink_discovery(&files, 16);
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16, &[]);
         let names: Vec<&str> = result
             .entry_points
             .iter()
@@ -564,7 +566,7 @@ mod tests {
             ],
             "src/backend/commands/fmgrtab.c",
         )];
-        let result = run_taint_iris_next_source_sink_discovery(&files, 16);
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16, &[]);
         let names: Vec<&str> = result.sinks.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"dlopen"), "got {names:?}");
         assert!(names.contains(&"load_external_function"));
@@ -589,7 +591,7 @@ mod tests {
             ],
             "app/routes/admin.py",
         )];
-        let result = run_taint_iris_next_source_sink_discovery(&files, 16);
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16, &[]);
         assert!(
             result
                 .entry_points
@@ -609,7 +611,7 @@ mod tests {
             lines.push("dlopen(\"libx.so\", 0);");
         }
         let files = vec![fixture("c", &lines, "src/x.c")];
-        let result = run_taint_iris_next_source_sink_discovery(&files, 5);
+        let result = run_taint_iris_next_source_sink_discovery(&files, 5, &[]);
         let dlopen_count = result
             .sinks
             .iter()
@@ -625,18 +627,23 @@ mod tests {
             &["dlopen \"libx.so\""],
             "src/x.hs",
         )];
-        let result = run_taint_iris_next_source_sink_discovery(&files, 16);
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16, &[]);
         assert!(result.sinks.is_empty());
         assert!(result.entry_points.is_empty());
     }
 
     #[test]
-    fn discovers_parser_layer_cwe120_sources() {
+    fn discovers_parser_layer_cwe120_sources_via_catalog_markers() {
         // pgcrypto-style file: pullf_read / mbuf_read / pgp_mpi_read
         // are parser-layer readers that produce caller-controlled
-        // length values; the rest of the catalog feeds these into
-        // memcpy as CWE-120 sources. The discovery sweep didn't see
-        // them before Thread A1; this regression locks that in.
+        // length values. They USED to be hard-coded in the static
+        // MARKERS table (Thread A1) but moved to the LLM-curated
+        // catalog in C5. This test now verifies the catalog-driven
+        // discovery path produces equivalent output — the catalog
+        // supplies the regex markers, discovery picks up the call
+        // sites. Verifies the multi-codebase claim: this exact same
+        // pipeline works on libxml2, ImageMagick, etc. by emitting
+        // different markers from `:catalog`.
         let files = vec![fixture(
             "c",
             &[
@@ -652,7 +659,36 @@ mod tests {
             ],
             "contrib/pgcrypto/pgp-pubdec.c",
         )];
-        let result = run_taint_iris_next_source_sink_discovery(&files, 16);
+        // These are the same regex shapes A1 used to ship in the
+        // static MARKERS table — the test now supplies them via the
+        // catalog-driven `extra_markers` path instead. Operators on
+        // novel C codebases get the same plumbing by having `:catalog`
+        // emit their codebase-shape markers (libxml2's `xmlParse*`,
+        // ImageMagick's `Read*Image`, etc.).
+        let extra = vec![
+            OwnedMarkerSpec {
+                pattern: r"\b((?:pullf|mbuf)_[a-z_]+)\s*\(".to_string(),
+                cwe: "CWE-120".to_string(),
+                kind: "source".to_string(),
+                languages: vec!["c".to_string()],
+                marker: "buffer.parser-read".to_string(),
+            },
+            OwnedMarkerSpec {
+                pattern: r"\b(pq_get[a-z_]+|pq_copymsgbytes)\s*\(".to_string(),
+                cwe: "CWE-120".to_string(),
+                kind: "source".to_string(),
+                languages: vec!["c".to_string()],
+                marker: "wire.parser-read".to_string(),
+            },
+            OwnedMarkerSpec {
+                pattern: r"\b([a-z_]+_mpi_(?:read|alloc))\s*\(".to_string(),
+                cwe: "CWE-120".to_string(),
+                kind: "source".to_string(),
+                languages: vec!["c".to_string()],
+                marker: "crypto.mpi-read".to_string(),
+            },
+        ];
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16, &extra);
         let source_names: std::collections::BTreeSet<&str> =
             result.sources.iter().map(|s| s.name.as_str()).collect();
         assert!(source_names.contains("pullf_read_fixed"), "got {source_names:?}");
@@ -661,7 +697,8 @@ mod tests {
         assert!(source_names.contains("mbuf_read"), "got {source_names:?}");
         assert!(source_names.contains("pq_getmsgbytes"), "got {source_names:?}");
         assert!(source_names.contains("pq_copymsgbytes"), "got {source_names:?}");
-        // Each source should carry CWE-120 and the marker tag.
+        // Each source should carry CWE-120 and the marker tag the
+        // catalog supplied.
         let pullf = result
             .sources
             .iter()
@@ -684,26 +721,163 @@ mod tests {
     }
 
     #[test]
-    fn parser_layer_noise_filter_rejects_short_or_uppercase_captures() {
-        // Typedef-shaped or struct-name captures should be filtered.
-        // Real parser fns are lowercase_snake_case >= 8 chars.
+    fn static_markers_table_no_longer_carries_codebase_specific_patterns() {
+        // C5 regression: a fresh discovery sweep with NO catalog
+        // markers must NOT pick up pgcrypto-shape names from the
+        // static table — those moved to the LLM catalog.
         let files = vec![fixture(
             "c",
             &[
-                // Real, should pass:
+                "res = pullf_read(src, &p, 4);",
+                "msglen = pq_getmsgbytes(buf, len);",
                 "n = pgp_mpi_read(src);",
-                // Noise — too short:
+            ],
+            "contrib/pgcrypto/pgp-pubdec.c",
+        )];
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16, &[]);
+        let source_names: std::collections::BTreeSet<&str> =
+            result.sources.iter().map(|s| s.name.as_str()).collect();
+        // None of these should appear when the catalog supplies no
+        // markers — the static table only carries framework-canonical
+        // primitives now (dlopen, system, PG_FUNCTION_INFO_V1, etc.).
+        assert!(
+            !source_names.contains("pullf_read"),
+            "static table must not contain pgcrypto pullf_*: {source_names:?}"
+        );
+        assert!(
+            !source_names.contains("pq_getmsgbytes"),
+            "static table must not contain libpq pq_get*: {source_names:?}"
+        );
+        assert!(
+            !source_names.contains("pgp_mpi_read"),
+            "static table must not contain crypto _mpi_*: {source_names:?}"
+        );
+    }
+
+    #[test]
+    fn catalog_marker_regex_owns_its_own_noise_rejection_post_c5() {
+        // Pre-C5 the static-table parser-source markers had a hardcoded
+        // noise filter rejecting short / uppercase-leading captures
+        // (`mbuf_t`, `MBuf`). C5 moved those markers into the catalog
+        // and dropped the post-filter, on the principle that the LLM
+        // owns its regex's precision: if the catalog emits a tighter
+        // pattern (`\b((?:pullf|mbuf)_(?:read|write|grab|alloc|free|...))\s*\(`,
+        // enumerating known shapes), false captures disappear at the
+        // regex layer.
+        //
+        // This test documents the new contract:
+        //   * `MBuf(...)` is rejected by the regex itself (the catalog
+        //     pattern requires a lowercase `mbuf_` prefix) — same
+        //     behaviour as A1.
+        //   * `pgp_mpi_read(...)` is captured (real parser-layer source).
+        //   * `mbuf_t(...)` would now be captured under a loose pattern;
+        //     operators write tighter regex via `:catalog` regen if it
+        //     produces too much noise.
+        let files = vec![fixture(
+            "c",
+            &[
+                "n = pgp_mpi_read(src);",
                 "var = mbuf_t(...);",
-                // Noise — starts uppercase:
                 "var = MBuf(NULL);",
             ],
             "src/x.c",
         )];
-        let result = run_taint_iris_next_source_sink_discovery(&files, 16);
+        let extra = vec![
+            OwnedMarkerSpec {
+                pattern: r"\b((?:pullf|mbuf)_[a-z_]+)\s*\(".to_string(),
+                cwe: "CWE-120".to_string(),
+                kind: "source".to_string(),
+                languages: vec!["c".to_string()],
+                marker: "buffer.parser-read".to_string(),
+            },
+            OwnedMarkerSpec {
+                pattern: r"\b([a-z_]+_mpi_(?:read|alloc))\s*\(".to_string(),
+                cwe: "CWE-120".to_string(),
+                kind: "source".to_string(),
+                languages: vec!["c".to_string()],
+                marker: "crypto.mpi-read".to_string(),
+            },
+        ];
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16, &extra);
         let names: std::collections::BTreeSet<&str> =
             result.sources.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains("pgp_mpi_read"), "got {names:?}");
-        assert!(!names.contains("mbuf_t"), "short capture must be filtered: {names:?}");
-        assert!(!names.contains("MBuf"), "uppercase capture must be filtered: {names:?}");
+        assert!(names.contains("pgp_mpi_read"), "real parser fn must capture: {names:?}");
+        assert!(
+            !names.contains("MBuf"),
+            "uppercase prefix must be excluded by the regex itself: {names:?}",
+        );
+    }
+
+    #[test]
+    fn extra_markers_augment_static_markers_at_discovery_time() {
+        // A codebase-shape marker the LLM catalog might emit for, say,
+        // libxml2 (`xmlParse*` family). It is NOT in the static MARKERS
+        // table — proof that catalog-supplied markers reach discovery.
+        let files = vec![fixture(
+            "c",
+            &[
+                "doc = xmlParseFile(filename);",
+                "node = xmlParseMemory(buffer, len);",
+            ],
+            "src/parser.c",
+        )];
+        let extra = vec![OwnedMarkerSpec {
+            pattern: r"\b(xmlParse[A-Za-z]+)\s*\(".to_string(),
+            cwe: "CWE-120".to_string(),
+            kind: "source".to_string(),
+            languages: vec!["c".to_string()],
+            marker: "libxml2.parse".to_string(),
+        }];
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16, &extra);
+        let names: std::collections::BTreeSet<&str> =
+            result.sources.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains("xmlParseFile"),
+            "extra marker must reach discovery sweep; got {names:?}"
+        );
+        assert!(
+            names.contains("xmlParseMemory"),
+            "extra marker must match multiple occurrences; got {names:?}"
+        );
+        // Sanity: catalog-supplied markers get the canonical fields
+        // populated (kind, language, cwe) from the OwnedMarkerSpec so
+        // downstream splice + ranking sees them as proper sources.
+        let xml_file = result
+            .sources
+            .iter()
+            .find(|s| s.name == "xmlParseFile")
+            .expect("xmlParseFile must be present");
+        assert_eq!(xml_file.marker, "libxml2.parse");
+        assert_eq!(xml_file.language, "c");
+        assert_eq!(xml_file.cwe, "CWE-120");
+        assert_eq!(xml_file.kind, "source");
+    }
+
+    #[test]
+    fn invalid_extra_marker_pattern_drops_silently_without_crashing() {
+        let files = vec![fixture("c", &["foo(bar);"], "src/x.c")];
+        let extra = vec![
+            OwnedMarkerSpec {
+                pattern: "((".to_string(), // malformed regex
+                cwe: "CWE-120".to_string(),
+                kind: "source".to_string(),
+                languages: vec!["c".to_string()],
+                marker: "broken".to_string(),
+            },
+            OwnedMarkerSpec {
+                pattern: r"\bfoo\(".to_string(),
+                cwe: "CWE-120".to_string(),
+                kind: "source".to_string(),
+                languages: vec!["c".to_string()],
+                marker: "good".to_string(),
+            },
+        ];
+        // Should not panic; the malformed regex is silently dropped and
+        // the good one still fires.
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16, &extra);
+        let markers: std::collections::BTreeSet<&str> =
+            result.sources.iter().map(|s| s.marker.as_str()).collect();
+        assert!(markers.contains("good"));
+        assert!(!markers.contains("broken"));
     }
 }
