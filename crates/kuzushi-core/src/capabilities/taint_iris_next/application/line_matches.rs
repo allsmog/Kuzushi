@@ -2,10 +2,44 @@ use super::*;
 
 pub(crate) fn taint_iris_next_line_matches(line_lower: &str, pattern: &str) -> bool {
     let pattern_lower = pattern.to_ascii_lowercase();
-    if line_lower.contains(&pattern_lower) {
+    if pattern_starts_with_identifier_char(&pattern_lower) {
+        if line_contains_with_identifier_word_boundary(line_lower, &pattern_lower) {
+            return true;
+        }
+    } else if line_lower.contains(&pattern_lower) {
         return true;
     }
     taint_iris_next_alias_match(line_lower, pattern_lower.as_str())
+}
+
+fn line_contains_with_identifier_word_boundary(line: &str, pattern: &str) -> bool {
+    if pattern.is_empty() {
+        return false;
+    }
+
+    let line_bytes = line.as_bytes();
+    let pattern_bytes = pattern.as_bytes();
+    let mut index = 0;
+    while index + pattern_bytes.len() <= line_bytes.len() {
+        if &line_bytes[index..index + pattern_bytes.len()] == pattern_bytes
+            && (index == 0 || !is_identifier_byte(line_bytes[index - 1]))
+        {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+fn pattern_starts_with_identifier_char(pattern: &str) -> bool {
+    pattern
+        .as_bytes()
+        .first()
+        .is_some_and(|byte| is_identifier_byte(*byte))
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 fn taint_iris_next_alias_match(line_lower: &str, pattern: &str) -> bool {
@@ -104,4 +138,45 @@ pub(crate) fn shared_taint_iris_next_tokens(left: &str, right: &str) -> Vec<Stri
         .take(8)
         .cloned()
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn line_matches_enforces_identifier_word_boundary() {
+        assert!(taint_iris_next_line_matches(
+            "    sprintf(buf, \"hi %s\", arg);",
+            "sprintf("
+        ));
+        assert!(!taint_iris_next_line_matches(
+            "    psprintf(\"%u\", stat.blkno);",
+            "sprintf("
+        ));
+        assert!(taint_iris_next_line_matches(
+            "    strcpy(dest, src);",
+            "strcpy("
+        ));
+        assert!(!taint_iris_next_line_matches(
+            "    pg_strcpy(dest, src);",
+            "strcpy("
+        ));
+        assert!(taint_iris_next_line_matches(
+            "    strcat(dest, src);",
+            "strcat("
+        ));
+        assert!(!taint_iris_next_line_matches(
+            "    pg_strcat(dest, src);",
+            "strcat("
+        ));
+        assert!(taint_iris_next_line_matches(
+            "    text *t = pg_getarg_text_pp(0);",
+            "PG_GETARG_TEXT_PP"
+        ));
+        assert!(taint_iris_next_line_matches(
+            "    const x = req.query.foo;",
+            "req.query"
+        ));
+    }
 }

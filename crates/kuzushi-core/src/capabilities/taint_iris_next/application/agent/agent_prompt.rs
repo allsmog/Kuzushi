@@ -62,14 +62,9 @@ pub(in crate::capabilities::taint_iris_next) fn build_taint_iris_next_agent_prom
             story.cwe, story.file_path, story.source_line, story.sink_line, story.rationale
         ));
     }
+    append_sanitizer_bodies_section(&mut lines, plan, evidence);
     lines.push(String::new());
-    lines.push("## False-Positive Patterns".to_string());
-    lines.push(
-        "Before promoting a candidate, reject by-design flows: documented passthrough APIs where the entire caller-supplied SQL/script is intentionally executed, role-gated privileged primitives, superuser-only configuration commands, build/offline tools outside the runtime attack surface, and string-literal arguments to risky sinks.".to_string(),
-    );
-    lines.push(
-        "Use tree-sitter to confirm the surrounding function and argument shape, and use Joern/CodeQL to distinguish a real attacker-controlled fragment flow from an intentional whole-query or privileged operation.".to_string(),
-    );
+    append_false_positive_patterns(&mut lines);
     lines.push(String::new());
     lines.push("## Contract".to_string());
     lines.push(
@@ -81,4 +76,286 @@ pub(in crate::capabilities::taint_iris_next) fn build_taint_iris_next_agent_prom
     ));
     lines.push("- Cite catalogSignals for every selected CWE and every finding.".to_string());
     lines.join("\n")
+}
+
+fn append_false_positive_patterns(lines: &mut Vec<String>) {
+    lines.push("## False-Positive Patterns".to_string());
+    lines.push(
+        "Before promoting a candidate, reject by-design flows only with explicit rationale. Use tree-sitter to read function signatures and Joern/CodeQL to distinguish attacker-controlled fragments from intentional whole-input APIs.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "- Documented passthrough execution: a text/string parameter named sql, sqlquery, query, select_query, cmd, script, or expression passed as the entire input to SPI_execute, SPI_prepare, eval, Function(), exec(), or Runtime.exec is not injection by itself. Real injection requires attacker input to be concatenated or formatted into a larger command/query fragment.".to_string(),
+    );
+    lines.push(
+        "- Role-gated privileged primitives: dlopen, system, or file I/O reachable only after has_privs_of_role, superuser, admin, or role-membership checks can be documented privileged functionality rather than a vulnerability.".to_string(),
+    );
+    lines.push(
+        "- Superuser-only configuration: archive_command, restore_command, shell command settings, and similar operator-only configuration paths are not findings unless the evidence shows unprivileged control.".to_string(),
+    );
+    lines.push(
+        "- Offline tooling: build tools, migration utilities, test harnesses, and argv-only CLI paths outside the runtime attack surface should be rejected unless the evidence ties them to attacker-reachable execution.".to_string(),
+    );
+    lines.push(
+        "- String-literal sink arguments are not attacker-controlled when syntax evidence confirms the risky argument is constant.".to_string(),
+    );
+    lines.push(
+        "- Sanitizer-shaped names are hypotheses, not proof. Before rejecting a corroborated flow because it passes through names such as get_safe_path, check_*, validate_*, sanitize_*, is_safe, or safe_*, inspect the definition for skipped checks, pre-concatenation-only validation, prefix-only whitelists, canonicalization after validation, or trusted branches that still process caller-controlled input. If the body is not inspected, keep the item as a candidate.".to_string(),
+    );
+}
+
+fn append_sanitizer_bodies_section(
+    lines: &mut Vec<String>,
+    plan: &TaintIrisNextPlan,
+    evidence: &TaintIrisNextEvidenceResult,
+) {
+    let bodies = sanitizer_body_candidates(plan, evidence);
+    if bodies.is_empty() {
+        return;
+    }
+
+    lines.push(String::new());
+    lines.push("## Sanitizer Function Bodies".to_string());
+    lines.push(
+        "Audit these sanitizer-shaped functions for bypasses before rejecting linked flows."
+            .to_string(),
+    );
+    for body in bodies {
+        lines.push(String::new());
+        lines.push(format!(
+            "### {} at {}:{}",
+            body.name, body.file_path, body.start_line
+        ));
+        lines.push("```c".to_string());
+        lines.push(body.source);
+        lines.push("```".to_string());
+    }
+}
+
+fn sanitizer_body_candidates(
+    plan: &TaintIrisNextPlan,
+    evidence: &TaintIrisNextEvidenceResult,
+) -> Vec<SanitizerFunctionBody> {
+    let mut files_to_scan = BTreeSet::new();
+    for story in &evidence.linked_stories {
+        files_to_scan.insert(story.file_path.clone());
+    }
+    for row in &evidence.evidence {
+        files_to_scan.insert(row.file_path.clone());
+    }
+
+    let mut bodies = Vec::new();
+    for relative_path in files_to_scan.iter().take(20) {
+        let source_path = plan.scan_root.join(relative_path);
+        let Ok(content) = fs::read_to_string(&source_path) else {
+            continue;
+        };
+        for (name, start_line, source) in extract_sanitizer_function_bodies(&content) {
+            bodies.push(SanitizerFunctionBody {
+                file_path: relative_path.clone(),
+                name,
+                start_line,
+                source,
+            });
+            if bodies.len() >= 8 {
+                return bodies;
+            }
+        }
+    }
+    bodies
+}
+
+struct SanitizerFunctionBody {
+    file_path: String,
+    name: String,
+    start_line: u32,
+    source: String,
+}
+
+fn extract_sanitizer_function_bodies(content: &str) -> Vec<(String, u32, String)> {
+    let lines = content.lines().collect::<Vec<_>>();
+    let mut bodies = Vec::new();
+    let mut index = 0;
+
+    while index < lines.len() {
+        let Some(name) = function_name_from_def_line(lines[index].trim_start()) else {
+            index += 1;
+            continue;
+        };
+        if !is_sanitizer_shaped_name(&name) {
+            index += 1;
+            continue;
+        }
+        let Some((start, end)) = function_body_span(&lines, index) else {
+            index += 1;
+            continue;
+        };
+
+        let capped_end = end.min(index + 60);
+        bodies.push((
+            name,
+            (index + 1) as u32,
+            lines[index..=capped_end].join("\n"),
+        ));
+        if bodies.len() >= 8 {
+            return bodies;
+        }
+        index = start.max(end) + 1;
+    }
+
+    bodies
+}
+
+fn function_body_span(lines: &[&str], definition_line: usize) -> Option<(usize, usize)> {
+    let mut brace_start = None;
+    for index in definition_line..lines.len().min(definition_line + 8) {
+        if lines[index].contains('{') {
+            brace_start = Some(index);
+            break;
+        }
+        if lines[index].trim_end().ends_with(';') {
+            return None;
+        }
+    }
+
+    let start = brace_start?;
+    let mut depth = 0i32;
+    let mut started = false;
+    for (index, line) in lines.iter().enumerate().skip(start) {
+        for byte in line.bytes() {
+            match byte {
+                b'{' => {
+                    depth += 1;
+                    started = true;
+                }
+                b'}' => depth -= 1,
+                _ => {}
+            }
+        }
+        if started && depth <= 0 {
+            return Some((start, index));
+        }
+    }
+    Some((start, lines.len().saturating_sub(1)))
+}
+
+fn function_name_from_def_line(line: &str) -> Option<String> {
+    let paren = line.find('(')?;
+    if paren == 0 {
+        return None;
+    }
+
+    let before_paren = line[..paren].trim_end();
+    let name_start = before_paren
+        .bytes()
+        .rposition(|byte| !(byte.is_ascii_alphanumeric() || byte == b'_'))
+        .map_or(0, |position| position + 1);
+    let name = &before_paren[name_start..];
+    if name.is_empty() || is_control_or_logging_name(name) {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+fn is_control_or_logging_name(name: &str) -> bool {
+    matches!(
+        name,
+        "if" | "while"
+            | "for"
+            | "switch"
+            | "return"
+            | "sizeof"
+            | "elog"
+            | "ereport"
+            | "Assert"
+            | "DEBUG"
+            | "ERROR"
+            | "FATAL"
+            | "WARNING"
+            | "NOTICE"
+    )
+}
+
+fn is_sanitizer_shaped_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.starts_with("check_")
+        || lower.starts_with("validate_")
+        || lower.starts_with("verify_")
+        || lower.starts_with("safe_")
+        || lower.starts_with("sanitize_")
+        || lower.starts_with("escape_")
+        || lower.starts_with("quote_")
+        || lower.starts_with("canonicalize_")
+        || matches!(
+            lower.as_str(),
+            "is_safe" | "is_valid" | "is_safe_path" | "is_authorized"
+        )
+        || lower.contains("_safe_")
+        || lower.contains("_safer_")
+        || lower.contains("get_safe")
+        || lower.contains("ensure_")
+}
+
+#[cfg(test)]
+mod sanitizer_body_tests {
+    use super::*;
+
+    #[test]
+    fn extracts_sanitizer_body_from_orafce_style_source() {
+        let source = r#"
+static char *
+get_safe_path(text *location, text *filename)
+{
+    char *fullname;
+    bool check_locality;
+    if (safe_named_location(location))
+    {
+        fullname = build(location, filename);
+        check_locality = false;
+    }
+    else
+    {
+        fullname = build(location, filename);
+        check_locality = true;
+    }
+    canonicalize_path(fullname);
+    if (check_locality)
+        check_secure_locality(fullname);
+    return fullname;
+}
+
+static void
+utl_file_fopen(int x)
+{
+    return;
+}
+"#;
+
+        let bodies = extract_sanitizer_function_bodies(source);
+        let (_, _, body) = bodies
+            .iter()
+            .find(|(name, _, _)| name == "get_safe_path")
+            .expect("get_safe_path should be extracted");
+
+        assert!(body.contains("check_locality = false"), "{body}");
+        assert!(body.contains("canonicalize_path"), "{body}");
+        assert!(!bodies.iter().any(|(name, _, _)| name == "utl_file_fopen"));
+    }
+
+    #[test]
+    fn name_classification_only_flags_sanitizer_shapes() {
+        assert!(is_sanitizer_shaped_name("check_locality"));
+        assert!(is_sanitizer_shaped_name("get_safe_path"));
+        assert!(is_sanitizer_shaped_name("safe_named_location"));
+        assert!(is_sanitizer_shaped_name("validate_filename"));
+        assert!(is_sanitizer_shaped_name("escape_string"));
+        assert!(is_sanitizer_shaped_name("quote_identifier"));
+        assert!(is_sanitizer_shaped_name("canonicalize_path"));
+        assert!(is_sanitizer_shaped_name("ensure_directory_exists"));
+
+        assert!(!is_sanitizer_shaped_name("utl_file_fopen"));
+        assert!(!is_sanitizer_shaped_name("strcpy"));
+        assert!(!is_sanitizer_shaped_name("appendStringInfo"));
+        assert!(!is_sanitizer_shaped_name("PG_GETARG_TEXT_PP"));
+    }
 }
