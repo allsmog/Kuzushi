@@ -74,6 +74,68 @@ pub(in crate::modules::taint_iris_next) fn build_taint_iris_next_agent_prompt(
         ));
     }
     lines.push(String::new());
+    lines.push("## False-Positive Patterns (apply BEFORE promoting to finding)".to_string());
+    lines.push(
+        "Some apparent source→sink flows are by-design APIs, not vulnerabilities. \
+         Recognise these patterns dynamically and downgrade to candidate or rejected \
+         (with rationale) instead of promoting to finding:".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "**Documented passthrough SQL execution.** A function whose contract IS \
+         \"execute the SQL the caller provides\" is not SQL injection — SPI / \
+         exec / eval respects the caller's privileges. Signals: a `text` / `string` \
+         parameter named like `sql`, `sqlquery`, `query`, `select_query`, `cmd`, \
+         `script`, `expression` is passed AS THE ENTIRE INPUT to SPI_execute / \
+         SPI_prepare / eval / Function() / exec() / Runtime.exec — no \
+         concatenation, no format string. Examples: postgres `crosstab(text)`, \
+         `ts_rewrite(query, select_query)`, `ts_stat(sqlquery)`, `dblink_exec`; \
+         JS `vm.runInNewContext(userScript)`; Python `pandas.eval(expr)`. \
+         **Real injection** requires the user input to be CONCATENATED into a \
+         SQL/command string (e.g. `appendStringInfo(buf, \"SELECT * FROM %s\", \
+         user_text)` then `SPI_execute(buf)`); the user controls a FRAGMENT, not \
+         the whole query.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "**Role-gated privileged primitives.** `dlopen` / `system` / file I/O \
+         reachable only after a `has_privs_of_role(...)` / `superuser()` / role \
+         membership check is documented privileged functionality, not a \
+         vulnerability. The check restricts WHO can call the API; reaching the \
+         sink from a SQL session means the operator already granted that role.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "**Configuration GUCs / superuser-only settings.** `archive_command`, \
+         `restore_command`, `shell_archive_command`, and other superuser-only \
+         GUCs are documented as shell-executing settings configurable only by \
+         the operator. Reaching `system()` / `OpenPipeStream()` from a GUC is \
+         not injection.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "**Build tools / offline binaries.** Code under `src/tools/`, \
+         `src/bin/pg_upgrade/`, `pg_bsd_indent/`, build scripts, and CLI \
+         utilities that accept `argv` is not part of the server's runtime \
+         attack surface. argv-derived filenames in CLI tools are not SQL-\
+         reachable sources.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "**String-literal arguments to risky sinks.** Tree-sitter confirms the \
+         argument is a string literal (e.g. `system(\"locale -a\")`, \
+         `LoadLibrary(\"netmsg.dll\")`) → not attacker-controlled.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "For each candidate that LOOKS like a textbook injection / privesc \
+         flow, run through these patterns before promoting. Use \
+         `tree_sitter:node_at` to read the function signature (parameter \
+         names) and `joern.callers_of` to see who invokes the function. \
+         A finding requires the flow to NOT match any of these by-design \
+         patterns.".to_string(),
+    );
+    lines.push(String::new());
     lines.push("## Contract".to_string());
     lines.push(
         "- Return strict JSON matching { selectedCwes, findings, triage, notes }.".to_string(),
