@@ -15,7 +15,6 @@ mod support;
 mod tests;
 mod tool_requirements;
 mod tool_run_artifacts;
-mod wants_sast_runtime;
 
 #[tokio::main]
 async fn main() -> Result<()> {

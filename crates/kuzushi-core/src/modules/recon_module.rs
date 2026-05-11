@@ -34,6 +34,7 @@ pub(crate) fn recon_module() -> BuiltinModule {
                         OptionType::Int,
                         "HTTP fetch timeout in seconds.",
                     )
+                    .aliases(&["timeout_seconds"])
                     .default(json!(20)),
                     binary_option("curl binary path."),
                 ],
@@ -48,6 +49,7 @@ pub(crate) fn recon_module() -> BuiltinModule {
                         OptionType::Int,
                         "HTTP fetch timeout in seconds.",
                     )
+                    .aliases(&["timeout_seconds"])
                     .default(json!(10)),
                     binary_option("curl binary path."),
                 ],

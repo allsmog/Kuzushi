@@ -1,20 +1,21 @@
 use crate::command::ScanModeArg;
 use crate::presentation::{emit_scan_ci_start, emit_scan_output, scan_result_or_report_ci_error};
 use crate::scan_budget::apply_scan_budget_caps;
-use crate::wants_sast_runtime::wants_sast_runtime;
 use anyhow::{Context, Result};
+use kuzushi_core::modules::wants_sast_runtime;
 use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::{
-    load_config_for_target, AgentRuntime, FindingStore, ModuleRegistry, WorkspaceTarget,
+    load_config_for_target, AgentRuntime, FindingStore, ModuleRegistry, ToolOptionStore,
+    WorkspaceTarget,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
 use std::path::PathBuf;
 
 pub(crate) async fn scan_command(
     target: PathBuf,
-    mode: ScanModeArg,
+    mode: Option<ScanModeArg>,
     tasks: Vec<String>,
-    triage: bool,
+    triage: Option<bool>,
     json: bool,
     ci: bool,
     budget: Option<String>,
@@ -28,7 +29,12 @@ pub(crate) async fn scan_command(
 
     apply_scan_since_scope(&workspace, since.as_deref(), include_worktree, json, ci)?;
     apply_scan_budget_caps(&workspace, budget.as_deref(), json, ci)?;
-    let input = scan_tool_input(mode, &tasks, triage);
+    let option_store = scan_option_store(&workspace)?;
+    let input = registry.prepare_tool_input(
+        "sast:scan",
+        scan_tool_input(mode, &tasks, triage),
+        Some(&option_store),
+    )?;
     let runtime = scan_runtime(&config, &input)?;
     let ctx = ToolExecutionContext {
         config: &config,
@@ -99,24 +105,30 @@ pub(crate) fn scan_worktree_suffix(include_worktree: bool) -> &'static str {
 }
 
 pub(crate) fn scan_tool_input(
-    mode: ScanModeArg,
+    mode: Option<ScanModeArg>,
     tasks: &[String],
-    triage: bool,
+    triage: Option<bool>,
 ) -> serde_json::Value {
-    serde_json::json!({
-        "mode": mode.as_input_value(),
-        "taskMode": scan_task_mode(tasks),
-        "tasks": tasks,
-        "triage": triage,
-    })
+    let mut input = serde_json::Map::new();
+    if let Some(mode) = mode {
+        input.insert("mode".to_string(), serde_json::json!(mode.as_input_value()));
+    }
+    if !tasks.is_empty() {
+        input.insert("taskMode".to_string(), serde_json::json!("manual"));
+        input.insert("tasks".to_string(), serde_json::json!(tasks));
+    }
+    if let Some(triage) = triage {
+        input.insert("triage".to_string(), serde_json::json!(triage));
+    }
+    serde_json::Value::Object(input)
 }
 
-pub(crate) fn scan_task_mode(tasks: &[String]) -> &'static str {
-    if tasks.is_empty() {
-        "auto"
-    } else {
-        "manual"
-    }
+pub(crate) fn scan_option_store(workspace: &WorkspaceTarget) -> Result<ToolOptionStore> {
+    let paths = kuzushi_core::ConfigPaths::from_target(Some(workspace.root()))?;
+    ToolOptionStore::load_persistent(
+        &paths.global_options_path(),
+        paths.project_options_path().as_deref(),
+    )
 }
 
 pub(crate) fn scan_runtime(

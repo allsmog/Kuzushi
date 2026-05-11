@@ -38,9 +38,9 @@ pub use crate::run_artifacts::{
 };
 pub use crate::runtime::{
     append_structured_output_contract, run_tool_loop, AgentLoopOutcome, AgentLoopStep,
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentStructuredOutput, AgentTool,
-    AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry, ModelTier, SubagentRole, ToolBox,
-    ToolCall, ToolCallHandler, ToolResult, TriageRequest,
+    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
+    AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry,
+    ModelTier, SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult, TriageRequest,
 };
 pub use crate::workspace::{
     export_workspace_findings, workspace_status_for_target, WorkspaceExportFormat,

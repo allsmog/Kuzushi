@@ -22,7 +22,8 @@ pub(in crate::modules) fn module() -> BuiltinModule {
                         "diffBase",
                         OptionType::String,
                         "Git reference for PR hot-path review.",
-                    ),
+                    )
+                    .aliases(&["diff_base"]),
                 ],
             ),
         ],

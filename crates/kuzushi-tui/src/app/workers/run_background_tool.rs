@@ -13,7 +13,7 @@ pub(crate) fn run_background_tool(
     } else {
         None
     };
-    let runtime = if tool_uses_agent_runtime(tool_name) {
+    let runtime = if tool_uses_agent_runtime_for(tool_name, &input) {
         Some(
             PiAgentCoreRuntime::from_config(
                 &config,
@@ -35,6 +35,13 @@ pub(crate) fn run_background_tool(
         &ctx,
         runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
     )
+}
+
+pub(crate) fn tool_uses_agent_runtime_for(tool_name: &str, input: &serde_json::Value) -> bool {
+    if tool_name == "sast:scan" {
+        return kuzushi_core::modules::wants_sast_runtime(input);
+    }
+    tool_uses_agent_runtime(tool_name)
 }
 
 pub(crate) fn tool_requires_findings_store(tool_name: &str) -> bool {
@@ -99,7 +106,6 @@ pub(crate) fn tool_uses_agent_runtime(tool_name: &str) -> bool {
             | "systems-hunt:deep-semantic-hunt"
             | "taint-iris:hunt"
             | "taint-iris-next:hunt"
-            | "sast:scan"
             | "threat-model:build"
             | "randori:pasta"
             | "x-ray:run"

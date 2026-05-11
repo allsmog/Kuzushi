@@ -60,8 +60,7 @@ pub(crate) fn run_taint_iris_next_hunt(
 ) -> Result<TaintIrisNextReport> {
     let runtime = require_taint_iris_next_runtime(runtime)?;
     let model = require_taint_iris_next_model(input, ctx)?;
-    apply_taint_iris_next_mcp_options(input);
-    apply_taint_iris_next_joern_timeout_default(input, &plan.backend.selected);
+    let runtime_options = taint_iris_next_runtime_options(input, &plan.backend.selected);
     let mcps_enabled = read_bool_option(input, "mcps").unwrap_or(true);
     let agent_tool_policy = agent_tool_policy_for_input(input)?.with_mcps(mcps_enabled);
     let mut agent = run_taint_iris_next_agent(
@@ -71,6 +70,7 @@ pub(crate) fn run_taint_iris_next_hunt(
         runtime,
         &model,
         agent_tool_policy,
+        runtime_options,
     )?;
     let mut findings = agent.findings.clone();
     if whitebox_static_profile_requested(input)? {
@@ -145,50 +145,46 @@ pub(crate) fn require_taint_iris_next_runtime<'a>(
     )
 }
 
-pub(in crate::capabilities::taint_iris_next) fn apply_taint_iris_next_mcp_options(input: &Value) {
-    apply_path_option_env(input, "joernCpg", "KUZUSHI_JOERN_CPG");
-    apply_path_option_env(input, "joern_cpg", "KUZUSHI_JOERN_CPG");
-    apply_int_option_env(
-        input,
-        "joernPerCweTimeoutMs",
-        "KUZUSHI_JOERN_PER_CWE_TIMEOUT_MS",
-    );
-    apply_int_option_env(
-        input,
-        "joern_per_cwe_timeout_ms",
-        "KUZUSHI_JOERN_PER_CWE_TIMEOUT_MS",
-    );
-    apply_bool_option_env(input, "codeqlPrewarm", "KUZUSHI_CODEQL_PREWARM");
-    apply_bool_option_env(input, "codeql_prewarm", "KUZUSHI_CODEQL_PREWARM");
-    apply_path_option_env(input, "codeqlCacheDir", "KUZUSHI_CODEQL_CACHE_DIR");
-    apply_path_option_env(input, "codeql_cache_dir", "KUZUSHI_CODEQL_CACHE_DIR");
-    apply_int_option_env(input, "mcpToolTimeoutMs", "KUZUSHI_MCP_TOOL_TIMEOUT_MS");
-    apply_int_option_env(input, "mcp_tool_timeout_ms", "KUZUSHI_MCP_TOOL_TIMEOUT_MS");
-    apply_bool_option_env(input, "bridgeVerbose", "KUZUSHI_BRIDGE_VERBOSE");
-    apply_bool_option_env(input, "bridge_verbose", "KUZUSHI_BRIDGE_VERBOSE");
-    apply_path_option_env(input, "bridgeLogPath", "KUZUSHI_BRIDGE_LOG");
-    apply_path_option_env(input, "bridge_log_path", "KUZUSHI_BRIDGE_LOG");
-}
-
 const JOERN_DEFAULT_MCP_TOOL_TIMEOUT_MS: &str = "180000";
 
-pub(in crate::capabilities::taint_iris_next) fn apply_taint_iris_next_joern_timeout_default(
+pub(in crate::capabilities::taint_iris_next) fn taint_iris_next_runtime_options(
     input: &Value,
     selected_backend: &str,
-) {
-    if !joern_reachable_from_agent(input, selected_backend) {
-        return;
-    }
-    if std::env::var_os("KUZUSHI_MCP_TOOL_TIMEOUT_MS").is_some() {
-        return;
-    }
-    if input.get("mcpToolTimeoutMs").is_some() || input.get("mcp_tool_timeout_ms").is_some() {
-        return;
-    }
-    std::env::set_var(
-        "KUZUSHI_MCP_TOOL_TIMEOUT_MS",
-        JOERN_DEFAULT_MCP_TOOL_TIMEOUT_MS,
+) -> Option<AgentRuntimeOptions> {
+    let mut options = AgentRuntimeOptions::default();
+    insert_path_option(
+        &mut options.mcp_environment,
+        input,
+        &["joernCpg", "joern_cpg"],
+        "KUZUSHI_JOERN_CPG",
     );
+    insert_int_option(
+        &mut options.mcp_environment,
+        input,
+        &["joernPerCweTimeoutMs", "joern_per_cwe_timeout_ms"],
+        "KUZUSHI_JOERN_PER_CWE_TIMEOUT_MS",
+    );
+    insert_bool_option(
+        &mut options.mcp_environment,
+        input,
+        &["codeqlPrewarm", "codeql_prewarm"],
+        "KUZUSHI_CODEQL_PREWARM",
+    );
+    insert_path_option(
+        &mut options.mcp_environment,
+        input,
+        &["codeqlCacheDir", "codeql_cache_dir"],
+        "KUZUSHI_CODEQL_CACHE_DIR",
+    );
+    options.mcp_tool_timeout_ms =
+        read_u64_option(input, &["mcpToolTimeoutMs", "mcp_tool_timeout_ms"]);
+    if options.mcp_tool_timeout_ms.is_none() && joern_reachable_from_agent(input, selected_backend)
+    {
+        options.mcp_tool_timeout_ms = JOERN_DEFAULT_MCP_TOOL_TIMEOUT_MS.parse::<u64>().ok();
+    }
+    options.bridge_verbose = read_bool_alias(input, &["bridgeVerbose", "bridge_verbose"]);
+    options.bridge_log_path = read_string_option(input, &["bridgeLogPath", "bridge_log_path"]);
+    (!options.is_empty()).then_some(options)
 }
 
 fn joern_reachable_from_agent(input: &Value, selected_backend: &str) -> bool {
@@ -200,40 +196,64 @@ fn joern_reachable_from_agent(input: &Value, selected_backend: &str) -> bool {
     {
         return true;
     }
-    std::env::var_os("KUZUSHI_JOERN_CPG").is_some()
+    false
 }
 
-fn apply_bool_option_env(input: &Value, key: &str, env: &str) {
-    if std::env::var_os(env).is_some() {
-        return;
-    }
-    if let Some(value) = read_bool_option(input, key) {
-        std::env::set_var(env, if value { "1" } else { "0" });
-    }
-}
-
-fn apply_int_option_env(input: &Value, key: &str, env: &str) {
-    if std::env::var_os(env).is_some() {
-        return;
-    }
-    if let Some(value) = input.get(key).and_then(Value::as_i64) {
-        std::env::set_var(env, value.to_string());
-    } else if let Some(value) = input.get(key).and_then(Value::as_str) {
-        let value = value.trim();
-        if !value.is_empty() {
-            std::env::set_var(env, value);
-        }
+fn insert_bool_option(
+    values: &mut BTreeMap<String, String>,
+    input: &Value,
+    aliases: &[&str],
+    env_key: &str,
+) {
+    if let Some(value) = read_bool_alias(input, aliases) {
+        values.insert(
+            env_key.to_string(),
+            if value { "1" } else { "0" }.to_string(),
+        );
     }
 }
 
-fn apply_path_option_env(input: &Value, key: &str, env: &str) {
-    if std::env::var_os(env).is_some() {
-        return;
+fn insert_int_option(
+    values: &mut BTreeMap<String, String>,
+    input: &Value,
+    aliases: &[&str],
+    env_key: &str,
+) {
+    if let Some(value) = read_u64_option(input, aliases) {
+        values.insert(env_key.to_string(), value.to_string());
     }
-    if let Some(value) = input.get(key).and_then(Value::as_str) {
-        let value = value.trim();
-        if !value.is_empty() {
-            std::env::set_var(env, value);
-        }
+}
+
+fn insert_path_option(
+    values: &mut BTreeMap<String, String>,
+    input: &Value,
+    aliases: &[&str],
+    env_key: &str,
+) {
+    if let Some(value) = read_string_option(input, aliases) {
+        values.insert(env_key.to_string(), value);
     }
+}
+
+fn read_u64_option(input: &Value, aliases: &[&str]) -> Option<u64> {
+    aliases.iter().find_map(|key| match input.get(*key) {
+        Some(Value::Number(value)) => value.as_u64(),
+        Some(Value::String(value)) => value.trim().parse::<u64>().ok(),
+        _ => None,
+    })
+}
+
+fn read_bool_alias(input: &Value, aliases: &[&str]) -> Option<bool> {
+    aliases.iter().find_map(|key| read_bool_option(input, key))
+}
+
+fn read_string_option(input: &Value, aliases: &[&str]) -> Option<String> {
+    aliases.iter().find_map(|key| {
+        input
+            .get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    })
 }

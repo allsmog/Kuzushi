@@ -25,9 +25,11 @@ mod tests {
                 opt("target", OptionType::Path, "path option").required(),
                 opt("label", OptionType::String, "string option"),
                 opt("tags", OptionType::StringList, "string-list option"),
+                opt("payload", OptionType::Json, "structured option"),
                 opt("mode", OptionType::Enum, "enum option")
                     .choices(&["auto", "manual"])
                     .default(json!("auto")),
+                opt("maxFindings", OptionType::Int, "aliased option").aliases(&["max_findings"]),
             ],
         );
 
@@ -40,8 +42,9 @@ mod tests {
                 "target": "./repo",
                 "label": "baseline",
                 "tags": ["one", "two"],
+                "payload": {"nested": true},
                 "mode": "manual",
-                "extra": {"left": "untouched"}
+                "max_findings": "7"
             }),
         )
         .unwrap();
@@ -51,8 +54,10 @@ mod tests {
         assert_eq!(validated["target"], json!("./repo"));
         assert_eq!(validated["label"], json!("baseline"));
         assert_eq!(validated["tags"], json!(["one", "two"]));
+        assert_eq!(validated["payload"], json!({"nested": true}));
         assert_eq!(validated["mode"], json!("manual"));
-        assert_eq!(validated["extra"], json!({"left": "untouched"}));
+        assert_eq!(validated["maxFindings"], json!(7));
+        assert_eq!(validated.get("max_findings"), None);
 
         let with_defaults = validate_tool_input_options(
             &descriptor,
@@ -65,6 +70,33 @@ mod tests {
         assert_eq!(with_defaults["enabled"], json!(false));
         assert_eq!(with_defaults["limit"], json!(10));
         assert_eq!(with_defaults["mode"], json!("auto"));
+    }
+
+    #[test]
+    fn rejects_unknown_options_with_declared_option_hint() {
+        let descriptor = tool_with_options(
+            "test:demo",
+            "exercise strict option validation",
+            vec![
+                opt("target", OptionType::Path, "path option").required(),
+                opt("maxFindings", OptionType::Int, "aliased option").aliases(&["max_findings"]),
+            ],
+        );
+
+        let error = validate_tool_input_options(
+            &descriptor,
+            json!({
+                "target": "./repo",
+                "extra": true
+            }),
+        )
+        .unwrap_err();
+        let error = format!("{error:#}");
+
+        assert!(error.contains("unknown option \"extra\""), "{error}");
+        assert!(error.contains("target"), "{error}");
+        assert!(error.contains("maxFindings"), "{error}");
+        assert!(error.contains("max_findings"), "{error}");
     }
 
     #[test]
@@ -99,6 +131,7 @@ mod tests {
                 json!({"target": "./repo", "mode": "toggle"}),
                 "must be one of auto|manual",
             ),
+            (json!({"target": "./repo", "extra": true}), "unknown option"),
         ] {
             let error = validate_tool_input_options(&descriptor, input).unwrap_err();
             let error = format!("{error:#}");

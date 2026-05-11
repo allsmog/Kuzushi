@@ -46,6 +46,21 @@ pub(crate) fn variant_module() -> BuiltinModule {
                     target_option(),
                     fingerprint_option(),
                     max_findings_option(25),
+                    opt(
+                        "includeVendored",
+                        OptionType::Bool,
+                        "Include vendored and third-party paths in the hunt scope.",
+                    )
+                    .aliases(&["include_vendored"])
+                    .default(json!(true))
+                    .advanced(),
+                    opt(
+                        "vendorPaths",
+                        OptionType::StringList,
+                        "Vendor path patterns for variant scope control.",
+                    )
+                    .aliases(&["vendor_paths"])
+                    .advanced(),
                     model_option(),
                 ],
             ),
@@ -64,17 +79,69 @@ pub(crate) fn ndiff_module() -> BuiltinModule {
             tool_with_options(
                 "ndiff:fetch-cve",
                 "Fetch CVE and patch metadata.",
-                vec![opt("id", OptionType::String, "CVE or advisory id to fetch.").required()],
+                vec![
+                    opt("id", OptionType::String, "CVE or advisory id to fetch.").required(),
+                    opt(
+                        "offline",
+                        OptionType::Bool,
+                        "Use only supplied advisory fixtures.",
+                    )
+                    .default(json!(false))
+                    .advanced(),
+                    opt("record", OptionType::Json, "Inline advisory record JSON.").advanced(),
+                    opt(
+                        "fixtures",
+                        OptionType::Json,
+                        "Offline advisory fixture JSON.",
+                    )
+                    .advanced(),
+                    binary_option("curl binary path."),
+                ],
             ),
             tool_with_options(
                 "ndiff:extract-fix-pattern",
                 "Extract a vulnerability fix pattern from a patch.",
-                vec![model_option()],
+                vec![
+                    target_option(),
+                    opt("record", OptionType::Json, "Advisory record JSON.").advanced(),
+                    opt("patchText", OptionType::String, "Patch text to analyze.")
+                        .aliases(&["patch_text"])
+                        .advanced(),
+                    opt("patchPath", OptionType::Path, "Patch file to analyze.")
+                        .aliases(&["patch_path"])
+                        .advanced(),
+                    opt("patchUrl", OptionType::String, "Patch URL to fetch.")
+                        .aliases(&["patch_url"])
+                        .advanced(),
+                    opt(
+                        "thinkingLevel",
+                        OptionType::String,
+                        "Runtime thinking-level hint.",
+                    )
+                    .aliases(&["thinking_level"])
+                    .advanced(),
+                    model_option(),
+                ],
             ),
             tool_with_options(
                 "ndiff:hunt-variants",
                 "Hunt variants using an extracted n-day fix pattern.",
-                vec![target_option(), max_findings_option(25), model_option()],
+                vec![
+                    target_option(),
+                    max_findings_option(25),
+                    opt("advisoryId", OptionType::String, "CVE or advisory id.")
+                        .aliases(&["advisory_id", "cve"])
+                        .advanced(),
+                    opt("pattern", OptionType::Json, "Extracted fix pattern JSON.").advanced(),
+                    opt("record", OptionType::Json, "Advisory record JSON.").advanced(),
+                    opt(
+                        "fixtures",
+                        OptionType::Json,
+                        "Offline advisory fixture JSON.",
+                    )
+                    .advanced(),
+                    model_option(),
+                ],
             ),
         ],
         vec![dag(
@@ -95,12 +162,66 @@ pub(crate) fn randori_module() -> BuiltinModule {
             tool_with_options(
                 "randori:pasta",
                 "Generate a PASTA threat model.",
-                vec![target_option(), model_option()],
+                vec![
+                    target_option(),
+                    opt(
+                        "outputDir",
+                        OptionType::Path,
+                        "Directory for randori PASTA artifacts.",
+                    )
+                    .aliases(&["output_dir"])
+                    .advanced(),
+                    opt("slice", OptionType::Enum, "Threat-model slice to generate.")
+                        .choices(&["all", "dfd", "stride", "stories", "scope", "scenarios"])
+                        .default(json!("all"))
+                        .advanced(),
+                    opt("stages", OptionType::StringList, "PASTA stages to generate.")
+                        .advanced(),
+                    opt("maxElements", OptionType::Int, "Maximum model elements.")
+                        .aliases(&["max_elements"])
+                        .default(json!(40))
+                        .advanced(),
+                    opt("maxThreats", OptionType::Int, "Maximum threats.")
+                        .aliases(&["max_threats"])
+                        .default(json!(30))
+                        .advanced(),
+                    opt("emitFindings", OptionType::Bool, "Persist threats as findings.")
+                        .aliases(&["emit_findings"])
+                        .default(json!(false))
+                        .advanced(),
+                    opt(
+                        "preserveUserEdits",
+                        OptionType::Bool,
+                        "Preserve existing user-edited threat model.",
+                    )
+                    .aliases(&["preserve_user_edits"])
+                    .default(json!(true))
+                    .advanced(),
+                    model_option(),
+                ],
             ),
             tool_with_options(
                 "randori:threat-model",
                 "Generate a randori threat model.",
-                vec![target_option(), model_option()],
+                vec![
+                    target_option(),
+                    opt(
+                        "outputDir",
+                        OptionType::Path,
+                        "Directory containing randori artifacts.",
+                    )
+                    .aliases(&["output_dir"])
+                    .required(),
+                    opt(
+                        "methodology",
+                        OptionType::Enum,
+                        "Threat-model methodology overlay.",
+                    )
+                    .aliases(&["type"])
+                    .choices(&["pasta", "stride", "dread"])
+                    .default(json!("pasta")),
+                    model_option(),
+                ],
             ),
         ],
         vec![dag(

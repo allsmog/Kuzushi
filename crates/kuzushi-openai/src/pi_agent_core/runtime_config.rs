@@ -1,6 +1,5 @@
 use anyhow::Result;
 use kuzushi_core::{RuntimeConfig, V2Config};
-use std::env;
 use std::path::Path;
 
 use super::bridge_process::default_bridge_command;
@@ -31,7 +30,7 @@ impl PiAgentCoreRuntime {
             anyhow::bail!("pi-agent-core bridge command is empty");
         }
 
-        let api_key = env::var(&runtime.api_key_env)
+        let api_key = std::env::var(&runtime.api_key_env)
             .ok()
             .filter(|value| !value.trim().is_empty());
 
@@ -40,8 +39,9 @@ impl PiAgentCoreRuntime {
             api_key_env: runtime.api_key_env.clone(),
             api_key,
             base_url: runtime.base_url.clone(),
-            thinking_level: env::var("KUZUSHI_THINKING_LEVEL")
-                .ok()
+            thinking_level: runtime
+                .thinking_level
+                .clone()
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
         })

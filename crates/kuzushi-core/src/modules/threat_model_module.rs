@@ -19,12 +19,63 @@ pub(crate) fn threat_model_module() -> BuiltinModule {
                     )
                     .choices(&["pasta", "stride", "dread"])
                     .default(json!("stride")),
+                    opt(
+                        "outputDir",
+                        OptionType::Path,
+                        "Directory for normalized threat-model artifacts.",
+                    )
+                    .aliases(&["output_dir"])
+                    .advanced(),
+                    opt("slice", OptionType::Enum, "Threat-model slice to generate.")
+                        .choices(&["all", "dfd", "stride", "stories", "scope", "scenarios"])
+                        .default(json!("all"))
+                        .advanced(),
+                    opt("stages", OptionType::StringList, "PASTA stages to generate.")
+                        .advanced(),
+                    opt("maxElements", OptionType::Int, "Maximum model elements.")
+                        .aliases(&["max_elements"])
+                        .default(json!(40))
+                        .advanced(),
+                    opt("maxThreats", OptionType::Int, "Maximum threats.")
+                        .aliases(&["max_threats"])
+                        .default(json!(30))
+                        .advanced(),
+                    opt("emitFindings", OptionType::Bool, "Persist threats as findings.")
+                        .aliases(&["emit_findings"])
+                        .default(json!(false))
+                        .advanced(),
+                    opt(
+                        "preserveUserEdits",
+                        OptionType::Bool,
+                        "Preserve existing user-edited threat model.",
+                    )
+                    .aliases(&["preserve_user_edits"])
+                    .default(json!(true))
+                    .advanced(),
                     model_option(),
                 ],
             ),
-            tool(
+            tool_with_options(
                 "threat-model:read",
                 "Read the current threat model artifact.",
+                vec![
+                    target_option(),
+                    opt(
+                        "outputDir",
+                        OptionType::Path,
+                        "Directory containing threat-model artifacts.",
+                    )
+                    .aliases(&["output_dir"])
+                    .required(),
+                    opt(
+                        "methodology",
+                        OptionType::Enum,
+                        "Threat-model methodology overlay.",
+                    )
+                    .aliases(&["type"])
+                    .choices(&["pasta", "stride", "dread"])
+                    .default(json!("pasta")),
+                ],
             ),
             tool(
                 "threat-model:methodologies",
@@ -63,6 +114,7 @@ pub(crate) fn x_ray_module() -> BuiltinModule {
                         OptionType::Float,
                         "Maximum runtime budget for the X-Ray request.",
                     )
+                    .aliases(&["max_budget_usd"])
                     .advanced(),
                 ],
             ),
@@ -103,6 +155,7 @@ pub(crate) fn secret_scan_module() -> BuiltinModule {
                     OptionType::Int,
                     "Maximum file size to scan.",
                 )
+                .aliases(&["max_file_bytes"])
                 .default(json!(524288)),
                 max_findings_option(1000),
             ],

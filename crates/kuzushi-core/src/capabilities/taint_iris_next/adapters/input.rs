@@ -8,7 +8,6 @@ impl TaintIrisNextInput {
         let caps = taint_iris_next_caps(input)?;
         let allow_deterministic_fallback = read_bool_option(input, "allowDeterministicFallback")
             .or_else(|| read_bool_option(input, "allow_deterministic_fallback"))
-            .or_else(allow_deterministic_fallback_env)
             .unwrap_or(false);
         Ok(Self {
             mode,
@@ -23,13 +22,6 @@ impl TaintIrisNextInput {
             allow_deterministic_fallback,
         })
     }
-}
-
-fn allow_deterministic_fallback_env() -> Option<bool> {
-    std::env::var("KUZUSHI_TAINT_IRIS_NEXT_ALLOW_DETERMINISTIC_FALLBACK")
-        .ok()
-        .as_deref()
-        .and_then(parse_bool_text)
 }
 
 fn taint_iris_next_backend(input: &Value) -> Result<String> {

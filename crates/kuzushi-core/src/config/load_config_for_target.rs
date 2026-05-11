@@ -7,6 +7,7 @@ pub(crate) struct PartialRuntimeConfig {
     pub(crate) api_key_env: Option<String>,
     pub(crate) base_url: Option<Option<String>>,
     pub(crate) agent_bridge_command: Option<Option<Vec<String>>>,
+    pub(crate) thinking_level: Option<Option<String>>,
     pub(crate) anthropic_oauth: Option<Option<AnthropicOauthConfig>>,
 }
 
@@ -88,6 +89,9 @@ pub(crate) fn merge_config(config: &mut V2Config, patch: PartialConfig) {
         }
         if let Some(agent_bridge_command) = runtime.agent_bridge_command {
             config.runtime.agent_bridge_command = agent_bridge_command;
+        }
+        if let Some(thinking_level) = runtime.thinking_level {
+            config.runtime.thinking_level = thinking_level;
         }
         if let Some(anthropic_oauth) = runtime.anthropic_oauth {
             config.runtime.anthropic_oauth = anthropic_oauth;

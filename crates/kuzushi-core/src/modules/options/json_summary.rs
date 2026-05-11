@@ -18,7 +18,7 @@ pub(in crate::modules) fn validate_tool_input_options(
         return Ok(input);
     }
 
-    let mut object = match input {
+    let object = match input {
         Value::Null => Map::new(),
         Value::Object(object) => object,
         other => {
@@ -29,26 +29,72 @@ pub(in crate::modules) fn validate_tool_input_options(
             );
         }
     };
+    let mut object = canonicalize_tool_option_keys(tool, object)?;
+    let mut validated = Map::new();
 
     for spec in &tool.options {
         match object.remove(&spec.name) {
             Some(value) => {
                 let coerced = coerce_option_value(spec, value)
                     .with_context(|| format!("{} option {}", tool.name, spec.name))?;
-                object.insert(spec.name.clone(), coerced);
+                validated.insert(spec.name.clone(), coerced);
             }
             None if spec.required => {
                 anyhow::bail!("{} requires option {}", tool.name, spec.name);
             }
             None => {
                 if let Some(default) = spec.default.clone() {
-                    object.insert(spec.name.clone(), default);
+                    validated.insert(spec.name.clone(), default);
                 }
             }
         }
     }
 
-    Ok(Value::Object(object))
+    reject_unknown_tool_options(tool, &object)?;
+    Ok(Value::Object(validated))
+}
+
+fn canonicalize_tool_option_keys(
+    tool: &ToolDescriptor,
+    object: Map<String, Value>,
+) -> Result<Map<String, Value>> {
+    let mut canonical = Map::new();
+    for (name, value) in object {
+        let spec = option_spec_for_input_key(tool, &name)
+            .with_context(|| unknown_tool_option_message(tool, &name))?;
+        if name == spec.name || !canonical.contains_key(&spec.name) {
+            canonical.insert(spec.name.clone(), value);
+        }
+    }
+    Ok(canonical)
+}
+
+fn option_spec_for_input_key<'a>(tool: &'a ToolDescriptor, name: &str) -> Option<&'a OptionSpec> {
+    tool.options
+        .iter()
+        .find(|spec| spec.matches_name_or_alias(name))
+}
+
+fn reject_unknown_tool_options(tool: &ToolDescriptor, object: &Map<String, Value>) -> Result<()> {
+    if let Some(name) = object.keys().next() {
+        anyhow::bail!("{}", unknown_tool_option_message(tool, name));
+    }
+    Ok(())
+}
+
+fn unknown_tool_option_message(tool: &ToolDescriptor, name: &str) -> String {
+    let choices = tool
+        .options
+        .iter()
+        .flat_map(|spec| {
+            std::iter::once(spec.name.as_str()).chain(spec.aliases.iter().map(String::as_str))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{} received unknown option {name:?}. Declare it in option metadata or use one of: {choices}",
+        tool.name
+    )
 }
 
 pub(in crate::modules) fn coerce_option_value(spec: &OptionSpec, value: Value) -> Result<Value> {
@@ -59,6 +105,7 @@ pub(in crate::modules) fn coerce_option_value(spec: &OptionSpec, value: Value) -
         OptionType::Int => coerce_int_option(value),
         OptionType::Float => coerce_float_option(value),
         OptionType::Enum => coerce_enum_option(spec, value),
+        OptionType::Json => Ok(value),
     }
 }
 

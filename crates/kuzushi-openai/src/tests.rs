@@ -2,8 +2,10 @@
 mod tests {
     use super::super::*;
     use kuzushi_core::{
-        AgentRuntime, Finding, RuntimeConfig, RuntimeKind, Severity, TriageRequest,
+        AgentQueryRequest, AgentRuntime, AgentRuntimeOptions, Finding, RuntimeConfig, RuntimeKind,
+        Severity, TriageRequest,
     };
+    use std::collections::BTreeMap;
 
     #[test]
     fn uses_configured_bridge_command() {
@@ -11,6 +13,7 @@ mod tests {
             kind: RuntimeKind::PiAgentCore,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
+            thinking_level: None,
             agent_bridge_command: Some(vec!["node".to_string(), "bridge.mjs".to_string()]),
             anthropic_oauth: None,
         };
@@ -55,6 +58,7 @@ fi
             kind: RuntimeKind::PiAgentCore,
             api_key_env: "ANTHROPIC_API_KEY".to_string(),
             base_url: None,
+            thinking_level: None,
             agent_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
             anthropic_oauth: None,
         };
@@ -72,6 +76,7 @@ fi
                 input_schema: serde_json::json!({"type":"object"}),
             }],
             max_steps: 4,
+            runtime_options: None,
         };
 
         let step1 = bridge.next_step_blocking(&req, &[]).unwrap();
@@ -113,6 +118,7 @@ fi
             kind: RuntimeKind::PiAgentCore,
             api_key_env: "ANTHROPIC_API_KEY".to_string(),
             base_url: None,
+            thinking_level: None,
             agent_bridge_command: Some(vec![
                 "sh".to_string(),
                 "-c".to_string(),
@@ -133,6 +139,7 @@ fi
                 input_schema: serde_json::json!({"type":"object"}),
             }],
             max_steps: 1,
+            runtime_options: None,
         };
         let err = bridge
             .next_step_blocking(&req, &[])
@@ -148,6 +155,7 @@ fi
             kind: RuntimeKind::PiAgentCore,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
+            thinking_level: None,
             agent_bridge_command: Some(vec![
                 "sh".to_string(),
                 "-c".to_string(),
@@ -177,5 +185,68 @@ fi
 
         assert!(err.contains("pi-agent-core bridge failed"));
         assert!(err.contains("install @mariozechner/pi-agent-core"));
+    }
+
+    #[test]
+    fn query_forwards_runtime_options_to_bridge_payload() {
+        let tmp = tempfile::tempdir().unwrap();
+        let payload_path = tmp.path().join("payload.json");
+        let script = format!(
+            r#"#!/bin/sh
+cat > {payload}
+printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
+"#,
+            payload = payload_path.display()
+        );
+        let bridge_script = tmp.path().join("bridge.sh");
+        std::fs::write(&bridge_script, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bridge_script, std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        }
+        let runtime = RuntimeConfig {
+            kind: RuntimeKind::PiAgentCore,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            thinking_level: Some("high".to_string()),
+            agent_bridge_command: Some(vec![bridge_script.to_string_lossy().into_owned()]),
+            anthropic_oauth: None,
+        };
+        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let mut mcp_environment = BTreeMap::new();
+        mcp_environment.insert(
+            "KUZUSHI_JOERN_CPG".to_string(),
+            ".kuzushi/cpg.bin".to_string(),
+        );
+
+        bridge
+            .query_blocking(
+                AgentQueryRequest::new("openai:gpt-4.1", ".", "system", "prompt")
+                    .with_runtime_options(AgentRuntimeOptions {
+                        mcp_environment,
+                        mcp_tool_timeout_ms: Some(180_000),
+                        bridge_verbose: Some(true),
+                        bridge_log_path: Some("bridge.log".to_string()),
+                    }),
+            )
+            .unwrap();
+
+        let payload: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(payload_path).unwrap()).unwrap();
+        assert_eq!(payload["thinkingLevel"], serde_json::json!("high"));
+        assert_eq!(
+            payload["runtimeOptions"]["mcpEnvironment"]["KUZUSHI_JOERN_CPG"],
+            serde_json::json!(".kuzushi/cpg.bin")
+        );
+        assert_eq!(
+            payload["runtimeOptions"]["mcpToolTimeoutMs"],
+            serde_json::json!(180000)
+        );
+        assert_eq!(
+            payload["runtimeOptions"]["bridgeLogPath"],
+            serde_json::json!("bridge.log")
+        );
     }
 }

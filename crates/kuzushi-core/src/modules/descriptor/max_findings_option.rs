@@ -7,6 +7,7 @@ pub(in crate::modules) fn max_findings_option(default: usize) -> OptionSpec {
         "Maximum findings or candidates to return.",
     )
     .default(json!(default))
+    .aliases(&["max_findings"])
 }
 
 pub(in crate::modules) fn fingerprint_option() -> OptionSpec {
@@ -19,7 +20,9 @@ pub(in crate::modules) fn fingerprint_option() -> OptionSpec {
 }
 
 pub(in crate::modules) fn binary_option(description: &str) -> OptionSpec {
-    opt("binary", OptionType::Path, description).advanced()
+    opt("binary", OptionType::Path, description)
+        .aliases(&["scannerBin", "scanner_bin"])
+        .advanced()
 }
 
 pub(in crate::modules) fn dag(

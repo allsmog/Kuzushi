@@ -15,8 +15,8 @@ mod tests;
 pub use application::run_tool_loop;
 pub use domain::{
     append_structured_output_contract, AgentLoopOutcome, AgentLoopStep, AgentQueryRequest,
-    AgentQueryResponse, AgentRuntime, AgentStructuredOutput, AgentTool, AgentToolLoopRequest,
-    AgentToolPolicy, LoopHistoryEntry, ModelTier, SubagentRole, ToolBox, ToolCall, ToolCallHandler,
-    ToolResult, TriageRequest,
+    AgentQueryResponse, AgentRuntime, AgentRuntimeOptions, AgentStructuredOutput, AgentTool,
+    AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry, ModelTier, SubagentRole, ToolBox,
+    ToolCall, ToolCallHandler, ToolResult, TriageRequest,
 };
 pub use policy::{require_configured_model, resolve_explicit_model, validate_model_spec};

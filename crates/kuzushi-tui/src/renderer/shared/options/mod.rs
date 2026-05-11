@@ -36,6 +36,7 @@ pub(crate) fn option_type_label(option_type: OptionType) -> &'static str {
         OptionType::Path => "path",
         OptionType::Enum => "enum",
         OptionType::StringList => "list",
+        OptionType::Json => "json",
     }
 }
 

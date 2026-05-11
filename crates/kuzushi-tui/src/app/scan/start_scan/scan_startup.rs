@@ -39,7 +39,10 @@ impl ShellApp {
                 request.db_path,
                 tx,
                 cancel,
-                request.scan_options,
+                request.input,
+                request.registry,
+                request.config,
+                request.thinking_level,
             )
         });
     }
@@ -55,11 +58,14 @@ impl ShellApp {
     fn resolve_scan_start_request(&mut self, target: Option<PathBuf>) -> Option<ScanStartRequest> {
         let target_path = self.scan_target_path(target);
         let workspace = self.scan_workspace(&target_path)?;
-        let scan_options = self.scan_options_or_log()?;
+        let input = self.scan_input_or_log()?;
         Some(ScanStartRequest {
             target_root: workspace.root().to_path_buf(),
             db_path: workspace.findings_db_path(),
-            scan_options,
+            input,
+            registry: self.registry.clone(),
+            config: self.config.clone(),
+            thinking_level: self.session_thinking_level.clone(),
         })
     }
 
@@ -79,9 +85,9 @@ impl ShellApp {
         }
     }
 
-    fn scan_options_or_log(&mut self) -> Option<ScanRunOptions> {
-        match self.scan_options_from_store() {
-            Ok(options) => Some(options),
+    fn scan_input_or_log(&mut self) -> Option<serde_json::Value> {
+        match self.scan_input_from_store() {
+            Ok(input) => Some(input),
             Err(error) => {
                 self.log("error", error.to_string());
                 None
@@ -89,12 +95,16 @@ impl ShellApp {
         }
     }
 
-    pub(crate) fn scan_options_from_store(&self) -> Result<ScanRunOptions> {
-        let input = self.registry.prepare_tool_input(
+    pub(crate) fn scan_input_from_store(&self) -> Result<serde_json::Value> {
+        self.registry.prepare_tool_input(
             "sast:scan",
             serde_json::json!({}),
             Some(&self.option_store),
-        )?;
+        )
+    }
+
+    pub(crate) fn scan_options_from_store(&self) -> Result<ScanRunOptions> {
+        let input = self.scan_input_from_store()?;
         Ok(ScanRunOptions {
             severity: parse_scan_severity_filter(&input)?,
             tasks: parse_native_scan_tasks(&input)?,
@@ -107,5 +117,8 @@ impl ShellApp {
 struct ScanStartRequest {
     target_root: PathBuf,
     db_path: PathBuf,
-    scan_options: ScanRunOptions,
+    input: serde_json::Value,
+    registry: ModuleRegistry,
+    config: V2Config,
+    thinking_level: Option<String>,
 }

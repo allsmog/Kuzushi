@@ -74,11 +74,15 @@ mod tests {
             .options
             .iter()
             .any(|option| option.name == "tasks" && option.option_type == OptionType::StringList));
+        assert!(sast.options.iter().any(|option| {
+            option.name == "tasks" && option.aliases.contains(&"taskIds".to_string())
+        }));
         assert!(sast
             .options
             .iter()
             .any(|option| option.name == "disabledTasks"
-                && option.option_type == OptionType::StringList));
+                && option.option_type == OptionType::StringList
+                && option.aliases.contains(&"disabled_tasks".to_string())));
         assert!(sast.options.iter().any(
             |option| option.name == "severity" && option.option_type == OptionType::StringList
         ));
@@ -121,6 +125,13 @@ mod tests {
             .options
             .iter()
             .any(|option| option.name == "payload" && option.evasion));
+
+        let taint_next = registry.resolve_tool("taint-iris-next:hunt").unwrap();
+        assert!(taint_next.options.iter().any(|option| {
+            option.name == "bridgeVerbose"
+                && option.option_type == OptionType::Bool
+                && option.aliases.contains(&"bridge_verbose".to_string())
+        }));
     }
 
     #[test]

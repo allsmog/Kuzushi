@@ -1413,6 +1413,33 @@ fn scan_path_reads_stored_sast_options() {
 }
 
 #[test]
+fn scan_path_builds_canonical_sast_tool_input_from_option_store() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.option_store.set_value(
+        OptionScope::Session,
+        OptionTarget::Tool("sast:scan".to_string()),
+        "disabled_tasks",
+        serde_json::json!("semgrep,codeql"),
+    );
+    app.option_store.set_value(
+        OptionScope::Session,
+        OptionTarget::Tool("sast:scan".to_string()),
+        "triage",
+        serde_json::json!("yes"),
+    );
+
+    let input = app.scan_input_from_store().unwrap();
+
+    assert_eq!(
+        input["disabledTasks"],
+        serde_json::json!(["semgrep", "codeql"])
+    );
+    assert_eq!(input["triage"], serde_json::json!(true));
+    assert_eq!(input["taskMode"], serde_json::json!("auto"));
+    assert_eq!(input.get("disabled_tasks"), None);
+}
+
+#[test]
 fn task_commands_update_sast_scan_selection_options() {
     let mut app = ShellApp::new(V2Config::default(), None);
 
@@ -2371,6 +2398,7 @@ fn ask_dispatches_agent_question_through_explicit_runtime() {
         kind: RuntimeKind::PiAgentCore,
         api_key_env: "KUZUSHI_TEST_API_KEY".to_string(),
         base_url: None,
+        thinking_level: None,
         agent_bridge_command: Some(vec![bridge.display().to_string()]),
         anthropic_oauth: None,
     };
@@ -2686,6 +2714,7 @@ fn run_command_dispatches_agentic_sast_through_pi_agent_core_bridge_and_persists
         kind: RuntimeKind::PiAgentCore,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
+        thinking_level: None,
         agent_bridge_command: Some(vec![bridge.display().to_string()]),
         anthropic_oauth: None,
     };
@@ -2726,6 +2755,7 @@ fn run_command_dispatches_variant_hunt_through_pi_agent_core_bridge_and_persists
         kind: RuntimeKind::PiAgentCore,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
+        thinking_level: None,
         agent_bridge_command: Some(vec![bridge.display().to_string()]),
         anthropic_oauth: None,
     };
@@ -2767,6 +2797,7 @@ fn run_command_dispatches_ndiff_hunt_through_pi_agent_core_bridge_and_persists()
         kind: RuntimeKind::PiAgentCore,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
+        thinking_level: None,
         agent_bridge_command: Some(vec![bridge.display().to_string()]),
         anthropic_oauth: None,
     };
@@ -2808,6 +2839,7 @@ fn run_command_dispatches_taint_iris_through_pi_agent_core_bridge_and_persists()
         kind: RuntimeKind::PiAgentCore,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
+        thinking_level: None,
         agent_bridge_command: Some(vec![bridge.display().to_string()]),
         anthropic_oauth: None,
     };
@@ -2855,6 +2887,7 @@ fn run_command_dispatches_taint_iris_next_through_pi_agent_core_bridge_and_persi
         kind: RuntimeKind::PiAgentCore,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
+        thinking_level: None,
         agent_bridge_command: Some(vec![bridge.display().to_string()]),
         anthropic_oauth: None,
     };
@@ -2901,6 +2934,7 @@ fn run_command_dispatches_carlini_threat_hunt_through_pi_agent_core_bridge_and_p
         kind: RuntimeKind::PiAgentCore,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
+        thinking_level: None,
         agent_bridge_command: Some(vec![bridge.display().to_string()]),
         anthropic_oauth: None,
     };
@@ -2941,6 +2975,7 @@ fn run_command_dispatches_systems_hunt_through_pi_agent_core_bridge_and_persists
         kind: RuntimeKind::PiAgentCore,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
+        thinking_level: None,
         agent_bridge_command: Some(vec![bridge.display().to_string()]),
         anthropic_oauth: None,
     };
@@ -3033,6 +3068,7 @@ fn run_command_dispatches_triage_through_pi_agent_core_bridge_and_persists() {
         kind: RuntimeKind::PiAgentCore,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
+        thinking_level: None,
         agent_bridge_command: Some(vec![bridge.display().to_string()]),
         anthropic_oauth: None,
     };
@@ -3098,6 +3134,7 @@ fn run_command_dispatches_verify_through_pi_agent_core_bridge() {
         kind: RuntimeKind::PiAgentCore,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
+        thinking_level: None,
         agent_bridge_command: Some(vec![bridge.display().to_string()]),
         anthropic_oauth: None,
     };
@@ -3161,6 +3198,7 @@ fn run_command_dispatches_patch_through_pi_agent_core_bridge_and_persists() {
         kind: RuntimeKind::PiAgentCore,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
+        thinking_level: None,
         agent_bridge_command: Some(vec![bridge.display().to_string()]),
         anthropic_oauth: None,
     };
@@ -3207,6 +3245,7 @@ fn run_command_dispatches_threat_model_build_through_pi_agent_core_bridge() {
         kind: RuntimeKind::PiAgentCore,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
+        thinking_level: None,
         agent_bridge_command: Some(vec![bridge.display().to_string()]),
         anthropic_oauth: None,
     };
@@ -3243,6 +3282,7 @@ fn run_command_dispatches_x_ray_run_through_pi_agent_core_bridge() {
         kind: RuntimeKind::PiAgentCore,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
+        thinking_level: None,
         agent_bridge_command: Some(vec![bridge.display().to_string()]),
         anthropic_oauth: None,
     };

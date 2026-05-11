@@ -10,4 +10,4 @@ use serde_json::Value;
 pub(in crate::modules) use shinsa_module::*;
 mod register_modules;
 mod shinsa_module;
-pub(in crate::modules) use register_modules::{execute_tool, register_modules};
+pub(in crate::modules) use register_modules::{execute_tool, plugin_root_option, register_modules};
