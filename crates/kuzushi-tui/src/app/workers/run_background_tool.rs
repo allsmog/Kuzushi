@@ -104,5 +104,32 @@ pub(crate) fn tool_uses_agent_runtime(tool_name: &str) -> bool {
             | "randori:pasta"
             | "x-ray:run"
             | "x-ray:x-ray"
+            | "full-mode:hunt"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tool_uses_agent_runtime;
+
+    #[test]
+    fn full_mode_hunt_requires_agent_runtime() {
+        // Regression: full-mode:hunt was missing from the predicate, so the
+        // shell worker passed runtime=None and the tool failed with
+        // "full-mode:hunt requires an agent runtime; none configured" the
+        // moment a non-dry-run scan started.
+        assert!(tool_uses_agent_runtime("full-mode:hunt"));
+    }
+
+    #[test]
+    fn deterministic_tools_skip_runtime() {
+        assert!(!tool_uses_agent_runtime("semgrep:scan"));
+        assert!(!tool_uses_agent_runtime("secret-scan:scan"));
+        assert!(!tool_uses_agent_runtime("context:build"));
+        assert!(!tool_uses_agent_runtime("findings:list"));
+        // Hidden DAG node that's purely deterministic surface gathering.
+        assert!(!tool_uses_agent_runtime(
+            "systems-hunt:systems-context-gatherer"
+        ));
+    }
 }

@@ -96,18 +96,31 @@ pub(crate) fn parse_chunk_value(value: serde_json::Value) -> Result<Vec<Finding>
 }
 
 pub(crate) fn full_mode_findings_schema() -> serde_json::Value {
+    // Keep the schema aligned with the prompt and `ModelFinding`. The previous
+    // shape (`rule`/`message`) made the structured-output channel reject the
+    // shape the prompt actually requests; Haiku ends up either repairing into
+    // unusable empty fields or returning [], both of which deserialise to 0
+    // findings via `model_to_finding`'s required-field filter.
     serde_json::json!({
         "type": "array",
         "items": {
             "type": "object",
-            "required": ["rule", "file", "line", "severity", "message"],
+            "required": ["file", "line", "severity", "title"],
             "additionalProperties": true,
             "properties": {
-                "rule": {"type": "string"},
                 "file": {"type": "string"},
-                "line": {"type": "integer"},
-                "severity": {"type": "string"},
-                "message": {"type": "string"}
+                "line": {"type": "integer", "minimum": 1},
+                "function": {"type": "string"},
+                "severity": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high", "critical"]
+                },
+                "cwe": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                },
+                "title": {"type": "string"},
+                "rationale": {"type": "string"}
             }
         }
     })
@@ -176,5 +189,72 @@ pub fn cost_summary(plan: &FullModePlan, model_hint: Option<&str>) -> CostSummar
         // average; charge it at the same rate as input for the band.
         usd_low: low * tokens / 1000.0 * 1.10,
         usd_high: high * tokens / 1000.0 * 1.10,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{full_mode_findings_schema, parse_chunk_value, SYSTEM_PROMPT_C};
+    use crate::findings::Severity;
+
+    #[test]
+    fn schema_required_fields_match_prompt_and_deserializer() {
+        // Regression: the schema previously required `rule` + `message`, but
+        // the prompt asks for `file`/`line`/`severity`/`title`/... and the
+        // deserialiser (ModelFinding) uses those names. The mismatch made
+        // Anthropic's structured-output channel either reject the response
+        // or coerce it into a shape where every finding had empty file/title
+        // and was silently dropped by `model_to_finding`'s required-field
+        // filter — so every Haiku full-mode chunk reported 0 findings even
+        // when the input had obvious bugs.
+        let schema = full_mode_findings_schema();
+        let required: Vec<String> = schema["items"]["required"]
+            .as_array()
+            .expect("schema items.required must be an array")
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect();
+        assert!(required.iter().any(|f| f == "file"));
+        assert!(required.iter().any(|f| f == "line"));
+        assert!(required.iter().any(|f| f == "severity"));
+        assert!(required.iter().any(|f| f == "title"));
+        assert!(!required.iter().any(|f| f == "rule"));
+        assert!(!required.iter().any(|f| f == "message"));
+
+        for field in [
+            "file",
+            "line",
+            "function",
+            "severity",
+            "cwe",
+            "title",
+            "rationale",
+        ] {
+            assert!(
+                SYSTEM_PROMPT_C.contains(field),
+                "SYSTEM_PROMPT_C drifted: missing {field:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn parse_chunk_value_round_trips_prompt_shape() {
+        let raw = serde_json::json!([
+            {
+                "file": "crypto/algif_aead.c",
+                "line": 123,
+                "function": "aead_recvmsg",
+                "severity": "critical",
+                "cwe": ["CWE-787"],
+                "title": "OOB write via chained AEAD tag scatterlist",
+                "rationale": "authencesn writes seqno_lo at dst[assoclen+cryptlen] into a sg_chain'd tag page sourced from splice."
+            }
+        ]);
+        let findings = parse_chunk_value(raw).expect("parse should succeed for prompt shape");
+        assert_eq!(findings.len(), 1, "prompt-shaped finding must survive");
+        let f = &findings[0];
+        assert_eq!(f.severity, Severity::Critical);
+        assert_eq!(f.file_path, "crypto/algif_aead.c");
+        assert_eq!(f.start_line, 123);
     }
 }
