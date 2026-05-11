@@ -144,15 +144,33 @@ mod tests {
 
     #[test]
     fn runs_trace_output_covers_plain_and_json() {
-        let body = "{\"n\":1,\"kind\":\"plan\"}\n";
+        let body = "{\"n\":1,\"kind\":\"plan\",\"label\":\"draft\"}\n";
 
-        assert_eq!(
-            runs_trace_output(Path::new("/tmp/trace.jsonl"), body, false).unwrap(),
-            body
-        );
+        let plain = runs_trace_output(Path::new("/tmp/trace.jsonl"), body, false).unwrap();
+        assert!(plain.contains("plan"));
+        assert!(plain.contains("draft"));
+        assert!(plain.contains("[-]"));
         let json = runs_trace_output(Path::new("/tmp/trace.jsonl"), body, true).unwrap();
         assert!(json.contains("\"kind\": \"plan\""));
         assert!(json.ends_with('\n'));
+    }
+
+    #[test]
+    fn runs_trace_output_renders_module_and_verb_columns() {
+        let body = "{\"n\":1,\"kind\":\"tool\",\"label\":\"semgrep started\",\
+                    \"module_id\":\"semgrep\",\"verb\":\"scan\"}\n\
+                    {\"n\":2,\"kind\":\"reasoning\",\"label\":\"clustering\",\
+                    \"module_id\":\"taint-iris\",\"verb\":\"hunt\",\"parent_step\":1,\
+                    \"latency_ms\":143,\"cost_usd\":0.0021,\"severity\":\"info\"}\n";
+
+        let plain = runs_trace_output(Path::new("/tmp/trace.jsonl"), body, false).unwrap();
+
+        assert!(plain.contains("[semgrep:scan]"));
+        assert!(plain.contains("[taint-iris:hunt]"));
+        assert!(plain.contains("parent=1"));
+        assert!(plain.contains("143ms"));
+        assert!(plain.contains("$0.0021"));
+        assert!(plain.contains("sev=info"));
     }
 
     #[test]
