@@ -1,5 +1,6 @@
 use kuzushi_core::{
-    append_run_trace_step, write_run_artifact_json, write_run_summary, RunSummary, RunTraceStep,
+    append_run_trace_step, next_run_trace_step_number, write_run_artifact_json, write_run_summary,
+    RunSummary, RunTraceStep,
 };
 use std::path::Path;
 
@@ -26,9 +27,13 @@ pub(crate) fn finish_cli_tool_run(
     let _ = append_run_trace_step(
         target,
         run_id,
-        &RunTraceStep::new(2, "done", format!("{tool} complete"))
-            .with_tool_name(tool)
-            .with_cost_usd(run_output_cost_usd(output)),
+        &RunTraceStep::new(
+            next_run_trace_step_number(target, run_id),
+            "done",
+            format!("{tool} complete"),
+        )
+        .with_tool_name(tool)
+        .with_cost_usd(run_output_cost_usd(output)),
     );
     let _ = write_run_summary(target, &summary);
 }
@@ -44,9 +49,13 @@ pub(crate) fn fail_cli_tool_run(target: &Path, run_id: &str, tool: &str, error: 
     let _ = append_run_trace_step(
         target,
         run_id,
-        &RunTraceStep::new(2, "refused", format!("{tool} failed"))
-            .with_tool_name(tool)
-            .with_severity("danger"),
+        &RunTraceStep::new(
+            next_run_trace_step_number(target, run_id),
+            "refused",
+            format!("{tool} failed"),
+        )
+        .with_tool_name(tool)
+        .with_severity("danger"),
     );
     let _ = write_run_summary(target, &summary);
 }

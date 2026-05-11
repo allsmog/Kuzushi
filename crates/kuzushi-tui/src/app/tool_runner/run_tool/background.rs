@@ -79,6 +79,7 @@ impl ShellApp {
                 workspace,
                 tool_name,
                 input,
+                run_id,
                 thinking_level,
                 tx,
             )

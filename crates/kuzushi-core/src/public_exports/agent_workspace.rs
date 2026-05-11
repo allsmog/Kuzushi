@@ -33,14 +33,16 @@ pub use crate::repository_inventory::{
     RepositoryInventory,
 };
 pub use crate::run_artifacts::{
-    append_run_trace_step, list_run_summaries, load_run_summary, new_run_id, run_dir, runs_root,
-    write_run_artifact_json, write_run_summary, RunArtifact, RunSummary, RunTraceStep,
+    append_run_trace_step, list_run_summaries, load_run_summary, new_run_id,
+    next_run_trace_step_number, run_dir, runs_root, write_run_artifact_json, write_run_summary,
+    RunArtifact, RunSummary, RunTraceStep, TraceHandle,
 };
 pub use crate::runtime::{
     append_structured_output_contract, run_tool_loop, AgentLoopOutcome, AgentLoopStep,
     AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
     AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry,
-    ModelTier, SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult, TriageRequest,
+    ModelTier, SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult, TracedRuntime,
+    TriageRequest,
 };
 pub use crate::workspace::{
     export_workspace_findings, workspace_status_for_target, WorkspaceExportFormat,

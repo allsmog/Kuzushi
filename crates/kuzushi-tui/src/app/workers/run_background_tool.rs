@@ -6,6 +6,7 @@ pub(crate) fn run_background_tool(
     workspace: &WorkspaceTarget,
     tool_name: &str,
     input: serde_json::Value,
+    run_id: &str,
     thinking_level: Option<String>,
 ) -> Result<serde_json::Value> {
     let store = if tool_requires_findings_store(tool_name) {
@@ -24,17 +25,22 @@ pub(crate) fn run_background_tool(
     } else {
         None
     };
+    let trace = TraceHandle::jsonl(workspace.root(), run_id)
+        .for_tool(tool_name)
+        .child(1);
+    let traced_runtime = runtime
+        .as_ref()
+        .map(|runtime| TracedRuntime::new(runtime as &dyn AgentRuntime, trace));
+    let runtime_ref = traced_runtime
+        .as_ref()
+        .map(|runtime| runtime as &dyn AgentRuntime)
+        .or_else(|| runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime));
     let ctx = ToolExecutionContext {
         config: &config,
         workspace: Some(workspace),
         findings_store: store.as_ref(),
     };
-    registry.execute_tool_with_runtime(
-        tool_name,
-        input,
-        &ctx,
-        runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
-    )
+    registry.execute_tool_with_runtime(tool_name, input, &ctx, runtime_ref)
 }
 
 pub(crate) fn tool_uses_agent_runtime_for(tool_name: &str, input: &serde_json::Value) -> bool {
