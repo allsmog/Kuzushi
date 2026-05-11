@@ -71,41 +71,12 @@ pub(crate) fn tool_requires_findings_store(tool_name: &str) -> bool {
 }
 
 pub(crate) fn tool_uses_agent_runtime(tool_name: &str) -> bool {
-    matches!(
-        tool_name,
-        "triage:run"
-            | "verify:finding"
-            | "patch:finding"
-            | "agentic-sast:scan"
-            | "carlini-threat-hunt:run"
-            | "vendor-assessment:assess"
-            | "vuln-scout:audit"
-            | "tob:audit"
-            | "shinsa:scan"
-            | "shinsa:quick-check"
-            | "shinsa:nist-scan"
-            | "shinsa:nist-quick-check"
-            | "prompt-armor:scan"
-            | "prompt-armor:analyze"
-            | "prompt-armor:attack"
-            | "variant:lift-pattern"
-            | "variant:hunt"
-            | "ndiff:extract-fix-pattern"
-            | "ndiff:hunt-variants"
-            | "systems-hunt:systems-invariant-extract"
-            | "systems-hunt:systems-trigger-synth"
-            | "systems-hunt:systems-hunt"
-            | "systems-hunt:deep-semantic-cwe-select"
-            | "systems-hunt:deep-semantic-hunt"
-            | "taint-iris:hunt"
-            | "taint-iris-next:hunt"
-            | "sast:scan"
-            | "threat-model:build"
-            | "randori:pasta"
-            | "x-ray:run"
-            | "x-ray:x-ray"
-            | "full-mode:hunt"
-    )
+    // Both `sast:scan` and the names in `kuzushi_core::RUNTIME_TOOL_NAMES`
+    // need a live runtime. We treat `sast:scan` unconditionally here
+    // because the shell worker doesn't have the input ready to inspect the
+    // way the CLI does — running it without a runtime fails fast enough
+    // that always wiring one in is the cheaper default.
+    tool_name == "sast:scan" || kuzushi_core::tool_requires_agent_runtime(tool_name)
 }
 
 #[cfg(test)]
@@ -119,6 +90,15 @@ mod tests {
         // "full-mode:hunt requires an agent runtime; none configured" the
         // moment a non-dry-run scan started.
         assert!(tool_uses_agent_runtime("full-mode:hunt"));
+    }
+
+    #[test]
+    fn deep_audit_run_requires_agent_runtime() {
+        // Regression: deep-audit:run was missing from the shell-worker
+        // predicate even though the CLI listed it, so `run deep-audit:run`
+        // from the TUI failed immediately with "requires an agent runtime;
+        // none configured".
+        assert!(tool_uses_agent_runtime("deep-audit:run"));
     }
 
     #[test]
