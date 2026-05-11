@@ -304,6 +304,42 @@ pub(in crate::modules::taint_iris_next) fn append_sanitizer_bodies_section(
     if files_to_scan.is_empty() {
         return;
     }
+    // Walk each linked story's source / sink line UP to the enclosing
+    // function definition. Add the enclosing function's name to a
+    // `relaxed_names` set so the extractor pulls its body even if the
+    // name isn't sanitizer-shaped. This catches upstream bound-check
+    // helpers like postgres `pgp_mpi_alloc` (enforces `bits > 0xFFFF`)
+    // and `prepare_room` (allocates the right size) that ARE named
+    // like neutral allocators / setup helpers, not sanitizers — but
+    // their bodies tell the agent the flow is bounded.
+    const RELAXED_BODY_MAX_LINES: usize = 30;
+    const RELAXED_BODY_SLOTS: usize = 2;
+    let mut relaxed_names: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    // Thread B1: every callee on each joern flow becomes a relaxed
+    // body-lookup candidate — that's how `pgp_mpi_alloc` /
+    // `prepare_room` style upstream bound-check helpers land inline.
+    for story in evidence.linked_stories.iter() {
+        for callee in &story.callees {
+            relaxed_names.insert(callee.clone());
+        }
+    }
+    let mut file_line_pairs: Vec<(String, u32)> = Vec::new();
+    for story in evidence.linked_stories.iter() {
+        file_line_pairs.push((story.file_path.clone(), story.source_line));
+        file_line_pairs.push((story.file_path.clone(), story.sink_line));
+    }
+    file_line_pairs.sort();
+    file_line_pairs.dedup();
+    for (relative_path, line) in &file_line_pairs {
+        let abs = plan.scan_root.join(relative_path);
+        let Ok(content) = std::fs::read_to_string(&abs) else {
+            continue;
+        };
+        if let Some(name) = enclosing_function_name(&content, *line) {
+            relaxed_names.insert(name);
+        }
+    }
     let mut bodies: Vec<(String, String, u32, String)> = Vec::new();
     let mut seen_bodies: std::collections::BTreeSet<String> =
         std::collections::BTreeSet::new();
@@ -341,6 +377,34 @@ pub(in crate::modules::taint_iris_next) fn append_sanitizer_bodies_section(
         }
         if bodies.len() >= 8 {
             break;
+        }
+    }
+    // Pass 2: relaxed-name extraction for enclosing functions of
+    // linked-story source/sink lines. Cap relaxed bodies at
+    // RELAXED_BODY_SLOTS (2) of the 8 total slots and 30 lines per
+    // body — they're noisier and we don't want them to crowd out the
+    // sanitizer-named bodies that the agent should prioritise.
+    if !relaxed_names.is_empty() && bodies.len() < 8 {
+        let relaxed_quota = 8usize.saturating_sub(bodies.len()).min(RELAXED_BODY_SLOTS);
+        let mut relaxed_added = 0usize;
+        'relaxed_files: for relative_path in files_to_scan.iter().take(40) {
+            let abs = plan.scan_root.join(relative_path);
+            let Ok(content) = std::fs::read_to_string(&abs) else {
+                continue;
+            };
+            for (name, start_line, body) in
+                extract_named_function_bodies(&content, &relaxed_names, RELAXED_BODY_MAX_LINES)
+            {
+                let dedup_key = format!("{name}:{}", body.len());
+                if !seen_bodies.insert(dedup_key) {
+                    continue;
+                }
+                bodies.push((relative_path.clone(), name, start_line, body));
+                relaxed_added += 1;
+                if relaxed_added >= relaxed_quota || bodies.len() >= 8 {
+                    break 'relaxed_files;
+                }
+            }
         }
     }
     if bodies.is_empty() {
@@ -466,6 +530,139 @@ fn extract_sanitizer_function_bodies(content: &str) -> Vec<(String, u32, String)
         i += 1;
     }
     out
+}
+
+/// Variant of `extract_sanitizer_function_bodies` that accepts an
+/// arbitrary allow-list of function names (NOT restricted to
+/// sanitizer-shaped). Used for the enclosing-function pass: linked
+/// stories' source/sink lines walk UP to their enclosing fn, and
+/// that fn's body lands in the agent prompt even if the name is a
+/// neutral allocator / setup helper like `pgp_mpi_alloc` or
+/// `prepare_room`. Bodies cap at `max_lines` rows so we don't bloat
+/// the prompt on a long function.
+fn extract_named_function_bodies(
+    content: &str,
+    accept: &std::collections::BTreeSet<String>,
+    max_lines: usize,
+) -> Vec<(String, u32, String)> {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut out: Vec<(String, u32, String)> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim_start();
+        if let Some(name) = function_name_from_def_line(trimmed) {
+            if accept.contains(&name) {
+                let mut brace_line: Option<usize> = None;
+                for j in i..lines.len().min(i + 8) {
+                    if lines[j].contains('{') {
+                        brace_line = Some(j);
+                        break;
+                    }
+                    if lines[j].trim_end().ends_with(';') {
+                        break;
+                    }
+                }
+                if let Some(brace_start) = brace_line {
+                    let mut depth: i32 = 0;
+                    let mut started = false;
+                    let mut end_line = brace_start;
+                    for j in brace_start..lines.len() {
+                        for ch in lines[j].chars() {
+                            match ch {
+                                '{' => {
+                                    depth += 1;
+                                    started = true;
+                                }
+                                '}' => depth -= 1,
+                                _ => {}
+                            }
+                        }
+                        if started && depth <= 0 {
+                            end_line = j;
+                            break;
+                        }
+                    }
+                    let span_end = end_line.min(i + max_lines);
+                    let body: String = lines[i..=span_end].join("\n");
+                    out.push((name, (i + 1) as u32, body));
+                    if out.len() >= 8 {
+                        return out;
+                    }
+                    i = end_line + 1;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Walk backward from `target_line` (1-indexed) until we find a
+/// function-definition line (per `function_name_from_def_line`)
+/// whose `{` lies between the def line and target_line. Used by
+/// Thread B2 to find the enclosing function of a linked-story
+/// source/sink line so its body can be inlined for upstream-bound-
+/// check audit.
+pub(in crate::modules::taint_iris_next) fn enclosing_function_name(
+    content: &str,
+    target_line: u32,
+) -> Option<String> {
+    let lines: Vec<&str> = content.lines().collect();
+    if (target_line as usize) == 0 || (target_line as usize) > lines.len() {
+        return None;
+    }
+    let target_idx = (target_line as usize) - 1;
+    let mut i = target_idx;
+    loop {
+        let trimmed = lines[i].trim_start();
+        if let Some(name) = function_name_from_def_line(trimmed) {
+            // Confirm there's a `{` within ~8 lines AFTER the
+            // def header (definitions, not prototypes), AND the
+            // body's closing `}` lies at or after target_idx.
+            // Without this we'd match prototypes / forward-decls,
+            // or attribute a target to a sibling function whose
+            // body sits entirely before the target line.
+            let mut brace_line: Option<usize> = None;
+            for j in i..lines.len().min(i + 8) {
+                if lines[j].contains('{') {
+                    brace_line = Some(j);
+                    break;
+                }
+                if lines[j].trim_end().ends_with(';') {
+                    break; // prototype
+                }
+            }
+            if let Some(brace_start) = brace_line {
+                let mut depth: i32 = 0;
+                let mut started = false;
+                let mut end_idx = brace_start;
+                for j in brace_start..lines.len() {
+                    for ch in lines[j].chars() {
+                        match ch {
+                            '{' => {
+                                depth += 1;
+                                started = true;
+                            }
+                            '}' => depth -= 1,
+                            _ => {}
+                        }
+                    }
+                    if started && depth <= 0 {
+                        end_idx = j;
+                        break;
+                    }
+                }
+                if target_idx <= end_idx {
+                    return Some(name);
+                }
+            }
+        }
+        if i == 0 {
+            return None;
+        }
+        i -= 1;
+    }
 }
 
 /// Match a line of the shape `name(args)` (with optional return-type
@@ -606,5 +803,75 @@ other_fn(int x)
         assert!(!is_sanitizer_shaped_name("strcpy"));
         assert!(!is_sanitizer_shaped_name("appendStringInfo"));
         assert!(!is_sanitizer_shaped_name("PG_GETARG_TEXT_PP"));
+    }
+
+    #[test]
+    fn enclosing_function_walks_up_to_definition() {
+        // Source / sink line in linked story points INSIDE a function;
+        // we need to walk up to the definition header to get the
+        // function's name.
+        let src = r#"
+static int
+pgp_mpi_alloc(int bits, PGP_MPI **mpi)
+{
+    int len = (bits + 7) / 8;
+    if (bits < 0 || bits > 0xFFFF)
+    {
+        return PXE_PGP_CORRUPT_DATA;
+    }
+    n = palloc(sizeof(*n) + len);  /* sink line — line ~9 of body */
+    return 0;
+}
+"#;
+        // Target the palloc line.
+        let palloc_line = src
+            .lines()
+            .enumerate()
+            .find(|(_, l)| l.contains("palloc(sizeof"))
+            .map(|(i, _)| (i + 1) as u32)
+            .unwrap();
+        let name = enclosing_function_name(src, palloc_line);
+        assert_eq!(name.as_deref(), Some("pgp_mpi_alloc"));
+    }
+
+    #[test]
+    fn enclosing_function_handles_target_at_def_line() {
+        // The walk should also succeed when the target line IS the
+        // function's def line — useful for source-line candidates
+        // that land at the macro PG_FUNCTION_INFO_V1 / function
+        // header itself.
+        let src = "static int\nfoo(int x)\n{\n    return x;\n}\n";
+        // Line 2 = the def line.
+        let name = enclosing_function_name(src, 2);
+        assert_eq!(name.as_deref(), Some("foo"));
+    }
+
+    #[test]
+    fn extract_named_function_bodies_includes_non_sanitizer_helper() {
+        // `prepare_room` is named like an allocator helper, NOT a
+        // sanitizer (it doesn't start with `check_`, `safe_`, etc.).
+        // The B2 relaxed-pass extractor must accept it when its name
+        // is in the allow-set so the agent can audit the upstream
+        // bound check inline.
+        let src = r#"
+static void
+prepare_room(MBuf *dst, int len)
+{
+    if (dst->buf_end - dst->data_end < len)
+    {
+        realloc_mbuf(dst, len);
+    }
+}
+"#;
+        let mut accept = std::collections::BTreeSet::new();
+        accept.insert("prepare_room".to_string());
+        let bodies = extract_named_function_bodies(src, &accept, 30);
+        let names: Vec<&str> = bodies.iter().map(|(n, _, _)| n.as_str()).collect();
+        assert_eq!(names, vec!["prepare_room"]);
+        let body = &bodies[0].2;
+        assert!(
+            body.contains("realloc_mbuf"),
+            "body should include the function body content: {body}"
+        );
     }
 }

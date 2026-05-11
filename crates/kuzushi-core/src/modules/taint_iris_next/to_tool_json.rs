@@ -36,6 +36,16 @@ pub(in crate::modules) struct TaintIrisNextLinkedStory {
     pub(in crate::modules) sink_line: u32,
     pub(in crate::modules) shared_tokens: Vec<String>,
     pub(in crate::modules) rationale: String,
+    /// Function names appearing on the source→sink flow as
+    /// interprocedural callees, captured from joern's flow steps
+    /// (`JoernStep.code`). Empty for the heuristic linker, which
+    /// has no notion of a call graph. Drives Thread B1's
+    /// relaxed-name body-inlining: the agent prompt pulls the body
+    /// of each callee so upstream bound-check helpers
+    /// (`pgp_mpi_alloc`, `prepare_room`, etc.) are visible inline
+    /// without an extra MCP round-trip.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(in crate::modules) callees: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

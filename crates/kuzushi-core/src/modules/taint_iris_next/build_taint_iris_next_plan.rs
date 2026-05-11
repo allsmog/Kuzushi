@@ -157,31 +157,121 @@ fn boost_catalog_with_discovered_signals(
     if signals.sources.is_empty() && signals.sinks.is_empty() && signals.entry_points.is_empty() {
         return catalog;
     }
-    let mut source_index: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    let mut sink_index: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // Per-CWE source / sink indexes from discovery, with the language
+    // tag attached so we only splice into entries the discovery
+    // language is in scope for. Falls back to "any" entries always.
+    let mut sources_by_cwe: std::collections::BTreeMap<
+        String,
+        Vec<&DiscoveredSignal>,
+    > = std::collections::BTreeMap::new();
+    let mut sinks_by_cwe: std::collections::BTreeMap<
+        String,
+        Vec<&DiscoveredSignal>,
+    > = std::collections::BTreeMap::new();
     for entry in signals.sources.iter().chain(signals.entry_points.iter()) {
-        source_index.insert(entry.name.clone());
+        sources_by_cwe
+            .entry(entry.cwe.to_ascii_uppercase())
+            .or_default()
+            .push(entry);
     }
     for entry in &signals.sinks {
-        sink_index.insert(entry.name.clone());
+        sinks_by_cwe
+            .entry(entry.cwe.to_ascii_uppercase())
+            .or_default()
+            .push(entry);
     }
+    // Build a flat name index for the existing +15-per-overlap bonus
+    // (preserves the prior ranking semantics — the bonus only fires
+    // on PRE-EXISTING catalog signals that match a discovered name,
+    // never on the names we're about to splice in below).
+    let mut source_name_index: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    let mut sink_name_index: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    for s in sources_by_cwe.values().flatten() {
+        source_name_index.insert(s.name.clone());
+    }
+    for s in sinks_by_cwe.values().flatten() {
+        sink_name_index.insert(s.name.clone());
+    }
+    const SPLICE_PER_ROLE_PER_ENTRY: usize = 8;
     for entry in &mut catalog {
+        // Bonus snapshot (PRE-splice) — see comment above.
         let mut bonus: i32 = 0;
         for src in &entry.source_signals {
-            if source_index.contains(src) {
+            if source_name_index.contains(src) {
                 bonus = bonus.saturating_add(15);
             }
         }
         for snk in &entry.sink_signals {
-            if sink_index.contains(snk) {
+            if sink_name_index.contains(snk) {
                 bonus = bonus.saturating_add(15);
             }
         }
         let bonus = bonus.min(60);
         entry.score = entry.score.saturating_add(bonus);
+        // Splice discovered names of MATCHING CWE into source / sink
+        // signal lists so the downstream rg engine actually scans for
+        // them (otherwise the +15 bonus only fires on names already
+        // in the catalog, and the rg sweep never widens beyond the
+        // a-priori catalog set). Restrict to source/sink roles only
+        // — never touch sanitizer_signals (Thread B's body-inlining
+        // reads from sanitizer_signals and the discovery markers
+        // don't carry a "sanitizer" kind today; preserves the cycle-
+        // free pipeline order).
+        let cwe = entry.cwe.to_ascii_uppercase();
+        let language_match = |sig: &DiscoveredSignal| -> bool {
+            entry.languages.is_empty()
+                || entry.languages.iter().any(|lang| lang == "any")
+                || entry.languages.iter().any(|lang| lang == &sig.language)
+        };
+        if let Some(disc_sources) = sources_by_cwe.get(&cwe) {
+            let existing: std::collections::BTreeSet<String> =
+                entry.source_signals.iter().cloned().collect();
+            let mut spliced = 0usize;
+            for sig in disc_sources {
+                if spliced >= SPLICE_PER_ROLE_PER_ENTRY {
+                    break;
+                }
+                if !language_match(sig) {
+                    continue;
+                }
+                if existing.contains(&sig.name) {
+                    continue;
+                }
+                entry.source_signals.push(sig.name.clone());
+                spliced += 1;
+            }
+        }
+        if let Some(disc_sinks) = sinks_by_cwe.get(&cwe) {
+            let existing: std::collections::BTreeSet<String> =
+                entry.sink_signals.iter().cloned().collect();
+            let mut spliced = 0usize;
+            for sig in disc_sinks {
+                if spliced >= SPLICE_PER_ROLE_PER_ENTRY {
+                    break;
+                }
+                if !language_match(sig) {
+                    continue;
+                }
+                if existing.contains(&sig.name) {
+                    continue;
+                }
+                entry.sink_signals.push(sig.name.clone());
+                spliced += 1;
+            }
+        }
+        // Dedup + sort-stable: preserve insertion order via dedup-by-set.
+        dedup_signal_list(&mut entry.source_signals);
+        dedup_signal_list(&mut entry.sink_signals);
     }
     catalog.sort_by(|a, b| b.score.cmp(&a.score));
     catalog
+}
+
+fn dedup_signal_list(list: &mut Vec<String>) {
+    let mut seen = std::collections::BTreeSet::new();
+    list.retain(|item| seen.insert(item.clone()));
 }
 
 /// Add a +20-per-overlap (capped at +80) boost to ranked catalog
@@ -675,6 +765,127 @@ pub(in crate::modules) fn load_taint_iris_next_context(
             },
             value: None,
         },
+    }
+}
+
+#[cfg(test)]
+mod boost_with_discovered_signals_tests {
+    use super::*;
+
+    fn entry(cwe: &str, languages: Vec<&str>, sources: Vec<&str>, sinks: Vec<&str>) -> TaintIrisNextRankedCatalogEntry {
+        TaintIrisNextRankedCatalogEntry {
+            cwe: cwe.to_string(),
+            name: cwe.to_string(),
+            taint_class: "test".to_string(),
+            languages: languages.into_iter().map(String::from).collect(),
+            source_signals: sources.into_iter().map(String::from).collect(),
+            sink_signals: sinks.into_iter().map(String::from).collect(),
+            sanitizer_signals: Vec::new(),
+            structural_queries: Vec::new(),
+            score: 0,
+            reasons: Vec::new(),
+        }
+    }
+
+    fn signal(name: &str, cwe: &str, kind: &str, language: &str) -> DiscoveredSignal {
+        DiscoveredSignal {
+            name: name.to_string(),
+            cwe: cwe.to_string(),
+            kind: kind.to_string(),
+            language: language.to_string(),
+            marker: "test".to_string(),
+            file: "f.c".to_string(),
+            line: 1,
+        }
+    }
+
+    #[test]
+    fn splices_discovered_sources_into_matching_cwe_entry() {
+        let catalog = vec![entry(
+            "CWE-120",
+            vec!["c"],
+            vec!["PG_GETARG_TEXT_PP"],
+            vec!["memcpy("],
+        )];
+        let signals = DiscoveredSignals {
+            discovered_at_unix: 0,
+            sources: vec![signal("pullf_read", "CWE-120", "source", "c")],
+            sinks: Vec::new(),
+            entry_points: Vec::new(),
+            discoverers: vec!["test".to_string()],
+        };
+        let out = boost_catalog_with_discovered_signals(catalog, &signals);
+        let cwe120 = out.iter().find(|e| e.cwe == "CWE-120").unwrap();
+        assert!(
+            cwe120.source_signals.contains(&"pullf_read".to_string()),
+            "got {:?}",
+            cwe120.source_signals
+        );
+        assert!(cwe120.source_signals.contains(&"PG_GETARG_TEXT_PP".to_string()));
+        assert_eq!(cwe120.score, 0, "bonus must NOT count spliced names");
+    }
+
+    #[test]
+    fn pre_existing_overlap_still_earns_bonus() {
+        let catalog = vec![entry(
+            "CWE-120",
+            vec!["c"],
+            vec!["pullf_read"],
+            vec!["memcpy("],
+        )];
+        let signals = DiscoveredSignals {
+            discovered_at_unix: 0,
+            sources: vec![signal("pullf_read", "CWE-120", "source", "c")],
+            sinks: Vec::new(),
+            entry_points: Vec::new(),
+            discoverers: vec!["test".to_string()],
+        };
+        let out = boost_catalog_with_discovered_signals(catalog, &signals);
+        let cwe120 = out.iter().find(|e| e.cwe == "CWE-120").unwrap();
+        assert_eq!(cwe120.score, 15, "PRE-existing overlap must still earn +15");
+    }
+
+    #[test]
+    fn respects_language_match_for_splicing() {
+        let catalog = vec![entry(
+            "CWE-120",
+            vec!["python"],
+            vec!["existing_source"],
+            vec!["existing_sink"],
+        )];
+        let signals = DiscoveredSignals {
+            discovered_at_unix: 0,
+            sources: vec![signal("pullf_read", "CWE-120", "source", "c")],
+            sinks: Vec::new(),
+            entry_points: Vec::new(),
+            discoverers: vec!["test".to_string()],
+        };
+        let out = boost_catalog_with_discovered_signals(catalog, &signals);
+        let cwe120 = out.iter().find(|e| e.cwe == "CWE-120").unwrap();
+        assert!(
+            !cwe120.source_signals.contains(&"pullf_read".to_string()),
+            "language gate must reject mismatched language"
+        );
+    }
+
+    #[test]
+    fn cross_cwe_does_not_splice() {
+        let catalog = vec![entry(
+            "CWE-94",
+            vec!["c"],
+            vec!["existing_source"],
+            vec!["dlopen("],
+        )];
+        let signals = DiscoveredSignals {
+            discovered_at_unix: 0,
+            sources: vec![signal("pullf_read", "CWE-120", "source", "c")],
+            sinks: Vec::new(),
+            entry_points: Vec::new(),
+            discoverers: vec!["test".to_string()],
+        };
+        let out = boost_catalog_with_discovered_signals(catalog, &signals);
+        let cwe94 = out.iter().find(|e| e.cwe == "CWE-94").unwrap();
+        assert!(!cwe94.source_signals.contains(&"pullf_read".to_string()));
     }
 }
 

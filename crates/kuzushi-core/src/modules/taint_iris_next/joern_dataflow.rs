@@ -363,9 +363,43 @@ pub(in crate::modules) fn joern_flows_to_linked_stories(
                 sink_line: flow.sink_line,
                 shared_tokens: Vec::new(),
                 rationale: format!("joern reachableByFlows path: {trace}"),
+                callees: extract_callees_from_flow_steps(&flow.steps),
             }
         })
         .collect()
+}
+
+/// Walk each `JoernStep.code` and pull out identifier-shaped tokens
+/// that look like function calls: `identifier(...)`. Filters a small
+/// set of control-flow / built-in / memcpy-family keywords that would
+/// otherwise be the most common false matches. The resulting list
+/// drives Thread B1's body inlining: every callee on the taint path
+/// has its body included in the agent prompt so the model can audit
+/// the upstream bound-check helpers (e.g. `pgp_mpi_alloc`,
+/// `prepare_room`) inline.
+fn extract_callees_from_flow_steps(steps: &[JoernStep]) -> Vec<String> {
+    use std::collections::BTreeSet;
+    static CALLEE_RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = CALLEE_RE
+        .get_or_init(|| regex::Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]{3,})\s*\(").unwrap());
+    let skip: &[&str] = &[
+        "if", "while", "for", "switch", "sizeof", "return", "case",
+        "elog", "ereport", "Assert", "memcpy", "memmove", "memset",
+        "strcpy", "strncpy", "strcat", "strncat", "sprintf", "snprintf",
+        "palloc", "palloc0", "pfree", "repalloc",
+    ];
+    let mut out: BTreeSet<String> = BTreeSet::new();
+    for step in steps {
+        for cap in re.captures_iter(&step.code) {
+            if let Some(name) = cap.get(1).map(|m| m.as_str()) {
+                if skip.contains(&name) {
+                    continue;
+                }
+                out.insert(name.to_string());
+            }
+        }
+    }
+    out.into_iter().collect()
 }
 
 /// Mint synthetic TaintIrisNextCandidate rows for each flow endpoint so
@@ -526,5 +560,45 @@ mod tests {
         assert_eq!(escape_regex_meta("req.query"), "req\\.query");
         assert_eq!(escape_regex_meta(".execute("), "\\.execute\\(");
         assert_eq!(escape_regex_meta("plain"), "plain");
+    }
+
+    #[test]
+    fn extract_callees_from_flow_steps_picks_function_calls() {
+        // Joern's flow steps carry one line of code per step. The
+        // extractor should pull identifier-shaped tokens followed by
+        // `(` — that's how upstream bound-check helpers like
+        // `pgp_mpi_alloc` and `prepare_room` get into the
+        // relaxed_names set for Thread B2's body inlining. Built-in
+        // / control-flow / memcpy-family names are skipped so we
+        // don't waste body-slots on them.
+        let steps = vec![
+            JoernStep {
+                file: "f.c".to_string(),
+                line: 10,
+                code: "res = pgp_mpi_read(src, &c1);".to_string(),
+            },
+            JoernStep {
+                file: "f.c".to_string(),
+                line: 20,
+                code: "if (sess_key_len > PGP_MAX_KEY) return 0;".to_string(),
+            },
+            JoernStep {
+                file: "f.c".to_string(),
+                line: 30,
+                code: "prepare_room(dst, len);".to_string(),
+            },
+            JoernStep {
+                file: "f.c".to_string(),
+                line: 40,
+                code: "memcpy(ctx->sess_key, msg + 1, sess_key_len);".to_string(),
+            },
+        ];
+        let callees = extract_callees_from_flow_steps(&steps);
+        // The two real upstream callees should appear.
+        assert!(callees.contains(&"pgp_mpi_read".to_string()), "got {callees:?}");
+        assert!(callees.contains(&"prepare_room".to_string()), "got {callees:?}");
+        // Skip-list keywords / sinks should NOT appear.
+        assert!(!callees.contains(&"if".to_string()));
+        assert!(!callees.contains(&"memcpy".to_string()));
     }
 }
