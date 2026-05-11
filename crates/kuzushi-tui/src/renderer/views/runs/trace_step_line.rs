@@ -1,13 +1,18 @@
 use super::*;
 
 pub(crate) fn trace_step_line(step: &TraceStep, width: u16) -> Line<'static> {
-    let kind_style = match step.kind.as_str() {
-        "plan" => theme::label(),
-        "tool" => theme::success(),
-        "llm" => theme::accent(),
-        "refused" => theme::danger(),
-        "critic" => theme::warn(),
-        _ => theme::muted(),
+    let kind_style = match step.severity.as_deref() {
+        Some("danger") => theme::danger(),
+        Some("warn") => theme::warn(),
+        _ => match step.kind.as_str() {
+            "plan" => theme::label(),
+            "tool" | "tool-start" => theme::success(),
+            "done" | "tool-complete" => theme::success(),
+            "llm" | "reasoning" | "tool-progress" => theme::accent(),
+            "refused" | "failing" => theme::danger(),
+            "critic" => theme::warn(),
+            _ => theme::muted(),
+        },
     };
     let latency = step
         .latency_ms
@@ -23,18 +28,36 @@ pub(crate) fn trace_step_line(step: &TraceStep, width: u16) -> Line<'static> {
         .cost_usd
         .map(|c| format!("${c:.4}"))
         .unwrap_or_else(|| "—".to_string());
+    let label = trace_step_label(step);
     let label_budget = (width as usize).saturating_sub(28).max(20);
     Line::from(vec![
         Span::raw(" "),
         Span::styled(format!("{:>3} ", step.n), theme::subtle()),
         Span::styled(format!("{:8}", step.kind), kind_style),
         Span::raw(" "),
-        Span::styled(fit(&step.label, label_budget), theme::primary()),
+        Span::styled(fit(&label, label_budget), theme::primary()),
         Span::raw("  "),
         Span::styled(format!("{:>7}", latency), theme::muted()),
         Span::raw("  "),
         Span::styled(cost, theme::muted()),
     ])
+}
+
+fn trace_step_label(step: &TraceStep) -> String {
+    let prefix = match (step.module_id.as_deref(), step.verb.as_deref()) {
+        (Some(module), Some(verb)) => Some(format!("[{module}:{verb}]")),
+        (Some(module), None) => Some(format!("[{module}]")),
+        _ => None,
+    };
+    let indent = if step.parent_step.is_some() {
+        "↳ "
+    } else {
+        ""
+    };
+    match prefix {
+        Some(prefix) => format!("{indent}{prefix} {}", step.label),
+        None => format!("{indent}{}", step.label),
+    }
 }
 
 pub(crate) fn run_artifact_path(app: &ShellApp, run_id: &str, leaf: &str) -> std::path::PathBuf {

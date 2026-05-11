@@ -53,7 +53,8 @@ impl ShellApp {
         let _ = append_run_trace_step(
             &target,
             &run_id,
-            &RunTraceStep::new(1, "tool", format!("{tool_name} started")),
+            &RunTraceStep::new(1, "tool", format!("{tool_name} started"))
+                .with_tool_name(&tool_name),
         );
         let (tx, rx) = mpsc::channel();
         self.target = Some(target.clone());

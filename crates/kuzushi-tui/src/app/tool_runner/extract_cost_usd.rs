@@ -37,7 +37,8 @@ pub(crate) fn record_tool_run_complete(
     let _ = append_run_trace_step(
         target,
         run_id,
-        &RunTraceStep::new(2, "tool", format!("{tool_name} complete"))
+        &RunTraceStep::new(2, "done", format!("{tool_name} complete"))
+            .with_tool_name(tool_name)
             .with_cost_usd(extract_cost_usd(result)),
     );
     let _ = write_run_summary(target, &summary);
@@ -62,7 +63,9 @@ pub(crate) fn record_tool_run_failed(
     let _ = append_run_trace_step(
         target,
         run_id,
-        &RunTraceStep::new(2, "tool", format!("{tool_name} failed")),
+        &RunTraceStep::new(2, "refused", format!("{tool_name} failed"))
+            .with_tool_name(tool_name)
+            .with_severity("danger"),
     );
     let _ = write_run_summary(target, &summary);
 }

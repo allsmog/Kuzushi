@@ -61,6 +61,11 @@ pub(crate) struct TraceStep {
     pub(in crate::renderer::views) label: String,
     pub(in crate::renderer::views) latency_ms: Option<u64>,
     pub(in crate::renderer::views) cost_usd: Option<f64>,
+    pub(in crate::renderer::views) module_id: Option<String>,
+    pub(in crate::renderer::views) verb: Option<String>,
+    pub(in crate::renderer::views) parent_step: Option<usize>,
+    pub(in crate::renderer::views) severity: Option<String>,
+    pub(in crate::renderer::views) started_at_ms: Option<u64>,
 }
 
 pub(crate) fn parse_trace_jsonl(path: &std::path::Path) -> Vec<TraceStep> {
@@ -97,12 +102,36 @@ pub(crate) fn parse_trace_jsonl(path: &std::path::Path) -> Vec<TraceStep> {
             .to_string();
         let latency_ms = value.get("latency_ms").and_then(serde_json::Value::as_u64);
         let cost_usd = value.get("cost_usd").and_then(serde_json::Value::as_f64);
+        let module_id = value
+            .get("module_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        let verb = value
+            .get("verb")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        let parent_step = value
+            .get("parent_step")
+            .and_then(serde_json::Value::as_u64)
+            .map(|n| n as usize);
+        let severity = value
+            .get("severity")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        let started_at_ms = value
+            .get("started_at_ms")
+            .and_then(serde_json::Value::as_u64);
         out.push(TraceStep {
             n,
             kind,
             label,
             latency_ms,
             cost_usd,
+            module_id,
+            verb,
+            parent_step,
+            severity,
+            started_at_ms,
         });
     }
     out

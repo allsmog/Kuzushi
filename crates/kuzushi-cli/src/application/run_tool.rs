@@ -79,7 +79,7 @@ pub(crate) fn start_cli_tool_run(target: &Path, tool: &str, input: &serde_json::
     let _ = append_run_trace_step(
         target,
         &run_id,
-        &RunTraceStep::new(1, "tool", format!("{tool} started")),
+        &RunTraceStep::new(1, "tool", format!("{tool} started")).with_tool_name(tool),
     );
     let _ = write_run_summary(target, &summary);
     run_id
