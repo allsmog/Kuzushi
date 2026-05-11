@@ -59,6 +59,22 @@ pub(in crate::modules) fn joern_cpg_path(target: &Path) -> PathBuf {
     target.join(".kuzushi").join("cpg.bin")
 }
 
+/// Resolve the CPG path the pre-agent flow query should load. Honour
+/// the operator's `joernCpg` input first — it propagates as
+/// `KUZUSHI_JOERN_CPG` via `apply_path_option_env` so the same value
+/// also reaches the agent-facing MCP joern server. Falling back to
+/// the canonical `<scan_root>/.kuzushi/cpg.bin` keeps the
+/// zero-configuration case working.
+pub(in crate::modules) fn resolve_joern_cpg_path(scan_root: &Path) -> PathBuf {
+    if let Some(env_path) = std::env::var_os("KUZUSHI_JOERN_CPG") {
+        let candidate = PathBuf::from(env_path);
+        if !candidate.as_os_str().is_empty() {
+            return candidate;
+        }
+    }
+    joern_cpg_path(scan_root)
+}
+
 /// Locate the bundled Scala flow script. Same resolution strategy as the
 /// pi-agent-core bridge: env override, source_root (via `current_exe`
 /// walk-up), then the well-known repo-relative path.
@@ -96,7 +112,7 @@ pub(in crate::modules) fn run_joern_flows(
     if !joern_available() {
         return Ok(None);
     }
-    let cpg_path = joern_cpg_path(&plan.scan_root);
+    let cpg_path = resolve_joern_cpg_path(&plan.scan_root);
     if !cpg_path.exists() {
         return Ok(None);
     }
@@ -145,6 +161,31 @@ pub(in crate::modules) fn run_joern_flows(
 
     let mut child = child;
     let output = wait_with_optional_timeout(&mut child, timeout_secs)?;
+
+    // Joern's stderr carries the per-CWE `X sources, Y sinks, Z flows`
+    // diagnostic the Scala script prints, and joern's stdout carries the
+    // JSONL flow records the parser consumes. Both are silenced on a
+    // zero-exit success path because they live on piped FDs, so a "0 flows"
+    // outcome is indistinguishable from "no source-to-sink reachable in CPG"
+    // without re-running. When `KUZUSHI_JOERN_DEBUG_LOG=<path>` is set,
+    // append a self-describing record (queries + stdout + stderr + exit) to
+    // that file so an operator can diagnose empty-flow situations without
+    // rebuilding the binary.
+    if let Some(debug_path) = std::env::var_os("KUZUSHI_JOERN_DEBUG_LOG") {
+        let record = format!(
+            "=== run_joern_flows debug ===\ncpg: {}\nqueries: {}\nexit: {}\n--- stdout ---\n{}\n--- stderr ---\n{}\n=== end ===\n",
+            cpg_path.display(),
+            queries,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&debug_path)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, record.as_bytes()));
+    }
 
     if !output.status.success() {
         anyhow::bail!(
@@ -560,6 +601,47 @@ mod tests {
         assert_eq!(escape_regex_meta("req.query"), "req\\.query");
         assert_eq!(escape_regex_meta(".execute("), "\\.execute\\(");
         assert_eq!(escape_regex_meta("plain"), "plain");
+    }
+
+    /// `resolve_joern_cpg_path` and related env-var tests share the
+    /// process env. Serialise them through this mutex so concurrent
+    /// test threads can't observe each other's `KUZUSHI_JOERN_CPG`
+    /// mutations. Mirrors the pattern in `run_taint_iris_next_report::tests`.
+    fn cpg_env_lock() -> &'static std::sync::Mutex<()> {
+        static LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    #[test]
+    fn resolve_joern_cpg_path_prefers_env_override() {
+        let _guard = cpg_env_lock().lock().unwrap();
+        std::env::set_var("KUZUSHI_JOERN_CPG", "/tmp/alt-cpg.bin");
+        let resolved = resolve_joern_cpg_path(Path::new("/some/scan/root"));
+        assert_eq!(resolved, PathBuf::from("/tmp/alt-cpg.bin"));
+        std::env::remove_var("KUZUSHI_JOERN_CPG");
+    }
+
+    #[test]
+    fn resolve_joern_cpg_path_falls_back_to_canonical_when_env_unset() {
+        let _guard = cpg_env_lock().lock().unwrap();
+        std::env::remove_var("KUZUSHI_JOERN_CPG");
+        let resolved = resolve_joern_cpg_path(Path::new("/some/scan/root"));
+        assert_eq!(
+            resolved,
+            PathBuf::from("/some/scan/root/.kuzushi/cpg.bin"),
+        );
+    }
+
+    #[test]
+    fn resolve_joern_cpg_path_ignores_empty_env_value() {
+        let _guard = cpg_env_lock().lock().unwrap();
+        std::env::set_var("KUZUSHI_JOERN_CPG", "");
+        let resolved = resolve_joern_cpg_path(Path::new("/some/scan/root"));
+        assert_eq!(
+            resolved,
+            PathBuf::from("/some/scan/root/.kuzushi/cpg.bin"),
+        );
+        std::env::remove_var("KUZUSHI_JOERN_CPG");
     }
 
     #[test]
