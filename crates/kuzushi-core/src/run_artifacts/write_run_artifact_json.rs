@@ -37,6 +37,19 @@ pub fn append_run_trace_step(
     Ok(path)
 }
 
+pub fn next_run_trace_step_number(target: impl AsRef<Path>, run_id: &str) -> usize {
+    let path = run_dir(target, run_id).join("trace.jsonl");
+    let Ok(text) = fs::read_to_string(path) else {
+        return 1;
+    };
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<RunTraceStep>(line).ok())
+        .map(|step| step.n)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1)
+}
+
 pub(crate) fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

@@ -61,6 +61,7 @@ pub(crate) fn background_tool_worker(
     workspace: WorkspaceTarget,
     tool_name: String,
     input: serde_json::Value,
+    run_id: String,
     thinking_level: Option<String>,
     tx: Sender<ToolEvent>,
 ) {
@@ -70,6 +71,7 @@ pub(crate) fn background_tool_worker(
         &workspace,
         &tool_name,
         input,
+        &run_id,
         thinking_level,
     );
     let event = match result {

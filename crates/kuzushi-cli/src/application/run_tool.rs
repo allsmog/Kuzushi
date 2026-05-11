@@ -7,7 +7,7 @@ use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::{
     append_run_trace_step, load_config_for_target, new_run_id, write_run_artifact_json,
     write_run_summary, AgentRuntime, FindingStore, ModuleRegistry, RunSummary, RunTraceStep,
-    ToolOptionStore, WorkspaceTarget,
+    ToolOptionStore, TraceHandle, TracedRuntime, WorkspaceTarget,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
 use std::path::{Path, PathBuf};
@@ -41,17 +41,28 @@ pub(crate) fn run_tool_command(
     } else {
         None
     };
+    let trace = workspace
+        .as_ref()
+        .zip(run_id.as_ref())
+        .map(|(workspace, run_id)| {
+            TraceHandle::jsonl(workspace.root(), run_id)
+                .for_tool(&tool)
+                .child(1)
+        });
+    let traced_runtime = runtime
+        .as_ref()
+        .zip(trace.as_ref())
+        .map(|(runtime, trace)| TracedRuntime::new(runtime as &dyn AgentRuntime, trace.clone()));
+    let runtime_ref = traced_runtime
+        .as_ref()
+        .map(|runtime| runtime as &dyn AgentRuntime)
+        .or_else(|| runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime));
     let ctx = ToolExecutionContext {
         config: &config,
         workspace: workspace.as_ref(),
         findings_store: store.as_ref(),
     };
-    let result = registry.execute_tool_with_runtime(
-        &tool,
-        input,
-        &ctx,
-        runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
-    );
+    let result = registry.execute_tool_with_runtime(&tool, input, &ctx, runtime_ref);
     let output = match result {
         Ok(output) => {
             if let (Some(workspace), Some(run_id)) = (workspace.as_ref(), run_id.as_deref()) {

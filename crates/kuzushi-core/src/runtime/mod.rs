@@ -11,6 +11,7 @@ pub mod domain;
 pub mod policy;
 #[cfg(test)]
 mod tests;
+mod traced_runtime;
 
 pub use application::run_tool_loop;
 pub use domain::{
@@ -20,3 +21,4 @@ pub use domain::{
     ToolCall, ToolCallHandler, ToolResult, TriageRequest,
 };
 pub use policy::{require_configured_model, resolve_explicit_model, validate_model_spec};
+pub use traced_runtime::TracedRuntime;
