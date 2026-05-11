@@ -58,16 +58,6 @@ pub(in crate::modules::taint_iris_next) fn taint_iris_next_evidence_meets_minimu
     rank(level) >= rank(minimum)
 }
 
-pub(in crate::modules::taint_iris_next) fn deterministic_taint_iris_next_severity(
-    cwe: &str,
-) -> Severity {
-    match cwe {
-        "CWE-78" | "CWE-89" | "CWE-94" => Severity::High,
-        "CWE-22" | "CWE-79" | "CWE-502" | "CWE-611" | "CWE-918" => Severity::Medium,
-        _ => Severity::Low,
-    }
-}
-
 pub(in crate::modules::taint_iris_next) fn cwe_priority(cwe: &str) -> i32 {
     match cwe {
         "CWE-78" | "CWE-89" | "CWE-94" => 3,
