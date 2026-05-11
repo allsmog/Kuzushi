@@ -194,7 +194,15 @@ fn boost_catalog_with_discovered_signals(
     for s in sinks_by_cwe.values().flatten() {
         sink_name_index.insert(s.name.clone());
     }
-    const SPLICE_PER_ROLE_PER_ENTRY: usize = 8;
+    // pgcrypto-shaped discoveries (mbuf_*, pullf_*, pgp_mpi_*) yield
+    // ~16 unique source names per CWE; a cap of 8 alphabetically
+    // truncated the parser-layer reads (`pullf_read`, `pgp_mpi_read`)
+    // out of the joern source set and the heap-overflow flow that
+    // hinges on them never surfaced. 24 fits the pgcrypto family
+    // comfortably while still bounding postgres-scale discoveries
+    // (the joern script enforces its own 200-source per-CWE cap so a
+    // pathological codebase can't blow up reachableByFlows runtime).
+    const SPLICE_PER_ROLE_PER_ENTRY: usize = 24;
     for entry in &mut catalog {
         // Bonus snapshot (PRE-splice) — see comment above.
         let mut bonus: i32 = 0;
@@ -226,7 +234,13 @@ fn boost_catalog_with_discovered_signals(
                 || entry.languages.iter().any(|lang| lang == &sig.language)
         };
         if let Some(disc_sources) = sources_by_cwe.get(&cwe) {
-            let existing: std::collections::BTreeSet<String> =
+            // Track names already in the catalog AND names spliced so far
+            // — discovery output can list a marker many times (one record
+            // per call site), and counting each push against the 8-slot
+            // budget would mean a single duplicated name eats multiple
+            // slots and starves other discovered names from making it in.
+            // Mutate the set as we push so each unique name costs one slot.
+            let mut already: std::collections::BTreeSet<String> =
                 entry.source_signals.iter().cloned().collect();
             let mut spliced = 0usize;
             for sig in disc_sources {
@@ -236,7 +250,7 @@ fn boost_catalog_with_discovered_signals(
                 if !language_match(sig) {
                     continue;
                 }
-                if existing.contains(&sig.name) {
+                if !already.insert(sig.name.clone()) {
                     continue;
                 }
                 entry.source_signals.push(sig.name.clone());
@@ -244,7 +258,7 @@ fn boost_catalog_with_discovered_signals(
             }
         }
         if let Some(disc_sinks) = sinks_by_cwe.get(&cwe) {
-            let existing: std::collections::BTreeSet<String> =
+            let mut already: std::collections::BTreeSet<String> =
                 entry.sink_signals.iter().cloned().collect();
             let mut spliced = 0usize;
             for sig in disc_sinks {
@@ -254,7 +268,7 @@ fn boost_catalog_with_discovered_signals(
                 if !language_match(sig) {
                     continue;
                 }
-                if existing.contains(&sig.name) {
+                if !already.insert(sig.name.clone()) {
                     continue;
                 }
                 entry.sink_signals.push(sig.name.clone());
@@ -886,6 +900,53 @@ mod boost_with_discovered_signals_tests {
         let out = boost_catalog_with_discovered_signals(catalog, &signals);
         let cwe94 = out.iter().find(|e| e.cwe == "CWE-94").unwrap();
         assert!(!cwe94.source_signals.contains(&"pullf_read".to_string()));
+    }
+
+    #[test]
+    fn duplicate_discovery_records_do_not_starve_splice_budget() {
+        // Discovery emits one record per occurrence, so a marker that
+        // appears at 3 call sites lands in the per-CWE list 3 times.
+        // The 8-slot budget MUST count unique names, not raw pushes —
+        // otherwise the first frequently-occurring name eats every
+        // slot and downstream names like pullf_read / pgp_mpi_read
+        // are starved. Reproduces the pgcrypto bug where mbuf_*
+        // duplicates squeezed pullf_read out of the joern source set.
+        let catalog = vec![entry(
+            "CWE-120",
+            vec!["c"],
+            vec!["PG_GETARG_TEXT_PP"],
+            vec!["memcpy("],
+        )];
+        // 9 records, only 3 unique names. If the splice counts pushes
+        // instead of unique names, mbuf_append would consume 4 slots,
+        // mbuf_avail would consume 4 more, and the 8-slot budget would
+        // exhaust before pgp_mpi_read is reached.
+        let signals = DiscoveredSignals {
+            discovered_at_unix: 0,
+            sources: vec![
+                signal("mbuf_append", "CWE-120", "source", "c"),
+                signal("mbuf_append", "CWE-120", "source", "c"),
+                signal("mbuf_append", "CWE-120", "source", "c"),
+                signal("mbuf_append", "CWE-120", "source", "c"),
+                signal("mbuf_avail", "CWE-120", "source", "c"),
+                signal("mbuf_avail", "CWE-120", "source", "c"),
+                signal("mbuf_avail", "CWE-120", "source", "c"),
+                signal("mbuf_avail", "CWE-120", "source", "c"),
+                signal("pgp_mpi_read", "CWE-120", "source", "c"),
+            ],
+            sinks: Vec::new(),
+            entry_points: Vec::new(),
+            discoverers: vec!["test".to_string()],
+        };
+        let out = boost_catalog_with_discovered_signals(catalog, &signals);
+        let cwe120 = out.iter().find(|e| e.cwe == "CWE-120").unwrap();
+        assert!(
+            cwe120.source_signals.contains(&"pgp_mpi_read".to_string()),
+            "pgp_mpi_read must fit in the splice budget despite mbuf_* duplicates; got {:?}",
+            cwe120.source_signals
+        );
+        assert!(cwe120.source_signals.contains(&"mbuf_append".to_string()));
+        assert!(cwe120.source_signals.contains(&"mbuf_avail".to_string()));
     }
 }
 

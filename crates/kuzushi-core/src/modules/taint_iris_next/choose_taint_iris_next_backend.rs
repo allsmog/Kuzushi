@@ -6,7 +6,7 @@ pub(in crate::modules) fn choose_taint_iris_next_backend(
 ) -> TaintIrisNextBackendChoice {
     let codeql_db = super::codeql_db_path(repo_root);
     let codeql_runnable = codeql_db.is_some() && super::codeql_available();
-    let joern_cpg = joern_cpg_path(repo_root);
+    let joern_cpg = super::resolve_joern_cpg_path(repo_root);
     let joern_cpg_present = joern_cpg.exists();
     let joern_runnable = joern_cpg_present && super::joern_available();
     let mut warnings = Vec::new();
