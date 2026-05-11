@@ -92,18 +92,6 @@ pub(crate) fn total_committed_all(conn: &Connection) -> Result<f64> {
     Ok(value.unwrap_or(0.0))
 }
 
-pub(crate) fn read_hard_ceiling_from_env() -> Option<f64> {
-    let raw = env::var("KUZUSHI_MAX_USD_PER_RUN").ok()?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    trimmed
-        .parse::<f64>()
-        .ok()
-        .filter(|v| v.is_finite() && *v >= 0.0)
-}
-
 pub(crate) fn unix_seconds() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

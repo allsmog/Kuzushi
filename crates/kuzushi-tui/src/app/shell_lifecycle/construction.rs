@@ -4,6 +4,8 @@ impl ShellApp {
     pub fn new(config: V2Config, target: Option<&WorkspaceTarget>) -> Self {
         let selected_model_index = preferred_model_choice_index(&config);
         let (option_store, option_store_error) = persistent_option_store(target);
+        let session_budget_usd = config.operator.session_budget_usd;
+        let trusted_workflow_auto_accept = config.operator.trusted_workflow_auto_accept;
         let mut app = Self {
             input: String::new(),
             cursor: 0,
@@ -45,10 +47,10 @@ impl ShellApp {
             scan: None,
             should_quit: false,
             ctrl_c_armed_at: None,
-            session_budget_usd: parse_budget_env(),
+            session_budget_usd,
             advisory: AdvisoryState::default(),
             live_activity: None,
-            trusted_workflow_auto_accept: trusted_workflow_auto_accept_from_env(),
+            trusted_workflow_auto_accept,
             pending_chain: None,
             pending_prereq_prompt: None,
             pending_plan: None,
@@ -120,15 +122,4 @@ fn persistent_option_store(target: Option<&WorkspaceTarget>) -> (ToolOptionStore
         Ok(store) => (store, None),
         Err(error) => (ToolOptionStore::new(), Some(error.to_string())),
     }
-}
-
-fn trusted_workflow_auto_accept_from_env() -> bool {
-    std::env::var("KUZUSHI_TRUSTED_WORKFLOW_AUTO_ACCEPT")
-        .map(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or(false)
 }

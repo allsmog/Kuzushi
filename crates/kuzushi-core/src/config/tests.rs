@@ -55,6 +55,11 @@ model = "openai:gpt-4.1"
 api_key_env = "KUZUSHI_OPENAI_KEY"
 base_url = "https://api.example.test/v1"
 thinking_level = "high"
+
+[operator]
+session_budget_usd = 2.5
+spend_hard_ceiling_usd = 10.0
+trusted_workflow_auto_accept = true
 "#,
         )
         .unwrap();
@@ -72,6 +77,9 @@ thinking_level = "high"
             Some("https://api.example.test/v1")
         );
         assert_eq!(config.runtime.thinking_level.as_deref(), Some("high"));
+        assert_eq!(config.operator.session_budget_usd, Some(2.5));
+        assert_eq!(config.operator.spend_hard_ceiling_usd, Some(10.0));
+        assert!(config.operator.trusted_workflow_auto_accept);
     }
 
     #[test]
@@ -152,6 +160,45 @@ allow_env_token = true
     }
 
     #[test]
+    fn legacy_product_behavior_env_vars_do_not_override_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let prev_budget = env::var("KUZUSHI_BUDGET_USD").ok();
+        let prev_ceiling = env::var("KUZUSHI_MAX_USD_PER_RUN").ok();
+        let prev_thinking = env::var("KUZUSHI_THINKING_LEVEL").ok();
+        unsafe {
+            env::set_var("KUZUSHI_BUDGET_USD", "99");
+            env::set_var("KUZUSHI_MAX_USD_PER_RUN", "123");
+            env::set_var("KUZUSHI_THINKING_LEVEL", "xhigh");
+        }
+
+        let restore = || unsafe {
+            match prev_budget.clone() {
+                Some(v) => env::set_var("KUZUSHI_BUDGET_USD", v),
+                None => env::remove_var("KUZUSHI_BUDGET_USD"),
+            }
+            match prev_ceiling.clone() {
+                Some(v) => env::set_var("KUZUSHI_MAX_USD_PER_RUN", v),
+                None => env::remove_var("KUZUSHI_MAX_USD_PER_RUN"),
+            }
+            match prev_thinking.clone() {
+                Some(v) => env::set_var("KUZUSHI_THINKING_LEVEL", v),
+                None => env::remove_var("KUZUSHI_THINKING_LEVEL"),
+            }
+        };
+
+        let config = load_config(ConfigPaths {
+            home_dir: tmp.path().join("home"),
+            target_dir: None,
+        });
+        restore();
+        let config = config.unwrap();
+
+        assert_eq!(config.operator.session_budget_usd, None);
+        assert_eq!(config.operator.spend_hard_ceiling_usd, None);
+        assert_eq!(config.runtime.thinking_level, None);
+    }
+
+    #[test]
     fn rejects_model_without_provider_prefix() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
@@ -190,5 +237,27 @@ thinking_level = "extreme"
         })
         .unwrap_err();
         assert!(err.to_string().contains("runtime.thinking_level"));
+    }
+
+    #[test]
+    fn rejects_negative_operator_budget() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v2/config.toml"),
+            r#"
+[operator]
+spend_hard_ceiling_usd = -1.0
+"#,
+        )
+        .unwrap();
+
+        let err = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("operator.spend_hard_ceiling_usd"));
     }
 }

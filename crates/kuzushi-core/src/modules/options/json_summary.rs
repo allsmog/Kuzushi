@@ -87,7 +87,9 @@ fn unknown_tool_option_message(tool: &ToolDescriptor, name: &str) -> String {
         .options
         .iter()
         .flat_map(|spec| {
-            std::iter::once(spec.name.as_str()).chain(spec.aliases.iter().map(String::as_str))
+            std::iter::once(spec.name.as_str())
+                .chain(spec.aliases.iter().map(String::as_str))
+                .chain(spec.deprecated_aliases.iter().map(String::as_str))
         })
         .collect::<Vec<_>>()
         .join(", ");
@@ -118,13 +120,24 @@ pub(in crate::modules) fn coerce_string_option(value: Value) -> Result<Value> {
 
 pub(in crate::modules) fn coerce_string_list_option(value: Value) -> Result<Value> {
     match value {
-        Value::String(value) => Ok(Value::String(value)),
+        Value::String(value) => Ok(Value::Array(coerce_comma_separated_strings(&value)?)),
         Value::Array(items) => Ok(Value::Array(coerce_string_list_items(items)?)),
         other => anyhow::bail!(
             "must be a string list or comma-separated string, got {}",
             json_summary(&other)
         ),
     }
+}
+
+pub(in crate::modules) fn coerce_comma_separated_strings(value: &str) -> Result<Vec<Value>> {
+    let items = value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(|item| Value::String(item.to_string()))
+        .collect::<Vec<_>>();
+    anyhow::ensure!(!items.is_empty(), "must contain at least one string");
+    Ok(items)
 }
 
 pub(in crate::modules) fn coerce_string_list_items(items: Vec<Value>) -> Result<Vec<Value>> {

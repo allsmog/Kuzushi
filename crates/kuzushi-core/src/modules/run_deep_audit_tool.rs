@@ -43,7 +43,10 @@ pub(crate) fn run_deep_audit_tool(
     let router = Arc::new(AgentRouter::load(&paths)?);
     let inner_arc: Arc<dyn AgentRuntime> = unsafe_clone_runtime_ref(runtime);
     let routed = RoutedRuntime::new(inner_arc, router, ctx.config.model.clone());
-    let spend = SpendLimiter::open(workspace.findings_db_path())?;
+    let spend = SpendLimiter::open_with_hard_ceiling(
+        workspace.findings_db_path(),
+        ctx.config.operator.spend_hard_ceiling_usd,
+    )?;
 
     let cfg = DeepAuditConfig {
         workspace_root: workspace.root().to_path_buf(),

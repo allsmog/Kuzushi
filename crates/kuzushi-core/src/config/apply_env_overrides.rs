@@ -78,6 +78,24 @@ pub(crate) fn validate_config(config: &V2Config) -> Result<()> {
         }
     }
 
+    validate_optional_usd(
+        "operator.session_budget_usd",
+        config.operator.session_budget_usd,
+    )?;
+    validate_optional_usd(
+        "operator.spend_hard_ceiling_usd",
+        config.operator.spend_hard_ceiling_usd,
+    )?;
+
+    Ok(())
+}
+
+fn validate_optional_usd(name: &str, value: Option<f64>) -> Result<()> {
+    if let Some(value) = value {
+        if !value.is_finite() || value < 0.0 {
+            anyhow::bail!("{name} must be a finite non-negative number");
+        }
+    }
     Ok(())
 }
 

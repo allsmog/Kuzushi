@@ -76,7 +76,7 @@ pub(crate) fn unknown_option_message(tool: &ToolDescriptor, name: &str) -> Strin
     let choices = tool
         .options
         .iter()
-        .map(|spec| spec.name.as_str())
+        .flat_map(option_choice_names)
         .collect::<Vec<_>>();
     let closest = closest_option_names(name, &choices);
     let closest = if closest.is_empty() {
@@ -88,6 +88,13 @@ pub(crate) fn unknown_option_message(tool: &ToolDescriptor, name: &str) -> Strin
         "unknown option {name:?} for {}. Closest: {closest}. Next: show options {}",
         tool.name, tool.name
     )
+}
+
+fn option_choice_names(spec: &OptionSpec) -> Vec<&str> {
+    std::iter::once(spec.name.as_str())
+        .chain(spec.aliases.iter().map(String::as_str))
+        .chain(spec.deprecated_aliases.iter().map(String::as_str))
+        .collect()
 }
 
 pub(crate) fn closest_option_names(name: &str, choices: &[&str]) -> Vec<String> {

@@ -39,10 +39,22 @@ pub(crate) fn plain_options_lines(
 
     lines.push(String::new());
     let widths = option_table_widths(width.min(u16::MAX as usize) as u16);
-    lines.push(table_text(
-        &["option", "value", "default", "req", "type", "description"],
-        &widths,
-    ));
+    lines.push(
+        table_text(
+            &[
+                "option",
+                "value",
+                "default",
+                "req",
+                "type",
+                "aliases",
+                "description",
+            ],
+            &widths,
+        )
+        .trim_end()
+        .to_string(),
+    );
     for spec in specs {
         let current = stored.get(&spec.name);
         let required = if spec.required && current.is_none() && spec.default.is_none() {
@@ -61,19 +73,30 @@ pub(crate) fn plain_options_lines(
             .as_ref()
             .map(format_json_value)
             .unwrap_or_else(|| "-".to_string());
-        lines.push(table_text(
-            &[
-                &spec.name,
-                &current,
-                &default,
-                required,
-                option_type_label(spec.option_type),
-                &fit(&description, widths.get(5).copied().unwrap_or(16)),
-            ],
-            &widths,
-        ));
+        lines.push(
+            table_text(
+                &[
+                    &spec.name,
+                    &current,
+                    &default,
+                    required,
+                    option_type_label(spec.option_type),
+                    &fit(
+                        &option_alias_label(spec),
+                        widths.get(5).copied().unwrap_or(10),
+                    ),
+                    &fit(&description, widths.get(6).copied().unwrap_or(16)),
+                ],
+                &widths,
+            )
+            .trim_end()
+            .to_string(),
+        );
     }
     lines.push(String::new());
+    lines.push(
+        "Canonical keys are in the option column; aliases are compatibility names.".to_string(),
+    );
     lines.push(
         "Next: set <key> <value>, setg <key> <value>, show advanced, show missing".to_string(),
     );

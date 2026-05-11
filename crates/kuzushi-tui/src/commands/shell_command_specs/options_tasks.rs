@@ -14,14 +14,14 @@ pub(crate) const OPTIONS_TASK_COMMANDS: &[ShellCommandSpec] = &[
         description: "show tool options",
     },
     ShellCommandSpec {
-        command: "show advanced",
-        aliases: &["/show advanced"],
+        command: "show advanced [tool]",
+        aliases: &["/show advanced [tool]"],
         category: ShellCommandCategory::OptionsTasks,
         description: "advanced and evasion options",
     },
     ShellCommandSpec {
-        command: "show missing",
-        aliases: &["/show missing"],
+        command: "show missing [tool]",
+        aliases: &["/show missing [tool]"],
         category: ShellCommandCategory::OptionsTasks,
         description: "required options without values",
     },

@@ -47,7 +47,7 @@ mod plan;
 mod prereq_chain;
 #[cfg(test)]
 use self::runtime::{mouse_capture_setting_enabled, render_plain_scripted_session};
-use self::settings::{parse_budget_env, preferred_model_choice_index, thinking_level_from_input};
+use self::settings::{preferred_model_choice_index, thinking_level_from_input};
 use self::workers::{
     merge_json, planner_worker, threat_ask_worker, threat_regen_worker, AgentEvent, PlanEvent,
     ScanEvent, ThreatPatchEvent, ToolEvent,

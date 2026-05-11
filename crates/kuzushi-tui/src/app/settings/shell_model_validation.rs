@@ -1,12 +1,3 @@
-use super::*;
-
-pub(crate) fn parse_budget_env() -> Option<f64> {
-    env::var("KUZUSHI_BUDGET_USD")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<f64>().ok())
-        .filter(|value| value.is_finite() && *value > 0.0)
-}
-
 pub(crate) fn validate_shell_model_id(model: &str) -> std::result::Result<(), String> {
     if model.is_empty() {
         return Err("model cannot be empty. Next: model, or model provider:model-id".to_string());

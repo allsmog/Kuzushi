@@ -48,6 +48,25 @@ pub(crate) fn option_description(spec: &OptionSpec) -> String {
     }
 }
 
+pub(crate) fn option_alias_label(spec: &OptionSpec) -> String {
+    let aliases = option_alias_values(spec);
+    if aliases.is_empty() {
+        "-".to_string()
+    } else {
+        aliases.join(", ")
+    }
+}
+
+fn option_alias_values(spec: &OptionSpec) -> Vec<String> {
+    let mut aliases = spec.aliases.clone();
+    aliases.extend(
+        spec.deprecated_aliases
+            .iter()
+            .map(|alias| format!("{alias} (deprecated)")),
+    );
+    aliases
+}
+
 pub(crate) fn format_json_value(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(value) => value.clone(),
@@ -60,16 +79,17 @@ pub(crate) fn format_json_value(value: &serde_json::Value) -> String {
 
 pub(crate) fn option_table_widths(width: u16) -> Vec<usize> {
     let total = width as usize;
-    let option = if total < 80 { 14 } else { 16 };
-    let value = if total < 80 { 10 } else { 12 };
-    let default = if total < 80 { 8 } else { 10 };
-    let required = if total < 80 { 5 } else { 7 };
-    let kind = 6;
-    let gaps = 10;
+    let option = if total <= 80 { 13 } else { 16 };
+    let value = if total <= 80 { 8 } else { 10 };
+    let default = if total <= 80 { 7 } else { 9 };
+    let required = if total <= 80 { 3 } else { 5 };
+    let kind = 5;
+    let aliases = if total <= 80 { 10 } else { 16 };
+    let gaps = 12;
     let description = total
-        .saturating_sub(option + value + default + required + kind + gaps)
+        .saturating_sub(option + value + default + required + kind + aliases + gaps)
         .max(12);
-    vec![option, value, default, required, kind, description]
+    vec![option, value, default, required, kind, aliases, description]
 }
 
 pub(crate) fn sast_task_table_widths(width: u16) -> Vec<usize> {

@@ -16,7 +16,8 @@ use crate::commands::{
 };
 use kuzushi_core::{
     load_persistent_threat_model, save_persistent_threat_model, AttachmentRecord, FindingStore,
-    OptionScope, OptionTarget, RuntimeConfig, RuntimeKind, Severity, TriageOutcome, TriageVerdict,
+    OptionScope, OptionTarget, RuntimeConfig, RuntimeKind, Severity, ToolOptionStore,
+    TriageOutcome, TriageVerdict,
 };
 use std::fs;
 
@@ -1454,7 +1455,7 @@ fn task_commands_update_sast_scan_selection_options() {
         .registry
         .prepare_tool_input("sast:scan", serde_json::json!({}), Some(&app.option_store))
         .unwrap();
-    assert_eq!(prepared["disabledTasks"], serde_json::json!("semgrep"));
+    assert_eq!(prepared["disabledTasks"], serde_json::json!(["semgrep"]));
 
     let scan_options = app.scan_options_from_store().unwrap();
     assert_eq!(
@@ -1484,8 +1485,8 @@ fn task_mode_manual_seeds_and_allows_tasks_for_sast_scan() {
         .unwrap();
     assert_eq!(prepared["taskMode"], serde_json::json!("manual"));
     assert!(prepared["tasks"]
-        .as_str()
-        .is_some_and(|tasks| tasks.split(',').any(|task| task == "codeql")));
+        .as_array()
+        .is_some_and(|tasks| tasks.iter().any(|task| task == "codeql")));
 }
 
 #[test]
@@ -1714,6 +1715,7 @@ fn options_command_resolves_default_tool_and_set_updates_session_store() {
     fs::write(tmp.path().join("src/lib.rs"), "pub fn demo() {}\n").unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.option_store = ToolOptionStore::new();
 
     app.handle_command(ShellCommand::Use("context".to_string()));
     app.handle_command(ShellCommand::Options {
@@ -3446,6 +3448,18 @@ fn budget_halt_triggers_when_cost_exceeds_cap() {
     let halt = app.advisory.budget_halt.as_ref().unwrap();
     assert!(halt.spent_usd >= 0.12);
     assert_eq!(halt.limit_usd, 0.10);
+}
+
+#[test]
+fn shell_uses_operator_budget_and_trusted_workflow_from_config() {
+    let mut config = V2Config::default();
+    config.operator.session_budget_usd = Some(1.25);
+    config.operator.trusted_workflow_auto_accept = true;
+
+    let app = ShellApp::new(config, None);
+
+    assert_eq!(app.session_budget_usd, Some(1.25));
+    assert!(app.trusted_workflow_auto_accept);
 }
 
 fn make_finding(severity: Severity, fp: &str, title: &str) -> Finding {

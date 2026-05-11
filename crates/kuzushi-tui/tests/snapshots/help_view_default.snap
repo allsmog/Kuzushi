@@ -35,10 +35,10 @@ options [tool] - show tool options
   aliases / examples: /options [tool]
 show options [tool] - show tool options
   aliases / examples: /show options [tool]
-show advanced - advanced and evasion options
-  aliases / examples: /show advanced
-show missing - required options without values
-  aliases / examples: /show missing
+show advanced [tool] - advanced and evasion options
+  aliases / examples: /show advanced [tool]
+show missing [tool] - required options without values
+  aliases / examples: /show missing [tool]
 set <key> <value> - set a session option
   aliases / examples: /set <key> <value>
 setg <key> <value> - set a global option

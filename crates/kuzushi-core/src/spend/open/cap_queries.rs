@@ -29,8 +29,7 @@ impl SpendLimiter {
         self.lock().hard_ceiling
     }
 
-    /// Override the hard ceiling for the current process. Used by tests; in
-    /// production set `KUZUSHI_MAX_USD_PER_RUN`.
+    /// Override the hard ceiling for this limiter instance.
     pub fn set_hard_ceiling(&self, value: Option<f64>) {
         self.lock().hard_ceiling = value;
     }

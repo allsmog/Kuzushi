@@ -21,11 +21,12 @@ pub(crate) fn options_lines(
     };
 
     let stored = app.option_store.effective_stored_values(&tool.name);
-    let specs = tool
+    let mut specs = tool
         .options
         .iter()
         .filter(|spec| option_visible(spec, view.filter, stored.get(&spec.name).is_some()))
         .collect::<Vec<_>>();
+    specs.sort_by_key(|spec| !stored.contains_key(&spec.name));
 
     if specs.is_empty() {
         lines.push(blank());
@@ -41,8 +42,21 @@ pub(crate) fn options_lines(
     }
 
     lines.push(blank());
+    lines.push(muted(&fit(
+        "set <key> <value> writes session state; setg writes global state. Option names are canonical; aliases work.",
+        area.width as usize,
+    )));
+    lines.push(blank());
     lines.push(table_header(
-        &["option", "value", "default", "req", "type", "description"],
+        &[
+            "option",
+            "value",
+            "default",
+            "req",
+            "type",
+            "aliases",
+            "description",
+        ],
         &option_table_widths(area.width),
     ));
     for spec in specs {
@@ -69,16 +83,15 @@ pub(crate) fn options_lines(
                     .unwrap_or_else(|| "-".to_string()),
                 required,
                 option_type_label(spec.option_type),
-                &fit(&description, widths.get(5).copied().unwrap_or(16)),
+                &fit(
+                    &option_alias_label(spec),
+                    widths.get(5).copied().unwrap_or(10),
+                ),
+                &fit(&description, widths.get(6).copied().unwrap_or(16)),
             ],
             &widths,
         ));
     }
-    lines.push(blank());
-    lines.push(muted(&fit(
-        "set <key> <value> writes a session option; setg writes a global option for this shell session.",
-        area.width as usize,
-    )));
     lines
 }
 

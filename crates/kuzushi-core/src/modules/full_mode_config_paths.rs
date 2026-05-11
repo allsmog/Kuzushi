@@ -14,7 +14,12 @@ pub(crate) fn full_mode_spend_limiter(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Option<crate::spend::SpendLimiter>> {
     ctx.workspace
-        .map(|w| crate::spend::SpendLimiter::open(w.findings_db_path()))
+        .map(|w| {
+            crate::spend::SpendLimiter::open_with_hard_ceiling(
+                w.findings_db_path(),
+                ctx.config.operator.spend_hard_ceiling_usd,
+            )
+        })
         .transpose()
 }
 
