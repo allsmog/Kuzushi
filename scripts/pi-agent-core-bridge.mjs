@@ -100,6 +100,26 @@ function applyClaudeCodeIdentityPrefix(systemPrompt) {
 }
 
 /**
+ * Anthropic's Messages API checks for the Claude Code identity *as the
+ * first content block* in the system field — a concatenated string like
+ * "You are Claude Code...\n\nYou are an auditor." fails the check and
+ * trips a sub-second rate_limit_error. Returning an array of text blocks
+ * with the identity line as the first block is what pi-ai's OAuth path
+ * does (see @mariozechner/pi-ai dist/providers/anthropic.js buildParams).
+ */
+function claudeCodeIdentitySystemBlocks(originalSystem) {
+  const body = typeof originalSystem === "string" ? originalSystem : "";
+  const blocks = [{ type: "text", text: CLAUDE_CODE_IDENTITY_LINE }];
+  if (body.trim() && !body.startsWith(CLAUDE_CODE_IDENTITY_LINE)) {
+    blocks.push({ type: "text", text: body });
+  } else if (body.startsWith(CLAUDE_CODE_IDENTITY_LINE)) {
+    const remainder = body.slice(CLAUDE_CODE_IDENTITY_LINE.length).replace(/^\n+/, "");
+    if (remainder.trim()) blocks.push({ type: "text", text: remainder });
+  }
+  return blocks;
+}
+
+/**
  * Returns true if the bridge is about to authenticate to Anthropic via an
  * OAuth bearer (file bag or env token). Mirrors the precedence used by
  * `getApiKey` so the runAgent path agrees with handleNextStep/handlePing.
@@ -794,11 +814,11 @@ async function handlePing(request) {
     max_tokens: 1,
     messages: [{ role: "user", content: "ok" }],
   };
-  // Claude Code OAuth bags rate-limit Sonnet/Opus unless the system prompt
-  // opens with the Claude Code identity line; haiku is unaffected but it
-  // costs us nothing to include it here too.
+  // Claude Code OAuth bags rate-limit Sonnet/Opus unless `system` is an
+  // array whose first text block is exactly the Claude Code identity
+  // line. A concatenated string with the identity prefix is NOT enough.
   if (oauthToken || envOauth) {
-    body.system = CLAUDE_CODE_IDENTITY_LINE;
+    body.system = claudeCodeIdentitySystemBlocks("");
   }
   const t0 = Date.now();
   const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -875,13 +895,13 @@ async function handleNextStep(request) {
     headers["x-api-key"] = apiKey;
   }
 
-  let systemPrompt = request.systemPrompt ?? request.system_prompt ?? "";
-  if (oauthToken || envOauth) {
-    systemPrompt = applyClaudeCodeIdentityPrefix(systemPrompt);
-  }
+  const rawSystem = request.systemPrompt ?? request.system_prompt ?? "";
   const body = {
     model: modelId,
-    system: systemPrompt,
+    system:
+      oauthToken || envOauth
+        ? claudeCodeIdentitySystemBlocks(rawSystem)
+        : rawSystem,
     messages: request.messages ?? [],
     tools: (request.tools ?? []).map((t) => ({
       name: t.name,
