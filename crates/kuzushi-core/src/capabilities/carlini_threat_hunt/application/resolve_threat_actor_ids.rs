@@ -7,11 +7,20 @@ pub(crate) fn resolve_threat_actor_ids(
     nodes_by_id: &BTreeMap<String, DfdNode>,
     flows_by_id: &BTreeMap<String, DfdFlow>,
 ) -> Vec<String> {
+    // Operator-authored fields (direct actorIds, declared targetElementIds,
+    // declared flowIds) describe explicit intent. Semantic matching is a
+    // best-effort fallback when the threat-model author leaves those
+    // empty. Previously semantic ran before targetElementIds, which meant
+    // an explicit "this threat targets the command-parser" got overruled
+    // by whichever 3 nodes happened to share keyword tokens with the
+    // threat description — a UAF threat targeting the command parser was
+    // routed to the CI/CD actors because "code execution" tokenised to
+    // them. Prefer declared targets over inferred ones.
     first_non_empty_actor_ids([
         direct_actor_ids(threat, actor_ids),
-        semantic_actor_ids(threat, actors_by_id),
+        target_element_actor_ids(threat, actor_ids, nodes_by_id),
         flow_actor_ids(threat, actor_ids, flows_by_id),
-        target_element_actor_ids(threat, nodes_by_id),
+        semantic_actor_ids(threat, actors_by_id),
     ])
 }
 
@@ -60,8 +69,14 @@ fn append_flow_actor_ids(
 
 fn target_element_actor_ids(
     threat: &Value,
+    actor_ids: &BTreeSet<String>,
     nodes_by_id: &BTreeMap<String, DfdNode>,
 ) -> Vec<String> {
+    // Accept any targetElementId that points at an actor under the relaxed
+    // resolution in `actors_from_document` (canonical external-entity OR
+    // untrusted-zone-tagged process OR any non-data-store fallback).
+    // Restricting to `external-entity` here meant the LLM had to emit a
+    // very specific node-type string we have no way to enforce.
     unique_strings(
         object_string_array(
             threat,
@@ -73,7 +88,7 @@ fn target_element_actor_ids(
             ],
         )
         .into_iter()
-        .filter(|node_id| is_external_entity_node(nodes_by_id.get(node_id)))
+        .filter(|node_id| actor_ids.contains(node_id) || is_external_entity_node(nodes_by_id.get(node_id)))
         .collect(),
     )
 }
