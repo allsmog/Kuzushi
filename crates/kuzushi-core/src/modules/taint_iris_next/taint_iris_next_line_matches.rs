@@ -2,10 +2,64 @@ use super::*;
 
 pub(in crate::modules) fn taint_iris_next_line_matches(line_lower: &str, pattern: &str) -> bool {
     let pattern_lower = pattern.to_ascii_lowercase();
-    if line_lower.contains(&pattern_lower) {
+    if pattern_starts_with_identifier_char(&pattern_lower) {
+        if line_contains_with_identifier_word_boundary(line_lower, &pattern_lower) {
+            return true;
+        }
+    } else if line_lower.contains(&pattern_lower) {
         return true;
     }
     taint_iris_next_alias_match(line_lower, pattern_lower.as_str())
+}
+
+/// Check whether `pattern` appears in `line` with an identifier-style
+/// word boundary on the LEFT (the byte immediately before the match
+/// is not an identifier char). Without this, the C catalog pattern
+/// `sprintf(` matches `psprintf(` (postgres' memory-safe
+/// palloc-based printf), `strcat(` matches `pg_strcat(`, etc. — and
+/// floods the agent prompt with false-positive buffer-overflow
+/// candidates from sites that use the safe variants.
+///
+/// We only enforce the LEFT boundary because most sink patterns end
+/// in `(` (their own right boundary). For patterns that don't (e.g.
+/// `PG_GETARG_TEXT_PP`), the next byte is always `(` in real code so
+/// no right-boundary check is needed.
+fn line_contains_with_identifier_word_boundary(line: &str, pattern: &str) -> bool {
+    if pattern.is_empty() {
+        return false;
+    }
+    let bytes = line.as_bytes();
+    let pat_bytes = pattern.as_bytes();
+    let mut idx = 0;
+    while idx + pat_bytes.len() <= bytes.len() {
+        if &bytes[idx..idx + pat_bytes.len()] == pat_bytes {
+            // Left boundary: previous byte must not be an identifier
+            // character, OR we're at the start of the line.
+            let left_ok = idx == 0 || !is_identifier_byte(bytes[idx - 1]);
+            if left_ok {
+                return true;
+            }
+        }
+        idx += 1;
+    }
+    false
+}
+
+fn is_identifier_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Most catalog sink patterns start with an identifier char
+/// (`sprintf(`, `memcpy(`, `system(`, `dlopen`, `PG_GETARG_TEXT_PP`).
+/// The word-boundary check only matters for those. Patterns that
+/// start with a non-identifier char (e.g. `@app.route`, `req.query`,
+/// `../`) fall through to the plain substring check — `@` already
+/// is its own left boundary, etc.
+fn pattern_starts_with_identifier_char(pattern: &str) -> bool {
+    pattern
+        .as_bytes()
+        .first()
+        .is_some_and(|b| is_identifier_byte(*b))
 }
 
 fn taint_iris_next_alias_match(line_lower: &str, pattern: &str) -> bool {
@@ -353,6 +407,52 @@ mod non_production_path_tests {
         ));
         assert!(is_taint_iris_next_non_production_path(
             "examples/sandbox-backend/server.js"
+        ));
+    }
+
+    #[test]
+    fn line_matches_enforces_identifier_word_boundary() {
+        // `sprintf(` must match `sprintf(buf, ...)` but NOT
+        // `psprintf(buf, ...)` (postgres' memory-safe palloc printf).
+        // Without the word-boundary check, every postgres source file
+        // using `psprintf` flooded the agent with false-positive
+        // CWE-120 candidates.
+        assert!(taint_iris_next_line_matches(
+            "    sprintf(buf, \"hi %s\", arg);",
+            "sprintf("
+        ));
+        assert!(!taint_iris_next_line_matches(
+            "    psprintf(\"%u\", stat.blkno);",
+            "sprintf("
+        ));
+        // Similar pairs:
+        assert!(taint_iris_next_line_matches(
+            "    strcpy(dest, src);",
+            "strcpy("
+        ));
+        assert!(!taint_iris_next_line_matches(
+            "    pg_strcpy(dest, src);",
+            "strcpy("
+        ));
+        assert!(taint_iris_next_line_matches(
+            "    strcat(dest, src);",
+            "strcat("
+        ));
+        assert!(!taint_iris_next_line_matches(
+            "    pg_strcat(dest, src);",
+            "strcat("
+        ));
+        // PG_GETARG_TEXT_PP must still match (was working).
+        assert!(taint_iris_next_line_matches(
+            "    text *t = pg_getarg_text_pp(0);",
+            "PG_GETARG_TEXT_PP"
+        ));
+        // Patterns that don't start with identifier chars fall through
+        // to plain substring — `req.query` should match
+        // `req.query.foo`.
+        assert!(taint_iris_next_line_matches(
+            "    const x = req.query.foo;",
+            "req.query"
         ));
     }
 }
