@@ -53,6 +53,7 @@ mod plugin_adapters;
 mod plugin_resolution;
 mod prompt_armor;
 mod registry;
+mod runtime_requirements;
 mod sast_pipeline;
 mod sast_run;
 mod support;
@@ -87,3 +88,4 @@ pub use contracts::{
     ToolDescriptor,
 };
 pub use registry::ModuleRegistry;
+pub use runtime_requirements::{agent_runtime_tool_names, tool_uses_agent_runtime};
