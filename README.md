@@ -102,7 +102,7 @@ inside the TUI and your terminal still gives you a selection modifier.
 | `kuzushi modules [--json]` | List visible native modules. |
 | `kuzushi tools [--json]` | List visible executable tool descriptors. |
 | `kuzushi doctor [--target <repo>] [--json]` | Check config, local state, findings DB openability, scanner binaries, bridge readiness, and model/auth setup. |
-| `kuzushi run <module:tool> --input '<json>'` | Execute one explicit tool through the Rust registry. Use global `--target` for workspace-backed tools; `run .` is shell-only focused-module shorthand. |
+| `kuzushi run <module:tool> --input '<json>' [--option key=value]` | Execute one explicit tool through the Rust registry. Use global `--target` for workspace-backed tools; `run .` is shell-only focused-module shorthand. |
 | `kuzushi mcp <server>` | Run a local MCP server over stdio. |
 | `kuzushi auth` | Print auth diagnostics; interactive provider login is handled inside `kuzushi shell`. |
 | `kuzushi config show` | Print effective config. |
@@ -122,6 +122,7 @@ kuzushi permissions --target .
 kuzushi pr-comment --target . --repo allsmog/Kuzushi > kuzushi-report.md
 kuzushi --target . run context:build --input '{}'
 kuzushi --target . run semgrep:scan --input '{"config":"p/default"}'
+kuzushi --target . run semgrep:scan --option config=p/default --input '{}'
 kuzushi --target . run findings:list --input '{"severity":["high"],"limit":10}'
 kuzushi --target . run triage:run --input '{"fingerprints":["abc123"]}'
 ```
@@ -138,6 +139,30 @@ Kuzushi does not silently choose a fallback model. If a runtime-backed tool has
 no explicit model or an incompatible model/provider pair, startup or dispatch
 fails with an actionable error.
 
+## Options And Config
+
+Tool behavior is driven by typed tool descriptors. Shell `set`/`setg`,
+headless `run --option`, and `scan` flags all converge on the same canonical
+preparation path before registry dispatch. Unknown keys fail unless the tool
+declares a compatibility alias.
+
+Precedence is global options, workspace options, session options, then
+explicit JSON input. That means `--input` wins over `--option` when both set
+the same canonical key.
+
+| Surface | Purpose |
+| --- | --- |
+| `show options [tool]` | Inspect accepted option names, aliases, types, defaults, and current values. |
+| `set <key> <value>` | Set a shell-session option for the focused tool. |
+| `setg <key> <value>` | Persist a global option in `~/.kuzushi/v2/options.json`. |
+| `kuzushi run <tool> --option key=value` | Apply a one-shot session option before `--input` is merged. |
+| `kuzushi scan ...` | Compile scan flags into canonical `sast:scan` input. |
+
+Persistent state lives in `~/.kuzushi/v2/options.json` and
+`<target>/.kuzushi/v2/options.json`. Config remains separate for model,
+runtime, bridge, budget, and approval policy. See
+[docs/operator-control-surfaces.md](docs/operator-control-surfaces.md).
+
 ## Rust Shell
 
 The shell routes slash commands and their bare equivalents through the Rust
@@ -153,7 +178,7 @@ Piped shell output automatically uses the same strict plain renderer as
 | `/modules`, `/tools`, `/use <module>`, `/back` | Browse modules/tools, focus a module, and step back. |
 | `/run <tool> [json]`, `run . [json]`, `/scan [target]` | Dispatch a tool or start the native scan path. In the shell, `run .` resolves to the focused module's primary tool; from a terminal use `kuzushi run <module:tool>`. |
 | `/ask <question>`, `ask <question>`, `?text` | Ask an explicit agent question with the configured model. |
-| `/options [tool]`, `show options [tool]`, `show advanced`, `show missing` | Inspect typed Rust tool options and missing required values. |
+| `/options [tool]`, `show options [tool]`, `show advanced [tool]`, `show missing [tool]` | Inspect typed Rust tool options and missing required values. |
 | `/set <key> <value>`, `setg <key> <value>`, `/unset <key>`, `unsetg <key>` | Set or clear session/global option values for subsequent runs and scans. |
 | `/tasks`, `/task block <id>`, `/task allow <id>`, `/task toggle [id]`, `/task mode auto\|manual\|toggle`, `/task reset` | Configure SAST task selection for `sast:scan` and shell scans. |
 | `/context`, `/context build`, `/context status`, `/context regen <slice>` | View or rebuild the local context snapshot. |
@@ -225,17 +250,17 @@ Subprocess-backed tools require the operator to install or configure binaries:
 
 pi-agent-core-backed tools require Node, `@mariozechner/pi-agent-core`,
 `@mariozechner/pi-ai`, a configured model, and provider credentials. A custom
-bridge can be supplied through `runtime.agent_bridge_command` in config or
-`KUZUSHI_AGENT_BRIDGE`.
+bridge should be supplied through `runtime.agent_bridge_command` in config;
+`KUZUSHI_AGENT_BRIDGE` is kept as a compatibility/bootstrap override.
 
 Plugin-backed wrappers also require explicit plugin roots:
 
-| Module | Environment variable |
-| --- | --- |
-| `vuln-scout` | `KUZUSHI_VULN_SCOUT_PLUGIN` |
-| `tob` | `KUZUSHI_TOB_SKILLS_DIR` |
-| `shinsa` | `KUZUSHI_SHINSA_PLUGIN` |
-| `prompt-armor` | `KUZUSHI_PROMPT_ARMOR_PLUGIN` |
+| Module | Preferred option | Compatibility env var |
+| --- | --- | --- |
+| `vuln-scout` | `pluginRoot` | `KUZUSHI_VULN_SCOUT_PLUGIN` |
+| `tob` | `pluginRoot` | `KUZUSHI_TOB_SKILLS_DIR` |
+| `shinsa` | `pluginRoot` | `KUZUSHI_SHINSA_PLUGIN` |
+| `prompt-armor` | `pluginRoot` | `KUZUSHI_PROMPT_ARMOR_PLUGIN` |
 
 Missing subprocesses, models, bridges, or plugin roots fail explicitly. They do
 not silently succeed and they do not substitute a different model.
@@ -246,6 +271,8 @@ not silently succeed and they do not substitute a different model.
 | --- | --- |
 | `~/.kuzushi/v2/config.toml` | `kuzushi config init` |
 | `.kuzushi/v2/config.toml` | Optional project override |
+| `~/.kuzushi/v2/options.json` | persisted global tool options from shell `setg` |
+| `.kuzushi/v2/options.json` | optional project/workspace tool option overrides |
 | `.kuzushi/v2/findings.sqlite3` | scan, shell, and run-mode tool persistence |
 | `.kuzushi/v2/attachments.json` | Rust shell KB attachments |
 | `.kuzushi/v2/artifact-kb.sqlite3` | Local artifact knowledge search index |

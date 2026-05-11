@@ -193,6 +193,9 @@ Never inline a literal model string as a runtime fallback.
 
 ### Operator control surfaces (flags, options, env)
 
+See [docs/operator-control-surfaces.md](./docs/operator-control-surfaces.md)
+for the operator-facing contract and precedence rules.
+
 Tool/module behavior should flow through declared options, not scattered
 environment variables or ad hoc JSON keys. Treat `OptionSpec` metadata and
 `ModuleRegistry.prepareToolInput` / Rust `prepare_tool_input` as the canonical
@@ -209,7 +212,8 @@ tool-input boundary.
   accessibility mode, test hooks, and documented emergency debug toggles.
 - Do not add product behavior env vars for ordinary tool settings such as
   scanner binaries, budgets, MCP/CodeQL/Joern tuning, reasoning effort,
-  plugin roots, or prompt knobs. Surface those as options or config fields.
+  plugin roots, or prompt knobs. Surface those as options or config fields;
+  existing compatibility env vars should stay at config/adapter boundaries.
 - Direct env reads belong at adapter/config/presentation boundaries. Domain
   types, module input parsers, scan engines, and runtime policy code should
   receive resolved values rather than reading `std::env` / `process.env`.
