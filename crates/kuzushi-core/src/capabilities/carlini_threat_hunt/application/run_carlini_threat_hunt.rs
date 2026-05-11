@@ -83,26 +83,6 @@ pub(crate) fn ensure_carlini_target_dir(target: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn empty_carlini_threat_hunt_report(
-    target: &Path,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<CarliniThreatHuntReport> {
-    Ok(CarliniThreatHuntReport {
-        target: target.display().to_string(),
-        count: 0,
-        actors: 0,
-        actor_runs: 0,
-        findings: Vec::new(),
-        persisted: persist_findings(target, &[], ctx)?,
-        kb_context: Some(ctx.artifact_knowledge_context(
-            target,
-            "carlini threat hunt actor flows threat model x-ray context",
-            5,
-        )),
-        cost_usd: 0.0,
-    })
-}
-
 pub(crate) fn require_carlini_runtime(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<&dyn AgentRuntime> {

@@ -12,7 +12,25 @@ pub fn run_systems_hunt_report(
     let options = SystemsHuntInput::from_tool_input(input)?;
     let context = gather_systems_context(&target, &options)?;
     if context.surfaces.is_empty() {
-        return empty_systems_hunt_report(&target, ctx);
+        // Was a silent `Ok(empty_report)` — operators got 0 findings with
+        // no way to tell whether the repo had no systems-level surfaces,
+        // the inventory walker hit max_files=0, or the index-augmentation
+        // path quietly failed. Bail with diagnostic context. (Same shape
+        // as the carlini empty-actor fix; see CLAUDE.md "no silent
+        // fallback" + assessments/mode-parity.)
+        anyhow::bail!(
+            "systems-hunt: no memory-safety surfaces detected under {}. \
+             gather_systems_context yielded 0 surfaces from max_files={} \
+             head_bytes={} max_surfaces={}. Likely causes: target has no \
+             C/C++/Rust source, or `maxFiles`/`headBytes` is too restrictive, \
+             or the joern/codeql augmentation backend errored silently. \
+             Re-run with larger inventory caps, or scope to a directory \
+             that contains systems-level code.",
+            target.display(),
+            options.max_files,
+            options.head_bytes,
+            options.max_surfaces,
+        );
     }
 
     let runtime = required_systems_runtime(runtime, "systems-hunt")?;
@@ -67,20 +85,6 @@ fn finalize_systems_hunt_report(
         findings,
         persisted,
         artifacts,
-        cost_usd: 0.0,
-    })
-}
-
-fn empty_systems_hunt_report(
-    target: &Path,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<SystemsHuntReport> {
-    Ok(SystemsHuntReport {
-        target: target.display().to_string(),
-        count: 0,
-        findings: Vec::new(),
-        persisted: persist_systems_findings(target, &[], ctx)?,
-        artifacts: Vec::new(),
         cost_usd: 0.0,
     })
 }
