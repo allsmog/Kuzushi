@@ -128,6 +128,42 @@ pub(in crate::modules::taint_iris_next) fn build_taint_iris_next_agent_prompt(
     );
     lines.push(String::new());
     lines.push(
+        "**Do NOT trust function names as sanitizers — MANDATORY VERIFICATION.** \
+         A function named `get_safe_path`, `is_safe`, `check_locality`, \
+         `sanitize_input`, `validate_*`, `check_*` may CLAIM to be a sanitizer \
+         but the bug can be INSIDE the sanitizer (skipped branch, incomplete \
+         check, post-canonicalisation bypass).\n\n\
+         When a joern-confirmed flow passes through a sanitizer-named \
+         function, you MUST do all of the following before rejecting the \
+         flow as 'sanitised':\n\
+         1. Call `joern.method_at` (or `tree_sitter:node_at`) on the \
+            sanitizer's DEFINITION line (use `joern.callers_of` first to \
+            locate it). Reading the CALL SITE alone is not enough — bugs \
+            live in the function body.\n\
+         2. Look for these bypass patterns in the body:\n\
+            - A `check = false` (or skip-flag) branch — e.g. \
+              `if (location_came_from_trusted_table) skip_check = true;`\n\
+            - A check applied to the input BEFORE concatenation but not \
+              after — e.g. `validate(prefix); fullname = prefix + '/' + \
+              user_input; (no validate(fullname));`\n\
+            - Canonicalisation that resolves `..` after the check, so the \
+              check sees a pre-canonical form.\n\
+            - Whitelist by prefix only (`strncmp(path, allowed, n) == 0`) \
+              without verifying the suffix doesn't escape via `..` after \
+              canonicalisation.\n\
+            - Locality / privilege check skipped on a 'trusted' branch \
+              that processes user-supplied filename / path / SQL fragment.\n\
+         3. If you find any of these patterns, the flow IS exploitable — \
+            promote to finding with a customCweRationale explaining the \
+            exact bypass and the line numbers of the missing check.\n\
+         4. If you DON'T inspect the sanitizer body, default to keeping \
+            the candidate at evidence_level=candidate (not 'rejected') so \
+            an operator reviewer can audit. 'Sanitizer name looks right' \
+            is NOT sufficient evidence to reject — it is sufficient \
+            evidence to investigate.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
         "For each candidate that LOOKS like a textbook injection / privesc \
          flow, run through these patterns before promoting. Use \
          `tree_sitter:node_at` to read the function signature (parameter \
