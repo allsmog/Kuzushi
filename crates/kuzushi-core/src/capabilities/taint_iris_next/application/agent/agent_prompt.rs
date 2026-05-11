@@ -63,6 +63,14 @@ pub(in crate::capabilities::taint_iris_next) fn build_taint_iris_next_agent_prom
         ));
     }
     lines.push(String::new());
+    lines.push("## False-Positive Patterns".to_string());
+    lines.push(
+        "Before promoting a candidate, reject by-design flows: documented passthrough APIs where the entire caller-supplied SQL/script is intentionally executed, role-gated privileged primitives, superuser-only configuration commands, build/offline tools outside the runtime attack surface, and string-literal arguments to risky sinks.".to_string(),
+    );
+    lines.push(
+        "Use tree-sitter to confirm the surrounding function and argument shape, and use Joern/CodeQL to distinguish a real attacker-controlled fragment flow from an intentional whole-query or privileged operation.".to_string(),
+    );
+    lines.push(String::new());
     lines.push("## Contract".to_string());
     lines.push(
         "- Return strict JSON matching { selectedCwes, findings, triage, notes }.".to_string(),

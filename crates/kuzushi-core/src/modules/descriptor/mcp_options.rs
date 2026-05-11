@@ -1,0 +1,88 @@
+use super::*;
+
+pub(in crate::modules) fn mcps_option() -> OptionSpec {
+    opt(
+        "mcps",
+        OptionType::Bool,
+        "Attach the kuzushi MCP servers as agent tools during the hunt.",
+    )
+    .default(json!(true))
+    .advanced()
+}
+
+pub(in crate::modules) fn joern_cpg_option() -> OptionSpec {
+    opt(
+        "joernCpg",
+        OptionType::Path,
+        "Path to a Joern CPG (`cpg.bin`) for the Joern MCP server.",
+    )
+    .advanced()
+}
+
+pub(in crate::modules) fn joern_per_cwe_timeout_ms_option() -> OptionSpec {
+    opt(
+        "joernPerCweTimeoutMs",
+        OptionType::Int,
+        "Wall-clock budget in milliseconds for each Joern CWE flow query.",
+    )
+    .default(json!(60000))
+    .advanced()
+}
+
+pub(in crate::modules) fn codeql_prewarm_option() -> OptionSpec {
+    opt(
+        "codeqlPrewarm",
+        OptionType::Bool,
+        "Pre-compile common CodeQL CWE query folders at MCP server startup.",
+    )
+    .default(json!(false))
+    .advanced()
+}
+
+pub(in crate::modules) fn codeql_cache_dir_option() -> OptionSpec {
+    opt(
+        "codeqlCacheDir",
+        OptionType::Path,
+        "Override CodeQL's pack cache directory for the MCP CodeQL server.",
+    )
+    .advanced()
+}
+
+pub(in crate::modules) fn mcp_tool_timeout_ms_option() -> OptionSpec {
+    opt(
+        "mcpToolTimeoutMs",
+        OptionType::Int,
+        "Wall-clock cap in milliseconds for each MCP tool call from the bridge.",
+    )
+    .default(json!(60000))
+    .advanced()
+}
+
+pub(in crate::modules) fn bridge_verbose_option() -> OptionSpec {
+    opt(
+        "bridgeVerbose",
+        OptionType::Bool,
+        "Forward bridge and MCP child logs to stderr in real time.",
+    )
+    .default(json!(false))
+    .advanced()
+}
+
+pub(in crate::modules) fn bridge_log_path_option() -> OptionSpec {
+    opt(
+        "bridgeLogPath",
+        OptionType::Path,
+        "Append bridge and MCP child logs to this path.",
+    )
+    .advanced()
+}
+
+pub(in crate::modules) fn allow_deterministic_fallback_option() -> OptionSpec {
+    opt(
+        "allowDeterministicFallback",
+        OptionType::Bool,
+        "Allow deterministic linked-story projection when the agent fails to return valid JSON.",
+    )
+    .default(json!(false))
+    .advanced()
+}

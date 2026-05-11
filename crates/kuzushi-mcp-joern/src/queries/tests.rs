@@ -25,10 +25,91 @@ mod tests {
 
     #[test]
     fn taint_paths_includes_max_count() {
-        let q = taint_paths("argv", "system", 50);
+        let q = taint_paths("argv", "system", 50, None);
         assert!(q.contains("take(50)"));
         assert!(q.contains("\"argv\""));
         assert!(q.contains("\"system\""));
+    }
+
+    #[test]
+    fn taint_paths_unions_call_and_method_parameter_sources() {
+        // The single most important regression: the prior builder
+        // treated `source` as a method-name regex only, so call-style
+        // sources (postgres `PG_GETARG_TEXT_PP`, JS `req.query`)
+        // matched no nodes and reachableByFlows silently returned an
+        // empty list. The new builder must union both kinds and
+        // surface a per-traversal node count so the agent can tell
+        // "source matched nothing" from "source matched but no flow
+        // reaches the sink".
+        let q = taint_paths("PG_GETARG_TEXT_PP", "snprintf", 25, None);
+        assert!(
+            q.contains("cpg.call.name(\"PG_GETARG_TEXT_PP\")"),
+            "expected call-name source traversal in: {q}"
+        );
+        assert!(
+            q.contains("cpg.method.name(\"PG_GETARG_TEXT_PP\").parameter"),
+            "expected method-parameter source traversal in: {q}"
+        );
+        assert!(
+            q.contains("reachableByFlows(srcs)"),
+            "expected the unioned `srcs` traversal to be the reachableByFlows input in: {q}"
+        );
+        // Output envelope must report counts so the agent can
+        // distinguish "no source" from "no flow".
+        assert!(q.contains("sourceCounts"));
+        assert!(q.contains("sinkCount"));
+        assert!(q.contains("flowCount"));
+    }
+
+    #[test]
+    fn taint_paths_emits_default_call_depth_when_none_supplied() {
+        let q = taint_paths("argv", "system", 10, None);
+        // The default call depth must show up both in the EngineConfig
+        // override and in the response envelope so the agent can see
+        // what depth produced the result.
+        assert!(
+            q.contains(&format!(
+                "maxCallDepth = {}",
+                TAINT_PATHS_DEFAULT_CALL_DEPTH
+            )),
+            "expected default maxCallDepth in EngineConfig in: {q}"
+        );
+        assert!(q.contains("\"maxCallDepth\""));
+    }
+
+    #[test]
+    fn taint_paths_threads_caller_supplied_depth() {
+        let q = taint_paths("argv", "system", 10, Some(24));
+        assert!(
+            q.contains("maxCallDepth = 24"),
+            "expected maxCallDepth = 24 in EngineConfig in: {q}"
+        );
+        // Implicit val is mandatory so reachableByFlows picks up the
+        // override; without it joern silently uses its default.
+        assert!(
+            q.contains("implicit val engineContext"),
+            "expected implicit EngineContext binding in: {q}"
+        );
+    }
+
+    #[test]
+    fn taint_paths_clamps_depth_to_ceiling() {
+        // A 50-deep request must clamp to the 32 ceiling — joern's
+        // dataflow engine is exponential in depth on large CPGs and
+        // values past 32 routinely trigger JVM pauses we'd rather
+        // surface as "no path at depth 32" than as a tool timeout.
+        let q = taint_paths("argv", "system", 10, Some(50));
+        assert!(
+            q.contains(&format!(
+                "maxCallDepth = {}",
+                TAINT_PATHS_MAX_CALL_DEPTH_CEILING
+            )),
+            "expected clamped maxCallDepth = ceiling in: {q}"
+        );
+        assert!(
+            !q.contains("maxCallDepth = 50"),
+            "must not pass uncapped depth to joern in: {q}"
+        );
     }
 
     #[test]

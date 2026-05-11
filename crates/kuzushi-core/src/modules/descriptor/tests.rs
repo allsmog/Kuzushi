@@ -53,5 +53,13 @@ mod tests {
         assert_eq!(max_findings_option(7).default, Some(json!(7)));
         assert!(fingerprint_option().required);
         assert_eq!(binary_option("Binary path.").option_type, OptionType::Path);
+        assert_eq!(mcps_option().default, Some(json!(true)));
+        assert!(mcps_option().advanced);
+        assert_eq!(
+            allow_deterministic_fallback_option().default,
+            Some(json!(false))
+        );
+        assert_eq!(joern_cpg_option().option_type, OptionType::Path);
+        assert_eq!(mcp_tool_timeout_ms_option().default, Some(json!(60000)));
     }
 }

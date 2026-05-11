@@ -155,6 +155,95 @@ mod tests {
         }
     }
 
+    fn linked_candidate(id: &str, role: &str, line: u32) -> TaintIrisNextCandidate {
+        TaintIrisNextCandidate {
+            id: id.to_string(),
+            cwe: "CWE-89".to_string(),
+            taint_class: "injection".to_string(),
+            track: "web".to_string(),
+            role: role.to_string(),
+            kind: role.to_string(),
+            pattern: "query".to_string(),
+            file_path: "src/app.ts".to_string(),
+            line,
+            snippet: "db.query(input)".to_string(),
+            language: "typescript".to_string(),
+            confidence: "medium".to_string(),
+            catalog_signal: format!("{role}: query"),
+            source: "test".to_string(),
+        }
+    }
+
+    fn evidence_with_linked_story() -> TaintIrisNextEvidenceResult {
+        let mut result = evidence_result(Vec::new());
+        result.candidates = vec![
+            linked_candidate("source-1", "source", 1),
+            linked_candidate("sink-1", "sink", 2),
+        ];
+        result.linked_stories = vec![TaintIrisNextLinkedStory {
+            id: "story-1".to_string(),
+            cwe: "CWE-89".to_string(),
+            taint_class: "injection".to_string(),
+            track: "web".to_string(),
+            evidence_level: "linked".to_string(),
+            file_path: "src/app.ts".to_string(),
+            language: "typescript".to_string(),
+            source_candidate_id: "source-1".to_string(),
+            sink_candidate_id: "sink-1".to_string(),
+            source_line: 1,
+            sink_line: 2,
+            shared_tokens: vec!["input".to_string()],
+            rationale: "source and sink share request input".to_string(),
+        }];
+        result.linked_story_count = result.linked_stories.len();
+        result
+    }
+
+    fn minimal_plan(allow_deterministic_fallback: bool) -> TaintIrisNextPlan {
+        TaintIrisNextPlan {
+            target: PathBuf::from("."),
+            scan_root: PathBuf::from("."),
+            repo_root: PathBuf::from("."),
+            mode: TaintIrisNextMode::Hunt,
+            caps: TaintIrisNextCaps {
+                max_catalog_entries: 1,
+                max_candidates_per_cwe: 10,
+                max_evidence_per_cwe: 10,
+                max_files_per_query: 10,
+                max_specs_per_cwe: 10,
+                max_agent_findings: 10,
+                codeql_analyze_timeout_ms: 1000,
+                min_evidence_level: "candidate".to_string(),
+            },
+            languages: vec!["typescript".to_string()],
+            context_status: TaintIrisNextArtifactStatus {
+                ok: true,
+                path: None,
+                reason: "test".to_string(),
+            },
+            threat_model_status: TaintIrisNextArtifactStatus {
+                ok: true,
+                path: None,
+                reason: "test".to_string(),
+            },
+            repo_context: None,
+            threat_model: None,
+            catalog: Vec::new(),
+            structural_queries: Vec::new(),
+            prompt_catalog: String::new(),
+            backend: TaintIrisNextBackendChoice {
+                requested: "structural".to_string(),
+                selected: "structural".to_string(),
+                codeql_db_path: None,
+                corroborate_with_codeql: None,
+                structural_tool: "test".to_string(),
+                warnings: Vec::new(),
+            },
+            max_budget_usd: None,
+            allow_deterministic_fallback,
+        }
+    }
+
     #[test]
     fn strongest_taint_iris_next_evidence_level_prefers_path_then_linked() {
         let result = evidence_result(vec![
@@ -190,6 +279,50 @@ mod tests {
         assert!(cwes.contains("CWE-89"));
         assert!(cwes.contains("CWE-79"));
         assert!(cwes.contains("CWE-22"));
+    }
+
+    #[test]
+    fn invalid_agent_output_does_not_project_deterministic_findings_by_default() {
+        let plan = minimal_plan(false);
+        let evidence = evidence_with_linked_story();
+
+        let result = invalid_taint_iris_next_agent_result(
+            &plan,
+            &evidence,
+            anyhow::anyhow!("bad json"),
+            1,
+            0.25,
+        );
+
+        assert!(result.findings.is_empty());
+        assert!(result.review_candidates.is_empty());
+        assert_eq!(result.cost_usd, 0.25);
+        assert!(result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("allowDeterministicFallback=true")));
+    }
+
+    #[test]
+    fn invalid_agent_output_projects_deterministic_findings_when_operator_opts_in() {
+        let plan = minimal_plan(true);
+        let evidence = evidence_with_linked_story();
+
+        let result = invalid_taint_iris_next_agent_result(
+            &plan,
+            &evidence,
+            anyhow::anyhow!("bad json"),
+            1,
+            0.25,
+        );
+
+        assert_eq!(result.findings.len(), 1);
+        assert_eq!(result.review_candidates.len(), 1);
+        assert_eq!(result.cost_usd, 0.25);
+        assert!(result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("allowDeterministicFallback=true")));
     }
 
     #[test]

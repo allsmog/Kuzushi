@@ -1,3 +1,4 @@
+mod auto_spawn;
 mod cpg_parse;
 mod http_query;
 

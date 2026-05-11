@@ -8,11 +8,17 @@ impl AgentToolPolicy {
         Self {
             profile: profile.into(),
             tools: tools.into_iter().map(Into::into).collect(),
+            mcps: false,
         }
     }
 
+    pub fn with_mcps(mut self, mcps: bool) -> Self {
+        self.mcps = mcps;
+        self
+    }
+
     pub fn is_default(&self) -> bool {
-        self.profile == "default" && self.tools.is_empty()
+        self.profile == "default" && self.tools.is_empty() && !self.mcps
     }
 }
 
@@ -21,7 +27,37 @@ impl Default for AgentToolPolicy {
         Self {
             profile: "default".to_string(),
             tools: Vec::new(),
+            mcps: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+
+    #[test]
+    fn default_policy_does_not_enable_mcps() {
+        let policy = AgentToolPolicy::default();
+        assert!(!policy.mcps);
+        assert!(policy.is_default());
+    }
+
+    #[test]
+    fn with_mcps_flips_flag_and_loses_is_default() {
+        let policy = AgentToolPolicy::default().with_mcps(true);
+        assert!(policy.mcps);
+        assert!(!policy.is_default());
+    }
+
+    #[test]
+    fn mcps_field_round_trips_through_serde_camelcase() {
+        let policy = AgentToolPolicy::new("whitebox-static", ["Read", "Glob"]).with_mcps(true);
+        let json = serde_json::to_value(&policy).unwrap();
+        assert_eq!(json["mcps"], serde_json::Value::Bool(true));
+
+        let round_tripped: AgentToolPolicy = serde_json::from_value(json).unwrap();
+        assert_eq!(round_tripped, policy);
     }
 }
 

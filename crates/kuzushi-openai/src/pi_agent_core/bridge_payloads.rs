@@ -36,7 +36,7 @@ pub(crate) struct NextStepBridgeResponse {
     pub(crate) text: Option<String>,
     #[serde(default)]
     pub(crate) structured: Option<Value>,
-    #[serde(default)]
+    #[serde(default, alias = "cost_usd")]
     pub(crate) cost_usd: Option<f64>,
     #[serde(default)]
     pub(crate) call: Option<NextStepBridgeCall>,
@@ -82,4 +82,10 @@ pub(crate) struct BridgeResponse {
     pub(crate) truncated: bool,
     #[serde(default)]
     pub(crate) stop_reason: Option<String>,
+    #[serde(default, alias = "cost_usd")]
+    pub(crate) cost_usd: Option<f64>,
+    #[serde(default, alias = "input_tokens")]
+    pub(crate) input_tokens: Option<u64>,
+    #[serde(default, alias = "output_tokens")]
+    pub(crate) output_tokens: Option<u64>,
 }

@@ -43,7 +43,20 @@ pub(crate) fn taint_iris_next_module() -> BuiltinModule {
         vec![tool_with_options(
             "taint-iris-next:hunt",
             "Run the next-generation bounded taint hunting pipeline.",
-            vec![target_option(), max_findings_option(20), model_option()],
+            vec![
+                target_option(),
+                max_findings_option(20),
+                model_option(),
+                mcps_option(),
+                allow_deterministic_fallback_option(),
+                joern_cpg_option(),
+                joern_per_cwe_timeout_ms_option(),
+                codeql_prewarm_option(),
+                codeql_cache_dir_option(),
+                mcp_tool_timeout_ms_option(),
+                bridge_verbose_option(),
+                bridge_log_path_option(),
+            ],
         )],
         vec![dag("taint-iris-next:hunt", "findings", &["context:build"])],
     )

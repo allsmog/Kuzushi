@@ -1,9 +1,20 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use kuzushi_mcp_common::doctor::which;
+    use crate::tools::availability::locate_joern_binary;
     use kuzushi_mcp_common::tool::ToolHandler;
     use serde_json::{json, Value};
+
+    /// Test-side equivalent of `ensure_joern_available`: matches the
+    /// same lookup logic the production code uses (PATH +
+    /// KUZUSHI_JOERN_BIN + hardcoded fallbacks). Otherwise tests that
+    /// skip when "joern is missing" silently miss the case where
+    /// joern is at /opt/joern/joern-cli but not on PATH — which is
+    /// how every Linux container with the joern-cli debian package
+    /// is configured.
+    fn joern_locatable() -> bool {
+        locate_joern_binary("joern").is_some() || locate_joern_binary("joern-parse").is_some()
+    }
 
     #[test]
     fn registry_includes_all_planned_tools() {
@@ -75,7 +86,7 @@ mod tests {
 
     #[tokio::test]
     async fn callers_of_reports_backend_unavailable_when_joern_missing() {
-        if which("joern-parse").is_some() || which("joern").is_some() {
+        if joern_locatable() {
             return;
         }
         let tool = CallersOfTool;
@@ -85,7 +96,7 @@ mod tests {
 
     #[tokio::test]
     async fn parse_and_method_at_report_backend_unavailable_when_joern_missing() {
-        if which("joern-parse").is_some() || which("joern").is_some() {
+        if joern_locatable() {
             return;
         }
         let parse = ParseTool;
@@ -113,7 +124,7 @@ mod tests {
 
     #[tokio::test]
     async fn taint_paths_reports_backend_unavailable_when_joern_missing() {
-        if which("joern-parse").is_some() || which("joern").is_some() {
+        if joern_locatable() {
             return;
         }
         let tool = TaintPathsTool;
@@ -126,7 +137,7 @@ mod tests {
 
     #[tokio::test]
     async fn taint_paths_requires_source_and_sink() {
-        if which("joern-parse").is_none() && which("joern").is_none() {
+        if !joern_locatable() {
             return;
         }
         let tool = TaintPathsTool;
@@ -136,7 +147,7 @@ mod tests {
 
     #[tokio::test]
     async fn reaching_def_requires_var_file_and_line() {
-        if which("joern-parse").is_none() && which("joern").is_none() {
+        if !joern_locatable() {
             return;
         }
         let tool = ReachingDefTool;
@@ -148,7 +159,7 @@ mod tests {
     async fn unsafe_blocks_accepts_optional_file() {
         // Schema check only — both valid and invalid args go through the
         // joern probe; this exercises the schema-validation arm.
-        if which("joern-parse").is_some() || which("joern").is_some() {
+        if joern_locatable() {
             return;
         }
         let tool = UnsafeBlocksTool;

@@ -10,3 +10,6 @@ pub(crate) use builders::{
 
 #[cfg(test)]
 pub(crate) use builders::escape_scala_string;
+
+#[cfg(test)]
+pub(crate) use builders::{TAINT_PATHS_DEFAULT_CALL_DEPTH, TAINT_PATHS_MAX_CALL_DEPTH_CEILING};

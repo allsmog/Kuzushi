@@ -6,6 +6,10 @@ impl TaintIrisNextInput {
         let backend = taint_iris_next_backend(input)?;
         let languages = taint_iris_next_languages(input)?;
         let caps = taint_iris_next_caps(input)?;
+        let allow_deterministic_fallback = read_bool_option(input, "allowDeterministicFallback")
+            .or_else(|| read_bool_option(input, "allow_deterministic_fallback"))
+            .or_else(allow_deterministic_fallback_env)
+            .unwrap_or(false);
         Ok(Self {
             mode,
             backend,
@@ -16,8 +20,16 @@ impl TaintIrisNextInput {
                 &["maxBudgetUsd", "max_budget_usd"],
                 "taint-iris-next:hunt maxBudgetUsd",
             )?,
+            allow_deterministic_fallback,
         })
     }
+}
+
+fn allow_deterministic_fallback_env() -> Option<bool> {
+    std::env::var("KUZUSHI_TAINT_IRIS_NEXT_ALLOW_DETERMINISTIC_FALLBACK")
+        .ok()
+        .as_deref()
+        .and_then(parse_bool_text)
 }
 
 fn taint_iris_next_backend(input: &Value) -> Result<String> {
@@ -186,6 +198,28 @@ fn nonempty_string_item(item: &Value) -> Result<String> {
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
         .context("sast:scan list inputs must contain only non-empty strings")
+}
+
+pub(in crate::capabilities::taint_iris_next) fn read_bool_option(
+    input: &Value,
+    key: &str,
+) -> Option<bool> {
+    let raw = input.get(key)?;
+    if let Some(value) = raw.as_bool() {
+        return Some(value);
+    }
+    if let Some(value) = raw.as_str().and_then(parse_bool_text) {
+        return Some(value);
+    }
+    raw.as_i64().map(|value| value != 0)
+}
+
+fn parse_bool_text(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Some(true),
+        "false" | "0" | "no" | "off" => Some(false),
+        _ => None,
+    }
 }
 
 pub(in crate::capabilities::taint_iris_next) fn optional_nonempty_string(

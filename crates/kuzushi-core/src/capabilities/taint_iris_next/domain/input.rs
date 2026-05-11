@@ -45,4 +45,5 @@ pub(crate) struct TaintIrisNextInput {
     pub(crate) languages: Vec<String>,
     pub(crate) caps: TaintIrisNextCaps,
     pub(crate) max_budget_usd: Option<f64>,
+    pub(crate) allow_deterministic_fallback: bool,
 }
