@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 /// Default chunk budget in approximate tokens. Sized so a chunk fits in
 /// a single 200k-context call with room for the system prompt and output.
-pub const DEFAULT_MAX_TOKENS_PER_CHUNK: usize = 120_000;
+pub const DEFAULT_MAX_TOKENS_PER_CHUNK: usize = 12_000;
 
 /// Approximate bytes-per-token used for chunk packing without invoking a
 /// runtime tokenizer.
@@ -50,6 +50,10 @@ pub struct FullModeConfig {
     /// the `--since <ref>` flag to scan only what changed.
     #[serde(default)]
     pub scope_files: Option<Vec<PathBuf>>,
+    /// Optional chunk-id filter: when set, only matching planned chunk IDs are executed.
+    /// Used to retry only failed chunks from a previous broad run.
+    #[serde(default)]
+    pub failed_chunk_ids: Option<Vec<u32>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -69,6 +73,7 @@ impl Default for FullModeConfig {
             language: FullModeLanguage::C,
             dry_run: false,
             scope_files: None,
+            failed_chunk_ids: None,
         }
     }
 }
@@ -101,8 +106,16 @@ pub struct FullModeReport {
     pub plan: FullModePlan,
     pub chunks_dispatched: u32,
     pub chunks_failed: u32,
+    #[serde(default)]
+    pub failed_chunk_errors: Vec<FailedChunkError>,
     pub cost_usd: f64,
     pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FailedChunkError {
+    pub chunk_id: u32,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

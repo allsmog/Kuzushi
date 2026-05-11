@@ -13,20 +13,29 @@ pub(super) fn dry_run_report(plan: FullModePlan) -> FullModeReport {
         plan,
         chunks_dispatched: 0,
         chunks_failed: 0,
+        failed_chunk_errors: Vec::new(),
         cost_usd: 0.0,
         dry_run: true,
     }
 }
 
 pub(super) fn resolve_full_mode_model(runtime: &RoutedRuntime) -> Result<String> {
-    runtime
-        .resolve_model(AgentRole::FullModeMulti, 0, None)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "no model configured for full_mode_multi role: \
-                 set models.toml [roles.full_mode_multi] or `setg MODEL_FULL_MODE_MULTI`"
-            )
-        })
+    if let Some(model) = runtime.resolve_model(AgentRole::FullModeMulti, 0, None) {
+        return Ok(model);
+    }
+
+    if let Ok(model) = std::env::var(AgentRole::FullModeMulti.option_store_key()) {
+        let trimmed = model.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "no model configured for full_mode_multi role: \
+         set models.toml [roles.full_mode_multi], `setg MODEL_FULL_MODE_MULTI`, \
+         or export MODEL_FULL_MODE_MULTI=<model>"
+    ))
 }
 
 pub(super) fn system_prompt_for_language(language: FullModeLanguage) -> String {

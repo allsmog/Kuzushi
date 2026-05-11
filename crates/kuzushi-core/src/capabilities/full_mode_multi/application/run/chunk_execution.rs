@@ -13,6 +13,7 @@ pub(super) struct FullModeChunkResult {
     pub(super) succeeded: bool,
     pub(super) findings: Vec<Finding>,
     pub(super) cost_usd: f64,
+    pub(super) error: Option<String>,
 }
 
 pub(super) fn run_full_mode_chunk(
@@ -51,6 +52,25 @@ fn query_full_mode_chunk(
     system_prompt: &str,
 ) -> Result<Vec<Finding>> {
     let prompt = render_chunk_prompt(&cfg.workspace_root, chunk)?;
+    if let Ok(findings) =
+        query_full_mode_chunk_with_prompt(runtime, cfg, model, system_prompt, prompt.clone())
+    {
+        return Ok(findings);
+    }
+    let repair_prompt = format!(
+        "{prompt}\n\nIMPORTANT: return strict JSON only that matches FullModeFindingArray. \
+         No prose, no markdown fences, no commentary."
+    );
+    query_full_mode_chunk_with_prompt(runtime, cfg, model, system_prompt, repair_prompt)
+}
+
+fn query_full_mode_chunk_with_prompt(
+    runtime: &RoutedRuntime,
+    cfg: &FullModeConfig,
+    model: &str,
+    system_prompt: &str,
+    prompt: String,
+) -> Result<Vec<Finding>> {
     let request = AgentQueryRequest::new(
         model.to_string(),
         cfg.workspace_root.clone(),
@@ -95,11 +115,13 @@ fn chunk_result_from_query(result: Result<Vec<Finding>>, actual_cost: f64) -> Fu
             succeeded: true,
             findings,
             cost_usd: actual_cost,
+            error: None,
         },
-        Err(_error) => FullModeChunkResult {
+        Err(error) => FullModeChunkResult {
             succeeded: false,
             findings: Vec::new(),
             cost_usd: 0.0,
+            error: Some(error.to_string()),
         },
     }
 }

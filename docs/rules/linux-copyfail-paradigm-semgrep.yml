@@ -1,0 +1,26 @@
+rules:
+  - id: linux-aead-scatterwalk-write-derived-offset
+    languages: [c]
+    severity: WARNING
+    message: >-
+      Destination scatterlist write uses a computed offset; review for
+      assoclen/cryptlen arithmetic, src==dst aliasing, and whether referenced
+      pages can originate from read-only page cache via splice/AF_ALG-style
+      plumbing.
+    patterns:
+      - pattern: scatterwalk_map_and_copy($SRC, $DST, $OFF, $N, 1)
+      - pattern-not: scatterwalk_map_and_copy($SRC, $DST, 0, $N, 1)
+
+  - id: linux-aead-src-dst-alias-with-sg-write
+    languages: [c]
+    severity: WARNING
+    message: >-
+      src==dst alias branch performs scatterwalk writes. If dst can include
+      externally referenced pages, validate no out-of-contract writes survive
+      error paths.
+    patterns:
+      - pattern-inside: |
+          if ($SRC == $DST) {
+            ...
+          }
+      - pattern: scatterwalk_map_and_copy($X, $DST, $OFF, $N, 1)
