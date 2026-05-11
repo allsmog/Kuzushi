@@ -45,6 +45,10 @@ pub struct AgentQueryResponse {
     pub input_tokens: u32,
     #[serde(default)]
     pub output_tokens: u32,
+    #[serde(default)]
+    pub truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

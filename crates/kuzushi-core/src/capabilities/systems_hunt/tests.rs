@@ -380,6 +380,82 @@ mod tests {
         assert!(err.contains("will not choose a fallback model"));
     }
 
+    #[test]
+    fn first_line_field_accepts_scalar_array_string_and_range_shapes() {
+        let parse = |value: Value| {
+            let object = value.as_object().unwrap().clone();
+            first_line_field(&object, &["startLine", "lines", "lineRange", "line"])
+        };
+
+        assert_eq!(parse(json!({"startLine": 123})), 123);
+        assert_eq!(parse(json!({"lines": [456, 458]})), 456);
+        assert_eq!(parse(json!({"lineRange": "125-138"})), 125);
+        assert_eq!(parse(json!({"lineRange": "200:215"})), 200);
+        assert_eq!(parse(json!({"lineRange": "300\u{2013}310"})), 300);
+        assert_eq!(parse(json!({"line": "  789  "})), 789);
+        assert_eq!(parse(json!({"startLine": 0, "lines": [42]})), 42);
+        assert_eq!(parse(json!({"lineRange": "unknown"})), 1);
+    }
+
+    #[test]
+    fn normalize_systems_hunt_findings_preserves_rich_model_fields() {
+        let temp = tempdir().unwrap();
+        let artifact_root = temp.path().join(".kuzushi/systems-hunt");
+        let context = ctx_with(vec![surface("src/parser.c", "unsafe-region")]);
+        let raw = json!({
+            "findings": [{
+                "name": "OAuth packet length reaches MariaDB buffer",
+                "cwes": ["CWE-787", "CWE-190"],
+                "severity": "high",
+                "path": "src/parser.c",
+                "lineRange": "125-138",
+                "root_cause": "The OAuth packet length is trusted when copying into the MariaDB handshake buffer.",
+                "functionName": "parse_oauth_packet",
+                "domains": "oauth",
+                "evidence": [{"text": "len comes from packet header"}, "memcpy uses len"],
+                "impact": "remote memory corruption before authentication",
+                "recommendations": [{"description": "bound len to the destination buffer"}],
+                "attackerInputs": "packet length",
+                "reasoning": "the same unchecked length controls allocation and copy"
+            }]
+        });
+
+        let (findings, artifacts) =
+            normalize_systems_hunt_findings(raw, temp.path(), &context, &artifact_root, 5).unwrap();
+
+        assert_eq!(findings.len(), 1);
+        let finding = &findings[0];
+        assert_eq!(finding.rule_id, "systems-hunt/cwe-787");
+        assert_eq!(finding.file_path, "src/parser.c");
+        assert_eq!(finding.start_line, 125);
+        assert!(finding.message.contains("Function: parse_oauth_packet"));
+        assert!(finding
+            .message
+            .contains("Evidence:\n  - len comes from packet header"));
+        assert!(finding
+            .message
+            .contains("Recommendation:\n  - bound len to the destination buffer"));
+        assert_eq!(artifacts.len(), 1);
+
+        let artifact: Value =
+            serde_json::from_str(&fs::read_to_string(temp.path().join(&artifacts[0])).unwrap())
+                .unwrap();
+        assert_eq!(
+            artifact["description"],
+            "The OAuth packet length is trusted when copying into the MariaDB handshake buffer."
+        );
+        assert_eq!(artifact["function"], "parse_oauth_packet");
+        assert_eq!(artifact["domain"], json!(["oauth"]));
+        assert_eq!(
+            artifact["attackerControlledFields"],
+            json!(["packet length"])
+        );
+        assert_eq!(
+            artifact["recommendation"],
+            json!(["bound len to the destination buffer"])
+        );
+    }
+
     // ----- pick_role_for_invariants --------------------------------
 
     fn surface(file: &str, kind: &str) -> RankedSystemsSurface {

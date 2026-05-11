@@ -50,6 +50,7 @@ pub fn run_ndiff_extract_fix_pattern(
     let model = require_model("ndiff:extract-fix-pattern", &input, ctx)?;
     let target = resolve_tool_target(&input, ctx)
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let thinking_level = agentic_hunter_thinking_level(&input);
     let prompt = build_ndiff_fix_pattern_prompt(source.record.as_ref(), &source.patch_text);
     let pattern = query_required_structured_json(
         runtime,
@@ -58,7 +59,9 @@ pub fn run_ndiff_extract_fix_pattern(
             target,
             NDIFF_FIX_PATTERN_SYSTEM_PROMPT.to_string(),
             prompt,
-        ),
+        )
+        .with_tool_policy(default_whitebox_static_agent_tool_policy())
+        .with_thinking_level(thinking_level),
         StructuredJsonContract::new(
             "ndiff:extract-fix-pattern",
             "NdiffFixPattern",

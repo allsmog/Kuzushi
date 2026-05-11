@@ -28,7 +28,8 @@ pub(crate) fn run_deep_semantic_cwe_select(
             format_inventory(&inventory)
         ),
         )
-        .with_tool_policy(agent_tool_policy_for_input(input)?),
+        .with_tool_policy(default_whitebox_static_agent_tool_policy())
+        .with_thinking_level(agentic_hunter_thinking_level(input)),
         StructuredJsonContract::new(
             "systems-hunt:deep-semantic-cwe-select",
             "DeepSemanticCweSelection",

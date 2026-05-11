@@ -20,6 +20,8 @@ pub struct AgentQueryRequest {
     pub structured_output: Option<AgentStructuredOutput>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
 }
 
 impl AgentQueryRequest {
@@ -37,6 +39,7 @@ impl AgentQueryRequest {
             tool_policy: AgentToolPolicy::default(),
             structured_output: None,
             thinking_level: None,
+            max_output_tokens: None,
         }
     }
 
@@ -52,6 +55,11 @@ impl AgentQueryRequest {
 
     pub fn with_thinking_level(mut self, thinking_level: impl Into<String>) -> Self {
         self.thinking_level = Some(thinking_level.into());
+        self
+    }
+
+    pub fn with_max_output_tokens(mut self, tokens: u32) -> Self {
+        self.max_output_tokens = Some(tokens);
         self
     }
 }

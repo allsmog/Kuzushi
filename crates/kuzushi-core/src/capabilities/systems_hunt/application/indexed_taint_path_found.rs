@@ -30,6 +30,7 @@ pub(crate) fn query_systems_triggers(
     invariants: &SystemsInvariantOutput,
     options: &SystemsHuntInput,
     agent_tool_policy: AgentToolPolicy,
+    thinking_level: &str,
 ) -> Result<SystemsTriggerOutput> {
     let raw = query_required_structured_json(
         runtime,
@@ -38,13 +39,16 @@ pub(crate) fn query_systems_triggers(
             target.to_path_buf(),
             SYSTEMS_TRIGGER_SYSTEM_PROMPT.to_string(),
             format!(
-            "Synthesize at most {} attacker trigger hypotheses per surface. Return JSON with triggers[].\n\nContext:\n{}\n\nInvariants:\n{}",
+            "Synthesize at most {} attacker trigger hypotheses per surface. Return JSON with triggers[].\n\n\
+            For each surface you have file_path + line_number markers; use Read to fetch source as needed (line text is not embedded to keep this prompt small).\n\n\
+            Context:\n{}\n\nInvariants:\n{}",
             options.max_trigger_hypotheses_per_surface,
-            serde_json::to_string_pretty(context)?,
-            serde_json::to_string_pretty(invariants)?,
+            lean_prompt_payload(context)?,
+            lean_prompt_payload(invariants)?,
         ),
         )
-        .with_tool_policy(agent_tool_policy),
+        .with_tool_policy(agent_tool_policy)
+        .with_thinking_level(thinking_level.to_string()),
         StructuredJsonContract::new(
             "systems-hunt:systems-trigger-synth",
             "SystemsTriggers",
@@ -58,19 +62,26 @@ pub(crate) fn query_systems_triggers(
 }
 
 pub(crate) fn build_systems_hunt_prompt(
-    target: &Path,
+    _target: &Path,
     context: &SystemsContextOutput,
     invariants: &SystemsInvariantOutput,
     triggers: &SystemsTriggerOutput,
     options: &SystemsHuntInput,
 ) -> Result<String> {
-    let inventory = collect_inventory(target, 80, 2048)?;
     Ok(format!(
-        "Hunt for concrete memory-safety, integer-boundary, parser-state, resource-provenance, or hardening-bypass vulnerabilities. Return JSON with findings[]. Limit to {} findings.\n\nContext:\n{}\n\nInvariants:\n{}\n\nTriggers:\n{}\n\nRepository snippets:\n{}",
-        options.max_findings,
-        serde_json::to_string_pretty(context)?,
-        serde_json::to_string_pretty(invariants)?,
-        serde_json::to_string_pretty(triggers)?,
-        format_inventory(&inventory)
+        "Hunt for concrete memory-safety, integer-boundary, parser-state, resource-provenance, or hardening-bypass vulnerabilities. Return JSON with findings[]. Limit to {max_findings} findings.\n\n\
+        Process:\n\
+        1. Skim the {surface_count} surfaces below and pick at most the {investigate_cap} that look most exploitable.\n\
+        2. For each chosen surface, Read the cited file once at the relevant line span.\n\
+        3. Decide go/no-go quickly per surface and move on.\n\
+        4. Emit final `{{\"findings\":[...]}}` JSON in one shot at the end of your turn.\n\n\
+        For each surface in the context below you have its file_path, start_line, and one or more line_number markers in `evidence[]`. Use the Read tool to fetch surrounding source for any line you actually need to reason about; the prompt deliberately does not embed source text. Use Glob/Grep only when broadening outside the listed surfaces.\n\n\
+        Context:\n{context}\n\nInvariants:\n{invariants}\n\nTriggers:\n{triggers}",
+        max_findings = options.max_findings,
+        surface_count = context.surfaces.len(),
+        investigate_cap = options.max_findings.saturating_mul(2).min(context.surfaces.len()),
+        context = lean_prompt_payload(context)?,
+        invariants = lean_prompt_payload(invariants)?,
+        triggers = lean_prompt_payload(triggers)?,
     ))
 }

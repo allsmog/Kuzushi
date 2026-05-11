@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::env;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -73,13 +74,96 @@ fn write_bridge_request<T: Serialize>(
 }
 
 pub(crate) fn default_bridge_command(source_root: &Path) -> Vec<String> {
-    let source_bridge = source_root.join("scripts").join("pi-agent-core-bridge.mjs");
-    if source_bridge.exists() {
-        return vec!["node".to_string(), source_bridge.display().to_string()];
+    if let Some(command) = bridge_command_from_env() {
+        return command;
+    }
+    if let Some(command) = bridge_command_at(source_root) {
+        return command;
+    }
+    if let Some(command) = bridge_command_near_executable() {
+        return command;
     }
 
     vec![
         "node".to_string(),
         "scripts/pi-agent-core-bridge.mjs".to_string(),
     ]
+}
+
+fn bridge_command_from_env() -> Option<Vec<String>> {
+    let raw = env::var("KUZUSHI_AGENT_BRIDGE").ok()?;
+    let path = raw.trim();
+    if path.is_empty() {
+        return None;
+    }
+    Some(vec!["node".to_string(), path.to_string()])
+}
+
+fn bridge_command_at(source_root: &Path) -> Option<Vec<String>> {
+    let bridge = source_root.join("scripts").join("pi-agent-core-bridge.mjs");
+    bridge
+        .exists()
+        .then(|| vec!["node".to_string(), bridge.display().to_string()])
+}
+
+fn bridge_command_near_executable() -> Option<Vec<String>> {
+    let exe = env::current_exe().ok()?;
+    let mut cursor = exe.parent();
+    while let Some(dir) = cursor {
+        if let Some(command) = bridge_command_at(dir) {
+            return Some(command);
+        }
+        cursor = dir.parent();
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn default_bridge_command_resolves_from_source_root_when_present() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let prior = env::var("KUZUSHI_AGENT_BRIDGE").ok();
+        env::remove_var("KUZUSHI_AGENT_BRIDGE");
+        let temp = tempfile::tempdir().unwrap();
+        let scripts = temp.path().join("scripts");
+        std::fs::create_dir(&scripts).unwrap();
+        let bridge = scripts.join("pi-agent-core-bridge.mjs");
+        std::fs::write(&bridge, "// stub\n").unwrap();
+
+        let command = default_bridge_command(temp.path());
+        restore_kuzushi_agent_bridge(prior);
+
+        assert_eq!(command[0], "node");
+        assert_eq!(command[1], bridge.display().to_string());
+    }
+
+    #[test]
+    fn default_bridge_command_honors_kuzushi_agent_bridge_env_var() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let prior = env::var("KUZUSHI_AGENT_BRIDGE").ok();
+        let temp = tempfile::tempdir().unwrap();
+        let bridge = temp.path().join("custom-bridge.mjs");
+        std::fs::write(&bridge, "// stub\n").unwrap();
+
+        env::set_var("KUZUSHI_AGENT_BRIDGE", &bridge);
+        let command = default_bridge_command(&temp.path().join("missing-source-root"));
+        restore_kuzushi_agent_bridge(prior);
+
+        assert_eq!(command[0], "node");
+        assert_eq!(command[1], bridge.display().to_string());
+    }
+
+    fn restore_kuzushi_agent_bridge(prior: Option<String>) {
+        if let Some(value) = prior {
+            env::set_var("KUZUSHI_AGENT_BRIDGE", value);
+        } else {
+            env::remove_var("KUZUSHI_AGENT_BRIDGE");
+        }
+    }
 }

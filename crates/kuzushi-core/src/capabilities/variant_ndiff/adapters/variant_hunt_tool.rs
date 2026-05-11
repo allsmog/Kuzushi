@@ -37,6 +37,7 @@ pub fn run_variant_hunt(
     let runtime = require_runtime("variant:hunt", runtime)?;
     let model = require_model("variant:hunt", &input, ctx)?;
     let max_findings = positive_usize_input(&input, "maxFindings", 10, 50);
+    let thinking_level = agentic_hunter_thinking_level(&input);
     let include_vendored = input
         .get("includeVendored")
         .and_then(Value::as_bool)
@@ -50,7 +51,9 @@ pub fn run_variant_hunt(
             target.clone(),
             VARIANT_HUNT_SYSTEM_PROMPT.to_string(),
             prompt,
-        ),
+        )
+        .with_tool_policy(default_whitebox_static_agent_tool_policy())
+        .with_thinking_level(thinking_level),
         StructuredJsonContract::new("variant:hunt", "VariantFindings", findings_schema()),
         require_json_object,
     )?;

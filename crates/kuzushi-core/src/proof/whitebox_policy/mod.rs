@@ -17,6 +17,7 @@ pub(in crate::proof::whitebox_policy) use apply_whitebox_static_sast_policy::{
 mod tests;
 
 pub use analysis_mode_from_input::agent_tool_policy_for_input;
+pub use analysis_mode_from_input::agentic_hunter_thinking_level;
 pub use analysis_mode_from_input::analysis_mode_from_input;
 pub use analysis_mode_from_input::default_whitebox_static_agent_tool_policy;
 pub use analysis_mode_from_input::validate_whitebox_static_agent_tool_policy;

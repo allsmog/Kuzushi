@@ -28,6 +28,7 @@ impl AgentRuntime for PiAgentCoreRuntime {
             api_key: self.api_key.clone(),
             base_url: self.base_url.clone(),
             thinking_level,
+            max_output_tokens: request.max_output_tokens,
             tool_policy: request.tool_policy,
         };
 
@@ -44,6 +45,8 @@ impl AgentRuntime for PiAgentCoreRuntime {
         Ok(AgentQueryResponse {
             text: response.text.unwrap_or_default(),
             structured: response.structured,
+            truncated: response.truncated,
+            stop_reason: response.stop_reason,
             ..Default::default()
         })
     }

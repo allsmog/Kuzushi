@@ -32,6 +32,18 @@ pub fn default_whitebox_static_agent_tool_policy() -> AgentToolPolicy {
     )
 }
 
+pub fn agentic_hunter_thinking_level(input: &Value) -> String {
+    for key in ["thinkingLevel", "reasoningEffort", "effort"] {
+        if let Some(value) = input.get(key).and_then(Value::as_str) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+    "high".to_string()
+}
+
 pub fn whitebox_static_triage_system_prompt() -> &'static str {
     WHITEBOX_STATIC_TRIAGE_SYSTEM_PROMPT
 }

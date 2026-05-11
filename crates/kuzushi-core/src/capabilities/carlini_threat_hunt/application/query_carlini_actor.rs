@@ -30,31 +30,29 @@ fn carlini_actor_request(
     prompt: String,
     input: &Value,
 ) -> AgentQueryRequest {
-    AgentQueryRequest::new(
+    let request = AgentQueryRequest::new(
         model.to_string(),
         target.to_path_buf(),
         SYSTEM_PROMPT.to_string(),
         prompt,
     )
     .with_tool_policy(default_whitebox_static_agent_tool_policy())
-    .with_thinking_level(carlini_thinking_level(input))
+    .with_thinking_level(agentic_hunter_thinking_level(input));
+
+    match max_output_tokens_from_input(input) {
+        Some(tokens) => request.with_max_output_tokens(tokens),
+        None => request,
+    }
 }
 
-pub(in crate::capabilities::carlini_threat_hunt) fn carlini_thinking_level(
+pub(in crate::capabilities::carlini_threat_hunt) fn max_output_tokens_from_input(
     input: &Value,
-) -> String {
-    carlini_thinking_level_override(input).unwrap_or_else(|| "high".to_string())
-}
-
-fn carlini_thinking_level_override(input: &Value) -> Option<String> {
-    ["thinkingLevel", "reasoningEffort", "effort"]
+) -> Option<u32> {
+    ["maxOutputTokens", "max_output_tokens", "maxTokens"]
         .iter()
-        .find_map(|key| nonempty_input_string(input, key))
-}
-
-fn nonempty_input_string(input: &Value, key: &str) -> Option<String> {
-    let value = input.get(key)?.as_str()?.trim();
-    (!value.is_empty()).then(|| value.to_string())
+        .filter_map(|key| input.get(*key).and_then(Value::as_u64))
+        .find(|tokens| *tokens > 0 && *tokens <= u32::MAX as u64)
+        .map(|tokens| tokens as u32)
 }
 
 pub(crate) fn record_unique_carlini_findings(

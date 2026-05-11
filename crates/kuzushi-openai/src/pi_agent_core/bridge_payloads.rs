@@ -66,6 +66,8 @@ pub(crate) struct BridgeRequest {
     pub(crate) api_key: Option<String>,
     pub(crate) base_url: Option<String>,
     pub(crate) thinking_level: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) max_output_tokens: Option<u32>,
     pub(crate) tool_policy: AgentToolPolicy,
 }
 
@@ -76,4 +78,8 @@ pub(crate) struct BridgeResponse {
     pub(crate) text: Option<String>,
     pub(crate) structured: Option<Value>,
     pub(crate) error: Option<String>,
+    #[serde(default)]
+    pub(crate) truncated: bool,
+    #[serde(default)]
+    pub(crate) stop_reason: Option<String>,
 }
