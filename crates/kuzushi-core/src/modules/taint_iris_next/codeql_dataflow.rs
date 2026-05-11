@@ -628,6 +628,7 @@ pub(in crate::modules) fn codeql_flows_to_linked_stories(
                     "codeql {}: {} | path: {trace}",
                     flow.rule_id, flow.message
                 ),
+                callees: Vec::new(),
             }
         })
         .collect()

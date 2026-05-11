@@ -190,6 +190,34 @@ const MARKERS: &[MarkerSpec] = &[
         languages: &["python"],
         marker: "python.exec",
     },
+    // ----- CWE-120 buffer-overflow source markers ------------------------
+    // Parser-layer reads. These are C / C++ codebases' "I just pulled N
+    // bytes from a wire / blob" primitives — anything that returns a
+    // length the caller then feeds to memcpy/strcpy/sprintf. The pattern
+    // names are framework-canonical (pgcrypto pullf/mbuf, libpq pq_get*,
+    // crypto MPI readers), not specific to any one codebase, so they
+    // generalise to other postgres extensions doing wire parsing.
+    MarkerSpec {
+        pattern: r"\b((?:pullf|mbuf)_[a-z_]+)\s*\(",
+        cwe: "CWE-120",
+        kind: "source",
+        languages: &["c", "cpp"],
+        marker: "buffer.parser-read",
+    },
+    MarkerSpec {
+        pattern: r"\b(pq_get[a-z_]+|pq_copymsgbytes)\s*\(",
+        cwe: "CWE-120",
+        kind: "source",
+        languages: &["c", "cpp"],
+        marker: "wire.parser-read",
+    },
+    MarkerSpec {
+        pattern: r"\b([a-z_]+_mpi_(?:read|alloc))\s*\(",
+        cwe: "CWE-120",
+        kind: "source",
+        languages: &["c", "cpp"],
+        marker: "crypto.mpi-read",
+    },
 ];
 
 /// Cached compiled regexes so a postgres run with ~30k source files
@@ -309,6 +337,33 @@ pub(in crate::modules) fn run_taint_iris_next_source_sink_discovery(
 /// placeholder shadow). Other markers (route decorators, sink names)
 /// pass through unchanged.
 fn is_likely_entry_point_name_noise(marker: &str, name: &str) -> bool {
+    // Parser-source markers (`buffer.parser-read`, `wire.parser-read`,
+    // `crypto.mpi-read`) capture identifiers preceding `(` in C source.
+    // The same regex matches typedef-shaped names like `mbuf_t` or
+    // struct-init macros like `MBuf` (alignment-padded constructors in
+    // pgcrypto's header). Require length >= 8 and at least one
+    // lowercase letter — real parser fns are conventionally
+    // `pullf_read_max`, `pgp_mpi_read`, `pq_getmsgbytes`. Single-word
+    // captures like `MBuf` and short typedef names get filtered.
+    if marker == "buffer.parser-read"
+        || marker == "wire.parser-read"
+        || marker == "crypto.mpi-read"
+    {
+        if name.len() < 8 {
+            return true;
+        }
+        let has_lowercase = name.chars().any(|c| c.is_ascii_lowercase());
+        if !has_lowercase {
+            return true;
+        }
+        // First char must be lowercase or underscore (not a type name).
+        if let Some(first) = name.chars().next() {
+            if first.is_ascii_uppercase() {
+                return true;
+            }
+        }
+        return false;
+    }
     if marker != "PG_FUNCTION_ARGS" {
         return false;
     }
@@ -573,5 +628,82 @@ mod tests {
         let result = run_taint_iris_next_source_sink_discovery(&files, 16);
         assert!(result.sinks.is_empty());
         assert!(result.entry_points.is_empty());
+    }
+
+    #[test]
+    fn discovers_parser_layer_cwe120_sources() {
+        // pgcrypto-style file: pullf_read / mbuf_read / pgp_mpi_read
+        // are parser-layer readers that produce caller-controlled
+        // length values; the rest of the catalog feeds these into
+        // memcpy as CWE-120 sources. The discovery sweep didn't see
+        // them before Thread A1; this regression locks that in.
+        let files = vec![fixture(
+            "c",
+            &[
+                "Datum pgp_parse_pubenc_sesskey(PGP_Context *ctx, PullFilter *pkt)",
+                "{",
+                "    res = pullf_read_fixed(pkt, 8, key_id);",
+                "    res = pullf_read(src, &p, 4);",
+                "    res = pgp_mpi_read(pkt, &c1);",
+                "    n = mbuf_read(src);",
+                "    msglen = pq_getmsgbytes(buf, len);",
+                "    msglen = pq_copymsgbytes(buf, dest, len);",
+                "}",
+            ],
+            "contrib/pgcrypto/pgp-pubdec.c",
+        )];
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16);
+        let source_names: std::collections::BTreeSet<&str> =
+            result.sources.iter().map(|s| s.name.as_str()).collect();
+        assert!(source_names.contains("pullf_read_fixed"), "got {source_names:?}");
+        assert!(source_names.contains("pullf_read"), "got {source_names:?}");
+        assert!(source_names.contains("pgp_mpi_read"), "got {source_names:?}");
+        assert!(source_names.contains("mbuf_read"), "got {source_names:?}");
+        assert!(source_names.contains("pq_getmsgbytes"), "got {source_names:?}");
+        assert!(source_names.contains("pq_copymsgbytes"), "got {source_names:?}");
+        // Each source should carry CWE-120 and the marker tag.
+        let pullf = result
+            .sources
+            .iter()
+            .find(|s| s.name == "pullf_read")
+            .unwrap();
+        assert_eq!(pullf.cwe, "CWE-120");
+        assert_eq!(pullf.marker, "buffer.parser-read");
+        let mpi = result
+            .sources
+            .iter()
+            .find(|s| s.name == "pgp_mpi_read")
+            .unwrap();
+        assert_eq!(mpi.marker, "crypto.mpi-read");
+        let pq = result
+            .sources
+            .iter()
+            .find(|s| s.name == "pq_getmsgbytes")
+            .unwrap();
+        assert_eq!(pq.marker, "wire.parser-read");
+    }
+
+    #[test]
+    fn parser_layer_noise_filter_rejects_short_or_uppercase_captures() {
+        // Typedef-shaped or struct-name captures should be filtered.
+        // Real parser fns are lowercase_snake_case >= 8 chars.
+        let files = vec![fixture(
+            "c",
+            &[
+                // Real, should pass:
+                "n = pgp_mpi_read(src);",
+                // Noise — too short:
+                "var = mbuf_t(...);",
+                // Noise — starts uppercase:
+                "var = MBuf(NULL);",
+            ],
+            "src/x.c",
+        )];
+        let result = run_taint_iris_next_source_sink_discovery(&files, 16);
+        let names: std::collections::BTreeSet<&str> =
+            result.sources.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains("pgp_mpi_read"), "got {names:?}");
+        assert!(!names.contains("mbuf_t"), "short capture must be filtered: {names:?}");
+        assert!(!names.contains("MBuf"), "uppercase capture must be filtered: {names:?}");
     }
 }

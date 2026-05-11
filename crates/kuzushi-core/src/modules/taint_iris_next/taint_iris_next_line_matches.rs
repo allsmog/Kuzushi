@@ -225,6 +225,7 @@ fn pair_taint_iris_next_candidates(
         sink_line: sink.line,
         shared_tokens,
         rationale,
+        callees: Vec::new(),
     })
 }
 
