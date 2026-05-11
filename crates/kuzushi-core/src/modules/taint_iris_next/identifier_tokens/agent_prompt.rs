@@ -73,6 +73,7 @@ pub(in crate::modules::taint_iris_next) fn build_taint_iris_next_agent_prompt(
             story.cwe, story.file_path, story.source_line, story.sink_line, story.rationale
         ));
     }
+    append_sanitizer_bodies_section(&mut lines, plan, evidence);
     lines.push(String::new());
     lines.push("## False-Positive Patterns (apply BEFORE promoting to finding)".to_string());
     lines.push(
@@ -245,4 +246,294 @@ fn append_discovered_signals_section(
         }
     }
     lines.push(String::new());
+}
+
+/// Read source files referenced in linked stories and extract the
+/// bodies of any functions whose names match sanitizer-shaped
+/// patterns (`check_*`, `validate_*`, `safe_*`, `*_safe_*`,
+/// `is_safe`, `sanitize_*`). Include them verbatim in the agent
+/// prompt so the agent can audit the sanitizer body without spending
+/// MCP-call budget — the bypass usually lives in a single function
+/// (e.g. orafce `get_safe_path` setting `check_locality = false` on
+/// the named-location branch).
+///
+/// Capped per-body (60 lines), capped total (8 bodies / ~2KB worst
+/// case) so the prompt stays compact on large hunts. Files that
+/// don't open are silently skipped; this is best-effort, not a
+/// correctness gate.
+pub(in crate::modules::taint_iris_next) fn append_sanitizer_bodies_section(
+    lines: &mut Vec<String>,
+    plan: &TaintIrisNextPlan,
+    evidence: &TaintIrisNextEvidenceResult,
+) {
+    let mut files_to_scan: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    for story in evidence.linked_stories.iter() {
+        files_to_scan.insert(story.file_path.clone());
+    }
+    for evidence_row in evidence.evidence.iter() {
+        files_to_scan.insert(evidence_row.file_path.clone());
+    }
+    if files_to_scan.is_empty() {
+        return;
+    }
+    let mut bodies: Vec<(String, String, u32, String)> = Vec::new();
+    for relative_path in files_to_scan.iter().take(20) {
+        let abs = plan.scan_root.join(relative_path);
+        let Ok(content) = std::fs::read_to_string(&abs) else {
+            continue;
+        };
+        for (name, start_line, body) in extract_sanitizer_function_bodies(&content) {
+            bodies.push((
+                relative_path.clone(),
+                name,
+                start_line,
+                body,
+            ));
+            if bodies.len() >= 8 {
+                break;
+            }
+        }
+        if bodies.len() >= 8 {
+            break;
+        }
+    }
+    if bodies.is_empty() {
+        return;
+    }
+    lines.push(String::new());
+    lines.push("## Sanitizer Function Bodies (audit for bypass)".to_string());
+    lines.push(
+        "Functions in linked-story files whose names suggest sanitization. \
+         Bugs hide INSIDE these — `check_locality = false` skip-branches, \
+         pre-concatenation-only validation, prefix whitelists vs canonical \
+         paths, etc. Read each body and check whether every flow to a sink \
+         goes through the sanitizer AND whether the sanitizer is applied to \
+         the FINAL value used at the sink. If a sanitizer's body contains \
+         a skip-branch that bypasses the check on a 'trusted' input, the \
+         flow that hits the skip-branch is exploitable — promote to finding."
+            .to_string(),
+    );
+    for (path, name, start_line, body) in &bodies {
+        lines.push(String::new());
+        lines.push(format!("### {name} at {path}:{start_line}"));
+        lines.push("```c".to_string());
+        lines.push(body.clone());
+        lines.push("```".to_string());
+    }
+    lines.push(String::new());
+}
+
+/// Extract function bodies whose names look like sanitizers. Returns
+/// `(name, start_line, body)` for each match.
+///
+/// Heuristic parser: find a line that starts with an identifier (the
+/// return type or a continuation), where the NEXT non-comment line
+/// has the function name followed by `(`. Then track brace depth from
+/// the first `{` until depth returns to 0.
+///
+/// Caps each body at 60 lines so we never include a huge function.
+/// Skips static-prototype-only declarations (`fn(...)` with `;`).
+fn extract_sanitizer_function_bodies(content: &str) -> Vec<(String, u32, String)> {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut out: Vec<(String, u32, String)> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim_start();
+        // Look for `name(args)` definition lines (no leading whitespace
+        // for the return type two lines above is typical postgres
+        // style: `static char *\nget_safe_path(text *...)`).
+        if let Some(name) = function_name_from_def_line(trimmed) {
+            if is_sanitizer_shaped_name(&name) {
+                // Find the opening brace (search forward up to 8 lines).
+                let mut brace_line: Option<usize> = None;
+                for j in i..lines.len().min(i + 8) {
+                    if lines[j].contains('{') {
+                        brace_line = Some(j);
+                        break;
+                    }
+                    if lines[j].trim_end().ends_with(';') {
+                        // Prototype, not definition.
+                        break;
+                    }
+                }
+                if let Some(brace_start) = brace_line {
+                    // Track brace depth.
+                    let mut depth: i32 = 0;
+                    let mut started = false;
+                    let mut end_line = brace_start;
+                    for j in brace_start..lines.len() {
+                        for ch in lines[j].chars() {
+                            match ch {
+                                '{' => {
+                                    depth += 1;
+                                    started = true;
+                                }
+                                '}' => depth -= 1,
+                                _ => {}
+                            }
+                        }
+                        if started && depth <= 0 {
+                            end_line = j;
+                            break;
+                        }
+                    }
+                    // Include up to 60 lines starting from the
+                    // declaration (i) to the closing brace.
+                    let span_end = end_line.min(i + 60);
+                    let body: String = lines[i..=span_end].join("\n");
+                    out.push((name, (i + 1) as u32, body));
+                    if out.len() >= 8 {
+                        return out;
+                    }
+                    i = end_line + 1;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Match a line of the shape `name(args)` (with optional return-type
+/// prefix on the same line) and return `name` if the next char after
+/// the name is `(`. Returns None for if/while/for/switch etc.
+fn function_name_from_def_line(line: &str) -> Option<String> {
+    // The function name is the identifier immediately preceding `(`.
+    let paren = line.find('(')?;
+    if paren == 0 {
+        return None;
+    }
+    let before = &line[..paren];
+    // Trim trailing whitespace.
+    let trimmed = before.trim_end();
+    // Walk backward to find the start of the identifier.
+    let bytes = trimmed.as_bytes();
+    let mut end = bytes.len();
+    while end > 0 {
+        let b = bytes[end - 1];
+        if b.is_ascii_alphanumeric() || b == b'_' {
+            end -= 1;
+        } else {
+            break;
+        }
+    }
+    let name = &trimmed[end..];
+    if name.is_empty() {
+        return None;
+    }
+    // Reject C keywords that look like calls.
+    if matches!(
+        name,
+        "if" | "while"
+            | "for"
+            | "switch"
+            | "return"
+            | "sizeof"
+            | "elog"
+            | "ereport"
+            | "Assert"
+            | "DEBUG"
+            | "ERROR"
+            | "FATAL"
+            | "WARNING"
+            | "NOTICE"
+    ) {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+fn is_sanitizer_shaped_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if lower.starts_with("check_")
+        || lower.starts_with("validate_")
+        || lower.starts_with("verify_")
+        || lower.starts_with("safe_")
+        || lower.starts_with("sanitize_")
+        || lower.starts_with("escape_")
+        || lower.starts_with("quote_")
+        || lower.starts_with("canonicalize_")
+    {
+        return true;
+    }
+    matches!(
+        lower.as_str(),
+        "is_safe" | "is_valid" | "is_safe_path" | "is_authorized"
+    ) || lower.contains("_safe_")
+        || lower.contains("_safer_")
+        || lower.contains("get_safe")
+        || lower.contains("ensure_")
+}
+
+#[cfg(test)]
+mod sanitizer_body_tests {
+    use super::*;
+
+    #[test]
+    fn extracts_sanitizer_body_from_orafce_style_source() {
+        let src = r#"
+static char *
+get_safe_path(text *location, text *filename)
+{
+    char *fullname;
+    bool check_locality;
+    if (safe_named_location(location))
+    {
+        fullname = build(location, filename);
+        check_locality = false;
+    }
+    else
+    {
+        fullname = build(location, filename);
+        check_locality = true;
+    }
+    canonicalize_path(fullname);
+    if (check_locality)
+        check_secure_locality(fullname);
+    return fullname;
+}
+
+static void
+other_fn(int x)
+{
+    return;
+}
+"#;
+        let bodies = extract_sanitizer_function_bodies(src);
+        assert!(
+            bodies.iter().any(|(n, _, _)| n == "get_safe_path"),
+            "get_safe_path should be extracted: {:?}",
+            bodies.iter().map(|(n, _, _)| n).collect::<Vec<_>>()
+        );
+        let body = &bodies
+            .iter()
+            .find(|(n, _, _)| n == "get_safe_path")
+            .unwrap()
+            .2;
+        // The body should include the skip-branch.
+        assert!(body.contains("check_locality = false"), "got body:\n{body}");
+        assert!(body.contains("canonicalize_path"));
+        // Non-sanitizer function not extracted.
+        assert!(!bodies.iter().any(|(n, _, _)| n == "other_fn"));
+    }
+
+    #[test]
+    fn name_classification_only_flags_sanitizer_shapes() {
+        assert!(is_sanitizer_shaped_name("check_locality"));
+        assert!(is_sanitizer_shaped_name("get_safe_path"));
+        assert!(is_sanitizer_shaped_name("safe_named_location"));
+        assert!(is_sanitizer_shaped_name("validate_filename"));
+        assert!(is_sanitizer_shaped_name("escape_string"));
+        assert!(is_sanitizer_shaped_name("quote_identifier"));
+        assert!(is_sanitizer_shaped_name("canonicalize_path"));
+        assert!(is_sanitizer_shaped_name("ensure_directory_exists"));
+        // Negative cases.
+        assert!(!is_sanitizer_shaped_name("utl_file_fopen"));
+        assert!(!is_sanitizer_shaped_name("strcpy"));
+        assert!(!is_sanitizer_shaped_name("appendStringInfo"));
+        assert!(!is_sanitizer_shaped_name("PG_GETARG_TEXT_PP"));
+    }
 }
