@@ -83,7 +83,16 @@ pub(crate) fn verify_module() -> BuiltinModule {
             tool_with_options(
                 "verify:finding",
                 "Verify whether a finding is exploitable (LLM-driven; consults runtime for PoC reasoning).",
-                vec![fingerprint_option(), model_option()],
+                vec![
+                    fingerprint_option(),
+                    opt(
+                        "VERIFY_PROMPT",
+                        OptionType::String,
+                        "Prompt text or path override for verification.",
+                    )
+                    .advanced(),
+                    model_option(),
+                ],
             ),
             tool_with_options(
                 "verify:exploit",

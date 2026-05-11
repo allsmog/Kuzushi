@@ -361,9 +361,13 @@ mod tests {
         assert_eq!(scope, "src/lib.rs\nCargo.toml\n");
         assert_eq!(scan_tool_input(None, &[], None), serde_json::json!({}));
         assert_eq!(
-            scan_tool_input(Some(ScanModeArg::Fast), &["sast".to_string()], Some(true)),
+            scan_tool_input(
+                Some(ScanModeArg::Standard),
+                &["sast".to_string()],
+                Some(true)
+            ),
             serde_json::json!({
-                "mode": "fast",
+                "mode": "standard",
                 "taskMode": "manual",
                 "tasks": ["sast"],
                 "triage": true

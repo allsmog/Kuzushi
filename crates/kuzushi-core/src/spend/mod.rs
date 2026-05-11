@@ -19,7 +19,6 @@ pub(crate) use as_db_str::*;
 pub(crate) use drop::*;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::BTreeMap;
-use std::env;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};

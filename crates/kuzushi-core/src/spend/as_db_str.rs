@@ -91,6 +91,6 @@ pub(crate) struct LimiterState {
     pub(crate) conn: Connection,
     /// Caps loaded once at init; mutated through [`SpendLimiter::set_cap`].
     pub(crate) caps: BTreeMap<Operation, f64>,
-    /// Hard ceiling from `KUZUSHI_MAX_USD_PER_RUN`; `None` = unlimited.
+    /// Optional hard ceiling for the current limiter; `None` = unlimited.
     pub(crate) hard_ceiling: Option<f64>,
 }

@@ -97,6 +97,14 @@ pub(crate) const SHOW_COMPLETION_RULES: &[SubcommandCompletionRule] = &[
         values: tool_completion_values_for,
     },
     SubcommandCompletionRule {
+        prefix_words: &["show", "advanced"],
+        values: tool_completion_values_for,
+    },
+    SubcommandCompletionRule {
+        prefix_words: &["show", "missing"],
+        values: tool_completion_values_for,
+    },
+    SubcommandCompletionRule {
         prefix_words: &["show", "aliases"],
         values: finding_completion_values_for,
     },

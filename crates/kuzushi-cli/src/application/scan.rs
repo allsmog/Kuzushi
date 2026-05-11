@@ -28,7 +28,13 @@ pub(crate) async fn scan_command(
     let registry = ModuleRegistry::with_v2_builtins();
 
     apply_scan_since_scope(&workspace, since.as_deref(), include_worktree, json, ci)?;
-    apply_scan_budget_caps(&workspace, budget.as_deref(), json, ci)?;
+    apply_scan_budget_caps(
+        &workspace,
+        budget.as_deref(),
+        config.operator.spend_hard_ceiling_usd,
+        json,
+        ci,
+    )?;
     let option_store = scan_option_store(&workspace)?;
     let input = registry.prepare_tool_input(
         "sast:scan",

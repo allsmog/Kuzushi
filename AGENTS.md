@@ -191,6 +191,32 @@ When authoring a new module: derive the model from `ctx.toolModel ??
 ctx.config.model` (or, in DAG tasks, via `resolveTaskModel(context, ...)`).
 Never inline a literal model string as a runtime fallback.
 
+### Operator control surfaces (flags, options, env)
+
+Tool/module behavior should flow through declared options, not scattered
+environment variables or ad hoc JSON keys. Treat `OptionSpec` metadata and
+`ModuleRegistry.prepareToolInput` / Rust `prepare_tool_input` as the canonical
+tool-input boundary.
+
+- Tool options are the source of truth for module behavior. Add new knobs to
+  the tool descriptor first, with aliases only for compatibility.
+- CLI flags are shorthands that compile into the same canonical tool input.
+  Do not maintain a separate flag-only behavior path for scan, shell, or run.
+- Config files are for durable runtime/provider defaults and workspace/global
+  policy. They should not become a parallel per-tool option system.
+- Environment variables are allowed for secrets and process integration:
+  provider API keys/OAuth tokens, `PATH`/`HOME`/`EDITOR`, terminal or
+  accessibility mode, test hooks, and documented emergency debug toggles.
+- Do not add product behavior env vars for ordinary tool settings such as
+  scanner binaries, budgets, MCP/CodeQL/Joern tuning, reasoning effort,
+  plugin roots, or prompt knobs. Surface those as options or config fields.
+- Direct env reads belong at adapter/config/presentation boundaries. Domain
+  types, module input parsers, scan engines, and runtime policy code should
+  receive resolved values rather than reading `std::env` / `process.env`.
+- Unknown tool input keys should not be accepted silently. Preserve backward
+  compatibility through declared aliases/deprecated aliases, then validate at
+  the canonical preparation boundary.
+
 ### Troubleshooting pointers
 
 All `ModuleLoadError` codes and their fixes live in

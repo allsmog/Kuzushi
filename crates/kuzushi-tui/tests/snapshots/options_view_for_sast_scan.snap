@@ -8,12 +8,13 @@ mode:shell | target:none | catalog | 0 findings | 35 mods
 tool: sast:scan
 view: options
 
-option            value         default     req      type    description                                                
-mode              -             standard    no       enum    Analysis mode or preset. Choices: standard|whitebox-static.
-taskMode          -             auto        no       enum    Task-selection mode. Choices: auto|manual.                 
-tasks             -             -           no       list    Manual task allowlist. Use /tasks to edit.                 
-disabledTasks     -             -           no       list    Auto-mode task denylist. Use /tasks to edit.               
-severity          -             -           no       list    Optional severity filter: critical, high, medium, low, o...
-triage            -             false       no       bool    Run model-backed triage after static scanners.             
+option            value       default    req    type   aliases           description
+mode              -           standard   no     enum   preset            Analysis mode or preset. Choices: standard|w...
+taskMode          -           auto       no     enum   task_mode         Task-selection mode. Choices: auto|manual.
+tasks             -           -          no     list   taskIds, task...  Manual task allowlist. Use /tasks to edit.
+disabledTasks     -           -          no     list   disabled_tasks    Auto-mode task denylist. Use /tasks to edit.
+severity          -           -          no     list   -                 Optional severity filter: critical, high, me...
+triage            -           false      no     bool   aiTriage, ai_...  Run model-backed triage after static scanners.
 
+Canonical keys are in the option column; aliases are compatibility names.
 Next: set <key> <value>, setg <key> <value>, show advanced, show missing

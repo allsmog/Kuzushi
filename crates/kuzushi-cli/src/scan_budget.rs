@@ -4,6 +4,7 @@ use kuzushi_core::WorkspaceTarget;
 pub(crate) fn apply_scan_budget_caps(
     workspace: &WorkspaceTarget,
     budget: Option<&str>,
+    hard_ceiling: Option<f64>,
     json: bool,
     ci: bool,
 ) -> Result<()> {
@@ -12,8 +13,11 @@ pub(crate) fn apply_scan_budget_caps(
     };
     let pairs = kuzushi_core::parse_budget_flag(spec)
         .with_context(|| format!("invalid --budget spec {spec:?}"))?;
-    let limiter = kuzushi_core::SpendLimiter::open(workspace.findings_db_path())
-        .context("could not open spend ledger")?;
+    let limiter = kuzushi_core::SpendLimiter::open_with_hard_ceiling(
+        workspace.findings_db_path(),
+        hard_ceiling,
+    )
+    .context("could not open spend ledger")?;
     for (op, cap) in &pairs {
         limiter
             .set_cap(*op, *cap)

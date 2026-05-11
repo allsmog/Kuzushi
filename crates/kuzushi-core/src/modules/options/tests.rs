@@ -41,7 +41,7 @@ mod tests {
                 "ratio": "0.75",
                 "target": "./repo",
                 "label": "baseline",
-                "tags": ["one", "two"],
+                "tags": "one, two",
                 "payload": {"nested": true},
                 "mode": "manual",
                 "max_findings": "7"

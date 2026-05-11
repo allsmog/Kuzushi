@@ -12,6 +12,25 @@ pub(in crate::modules) fn semgrep_module() -> BuiltinModule {
             vec![
                 target_option(),
                 binary_option("Semgrep binary path."),
+                opt("mode", OptionType::Enum, "Analysis mode or preset.")
+                    .aliases(&["preset"])
+                    .choices(&["standard", "whitebox-static"])
+                    .default(json!("standard"))
+                    .advanced(),
+                opt(
+                    "whiteboxStatic",
+                    OptionType::Json,
+                    "Enable whitebox-static mode.",
+                )
+                .aliases(&["whitebox_static"])
+                .advanced(),
+                opt(
+                    "staticProofState",
+                    OptionType::String,
+                    "Default static proof state for whitebox-static findings.",
+                )
+                .aliases(&["static_proof_state"])
+                .advanced(),
                 opt("config", OptionType::String, "Semgrep config name or path.")
                     .aliases(&["configFlag", "config_flag"])
                     .default(json!("auto")),
@@ -33,6 +52,25 @@ pub(in crate::modules) fn codeql_module() -> BuiltinModule {
             vec![
                 target_option(),
                 binary_option("CodeQL binary path."),
+                opt("mode", OptionType::Enum, "Analysis mode or preset.")
+                    .aliases(&["preset"])
+                    .choices(&["standard", "whitebox-static"])
+                    .default(json!("standard"))
+                    .advanced(),
+                opt(
+                    "whiteboxStatic",
+                    OptionType::Json,
+                    "Enable whitebox-static mode.",
+                )
+                .aliases(&["whitebox_static"])
+                .advanced(),
+                opt(
+                    "staticProofState",
+                    OptionType::String,
+                    "Default static proof state for whitebox-static findings.",
+                )
+                .aliases(&["static_proof_state"])
+                .advanced(),
                 opt("dbPath", OptionType::Path, "Existing CodeQL database path.")
                     .aliases(&["db_path"])
                     .advanced(),

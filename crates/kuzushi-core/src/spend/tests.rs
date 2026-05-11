@@ -55,8 +55,7 @@ mod tests {
 
     #[test]
     fn hard_ceiling_is_global_across_ops() {
-        let s = fresh();
-        s.set_hard_ceiling(Some(100.0));
+        let s = SpendLimiter::open_in_memory_with_hard_ceiling(Some(100.0)).unwrap();
         s.set_cap(Operation::Triage, 1000.0).unwrap();
         s.set_cap(Operation::DeepAudit, 1000.0).unwrap();
 
@@ -66,6 +65,13 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("hard ceiling"), "{err}");
+    }
+
+    #[test]
+    fn open_in_memory_defaults_to_no_hard_ceiling() {
+        let s = SpendLimiter::open_in_memory().unwrap();
+
+        assert_eq!(s.hard_ceiling(), None);
     }
 
     #[test]

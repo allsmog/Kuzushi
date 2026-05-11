@@ -1,11 +1,12 @@
 use super::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct V2Config {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     pub runtime: RuntimeConfig,
+    pub operator: OperatorConfig,
 }
 
 impl Default for V2Config {
@@ -13,8 +14,20 @@ impl Default for V2Config {
         Self {
             model: None,
             runtime: RuntimeConfig::default(),
+            operator: OperatorConfig::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
+pub struct OperatorConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_budget_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spend_hard_ceiling_usd: Option<f64>,
+    #[serde(default)]
+    pub trusted_workflow_auto_accept: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -112,4 +125,5 @@ impl ConfigPaths {
 pub(crate) struct PartialConfig {
     pub(crate) model: Option<Option<String>>,
     pub(crate) runtime: Option<PartialRuntimeConfig>,
+    pub(crate) operator: Option<PartialOperatorConfig>,
 }

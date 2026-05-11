@@ -11,6 +11,14 @@ pub(crate) struct PartialRuntimeConfig {
     pub(crate) anthropic_oauth: Option<Option<AnthropicOauthConfig>>,
 }
 
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct PartialOperatorConfig {
+    pub(crate) session_budget_usd: Option<Option<f64>>,
+    pub(crate) spend_hard_ceiling_usd: Option<Option<f64>>,
+    pub(crate) trusted_workflow_auto_accept: Option<bool>,
+}
+
 pub fn load_config_for_target(target: Option<&Path>) -> Result<V2Config> {
     load_config(ConfigPaths::from_target(target)?)
 }
@@ -95,6 +103,18 @@ pub(crate) fn merge_config(config: &mut V2Config, patch: PartialConfig) {
         }
         if let Some(anthropic_oauth) = runtime.anthropic_oauth {
             config.runtime.anthropic_oauth = anthropic_oauth;
+        }
+    }
+
+    if let Some(operator) = patch.operator {
+        if let Some(session_budget_usd) = operator.session_budget_usd {
+            config.operator.session_budget_usd = session_budget_usd;
+        }
+        if let Some(spend_hard_ceiling_usd) = operator.spend_hard_ceiling_usd {
+            config.operator.spend_hard_ceiling_usd = spend_hard_ceiling_usd;
+        }
+        if let Some(trusted_workflow_auto_accept) = operator.trusted_workflow_auto_accept {
+            config.operator.trusted_workflow_auto_accept = trusted_workflow_auto_accept;
         }
     }
 }

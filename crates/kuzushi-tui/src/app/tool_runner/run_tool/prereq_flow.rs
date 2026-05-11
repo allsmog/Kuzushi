@@ -18,7 +18,7 @@ impl ShellApp {
         if self.trusted_workflow_auto_accept {
             self.log(
                 "system",
-                "trusted workflow auto-accepted prerequisite plan via KUZUSHI_TRUSTED_WORKFLOW_AUTO_ACCEPT",
+                "trusted workflow auto-accepted prerequisite plan via operator config",
             );
             self.accept_prereq_plan(PrereqPlanAction::Approve, workspace);
             return;

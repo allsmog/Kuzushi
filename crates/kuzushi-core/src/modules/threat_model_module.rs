@@ -30,8 +30,12 @@ pub(crate) fn threat_model_module() -> BuiltinModule {
                         .choices(&["all", "dfd", "stride", "stories", "scope", "scenarios"])
                         .default(json!("all"))
                         .advanced(),
-                    opt("stages", OptionType::StringList, "PASTA stages to generate.")
-                        .advanced(),
+                    opt(
+                        "stages",
+                        OptionType::StringList,
+                        "PASTA stages to generate.",
+                    )
+                    .advanced(),
                     opt("maxElements", OptionType::Int, "Maximum model elements.")
                         .aliases(&["max_elements"])
                         .default(json!(40))
@@ -40,10 +44,14 @@ pub(crate) fn threat_model_module() -> BuiltinModule {
                         .aliases(&["max_threats"])
                         .default(json!(30))
                         .advanced(),
-                    opt("emitFindings", OptionType::Bool, "Persist threats as findings.")
-                        .aliases(&["emit_findings"])
-                        .default(json!(false))
-                        .advanced(),
+                    opt(
+                        "emitFindings",
+                        OptionType::Bool,
+                        "Persist threats as findings.",
+                    )
+                    .aliases(&["emit_findings"])
+                    .default(json!(false))
+                    .advanced(),
                     opt(
                         "preserveUserEdits",
                         OptionType::Bool,

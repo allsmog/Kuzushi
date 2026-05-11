@@ -42,6 +42,7 @@ pub(crate) fn sast_module() -> BuiltinModule {
             "Run the full SAST pipeline for the current target.",
             vec![
                 opt("mode", OptionType::Enum, "Analysis mode or preset.")
+                    .aliases(&["preset"])
                     .choices(&["standard", "whitebox-static"])
                     .default(json!("standard")),
                 opt("taskMode", OptionType::Enum, "Task-selection mode.")
@@ -65,12 +66,41 @@ pub(crate) fn sast_module() -> BuiltinModule {
                     OptionType::StringList,
                     "Optional severity filter: critical, high, medium, low, or info.",
                 ),
+                max_findings_option(40).advanced(),
                 opt(
                     "diffBase",
                     OptionType::String,
                     "Git revision for whitebox-static PR diff scope.",
                 )
                 .aliases(&["diff_base"])
+                .advanced(),
+                opt(
+                    "whiteboxStatic",
+                    OptionType::Json,
+                    "Enable whitebox-static mode.",
+                )
+                .aliases(&["whitebox_static"])
+                .advanced(),
+                opt(
+                    "staticProofState",
+                    OptionType::String,
+                    "Default static proof state for whitebox-static findings.",
+                )
+                .aliases(&["static_proof_state"])
+                .advanced(),
+                opt(
+                    "proofState",
+                    OptionType::String,
+                    "Proof state hint rewritten in whitebox-static mode.",
+                )
+                .aliases(&["proof_state"])
+                .advanced(),
+                opt(
+                    "proofStates",
+                    OptionType::StringList,
+                    "Proof state hints rewritten in whitebox-static mode.",
+                )
+                .aliases(&["proof_states"])
                 .advanced(),
                 opt(
                     "triage",
@@ -92,6 +122,55 @@ pub(crate) fn sast_module() -> BuiltinModule {
                     "Generate patches for verified true positives.",
                 )
                 .aliases(&["auto_patch"])
+                .default(json!(false))
+                .advanced(),
+                opt("patch", OptionType::Bool, "Legacy patch enable flag.")
+                    .default(json!(false))
+                    .advanced(),
+                opt("patching", OptionType::Bool, "Legacy patching enable flag.")
+                    .default(json!(false))
+                    .advanced(),
+                opt("poc", OptionType::Bool, "Legacy PoC enable flag.")
+                    .default(json!(false))
+                    .advanced(),
+                opt("pocHarness", OptionType::Bool, "Generate PoC harnesses.")
+                    .aliases(&["poc_harness"])
+                    .default(json!(false))
+                    .advanced(),
+                opt("pocExecution", OptionType::Bool, "Execute generated PoCs.")
+                    .aliases(&["poc_execution"])
+                    .default(json!(false))
+                    .advanced(),
+                opt(
+                    "dynamicAnalysis",
+                    OptionType::Bool,
+                    "Allow dynamic analysis.",
+                )
+                .aliases(&["dynamic_analysis"])
+                .default(json!(false))
+                .advanced(),
+                opt(
+                    "cryptoBehavioralTesting",
+                    OptionType::Bool,
+                    "Allow crypto behavioral testing.",
+                )
+                .aliases(&["crypto_behavioral_testing"])
+                .default(json!(false))
+                .advanced(),
+                opt(
+                    "runtimeExploitabilityClaims",
+                    OptionType::Bool,
+                    "Allow runtime exploitability claims.",
+                )
+                .aliases(&["runtime_exploitability_claims"])
+                .default(json!(false))
+                .advanced(),
+                opt(
+                    "executionProofStates",
+                    OptionType::Bool,
+                    "Allow execution proof states.",
+                )
+                .aliases(&["execution_proof_states"])
                 .default(json!(false))
                 .advanced(),
                 opt("maxIterations", OptionType::Int, "Maximum patch attempts.")
@@ -131,6 +210,18 @@ pub(crate) fn sast_module() -> BuiltinModule {
                     OptionType::StringList,
                     "Language filters for agentic SAST tasks.",
                 )
+                .advanced(),
+                opt(
+                    "thinkingLevel",
+                    OptionType::String,
+                    "Runtime reasoning effort hint.",
+                )
+                .aliases(&[
+                    "thinking_level",
+                    "reasoningEffort",
+                    "reasoning_effort",
+                    "effort",
+                ])
                 .advanced(),
                 opt(
                     "maxCatalogEntries",

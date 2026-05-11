@@ -23,6 +23,37 @@ pub(in crate::modules) fn module() -> BuiltinModule {
                     .advanced(),
                     opt("kind", OptionType::String, "Evidence kind.").advanced(),
                     opt("title", OptionType::String, "Evidence title.").advanced(),
+                    opt("vendorName", OptionType::String, "Vendor name.")
+                        .aliases(&["vendor_name"])
+                        .advanced(),
+                    opt("productName", OptionType::String, "Product name.")
+                        .aliases(&["product_name"])
+                        .advanced(),
+                    opt("vendor", OptionType::String, "Legacy vendor name alias.").advanced(),
+                    opt(
+                        "primaryDomain",
+                        OptionType::String,
+                        "Primary vendor domain.",
+                    )
+                    .aliases(&["domain", "primary_domain"])
+                    .advanced(),
+                    opt("useCase", OptionType::String, "Vendor use case.")
+                        .aliases(&["use_case"])
+                        .advanced(),
+                    opt(
+                        "dataClasses",
+                        OptionType::StringList,
+                        "Data classes in scope.",
+                    )
+                    .aliases(&["data_classes"])
+                    .advanced(),
+                    opt(
+                        "integrations",
+                        OptionType::StringList,
+                        "Vendor integrations.",
+                    )
+                    .advanced(),
+                    opt("profile", OptionType::String, "Assessment profile.").advanced(),
                 ],
             ),
             tool_with_options(
