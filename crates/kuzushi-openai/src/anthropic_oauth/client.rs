@@ -49,7 +49,8 @@ impl AnthropicOAuthRuntime {
         request: AgentQueryRequest,
     ) -> Result<AgentQueryResponse> {
         let model = strip_provider_prefix(&request.model);
-        let body = anthropic_messages_body(&model, self.max_tokens, &request);
+        let max_tokens = request.max_output_tokens.unwrap_or(self.max_tokens);
+        let body = anthropic_messages_body(&model, max_tokens, &request);
         let resp = self.send_anthropic_messages_request(&body).await?;
         parse_anthropic_messages_http_response(&model, resp).await
     }
@@ -121,6 +122,8 @@ pub(crate) fn parse_anthropic_messages_response(
     let structured = maybe_parse_json(&text);
     let (input_tokens, output_tokens) = super::response::anthropic_response_usage(&parsed);
     let cost_usd = estimate_cost_usd(model, input_tokens, output_tokens);
+    let stop_reason = parsed.stop_reason.clone();
+    let truncated = stop_reason.as_deref() == Some("max_tokens");
 
     Ok(AgentQueryResponse {
         text,
@@ -128,5 +131,7 @@ pub(crate) fn parse_anthropic_messages_response(
         cost_usd,
         input_tokens,
         output_tokens,
+        truncated,
+        stop_reason,
     })
 }

@@ -17,19 +17,76 @@ pub(crate) fn normalize_systems_hunt_findings(
         let Some(object) = item.as_object() else {
             continue;
         };
-        let title = string_field(object.get("title"));
-        let file_path = normalize_relative_path(string_field(object.get("filePath")));
-        let message = string_field(object.get("message"));
+        let title = first_string_field(object, &["title", "name"]);
+        let file_path = normalize_relative_path(first_string_field(
+            object,
+            &["filePath", "file_path", "path", "file"],
+        ));
+        let message = collect_finding_body(object, &title);
         if title.is_empty() || file_path.is_empty() || message.is_empty() {
             continue;
         }
-        let start_line = object
-            .get("startLine")
-            .and_then(Value::as_u64)
-            .unwrap_or(1)
-            .max(1) as u32;
+        let start_line = first_line_field(
+            object,
+            &[
+                "startLine",
+                "start_line",
+                "line",
+                "lines",
+                "anchorLine",
+                "line_start",
+                "lineStart",
+                "anchorLines",
+                "lineRange",
+                "line_range",
+            ],
+        )
+        .max(1) as u32;
         let severity = parse_severity(string_field(object.get("severity")));
-        let cwe = string_or_first_array(object.get("cwe")).unwrap_or_else(|| "unknown".to_string());
+        let evidence = first_string_array_field(
+            object,
+            &["evidence", "evidenceAnchors", "supporting_evidence"],
+        );
+        let attacker_inputs = first_string_array_field(
+            object,
+            &[
+                "attackerControlledFields",
+                "attackerInputs",
+                "attacker_inputs",
+                "attacker_input",
+            ],
+        );
+        let hardening_notes = first_string_array_field(
+            object,
+            &[
+                "hardeningNotes",
+                "missingHardening",
+                "missing_hardening",
+                "recommendation",
+                "recommendations",
+                "fix",
+            ],
+        );
+        let impact = optional_string(first_string_field(
+            object,
+            &[
+                "impact",
+                "exploitability",
+                "exploitability_notes",
+                "exploitabilityNotes",
+            ],
+        ));
+        let function = optional_string(first_string_field(
+            object,
+            &["function", "functionName", "fn"],
+        ));
+        let domain = first_string_array_field(object, &["domains", "domain"]);
+        let reasoning = optional_string(first_string_field(object, &["reasoning", "rationale"]));
+        let cwe_list = first_string_array_field(object, &["cwe", "cwes"]);
+        let cwe = cwe_list
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string());
         let rule_id = object
             .get("ruleId")
             .and_then(Value::as_str)
@@ -44,10 +101,14 @@ pub(crate) fn normalize_systems_hunt_findings(
             start_line,
             None,
             severity,
-            format!(
-                "{title}: {message}\n\nReasoning: {}\nTrigger: {}\nSystems hunt artifact: pending",
-                string_field(object.get("reasoning")),
-                string_array(object.get("triggerSequence")).join(" -> ")
+            build_finding_message(
+                &title,
+                &message,
+                function.as_deref(),
+                &evidence,
+                impact.as_deref(),
+                &hardening_notes,
+                reasoning.as_deref(),
             ),
         );
         finding.title = title;
@@ -60,10 +121,16 @@ pub(crate) fn normalize_systems_hunt_findings(
         let artifact = json!({
             "fingerprint": finding.fingerprint,
             "title": finding.title,
-            "cwe": string_array(object.get("cwe")),
+            "cwe": cwe_list,
             "severity": severity.as_str(),
             "filePath": file_path,
             "startLine": start_line,
+            "function": function,
+            "domain": domain,
+            "description": message,
+            "evidence": evidence,
+            "impact": impact,
+            "recommendation": hardening_notes,
             "surfaceId": surface.map(|surface| surface.id.clone()).unwrap_or_default(),
             "surfaceKind": surface.map(|surface| surface.kind.clone()).unwrap_or_else(|| "unknown".to_string()),
             "lenses": string_array(object.get("lenses")),
@@ -73,11 +140,11 @@ pub(crate) fn normalize_systems_hunt_findings(
             "triggerSequence": string_array(object.get("triggerSequence")),
             "stateMachine": string_array(object.get("stateMachine")),
             "boundaryAssignments": object.get("boundaryAssignments").cloned().unwrap_or_else(|| json!({})),
-            "attackerControlledFields": string_array(object.get("attackerControlledFields")),
+            "attackerControlledFields": attacker_inputs,
             "memoryPrimitive": string_field(object.get("memoryPrimitive")),
-            "hardeningNotes": string_array(object.get("hardeningNotes")),
+            "hardeningNotes": hardening_notes,
             "cheapVerifiable": object.get("cheapVerifiable").and_then(Value::as_bool).unwrap_or(false),
-            "reasoning": string_field(object.get("reasoning")),
+            "reasoning": reasoning,
             "analysisPath": object.get("analysisPath").cloned().unwrap_or_else(|| json!([])),
             "guardLocations": object.get("guardLocations").cloned().unwrap_or_else(|| json!([])),
             "counterexampleNotes": string_array(object.get("counterexampleNotes")),

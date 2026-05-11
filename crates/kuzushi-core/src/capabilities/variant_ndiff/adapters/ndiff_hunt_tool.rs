@@ -61,6 +61,7 @@ pub fn run_ndiff_hunt_variants(
     let runtime = require_runtime("ndiff:hunt-variants", runtime)?;
     let model = require_model("ndiff:hunt-variants", &input, ctx)?;
     let max_findings = positive_usize_input(&input, "maxFindings", 15, 100);
+    let thinking_level = agentic_hunter_thinking_level(&input);
     let include_vendored = input
         .get("includeVendored")
         .and_then(Value::as_bool)
@@ -81,7 +82,9 @@ pub fn run_ndiff_hunt_variants(
             target.clone(),
             NDIFF_HUNT_SYSTEM_PROMPT.to_string(),
             prompt,
-        ),
+        )
+        .with_tool_policy(default_whitebox_static_agent_tool_policy())
+        .with_thinking_level(thinking_level),
         StructuredJsonContract::new(
             "ndiff:hunt-variants",
             "NdiffVariantFindings",

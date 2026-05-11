@@ -7,6 +7,7 @@ pub(crate) fn query_systems_invariants(
     context: &SystemsContextOutput,
     _options: &SystemsHuntInput,
     agent_tool_policy: AgentToolPolicy,
+    thinking_level: &str,
 ) -> Result<SystemsInvariantOutput> {
     // Pick a sub-agent role appropriate for the dominant surface kind.
     // When at least one Rust unsafe-region surface is present, the
@@ -18,11 +19,13 @@ pub(crate) fn query_systems_invariants(
         target.to_path_buf(),
         SYSTEMS_INVARIANT_SYSTEM_PROMPT.to_string(),
         format!(
-            "Extract safety invariants for these low-level surfaces. Return JSON with invariants[].\n\n{}",
-            serde_json::to_string_pretty(context)?
+            "Extract safety invariants for these low-level surfaces. Return JSON with invariants[].\n\n\
+            For each surface you have file_path + line_number markers; use Read to fetch source as needed (line text is not embedded to keep this prompt small).\n\n{}",
+            lean_prompt_payload(context)?
         ),
     )
-    .with_tool_policy(agent_tool_policy);
+    .with_tool_policy(agent_tool_policy)
+    .with_thinking_level(thinking_level.to_string());
     let request =
         request.with_structured_output(crate::runtime::AgentStructuredOutput::json_schema(
             "SystemsInvariants",
@@ -42,7 +45,7 @@ pub(crate) fn query_systems_invariants(
         ),
         require_json_object,
         |repair_prompt, output| {
-            let repair_request = AgentQueryRequest::new(
+            let mut repair_request = AgentQueryRequest::new(
                 request.model.clone(),
                 request.cwd.clone(),
                 request.system_prompt.clone(),
@@ -50,6 +53,12 @@ pub(crate) fn query_systems_invariants(
             )
             .with_tool_policy(request.tool_policy.clone())
             .with_structured_output(output);
+            if let Some(level) = request.thinking_level.clone() {
+                repair_request = repair_request.with_thinking_level(level);
+            }
+            if let Some(tokens) = request.max_output_tokens {
+                repair_request = repair_request.with_max_output_tokens(tokens);
+            }
             if role == SubagentRole::Generic {
                 runtime.query_blocking(repair_request)
             } else {

@@ -45,21 +45,6 @@ pub(crate) fn string_record(value: Option<&Value>) -> BTreeMap<String, String> {
     out
 }
 
-pub(crate) fn string_or_first_array(value: Option<&Value>) -> Option<String> {
-    match value {
-        Some(Value::String(value)) => {
-            Some(value.trim().to_string()).filter(|value| !value.is_empty())
-        }
-        Some(Value::Array(items)) => items
-            .iter()
-            .find_map(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string),
-        _ => None,
-    }
-}
-
 pub(crate) fn sanitize_rule_segment(value: &str) -> String {
     let mut out = value
         .trim()

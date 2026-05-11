@@ -4,6 +4,7 @@ import {
   chmodSync,
   closeSync,
   existsSync,
+  appendFileSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -436,6 +437,39 @@ function subscribeText(agent, onText) {
   });
 }
 
+function subscribeMessageEnd(agent, onMessageEnd) {
+  if (typeof agent?.subscribe !== "function") return;
+  agent.subscribe((event) => {
+    if (event?.type !== "message_end") return;
+    onMessageEnd(event.message);
+  });
+}
+
+function sanitizeMaxOutputTokens(request) {
+  const raw =
+    request.maxOutputTokens ?? request.max_output_tokens ?? request.maxTokens;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
+    return null;
+  }
+  return Math.floor(raw);
+}
+
+function makeStreamFnWithMaxTokens(maxOutputTokens) {
+  let streamSimplePromise;
+  return function streamFnWithMaxTokens(model, llmContext, options) {
+    streamSimplePromise =
+      streamSimplePromise ?? import("@mariozechner/pi-ai").then((mod) => mod.streamSimple);
+    return (async function* () {
+      const streamSimple = await streamSimplePromise;
+      const stream = streamSimple(model, llmContext, {
+        ...options,
+        maxTokens: maxOutputTokens,
+      });
+      for await (const event of stream) yield event;
+    })();
+  };
+}
+
 async function runAgent(AgentCtor, model, request) {
   const agentTools = buildAgentTools(request);
   const allowedToolNames = new Set(agentTools.map((tool) => tool.name.toLowerCase()));
@@ -448,6 +482,8 @@ async function runAgent(AgentCtor, model, request) {
     normalizeThinkingLevel(process.env.KUZUSHI_THINKING_LEVEL) ??
     normalizeThinkingLevel(process.env.KUZUSHI_REASONING_EFFORT) ??
     "low";
+  const maxOutputTokens = sanitizeMaxOutputTokens(request);
+  const streamFn = maxOutputTokens ? makeStreamFnWithMaxTokens(maxOutputTokens) : undefined;
   const agent = new AgentCtor({
     initialState: {
       systemPrompt,
@@ -456,6 +492,7 @@ async function runAgent(AgentCtor, model, request) {
       messages: [],
       thinkingLevel,
     },
+    ...(streamFn ? { streamFn } : {}),
     beforeToolCall: async ({ toolCall }) => {
       const name = toolCall?.name ?? "";
       if (isForbiddenWhiteboxTool(name)) {
@@ -477,6 +514,16 @@ async function runAgent(AgentCtor, model, request) {
   let text = "";
   subscribeText(agent, (delta) => {
     text += delta;
+  });
+  let truncated = false;
+  let lastStopReason;
+  subscribeMessageEnd(agent, (message) => {
+    if (message?.role !== "assistant") return;
+    if (typeof message.stopReason !== "string") return;
+    lastStopReason = message.stopReason;
+    if (message.stopReason === "length" || message.stopReason === "max_tokens") {
+      truncated = true;
+    }
   });
 
   if (typeof agent.prompt === "function") {
@@ -503,7 +550,67 @@ async function runAgent(AgentCtor, model, request) {
     text = extractTextFromState(agent);
   }
 
-  return text.trim();
+  text = text.trim();
+  writeDebugDump({
+    model,
+    agentTools,
+    thinkingLevel,
+    request,
+    systemPrompt,
+    text,
+  });
+  writeFullPromptDump(request);
+
+  return { text, truncated, stopReason: lastStopReason };
+}
+
+function writeDebugDump({ model, agentTools, thinkingLevel, request, systemPrompt, text }) {
+  const dumpPath = process.env.KUZUSHI_BRIDGE_DEBUG_DUMP;
+  if (!dumpPath) return;
+  try {
+    const dump = {
+      ts: Date.now(),
+      model: describeModel(model),
+      toolCount: agentTools.length,
+      toolNames: agentTools.map((tool) => tool.name),
+      thinkingLevel,
+      promptLen: (request.prompt ?? "").length,
+      promptHead: (request.prompt ?? "").slice(0, 1500),
+      systemPromptLen: systemPrompt.length,
+      systemPromptHead: systemPrompt.slice(0, 800),
+      responseLen: text.length,
+      responseHead: text.slice(0, 4000),
+      responseTail: text.slice(-500),
+    };
+    appendFileSync(dumpPath, `${JSON.stringify(dump)}\n`);
+  } catch {
+    /* diagnostic only */
+  }
+}
+
+function describeModel(model) {
+  if (typeof model === "string") return model;
+  for (const key of ["id", "name", "model", "modelId"]) {
+    const value = model?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  try {
+    return JSON.stringify(model);
+  } catch {
+    return String(model);
+  }
+}
+
+function writeFullPromptDump(request) {
+  const root = process.env.KUZUSHI_BRIDGE_DEBUG_FULL_PROMPT;
+  if (!root) return;
+  try {
+    mkdirSync(root, { recursive: true });
+    const filename = `prompt-${Date.now()}-${process.pid}.txt`;
+    writeFileSync(path.join(root, filename), request.prompt ?? "");
+  } catch {
+    /* diagnostic only */
+  }
 }
 
 function appendStructuredOutputContract(systemPrompt, contract) {
@@ -960,13 +1067,15 @@ async function main() {
 
   const [provider, modelId] = parseModelSpec(request.model);
   const model = getModel(provider, modelId);
-  const text = await runAgent(AgentCtor, model, request);
+  const { text, truncated, stopReason } = await runAgent(AgentCtor, model, request);
 
   process.stdout.write(
     JSON.stringify({
       ok: true,
       text,
       structured: maybeParseJson(text),
+      truncated,
+      stopReason,
     }),
   );
 }

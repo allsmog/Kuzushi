@@ -33,23 +33,56 @@ pub(crate) fn query_required_structured_json<T>(
 ) -> Result<T> {
     let request = request.with_structured_output(contract.runtime_contract());
     let response = runtime.query_blocking(request.clone())?;
+    let response = if response.truncated {
+        retry_with_higher_output_budget(runtime, &request).unwrap_or(response)
+    } else {
+        response
+    };
     parse_or_repair_required_structured_json(
         response,
         contract,
         validate,
         |repair_prompt, output| {
-            runtime.query_blocking(
-                AgentQueryRequest::new(
-                    request.model.clone(),
-                    request.cwd.clone(),
-                    request.system_prompt.clone(),
-                    repair_prompt,
-                )
-                .with_tool_policy(request.tool_policy.clone())
-                .with_structured_output(output),
-            )
+            let repair_request = repair_request_from(&request, repair_prompt, output);
+            runtime.query_blocking(repair_request)
         },
     )
+}
+
+fn retry_with_higher_output_budget(
+    runtime: &dyn AgentRuntime,
+    request: &AgentQueryRequest,
+) -> Result<AgentQueryResponse> {
+    const RETRY_FLOOR: u32 = 16_000;
+    const RETRY_CEILING: u32 = 65_535;
+    let next_budget = match request.max_output_tokens {
+        Some(cap) if cap >= RETRY_CEILING => cap,
+        Some(cap) => cap.saturating_mul(2).clamp(RETRY_FLOOR, RETRY_CEILING),
+        None => RETRY_FLOOR,
+    };
+    runtime.query_blocking(request.clone().with_max_output_tokens(next_budget))
+}
+
+pub(crate) fn repair_request_from(
+    request: &AgentQueryRequest,
+    repair_prompt: String,
+    output: AgentStructuredOutput,
+) -> AgentQueryRequest {
+    let mut repair_request = AgentQueryRequest::new(
+        request.model.clone(),
+        request.cwd.clone(),
+        request.system_prompt.clone(),
+        repair_prompt,
+    )
+    .with_tool_policy(request.tool_policy.clone())
+    .with_structured_output(output);
+    if let Some(thinking_level) = request.thinking_level.clone() {
+        repair_request = repair_request.with_thinking_level(thinking_level);
+    }
+    if let Some(max_output_tokens) = request.max_output_tokens {
+        repair_request = repair_request.with_max_output_tokens(max_output_tokens);
+    }
+    repair_request
 }
 
 pub(crate) fn parse_or_repair_required_structured_json<T>(
@@ -61,11 +94,21 @@ pub(crate) fn parse_or_repair_required_structured_json<T>(
     match parse_and_validate(&response, &contract, &validate) {
         Ok(value) => Ok(value),
         Err(initial_error) => {
+            if response.truncated {
+                return Err(truncation_error(&contract, &response, &initial_error));
+            }
             let raw = raw_agent_response(&response);
             let repair_response = repair(
                 build_repair_prompt(&contract, &raw, &initial_error.to_string()),
                 contract.runtime_contract(),
             )?;
+            if repair_response.truncated {
+                return Err(truncation_error(
+                    &contract,
+                    &repair_response,
+                    &initial_error,
+                ));
+            }
             parse_and_validate(&repair_response, &contract, &validate).with_context(|| {
                 let repair_raw = raw_agent_response(&repair_response);
                 format!(
@@ -80,6 +123,26 @@ pub(crate) fn parse_or_repair_required_structured_json<T>(
             })
         }
     }
+}
+
+fn truncation_error(
+    contract: &StructuredJsonContract,
+    response: &AgentQueryResponse,
+    initial_error: &anyhow::Error,
+) -> anyhow::Error {
+    let raw = raw_agent_response(response);
+    let stop_reason = response.stop_reason.as_deref().unwrap_or("length");
+    anyhow::anyhow!(
+        "{tool} response was truncated by the per-call output-token cap \
+         (stopReason: {stop_reason:?}); the partial JSON cannot satisfy \
+         contract `{schema}`. Remediation: raise `AgentQueryRequest::max_output_tokens` \
+         (or set `maxOutputTokens` in the tool input), reduce the requested output \
+         size such as `maxFindings`, or shorten the prompt. \
+         Initial parse/validation failure: {initial_error}\n\
+         Raw partial response (truncated):\n{raw}",
+        tool = contract.tool_name,
+        schema = contract.schema_name,
+    )
 }
 
 pub(crate) fn parse_and_validate<T>(

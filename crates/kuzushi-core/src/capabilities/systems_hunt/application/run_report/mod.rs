@@ -17,7 +17,8 @@ pub fn run_systems_hunt_report(
 
     let runtime = required_systems_runtime(runtime, "systems-hunt")?;
     let model = resolve_model("systems-hunt", input, ctx, &options)?;
-    let agent_tool_policy = agent_tool_policy_for_input(input)?;
+    let agent_tool_policy = default_whitebox_static_agent_tool_policy();
+    let thinking_level = agentic_hunter_thinking_level(input);
     let raw = query_systems_hunt_findings(
         runtime,
         &model,
@@ -25,6 +26,7 @@ pub fn run_systems_hunt_report(
         &context,
         &options,
         agent_tool_policy,
+        &thinking_level,
     )?;
     finalize_systems_hunt_report(raw, input, ctx, &target, &context, &options)
 }
@@ -92,6 +94,7 @@ fn query_systems_hunt_findings(
     context: &SystemsContextOutput,
     options: &SystemsHuntInput,
     agent_tool_policy: AgentToolPolicy,
+    thinking_level: &str,
 ) -> Result<Value> {
     let invariants = query_systems_invariants(
         runtime,
@@ -100,6 +103,7 @@ fn query_systems_hunt_findings(
         context,
         options,
         agent_tool_policy.clone(),
+        thinking_level,
     )?;
     let triggers = query_systems_triggers(
         runtime,
@@ -109,6 +113,7 @@ fn query_systems_hunt_findings(
         &invariants,
         options,
         agent_tool_policy.clone(),
+        thinking_level,
     )?;
     query_required_structured_json(
         runtime,
@@ -118,7 +123,8 @@ fn query_systems_hunt_findings(
             SYSTEMS_HUNT_SYSTEM_PROMPT.to_string(),
             build_systems_hunt_prompt(target, context, &invariants, &triggers, options)?,
         )
-        .with_tool_policy(agent_tool_policy),
+        .with_tool_policy(agent_tool_policy)
+        .with_thinking_level(thinking_level.to_string()),
         StructuredJsonContract::new(
             "systems-hunt:systems-hunt",
             "SystemsHuntFindings",

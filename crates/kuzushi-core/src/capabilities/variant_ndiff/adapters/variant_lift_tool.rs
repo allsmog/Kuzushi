@@ -32,6 +32,7 @@ pub fn run_variant_lift_pattern(
     };
     let runtime = require_runtime("variant:lift-pattern", runtime)?;
     let model = require_model("variant:lift-pattern", &input, ctx)?;
+    let thinking_level = agentic_hunter_thinking_level(&input);
     let prompt = build_variant_lift_prompt(&finding);
     let signature = query_required_structured_json(
         runtime,
@@ -40,7 +41,9 @@ pub fn run_variant_lift_pattern(
             workspace.root().to_path_buf(),
             VARIANT_SIGNATURE_SYSTEM_PROMPT.to_string(),
             prompt,
-        ),
+        )
+        .with_tool_policy(default_whitebox_static_agent_tool_policy())
+        .with_thinking_level(thinking_level),
         StructuredJsonContract::new("variant:lift-pattern", "VariantSignature", object_schema()),
         require_json_object,
     )?;

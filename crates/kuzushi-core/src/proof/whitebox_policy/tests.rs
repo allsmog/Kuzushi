@@ -57,6 +57,31 @@ mod tests {
     }
 
     #[test]
+    fn agentic_hunter_thinking_level_defaults_to_high_and_honors_override_keys() {
+        assert_eq!(agentic_hunter_thinking_level(&json!({})), "high");
+        assert_eq!(
+            agentic_hunter_thinking_level(&json!({"thinkingLevel": "medium"})),
+            "medium"
+        );
+        assert_eq!(
+            agentic_hunter_thinking_level(&json!({"reasoningEffort": "low"})),
+            "low"
+        );
+        assert_eq!(
+            agentic_hunter_thinking_level(&json!({"effort": "xhigh"})),
+            "xhigh"
+        );
+        assert_eq!(
+            agentic_hunter_thinking_level(&json!({"thinkingLevel": ""})),
+            "high"
+        );
+        assert_eq!(
+            agentic_hunter_thinking_level(&json!({"thinkingLevel": "  high  "})),
+            "high"
+        );
+    }
+
+    #[test]
     fn whitebox_agent_tools_reject_shell_write_and_patch_tools() {
         for forbidden in ["Bash", "shell", "Write", "Edit", "patch", "apply_patch"] {
             let policy = AgentToolPolicy::new("whitebox-static", ["Read", forbidden]);

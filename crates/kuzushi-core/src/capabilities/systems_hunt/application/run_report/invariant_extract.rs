@@ -37,12 +37,14 @@ fn query_systems_invariants_for_context(
         &context,
         &options,
         request.tool_policy,
+        &request.thinking_level,
     )
 }
 
 struct SystemsInvariantQueryRequest {
     model: String,
     tool_policy: AgentToolPolicy,
+    thinking_level: String,
 }
 
 fn systems_invariant_query_request(
@@ -52,7 +54,8 @@ fn systems_invariant_query_request(
 ) -> Result<SystemsInvariantQueryRequest> {
     Ok(SystemsInvariantQueryRequest {
         model: systems_invariant_model(input, ctx, options)?,
-        tool_policy: agent_tool_policy_for_input(input)?,
+        tool_policy: default_whitebox_static_agent_tool_policy(),
+        thinking_level: agentic_hunter_thinking_level(input),
     })
 }
 

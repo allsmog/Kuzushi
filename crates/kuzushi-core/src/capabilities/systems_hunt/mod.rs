@@ -7,7 +7,8 @@
 use crate::findings::{Finding, Severity, StaticProofState};
 use crate::modules::ToolExecutionContext;
 use crate::proof::whitebox_policy::{
-    agent_tool_policy_for_input, mark_whitebox_static_findings, whitebox_static_profile_requested,
+    agentic_hunter_thinking_level, default_whitebox_static_agent_tool_policy,
+    mark_whitebox_static_findings, whitebox_static_profile_requested,
 };
 use crate::runtime::SubagentRole;
 use crate::runtime::{AgentQueryRequest, AgentRuntime, AgentToolPolicy};
