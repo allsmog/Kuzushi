@@ -11,8 +11,30 @@ pub(in crate::modules) struct TaintIrisNextRankedCatalogEntry {
     pub(in crate::modules) sink_signals: Vec<String>,
     pub(in crate::modules) sanitizer_signals: Vec<String>,
     pub(in crate::modules) structural_queries: Vec<String>,
+    /// LLM-curated regex markers the `:catalog` tool emits for this
+    /// CWE. Fed into the discovery sweep at hunt time via
+    /// `OwnedMarkerSpec` so codebase-shape patterns (e.g. pgcrypto's
+    /// `pullf_*`, libxml2's `xmlParse*`) reach discovery without a
+    /// code change. Empty for static-fallback entries and for legacy
+    /// catalogs predating C2; both round-trip cleanly via
+    /// `skip_serializing_if`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(in crate::modules) regex_markers: Vec<TaintIrisNextRegexMarker>,
     pub(in crate::modules) score: i32,
     pub(in crate::modules) reasons: Vec<String>,
+}
+
+/// Codebase-shape regex marker carried on a ranked catalog entry. The
+/// `:catalog` tool emits these so the discovery sweep at `:hunt` time
+/// can match parser-layer / sink-layer call shapes specific to this
+/// codebase without a static `MARKERS`-table edit.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(in crate::modules) struct TaintIrisNextRegexMarker {
+    pub(in crate::modules) pattern: String,
+    pub(in crate::modules) kind: String,
+    pub(in crate::modules) languages: Vec<String>,
+    pub(in crate::modules) marker: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
