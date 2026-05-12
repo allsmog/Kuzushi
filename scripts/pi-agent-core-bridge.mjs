@@ -134,6 +134,24 @@ function providerEnvName(provider) {
   return `${provider.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`;
 }
 
+/**
+ * Pull a sampling temperature out of the request envelope. Accepts
+ * camelCase (`temperature`) and snake_case (`temperature` as well — the
+ * field name has no underscore). Returns undefined when absent or
+ * not-a-number so the body field can be omitted entirely.
+ */
+function numericTemperature(request) {
+  const candidate =
+    request?.temperature ??
+    request?.samplingTemperature ??
+    request?.sampling_temperature;
+  if (candidate === undefined || candidate === null) return undefined;
+  const value = Number(candidate);
+  if (!Number.isFinite(value)) return undefined;
+  if (value < 0 || value > 2) return undefined;
+  return value;
+}
+
 function normalizeThinkingLevel(value) {
   const normalized = String(value ?? "")
     .trim()
@@ -503,14 +521,22 @@ async function runAgent(AgentCtor, model, request) {
     normalizeThinkingLevel(process.env.KUZUSHI_THINKING_LEVEL) ??
     normalizeThinkingLevel(process.env.KUZUSHI_REASONING_EFFORT) ??
     "low";
+  const temperature = numericTemperature(request);
+  const initialState = {
+    systemPrompt,
+    model,
+    tools: agentTools,
+    messages: [],
+    thinkingLevel,
+  };
+  if (temperature !== undefined) {
+    // pi-agent-core forwards options.temperature into the provider's
+    // sampling param; null means "use provider default" so we only set
+    // the field when the caller asked for a specific value.
+    initialState.temperature = temperature;
+  }
   const agent = new AgentCtor({
-    initialState: {
-      systemPrompt,
-      model,
-      tools: agentTools,
-      messages: [],
-      thinkingLevel,
-    },
+    initialState,
     beforeToolCall: async ({ toolCall }) => {
       const name = toolCall?.name ?? "";
       if (isForbiddenWhiteboxTool(name)) {
@@ -910,6 +936,13 @@ async function handleNextStep(request) {
     })),
     max_tokens: request.max_tokens ?? request.maxTokens ?? 4096,
   };
+  // Sampling temperature when the caller wants determinism (deep-audit
+  // verdict consistency, structured-output triage). Only set when
+  // explicitly provided; otherwise let the provider default apply.
+  const temperature = numericTemperature(request);
+  if (temperature !== undefined) {
+    body.temperature = temperature;
+  }
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",

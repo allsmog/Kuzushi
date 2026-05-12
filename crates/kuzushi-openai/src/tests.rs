@@ -72,6 +72,7 @@ fi
                 input_schema: serde_json::json!({"type":"object"}),
             }],
             max_steps: 4,
+            temperature: None,
         };
 
         let step1 = bridge.next_step_blocking(&req, &[]).unwrap();
@@ -133,6 +134,7 @@ fi
                 input_schema: serde_json::json!({"type":"object"}),
             }],
             max_steps: 1,
+            temperature: None,
         };
         let err = bridge
             .next_step_blocking(&req, &[])

@@ -20,6 +20,12 @@ pub struct AgentQueryRequest {
     pub structured_output: Option<AgentStructuredOutput>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
+    /// Sampling temperature (0.0..=1.0). When set, the bridge forwards
+    /// it to the provider; when None the provider's default is used.
+    /// Set this near 0 for audit / triage flows where determinism
+    /// matters (deep-audit relies on it to reduce verdict variance).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
 }
 
 impl AgentQueryRequest {
@@ -37,6 +43,7 @@ impl AgentQueryRequest {
             tool_policy: AgentToolPolicy::default(),
             structured_output: None,
             thinking_level: None,
+            temperature: None,
         }
     }
 
@@ -52,6 +59,11 @@ impl AgentQueryRequest {
 
     pub fn with_thinking_level(mut self, thinking_level: impl Into<String>) -> Self {
         self.thinking_level = Some(thinking_level.into());
+        self
+    }
+
+    pub fn with_temperature(mut self, temperature: f32) -> Self {
+        self.temperature = Some(temperature);
         self
     }
 }

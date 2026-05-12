@@ -40,6 +40,22 @@ pub(crate) fn full_mode_module() -> BuiltinModule {
                     OptionType::Path,
                     "Optional repo-relative path to a newline-delimited scope file. Defaults to <target>/.kuzushi/v2/since.txt when --since populated it.",
                 ),
+                opt(
+                    "autoTriage",
+                    OptionType::Bool,
+                    "Run deep-audit on every HIGH+CRITICAL finding before returning. Verdicts are saved back into the findings store.",
+                )
+                .default(serde_json::json!(false)),
+                opt(
+                    "autoTriageMaxSteps",
+                    OptionType::Int,
+                    "Step budget per auto-triage deep-audit pass (default 12).",
+                ),
+                opt(
+                    "autoTriageDepositUsd",
+                    OptionType::Float,
+                    "Spend deposit per auto-triage pass (default 1.0; deep-audit refunds the unused portion).",
+                ),
             ],
         )],
         vec![],

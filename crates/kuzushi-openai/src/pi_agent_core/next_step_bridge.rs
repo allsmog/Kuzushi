@@ -40,6 +40,7 @@ fn next_step_bridge_request(
         api_key_env: runtime.api_key_env.clone(),
         api_key: runtime.api_key.clone(),
         base_url: runtime.base_url.clone(),
+        temperature: request.temperature,
     }
 }
 
