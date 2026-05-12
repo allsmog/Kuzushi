@@ -24,6 +24,15 @@ pub(in crate::modules) fn extract_taint_iris_next_evidence(
         candidates_from_discovered_signals(&plan.discovered_signals, &plan.cwe_focus);
     let mut combined_raw = raw_candidates;
     combined_raw.extend(discovered_candidates);
+    // E1: deterministic tree-sitter detector for identifier-position
+    // SQL injection (the dblink_open/close/fetch finding shape).
+    // Runs in <10s on a 1600-file tree, no LLM cost. Feeds candidates
+    // marked `source: "ts.identifier-injection"` at confidence: high
+    // so Thread D's call-site audit reaches them with the right
+    // priority. Bounded by the same file-walker budget the discovery
+    // sweep uses to stay below the structural-pass cap.
+    let detector_candidates = run_identifier_injection_detector_for_plan(plan);
+    combined_raw.extend(detector_candidates);
     // Syntactic narrowing: drop candidates whose match landed in a comment
     // or string literal. Languages without a tree-sitter grammar pass
     // through unchanged. This happens *after* the catalog language gate
@@ -215,6 +224,34 @@ const DISCOVERY_MAX_ENTRY_POINT_CANDIDATES: usize = 40;
 /// source patterns. When `cwe_focus` is empty, fall back to the
 /// marker-table CWE so an unfocused hunt still gets framework-canonical
 /// CWE-862 entry points without explosion.
+/// E1 bridge: walk the target's source files (same budget the
+/// discovery sweep uses), run the tree-sitter identifier-injection
+/// detector, and map matches into `TaintIrisNextCandidate` rows
+/// honouring the operator's `cwe_focus`.
+///
+/// Bails to an empty Vec when:
+/// - the file walker fails (target path doesn't exist, permission denied)
+/// - no C/C++ files in the target
+/// - `cwe_focus` is non-empty and doesn't include CWE-89
+fn run_identifier_injection_detector_for_plan(
+    plan: &TaintIrisNextPlan,
+) -> Vec<TaintIrisNextCandidate> {
+    // Match the discovery sweep's file budget so a 100k-file repo
+    // doesn't double its disk-read cost just for the detector.
+    let max_files = plan.caps.max_files_per_query.saturating_mul(8).max(2_000);
+    let max_bytes = 256 * 1024;
+    let files = match collect_taint_iris_next_source_files(
+        &plan.scan_root,
+        Some(max_files),
+        max_bytes,
+    ) {
+        Ok(files) => files,
+        Err(_) => return Vec::new(),
+    };
+    let matches = detect_identifier_injection_in_target(&plan.scan_root, &files);
+    candidates_from_identifier_injection_matches(&matches, &plan.cwe_focus)
+}
+
 fn candidates_from_discovered_signals(
     signals: &DiscoveredSignals,
     cwe_focus: &[String],

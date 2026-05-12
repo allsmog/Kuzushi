@@ -257,6 +257,93 @@ pub(in crate::modules::taint_iris_next) fn build_taint_iris_next_agent_prompt(
             Verdicts without this audit trail are not defensible.".to_string(),
     );
     lines.push(String::new());
+    lines.push(
+        "## Realistic Exploit Patterns (privilege-boundary crossing)".to_string(),
+    );
+    lines.push(
+        "A SQL-injection / command-injection / path-traversal finding is \
+         interesting only when it crosses a privilege boundary that an \
+         operator-controlled threat model cares about. When promoting a \
+         finding, NAME the realistic application pattern that creates the \
+         boundary. Without a named pattern, the finding is a candidate, \
+         not a finding.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "Common postgres-shaped patterns to look for:".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "- **SECURITY DEFINER wrapper**: an admin-created function calls \
+         the vulnerable primitive (`dblink_open`, `dblink_close`, \
+         `dblink_fetch`, `SPI_execute`, dynamic-SQL `appendStringInfo` \
+         sites, etc.) using `dblink_connect_u` or stored credentials. \
+         The wrapper is GRANTed EXECUTE to less-privileged roles. The \
+         injection runs as the wrapper's identity, not the caller's. The \
+         privilege boundary is *admin role* → *unprivileged role*; the \
+         injection crosses it. This is the dblink CVE shape: cursor-name \
+         injection in `dblink_close('cur; DROP TABLE x; --')` reached via \
+         `app_close_remote_cursor` becomes arbitrary SQL on the remote \
+         server with the wrapper's identity.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "- **GRANT EXECUTE asymmetry**: an admin grants EXECUTE on only \
+         the 'safe-sounding' subset of an extension's functions (cursor \
+         management, build_sql helpers) while withholding the 'obviously \
+         dangerous' ones (`dblink_exec`, `dblink_send_query`). An \
+         identifier-injection in the 'safe' subset escalates to the \
+         capability the admin intended to withhold.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "- **Foreign user mapping** (postgres_fdw / dblink): a CREATE \
+         SERVER + CREATE USER MAPPING authenticates the local caller as a \
+         more-privileged remote role. An injection in any function that \
+         emits SQL through the foreign connection runs on the remote with \
+         the foreign role's privileges, which may exceed everything the \
+         local caller has access to.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "- **Trigger-driven**: a row-level trigger calls the vulnerable \
+         primitive when an unprivileged user INSERTs / UPDATEs a watched \
+         table. The injection runs in the trigger's owner's identity \
+         (usually the schema owner / table owner, which is elevated \
+         relative to the modifier).".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "Common framework-shaped patterns (non-postgres):".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "- **Java reflection gadgets** (Spring / Jackson): an injection \
+         point that picks a class name lets the attacker reach \
+         `ProcessBuilder` / `Runtime.exec` via deserialisation or \
+         dependency-injection lookup.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "- **Python `__subclasses__` / `__globals__` chains**: a template \
+         injection (Jinja / Mako / Django) reaches \
+         `{}.__class__.__bases__[0].__subclasses__()` → \
+         `subprocess.Popen`.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "- **Node `child_process.spawnSync`** reachable from an \
+         `eval`-shaped sink (vm.runInNewContext, Function ctor) or a \
+         `require` whose path is user-influenced.".to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "**Required**: cite the named pattern in your finding's \
+         `customCweRationale` or `reason`. A finding without a named \
+         privilege-boundary-crossing pattern stays at the `candidate` \
+         level for operator audit.".to_string(),
+    );
+    lines.push(String::new());
     lines.push("## Contract".to_string());
     lines.push(
         "- Return strict JSON matching { selectedCwes, findings, triage, notes }.".to_string(),
@@ -1083,6 +1170,67 @@ mod mandatory_audit_section_tests {
         assert!(
             audit_idx < contract_idx,
             "audit must come before the contract so the contract sees it as a prerequisite"
+        );
+    }
+
+    #[test]
+    fn prompt_names_privilege_boundary_patterns() {
+        // E3: the prompt must teach the agent to name a
+        // privilege-boundary-crossing application pattern when
+        // promoting any injection finding. Without this, the agent
+        // surfaces the dblink cursor-name injection as a generic
+        // CWE-89 and misses the SECURITY DEFINER privesc framing
+        // that turns it from "by-design caller-trusted" into a CVE.
+        let prompt = build_taint_iris_next_agent_prompt(&minimal_plan(), &empty_evidence());
+        assert!(
+            prompt.contains("Realistic Exploit Patterns"),
+            "prompt must include the realistic-exploit framing section",
+        );
+        assert!(
+            prompt.contains("SECURITY DEFINER wrapper"),
+            "prompt must name the SECURITY DEFINER wrapper privesc pattern",
+        );
+        assert!(
+            prompt.contains("GRANT EXECUTE asymmetry"),
+            "prompt must name the GRANT EXECUTE asymmetry pattern",
+        );
+        assert!(
+            prompt.contains("Foreign user mapping"),
+            "prompt must name the postgres_fdw / dblink user-mapping pattern",
+        );
+        // Non-postgres patterns are listed for generalization.
+        assert!(
+            prompt.contains("Java reflection gadgets")
+                && prompt.contains("__subclasses__")
+                && prompt.contains("child_process.spawnSync"),
+            "prompt must name common framework gadget patterns",
+        );
+        // The "must name a pattern" requirement is explicit.
+        assert!(
+            prompt.contains("customCweRationale") || prompt.contains("Required"),
+            "prompt must require the named pattern in the rationale field",
+        );
+    }
+
+    #[test]
+    fn realistic_exploit_section_lands_between_audit_and_contract() {
+        let prompt = build_taint_iris_next_agent_prompt(&minimal_plan(), &empty_evidence());
+        let audit_idx = prompt
+            .find("## Mandatory Call-Site + Entry-Point Audit")
+            .expect("audit section must exist");
+        let realistic_idx = prompt
+            .find("## Realistic Exploit Patterns")
+            .expect("realistic-exploit section must exist");
+        let contract_idx = prompt
+            .find("## Contract")
+            .expect("contract section must exist");
+        assert!(
+            audit_idx < realistic_idx,
+            "realistic-exploit framing must come after the call-site audit",
+        );
+        assert!(
+            realistic_idx < contract_idx,
+            "realistic-exploit framing must come before the contract",
         );
     }
 }
