@@ -363,6 +363,211 @@ fn harvest_pipeline_with_mock_dispatch_writes_catalog_and_summary() {
 }
 
 #[test]
+fn harvest_with_regression_gate_validates_and_writes_entry() {
+    use crate::capabilities::threat_intel::harvest_threat_intel_catalog;
+    use crate::config::V2Config;
+    use crate::modules::ToolExecutionContext;
+    use crate::workspace::WorkspaceTarget;
+    use serde_json::json;
+
+    // Build a synthetic git repo with a real fix commit so the gate
+    // can actually run.
+    let temp = tempdir().unwrap();
+    let repo = temp.path();
+    if std::process::Command::new("git").arg("--version").output().is_err() {
+        eprintln!("skipping live harvest+gate test: git not on PATH");
+        return;
+    }
+    let run_git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .expect("git invocation failed")
+    };
+    run_git(&["init", "-q"]);
+    run_git(&["config", "user.email", "t@test.invalid"]);
+    run_git(&["config", "user.name", "t"]);
+    run_git(&["config", "commit.gpgsign", "false"]);
+    std::fs::write(repo.join("vuln.c"), "void f() { UNSAFE_OP(); }\n").unwrap();
+    run_git(&["add", "vuln.c"]);
+    run_git(&["commit", "-q", "-m", "pre"]);
+    std::fs::write(repo.join("vuln.c"), "void f() { SAFE_OP(); }\n").unwrap();
+    run_git(&["add", "vuln.c"]);
+    run_git(&["commit", "-q", "-m", "fix"]);
+    let sha = String::from_utf8(run_git(&["rev-parse", "HEAD"]).stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+
+    let workspace = WorkspaceTarget::new(repo).unwrap();
+    let config = V2Config::default();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+    };
+
+    let dispatch = |name: &str,
+                    _input: serde_json::Value,
+                    _ctx: &ToolExecutionContext<'_>,
+                    _runtime: Option<&dyn crate::runtime::AgentRuntime>|
+     -> anyhow::Result<serde_json::Value> {
+        let sha = sha.clone();
+        match name {
+            "ndiff:fetch-cve" => Ok(json!({
+                "ok": true,
+                "output": "ok",
+                "data": {
+                    "record": {
+                        "id": "CVE-TEST",
+                        "description": "Synthetic test.",
+                        "cwes": ["CWE-190"],
+                        "severity": "HIGH",
+                        "affectedFiles": ["vuln.c"],
+                        "patches": [{"url": format!("https://example.com/commit/{sha}")}],
+                    }
+                }
+            })),
+            "ndiff:extract-fix-pattern" => Ok(json!({
+                "ok": true,
+                "output": "ok",
+                "data": {
+                    "pattern": {
+                        "cwe": ["CWE-190"],
+                        "languages": ["c"],
+                        "vulnerableShape": "UNSAFE_OP",
+                        "fixShape": "SAFE_OP",
+                        "detectionQuery": "UNSAFE_OP",
+                        "keywords": ["UNSAFE_OP"],
+                        "description": "synthetic",
+                        "confidence": "HIGH",
+                    }
+                }
+            })),
+            other => panic!("unexpected dispatch: {other}"),
+        }
+    };
+
+    let result = harvest_threat_intel_catalog(
+        &json!({"cves": ["CVE-TEST"]}),
+        &ctx,
+        None,
+        dispatch,
+    )
+    .unwrap();
+
+    assert_eq!(result["summary"]["totalCves"], 1);
+    assert_eq!(result["summary"]["harvested"], 1);
+    assert_eq!(result["summary"]["regressionGate"]["validated"], 1);
+    assert_eq!(result["summary"]["regressionGate"]["rejected"], 0);
+
+    let per = result["data"]["perCve"][0].clone();
+    assert_eq!(per["status"], "harvested");
+    assert_eq!(per["gate"]["status"], "validated");
+    assert_eq!(per["gate"]["preFixHits"], 1);
+    assert_eq!(per["gate"]["postFixHits"], 0);
+    assert_eq!(per["gate"]["fixSha"], sha);
+
+    let toml_text = std::fs::read_to_string(
+        repo.join(".kuzushi").join("catalogs").join("harvested.toml"),
+    )
+    .unwrap();
+    assert!(toml_text.contains("regression-gate=validated"));
+    assert!(toml_text.contains(&sha[..12]));
+}
+
+#[test]
+fn harvest_with_regression_gate_rejects_non_splitting_pattern() {
+    use crate::capabilities::threat_intel::harvest_threat_intel_catalog;
+    use crate::config::V2Config;
+    use crate::modules::ToolExecutionContext;
+    use crate::workspace::WorkspaceTarget;
+    use serde_json::json;
+
+    let temp = tempdir().unwrap();
+    let repo = temp.path();
+    if std::process::Command::new("git").arg("--version").output().is_err() {
+        return;
+    }
+    let run_git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .expect("git invocation failed")
+    };
+    run_git(&["init", "-q"]);
+    run_git(&["config", "user.email", "t@test.invalid"]);
+    run_git(&["config", "user.name", "t"]);
+    run_git(&["config", "commit.gpgsign", "false"]);
+    std::fs::write(repo.join("vuln.c"), "void f() { CALL(); }\n").unwrap();
+    run_git(&["add", "vuln.c"]);
+    run_git(&["commit", "-q", "-m", "pre"]);
+    std::fs::write(repo.join("vuln.c"), "void f() { CALL(); CHECK(); }\n").unwrap();
+    run_git(&["add", "vuln.c"]);
+    run_git(&["commit", "-q", "-m", "fix"]);
+    let sha = String::from_utf8(run_git(&["rev-parse", "HEAD"]).stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+
+    let workspace = WorkspaceTarget::new(repo).unwrap();
+    let config = V2Config::default();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+    };
+
+    let dispatch = |name: &str,
+                    _input: serde_json::Value,
+                    _ctx: &ToolExecutionContext<'_>,
+                    _runtime: Option<&dyn crate::runtime::AgentRuntime>|
+     -> anyhow::Result<serde_json::Value> {
+        let sha = sha.clone();
+        match name {
+            "ndiff:fetch-cve" => Ok(json!({
+                "ok": true, "output": "ok",
+                "data": {"record": {
+                    "id": "CVE-NOSPLIT", "description": "noise pattern",
+                    "cwes": ["CWE-190"], "severity": "HIGH",
+                    "affectedFiles": ["vuln.c"],
+                    "patches": [{"url": format!("https://example.com/commit/{sha}")}],
+                }}
+            })),
+            // "CALL" appears in both pre-fix and post-fix — the gate
+            // must reject (same hit count, doesn't distinguish).
+            "ndiff:extract-fix-pattern" => Ok(json!({
+                "ok": true, "output": "ok",
+                "data": {"pattern": {
+                    "cwe": ["CWE-190"], "languages": ["c"],
+                    "vulnerableShape": "CALL", "fixShape": "CHECK",
+                    "detectionQuery": "CALL", "keywords": ["CALL"],
+                    "description": "noise", "confidence": "MEDIUM",
+                }}
+            })),
+            other => panic!("unexpected dispatch: {other}"),
+        }
+    };
+
+    let result = harvest_threat_intel_catalog(
+        &json!({"cves": ["CVE-NOSPLIT"]}),
+        &ctx,
+        None,
+        dispatch,
+    )
+    .unwrap();
+
+    assert_eq!(result["summary"]["harvested"], 0);
+    assert_eq!(result["summary"]["skipped"], 1);
+    assert_eq!(result["summary"]["regressionGate"]["rejected"], 1);
+    assert_eq!(result["data"]["perCve"][0]["status"], "rejected-by-gate");
+}
+
+#[test]
 fn loads_catalog_from_disk_with_multiple_entries() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("redis.toml");

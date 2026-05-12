@@ -10,7 +10,8 @@ pub use adapters::{
     SUPPORTED_SCHEMA_VERSIONS,
 };
 pub use application::{
-    apply_threat_intel_catalog, harvest_threat_intel_catalog, list_threat_intel_catalog,
-    resolve_catalog_path,
+    apply_threat_intel_catalog, apply_regression_gate_to_entries, harvest_threat_intel_catalog,
+    list_threat_intel_catalog, resolve_catalog_path, run_regression_gate, RegressionGateOutcome,
+    RegressionGateStatus,
 };
 pub use domain::{CatalogEntry, CatalogFile, CatalogSeverity, HuntKind, RawCatalogEntry};

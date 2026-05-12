@@ -32,7 +32,27 @@ pub(crate) fn fetch_online_cve_or_advisory(id: &str, input: &Value) -> Result<Op
     if input_is_offline(input) {
         return Ok(None);
     }
-    fetch_advisory_from_source(advisory_source_for_id(id)?, id, input)
+    // Try each candidate source in priority order. The first one to
+    // return a usable record wins. A source that errors at the
+    // transport layer (curl missing, malformed JSON) bubbles up as a
+    // hard error — sources that simply return empty bodies (no data
+    // for this id) fall through to the next source.
+    let candidates = advisory_sources_for_id(id);
+    let mut last_error: Option<anyhow::Error> = None;
+    for source in candidates {
+        match fetch_advisory_from_source(source, id, input) {
+            Ok(Some(record)) => return Ok(Some(record)),
+            Ok(None) => continue,
+            Err(err) => {
+                last_error = Some(err);
+                continue;
+            }
+        }
+    }
+    match last_error {
+        Some(err) => Err(err),
+        None => Ok(None),
+    }
 }
 
 pub(crate) fn fetch_advisory_from_source(
@@ -43,6 +63,7 @@ pub(crate) fn fetch_advisory_from_source(
     match source {
         AdvisorySource::Nvd => fetch_nvd_advisory(id, input),
         AdvisorySource::Ghsa => fetch_ghsa_advisory(id, input),
+        AdvisorySource::Osv => fetch_osv_advisory(id, input),
     }
 }
 
@@ -57,20 +78,56 @@ pub(crate) fn fetch_ghsa_advisory(id: &str, input: &Value) -> Result<Option<CveR
     Ok(Some(map_ghsa_record(&normalized, raw)))
 }
 
+pub(crate) fn fetch_osv_advisory(id: &str, input: &Value) -> Result<Option<CveRecord>> {
+    let raw = curl_json(&osv_advisory_url(id), input, "ndiff:fetch-cve")?;
+    if raw.is_null() {
+        return Ok(None);
+    }
+    Ok(Some(map_osv_record(id, raw)))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AdvisorySource {
     Nvd,
     Ghsa,
+    Osv,
+}
+
+/// Pick the fallback chain for a given advisory id.
+///
+/// CVE-* IDs are present in both NVD and OSV. NVD is the authoritative
+/// numbering authority but OSV often has fresher patch references; we
+/// try NVD first, then OSV as a fallback.
+/// GHSA-* IDs live in GitHub; OSV mirrors them with the upstream
+/// classification, so OSV is the natural fallback when the GHSA REST
+/// endpoint returns nothing.
+/// Other prefixes (`PYSEC-`, `GO-`, `RUSTSEC-`, …) are OSV-native.
+pub(crate) fn advisory_sources_for_id(id: &str) -> Vec<AdvisorySource> {
+    let upper = id.to_ascii_uppercase();
+    if upper.starts_with("CVE-") {
+        return vec![AdvisorySource::Nvd, AdvisorySource::Osv];
+    }
+    if upper.starts_with("GHSA-") {
+        return vec![AdvisorySource::Ghsa, AdvisorySource::Osv];
+    }
+    if upper.starts_with("PYSEC-")
+        || upper.starts_with("GO-")
+        || upper.starts_with("RUSTSEC-")
+        || upper.starts_with("CARGO-")
+        || upper.starts_with("MAL-")
+        || upper.starts_with("OSV-")
+    {
+        return vec![AdvisorySource::Osv];
+    }
+    // Unknown prefix: still try OSV (it accepts any registered id),
+    // but no upstream fallback.
+    vec![AdvisorySource::Osv]
 }
 
 pub(crate) fn advisory_source_for_id(id: &str) -> Result<AdvisorySource> {
-    if id.to_ascii_uppercase().starts_with("CVE-") {
-        return Ok(AdvisorySource::Nvd);
-    }
-    if id.to_ascii_lowercase().starts_with("ghsa-") {
-        return Ok(AdvisorySource::Ghsa);
-    }
-    anyhow::bail!("Unrecognized advisory ID: {id:?} (expected CVE-* or GHSA-*)")
+    advisory_sources_for_id(id).into_iter().next().with_context(|| {
+        format!("Unrecognized advisory ID: {id:?} (expected CVE-*, GHSA-*, or OSV-supported prefix)")
+    })
 }
 
 pub(crate) fn nvd_advisory_url(id: &str) -> String {
@@ -82,6 +139,10 @@ pub(crate) fn nvd_advisory_url(id: &str) -> String {
 
 pub(crate) fn ghsa_advisory_url(id: &str) -> String {
     format!("https://api.github.com/advisories/{}", shell_escape_url(id))
+}
+
+pub(crate) fn osv_advisory_url(id: &str) -> String {
+    format!("https://api.osv.dev/v1/vulns/{}", shell_escape_url(id))
 }
 
 pub(crate) fn record_from_input(id: &str, input: &Value) -> Result<Option<CveRecord>> {

@@ -134,6 +134,10 @@ mod tests {
 
     #[test]
     fn advisory_source_and_urls_cover_cve_ghsa_and_unknown_ids() {
+        // CVE-* routes primarily to NVD (OSV is the multi-source
+        // fallback added in the threat-intel:harvest work; see
+        // advisory_sources_for_cve_id_starts_with_nvd_falls_back_to_osv
+        // below for the chain assertion).
         assert_eq!(
             advisory_source_for_id("CVE-2024-1234").unwrap(),
             AdvisorySource::Nvd
@@ -142,10 +146,15 @@ mod tests {
             advisory_source_for_id("ghsa-abcd-efgh-ijkl").unwrap(),
             AdvisorySource::Ghsa
         );
-        assert!(advisory_source_for_id("OSV-2024-1")
-            .unwrap_err()
-            .to_string()
-            .contains("expected CVE-* or GHSA-*"));
+        // OSV-* and friends now route directly to OSV (was: error).
+        assert_eq!(
+            advisory_source_for_id("OSV-2024-1").unwrap(),
+            AdvisorySource::Osv
+        );
+        assert_eq!(
+            advisory_source_for_id("PYSEC-2024-100").unwrap(),
+            AdvisorySource::Osv
+        );
         assert_eq!(
             nvd_advisory_url("CVE-2024-1234"),
             "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2024-1234"
@@ -575,5 +584,99 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("requires an explicit model"));
+    }
+
+    #[test]
+    fn advisory_sources_for_cve_id_starts_with_nvd_falls_back_to_osv() {
+        let chain =
+            crate::capabilities::variant_ndiff::persistence::advisory_sources_for_id(
+                "CVE-2022-31144",
+            );
+        assert_eq!(
+            chain,
+            vec![
+                crate::capabilities::variant_ndiff::persistence::AdvisorySource::Nvd,
+                crate::capabilities::variant_ndiff::persistence::AdvisorySource::Osv,
+            ]
+        );
+    }
+
+    #[test]
+    fn advisory_sources_for_ghsa_id_starts_with_ghsa_falls_back_to_osv() {
+        let chain =
+            crate::capabilities::variant_ndiff::persistence::advisory_sources_for_id(
+                "GHSA-aaaa-bbbb-cccc",
+            );
+        assert_eq!(
+            chain,
+            vec![
+                crate::capabilities::variant_ndiff::persistence::AdvisorySource::Ghsa,
+                crate::capabilities::variant_ndiff::persistence::AdvisorySource::Osv,
+            ]
+        );
+    }
+
+    #[test]
+    fn advisory_sources_for_osv_native_prefixes_route_only_to_osv() {
+        for id in ["PYSEC-2024-100", "GO-2024-3001", "RUSTSEC-2024-0001"] {
+            let chain = crate::capabilities::variant_ndiff::persistence::advisory_sources_for_id(id);
+            assert_eq!(
+                chain,
+                vec![crate::capabilities::variant_ndiff::persistence::AdvisorySource::Osv],
+                "{id} should only try OSV"
+            );
+        }
+    }
+
+    #[test]
+    fn osv_record_mapper_extracts_cwe_patches_and_severity() {
+        let raw = serde_json::json!({
+            "id": "CVE-2024-31449",
+            "summary": "Lua bit_lib buffer overflow",
+            "details": "Stack buffer overflow in bit_lib.",
+            "published": "2024-10-07T00:00:00Z",
+            "severity": [
+                {"type": "CVSS_V3", "score": "8.8"}
+            ],
+            "references": [
+                {"type": "FIX", "url": "https://github.com/redis/redis/commit/abcdef1234567890"},
+                {"type": "WEB", "url": "https://example.com/notes"},
+                {"type": "ADVISORY", "url": "https://github.com/redis/redis/pull/12345"},
+            ],
+            "database_specific": {
+                "cwe_ids": ["CWE-122"],
+                "severity": "HIGH",
+            }
+        });
+        let record = crate::capabilities::variant_ndiff::domain::map_osv_record("CVE-2024-31449", raw);
+        assert_eq!(record.id, "CVE-2024-31449");
+        assert_eq!(record.source, "osv");
+        assert_eq!(record.cwes, vec!["CWE-122"]);
+        assert_eq!(record.severity.as_deref(), Some("HIGH"));
+        // FIX-typed refs and PR refs both kept as patches; the patch
+        // selector ranks them later.
+        assert!(record
+            .patches
+            .iter()
+            .any(|p| p.url.contains("/commit/abcdef1234567890")));
+        assert!(record
+            .patches
+            .iter()
+            .any(|p| p.url.contains("/pull/12345")));
+        assert_eq!(record.description, "Stack buffer overflow in bit_lib.");
+    }
+
+    #[test]
+    fn osv_record_mapper_falls_back_to_summary_when_details_missing() {
+        let raw = serde_json::json!({
+            "id": "PYSEC-2024-1",
+            "summary": "Short summary only",
+            "references": [],
+        });
+        let record =
+            crate::capabilities::variant_ndiff::domain::map_osv_record("PYSEC-2024-1", raw);
+        assert_eq!(record.description, "Short summary only");
+        assert!(record.patches.is_empty());
+        assert!(record.cwes.is_empty());
     }
 }
