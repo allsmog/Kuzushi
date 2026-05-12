@@ -76,16 +76,27 @@ fn readiness_from_entry(path: &Path, entry: &serde_json::Value) -> Result<OauthR
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(0);
 
-    if !has_refresh || !has_access {
+    if !has_access {
         return Ok(OauthReadiness::Invalid {
             searched: path.to_path_buf(),
-            reason: "anthropic entry is missing access/refresh fields".to_string(),
+            reason: "anthropic entry is missing the `access` field".to_string(),
         });
     }
 
-    if expires_at_ms <= current_unix_ms() {
+    let now = current_unix_ms();
+    if expires_at_ms <= now {
+        if !has_refresh {
+            return Ok(OauthReadiness::Invalid {
+                searched: path.to_path_buf(),
+                reason: "anthropic access token is expired and no `refresh` token is present"
+                    .to_string(),
+            });
+        }
         return Ok(OauthReadiness::Expired { expires_at_ms });
     }
+    // Access token is non-empty and not yet expired. An empty `refresh` is
+    // allowed for non-refreshable long-lived tokens — the bridge uses
+    // `access` directly until expiry and only refreshes when needed.
     Ok(OauthReadiness::Ready { expires_at_ms })
 }
 

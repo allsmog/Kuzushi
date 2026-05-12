@@ -41,6 +41,7 @@ fn next_step_bridge_request(
         api_key: runtime.api_key.clone(),
         base_url: runtime.base_url.clone(),
         runtime_options: request.runtime_options.clone(),
+        temperature: request.temperature,
     }
 }
 

@@ -6,7 +6,9 @@ pub(crate) fn run_deep_audit_tool(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
     use crate::agent_router::{AgentRouter, RoutedRuntime};
-    use crate::capabilities::deep_auditor::{run_deep_auditor, save_evidence, DeepAuditConfig};
+    use crate::capabilities::deep_auditor::{
+        run_deep_auditor, save_evidence, DeepAuditConfig, DEFAULT_PASSES, DEFAULT_TEMPERATURE,
+    };
     use crate::config::ConfigPaths;
     use crate::spend::SpendLimiter;
     use std::sync::Arc;
@@ -35,6 +37,16 @@ pub(crate) fn run_deep_audit_tool(
         .get("depositUsd")
         .and_then(Value::as_f64)
         .unwrap_or(1.0);
+    let temperature = input
+        .get("temperature")
+        .and_then(Value::as_f64)
+        .map(|v| v.clamp(0.0, 2.0) as f32)
+        .unwrap_or(DEFAULT_TEMPERATURE);
+    let passes = input
+        .get("passes")
+        .and_then(Value::as_u64)
+        .map(|v| v.max(1) as u32)
+        .unwrap_or(DEFAULT_PASSES);
 
     let paths = ConfigPaths {
         home_dir: dirs::home_dir().unwrap_or_default(),
@@ -54,6 +66,8 @@ pub(crate) fn run_deep_audit_tool(
         deposit_usd,
         system_prompt: None,
         include_static_evidence: true,
+        temperature,
+        passes,
     };
     let outcome = run_deep_auditor(&routed, Some(&spend), &cfg, &finding)?;
 

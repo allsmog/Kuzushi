@@ -18,6 +18,8 @@ pub(crate) struct NextStepBridgeRequest {
     pub(crate) base_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) runtime_options: Option<AgentRuntimeOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) temperature: Option<f32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -73,6 +75,8 @@ pub(crate) struct BridgeRequest {
     pub(crate) tool_policy: AgentToolPolicy,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) runtime_options: Option<AgentRuntimeOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) temperature: Option<f32>,
 }
 
 #[derive(Debug, Deserialize)]

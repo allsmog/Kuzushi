@@ -70,25 +70,12 @@ pub(crate) fn collect_implicit_evidence(transcript: &[LoopHistoryEntry]) -> Vec<
 }
 
 pub(crate) fn try_parse_loose_json<T: serde::de::DeserializeOwned>(text: &str) -> Option<T> {
-    // Strip ```json fences if present, then locate the outermost {...}.
-    let trimmed = text.trim();
-    let stripped = if trimmed.starts_with("```") {
-        let after = trimmed
-            .trim_start_matches("```json")
-            .trim_start_matches("```");
-        after.trim_end_matches("```").trim().to_string()
-    } else {
-        trimmed.to_string()
-    };
-    if let Ok(value) = serde_json::from_str::<T>(&stripped) {
-        return Some(value);
-    }
-    let start = stripped.find('{')?;
-    let end = stripped.rfind('}')?;
-    if end <= start {
-        return None;
-    }
-    serde_json::from_str(&stripped[start..=end]).ok()
+    // Delegate to the shared parser in `structured_output`. That module
+    // handles: leading-fence strip, last-fenced ```json…``` block
+    // extraction, balanced-brace walk from the LAST `{` backward. Using
+    // the shared implementation means agentic-sast / systems-hunt /
+    // taint-iris all benefit from the same robustness improvements.
+    crate::structured_output::try_parse_typed_from_agent_text(text)
 }
 
 pub(crate) fn clamp(mut a: VulnAnalysis) -> VulnAnalysis {

@@ -389,6 +389,7 @@ mod tests {
             tools: vec![],
             max_steps: 5,
             runtime_options: None,
+            temperature: None,
         };
         let mut history = Vec::new();
 

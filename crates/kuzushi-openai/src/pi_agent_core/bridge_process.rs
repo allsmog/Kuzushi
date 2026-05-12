@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use super::bridge_payloads::{
@@ -76,8 +76,14 @@ pub(crate) fn default_bridge_command(source_root: &Path) -> Vec<String> {
     if let Some(command) = bridge_command_at(source_root) {
         return command;
     }
-    if let Some(command) = bridge_command_near_executable() {
-        return command;
+
+    // The caller's cwd (`source_root`) is the natural lookup spot when
+    // kuzushi is invoked from inside the Kuzushi repo. When kuzushi is
+    // invoked against an external target the cwd is the *target*, not
+    // the Kuzushi tree, so fall back to the script that lives next to
+    // the kuzushi executable.
+    if let Some(exe_bridge) = bridge_next_to_executable() {
+        return vec!["node".to_string(), exe_bridge.display().to_string()];
     }
 
     vec![
@@ -93,33 +99,71 @@ fn bridge_command_at(source_root: &Path) -> Option<Vec<String>> {
         .then(|| vec!["node".to_string(), bridge.display().to_string()])
 }
 
-fn bridge_command_near_executable() -> Option<Vec<String>> {
+fn bridge_next_to_executable() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let mut cursor = exe.parent();
-    while let Some(dir) = cursor {
-        if let Some(command) = bridge_command_at(dir) {
-            return Some(command);
+    bridge_near_executable(&exe)
+}
+
+fn bridge_near_executable(exe: &Path) -> Option<PathBuf> {
+    // Walk up to 6 ancestors so we cover the layouts kuzushi ships in:
+    //   target/release/kuzushi          -> ../../scripts/...   (2 hops)
+    //   target/debug/kuzushi            -> ../../scripts/...   (2 hops)
+    //   native/<plat>-<arch>/kuzushi    -> ../../scripts/...   (2 hops)
+    //   bin/kuzushi (npm package)       -> ../scripts/...      (1 hop)
+    //   share/kuzushi/bin/kuzushi       -> ../../scripts/...   (2 hops)
+    // 6 keeps the search bounded and well clear of `/`.
+    let mut dir = exe.parent();
+    for _ in 0..6 {
+        let Some(parent) = dir else { return None };
+        let candidate = parent.join("scripts").join("pi-agent-core-bridge.mjs");
+        if candidate.exists() {
+            return Some(candidate);
         }
-        cursor = dir.parent();
+        dir = parent.parent();
     }
     None
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{bridge_near_executable, default_bridge_command};
+    use std::fs;
+    use tempfile::tempdir;
 
     #[test]
-    fn default_bridge_command_resolves_from_source_root_when_present() {
-        let temp = tempfile::tempdir().unwrap();
-        let scripts = temp.path().join("scripts");
-        std::fs::create_dir(&scripts).unwrap();
+    fn default_bridge_command_finds_bridge_in_source_root() {
+        let tmp = tempdir().unwrap();
+        let scripts = tmp.path().join("scripts");
+        fs::create_dir_all(&scripts).unwrap();
         let bridge = scripts.join("pi-agent-core-bridge.mjs");
-        std::fs::write(&bridge, "// stub\n").unwrap();
+        fs::write(&bridge, "/* test */").unwrap();
 
-        let command = default_bridge_command(temp.path());
+        let cmd = default_bridge_command(tmp.path());
+        assert_eq!(cmd[0], "node");
+        assert_eq!(cmd[1], bridge.display().to_string());
+    }
 
-        assert_eq!(command[0], "node");
-        assert_eq!(command[1], bridge.display().to_string());
+    #[test]
+    fn bridge_near_executable_walks_up_to_find_scripts_dir() {
+        let tmp = tempdir().unwrap();
+        let release = tmp.path().join("target").join("release");
+        fs::create_dir_all(&release).unwrap();
+        let exe = release.join("kuzushi");
+        fs::write(&exe, b"#!/bin/sh\n").unwrap();
+        let scripts = tmp.path().join("scripts");
+        fs::create_dir_all(&scripts).unwrap();
+        let bridge = scripts.join("pi-agent-core-bridge.mjs");
+        fs::write(&bridge, "/* test */").unwrap();
+
+        let resolved = bridge_near_executable(&exe).expect("walks up to <root>/scripts");
+        assert_eq!(resolved, bridge);
+    }
+
+    #[test]
+    fn bridge_near_executable_returns_none_when_absent() {
+        let tmp = tempdir().unwrap();
+        let exe = tmp.path().join("kuzushi");
+        fs::write(&exe, b"#!/bin/sh\n").unwrap();
+        assert!(bridge_near_executable(&exe).is_none());
     }
 }

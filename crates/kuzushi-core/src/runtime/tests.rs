@@ -53,6 +53,7 @@ mod tests {
             }],
             max_steps: 5,
             runtime_options: None,
+            temperature: None,
         }
     }
 

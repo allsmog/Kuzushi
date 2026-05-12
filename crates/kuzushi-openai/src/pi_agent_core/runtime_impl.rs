@@ -32,6 +32,7 @@ impl AgentRuntime for PiAgentCoreRuntime {
             max_output_tokens: request.max_output_tokens,
             tool_policy: request.tool_policy,
             runtime_options,
+            temperature: request.temperature,
         };
 
         let response = run_bridge(&self.command, &bridge_request)?;

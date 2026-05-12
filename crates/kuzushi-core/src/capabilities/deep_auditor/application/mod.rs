@@ -5,7 +5,8 @@ use crate::agent_router::{AgentRole, RoutedRuntime};
 use crate::code_nav::{code_nav_tool_specs, code_nav_toolbox, CodeNavConfig};
 use crate::findings::{Finding, TriageOutcome, TriageVerdict};
 use crate::runtime::{
-    run_tool_loop, AgentLoopOutcome, AgentRuntime, AgentToolLoopRequest, LoopHistoryEntry,
+    run_tool_loop, AgentLoopOutcome, AgentQueryRequest, AgentRuntime, AgentToolLoopRequest,
+    LoopHistoryEntry,
 };
 use crate::spend::{Operation, SpendLimiter};
 use anyhow::{Context, Result};
