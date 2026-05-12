@@ -92,4 +92,6 @@ pub use contracts::{
     ToolDescriptor,
 };
 pub use registry::ModuleRegistry;
-pub use runtime_requirements::{agent_runtime_tool_names, tool_uses_agent_runtime};
+pub use runtime_requirements::{
+    agent_runtime_tool_names, tool_needs_runtime, tool_uses_agent_runtime, wants_sast_runtime,
+};

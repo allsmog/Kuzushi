@@ -13,7 +13,11 @@ pub(crate) fn run_background_tool(
     } else {
         None
     };
-    let runtime = if tool_uses_agent_runtime(tool_name) {
+    // Input-aware check: `sast:scan` skips the runtime in
+    // scanner-only mode (whitebox-static, no triage/verify/agentic
+    // sub-tasks). Name-only tools fall through to the allowlist. See
+    // `kuzushi_core::modules::runtime_requirements`.
+    let runtime = if tool_needs_runtime(tool_name, &input) {
         Some(
             PiAgentCoreRuntime::from_config(
                 &config,

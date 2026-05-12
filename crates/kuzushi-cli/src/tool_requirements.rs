@@ -1,6 +1,5 @@
-use crate::wants_sast_runtime::wants_sast_runtime;
 use anyhow::Result;
-use kuzushi_core::{tool_uses_agent_runtime, WorkspaceTarget};
+use kuzushi_core::WorkspaceTarget;
 use std::path::Path;
 
 pub(crate) fn reject_shell_only_run_dot(tool: &str) -> Result<()> {
@@ -104,13 +103,11 @@ pub(crate) fn tool_needs_finding_store(tool: &str) -> bool {
         || has_known_name(tool, FINDING_STORE_TOOL_NAMES)
 }
 
-/// Whether `kuzushi run <tool>` needs to construct an agent runtime before
-/// dispatch. Delegates the name check to `kuzushi_core::tool_uses_agent_runtime`
-/// — the single source of truth shared with the shell — and then applies the
-/// CLI-specific `sast:scan` input nuance (scanner-only modes don't need a
-/// runtime).
+/// Whether `kuzushi run <tool>` needs to construct an agent runtime
+/// before dispatch. Thin re-export of `kuzushi_core::tool_needs_runtime`
+/// — the canonical name + input-aware combiner shared with the shell.
 pub(crate) fn tool_needs_runtime(tool: &str, input: &serde_json::Value) -> bool {
-    tool_uses_agent_runtime(tool) || (tool == "sast:scan" && wants_sast_runtime(input))
+    kuzushi_core::tool_needs_runtime(tool, input)
 }
 
 pub(crate) fn has_known_prefix(tool: &str, prefixes: &[&str]) -> bool {
