@@ -11,6 +11,7 @@ pub fn report_to_tool_json(report: &FullModeReport) -> serde_json::Value {
             "findingsCount": report.findings.len(),
             "chunksDispatched": report.chunks_dispatched,
             "chunksFailed": report.chunks_failed,
+            "failedChunkErrors": report.failed_chunk_errors,
             "costUsd": report.cost_usd,
             "dryRun": report.dry_run,
         },

@@ -49,6 +49,27 @@ pub(crate) fn record_anthropic_env_presence(log: &mut AuthPingLog) {
     record_env_presence(log, &["ANTHROPIC_API_KEY"], "ANTHROPIC_API_KEY env present");
 }
 
+pub(crate) fn record_codex_runtime_auth_presence(log: &mut AuthPingLog) {
+    record_env_presence(log, &["OPENAI_API_KEY"], "OPENAI_API_KEY env present");
+    if let Ok(base_url) = std::env::var("OPENAI_BASE_URL") {
+        let masked = if base_url.len() > 96 {
+            format!("{}…", &base_url[..96])
+        } else {
+            base_url
+        };
+        log.record(
+            true,
+            format!("OPENAI_BASE_URL present ({masked}); runtime/provider auth may be injected out-of-band"),
+        );
+    }
+    if std::env::var("CODEX_CI").is_ok() {
+        log.record(
+            true,
+            "CODEX_CI env present; hosted runtime may authenticate Codex without local oauth-credentials.json",
+        );
+    }
+}
+
 pub(crate) fn record_env_presence(log: &mut AuthPingLog, names: &[&str], label: &str) {
     if names.iter().any(|name| std::env::var(name).is_ok()) {
         log.record(true, label);

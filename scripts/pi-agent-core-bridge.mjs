@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   closeSync,
@@ -217,6 +217,37 @@ function maybeParseJson(text) {
   }
 }
 
+function extractTextFromResult(result) {
+  if (typeof result === "string") return result;
+  if (!result || typeof result !== "object") return "";
+  if (typeof result.text === "string") return result.text;
+  if (typeof result.output_text === "string") return result.output_text;
+  if (typeof result.content === "string") return result.content;
+  if (Array.isArray(result.output)) {
+    const joined = result.output
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (typeof part?.text === "string") return part.text;
+        if (typeof part?.content === "string") return part.content;
+        return "";
+      })
+      .join("");
+    if (joined.trim()) return joined;
+  }
+  if (Array.isArray(result.content)) {
+    const joined = result.content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (typeof part?.text === "string") return part.text;
+        if (typeof part?.content === "string") return part.content;
+        return "";
+      })
+      .join("");
+    if (joined.trim()) return joined;
+  }
+  return "";
+}
+
 const WHITEBOX_STATIC_TOOL_PROFILE = "whitebox-static";
 const WHITEBOX_STATIC_READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "LS"];
 const FORBIDDEN_WHITEBOX_TOOLS = new Set([
@@ -294,6 +325,91 @@ function resolveRepoPath(root, rawPath = ".") {
 function relativeRepoPath(root, filePath) {
   const relative = path.relative(root, filePath).replaceAll(path.sep, "/");
   return relative || ".";
+}
+
+async function runOpenAiResponsesCall(provider, modelId, request) {
+  const base = resolveOpenAiResponsesBaseUrl();
+  const payload = {
+    model: modelId,
+    input: request.prompt,
+  };
+  const systemPrompt = request.systemPrompt ?? request.system_prompt;
+  if (systemPrompt) {
+    payload.instructions = systemPrompt;
+  }
+  const args = [
+    "-sS",
+    "--connect-timeout",
+    "10",
+    "--max-time",
+    String(process.env.KUZUSHI_OPENAI_RESPONSE_TIMEOUT_SEC || "60"),
+    "-X",
+    "POST",
+    "-H",
+    "Content-Type: application/json",
+    "-d",
+    JSON.stringify(payload),
+    `${base}/responses`,
+  ];
+  const bearerToken = await resolveOpenAiBearerToken(provider, request);
+  if (bearerToken) {
+    args.splice(9, 0, "-H", `Authorization: Bearer ${bearerToken}`);
+  }
+  const result = spawnSync("curl", args, { encoding: "utf8" });
+  if (result.status !== 0) {
+    throw new Error(`openai responses curl failed: ${result.stderr?.slice(0, 300)}`);
+  }
+  const text = result.stdout ?? "";
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`openai responses returned non-JSON: ${text.slice(0, 200)}`);
+  }
+  if (parsed?.error) {
+    throw new Error(`openai responses error: ${JSON.stringify(parsed.error).slice(0, 400)}`);
+  }
+  const outputText =
+    parsed.output_text ??
+    parsed.output?.flatMap?.((item) => item.content ?? []).map?.((part) => part.text ?? "").join?.("") ??
+    "";
+  return String(outputText || "").trim();
+}
+
+async function resolveOpenAiBearerToken(provider, request) {
+  const freshOauth = provider === "openai-codex"
+    ? await getFreshOAuthAccessTokenForProvider("openai-codex")
+    : undefined;
+  return (
+    freshOauth ??
+    providerAuthToken(provider) ??
+    configuredProviderApiKey(provider, request) ??
+    process.env[providerEnvName(provider)] ??
+    process.env.OPENAI_API_KEY ??
+    undefined
+  );
+}
+
+function resolveOpenAiResponsesBaseUrl() {
+  const fallback = "https://api.openai.com/v1";
+  const raw = String(process.env.OPENAI_BASE_URL || fallback).trim();
+  if (!raw) return fallback;
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return fallback;
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  const isDefaultOpenAiHost = hostname === "api.openai.com";
+  if (isDefaultOpenAiHost && parsed.port && parsed.port !== "443") {
+    parsed.port = "";
+  }
+  const normalizedPath = parsed.pathname.replace(/\/+$/, "");
+  if (normalizedPath === "" || normalizedPath === "/") {
+    parsed.pathname = "/v1";
+  }
+  return parsed.toString().replace(/\/$/, "");
 }
 
 function isSkippedRepoEntry(name) {
@@ -780,7 +896,7 @@ function makeStreamFnWithMaxTokens(maxOutputTokens) {
 }
 
 async function runAgent(AgentCtor, model, request) {
-  const agentTools = await buildAgentTools(request);
+  const [provider, modelId] = parseModelSpec(String(request.model ?? ""));
   const systemPrompt = appendStructuredOutputContract(
     request.systemPrompt ?? request.system_prompt ?? "",
     request.structuredOutput ?? request.structured_output ?? request.outputFormat,
@@ -788,6 +904,35 @@ async function runAgent(AgentCtor, model, request) {
   const thinkingLevel =
     normalizeThinkingLevel(request.thinkingLevel) ??
     "low";
+
+  if (provider === "openai" || provider === "openai-codex") {
+    const openaiText = await runOpenAiResponsesCall(provider, modelId, {
+      ...request,
+      systemPrompt,
+    });
+    if (!openaiText) {
+      throw new Error(`openai responses returned empty output_text for ${provider}:${modelId}`);
+    }
+    writeDebugDump({
+      model,
+      agentTools: [],
+      thinkingLevel,
+      request,
+      systemPrompt,
+      text: openaiText,
+    });
+    writeFullPromptDump(request);
+    return {
+      text: openaiText,
+      usage: undefined,
+      errorMessage: undefined,
+      truncated: false,
+      stopReason: undefined,
+    };
+  }
+
+  const agentTools = await buildAgentTools(request);
+  const allowedToolNames = new Set(agentTools.map((tool) => tool.name.toLowerCase()));
   const maxOutputTokens = sanitizeMaxOutputTokens(request);
   const streamFn = maxOutputTokens ? makeStreamFnWithMaxTokens(maxOutputTokens) : undefined;
   const agent = new AgentCtor({
@@ -803,6 +948,9 @@ async function runAgent(AgentCtor, model, request) {
       const name = toolCall?.name ?? "";
       if (isForbiddenWhiteboxTool(name)) {
         return { block: true, reason: `whitebox-static blocks execution/write tool ${name}` };
+      }
+      if (allowedToolNames.size > 0 && !allowedToolNames.has(String(name).toLowerCase())) {
+        return { block: true, reason: `whitebox-static only allows configured read-only tools` };
       }
       return undefined;
     },
@@ -845,10 +993,10 @@ async function runAgent(AgentCtor, model, request) {
 
   if (typeof agent.prompt === "function") {
     const result = await agent.prompt(request.prompt);
-    if (typeof result === "string") text += result;
+    text += extractTextFromResult(result);
   } else if (typeof agent.run === "function") {
     const result = await agent.run(request.prompt);
-    if (typeof result === "string") text += result;
+    text += extractTextFromResult(result);
   } else if (typeof agent.followUp === "function") {
     const promptMessage = {
       role: "user",
@@ -866,20 +1014,36 @@ async function runAgent(AgentCtor, model, request) {
   if (!text.trim()) {
     text = extractTextFromState(agent);
   }
+  const finalText = text.trim();
+  if (!finalText) {
+    let provider = "unknown";
+    let modelId = "unknown";
+    try {
+      [provider, modelId] = parseModelSpec(String(request.model ?? ""));
+    } catch {
+      provider = String(model?.provider ?? "unknown");
+      modelId = String(model?.id ?? "unknown");
+    }
+    const baseUrlSet = Boolean(process.env.OPENAI_BASE_URL);
+    const apiKeySet = Boolean(process.env.OPENAI_API_KEY);
+    throw new Error(
+      `empty_model_output provider=${provider} model=${modelId} ` +
+        `OPENAI_BASE_URL=${baseUrlSet ? "set" : "unset"} OPENAI_API_KEY=${apiKeySet ? "set" : "unset"}`,
+    );
+  }
 
-  text = text.trim();
   writeDebugDump({
     model,
     agentTools,
     thinkingLevel,
     request,
     systemPrompt,
-    text,
+    text: finalText,
   });
   writeFullPromptDump(request);
 
   return {
-    text,
+    text: finalText,
     usage: aggregateAgentUsage(agent),
     errorMessage: agent?.state?.errorMessage ?? undefined,
     truncated,
@@ -1072,6 +1236,9 @@ function providerAuthToken(provider) {
   if (provider === "anthropic") {
     return process.env.ANTHROPIC_AUTH_TOKEN ?? process.env.ANTHROPIC_OAUTH_TOKEN;
   }
+  if (provider === "openai-codex" || provider === "openai") {
+    return process.env.OPENAI_AUTH_TOKEN ?? process.env.OPENAI_OAUTH_TOKEN;
+  }
   return undefined;
 }
 
@@ -1156,11 +1323,35 @@ async function promptManualCode() {
  */
 async function handlePing(request) {
   const [provider, modelId] = parseModelSpec(request.model);
+  if (provider === "openai-codex" || provider === "openai") {
+    const t0 = Date.now();
+    const result = await runAgent(null, { provider, id: modelId }, {
+      model: `${provider}:${modelId}`,
+      system_prompt: "You are an auth ping probe. Reply with ok.",
+      prompt: "ok",
+      cwd: process.cwd(),
+    });
+    const latency_ms = Date.now() - t0;
+
+    const auth_mode = (await resolveOpenAiBearerToken(provider, request))
+      ? "oauth-or-api-key"
+      : process.env.OPENAI_BASE_URL
+        ? "runtime-base-url"
+        : "runtime";
+    return {
+      ok: true,
+      auth_mode,
+      model: modelId,
+      latency_ms,
+      input_tokens: 0,
+      output_tokens: 0,
+      cost_usd: 0,
+      note: "openai-codex ping verifies provider round-trip; token/cost fields unavailable in this bridge path",
+      text_preview: String(result.text ?? "").slice(0, 120),
+    };
+  }
   if (provider !== "anthropic") {
-    throw new Error(
-      `auth ping currently only supports anthropic (got ${provider}). ` +
-        "OpenAI / Gemini support is a follow-up.",
-    );
+    throw new Error(`auth ping unsupported provider: ${provider}`);
   }
   const oauthToken = await getFreshOAuthAccessTokenForProvider("anthropic");
   const envOauth = providerAuthToken("anthropic");
@@ -1390,7 +1581,10 @@ async function main() {
   if (!AgentCtor) throw new Error("@mariozechner/pi-agent-core did not export Agent");
 
   const [provider, modelId] = parseModelSpec(request.model);
-  const model = getModel(provider, modelId);
+  const model =
+    provider === "openai" || provider === "openai-codex"
+      ? { provider, id: modelId }
+      : getModel(provider, modelId);
   const { text, usage, errorMessage, truncated, stopReason } = await runAgent(
     AgentCtor,
     model,
