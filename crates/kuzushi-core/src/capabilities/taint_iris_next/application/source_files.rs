@@ -9,7 +9,7 @@ pub(crate) struct TaintIrisNextSourceFile {
 
 pub(crate) fn collect_taint_iris_next_source_files(
     root: &Path,
-    max_files: usize,
+    max_files: Option<usize>,
     max_bytes_per_file: usize,
 ) -> Result<Vec<TaintIrisNextSourceFile>> {
     let mut files = Vec::new();
@@ -26,11 +26,11 @@ pub(crate) fn collect_taint_iris_next_source_files(
 pub(crate) fn collect_taint_iris_next_source_files_inner(
     root: &Path,
     dir: &Path,
-    max_files: usize,
+    max_files: Option<usize>,
     max_bytes_per_file: usize,
     files: &mut Vec<TaintIrisNextSourceFile>,
 ) -> Result<()> {
-    if files.len() >= max_files {
+    if reached_walker_cap(files.len(), max_files) {
         return Ok(());
     }
     let Ok(read_dir) = fs::read_dir(dir) else {
@@ -39,7 +39,7 @@ pub(crate) fn collect_taint_iris_next_source_files_inner(
     let mut entries = read_dir.filter_map(|entry| entry.ok()).collect::<Vec<_>>();
     entries.sort_by_key(|entry| entry.path());
     for entry in entries {
-        if files.len() >= max_files {
+        if reached_walker_cap(files.len(), max_files) {
             break;
         }
         let path = entry.path();
@@ -83,8 +83,15 @@ pub(crate) fn collect_taint_iris_next_source_files_inner(
     Ok(())
 }
 
+fn reached_walker_cap(current: usize, max_files: Option<usize>) -> bool {
+    matches!(max_files, Some(cap) if current >= cap)
+}
+
 pub(crate) fn detect_taint_iris_next_languages(root: &Path) -> Result<Vec<String>> {
-    Ok(collect_taint_iris_next_source_files(root, 600, 1024)?
+    // Language detection only needs a representative sample; capping at 600
+    // files keeps the language-fingerprinting cheap on huge repos and never
+    // affects taint-hunt scope (which uses the unbounded walker below).
+    Ok(collect_taint_iris_next_source_files(root, Some(600), 1024)?
         .into_iter()
         .map(|file| file.language)
         .collect::<BTreeSet<_>>()

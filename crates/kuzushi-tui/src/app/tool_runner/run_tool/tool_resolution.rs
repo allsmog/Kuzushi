@@ -22,6 +22,15 @@ impl ShellApp {
         if module == "verify" && self.registry.resolve_tool("verify:finding").is_some() {
             return Some("verify:finding".to_string());
         }
+        if let Some(tool_name) = self
+            .registry
+            .modules()
+            .find(|entry| entry.metadata().id == *module)
+            .and_then(|entry| entry.tools().first())
+            .map(|tool| tool.name.clone())
+        {
+            return Some(tool_name);
+        }
         let prefix = format!("{module}:");
         self.registry
             .tools()

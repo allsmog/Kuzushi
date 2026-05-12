@@ -36,6 +36,8 @@ pub(crate) struct TaintIrisNextLinkedStory {
     pub(crate) sink_line: u32,
     pub(crate) shared_tokens: Vec<String>,
     pub(crate) rationale: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) callees: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

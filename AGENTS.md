@@ -51,6 +51,43 @@ registration stores module-owned `DagTool`s in `DagRegistry`, and workers call
 - `src/testing/index.ts` — `kuzushi/testing` mocks.
 - `schemas/module.manifest.schema.json` — published JSON schema.
 
+### Rust-native MCP servers (agent-callable)
+
+Kuzushi also ships three Rust MCP servers that the pi-agent-core bridge
+attaches as agent tools when a module asks for it:
+
+- `crates/kuzushi-mcp-treesitter` — `tree_sitter:node_at`,
+  `tree_sitter:query`, `tree_sitter:callers`. Pure-Rust, sub-10ms per
+  call. Verifies AST structure of a candidate without spawning anything.
+- `crates/kuzushi-mcp-joern` — `joern.taint_paths`, `joern.callers_of`,
+  `joern.method_at`, etc. Lazy-spawns `joern --server` on first call
+  under the MCP server's lifetime; honour `KUZUSHI_JOERN_CPG=<cpg.bin>`
+  to importCpg the project at spawn time, or set `JOERN_SERVER_URL` to
+  point at an operator-managed server. Schema includes regex examples
+  for `source`/`sink` so the agent doesn't have to guess.
+- `crates/kuzushi-mcp-codeql` — `codeql:flows_for_cwe`, `codeql:query`,
+  `codeql:db_info`. Wraps `codeql database analyze` with an in-process
+  result memo (same `(db, selector, limit)` returns instantly on
+  repeat). Set `KUZUSHI_CODEQL_PREWARM=1` to pre-compile common CWE
+  packs at MCP-server startup; set `KUZUSHI_CODEQL_CACHE_DIR=<path>` to
+  share the on-disk pack cache across kuzushi runs.
+
+The bridge wires these in when the request carries
+`toolPolicy.mcps === true` (set by `taint-iris-next:hunt` automatically
+via `AgentToolPolicy::with_mcps(true)`) or when the operator forces it
+with `KUZUSHI_AGENT_MCPS=1`. Useful env vars when debugging:
+
+- `KUZUSHI_BRIDGE_VERBOSE=1` — bridge stderr is drained on a background
+  thread and forwarded to the parent's stderr in real time.
+- `KUZUSHI_BRIDGE_LOG=<path>` — also append every bridge log line to
+  `<path>` (useful when stdout is being captured by Rust).
+- `KUZUSHI_MCP_TOOL_TIMEOUT_MS=<N>` — cap per-MCP-tool-call wall-clock
+  so a runaway joern/codeql query surfaces as a tool error instead of
+  hanging the agent loop.
+- `KUZUSHI_JOERN_PER_CWE_TIMEOUT_MS=<N>` — read by
+  `scripts/taint_iris_next_flows.sc` so one catastrophic CWE doesn't
+  deadlock the structural pass on a 187 MB postgres CPG.
+
 ### Load specifiers
 
 `parseModuleSpecifier()` supports `builtin:<id>`, `file://<abs-path>`,

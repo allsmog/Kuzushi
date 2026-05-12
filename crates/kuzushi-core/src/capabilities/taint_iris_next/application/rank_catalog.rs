@@ -93,6 +93,7 @@ pub(crate) fn rank_taint_iris_next_catalog(
                     .iter()
                     .map(|item| item.to_string())
                     .collect(),
+                regex_markers: Vec::new(),
                 score,
                 reasons,
             }

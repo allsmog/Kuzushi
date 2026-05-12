@@ -289,6 +289,7 @@ fn harvest_pipeline_with_mock_dispatch_writes_catalog_and_summary() {
         config: &config,
         workspace: Some(&workspace),
         findings_store: None,
+        trace: None,
     };
 
     // Canned ndiff responses: usable patterns for two CVE IDs, ok=false
@@ -430,6 +431,7 @@ fn harvest_with_regression_gate_validates_and_writes_entry() {
         config: &config,
         workspace: Some(&workspace),
         findings_store: None,
+        trace: None,
     };
 
     let dispatch = |name: &str,
@@ -544,6 +546,7 @@ fn harvest_with_regression_gate_rejects_non_splitting_pattern() {
         config: &config,
         workspace: Some(&workspace),
         findings_store: None,
+        trace: None,
     };
 
     let dispatch = |name: &str,

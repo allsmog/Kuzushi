@@ -149,6 +149,13 @@ pub struct AgentToolPolicy {
     pub profile: String,
     #[serde(default)]
     pub tools: Vec<String>,
+    /// If true, the bridge attaches the kuzushi MCP servers
+    /// (tree-sitter, joern, codeql) as agent tools alongside whatever
+    /// the `profile`/`tools` fields specify. This lets a module like
+    /// taint-iris-next opt every hunt into the MCP triangulation
+    /// surface without forcing the operator to set
+    /// `KUZUSHI_AGENT_MCPS=1` in their shell. The env var still works
+    /// as an override for ad-hoc operator runs.
     #[serde(default)]
     pub mcps: bool,
 }

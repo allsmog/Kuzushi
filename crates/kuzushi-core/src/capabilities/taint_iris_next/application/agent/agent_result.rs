@@ -37,18 +37,17 @@ pub(in crate::capabilities::taint_iris_next) fn normalized_taint_iris_next_agent
     } else {
         "valid-json".to_string()
     };
-    if let Some(result) = no_selection_taint_iris_next_result(
-        plan,
-        evidence,
-        &selections,
-        &findings,
-        &mut warnings,
-        &raw,
-        retry_count,
-        cost_usd,
-    ) {
-        return Ok(result);
-    }
+    // Deliberately *do not* substitute deterministic fallback findings here.
+    // The agent returned valid JSON — if it chose to emit no CWEs we treat
+    // that as a considered rejection of the linked-story heuristic, not a
+    // failure to triage. Synthesising "review candidates" from structural
+    // proximity would override that judgment with a noisier guess and
+    // double-bill the operator (e.g. opus-4-7 explicitly noting "TS slice
+    // is memory-safe" should not be silently re-flagged as CWE-190).
+    //
+    // Real agent failures (parse errors, timeouts, empty text) take the
+    // `invalid_taint_iris_next_agent_result` path in `agent_runtime.rs`,
+    // which keeps its own deterministic safety net for that case.
     if selections.is_empty() && !evidence.evidence.is_empty() {
         warnings.push(format!(
             "agent selected no CWEs from {} evidence row(s)",
@@ -71,46 +70,6 @@ pub(in crate::capabilities::taint_iris_next) fn normalized_taint_iris_next_agent
         parse_error: None,
         result_text_excerpt: None,
         warnings,
-        cost_usd,
-    })
-}
-
-pub(in crate::capabilities::taint_iris_next) fn no_selection_taint_iris_next_result(
-    plan: &TaintIrisNextPlan,
-    evidence: &TaintIrisNextEvidenceResult,
-    selections: &[Value],
-    findings: &[Finding],
-    warnings: &mut Vec<String>,
-    raw: &Value,
-    retry_count: usize,
-    cost_usd: f64,
-) -> Option<TaintIrisNextAgentResult> {
-    if !selections.is_empty() || !findings.is_empty() || evidence.linked_stories.is_empty() {
-        return None;
-    }
-    let (fallback_findings, fallback_selections, fallback_triage) =
-        deterministic_taint_iris_next_fallback(plan, evidence);
-    if fallback_findings.is_empty() {
-        return None;
-    }
-    warnings.push(format!(
-        "agent selected no CWEs; returning {} deterministic linked finding candidate(s) for review",
-        fallback_findings.len()
-    ));
-    Some(TaintIrisNextAgentResult {
-        agent_status: "no-selection-fallback".to_string(),
-        selected_cwes: fallback_selections,
-        findings: fallback_findings.clone(),
-        review_candidates: fallback_findings,
-        triage: fallback_triage.clone(),
-        triage_summary: summarize_taint_iris_next_triage(&fallback_triage),
-        outcome: "agent-no-selection".to_string(),
-        raw_output: raw.clone(),
-        structured_output_valid: true,
-        structured_output_retry_count: retry_count,
-        parse_error: None,
-        result_text_excerpt: None,
-        warnings: warnings.clone(),
         cost_usd,
     })
 }

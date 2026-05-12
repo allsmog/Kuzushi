@@ -11,8 +11,19 @@ pub(crate) struct TaintIrisNextRankedCatalogEntry {
     pub(crate) sink_signals: Vec<String>,
     pub(crate) sanitizer_signals: Vec<String>,
     pub(crate) structural_queries: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) regex_markers: Vec<TaintIrisNextRegexMarker>,
     pub(crate) score: i32,
     pub(crate) reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TaintIrisNextRegexMarker {
+    pub(crate) pattern: String,
+    pub(crate) kind: String,
+    pub(crate) languages: Vec<String>,
+    pub(crate) marker: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -66,6 +77,8 @@ pub(crate) struct TaintIrisNextPlan {
     pub(crate) backend: TaintIrisNextBackendChoice,
     pub(crate) max_budget_usd: Option<f64>,
     pub(crate) allow_deterministic_fallback: bool,
+    pub(crate) cwe_focus: Vec<String>,
+    pub(crate) discovered_signals: DiscoveredSignals,
 }
 
 #[derive(Debug, Clone, Serialize)]

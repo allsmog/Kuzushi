@@ -35,11 +35,6 @@ pub(crate) fn variant_module() -> BuiltinModule {
         "Lift exploit patterns from confirmed findings and hunt sibling variants.",
         vec![
             tool_with_options(
-                "variant:lift-pattern",
-                "Lift a reusable vulnerability pattern from a confirmed finding.",
-                vec![fingerprint_option(), model_option()],
-            ),
-            tool_with_options(
                 "variant:hunt",
                 "Hunt variants of a confirmed finding.",
                 vec![
@@ -63,6 +58,11 @@ pub(crate) fn variant_module() -> BuiltinModule {
                     .advanced(),
                     model_option(),
                 ],
+            ),
+            tool_with_options(
+                "variant:lift-pattern",
+                "Lift a reusable vulnerability pattern from a confirmed finding.",
+                vec![fingerprint_option(), model_option()],
             ),
         ],
         vec![dag("variant:hunt", "findings", &["variant:lift-pattern"])],

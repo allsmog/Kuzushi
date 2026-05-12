@@ -7,10 +7,8 @@ pub(crate) fn auth_ping_bridge_command(config: &kuzushi_core::V2Config) -> Vec<S
         .agent_bridge_command
         .clone()
         .unwrap_or_else(|| {
-            vec![
-                "node".to_string(),
-                "scripts/pi-agent-core-bridge.mjs".to_string(),
-            ]
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            kuzushi_openai::default_bridge_command(&cwd)
         })
 }
 
