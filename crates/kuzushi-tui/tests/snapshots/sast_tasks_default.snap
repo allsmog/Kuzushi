@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 137
 ---
-mode:shell | target:none | catalog | 0 findings | 35 mods
+mode:shell | target:none | catalog | 0 findings | 37 mods
 
  -- SAST TASKS ---------------------------------------------------------------------------------------------------------
 mode: auto + denylist
