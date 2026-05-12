@@ -7,6 +7,12 @@ pub struct UafHuntPersistedRun {
     pub run_id: String,
     #[serde(rename = "findingsDb")]
     pub findings_db: String,
+    /// Newline-delimited JSON transcript of the agent's tool-call loop.
+    /// Each line is one `LoopHistoryEntry` (assistant text, tool call,
+    /// tool result). Operators inspect this when a run hits the step
+    /// cap with no findings to see what the agent actually looked at.
+    #[serde(rename = "transcriptPath", skip_serializing_if = "Option::is_none")]
+    pub transcript_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

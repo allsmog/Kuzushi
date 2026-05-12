@@ -9,7 +9,11 @@ pub(crate) fn parse_uaf_hunt_input(input: &Value, target: &Path) -> Result<UafHu
     let compile_commands_path = resolve_compile_commands_path(input, target)?;
     let alloc_free_pairs = resolve_alloc_free_pairs(input)?;
     let max_findings = read_usize(input, &["maxFindings", "max_findings"], 30, 1).min(500);
-    let max_agent_steps = read_u32(input, &["maxAgentSteps", "max_agent_steps"], 60, 4).min(200);
+    // Default was 60; bumped to 120 after the first live run hit the cap
+    // at 85 steps with a single alloc/free pair on a 200-file C codebase.
+    // Tool-augmented hunts on real codebases routinely need 80-150 steps
+    // before the model converges on a structured Final.
+    let max_agent_steps = read_u32(input, &["maxAgentSteps", "max_agent_steps"], 120, 4).min(400);
     let clang_call_timeout_secs = read_u64(input, &["clangTimeoutSecs"], 60, 5).min(300);
     let model = input
         .get("model")

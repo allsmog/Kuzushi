@@ -5,6 +5,24 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::Duration;
 
+#[derive(Debug, Clone)]
+pub(crate) struct UnsupportedAdvisory {
+    pub(crate) method: String,
+    pub(crate) reason: String,
+    pub(crate) workaround: String,
+}
+
+impl UnsupportedAdvisory {
+    pub(crate) fn to_tool_result(&self) -> Value {
+        json!({
+            "unsupported": true,
+            "method": self.method,
+            "reason": self.reason,
+            "workaround": self.workaround,
+        })
+    }
+}
+
 /// A line-delimited JSON-RPC 2.0 client for the `kuzushi-mcp-clang`
 /// stdio server. The server's protocol is implemented in
 /// `kuzushi_mcp_common::server::serve_stdio` and accepts `initialize`,
@@ -235,4 +253,44 @@ fn which_kuzushi_mcp_clang() -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Re-shape an error from `ClangMcpClient::call_tool` into an
+/// `UnsupportedAdvisory` when it looks like an LSP "method not found"
+/// (JSON-RPC error code -32601). The toolbox handler then returns the
+/// advisory to the agent as a successful tool result so the agent sees
+/// a concrete workaround instead of a cryptic error and a wasted step.
+///
+/// Returns `None` for any error that isn't an unsupported-method error
+/// — the handler bubbles those up the normal `firstClangError` path.
+pub(crate) fn rewrite_unsupported_method_error(
+    clang_method: &str,
+    error: &anyhow::Error,
+) -> Option<UnsupportedAdvisory> {
+    let chain = format!("{error:#}");
+    let looks_unsupported = chain.contains("method not found")
+        || chain.contains("-32601");
+    if !looks_unsupported {
+        return None;
+    }
+    let advisory = match clang_method {
+        "clang.callees" => UnsupportedAdvisory {
+            method: clang_method.to_string(),
+            reason: "clangd `callHierarchy/outgoingCalls` is unimplemented in this clangd \
+                     build (typical for clangd 18 and earlier)."
+                .to_string(),
+            workaround: "Use `clang_definition` to jump to the function body, then `read_file` \
+                         on that range and identify call sites by reading the body. Or use \
+                         `grep` for specific callee names to confirm individual edges."
+                .to_string(),
+        },
+        other => UnsupportedAdvisory {
+            method: other.to_string(),
+            reason: "clangd reports this method as unimplemented.".to_string(),
+            workaround: "Substitute a structural pass: `grep` plus `read_file` and \
+                         `clang_definition`."
+                .to_string(),
+        },
+    };
+    Some(advisory)
 }
