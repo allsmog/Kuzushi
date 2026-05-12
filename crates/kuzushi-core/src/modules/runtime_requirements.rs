@@ -48,6 +48,7 @@ const RUNTIME_TOOL_NAMES: &[&str] = &[
     "threat-model:build",
     "tob:audit",
     "triage:run",
+    "uaf-hunt:hunt",
     "variant:hunt",
     "variant:lift-pattern",
     "vendor-assessment:assess",
@@ -104,6 +105,7 @@ mod tests {
             "full-mode:hunt",
             "deep-audit:run",
             "classifier-gate:score",
+            "uaf-hunt:hunt",
         ] {
             assert!(
                 tool_uses_agent_runtime(tool),

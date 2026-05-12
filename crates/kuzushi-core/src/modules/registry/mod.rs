@@ -21,6 +21,7 @@ use self::{
     verify_module, workspace_module, x_ray_module,
 };
 use crate::capabilities::systems_hunt::execute_systems_hunt_tool;
+use crate::capabilities::uaf_hunt::execute_uaf_hunt_tool;
 use crate::carlini_threat_hunt::run_carlini_threat_hunt;
 use crate::dep_hygiene::check_dependency_hygiene;
 use crate::findings::FindingListFilter;

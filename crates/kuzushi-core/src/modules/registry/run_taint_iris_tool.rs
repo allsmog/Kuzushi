@@ -35,6 +35,18 @@ pub(in crate::modules) fn dispatch_systems_hunt_tool(
     }
 }
 
+pub(in crate::modules) fn dispatch_uaf_hunt_tool(
+    name: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> ToolDispatchResult {
+    match name {
+        "uaf-hunt:hunt" => Some(execute_uaf_hunt_tool(name, input.clone(), ctx, runtime)),
+        _ => None,
+    }
+}
+
 pub(in crate::modules) fn dispatch_runtime_analysis_tool(
     name: &str,
     input: &Value,

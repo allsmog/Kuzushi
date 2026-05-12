@@ -39,6 +39,7 @@ pub(crate) const WORKSPACE_TOOL_PREFIXES: &[&str] = &[
     "variant:",
     "ndiff:",
     "systems-hunt:",
+    "uaf-hunt:",
 ];
 
 pub(crate) const WORKSPACE_TOOL_NAMES: &[&str] = &[
@@ -60,8 +61,13 @@ pub(crate) const WORKSPACE_TOOL_NAMES: &[&str] = &[
     "iac-scan:scan",
 ];
 
-pub(crate) const FINDING_STORE_TOOL_PREFIXES: &[&str] =
-    &["findings:", "chrome-rce:", "variant:", "systems-hunt:"];
+pub(crate) const FINDING_STORE_TOOL_PREFIXES: &[&str] = &[
+    "findings:",
+    "chrome-rce:",
+    "variant:",
+    "systems-hunt:",
+    "uaf-hunt:",
+];
 
 pub(crate) const FINDING_STORE_TOOL_NAMES: &[&str] = &[
     "triage:run",

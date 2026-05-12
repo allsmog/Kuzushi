@@ -34,6 +34,7 @@ pub(in crate::modules) use taint_iris_next::*;
 pub(in crate::modules) use threat_model_module::*;
 pub(in crate::modules) use triage::*;
 pub(in crate::modules) use triage_module::*;
+pub(in crate::modules) use uaf_hunt_module::*;
 pub(in crate::modules) use unsafe_clone_runtime_ref::*;
 pub(in crate::modules) use verify::*;
 pub(in crate::modules) use workspace_module::*;
@@ -78,6 +79,7 @@ mod run_smoke_next_step_tool;
 mod tests;
 mod threat_model_module;
 mod triage_module;
+mod uaf_hunt_module;
 mod unsafe_clone_runtime_ref;
 mod workspace_module;
 
