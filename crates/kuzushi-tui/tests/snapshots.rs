@@ -19,7 +19,15 @@ fn render_at_120(app: &mut ShellApp) -> String {
             line.time_secs = SNAPSHOT_LOG_TIME;
         }
     }
-    render_plain_app(app, SNAPSHOT_WIDTH)
+    strip_line_end_whitespace(&render_plain_app(app, SNAPSHOT_WIDTH))
+}
+
+fn strip_line_end_whitespace(output: &str) -> String {
+    output
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn fresh_app() -> ShellApp {

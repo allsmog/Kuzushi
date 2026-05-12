@@ -2920,11 +2920,12 @@ fn run_command_dispatches_taint_iris_next_through_pi_agent_core_bridge_and_persi
 
     assert_eq!(app.shell_view, ShellView::Activity);
     assert!(
-        app.log
-            .iter()
-            .any(|line| { line.prefix == "result" && line.body.contains("taint-iris-next:hunt") }),
-        "expected taint-iris-next:hunt result log, got {:?}",
-        app.log
+        app.log.iter().any(|line| {
+            line.prefix == "result"
+                && line.body.contains("Taint IRIS Next")
+                && line.body.contains("hunt complete")
+        }),
+        "expected Taint IRIS Next hunt result log"
     );
 
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();

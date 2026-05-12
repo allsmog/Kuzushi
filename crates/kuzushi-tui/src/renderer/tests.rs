@@ -269,8 +269,13 @@ fn renders_actionable_empty_states_at_80_columns() {
         let backend = TestBackend::new(80, 18);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
+        let runs_target = tempfile::tempdir().unwrap();
         let is_dfd = matches!(view, ShellView::Threat(ThreatView::Dfd));
+        let is_runs = matches!(view, ShellView::Runs);
         app.shell_view = view;
+        if is_runs {
+            app.target = Some(runs_target.path().to_path_buf());
+        }
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
