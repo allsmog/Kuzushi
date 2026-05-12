@@ -667,6 +667,7 @@ OUT
             failed_chunk_errors: Vec::new(),
             cost_usd: 0.0,
             dry_run: false,
+            first_chunk_error: None,
         };
 
         persist_full_mode_report(&ctx, &report).unwrap();

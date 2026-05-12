@@ -24,13 +24,25 @@ pub fn run_systems_hunt_report(
         if let Some(trace) = ctx.trace {
             let _ = trace
                 .step(
-                    "done",
+                    "refused",
                     "systems-hunt",
-                    "systems-hunt complete · no native surfaces detected",
+                    "systems-hunt refused · no native surfaces detected",
                 )
                 .emit();
         }
-        return empty_systems_hunt_report(&target, ctx);
+        anyhow::bail!(
+            "systems-hunt: no memory-safety surfaces detected under {}. \
+             gather_systems_context yielded 0 surfaces from max_files={} \
+             head_bytes={} max_surfaces={}. Likely causes: target has no \
+             C/C++/Rust source, or `maxFiles`/`headBytes` is too restrictive, \
+             or the joern/codeql augmentation backend errored silently. \
+             Re-run with larger inventory caps, or scope to a directory \
+             that contains systems-level code.",
+            target.display(),
+            options.max_files,
+            options.head_bytes,
+            options.max_surfaces,
+        );
     }
 
     let runtime = required_systems_runtime(runtime, "systems-hunt")?;
@@ -104,20 +116,6 @@ fn finalize_systems_hunt_report(
         findings,
         persisted,
         artifacts,
-        cost_usd: 0.0,
-    })
-}
-
-fn empty_systems_hunt_report(
-    target: &Path,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<SystemsHuntReport> {
-    Ok(SystemsHuntReport {
-        target: target.display().to_string(),
-        count: 0,
-        findings: Vec::new(),
-        persisted: persist_systems_findings(target, &[], ctx)?,
-        artifacts: Vec::new(),
         cost_usd: 0.0,
     })
 }

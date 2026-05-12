@@ -35,6 +35,52 @@ pub(in crate::modules) fn dispatch_systems_hunt_tool(
     }
 }
 
+pub(in crate::modules) fn dispatch_uaf_hunt_tool(
+    name: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> ToolDispatchResult {
+    match name {
+        "uaf-hunt:hunt" => Some(execute_uaf_hunt_tool(name, input.clone(), ctx, runtime)),
+        _ => None,
+    }
+}
+
+impl ModuleRegistry {
+    /// Threat-intel dispatch lives as a method (not a free function)
+    /// because the apply path re-enters the registry to invoke
+    /// sub-hunts. The closure passed to the capability is the
+    /// canonical tool router; recursion is bounded because the
+    /// `HuntKind` enum doesn't contain `threat-intel` as a valid
+    /// hunt target.
+    pub(in crate::modules) fn dispatch_threat_intel_tool(
+        &self,
+        name: &str,
+        input: &Value,
+        ctx: &ToolExecutionContext<'_>,
+        runtime: Option<&dyn AgentRuntime>,
+    ) -> ToolDispatchResult {
+        use crate::capabilities::threat_intel::execute_threat_intel_tool;
+        if !matches!(
+            name,
+            "threat-intel:list" | "threat-intel:apply" | "threat-intel:harvest"
+        ) {
+            return None;
+        }
+        let result = execute_threat_intel_tool(
+            name,
+            input.clone(),
+            ctx,
+            runtime,
+            |inner_name, inner_input, inner_ctx, inner_runtime| {
+                self.execute_tool_with_runtime(inner_name, inner_input, inner_ctx, inner_runtime)
+            },
+        );
+        Some(result)
+    }
+}
+
 pub(in crate::modules) fn dispatch_runtime_analysis_tool(
     name: &str,
     input: &Value,

@@ -32,13 +32,48 @@ pub fn run_carlini_threat_hunt_report(
         if let Some(trace) = ctx.trace {
             let _ = trace
                 .step(
-                    "done",
+                    "refused",
                     "run",
-                    "carlini-threat-hunt:run complete · no actors in threat model",
+                    "carlini-threat-hunt:run refused · no actors in threat model",
                 )
                 .emit();
         }
-        return empty_carlini_threat_hunt_report(&target, ctx);
+        anyhow::bail!(
+            "carlini-threat-hunt: threat model at {} has no actors to hunt. \
+             Expected at least one node with `type: external-entity` or with a \
+             trust zone matching untrusted/external/internet/public. Found {} \
+             total node(s). Re-run threat-model:build with a methodology that \
+             emits DFD actors, or hand-edit the threat-model artifact to \
+             declare external actors before re-running carlini.",
+            target.display(),
+            document
+                .pointer("/dfd/nodes")
+                .and_then(Value::as_array)
+                .map(|nodes| nodes.len())
+                .unwrap_or(0),
+        );
+    }
+    if actors.prioritized.is_empty() {
+        if let Some(trace) = ctx.trace {
+            let _ = trace
+                .step(
+                    "refused",
+                    "run",
+                    "carlini-threat-hunt:run refused · no high-priority actor threats",
+                )
+                .emit();
+        }
+        anyhow::bail!(
+            "carlini-threat-hunt: threat model at {} has {} actor(s) but no \
+             high/critical threats reference them. Either the impact/severity \
+             fields didn't match the expected enum (critical|high) and didn't \
+             match any high-severity keywords (arbitrary code execution, \
+             memory corruption, use-after-free, …), or no threat declared an \
+             `affectedNodeIds`/`targetElementIds` pointing at an actor. \
+             Re-run threat-model:build or hand-edit threat impact fields.",
+            target.display(),
+            actors.all_actors.len(),
+        );
     }
 
     let options = CarliniInput::from_tool_input(input, ctx, &target)?;
@@ -112,26 +147,6 @@ pub(crate) fn ensure_carlini_target_dir(target: &Path) -> Result<()> {
         );
     }
     Ok(())
-}
-
-pub(crate) fn empty_carlini_threat_hunt_report(
-    target: &Path,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<CarliniThreatHuntReport> {
-    Ok(CarliniThreatHuntReport {
-        target: target.display().to_string(),
-        count: 0,
-        actors: 0,
-        actor_runs: 0,
-        findings: Vec::new(),
-        persisted: persist_findings(target, &[], ctx)?,
-        kb_context: Some(ctx.artifact_knowledge_context(
-            target,
-            "carlini threat hunt actor flows threat model x-ray context",
-            5,
-        )),
-        cost_usd: 0.0,
-    })
 }
 
 pub(crate) fn require_carlini_runtime(

@@ -15,7 +15,11 @@ pub(crate) fn run_background_tool(
     } else {
         None
     };
-    let runtime = if tool_uses_agent_runtime_for(tool_name, &input) {
+    // Input-aware check: `sast:scan` skips the runtime in
+    // scanner-only mode (whitebox-static, no triage/verify/agentic
+    // sub-tasks). Name-only tools fall through to the allowlist. See
+    // `kuzushi_core::tool_needs_runtime`.
+    let runtime = if tool_needs_runtime(tool_name, &input) {
         Some(
             PiAgentCoreRuntime::from_config(
                 &config,
@@ -46,17 +50,11 @@ pub(crate) fn run_background_tool(
     registry.execute_tool_with_runtime(tool_name, input, &ctx, runtime_ref)
 }
 
-pub(crate) fn tool_uses_agent_runtime_for(tool_name: &str, input: &serde_json::Value) -> bool {
-    if tool_name == "sast:scan" {
-        return kuzushi_core::modules::wants_sast_runtime(input);
-    }
-    tool_uses_agent_runtime(tool_name)
-}
-
 pub(crate) fn tool_requires_findings_store(tool_name: &str) -> bool {
     tool_name.starts_with("findings:")
         || tool_name.starts_with("systems-hunt:")
         || tool_name.starts_with("chrome-rce:")
+        || tool_name.starts_with("uaf-hunt:")
         || matches!(
             tool_name,
             "triage:run"
@@ -86,13 +84,9 @@ pub(crate) fn tool_requires_findings_store(tool_name: &str) -> bool {
         )
 }
 
-pub(crate) fn tool_uses_agent_runtime(tool_name: &str) -> bool {
-    kuzushi_core::tool_requires_agent_runtime(tool_name)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::tool_uses_agent_runtime;
+    use kuzushi_core::tool_uses_agent_runtime;
 
     #[test]
     fn full_mode_hunt_requires_agent_runtime() {

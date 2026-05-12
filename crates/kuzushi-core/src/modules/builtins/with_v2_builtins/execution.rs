@@ -109,6 +109,18 @@ impl ModuleRegistry {
         if let Some(result) = dispatch_systems_hunt_tool(name, &input, ctx, runtime) {
             return result;
         }
+        if let Some(result) = dispatch_uaf_hunt_tool(name, &input, ctx, runtime) {
+            return result;
+        }
+        // threat-intel orchestrates other hunts, so its dispatch needs
+        // a callback into `self` to invoke them. We thread the
+        // re-entry through a closure that locks the recursion to one
+        // step (catalog entries cannot themselves point at
+        // `threat-intel:apply` — see `HuntKind` for the enumerated
+        // set of legal targets).
+        if let Some(result) = self.dispatch_threat_intel_tool(name, &input, ctx, runtime) {
+            return result;
+        }
         if let Some(result) = dispatch_runtime_analysis_tool(name, &input, ctx, runtime) {
             return result;
         }

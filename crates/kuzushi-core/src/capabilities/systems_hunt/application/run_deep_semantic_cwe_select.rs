@@ -66,7 +66,22 @@ pub(crate) fn run_deep_semantic_hunt_report(
     let cwes = selected_deep_semantic_cwes(input, ctx, runtime, &options)?;
 
     if cwes.is_empty() {
-        return empty_deep_semantic_hunt_report(&target, ctx);
+        // Was a silent `Ok(empty_report)` — the operator had no way to
+        // tell whether (a) the model legitimately found no CWEs worth
+        // hunting, (b) the cwe-select agent returned malformed JSON and
+        // the inner Result got `.unwrap_or_default()`-ed, or (c) the
+        // runtime errored and the fallback path swallowed it. Bail
+        // loudly with the resolved options so the operator can see
+        // what cap was in effect.
+        anyhow::bail!(
+            "systems-hunt:deep-semantic-hunt: CWE selection returned 0 \
+             classes for target {}. The deep-semantic agent either \
+             produced no candidates or its response failed to parse. \
+             Re-run with an explicit `cwes` input (array of CWE strings) \
+             to bypass selection, or raise `maxCweClasses` (currently {}).",
+            target.display(),
+            options.max_cwe_classes,
+        );
     }
 
     let _llm_scope = ctx.trace.map(|trace| {
@@ -101,7 +116,7 @@ pub(crate) fn selected_deep_semantic_cwes(
 ) -> Result<Vec<DeepSemanticCweSelection>> {
     let cwes = match cwes_from_input(input) {
         Some(cwes) => cwes,
-        None => fallback_deep_semantic_cwes(input, ctx, runtime),
+        None => fallback_deep_semantic_cwes(input, ctx, runtime)?,
     };
     Ok(cwes.into_iter().take(options.max_cwe_classes).collect())
 }
@@ -110,22 +125,14 @@ pub(crate) fn fallback_deep_semantic_cwes(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: &dyn AgentRuntime,
-) -> Vec<DeepSemanticCweSelection> {
-    run_deep_semantic_cwe_select(input, ctx, Some(runtime))
-        .map(|output| output.cwes)
-        .unwrap_or_default()
-}
-
-pub(crate) fn empty_deep_semantic_hunt_report(
-    target: &Path,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<SystemsHuntReport> {
-    Ok(SystemsHuntReport {
-        target: target.display().to_string(),
-        count: 0,
-        findings: Vec::new(),
-        persisted: persist_systems_findings(target, &[], ctx)?,
-        artifacts: Vec::new(),
-        cost_usd: 0.0,
-    })
+) -> Result<Vec<DeepSemanticCweSelection>> {
+    // Used to be `.unwrap_or_default()` — any failure inside
+    // `run_deep_semantic_cwe_select` (bridge crash, structured-JSON
+    // contract failure, model 429, parse error) silently produced an
+    // empty Vec, which the caller turned into a 0-finding success.
+    // Surface the underlying cause so the operator can fix it instead
+    // of staring at "0 findings, ok: true".
+    let output = run_deep_semantic_cwe_select(input, ctx, Some(runtime))
+        .context("systems-hunt:deep-semantic-cwe-select failed; cannot fall back to empty CWE list because that hides agent/bridge errors")?;
+    Ok(output.cwes)
 }

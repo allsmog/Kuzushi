@@ -27,11 +27,17 @@ import { mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 // Registered generators. Add new ones here in alphabetical order.
 import configJsonSchema from "./generators/config-json-schema.js";
-import dbSchemaSql from "./generators/db-schema-sql.js";
+// `db-schema-sql` was intentionally dropped from the registry: its
+// implementation imports `../../../src/migrations/index.js`, but the
+// migration runtime moved to Rust (`crates/kuzushi-core/.../persistence/`).
+// The generator stub still sits in `generators/db-schema-sql.ts` as a
+// reference for the new Rust-driven port; re-register it once the SQL
+// snapshot has a Rust source-of-truth. See PR #60 for the cleanup.
+// import dbSchemaSql from "./generators/db-schema-sql.js";
 import llmIoJsonSchemas from "./generators/llm-io-json-schemas.js";
 import type { Generator } from "./types.js";
 
-const generators: Generator[] = [configJsonSchema, dbSchemaSql, llmIoJsonSchemas];
+const generators: Generator[] = [configJsonSchema, llmIoJsonSchemas];
 
 const REPO_ROOT = resolve(new URL(".", import.meta.url).pathname, "../..");
 const DEFAULT_OUT_DIR = resolve(REPO_ROOT, "generated");

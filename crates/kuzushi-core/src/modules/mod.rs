@@ -31,9 +31,11 @@ use serde_json::{json, Value};
 pub(in crate::modules) use support::*;
 pub(in crate::modules) use taint_iris::*;
 pub(in crate::modules) use taint_iris_next::*;
+pub(in crate::modules) use threat_intel_module::*;
 pub(in crate::modules) use threat_model_module::*;
 pub(in crate::modules) use triage::*;
 pub(in crate::modules) use triage_module::*;
+pub(in crate::modules) use uaf_hunt_module::*;
 pub(in crate::modules) use unsafe_clone_runtime_ref::*;
 pub(in crate::modules) use verify::*;
 pub(in crate::modules) use workspace_module::*;
@@ -53,6 +55,7 @@ mod plugin_adapters;
 mod plugin_resolution;
 mod prompt_armor;
 mod registry;
+mod runtime_requirements;
 mod sast_pipeline;
 mod sast_run;
 mod support;
@@ -73,13 +76,13 @@ mod resolve_tool_model;
 mod router_show_tool;
 mod run_deep_audit_tool;
 mod run_smoke_next_step_tool;
-mod runtime_tool_policy;
 #[cfg(test)]
 mod tests;
+mod threat_intel_module;
 mod threat_model_module;
 mod triage_module;
+mod uaf_hunt_module;
 mod unsafe_clone_runtime_ref;
-mod wants_sast_runtime;
 mod workspace_module;
 
 pub use agentic_sast::{AgenticSastPersistedRun, AgenticSastReport};
@@ -89,5 +92,7 @@ pub use contracts::{
     ToolDescriptor,
 };
 pub use registry::ModuleRegistry;
-pub use runtime_tool_policy::{tool_requires_agent_runtime, RUNTIME_TOOL_NAMES};
-pub use wants_sast_runtime::wants_sast_runtime;
+pub use runtime_requirements::{
+    agent_runtime_tool_names, tool_needs_runtime, tool_requires_agent_runtime,
+    tool_uses_agent_runtime, wants_sast_runtime, RUNTIME_TOOL_NAMES,
+};

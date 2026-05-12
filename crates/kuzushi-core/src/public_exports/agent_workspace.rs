@@ -23,8 +23,9 @@ pub use crate::config::{
 };
 pub use crate::events::{CoreEvent, EventSink, InMemoryEventSink, ScanProgress};
 pub use crate::modules::{
-    tool_requires_agent_runtime, AgenticSastPersistedRun, AgenticSastReport, BuiltinModule,
-    ModuleMetadata, ModuleRegistry, ToolDescriptor, RUNTIME_TOOL_NAMES,
+    agent_runtime_tool_names, tool_needs_runtime, tool_requires_agent_runtime,
+    tool_uses_agent_runtime, wants_sast_runtime, AgenticSastPersistedRun, AgenticSastReport,
+    BuiltinModule, ModuleMetadata, ModuleRegistry, ToolDescriptor, RUNTIME_TOOL_NAMES,
 };
 pub use crate::options::{OptionScope, OptionTarget, ToolOptionStore};
 pub use crate::repository_inventory::{

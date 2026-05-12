@@ -1,0 +1,180 @@
+# Hand-curated threat-intel catalog for Redis. Each entry maps one
+# (or one cluster of) historical high/critical Redis CVE(s) onto an
+# existing native hunt module.
+#
+# Provenance: hand-authored 2026-05-12 as the day-1 prototype before
+# the `threat-intel:harvest` automated generator lands. CVE IDs and
+# patch references are intended as architectural examples — operators
+# MUST validate each entry against the upstream advisory and the
+# linked fix commit before promoting it from `provenance:
+# "hand-curated"` to a trusted catalog. The catalog format itself
+# (schema, dispatch shape, per-hunt subtables) is the stable artefact
+# of this commit; the entries are exemplars.
+#
+# Drop this file at <target>/.kuzushi/catalogs/redis-curated.toml and
+# run:
+#   kuzushi --target . run threat-intel:list
+#   kuzushi --target . run threat-intel:apply --input '{"dryRun":true}'
+#
+# `dryRun=true` (the default) produces the dispatch plan without
+# spending agent budget. Re-run with `{"dryRun":false}` to invoke each
+# hunt for real.
+
+schema_version = "1"
+
+# -----------------------------------------------------------------
+# Entry 1: integer overflow → undersized heap allocation, same
+# family as F-0010 (verified by our deep-audit pass).
+# -----------------------------------------------------------------
+[[entry]]
+id = "redis-int-overflow-stream-count"
+cves = ["CVE-2022-31144"]
+title = "Stream command integer overflow in count argument"
+cwe = "CWE-190"
+severity = "high"
+provenance = "hand-curated 2026-05-12; verify against upstream advisory"
+source_repo = "https://github.com/redis/redis"
+hunt = "taint-iris-next"
+
+[entry.taint_iris_next]
+taint_class = "integer-overflow"
+source_signals = [
+    "RESP integer parsed via getLongFromObjectOrReply",
+    "argv[N] count argument",
+    "Stream entry count from RESP",
+]
+sink_signals = [
+    "zmalloc(count * sizeof(...))",
+    "zcalloc(count * stride)",
+    "streamID array allocation",
+    "memcpy(dst, src, count * stride)",
+]
+sanitizer_signals = [
+    "count bounds check",
+    "STREAM_LISTPACK_MAX_PRE_ALLOCATE",
+    "if (count > LIMIT) addReplyError",
+]
+structural_queries = ["XAUTOCLAIM", "XADD", "streamID *", "consumerCreate"]
+affected_files = ["src/t_stream.c"]
+
+# -----------------------------------------------------------------
+# Entry 2: Lua sandbox stack buffer overflow. Bit-string handling
+# in the Lua struct library was the canonical attack surface.
+# -----------------------------------------------------------------
+[[entry]]
+id = "redis-lua-bit-lib-overflow"
+cves = ["CVE-2024-31449"]
+title = "Lua bit_lib stack buffer overflow"
+cwe = "CWE-122"
+severity = "critical"
+provenance = "hand-curated 2026-05-12; verify against upstream advisory"
+hunt = "taint-iris-next"
+
+[entry.taint_iris_next]
+taint_class = "heap-buffer-overflow"
+source_signals = [
+    "lua_tolstring",
+    "Lua-controlled bit-string argument",
+    "lua bit_lib argument",
+]
+sink_signals = [
+    "memcpy in lua_struct",
+    "buf_format format-string traversal",
+    "bitpack memcpy without length check",
+]
+sanitizer_signals = [
+    "bit-string length bound",
+    "format-string length check",
+    "LUAL_BUFFERSIZE bound",
+]
+structural_queries = ["lua_struct", "bit_lib", "bitop_field", "luaB_bit"]
+affected_files = ["deps/lua/src/struct.c", "src/script_lua.c"]
+
+# -----------------------------------------------------------------
+# Entry 3: Use-after-free in Lua client lifecycle. Dispatches to
+# the new uaf-hunt module — the catalog's first live-dispatchable
+# entry.
+# -----------------------------------------------------------------
+[[entry]]
+id = "redis-lua-client-uaf"
+cves = ["CVE-2025-49844"]
+title = "Use-after-free in Lua client lifecycle (RediShell)"
+cwe = "CWE-416"
+severity = "critical"
+provenance = "hand-curated 2026-05-12; verify against upstream advisory"
+hunt = "uaf-hunt"
+
+[entry.uaf_hunt]
+alloc_free_pairs = [
+    { alloc = "createClient", free = "freeClient" },
+    { alloc = "scriptingInit", free = "scriptingRelease" },
+    { alloc = "luaCreateFunction", free = "luaDeleteFunction" },
+]
+max_findings = 8
+max_agent_steps = 150
+
+# -----------------------------------------------------------------
+# Entry 4: ACL bypass on the COPY command. Authorization-class
+# issue rather than memory safety; included to show the catalog
+# spans CWE families.
+# -----------------------------------------------------------------
+[[entry]]
+id = "redis-copy-acl-bypass"
+cves = ["CVE-2023-41053"]
+title = "COPY command bypassed ACL key permissions"
+cwe = "CWE-862"
+severity = "high"
+provenance = "hand-curated 2026-05-12; verify against upstream advisory"
+hunt = "taint-iris-next"
+
+[entry.taint_iris_next]
+taint_class = "missing-authorization"
+source_signals = [
+    "client command dispatch",
+    "argv[0] = COPY",
+    "lookupCommandLogic returning copyCommand",
+]
+sink_signals = [
+    "dbAsyncDelete",
+    "dbAdd without prior aclCheckCommandPerm",
+    "lookupKeyWrite without ACL check",
+]
+sanitizer_signals = [
+    "ACLCheckAllPerm",
+    "aclCheckCommandPerm",
+    "ACL_KEY_PERMISSION",
+]
+structural_queries = ["copyCommand", "ACL_KEY_NEEDS"]
+affected_files = ["src/db.c"]
+
+# -----------------------------------------------------------------
+# Entry 5: HyperLogLog integer overflow → heap overflow.
+# -----------------------------------------------------------------
+[[entry]]
+id = "redis-hll-heap-overflow"
+cves = ["CVE-2025-32023"]
+title = "HyperLogLog cardinality counter integer overflow → heap overflow"
+cwe = "CWE-122"
+severity = "critical"
+provenance = "hand-curated 2026-05-12; verify against upstream advisory"
+hunt = "taint-iris-next"
+
+[entry.taint_iris_next]
+taint_class = "heap-buffer-overflow"
+source_signals = [
+    "HLL header count field",
+    "PFCOUNT/PFADD untrusted register index",
+    "RESP-controlled HLL precision",
+]
+sink_signals = [
+    "hllSparseToDense buffer copy",
+    "memcpy of HLL register array",
+    "hllSparseAdd allocation",
+]
+sanitizer_signals = [
+    "HLL_DENSE_SIZE bound check",
+    "isHLLObjectOrReply",
+    "hll-> precision range check",
+]
+structural_queries = ["hllSparseToDense", "hllSparseAdd", "HLL_DENSE_SIZE"]
+affected_files = ["src/hyperloglog.c"]

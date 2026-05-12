@@ -38,6 +38,7 @@ fn dispatch_full_mode_chunks(
     let mut failed = 0u32;
     let mut failed_chunk_errors = Vec::new();
     let mut cost = 0.0f64;
+    let mut first_chunk_error: Option<String> = None;
 
     for chunk in &plan.chunks {
         if let Some(ids) = &cfg.failed_chunk_ids {
@@ -53,11 +54,15 @@ fn dispatch_full_mode_chunks(
             all_findings.extend(chunk_result.findings);
         } else {
             failed += 1;
+            let reason = chunk_result
+                .error
+                .unwrap_or_else(|| "unknown chunk failure".to_string());
+            if first_chunk_error.is_none() {
+                first_chunk_error = Some(reason.clone());
+            }
             failed_chunk_errors.push(FailedChunkError {
                 chunk_id: chunk.id,
-                reason: chunk_result
-                    .error
-                    .unwrap_or_else(|| "unknown chunk failure".to_string()),
+                reason,
             });
         }
     }
@@ -70,5 +75,6 @@ fn dispatch_full_mode_chunks(
         failed_chunk_errors,
         cost_usd: cost,
         dry_run: false,
+        first_chunk_error,
     })
 }
