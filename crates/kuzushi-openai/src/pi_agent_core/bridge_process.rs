@@ -68,8 +68,24 @@ fn write_bridge_request<T: Serialize>(
         .with_context(|| format!("could not open {label} stdin"))?;
     let body =
         serde_json::to_vec(request).with_context(|| format!("could not encode {label} request"))?;
-    stdin.write_all(&body)?;
-    Ok(())
+    match stdin.write_all(&body) {
+        Ok(()) => Ok(()),
+        // `BrokenPipe` here means the bridge subprocess closed its stdin
+        // (or exited entirely) before we finished writing the request.
+        // That's a *normal* outcome for bridges that decided to short-
+        // circuit — e.g. they emit an error JSON and exit 1 without ever
+        // reading stdin, which is exactly what
+        // `tests::next_step_bridge_surfaces_error_payload` and
+        // `tests::bridge_failure_json_is_returned_as_actionable_error`
+        // do. Before this carve-out the EPIPE propagated as a raw
+        // `broken pipe` IO error with no label, and the tests's
+        // assertions failed under parallel load because the unrelated
+        // OS error obscured the actual bridge response. Drop EPIPE
+        // here and let `wait_with_output` collect the bridge's already-
+        // emitted stdout.
+        Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        Err(err) => Err(err).with_context(|| format!("could not write {label} stdin request body")),
+    }
 }
 
 pub(crate) fn default_bridge_command(source_root: &Path) -> Vec<String> {

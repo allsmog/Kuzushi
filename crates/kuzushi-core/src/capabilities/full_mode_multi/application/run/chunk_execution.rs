@@ -13,6 +13,9 @@ pub(super) struct FullModeChunkResult {
     pub(super) succeeded: bool,
     pub(super) findings: Vec<Finding>,
     pub(super) cost_usd: f64,
+    /// Full anyhow chain string for a failed chunk. `None` for successes.
+    /// The dispatcher keeps the first one and surfaces it to the operator
+    /// so we don't repeat the "27 chunks failed, no diagnostic info" trap.
     pub(super) error: Option<String>,
 }
 
@@ -121,7 +124,11 @@ fn chunk_result_from_query(result: Result<Vec<Finding>>, actual_cost: f64) -> Fu
             succeeded: false,
             findings: Vec::new(),
             cost_usd: 0.0,
-            error: Some(error.to_string()),
+            // `{:#}` walks the full anyhow chain so the dispatcher's
+            // operator-facing summary keeps the bridge / provider cause
+            // (e.g. "Anthropic API 429" or "Cannot find package
+            // @mariozechner/pi-agent-core") instead of dropping it.
+            error: Some(format!("{error:#}")),
         },
     }
 }

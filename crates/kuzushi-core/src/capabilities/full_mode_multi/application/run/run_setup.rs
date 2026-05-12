@@ -16,6 +16,7 @@ pub(super) fn dry_run_report(plan: FullModePlan) -> FullModeReport {
         failed_chunk_errors: Vec::new(),
         cost_usd: 0.0,
         dry_run: true,
+        first_chunk_error: None,
     }
 }
 

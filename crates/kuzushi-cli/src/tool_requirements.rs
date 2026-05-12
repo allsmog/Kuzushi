@@ -1,6 +1,5 @@
 use anyhow::Result;
-use kuzushi_core::modules::wants_sast_runtime;
-use kuzushi_core::{tool_requires_agent_runtime, WorkspaceTarget};
+use kuzushi_core::WorkspaceTarget;
 use std::path::Path;
 
 pub(crate) fn reject_shell_only_run_dot(tool: &str) -> Result<()> {
@@ -39,6 +38,8 @@ pub(crate) const WORKSPACE_TOOL_PREFIXES: &[&str] = &[
     "variant:",
     "ndiff:",
     "systems-hunt:",
+    "threat-intel:",
+    "uaf-hunt:",
 ];
 
 pub(crate) const WORKSPACE_TOOL_NAMES: &[&str] = &[
@@ -60,8 +61,13 @@ pub(crate) const WORKSPACE_TOOL_NAMES: &[&str] = &[
     "iac-scan:scan",
 ];
 
-pub(crate) const FINDING_STORE_TOOL_PREFIXES: &[&str] =
-    &["findings:", "chrome-rce:", "variant:", "systems-hunt:"];
+pub(crate) const FINDING_STORE_TOOL_PREFIXES: &[&str] = &[
+    "findings:",
+    "chrome-rce:",
+    "variant:",
+    "systems-hunt:",
+    "uaf-hunt:",
+];
 
 pub(crate) const FINDING_STORE_TOOL_NAMES: &[&str] = &[
     "triage:run",
@@ -97,8 +103,11 @@ pub(crate) fn tool_needs_finding_store(tool: &str) -> bool {
         || has_known_name(tool, FINDING_STORE_TOOL_NAMES)
 }
 
+/// Whether `kuzushi run <tool>` needs to construct an agent runtime
+/// before dispatch. Thin re-export of `kuzushi_core::tool_needs_runtime`
+/// — the canonical name + input-aware combiner shared with the shell.
 pub(crate) fn tool_needs_runtime(tool: &str, input: &serde_json::Value) -> bool {
-    tool_requires_agent_runtime(tool) || tool == "sast:scan" && wants_sast_runtime(input)
+    kuzushi_core::tool_needs_runtime(tool, input)
 }
 
 pub(crate) fn has_known_prefix(tool: &str, prefixes: &[&str]) -> bool {
