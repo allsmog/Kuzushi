@@ -45,6 +45,7 @@ const RUNTIME_TOOL_NAMES: &[&str] = &[
     "systems-hunt:systems-trigger-synth",
     "taint-iris-next:hunt",
     "taint-iris:hunt",
+    "threat-intel:apply",
     "threat-model:build",
     "tob:audit",
     "triage:run",

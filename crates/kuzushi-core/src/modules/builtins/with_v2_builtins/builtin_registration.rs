@@ -21,6 +21,7 @@ impl ModuleRegistry {
         registry.register(taint_iris_next_module());
         registry.register(systems_hunt_module());
         registry.register(uaf_hunt_module());
+        registry.register(threat_intel_module());
         registry.register(triage_module());
         registry.register(verify_module());
         registry.register(patch_module());
