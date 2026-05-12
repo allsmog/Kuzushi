@@ -397,8 +397,41 @@ fn string_literal_inner_text(node: Node<'_>, src: &[u8]) -> String {
 }
 
 fn preceding_window_uppercase(fmt_upper: &str, byte_offset: usize, window: usize) -> String {
-    let start = byte_offset.saturating_sub(window);
-    fmt_upper[start..byte_offset].to_string()
+    // The format string can contain multi-byte UTF-8 sequences
+    // (emoji, accented chars in error messages, etc.). Slicing by
+    // raw byte offset risks landing mid-codepoint and panicking
+    // with `byte index N is not a char boundary`. Walk back to
+    // the nearest char boundary at-or-before the requested offset,
+    // and to the boundary at-or-after the requested start. The
+    // SQL-keyword check is ASCII-only so dropping a few leading
+    // bytes is harmless.
+    let bytes = fmt_upper.as_bytes();
+    let safe_end = clamp_to_char_boundary_left(bytes, byte_offset.min(bytes.len()));
+    let raw_start = safe_end.saturating_sub(window);
+    let safe_start = clamp_to_char_boundary_right(bytes, raw_start);
+    if safe_start >= safe_end {
+        return String::new();
+    }
+    fmt_upper[safe_start..safe_end].to_string()
+}
+
+/// Move left until the byte at `idx` is the start of a UTF-8
+/// codepoint (continuation bytes have the form 10xxxxxx).
+fn clamp_to_char_boundary_left(bytes: &[u8], mut idx: usize) -> usize {
+    while idx > 0 && idx < bytes.len() && (bytes[idx] & 0b1100_0000) == 0b1000_0000 {
+        idx -= 1;
+    }
+    idx
+}
+
+/// Move right until the byte at `idx` is the start of a UTF-8
+/// codepoint. Useful when the window-start raw offset lands mid-
+/// codepoint.
+fn clamp_to_char_boundary_right(bytes: &[u8], mut idx: usize) -> usize {
+    while idx < bytes.len() && (bytes[idx] & 0b1100_0000) == 0b1000_0000 {
+        idx += 1;
+    }
+    idx
 }
 
 fn identifier_keyword_hit(preceding_window_upper: &str) -> Option<String> {
@@ -716,6 +749,25 @@ void f(void) { appendStringInfo(&buf, "CLOSE %s", curname); }
         let candidates =
             candidates_from_identifier_injection_matches(&matches, &["CWE-89".to_string()]);
         assert_eq!(candidates.len(), 1);
+    }
+
+    #[test]
+    fn handles_utf8_in_format_string_without_panicking() {
+        // Regression for the llama.cpp panic: format strings can
+        // contain multi-byte UTF-8 (emoji, accented chars in
+        // error messages). The detector must not panic on these
+        // when slicing the 32-byte preceding window.
+        let (temp, files) = fixture_file(
+            "emoji.c",
+            r#"
+void f(void) {
+    // U+2728 (sparkles) + U+1F680 (rocket) + arbitrary identifier %s
+    appendStringInfo(&buf, "✨ working 🚀 DECLARE %s CURSOR FOR SELECT 1", curname);
+}
+"#,
+        );
+        // Must not panic. May or may not flag — both are fine.
+        let _ = detect_identifier_injection_in_target(temp.path(), &files);
     }
 
     #[test]
