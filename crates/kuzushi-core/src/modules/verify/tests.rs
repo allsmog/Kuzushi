@@ -15,6 +15,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let response = run_verify_exploit(json!({"fingerprint": "missing"}), &ctx).unwrap();

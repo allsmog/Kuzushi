@@ -14,6 +14,20 @@ pub(crate) fn run_plugin_finding_adapter(
             target.display()
         );
     }
+    let verb = spec
+        .tool_name
+        .split_once(':')
+        .map(|(_, v)| v)
+        .unwrap_or("audit");
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                verb,
+                format!("{} start · target={}", spec.tool_name, target.display()),
+            )
+            .emit();
+    }
     let plugin_root = resolve_required_plugin_root(&input, spec)?;
     let runtime = runtime.context(format!(
         "{} requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
@@ -25,6 +39,15 @@ pub(crate) fn run_plugin_finding_adapter(
             .unwrap_or(50)
             .min(200);
     let inventory = collect_agentic_repo_inventory(&target, 100, 4096)?;
+    // Phase scope so the plugin's LLM round-trip surfaces under
+    // `skill-pick · audit-loop` (or seed-gen · attack-loop · judge for
+    // prompt-armor; similar shape for shinsa) in the feed.
+    let _audit_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step("reasoning", verb, "skill-pick · audit-loop")
+            .emit();
+        trace.parent_scope(phase)
+    });
     let raw = query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
@@ -39,6 +62,7 @@ pub(crate) fn run_plugin_finding_adapter(
         StructuredJsonContract::new(spec.tool_name, "PluginAdapterFindings", findings_schema()),
         require_json_object,
     )?;
+    drop(_audit_scope);
     let findings = normalize_agent_json_findings(raw, &target, spec.tool_slug, max_findings)?;
     let persisted = persist_tool_findings(
         spec.tool_slug,
@@ -47,6 +71,15 @@ pub(crate) fn run_plugin_finding_adapter(
         ctx.workspace,
         ctx.findings_store,
     )?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                verb,
+                format!("{} complete · {} findings", spec.tool_name, findings.len()),
+            )
+            .emit();
+    }
     Ok(json!({
         "ok": true,
         "output": render_generic_findings_output(spec.tool_name, &target, &findings, &persisted),

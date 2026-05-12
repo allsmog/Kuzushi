@@ -9,19 +9,86 @@ pub(crate) fn run_taint_iris_report(
     let options = TaintIrisInput::from_tool_input(input, &target)?;
     let runtime = require_taint_iris_runtime(runtime)?;
     let model = require_taint_iris_model(input, ctx)?;
+    let parent_step = ctx.trace.map(|trace| {
+        trace
+            .step(
+                "tool",
+                "hunt",
+                format!("taint-iris:hunt start · target={}", target.display()),
+            )
+            .emit()
+    });
 
+    // Phase scope so the cwe-select LLM call lands as a child of the
+    // tool's start row in the feed.
+    let _cwe_scope = match (ctx.trace, parent_step) {
+        (Some(trace), Some(parent)) => {
+            let phase = trace
+                .child(parent)
+                .step("reasoning", "hunt", "cwe-select")
+                .emit();
+            Some(trace.parent_scope(phase))
+        }
+        _ => None,
+    };
     let cwes = selected_taint_iris_cwes(input, &target, runtime, &model, options.max_cwes)?;
+    drop(_cwe_scope);
+    if let (Some(trace), Some(parent)) = (ctx.trace, parent_step) {
+        let _ = trace
+            .child(parent)
+            .step(
+                "reasoning",
+                "hunt",
+                format!("cwe-select · {} CWE classes selected", cwes.len()),
+            )
+            .emit();
+    }
 
     if cwes.is_empty() {
+        if let Some(trace) = ctx.trace {
+            let _ = trace
+                .step(
+                    "done",
+                    "hunt",
+                    "taint-iris:hunt complete · no CWEs selected",
+                )
+                .emit();
+        }
         return empty_taint_iris_report(&target, cwes, ctx);
     }
 
+    // Phase scope so the agent's taint-trace round-trips appear under
+    // taint-trace in the feed.
+    let _trace_scope = match (ctx.trace, parent_step) {
+        (Some(trace), Some(parent)) => {
+            let phase = trace
+                .child(parent)
+                .step(
+                    "reasoning",
+                    "hunt",
+                    format!("taint-trace · {} CWE classes", cwes.len()),
+                )
+                .emit();
+            Some(trace.parent_scope(phase))
+        }
+        _ => None,
+    };
     let raw = query_taint_iris_agent(input, &target, ctx, runtime, &model, &cwes, &options)?;
+    drop(_trace_scope);
     let mut findings = normalize_taint_iris_findings(raw, &target, options.max_findings)?;
     if whitebox_static_profile_requested(input)? {
         mark_whitebox_static_findings(&mut findings, StaticProofState::SourceSinkLinked)?;
     }
     let persisted = persist_taint_iris_findings(&target, &findings, ctx)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "hunt",
+                format!("taint-iris:hunt complete · {} findings", findings.len()),
+            )
+            .emit();
+    }
 
     Ok(taint_iris_report(&target, cwes, findings, persisted, None))
 }

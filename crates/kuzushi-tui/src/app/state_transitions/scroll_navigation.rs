@@ -118,6 +118,7 @@ impl ShellApp {
             | ShellView::Runs
             | ShellView::Replay(_)
             | ShellView::Trace(_)
+            | ShellView::Activity
             | ShellView::SastTasks
             | ShellView::Context
             | ShellView::Workspace

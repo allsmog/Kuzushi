@@ -34,6 +34,7 @@ pub(crate) const COMMAND_HANDLERS: &[CommandHandler] = &[
     handle_since_command,
     handle_replay_command,
     handle_trace_command,
+    handle_activity_command,
     handle_plan_command,
     handle_plan_apply_command,
     handle_plan_discard_command,

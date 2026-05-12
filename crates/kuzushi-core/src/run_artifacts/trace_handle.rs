@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -48,6 +49,10 @@ struct TraceHandleInner {
 impl TraceHandle {
     pub fn new(sink: Arc<dyn TraceSink>) -> Self {
         Self::with_counter(sink, 0)
+    }
+
+    pub fn with_initial_step_number(sink: Arc<dyn TraceSink>, initial_step_number: usize) -> Self {
+        Self::with_counter(sink, initial_step_number)
     }
 
     fn with_counter(sink: Arc<dyn TraceSink>, initial_step_number: usize) -> Self {
@@ -102,7 +107,7 @@ impl TraceHandle {
             .with_verb(verb)
             .with_started_at_ms(now_unix_ms());
         if let Some(module_id) = &self.module_id {
-            step.module_id = Some(module_id.to_string());
+            step.module_id = Some(module_id.as_ref().to_string());
         }
         if let Some(parent_step) = self.parent_step.or_else(current_parent_step) {
             step.parent_step = Some(parent_step);
@@ -197,6 +202,24 @@ impl TraceSink for JsonlSink {
     }
 }
 
+pub struct BroadcastSink {
+    inner: Arc<dyn TraceSink>,
+    tx: Sender<RunTraceStep>,
+}
+
+impl BroadcastSink {
+    pub fn new(inner: Arc<dyn TraceSink>, tx: Sender<RunTraceStep>) -> Self {
+        Self { inner, tx }
+    }
+}
+
+impl TraceSink for BroadcastSink {
+    fn record(&self, step: &RunTraceStep) {
+        self.inner.record(step);
+        let _ = self.tx.send(step.clone());
+    }
+}
+
 fn module_id_from_tool_name(name: &str) -> &str {
     name.split_once(':')
         .map(|(prefix, _)| prefix)
@@ -213,6 +236,7 @@ fn now_unix_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -274,6 +298,23 @@ mod tests {
     }
 
     #[test]
+    fn broadcast_sink_writes_to_inner_and_channel() {
+        let inner = Arc::new(VecSink::default());
+        let inner_dyn: Arc<dyn TraceSink> = inner.clone();
+        let (tx, rx) = mpsc::channel::<RunTraceStep>();
+        let broadcast = Arc::new(BroadcastSink::new(inner_dyn, tx));
+        let handle = TraceHandle::new(broadcast).for_module("semgrep");
+
+        let _ = handle.step("tool", "scan", "started").emit();
+
+        let received = rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .unwrap();
+        assert_eq!(received.module_id.as_deref(), Some("semgrep"));
+        assert_eq!(inner.steps.lock().unwrap().len(), 1);
+    }
+
+    #[test]
     fn drop_emits_step_when_emit_is_not_called() {
         let sink = Arc::new(VecSink::default());
         let handle = TraceHandle::new(sink.clone()).for_module("verify");
@@ -315,6 +356,20 @@ mod tests {
         let n = handle.step("reasoning", "run", "classified finding").emit();
 
         assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn seeded_broadcast_handle_continues_existing_trace_numbering() {
+        let inner = Arc::new(VecSink::default());
+        let inner_dyn: Arc<dyn TraceSink> = inner.clone();
+        let (tx, rx) = mpsc::channel::<RunTraceStep>();
+        let broadcast = Arc::new(BroadcastSink::new(inner_dyn, tx));
+        let handle = TraceHandle::with_initial_step_number(broadcast, 1).for_tool("triage:run");
+
+        let n = handle.step("reasoning", "run", "classified finding").emit();
+
+        assert_eq!(n, 2);
+        assert_eq!(rx.recv().unwrap().n, 2);
     }
 
     #[test]

@@ -9,6 +9,15 @@ pub(crate) fn run_recon_subdomain(
         "recon:subdomain needs an active workspace. Pass --target <repo> or start the shell with --target.",
     )?;
     let options = SubdomainInput::from_tool_input(input)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "subdomain",
+                format!("recon:subdomain start · domain={}", options.domain),
+            )
+            .emit();
+    }
     let enumerator = ReconSubdomainEnumerator::from_input(&options);
     let subdomains = enumerator.enumerate(cancel)?;
     let mut store = ReconWorkspaceStore::open(workspace)?;
@@ -42,6 +51,15 @@ pub(crate) fn run_recon_subdomain(
         }),
     )?;
 
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "subdomain",
+                format!("recon:subdomain complete · {} subdomains", subdomains.len()),
+            )
+            .emit();
+    }
     Ok(ReconReport {
         tool: "recon:subdomain".to_string(),
         target: options.domain,

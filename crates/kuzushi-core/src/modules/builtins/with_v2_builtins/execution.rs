@@ -62,6 +62,38 @@ impl ModuleRegistry {
         ctx: &ToolExecutionContext<'_>,
         runtime: Option<&dyn AgentRuntime>,
     ) -> Result<Value> {
+        // Stamp the trace handle with the module id derived from the tool name
+        // so producers don't need to thread it themselves. `ctx.trace` is None
+        // in non-shell contexts (kuzushi run, evals) — the stamping no-ops.
+        let scoped_trace = ctx
+            .trace
+            .map(|handle| handle.for_module(module_id_from_tool_name(name)));
+        let scoped_ctx;
+        let ctx: &ToolExecutionContext<'_> = if let Some(handle) = scoped_trace.as_ref() {
+            scoped_ctx = ToolExecutionContext {
+                config: ctx.config,
+                workspace: ctx.workspace,
+                findings_store: ctx.findings_store,
+                trace: Some(handle),
+            };
+            &scoped_ctx
+        } else {
+            ctx
+        };
+
+        // Wrap the runtime in TracedRuntime so every LLM call (query,
+        // next_step, triage, subagent) auto-emits a trace step. The wrapped
+        // runtime is `'tool`-lifetime and stays in scope for the entire
+        // dispatch; tools call it via `&dyn AgentRuntime` like before.
+        let traced_runtime;
+        let runtime: Option<&dyn AgentRuntime> = match (runtime, scoped_trace.as_ref()) {
+            (Some(rt), Some(handle)) => {
+                traced_runtime = crate::runtime::TracedRuntime::new(rt, handle.clone());
+                Some(&traced_runtime as &dyn AgentRuntime)
+            }
+            _ => runtime,
+        };
+
         if let Some(result) = self.dispatch_catalog_tool(name) {
             return result;
         }
@@ -90,5 +122,48 @@ impl ModuleRegistry {
             return result;
         }
         anyhow::bail!("registered tool or DAG node {name:?} has no Rust executor mapping")
+    }
+}
+
+/// Derive a module id from a qualified tool name (`semgrep:scan` -> `semgrep`).
+/// Returns the full name when the colon is missing so unprefixed entries still
+/// flow through with a stable label.
+pub fn module_id_from_tool_name(name: &str) -> &str {
+    name.split_once(':')
+        .map(|(prefix, _)| prefix)
+        .unwrap_or(name)
+}
+
+#[cfg(test)]
+mod module_id_derivation_tests {
+    use super::module_id_from_tool_name;
+
+    #[test]
+    fn module_id_strips_first_colon() {
+        assert_eq!(module_id_from_tool_name("semgrep:scan"), "semgrep");
+        assert_eq!(module_id_from_tool_name("triage:run"), "triage");
+        assert_eq!(
+            module_id_from_tool_name("agentic-sast:scan"),
+            "agentic-sast"
+        );
+    }
+
+    #[test]
+    fn module_id_handles_unprefixed() {
+        assert_eq!(module_id_from_tool_name("smoke"), "smoke");
+    }
+
+    #[test]
+    fn module_id_only_strips_first_segment() {
+        // Hidden internal nodes like `pipeline:taint-cwe-select` should still
+        // collapse to their module id.
+        assert_eq!(
+            module_id_from_tool_name("pipeline:taint-cwe-select"),
+            "pipeline"
+        );
+        assert_eq!(
+            module_id_from_tool_name("systems-hunt:systems-trigger-synth"),
+            "systems-hunt"
+        );
     }
 }

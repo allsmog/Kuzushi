@@ -76,7 +76,19 @@ pub(in crate::modules) fn run_dep_hygiene_tool(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(input, ctx)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "check",
+                format!("dep-hygiene start · target={}", target.display()),
+            )
+            .emit();
+    }
     let report = check_dependency_hygiene(&target)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace.step("done", "check", "dep-hygiene complete").emit();
+    }
     Ok(report.to_tool_json())
 }
 
@@ -85,8 +97,20 @@ pub(in crate::modules) fn run_secret_scan_tool(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(input, ctx)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "scan",
+                format!("secret-scan start · target={}", target.display()),
+            )
+            .emit();
+    }
     let options = SecretScanOptions::from_tool_input(input)?;
     let report = scan_for_secrets(&target, &options, &ScanCancellation::default())?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace.step("done", "scan", "secret-scan complete").emit();
+    }
     Ok(report.to_tool_json())
 }
 

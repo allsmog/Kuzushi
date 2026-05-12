@@ -137,6 +137,17 @@ Legend: ✓ = present, ✗ = absent, ◐ = partial / opt-in, N/A = not applicabl
 - **`/replay <runId>` and `/trace <runId>` are shell-only operator
   surfaces** that consume shared `.kuzushi/runs/<runId>/`
   artefacts. They are read-only over a shared on-disk format.
+- **`/activity` is a shell+scan-mode live progress dashboard.** Auto-opens
+  on `scan` and `kuzushi run` (configurable via
+  `KUZUSHI_AUTO_OPEN_ACTIVITY=false`). Frame-level Ratatui split-pane:
+  left shows DAG status (rows seeded from the registry on scan start,
+  updated live via the trace mpsc channel), right shows a
+  `[module:verb]` reasoning feed fed by `TracedRuntime` plus producer
+  `ctx.trace.step` calls. CLI `kuzushi run` produces the same
+  trace.jsonl on disk; the shell's BroadcastSink fans events into the
+  live view. Hidden modules collapse into a `subsystems` aggregate row;
+  `V` reveals them in the feed. Cancel via `c`; reset via `R`; pause
+  feed auto-tail via `p`; manual scroll pins position until `G`.
 - **Pipeline-only artefacts remain scan-only.** Single-tool invocations
   write `summary.json`, `trace.jsonl`, and input/result JSON, but do not
   produce scan-specific `triage.jsonl`, `verify.jsonl`, or `patch.jsonl`

@@ -10,8 +10,26 @@ pub fn run_systems_hunt_report(
 ) -> Result<SystemsHuntReport> {
     let target = systems_hunt_target(input, ctx)?;
     let options = SystemsHuntInput::from_tool_input(input)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "systems-hunt",
+                format!("systems-hunt start · target={}", target.display()),
+            )
+            .emit();
+    }
     let context = gather_systems_context(&target, &options)?;
     if context.surfaces.is_empty() {
+        if let Some(trace) = ctx.trace {
+            let _ = trace
+                .step(
+                    "done",
+                    "systems-hunt",
+                    "systems-hunt complete · no native surfaces detected",
+                )
+                .emit();
+        }
         return empty_systems_hunt_report(&target, ctx);
     }
 
@@ -19,6 +37,12 @@ pub fn run_systems_hunt_report(
     let model = resolve_model("systems-hunt", input, ctx, &options)?;
     let agent_tool_policy = default_whitebox_static_agent_tool_policy();
     let thinking_level = agentic_hunter_thinking_level(input);
+    let _llm_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step("reasoning", "systems-hunt", "invariants · triggers · hunt")
+            .emit();
+        trace.parent_scope(phase)
+    });
     let raw = query_systems_hunt_findings(
         runtime,
         &model,
@@ -28,7 +52,18 @@ pub fn run_systems_hunt_report(
         agent_tool_policy,
         &thinking_level,
     )?;
-    finalize_systems_hunt_report(raw, input, ctx, &target, &context, &options)
+    drop(_llm_scope);
+    let report = finalize_systems_hunt_report(raw, input, ctx, &target, &context, &options)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "systems-hunt",
+                format!("systems-hunt complete · {} findings", report.count),
+            )
+            .emit();
+    }
+    Ok(report)
 }
 
 fn systems_hunt_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {

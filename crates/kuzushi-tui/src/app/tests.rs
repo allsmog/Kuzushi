@@ -1095,7 +1095,7 @@ fn run_command_dispatches_focused_module_tool_through_registry() {
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app.log.iter().any(
         |line| line.prefix == "result" && line.body.contains("dep-hygiene: 1 risky specifier")
     ));
@@ -1119,7 +1119,7 @@ fn run_command_dispatches_context_build_and_writes_snapshot() {
         input: Some(r#"{"sampleLimit":10}"#.to_string()),
     });
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app.has_running_work());
     assert!(app.log.iter().any(|line| {
         line.prefix == "tool" && line.body.contains("running context:build in background")
@@ -1150,7 +1150,7 @@ fn run_dot_dispatches_focused_default_tool() {
     app.handle_command(parse_command("use context"));
     app.handle_command(parse_command(r#"run . {"sampleLimit":10}"#));
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app.has_running_work());
     drain_tool(&mut app);
     assert!(app.context_view.exists);
@@ -1174,7 +1174,10 @@ fn context_build_command_dispatches_context_build_and_writes_snapshot() {
 
     app.handle_command(ShellCommand::Context(ContextCommand::Build));
 
-    assert_eq!(app.shell_view, ShellView::Context);
+    // Auto-open lifts the user into the Activity view so the live trace
+    // feed is visible while context:build runs. The original test
+    // contract (shell_view == Context after dispatch) is now superseded.
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert_eq!(app.focused_module.as_deref(), Some("context"));
     assert!(app.has_running_work());
     drain_tool(&mut app);
@@ -2462,7 +2465,7 @@ fn run_command_dispatches_recon_nmap_through_registry() {
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app.log.iter().any(|line| {
         line.prefix == "result"
             && line
@@ -2493,7 +2496,7 @@ fn run_command_dispatches_recon_http_fingerprint_through_registry() {
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app.log.iter().any(|line| {
         line.prefix == "result"
             && line
@@ -2530,7 +2533,7 @@ fn run_command_dispatches_secret_scan_through_registry() {
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
         .log
         .iter()
@@ -2555,7 +2558,7 @@ fn run_command_dispatches_semgrep_through_registry_and_persists() {
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
         .log
         .iter()
@@ -2584,7 +2587,7 @@ fn run_command_dispatches_codeql_through_registry_and_persists() {
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
         .log
         .iter()
@@ -2611,7 +2614,7 @@ fn run_command_dispatches_iac_scan_through_registry_and_persists() {
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
         .log
         .iter()
@@ -2651,7 +2654,7 @@ fn run_command_dispatches_sast_scan_through_registry_and_persists() {
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
         .log
         .iter()
@@ -2687,7 +2690,7 @@ fn run_dot_from_catalog_dispatches_sast_scan() {
     ));
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app.focused_module.is_none());
     assert!(app
         .log
@@ -2729,7 +2732,7 @@ fn run_command_dispatches_agentic_sast_through_pi_agent_core_bridge_and_persists
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
         .log
         .iter()
@@ -2772,7 +2775,7 @@ fn run_command_dispatches_variant_hunt_through_pi_agent_core_bridge_and_persists
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
         .log
         .iter()
@@ -2815,7 +2818,7 @@ fn run_command_dispatches_ndiff_hunt_through_pi_agent_core_bridge_and_persists()
         });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app.log.iter().any(|line| {
         line.prefix == "result" && line.body.contains("ndiff:hunt-variants complete")
     }));
@@ -2854,7 +2857,7 @@ fn run_command_dispatches_taint_iris_through_pi_agent_core_bridge_and_persists()
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
         .log
         .iter()
@@ -2905,7 +2908,7 @@ fn run_command_dispatches_taint_iris_next_through_pi_agent_core_bridge_and_persi
         });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
         .log
         .iter()
@@ -2949,7 +2952,7 @@ fn run_command_dispatches_carlini_threat_hunt_through_pi_agent_core_bridge_and_p
     });
     drain_chain_with_auto_reuse(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app.log.iter().any(|line| {
         line.prefix == "result" && line.body.contains("carlini-threat-hunt: 1 finding")
     }));
@@ -2989,7 +2992,7 @@ fn run_command_dispatches_systems_hunt_through_pi_agent_core_bridge_and_persists
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
         .log
         .iter()
@@ -3037,7 +3040,7 @@ fn run_command_dispatches_findings_filters_through_registry() {
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app.log.iter().any(|line| {
         line.prefix == "result"
             && line.body.contains("SQL injection in search")
@@ -3083,7 +3086,7 @@ fn run_command_dispatches_triage_through_pi_agent_core_bridge_and_persists() {
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
         .log
         .iter()
@@ -3149,7 +3152,7 @@ fn run_command_dispatches_verify_through_pi_agent_core_bridge() {
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
         .log
         .iter()
@@ -3216,7 +3219,7 @@ fn run_command_dispatches_patch_through_pi_agent_core_bridge_and_persists() {
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
         .log
         .iter()
@@ -3260,7 +3263,7 @@ fn run_command_dispatches_threat_model_build_through_pi_agent_core_bridge() {
     });
     drain_chain_with_auto_reuse(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app.log.iter().any(|line| {
         line.prefix == "result" && line.body.contains("threat-model:build complete")
     }));
@@ -3297,7 +3300,7 @@ fn run_command_dispatches_x_ray_run_through_pi_agent_core_bridge() {
     });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::ModuleRun);
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
         .log
         .iter()
@@ -3489,6 +3492,8 @@ fn key_event_for_trigger(trigger: HotkeyTrigger) -> KeyEvent {
     let code = match trigger {
         HotkeyTrigger::Char(ch) => KeyCode::Char(ch),
         HotkeyTrigger::Enter => KeyCode::Enter,
+        HotkeyTrigger::Tab => KeyCode::Tab,
+        HotkeyTrigger::Esc => KeyCode::Esc,
         HotkeyTrigger::PageUp => KeyCode::PageUp,
         HotkeyTrigger::PageDown => KeyCode::PageDown,
         HotkeyTrigger::Up => KeyCode::Up,
@@ -4805,6 +4810,79 @@ fn plan_cursor_navigation_and_skip_toggle() {
     assert!(app.pending_plan.is_none());
     assert_eq!(app.plan_cursor, 0);
     assert!(app.plan_skipped.is_empty());
+}
+
+#[test]
+fn activity_command_opens_view_and_creates_session() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    assert!(matches!(app.shell_view, ShellView::Catalog));
+    assert!(app.activity.is_none());
+
+    app.handle_command(ShellCommand::Activity);
+
+    assert!(matches!(app.shell_view, ShellView::Activity));
+    assert!(
+        app.activity.is_some(),
+        "/activity should mint a session if none exists"
+    );
+}
+
+#[test]
+fn activity_view_pause_verbose_reset_keys() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.handle_command(ShellCommand::Activity);
+
+    // Pause toggle.
+    app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()));
+    assert!(app.activity.as_ref().unwrap().paused);
+    app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()));
+    assert!(!app.activity.as_ref().unwrap().paused);
+
+    // Verbose toggle.
+    app.handle_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::empty()));
+    assert!(app.activity.as_ref().unwrap().verbose_subsystems);
+
+    // Reset drops the session.
+    app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::empty()));
+    assert!(app.activity.is_none());
+}
+
+#[test]
+fn activity_view_renders_dag_rows_and_feed_events() {
+    use kuzushi_core::RunTraceStep;
+
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.handle_command(ShellCommand::Activity);
+    let session = app.activity.as_mut().unwrap();
+    session.apply_step(
+        RunTraceStep::new(1, "tool", "started")
+            .with_module_id("semgrep")
+            .with_verb("scan"),
+    );
+    session.apply_step(
+        RunTraceStep::new(2, "reasoning", "verdict=likely-tp")
+            .with_module_id("triage")
+            .with_verb("run"),
+    );
+    session.apply_step(
+        RunTraceStep::new(3, "tool", "task-selector ran")
+            .with_module_id("pipeline")
+            .with_verb("task-selector"),
+    );
+
+    // Use the lower-level renderer directly since we already have an open
+    // Activity view + populated session.
+    let output = crate::renderer::render_plain_app(&app, 100);
+    assert!(output.contains("[semgrep:scan]"));
+    assert!(output.contains("[triage:run]"));
+    assert!(
+        output.contains("subsystems"),
+        "hidden pipeline:* events should collapse into the subsystems aggregate, output was: {output}"
+    );
+    assert!(
+        !output.contains("[pipeline:task-selector]"),
+        "hidden module events should be filtered from the feed by default"
+    );
 }
 
 fn assert_plain_output_strict_80(output: &str) {

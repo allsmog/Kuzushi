@@ -336,9 +336,9 @@ any TypeScript/React/Ink path.
 
 `ShellView` is defined in Rust, not TypeScript. Current variants include:
 `Catalog`, `Module`, `ModuleRun`, `ActorDetail`, `Findings`, `Finding`,
-`PromptsEditor`, `Plan`, `Threat`, `Replay`, `Trace`, `Help`, `Config`,
-`Tools`, `Options`, `SastTasks`, `Context`, `Workspace`, `KnowledgeBase`,
-`AgentChat`, `History`, and `Story`.
+`PromptsEditor`, `Plan`, `Threat`, `Replay`, `Trace`, `Activity`, `Help`,
+`Config`, `Tools`, `Options`, `SastTasks`, `Context`, `Workspace`,
+`KnowledgeBase`, `AgentChat`, `History`, and `Story`.
 
 ### Operator Verbs
 
@@ -353,9 +353,88 @@ router. Common verbs include:
 - Context/KB: `context <verb>`, `workspace <verb>`, `kb`, `attach`, `detach`,
   `reparse`.
 - Findings/evidence: `findings`, `open <id>`, `since <ref>`, `show aliases`,
-  `show runs`, `replay <runId>`, `trace <runId>`.
+  `show runs`, `replay <runId>`, `trace <runId>`, `activity` (`/a`,
+  `/progress`).
 - Auth/config/model/session: `auth`, `provider`, `backend`, `model`, `cost`,
   `config`, `load`, `resume`, `history`, `clear`, `story`, `quit`.
+
+### Live Module Progress (Activity view)
+
+The `/activity` view (auto-opened on `scan` and `kuzushi run`, or via the
+slash command) is a split-pane dashboard showing every running module's
+DAG status on the left and a streaming `[module:verb]` reasoning feed on
+the right. It is fed by `ctx.trace.step(kind, verb, label).emit()` calls
+in producer code, plumbed through `ToolExecutionContext.trace`.
+
+- **Producer authoring**: see `docs/modules.md` §7.1. Every DAG-participating
+  Rust module emits at least `start` + `done` steps; multi-phase modules
+  (`triage:run`, `verify:finding`, `agentic-sast:scan`, `taint-iris:hunt`,
+  `carlini-threat-hunt:run`, etc.) emit reasoning sub-steps via
+  `trace.child(parent)`.
+- **Hidden modules** (`pipeline:*`, `systems-hunt:*`, `context-lite:index`)
+  collapse into one aggregated `subsystems` row. Their events stay out of
+  the feed unless `V` (verbose toggle) is pressed.
+- **Schema**: `RunTraceStep` (v2) carries `module_id`, `verb`,
+  `parent_step`, `severity`, `started_at_ms`. All optional, backwards-
+  compatible with v1 trace.jsonl files.
+- **Transport**: `BroadcastSink` writes to `<run>/trace.jsonl` AND fans
+  events into an `mpsc::Sender<RunTraceStep>` consumed by
+  `ShellApp::drain_trace_events` and applied to `ActivitySession` via
+  `apply_step`.
+- **Keys**: `j`/`k`/`g`/`G` scroll, `Tab` toggles pane focus, `V` toggles
+  verbose, `p` toggles pause, `R` resets, `Enter` focuses a task in the
+  footer.
+
+When adding a new producer module, follow the pattern in
+`crates/kuzushi-core/src/modules/native_scanners/register_modules.rs::run_semgrep_scan`
+(simple) or
+`crates/kuzushi-core/src/modules/agentic_sast/run_agentic_sast_report.rs::run_agentic_sast_report`
+(parent_step + child sub-steps).
+
+### Live Module Progress — auto-tracing every LLM call
+
+Producers don't have to manually log per-LLM-call events. The dispatch
+wrapper (`src/modules/registry/with_v2_builtins/execution.rs`) wraps the
+incoming `AgentRuntime` in a `TracedRuntime` (from
+`src/runtime/traced_runtime.rs`) whenever `ctx.trace.is_some()`. Every
+`runtime.query_blocking`, `next_step_blocking`,
+`triage_finding_blocking`, or `spawn_subagent_blocking` call auto-emits
+a `reasoning`/`tool-progress`/`done` step with `latency_ms` and
+`cost_usd` populated from the provider response.
+
+To group several LLM calls under a labelled phase header, wrap the
+LLM region with a `TraceHandle::parent_scope(n)` RAII guard:
+
+```rust
+let phase = ctx
+    .trace
+    .map(|t| t.step("reasoning", "run", "evidence-collect").emit());
+let _scope = match (ctx.trace, phase) {
+    (Some(trace), Some(parent)) => Some(trace.parent_scope(parent)),
+    _ => None,
+};
+// every runtime.query_blocking(...) inside this block now emits a
+// child step under `phase` in the right-pane feed
+let result = run_triage_stage2(store, runtime, &input, &config, kept)?;
+drop(_scope);
+```
+
+Canonical references: `triage:run`, `verify:finding`,
+`agentic-sast:scan`, `taint-iris:hunt`, `taint-iris-next:hunt`,
+`carlini-threat-hunt:run`, `patch:finding`, `threat-model:build`,
+`x-ray:run`, `run_plugin_finding_adapter`, `shinsa:scan`,
+`prompt-armor:*`.
+
+### Activity view auto-open
+
+`ShellApp.auto_open_activity` defaults to `true`. Both
+`start_background_tool` and `start_scan` set
+`shell_view = ShellView::Activity` when the toggle is on. Operators can
+opt out by exporting `KUZUSHI_AUTO_OPEN_ACTIVITY=false` before launching
+the shell — the value is read in `ShellApp::new`. The view honours
+independent pane scroll: `Tab` toggles focus between DAG/feed, `j`/`k`
+operates on the focused pane, and manually scrolling the feed pauses
+auto-tail until `p` (resume) or scroll-to-bottom.
 
 ### Plain And CI Output
 

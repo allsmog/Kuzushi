@@ -64,6 +64,7 @@ pub(crate) fn background_tool_worker(
     run_id: String,
     thinking_level: Option<String>,
     tx: Sender<ToolEvent>,
+    trace_handle: Option<TraceHandle>,
 ) {
     let result = run_background_tool(
         registry,
@@ -73,6 +74,7 @@ pub(crate) fn background_tool_worker(
         input,
         &run_id,
         thinking_level,
+        trace_handle,
     );
     let event = match result {
         Ok(result) => ToolEvent::Finished { tool_name, result },

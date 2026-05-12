@@ -14,6 +14,15 @@ pub fn run_variant_hunt(
             }))
         }
     };
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "hunt",
+                format!("variant:hunt start · fp={fingerprint}"),
+            )
+            .emit();
+    }
     let target = resolve_tool_target(&input, ctx)?;
     let workspace = ctx.workspace.context(
         "variant:hunt needs an active workspace. Pass --target <repo> or start the shell with --target.",
@@ -44,6 +53,11 @@ pub fn run_variant_hunt(
         .unwrap_or(true);
     let vendor_paths = vendor_paths_from_input(&input);
     let prompt = build_variant_hunt_prompt(&finding, include_vendored, &vendor_paths);
+    // Phase scope so the LLM call indents under `hunt-variants` in the feed.
+    let _llm_scope = ctx.trace.map(|trace| {
+        let phase = trace.step("reasoning", "hunt", "hunt-variants").emit();
+        trace.parent_scope(phase)
+    });
     let raw = query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
@@ -57,6 +71,7 @@ pub fn run_variant_hunt(
         StructuredJsonContract::new("variant:hunt", "VariantFindings", findings_schema()),
         require_json_object,
     )?;
+    drop(_llm_scope);
     let repo_name = repo_name(&target);
     let findings = normalize_variant_findings(raw, &target, &repo_name, &finding, max_findings)?;
     let persisted = persist_findings(&target, &findings, ctx)?;
@@ -66,6 +81,15 @@ pub fn run_variant_hunt(
         include_vendored,
         findings.as_slice(),
     );
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "hunt",
+                format!("variant:hunt complete · {} variants", findings.len()),
+            )
+            .emit();
+    }
 
     Ok(json!({
         "ok": true,

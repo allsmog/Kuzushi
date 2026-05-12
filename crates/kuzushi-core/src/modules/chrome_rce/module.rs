@@ -59,7 +59,30 @@ const CHROME_RCE_HANDLERS: &[(&str, ChromeRceHandler)] = &[
 
 pub(in crate::modules) fn scan(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
-    run_scan(&target, chrome_rce_persistence(ctx))
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "scan",
+                format!("chrome-rce:scan start · target={}", target.display()),
+            )
+            .emit();
+    }
+    let result = run_scan(&target, chrome_rce_persistence(ctx));
+    if let (Some(trace), Ok(output)) = (ctx.trace, &result) {
+        let count = output
+            .pointer("/data/count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let _ = trace
+            .step(
+                "done",
+                "scan",
+                format!("chrome-rce:scan complete · {count} findings"),
+            )
+            .emit();
+    }
+    result
 }
 
 pub(in crate::modules) fn review_trigger(
@@ -68,7 +91,26 @@ pub(in crate::modules) fn review_trigger(
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
     let diff_base = string_input_any(&input, &["diffBase", "diff_base"]);
-    run_review_trigger(&target, diff_base.as_deref(), chrome_rce_persistence(ctx))
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step("tool", "review-trigger", "chrome-rce:review-trigger start")
+            .emit();
+    }
+    let result = run_review_trigger(&target, diff_base.as_deref(), chrome_rce_persistence(ctx));
+    if let (Some(trace), Ok(output)) = (ctx.trace, &result) {
+        let count = output
+            .pointer("/data/count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let _ = trace
+            .step(
+                "done",
+                "review-trigger",
+                format!("chrome-rce:review-trigger complete · {count} hot paths"),
+            )
+            .emit();
+    }
+    result
 }
 
 fn chrome_rce_persistence<'ctx>(ctx: &ToolExecutionContext<'ctx>) -> ChromeRcePersistence<'ctx> {

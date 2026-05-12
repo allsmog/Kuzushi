@@ -14,6 +14,15 @@ pub fn run_variant_lift_pattern(
             }))
         }
     };
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "lift-pattern",
+                format!("variant:lift-pattern start · fp={fingerprint}"),
+            )
+            .emit();
+    }
     let workspace = ctx.workspace.context(
         "variant:lift-pattern needs an active workspace. Pass --target <repo> or start the shell with --target.",
     )?;
@@ -34,6 +43,13 @@ pub fn run_variant_lift_pattern(
     let model = require_model("variant:lift-pattern", &input, ctx)?;
     let thinking_level = agentic_hunter_thinking_level(&input);
     let prompt = build_variant_lift_prompt(&finding);
+    // Phase scope so the LLM call indents under `lift-pattern` in the feed.
+    let _llm_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step("reasoning", "lift-pattern", "lift-pattern")
+            .emit();
+        trace.parent_scope(phase)
+    });
     let signature = query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
@@ -47,6 +63,7 @@ pub fn run_variant_lift_pattern(
         StructuredJsonContract::new("variant:lift-pattern", "VariantSignature", object_schema()),
         require_json_object,
     )?;
+    drop(_llm_scope);
     let object = signature
         .as_object()
         .context("variant:lift-pattern output parse failed: expected a JSON object")?;
@@ -80,6 +97,11 @@ pub fn run_variant_lift_pattern(
     ]
     .join("\n");
 
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step("done", "lift-pattern", "variant:lift-pattern complete")
+            .emit();
+    }
     Ok(json!({
         "ok": true,
         "output": output,

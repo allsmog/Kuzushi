@@ -17,6 +17,16 @@ pub(crate) fn run_systems_trigger_synth(
     let model = resolve_model("systems-hunt:systems-trigger-synth", input, ctx, &options)?;
     let agent_tool_policy = default_whitebox_static_agent_tool_policy();
     let thinking_level = agentic_hunter_thinking_level(input);
+    let _llm_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step(
+                "reasoning",
+                "systems-trigger-synth",
+                "invariant + trigger synthesis",
+            )
+            .emit();
+        trace.parent_scope(phase)
+    });
     let invariant_output = systems_invariants_from_input_or_query(
         input,
         runtime,
@@ -27,7 +37,7 @@ pub(crate) fn run_systems_trigger_synth(
         agent_tool_policy.clone(),
         &thinking_level,
     )?;
-    query_systems_triggers(
+    let result = query_systems_triggers(
         runtime,
         &model,
         &target,
@@ -36,7 +46,9 @@ pub(crate) fn run_systems_trigger_synth(
         &options,
         agent_tool_policy,
         &thinking_level,
-    )
+    );
+    drop(_llm_scope);
+    result
 }
 
 pub(crate) fn systems_context_from_input_or_gather(

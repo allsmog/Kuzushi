@@ -7,6 +7,15 @@ pub(crate) fn run_taint_iris_next_report(
 ) -> Result<TaintIrisNextReport> {
     let target = taint_iris_next_target(input, ctx)?;
     let options = TaintIrisNextInput::from_tool_input(input)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "hunt",
+                format!("taint-iris-next:hunt start · target={}", target.display()),
+            )
+            .emit();
+    }
     let plan = build_taint_iris_next_plan(&target, options)?;
 
     if !taint_iris_next_has_required_context(&plan) {
@@ -63,6 +72,16 @@ pub(crate) fn run_taint_iris_next_hunt(
     let runtime_options = taint_iris_next_runtime_options(input, &plan.backend.selected);
     let mcps_enabled = read_bool_option(input, "mcps").unwrap_or(true);
     let agent_tool_policy = agent_tool_policy_for_input(input)?.with_mcps(mcps_enabled);
+    let _trace_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step(
+                "reasoning",
+                "hunt",
+                "source-discovery · sink-discovery · taint-trace",
+            )
+            .emit();
+        trace.parent_scope(phase)
+    });
     let mut agent = run_taint_iris_next_agent(
         &plan,
         &evidence,
@@ -72,6 +91,7 @@ pub(crate) fn run_taint_iris_next_hunt(
         agent_tool_policy,
         runtime_options,
     )?;
+    drop(_trace_scope);
     let mut findings = agent.findings.clone();
     if whitebox_static_profile_requested(input)? {
         mark_whitebox_static_findings(&mut findings, StaticProofState::SourceSinkLinked)?;
@@ -81,6 +101,18 @@ pub(crate) fn run_taint_iris_next_hunt(
     let output = render_taint_iris_next_output(&plan, &evidence, Some(&agent));
     let status = taint_iris_next_hunt_status(&agent);
     let data = taint_iris_next_hunt_data(&plan, &evidence, status, &agent_prompt, &agent);
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "hunt",
+                format!(
+                    "taint-iris-next:hunt complete · {} findings",
+                    agent.findings.len()
+                ),
+            )
+            .emit();
+    }
 
     Ok(taint_iris_next_hunt_report(
         &plan, &agent, status, persisted, output, data,

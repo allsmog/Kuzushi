@@ -1,6 +1,42 @@
 use super::view_keybinding_helpers::{bind, bind_char};
 use super::*;
 
+pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
+    vec![
+        bind_char('j', "j/k/g/G", "scroll", ViewHotkeyAction::ViewScrollDown),
+        bind_char('k', "j/k/g/G", "scroll", ViewHotkeyAction::ViewScrollUp),
+        bind_char('g', "j/k/g/G", "top", ViewHotkeyAction::ViewScrollTop),
+        bind_char('G', "j/k/g/G", "bottom", ViewHotkeyAction::ViewScrollBottom),
+        bind(
+            HotkeyTrigger::Tab,
+            "Tab",
+            "toggle pane",
+            ViewHotkeyAction::ActivityTabPaneFocus,
+        ),
+        bind_char('V', "V", "verbose", ViewHotkeyAction::ActivityToggleVerbose),
+        bind_char('p', "p", "pause", ViewHotkeyAction::ActivityTogglePause),
+        bind_char('R', "R", "reset", ViewHotkeyAction::ActivityReset),
+        bind(
+            HotkeyTrigger::Enter,
+            "Enter",
+            "focus task",
+            ViewHotkeyAction::ActivityFocusSelected,
+        ),
+        bind_char(
+            'c',
+            "c",
+            "cancel run",
+            ViewHotkeyAction::ActivityCancelRunning,
+        ),
+        bind(
+            HotkeyTrigger::Esc,
+            "Esc",
+            "cancel run",
+            ViewHotkeyAction::ActivityCancelRunning,
+        ),
+    ]
+}
+
 pub(super) fn findings_keybindings() -> Vec<ViewKeybinding> {
     vec![
         bind_char('j', "j/k/g/G", "move", ViewHotkeyAction::FindingsNext),

@@ -644,6 +644,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
         let report = crate::capabilities::full_mode_multi::FullModeReport {
             findings: vec![Finding::new_tool(
@@ -696,6 +697,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
         let runtime = MockRuntime::new();
 
@@ -765,6 +767,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -884,6 +887,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -927,6 +931,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
         let runtime = MockRuntime::new();
 
@@ -976,6 +981,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
         let runtime = MockRuntime::new();
 
@@ -998,6 +1004,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let result = registry
@@ -1025,6 +1032,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let config_result = registry
@@ -1077,6 +1085,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let result = registry
@@ -1119,6 +1128,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let result = registry
@@ -1161,6 +1171,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let result = registry
@@ -1189,6 +1200,7 @@ OUT
             config: &config,
             workspace: None,
             findings_store: None,
+            trace: None,
         };
 
         let error = registry
@@ -1211,6 +1223,7 @@ OUT
             config: &config,
             workspace: None,
             findings_store: None,
+            trace: None,
         };
 
         let result = registry
@@ -1244,6 +1257,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let result = registry
@@ -1303,6 +1317,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         assert!(registry.resolve_tool("context-lite:index").is_none());
@@ -1329,6 +1344,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let err = registry
@@ -1396,6 +1412,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let result = registry
@@ -1428,6 +1445,7 @@ OUT
             config: &config,
             workspace: None,
             findings_store: None,
+            trace: None,
         };
 
         let err = registry
@@ -1464,6 +1482,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let result = registry
@@ -1492,6 +1511,7 @@ OUT
             config: &config,
             workspace: None,
             findings_store: None,
+            trace: None,
         };
 
         let err = registry
@@ -1523,6 +1543,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -1556,6 +1577,7 @@ OUT
             config: &config,
             workspace: None,
             findings_store: None,
+            trace: None,
         };
 
         let err = registry
@@ -1598,6 +1620,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -1649,6 +1672,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -1694,6 +1718,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -1742,6 +1767,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -1800,6 +1826,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         registry
@@ -1868,6 +1895,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let err = registry
@@ -1900,6 +1928,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -1959,6 +1988,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let err = registry
@@ -1993,6 +2023,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -2027,6 +2058,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -2083,6 +2115,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let err = registry
@@ -2122,6 +2155,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -2175,6 +2209,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -2226,6 +2261,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -2283,6 +2319,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -2336,6 +2373,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -2376,6 +2414,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let err = registry
@@ -2412,6 +2451,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -2470,6 +2510,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -2559,6 +2600,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -2703,6 +2745,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -2767,6 +2810,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -2827,6 +2871,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -2879,6 +2924,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let err = registry
@@ -2912,6 +2958,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -2971,6 +3018,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -3026,6 +3074,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let err = registry
@@ -3090,6 +3139,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
         let result = registry
             .execute_tool(
@@ -3151,6 +3201,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -3217,6 +3268,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let err = registry
@@ -3247,6 +3299,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -3298,6 +3351,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -3362,6 +3416,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -3416,6 +3471,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -3480,6 +3536,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -3549,6 +3606,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -3645,6 +3703,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -3714,6 +3773,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -3797,6 +3857,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         let result = registry

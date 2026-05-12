@@ -33,6 +33,12 @@ pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
         ShellView::KnowledgeBase => plain_knowledge_base_lines(app, width),
         ShellView::Config => plain_config_lines(app, width),
         ShellView::Help => plain_help_lines(app, width),
+        // Activity view's main render path is frame-level Ratatui (see
+        // render_activity_view); the plain path uses the legacy line-based
+        // helper so non-TTY callers (--scripted, render_plain_app tests)
+        // still get text output. Fall through to shell_view_lines so the
+        // primary_view_lines arm for ShellView::Activity drives the
+        // line-based renderer.
         _ => {
             let area = Rect::new(0, 0, width.min(u16::MAX as usize) as u16, u16::MAX);
             shell_view_lines(app, area)

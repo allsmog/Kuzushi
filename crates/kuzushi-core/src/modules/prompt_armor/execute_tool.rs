@@ -131,8 +131,19 @@ fn authorized_runtime_tool(
 ) -> Result<Value> {
     required_runtime(tool_name, runtime).and_then(|runtime| {
         runtime_inputs(tool_name, command, input, ctx).and_then(|inputs| {
+            if let Some(trace) = ctx.trace {
+                let _ = trace
+                    .step("tool", command, format!("{tool_name} start"))
+                    .emit();
+            }
             let model = resolve_tool_model(&inputs.tool_name, &inputs.input, ctx)?;
-            prompt_armor_capability::run_runtime_tool(
+            let _runtime_scope = ctx.trace.map(|trace| {
+                let phase = trace
+                    .step("reasoning", command, "seed-gen · attack-loop · judge")
+                    .emit();
+                trace.parent_scope(phase)
+            });
+            let result = prompt_armor_capability::run_runtime_tool(
                 prompt_armor_capability::PromptArmorRuntimeInput {
                     tool_name: &inputs.tool_name,
                     command: &inputs.command,
@@ -144,9 +155,29 @@ fn authorized_runtime_tool(
                     workspace: ctx.workspace,
                     findings_store: ctx.findings_store,
                 },
-            )
+            )?;
+            drop(_runtime_scope);
+            if let Some(trace) = ctx.trace {
+                let count = prompt_armor_finding_count(&result);
+                let _ = trace
+                    .step(
+                        "done",
+                        command,
+                        format!("{tool_name} complete · {count} findings"),
+                    )
+                    .emit();
+            }
+            Ok(result)
         })
     })
+}
+
+fn prompt_armor_finding_count(result: &Value) -> usize {
+    result
+        .pointer("/data/findings")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0)
 }
 
 struct RuntimeInputs {

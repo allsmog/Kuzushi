@@ -1,0 +1,104 @@
+use super::*;
+use crate::app::{ActivitySession, DagTaskRow, DagTaskState};
+use std::sync::OnceLock;
+use std::time::Instant;
+
+/// Braille spinner used to animate `Active` DAG rows so the operator can
+/// distinguish a running tool from a stuck one. Frame index is derived
+/// from wall-clock elapsed since process start, advancing every ~100ms.
+const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+static SPINNER_EPOCH: OnceLock<Instant> = OnceLock::new();
+
+fn spinner_frame(now: Instant) -> &'static str {
+    let epoch = SPINNER_EPOCH.get_or_init(Instant::now);
+    let ms = now
+        .checked_duration_since(*epoch)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let idx = ((ms / 100) as usize) % SPINNER_FRAMES.len();
+    SPINNER_FRAMES[idx]
+}
+
+/// Render one DAG task row as plain text (no styling). The renderer turns each
+/// String into a styled span downstream so we keep the column-width math here
+/// in one place.
+pub(crate) fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant) -> String {
+    let symbol = match row.state {
+        DagTaskState::Done => "✓",
+        DagTaskState::Active => spinner_frame(now),
+        DagTaskState::Queued => "·",
+        DagTaskState::Failing => "!",
+    };
+    // Right-side reserve: " " (1) + elapsed (8) = 9. The redundant
+    // status word ("running"/"done"/...) was dropped — the colored
+    // symbol prefix already conveys state (✓ green, spinner amber,
+    // · muted, ! red) and at narrow widths the extra column cost
+    // ~9 task-label chars on a 37-wide pane.
+    let right_reserve: usize = 9;
+    let task_pad = width.saturating_sub(right_reserve + 3).max(8);
+    let task_label = fit(&row.task_id, task_pad);
+    let elapsed = elapsed_label(row, now);
+    let body = format!(
+        " {symbol} {task:<task_pad$} {elapsed:>8}",
+        symbol = symbol,
+        task = task_label,
+        task_pad = task_pad,
+        elapsed = elapsed,
+    );
+    fit(&body, width)
+}
+
+pub(crate) fn dag_subsystems_row_text(session: &ActivitySession, width: usize) -> Option<String> {
+    let agg = &session.subsystem_aggregate;
+    if agg.total_count == 0 {
+        return None;
+    }
+    let label = fit(&agg.last_label, width.saturating_sub(28).max(8));
+    Some(fit(
+        &format!(
+            " ⤳ subsystems ({total})  {label}",
+            total = agg.total_count,
+            label = label,
+        ),
+        width,
+    ))
+}
+
+pub(crate) fn dag_state_style(state: DagTaskState) -> ratatui::style::Style {
+    match state {
+        DagTaskState::Done => theme::success(),
+        DagTaskState::Active => theme::warn(),
+        DagTaskState::Queued => theme::muted(),
+        DagTaskState::Failing => theme::danger(),
+    }
+}
+
+fn elapsed_label(row: &DagTaskRow, now: Instant) -> String {
+    let started = match row.started_at {
+        Some(t) => t,
+        None => return "-".to_string(),
+    };
+    let end = row.completed_at.unwrap_or(now);
+    let elapsed = end.saturating_duration_since(started);
+    let secs = elapsed.as_secs_f64();
+    if secs >= 60.0 {
+        format!("{:.0}m{:02.0}s", (secs / 60.0).floor(), secs % 60.0)
+    } else if secs >= 10.0 {
+        format!("{secs:>4.1}s")
+    } else if secs >= 1.0 {
+        format!("{secs:>4.2}s")
+    } else {
+        // Sub-second tools (native scanners, tiny LLM calls) render as
+        // milliseconds. `0.00s` was misleading — operator couldn't tell
+        // whether the tool actually ran or was a no-op.
+        let ms = elapsed.as_millis();
+        if ms == 0 {
+            "  <1ms".to_string()
+        } else if ms < 1000 {
+            format!("{ms:>4}ms")
+        } else {
+            format!("{secs:>4.2}s")
+        }
+    }
+}

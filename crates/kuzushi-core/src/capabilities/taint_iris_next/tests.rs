@@ -382,6 +382,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = run_taint_iris_next_report(
@@ -423,6 +424,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = run_taint_iris_next_report(
@@ -487,6 +489,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let err = run_taint_iris_next_report(
