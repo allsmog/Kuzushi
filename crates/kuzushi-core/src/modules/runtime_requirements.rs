@@ -46,6 +46,7 @@ const RUNTIME_TOOL_NAMES: &[&str] = &[
     "taint-iris-next:hunt",
     "taint-iris:hunt",
     "threat-intel:apply",
+    "threat-intel:harvest",
     "threat-model:build",
     "tob:audit",
     "triage:run",

@@ -1,5 +1,6 @@
 use crate::capabilities::threat_intel::application::{
-    apply_threat_intel_catalog, list_threat_intel_catalog, resolve_catalog_path,
+    apply_threat_intel_catalog, harvest_threat_intel_catalog, list_threat_intel_catalog,
+    resolve_catalog_path,
 };
 use crate::modules::ToolExecutionContext;
 use crate::runtime::AgentRuntime;
@@ -34,6 +35,9 @@ pub fn execute_threat_intel_tool(
                 !dry_run,
                 &mut dispatch_tool,
             )
+        }
+        "threat-intel:harvest" => {
+            harvest_threat_intel_catalog(&input, ctx, runtime, &mut dispatch_tool)
         }
         other => anyhow::bail!("threat-intel: unknown tool {other:?}"),
     }

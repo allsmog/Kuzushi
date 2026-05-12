@@ -45,4 +45,10 @@ pub(crate) struct TaintIrisNextInput {
     pub(crate) languages: Vec<String>,
     pub(crate) caps: TaintIrisNextCaps,
     pub(crate) max_budget_usd: Option<f64>,
+    /// Operator-supplied catalog entries merged on top of the hardcoded
+    /// `TAINT_IRIS_NEXT_CATALOG` before ranking. Carries threat-intel
+    /// TOML entries through to the agent prompt — see
+    /// `examples/threat-intel/redis-curated.toml` and
+    /// `capabilities/threat_intel/application/dispatch.rs`.
+    pub(crate) extra_catalog_entries: Vec<TaintIrisNextRankedCatalogEntry>,
 }

@@ -330,4 +330,97 @@ mod tests {
         assert!(err.contains("requires an explicit model"));
         assert!(err.contains("will not choose a fallback model"));
     }
+
+    #[test]
+    fn merge_extras_replaces_built_in_in_same_lane_and_keeps_others() {
+        let built_in = vec![
+            TaintIrisNextRankedCatalogEntry {
+                cwe: "CWE-79".to_string(),
+                name: "Cross-Site Scripting".to_string(),
+                taint_class: "xss".to_string(),
+                languages: vec!["javascript".to_string()],
+                source_signals: vec!["req.query".to_string()],
+                sink_signals: vec!["innerHTML".to_string()],
+                sanitizer_signals: vec!["escapeHtml".to_string()],
+                structural_queries: vec!["innerHTML".to_string()],
+                score: 100,
+                reasons: vec!["threat-model CWE".to_string()],
+            },
+            TaintIrisNextRankedCatalogEntry {
+                cwe: "CWE-190".to_string(),
+                name: "Integer Overflow".to_string(),
+                taint_class: "integer-overflow".to_string(),
+                languages: vec!["c".to_string()],
+                source_signals: vec!["length".to_string()],
+                sink_signals: vec!["malloc".to_string()],
+                sanitizer_signals: vec!["checked_add".to_string()],
+                structural_queries: vec!["checked_add".to_string()],
+                score: 50,
+                reasons: vec!["language match".to_string()],
+            },
+        ];
+        let extras = vec![TaintIrisNextRankedCatalogEntry {
+            cwe: "CWE-190".to_string(),
+            name: "Redis stream count overflow (threat-intel)".to_string(),
+            taint_class: "integer-overflow".to_string(),
+            languages: vec!["c".to_string()],
+            source_signals: vec!["RESP count argument".to_string()],
+            sink_signals: vec!["zmalloc(count * stride)".to_string()],
+            sanitizer_signals: vec!["count bounds check".to_string()],
+            structural_queries: vec!["XAUTOCLAIM".to_string()],
+            score: 200,
+            reasons: vec!["operator-supplied catalog entry (threat-intel)".to_string()],
+        }];
+
+        let merged = merge_taint_iris_next_extra_entries(built_in, &extras);
+
+        // CWE-190+integer-overflow lane: only the operator-supplied
+        // entry survives.
+        let int_overflow: Vec<_> = merged
+            .iter()
+            .filter(|e| e.cwe == "CWE-190" && e.taint_class == "integer-overflow")
+            .collect();
+        assert_eq!(int_overflow.len(), 1, "operator entry must replace built-in in same lane");
+        assert!(int_overflow[0]
+            .name
+            .contains("threat-intel"));
+        assert_eq!(int_overflow[0].score, 200);
+
+        // CWE-79 lane is untouched.
+        assert!(merged.iter().any(|e| e.cwe == "CWE-79"));
+
+        // After merge, highest-scored entry sits first.
+        assert_eq!(merged[0].cwe, "CWE-190");
+        assert_eq!(merged[0].score, 200);
+    }
+
+    #[test]
+    fn extra_catalog_entries_parse_from_camel_case_json_input() {
+        let input = serde_json::json!({
+            "mode": "hunt",
+            "extraCatalogEntries": [
+                {
+                    "cwe": "CWE-416",
+                    "name": "Lua client UAF",
+                    "taintClass": "use-after-free",
+                    "languages": ["c"],
+                    "sourceSignals": ["createClient return"],
+                    "sinkSignals": ["client deref after freeClient"],
+                    "sanitizerSignals": ["client->flags & CLIENT_FREED"],
+                    "structuralQueries": ["freeClient", "scriptingRelease"],
+                }
+            ]
+        });
+        let parsed = TaintIrisNextInput::from_tool_input(&input).unwrap();
+        assert_eq!(parsed.extra_catalog_entries.len(), 1);
+        let entry = &parsed.extra_catalog_entries[0];
+        assert_eq!(entry.cwe, "CWE-416");
+        assert_eq!(entry.name, "Lua client UAF");
+        assert_eq!(entry.taint_class, "use-after-free");
+        assert_eq!(entry.languages, vec!["c"]);
+        assert_eq!(entry.source_signals.len(), 1);
+        assert_eq!(entry.sink_signals.len(), 1);
+        assert_eq!(entry.score, 200, "operator entries must outrank built-ins");
+        assert!(entry.reasons.iter().any(|r| r.contains("operator-supplied")));
+    }
 }

@@ -20,7 +20,18 @@ pub(crate) fn build_taint_iris_next_plan(
 
     let threat_cwes = collect_taint_iris_next_cwes(threat_model.value.as_ref());
     let context_keywords = taint_iris_next_context_keywords(context.value.as_ref(), target)?;
-    let catalog = rank_taint_iris_next_catalog(&languages, &threat_cwes, &context_keywords)
+    // Merge operator-supplied entries (from threat-intel) on top of
+    // the hardcoded catalog before truncation. Extras are scored at
+    // 200 by the adapter so they survive truncation; the merged list
+    // re-sorts so a high-context-overlap built-in can still beat a
+    // low-priority extra. De-dup by `cwe + taint_class`: operator
+    // entries win because they typically carry richer source/sink
+    // signals than the generic built-ins.
+    let mut ranked = rank_taint_iris_next_catalog(&languages, &threat_cwes, &context_keywords);
+    if !options.extra_catalog_entries.is_empty() {
+        ranked = merge_taint_iris_next_extra_entries(ranked, &options.extra_catalog_entries);
+    }
+    let catalog = ranked
         .into_iter()
         .take(options.caps.max_catalog_entries)
         .collect::<Vec<_>>();
