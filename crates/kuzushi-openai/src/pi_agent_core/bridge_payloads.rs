@@ -16,6 +16,8 @@ pub(crate) struct NextStepBridgeRequest {
     pub(crate) api_key_env: String,
     pub(crate) api_key: Option<String>,
     pub(crate) base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) temperature: Option<f32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -67,6 +69,8 @@ pub(crate) struct BridgeRequest {
     pub(crate) base_url: Option<String>,
     pub(crate) thinking_level: Option<String>,
     pub(crate) tool_policy: AgentToolPolicy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) temperature: Option<f32>,
 }
 
 #[derive(Debug, Deserialize)]

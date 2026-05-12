@@ -40,6 +40,11 @@ pub struct AgentToolLoopRequest {
     /// stops here and surfaces the partial transcript even if the model
     /// hasn't returned a final.
     pub max_steps: u32,
+    /// Sampling temperature for every round-trip in the loop. None
+    /// means "use the provider default". Set near 0 for audit / triage
+    /// flows where determinism matters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

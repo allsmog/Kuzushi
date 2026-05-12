@@ -52,6 +52,7 @@ mod tests {
                 input_schema: serde_json::json!({ "type": "object" }),
             }],
             max_steps: 5,
+            temperature: None,
         }
     }
 

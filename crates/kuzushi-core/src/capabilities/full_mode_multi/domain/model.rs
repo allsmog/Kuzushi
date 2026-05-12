@@ -59,6 +59,21 @@ pub struct FullModeConfig {
     /// the `--since <ref>` flag to scan only what changed.
     #[serde(default)]
     pub scope_files: Option<Vec<PathBuf>>,
+    /// If `true`, run deep-audit on every HIGH+CRITICAL finding the
+    /// chunk pass emits, BEFORE persisting. Each finding's triage
+    /// verdict is then attached and the deep-audit cost is summed into
+    /// the report. Default false to keep the cheap-cast-wide-net mode
+    /// unchanged; set true for "scan + triage in one shot."
+    #[serde(default)]
+    pub auto_triage: bool,
+    /// When auto-triaging, the per-finding deep-audit step budget.
+    /// Default 12, same as `deep-audit:run`'s recommended floor.
+    #[serde(default)]
+    pub auto_triage_max_steps: Option<u32>,
+    /// When auto-triaging, the per-finding deep-audit deposit. Default
+    /// 1.0; deep-audit refunds unused budget.
+    #[serde(default)]
+    pub auto_triage_deposit_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -78,6 +93,9 @@ impl Default for FullModeConfig {
             language: FullModeLanguage::C,
             dry_run: false,
             scope_files: None,
+            auto_triage: false,
+            auto_triage_max_steps: None,
+            auto_triage_deposit_usd: None,
         }
     }
 }

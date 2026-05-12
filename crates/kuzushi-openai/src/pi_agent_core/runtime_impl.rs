@@ -29,6 +29,7 @@ impl AgentRuntime for PiAgentCoreRuntime {
             base_url: self.base_url.clone(),
             thinking_level,
             tool_policy: request.tool_policy,
+            temperature: request.temperature,
         };
 
         let response = run_bridge(&self.command, &bridge_request)?;
