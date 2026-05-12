@@ -15,6 +15,23 @@ impl TaintIrisNextInput {
         let discover_signals = read_bool_option(input, "discoverSignals")
             .or_else(|| read_bool_option(input, "discover_signals"))
             .unwrap_or(true);
+        let target_subdir = optional_taint_next_string(
+            input,
+            &["targetSubdir", "target_subdir"],
+        )?
+        .filter(|s| !s.trim().is_empty());
+        if let Some(subdir) = &target_subdir {
+            if subdir.split('/').any(|part| part == "..") {
+                anyhow::bail!(
+                    "taint-iris-next:hunt targetSubdir must not contain '..' traversal: {subdir:?}"
+                );
+            }
+            if subdir.starts_with('/') {
+                anyhow::bail!(
+                    "taint-iris-next:hunt targetSubdir must be a relative path under --target, got {subdir:?}"
+                );
+            }
+        }
         Ok(Self {
             mode,
             backend,
@@ -27,6 +44,7 @@ impl TaintIrisNextInput {
             )?,
             cwe_focus,
             discover_signals,
+            target_subdir,
         })
     }
 }

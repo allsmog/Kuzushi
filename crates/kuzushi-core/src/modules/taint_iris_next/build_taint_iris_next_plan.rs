@@ -5,6 +5,32 @@ pub(in crate::modules) fn build_taint_iris_next_plan(
     options: TaintIrisNextInput,
 ) -> Result<TaintIrisNextPlan> {
     let repo_root = target.to_path_buf();
+    // E2a: when the operator supplies `targetSubdir`, scope all of
+    // structural collection, the discovery sweep, the
+    // identifier-injection detector, and joern flow query to that
+    // subtree. `repo_root` stays at the original --target so the
+    // codeql DB (which lives at <repo_root>/.kuzushi/codeql-db by
+    // convention) is still found, and threat-model / context
+    // artifacts under <repo_root>/.kuzushi/ still load.
+    let scan_root = match options.target_subdir.as_deref() {
+        Some(subdir) => {
+            let joined = repo_root.join(subdir);
+            // Reject any path that escapes the repo via `..`. The
+            // input parser also rejects '..' segments, but defense
+            // in depth: re-check against the canonicalised parent.
+            let canonical_root = std::fs::canonicalize(&repo_root)
+                .unwrap_or_else(|_| repo_root.clone());
+            let canonical_joined = std::fs::canonicalize(&joined)
+                .unwrap_or_else(|_| joined.clone());
+            if !canonical_joined.starts_with(&canonical_root) {
+                anyhow::bail!(
+                    "taint-iris-next:hunt targetSubdir escapes --target: {subdir:?}"
+                );
+            }
+            joined
+        }
+        None => repo_root.clone(),
+    };
     let context = load_taint_iris_next_context(&repo_root);
     let threat_model = load_taint_iris_next_threat_model(&repo_root);
     let mut languages = options.languages.clone();
@@ -101,11 +127,35 @@ pub(in crate::modules) fn build_taint_iris_next_plan(
     );
     let structural_queries = build_taint_iris_next_structural_queries(&catalog);
     let prompt_catalog = render_taint_iris_next_catalog(&catalog);
-    let backend = choose_taint_iris_next_backend(&options.backend, &repo_root);
+    let mut backend = choose_taint_iris_next_backend(&options.backend, &repo_root);
+    // E2b: if the operator pointed at the whole postgres tree
+    // without targetSubdir AND the tree is large enough that joern
+    // is likely to hang on broad CWE regexes (1612 .c files etc),
+    // surface a partition recommendation as a backend warning.
+    // Doesn't change behavior — the hunt still proceeds — but
+    // operators see actionable next steps in `kuzushi findings` /
+    // run output.
+    if options.target_subdir.is_none() {
+        let c_file_count = count_c_files_under(&repo_root);
+        if should_recommend_partitioning(&repo_root, c_file_count) {
+            let parts = postgres_partitions_for(&repo_root);
+            backend.warnings.push(format!(
+                "target looks postgres-shaped with {c_file_count} .c files; broad CWE regex on joern \
+                 will likely hang. Run partitioned hunts in parallel with `targetSubdir` for each \
+                 subdir: {}",
+                parts
+                    .iter()
+                    .take(8)
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+    }
 
     Ok(TaintIrisNextPlan {
         target: target.to_path_buf(),
-        scan_root: target.to_path_buf(),
+        scan_root,
         repo_root,
         mode: options.mode,
         caps: options.caps,
@@ -122,6 +172,45 @@ pub(in crate::modules) fn build_taint_iris_next_plan(
         cwe_focus: options.cwe_focus,
         discovered_signals,
     })
+}
+
+/// Cheap .c-file count under a directory. Stops walking after
+/// `cap` to keep the partition heuristic from O(tree) scanning a
+/// 20GB monorepo just to decide whether to recommend partitioning.
+/// Returns the count saturated at `cap`.
+fn count_c_files_under(root: &Path) -> usize {
+    const CAP: usize = 2000;
+    let mut count = 0usize;
+    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if count >= CAP {
+            return count;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            if count >= CAP {
+                return count;
+            }
+            let path = entry.path();
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_dir() {
+                // Skip the `.kuzushi/` artifact dir + .git
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name == ".kuzushi" || name == ".git" || name == "target" || name == "node_modules" {
+                        continue;
+                    }
+                }
+                stack.push(path);
+            } else if ft.is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if ext == "c" || ext == "cpp" || ext == "cc" || ext == "cxx" {
+                        count += 1;
+                    }
+                }
+            }
+        }
+    }
+    count
 }
 
 /// Bridge between `build_taint_iris_next_plan` and the discovery

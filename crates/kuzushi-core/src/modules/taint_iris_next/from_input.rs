@@ -57,6 +57,15 @@ pub(in crate::modules) struct TaintIrisNextInput {
     /// can disable for fast/clean runs via
     /// `set taint-iris-next:hunt discoverSignals false`.
     pub(in crate::modules) discover_signals: bool,
+    /// Operator-supplied subtree under `--target` to narrow the
+    /// hunt to. When set, structural collection, the discovery
+    /// sweep, the identifier-injection detector, and joern flow
+    /// queries all scope to `target.join(target_subdir)` (rejected
+    /// if the joined path escapes `target` via `..` traversal).
+    /// codeql analyze still runs against `target/.kuzushi/codeql-db`
+    /// because the DB lives at repo root by convention. Empty /
+    /// None means "scan the whole tree" (current behavior).
+    pub(in crate::modules) target_subdir: Option<String>,
 }
 
 /// Parse a JSON value (string, array of strings, or comma/space
