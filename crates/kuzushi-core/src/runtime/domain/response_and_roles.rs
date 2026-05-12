@@ -12,6 +12,8 @@ impl AgentToolPolicy {
         }
     }
 
+    /// Opt this policy into the kuzushi MCP-as-agent surface (tree-sitter,
+    /// joern, codeql tools become callable from the agent loop).
     pub fn with_mcps(mut self, mcps: bool) -> Self {
         self.mcps = mcps;
         self
@@ -39,24 +41,32 @@ mod policy_tests {
     #[test]
     fn default_policy_does_not_enable_mcps() {
         let policy = AgentToolPolicy::default();
-        assert!(!policy.mcps);
-        assert!(policy.is_default());
+        assert!(!policy.mcps, "default policy must keep MCP surface off");
+        assert!(policy.is_default(), "fresh default policy is_default");
     }
 
     #[test]
     fn with_mcps_flips_flag_and_loses_is_default() {
         let policy = AgentToolPolicy::default().with_mcps(true);
         assert!(policy.mcps);
-        assert!(!policy.is_default());
+        assert!(
+            !policy.is_default(),
+            "is_default must consider mcps so callers can detect a non-default policy"
+        );
     }
 
     #[test]
     fn mcps_field_round_trips_through_serde_camelcase() {
         let policy = AgentToolPolicy::new("whitebox-static", ["Read", "Glob"]).with_mcps(true);
-        let json = serde_json::to_value(&policy).unwrap();
+        let json = serde_json::to_value(&policy).expect("serialise");
+        // Bridge JS reads `request.toolPolicy.mcps === true`; the field
+        // must serialise as camelCase `mcps`, not `Mcps` or snake_case.
         assert_eq!(json["mcps"], serde_json::Value::Bool(true));
-
-        let round_tripped: AgentToolPolicy = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            json["profile"],
+            serde_json::Value::String("whitebox-static".into())
+        );
+        let round_tripped: AgentToolPolicy = serde_json::from_value(json).expect("deserialise");
         assert_eq!(round_tripped, policy);
     }
 }

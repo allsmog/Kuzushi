@@ -797,6 +797,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let err = registry
@@ -821,6 +822,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let result = registry
@@ -848,6 +850,7 @@ OUT
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
 
         let err = chrome_rce::execute_tool("chrome-rce:unknown", json!({}), &ctx).unwrap_err();

@@ -6,6 +6,19 @@ impl TaintIrisNextInput {
         let backend = taint_iris_next_backend(input)?;
         let languages = taint_iris_next_languages(input)?;
         let caps = taint_iris_next_caps(input)?;
+        let cwe_focus = parse_taint_iris_next_cwe_focus(input);
+        let discover_signals = read_bool_option(input, "discoverSignals")
+            .or_else(|| read_bool_option(input, "discover_signals"))
+            .unwrap_or(true);
+        let target_subdir = optional_taint_next_string(input, &["targetSubdir", "target_subdir"])?
+            .filter(|subdir| !subdir.trim().is_empty());
+        if let Some(subdir) = &target_subdir {
+            if subdir.starts_with('/') || subdir.split('/').any(|part| part == "..") {
+                anyhow::bail!(
+                    "taint-iris-next:hunt targetSubdir must be a relative path under --target without '..' traversal, got {subdir:?}"
+                );
+            }
+        }
         let allow_deterministic_fallback = read_bool_option(input, "allowDeterministicFallback")
             .or_else(|| read_bool_option(input, "allow_deterministic_fallback"))
             .unwrap_or(false);
@@ -20,10 +33,56 @@ impl TaintIrisNextInput {
                 &["maxBudgetUsd", "max_budget_usd"],
                 "taint-iris-next:hunt maxBudgetUsd",
             )?,
+            cwe_focus,
+            discover_signals,
+            target_subdir,
             allow_deterministic_fallback,
             extra_catalog_entries,
         })
     }
+}
+
+pub(in crate::capabilities::taint_iris_next) fn parse_taint_iris_next_cwe_focus(
+    input: &Value,
+) -> Vec<String> {
+    let raw = input.get("cweFocus").or_else(|| input.get("cwe_focus"));
+    let mut tokens = Vec::new();
+    match raw {
+        Some(Value::Array(items)) => {
+            for item in items {
+                if let Some(value) = item.as_str() {
+                    tokens.push(value.to_string());
+                }
+            }
+        }
+        Some(Value::String(value)) => {
+            tokens.extend(
+                value
+                    .split(|ch: char| ch == ',' || ch == ' ' || ch == ';')
+                    .map(str::to_string),
+            );
+        }
+        _ => {}
+    }
+
+    tokens
+        .into_iter()
+        .filter_map(|raw| {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            let upper = trimmed.to_ascii_uppercase();
+            let stripped = upper.strip_prefix("CWE-").unwrap_or(&upper);
+            stripped
+                .parse::<u32>()
+                .ok()
+                .map(|number| format!("CWE-{number}"))
+                .or_else(|| Some(format!("CWE-{stripped}")))
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 /// Parse the optional `extraCatalogEntries` input field into ranked
@@ -76,6 +135,7 @@ fn parse_one_extra_entry(item: &Value, idx: usize) -> Result<TaintIrisNextRanked
     let sink_signals = read_string_array(item, &["sinkSignals", "sink_signals"])?;
     let sanitizer_signals = read_string_array(item, &["sanitizerSignals", "sanitizer_signals"])?;
     let structural_queries = read_string_array(item, &["structuralQueries", "structural_queries"])?;
+    let regex_markers = parse_regex_markers(item)?;
 
     // Operator-supplied entries score above all const-catalog entries.
     // If the operator went to the trouble of authoring a catalog entry
@@ -95,8 +155,54 @@ fn parse_one_extra_entry(item: &Value, idx: usize) -> Result<TaintIrisNextRanked
         sink_signals,
         sanitizer_signals,
         structural_queries,
+        regex_markers,
         score,
         reasons,
+    })
+}
+
+fn parse_regex_markers(item: &Value) -> Result<Vec<TaintIrisNextRegexMarker>> {
+    let Some(raw) = item
+        .get("regexMarkers")
+        .or_else(|| item.get("regex_markers"))
+    else {
+        return Ok(Vec::new());
+    };
+    let markers = raw
+        .as_array()
+        .context("regexMarkers must be an array of marker objects")?;
+    markers
+        .iter()
+        .enumerate()
+        .map(|(idx, marker)| parse_regex_marker(marker, idx))
+        .collect()
+}
+
+fn parse_regex_marker(marker: &Value, idx: usize) -> Result<TaintIrisNextRegexMarker> {
+    let pattern = marker
+        .get("pattern")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .with_context(|| format!("regexMarkers[{idx}].pattern is required"))?
+        .to_string();
+    let kind = marker
+        .get("kind")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "source".to_string());
+    let languages = read_string_array(marker, &["languages"])?;
+    let marker_name = marker
+        .get("marker")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("operator.regex.{idx}"));
+    Ok(TaintIrisNextRegexMarker {
+        pattern,
+        kind,
+        languages,
+        marker: marker_name,
     })
 }
 
@@ -169,8 +275,8 @@ fn taint_iris_next_caps(input: &Value) -> Result<TaintIrisNextCaps> {
             &["maxCandidatesPerCwe", "max_candidates_per_cwe"],
             "taint-iris-next:hunt maxCandidatesPerCwe",
         )?
-        .unwrap_or(24)
-        .min(200),
+        .unwrap_or(2000)
+        .min(10000),
         max_evidence_per_cwe: positive_usize_input(
             input,
             &["maxEvidencePerCwe", "max_evidence_per_cwe"],
@@ -183,7 +289,7 @@ fn taint_iris_next_caps(input: &Value) -> Result<TaintIrisNextCaps> {
             &["maxFilesPerQuery", "max_files_per_query"],
             "taint-iris-next:hunt maxFilesPerQuery",
         )?
-        .unwrap_or(25)
+        .unwrap_or(120)
         .min(500),
         max_specs_per_cwe: positive_usize_input(
             input,

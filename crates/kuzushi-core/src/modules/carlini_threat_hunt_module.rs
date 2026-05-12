@@ -100,85 +100,111 @@ pub(crate) fn taint_iris_next_module() -> BuiltinModule {
         "Taint IRIS Next",
         ModuleKind::Defense,
         "Bounded IRIS-style taint analysis with deterministic evidence extraction and agent review.",
-        vec![tool_with_options(
-            "taint-iris-next:hunt",
-            "Run the next-generation bounded taint hunting pipeline.",
-            vec![
-                target_option(),
-                max_findings_option(20),
-                model_option(),
-                opt("mode", OptionType::Enum, "Taint IRIS Next run mode.")
-                    .choices(&["plan", "hunt"])
-                    .default(json!("plan")),
-                opt("backend", OptionType::Enum, "Evidence backend selector.")
-                    .choices(&["auto", "structural", "semgrep", "codeql", "joern", "language"])
-                    .default(json!("auto"))
+        vec![
+            tool_with_options(
+                "taint-iris-next:hunt",
+                "Run the next-generation bounded taint hunting pipeline.",
+                vec![
+                    target_option(),
+                    max_findings_option(20),
+                    model_option(),
+                    opt("mode", OptionType::Enum, "Taint IRIS Next run mode.")
+                        .choices(&["plan", "hunt"])
+                        .default(json!("plan")),
+                    opt("backend", OptionType::Enum, "Evidence backend selector.")
+                        .choices(&["auto", "structural", "semgrep", "codeql", "joern", "language"])
+                        .default(json!("auto"))
+                        .advanced(),
+                    opt(
+                        "languages",
+                        OptionType::StringList,
+                        "Language filters for catalog ranking.",
+                    )
                     .advanced(),
-                opt(
-                    "languages",
-                    OptionType::StringList,
-                    "Language filters for catalog ranking.",
-                )
-                .advanced(),
-                opt(
-                    "maxBudgetUsd",
-                    OptionType::Float,
-                    "Maximum runtime budget for this hunt.",
-                )
-                .aliases(&["max_budget_usd"])
-                .advanced(),
-                opt("maxCatalogEntries", OptionType::Int, "Maximum catalog entries.")
-                    .aliases(&["maxCwes", "max_catalog_entries", "max_cwes"])
-                    .default(json!(24))
+                    opt(
+                        "maxBudgetUsd",
+                        OptionType::Float,
+                        "Maximum runtime budget for this hunt.",
+                    )
+                    .aliases(&["max_budget_usd"])
                     .advanced(),
-                opt(
-                    "maxCandidatesPerCwe",
-                    OptionType::Int,
-                    "Maximum candidates per CWE.",
-                )
-                .aliases(&["max_candidates_per_cwe"])
-                .default(json!(24))
-                .advanced(),
-                opt("maxEvidencePerCwe", OptionType::Int, "Maximum evidence items per CWE.")
-                    .aliases(&["max_evidence_per_cwe"])
-                    .default(json!(12))
+                    opt("maxCatalogEntries", OptionType::Int, "Maximum catalog entries.")
+                        .aliases(&["maxCwes", "max_catalog_entries", "max_cwes"])
+                        .default(json!(24))
+                        .advanced(),
+                    opt(
+                        "maxCandidatesPerCwe",
+                        OptionType::Int,
+                        "Maximum candidates per CWE.",
+                    )
+                    .aliases(&["max_candidates_per_cwe"])
+                    .default(json!(2000))
                     .advanced(),
-                opt("maxFilesPerQuery", OptionType::Int, "Maximum files per query.")
-                    .aliases(&["max_files_per_query"])
-                    .default(json!(25))
+                    opt("maxEvidencePerCwe", OptionType::Int, "Maximum evidence items per CWE.")
+                        .aliases(&["max_evidence_per_cwe"])
+                        .default(json!(12))
+                        .advanced(),
+                    opt("maxFilesPerQuery", OptionType::Int, "Maximum files per query.")
+                        .aliases(&["max_files_per_query"])
+                        .default(json!(120))
+                        .advanced(),
+                    opt("maxSpecsPerCwe", OptionType::Int, "Maximum specs per CWE.")
+                        .aliases(&["max_specs_per_cwe"])
+                        .default(json!(16))
+                        .advanced(),
+                    opt("maxAgentFindings", OptionType::Int, "Maximum agent findings.")
+                        .aliases(&["max_agent_findings"])
+                        .advanced(),
+                    opt(
+                        "codeqlAnalyzeTimeoutMs",
+                        OptionType::Int,
+                        "CodeQL analyze timeout in milliseconds.",
+                    )
+                    .aliases(&["codeql_analyze_timeout_ms"])
+                    .default(json!(180000))
                     .advanced(),
-                opt("maxSpecsPerCwe", OptionType::Int, "Maximum specs per CWE.")
-                    .aliases(&["max_specs_per_cwe"])
-                    .default(json!(16))
-                    .advanced(),
-                opt("maxAgentFindings", OptionType::Int, "Maximum agent findings.")
-                    .aliases(&["max_agent_findings"])
-                    .advanced(),
-                opt(
-                    "codeqlAnalyzeTimeoutMs",
-                    OptionType::Int,
-                    "CodeQL analyze timeout in milliseconds.",
-                )
-                .aliases(&["codeql_analyze_timeout_ms"])
-                .default(json!(180000))
-                .advanced(),
-                opt("minEvidenceLevel", OptionType::Enum, "Minimum evidence level.")
-                    .aliases(&["min_evidence_level"])
-                    .choices(&["path", "linked", "candidate"])
-                    .default(json!("linked"))
-                    .advanced(),
-                mcps_option(),
-                allow_deterministic_fallback_option(),
-                joern_cpg_option(),
-                joern_per_cwe_timeout_ms_option(),
-                codeql_prewarm_option(),
-                codeql_cache_dir_option(),
-                mcp_tool_timeout_ms_option(),
-                bridge_verbose_option(),
-                bridge_log_path_option(),
-            ],
-        )],
-        vec![dag("taint-iris-next:hunt", "findings", &["context:build"])],
+                    opt("minEvidenceLevel", OptionType::Enum, "Minimum evidence level.")
+                        .aliases(&["min_evidence_level"])
+                        .choices(&["path", "linked", "candidate"])
+                        .default(json!("linked"))
+                        .advanced(),
+                    mcps_option(),
+                    cwe_focus_option(),
+                    discover_signals_option(),
+                    target_subdir_option(),
+                    allow_deterministic_fallback_option(),
+                    joern_cpg_option(),
+                    joern_per_cwe_timeout_ms_option(),
+                    codeql_prewarm_option(),
+                    codeql_cache_dir_option(),
+                    mcp_tool_timeout_ms_option(),
+                    bridge_verbose_option(),
+                    bridge_log_path_option(),
+                ],
+            ),
+            tool_with_options(
+                "taint-iris-next:catalog",
+                "Generate a target-specific CWE catalog tailored to this codebase. \
+Persists to <target>/.kuzushi/taint-iris-next-catalog.json; subsequent \
+taint-iris-next:hunt runs prefer it over the static built-in catalog.",
+                vec![target_option(), model_option()],
+            ),
+            tool_with_options(
+                "taint-iris-next:codeql-db",
+                "Build the CodeQL database for the target codebase. The agent \
+inspects manifests/build files, picks the correct CodeQL language and \
+build command (e.g. `./configure ... && make` for postgres), then runs \
+`codeql database create` with tracing. Persists to \
+<target>/.kuzushi/codeql-db so subsequent taint-iris-next:hunt runs \
+with backend=codeql can immediately consume it.",
+                vec![target_option(), model_option()],
+            ),
+        ],
+        vec![
+            dag("taint-iris-next:hunt", "findings", &["context:build"]),
+            dag("taint-iris-next:catalog", "catalog", &["context:build"]),
+            dag("taint-iris-next:codeql-db", "codeql-db", &["context:build"]),
+        ],
     )
 }
 

@@ -63,6 +63,12 @@ Return a single JSON object representing ThreatModelDocument. Include at least:
 - dfd.flows with id, description, sourceId, targetId, trustBoundaryIds
 - dfd.trustBoundaries with id, name, innerZone, outerZone, crossingFlowIds
 - threats with id, targetElementIds, category, title, description, attackVector, preconditions, impact, likelihood, existingMitigations, missingMitigations, relatedCwe, affectedFiles
+- attackSurface with the structured handoff to the taint-hunting pipeline (taint-iris-next consumes this directly):
+    - entryPoints: [{{name (concrete function/handler symbol), trustZone, evidence (file:line or filename), description}}]
+    - roleGates:   [{{check (the privilege predicate, e.g. has_privs_of_role / superuser()), guarded (the API name behind the gate)}}]
+    - externalSinks: [{{name (concrete sink call e.g. dlopen / load_external_function / system / exec), category (dlopen|exec|filesystem|network|privesc), context}}]
+    - trustedCallers: [{{role, purpose}}]
+  Use real symbols mined from the file inventory above; do not invent placeholder names.
 "#,
         target = input.target.display(),
         repo_name = input.repo_name,

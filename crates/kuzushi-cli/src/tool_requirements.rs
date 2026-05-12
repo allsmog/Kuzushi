@@ -47,6 +47,8 @@ pub(crate) const WORKSPACE_TOOL_NAMES: &[&str] = &[
     "agentic-sast:scan",
     "taint-iris:hunt",
     "taint-iris-next:hunt",
+    "taint-iris-next:catalog",
+    "taint-iris-next:codeql-db",
     "triage:run",
     "verify:finding",
     "verify:exploit",

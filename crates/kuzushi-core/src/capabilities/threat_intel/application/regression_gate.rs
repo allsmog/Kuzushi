@@ -381,6 +381,7 @@ where
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::path::PathBuf;
 
     #[test]
     fn extracts_commit_sha_from_github_commit_url() {

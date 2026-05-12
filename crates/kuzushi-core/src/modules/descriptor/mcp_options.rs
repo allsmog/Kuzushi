@@ -4,7 +4,7 @@ pub(in crate::modules) fn mcps_option() -> OptionSpec {
     opt(
         "mcps",
         OptionType::Bool,
-        "Attach the kuzushi MCP servers as agent tools during the hunt.",
+        "Attach the kuzushi MCP servers (tree-sitter, joern, codeql) as agent tools during the hunt.",
     )
     .default(json!(true))
     .advanced()
@@ -92,5 +92,36 @@ pub(in crate::modules) fn allow_deterministic_fallback_option() -> OptionSpec {
     )
     .aliases(&["allow_deterministic_fallback"])
     .default(json!(false))
+    .advanced()
+}
+
+pub(in crate::modules) fn cwe_focus_option() -> OptionSpec {
+    opt(
+        "cweFocus",
+        OptionType::StringList,
+        "Comma-separated CWE allow-list to focus the hunt on.",
+    )
+    .aliases(&["cwe_focus"])
+    .advanced()
+}
+
+pub(in crate::modules) fn discover_signals_option() -> OptionSpec {
+    opt(
+        "discoverSignals",
+        OptionType::Bool,
+        "Run the per-target source/sink discovery pass at plan time.",
+    )
+    .aliases(&["discover_signals"])
+    .default(json!(true))
+    .advanced()
+}
+
+pub(in crate::modules) fn target_subdir_option() -> OptionSpec {
+    opt(
+        "targetSubdir",
+        OptionType::Path,
+        "Relative subdirectory under the target to scan.",
+    )
+    .aliases(&["target_subdir"])
     .advanced()
 }

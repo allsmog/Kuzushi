@@ -54,6 +54,8 @@ pub const RUNTIME_TOOL_NAMES: &[&str] = &[
     "systems-hunt:systems-hunt",
     "systems-hunt:systems-invariant-extract",
     "systems-hunt:systems-trigger-synth",
+    "taint-iris-next:catalog",
+    "taint-iris-next:codeql-db",
     "taint-iris-next:hunt",
     "taint-iris:hunt",
     "threat-intel:apply",

@@ -88,7 +88,7 @@ fn write_bridge_request<T: Serialize>(
     }
 }
 
-pub(crate) fn default_bridge_command(source_root: &Path) -> Vec<String> {
+pub fn default_bridge_command(source_root: &Path) -> Vec<String> {
     if let Some(command) = bridge_command_at(source_root) {
         return command;
     }

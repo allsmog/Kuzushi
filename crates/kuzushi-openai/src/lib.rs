@@ -13,4 +13,4 @@ mod tests;
 
 pub use anthropic_oauth::{AnthropicOAuthRuntime, AnthropicOAuthRuntimeOptions};
 pub use oauth::{probe as probe_anthropic_oauth, OauthReadiness};
-pub use pi_agent_core::PiAgentCoreRuntime;
+pub use pi_agent_core::{default_bridge_command, PiAgentCoreRuntime};

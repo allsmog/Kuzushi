@@ -635,6 +635,11 @@ case "$request" in
 {"ok":true,"structured":{"selectedCwes":[{"cwe":"CWE-89","reason":"raw query receives request data","catalogSignals":["sink: query("],"sourceSpec":"request query parameters","sinkSpec":"database query calls","sanitizerSpec":"parameterized query APIs","customCweRationale":""}],"findings":[{"title":"Request parameter reaches raw SQL query","cwe":"CWE-89","severity":"high","confidence":"medium","evidenceLevel":"linked","filePath":"src/routes.ts","startLine":1,"message":"The query uses request-controlled data in SQL construction.","sourceSinkTrace":"req.query.id -> db.query(sql)","catalogSignals":["source: req.query","sink: query("],"customCweRationale":"","taintPath":[{"filePath":"src/routes.ts","line":1,"message":"source and SQL sink","snippet":"db.query(req.query.id)"}]}],"triage":[{"status":"finding","cwe":"CWE-89","evidenceLevel":"linked","rationale":"request data reaches raw SQL query","filePath":"src/routes.ts","line":1,"catalogSignals":["sink: query("]}],"notes":[]}}
 JSON
     ;;
+  *"Taint IRIS Next catalog architect"*)
+    cat <<'JSON'
+{"ok":true,"structured":{"catalog":[{"cwe":"CWE-89","name":"SQL Injection","taintClass":"sql-injection","languages":["typescript"],"sourceSignals":["req.query"],"sinkSignals":["db.query"],"sanitizerSignals":["parameterized query"],"structuralQueries":["db.query"],"regexMarkers":[],"score":90,"reasons":["fixture route builds SQL from request input"]}]}}
+JSON
+    ;;
   *)
     echo '{"ok":false,"error":"unexpected taint-iris-next request"}'
     exit 1
@@ -2647,12 +2652,13 @@ fn run_command_dispatches_sast_scan_through_registry_and_persists() {
     .unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.trusted_workflow_auto_accept = true;
     app.handle_command(ShellCommand::Use("sast".to_string()));
     app.handle_command(ShellCommand::RunTool {
         tool: None,
         input: Some(r#"{"taskMode":"manual","tasks":["dep-hygiene","secret-scan"]}"#.to_string()),
     });
-    drain_tool(&mut app);
+    drain_chain_with_auto_reuse(&mut app);
 
     assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
@@ -2685,10 +2691,11 @@ fn run_dot_from_catalog_dispatches_sast_scan() {
     .unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.trusted_workflow_auto_accept = true;
     app.handle_command(parse_command(
         r#"run . {"taskMode":"manual","tasks":["dep-hygiene","secret-scan"]}"#,
     ));
-    drain_tool(&mut app);
+    drain_chain_with_auto_reuse(&mut app);
 
     assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app.focused_module.is_none());
@@ -2725,12 +2732,13 @@ fn run_command_dispatches_agentic_sast_through_pi_agent_core_bridge_and_persists
     };
 
     let mut app = ShellApp::new(config, Some(&workspace));
+    app.trusted_workflow_auto_accept = true;
     app.handle_command(ShellCommand::Use("agentic-sast".to_string()));
     app.handle_command(ShellCommand::RunTool {
         tool: None,
         input: Some(r#"{"maxFindings":5}"#.to_string()),
     });
-    drain_tool(&mut app);
+    drain_chain_with_auto_reuse(&mut app);
 
     assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
@@ -2850,12 +2858,13 @@ fn run_command_dispatches_taint_iris_through_pi_agent_core_bridge_and_persists()
     };
 
     let mut app = ShellApp::new(config, Some(&workspace));
+    app.trusted_workflow_auto_accept = true;
     app.handle_command(ShellCommand::Use("taint-iris".to_string()));
     app.handle_command(ShellCommand::RunTool {
         tool: None,
         input: Some(r#"{"maxFindings":5}"#.to_string()),
     });
-    drain_tool(&mut app);
+    drain_chain_with_auto_reuse(&mut app);
 
     assert_eq!(app.shell_view, ShellView::Activity);
     assert!(app
@@ -2898,21 +2907,25 @@ fn run_command_dispatches_taint_iris_next_through_pi_agent_core_bridge_and_persi
     };
 
     let mut app = ShellApp::new(config, Some(&workspace));
+    app.trusted_workflow_auto_accept = true;
     app.handle_command(ShellCommand::Use("taint-iris-next".to_string()));
     app.handle_command(ShellCommand::RunTool {
-            tool: None,
-            input: Some(
-                r#"{"mode":"hunt","maxCatalogEntries":3,"maxAgentFindings":5,"minEvidenceLevel":"candidate"}"#
-                    .to_string(),
-            ),
-        });
-    drain_tool(&mut app);
+        tool: None,
+        input: Some(
+            r#"{"mode":"hunt","maxCatalogEntries":3,"maxAgentFindings":5,"minEvidenceLevel":"candidate"}"#
+                .to_string(),
+        ),
+    });
+    drain_chain_with_auto_reuse(&mut app);
 
     assert_eq!(app.shell_view, ShellView::Activity);
-    assert!(app
-        .log
-        .iter()
-        .any(|line| { line.prefix == "result" && line.body.contains("Taint IRIS Next") }));
+    assert!(
+        app.log
+            .iter()
+            .any(|line| { line.prefix == "result" && line.body.contains("taint-iris-next:hunt") }),
+        "expected taint-iris-next:hunt result log, got {:?}",
+        app.log
+    );
 
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     let findings = store.list_findings(10).unwrap();

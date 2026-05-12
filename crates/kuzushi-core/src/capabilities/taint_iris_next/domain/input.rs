@@ -45,6 +45,9 @@ pub(crate) struct TaintIrisNextInput {
     pub(crate) languages: Vec<String>,
     pub(crate) caps: TaintIrisNextCaps,
     pub(crate) max_budget_usd: Option<f64>,
+    pub(crate) cwe_focus: Vec<String>,
+    pub(crate) discover_signals: bool,
+    pub(crate) target_subdir: Option<String>,
     pub(crate) allow_deterministic_fallback: bool,
     /// Operator-supplied catalog entries merged on top of the hardcoded
     /// `TAINT_IRIS_NEXT_CATALOG` before ranking. Carries threat-intel
