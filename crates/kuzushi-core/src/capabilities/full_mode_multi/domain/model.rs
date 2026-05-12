@@ -10,8 +10,17 @@ pub const DEFAULT_MAX_TOKENS_PER_CHUNK: usize = 12_000;
 /// runtime tokenizer.
 pub const BYTES_PER_TOKEN: f64 = 3.6;
 
-/// Hard cap on per-file size before we split.
-pub const MAX_FILE_BYTES: usize = MAX_FILE_TOKENS * BYTES_PER_TOKEN as usize;
+/// Hard cap on per-file size before we silently skip the file. The
+/// intent is "if this file's token estimate exceeds MAX_FILE_TOKENS,
+/// it's too big for a single chunk and gets dropped". Computing the
+/// byte cap as `MAX_FILE_TOKENS * BYTES_PER_TOKEN as usize` was a
+/// silent truncation bug: `BYTES_PER_TOKEN` is `3.6` but `as usize`
+/// rounds toward zero, so the cap collapsed to `80_000 * 3 = 240_000`
+/// bytes. A 250 KB `fs/smb/server/smb2pdu.c` (≈68k est-tokens, well
+/// under MAX_FILE_TOKENS) was silently skipped from every kernel
+/// scan. Use the float multiplication path so the cap matches its
+/// documented intent.
+pub const MAX_FILE_BYTES: usize = (MAX_FILE_TOKENS as f64 * BYTES_PER_TOKEN) as usize;
 
 pub(crate) const MAX_FILE_TOKENS: usize = 80_000;
 
@@ -54,6 +63,21 @@ pub struct FullModeConfig {
     /// Used to retry only failed chunks from a previous broad run.
     #[serde(default)]
     pub failed_chunk_ids: Option<Vec<u32>>,
+    /// If `true`, run deep-audit on every HIGH+CRITICAL finding the
+    /// chunk pass emits, BEFORE persisting. Each finding's triage
+    /// verdict is then attached and the deep-audit cost is summed into
+    /// the report. Default false to keep the cheap-cast-wide-net mode
+    /// unchanged; set true for "scan + triage in one shot."
+    #[serde(default)]
+    pub auto_triage: bool,
+    /// When auto-triaging, the per-finding deep-audit step budget.
+    /// Default 12, same as `deep-audit:run`'s recommended floor.
+    #[serde(default)]
+    pub auto_triage_max_steps: Option<u32>,
+    /// When auto-triaging, the per-finding deep-audit deposit. Default
+    /// 1.0; deep-audit refunds unused budget.
+    #[serde(default)]
+    pub auto_triage_deposit_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -74,6 +98,9 @@ impl Default for FullModeConfig {
             dry_run: false,
             scope_files: None,
             failed_chunk_ids: None,
+            auto_triage: false,
+            auto_triage_max_steps: None,
+            auto_triage_deposit_usd: None,
         }
     }
 }
@@ -125,4 +152,22 @@ pub struct CostSummary {
     pub total_tokens: usize,
     pub usd_low: f64,
     pub usd_high: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BYTES_PER_TOKEN, MAX_FILE_BYTES, MAX_FILE_TOKENS};
+
+    #[test]
+    fn max_file_bytes_matches_documented_intent() {
+        // Regression for a silent `as usize` truncation that dropped the
+        // 0.6 fractional part of BYTES_PER_TOKEN, collapsing the per-file
+        // size cap from 288_000 → 240_000 bytes and excluding files like
+        // fs/smb/server/smb2pdu.c (~250 KB) from every full-mode scan.
+        assert_eq!(MAX_FILE_BYTES, 288_000);
+        assert_eq!(
+            MAX_FILE_BYTES,
+            (MAX_FILE_TOKENS as f64 * BYTES_PER_TOKEN) as usize
+        );
+    }
 }

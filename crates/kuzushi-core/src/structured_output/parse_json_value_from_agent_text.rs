@@ -10,11 +10,24 @@ pub(crate) fn parse_json_value_from_agent_text(text: &str) -> Result<Value> {
         return Ok(value);
     }
 
+    // Models often emit a paragraph of analysis followed by a fenced
+    // ```json … ``` block at the end. The leading-fence-strip above
+    // catches the case where the WHOLE response is fenced; this catches
+    // the case where the verdict is embedded in prose. Try the LAST
+    // fenced block first because that's where the verdict tends to live.
+    if let Some(value) = parse_last_fenced_json(text) {
+        return Ok(value);
+    }
+
+    // Balanced-brace fallback, walked from the LAST `{` backward — the
+    // verdict tends to be at the end, and the FIRST `{` is often inside
+    // a C code snippet quoted earlier in the analysis.
     let mut saw_json_like_text = false;
-    for slice in balanced_json_slices(candidate, '{', '}')
-        .into_iter()
-        .chain(balanced_json_slices(candidate, '[', ']'))
-    {
+    let mut slices_obj = balanced_json_slices(candidate, '{', '}');
+    slices_obj.reverse();
+    let mut slices_arr = balanced_json_slices(candidate, '[', ']');
+    slices_arr.reverse();
+    for slice in slices_obj.into_iter().chain(slices_arr) {
         saw_json_like_text = true;
         if let Ok(value) = serde_json::from_str::<Value>(slice) {
             return Ok(value);
@@ -24,6 +37,45 @@ pub(crate) fn parse_json_value_from_agent_text(text: &str) -> Result<Value> {
         anyhow::bail!("model response contained JSON-looking text, but it was invalid");
     }
     anyhow::bail!("model response did not contain a JSON object or array")
+}
+
+/// Locate every ```json … ``` (or bare ``` … ```) block in `text`, parse
+/// each as a JSON Value, return the last one that parses. Anthropic /
+/// Sonnet typically emit the verdict in the FINAL fenced block; older
+/// reasoning traces above it can contain C code with unbalanced braces
+/// that would defeat the simple `find('{')..rfind('}')` approach.
+fn parse_last_fenced_json(text: &str) -> Option<Value> {
+    let mut rest = text;
+    let mut last_ok: Option<Value> = None;
+    while let Some(open_pos) = rest.find("```") {
+        let after_ticks = &rest[open_pos + 3..];
+        // Optional `json` (or `JSON`) tag right after the opening fence.
+        let body_start = after_ticks
+            .strip_prefix("json")
+            .or_else(|| after_ticks.strip_prefix("JSON"))
+            .unwrap_or(after_ticks);
+        let body_start = body_start.trim_start_matches('\n').trim_start_matches(' ');
+        let Some(close_off) = body_start.find("```") else {
+            break;
+        };
+        let body = body_start[..close_off].trim();
+        if let Ok(value) = serde_json::from_str::<Value>(body) {
+            last_ok = Some(value);
+        }
+        let consumed = (body_start.as_ptr() as usize - rest.as_ptr() as usize) + close_off + 3;
+        rest = &rest[consumed..];
+    }
+    last_ok
+}
+
+/// Typed convenience wrapper: parse the agent's text as a JSON Value
+/// via `parse_json_value_from_agent_text`, then deserialise into T.
+/// Returns None on any failure so callers can fall back to defaults.
+pub(crate) fn try_parse_typed_from_agent_text<T: serde::de::DeserializeOwned>(
+    text: &str,
+) -> Option<T> {
+    let value = parse_json_value_from_agent_text(text).ok()?;
+    serde_json::from_value::<T>(value).ok()
 }
 
 pub(crate) fn strip_markdown_fence(text: &str) -> &str {

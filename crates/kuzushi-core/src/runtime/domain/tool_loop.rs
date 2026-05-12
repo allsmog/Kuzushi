@@ -42,6 +42,11 @@ pub struct AgentToolLoopRequest {
     pub max_steps: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_options: Option<AgentRuntimeOptions>,
+    /// Sampling temperature for every round-trip in the loop. None
+    /// means "use the provider default". Set near 0 for audit / triage
+    /// flows where determinism matters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

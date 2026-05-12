@@ -64,9 +64,74 @@ pub(crate) fn run_full_mode_hunt_tool(
     let runtime = required_full_mode_runtime(runtime)?;
     let routed = full_mode_routed_runtime(runtime, ctx)?;
     let limiter = full_mode_spend_limiter(ctx)?;
-    let report = run_full_mode_multi(&routed, limiter.as_ref(), &cfg)?;
+    let mut report = run_full_mode_multi(&routed, limiter.as_ref(), &cfg)?;
     persist_full_mode_report(ctx, &report)?;
+
+    // Auto-triage hook: when enabled, run deep-audit on every persisted
+    // HIGH+CRITICAL finding using the same routed runtime + spend
+    // limiter the chunk pass used. The triage verdict is saved back into
+    // the findings store so a subsequent `findings --triage` query
+    // reflects it; the per-finding cost is summed into `report.cost_usd`.
+    if cfg.auto_triage {
+        let extra = auto_triage_full_mode_findings(&cfg, ctx, &routed, &report)?;
+        report.cost_usd += extra;
+    }
     Ok(report_to_tool_json(&report))
+}
+
+fn auto_triage_full_mode_findings(
+    cfg: &crate::capabilities::full_mode_multi::FullModeConfig,
+    ctx: &ToolExecutionContext<'_>,
+    routed: &crate::agent_router::RoutedRuntime,
+    report: &crate::capabilities::full_mode_multi::FullModeReport,
+) -> Result<f64> {
+    use crate::capabilities::deep_auditor::{
+        run_deep_auditor, save_evidence, DeepAuditConfig, DEFAULT_MAX_STEPS, DEFAULT_PASSES,
+        DEFAULT_TEMPERATURE,
+    };
+    use crate::findings::Severity;
+    use crate::spend::SpendLimiter;
+
+    let workspace = ctx
+        .workspace
+        .ok_or_else(|| anyhow::anyhow!("autoTriage requires a workspace target"))?;
+    let store = match ctx.findings_store {
+        Some(store) => store,
+        None => return Ok(0.0),
+    };
+    let spend = SpendLimiter::open(workspace.findings_db_path())?;
+
+    let max_steps = cfg
+        .auto_triage_max_steps
+        .unwrap_or(DEFAULT_MAX_STEPS.min(12));
+    let deposit_usd = cfg.auto_triage_deposit_usd.unwrap_or(1.0);
+
+    let audit_cfg = DeepAuditConfig {
+        workspace_root: workspace.root().to_path_buf(),
+        max_steps,
+        deposit_usd,
+        system_prompt: None,
+        include_static_evidence: true,
+        temperature: DEFAULT_TEMPERATURE,
+        passes: DEFAULT_PASSES,
+    };
+
+    let mut extra_cost = 0.0;
+    for finding in &report.findings {
+        if !matches!(finding.severity, Severity::High | Severity::Critical) {
+            continue;
+        }
+        let outcome = match run_deep_auditor(routed, Some(&spend), &audit_cfg, finding) {
+            Ok(o) => o,
+            Err(_) => continue, // never let one bad triage abort the rest
+        };
+        if let Some(id) = finding.id {
+            let _ = store.save_triage(id, &outcome.triage);
+            let _ = save_evidence(&workspace.findings_db_path(), id, &outcome.evidence);
+        }
+        extra_cost += outcome.cost_usd;
+    }
+    Ok(extra_cost)
 }
 
 pub(crate) fn full_mode_config_from_input(
@@ -82,6 +147,15 @@ pub(crate) fn full_mode_config_from_input(
         dry_run: full_mode_dry_run(input),
         scope_files: full_mode_scope_files(input, ctx)?,
         failed_chunk_ids: full_mode_failed_chunk_ids(input)?,
+        auto_triage: input
+            .get("autoTriage")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        auto_triage_max_steps: input
+            .get("autoTriageMaxSteps")
+            .and_then(Value::as_u64)
+            .map(|v| v as u32),
+        auto_triage_deposit_usd: input.get("autoTriageDepositUsd").and_then(Value::as_f64),
     })
 }
 

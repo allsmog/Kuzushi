@@ -45,6 +45,22 @@ pub(crate) fn full_mode_module() -> BuiltinModule {
                     OptionType::String,
                     "Optional retry filter: comma-separated chunk IDs (\"3,7,11\") or JSON array when using run JSON input.",
                 ),
+                opt(
+                    "autoTriage",
+                    OptionType::Bool,
+                    "Run deep-audit on every HIGH+CRITICAL finding before returning. Verdicts are saved back into the findings store.",
+                )
+                .default(serde_json::json!(false)),
+                opt(
+                    "autoTriageMaxSteps",
+                    OptionType::Int,
+                    "Step budget per auto-triage deep-audit pass (default 12).",
+                ),
+                opt(
+                    "autoTriageDepositUsd",
+                    OptionType::Float,
+                    "Spend deposit per auto-triage pass (default 1.0; deep-audit refunds the unused portion).",
+                ),
             ],
         )],
         vec![],

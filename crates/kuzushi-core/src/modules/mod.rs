@@ -73,6 +73,7 @@ mod resolve_tool_model;
 mod router_show_tool;
 mod run_deep_audit_tool;
 mod run_smoke_next_step_tool;
+mod runtime_tool_policy;
 #[cfg(test)]
 mod tests;
 mod threat_model_module;
@@ -88,4 +89,5 @@ pub use contracts::{
     ToolDescriptor,
 };
 pub use registry::ModuleRegistry;
+pub use runtime_tool_policy::{tool_requires_agent_runtime, RUNTIME_TOOL_NAMES};
 pub use wants_sast_runtime::wants_sast_runtime;

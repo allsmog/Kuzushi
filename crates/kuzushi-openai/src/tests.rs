@@ -77,6 +77,7 @@ fi
             }],
             max_steps: 4,
             runtime_options: None,
+            temperature: None,
         };
 
         let step1 = bridge.next_step_blocking(&req, &[]).unwrap();
@@ -140,6 +141,7 @@ fi
             }],
             max_steps: 1,
             runtime_options: None,
+            temperature: None,
         };
         let err = bridge
             .next_step_blocking(&req, &[])

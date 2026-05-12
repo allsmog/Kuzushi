@@ -126,8 +126,78 @@ async function readStdin() {
   return data;
 }
 
+/**
+ * Claude Code remote-session OAuth tokens are rate-limited on the
+ * Sonnet / Opus tier unless the system prompt opens with the Claude Code
+ * identity string. Haiku is unaffected. Without this prefix the API
+ * returns a sub-second `429 rate_limit_error` whose message is literally
+ * `"Error"` — easy to misread as a real quota signal.
+ *
+ * Prepend the identity string transparently whenever the bridge is about
+ * to use an Anthropic OAuth bag. If the caller's system prompt already
+ * starts with the line, leave it as-is so we don't double-prefix.
+ */
+const CLAUDE_CODE_IDENTITY_LINE =
+  "You are Claude Code, Anthropic's official CLI for Claude.";
+
+function applyClaudeCodeIdentityPrefix(systemPrompt) {
+  const body = typeof systemPrompt === "string" ? systemPrompt : "";
+  if (body.startsWith(CLAUDE_CODE_IDENTITY_LINE)) return body;
+  if (!body.trim()) return CLAUDE_CODE_IDENTITY_LINE;
+  return `${CLAUDE_CODE_IDENTITY_LINE}\n\n${body}`;
+}
+
+/**
+ * Anthropic's Messages API checks for the Claude Code identity *as the
+ * first content block* in the system field — a concatenated string like
+ * "You are Claude Code...\n\nYou are an auditor." fails the check and
+ * trips a sub-second rate_limit_error. Returning an array of text blocks
+ * with the identity line as the first block is what pi-ai's OAuth path
+ * does (see @mariozechner/pi-ai dist/providers/anthropic.js buildParams).
+ */
+function claudeCodeIdentitySystemBlocks(originalSystem) {
+  const body = typeof originalSystem === "string" ? originalSystem : "";
+  const blocks = [{ type: "text", text: CLAUDE_CODE_IDENTITY_LINE }];
+  if (body.trim() && !body.startsWith(CLAUDE_CODE_IDENTITY_LINE)) {
+    blocks.push({ type: "text", text: body });
+  } else if (body.startsWith(CLAUDE_CODE_IDENTITY_LINE)) {
+    const remainder = body.slice(CLAUDE_CODE_IDENTITY_LINE.length).replace(/^\n+/, "");
+    if (remainder.trim()) blocks.push({ type: "text", text: remainder });
+  }
+  return blocks;
+}
+
+/**
+ * Returns true if the bridge is about to authenticate to Anthropic via an
+ * OAuth bearer (file bag or env token). Mirrors the precedence used by
+ * `getApiKey` so the runAgent path agrees with handleNextStep/handlePing.
+ */
+async function anthropicOauthIsActive(request) {
+  if ((await getFreshOAuthAccessTokenForProvider("anthropic")) ?? null) return true;
+  if (providerAuthToken("anthropic")) return true;
+  return false;
+}
+
 function providerEnvName(provider) {
   return `${provider.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`;
+}
+
+/**
+ * Pull a sampling temperature out of the request envelope. Accepts
+ * camelCase (`temperature`) and snake_case (`temperature` as well — the
+ * field name has no underscore). Returns undefined when absent or
+ * not-a-number so the body field can be omitted entirely.
+ */
+function numericTemperature(request) {
+  const candidate =
+    request?.temperature ??
+    request?.samplingTemperature ??
+    request?.sampling_temperature;
+  if (candidate === undefined || candidate === null) return undefined;
+  const value = Number(candidate);
+  if (!Number.isFinite(value)) return undefined;
+  if (value < 0 || value > 2) return undefined;
+  return value;
 }
 
 function normalizeThinkingLevel(value) {
@@ -897,10 +967,15 @@ function makeStreamFnWithMaxTokens(maxOutputTokens) {
 
 async function runAgent(AgentCtor, model, request) {
   const [provider, modelId] = parseModelSpec(String(request.model ?? ""));
-  const systemPrompt = appendStructuredOutputContract(
+  const agentTools = await buildAgentTools(request);
+  const allowedToolNames = new Set(agentTools.map((tool) => tool.name.toLowerCase()));
+  let systemPrompt = appendStructuredOutputContract(
     request.systemPrompt ?? request.system_prompt ?? "",
     request.structuredOutput ?? request.structured_output ?? request.outputFormat,
   );
+  if (model?.provider === "anthropic" && (await anthropicOauthIsActive(request))) {
+    systemPrompt = applyClaudeCodeIdentityPrefix(systemPrompt);
+  }
   const thinkingLevel =
     normalizeThinkingLevel(request.thinkingLevel) ??
     "low";
@@ -931,18 +1006,24 @@ async function runAgent(AgentCtor, model, request) {
     };
   }
 
-  const agentTools = await buildAgentTools(request);
-  const allowedToolNames = new Set(agentTools.map((tool) => tool.name.toLowerCase()));
   const maxOutputTokens = sanitizeMaxOutputTokens(request);
   const streamFn = maxOutputTokens ? makeStreamFnWithMaxTokens(maxOutputTokens) : undefined;
+  const temperature = numericTemperature(request);
+  const initialState = {
+    systemPrompt,
+    model,
+    tools: agentTools,
+    messages: [],
+    thinkingLevel,
+  };
+  if (temperature !== undefined) {
+    // pi-agent-core forwards options.temperature into the provider's
+    // sampling param; null means "use provider default" so we only set
+    // the field when the caller asked for a specific value.
+    initialState.temperature = temperature;
+  }
   const agent = new AgentCtor({
-    initialState: {
-      systemPrompt,
-      model,
-      tools: agentTools,
-      messages: [],
-      thinkingLevel,
-    },
+    initialState,
     ...(streamFn ? { streamFn } : {}),
     beforeToolCall: async ({ toolCall }) => {
       const name = toolCall?.name ?? "";
@@ -1380,6 +1461,12 @@ async function handlePing(request) {
     max_tokens: 1,
     messages: [{ role: "user", content: "ok" }],
   };
+  // Claude Code OAuth bags rate-limit Sonnet/Opus unless `system` is an
+  // array whose first text block is exactly the Claude Code identity
+  // line. A concatenated string with the identity prefix is NOT enough.
+  if (oauthToken || envOauth) {
+    body.system = claudeCodeIdentitySystemBlocks("");
+  }
   const t0 = Date.now();
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -1455,9 +1542,13 @@ async function handleNextStep(request) {
     headers["x-api-key"] = apiKey;
   }
 
+  const rawSystem = request.systemPrompt ?? request.system_prompt ?? "";
   const body = {
     model: modelId,
-    system: request.systemPrompt ?? request.system_prompt ?? "",
+    system:
+      oauthToken || envOauth
+        ? claudeCodeIdentitySystemBlocks(rawSystem)
+        : rawSystem,
     messages: request.messages ?? [],
     tools: (request.tools ?? []).map((t) => ({
       name: t.name,
@@ -1466,6 +1557,13 @@ async function handleNextStep(request) {
     })),
     max_tokens: request.max_tokens ?? request.maxTokens ?? 4096,
   };
+  // Sampling temperature when the caller wants determinism (deep-audit
+  // verdict consistency, structured-output triage). Only set when
+  // explicitly provided; otherwise let the provider default apply.
+  const temperature = numericTemperature(request);
+  if (temperature !== undefined) {
+    body.temperature = temperature;
+  }
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",

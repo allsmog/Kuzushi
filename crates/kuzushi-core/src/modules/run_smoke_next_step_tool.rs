@@ -35,6 +35,7 @@ pub(crate) fn run_smoke_next_step_tool(
         }],
         max_steps: 4,
         runtime_options: None,
+        temperature: None,
     };
 
     let mut toolbox = smoke_toolbox();

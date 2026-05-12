@@ -24,6 +24,12 @@ pub struct AgentQueryRequest {
     pub max_output_tokens: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_options: Option<AgentRuntimeOptions>,
+    /// Sampling temperature (0.0..=1.0). When set, the bridge forwards
+    /// it to the provider; when None the provider's default is used.
+    /// Set this near 0 for audit / triage flows where determinism
+    /// matters (deep-audit relies on it to reduce verdict variance).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
 }
 
 impl AgentQueryRequest {
@@ -43,6 +49,7 @@ impl AgentQueryRequest {
             thinking_level: None,
             max_output_tokens: None,
             runtime_options: None,
+            temperature: None,
         }
     }
 
@@ -68,6 +75,11 @@ impl AgentQueryRequest {
 
     pub fn with_runtime_options(mut self, runtime_options: AgentRuntimeOptions) -> Self {
         self.runtime_options = Some(runtime_options);
+        self
+    }
+
+    pub fn with_temperature(mut self, temperature: f32) -> Self {
+        self.temperature = Some(temperature);
         self
     }
 }

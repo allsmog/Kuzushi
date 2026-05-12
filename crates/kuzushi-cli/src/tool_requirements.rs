@@ -1,6 +1,6 @@
 use anyhow::Result;
 use kuzushi_core::modules::wants_sast_runtime;
-use kuzushi_core::WorkspaceTarget;
+use kuzushi_core::{tool_requires_agent_runtime, WorkspaceTarget};
 use std::path::Path;
 
 pub(crate) fn reject_shell_only_run_dot(tool: &str) -> Result<()> {
@@ -88,43 +88,6 @@ pub(crate) const FINDING_STORE_TOOL_NAMES: &[&str] = &[
     "iac-scan:scan",
 ];
 
-pub(crate) const RUNTIME_TOOL_NAMES: &[&str] = &[
-    "triage:run",
-    "verify:finding",
-    "patch:finding",
-    "agentic-sast:scan",
-    "carlini-threat-hunt:run",
-    "vendor-assessment:assess",
-    "vuln-scout:audit",
-    "tob:audit",
-    "shinsa:scan",
-    "shinsa:quick-check",
-    "shinsa:nist-scan",
-    "shinsa:nist-quick-check",
-    "prompt-armor:scan",
-    "prompt-armor:analyze",
-    "prompt-armor:attack",
-    "variant:lift-pattern",
-    "variant:hunt",
-    "ndiff:extract-fix-pattern",
-    "ndiff:hunt-variants",
-    "systems-hunt:systems-invariant-extract",
-    "systems-hunt:systems-trigger-synth",
-    "systems-hunt:systems-hunt",
-    "systems-hunt:deep-semantic-cwe-select",
-    "systems-hunt:deep-semantic-hunt",
-    "taint-iris:hunt",
-    "taint-iris-next:hunt",
-    "full-mode:hunt",
-    "classifier-gate:score",
-    "deep-audit:run",
-    "smoke:next-step",
-    "threat-model:build",
-    "randori:pasta",
-    "x-ray:run",
-    "x-ray:x-ray",
-];
-
 pub(crate) fn tool_defaults_to_workspace(tool: &str) -> bool {
     has_known_prefix(tool, WORKSPACE_TOOL_PREFIXES) || has_known_name(tool, WORKSPACE_TOOL_NAMES)
 }
@@ -135,7 +98,7 @@ pub(crate) fn tool_needs_finding_store(tool: &str) -> bool {
 }
 
 pub(crate) fn tool_needs_runtime(tool: &str, input: &serde_json::Value) -> bool {
-    has_known_name(tool, RUNTIME_TOOL_NAMES) || tool == "sast:scan" && wants_sast_runtime(input)
+    tool_requires_agent_runtime(tool) || tool == "sast:scan" && wants_sast_runtime(input)
 }
 
 pub(crate) fn has_known_prefix(tool: &str, prefixes: &[&str]) -> bool {
