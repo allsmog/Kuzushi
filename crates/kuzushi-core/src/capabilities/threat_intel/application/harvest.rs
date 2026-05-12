@@ -48,89 +48,26 @@ pub fn harvest_threat_intel_catalog(
         .get("acceptRejected")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let gate_target = ctx.workspace.map(|w| w.root().to_path_buf());
     let mut per_cve = Vec::with_capacity(cves.len());
     let mut new_entries = Vec::new();
-    let mut harvested = 0u32;
-    let mut skipped = 0u32;
-    let mut failed = 0u32;
-    let mut rejected_by_gate = 0u32;
-    let mut validated_by_gate = 0u32;
-    let mut unverified_by_gate = 0u32;
+    let mut stats = HarvestStats::default();
+    let gate = HarvestGateConfig {
+        enabled: gate_enabled,
+        accept_rejected,
+        target: ctx.workspace.map(|w| w.root().to_path_buf()),
+    };
 
     for cve in &cves {
-        match harvest_one(cve, ctx, runtime, &mut dispatch_tool) {
-            Ok(HarvestedEntry::Entry(mut entry)) => {
-                let gate_outcome = if gate_enabled {
-                    match gate_target.as_deref() {
-                        Some(target) => Some(gate_outcome_or_unverified(
-                            target,
-                            cve,
-                            &entry.fetched_record,
-                            &entry.fetched_pattern,
-                        )),
-                        None => Some(RegressionGateOutcome::unverified(
-                            "no workspace target available; pass --target <repo> to enable \
-                             the regression gate"
-                                .to_string(),
-                        )),
-                    }
-                } else {
-                    None
-                };
-                let gate_status_for_entry =
-                    gate_outcome.as_ref().map(|outcome| outcome.status.clone());
-                let drop_due_to_gate =
-                    matches!(gate_status_for_entry, Some(RegressionGateStatus::Rejected))
-                        && !accept_rejected;
-
-                match gate_status_for_entry {
-                    Some(RegressionGateStatus::Validated) => validated_by_gate += 1,
-                    Some(RegressionGateStatus::Unverified) => unverified_by_gate += 1,
-                    Some(RegressionGateStatus::Rejected) => rejected_by_gate += 1,
-                    None => {}
-                }
-
-                if let Some(outcome) = &gate_outcome {
-                    entry.gate_outcome = Some(outcome.clone());
-                }
-
-                if drop_due_to_gate {
-                    skipped += 1;
-                    per_cve.push(json!({
-                        "cve": cve,
-                        "status": "rejected-by-gate",
-                        "reason": gate_outcome.as_ref().map(|o| o.reason.clone()),
-                        "preFixHits": gate_outcome.as_ref().and_then(|o| o.pre_fix_hits),
-                        "postFixHits": gate_outcome.as_ref().and_then(|o| o.post_fix_hits),
-                    }));
-                    continue;
-                }
-
-                harvested += 1;
-                per_cve.push(json!({
-                    "cve": cve,
-                    "status": "harvested",
-                    "entryId": entry.id,
-                    "hunt": entry.hunt.as_str(),
-                    "cwe": entry.cwe,
-                    "gate": gate_outcome,
-                }));
-                new_entries.push(entry);
-            }
-            Ok(HarvestedEntry::Skipped { reason }) => {
-                skipped += 1;
-                per_cve.push(json!({"cve": cve, "status": "skipped", "reason": reason}));
-            }
-            Err(err) => {
-                failed += 1;
-                per_cve.push(json!({
-                    "cve": cve,
-                    "status": "failed",
-                    "error": format!("{err:#}"),
-                }));
-            }
-        }
+        harvest_cve_into_catalog(
+            cve,
+            ctx,
+            runtime,
+            &mut dispatch_tool,
+            &gate,
+            &mut stats,
+            &mut per_cve,
+            &mut new_entries,
+        );
     }
 
     let toml_text = render_catalog_toml(&new_entries, &output_path)?;
@@ -144,18 +81,152 @@ pub fn harvest_threat_intel_catalog(
         },
         "summary": {
             "totalCves": cves.len(),
-            "harvested": harvested,
-            "skipped": skipped,
-            "failed": failed,
+            "harvested": stats.harvested,
+            "skipped": stats.skipped,
+            "failed": stats.failed,
             "regressionGate": {
                 "enabled": gate_enabled,
                 "acceptRejected": accept_rejected,
-                "validated": validated_by_gate,
-                "unverified": unverified_by_gate,
-                "rejected": rejected_by_gate,
+                "validated": stats.validated_by_gate,
+                "unverified": stats.unverified_by_gate,
+                "rejected": stats.rejected_by_gate,
             },
         },
     }))
+}
+
+#[derive(Default)]
+struct HarvestStats {
+    harvested: u32,
+    skipped: u32,
+    failed: u32,
+    rejected_by_gate: u32,
+    validated_by_gate: u32,
+    unverified_by_gate: u32,
+}
+
+struct HarvestGateConfig {
+    enabled: bool,
+    accept_rejected: bool,
+    target: Option<PathBuf>,
+}
+
+fn harvest_cve_into_catalog(
+    cve: &str,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    dispatch_tool: &mut impl FnMut(
+        &str,
+        Value,
+        &ToolExecutionContext<'_>,
+        Option<&dyn AgentRuntime>,
+    ) -> Result<Value>,
+    gate: &HarvestGateConfig,
+    stats: &mut HarvestStats,
+    per_cve: &mut Vec<Value>,
+    new_entries: &mut Vec<HarvestedCatalogEntry>,
+) {
+    match harvest_one(cve, ctx, runtime, dispatch_tool) {
+        Ok(HarvestedEntry::Entry(entry)) => {
+            record_harvested_entry(cve, entry, gate, stats, per_cve, new_entries);
+        }
+        Ok(HarvestedEntry::Skipped { reason }) => {
+            stats.skipped += 1;
+            per_cve.push(json!({"cve": cve, "status": "skipped", "reason": reason}));
+        }
+        Err(err) => {
+            stats.failed += 1;
+            per_cve.push(json!({
+                "cve": cve,
+                "status": "failed",
+                "error": format!("{err:#}"),
+            }));
+        }
+    }
+}
+
+fn record_harvested_entry(
+    cve: &str,
+    mut entry: HarvestedCatalogEntry,
+    gate: &HarvestGateConfig,
+    stats: &mut HarvestStats,
+    per_cve: &mut Vec<Value>,
+    new_entries: &mut Vec<HarvestedCatalogEntry>,
+) {
+    let gate_outcome = harvest_gate_outcome(gate, cve, &entry);
+    record_gate_stats(stats, gate_outcome.as_ref());
+    if let Some(outcome) = &gate_outcome {
+        entry.gate_outcome = Some(outcome.clone());
+    }
+    if harvest_rejected_by_gate(gate, gate_outcome.as_ref()) {
+        stats.skipped += 1;
+        per_cve.push(rejected_gate_row(cve, gate_outcome.as_ref()));
+        return;
+    }
+    stats.harvested += 1;
+    per_cve.push(harvested_entry_row(cve, &entry, gate_outcome));
+    new_entries.push(entry);
+}
+
+fn harvest_gate_outcome(
+    gate: &HarvestGateConfig,
+    cve: &str,
+    entry: &HarvestedCatalogEntry,
+) -> Option<RegressionGateOutcome> {
+    if !gate.enabled {
+        return None;
+    }
+    Some(match gate.target.as_deref() {
+        Some(target) => {
+            gate_outcome_or_unverified(target, cve, &entry.fetched_record, &entry.fetched_pattern)
+        }
+        None => RegressionGateOutcome::unverified(
+            "no workspace target available; pass --target <repo> to enable the regression gate"
+                .to_string(),
+        ),
+    })
+}
+
+fn record_gate_stats(stats: &mut HarvestStats, outcome: Option<&RegressionGateOutcome>) {
+    match outcome.map(|outcome| &outcome.status) {
+        Some(RegressionGateStatus::Validated) => stats.validated_by_gate += 1,
+        Some(RegressionGateStatus::Unverified) => stats.unverified_by_gate += 1,
+        Some(RegressionGateStatus::Rejected) => stats.rejected_by_gate += 1,
+        None => {}
+    }
+}
+
+fn harvest_rejected_by_gate(
+    gate: &HarvestGateConfig,
+    outcome: Option<&RegressionGateOutcome>,
+) -> bool {
+    outcome.is_some_and(|outcome| matches!(outcome.status, RegressionGateStatus::Rejected))
+        && !gate.accept_rejected
+}
+
+fn rejected_gate_row(cve: &str, outcome: Option<&RegressionGateOutcome>) -> Value {
+    json!({
+        "cve": cve,
+        "status": "rejected-by-gate",
+        "reason": outcome.map(|o| o.reason.clone()),
+        "preFixHits": outcome.and_then(|o| o.pre_fix_hits),
+        "postFixHits": outcome.and_then(|o| o.post_fix_hits),
+    })
+}
+
+fn harvested_entry_row(
+    cve: &str,
+    entry: &HarvestedCatalogEntry,
+    gate_outcome: Option<RegressionGateOutcome>,
+) -> Value {
+    json!({
+        "cve": cve,
+        "status": "harvested",
+        "entryId": entry.id,
+        "hunt": entry.hunt.as_str(),
+        "cwe": entry.cwe,
+        "gate": gate_outcome,
+    })
 }
 
 fn gate_outcome_or_unverified(

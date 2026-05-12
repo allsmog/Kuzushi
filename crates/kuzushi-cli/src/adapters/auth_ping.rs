@@ -112,12 +112,37 @@ pub(crate) fn probe_auth_credentials(
     config: &kuzushi_core::V2Config,
     log: &mut AuthPingLog,
 ) -> Result<()> {
-    if provider == "anthropic" {
-        probe_anthropic_credentials(config, log)?;
-    } else if matches!(provider, "openai-codex" | "codex" | "openai") {
+    if matches!(auth_provider_kind(provider), AuthProviderKind::Anthropic) {
+        return probe_anthropic_credentials(config, log);
+    }
+    record_codex_auth_if_needed(provider, log);
+    Ok(())
+}
+
+fn record_codex_auth_if_needed(provider: &str, log: &mut AuthPingLog) {
+    if matches!(auth_provider_kind(provider), AuthProviderKind::Codex) {
         record_codex_runtime_auth_presence(log);
     }
-    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum AuthProviderKind {
+    Anthropic,
+    Codex,
+    Other,
+}
+
+fn auth_provider_kind(provider: &str) -> AuthProviderKind {
+    const AUTH_PROVIDER_KINDS: &[(&str, AuthProviderKind)] = &[
+        ("anthropic", AuthProviderKind::Anthropic),
+        ("openai-codex", AuthProviderKind::Codex),
+        ("codex", AuthProviderKind::Codex),
+        ("openai", AuthProviderKind::Codex),
+    ];
+    AUTH_PROVIDER_KINDS
+        .iter()
+        .find_map(|(name, kind)| (*name == provider).then_some(*kind))
+        .unwrap_or(AuthProviderKind::Other)
 }
 
 pub(crate) fn probe_anthropic_credentials(

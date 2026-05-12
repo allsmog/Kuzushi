@@ -19,3 +19,23 @@ pub fn execute_uaf_hunt_tool(
         other => anyhow::bail!("uaf-hunt: unknown tool {other:?}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::V2Config;
+
+    #[test]
+    fn unknown_uaf_hunt_tool_errors_before_runtime_work() {
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: None,
+            findings_store: None,
+            trace: None,
+        };
+        let err =
+            execute_uaf_hunt_tool("uaf-hunt:nope", serde_json::json!({}), &ctx, None).unwrap_err();
+        assert!(err.to_string().contains("unknown tool"));
+    }
+}

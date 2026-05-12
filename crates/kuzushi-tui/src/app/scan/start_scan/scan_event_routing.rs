@@ -55,37 +55,7 @@ impl ShellApp {
         let Some(session) = self.activity.as_mut() else {
             return;
         };
-        // "running <scanner_id>" — emit a `tool` start step under the
-        // matching DAG row. The seeded row's task_id is `<id>:scan`,
-        // which matches semgrep, codeql, iac-scan, secret-scan; for
-        // others (taint-iris:hunt etc.) we fall back to id-only.
-        if let Some(scanner_id) = stage.strip_prefix("running ") {
-            let scanner_id = scanner_id.trim();
-            if scanner_id.is_empty() || scanner_id == "scan" {
-                return;
-            }
-            let task_id = scan_stage_to_task_id(&session.tasks, scanner_id);
-            let (module_id, verb) = task_id
-                .split_once(':')
-                .map(|(m, v)| (m.to_string(), v.to_string()))
-                .unwrap_or_else(|| (scanner_id.to_string(), "scan".to_string()));
-            session.apply_step(
-                RunTraceStep::new(0, "tool", format!("{scanner_id} start"))
-                    .with_module_id(module_id)
-                    .with_verb(verb),
-            );
-        } else if let Some(rest) = stage.strip_prefix("persisting ") {
-            // Persisting marks the end of all scanner work. Flip every
-            // currently-Active row to Done.
-            let label = format!("persisting {}", rest.trim());
-            for row in session.tasks.values_mut() {
-                if matches!(row.state, crate::app::DagTaskState::Active) {
-                    row.state = crate::app::DagTaskState::Done;
-                    row.completed_at = Some(std::time::Instant::now());
-                    row.last_label = label.clone();
-                }
-            }
-        }
+        bridge_stage_into_activity_session(session, stage);
     }
 
     pub(crate) fn append_scan_stage_trace(&self, stage: &str) {
@@ -102,6 +72,67 @@ impl ShellApp {
             None,
             None,
         );
+    }
+}
+
+fn bridge_stage_into_activity_session(session: &mut crate::app::ActivitySession, stage: &str) {
+    if let Some(scanner_id) = running_scanner_id(stage) {
+        apply_running_scanner_step(session, scanner_id);
+        return;
+    }
+    apply_persisting_stage(session, stage);
+}
+
+fn running_scanner_id(stage: &str) -> Option<&str> {
+    let scanner_id = stage.strip_prefix("running ")?.trim();
+    scanner_activity_enabled(scanner_id).then_some(scanner_id)
+}
+
+fn scanner_activity_enabled(scanner_id: &str) -> bool {
+    !scanner_id.is_empty() && scanner_id != "scan"
+}
+
+fn apply_running_scanner_step(session: &mut crate::app::ActivitySession, scanner_id: &str) {
+    let task_id = scan_stage_to_task_id(&session.tasks, scanner_id);
+    let (module_id, verb) = scan_task_module_verb(&task_id, scanner_id);
+    session.apply_step(
+        RunTraceStep::new(0, "tool", format!("{scanner_id} start"))
+            .with_module_id(module_id)
+            .with_verb(verb),
+    );
+}
+
+fn scan_task_module_verb(task_id: &str, scanner_id: &str) -> (String, String) {
+    task_id
+        .split_once(':')
+        .map(|(module_id, verb)| (module_id.to_string(), verb.to_string()))
+        .unwrap_or_else(|| (scanner_id.to_string(), "scan".to_string()))
+}
+
+fn apply_persisting_stage(session: &mut crate::app::ActivitySession, stage: &str) {
+    if let Some(label) = persisting_stage_label(stage) {
+        mark_active_tasks_done(session, label);
+    }
+}
+
+fn persisting_stage_label(stage: &str) -> Option<String> {
+    stage
+        .strip_prefix("persisting ")
+        .map(str::trim)
+        .map(|rest| format!("persisting {rest}"))
+}
+
+fn mark_active_tasks_done(session: &mut crate::app::ActivitySession, label: String) {
+    for row in session.tasks.values_mut() {
+        mark_active_task_done(row, &label);
+    }
+}
+
+fn mark_active_task_done(row: &mut crate::app::DagTaskRow, label: &str) {
+    if matches!(row.state, crate::app::DagTaskState::Active) {
+        row.state = crate::app::DagTaskState::Done;
+        row.completed_at = Some(std::time::Instant::now());
+        row.last_label = label.to_string();
     }
 }
 

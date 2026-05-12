@@ -29,28 +29,35 @@ pub(crate) struct JoernStep {
 /// `/opt/joern/joern-cli/`). The Scala flow script needs the full
 /// REPL — `joern-parse` and `joern-flow` are insufficient.
 pub(crate) fn joern_available() -> bool {
-    static AVAILABLE: OnceLock<bool> = OnceLock::new();
-    *AVAILABLE.get_or_init(|| joern_launcher_path().is_some())
+    #[cfg(test)]
+    {
+        return joern_launcher_path().is_some();
+    }
+    #[cfg(not(test))]
+    {
+        static AVAILABLE: OnceLock<bool> = OnceLock::new();
+        *AVAILABLE.get_or_init(|| joern_launcher_path().is_some())
+    }
 }
 
 /// Resolve the absolute path to the Joern REPL launcher.
 pub(crate) fn joern_launcher_path() -> Option<PathBuf> {
-    if let Some(env_path) = std::env::var_os("KUZUSHI_JOERN_BIN") {
-        let candidate = PathBuf::from(env_path);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    for candidate in [
+    configured_joern_launcher().or_else(first_standard_joern_launcher)
+}
+
+fn configured_joern_launcher() -> Option<PathBuf> {
+    let candidate = PathBuf::from(std::env::var_os("KUZUSHI_JOERN_BIN")?);
+    candidate.is_file().then_some(candidate)
+}
+
+fn first_standard_joern_launcher() -> Option<PathBuf> {
+    [
         PathBuf::from("/opt/joern/joern-cli/joern"),
         PathBuf::from("/usr/local/bin/joern"),
         PathBuf::from("/usr/bin/joern"),
-    ] {
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_file())
 }
 
 /// CPG file the Joern adapter expects under a target. Build with
@@ -79,23 +86,35 @@ pub(crate) fn resolve_joern_cpg_path(scan_root: &Path) -> PathBuf {
 /// pi-agent-core bridge: env override, source_root (via `current_exe`
 /// walk-up), then the well-known repo-relative path.
 fn flow_script_path() -> Option<PathBuf> {
-    if let Some(env_path) = std::env::var_os("KUZUSHI_JOERN_FLOW_SCRIPT") {
-        let candidate = PathBuf::from(env_path);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
+    configured_flow_script_path()
+        .or_else(flow_script_near_current_exe)
+        .or_else(flow_script_under_current_dir)
+}
+
+fn configured_flow_script_path() -> Option<PathBuf> {
+    let candidate = PathBuf::from(std::env::var_os("KUZUSHI_JOERN_FLOW_SCRIPT")?);
+    candidate.exists().then_some(candidate)
+}
+
+fn flow_script_near_current_exe() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let mut dir = exe.parent()?.to_path_buf();
+    flow_script_candidates_above(exe.parent()?.to_path_buf())
+        .into_iter()
+        .find(|candidate| candidate.exists())
+}
+
+fn flow_script_candidates_above(mut dir: PathBuf) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
     for _ in 0..6 {
-        let candidate = dir.join("scripts").join("taint_iris_next_flows.sc");
-        if candidate.exists() {
-            return Some(candidate);
-        }
+        candidates.push(dir.join("scripts").join("taint_iris_next_flows.sc"));
         if !dir.pop() {
             break;
         }
     }
+    candidates
+}
+
+fn flow_script_under_current_dir() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
     let cwd_candidate = cwd.join("scripts").join("taint_iris_next_flows.sc");
     cwd_candidate.exists().then_some(cwd_candidate)
@@ -612,6 +631,109 @@ mod tests {
     fn cpg_env_lock() -> &'static std::sync::Mutex<()> {
         static LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    fn joern_dataflow_test_plan(scan_root: PathBuf) -> TaintIrisNextPlan {
+        TaintIrisNextPlan {
+            target: scan_root.clone(),
+            scan_root,
+            repo_root: PathBuf::from("."),
+            mode: TaintIrisNextMode::Hunt,
+            caps: TaintIrisNextCaps {
+                max_catalog_entries: 1,
+                max_candidates_per_cwe: 10,
+                max_evidence_per_cwe: 10,
+                max_files_per_query: 10,
+                max_specs_per_cwe: 10,
+                max_agent_findings: 10,
+                codeql_analyze_timeout_ms: 1000,
+                min_evidence_level: "candidate".to_string(),
+            },
+            languages: vec!["cpp".to_string()],
+            context_status: TaintIrisNextArtifactStatus {
+                ok: true,
+                path: None,
+                reason: "test".to_string(),
+            },
+            threat_model_status: TaintIrisNextArtifactStatus {
+                ok: true,
+                path: None,
+                reason: "test".to_string(),
+            },
+            repo_context: None,
+            threat_model: None,
+            catalog: vec![entry("CWE-89", &["input"], &["query("])],
+            structural_queries: Vec::new(),
+            prompt_catalog: String::new(),
+            backend: TaintIrisNextBackendChoice {
+                requested: "joern".to_string(),
+                selected: "joern".to_string(),
+                codeql_db_path: None,
+                corroborate_with_codeql: None,
+                structural_tool: "test".to_string(),
+                warnings: Vec::new(),
+            },
+            max_budget_usd: None,
+            allow_deterministic_fallback: false,
+            cwe_focus: Vec::new(),
+            discovered_signals: DiscoveredSignals::default(),
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn run_joern_flows_invokes_cli_and_parses_jsonl() {
+        let _guard = cpg_env_lock().lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let cpg = temp.path().join(".kuzushi/cpg.bin");
+        std::fs::create_dir_all(cpg.parent().unwrap()).unwrap();
+        std::fs::write(&cpg, "fake cpg").unwrap();
+
+        let fake_joern = temp.path().join("joern");
+        std::fs::write(
+            &fake_joern,
+            r#"#!/usr/bin/env bash
+set -euo pipefail
+printf '{"cwe":"CWE-89","taintClass":"sql-injection","filePath":"src/db.c","sourceLine":4,"sinkLine":12,"sourceCode":"input = arg;","sinkCode":"query(input);","steps":[{"file":"src/db.c","line":4,"code":"input = arg;"},{"file":"src/db.c","line":12,"code":"query(input);"}]}\n'
+"#,
+        )
+        .unwrap();
+        let fake_script = temp.path().join("flows.sc");
+        std::fs::write(&fake_script, "// fake").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&fake_joern).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&fake_joern, perms).unwrap();
+        }
+
+        let previous_bin = std::env::var_os("KUZUSHI_JOERN_BIN");
+        let previous_script = std::env::var_os("KUZUSHI_JOERN_FLOW_SCRIPT");
+        let previous_cpg = std::env::var_os("KUZUSHI_JOERN_CPG");
+        std::env::set_var("KUZUSHI_JOERN_BIN", &fake_joern);
+        std::env::set_var("KUZUSHI_JOERN_FLOW_SCRIPT", &fake_script);
+        std::env::remove_var("KUZUSHI_JOERN_CPG");
+
+        let flows = run_joern_flows(&joern_dataflow_test_plan(temp.path().to_path_buf()))
+            .unwrap()
+            .expect("joern flows");
+
+        restore_env("KUZUSHI_JOERN_BIN", previous_bin);
+        restore_env("KUZUSHI_JOERN_FLOW_SCRIPT", previous_script);
+        restore_env("KUZUSHI_JOERN_CPG", previous_cpg);
+
+        assert_eq!(flows.len(), 1);
+        assert_eq!(flows[0].cwe, "CWE-89");
+        assert_eq!(flows[0].source_line, 4);
+        assert_eq!(flows[0].sink_line, 12);
+        assert_eq!(flows[0].steps.len(), 2);
+    }
+
+    fn restore_env(name: &str, previous: Option<std::ffi::OsString>) {
+        match previous {
+            Some(value) => std::env::set_var(name, value),
+            None => std::env::remove_var(name),
+        }
     }
 
     #[test]

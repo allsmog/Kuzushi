@@ -75,18 +75,29 @@ pub(crate) fn feed_event_glyph(event: &RecordedTraceEvent) -> &'static str {
 }
 
 pub(crate) fn feed_event_style(event: &RecordedTraceEvent) -> ratatui::style::Style {
-    match event.step.severity.as_deref() {
-        Some("danger") => theme::danger(),
-        Some("warn") => theme::warn(),
-        _ => match event.step.kind.as_str() {
-            "tool" | "tool-start" => theme::primary(),
-            "done" | "tool-complete" => theme::success(),
-            "reasoning" | "tool-progress" => theme::muted(),
-            "refused" => theme::danger(),
-            "finding" | "find" => theme::warn(),
-            _ => theme::subtle(),
-        },
+    severity_event_style(event).unwrap_or_else(|| kind_event_style(event.step.kind.as_str()))
+}
+
+fn severity_event_style(event: &RecordedTraceEvent) -> Option<ratatui::style::Style> {
+    match event.step.severity.as_deref()? {
+        "danger" => Some(theme::danger()),
+        "warn" => Some(theme::warn()),
+        _ => None,
     }
+}
+
+fn kind_event_style(kind: &str) -> ratatui::style::Style {
+    const KIND_STYLES: &[(&[&str], fn() -> ratatui::style::Style)] = &[
+        (&["tool", "tool-start"], theme::primary),
+        (&["done", "tool-complete"], theme::success),
+        (&["reasoning", "tool-progress"], theme::muted),
+        (&["refused"], theme::danger),
+        (&["finding", "find"], theme::warn),
+    ];
+    KIND_STYLES
+        .iter()
+        .find_map(|(kinds, style)| kinds.contains(&kind).then_some(style()))
+        .unwrap_or_else(theme::subtle)
 }
 
 fn format_hh_mm_ss_from_ms(ms: u64) -> String {

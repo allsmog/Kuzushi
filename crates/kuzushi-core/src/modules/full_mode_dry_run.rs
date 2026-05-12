@@ -42,10 +42,16 @@ fn resolve_scope_file_against_workspace(
     if path.is_absolute() {
         return path;
     }
-    match ctx.workspace {
-        Some(workspace) => workspace.root().join(&path),
-        None => path,
-    }
+    relative_scope_file_path(path, ctx)
+}
+
+fn relative_scope_file_path(
+    path: std::path::PathBuf,
+    ctx: &ToolExecutionContext<'_>,
+) -> std::path::PathBuf {
+    ctx.workspace
+        .map(|workspace| workspace.root().join(&path))
+        .unwrap_or(path)
 }
 
 pub(crate) fn full_mode_since_scope_path(

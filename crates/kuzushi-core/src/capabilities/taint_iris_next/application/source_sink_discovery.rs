@@ -259,86 +259,140 @@ pub(crate) fn run_taint_iris_next_source_sink_discovery(
     max_per_marker: usize,
     extra_markers: &[OwnedMarkerSpec],
 ) -> DiscoveredSignals {
-    let mut all_markers: Vec<OwnedMarkerSpec> = MARKERS.iter().map(OwnedMarkerSpec::from).collect();
-    all_markers.extend(extra_markers.iter().cloned());
-    let markers = compile_owned_markers(&all_markers);
+    let markers = compiled_discovery_markers(extra_markers);
     let mut buckets: BTreeMap<(String, String), Vec<DiscoveredSignal>> = BTreeMap::new();
 
     for file in files {
-        for (regex, spec) in &markers {
-            if !spec.languages.iter().any(|lang| lang == &file.language) {
-                continue;
-            }
-            for (line_no, line) in file.lines.iter().enumerate() {
-                for capture in regex.captures_iter(line) {
-                    let name = match capture.get(1) {
-                        Some(m) => m.as_str().to_string(),
-                        None => capture
-                            .get(0)
-                            .map(|m| m.as_str().to_string())
-                            .unwrap_or_default(),
-                    };
-                    if name.is_empty() {
-                        continue;
-                    }
-                    // Filter out matches that are obviously macro
-                    // parameters or typedefs masquerading as function
-                    // names. The PG_FUNCTION_ARGS regex captures the
-                    // text immediately before `(PG_FUNCTION_ARGS)` —
-                    // which is usually a real SQL-callable C function,
-                    // but `#define CMPFUNC(NAME, ...) Datum
-                    // NAME(PG_FUNCTION_ARGS) {` makes the macro
-                    // parameter `NAME` look like a function. Real PG
-                    // functions are conventionally lowercase
-                    // snake_case (`pg_signal_backend`, `lo_import`)
-                    // or at minimum mixed case with a meaningful
-                    // length; `NAME`, `FN`, `OP` are noise.
-                    if is_likely_entry_point_name_noise(&spec.marker, &name) {
-                        continue;
-                    }
-                    let bucket_key = (spec.marker.clone(), name.clone());
-                    let bucket = buckets.entry(bucket_key).or_default();
-                    if bucket.len() >= max_per_marker {
-                        continue;
-                    }
-                    bucket.push(DiscoveredSignal {
-                        name,
-                        cwe: spec.cwe.clone(),
-                        kind: spec.kind.clone(),
-                        language: file.language.clone(),
-                        marker: spec.marker.clone(),
-                        file: file.relative_path.clone(),
-                        line: (line_no + 1) as u32,
-                    });
-                }
-            }
-        }
+        record_file_discoveries(file, &markers, max_per_marker, &mut buckets);
     }
 
-    let mut sources = Vec::new();
-    let mut sinks = Vec::new();
-    let mut entry_points = Vec::new();
-    for ((_, _), entries) in buckets.into_iter() {
-        for entry in entries {
-            match entry.kind.as_str() {
-                "source" => sources.push(entry),
-                "sink" => sinks.push(entry),
-                "entrypoint" => entry_points.push(entry),
-                _ => {}
-            }
-        }
-    }
+    let (sources, sinks, entry_points) = partition_discovered_signal_buckets(buckets);
 
     DiscoveredSignals {
-        discovered_at_unix: SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
+        discovered_at_unix: discovered_at_unix(),
         sources,
         sinks,
         entry_points,
         discoverers: vec!["tree-sitter-markers".to_string()],
     }
+}
+
+fn compiled_discovery_markers(
+    extra_markers: &[OwnedMarkerSpec],
+) -> Vec<(regex::Regex, OwnedMarkerSpec)> {
+    let mut all_markers: Vec<OwnedMarkerSpec> = MARKERS.iter().map(OwnedMarkerSpec::from).collect();
+    all_markers.extend(extra_markers.iter().cloned());
+    compile_owned_markers(&all_markers)
+}
+
+fn record_file_discoveries(
+    file: &TaintIrisNextSourceFile,
+    markers: &[(regex::Regex, OwnedMarkerSpec)],
+    max_per_marker: usize,
+    buckets: &mut BTreeMap<(String, String), Vec<DiscoveredSignal>>,
+) {
+    for (regex, spec) in markers {
+        if !marker_matches_file_language(spec, file) {
+            continue;
+        }
+        for (line_no, line) in file.lines.iter().enumerate() {
+            record_line_discoveries(file, line_no, line, regex, spec, max_per_marker, buckets);
+        }
+    }
+}
+
+fn marker_matches_file_language(spec: &OwnedMarkerSpec, file: &TaintIrisNextSourceFile) -> bool {
+    spec.languages.iter().any(|lang| lang == &file.language)
+}
+
+fn record_line_discoveries(
+    file: &TaintIrisNextSourceFile,
+    line_no: usize,
+    line: &str,
+    regex: &regex::Regex,
+    spec: &OwnedMarkerSpec,
+    max_per_marker: usize,
+    buckets: &mut BTreeMap<(String, String), Vec<DiscoveredSignal>>,
+) {
+    for capture in regex.captures_iter(line) {
+        let Some(name) = discovered_capture_name(&capture) else {
+            continue;
+        };
+        if is_likely_entry_point_name_noise(&spec.marker, &name) {
+            continue;
+        }
+        push_discovered_signal(file, line_no, spec, name, max_per_marker, buckets);
+    }
+}
+
+fn discovered_capture_name(capture: &regex::Captures<'_>) -> Option<String> {
+    capture
+        .get(1)
+        .or_else(|| capture.get(0))
+        .map(|matched| matched.as_str().to_string())
+        .filter(|name| !name.is_empty())
+}
+
+fn push_discovered_signal(
+    file: &TaintIrisNextSourceFile,
+    line_no: usize,
+    spec: &OwnedMarkerSpec,
+    name: String,
+    max_per_marker: usize,
+    buckets: &mut BTreeMap<(String, String), Vec<DiscoveredSignal>>,
+) {
+    let bucket = buckets
+        .entry((spec.marker.clone(), name.clone()))
+        .or_default();
+    if bucket.len() >= max_per_marker {
+        return;
+    }
+    bucket.push(DiscoveredSignal {
+        name,
+        cwe: spec.cwe.clone(),
+        kind: spec.kind.clone(),
+        language: file.language.clone(),
+        marker: spec.marker.clone(),
+        file: file.relative_path.clone(),
+        line: (line_no + 1) as u32,
+    });
+}
+
+fn partition_discovered_signal_buckets(
+    buckets: BTreeMap<(String, String), Vec<DiscoveredSignal>>,
+) -> (
+    Vec<DiscoveredSignal>,
+    Vec<DiscoveredSignal>,
+    Vec<DiscoveredSignal>,
+) {
+    let mut sources = Vec::new();
+    let mut sinks = Vec::new();
+    let mut entry_points = Vec::new();
+    for entry in buckets.into_values().flatten() {
+        push_discovered_signal_by_kind(entry, &mut sources, &mut sinks, &mut entry_points);
+    }
+    (sources, sinks, entry_points)
+}
+
+fn push_discovered_signal_by_kind(
+    entry: DiscoveredSignal,
+    sources: &mut Vec<DiscoveredSignal>,
+    sinks: &mut Vec<DiscoveredSignal>,
+    entry_points: &mut Vec<DiscoveredSignal>,
+) {
+    match entry.kind.as_str() {
+        "source" => sources.push(entry),
+        "sink" => sinks.push(entry),
+        "entrypoint" => entry_points.push(entry),
+        _ => {}
+    }
+}
+
+fn discovered_at_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 /// Filter out matches that are obviously not real entry-point names.

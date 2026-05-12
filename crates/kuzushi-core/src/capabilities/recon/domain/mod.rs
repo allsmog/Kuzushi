@@ -9,7 +9,9 @@ pub(crate) use http_target::{
     ensure_http_scheme, host_from_url, normalize_subdomain, now_isoish, plural, split_host_port,
 };
 pub(crate) use http_technologies::infer_http_technologies;
-pub(crate) use nmap::{parse_crtsh_subdomains, parse_nmap_grepable, NmapParseResult};
+pub(crate) use nmap::{
+    parse_crtsh_subdomains, parse_nmap_grepable, NmapHost, NmapParseResult, NmapService,
+};
 pub use records::{ReconHost, ReconNote, ReconService};
 pub(crate) use records::{ReconPersisted, ReconReport};
 

@@ -134,13 +134,13 @@ fn parse_cvss_base_score(vector: &str) -> Option<f64> {
 }
 
 fn severity_from_cvss(score: f64) -> String {
-    if score >= 9.0 {
-        "CRITICAL".to_string()
-    } else if score >= 7.0 {
-        "HIGH".to_string()
-    } else if score >= 4.0 {
-        "MEDIUM".to_string()
-    } else {
-        "LOW".to_string()
-    }
+    cvss_severity_label(score).to_string()
+}
+
+fn cvss_severity_label(score: f64) -> &'static str {
+    const BANDS: &[(f64, &str)] = &[(9.0, "CRITICAL"), (7.0, "HIGH"), (4.0, "MEDIUM")];
+    BANDS
+        .iter()
+        .find_map(|(minimum, label)| (score >= *minimum).then_some(*label))
+        .unwrap_or("LOW")
 }

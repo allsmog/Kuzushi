@@ -18,12 +18,7 @@ pub fn persist_uaf_hunt_findings(
         return Ok(None);
     };
     workspace.ensure_state_dir()?;
-    let run_id = Uuid::new_v4().to_string();
-    store.insert_scan_run(&run_id, target, "running")?;
-    for finding in findings {
-        store.insert_finding(&run_id, finding)?;
-    }
-    store.complete_scan_run(&run_id, "completed", findings.len())?;
+    let run_id = persist_uaf_findings_run(target, findings, store)?;
     let transcript_path = write_uaf_hunt_transcript(&workspace.state_dir(), &run_id, transcript)?;
 
     Ok(Some(UafHuntPersistedRun {
@@ -31,6 +26,46 @@ pub fn persist_uaf_hunt_findings(
         findings_db: workspace.findings_db_path().display().to_string(),
         transcript_path,
     }))
+}
+
+fn persist_uaf_findings_run(
+    target: &Path,
+    findings: &[Finding],
+    store: &crate::findings::FindingStore,
+) -> Result<String> {
+    let run_id = Uuid::new_v4().to_string();
+    start_uaf_findings_run(&run_id, target, findings, store)?;
+    complete_uaf_findings_run(&run_id, findings.len(), store)?;
+    Ok(run_id)
+}
+
+fn start_uaf_findings_run(
+    run_id: &str,
+    target: &Path,
+    findings: &[Finding],
+    store: &crate::findings::FindingStore,
+) -> Result<()> {
+    store.insert_scan_run(run_id, target, "running")?;
+    insert_uaf_findings(run_id, findings, store)
+}
+
+fn complete_uaf_findings_run(
+    run_id: &str,
+    finding_count: usize,
+    store: &crate::findings::FindingStore,
+) -> Result<()> {
+    store.complete_scan_run(run_id, "completed", finding_count)
+}
+
+fn insert_uaf_findings(
+    run_id: &str,
+    findings: &[Finding],
+    store: &crate::findings::FindingStore,
+) -> Result<()> {
+    for finding in findings {
+        store.insert_finding(run_id, finding)?;
+    }
+    Ok(())
 }
 
 /// Write each `LoopHistoryEntry` as a single JSON line to
@@ -58,4 +93,40 @@ fn write_uaf_hunt_transcript(
             .with_context(|| format!("uaf-hunt: could not write {}", path.display()))?;
     }
     Ok(Some(path.display().to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::{ToolCall, ToolResult};
+
+    #[test]
+    fn transcript_writer_skips_empty_and_writes_jsonl() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(write_uaf_hunt_transcript(temp.path(), "run-empty", &[])
+            .unwrap()
+            .is_none());
+
+        let transcript = vec![
+            LoopHistoryEntry::AssistantToolCall(ToolCall {
+                name: "grep".to_string(),
+                input: serde_json::json!({"pattern": "free"}),
+                call_id: "call-1".to_string(),
+            }),
+            LoopHistoryEntry::ToolResult(ToolResult {
+                call_id: "call-1".to_string(),
+                output: serde_json::json!({"matches": []}),
+                is_error: false,
+            }),
+        ];
+
+        let path = write_uaf_hunt_transcript(temp.path(), "run-1", &transcript)
+            .unwrap()
+            .expect("transcript path");
+        let raw = std::fs::read_to_string(path).unwrap();
+
+        assert_eq!(raw.lines().count(), 2);
+        assert!(raw.contains("\"grep\""));
+        assert!(raw.contains("\"matches\""));
+    }
 }

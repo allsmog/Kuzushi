@@ -212,33 +212,37 @@ impl Drop for ClangMcpClient {
 /// Bails loudly if none of those resolve — silently degrading to a
 /// no-clang mode would defeat the entire point of this module.
 pub(crate) fn locate_mcp_clang_binary() -> Result<PathBuf> {
-    if let Ok(explicit) = std::env::var("KUZUSHI_MCP_CLANG_BIN") {
-        let path = PathBuf::from(explicit);
-        if path.exists() {
-            return Ok(path);
-        }
-        anyhow::bail!(
-            "uaf-hunt: KUZUSHI_MCP_CLANG_BIN points at {}, which does not exist",
-            path.display()
-        );
-    }
-    if let Ok(current_exe) = std::env::current_exe() {
-        if let Some(parent) = current_exe.parent() {
-            let sibling = parent.join("kuzushi-mcp-clang");
-            if sibling.exists() {
-                return Ok(sibling);
-            }
-        }
-    }
-    if let Some(on_path) = which_kuzushi_mcp_clang() {
-        return Ok(on_path);
-    }
-    anyhow::bail!(
-        "uaf-hunt: could not find kuzushi-mcp-clang. Build it with \
+    explicit_mcp_clang_binary()?
+        .or_else(sibling_mcp_clang_binary)
+        .or_else(which_kuzushi_mcp_clang)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "uaf-hunt: could not find kuzushi-mcp-clang. Build it with \
          `cargo build -p kuzushi-mcp-clang --release` (it will land \
          next to the `kuzushi` binary) or set KUZUSHI_MCP_CLANG_BIN \
          to an absolute path."
+            )
+        })
+}
+
+fn explicit_mcp_clang_binary() -> Result<Option<PathBuf>> {
+    let Some(explicit) = std::env::var_os("KUZUSHI_MCP_CLANG_BIN") else {
+        return Ok(None);
+    };
+    let path = PathBuf::from(explicit);
+    if path.exists() {
+        return Ok(Some(path));
+    }
+    anyhow::bail!(
+        "uaf-hunt: KUZUSHI_MCP_CLANG_BIN points at {}, which does not exist",
+        path.display()
     )
+}
+
+fn sibling_mcp_clang_binary() -> Option<PathBuf> {
+    let current_exe = std::env::current_exe().ok()?;
+    let sibling = current_exe.parent()?.join("kuzushi-mcp-clang");
+    sibling.exists().then_some(sibling)
 }
 
 fn which_kuzushi_mcp_clang() -> Option<PathBuf> {
@@ -289,4 +293,55 @@ pub(crate) fn rewrite_unsupported_method_error(
         },
     };
     Some(advisory)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn restore_env(name: &str, previous: Option<std::ffi::OsString>) {
+        match previous {
+            Some(value) => std::env::set_var(name, value),
+            None => std::env::remove_var(name),
+        }
+    }
+
+    #[test]
+    fn locate_mcp_clang_honors_explicit_path_and_reports_missing_override() {
+        let _guard = env_lock().lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let binary = temp.path().join("kuzushi-mcp-clang");
+        std::fs::write(&binary, "").unwrap();
+
+        let previous = std::env::var_os("KUZUSHI_MCP_CLANG_BIN");
+        std::env::set_var("KUZUSHI_MCP_CLANG_BIN", &binary);
+        assert_eq!(locate_mcp_clang_binary().unwrap(), binary);
+
+        std::env::set_var("KUZUSHI_MCP_CLANG_BIN", temp.path().join("missing"));
+        let err = locate_mcp_clang_binary().unwrap_err().to_string();
+        restore_env("KUZUSHI_MCP_CLANG_BIN", previous);
+
+        assert!(err.contains("KUZUSHI_MCP_CLANG_BIN"));
+        assert!(err.contains("does not exist"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn which_mcp_clang_finds_binary_on_path() {
+        let _guard = env_lock().lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let binary = temp.path().join("kuzushi-mcp-clang");
+        std::fs::write(&binary, "").unwrap();
+
+        let previous = std::env::var_os("PATH");
+        std::env::set_var("PATH", temp.path());
+        assert_eq!(which_kuzushi_mcp_clang(), Some(binary));
+        restore_env("PATH", previous);
+    }
 }

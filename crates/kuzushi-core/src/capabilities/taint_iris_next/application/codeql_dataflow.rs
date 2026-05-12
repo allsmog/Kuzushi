@@ -1,6 +1,7 @@
 use super::*;
 use std::path::PathBuf;
 use std::process::{Child, Command};
+#[cfg(not(test))]
 use std::sync::OnceLock;
 
 /// Wait for a child process to exit. When `timeout_secs == 0` we block
@@ -11,41 +12,89 @@ pub(crate) fn wait_with_optional_timeout(
     timeout_secs: u64,
 ) -> anyhow::Result<std::process::Output> {
     if timeout_secs == 0 {
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
-        let status = child.wait().context("could not wait for child process")?;
-        let stdout = read_optional_pipe(stdout);
-        let stderr = read_optional_pipe(stderr);
-        return Ok(std::process::Output {
-            status,
-            stdout,
-            stderr,
-        });
+        return wait_without_timeout(child);
     }
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) => {
-                if std::time::Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    anyhow::bail!(
-                        "child exceeded {timeout_secs}s timeout; set the relevant *_TIMEOUT_SECS=0 to disable"
-                    );
-                }
-                std::thread::sleep(std::time::Duration::from_secs(2));
-            }
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                anyhow::bail!("could not poll child process: {error}");
-            }
-        }
-    }
+    wait_until_child_exits(child, deadline, timeout_secs)?;
+    finish_child_output(child, "could not finalise child")
+}
+
+fn wait_without_timeout(child: &mut Child) -> anyhow::Result<std::process::Output> {
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    let status = child.wait().context("could not finalise child")?;
+    let status = child.wait().context("could not wait for child process")?;
+    Ok(std::process::Output {
+        status,
+        stdout: read_optional_pipe(stdout),
+        stderr: read_optional_pipe(stderr),
+    })
+}
+
+fn wait_until_child_exits(
+    child: &mut Child,
+    deadline: std::time::Instant,
+    timeout_secs: u64,
+) -> anyhow::Result<()> {
+    while child_is_still_running(child, deadline, timeout_secs)? {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
+    Ok(())
+}
+
+fn child_is_still_running(
+    child: &mut Child,
+    deadline: std::time::Instant,
+    timeout_secs: u64,
+) -> anyhow::Result<bool> {
+    Ok(!poll_child_exit(child, deadline, timeout_secs)?)
+}
+
+fn poll_child_exit(
+    child: &mut Child,
+    deadline: std::time::Instant,
+    timeout_secs: u64,
+) -> anyhow::Result<bool> {
+    let Some(status) = try_wait_child(child)? else {
+        enforce_child_deadline(child, deadline, timeout_secs)?;
+        return Ok(false);
+    };
+    let _ = status;
+    Ok(true)
+}
+
+fn try_wait_child(child: &mut Child) -> anyhow::Result<Option<std::process::ExitStatus>> {
+    child.try_wait().or_else(|error| {
+        kill_and_reap_child(child);
+        anyhow::bail!("could not poll child process: {error}")
+    })
+}
+
+fn enforce_child_deadline(
+    child: &mut Child,
+    deadline: std::time::Instant,
+    timeout_secs: u64,
+) -> anyhow::Result<()> {
+    if std::time::Instant::now() < deadline {
+        return Ok(());
+    }
+    kill_and_reap_child(child);
+    anyhow::bail!(
+        "child exceeded {timeout_secs}s timeout; set the relevant *_TIMEOUT_SECS=0 to disable"
+    )
+}
+
+fn kill_and_reap_child(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn finish_child_output(
+    child: &mut Child,
+    wait_context: &'static str,
+) -> anyhow::Result<std::process::Output> {
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let status = child.wait().context(wait_context)?;
     Ok(std::process::Output {
         status,
         stdout: read_optional_pipe(stdout),
@@ -64,28 +113,35 @@ fn read_optional_pipe<R: std::io::Read>(pipe: Option<R>) -> Vec<u8> {
 
 /// True iff a usable `codeql` CLI is on PATH (or under `/opt/codeql/`).
 pub(crate) fn codeql_available() -> bool {
-    static AVAILABLE: OnceLock<bool> = OnceLock::new();
-    *AVAILABLE.get_or_init(|| codeql_launcher_path().is_some())
+    #[cfg(test)]
+    {
+        return codeql_launcher_path().is_some();
+    }
+    #[cfg(not(test))]
+    {
+        static AVAILABLE: OnceLock<bool> = OnceLock::new();
+        *AVAILABLE.get_or_init(|| codeql_launcher_path().is_some())
+    }
 }
 
 /// Resolve the CodeQL CLI launcher.
 pub(crate) fn codeql_launcher_path() -> Option<PathBuf> {
-    if let Some(env_path) = std::env::var_os("KUZUSHI_CODEQL_BIN") {
-        let candidate = PathBuf::from(env_path);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    for candidate in [
+    configured_codeql_launcher().or_else(first_standard_codeql_launcher)
+}
+
+fn configured_codeql_launcher() -> Option<PathBuf> {
+    let candidate = PathBuf::from(std::env::var_os("KUZUSHI_CODEQL_BIN")?);
+    candidate.is_file().then_some(candidate)
+}
+
+fn first_standard_codeql_launcher() -> Option<PathBuf> {
+    [
         PathBuf::from("/opt/codeql/codeql/codeql"),
         PathBuf::from("/usr/local/bin/codeql"),
         PathBuf::from("/usr/bin/codeql"),
-    ] {
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_file())
 }
 
 /// Standard locations kuzushi expects for an existing CodeQL DB.
@@ -433,20 +489,24 @@ fn sarif_result_to_flow(result: &Value, run: &Value) -> Option<CodeqlFlow> {
 }
 
 fn first_thread_flow_locations(result: &Value) -> Option<Vec<CodeqlStep>> {
-    let code_flows = result.get("codeFlows").and_then(Value::as_array)?;
-    let first_flow = code_flows.first()?;
-    let thread_flows = first_flow.get("threadFlows").and_then(Value::as_array)?;
-    let first_thread = thread_flows.first()?;
-    let locations = first_thread.get("locations").and_then(Value::as_array)?;
-    let steps: Vec<CodeqlStep> = locations
+    let steps: Vec<CodeqlStep> = first_thread_flow_location_values(result)?
         .iter()
         .filter_map(|location| sarif_location_to_step(location.get("location").unwrap_or(location)))
         .collect();
-    if steps.is_empty() {
-        None
-    } else {
-        Some(steps)
-    }
+    non_empty_codeql_steps(steps)
+}
+
+fn first_thread_flow_location_values(result: &Value) -> Option<&Vec<Value>> {
+    let first_flow = result.get("codeFlows").and_then(Value::as_array)?.first()?;
+    let first_thread = first_flow
+        .get("threadFlows")
+        .and_then(Value::as_array)?
+        .first()?;
+    first_thread.get("locations").and_then(Value::as_array)
+}
+
+fn non_empty_codeql_steps(steps: Vec<CodeqlStep>) -> Option<Vec<CodeqlStep>> {
+    (!steps.is_empty()).then_some(steps)
 }
 
 fn sarif_location_to_step(location: &Value) -> Option<CodeqlStep> {
@@ -520,50 +580,51 @@ fn sarif_rule_to_cwe(rule_id: &str, run: &Value) -> String {
 
 fn cwe_from_rule_id(rule_id: &str) -> String {
     let lower = rule_id.to_ascii_lowercase();
-    if lower.contains("sql-injection") {
-        "CWE-89".to_string()
-    } else if lower.contains("path-injection") || lower.contains("path-traversal") {
-        "CWE-22".to_string()
-    } else if lower.contains("command-injection") || lower.contains("command-line-injection") {
-        "CWE-78".to_string()
-    } else if lower.contains("xss") || lower.contains("cross-site-scripting") {
-        "CWE-79".to_string()
-    } else if lower.contains("ssrf") || lower.contains("server-side-request-forgery") {
-        "CWE-918".to_string()
-    } else if lower.contains("integer-overflow") || lower.contains("arithmetic-overflow") {
-        "CWE-190".to_string()
-    } else if lower.contains("deserialization") {
-        "CWE-502".to_string()
-    } else if lower.contains("xxe") || lower.contains("xml-external") {
-        "CWE-611".to_string()
-    } else if lower.contains("code-injection") {
-        "CWE-94".to_string()
-    } else if lower.contains("log-injection") {
-        "CWE-117".to_string()
-    } else if lower.contains("missing-authorization") || lower.contains("missing-auth") {
-        "CWE-862".to_string()
-    } else {
-        "CWE-CODEQL".to_string()
-    }
+    codeql_rule_cwe_label(&lower).to_string()
+}
+
+fn codeql_rule_cwe_label(lower_rule_id: &str) -> &'static str {
+    const CWE_PATTERNS: &[(&[&str], &str)] = &[
+        (&["sql-injection"], "CWE-89"),
+        (&["path-injection", "path-traversal"], "CWE-22"),
+        (&["command-injection", "command-line-injection"], "CWE-78"),
+        (&["xss", "cross-site-scripting"], "CWE-79"),
+        (&["ssrf", "server-side-request-forgery"], "CWE-918"),
+        (&["integer-overflow", "arithmetic-overflow"], "CWE-190"),
+        (&["deserialization"], "CWE-502"),
+        (&["xxe", "xml-external"], "CWE-611"),
+        (&["code-injection"], "CWE-94"),
+        (&["log-injection"], "CWE-117"),
+        (&["missing-authorization", "missing-auth"], "CWE-862"),
+    ];
+    CWE_PATTERNS
+        .iter()
+        .find_map(|(needles, cwe)| contains_any(lower_rule_id, needles).then_some(*cwe))
+        .unwrap_or("CWE-CODEQL")
 }
 
 fn sarif_rule_to_taint_class(rule_id: &str) -> String {
     let lower = rule_id.to_ascii_lowercase();
-    if lower.contains("sql-injection") {
-        "sql-injection".to_string()
-    } else if lower.contains("path") {
-        "path-traversal".to_string()
-    } else if lower.contains("command") {
-        "os-command-injection".to_string()
-    } else if lower.contains("xss") {
-        "xss".to_string()
-    } else if lower.contains("ssrf") {
-        "ssrf".to_string()
-    } else if lower.contains("integer") || lower.contains("arithmetic") {
-        "integer-overflow".to_string()
-    } else {
-        "codeql".to_string()
-    }
+    codeql_rule_taint_class_label(&lower).to_string()
+}
+
+fn codeql_rule_taint_class_label(lower_rule_id: &str) -> &'static str {
+    const TAINT_CLASS_PATTERNS: &[(&[&str], &str)] = &[
+        (&["sql-injection"], "sql-injection"),
+        (&["path"], "path-traversal"),
+        (&["command"], "os-command-injection"),
+        (&["xss"], "xss"),
+        (&["ssrf"], "ssrf"),
+        (&["integer", "arithmetic"], "integer-overflow"),
+    ];
+    TAINT_CLASS_PATTERNS
+        .iter()
+        .find_map(|(needles, class)| contains_any(lower_rule_id, needles).then_some(*class))
+        .unwrap_or("codeql")
+}
+
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
 }
 
 pub(crate) fn codeql_flows_to_linked_stories(
@@ -682,6 +743,125 @@ fn truncate(value: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+    use tempfile::tempdir;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn codeql_dataflow_test_plan(scan_root: PathBuf) -> TaintIrisNextPlan {
+        TaintIrisNextPlan {
+            target: scan_root.clone(),
+            scan_root,
+            repo_root: PathBuf::from("."),
+            mode: TaintIrisNextMode::Hunt,
+            caps: TaintIrisNextCaps {
+                max_catalog_entries: 1,
+                max_candidates_per_cwe: 10,
+                max_evidence_per_cwe: 10,
+                max_files_per_query: 10,
+                max_specs_per_cwe: 10,
+                max_agent_findings: 10,
+                codeql_analyze_timeout_ms: 1000,
+                min_evidence_level: "candidate".to_string(),
+            },
+            languages: vec!["cpp".to_string()],
+            context_status: TaintIrisNextArtifactStatus {
+                ok: true,
+                path: None,
+                reason: "test".to_string(),
+            },
+            threat_model_status: TaintIrisNextArtifactStatus {
+                ok: true,
+                path: None,
+                reason: "test".to_string(),
+            },
+            repo_context: None,
+            threat_model: None,
+            catalog: vec![TaintIrisNextRankedCatalogEntry {
+                cwe: "CWE-89".to_string(),
+                name: "SQL injection".to_string(),
+                taint_class: "sql-injection".to_string(),
+                languages: vec!["cpp".to_string()],
+                source_signals: vec!["input".to_string()],
+                sink_signals: vec!["query".to_string()],
+                sanitizer_signals: Vec::new(),
+                structural_queries: Vec::new(),
+                regex_markers: Vec::new(),
+                score: 10,
+                reasons: Vec::new(),
+            }],
+            structural_queries: Vec::new(),
+            prompt_catalog: String::new(),
+            backend: TaintIrisNextBackendChoice {
+                requested: "codeql".to_string(),
+                selected: "codeql".to_string(),
+                codeql_db_path: None,
+                corroborate_with_codeql: None,
+                structural_tool: "test".to_string(),
+                warnings: Vec::new(),
+            },
+            max_budget_usd: None,
+            allow_deterministic_fallback: false,
+            cwe_focus: Vec::new(),
+            discovered_signals: DiscoveredSignals::default(),
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn run_codeql_flows_invokes_cli_and_parses_sarif() {
+        let _guard = env_lock().lock().unwrap();
+        let temp = tempdir().unwrap();
+        let db = temp.path().join(".kuzushi/codeql-db");
+        std::fs::create_dir_all(db.join("db-cpp")).unwrap();
+        std::fs::write(db.join("codeql-database.yml"), "primaryLanguage: cpp\n").unwrap();
+
+        let fake_codeql = temp.path().join("codeql");
+        std::fs::write(
+            &fake_codeql,
+            r#"#!/usr/bin/env bash
+set -euo pipefail
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    shift
+    out="$1"
+  fi
+  shift || true
+done
+cat > "$out" <<'JSON'
+{"runs":[{"tool":{"driver":{"rules":[]}},"results":[{"ruleId":"cpp/sql-injection","message":{"text":"sql injection"},"codeFlows":[{"threadFlows":[{"locations":[{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/api.c"},"region":{"startLine":3,"snippet":{"text":"input = arg;"}}}}},{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/db.c"},"region":{"startLine":9,"snippet":{"text":"query(input);"}}}}}]}]}]}]}]}
+JSON
+"#,
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&fake_codeql).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&fake_codeql, perms).unwrap();
+        }
+
+        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
+        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake_codeql);
+        let plan = codeql_dataflow_test_plan(temp.path().to_path_buf());
+
+        let flows = run_codeql_flows(&plan).unwrap().expect("codeql flows");
+
+        match previous {
+            Some(value) => std::env::set_var("KUZUSHI_CODEQL_BIN", value),
+            None => std::env::remove_var("KUZUSHI_CODEQL_BIN"),
+        }
+
+        assert_eq!(flows.len(), 1);
+        assert_eq!(flows[0].cwe, "CWE-89");
+        assert_eq!(flows[0].taint_class, "sql-injection");
+        assert_eq!(flows[0].source_line, 3);
+        assert_eq!(flows[0].sink_line, 9);
+    }
 
     #[test]
     fn cwe_from_rule_id_recognizes_common_codeql_rules() {

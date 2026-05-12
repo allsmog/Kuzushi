@@ -60,30 +60,49 @@ pub fn run_uaf_hunt_report(
 }
 
 fn resolve_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
-    let resolved = if let Some(raw) = input.get("target").and_then(Value::as_str) {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            current_dir_target()?
-        } else {
-            let candidate = PathBuf::from(trimmed);
-            if candidate.is_absolute() {
-                candidate
-            } else {
-                current_dir_target()?.join(candidate)
-            }
-        }
-    } else if let Some(workspace) = ctx.workspace {
-        workspace.root().to_path_buf()
-    } else {
-        current_dir_target()?
+    let resolved = match requested_uaf_target(input)? {
+        Some(target) => target,
+        None => context_uaf_target(ctx)?,
     };
+    ensure_uaf_target_dir(&resolved)?;
+    Ok(resolved)
+}
+
+fn requested_uaf_target(input: &Value) -> Result<Option<PathBuf>> {
+    input
+        .get("target")
+        .and_then(Value::as_str)
+        .map(normalize_requested_uaf_target)
+        .transpose()
+}
+
+fn normalize_requested_uaf_target(raw: &str) -> Result<PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return current_dir_target();
+    }
+    let candidate = PathBuf::from(trimmed);
+    if candidate.is_absolute() {
+        Ok(candidate)
+    } else {
+        Ok(current_dir_target()?.join(candidate))
+    }
+}
+
+fn context_uaf_target(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
+    ctx.workspace
+        .map(|workspace| Ok(workspace.root().to_path_buf()))
+        .unwrap_or_else(current_dir_target)
+}
+
+fn ensure_uaf_target_dir(resolved: &Path) -> Result<()> {
     if !resolved.is_dir() {
         anyhow::bail!(
             "uaf-hunt:hunt: target is not a directory: {}",
             resolved.display()
         );
     }
-    Ok(resolved)
+    Ok(())
 }
 
 fn current_dir_target() -> Result<PathBuf> {
@@ -200,66 +219,80 @@ impl<'a> ToolCallHandler for UafHuntHandler<'a> {
     fn run(&mut self, call: &ToolCall) -> Result<ToolResult> {
         let name = call.name.as_str();
         if let Some(clang_method) = clang_tool_method(name) {
-            // Safety: see comment on `UafHuntHandler`.
-            let clang = unsafe { &mut *self.clang };
-            self.stats.lock().expect("clang stats lock").calls += 1;
-            // mcp-clang tools require a `repoPath` argument the agent
-            // shouldn't have to know. Inject it from the host
-            // workspace target before forwarding.
-            let mut arguments = call.input.clone();
-            if let Some(map) = arguments.as_object_mut() {
-                if !map.contains_key("repoPath") {
-                    map.insert(
-                        "repoPath".to_string(),
-                        Value::String(self.target.display().to_string()),
-                    );
-                }
-            }
-            let result = clang.call_tool(clang_method, arguments);
-            let outcome = match result {
-                Ok(value) => ToolResult {
-                    call_id: call.call_id.clone(),
-                    output: value,
-                    is_error: false,
-                },
-                Err(err) => {
-                    let formatted = format!("{err:#}");
-                    let mut stats = self.stats.lock().expect("clang stats lock");
-                    if stats.first_error.is_none() {
-                        stats.first_error = Some(formatted.clone());
-                    }
-                    // Intercept "method not found" failures (clangd 18
-                    // doesn't implement outgoingCalls). Return a structured
-                    // advisory so the agent learns to fall back to
-                    // clang_definition + read_file instead of retrying the
-                    // unsupported call.
-                    if let Some(advisory) = rewrite_unsupported_method_error(clang_method, &err) {
-                        ToolResult {
-                            call_id: call.call_id.clone(),
-                            output: advisory.to_tool_result(),
-                            is_error: false,
-                        }
-                    } else {
-                        ToolResult {
-                            call_id: call.call_id.clone(),
-                            output: json!({"error": formatted}),
-                            is_error: true,
-                        }
-                    }
-                }
-            };
-            return Ok(outcome);
+            return self.run_clang_tool(call, clang_method);
         }
-        match name {
-            "grep" => Ok(handle_grep(&self.target, call)),
-            "read_file" => Ok(handle_read_file(&self.target, call)),
-            "list_dir" => Ok(handle_list_dir(&self.target, call)),
-            other => Ok(ToolResult {
-                call_id: call.call_id.clone(),
-                output: json!({"error": format!("uaf-hunt: unknown tool {other:?}")}),
-                is_error: true,
-            }),
+        Ok(run_uaf_repo_tool(&self.target, call))
+    }
+}
+
+impl<'a> UafHuntHandler<'a> {
+    fn run_clang_tool(&mut self, call: &ToolCall, clang_method: &str) -> Result<ToolResult> {
+        // Safety: see comment on `UafHuntHandler`.
+        let clang = unsafe { &mut *self.clang };
+        self.stats.lock().expect("clang stats lock").calls += 1;
+        let arguments = clang_tool_arguments(&self.target, call);
+        clang
+            .call_tool(clang_method, arguments)
+            .map(|value| successful_tool_result(call, value))
+            .or_else(|error| Ok(self.clang_tool_error_result(call, clang_method, error)))
+    }
+
+    fn clang_tool_error_result(
+        &self,
+        call: &ToolCall,
+        clang_method: &str,
+        error: anyhow::Error,
+    ) -> ToolResult {
+        let formatted = format!("{error:#}");
+        self.record_first_clang_error(&formatted);
+        rewrite_unsupported_method_error(clang_method, &error).map_or_else(
+            || failed_tool_result(call, json!({"error": formatted})),
+            |advisory| successful_tool_result(call, advisory.to_tool_result()),
+        )
+    }
+
+    fn record_first_clang_error(&self, formatted: &str) {
+        let mut stats = self.stats.lock().expect("clang stats lock");
+        if stats.first_error.is_none() {
+            stats.first_error = Some(formatted.to_string());
         }
+    }
+}
+
+fn clang_tool_arguments(target: &Path, call: &ToolCall) -> Value {
+    let mut arguments = call.input.clone();
+    if let Some(map) = arguments.as_object_mut() {
+        map.entry("repoPath".to_string())
+            .or_insert_with(|| Value::String(target.display().to_string()));
+    }
+    arguments
+}
+
+fn run_uaf_repo_tool(target: &Path, call: &ToolCall) -> ToolResult {
+    match call.name.as_str() {
+        "grep" => handle_grep(target, call),
+        "read_file" => handle_read_file(target, call),
+        "list_dir" => handle_list_dir(target, call),
+        other => failed_tool_result(
+            call,
+            json!({"error": format!("uaf-hunt: unknown tool {other:?}")}),
+        ),
+    }
+}
+
+fn successful_tool_result(call: &ToolCall, output: Value) -> ToolResult {
+    ToolResult {
+        call_id: call.call_id.clone(),
+        output,
+        is_error: false,
+    }
+}
+
+fn failed_tool_result(call: &ToolCall, output: Value) -> ToolResult {
+    ToolResult {
+        call_id: call.call_id.clone(),
+        output,
+        is_error: true,
     }
 }
 
@@ -492,3 +525,16 @@ fn resolve_repo_path(target: &Path, raw: &str) -> Result<PathBuf> {
 // in the AgentToolLoopRequest comment doesn't break. (Compile no-op.)
 #[allow(dead_code)]
 fn _unused_history_marker(_entry: LoopHistoryEntry) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_json_object_parser_recovers_balanced_object_from_prose() {
+        let parsed = extract_first_json_object("before {\"findings\":[]} after").unwrap();
+        assert_eq!(parsed["findings"], json!([]));
+        assert!(extract_first_json_object("no object").is_none());
+        assert!(extract_first_json_object("} before {").is_none());
+    }
+}

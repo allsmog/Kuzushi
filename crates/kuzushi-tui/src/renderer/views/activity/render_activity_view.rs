@@ -61,6 +61,24 @@ pub(crate) fn render_activity_view(frame: &mut Frame<'_>, area: Rect, app: &Shel
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
+    let para = Paragraph::new(activity_header_lines(session));
+    frame.render_widget(para, area);
+}
+
+fn activity_header_lines(session: &ActivitySession) -> Vec<Line<'static>> {
+    vec![
+        Line::from(vec![Span::styled(
+            activity_header_text(session),
+            theme::heading(),
+        )]),
+        Line::from(vec![Span::styled(
+            pane_focus_label(session).to_string(),
+            theme::accent(),
+        )]),
+    ]
+}
+
+fn activity_header_text(session: &ActivitySession) -> String {
     let total = session.tasks.len();
     let done = session
         .tasks
@@ -75,62 +93,51 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
     // Aggregate cost across all DAG rows. Mirrors the
     // `cost: $X.XX` segment in design/mockups/_shared.jsx::statusStrip.
     let cost: f64 = session.tasks.values().map(|row| row.cost_usd).sum();
-    // Trim long synthetic run ids ("tool-1778354160-e1b1d602a576") to
-    // the trailing 8 chars. Shipped run ids are typically short
-    // (`r-...`) so this only kicks in for the auto-minted single-tool
-    // ids — keeps the 80-col header from overflowing.
-    let run_id = if session.run_id.len() > 12 {
-        let tail: String = session.run_id.chars().rev().take(8).collect();
-        format!("…{}", tail.chars().rev().collect::<String>())
-    } else {
-        session.run_id.clone()
-    };
-    let header = format!(
+    format!(
         "ACTIVITY  run {run}  ·  {done}/{total} done  ·  {running} running  ·  cost ${cost:.4}{paused}{verbose}",
-        run = run_id,
+        run = compact_activity_run_id(&session.run_id),
         done = done,
         total = total,
         running = running,
         cost = cost,
-        paused = if session.paused { "  ·  ⏸ paused" } else { "" },
-        verbose = if session.verbose_subsystems {
-            "  ·  V verbose"
-        } else {
-            ""
-        },
-    );
-    let pane_label = match session.pane_focus {
+        paused = paused_header_segment(session),
+        verbose = verbose_header_segment(session),
+    )
+}
+
+// Trim long synthetic run ids ("tool-1778354160-e1b1d602a576") to
+// the trailing 8 chars. Shipped run ids are typically short (`r-...`)
+// so this only kicks in for auto-minted single-tool ids.
+fn compact_activity_run_id(run_id: &str) -> String {
+    if run_id.len() <= 12 {
+        return run_id.to_string();
+    }
+    let tail: String = run_id.chars().rev().take(8).collect();
+    format!("…{}", tail.chars().rev().collect::<String>())
+}
+
+fn paused_header_segment(session: &ActivitySession) -> &'static str {
+    session.paused.then_some("  ·  ⏸ paused").unwrap_or("")
+}
+
+fn verbose_header_segment(session: &ActivitySession) -> &'static str {
+    session
+        .verbose_subsystems
+        .then_some("  ·  V verbose")
+        .unwrap_or("")
+}
+
+fn pane_focus_label(session: &ActivitySession) -> &'static str {
+    match session.pane_focus {
         PaneFocus::Left => "[DAG focused]",
         PaneFocus::Right => "[FEED focused]",
-    };
-    let para = Paragraph::new(vec![
-        Line::from(vec![Span::styled(header, theme::heading())]),
-        Line::from(vec![Span::styled(pane_label.to_string(), theme::accent())]),
-    ]);
-    frame.render_widget(para, area);
+    }
 }
 
 fn render_dag_pane_widget(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
     let now = Instant::now();
     let inner_width = area.width.saturating_sub(2) as usize;
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    for row in session.tasks.values() {
-        let text = dag_row_text(row, inner_width, now);
-        lines.push(Line::from(vec![Span::styled(
-            text,
-            dag_state_style(row.state),
-        )]));
-    }
-    if let Some(text) = dag_subsystems_row_text(session, inner_width) {
-        lines.push(Line::from(vec![Span::styled(text, theme::muted())]));
-    }
-    if lines.is_empty() {
-        lines.push(Line::from(vec![Span::styled(
-            " (no DAG tasks yet)".to_string(),
-            theme::muted(),
-        )]));
-    }
-
+    let lines = dag_pane_lines(session, inner_width, now);
     let title_style = if matches!(session.pane_focus, PaneFocus::Left) {
         theme::accent()
     } else {
@@ -153,51 +160,46 @@ fn render_dag_pane_widget(frame: &mut Frame<'_>, area: Rect, session: &ActivityS
     frame.render_widget(para, inner_area);
 }
 
-fn render_feed_pane_widget(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
-    let inner_width = area.width.saturating_sub(2) as usize;
+fn dag_pane_lines(
+    session: &ActivitySession,
+    inner_width: usize,
+    now: Instant,
+) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
-    if session.paused {
+    for row in session.tasks.values() {
+        let text = dag_row_text(row, inner_width, now);
         lines.push(Line::from(vec![Span::styled(
-            " ⏸ paused — press p to resume".to_string(),
-            theme::warn(),
+            text,
+            dag_state_style(row.state),
         )]));
     }
-    for event in session.events.iter() {
-        if let Some(text) = feed_event_text(event, session.verbose_subsystems, inner_width) {
-            lines.push(Line::from(vec![Span::styled(
-                text,
-                feed_event_style(event),
-            )]));
-        }
-    }
-    if lines.is_empty() {
-        // Distinguish "nothing has happened yet" from "events exist but are
-        // all hidden subsystem activity (operator can press V)". Counts the
-        // events the verbose filter is suppressing so the message is honest
-        // about what the feed isn't showing.
-        let hidden_count = session
-            .events
-            .iter()
-            .filter(|event| {
-                event
-                    .step
-                    .module_id
-                    .as_deref()
-                    .map(crate::app::is_hidden_module_id)
-                    .unwrap_or(false)
-            })
-            .count();
-        let placeholder = if hidden_count > 0 && !session.verbose_subsystems {
-            format!(
-                " ({hidden_count} hidden subsystem event{plural} — press V to show)",
-                plural = if hidden_count == 1 { "" } else { "s" }
-            )
-        } else {
-            " (waiting for trace events…)".to_string()
-        };
-        lines.push(Line::from(vec![Span::styled(placeholder, theme::muted())]));
-    }
+    push_subsystems_line(&mut lines, session, inner_width);
+    ensure_dag_placeholder(&mut lines);
+    lines
+}
 
+fn push_subsystems_line(
+    lines: &mut Vec<Line<'static>>,
+    session: &ActivitySession,
+    inner_width: usize,
+) {
+    if let Some(text) = dag_subsystems_row_text(session, inner_width) {
+        lines.push(Line::from(vec![Span::styled(text, theme::muted())]));
+    }
+}
+
+fn ensure_dag_placeholder(lines: &mut Vec<Line<'static>>) {
+    if lines.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            " (no DAG tasks yet)".to_string(),
+            theme::muted(),
+        )]));
+    }
+}
+
+fn render_feed_pane_widget(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let lines = feed_pane_lines(session, inner_width);
     let title_style = if matches!(session.pane_focus, PaneFocus::Right) {
         theme::accent()
     } else {
@@ -209,43 +211,140 @@ fn render_feed_pane_widget(frame: &mut Frame<'_>, area: Rect, session: &Activity
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    let scroll = if session.feed_auto_tail {
-        // Auto-tail: scroll so the last `inner_height` lines are visible.
-        let height = inner_area.height as usize;
-        lines.len().saturating_sub(height)
-    } else {
-        // Operator pinned a position via manual scroll; honour it regardless
-        // of whether the run is paused. `G` (scroll-to-bottom) resets
-        // `feed_auto_tail = true` to return to live tailing.
-        clamp_scroll(session.feed_scroll, lines.len(), inner_area.height as usize)
-    };
+    let scroll = feed_scroll(session, lines.len(), inner_area.height as usize);
     let para = Paragraph::new(lines)
         .scroll((scroll as u16, 0))
         .wrap(Wrap { trim: false });
     frame.render_widget(para, inner_area);
 }
 
+fn feed_pane_lines(session: &ActivitySession, inner_width: usize) -> Vec<Line<'static>> {
+    let mut lines = paused_feed_line(session).into_iter().collect::<Vec<_>>();
+    lines.extend(visible_feed_event_lines(session, inner_width));
+    ensure_feed_placeholder(&mut lines, session);
+    lines
+}
+
+fn paused_feed_line(session: &ActivitySession) -> Option<Line<'static>> {
+    session.paused.then(|| {
+        Line::from(vec![Span::styled(
+            " ⏸ paused — press p to resume".to_string(),
+            theme::warn(),
+        )])
+    })
+}
+
+fn visible_feed_event_lines(session: &ActivitySession, inner_width: usize) -> Vec<Line<'static>> {
+    session
+        .events
+        .iter()
+        .filter_map(|event| {
+            feed_event_text(event, session.verbose_subsystems, inner_width)
+                .map(|text| Line::from(vec![Span::styled(text, feed_event_style(event))]))
+        })
+        .collect()
+}
+
+fn ensure_feed_placeholder(lines: &mut Vec<Line<'static>>, session: &ActivitySession) {
+    if lines.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            feed_placeholder_text(session),
+            theme::muted(),
+        )]));
+    }
+}
+
+fn feed_placeholder_text(session: &ActivitySession) -> String {
+    let hidden_count = hidden_subsystem_event_count(session);
+    if hidden_count == 0 || session.verbose_subsystems {
+        return " (waiting for trace events…)".to_string();
+    }
+    format!(
+        " ({hidden_count} hidden subsystem event{plural} — press V to show)",
+        plural = plural_suffix(hidden_count)
+    )
+}
+
+fn hidden_subsystem_event_count(session: &ActivitySession) -> usize {
+    session
+        .events
+        .iter()
+        .filter(|event| hidden_event_module(&event.step.module_id))
+        .count()
+}
+
+fn hidden_event_module(module_id: &Option<String>) -> bool {
+    module_id
+        .as_deref()
+        .map(crate::app::is_hidden_module_id)
+        .unwrap_or(false)
+}
+
+fn plural_suffix(count: usize) -> &'static str {
+    (count != 1).then_some("s").unwrap_or("")
+}
+
+fn feed_scroll(session: &ActivitySession, line_count: usize, height: usize) -> usize {
+    if session.feed_auto_tail {
+        return line_count.saturating_sub(height);
+    }
+    clamp_scroll(session.feed_scroll, line_count, height)
+}
+
 fn render_focus_footer(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
-    let body = if let Some(task_id) = session.focus_task.as_ref() {
-        if let Some(row) = session.tasks.get(task_id) {
-            format!(
-                " ▸ FOCUS  {task}  {state:?}  steps {n}  {label}",
-                task = row.task_id,
-                state = row.state,
-                n = row.steps_done,
-                label = row.last_label,
-            )
-        } else {
-            format!(" ▸ FOCUS  {task_id}  (not yet recorded)")
-        }
-    } else {
-        " ▸ FOCUS  hover [j/k] to inspect a task".to_string()
-    };
-    // Keybind row formatted like design/mockups/_shared.jsx::footer (lines
-    // 119-127): bracketed key in c-accent followed by hint in c-muted, with
-    // a single space between pairs. At narrow widths (<100 cols) drop
-    // the trailing low-priority hints so the footer doesn't truncate.
-    let full_hints: &[(&str, &str)] = &[
+    let lines = focus_footer_lines(area.width, session);
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+    frame.render_widget(para, area);
+}
+
+fn focus_footer_lines(width: u16, session: &ActivitySession) -> Vec<Line<'static>> {
+    let lines = vec![
+        Line::from(vec![Span::styled(
+            focus_footer_body(session),
+            theme::label(),
+        )]),
+        Line::from(key_hint_spans(width)),
+    ];
+    lines
+}
+
+fn focus_footer_body(session: &ActivitySession) -> String {
+    match focused_task_row(session) {
+        Some((_, row)) => format!(
+            " ▸ FOCUS  {task}  {state:?}  steps {n}  {label}",
+            task = row.task_id,
+            state = row.state,
+            n = row.steps_done,
+            label = row.last_label,
+        ),
+        None => focus_footer_empty_body(session),
+    }
+}
+
+fn focused_task_row(session: &ActivitySession) -> Option<(&String, &crate::app::DagTaskRow)> {
+    let task_id = session.focus_task.as_ref()?;
+    session.tasks.get_key_value(task_id)
+}
+
+fn focus_footer_empty_body(session: &ActivitySession) -> String {
+    session
+        .focus_task
+        .as_ref()
+        .map(|task_id| format!(" ▸ FOCUS  {task_id}  (not yet recorded)"))
+        .unwrap_or_else(|| " ▸ FOCUS  hover [j/k] to inspect a task".to_string())
+}
+
+fn key_hint_spans(width: u16) -> Vec<Span<'static>> {
+    let mut spans = vec![Span::raw(" ")];
+    for (i, (key, hint)) in key_hints_for_width(width).iter().enumerate() {
+        append_key_hint(&mut spans, i, key, hint);
+    }
+    append_narrow_cancel_hint(&mut spans, width);
+    spans
+}
+
+fn key_hints_for_width(width: u16) -> &'static [(&'static str, &'static str)] {
+    const FULL_HINTS: &[(&str, &str)] = &[
         ("j/k", "scroll"),
         ("Tab", "pane"),
         ("V", "verbose"),
@@ -254,35 +353,29 @@ fn render_focus_footer(frame: &mut Frame<'_>, area: Rect, session: &ActivitySess
         ("Enter", "focus"),
         ("c", "cancel"),
     ];
-    let key_hints: &[(&str, &str)] = if area.width < 100 {
-        // Top 5 most-used: drop "reset" + "focus".
-        &full_hints[..5.min(full_hints.len())]
-    } else {
-        full_hints
-    };
-    let mut key_spans: Vec<Span<'static>> = vec![Span::raw(" ")];
-    for (i, (key, hint)) in key_hints.iter().enumerate() {
-        if i > 0 {
-            key_spans.push(Span::raw(" "));
-        }
-        key_spans.push(Span::styled(format!("[{key}"), theme::accent()));
-        key_spans.push(Span::raw(" "));
-        key_spans.push(Span::styled(format!("{hint}]"), theme::muted()));
+    if width < 100 {
+        return &FULL_HINTS[..5];
     }
-    // Always include `c cancel` so operators have an abort hint even at
-    // narrow widths.
-    if area.width < 100 {
-        key_spans.push(Span::raw(" "));
-        key_spans.push(Span::styled("[c".to_string(), theme::accent()));
-        key_spans.push(Span::raw(" "));
-        key_spans.push(Span::styled("cancel]".to_string(), theme::muted()));
+    FULL_HINTS
+}
+
+fn append_key_hint(spans: &mut Vec<Span<'static>>, index: usize, key: &str, hint: &str) {
+    if index > 0 {
+        spans.push(Span::raw(" "));
     }
-    let lines = vec![
-        Line::from(vec![Span::styled(body, theme::label())]),
-        Line::from(key_spans),
-    ];
-    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
-    frame.render_widget(para, area);
+    spans.push(Span::styled(format!("[{key}"), theme::accent()));
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(format!("{hint}]"), theme::muted()));
+}
+
+fn append_narrow_cancel_hint(spans: &mut Vec<Span<'static>>, width: u16) {
+    if width >= 100 {
+        return;
+    }
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled("[c".to_string(), theme::accent()));
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled("cancel]".to_string(), theme::muted()));
 }
 
 fn clamp_scroll(requested: usize, total: usize, viewport: usize) -> usize {

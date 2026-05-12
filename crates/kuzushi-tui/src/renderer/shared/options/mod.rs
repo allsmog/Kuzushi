@@ -28,16 +28,20 @@ pub(crate) fn option_visible(
 }
 
 pub(crate) fn option_type_label(option_type: OptionType) -> &'static str {
-    match option_type {
-        OptionType::String => "string",
-        OptionType::Bool => "bool",
-        OptionType::Int => "int",
-        OptionType::Float => "float",
-        OptionType::Path => "path",
-        OptionType::Enum => "enum",
-        OptionType::StringList => "list",
-        OptionType::Json => "json",
-    }
+    const OPTION_TYPE_LABELS: &[(OptionType, &str)] = &[
+        (OptionType::String, "string"),
+        (OptionType::Bool, "bool"),
+        (OptionType::Int, "int"),
+        (OptionType::Float, "float"),
+        (OptionType::Path, "path"),
+        (OptionType::Enum, "enum"),
+        (OptionType::StringList, "list"),
+        (OptionType::Json, "json"),
+    ];
+    OPTION_TYPE_LABELS
+        .iter()
+        .find_map(|(candidate, label)| (*candidate == option_type).then_some(*label))
+        .unwrap_or("json")
 }
 
 pub(crate) fn option_description(spec: &OptionSpec) -> String {

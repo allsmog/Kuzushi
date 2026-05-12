@@ -26,7 +26,7 @@ pub(crate) fn apply_env_overrides(config: &mut V2Config) {
     }
 
     if let Some(command) = first_env(&["KUZUSHI_AGENT_BRIDGE", "KUZUSHI_V2_AGENT_BRIDGE"]) {
-        let parts = shell_words(&command);
+        let parts = agent_bridge_command_from_env(&command);
         if !parts.is_empty() {
             config.runtime.agent_bridge_command = Some(parts);
         }
@@ -105,4 +105,16 @@ pub(crate) fn shell_words(value: &str) -> Vec<String> {
         .filter(|part| !part.is_empty())
         .map(ToString::to_string)
         .collect()
+}
+
+pub(crate) fn agent_bridge_command_from_env(value: &str) -> Vec<String> {
+    let parts = shell_words(value);
+    if is_bare_node_bridge_script(&parts) {
+        return vec!["node".to_string(), parts[0].clone()];
+    }
+    parts
+}
+
+fn is_bare_node_bridge_script(parts: &[String]) -> bool {
+    parts.len() == 1 && parts[0].ends_with(".mjs")
 }

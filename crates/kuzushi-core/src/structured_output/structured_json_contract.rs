@@ -125,6 +125,51 @@ pub(crate) fn parse_or_repair_required_structured_json<T>(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::findings::TriageOutcome;
+    use crate::runtime::TriageRequest;
+    use std::sync::Mutex;
+
+    struct CapturingRuntime {
+        tokens: Mutex<Vec<Option<u32>>>,
+    }
+
+    impl CapturingRuntime {
+        fn new() -> Self {
+            Self {
+                tokens: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl AgentRuntime for CapturingRuntime {
+        fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            self.tokens.lock().unwrap().push(request.max_output_tokens);
+            Ok(AgentQueryResponse::default())
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            anyhow::bail!("not used by structured output tests")
+        }
+    }
+
+    #[test]
+    fn retry_budget_raises_missing_small_and_capped_requests() {
+        let runtime = CapturingRuntime::new();
+        let base = AgentQueryRequest::new("model", ".", "system", "prompt");
+
+        retry_with_higher_output_budget(&runtime, &base).unwrap();
+        retry_with_higher_output_budget(&runtime, &base.clone().with_max_output_tokens(4_000))
+            .unwrap();
+        retry_with_higher_output_budget(&runtime, &base.with_max_output_tokens(65_535)).unwrap();
+
+        let tokens = runtime.tokens.lock().unwrap().clone();
+        assert_eq!(tokens, vec![Some(16_000), Some(16_000), Some(65_535)]);
+    }
+}
+
 fn truncation_error(
     contract: &StructuredJsonContract,
     response: &AgentQueryResponse,

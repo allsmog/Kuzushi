@@ -139,51 +139,10 @@ impl ActivitySession {
     ///   rows that never finish.
     pub fn apply_step(&mut self, step: RunTraceStep) {
         let module_id = step.module_id.as_deref().unwrap_or("").to_string();
-        let mints_row = matches!(
-            step.kind.as_str(),
-            "tool" | "done" | "tool-complete" | "refused"
-        );
         if !module_id.is_empty() && is_hidden_module_id(&module_id) {
-            self.subsystem_aggregate.active_count =
-                self.subsystem_aggregate.active_count.saturating_add(1);
-            self.subsystem_aggregate.total_count =
-                self.subsystem_aggregate.total_count.saturating_add(1);
-            self.subsystem_aggregate.last_label = step.label.clone();
+            self.apply_hidden_module_step(&step);
         } else if let Some(verb) = step.verb.as_deref() {
-            let task_id = format!("{module_id}:{verb}");
-            // Only `tool`/`done`/`tool-complete`/`refused` events mint new
-            // rows. Sub-step events (reasoning/tool-progress) update an
-            // existing row's last_label/steps_done if one exists, otherwise
-            // skip the row update entirely.
-            let row = if mints_row {
-                Some(self.tasks.entry(task_id.clone()).or_insert_with(|| {
-                    DagTaskRow::queued(task_id.clone(), module_id.clone(), Vec::new())
-                }))
-            } else {
-                self.tasks.get_mut(&task_id)
-            };
-            if let Some(row) = row {
-                row.steps_done = row.steps_done.saturating_add(1);
-                row.last_label = step.label.clone();
-                if let Some(cost) = step.cost_usd {
-                    row.cost_usd += cost;
-                }
-                row.severity = step.severity.clone();
-                row.state = match (step.severity.as_deref(), step.kind.as_str(), row.state) {
-                    (Some("danger"), _, _) => DagTaskState::Failing,
-                    (_, "done" | "tool-complete", _) => DagTaskState::Done,
-                    (_, _, DagTaskState::Queued) => DagTaskState::Active,
-                    (_, _, current) => current,
-                };
-                if row.started_at.is_none() {
-                    row.started_at = Some(Instant::now());
-                }
-                if matches!(row.state, DagTaskState::Done | DagTaskState::Failing)
-                    && row.completed_at.is_none()
-                {
-                    row.completed_at = Some(Instant::now());
-                }
-            }
+            self.apply_visible_module_step(&module_id, verb, &step);
         }
 
         let event = RecordedTraceEvent {
@@ -194,6 +153,35 @@ impl ActivitySession {
             self.events.pop_front();
         }
         self.events.push_back(event);
+    }
+
+    fn apply_hidden_module_step(&mut self, step: &RunTraceStep) {
+        self.subsystem_aggregate.active_count =
+            self.subsystem_aggregate.active_count.saturating_add(1);
+        self.subsystem_aggregate.total_count =
+            self.subsystem_aggregate.total_count.saturating_add(1);
+        self.subsystem_aggregate.last_label = step.label.clone();
+    }
+
+    fn apply_visible_module_step(&mut self, module_id: &str, verb: &str, step: &RunTraceStep) {
+        let task_id = format!("{module_id}:{verb}");
+        if let Some(row) = self.activity_row_for_step(&task_id, module_id, step) {
+            apply_activity_row_step(row, step);
+        }
+    }
+
+    fn activity_row_for_step(
+        &mut self,
+        task_id: &str,
+        module_id: &str,
+        step: &RunTraceStep,
+    ) -> Option<&mut DagTaskRow> {
+        if activity_step_mints_row(step) {
+            return Some(self.tasks.entry(task_id.to_string()).or_insert_with(|| {
+                DagTaskRow::queued(task_id.to_string(), module_id.to_string(), Vec::new())
+            }));
+        }
+        self.tasks.get_mut(task_id)
     }
 
     pub fn toggle_pane_focus(&mut self) {
@@ -240,6 +228,46 @@ impl ActivitySession {
     pub fn toggle_paused(&mut self) {
         self.paused = !self.paused;
     }
+}
+
+fn activity_step_mints_row(step: &RunTraceStep) -> bool {
+    matches!(
+        step.kind.as_str(),
+        "tool" | "done" | "tool-complete" | "refused"
+    )
+}
+
+fn apply_activity_row_step(row: &mut DagTaskRow, step: &RunTraceStep) {
+    row.steps_done = row.steps_done.saturating_add(1);
+    row.last_label = step.label.clone();
+    if let Some(cost) = step.cost_usd {
+        row.cost_usd += cost;
+    }
+    row.severity = step.severity.clone();
+    row.state = next_activity_row_state(row.state, step);
+    mark_activity_row_times(row);
+}
+
+fn next_activity_row_state(current: DagTaskState, step: &RunTraceStep) -> DagTaskState {
+    match (step.severity.as_deref(), step.kind.as_str(), current) {
+        (Some("danger"), _, _) => DagTaskState::Failing,
+        (_, "done" | "tool-complete", _) => DagTaskState::Done,
+        (_, _, DagTaskState::Queued) => DagTaskState::Active,
+        (_, _, state) => state,
+    }
+}
+
+fn mark_activity_row_times(row: &mut DagTaskRow) {
+    if row.started_at.is_none() {
+        row.started_at = Some(Instant::now());
+    }
+    if activity_row_is_terminal(row) && row.completed_at.is_none() {
+        row.completed_at = Some(Instant::now());
+    }
+}
+
+fn activity_row_is_terminal(row: &DagTaskRow) -> bool {
+    matches!(row.state, DagTaskState::Done | DagTaskState::Failing)
 }
 
 /// True for module ids that should never claim a row in the left pane and

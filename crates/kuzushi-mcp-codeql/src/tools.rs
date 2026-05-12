@@ -443,6 +443,59 @@ fn read_required_path(args: &Value, field: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+    use tempfile::tempdir;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn restore_env(name: &str, previous: Option<std::ffi::OsString>) {
+        match previous {
+            Some(value) => std::env::set_var(name, value),
+            None => std::env::remove_var(name),
+        }
+    }
+
+    #[cfg(unix)]
+    fn fake_codeql(temp: &tempfile::TempDir) -> PathBuf {
+        let path = temp.path().join("codeql");
+        std::fs::write(
+            &path,
+            r#"#!/usr/bin/env bash
+set -euo pipefail
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    shift
+    out="$1"
+  fi
+  shift || true
+done
+if [ -n "$out" ]; then
+  cat > "$out" <<'JSON'
+{"runs":[{"tool":{"driver":{"rules":[]}},"results":[{"ruleId":"cpp/sql-injection","message":{"text":"sql injection"},"codeFlows":[{"threadFlows":[{"locations":[{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/api.c"},"region":{"startLine":7,"snippet":{"text":"input = arg;"}}}}},{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/db.c"},"region":{"startLine":11,"snippet":{"text":"query(input);"}}}}}]}]}]}]}]}
+JSON
+fi
+"#,
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).unwrap();
+        }
+        path
+    }
+
+    fn codeql_db(temp: &tempfile::TempDir) -> PathBuf {
+        let db = temp.path().join("codeql-db");
+        std::fs::create_dir_all(db.join("db-cpp")).unwrap();
+        std::fs::write(db.join("codeql-database.yml"), "primaryLanguage: cpp\n").unwrap();
+        db
+    }
 
     #[test]
     fn cwe_folder_pads_three_digits() {
@@ -495,5 +548,69 @@ mod tests {
             Some("codeql/python-queries")
         );
         assert!(query_pack_for_language("rust").is_none());
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn query_handler_invokes_codeql_and_memoizes_sarif_flows() {
+        let _guard = env_lock().lock().unwrap();
+        let temp = tempdir().unwrap();
+        let fake = fake_codeql(&temp);
+        let db = codeql_db(&temp);
+        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
+        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake);
+
+        let response = QueryHandler
+            .call(json!({
+                "db": db.display().to_string(),
+                "query": "codeql/cpp-queries:Security/CWE/CWE-089",
+                "limit": 10
+            }))
+            .await
+            .unwrap();
+
+        restore_env("KUZUSHI_CODEQL_BIN", previous);
+
+        assert_eq!(response["flow_count"], json!(1));
+        assert_eq!(response["flows"][0]["source"]["line"], json!(7));
+        assert_eq!(response["flows"][0]["sink"]["line"], json!(11));
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn flows_for_cwe_handler_infers_language_and_selector() {
+        let _guard = env_lock().lock().unwrap();
+        let temp = tempdir().unwrap();
+        let fake = fake_codeql(&temp);
+        let db = codeql_db(&temp);
+        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
+        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake);
+
+        let response = FlowsForCweHandler
+            .call(json!({"db": db.display().to_string(), "cwe": "89", "limit": 5}))
+            .await
+            .unwrap();
+
+        restore_env("KUZUSHI_CODEQL_BIN", previous);
+
+        assert_eq!(
+            response["selector"],
+            json!("codeql/cpp-queries:Security/CWE/CWE-089")
+        );
+        assert_eq!(response["flow_count"], json!(1));
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn prewarm_uses_configured_codeql_binary_without_requiring_a_db() {
+        let _guard = env_lock().lock().unwrap();
+        let temp = tempdir().unwrap();
+        let fake = fake_codeql(&temp);
+        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
+        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake);
+
+        spawn_prewarm().await;
+
+        restore_env("KUZUSHI_CODEQL_BIN", previous);
     }
 }

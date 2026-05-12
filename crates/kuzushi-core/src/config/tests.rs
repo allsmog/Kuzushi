@@ -199,6 +199,29 @@ allow_env_token = true
     }
 
     #[test]
+    fn agent_bridge_env_wraps_bare_mjs_path_with_node() {
+        assert_eq!(
+            agent_bridge_command_from_env("/opt/kuzushi/pi-agent-core-bridge.mjs"),
+            vec![
+                "node".to_string(),
+                "/opt/kuzushi/pi-agent-core-bridge.mjs".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn agent_bridge_env_preserves_explicit_command() {
+        assert_eq!(
+            agent_bridge_command_from_env("node /opt/kuzushi/pi-agent-core-bridge.mjs --trace"),
+            vec![
+                "node".to_string(),
+                "/opt/kuzushi/pi-agent-core-bridge.mjs".to_string(),
+                "--trace".to_string()
+            ]
+        );
+    }
+
+    #[test]
     fn rejects_model_without_provider_prefix() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");

@@ -18,68 +18,148 @@ pub(crate) fn run_tool_command(
     options: Vec<String>,
     target: Option<PathBuf>,
 ) -> Result<()> {
+    let run = prepare_cli_tool_run(tool, input, options, target)?;
+    let output = execute_cli_tool_run(&run)?;
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+struct PreparedCliToolRun {
+    tool: String,
+    workspace: Option<WorkspaceTarget>,
+    config: kuzushi_core::V2Config,
+    store: Option<FindingStore>,
+    registry: ModuleRegistry,
+    input: serde_json::Value,
+    run_id: Option<String>,
+}
+
+fn prepare_cli_tool_run(
+    tool: String,
+    input: String,
+    options: Vec<String>,
+    target: Option<PathBuf>,
+) -> Result<PreparedCliToolRun> {
     reject_shell_only_run_dot(&tool)?;
     let workspace = run_tool_workspace(&tool, target.as_deref())?;
     let config = load_config_for_target(workspace.as_ref().map(WorkspaceTarget::root))?;
-    let store = workspace
-        .as_ref()
-        .filter(|_| tool_needs_finding_store(&tool))
-        .map(|workspace| FindingStore::open(workspace.findings_db_path()))
-        .transpose()?;
     let registry = ModuleRegistry::with_v2_builtins();
     let input = serde_json::from_str(&input).context("--input must be JSON")?;
     let option_store = run_option_store(workspace.as_ref(), &tool, &options)?;
     let input = registry.prepare_tool_input(&tool, input, Some(&option_store))?;
-    let run_id = workspace
-        .as_ref()
-        .map(|workspace| start_cli_tool_run(workspace.root(), &tool, &input));
-    let runtime = if tool_needs_runtime(&tool, &input) {
-        Some(PiAgentCoreRuntime::from_config(
-            &config,
-            std::env::current_dir()?,
-        )?)
-    } else {
-        None
-    };
-    let trace = workspace
-        .as_ref()
-        .zip(run_id.as_ref())
-        .map(|(workspace, run_id)| {
-            TraceHandle::jsonl(workspace.root(), run_id)
-                .for_tool(&tool)
-                .child(1)
-        });
-    let traced_runtime = runtime
-        .as_ref()
-        .zip(trace.as_ref())
-        .map(|(runtime, trace)| TracedRuntime::new(runtime as &dyn AgentRuntime, trace.clone()));
-    let runtime_ref = traced_runtime
-        .as_ref()
-        .map(|runtime| runtime as &dyn AgentRuntime)
-        .or_else(|| runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime));
+    let store = open_cli_tool_finding_store(workspace.as_ref(), &tool)?;
+    let run_id = start_cli_tool_run_artifacts(workspace.as_ref(), &tool, &input);
+    Ok(PreparedCliToolRun {
+        tool,
+        workspace,
+        config,
+        store,
+        registry,
+        input,
+        run_id,
+    })
+}
+
+fn open_cli_tool_finding_store(
+    workspace: Option<&WorkspaceTarget>,
+    tool: &str,
+) -> Result<Option<FindingStore>> {
+    workspace
+        .filter(|_| tool_needs_finding_store(tool))
+        .map(|workspace| FindingStore::open(workspace.findings_db_path()))
+        .transpose()
+}
+
+fn start_cli_tool_run_artifacts(
+    workspace: Option<&WorkspaceTarget>,
+    tool: &str,
+    input: &serde_json::Value,
+) -> Option<String> {
+    workspace.map(|workspace| start_cli_tool_run(workspace.root(), tool, input))
+}
+
+fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
+    let runtime = cli_tool_runtime(run)?;
+    let trace = cli_tool_trace(run);
+    let traced_runtime = traced_cli_tool_runtime(runtime.as_ref(), trace.as_ref());
+    let runtime_ref = active_cli_tool_runtime(runtime.as_ref(), traced_runtime.as_ref());
     let ctx = ToolExecutionContext {
-        config: &config,
-        workspace: workspace.as_ref(),
-        findings_store: store.as_ref(),
+        config: &run.config,
+        workspace: run.workspace.as_ref(),
+        findings_store: run.store.as_ref(),
         trace: trace.as_ref(),
     };
-    let result = registry.execute_tool_with_runtime(&tool, input, &ctx, runtime_ref);
-    let output = match result {
+    let result =
+        run.registry
+            .execute_tool_with_runtime(&run.tool, run.input.clone(), &ctx, runtime_ref);
+    handle_cli_tool_result(run, result)
+}
+
+fn cli_tool_runtime(run: &PreparedCliToolRun) -> Result<Option<PiAgentCoreRuntime>> {
+    if tool_needs_runtime(&run.tool, &run.input) {
+        return Ok(Some(PiAgentCoreRuntime::from_config(
+            &run.config,
+            std::env::current_dir()?,
+        )?));
+    }
+    Ok(None)
+}
+
+fn cli_tool_trace(run: &PreparedCliToolRun) -> Option<TraceHandle> {
+    run.workspace
+        .as_ref()
+        .zip(run.run_id.as_ref())
+        .map(|(workspace, run_id)| {
+            TraceHandle::jsonl(workspace.root(), run_id)
+                .for_tool(&run.tool)
+                .child(1)
+        })
+}
+
+fn traced_cli_tool_runtime<'a>(
+    runtime: Option<&'a PiAgentCoreRuntime>,
+    trace: Option<&'a TraceHandle>,
+) -> Option<TracedRuntime<'a>> {
+    runtime
+        .zip(trace)
+        .map(|(runtime, trace)| TracedRuntime::new(runtime as &dyn AgentRuntime, trace.clone()))
+}
+
+fn active_cli_tool_runtime<'a>(
+    runtime: Option<&'a PiAgentCoreRuntime>,
+    traced_runtime: Option<&'a TracedRuntime<'a>>,
+) -> Option<&'a dyn AgentRuntime> {
+    traced_runtime
+        .map(|runtime| runtime as &dyn AgentRuntime)
+        .or_else(|| runtime.map(|runtime| runtime as &dyn AgentRuntime))
+}
+
+fn handle_cli_tool_result(
+    run: &PreparedCliToolRun,
+    result: Result<serde_json::Value>,
+) -> Result<serde_json::Value> {
+    match result {
         Ok(output) => {
-            if let (Some(workspace), Some(run_id)) = (workspace.as_ref(), run_id.as_deref()) {
-                finish_cli_tool_run(workspace.root(), run_id, &tool, &output);
-            }
-            output
+            finish_cli_tool_run_artifacts(run, &output);
+            Ok(output)
         }
         Err(error) => {
-            if let (Some(workspace), Some(run_id)) = (workspace.as_ref(), run_id.as_deref()) {
-                fail_cli_tool_run(workspace.root(), run_id, &tool, &error.to_string());
-            }
-            return Err(error);
+            fail_cli_tool_run_artifacts(run, &error.to_string());
+            Err(error)
         }
-    };
-    println!("{}", serde_json::to_string_pretty(&output)?);
-    Ok(())
+    }
+}
+
+fn finish_cli_tool_run_artifacts(run: &PreparedCliToolRun, output: &serde_json::Value) {
+    if let (Some(workspace), Some(run_id)) = (run.workspace.as_ref(), run.run_id.as_deref()) {
+        finish_cli_tool_run(workspace.root(), run_id, &run.tool, output);
+    }
+}
+
+fn fail_cli_tool_run_artifacts(run: &PreparedCliToolRun, error: &str) {
+    if let (Some(workspace), Some(run_id)) = (run.workspace.as_ref(), run.run_id.as_deref()) {
+        fail_cli_tool_run(workspace.root(), run_id, &run.tool, error);
+    }
 }
 
 pub(crate) fn run_option_store(

@@ -110,6 +110,9 @@ impl ShellApp {
     }
 
     fn apply_shell_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
+        if self.apply_activity_hotkey(action) {
+            return true;
+        }
         match action {
             ViewHotkeyAction::ThreatView(view) => {
                 self.shell_view = ShellView::Threat(view);
@@ -120,50 +123,88 @@ impl ShellApp {
             ViewHotkeyAction::ResumeScan => {
                 self.handle_command(ShellCommand::Resume(None));
             }
-            ViewHotkeyAction::ActivityTabPaneFocus => {
-                if let Some(session) = self.activity.as_mut() {
-                    session.toggle_pane_focus();
-                }
-            }
-            ViewHotkeyAction::ActivityToggleVerbose => {
-                if let Some(session) = self.activity.as_mut() {
-                    session.toggle_verbose_subsystems();
-                }
-            }
-            ViewHotkeyAction::ActivityTogglePause => {
-                if let Some(session) = self.activity.as_mut() {
-                    session.toggle_paused();
-                }
-            }
-            ViewHotkeyAction::ActivityReset => {
-                self.activity = None;
-            }
-            ViewHotkeyAction::ActivityFocusSelected => {
-                if let Some(session) = self.activity.as_mut() {
-                    if !session.tasks.is_empty() {
-                        let cursor = session
-                            .task_scroll
-                            .min(session.tasks.len().saturating_sub(1));
-                        let task_id = session
-                            .tasks
-                            .values()
-                            .nth(cursor)
-                            .map(|row| row.task_id.clone());
-                        session.focus_task = task_id;
-                    }
-                }
-            }
-            ViewHotkeyAction::ActivityCancelRunning => {
-                // Try scan first, then single-tool. Both are no-ops if nothing
-                // is running, so the order doesn't matter much; scan abort
-                // first matches the operator mental model when both fire.
-                let aborted = self.request_scan_abort() || self.request_tool_abort();
-                if !aborted {
-                    self.log("activity", "no running tool or scan to cancel");
-                }
-            }
             _ => return false,
         }
         true
     }
+
+    fn apply_activity_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
+        if self.apply_activity_session_hotkey(action) {
+            return true;
+        }
+        match action {
+            ViewHotkeyAction::ActivityReset => self.activity = None,
+            ViewHotkeyAction::ActivityCancelRunning => self.cancel_activity_run(),
+            _ => return false,
+        }
+        true
+    }
+
+    fn apply_activity_session_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
+        let Some(session) = self.activity.as_mut() else {
+            return false;
+        };
+        let Some(apply) = activity_session_action(action) else {
+            return false;
+        };
+        apply(session);
+        true
+    }
+
+    fn cancel_activity_run(&mut self) {
+        // Try scan first, then single-tool. Both are no-ops if nothing
+        // is running, so the order doesn't matter much; scan abort
+        // first matches the operator mental model when both fire.
+        let aborted = self.request_scan_abort() || self.request_tool_abort();
+        if !aborted {
+            self.log("activity", "no running tool or scan to cancel");
+        }
+    }
+}
+
+type ActivitySessionAction = fn(&mut crate::app::ActivitySession);
+
+fn activity_session_action(action: ViewHotkeyAction) -> Option<ActivitySessionAction> {
+    const ACTIONS: &[(ViewHotkeyAction, ActivitySessionAction)] = &[
+        (
+            ViewHotkeyAction::ActivityTabPaneFocus,
+            crate::app::ActivitySession::toggle_pane_focus,
+        ),
+        (
+            ViewHotkeyAction::ActivityToggleVerbose,
+            crate::app::ActivitySession::toggle_verbose_subsystems,
+        ),
+        (
+            ViewHotkeyAction::ActivityTogglePause,
+            crate::app::ActivitySession::toggle_paused,
+        ),
+        (
+            ViewHotkeyAction::ActivityFocusSelected,
+            focus_visible_activity_task,
+        ),
+    ];
+    ACTIONS
+        .iter()
+        .find_map(|(candidate, apply)| (*candidate == action).then_some(*apply))
+}
+
+fn focus_visible_activity_task(session: &mut crate::app::ActivitySession) {
+    if session.tasks.is_empty() {
+        return;
+    }
+    let cursor = session
+        .task_scroll
+        .min(session.tasks.len().saturating_sub(1));
+    session.focus_task = visible_activity_task_id(session, cursor);
+}
+
+fn visible_activity_task_id(
+    session: &crate::app::ActivitySession,
+    cursor: usize,
+) -> Option<String> {
+    session
+        .tasks
+        .values()
+        .nth(cursor)
+        .map(|row| row.task_id.clone())
 }

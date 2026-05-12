@@ -42,17 +42,24 @@ fn render_codeql_build_summary(report: &CodeqlBuildReport) -> String {
         format!("build mode: {}", report.build_mode),
         format!("build command: {}", report.build_command),
     ];
-    if let Some(stderr) = &report.stderr_excerpt {
-        if !stderr.trim().is_empty() {
-            lines.push(String::new());
-            lines.push("--- codeql stderr (last 600 chars) ---".to_string());
-            lines.push(stderr.clone());
-        }
-    }
-    if let Some(error) = &report.parse_error {
+    append_codeql_stderr_summary(&mut lines, report.stderr_excerpt.as_deref());
+    append_codeql_parse_error(&mut lines, report.parse_error.as_deref());
+    lines.join("\n")
+}
+
+fn append_codeql_stderr_summary(lines: &mut Vec<String>, stderr: Option<&str>) {
+    let Some(stderr) = stderr.filter(|value| !value.trim().is_empty()) else {
+        return;
+    };
+    lines.push(String::new());
+    lines.push("--- codeql stderr (last 600 chars) ---".to_string());
+    lines.push(stderr.to_string());
+}
+
+fn append_codeql_parse_error(lines: &mut Vec<String>, error: Option<&str>) {
+    if let Some(error) = error {
         lines.push(format!("agent parse error: {error}"));
     }
-    lines.join("\n")
 }
 
 /// Decision the agent returns: which language to extract, how to build, and
@@ -83,25 +90,10 @@ pub(crate) fn run_codeql_build_report(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<CodeqlBuildReport> {
-    let target = resolve_tool_target(input, ctx)?;
-    if !target.is_dir() {
-        anyhow::bail!(
-            "taint-iris-next:codeql-db target is not a directory: {}",
-            target.display()
-        );
-    }
-
+    let target = resolve_codeql_build_target(input, ctx)?;
     let runtime = require_taint_iris_next_runtime(runtime)?;
     let model = require_taint_iris_next_model(input, ctx)?;
-
-    if !codeql_available() {
-        anyhow::bail!(
-            "taint-iris-next:codeql-db requires the codeql CLI on PATH (or set KUZUSHI_CODEQL_BIN)"
-        );
-    }
-    let Some(launcher) = codeql_launcher_path() else {
-        anyhow::bail!("codeql launcher disappeared between probe and run");
-    };
+    let launcher = require_codeql_launcher()?;
 
     // Ask the agent which build command to run. The plan stage provides
     // enough context (top-level filenames + detected languages) for the
@@ -114,113 +106,24 @@ pub(crate) fn run_codeql_build_report(
     let prompt =
         build_codeql_build_prompt(&target, &detected_languages, &top_level, &manifest_excerpt);
 
-    let response = runtime.query_blocking(AgentQueryRequest::new(
-        model.clone(),
-        target.clone(),
-        TAINT_IRIS_NEXT_CODEQL_BUILD_SYSTEM_PROMPT.to_string(),
-        prompt,
-    ))?;
+    let response = query_codeql_build_plan(runtime, model, &target, prompt)?;
     let cost_usd = response.cost_usd;
+    let (plan, parse_error) = decode_codeql_build_plan(&response, &detected_languages);
 
-    let raw = response
-        .structured
-        .clone()
-        .or_else(|| parse_json_object_from_agent_text(&response.text).ok())
-        .or_else(|| serde_json::from_str::<Value>(response.text.trim()).ok());
+    let language = resolved_codeql_language(&plan, &detected_languages);
+    let build_mode = resolved_codeql_build_mode(&plan, &language);
+    let db_path = prepare_codeql_db_path(&target);
 
-    let (plan, parse_error) = match raw
-        .as_ref()
-        .map(|value| serde_json::from_value::<CodeqlBuildPlan>(value.clone()))
-    {
-        Some(Ok(plan)) => (plan, None),
-        Some(Err(error)) => (default_plan(&detected_languages), Some(error.to_string())),
-        None => (
-            default_plan(&detected_languages),
-            Some("agent did not return a JSON build plan".to_string()),
-        ),
-    };
+    let mut cmd = codeql_database_create_command(&launcher, &db_path, &target, &language);
+    let build_command = attach_codeql_build_strategy(&mut cmd, &target, &plan, &build_mode)?;
 
-    let language = if plan.language.trim().is_empty() {
-        primary_codeql_language(&detected_languages)
-    } else {
-        plan.language.trim().to_lowercase()
-    };
-    let build_mode = if plan.build_mode.trim().is_empty() {
-        default_build_mode(&language)
-    } else {
-        plan.build_mode.trim().to_lowercase()
-    };
-
-    let db_path = target.join(".kuzushi").join("codeql-db");
-    let _ = std::fs::remove_dir_all(&db_path);
-
-    let mut cmd = Command::new(&launcher);
-    cmd.arg("database").arg("create").arg(&db_path);
-    cmd.arg(format!("--language={}", language));
-    cmd.arg(format!("--source-root={}", target.display()));
-    cmd.arg("--overwrite");
-    let build_command = if build_mode == "none" {
-        cmd.arg("--build-mode=none");
-        String::new()
-    } else {
-        // CodeQL's `--command` flag treats each invocation as a *single*
-        // shell-command-like string but exec()s it directly with no shell
-        // (so `&&`, pipes and env-prefixes don't work). Drop the agent's
-        // build steps into a wrapper script under .kuzushi and pass that
-        // script as the build command — bash interprets the script
-        // contents normally and codeql traces every compiler invocation
-        // along the way.
-        let raw = if plan.build_command.trim().is_empty() {
-            "make".to_string()
-        } else {
-            plan.build_command.trim().to_string()
-        };
-        let script_path = target.join(".kuzushi").join("codeql-build.sh");
-        if let Some(parent) = script_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let script_body =
-            format!("#!/usr/bin/env bash\nset -euo pipefail\ncd \"$(dirname \"$0\")/..\"\n{raw}\n");
-        if std::fs::write(&script_path, script_body).is_ok() {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if let Ok(metadata) = std::fs::metadata(&script_path) {
-                    let mut perms = metadata.permissions();
-                    perms.set_mode(0o755);
-                    let _ = std::fs::set_permissions(&script_path, perms);
-                }
-            }
-        }
-        cmd.arg(format!("--command=bash {}", script_path.display()));
-        raw
-    };
-
-    let output = cmd
-        .output()
-        .with_context(|| format!("could not invoke codeql at {}", launcher.display()))?;
-
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let stderr_excerpt = stderr
-        .lines()
-        .rev()
-        .take(8)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("\n");
+    let output = run_codeql_create_command(cmd, &launcher)?;
+    let stderr_excerpt = codeql_stderr_excerpt(&output.stderr);
 
     let ok = output.status.success() && db_built(&db_path);
-    let status = if ok {
-        "built".to_string()
-    } else {
-        format!("build-failed (exit {})", output.status)
-    };
-
     Ok(CodeqlBuildReport {
         target: target.display().to_string(),
-        status,
+        status: codeql_build_status(ok, output.status),
         db_path: db_path.display().to_string(),
         language,
         build_command,
@@ -230,6 +133,181 @@ pub(crate) fn run_codeql_build_report(
         cost_usd,
         ok,
     })
+}
+
+fn resolve_codeql_build_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
+    let target = resolve_tool_target(input, ctx)?;
+    if !target.is_dir() {
+        anyhow::bail!(
+            "taint-iris-next:codeql-db target is not a directory: {}",
+            target.display()
+        );
+    }
+    Ok(target)
+}
+
+fn require_codeql_launcher() -> Result<PathBuf> {
+    codeql_launcher_path().ok_or_else(|| {
+        anyhow::anyhow!(
+            "taint-iris-next:codeql-db requires the codeql CLI on PATH (or set KUZUSHI_CODEQL_BIN)"
+        )
+    })
+}
+
+fn query_codeql_build_plan(
+    runtime: &dyn AgentRuntime,
+    model: String,
+    target: &Path,
+    prompt: String,
+) -> Result<AgentQueryResponse> {
+    runtime.query_blocking(AgentQueryRequest::new(
+        model,
+        target.to_path_buf(),
+        TAINT_IRIS_NEXT_CODEQL_BUILD_SYSTEM_PROMPT.to_string(),
+        prompt,
+    ))
+}
+
+fn decode_codeql_build_plan(
+    response: &AgentQueryResponse,
+    detected_languages: &[String],
+) -> (CodeqlBuildPlan, Option<String>) {
+    match raw_codeql_build_plan(response)
+        .as_ref()
+        .map(|value| serde_json::from_value::<CodeqlBuildPlan>(value.clone()))
+    {
+        Some(Ok(plan)) => (plan, None),
+        Some(Err(error)) => (default_plan(detected_languages), Some(error.to_string())),
+        None => (
+            default_plan(detected_languages),
+            Some("agent did not return a JSON build plan".to_string()),
+        ),
+    }
+}
+
+fn raw_codeql_build_plan(response: &AgentQueryResponse) -> Option<Value> {
+    response
+        .structured
+        .clone()
+        .or_else(|| parse_json_object_from_agent_text(&response.text).ok())
+        .or_else(|| serde_json::from_str::<Value>(response.text.trim()).ok())
+}
+
+fn resolved_codeql_language(plan: &CodeqlBuildPlan, detected_languages: &[String]) -> String {
+    let language = plan.language.trim();
+    if language.is_empty() {
+        primary_codeql_language(detected_languages)
+    } else {
+        language.to_lowercase()
+    }
+}
+
+fn resolved_codeql_build_mode(plan: &CodeqlBuildPlan, language: &str) -> String {
+    let build_mode = plan.build_mode.trim();
+    if build_mode.is_empty() {
+        default_build_mode(language)
+    } else {
+        build_mode.to_lowercase()
+    }
+}
+
+fn prepare_codeql_db_path(target: &Path) -> PathBuf {
+    let db_path = target.join(".kuzushi").join("codeql-db");
+    let _ = std::fs::remove_dir_all(&db_path);
+    db_path
+}
+
+fn codeql_database_create_command(
+    launcher: &Path,
+    db_path: &Path,
+    target: &Path,
+    language: &str,
+) -> Command {
+    let mut cmd = Command::new(launcher);
+    cmd.arg("database").arg("create").arg(db_path);
+    cmd.arg(format!("--language={language}"));
+    cmd.arg(format!("--source-root={}", target.display()));
+    cmd.arg("--overwrite");
+    cmd
+}
+
+fn attach_codeql_build_strategy(
+    cmd: &mut Command,
+    target: &Path,
+    plan: &CodeqlBuildPlan,
+    build_mode: &str,
+) -> Result<String> {
+    if build_mode == "none" {
+        cmd.arg("--build-mode=none");
+        return Ok(String::new());
+    }
+    let raw = codeql_build_command(plan);
+    let script_path = write_codeql_build_script(target, &raw)?;
+    cmd.arg(format!("--command=bash {}", script_path.display()));
+    Ok(raw)
+}
+
+fn codeql_build_command(plan: &CodeqlBuildPlan) -> String {
+    let build_command = plan.build_command.trim();
+    if build_command.is_empty() {
+        "make".to_string()
+    } else {
+        build_command.to_string()
+    }
+}
+
+fn write_codeql_build_script(target: &Path, raw: &str) -> Result<PathBuf> {
+    // CodeQL's `--command` flag execs a single command directly. A wrapper
+    // script lets bash interpret shell operators while CodeQL traces the build.
+    let script_dir = target.join(".kuzushi");
+    std::fs::create_dir_all(&script_dir)
+        .with_context(|| format!("could not create {}", script_dir.display()))?;
+    let script_path = script_dir.join("codeql-build.sh");
+    let script_body =
+        format!("#!/usr/bin/env bash\nset -euo pipefail\ncd \"$(dirname \"$0\")/..\"\n{raw}\n");
+    std::fs::write(&script_path, script_body)
+        .with_context(|| format!("could not write {}", script_path.display()))?;
+    make_codeql_build_script_executable(&script_path);
+    Ok(script_path)
+}
+
+#[cfg(unix)]
+fn make_codeql_build_script_executable(script_path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(metadata) = std::fs::metadata(script_path) else {
+        return;
+    };
+    let mut perms = metadata.permissions();
+    perms.set_mode(0o755);
+    let _ = std::fs::set_permissions(script_path, perms);
+}
+
+#[cfg(not(unix))]
+fn make_codeql_build_script_executable(_script_path: &Path) {}
+
+fn run_codeql_create_command(mut cmd: Command, launcher: &Path) -> Result<std::process::Output> {
+    cmd.output()
+        .with_context(|| format!("could not invoke codeql at {}", launcher.display()))
+}
+
+fn codeql_stderr_excerpt(stderr: &[u8]) -> String {
+    String::from_utf8_lossy(stderr)
+        .lines()
+        .rev()
+        .take(8)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn codeql_build_status(ok: bool, status: std::process::ExitStatus) -> String {
+    if ok {
+        "built".to_string()
+    } else {
+        format!("build-failed (exit {status})")
+    }
 }
 
 const TAINT_IRIS_NEXT_CODEQL_BUILD_SYSTEM_PROMPT: &str =
@@ -400,7 +478,37 @@ pub(crate) fn has_codeql_db(repo_root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::V2Config;
+    use crate::findings::TriageOutcome;
+    use crate::runtime::TriageRequest;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
+
+    struct BuildPlanRuntime;
+
+    impl AgentRuntime for BuildPlanRuntime {
+        fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            Ok(AgentQueryResponse {
+                structured: Some(json!({
+                    "language": "cpp",
+                    "buildMode": "none",
+                    "buildCommand": "",
+                    "rationale": "unit test"
+                })),
+                cost_usd: 0.02,
+                ..AgentQueryResponse::default()
+            })
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            anyhow::bail!("not used by codeql build tests")
+        }
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn primary_codeql_language_prefers_cpp_then_python() {
@@ -441,5 +549,66 @@ mod tests {
         let temp = tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join(".kuzushi/codeql-db")).unwrap();
         assert!(!has_codeql_db(temp.path()));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn run_codeql_build_report_drives_agent_plan_and_codeql_cli() {
+        let _guard = env_lock().lock().unwrap();
+        let temp = tempdir().unwrap();
+        std::fs::write(temp.path().join("main.c"), "int main(void) { return 0; }\n").unwrap();
+
+        let fake_codeql = temp.path().join("codeql");
+        std::fs::write(
+            &fake_codeql,
+            r#"#!/usr/bin/env bash
+set -euo pipefail
+db="$3"
+mkdir -p "$db/db-cpp"
+printf 'primaryLanguage: cpp\n' > "$db/codeql-database.yml"
+printf 'fake warning\n' >&2
+"#,
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&fake_codeql).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&fake_codeql, perms).unwrap();
+        }
+
+        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
+        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake_codeql);
+
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: None,
+            findings_store: None,
+            trace: None,
+        };
+
+        let report = run_codeql_build_report(
+            &json!({"target": temp.path().display().to_string()}),
+            &ctx,
+            Some(&BuildPlanRuntime),
+        )
+        .unwrap();
+
+        match previous {
+            Some(value) => std::env::set_var("KUZUSHI_CODEQL_BIN", value),
+            None => std::env::remove_var("KUZUSHI_CODEQL_BIN"),
+        }
+
+        assert!(report.ok);
+        assert_eq!(report.status, "built");
+        assert_eq!(report.language, "cpp");
+        assert_eq!(report.build_mode, "none");
+        assert_eq!(report.cost_usd, 0.02);
+        assert!(report
+            .stderr_excerpt
+            .as_deref()
+            .is_some_and(|stderr| stderr.contains("fake warning")));
     }
 }

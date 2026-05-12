@@ -57,14 +57,61 @@ pub(crate) fn run_deep_semantic_hunt_report(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<SystemsHuntReport> {
+    let run = prepare_deep_semantic_hunt(input, ctx, runtime)?;
+    let cwes = selected_deep_semantic_cwes(input, ctx, run.runtime, &run.options)?;
+    ensure_deep_semantic_cwes_selected(&run, &cwes)?;
+    finish_deep_semantic_hunt(input, ctx, &run, &cwes)
+}
+
+struct DeepSemanticHuntRun<'a> {
+    target: PathBuf,
+    options: SystemsHuntInput,
+    runtime: &'a dyn AgentRuntime,
+    model: String,
+}
+
+fn prepare_deep_semantic_hunt<'a>(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&'a dyn AgentRuntime>,
+) -> Result<DeepSemanticHuntRun<'a>> {
     let target = resolve_target(input, ctx)?;
+    let execution = resolve_deep_semantic_execution(input, ctx, runtime)?;
+    Ok(DeepSemanticHuntRun {
+        target,
+        options: execution.options,
+        runtime: execution.runtime,
+        model: execution.model,
+    })
+}
+
+struct DeepSemanticExecution<'a> {
+    options: SystemsHuntInput,
+    runtime: &'a dyn AgentRuntime,
+    model: String,
+}
+
+fn resolve_deep_semantic_execution<'a>(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&'a dyn AgentRuntime>,
+) -> Result<DeepSemanticExecution<'a>> {
     let options = SystemsHuntInput::from_tool_input(input)?;
     let runtime = runtime.context(
         "systems-hunt:deep-semantic-hunt requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
     )?;
     let model = resolve_model("systems-hunt:deep-semantic-hunt", input, ctx, &options)?;
-    let cwes = selected_deep_semantic_cwes(input, ctx, runtime, &options)?;
+    Ok(DeepSemanticExecution {
+        options,
+        runtime,
+        model,
+    })
+}
 
+fn ensure_deep_semantic_cwes_selected(
+    run: &DeepSemanticHuntRun<'_>,
+    cwes: &[DeepSemanticCweSelection],
+) -> Result<()> {
     if cwes.is_empty() {
         // Was a silent `Ok(empty_report)` — the operator had no way to
         // tell whether (a) the model legitimately found no CWEs worth
@@ -79,33 +126,88 @@ pub(crate) fn run_deep_semantic_hunt_report(
              produced no candidates or its response failed to parse. \
              Re-run with an explicit `cwes` input (array of CWE strings) \
              to bypass selection, or raise `maxCweClasses` (currently {}).",
-            target.display(),
-            options.max_cwe_classes,
+            run.target.display(),
+            run.options.max_cwe_classes,
         );
     }
+    Ok(())
+}
 
-    let _llm_scope = ctx.trace.map(|trace| {
-        let phase = trace
-            .step("reasoning", "deep-semantic-hunt", "deep-semantic-hunt")
-            .emit();
-        trace.parent_scope(phase)
-    });
-    let raw = query_deep_semantic_findings(runtime, model, input, &target, &cwes)?;
-    drop(_llm_scope);
-    let artifact_root = artifact_root(&target, &options.artifact_dir)?;
-    let (mut findings, artifacts) =
-        normalize_deep_semantic_findings(raw, &target, &artifact_root, options.max_findings)?;
-    apply_deep_semantic_whitebox_profile(input, &mut findings)?;
-    let persisted = persist_systems_findings(&target, &findings, ctx)?;
+fn finish_deep_semantic_hunt(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    run: &DeepSemanticHuntRun<'_>,
+    cwes: &[DeepSemanticCweSelection],
+) -> Result<SystemsHuntReport> {
+    let (findings, artifacts) = collect_deep_semantic_hunt_findings(input, ctx, run, cwes)?;
+    let persisted = persist_systems_findings(&run.target, &findings, ctx)?;
+    Ok(deep_semantic_report(run, findings, persisted, artifacts))
+}
 
-    Ok(SystemsHuntReport {
-        target: target.display().to_string(),
+fn collect_deep_semantic_hunt_findings(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    run: &DeepSemanticHuntRun<'_>,
+    cwes: &[DeepSemanticCweSelection],
+) -> Result<(Vec<Finding>, Vec<String>)> {
+    let raw = query_deep_semantic_with_scope(input, ctx, run, cwes)?;
+    normalized_deep_semantic_hunt(input, run, raw)
+}
+
+fn deep_semantic_report(
+    run: &DeepSemanticHuntRun<'_>,
+    findings: Vec<Finding>,
+    persisted: Option<SystemsHuntPersistedRun>,
+    artifacts: Vec<String>,
+) -> SystemsHuntReport {
+    SystemsHuntReport {
+        target: run.target.display().to_string(),
         count: findings.len(),
         findings,
         persisted,
         artifacts,
         cost_usd: 0.0,
+    }
+}
+
+fn query_deep_semantic_with_scope(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    run: &DeepSemanticHuntRun<'_>,
+    cwes: &[DeepSemanticCweSelection],
+) -> Result<Value> {
+    let _llm_scope = begin_deep_semantic_scope(ctx);
+    let raw =
+        query_deep_semantic_findings(run.runtime, run.model.clone(), input, &run.target, cwes)?;
+    drop(_llm_scope);
+    Ok(raw)
+}
+
+fn begin_deep_semantic_scope(
+    ctx: &ToolExecutionContext<'_>,
+) -> Option<crate::run_artifacts::ParentScope> {
+    ctx.trace.map(|trace| {
+        let phase = trace
+            .step("reasoning", "deep-semantic-hunt", "deep-semantic-hunt")
+            .emit();
+        trace.parent_scope(phase)
     })
+}
+
+fn normalized_deep_semantic_hunt(
+    input: &Value,
+    run: &DeepSemanticHuntRun<'_>,
+    raw: Value,
+) -> Result<(Vec<Finding>, Vec<String>)> {
+    let artifact_root = artifact_root(&run.target, &run.options.artifact_dir)?;
+    let (mut findings, artifacts) = normalize_deep_semantic_findings(
+        raw,
+        &run.target,
+        &artifact_root,
+        run.options.max_findings,
+    )?;
+    apply_deep_semantic_whitebox_profile(input, &mut findings)?;
+    Ok((findings, artifacts))
 }
 
 pub(crate) fn selected_deep_semantic_cwes(

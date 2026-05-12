@@ -4,144 +4,256 @@ pub(crate) fn build_taint_iris_next_plan(
     target: &Path,
     options: TaintIrisNextInput,
 ) -> Result<TaintIrisNextPlan> {
+    let roots = resolve_taint_iris_next_roots(target, &options)?;
+    let planning = load_taint_iris_next_planning_context(target, &roots.repo_root, &options)?;
+    let catalog_selection = select_taint_iris_next_catalog(&roots.repo_root, &options, &planning);
+    let catalog = catalog_selection.catalog;
+    let structural_queries = build_taint_iris_next_structural_queries(&catalog);
+    let prompt_catalog = render_taint_iris_next_catalog(&catalog);
+    let backend = configure_taint_iris_next_backend(&roots.repo_root, &options);
+
+    Ok(TaintIrisNextPlan {
+        target: target.to_path_buf(),
+        scan_root: roots.scan_root,
+        repo_root: roots.repo_root,
+        mode: options.mode,
+        caps: options.caps,
+        languages: planning.languages,
+        context_status: planning.context.status,
+        threat_model_status: planning.threat_model.status,
+        repo_context: planning.context.value,
+        threat_model: planning.threat_model.value,
+        catalog,
+        structural_queries,
+        prompt_catalog,
+        backend,
+        max_budget_usd: options.max_budget_usd,
+        allow_deterministic_fallback: options.allow_deterministic_fallback,
+        cwe_focus: options.cwe_focus,
+        discovered_signals: catalog_selection.discovered_signals,
+    })
+}
+
+struct TaintIrisNextRoots {
+    repo_root: PathBuf,
+    scan_root: PathBuf,
+}
+
+fn resolve_taint_iris_next_roots(
+    target: &Path,
+    options: &TaintIrisNextInput,
+) -> Result<TaintIrisNextRoots> {
     let repo_root = target.to_path_buf();
-    // E2a: when the operator supplies `targetSubdir`, scope all of
-    // structural collection, the discovery sweep, the
-    // identifier-injection detector, and joern flow query to that
-    // subtree. `repo_root` stays at the original --target so the
-    // codeql DB (which lives at <repo_root>/.kuzushi/codeql-db by
-    // convention) is still found, and threat-model / context
-    // artifacts under <repo_root>/.kuzushi/ still load.
-    let scan_root = match options.target_subdir.as_deref() {
-        Some(subdir) => {
-            let joined = repo_root.join(subdir);
-            // Reject any path that escapes the repo via `..`. The
-            // input parser also rejects '..' segments, but defense
-            // in depth: re-check against the canonicalised parent.
-            let canonical_root =
-                std::fs::canonicalize(&repo_root).unwrap_or_else(|_| repo_root.clone());
-            let canonical_joined =
-                std::fs::canonicalize(&joined).unwrap_or_else(|_| joined.clone());
-            if !canonical_joined.starts_with(&canonical_root) {
-                anyhow::bail!("taint-iris-next:hunt targetSubdir escapes --target: {subdir:?}");
-            }
-            joined
-        }
-        None => repo_root.clone(),
-    };
-    let context = load_taint_iris_next_context(&repo_root);
-    let threat_model = load_taint_iris_next_threat_model(&repo_root);
+    let scan_root =
+        resolve_taint_iris_next_scan_root(&repo_root, options.target_subdir.as_deref())?;
+    Ok(TaintIrisNextRoots {
+        repo_root,
+        scan_root,
+    })
+}
+
+fn resolve_taint_iris_next_scan_root(
+    repo_root: &Path,
+    target_subdir: Option<&str>,
+) -> Result<PathBuf> {
+    target_subdir.map_or_else(
+        || Ok(repo_root.to_path_buf()),
+        |subdir| resolve_taint_iris_next_subdir_scan_root(repo_root, subdir),
+    )
+}
+
+fn resolve_taint_iris_next_subdir_scan_root(repo_root: &Path, subdir: &str) -> Result<PathBuf> {
+    let joined = repo_root.join(subdir);
+    let canonical_root =
+        std::fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
+    let canonical_joined = std::fs::canonicalize(&joined).unwrap_or_else(|_| joined.clone());
+    if !canonical_joined.starts_with(&canonical_root) {
+        anyhow::bail!("taint-iris-next:hunt targetSubdir escapes --target: {subdir:?}");
+    }
+    Ok(joined)
+}
+
+struct TaintIrisNextPlanningContext {
+    context: TaintIrisNextArtifactLoad,
+    threat_model: TaintIrisNextArtifactLoad,
+    languages: Vec<String>,
+    threat_cwes: BTreeSet<String>,
+    attack_surface_hints: TaintIrisNextAttackSurfaceHints,
+    context_keywords: String,
+}
+
+fn load_taint_iris_next_planning_context(
+    target: &Path,
+    repo_root: &Path,
+    options: &TaintIrisNextInput,
+) -> Result<TaintIrisNextPlanningContext> {
+    let context = load_taint_iris_next_context(repo_root);
+    let threat_model = load_taint_iris_next_threat_model(repo_root);
+    let languages = resolve_taint_iris_next_languages(target, options, context.value.as_ref())?;
+    let threat_cwes = collect_taint_iris_next_cwes(threat_model.value.as_ref());
+    let attack_surface_hints =
+        collect_taint_iris_next_attack_surface_hints(threat_model.value.as_ref());
+    let context_keywords = taint_iris_next_context_keywords(context.value.as_ref(), target)?;
+    Ok(TaintIrisNextPlanningContext {
+        context,
+        threat_model,
+        languages,
+        threat_cwes,
+        attack_surface_hints,
+        context_keywords,
+    })
+}
+
+fn resolve_taint_iris_next_languages(
+    target: &Path,
+    options: &TaintIrisNextInput,
+    context: Option<&Value>,
+) -> Result<Vec<String>> {
     let mut languages = options.languages.clone();
-    languages.extend(taint_iris_next_context_languages(context.value.as_ref()));
+    languages.extend(taint_iris_next_context_languages(context));
     languages.extend(detect_taint_iris_next_languages(target)?);
-    languages = languages
+    Ok(normalized_taint_iris_next_languages(languages))
+}
+
+fn normalized_taint_iris_next_languages(languages: Vec<String>) -> Vec<String> {
+    languages
         .into_iter()
         .map(|language| normalize_taint_next_language(&language))
         .filter(|language| !language.is_empty())
         .collect::<BTreeSet<_>>()
         .into_iter()
-        .collect();
+        .collect()
+}
 
-    let threat_cwes = collect_taint_iris_next_cwes(threat_model.value.as_ref());
-    let attack_surface_hints =
-        collect_taint_iris_next_attack_surface_hints(threat_model.value.as_ref());
-    let context_keywords = taint_iris_next_context_keywords(context.value.as_ref(), target)?;
-    // Prefer a target-specific catalog generated by `taint-iris-next:catalog`
-    // when one exists at <target>/.kuzushi/taint-iris-next-catalog.json.
-    // Falling back to the static built-in catalog keeps the hunt usable on
-    // targets that haven't run catalog generation yet.
-    let mut ranked = match load_taint_iris_next_target_catalog(&repo_root) {
-        Some(custom) => {
-            let mut entries = custom;
-            entries.sort_by(|a, b| b.score.cmp(&a.score));
-            entries
-        }
-        None => rank_taint_iris_next_catalog(&languages, &threat_cwes, &context_keywords)
-            .into_iter()
-            .collect::<Vec<_>>(),
-    };
+struct TaintIrisNextCatalogSelection {
+    catalog: Vec<TaintIrisNextRankedCatalogEntry>,
+    discovered_signals: DiscoveredSignals,
+}
+
+fn select_taint_iris_next_catalog(
+    repo_root: &Path,
+    options: &TaintIrisNextInput,
+    planning: &TaintIrisNextPlanningContext,
+) -> TaintIrisNextCatalogSelection {
+    let catalog = initial_taint_iris_next_catalog(repo_root, options, planning);
+    let discovered_signals = discover_taint_iris_next_plan_signals(repo_root, options, &catalog);
+    let catalog = finalize_taint_iris_next_catalog(catalog, options, planning, &discovered_signals);
+    TaintIrisNextCatalogSelection {
+        catalog,
+        discovered_signals,
+    }
+}
+
+fn initial_taint_iris_next_catalog(
+    repo_root: &Path,
+    options: &TaintIrisNextInput,
+    planning: &TaintIrisNextPlanningContext,
+) -> Vec<TaintIrisNextRankedCatalogEntry> {
+    let ranked = ranked_taint_iris_next_catalog(repo_root, options, planning);
+    let catalog = limited_taint_iris_next_catalog(ranked, options.caps.max_catalog_entries);
+    filter_taint_iris_next_catalog_by_cwe_focus(catalog, &options.cwe_focus)
+}
+
+fn ranked_taint_iris_next_catalog(
+    repo_root: &Path,
+    options: &TaintIrisNextInput,
+    planning: &TaintIrisNextPlanningContext,
+) -> Vec<TaintIrisNextRankedCatalogEntry> {
+    let mut ranked = target_or_static_taint_iris_next_catalog(repo_root, planning);
     if !options.extra_catalog_entries.is_empty() {
         ranked = merge_taint_iris_next_extra_entries(ranked, &options.extra_catalog_entries);
     }
-    let catalog = ranked
-        .into_iter()
-        .take(options.caps.max_catalog_entries)
-        .collect::<Vec<_>>();
-    // Apply the operator's cweFocus shell-option filter. When the
-    // allow-list is non-empty, drop catalog entries whose CWE isn't in
-    // it so the structural seeds + agent prompt stay scoped to the
-    // requested classes (e.g. CWE-78 / CWE-94 / CWE-426 for a privesc +
-    // RCE hunt). Empty allow-list = keep everything.
-    let catalog = if options.cwe_focus.is_empty() {
-        catalog
-    } else {
-        let allow: std::collections::BTreeSet<String> = options
-            .cwe_focus
-            .iter()
-            .map(|cwe| cwe.to_ascii_uppercase())
-            .collect();
-        catalog
-            .into_iter()
-            .filter(|entry| allow.contains(&entry.cwe.to_ascii_uppercase()))
-            .collect()
-    };
-    // Discovery pass: regex-scan the actual source files for
-    // language-specific entry-point markers + canonical privesc/RCE
-    // sinks. We always run it (cheap, pure-Rust) but the operator can
-    // opt out via the `discoverSignals` shell option (env var
-    // KUZUSHI_DISCOVER_SIGNALS=0). The result is folded into the
-    // ranking pass below and surfaced into the agent prompt; it does
-    // NOT replace the catalog, just supplements it.
-    // Lift the catalog's per-entry `regex_markers` (C2/C3) into the
-    // discovery sweep. Codebase-shape markers (pgcrypto's `pullf_*`,
-    // libxml2's `xmlParse*`, ...) travel via the LLM-built catalog
-    // rather than via a code change to the static `MARKERS` table.
-    let catalog_markers = catalog_regex_markers_for_discovery(&catalog);
-    let discovered_signals =
-        run_taint_iris_next_discovery_for_plan(&repo_root, &options, &catalog_markers);
-    persist_taint_iris_next_discovered_signals(&repo_root, &discovered_signals);
+    ranked
+}
 
-    // Re-rank (or re-filter) the catalog using discovered signals as a
-    // tiebreaker: entries whose source or sink names overlap with
-    // primitives we observed in the code score higher.
-    let catalog = boost_catalog_with_discovered_signals(catalog, &discovered_signals);
-    // Threat-model attack-surface hints stack on top of discovery: an
-    // entry-point named in the threat model AND observed in code is
-    // the strongest signal we have. The bonus is smaller than the
-    // CWE-match bonus (+100) so threat-model CWE matches still win
-    // ordering, but we make sure the attack-surface contribution can
-    // tip a tied entry.
-    let catalog = boost_catalog_with_attack_surface_hints(catalog, &attack_surface_hints);
-    // Phantom-entry fallback: when the operator's `cwe_focus` includes
-    // CWEs the post-boost catalog has no entries for, synthesise a
-    // phantom entry per missing CWE whose source/sink signals come
-    // from (1) threat-model `attackSurface` when present, falling back
-    // to (2) the static-marker discovery sweep's per-CWE primitives
-    // (e.g. dlopen / load_external_function for CWE-94, system / popen
-    // for CWE-78). This keeps the agent's `selectedCwes` validator from
-    // rejecting an honest claim like "I see CWE-94 candidates from
-    // discovery" when the static catalog ships no CWE-94 entry for
-    // this language. Both fallbacks are framework-agnostic.
-    let catalog = supplement_catalog_with_phantom_focus_entries(
+fn target_or_static_taint_iris_next_catalog(
+    repo_root: &Path,
+    planning: &TaintIrisNextPlanningContext,
+) -> Vec<TaintIrisNextRankedCatalogEntry> {
+    match load_taint_iris_next_target_catalog(repo_root) {
+        Some(custom) => sorted_taint_iris_next_catalog(custom),
+        None => rank_taint_iris_next_catalog(
+            &planning.languages,
+            &planning.threat_cwes,
+            &planning.context_keywords,
+        )
+        .into_iter()
+        .collect::<Vec<_>>(),
+    }
+}
+
+fn sorted_taint_iris_next_catalog(
+    mut entries: Vec<TaintIrisNextRankedCatalogEntry>,
+) -> Vec<TaintIrisNextRankedCatalogEntry> {
+    entries.sort_by(|a, b| b.score.cmp(&a.score));
+    entries
+}
+
+fn limited_taint_iris_next_catalog(
+    ranked: Vec<TaintIrisNextRankedCatalogEntry>,
+    max_entries: usize,
+) -> Vec<TaintIrisNextRankedCatalogEntry> {
+    ranked.into_iter().take(max_entries).collect()
+}
+
+fn filter_taint_iris_next_catalog_by_cwe_focus(
+    catalog: Vec<TaintIrisNextRankedCatalogEntry>,
+    cwe_focus: &[String],
+) -> Vec<TaintIrisNextRankedCatalogEntry> {
+    if cwe_focus.is_empty() {
+        return catalog;
+    }
+    let allow = normalized_taint_iris_next_cwe_focus(cwe_focus);
+    catalog
+        .into_iter()
+        .filter(|entry| allow.contains(&entry.cwe.to_ascii_uppercase()))
+        .collect()
+}
+
+fn normalized_taint_iris_next_cwe_focus(cwe_focus: &[String]) -> BTreeSet<String> {
+    cwe_focus
+        .iter()
+        .map(|cwe| cwe.to_ascii_uppercase())
+        .collect()
+}
+
+fn discover_taint_iris_next_plan_signals(
+    repo_root: &Path,
+    options: &TaintIrisNextInput,
+    catalog: &[TaintIrisNextRankedCatalogEntry],
+) -> DiscoveredSignals {
+    let catalog_markers = catalog_regex_markers_for_discovery(catalog);
+    let discovered_signals =
+        run_taint_iris_next_discovery_for_plan(repo_root, options, &catalog_markers);
+    persist_taint_iris_next_discovered_signals(repo_root, &discovered_signals);
+    discovered_signals
+}
+
+fn finalize_taint_iris_next_catalog(
+    catalog: Vec<TaintIrisNextRankedCatalogEntry>,
+    options: &TaintIrisNextInput,
+    planning: &TaintIrisNextPlanningContext,
+    discovered_signals: &DiscoveredSignals,
+) -> Vec<TaintIrisNextRankedCatalogEntry> {
+    let catalog = boost_catalog_with_discovered_signals(catalog, discovered_signals);
+    let catalog = boost_catalog_with_attack_surface_hints(catalog, &planning.attack_surface_hints);
+    supplement_catalog_with_phantom_focus_entries(
         catalog,
-        &attack_surface_hints,
-        &discovered_signals,
+        &planning.attack_surface_hints,
+        discovered_signals,
         &options.cwe_focus,
-    );
-    let structural_queries = build_taint_iris_next_structural_queries(&catalog);
-    let prompt_catalog = render_taint_iris_next_catalog(&catalog);
-    let mut backend = choose_taint_iris_next_backend(&options.backend, &repo_root);
-    // E2b: if the operator pointed at the whole postgres tree
-    // without targetSubdir AND the tree is large enough that joern
-    // is likely to hang on broad CWE regexes (1612 .c files etc),
-    // surface a partition recommendation as a backend warning.
-    // Doesn't change behavior — the hunt still proceeds — but
-    // operators see actionable next steps in `kuzushi findings` /
-    // run output.
+    )
+}
+
+fn configure_taint_iris_next_backend(
+    repo_root: &Path,
+    options: &TaintIrisNextInput,
+) -> TaintIrisNextBackendChoice {
+    let mut backend = choose_taint_iris_next_backend(&options.backend, repo_root);
     if options.target_subdir.is_none() {
-        let c_file_count = count_c_files_under(&repo_root);
-        if should_recommend_partitioning(&repo_root, c_file_count) {
-            let parts = postgres_partitions_for(&repo_root);
+        let c_file_count = count_c_files_under(repo_root);
+        if should_recommend_partitioning(repo_root, c_file_count) {
+            let parts = postgres_partitions_for(repo_root);
             backend.warnings.push(format!(
                 "target looks postgres-shaped with {c_file_count} .c files; broad CWE regex on joern \
                  will likely hang. Run partitioned hunts in parallel with `targetSubdir` for each \
@@ -155,27 +267,7 @@ pub(crate) fn build_taint_iris_next_plan(
             ));
         }
     }
-
-    Ok(TaintIrisNextPlan {
-        target: target.to_path_buf(),
-        scan_root,
-        repo_root,
-        mode: options.mode,
-        caps: options.caps,
-        languages,
-        context_status: context.status,
-        threat_model_status: threat_model.status,
-        repo_context: context.value,
-        threat_model: threat_model.value,
-        catalog,
-        structural_queries,
-        prompt_catalog,
-        backend,
-        max_budget_usd: options.max_budget_usd,
-        allow_deterministic_fallback: options.allow_deterministic_fallback,
-        cwe_focus: options.cwe_focus,
-        discovered_signals,
-    })
+    backend
 }
 
 /// Cheap .c-file count under a directory. Stops walking after
@@ -187,40 +279,54 @@ fn count_c_files_under(root: &Path) -> usize {
     let mut count = 0usize;
     let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        if count >= CAP {
+        if file_count_reached_cap(count, CAP) {
             return count;
         }
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
         for entry in entries.flatten() {
-            if count >= CAP {
+            if file_count_reached_cap(count, CAP) {
                 return count;
             }
-            let path = entry.path();
-            let Ok(ft) = entry.file_type() else { continue };
-            if ft.is_dir() {
-                // Skip the `.kuzushi/` artifact dir + .git
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name == ".kuzushi"
-                        || name == ".git"
-                        || name == "target"
-                        || name == "node_modules"
-                    {
-                        continue;
-                    }
-                }
-                stack.push(path);
-            } else if ft.is_file() {
-                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    if ext == "c" || ext == "cpp" || ext == "cc" || ext == "cxx" {
-                        count += 1;
-                    }
-                }
-            }
+            count_c_file_entry(entry, &mut stack, &mut count);
         }
     }
     count
+}
+
+fn file_count_reached_cap(count: usize, cap: usize) -> bool {
+    count >= cap
+}
+
+fn count_c_file_entry(entry: std::fs::DirEntry, stack: &mut Vec<PathBuf>, count: &mut usize) {
+    let path = entry.path();
+    let Ok(file_type) = entry.file_type() else {
+        return;
+    };
+    if should_descend_taint_plan_dir(&path, file_type.is_dir()) {
+        stack.push(path);
+    } else if file_type.is_file() && is_c_family_source_path(&path) {
+        *count += 1;
+    }
+}
+
+fn should_descend_taint_plan_dir(path: &Path, is_dir: bool) -> bool {
+    is_dir && !is_skipped_taint_plan_dir(path)
+}
+
+fn is_skipped_taint_plan_dir(path: &Path) -> bool {
+    matches!(
+        path.file_name().and_then(|name| name.to_str()),
+        Some(".kuzushi" | ".git" | "target" | "node_modules")
+    )
+}
+
+fn is_c_family_source_path(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("c" | "cpp" | "cc" | "cxx")
+    )
 }
 
 /// Bridge between `build_taint_iris_next_plan` and the discovery
@@ -319,41 +425,10 @@ fn boost_catalog_with_discovered_signals(
     mut catalog: Vec<TaintIrisNextRankedCatalogEntry>,
     signals: &DiscoveredSignals,
 ) -> Vec<TaintIrisNextRankedCatalogEntry> {
-    if signals.sources.is_empty() && signals.sinks.is_empty() && signals.entry_points.is_empty() {
+    if no_discovered_signals(signals) {
         return catalog;
     }
-    // Per-CWE source / sink indexes from discovery, with the language
-    // tag attached so we only splice into entries the discovery
-    // language is in scope for. Falls back to "any" entries always.
-    let mut sources_by_cwe: std::collections::BTreeMap<String, Vec<&DiscoveredSignal>> =
-        std::collections::BTreeMap::new();
-    let mut sinks_by_cwe: std::collections::BTreeMap<String, Vec<&DiscoveredSignal>> =
-        std::collections::BTreeMap::new();
-    for entry in signals.sources.iter().chain(signals.entry_points.iter()) {
-        sources_by_cwe
-            .entry(entry.cwe.to_ascii_uppercase())
-            .or_default()
-            .push(entry);
-    }
-    for entry in &signals.sinks {
-        sinks_by_cwe
-            .entry(entry.cwe.to_ascii_uppercase())
-            .or_default()
-            .push(entry);
-    }
-    // Build a flat name index for the existing +15-per-overlap bonus
-    // (preserves the prior ranking semantics — the bonus only fires
-    // on PRE-EXISTING catalog signals that match a discovered name,
-    // never on the names we're about to splice in below).
-    let mut source_name_index: std::collections::BTreeSet<String> =
-        std::collections::BTreeSet::new();
-    let mut sink_name_index: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for s in sources_by_cwe.values().flatten() {
-        source_name_index.insert(s.name.clone());
-    }
-    for s in sinks_by_cwe.values().flatten() {
-        sink_name_index.insert(s.name.clone());
-    }
+    let indexes = discovery_signal_indexes(signals);
     // pgcrypto-shaped discoveries (mbuf_*, pullf_*, pgp_mpi_*) yield
     // ~16 unique source names per CWE; a cap of 8 alphabetically
     // truncated the parser-layer reads (`pullf_read`, `pgp_mpi_read`)
@@ -364,20 +439,7 @@ fn boost_catalog_with_discovered_signals(
     // pathological codebase can't blow up reachableByFlows runtime).
     const SPLICE_PER_ROLE_PER_ENTRY: usize = 24;
     for entry in &mut catalog {
-        // Bonus snapshot (PRE-splice) — see comment above.
-        let mut bonus: i32 = 0;
-        for src in &entry.source_signals {
-            if source_name_index.contains(src) {
-                bonus = bonus.saturating_add(15);
-            }
-        }
-        for snk in &entry.sink_signals {
-            if sink_name_index.contains(snk) {
-                bonus = bonus.saturating_add(15);
-            }
-        }
-        let bonus = bonus.min(60);
-        entry.score = entry.score.saturating_add(bonus);
+        apply_discovery_overlap_bonus(entry, &indexes);
         // Splice discovered names of MATCHING CWE into source / sink
         // signal lists so the downstream rg engine actually scans for
         // them (otherwise the +15 bonus only fires on names already
@@ -387,60 +449,115 @@ fn boost_catalog_with_discovered_signals(
         // reads from sanitizer_signals and the discovery markers
         // don't carry a "sanitizer" kind today; preserves the cycle-
         // free pipeline order).
-        let cwe = entry.cwe.to_ascii_uppercase();
-        let language_match = |sig: &DiscoveredSignal| -> bool {
-            entry.languages.is_empty()
-                || entry.languages.iter().any(|lang| lang == "any")
-                || entry.languages.iter().any(|lang| lang == &sig.language)
-        };
-        if let Some(disc_sources) = sources_by_cwe.get(&cwe) {
-            // Track names already in the catalog AND names spliced so far
-            // — discovery output can list a marker many times (one record
-            // per call site), and counting each push against the 8-slot
-            // budget would mean a single duplicated name eats multiple
-            // slots and starves other discovered names from making it in.
-            // Mutate the set as we push so each unique name costs one slot.
-            let mut already: std::collections::BTreeSet<String> =
-                entry.source_signals.iter().cloned().collect();
-            let mut spliced = 0usize;
-            for sig in disc_sources {
-                if spliced >= SPLICE_PER_ROLE_PER_ENTRY {
-                    break;
-                }
-                if !language_match(sig) {
-                    continue;
-                }
-                if !already.insert(sig.name.clone()) {
-                    continue;
-                }
-                entry.source_signals.push(sig.name.clone());
-                spliced += 1;
-            }
-        }
-        if let Some(disc_sinks) = sinks_by_cwe.get(&cwe) {
-            let mut already: std::collections::BTreeSet<String> =
-                entry.sink_signals.iter().cloned().collect();
-            let mut spliced = 0usize;
-            for sig in disc_sinks {
-                if spliced >= SPLICE_PER_ROLE_PER_ENTRY {
-                    break;
-                }
-                if !language_match(sig) {
-                    continue;
-                }
-                if !already.insert(sig.name.clone()) {
-                    continue;
-                }
-                entry.sink_signals.push(sig.name.clone());
-                spliced += 1;
-            }
-        }
+        splice_discovered_signals(entry, &indexes, SPLICE_PER_ROLE_PER_ENTRY);
         // Dedup + sort-stable: preserve insertion order via dedup-by-set.
         dedup_signal_list(&mut entry.source_signals);
         dedup_signal_list(&mut entry.sink_signals);
     }
     catalog.sort_by(|a, b| b.score.cmp(&a.score));
     catalog
+}
+
+struct DiscoverySignalIndexes<'a> {
+    sources_by_cwe: std::collections::BTreeMap<String, Vec<&'a DiscoveredSignal>>,
+    sinks_by_cwe: std::collections::BTreeMap<String, Vec<&'a DiscoveredSignal>>,
+    source_names: std::collections::BTreeSet<String>,
+    sink_names: std::collections::BTreeSet<String>,
+}
+
+fn no_discovered_signals(signals: &DiscoveredSignals) -> bool {
+    signals.sources.is_empty() && signals.sinks.is_empty() && signals.entry_points.is_empty()
+}
+
+fn discovery_signal_indexes(signals: &DiscoveredSignals) -> DiscoverySignalIndexes<'_> {
+    let mut indexes = DiscoverySignalIndexes {
+        sources_by_cwe: std::collections::BTreeMap::new(),
+        sinks_by_cwe: std::collections::BTreeMap::new(),
+        source_names: std::collections::BTreeSet::new(),
+        sink_names: std::collections::BTreeSet::new(),
+    };
+    for signal in signals.sources.iter().chain(signals.entry_points.iter()) {
+        indexes
+            .sources_by_cwe
+            .entry(signal.cwe.to_ascii_uppercase())
+            .or_default()
+            .push(signal);
+        indexes.source_names.insert(signal.name.clone());
+    }
+    for signal in &signals.sinks {
+        indexes
+            .sinks_by_cwe
+            .entry(signal.cwe.to_ascii_uppercase())
+            .or_default()
+            .push(signal);
+        indexes.sink_names.insert(signal.name.clone());
+    }
+    indexes
+}
+
+fn apply_discovery_overlap_bonus(
+    entry: &mut TaintIrisNextRankedCatalogEntry,
+    indexes: &DiscoverySignalIndexes<'_>,
+) {
+    let source_bonus = overlap_bonus(&entry.source_signals, &indexes.source_names, 15);
+    let sink_bonus = overlap_bonus(&entry.sink_signals, &indexes.sink_names, 15);
+    entry.score = entry
+        .score
+        .saturating_add((source_bonus + sink_bonus).min(60));
+}
+
+fn overlap_bonus(
+    signals: &[String],
+    discovered_names: &std::collections::BTreeSet<String>,
+    points: i32,
+) -> i32 {
+    signals
+        .iter()
+        .filter(|signal| discovered_names.contains(*signal))
+        .fold(0, |total, _| total.saturating_add(points))
+}
+
+fn splice_discovered_signals(
+    entry: &mut TaintIrisNextRankedCatalogEntry,
+    indexes: &DiscoverySignalIndexes<'_>,
+    cap: usize,
+) {
+    let cwe = entry.cwe.to_ascii_uppercase();
+    if let Some(signals) = indexes.sources_by_cwe.get(&cwe) {
+        splice_discovered_role(&mut entry.source_signals, &entry.languages, signals, cap);
+    }
+    if let Some(signals) = indexes.sinks_by_cwe.get(&cwe) {
+        splice_discovered_role(&mut entry.sink_signals, &entry.languages, signals, cap);
+    }
+}
+
+fn splice_discovered_role(
+    catalog_signals: &mut Vec<String>,
+    languages: &[String],
+    discovered: &[&DiscoveredSignal],
+    cap: usize,
+) {
+    let mut already: std::collections::BTreeSet<String> = catalog_signals.iter().cloned().collect();
+    let mut spliced = 0usize;
+    for signal in discovered {
+        if spliced >= cap {
+            break;
+        }
+        if !discovery_language_matches(languages, signal) {
+            continue;
+        }
+        if !already.insert(signal.name.clone()) {
+            continue;
+        }
+        catalog_signals.push(signal.name.clone());
+        spliced += 1;
+    }
+}
+
+fn discovery_language_matches(languages: &[String], signal: &DiscoveredSignal) -> bool {
+    languages.is_empty()
+        || languages.iter().any(|lang| lang == "any")
+        || languages.iter().any(|lang| lang == &signal.language)
 }
 
 fn dedup_signal_list(list: &mut Vec<String>) {
@@ -463,31 +580,40 @@ fn boost_catalog_with_attack_surface_hints(
     if hints.is_empty() {
         return catalog;
     }
-    let source_index: std::collections::BTreeSet<String> =
-        hints.entry_points.iter().cloned().collect();
-    let sink_index: std::collections::BTreeSet<String> = hints
-        .external_sinks
-        .iter()
-        .chain(hints.role_gates.iter())
-        .cloned()
-        .collect();
+    let indexes = attack_surface_indexes(hints);
     for entry in &mut catalog {
-        let mut bonus: i32 = 0;
-        for src in &entry.source_signals {
-            if source_index.contains(src) {
-                bonus = bonus.saturating_add(20);
-            }
-        }
-        for snk in &entry.sink_signals {
-            if sink_index.contains(snk) {
-                bonus = bonus.saturating_add(20);
-            }
-        }
-        let bonus = bonus.min(80);
-        entry.score = entry.score.saturating_add(bonus);
+        entry.score = entry
+            .score
+            .saturating_add(attack_surface_bonus(entry, &indexes));
     }
     catalog.sort_by(|a, b| b.score.cmp(&a.score));
     catalog
+}
+
+struct AttackSurfaceIndexes {
+    sources: std::collections::BTreeSet<String>,
+    sinks: std::collections::BTreeSet<String>,
+}
+
+fn attack_surface_indexes(hints: &TaintIrisNextAttackSurfaceHints) -> AttackSurfaceIndexes {
+    AttackSurfaceIndexes {
+        sources: hints.entry_points.iter().cloned().collect(),
+        sinks: hints
+            .external_sinks
+            .iter()
+            .chain(hints.role_gates.iter())
+            .cloned()
+            .collect(),
+    }
+}
+
+fn attack_surface_bonus(
+    entry: &TaintIrisNextRankedCatalogEntry,
+    indexes: &AttackSurfaceIndexes,
+) -> i32 {
+    let source_bonus = overlap_bonus(&entry.source_signals, &indexes.sources, 20);
+    let sink_bonus = overlap_bonus(&entry.sink_signals, &indexes.sinks, 20);
+    (source_bonus + sink_bonus).min(80)
 }
 
 /// Synthesise a phantom `TaintIrisNextRankedCatalogEntry` per CWE in
@@ -725,19 +851,51 @@ fn phantom_entry_point_relevance(name: &str) -> i32 {
 /// independently and the mapping is small enough that one shared
 /// definition isn't load-bearing.
 fn phantom_taint_class_for_cwe(cwe: &str) -> &'static str {
-    match cwe {
-        "CWE-78" | "CWE-77" => "command-injection",
-        "CWE-94" => "code-injection",
-        "CWE-426" => "search-path",
-        "CWE-269" | "CWE-250" => "privesc",
-        "CWE-732" => "permission",
-        "CWE-862" => "missing-authorization",
-        "CWE-89" => "sql-injection",
-        "CWE-79" => "xss",
-        "CWE-22" => "path-traversal",
-        "CWE-918" => "ssrf",
-        "CWE-502" => "deserialization",
-        _ => "threat-model",
+    const PHANTOM_TAINT_CLASSES: &[(&[&str], &str)] = &[
+        (&["CWE-78", "CWE-77"], "command-injection"),
+        (&["CWE-94"], "code-injection"),
+        (&["CWE-426"], "search-path"),
+        (&["CWE-269", "CWE-250"], "privesc"),
+        (&["CWE-732"], "permission"),
+        (&["CWE-862"], "missing-authorization"),
+        (&["CWE-89"], "sql-injection"),
+        (&["CWE-79"], "xss"),
+        (&["CWE-22"], "path-traversal"),
+        (&["CWE-918"], "ssrf"),
+        (&["CWE-502"], "deserialization"),
+    ];
+    PHANTOM_TAINT_CLASSES
+        .iter()
+        .find_map(|(cwes, taint_class)| cwes.contains(&cwe).then_some(*taint_class))
+        .unwrap_or("threat-model")
+}
+
+#[cfg(test)]
+mod count_c_files_under_tests {
+    use super::*;
+
+    #[test]
+    fn counts_c_family_sources_and_skips_artifact_dirs() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("root.c"), "int main(void) { return 0; }").unwrap();
+        std::fs::write(temp.path().join("root.rs"), "fn main() {}").unwrap();
+        std::fs::create_dir(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src").join("a.cpp"), "int f();").unwrap();
+        std::fs::write(temp.path().join("src").join("b.cxx"), "int g();").unwrap();
+        std::fs::create_dir(temp.path().join(".kuzushi")).unwrap();
+        std::fs::write(
+            temp.path().join(".kuzushi").join("ignored.c"),
+            "int ignored;",
+        )
+        .unwrap();
+        std::fs::create_dir(temp.path().join("node_modules")).unwrap();
+        std::fs::write(
+            temp.path().join("node_modules").join("ignored.cc"),
+            "int ignored;",
+        )
+        .unwrap();
+
+        assert_eq!(count_c_files_under(temp.path()), 3);
     }
 }
 
