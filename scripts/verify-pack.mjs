@@ -1,14 +1,12 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 const repo = process.cwd();
 const manifest = JSON.parse(readFileSync(path.join(repo, "package.json"), "utf8"));
 const entries = manifest.files ?? [];
 const includes = entries.filter((entry) => !entry.startsWith("!"));
-const excludes = entries
-  .filter((entry) => entry.startsWith("!"))
-  .map((entry) => entry.slice(1));
+const excludes = entries.filter((entry) => entry.startsWith("!")).map((entry) => entry.slice(1));
 
 const denied = [
   /^\.kuzushi(?:\/|$)/,
@@ -72,10 +70,7 @@ function isExcluded(rel) {
   const normalized = normalize(rel);
   return excludes.some((exclude) => {
     const normalizedExclude = normalize(exclude);
-    return (
-      normalized === normalizedExclude ||
-      normalized.startsWith(`${normalizedExclude}/`)
-    );
+    return normalized === normalizedExclude || normalized.startsWith(`${normalizedExclude}/`);
   });
 }
 
