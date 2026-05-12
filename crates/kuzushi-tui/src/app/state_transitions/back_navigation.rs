@@ -62,6 +62,7 @@ fn returns_to_catalog(view: &ShellView) -> bool {
             | ShellView::Auth
             | ShellView::Cost
             | ShellView::Patch(_)
+            | ShellView::Pwn
             | ShellView::Threat(_)
             | ShellView::ThreatEditor
             | ShellView::ModuleRun

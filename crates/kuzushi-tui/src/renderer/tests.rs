@@ -1,8 +1,8 @@
 use super::*;
 
 use kuzushi_core::{
-    Finding, OptionScope, OptionTarget, ScanCancellation, Severity, StaticProofState,
-    TriageOutcome, TriageVerdict, V2Config,
+    Finding, FindingEvidence, OptionScope, OptionTarget, ScanCancellation, Severity,
+    StaticProofState, TriageOutcome, TriageVerdict, V2Config,
 };
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -144,7 +144,15 @@ fn renders_selected_finding_detail() {
         Some(8),
         Severity::High,
         "dangerous sink",
-    );
+    )
+    .with_evidence(vec![FindingEvidence {
+        kind: "filesystem_sink".to_string(),
+        file_path: "src/app.ts".to_string(),
+        line: 8,
+        snippet: "file.save(filepath)".to_string(),
+        rationale: "Raw upload path reaches a filesystem write".to_string(),
+        confidence: 92,
+    }]);
     app.findings = vec![finding.clone()];
     app.selected_finding = Some(finding);
     app.shell_view = ShellView::Finding;
@@ -156,6 +164,10 @@ fn renders_selected_finding_detail() {
     assert!(rendered.contains("alias"));
     assert!(rendered.contains("F-0001"));
     assert!(rendered.contains("fingerprint"));
+    assert!(rendered.contains("STRUCTURED EVIDENCE"));
+    assert!(rendered.contains("filesystem_sink"));
+    assert!(rendered.contains("src/app.ts:8"));
+    assert!(rendered.contains("file.save(filepath)"));
 }
 
 #[test]
@@ -254,6 +266,48 @@ fn renders_dense_findings_rows_at_80_columns() {
         );
     }
     assert!(!rendered.contains("┌"));
+}
+
+#[test]
+fn findings_rows_preview_structured_evidence_at_wide_width() {
+    let backend = TestBackend::new(120, 18);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let finding = Finding::new_tool(
+        "exploit-chain",
+        "exploit-chain/path-traversal-to-parser-abuse",
+        "app.py",
+        62,
+        None,
+        Severity::Critical,
+        "Path traversal reaches a parser import boundary",
+    )
+    .with_evidence(vec![
+        FindingEvidence {
+            kind: "attacker_input".to_string(),
+            file_path: "app.py".to_string(),
+            line: 48,
+            snippet: "filename = file.filename".to_string(),
+            rationale: "The upload filename is attacker-controlled".to_string(),
+            confidence: 90,
+        },
+        FindingEvidence {
+            kind: "filesystem_sink".to_string(),
+            file_path: "app.py".to_string(),
+            line: 63,
+            snippet: "file.save(filepath)".to_string(),
+            rationale: "The raw filename controls the write target".to_string(),
+            confidence: 94,
+        },
+    ]);
+    app.findings = vec![finding];
+    app.shell_view = ShellView::Findings;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("evidence 2 anchors"), "{rendered}");
+    assert!(rendered.contains("attacker_input app.py:48"), "{rendered}");
 }
 
 #[test]
@@ -2062,6 +2116,7 @@ fn renders_all_ink_parity_shell_surfaces() {
         (ShellView::Auth, "PROVIDERS"),
         (ShellView::Cost, "BUDGETS"),
         (ShellView::Patch("F-0001".to_string()), "PATCH"),
+        (ShellView::Pwn, "PWN TARGET"),
     ];
 
     for (view, expected) in cases {
@@ -2082,6 +2137,49 @@ fn renders_all_ink_parity_shell_surfaces() {
             assert!(!rendered.contains("┌"), "{expected} drew a box");
         }
     }
+}
+
+#[test]
+fn renders_pwn_dashboard_with_state_and_rounds() {
+    let backend = TestBackend::new(110, 28);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Pwn;
+    app.pwn_view.target = Some(std::path::PathBuf::from("./chal"));
+    app.pwn_view.profile_snapshot = Some(serde_json::json!({
+        "arch": "x86-64",
+        "needed": ["libc.so.6"]
+    }));
+    app.pwn_view.state_snapshot = Some(serde_json::json!({
+        "primitives": [{
+            "kind": "leak",
+            "confidence": 0.75,
+            "evidence": "controlled pointer disclosure",
+            "remoteSafe": true
+        }]
+    }));
+    app.pwn_view.auto_solve_snapshot = Some(serde_json::json!({
+        "llmPlanner": {
+            "iterations": [{
+                "round": 0,
+                "decision": {
+                    "actions": [{"operation": "reverse-function", "function": "main"}]
+                }
+            }]
+        }
+    }));
+    app.pwn_view.reverse_snapshots.push(serde_json::json!({
+        "function": "main",
+        "revng": {"ok": true, "output": "void main() { puts(\"hi\"); }"},
+        "dangerousIo": ["puts"]
+    }));
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+    assert!(rendered.contains("PWN TARGET"));
+    assert!(rendered.contains("leak"));
+    assert!(rendered.contains("round 0"));
+    assert!(rendered.contains("revng ok"));
 }
 
 fn buffer_row_text(buffer: &Buffer, width: u16, y: u16) -> String {

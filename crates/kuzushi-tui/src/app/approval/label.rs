@@ -5,6 +5,7 @@ pub enum ConfirmKind {
     NetworkEgress,
     FsWriteOutsideKuzushi,
     DestructiveVerb,
+    PwnCandidateAttempt,
 }
 
 impl ConfirmKind {
@@ -13,6 +14,7 @@ impl ConfirmKind {
             ConfirmKind::NetworkEgress => "CONFIRM · network egress",
             ConfirmKind::FsWriteOutsideKuzushi => "CONFIRM · fs:write outside .kuzushi/",
             ConfirmKind::DestructiveVerb => "REFUSED · destructive verb",
+            ConfirmKind::PwnCandidateAttempt => "CONFIRM · pwn candidate attempts",
         }
     }
 

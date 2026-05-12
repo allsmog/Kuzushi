@@ -32,6 +32,7 @@ impl FindingStore {
                             merge_id,
                         ],
                     )?;
+                    self.replace_finding_evidence(merge_id, &finding.evidence)?;
                 } else if existing.tool != merged_tool {
                     self.conn.execute(
                         "update findings set tool = ?, vuln_source = ? where id = ?",
@@ -83,6 +84,7 @@ impl FindingStore {
             params![scan_id, finding.fingerprint],
             |row| row.get(0),
         )?;
+        self.replace_finding_evidence(id, &finding.evidence)?;
         Ok(id)
     }
 
@@ -131,6 +133,7 @@ impl FindingStore {
                 created_at: String::new(),
                 vuln_source,
                 dedup_key: Some(dedup_key.to_string()),
+                evidence: Vec::new(),
             }
         }))
     }

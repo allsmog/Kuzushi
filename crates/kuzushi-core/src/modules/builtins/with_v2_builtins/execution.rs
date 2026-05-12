@@ -146,6 +146,7 @@ fn dispatch_pre_threat_intel_tool(
         .or_else(|| dispatch_agentic_security_tool(name, input, ctx, runtime))
         .or_else(|| dispatch_systems_hunt_tool(name, input, ctx, runtime))
         .or_else(|| dispatch_uaf_hunt_tool(name, input, ctx, runtime))
+        .or_else(|| dispatch_pwn_tool(name, input, ctx, runtime))
 }
 
 fn dispatch_post_threat_intel_tool(

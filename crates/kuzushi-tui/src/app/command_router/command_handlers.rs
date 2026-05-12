@@ -48,6 +48,7 @@ pub(crate) const COMMAND_HANDLERS: &[CommandHandler] = &[
     handle_task_command,
     handle_context_command,
     handle_workspace_command,
+    handle_pwn_command,
     handle_knowledge_base_command,
     handle_attach_command,
     handle_detach_command,

@@ -120,6 +120,7 @@ pub(super) fn workspace_view_status(app: &ShellApp) -> String {
         ShellView::Auth => "auth".to_string(),
         ShellView::Cost => "cost".to_string(),
         ShellView::Patch(alias) => format!("patch:{alias}"),
+        ShellView::Pwn => "pwn".to_string(),
         _ => "catalog".to_string(),
     }
 }

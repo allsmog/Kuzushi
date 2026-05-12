@@ -17,6 +17,7 @@ pub(crate) use options::*;
 pub(crate) use plan::*;
 pub(crate) use prereq_chain::*;
 pub(crate) use prompts::*;
+pub(crate) use pwn::*;
 pub(crate) use runtime::*;
 pub(crate) use sast_tasks::*;
 pub(crate) use scan::*;
@@ -45,6 +46,7 @@ mod log;
 mod options;
 mod plan;
 mod prereq_chain;
+mod pwn;
 #[cfg(test)]
 use self::runtime::{mouse_capture_setting_enabled, render_plain_scripted_session};
 use self::settings::{preferred_model_choice_index, thinking_level_from_input};
@@ -104,7 +106,7 @@ pub use shellapp::ShellApp;
 pub use view_state::{
     ActivitySession, ActorDetailFilter, AdvisoryState, BudgetHalt, CompletionCycle,
     ContextSnapshotView, DagTaskRow, DagTaskState, ExploitChain, KnowledgeBaseView, OptionsFilter,
-    OptionsView, PaneFocus, PlanChange, PlanProposal, PromptsAction, ReconSnapshot,
+    OptionsView, PaneFocus, PlanChange, PlanProposal, PromptsAction, PwnView, ReconSnapshot,
     RecordedTraceEvent, ScanPanelState, ShellView, SubsystemAggregate, ThreatPatch, ThreatView,
     ThrottleAdvisory, TuneAction, WorkspaceView,
 };

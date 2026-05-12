@@ -22,6 +22,7 @@ mod tests {
             created_at: String::new(),
             vuln_source: None,
             dedup_key: None,
+            evidence: Vec::new(),
         }
     }
 

@@ -453,6 +453,7 @@ mod tests {
         assert_eq!(McpBackend::Gtags.binary(), "kuzushi-mcp-gtags");
         assert_eq!(McpBackend::Clang.binary(), "kuzushi-mcp-clang");
         assert_eq!(McpBackend::Joern.binary(), "kuzushi-mcp-joern");
+        assert_eq!(McpBackend::Revng.binary(), "kuzushi-mcp-revng");
         assert!(mcp_spawn_error("kuzushi-mcp-gtags").contains("cargo build"));
         assert!(mcp_health_spawn_error("kuzushi-mcp-gtags").contains("--health"));
     }

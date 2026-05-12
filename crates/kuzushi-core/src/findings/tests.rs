@@ -269,6 +269,67 @@ mod tests {
     }
 
     #[test]
+    fn stores_lists_and_replaces_structured_finding_evidence() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let run_id = "run-evidence";
+        store
+            .insert_scan_run(run_id, Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "exploit-chain",
+            "exploit-chain/path-traversal-to-parser-abuse",
+            "app.py",
+            62,
+            None,
+            Severity::Critical,
+            "Path traversal reaches image parser plugin loading",
+        )
+        .with_evidence(vec![
+            FindingEvidence {
+                kind: "attacker_input".to_string(),
+                file_path: "app.py".to_string(),
+                line: 48,
+                snippet: "filename = file.filename".to_string(),
+                rationale: "The upload filename comes directly from the request".to_string(),
+                confidence: 90,
+            },
+            FindingEvidence {
+                kind: "filesystem_sink".to_string(),
+                file_path: "app.py".to_string(),
+                line: 63,
+                snippet: "file.save(filepath)".to_string(),
+                rationale: "The attacker-controlled filename reaches a write sink".to_string(),
+                confidence: 94,
+            },
+        ]);
+
+        store.insert_finding(run_id, &finding).unwrap();
+        let listed = store.list_findings_for_scan_id(run_id).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].evidence.len(), 2);
+        assert_eq!(listed[0].evidence[0].kind, "attacker_input");
+        assert_eq!(listed[0].evidence[1].line, 63);
+
+        let replacement = finding.clone().with_evidence(vec![FindingEvidence {
+            kind: "parser_boundary".to_string(),
+            file_path: "helpers.py".to_string(),
+            line: 15,
+            snippet: "Image.open(input_path)".to_string(),
+            rationale: "Pillow plugin initialization is the parser boundary".to_string(),
+            confidence: 88,
+        }]);
+        store.insert_finding(run_id, &replacement).unwrap();
+
+        let resolved = store
+            .get_finding_by_fingerprint(&finding.fingerprint)
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.evidence.len(), 1);
+        assert_eq!(resolved.evidence[0].kind, "parser_boundary");
+        assert_eq!(resolved.evidence[0].file_path, "helpers.py");
+    }
+
+    #[test]
     fn static_proof_taxonomy_parses_and_serializes_expected_states() {
         let states = [
             ("signal_only", StaticProofState::SignalOnly),

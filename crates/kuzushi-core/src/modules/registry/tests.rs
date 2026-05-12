@@ -132,6 +132,19 @@ mod tests {
                 && option.option_type == OptionType::Bool
                 && option.aliases.contains(&"bridge_verbose".to_string())
         }));
+
+        let pwn_auto = registry.resolve_tool("pwn:auto-solve").unwrap();
+        assert!(pwn_auto.options.iter().any(|option| {
+            option.name == "target" && option.option_type == OptionType::Path && option.required
+        }));
+        assert!(pwn_auto
+            .options
+            .iter()
+            .any(|option| { option.name == "model" && option.option_type == OptionType::String }));
+        assert!(!pwn_auto
+            .options
+            .iter()
+            .any(|option| option.name == "strategy"));
     }
 
     #[test]
@@ -190,6 +203,7 @@ mod tests {
             "ndiff",
             "patch",
             "prompt-armor",
+            "pwn",
             "randori",
             "recon",
             "sast",
@@ -280,6 +294,7 @@ mod tests {
             "verify:finding",
             "patch:finding",
             "taint-iris-next:hunt",
+            "pwn:auto-solve",
         ] {
             assert!(
                 registry.resolve_tool(expected).is_some(),

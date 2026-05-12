@@ -25,6 +25,11 @@ pub(crate) fn primary_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<
         ShellView::ModuleRun => Some(module_run_lines(app, area)),
         ShellView::Findings => Some(findings_lines(app, area)),
         ShellView::Finding => Some(finding_detail_lines(app, area)),
+        ShellView::Pwn => Some(viewport_lines(
+            pwn_lines(app, area),
+            area.height,
+            app.scroll_offset as usize,
+        )),
         ShellView::Activity => Some(viewport_lines(
             activity_lines(app, area),
             area.height,
