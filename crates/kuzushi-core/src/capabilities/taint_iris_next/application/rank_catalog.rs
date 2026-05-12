@@ -106,3 +106,26 @@ pub(crate) fn rank_taint_iris_next_catalog(
     });
     entries
 }
+
+/// Merge operator-supplied extras into the ranked catalog. Same lane
+/// (`cwe + taint_class`) → operator wins (replaces the built-in).
+/// Different lane → both kept. Re-sorts after merge.
+pub(crate) fn merge_taint_iris_next_extra_entries(
+    mut ranked: Vec<TaintIrisNextRankedCatalogEntry>,
+    extras: &[TaintIrisNextRankedCatalogEntry],
+) -> Vec<TaintIrisNextRankedCatalogEntry> {
+    use std::collections::HashSet;
+    let extra_lanes: HashSet<(String, String)> = extras
+        .iter()
+        .map(|entry| (entry.cwe.clone(), entry.taint_class.clone()))
+        .collect();
+    ranked.retain(|entry| !extra_lanes.contains(&(entry.cwe.clone(), entry.taint_class.clone())));
+    ranked.extend(extras.iter().cloned());
+    ranked.sort_by(|left, right| {
+        right
+            .score
+            .cmp(&left.score)
+            .then_with(|| cwe_number(&left.cwe).cmp(&cwe_number(&right.cwe)))
+    });
+    ranked
+}

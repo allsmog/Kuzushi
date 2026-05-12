@@ -10,6 +10,7 @@ pub use adapters::{
     SUPPORTED_SCHEMA_VERSIONS,
 };
 pub use application::{
-    apply_threat_intel_catalog, list_threat_intel_catalog, resolve_catalog_path,
+    apply_threat_intel_catalog, harvest_threat_intel_catalog, list_threat_intel_catalog,
+    resolve_catalog_path,
 };
 pub use domain::{CatalogEntry, CatalogFile, CatalogSeverity, HuntKind, RawCatalogEntry};

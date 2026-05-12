@@ -6,6 +6,7 @@ impl TaintIrisNextInput {
         let backend = taint_iris_next_backend(input)?;
         let languages = taint_iris_next_languages(input)?;
         let caps = taint_iris_next_caps(input)?;
+        let extra_catalog_entries = parse_extra_catalog_entries(input)?;
         Ok(Self {
             mode,
             backend,
@@ -16,8 +17,108 @@ impl TaintIrisNextInput {
                 &["maxBudgetUsd", "max_budget_usd"],
                 "taint-iris-next:hunt maxBudgetUsd",
             )?,
+            extra_catalog_entries,
         })
     }
+}
+
+/// Parse the optional `extraCatalogEntries` input field into ranked
+/// catalog entries. The threat-intel dispatcher uses this to thread
+/// operator-authored catalog TOML through to the agent without having
+/// to recompile when new CVE classes are added.
+fn parse_extra_catalog_entries(input: &Value) -> Result<Vec<TaintIrisNextRankedCatalogEntry>> {
+    let Some(raw) = input
+        .get("extraCatalogEntries")
+        .or_else(|| input.get("extra_catalog_entries"))
+    else {
+        return Ok(Vec::new());
+    };
+    let items = raw.as_array().context(
+        "taint-iris-next:hunt `extraCatalogEntries` must be an array of catalog-entry objects",
+    )?;
+    items
+        .iter()
+        .enumerate()
+        .map(|(idx, item)| {
+            parse_one_extra_entry(item, idx).with_context(|| {
+                format!("taint-iris-next:hunt extraCatalogEntries[{idx}] is invalid")
+            })
+        })
+        .collect()
+}
+
+fn parse_one_extra_entry(item: &Value, idx: usize) -> Result<TaintIrisNextRankedCatalogEntry> {
+    let cwe = item
+        .get("cwe")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .with_context(|| format!("extraCatalogEntries[{idx}].cwe is required"))?
+        .to_string();
+    let name = item
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("operator-supplied {cwe}"));
+    let taint_class = item
+        .get("taintClass")
+        .or_else(|| item.get("taint_class"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "operator-supplied".to_string());
+    let languages = read_string_array(item, &["languages"])?;
+    let source_signals = read_string_array(item, &["sourceSignals", "source_signals"])?;
+    let sink_signals = read_string_array(item, &["sinkSignals", "sink_signals"])?;
+    let sanitizer_signals = read_string_array(item, &["sanitizerSignals", "sanitizer_signals"])?;
+    let structural_queries =
+        read_string_array(item, &["structuralQueries", "structural_queries"])?;
+
+    // Operator-supplied entries score above all const-catalog entries.
+    // If the operator went to the trouble of authoring a catalog entry
+    // (or harvested one from a real CVE), they want it ranked highly
+    // enough to survive the `max_catalog_entries` truncation. The 200
+    // band sits above the 100-cap a built-in entry hits via
+    // "threat-model CWE" match — see `rank_taint_iris_next_catalog`.
+    let score = 200;
+    let reasons = vec!["operator-supplied catalog entry (threat-intel)".to_string()];
+
+    Ok(TaintIrisNextRankedCatalogEntry {
+        cwe,
+        name,
+        taint_class,
+        languages,
+        source_signals,
+        sink_signals,
+        sanitizer_signals,
+        structural_queries,
+        score,
+        reasons,
+    })
+}
+
+fn read_string_array(item: &Value, keys: &[&str]) -> Result<Vec<String>> {
+    for key in keys {
+        if let Some(value) = item.get(*key) {
+            return parse_string_array(value, key);
+        }
+    }
+    Ok(Vec::new())
+}
+
+fn parse_string_array(value: &Value, label: &str) -> Result<Vec<String>> {
+    let items = value
+        .as_array()
+        .with_context(|| format!("{label} must be an array of strings"))?;
+    items
+        .iter()
+        .enumerate()
+        .map(|(idx, item)| {
+            item.as_str()
+                .map(str::to_string)
+                .with_context(|| format!("{label}[{idx}] must be a string"))
+        })
+        .collect()
 }
 
 fn taint_iris_next_backend(input: &Value) -> Result<String> {

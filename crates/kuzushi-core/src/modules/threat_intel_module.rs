@@ -38,6 +38,21 @@ pub(crate) fn threat_intel_module() -> BuiltinModule {
                     .default(json!(true)),
                 ],
             ),
+            tool_with_options(
+                "threat-intel:harvest",
+                "Build a catalog TOML from a list of CVE IDs. For each CVE, calls \
+                 ndiff:fetch-cve + ndiff:extract-fix-pattern, then writes one entry per \
+                 CVE to the output catalog. The `cves` field is the only JSON-only input \
+                 (array of strings).",
+                vec![
+                    opt(
+                        "outputPath",
+                        OptionType::Path,
+                        "Destination catalog TOML. Defaults to <target>/.kuzushi/catalogs/harvested.toml. Existing files are appended to.",
+                    ),
+                    model_option(),
+                ],
+            ),
         ],
         vec![],
     )

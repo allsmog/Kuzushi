@@ -25,16 +25,7 @@ pub enum DispatchPlan {
 pub fn plan_for_entry(entry: &CatalogEntry) -> DispatchPlan {
     match &entry.hunt {
         HuntKind::UafHunt => plan_uaf_hunt(entry),
-        HuntKind::TaintIrisNext => DispatchPlan::Skipped {
-            reason: format!(
-                "taint-iris-next does not yet consume operator-supplied catalog entries; \
-                 entry {:?} (CWE {}) recorded as pending. Follow-up: extend \
-                 `capabilities/taint_iris_next/domain/catalog/mod.rs` to merge \
-                 threat-intel entries with the hardcoded const catalog before agent \
-                 prompting.",
-                entry.id, entry.cwe
-            ),
-        },
+        HuntKind::TaintIrisNext => plan_taint_iris_next(entry),
         HuntKind::SystemsHunt => DispatchPlan::Skipped {
             reason: format!(
                 "systems-hunt does not yet consume operator-supplied catalog entries; \
@@ -107,6 +98,95 @@ fn plan_uaf_hunt(entry: &CatalogEntry) -> DispatchPlan {
         tool_name: "uaf-hunt:hunt",
         input,
     }
+}
+
+fn plan_taint_iris_next(entry: &CatalogEntry) -> DispatchPlan {
+    let sub = match entry.hunt_config.get(entry.hunt.config_key()) {
+        Some(value) => value,
+        None => {
+            return DispatchPlan::Skipped {
+                reason: format!(
+                    "taint-iris-next entry {:?} has no `[entry.taint_iris_next]` subtable; \
+                     declare at least `taint_class` and `sink_signals` to dispatch",
+                    entry.id
+                ),
+            }
+        }
+    };
+    let json_entry = match toml_subtable_to_catalog_json(entry, sub) {
+        Ok(value) => value,
+        Err(err) => {
+            return DispatchPlan::Skipped {
+                reason: format!(
+                    "taint-iris-next entry {:?} has invalid subtable: {err:#}",
+                    entry.id
+                ),
+            }
+        }
+    };
+    let input = json!({
+        "mode": "hunt",
+        "extraCatalogEntries": [json_entry],
+    });
+    DispatchPlan::Dispatched {
+        tool_name: "taint-iris-next:hunt",
+        input,
+    }
+}
+
+fn toml_subtable_to_catalog_json(entry: &CatalogEntry, sub: &toml::Value) -> Result<Value> {
+    let table = sub.as_table().context("subtable must be a TOML table")?;
+    let taint_class = table
+        .get("taint_class")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("threat-intel-{}", entry.cwe.to_ascii_lowercase()));
+    let name = table
+        .get("name")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            if entry.title.is_empty() {
+                format!("threat-intel {}", entry.id)
+            } else {
+                entry.title.clone()
+            }
+        });
+    let languages = toml_string_array(table, "languages")?;
+    let source_signals = toml_string_array(table, "source_signals")?;
+    let sink_signals = toml_string_array(table, "sink_signals")?;
+    let sanitizer_signals = toml_string_array(table, "sanitizer_signals")?;
+    let structural_queries = toml_string_array(table, "structural_queries")?;
+    Ok(json!({
+        "cwe": entry.cwe,
+        "name": name,
+        "taintClass": taint_class,
+        "languages": languages,
+        "sourceSignals": source_signals,
+        "sinkSignals": sink_signals,
+        "sanitizerSignals": sanitizer_signals,
+        "structuralQueries": structural_queries,
+    }))
+}
+
+fn toml_string_array(table: &toml::value::Table, key: &str) -> Result<Vec<String>> {
+    let Some(value) = table.get(key) else {
+        return Ok(Vec::new());
+    };
+    let items = value
+        .as_array()
+        .with_context(|| format!("`{key}` must be an array of strings"))?;
+    items
+        .iter()
+        .enumerate()
+        .map(|(idx, item)| {
+            item.as_str()
+                .map(str::to_string)
+                .with_context(|| format!("`{key}[{idx}]` must be a string"))
+        })
+        .collect()
 }
 
 fn uaf_pairs_to_json(value: &toml::Value, entry_id: &str) -> Result<Value> {

@@ -178,7 +178,7 @@ hunt = "uaf-hunt"
 }
 
 #[test]
-fn taint_iris_next_entries_skip_with_followup_pointer() {
+fn taint_iris_next_entries_dispatch_with_extra_catalog_entries_input() {
     let toml = r#"
 schema_version = "1"
 
@@ -186,28 +186,180 @@ schema_version = "1"
 id = "redis-cve-tn"
 cwe = "CWE-190"
 severity = "high"
+title = "Redis stream integer overflow"
 hunt = "taint-iris-next"
 
 [entry.taint_iris_next]
 taint_class = "integer-overflow"
-source_signals = ["external input"]
+languages = ["c"]
+source_signals = ["external input", "RESP count"]
 sink_signals = ["zmalloc(count * sizeof(...))"]
+sanitizer_signals = ["bounds check on count"]
+structural_queries = ["XAUTOCLAIM"]
 "#;
     let entries = parse_catalog_str(toml, Path::new("redis.toml")).unwrap();
     let plan = plan_for_entry(&entries[0]);
     match plan {
+        DispatchPlan::Dispatched { tool_name, input } => {
+            assert_eq!(tool_name, "taint-iris-next:hunt");
+            assert_eq!(input["mode"], "hunt");
+            let extras = input["extraCatalogEntries"].as_array().expect("array");
+            assert_eq!(extras.len(), 1);
+            let e = &extras[0];
+            assert_eq!(e["cwe"], "CWE-190");
+            assert_eq!(e["taintClass"], "integer-overflow");
+            assert_eq!(e["name"], "Redis stream integer overflow");
+            assert_eq!(e["languages"], serde_json::json!(["c"]));
+            assert_eq!(
+                e["sourceSignals"],
+                serde_json::json!(["external input", "RESP count"])
+            );
+            assert_eq!(
+                e["sinkSignals"],
+                serde_json::json!(["zmalloc(count * sizeof(...))"])
+            );
+            assert_eq!(
+                e["sanitizerSignals"],
+                serde_json::json!(["bounds check on count"])
+            );
+            assert_eq!(e["structuralQueries"], serde_json::json!(["XAUTOCLAIM"]));
+        }
+        DispatchPlan::Skipped { reason } => {
+            panic!("taint-iris-next entries with a subtable must dispatch now: {reason}")
+        }
+    }
+}
+
+#[test]
+fn taint_iris_next_entry_without_subtable_skips_with_reason() {
+    let toml = r#"
+schema_version = "1"
+
+[[entry]]
+id = "tn-bare"
+cwe = "CWE-190"
+severity = "high"
+hunt = "taint-iris-next"
+"#;
+    let entries = parse_catalog_str(toml, Path::new("bare.toml")).unwrap();
+    let plan = plan_for_entry(&entries[0]);
+    match plan {
         DispatchPlan::Skipped { reason } => {
             assert!(
-                reason.contains("taint-iris-next") && reason.contains("catalog"),
-                "skip reason must name the missing wiring: {reason}"
-            );
-            assert!(
-                reason.contains("Follow-up") || reason.contains("follow-up"),
-                "skip reason should name the follow-up surface area: {reason}"
+                reason.contains("taint_iris_next") || reason.contains("subtable"),
+                "reason should name the missing subtable: {reason}"
             );
         }
-        DispatchPlan::Dispatched { .. } => panic!("taint-iris-next not yet wired; must skip"),
+        DispatchPlan::Dispatched { .. } => panic!("bare entry must skip"),
     }
+}
+
+#[test]
+fn harvest_pipeline_with_mock_dispatch_writes_catalog_and_summary() {
+    use crate::capabilities::threat_intel::harvest_threat_intel_catalog;
+    use crate::config::V2Config;
+    use crate::modules::ToolExecutionContext;
+    use crate::workspace::WorkspaceTarget;
+    use serde_json::json;
+
+    let workspace_root = tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(workspace_root.path()).unwrap();
+    let config = V2Config::default();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+    };
+
+    // Canned ndiff responses: usable patterns for two CVE IDs, ok=false
+    // for a third (unknown CVE).
+    let dispatch = |name: &str,
+                    input: serde_json::Value,
+                    _ctx: &ToolExecutionContext<'_>,
+                    _runtime: Option<&dyn crate::runtime::AgentRuntime>|
+     -> anyhow::Result<serde_json::Value> {
+        match name {
+            "ndiff:fetch-cve" => {
+                let cve = input.get("id").and_then(serde_json::Value::as_str).unwrap_or("");
+                if cve == "CVE-9999-AAAA" {
+                    return Ok(json!({"ok": false, "output": "advisory not found"}));
+                }
+                Ok(json!({
+                    "ok": true,
+                    "output": "ok",
+                    "data": {
+                        "record": {
+                            "id": cve,
+                            "description": "Stream count integer overflow in Redis.",
+                            "cwes": ["CWE-190"],
+                            "severity": "HIGH",
+                            "affectedFiles": ["src/t_stream.c"],
+                        }
+                    }
+                }))
+            }
+            "ndiff:extract-fix-pattern" => Ok(json!({
+                "ok": true,
+                "output": "ok",
+                "data": {
+                    "pattern": {
+                        "cwe": ["CWE-190"],
+                        "languages": ["c"],
+                        "vulnerableShape": "count multiplied without bounds check",
+                        "fixShape": "if (count > LIMIT) return error",
+                        "detectionQuery": "zmalloc(count * sizeof",
+                        "keywords": ["XAUTOCLAIM", "streamID"],
+                        "description": "stream count overflow",
+                        "confidence": "HIGH",
+                    }
+                }
+            })),
+            other => panic!("unexpected dispatch in harvest test: {other}"),
+        }
+    };
+
+    let result = harvest_threat_intel_catalog(
+        &json!({"cves": ["CVE-2022-31144", "CVE-9999-AAAA"]}),
+        &ctx,
+        None,
+        dispatch,
+    )
+    .unwrap();
+
+    assert_eq!(result["summary"]["totalCves"], 2);
+    assert_eq!(result["summary"]["harvested"], 1);
+    assert_eq!(result["summary"]["skipped"], 1);
+    assert_eq!(result["summary"]["failed"], 0);
+
+    let output_path = workspace_root
+        .path()
+        .join(".kuzushi")
+        .join("catalogs")
+        .join("harvested.toml");
+    assert!(output_path.exists(), "harvest must write the TOML file");
+    let toml_text = std::fs::read_to_string(&output_path).unwrap();
+    assert!(toml_text.contains("[[entry]]"));
+    assert!(toml_text.contains("CVE-2022-31144"));
+    assert!(toml_text.contains("hunt = \"taint-iris-next\""));
+    assert!(toml_text.contains("[entry.taint_iris_next]"));
+
+    // Round-trip: the harvested TOML must parse through our own loader.
+    let parsed = parse_catalog_str(&toml_text, &output_path).unwrap();
+    assert_eq!(parsed.len(), 1);
+    assert_eq!(parsed[0].cwe, "CWE-190");
+    assert_eq!(parsed[0].hunt, HuntKind::TaintIrisNext);
+
+    // Second run appends rather than overwriting.
+    let _ = harvest_threat_intel_catalog(
+        &json!({"cves": ["CVE-2022-31145"]}),
+        &ctx,
+        None,
+        dispatch,
+    )
+    .unwrap();
+    let after = std::fs::read_to_string(&output_path).unwrap();
+    assert!(after.contains("CVE-2022-31144"));
+    assert!(after.contains("CVE-2022-31145"));
 }
 
 #[test]
