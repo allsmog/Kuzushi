@@ -1,5 +1,6 @@
 pub mod codeql;
 pub mod dep_hygiene;
+pub mod exploit_chain;
 pub mod iac_scan;
 pub mod secret_scan;
 pub mod semgrep;

@@ -19,4 +19,10 @@ pub(crate) const RUN_SCAN_COMMANDS: &[ShellCommandSpec] = &[
         category: ShellCommandCategory::RunScan,
         description: "explicit agent question",
     },
+    ShellCommandSpec {
+        command: "pwn [verb]",
+        aliases: &["/pwn", "/pwn target <path>", "/pwn auto"],
+        category: ShellCommandCategory::RunScan,
+        description: "open the pwn dashboard or launch pwn workflow tools",
+    },
 ];

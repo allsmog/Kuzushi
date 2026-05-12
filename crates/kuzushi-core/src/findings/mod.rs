@@ -16,9 +16,9 @@ pub(crate) use application::{
     GenericPersistedRun,
 };
 pub use domain::{
-    compute_dedup_key, extract_cwe, normalize_cwe, Finding, PatchAttempt, PatchResult, PatchStatus,
-    PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, Severity,
-    StaticProofState, TriageOutcome, TriageVerdict, VulnSource,
+    compute_dedup_key, extract_cwe, normalize_cwe, Finding, FindingEvidence, PatchAttempt,
+    PatchResult, PatchStatus, PersistedProofVerdict, PersistedSandboxBackend,
+    PersistedVerification, Severity, StaticProofState, TriageOutcome, TriageVerdict, VulnSource,
 };
 pub use persistence::FindingStore;
 pub use presentation::{

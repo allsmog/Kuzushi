@@ -70,6 +70,8 @@ pub(crate) enum McpBackend {
     /// CodeQL CWE-folder selectors over a built database. Slow per
     /// call today (DB reload) but produces real reaching flows.
     Codeql,
+    /// rev.ng binary reverse-engineering facts through Docker/Podman.
+    Revng,
 }
 
 impl McpBackend {
@@ -80,6 +82,7 @@ impl McpBackend {
             Self::Joern => "kuzushi-mcp-joern",
             Self::TreeSitter => "kuzushi-mcp-treesitter",
             Self::Codeql => "kuzushi-mcp-codeql",
+            Self::Revng => "kuzushi-mcp-revng",
         }
     }
 }

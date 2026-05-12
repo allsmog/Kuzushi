@@ -77,6 +77,7 @@ impl Finding {
             created_at: now_isoish(),
             vuln_source,
             dedup_key,
+            evidence: Vec::new(),
         }
     }
 
@@ -91,6 +92,11 @@ impl Finding {
     /// Override the auto-computed dedup key.
     pub fn with_dedup_key(mut self, key: impl Into<String>) -> Self {
         self.dedup_key = Some(key.into());
+        self
+    }
+
+    pub fn with_evidence(mut self, evidence: Vec<FindingEvidence>) -> Self {
+        self.evidence = evidence;
         self
     }
 

@@ -36,6 +36,7 @@ pub const RUNTIME_TOOL_NAMES: &[&str] = &[
     "carlini-threat-hunt:run",
     "classifier-gate:score",
     "deep-audit:run",
+    "exploit-chain:scan",
     "full-mode:hunt",
     "ndiff:extract-fix-pattern",
     "ndiff:hunt-variants",
@@ -92,6 +93,9 @@ pub fn tool_requires_agent_runtime(tool_name: &str) -> bool {
 /// uses this in `kuzushi run`, the TUI in its background-tool worker.
 pub fn tool_needs_runtime(tool_name: &str, input: &Value) -> bool {
     if tool_uses_agent_runtime(tool_name) {
+        return true;
+    }
+    if tool_name == "pwn:auto-solve" {
         return true;
     }
     tool_name == "sast:scan" && wants_sast_runtime(input)
@@ -200,6 +204,7 @@ mod tests {
             "smoke:next-step",
             "full-mode:hunt",
             "deep-audit:run",
+            "exploit-chain:scan",
             "classifier-gate:score",
             "uaf-hunt:hunt",
         ] {
@@ -235,8 +240,14 @@ mod tests {
     }
 
     #[test]
+    fn pwn_auto_solve_always_needs_runtime() {
+        assert!(tool_needs_runtime("pwn:auto-solve", &json!({})));
+    }
+
+    #[test]
     fn tool_needs_runtime_falls_through_to_allowlist_for_other_tools() {
         assert!(tool_needs_runtime("deep-audit:run", &json!({})));
+        assert!(tool_needs_runtime("exploit-chain:scan", &json!({})));
         assert!(tool_needs_runtime("uaf-hunt:hunt", &json!({})));
         assert!(!tool_needs_runtime("findings:list", &json!({})));
     }

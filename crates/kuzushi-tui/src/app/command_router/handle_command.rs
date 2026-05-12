@@ -106,6 +106,14 @@ pub(crate) fn handle_findings_command(app: &mut ShellApp, command: &ShellCommand
     true
 }
 
+pub(crate) fn handle_pwn_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Pwn(command) = command else {
+        return false;
+    };
+    app.handle_pwn_command(command);
+    true
+}
+
 pub(crate) fn handle_open_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
     let ShellCommand::Open(id) = command else {
         return false;

@@ -25,6 +25,7 @@ pub use shell_command_specs::parse_command;
 pub use shell_command_specs::shell_command_specs;
 pub use shell_command_specs::shell_help_examples;
 pub use shell_command_specs::ContextCommand;
+pub use shell_command_specs::PwnCommand;
 pub use shell_command_specs::SastTaskCommand;
 pub use shell_command_specs::SastTaskModeCommand;
 pub use shell_command_specs::WorkspaceCommand;

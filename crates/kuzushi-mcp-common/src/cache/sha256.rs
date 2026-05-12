@@ -1,3 +1,17 @@
+pub fn sha256_hex_bytes(data: &[u8]) -> String {
+    let bytes = sha256_bytes(data);
+    let mut hex = String::with_capacity(64);
+    for byte in bytes {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    hex
+}
+
+pub fn sha256_file_hex(path: &std::path::Path) -> anyhow::Result<String> {
+    let bytes = std::fs::read(path)?;
+    Ok(sha256_hex_bytes(&bytes))
+}
+
 pub(crate) fn sha256_bytes(data: &[u8]) -> [u8; 32] {
     const K: [u32; 64] = [
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,

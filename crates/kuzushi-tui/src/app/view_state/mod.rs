@@ -46,6 +46,7 @@ pub use rank::TuneAction;
 pub use sast_task_row::CompletionCycle;
 pub use sast_task_row::ContextSnapshotView;
 pub use sast_task_row::KnowledgeBaseView;
+pub use sast_task_row::PwnView;
 pub use sast_task_row::ReconSnapshot;
 pub(crate) use sast_task_row::SastTaskRow;
 pub use sast_task_row::ShellView;

@@ -398,6 +398,40 @@ function relativeRepoPath(root, filePath) {
 }
 
 async function runOpenAiResponsesCall(provider, modelId, request) {
+  if (provider === "openai-codex") {
+    const bearerToken = await resolveOpenAiBearerToken(provider, request);
+    if (!bearerToken) {
+      throw new Error("openai-codex responses: no OAuth/API token available");
+    }
+    const { completeSimple, getModel } = await import("@mariozechner/pi-ai");
+    const model = getModel(provider, modelId);
+    if (!model) {
+      throw new Error(`openai-codex responses: unknown model ${provider}:${modelId}`);
+    }
+    const message = await completeSimple(
+      model,
+      {
+        systemPrompt: request.systemPrompt ?? request.system_prompt,
+        messages: [{ role: "user", content: request.prompt, timestamp: Date.now() }],
+      },
+      {
+        apiKey: bearerToken,
+        reasoning:
+          normalizeThinkingLevel(request.thinkingLevel) ??
+          normalizeThinkingLevel(process.env.KUZUSHI_THINKING_LEVEL) ??
+          "low",
+      },
+    );
+    if (message.errorMessage) {
+      throw new Error(`openai-codex responses error: ${message.errorMessage}`);
+    }
+    const text = (message.content ?? [])
+      .filter((part) => part?.type === "text" && typeof part.text === "string")
+      .map((part) => part.text)
+      .join("");
+    return String(text || "").trim();
+  }
+
   const base = resolveOpenAiResponsesBaseUrl();
   const payload = {
     model: modelId,

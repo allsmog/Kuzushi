@@ -97,6 +97,15 @@ pub fn finding_source_label(finding: &Finding) -> String {
 }
 
 pub fn finding_evidence_preview(finding: &Finding) -> String {
+    if let Some(first) = finding.evidence.first() {
+        return format!(
+            "evidence {} anchors · top: {} {}:{}",
+            finding.evidence.len(),
+            first.kind,
+            first.file_path,
+            first.line
+        );
+    }
     let lines = finding
         .message
         .lines()

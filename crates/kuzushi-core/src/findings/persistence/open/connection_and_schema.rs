@@ -62,6 +62,20 @@ impl FindingStore {
               created_at text not null
             );
 
+            create table if not exists finding_evidence (
+              finding_id integer not null references findings(id) on delete cascade,
+              ordinal integer not null,
+              kind text not null,
+              file_path text not null,
+              line integer not null,
+              snippet text not null,
+              rationale text not null,
+              confidence integer not null,
+              primary key (finding_id, ordinal)
+            );
+            create index if not exists idx_finding_evidence_finding
+              on finding_evidence(finding_id, ordinal);
+
             create table if not exists patch_results (
               patch_run_id text primary key,
               fingerprint text not null,

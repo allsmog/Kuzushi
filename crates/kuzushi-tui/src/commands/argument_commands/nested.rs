@@ -19,6 +19,7 @@ pub(crate) fn parse_nested_shell_command(
         "task" => parse_task_command(args.to_vec()),
         "context" => parse_context_command(args.to_vec()),
         "workspace" => parse_workspace_command(args.to_vec()),
+        "pwn" => parse_pwn_command(args),
         _ => return None,
     };
     Some(command)
@@ -43,5 +44,32 @@ pub(crate) fn parse_findings_command(args: &[&str]) -> ShellCommand {
             .unwrap_or_else(|| ShellCommand::Unknown("findings export".to_string())),
         Some(other) => ShellCommand::Unknown(format!("findings {other}")),
         None => ShellCommand::Findings,
+    }
+}
+
+fn parse_pwn_command(args: &[&str]) -> ShellCommand {
+    match args.first().copied() {
+        None => ShellCommand::Pwn(PwnCommand::Show),
+        Some("target") => args
+            .get(1)
+            .map(|path| ShellCommand::Pwn(PwnCommand::Target(PathBuf::from(path))))
+            .unwrap_or_else(|| {
+                ShellCommand::Pwn(PwnCommand::Unsupported("pwn target".to_string()))
+            }),
+        Some("profile") => ShellCommand::Pwn(PwnCommand::Profile),
+        Some("reverse") => ShellCommand::Pwn(PwnCommand::Reverse(
+            args.get(1).map(|value| (*value).to_string()),
+        )),
+        Some("auto") => ShellCommand::Pwn(PwnCommand::Auto),
+        Some("state") => ShellCommand::Pwn(PwnCommand::State),
+        Some("candidates") => {
+            let target = args.get(1..).unwrap_or_default().join(" ");
+            if target.trim().is_empty() {
+                ShellCommand::Pwn(PwnCommand::Unsupported("pwn candidates".to_string()))
+            } else {
+                ShellCommand::Pwn(PwnCommand::Candidates(target))
+            }
+        }
+        Some(other) => ShellCommand::Pwn(PwnCommand::Unsupported(format!("pwn {other}"))),
     }
 }

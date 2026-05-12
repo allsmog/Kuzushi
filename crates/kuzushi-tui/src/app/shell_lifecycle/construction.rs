@@ -55,6 +55,7 @@ impl ShellApp {
                 attachments: Vec::new(),
                 artifacts: Vec::new(),
             },
+            pwn_view: PwnView::default(),
             agent_chat: None,
             session_thinking_level: None,
             findings: Vec::new(),
