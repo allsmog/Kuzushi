@@ -131,36 +131,105 @@ pub(crate) fn run_registry_scan_worker(
     config: V2Config,
     thinking_level: Option<String>,
 ) -> Result<()> {
-    let workspace = prepare_scan_worker_workspace(target)?;
-    let store = FindingStore::open(db_path)?;
-    let runtime = if kuzushi_core::modules::wants_sast_runtime(&input) {
-        Some(
-            PiAgentCoreRuntime::from_config(
-                &config,
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            )?
-            .with_thinking_level(thinking_level),
-        )
-    } else {
-        None
-    };
-    let ctx = ToolExecutionContext {
-        config: &config,
-        workspace: Some(&workspace),
-        findings_store: Some(&store),
-        trace: None,
-    };
+    let invocation =
+        prepare_registry_scan_invocation(target, db_path, input, config, thinking_level)?;
     let _ = tx.send(ScanEvent::Stage("running sast:scan".to_string()));
-    let result = registry.execute_tool_with_runtime(
-        "sast:scan",
+    let result = invocation.execute(registry)?;
+    send_registry_scan_result(cancel, tx, result)
+}
+
+struct RegistryScanInvocation {
+    workspace: WorkspaceTarget,
+    store: FindingStore,
+    input: serde_json::Value,
+    config: V2Config,
+    runtime: Option<PiAgentCoreRuntime>,
+}
+
+impl RegistryScanInvocation {
+    fn execute(self, registry: ModuleRegistry) -> Result<serde_json::Value> {
+        let RegistryScanInvocation {
+            workspace,
+            store,
+            input,
+            config,
+            runtime,
+        } = self;
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
+        registry.execute_tool_with_runtime(
+            "sast:scan",
+            input,
+            &ctx,
+            runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
+        )
+    }
+}
+
+fn prepare_registry_scan_invocation(
+    target: PathBuf,
+    db_path: PathBuf,
+    input: serde_json::Value,
+    config: V2Config,
+    thinking_level: Option<String>,
+) -> Result<RegistryScanInvocation> {
+    let (workspace, store) = registry_scan_workspace_store(target, db_path)?;
+    let runtime = registry_scan_runtime(&input, &config, thinking_level)?;
+    Ok(RegistryScanInvocation {
+        workspace,
+        store,
         input,
-        &ctx,
-        runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
-    )?;
+        config,
+        runtime,
+    })
+}
+
+fn registry_scan_workspace_store(
+    target: PathBuf,
+    db_path: PathBuf,
+) -> Result<(WorkspaceTarget, FindingStore)> {
+    Ok((
+        prepare_scan_worker_workspace(target)?,
+        FindingStore::open(db_path)?,
+    ))
+}
+
+fn send_registry_scan_result(
+    cancel: &ScanCancellation,
+    tx: &Sender<ScanEvent>,
+    result: serde_json::Value,
+) -> Result<()> {
+    ensure_scan_not_cancelled(cancel)?;
+    send_registry_scan_finished(tx, result)
+}
+
+fn registry_scan_runtime(
+    input: &serde_json::Value,
+    config: &V2Config,
+    thinking_level: Option<String>,
+) -> Result<Option<PiAgentCoreRuntime>> {
+    if !kuzushi_core::modules::wants_sast_runtime(input) {
+        return Ok(None);
+    }
+    Ok(Some(
+        PiAgentCoreRuntime::from_config(config, scan_worker_runtime_cwd())?
+            .with_thinking_level(thinking_level),
+    ))
+}
+
+fn scan_worker_runtime_cwd() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+fn ensure_scan_not_cancelled(cancel: &ScanCancellation) -> Result<()> {
     if cancel.is_cancelled() {
         anyhow::bail!("scan cancelled");
     }
-    send_registry_scan_finished(tx, result)
+    Ok(())
 }
 
 fn send_registry_scan_finished(tx: &Sender<ScanEvent>, result: serde_json::Value) -> Result<()> {

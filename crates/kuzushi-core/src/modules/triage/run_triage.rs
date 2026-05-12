@@ -5,9 +5,106 @@ pub(in crate::modules) fn run_triage(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
+    let mut run = prepare_triage_run(input, ctx)?;
+    if run.findings.is_empty() {
+        emit_triage_no_findings(ctx);
+        return Ok(empty_triage_response(&run.input, run.missing_fingerprints));
+    }
+    let execution = resolve_triage_execution(ctx, runtime, &run)?;
+    let completed = classify_triage_findings(&mut run, ctx, &execution)?;
+    emit_triage_done(ctx, &completed.stats);
+    Ok(triage_response(
+        &run.input,
+        &execution.config,
+        &completed.stage1,
+        &completed.stats,
+        run.missing_fingerprints,
+    ))
+}
+
+struct PreparedTriageRun<'a> {
+    workspace: &'a WorkspaceTarget,
+    store: &'a FindingStore,
+    input: TriageRunInput,
+    findings: Vec<Finding>,
+    missing_fingerprints: Vec<String>,
+}
+
+fn prepare_triage_run<'a>(
+    input: Value,
+    ctx: &'a ToolExecutionContext<'_>,
+) -> Result<PreparedTriageRun<'a>> {
     let workspace = require_triage_workspace(ctx)?;
     let store = require_triage_store(ctx)?;
     let input = TriageRunInput::from_tool_input(&input, workspace.root())?;
+    emit_triage_start(ctx, &input);
+    let (findings, missing_fingerprints) = select_triage_findings(store, &input)?;
+    emit_triage_loaded(ctx, findings.len(), missing_fingerprints.len());
+    Ok(PreparedTriageRun {
+        workspace,
+        store,
+        input,
+        findings,
+        missing_fingerprints,
+    })
+}
+
+struct TriageExecution<'a> {
+    runtime: &'a dyn AgentRuntime,
+    config: TriageExecutionConfig,
+}
+
+fn resolve_triage_execution<'a>(
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&'a dyn AgentRuntime>,
+    run: &PreparedTriageRun<'_>,
+) -> Result<TriageExecution<'a>> {
+    let runtime = require_triage_runtime(runtime)?;
+    let stage2_model = resolve_triage_model(ctx, runtime, run.input.stage2_tier)?;
+    Ok(TriageExecution {
+        runtime,
+        config: TriageExecutionConfig::new(run.workspace.root().to_path_buf(), stage2_model),
+    })
+}
+
+struct CompletedTriageRun {
+    stage1: PrefilteredTriageFindings,
+    stats: TriageRunStats,
+}
+
+fn classify_triage_findings(
+    run: &mut PreparedTriageRun<'_>,
+    ctx: &ToolExecutionContext<'_>,
+    execution: &TriageExecution<'_>,
+) -> Result<CompletedTriageRun> {
+    let findings = std::mem::take(&mut run.findings);
+    let mut stage1 = prefilter_triage_findings(findings, run.input.prefilter_threshold);
+    let evidence_phase = emit_triage_evidence_phase(ctx, &run.input, &stage1);
+    let kept = std::mem::take(&mut stage1.kept);
+    let stats = run_triage_stage2_with_scope(ctx, evidence_phase, run, execution, kept)?;
+    Ok(CompletedTriageRun { stage1, stats })
+}
+
+fn run_triage_stage2_with_scope(
+    ctx: &ToolExecutionContext<'_>,
+    evidence_phase: Option<usize>,
+    run: &PreparedTriageRun<'_>,
+    execution: &TriageExecution<'_>,
+    kept: Vec<Finding>,
+) -> Result<TriageRunStats> {
+    let _llm_scope = begin_triage_llm_scope(ctx, evidence_phase);
+    let stats = run_triage_stage2(
+        run.store,
+        execution.runtime,
+        &run.input,
+        &execution.config,
+        kept,
+    )?;
+    drop(_llm_scope);
+    Ok(stats)
+}
+
+fn emit_triage_start(ctx: &ToolExecutionContext<'_>, input: &TriageRunInput) {
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
@@ -17,31 +114,32 @@ pub(in crate::modules) fn run_triage(
             )
             .emit();
     }
-    let (findings, missing_fingerprints) = select_triage_findings(store, &input)?;
+}
+
+fn emit_triage_loaded(ctx: &ToolExecutionContext<'_>, found: usize, missing: usize) {
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
                 "tool",
                 "run",
-                format!(
-                    "load-finding · {found} candidates ({missing} missing)",
-                    found = findings.len(),
-                    missing = missing_fingerprints.len(),
-                ),
+                format!("load-finding · {found} candidates ({missing} missing)"),
             )
             .emit();
     }
-    if findings.is_empty() {
-        if let Some(trace) = ctx.trace {
-            let _ = trace.step("done", "run", "no findings to triage").emit();
-        }
-        return Ok(empty_triage_response(&input, missing_fingerprints));
-    }
+}
 
-    let runtime = require_triage_runtime(runtime)?;
-    let stage2_model = resolve_triage_model(ctx, runtime, input.stage2_tier)?;
-    let mut stage1 = prefilter_triage_findings(findings, input.prefilter_threshold);
-    let evidence_phase = ctx.trace.map(|trace| {
+fn emit_triage_no_findings(ctx: &ToolExecutionContext<'_>) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace.step("done", "run", "no findings to triage").emit();
+    }
+}
+
+fn emit_triage_evidence_phase(
+    ctx: &ToolExecutionContext<'_>,
+    input: &TriageRunInput,
+    stage1: &PrefilteredTriageFindings,
+) -> Option<usize> {
+    ctx.trace.map(|trace| {
         trace
             .step(
                 "reasoning",
@@ -54,22 +152,23 @@ pub(in crate::modules) fn run_triage(
                 ),
             )
             .emit()
-    });
-    let config = TriageExecutionConfig::new(workspace.root().to_path_buf(), stage2_model);
-    let kept = std::mem::take(&mut stage1.kept);
-    // Open a phase scope so every LLM call inside run_triage_stage2 lands
-    // under the `evidence-collect` / `llm-classify` header in the feed.
-    let _llm_scope = match (ctx.trace, evidence_phase) {
+    })
+}
+
+fn begin_triage_llm_scope(
+    ctx: &ToolExecutionContext<'_>,
+    evidence_phase: Option<usize>,
+) -> Option<crate::run_artifacts::ParentScope> {
+    match (ctx.trace, evidence_phase) {
         (Some(trace), Some(_parent)) => {
-            // Emit a label for the LLM phase, then push it as parent so each
-            // runtime.query/triage_finding invocation appears indented under it.
             let phase_n = trace.step("reasoning", "run", "llm-classify").emit();
             Some(trace.parent_scope(phase_n))
         }
         _ => None,
-    };
-    let stats = run_triage_stage2(store, runtime, &input, &config, kept)?;
-    drop(_llm_scope);
+    }
+}
+
+fn emit_triage_done(ctx: &ToolExecutionContext<'_>, stats: &TriageRunStats) {
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
@@ -83,13 +182,6 @@ pub(in crate::modules) fn run_triage(
             .with_cost_usd(stats.total_cost)
             .emit();
     }
-    Ok(triage_response(
-        &input,
-        &config,
-        &stage1,
-        &stats,
-        missing_fingerprints,
-    ))
 }
 
 pub(in crate::modules) fn require_triage_workspace<'a>(

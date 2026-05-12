@@ -1,7 +1,55 @@
 use super::adapters::clang_subprocess::rewrite_unsupported_method_error;
 use super::adapters::{parse_uaf_hunt_input, resolve_compile_commands_path};
+use super::application::run_uaf_hunt_report;
+use crate::config::V2Config;
+use crate::findings::TriageOutcome;
+use crate::modules::ToolExecutionContext;
+use crate::runtime::{
+    AgentLoopStep, AgentRuntime, AgentToolLoopRequest, LoopHistoryEntry, ToolCall, TriageRequest,
+};
+use anyhow::Result;
 use serde_json::json;
+use std::sync::{Mutex, OnceLock};
 use tempfile::tempdir;
+
+struct ScriptedUafRuntime {
+    steps: Mutex<Vec<AgentLoopStep>>,
+}
+
+impl ScriptedUafRuntime {
+    fn new(steps: Vec<AgentLoopStep>) -> Self {
+        Self {
+            steps: Mutex::new(steps),
+        }
+    }
+}
+
+impl AgentRuntime for ScriptedUafRuntime {
+    fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+        anyhow::bail!("not used by uaf-hunt tests")
+    }
+
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
+    fn next_step_blocking(
+        &self,
+        _request: &AgentToolLoopRequest,
+        _history: &[LoopHistoryEntry],
+    ) -> Result<AgentLoopStep> {
+        let mut steps = self.steps.lock().unwrap();
+        if steps.is_empty() {
+            anyhow::bail!("scripted runtime exhausted")
+        }
+        Ok(steps.remove(0))
+    }
+}
+
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 #[test]
 fn defaults_include_malloc_calloc_realloc_strdup_strndup() {
@@ -198,4 +246,110 @@ fn non_method_not_found_errors_pass_through_unchanged() {
             "advisory should be None for non-method-not-found error: {chain}"
         );
     }
+}
+
+#[test]
+#[cfg(unix)]
+fn run_uaf_hunt_report_drives_tool_loop_and_repo_tools() {
+    let _guard = env_lock().lock().unwrap();
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("compile_commands.json"), "[]").unwrap();
+    std::fs::write(
+        dir.path().join("src.c"),
+        "void demo(char *arg) { malloc(4); query(arg); }\n",
+    )
+    .unwrap();
+
+    let fake_clang = dir.path().join("kuzushi-mcp-clang");
+    std::fs::write(
+        &fake_clang,
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+while IFS= read -r line; do
+  id="$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')"
+  if printf '%s' "$line" | grep -q '"method":"shutdown"'; then
+    exit 0
+  elif printf '%s' "$line" | grep -q '"method":"initialize"'; then
+    printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+  else
+    printf '{"jsonrpc":"2.0","id":%s,"result":{"isError":false,"structuredContent":{"definition":"src.c:1"}}}\n' "$id"
+  fi
+done
+"#,
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&fake_clang).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&fake_clang, perms).unwrap();
+    }
+
+    let previous = std::env::var_os("KUZUSHI_MCP_CLANG_BIN");
+    std::env::set_var("KUZUSHI_MCP_CLANG_BIN", &fake_clang);
+
+    let runtime = ScriptedUafRuntime::new(vec![
+        AgentLoopStep::ToolCall {
+            call: ToolCall {
+                name: "clang_definition".to_string(),
+                input: json!({"file": "src.c", "line": 1, "column": 6}),
+                call_id: "clang-1".to_string(),
+            },
+        },
+        AgentLoopStep::ToolCall {
+            call: ToolCall {
+                name: "grep".to_string(),
+                input: json!({"pattern": "malloc", "globs": ["*.c"], "maxResults": 5}),
+                call_id: "grep-1".to_string(),
+            },
+        },
+        AgentLoopStep::ToolCall {
+            call: ToolCall {
+                name: "read_file".to_string(),
+                input: json!({"file": "src.c", "startLine": 1, "endLine": 1}),
+                call_id: "read-1".to_string(),
+            },
+        },
+        AgentLoopStep::ToolCall {
+            call: ToolCall {
+                name: "list_dir".to_string(),
+                input: json!({"path": "."}),
+                call_id: "list-1".to_string(),
+            },
+        },
+        AgentLoopStep::Final {
+            text: String::new(),
+            structured: Some(json!({
+                "findings": [{
+                    "ruleId": "uaf-test",
+                    "filePath": "src.c",
+                    "startLine": 1,
+                    "severity": "medium",
+                    "message": "test finding"
+                }]
+            })),
+            cost_usd: Some(0.03),
+        },
+    ]);
+    let mut config = V2Config::default();
+    config.model = Some("anthropic:claude-haiku-4-5".to_string());
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: None,
+        findings_store: None,
+        trace: None,
+    };
+
+    let report = run_uaf_hunt_report(&json!({"target": dir.path()}), &ctx, Some(&runtime)).unwrap();
+
+    match previous {
+        Some(value) => std::env::set_var("KUZUSHI_MCP_CLANG_BIN", value),
+        None => std::env::remove_var("KUZUSHI_MCP_CLANG_BIN"),
+    }
+
+    assert_eq!(report.count, 1);
+    assert_eq!(report.clang_tool_calls, 1);
+    assert_eq!(report.steps_used, 5);
+    assert_eq!(report.cost_usd, 0.03);
+    assert!(report.first_clang_error.is_none());
 }

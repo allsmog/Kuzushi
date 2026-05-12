@@ -11,149 +11,18 @@ pub(crate) use rg_engine::rg_available;
 pub(crate) fn extract_taint_iris_next_evidence(
     plan: &TaintIrisNextPlan,
 ) -> Result<TaintIrisNextEvidenceResult> {
-    let raw_candidates = structural_candidates::collect_structural_candidates(plan)?;
-    // Fold the per-target source/sink discovery sweep into the raw
-    // candidate stream BEFORE syntactic narrowing so discovery's
-    // marker-regex matches go through the same comment/string-literal
-    // filter as rg-derived candidates. Without this, comment hits like
-    // `* random calls to C library routines like system(3);` (in
-    // postgres `fd.c:17`) sneak through the discovery sweep as bogus
-    // CWE-78 sinks and the cross-file linker happily pairs them into
-    // 605 false-positive linked stories.
-    let discovered_candidates =
-        candidates_from_discovered_signals(&plan.discovered_signals, &plan.cwe_focus);
-    let mut combined_raw = raw_candidates;
-    combined_raw.extend(discovered_candidates);
-    // E1: deterministic tree-sitter detector for identifier-position
-    // SQL injection (the dblink_open/close/fetch finding shape).
-    // Runs in <10s on a 1600-file tree, no LLM cost. Feeds candidates
-    // marked `source: "ts.identifier-injection"` at confidence: high
-    // so Thread D's call-site audit reaches them with the right
-    // priority. Bounded by the same file-walker budget the discovery
-    // sweep uses to stay below the structural-pass cap.
-    let detector_candidates = run_identifier_injection_detector_for_plan(plan);
-    combined_raw.extend(detector_candidates);
-    // Syntactic narrowing: drop candidates whose match landed in a comment
-    // or string literal. Languages without a tree-sitter grammar pass
-    // through unchanged. This happens *after* the catalog language gate
-    // so we never parse files for CWEs we'd reject anyway, and *before*
-    // linked-story construction so noise candidates can't pair into
-    // bogus source-to-sink stories.
-    let narrowed_candidates =
-        narrow_taint_iris_next_candidates_syntactically(&plan.scan_root, combined_raw);
-    // Drop candidates whose file path is obviously non-production code
-    // (test/, tutorial/, fixtures/, etc.). Filtering at the candidate
-    // level — not just at the linked-story level — keeps the agent
-    // prompt's `candidates` block clean too, so the agent can't
-    // speculate on tutorial/test paths even when the heuristic linker
-    // produces zero stories. Operators who explicitly want to scan
-    // non-production code can flip the catalog or pass a
-    // `targetSubdir` constrained at a non-production path.
-    let candidates: Vec<TaintIrisNextCandidate> = narrowed_candidates
-        .into_iter()
-        .filter(|candidate| !is_taint_iris_next_non_production_path(&candidate.file_path))
-        .collect();
-    let mut candidates = candidates;
+    let mut candidates = collect_taint_iris_next_candidates(plan)?;
     let mut warnings = plan.backend.warnings.clone();
-
-    // When the backend selector picked joern (CPG present + binary on PATH),
-    // run a real `reachableByFlows` query and trust its verdict.
-    // Operationally this means: empty Joern flows → empty linked_stories,
-    // not a fallback to the heuristic same-file linker. The whole point of
-    // selecting joern is replacing the proximity heuristic with real data
-    // flow; if the CPG says no source reaches any sink, that *is* the
-    // signal we want to surface to the agent.
-    //
-    // The heuristic linker is only used when joern itself can't run
-    // (binary missing mid-run, query timed out, parse error) — in those
-    // cases we surface a warning so the operator knows the result is
-    // best-effort.
-    let mut backend_path_count = 0usize;
-    let linked_stories = if plan.backend.selected == "codeql" {
-        match super::run_codeql_flows(plan) {
-            Ok(Some(flows)) => {
-                backend_path_count = flows.len();
-                let mut codeql_candidates = super::codeql_flows_to_candidates(&flows);
-                candidates.append(&mut codeql_candidates);
-                if flows.is_empty() {
-                    warnings.push(
-                        "codeql analyze produced no security results; reporting empty linked stories rather than synthesising heuristic ones".to_string(),
-                    );
-                }
-                super::codeql_flows_to_linked_stories(&flows)
-            }
-            Ok(None) => {
-                warnings.push(
-                    "codeql was selected but the launcher or DB disappeared between plan and run; using heuristic linker".to_string(),
-                );
-                build_taint_iris_next_linked_stories(&candidates, &plan.cwe_focus)
-            }
-            Err(error) => {
-                warnings.push(format!(
-                    "codeql analyze failed ({error}); falling back to heuristic linker"
-                ));
-                build_taint_iris_next_linked_stories(&candidates, &plan.cwe_focus)
-            }
-        }
-    } else if plan.backend.selected == "joern" {
-        match super::run_joern_flows(plan) {
-            Ok(Some(flows)) => {
-                backend_path_count = flows.len();
-                let mut joern_candidates = super::joern_flows_to_candidates(&flows);
-                candidates.append(&mut joern_candidates);
-                if flows.is_empty() {
-                    warnings.push(
-                        "joern reachableByFlows found no source-to-sink paths; reporting empty linked stories rather than synthesising heuristic ones".to_string(),
-                    );
-                }
-                super::joern_flows_to_linked_stories(&flows)
-            }
-            Ok(None) => {
-                warnings.push(
-                    "joern was selected but the launcher or CPG disappeared between plan and run; using heuristic linker".to_string(),
-                );
-                build_taint_iris_next_linked_stories(&candidates, &plan.cwe_focus)
-            }
-            Err(error) => {
-                warnings.push(format!(
-                    "joern dataflow query failed ({error}); falling back to heuristic linker"
-                ));
-                build_taint_iris_next_linked_stories(&candidates, &plan.cwe_focus)
-            }
-        }
-    } else {
-        build_taint_iris_next_linked_stories(&candidates, &plan.cwe_focus)
-    };
-
-    // CodeQL corroboration pass: when `corroborate_with_codeql` is on
-    // and the backend isn't already codeql, ALSO run codeql against
-    // the focus CWEs and fold its high-confidence flows into the
-    // linked-story set as evidence_level: "path". CodeQL's
-    // built-in cpp-queries/CWE-* queries do flow-sensitive size and
-    // range analysis that the rg pre-pass and joern's reachableByFlows
-    // can't match — running it deterministically in the pre-agent
-    // pipeline means the agent doesn't have to discover it via an MCP
-    // call (the previous behaviour was 0 codeql calls per hunt because
-    // the agent one-shot the prompt without exploration).
-    let (linked_stories, mut candidates) = (linked_stories, candidates);
-    let mut linked_stories = linked_stories;
-    if plan.backend.selected != "codeql" && plan.backend.corroborate_with_codeql.unwrap_or(false) {
-        match super::run_codeql_flows(plan) {
-            Ok(Some(corroboration)) if !corroboration.is_empty() => {
-                backend_path_count += corroboration.len();
-                let mut codeql_candidates = super::codeql_flows_to_candidates(&corroboration);
-                candidates.append(&mut codeql_candidates);
-                let mut codeql_stories = super::codeql_flows_to_linked_stories(&corroboration);
-                linked_stories.append(&mut codeql_stories);
-            }
-            Ok(_) => {}
-            Err(error) => {
-                warnings.push(format!(
-                    "codeql corroboration pass failed ({error}); proceeding with rg/joern evidence only"
-                ));
-            }
-        }
-    }
+    let primary = primary_backend_evidence(plan, &mut candidates, &mut warnings);
+    let mut linked_stories = primary.linked_stories;
+    let mut backend_path_count = primary.backend_path_count;
+    corroborate_with_codeql(
+        plan,
+        &mut candidates,
+        &mut linked_stories,
+        &mut backend_path_count,
+        &mut warnings,
+    );
 
     let linked_by_candidate = result_summary::linked_story_ids_by_candidate(&linked_stories);
     let mut evidence =
@@ -193,6 +62,248 @@ pub(crate) fn extract_taint_iris_next_evidence(
             "codeqlCompileStatus": "not-run",
         }),
     })
+}
+
+fn collect_taint_iris_next_candidates(
+    plan: &TaintIrisNextPlan,
+) -> Result<Vec<TaintIrisNextCandidate>> {
+    let raw_candidates = structural_candidates::collect_structural_candidates(plan)?;
+    // Fold the per-target source/sink discovery sweep into the raw
+    // candidate stream BEFORE syntactic narrowing so discovery's
+    // marker-regex matches go through the same comment/string-literal
+    // filter as rg-derived candidates. Without this, comment hits like
+    // `* random calls to C library routines like system(3);` (in
+    // postgres `fd.c:17`) sneak through the discovery sweep as bogus
+    // CWE-78 sinks and the cross-file linker happily pairs them into
+    // 605 false-positive linked stories.
+    let discovered_candidates =
+        candidates_from_discovered_signals(&plan.discovered_signals, &plan.cwe_focus);
+    let mut combined_raw = raw_candidates;
+    combined_raw.extend(discovered_candidates);
+    // E1: deterministic tree-sitter detector for identifier-position
+    // SQL injection (the dblink_open/close/fetch finding shape).
+    // Runs in <10s on a 1600-file tree, no LLM cost. Feeds candidates
+    // marked `source: "ts.identifier-injection"` at confidence: high
+    // so Thread D's call-site audit reaches them with the right
+    // priority. Bounded by the same file-walker budget the discovery
+    // sweep uses to stay below the structural-pass cap.
+    let detector_candidates = run_identifier_injection_detector_for_plan(plan);
+    combined_raw.extend(detector_candidates);
+    // Syntactic narrowing: drop candidates whose match landed in a comment
+    // or string literal. Languages without a tree-sitter grammar pass
+    // through unchanged. This happens *after* the catalog language gate
+    // so we never parse files for CWEs we'd reject anyway, and *before*
+    // linked-story construction so noise candidates can't pair into
+    // bogus source-to-sink stories.
+    let narrowed_candidates =
+        narrow_taint_iris_next_candidates_syntactically(&plan.scan_root, combined_raw);
+    // Drop candidates whose file path is obviously non-production code
+    // (test/, tutorial/, fixtures/, etc.). Filtering at the candidate
+    // level — not just at the linked-story level — keeps the agent
+    // prompt's `candidates` block clean too, so the agent can't
+    // speculate on tutorial/test paths even when the heuristic linker
+    // produces zero stories. Operators who explicitly want to scan
+    // non-production code can flip the catalog or pass a
+    // `targetSubdir` constrained at a non-production path.
+    Ok(narrowed_candidates
+        .into_iter()
+        .filter(|candidate| !is_taint_iris_next_non_production_path(&candidate.file_path))
+        .collect())
+}
+
+struct BackendEvidence {
+    linked_stories: Vec<TaintIrisNextLinkedStory>,
+    backend_path_count: usize,
+}
+
+fn primary_backend_evidence(
+    plan: &TaintIrisNextPlan,
+    candidates: &mut Vec<TaintIrisNextCandidate>,
+    warnings: &mut Vec<String>,
+) -> BackendEvidence {
+    match plan.backend.selected.as_str() {
+        "codeql" => codeql_backend_evidence(plan, candidates, warnings),
+        "joern" => joern_backend_evidence(plan, candidates, warnings),
+        _ => heuristic_backend_evidence(plan, candidates),
+    }
+}
+
+fn codeql_backend_evidence(
+    plan: &TaintIrisNextPlan,
+    candidates: &mut Vec<TaintIrisNextCandidate>,
+    warnings: &mut Vec<String>,
+) -> BackendEvidence {
+    let flows = match super::run_codeql_flows(plan) {
+        Ok(flows) => flows,
+        Err(error) => return codeql_error_fallback(plan, candidates, warnings, error),
+    };
+    let Some(flows) = flows else {
+        return backend_fallback_evidence(
+            plan,
+            candidates,
+            warnings,
+            "codeql was selected but the launcher or DB disappeared between plan and run; using heuristic linker",
+        );
+    };
+    codeql_flow_evidence(flows, candidates, warnings)
+}
+
+fn codeql_error_fallback(
+    plan: &TaintIrisNextPlan,
+    candidates: &[TaintIrisNextCandidate],
+    warnings: &mut Vec<String>,
+    error: anyhow::Error,
+) -> BackendEvidence {
+    let warning = format!("codeql analyze failed ({error}); falling back to heuristic linker");
+    backend_fallback_evidence(plan, candidates, warnings, &warning)
+}
+
+fn codeql_flow_evidence(
+    flows: Vec<super::CodeqlFlow>,
+    candidates: &mut Vec<TaintIrisNextCandidate>,
+    warnings: &mut Vec<String>,
+) -> BackendEvidence {
+    append_empty_flow_warning(
+        flows.is_empty(),
+        warnings,
+        "codeql analyze produced no security results; reporting empty linked stories rather than synthesising heuristic ones",
+    );
+    let backend_path_count = flows.len();
+    let mut codeql_candidates = super::codeql_flows_to_candidates(&flows);
+    candidates.append(&mut codeql_candidates);
+    BackendEvidence {
+        linked_stories: super::codeql_flows_to_linked_stories(&flows),
+        backend_path_count,
+    }
+}
+
+fn joern_backend_evidence(
+    plan: &TaintIrisNextPlan,
+    candidates: &mut Vec<TaintIrisNextCandidate>,
+    warnings: &mut Vec<String>,
+) -> BackendEvidence {
+    let flows = match super::run_joern_flows(plan) {
+        Ok(flows) => flows,
+        Err(error) => return joern_error_fallback(plan, candidates, warnings, error),
+    };
+    let Some(flows) = flows else {
+        return backend_fallback_evidence(
+            plan,
+            candidates,
+            warnings,
+            "joern was selected but the launcher or CPG disappeared between plan and run; using heuristic linker",
+        );
+    };
+    joern_flow_evidence(flows, candidates, warnings)
+}
+
+fn joern_error_fallback(
+    plan: &TaintIrisNextPlan,
+    candidates: &[TaintIrisNextCandidate],
+    warnings: &mut Vec<String>,
+    error: anyhow::Error,
+) -> BackendEvidence {
+    let warning =
+        format!("joern dataflow query failed ({error}); falling back to heuristic linker");
+    backend_fallback_evidence(plan, candidates, warnings, &warning)
+}
+
+fn joern_flow_evidence(
+    flows: Vec<super::JoernFlow>,
+    candidates: &mut Vec<TaintIrisNextCandidate>,
+    warnings: &mut Vec<String>,
+) -> BackendEvidence {
+    append_empty_flow_warning(
+        flows.is_empty(),
+        warnings,
+        "joern reachableByFlows found no source-to-sink paths; reporting empty linked stories rather than synthesising heuristic ones",
+    );
+    let backend_path_count = flows.len();
+    let mut joern_candidates = super::joern_flows_to_candidates(&flows);
+    candidates.append(&mut joern_candidates);
+    BackendEvidence {
+        linked_stories: super::joern_flows_to_linked_stories(&flows),
+        backend_path_count,
+    }
+}
+
+fn append_empty_flow_warning(empty: bool, warnings: &mut Vec<String>, message: &str) {
+    if empty {
+        warnings.push(message.to_string());
+    }
+}
+
+fn backend_fallback_evidence(
+    plan: &TaintIrisNextPlan,
+    candidates: &[TaintIrisNextCandidate],
+    warnings: &mut Vec<String>,
+    warning: &str,
+) -> BackendEvidence {
+    warnings.push(warning.to_string());
+    heuristic_backend_evidence(plan, candidates)
+}
+
+fn heuristic_backend_evidence(
+    plan: &TaintIrisNextPlan,
+    candidates: &[TaintIrisNextCandidate],
+) -> BackendEvidence {
+    BackendEvidence {
+        linked_stories: build_taint_iris_next_linked_stories(candidates, &plan.cwe_focus),
+        backend_path_count: 0,
+    }
+}
+
+fn corroborate_with_codeql(
+    plan: &TaintIrisNextPlan,
+    candidates: &mut Vec<TaintIrisNextCandidate>,
+    linked_stories: &mut Vec<TaintIrisNextLinkedStory>,
+    backend_path_count: &mut usize,
+    warnings: &mut Vec<String>,
+) {
+    if !should_run_codeql_corroboration(plan) {
+        return;
+    }
+    if let Some(corroboration) = codeql_corroboration_flows(plan, warnings) {
+        append_codeql_corroboration(
+            candidates,
+            linked_stories,
+            backend_path_count,
+            corroboration,
+        );
+    }
+}
+
+fn codeql_corroboration_flows(
+    plan: &TaintIrisNextPlan,
+    warnings: &mut Vec<String>,
+) -> Option<Vec<super::CodeqlFlow>> {
+    let flows = match super::run_codeql_flows(plan) {
+        Ok(flows) => flows,
+        Err(error) => {
+            warnings.push(format!(
+                "codeql corroboration pass failed ({error}); proceeding with rg/joern evidence only"
+            ));
+            return None;
+        }
+    };
+    flows.filter(|corroboration| !corroboration.is_empty())
+}
+
+fn should_run_codeql_corroboration(plan: &TaintIrisNextPlan) -> bool {
+    plan.backend.selected != "codeql" && plan.backend.corroborate_with_codeql.unwrap_or(false)
+}
+
+fn append_codeql_corroboration(
+    candidates: &mut Vec<TaintIrisNextCandidate>,
+    linked_stories: &mut Vec<TaintIrisNextLinkedStory>,
+    backend_path_count: &mut usize,
+    corroboration: Vec<super::CodeqlFlow>,
+) {
+    *backend_path_count += corroboration.len();
+    let mut codeql_candidates = super::codeql_flows_to_candidates(&corroboration);
+    candidates.append(&mut codeql_candidates);
+    let mut codeql_stories = super::codeql_flows_to_linked_stories(&corroboration);
+    linked_stories.append(&mut codeql_stories);
 }
 
 /// Caps for synthesised discovery-derived candidates so a postgres
@@ -259,13 +370,19 @@ fn candidates_from_discovered_signals(
         .map(|cwe| cwe.to_ascii_uppercase())
         .collect();
     let mut out: Vec<TaintIrisNextCandidate> = Vec::new();
+    append_discovered_sink_candidates(&mut out, signals, &allow);
+    append_discovered_entry_point_candidates(&mut out, signals, cwe_focus, &allow);
+    out
+}
 
-    // Sinks: pin to marker-table CWE. The marker table is per-CWE by
-    // construction (`dlopen` is always CWE-94 / `system` is always
-    // CWE-78), so cross-projection would be lossy here.
+fn append_discovered_sink_candidates(
+    out: &mut Vec<TaintIrisNextCandidate>,
+    signals: &DiscoveredSignals,
+    allow: &std::collections::BTreeSet<String>,
+) {
     let mut sink_count = 0usize;
     for signal in &signals.sinks {
-        if !allow.is_empty() && !allow.contains(&signal.cwe.to_ascii_uppercase()) {
+        if !discovered_signal_cwe_allowed(signal, allow) {
             continue;
         }
         if sink_count >= DISCOVERY_MAX_SINK_CANDIDATES {
@@ -279,24 +396,14 @@ fn candidates_from_discovered_signals(
         ));
         sink_count += 1;
     }
+}
 
-    // Entry points: when `cwe_focus` is non-empty, project across the
-    // focus set so e.g. a postgres SQL-callable function lands as a
-    // CWE-94 source for a downstream `dlopen` sink, not just CWE-862.
-    // Cap is partitioned across the focus list so a 1041-entry-point
-    // postgres sweep × 8 focus CWEs doesn't drown the prompt.
-    //
-    // Sampling-bias note: the source list arrives in walk order, which
-    // is alphabetical-by-file. On postgres that means the first 5
-    // entry points are `_int_contained` / `_int_contains` from
-    // `contrib/intarray/_int_op.c` — the LEAST interesting privesc
-    // sources in the entire tree. Re-rank by relevance to the focus
-    // CWEs first so privesc-shaped names (`pg_read_*`,
-    // `pg_signal_*`, `load_*`, `exec_*`, `*_admin`, `*_super`, ...)
-    // land at the top of the cap. Generic enough for any framework:
-    // the same tokens flag interesting handlers in Express
-    // (`/admin`, `/exec`), Flask (`upload_file`, `read_*`), Java
-    // (`*Service.exec`, `Admin*`), etc.
+fn append_discovered_entry_point_candidates(
+    out: &mut Vec<TaintIrisNextCandidate>,
+    signals: &DiscoveredSignals,
+    cwe_focus: &[String],
+    allow: &std::collections::BTreeSet<String>,
+) {
     let entry_point_target_cwes: Vec<String> = if cwe_focus.is_empty() {
         Vec::new()
     } else {
@@ -320,13 +427,9 @@ fn candidates_from_discovered_signals(
         std::collections::BTreeMap::new();
     let mut total_entry_points = 0usize;
     'entry_loop: for (signal, _score) in &ranked_entry_points {
-        let target_cwes: Vec<String> = if entry_point_target_cwes.is_empty() {
-            if !allow.is_empty() && !allow.contains(&signal.cwe.to_ascii_uppercase()) {
-                continue;
-            }
-            vec![signal.cwe.clone()]
-        } else {
-            entry_point_target_cwes.clone()
+        let Some(target_cwes) = entry_point_candidate_cwes(signal, &entry_point_target_cwes, allow)
+        else {
+            continue;
         };
         for target_cwe in target_cwes {
             if total_entry_points >= DISCOVERY_MAX_ENTRY_POINT_CANDIDATES {
@@ -348,7 +451,24 @@ fn candidates_from_discovered_signals(
             ));
         }
     }
-    out
+}
+
+fn discovered_signal_cwe_allowed(
+    signal: &DiscoveredSignal,
+    allow: &std::collections::BTreeSet<String>,
+) -> bool {
+    allow.is_empty() || allow.contains(&signal.cwe.to_ascii_uppercase())
+}
+
+fn entry_point_candidate_cwes(
+    signal: &DiscoveredSignal,
+    focused_cwes: &[String],
+    allow: &std::collections::BTreeSet<String>,
+) -> Option<Vec<String>> {
+    if focused_cwes.is_empty() {
+        return discovered_signal_cwe_allowed(signal, allow).then(|| vec![signal.cwe.clone()]);
+    }
+    Some(focused_cwes.to_vec())
 }
 
 /// Relevance score for an entry-point name when no operator-supplied

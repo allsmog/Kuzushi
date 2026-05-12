@@ -169,27 +169,41 @@ fn walk_node(node: Node<'_>, src: &[u8], rel_path: &str, out: &mut Vec<Identifie
 }
 
 fn check_call(call: Node<'_>, src: &[u8], rel_path: &str, out: &mut Vec<IdentifierInjectionMatch>) {
+    let Some(printf_call) = identifier_printf_call(call, src) else {
+        return;
+    };
+    collect_identifier_injection_specs(&printf_call, rel_path, out);
+}
+
+struct IdentifierPrintfCall<'tree, 'src> {
+    callee_name: &'src str,
+    src: &'src [u8],
+    args: Vec<Node<'tree>>,
+    fmt_arg_idx: usize,
+    fmt_node: Node<'tree>,
+    fmt_inner: String,
+    fmt_inner_upper: String,
+}
+
+fn identifier_printf_call<'tree, 'src>(
+    call: Node<'tree>,
+    src: &'src [u8],
+) -> Option<IdentifierPrintfCall<'tree, 'src>> {
     // Resolve callee name. Handles both plain `foo(...)` and the
     // field-expression form `obj->foo(...)`.
-    let Some(func_node) = call.child_by_field_name("function") else {
-        return;
-    };
+    let func_node = call.child_by_field_name("function")?;
     let callee_name = callee_name_text(func_node, src);
-    let Some(callee_name) = callee_name else {
-        return;
-    };
+    let callee_name = callee_name?;
     if !PRINTF_FAMILY.iter().any(|f| *f == callee_name) {
-        return;
+        return None;
     }
 
-    let Some(args_node) = call.child_by_field_name("arguments") else {
-        return;
-    };
+    let args_node = call.child_by_field_name("arguments")?;
     let arg_nodes: Vec<Node> = (0..args_node.named_child_count())
         .filter_map(|i| args_node.named_child(i))
         .collect();
     if arg_nodes.is_empty() {
-        return;
+        return None;
     }
 
     // Locate the format-string argument. Heuristic: first
@@ -201,97 +215,178 @@ fn check_call(call: Node<'_>, src: &[u8], rel_path: &str, out: &mut Vec<Identifi
     let Some((fmt_arg_idx, fmt_node)) = arg_nodes
         .iter()
         .enumerate()
-        .find(|(_, n)| n.kind() == "string_literal")
+        .find_map(|(idx, node)| (node.kind() == "string_literal").then_some((idx, *node)))
     else {
-        return;
+        return None;
     };
-    let fmt_inner = string_literal_inner_text(*fmt_node, src);
+    let fmt_inner = string_literal_inner_text(fmt_node, src);
     if fmt_inner.is_empty() {
-        return;
+        return None;
     }
-    let fmt_inner_upper = fmt_inner.to_ascii_uppercase();
+    Some(IdentifierPrintfCall {
+        callee_name,
+        src,
+        args: arg_nodes,
+        fmt_arg_idx,
+        fmt_node,
+        fmt_inner_upper: fmt_inner.to_ascii_uppercase(),
+        fmt_inner,
+    })
+}
 
+fn collect_identifier_injection_specs(
+    printf_call: &IdentifierPrintfCall<'_, '_>,
+    rel_path: &str,
+    out: &mut Vec<IdentifierInjectionMatch>,
+) {
     // Walk %-specs, tracking the variadic argument index. arg 0 in
     // the variadic position is the first arg AFTER the format
     // string in the call's argument list — so its absolute index in
     // `arg_nodes` is `fmt_arg_idx + 1 + variadic_position`.
     let mut variadic_position: usize = 0;
-    let bytes = fmt_inner.as_bytes();
+    let bytes = printf_call.fmt_inner.as_bytes();
     let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'%' {
-            i += 1;
-            continue;
+    while let Some(format_spec) = next_printf_format_spec(bytes, i) {
+        i = format_spec.next_offset;
+        if format_spec.spec == b's' {
+            push_identifier_spec_match(
+                printf_call,
+                rel_path,
+                format_spec.marker_offset,
+                variadic_position,
+                out,
+            );
         }
-        // Consume flags, width, precision, length modifiers.
-        let mut j = i + 1;
-        while j < bytes.len() && matches!(bytes[j], b'-' | b'+' | b' ' | b'#' | b'0') {
-            j += 1;
-        }
-        while j < bytes.len() && (bytes[j].is_ascii_digit() || bytes[j] == b'.' || bytes[j] == b'*')
-        {
-            j += 1;
-        }
-        while j < bytes.len() && matches!(bytes[j], b'h' | b'l' | b'L' | b'z' | b'j' | b't') {
-            j += 1;
-        }
-        if j >= bytes.len() {
-            break;
-        }
-        let spec = bytes[j];
-        if spec == b'%' {
-            // %% — literal %, no argument consumed.
-            i = j + 1;
-            continue;
-        }
-        // Every other spec consumes a variadic argument.
-        let consumes_arg = matches!(
-            spec,
-            b's' | b'd'
-                | b'i'
-                | b'u'
-                | b'x'
-                | b'X'
-                | b'o'
-                | b'f'
-                | b'e'
-                | b'E'
-                | b'g'
-                | b'G'
-                | b'c'
-                | b'p'
-                | b'a'
-                | b'A'
-                | b'n'
-        );
-        if spec == b's' {
-            // Identifier-position check.
-            let preceding_window = preceding_window_uppercase(&fmt_inner_upper, i, 32);
-            if let Some(keyword) = identifier_keyword_hit(&preceding_window) {
-                // Find the variadic arg expression.
-                let arg_idx = fmt_arg_idx + 1 + variadic_position;
-                if arg_idx < arg_nodes.len() {
-                    let arg_node = arg_nodes[arg_idx];
-                    if let Some(m) = classify_arg(arg_node, src) {
-                        if !m.wrapped_in_safe {
-                            let line = fmt_node.start_position().row as u32 + 1;
-                            out.push(IdentifierInjectionMatch {
-                                file_path: rel_path.to_string(),
-                                line,
-                                printf_callee: callee_name.to_string(),
-                                format_string: fmt_inner.clone(),
-                                sql_keyword_before_percent_s: keyword,
-                                injected_arg_source: m.text,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-        if consumes_arg {
+        if format_spec.consumes_arg {
             variadic_position += 1;
         }
-        i = j + 1;
+    }
+}
+
+struct PrintfFormatSpec {
+    marker_offset: usize,
+    next_offset: usize,
+    spec: u8,
+    consumes_arg: bool,
+}
+
+fn next_printf_format_spec(bytes: &[u8], offset: usize) -> Option<PrintfFormatSpec> {
+    let marker_offset = next_percent_offset(bytes, offset)?;
+    let spec_offset = printf_specifier_offset(bytes, marker_offset + 1)?;
+    let spec = bytes[spec_offset];
+    Some(PrintfFormatSpec {
+        marker_offset,
+        next_offset: spec_offset + 1,
+        spec,
+        consumes_arg: spec != b'%' && printf_spec_consumes_arg(spec),
+    })
+}
+
+fn next_percent_offset(bytes: &[u8], mut offset: usize) -> Option<usize> {
+    while offset < bytes.len() {
+        if bytes[offset] == b'%' {
+            return Some(offset);
+        }
+        offset += 1;
+    }
+    None
+}
+
+fn printf_specifier_offset(bytes: &[u8], mut offset: usize) -> Option<usize> {
+    offset = consume_printf_flags(bytes, offset);
+    offset = consume_printf_width_precision(bytes, offset);
+    offset = consume_printf_length(bytes, offset);
+    (offset < bytes.len()).then_some(offset)
+}
+
+fn consume_printf_flags(bytes: &[u8], mut offset: usize) -> usize {
+    while offset < bytes.len() && matches!(bytes[offset], b'-' | b'+' | b' ' | b'#' | b'0') {
+        offset += 1;
+    }
+    offset
+}
+
+fn consume_printf_width_precision(bytes: &[u8], mut offset: usize) -> usize {
+    while offset < bytes.len()
+        && (bytes[offset].is_ascii_digit() || bytes[offset] == b'.' || bytes[offset] == b'*')
+    {
+        offset += 1;
+    }
+    offset
+}
+
+fn consume_printf_length(bytes: &[u8], mut offset: usize) -> usize {
+    while offset < bytes.len() && matches!(bytes[offset], b'h' | b'l' | b'L' | b'z' | b'j' | b't') {
+        offset += 1;
+    }
+    offset
+}
+
+fn printf_spec_consumes_arg(spec: u8) -> bool {
+    matches!(
+        spec,
+        b's' | b'd'
+            | b'i'
+            | b'u'
+            | b'x'
+            | b'X'
+            | b'o'
+            | b'f'
+            | b'e'
+            | b'E'
+            | b'g'
+            | b'G'
+            | b'c'
+            | b'p'
+            | b'a'
+            | b'A'
+            | b'n'
+    )
+}
+
+fn push_identifier_spec_match(
+    printf_call: &IdentifierPrintfCall<'_, '_>,
+    rel_path: &str,
+    byte_offset: usize,
+    variadic_position: usize,
+    out: &mut Vec<IdentifierInjectionMatch>,
+) {
+    let preceding_window =
+        preceding_window_uppercase(&printf_call.fmt_inner_upper, byte_offset, 32);
+    let Some(keyword) = identifier_keyword_hit(&preceding_window) else {
+        return;
+    };
+    let arg_idx = printf_call.fmt_arg_idx + 1 + variadic_position;
+    let Some(arg_node) = printf_call.args.get(arg_idx).copied() else {
+        return;
+    };
+    let Some(match_arg) = classify_arg(arg_node, printf_call.src) else {
+        return;
+    };
+    if match_arg.wrapped_in_safe {
+        return;
+    }
+    out.push(identifier_injection_match(
+        printf_call,
+        rel_path,
+        keyword,
+        match_arg.text,
+    ));
+}
+
+fn identifier_injection_match(
+    printf_call: &IdentifierPrintfCall<'_, '_>,
+    rel_path: &str,
+    keyword: String,
+    injected_arg_source: String,
+) -> IdentifierInjectionMatch {
+    IdentifierInjectionMatch {
+        file_path: rel_path.to_string(),
+        line: printf_call.fmt_node.start_position().row as u32 + 1,
+        printf_callee: printf_call.callee_name.to_string(),
+        format_string: printf_call.fmt_inner.clone(),
+        sql_keyword_before_percent_s: keyword,
+        injected_arg_source,
     }
 }
 
@@ -331,22 +426,39 @@ fn classify_arg(arg: Node<'_>, src: &[u8]) -> Option<ArgClassification> {
 }
 
 fn callee_name_text<'a>(node: Node<'_>, src: &'a [u8]) -> Option<&'a str> {
-    match node.kind() {
-        "identifier" => Some(node_text(node, src)),
-        "field_expression" => node
-            .child_by_field_name("field")
-            .and_then(|f| Some(node_text(f, src))),
-        "parenthesized_expression" => {
-            let mut cursor = node.walk();
-            for child in node.named_children(&mut cursor) {
-                if let Some(name) = callee_name_text(child, src) {
-                    return Some(name);
-                }
-            }
-            None
-        }
-        _ => None,
+    identifier_callee_text(node, src)
+        .or_else(|| field_expression_callee_text(node, src))
+        .or_else(|| parenthesized_callee_text(node, src))
+}
+
+fn identifier_callee_text<'a>(node: Node<'_>, src: &'a [u8]) -> Option<&'a str> {
+    (node.kind() == "identifier").then_some(node_text(node, src))
+}
+
+fn field_expression_callee_text<'a>(node: Node<'_>, src: &'a [u8]) -> Option<&'a str> {
+    (node.kind() == "field_expression")
+        .then(|| {
+            node.child_by_field_name("field")
+                .map(|field| node_text(field, src))
+        })
+        .flatten()
+}
+
+fn parenthesized_callee_text<'a>(node: Node<'_>, src: &'a [u8]) -> Option<&'a str> {
+    if node.kind() != "parenthesized_expression" {
+        return None;
     }
+    first_child_callee_name(node, src)
+}
+
+fn first_child_callee_name<'a>(node: Node<'_>, src: &'a [u8]) -> Option<&'a str> {
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if let Some(name) = callee_name_text(child, src) {
+            return Some(name);
+        }
+    }
+    None
 }
 
 fn node_text<'a>(node: Node<'_>, src: &'a [u8]) -> &'a str {
@@ -358,35 +470,58 @@ fn node_text<'a>(node: Node<'_>, src: &'a [u8]) -> &'a str {
 /// represents `"foo"` as a `string_literal` whose children include
 /// `"` tokens and a `string_content` child carrying the contents.
 fn string_literal_inner_text(node: Node<'_>, src: &[u8]) -> String {
+    let out = string_literal_child_text(node, src);
+    if out.is_empty() {
+        raw_string_literal_inner_text(node, src).unwrap_or_default()
+    } else {
+        out
+    }
+}
+
+fn string_literal_child_text(node: Node<'_>, src: &[u8]) -> String {
     let mut out = String::new();
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        if child.kind() == "string_content" || child.kind() == "string_fragment" {
+        if is_string_literal_content_child(child.kind()) {
             out.push_str(node_text(child, src));
         } else if child.kind() == "escape_sequence" {
-            // Decode common escapes so a `\nDECLARE` still matches
-            // the identifier-keyword check. Anything we don't
-            // recognise gets passed through verbatim.
-            let raw = node_text(child, src);
-            match raw {
-                "\\n" => out.push('\n'),
-                "\\t" => out.push('\t'),
-                "\\r" => out.push('\r'),
-                "\\\\" => out.push('\\'),
-                "\\\"" => out.push('"'),
-                "\\'" => out.push('\''),
-                other => out.push_str(other),
-            }
-        }
-    }
-    if out.is_empty() {
-        // Fallback: strip the outer chars from raw node text.
-        let raw = node_text(node, src);
-        if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
-            return raw[1..raw.len() - 1].to_string();
+            push_decoded_escape(&mut out, node_text(child, src));
         }
     }
     out
+}
+
+fn is_string_literal_content_child(kind: &str) -> bool {
+    matches!(kind, "string_content" | "string_fragment")
+}
+
+fn raw_string_literal_inner_text(node: Node<'_>, src: &[u8]) -> Option<String> {
+    let raw = node_text(node, src);
+    raw.strip_prefix('"')
+        .and_then(|inner| inner.strip_suffix('"'))
+        .map(str::to_string)
+}
+
+fn push_decoded_escape(out: &mut String, raw: &str) {
+    if let Some(decoded) = decoded_common_escape(raw) {
+        out.push(decoded);
+    } else {
+        out.push_str(raw);
+    }
+}
+
+fn decoded_common_escape(raw: &str) -> Option<char> {
+    const ESCAPES: &[(&str, char)] = &[
+        ("\\n", '\n'),
+        ("\\t", '\t'),
+        ("\\r", '\r'),
+        ("\\\\", '\\'),
+        ("\\\"", '"'),
+        ("\\'", '\''),
+    ];
+    ESCAPES
+        .iter()
+        .find_map(|(candidate, decoded)| (*candidate == raw).then_some(*decoded))
 }
 
 fn preceding_window_uppercase(fmt_upper: &str, byte_offset: usize, window: usize) -> String {

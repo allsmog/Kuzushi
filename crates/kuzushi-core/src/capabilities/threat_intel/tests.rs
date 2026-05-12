@@ -1,6 +1,11 @@
+use super::adapters::execute_threat_intel_tool;
 use super::adapters::{load_catalog_from_path, parse_catalog_str};
+use super::application::apply_threat_intel_catalog;
 use super::application::dispatch::{plan_for_entry, DispatchPlan};
 use super::domain::{CatalogSeverity, HuntKind};
+use crate::config::V2Config;
+use crate::modules::ToolExecutionContext;
+use serde_json::json;
 use std::path::Path;
 use tempfile::tempdir;
 
@@ -272,6 +277,130 @@ hunt = "taint-iris-next"
         }
         DispatchPlan::Dispatched { .. } => panic!("bare entry must skip"),
     }
+}
+
+#[test]
+fn apply_catalog_plans_dispatches_skips_and_live_counts() {
+    let dir = tempdir().unwrap();
+    let catalog = dir.path().join("catalog.toml");
+    std::fs::write(
+        &catalog,
+        r#"
+schema_version = "1"
+
+[[entry]]
+id = "redis-cve-tn"
+cwe = "CWE-190"
+severity = "high"
+title = "Redis stream integer overflow"
+hunt = "taint-iris-next"
+
+[entry.taint_iris_next]
+taint_class = "integer-overflow"
+languages = ["c"]
+source_signals = ["external input"]
+sink_signals = ["zmalloc(count * sizeof(...))"]
+
+[[entry]]
+id = "future"
+cwe = "CWE-999"
+severity = "low"
+hunt = "ml-finetune"
+"#,
+    )
+    .unwrap();
+    let config = V2Config::default();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: None,
+        findings_store: None,
+        trace: None,
+    };
+
+    let dry = apply_threat_intel_catalog(&catalog, &ctx, None, false, |_, _, _, _| {
+        panic!("dry run must not dispatch")
+    })
+    .unwrap();
+    assert_eq!(dry["summary"]["dispatched"], json!(1));
+    assert_eq!(dry["summary"]["skipped"], json!(1));
+    assert_eq!(dry["summary"]["dryRun"], json!(true));
+
+    let live = apply_threat_intel_catalog(&catalog, &ctx, None, true, |name, input, _, _| {
+        assert_eq!(name, "taint-iris-next:hunt");
+        assert_eq!(input["mode"], json!("hunt"));
+        Ok(json!({"ok": true, "summary": {"count": 2}}))
+    })
+    .unwrap();
+    assert_eq!(live["summary"]["totalFindings"], json!(2));
+    assert_eq!(live["data"]["entries"][0]["status"], json!("dispatched"));
+
+    let failed = apply_threat_intel_catalog(&catalog, &ctx, None, true, |_, _, _, _| {
+        anyhow::bail!("boom")
+    })
+    .unwrap();
+    assert_eq!(failed["summary"]["failed"], json!(1));
+    assert_eq!(
+        failed["data"]["entries"][0]["status"],
+        json!("dispatch-failed")
+    );
+}
+
+#[test]
+fn execute_threat_intel_tool_routes_list_apply_and_unknown() {
+    let dir = tempdir().unwrap();
+    let catalog = dir.path().join("catalog.toml");
+    std::fs::write(
+        &catalog,
+        r#"
+schema_version = "1"
+
+[[entry]]
+id = "redis-cve-tn"
+cwe = "CWE-190"
+severity = "high"
+title = "Redis stream integer overflow"
+hunt = "taint-iris-next"
+
+[entry.taint_iris_next]
+taint_class = "integer-overflow"
+languages = ["c"]
+source_signals = ["external input"]
+sink_signals = ["zmalloc(count * sizeof(...))"]
+"#,
+    )
+    .unwrap();
+    let config = V2Config::default();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: None,
+        findings_store: None,
+        trace: None,
+    };
+    let input = json!({"catalogPath": catalog.display().to_string()});
+
+    let listed = execute_threat_intel_tool(
+        "threat-intel:list",
+        input.clone(),
+        &ctx,
+        None,
+        |_, _, _, _| panic!("list must not dispatch"),
+    )
+    .unwrap();
+    assert_eq!(listed["summary"]["totalEntries"], json!(1));
+
+    let planned =
+        execute_threat_intel_tool("threat-intel:apply", input, &ctx, None, |_, _, _, _| {
+            panic!("dry apply must not dispatch")
+        })
+        .unwrap();
+    assert_eq!(planned["summary"]["dryRun"], json!(true));
+
+    let err =
+        execute_threat_intel_tool("threat-intel:nope", json!({}), &ctx, None, |_, _, _, _| {
+            Ok(json!({}))
+        })
+        .unwrap_err();
+    assert!(err.to_string().contains("unknown tool"));
 }
 
 #[test]

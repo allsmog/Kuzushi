@@ -1,4 +1,5 @@
 use super::*;
+use crate::modules::registry::ToolDispatchResult;
 
 impl ModuleRegistry {
     pub fn execute_tool(
@@ -62,79 +63,101 @@ impl ModuleRegistry {
         ctx: &ToolExecutionContext<'_>,
         runtime: Option<&dyn AgentRuntime>,
     ) -> Result<Value> {
-        // Stamp the trace handle with the module id derived from the tool name
-        // so producers don't need to thread it themselves. `ctx.trace` is None
-        // in non-shell contexts (kuzushi run, evals) — the stamping no-ops.
-        let scoped_trace = ctx
-            .trace
-            .map(|handle| handle.for_module(module_id_from_tool_name(name)));
+        let scoped_trace = scoped_tool_trace(ctx, name);
         let scoped_ctx;
         let ctx: &ToolExecutionContext<'_> = if let Some(handle) = scoped_trace.as_ref() {
-            scoped_ctx = ToolExecutionContext {
-                config: ctx.config,
-                workspace: ctx.workspace,
-                findings_store: ctx.findings_store,
-                trace: Some(handle),
-            };
+            scoped_ctx = scoped_tool_context(ctx, handle);
             &scoped_ctx
         } else {
             ctx
         };
+        let traced_runtime = traced_tool_runtime(runtime, scoped_trace.as_ref());
+        let runtime = active_tool_runtime(runtime, traced_runtime.as_ref());
 
-        // Wrap the runtime in TracedRuntime so every LLM call (query,
-        // next_step, triage, subagent) auto-emits a trace step. The wrapped
-        // runtime is `'tool`-lifetime and stays in scope for the entire
-        // dispatch; tools call it via `&dyn AgentRuntime` like before.
-        let traced_runtime;
-        let runtime: Option<&dyn AgentRuntime> = match (runtime, scoped_trace.as_ref()) {
-            (Some(rt), Some(handle)) => {
-                traced_runtime = crate::runtime::TracedRuntime::new(rt, handle.clone());
-                Some(&traced_runtime as &dyn AgentRuntime)
-            }
-            _ => runtime,
-        };
-
-        if let Some(result) = self.dispatch_catalog_tool(name) {
-            return result;
-        }
-        if let Some(result) = dispatch_context_workspace_tool(name, &input, ctx) {
-            return result;
-        }
-        if let Some(result) = dispatch_native_security_tool(name, &input, ctx, runtime) {
-            return result;
-        }
-        if let Some(result) = dispatch_agentic_security_tool(name, &input, ctx, runtime) {
-            return result;
-        }
-        if let Some(result) = dispatch_systems_hunt_tool(name, &input, ctx, runtime) {
-            return result;
-        }
-        if let Some(result) = dispatch_uaf_hunt_tool(name, &input, ctx, runtime) {
-            return result;
-        }
-        // threat-intel orchestrates other hunts, so its dispatch needs
-        // a callback into `self` to invoke them. We thread the
-        // re-entry through a closure that locks the recursion to one
-        // step (catalog entries cannot themselves point at
-        // `threat-intel:apply` — see `HuntKind` for the enumerated
-        // set of legal targets).
-        if let Some(result) = self.dispatch_threat_intel_tool(name, &input, ctx, runtime) {
-            return result;
-        }
-        if let Some(result) = dispatch_runtime_analysis_tool(name, &input, ctx, runtime) {
-            return result;
-        }
-        if let Some(result) = dispatch_finding_action_tool(name, &input, ctx, runtime) {
-            return result;
-        }
-        if let Some(result) = dispatch_recon_assessment_tool(name, &input, ctx, runtime) {
-            return result;
-        }
-        if let Some(result) = dispatch_plugin_prompt_tool(name, &input, ctx, runtime) {
+        if let Some(result) = self.dispatch_prepared_tool_mapping(name, &input, ctx, runtime) {
             return result;
         }
         anyhow::bail!("registered tool or DAG node {name:?} has no Rust executor mapping")
     }
+
+    fn dispatch_prepared_tool_mapping(
+        &self,
+        name: &str,
+        input: &Value,
+        ctx: &ToolExecutionContext<'_>,
+        runtime: Option<&dyn AgentRuntime>,
+    ) -> ToolDispatchResult {
+        self.dispatch_catalog_tool(name)
+            .or_else(|| dispatch_pre_threat_intel_tool(name, input, ctx, runtime))
+            .or_else(|| self.dispatch_threat_intel_tool(name, input, ctx, runtime))
+            .or_else(|| dispatch_post_threat_intel_tool(name, input, ctx, runtime))
+    }
+}
+
+fn scoped_tool_trace(
+    ctx: &ToolExecutionContext<'_>,
+    name: &str,
+) -> Option<crate::run_artifacts::TraceHandle> {
+    ctx.trace
+        .map(|handle| handle.for_module(module_id_from_tool_name(name)))
+}
+
+fn scoped_tool_context<'scope>(
+    ctx: &'scope ToolExecutionContext<'_>,
+    trace: &'scope crate::run_artifacts::TraceHandle,
+) -> ToolExecutionContext<'scope> {
+    ToolExecutionContext {
+        config: ctx.config,
+        workspace: ctx.workspace,
+        findings_store: ctx.findings_store,
+        trace: Some(trace),
+    }
+}
+
+fn traced_tool_runtime<'scope>(
+    runtime: Option<&'scope dyn AgentRuntime>,
+    trace: Option<&'scope crate::run_artifacts::TraceHandle>,
+) -> Option<crate::runtime::TracedRuntime<'scope>> {
+    match (runtime, trace) {
+        (Some(runtime), Some(trace)) => {
+            Some(crate::runtime::TracedRuntime::new(runtime, trace.clone()))
+        }
+        _ => None,
+    }
+}
+
+fn active_tool_runtime<'scope>(
+    runtime: Option<&'scope dyn AgentRuntime>,
+    traced_runtime: Option<&'scope crate::runtime::TracedRuntime<'scope>>,
+) -> Option<&'scope dyn AgentRuntime> {
+    traced_runtime
+        .map(|runtime| runtime as &dyn AgentRuntime)
+        .or(runtime)
+}
+
+fn dispatch_pre_threat_intel_tool(
+    name: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> ToolDispatchResult {
+    dispatch_context_workspace_tool(name, input, ctx)
+        .or_else(|| dispatch_native_security_tool(name, input, ctx, runtime))
+        .or_else(|| dispatch_agentic_security_tool(name, input, ctx, runtime))
+        .or_else(|| dispatch_systems_hunt_tool(name, input, ctx, runtime))
+        .or_else(|| dispatch_uaf_hunt_tool(name, input, ctx, runtime))
+}
+
+fn dispatch_post_threat_intel_tool(
+    name: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> ToolDispatchResult {
+    dispatch_runtime_analysis_tool(name, input, ctx, runtime)
+        .or_else(|| dispatch_finding_action_tool(name, input, ctx, runtime))
+        .or_else(|| dispatch_recon_assessment_tool(name, input, ctx, runtime))
+        .or_else(|| dispatch_plugin_prompt_tool(name, input, ctx, runtime))
 }
 
 /// Derive a module id from a qualified tool name (`semgrep:scan` -> `semgrep`).

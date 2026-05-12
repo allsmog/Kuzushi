@@ -53,22 +53,50 @@ fn server_lock() -> &'static Mutex<Option<JoernServerHandle>> {
 /// reaches one) or a kuzushi-spawned one (otherwise). Idempotent: the
 /// spawned child is reused for the rest of the MCP server's lifetime.
 pub async fn ensure_joern_server() -> Result<String> {
-    if let Some(url) = std::env::var("JOERN_SERVER_URL").ok() {
-        if probe_reachable(&url).await {
-            return Ok(url);
-        }
-        // Configured URL doesn't respond — fall through to spawn.
+    if let Some(url) = reachable_operator_server().await {
+        return Ok(url);
     }
+    ensure_spawned_joern_server().await
+}
 
+async fn ensure_spawned_joern_server() -> Result<String> {
     let mut guard = server_lock().lock().await;
-    if let Some(handle) = guard.as_ref() {
-        if probe_reachable(&handle.url).await {
-            return Ok(handle.url.clone());
-        }
-        guard.take(); // dead — drop and respawn
-    }
+    cached_or_new_joern_server(&mut guard).await
+}
 
+async fn cached_or_new_joern_server(guard: &mut Option<JoernServerHandle>) -> Result<String> {
+    if let Some(url) = reachable_cached_server(guard).await {
+        return Ok(url);
+    }
+    spawn_and_cache_joern_server(guard).await
+}
+
+async fn spawn_and_cache_joern_server(guard: &mut Option<JoernServerHandle>) -> Result<String> {
+    let (url, command) = joern_server_spawn_plan()?;
+    let handle = spawn_joern_server(command, url)?;
+    wait_for_spawned_server(handle, guard).await
+}
+
+async fn reachable_operator_server() -> Option<String> {
+    let url = std::env::var("JOERN_SERVER_URL").ok()?;
+    probe_reachable(&url).await.then_some(url)
+}
+
+async fn reachable_cached_server(guard: &mut Option<JoernServerHandle>) -> Option<String> {
+    let url = guard.as_ref().map(|handle| handle.url.clone())?;
+    if probe_reachable(&url).await {
+        return Some(url);
+    }
+    guard.take();
+    None
+}
+
+fn joern_server_spawn_plan() -> Result<(String, Command)> {
     let port = pick_free_port().context("could not pick a free TCP port for joern --server")?;
+    joern_server_spawn_plan_for_port(port)
+}
+
+fn joern_server_spawn_plan_for_port(port: u16) -> Result<(String, Command)> {
     let url = format!("http://127.0.0.1:{port}");
     let mut command = Command::new(joern_launcher_path()?);
     command
@@ -77,6 +105,11 @@ pub async fn ensure_joern_server() -> Result<String> {
         .arg("127.0.0.1")
         .arg("--server-port")
         .arg(port.to_string());
+    attach_configured_cpg(&mut command)?;
+    Ok((url, command))
+}
+
+fn attach_configured_cpg(command: &mut Command) -> Result<()> {
     if let Some(cpg) = std::env::var_os("KUZUSHI_JOERN_CPG") {
         let cpg_path = std::path::PathBuf::from(&cpg);
         if !cpg_path.is_file() {
@@ -87,18 +120,24 @@ pub async fn ensure_joern_server() -> Result<String> {
         }
         command.arg(cpg_path);
     }
+    Ok(())
+}
+
+fn spawn_joern_server(mut command: Command, url: String) -> Result<JoernServerHandle> {
     let child = command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .context("could not spawn `joern --server`")?;
+    Ok(JoernServerHandle { child, url })
+}
 
-    let handle = JoernServerHandle {
-        child,
-        url: url.clone(),
-    };
-
+async fn wait_for_spawned_server(
+    handle: JoernServerHandle,
+    guard: &mut Option<JoernServerHandle>,
+) -> Result<String> {
+    let url = handle.url.clone();
     let deadline = Instant::now() + Duration::from_secs(SPAWN_READINESS_TIMEOUT_SECS);
     while Instant::now() < deadline {
         if probe_reachable(&url).await {

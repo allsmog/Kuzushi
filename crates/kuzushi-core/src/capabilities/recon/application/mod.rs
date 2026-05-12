@@ -11,7 +11,8 @@ use crate::capabilities::recon::adapters::{
     ReconSubdomainEnumerator, SubdomainInput,
 };
 use crate::capabilities::recon::domain::{
-    now_isoish, split_host_port, ReconPersisted, ReconReport,
+    now_isoish, split_host_port, NmapHost, NmapParseResult, NmapService, ReconHost, ReconNote,
+    ReconPersisted, ReconReport, ReconService,
 };
 use crate::capabilities::recon::persistence::ReconWorkspaceStore;
 use crate::modules::ToolExecutionContext;

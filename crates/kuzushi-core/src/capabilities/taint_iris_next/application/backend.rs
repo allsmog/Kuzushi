@@ -5,59 +5,15 @@ pub(crate) fn choose_taint_iris_next_backend(
     repo_root: &Path,
 ) -> TaintIrisNextBackendChoice {
     let codeql_db = super::codeql_db_path(repo_root);
-    let codeql_runnable = codeql_db.is_some() && super::codeql_available();
-    let joern_cpg = super::resolve_joern_cpg_path(repo_root);
-    let joern_cpg_present = joern_cpg.exists();
-    let joern_runnable = joern_cpg_present && super::joern_available();
-    let mut warnings = Vec::new();
-    let selected = match requested {
-        "codeql" if codeql_runnable => "codeql",
-        "codeql" if codeql_db.is_none() => {
-            warnings.push(
-                "backend=codeql requested, but no existing CodeQL DB was found; build with `codeql database create --language=<lang> --source-root=<repo> <repo>/.kuzushi/codeql-db` then rerun. Using structural evidence."
-                    .to_string(),
-            );
-            "structural"
-        }
-        "codeql" => {
-            warnings.push(
-                "backend=codeql requested, but the codeql launcher was not found on PATH (set KUZUSHI_CODEQL_BIN or install the CodeQL CLI bundle). Using structural evidence."
-                    .to_string(),
-            );
-            "structural"
-        }
-        "joern" if joern_runnable => "joern",
-        "joern" if !joern_cpg_present => {
-            warnings.push(format!(
-                "backend=joern requested, but no CPG was found at {}; build with `joern-parse <target> --output {}` then rerun. Using structural evidence.",
-                joern_cpg.display(),
-                joern_cpg.display(),
-            ));
-            "structural"
-        }
-        "joern" => {
-            warnings.push(
-                "backend=joern requested, but the joern launcher was not found on PATH (set KUZUSHI_JOERN_BIN or install Joern). Using structural evidence."
-                    .to_string(),
-            );
-            "structural"
-        }
-        // `auto` prefers codeql > joern > structural when each tier's
-        // tooling is available. CodeQL ranks first because it ships
-        // mature security query packs that already encode source/sink
-        // semantics, so we don't have to round-trip catalog patterns
-        // through `cpg.call.code(...)` regex matching. Fallback flow:
-        // codeql -> joern -> structural. No warning when auto upgrades.
-        "auto" if codeql_runnable => "codeql",
-        "auto" if joern_runnable => "joern",
-        "semgrep" | "language" => {
-            warnings.push(format!(
-                "backend={requested} is not a Rust execution backend in this cutover; using structural evidence"
-            ));
-            "structural"
-        }
-        _ => "structural",
+    let availability = TaintIrisNextBackendAvailability {
+        codeql_db_present: codeql_db.is_some(),
+        codeql_runnable: codeql_db.is_some() && super::codeql_available(),
+        joern_cpg: super::resolve_joern_cpg_path(repo_root),
+        joern_runnable: false,
     };
+    let availability = availability.with_joern_status();
+    let mut warnings = Vec::new();
+    let selected = select_taint_iris_next_backend(requested, &availability, &mut warnings);
     TaintIrisNextBackendChoice {
         requested: requested.to_string(),
         selected: selected.to_string(),
@@ -66,6 +22,148 @@ pub(crate) fn choose_taint_iris_next_backend(
         structural_tool: detect_structural_tool().to_string(),
         warnings,
     }
+}
+
+struct TaintIrisNextBackendAvailability {
+    codeql_db_present: bool,
+    codeql_runnable: bool,
+    joern_cpg: std::path::PathBuf,
+    joern_runnable: bool,
+}
+
+impl TaintIrisNextBackendAvailability {
+    fn with_joern_status(mut self) -> Self {
+        self.joern_runnable = self.joern_cpg.exists() && super::joern_available();
+        self
+    }
+}
+
+fn select_taint_iris_next_backend(
+    requested: &str,
+    availability: &TaintIrisNextBackendAvailability,
+    warnings: &mut Vec<String>,
+) -> &'static str {
+    let spec = backend_request_spec(requested);
+    (spec.selector)(requested, availability, warnings)
+}
+
+#[derive(Clone, Copy)]
+struct BackendRequestSpec {
+    name: &'static str,
+    selector: BackendSelector,
+}
+
+type BackendSelector =
+    fn(&str, &TaintIrisNextBackendAvailability, &mut Vec<String>) -> &'static str;
+
+fn backend_request_spec(requested: &str) -> BackendRequestSpec {
+    const STRUCTURAL: BackendRequestSpec = BackendRequestSpec {
+        name: "",
+        selector: select_structural_backend,
+    };
+    const REQUESTS: &[BackendRequestSpec] = &[
+        BackendRequestSpec {
+            name: "codeql",
+            selector: select_codeql_backend,
+        },
+        BackendRequestSpec {
+            name: "joern",
+            selector: select_joern_backend,
+        },
+        BackendRequestSpec {
+            name: "auto",
+            selector: select_auto_backend,
+        },
+        BackendRequestSpec {
+            name: "semgrep",
+            selector: select_deprecated_backend,
+        },
+        BackendRequestSpec {
+            name: "language",
+            selector: select_deprecated_backend,
+        },
+    ];
+    REQUESTS
+        .iter()
+        .find(|spec| spec.name == requested)
+        .copied()
+        .unwrap_or(STRUCTURAL)
+}
+
+fn select_codeql_backend(
+    _requested: &str,
+    availability: &TaintIrisNextBackendAvailability,
+    warnings: &mut Vec<String>,
+) -> &'static str {
+    if availability.codeql_runnable {
+        return "codeql";
+    }
+    warnings.push(codeql_unavailable_warning(availability).to_string());
+    "structural"
+}
+
+fn codeql_unavailable_warning(availability: &TaintIrisNextBackendAvailability) -> &'static str {
+    if !availability.codeql_db_present {
+        return "backend=codeql requested, but no existing CodeQL DB was found; build with `codeql database create --language=<lang> --source-root=<repo> <repo>/.kuzushi/codeql-db` then rerun. Using structural evidence.";
+    }
+    "backend=codeql requested, but the codeql launcher was not found on PATH (set KUZUSHI_CODEQL_BIN or install the CodeQL CLI bundle). Using structural evidence."
+}
+
+fn select_joern_backend(
+    _requested: &str,
+    availability: &TaintIrisNextBackendAvailability,
+    warnings: &mut Vec<String>,
+) -> &'static str {
+    if availability.joern_runnable {
+        return "joern";
+    }
+    warnings.push(joern_unavailable_warning(availability));
+    "structural"
+}
+
+fn joern_unavailable_warning(availability: &TaintIrisNextBackendAvailability) -> String {
+    if !availability.joern_cpg.exists() {
+        return format!(
+            "backend=joern requested, but no CPG was found at {}; build with `joern-parse <target> --output {}` then rerun. Using structural evidence.",
+            availability.joern_cpg.display(),
+            availability.joern_cpg.display(),
+        );
+    }
+    "backend=joern requested, but the joern launcher was not found on PATH (set KUZUSHI_JOERN_BIN or install Joern). Using structural evidence."
+        .to_string()
+}
+
+fn select_auto_backend(
+    _requested: &str,
+    availability: &TaintIrisNextBackendAvailability,
+    _warnings: &mut Vec<String>,
+) -> &'static str {
+    if availability.codeql_runnable {
+        return "codeql";
+    }
+    if availability.joern_runnable {
+        return "joern";
+    }
+    "structural"
+}
+
+fn select_deprecated_backend(
+    requested: &str,
+    _availability: &TaintIrisNextBackendAvailability,
+    warnings: &mut Vec<String>,
+) -> &'static str {
+    warnings.push(format!(
+        "backend={requested} is not a Rust execution backend in this cutover; using structural evidence"
+    ));
+    "structural"
+}
+
+fn select_structural_backend(
+    _requested: &str,
+    _availability: &TaintIrisNextBackendAvailability,
+    _warnings: &mut Vec<String>,
+) -> &'static str {
+    "structural"
 }
 
 /// Reports the actual structural matcher Kuzushi will use, not a hardcoded

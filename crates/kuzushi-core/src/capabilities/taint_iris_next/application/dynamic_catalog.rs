@@ -107,12 +107,7 @@ pub(crate) fn run_taint_iris_next_catalog_report(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<TaintIrisNextCatalogReport> {
     let target = resolve_tool_target(input, ctx)?;
-    if !target.is_dir() {
-        anyhow::bail!(
-            "taint-iris-next:catalog target is not a directory: {}",
-            target.display()
-        );
-    }
+    ensure_catalog_target_dir(&target)?;
     let runtime = require_taint_iris_next_runtime(runtime)?;
     let model = require_taint_iris_next_model(input, ctx)?;
 
@@ -121,16 +116,7 @@ pub(crate) fn run_taint_iris_next_catalog_report(
     // hunt would see — the agent gets the same view of the codebase.
     let context = load_taint_iris_next_context(&target);
     let threat_model = load_taint_iris_next_threat_model(&target);
-    let mut languages = taint_iris_next_context_languages(context.value.as_ref());
-    languages.extend(detect_taint_iris_next_languages(&target)?);
-    languages = languages
-        .into_iter()
-        .map(|language| normalize_taint_next_language(&language))
-        .filter(|language| !language.is_empty())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-
+    let languages = catalog_languages(&target, context.value.as_ref())?;
     let context_keywords = taint_iris_next_context_keywords(context.value.as_ref(), &target)?;
     let prompt = build_catalog_prompt(
         &target,
@@ -148,50 +134,12 @@ pub(crate) fn run_taint_iris_next_catalog_report(
     );
     let response = runtime.query_blocking(request)?;
     let cost_usd = response.cost_usd;
-    let raw_value = match response.structured.clone() {
-        Some(value @ Value::Object(_)) => Some(value),
-        Some(value @ Value::Array(_)) => Some(value),
-        _ => parse_json_object_from_agent_text(&response.text)
-            .ok()
-            .or_else(|| serde_json::from_str::<Value>(response.text.trim()).ok()),
-    };
-
-    let (entries, parse_error) = match raw_value
-        .as_ref()
-        .and_then(extract_catalog_array)
-        .map(|array| normalize_catalog_entries(&array, &languages))
-    {
-        Some(Ok(entries)) if !entries.is_empty() => (entries, None),
-        Some(Ok(_)) => (
-            Vec::new(),
-            Some("agent returned an empty catalog array".to_string()),
-        ),
-        Some(Err(error)) => (Vec::new(), Some(format!("normalize: {error}"))),
-        None => (
-            Vec::new(),
-            Some("agent did not return a recognisable JSON catalog".to_string()),
-        ),
-    };
+    let raw_value = catalog_raw_value(&response);
+    let (entries, parse_error) = parse_catalog_entries(raw_value.as_ref(), &languages);
 
     let catalog_path = taint_iris_next_target_catalog_path(&target);
-    let status = if entries.is_empty() {
-        "agent-output-invalid".to_string()
-    } else {
-        if let Err(error) = persist_target_catalog(&catalog_path, &entries) {
-            return Ok(TaintIrisNextCatalogReport {
-                target: target.display().to_string(),
-                status: format!("persist-failed: {error}"),
-                catalog_path: catalog_path.display().to_string(),
-                entries,
-                raw_agent_output: raw_value,
-                parse_error,
-                cost_usd,
-                ok: false,
-            });
-        }
-        "generated".to_string()
-    };
-    let ok = !entries.is_empty();
+    let status = persist_catalog_status(&catalog_path, &entries);
+    let ok = status == "generated";
 
     Ok(TaintIrisNextCatalogReport {
         target: target.display().to_string(),
@@ -203,6 +151,68 @@ pub(crate) fn run_taint_iris_next_catalog_report(
         cost_usd,
         ok,
     })
+}
+
+fn ensure_catalog_target_dir(target: &Path) -> Result<()> {
+    if target.is_dir() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "taint-iris-next:catalog target is not a directory: {}",
+        target.display()
+    )
+}
+
+fn catalog_languages(target: &Path, context: Option<&Value>) -> Result<Vec<String>> {
+    let mut languages = taint_iris_next_context_languages(context);
+    languages.extend(detect_taint_iris_next_languages(target)?);
+    Ok(languages
+        .into_iter()
+        .map(|language| normalize_taint_next_language(&language))
+        .filter(|language| !language.is_empty())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect())
+}
+
+fn catalog_raw_value(response: &AgentQueryResponse) -> Option<Value> {
+    match response.structured.clone() {
+        Some(value @ Value::Object(_)) => Some(value),
+        Some(value @ Value::Array(_)) => Some(value),
+        _ => parse_json_object_from_agent_text(&response.text)
+            .ok()
+            .or_else(|| serde_json::from_str::<Value>(response.text.trim()).ok()),
+    }
+}
+
+fn parse_catalog_entries(
+    raw_value: Option<&Value>,
+    languages: &[String],
+) -> (Vec<TaintIrisNextRankedCatalogEntry>, Option<String>) {
+    match raw_value
+        .and_then(extract_catalog_array)
+        .map(|array| normalize_catalog_entries(&array, languages))
+    {
+        Some(Ok(entries)) if !entries.is_empty() => (entries, None),
+        Some(Ok(_)) => (
+            Vec::new(),
+            Some("agent returned an empty catalog array".to_string()),
+        ),
+        Some(Err(error)) => (Vec::new(), Some(format!("normalize: {error}"))),
+        None => (
+            Vec::new(),
+            Some("agent did not return a recognisable JSON catalog".to_string()),
+        ),
+    }
+}
+
+fn persist_catalog_status(path: &Path, entries: &[TaintIrisNextRankedCatalogEntry]) -> String {
+    if entries.is_empty() {
+        return "agent-output-invalid".to_string();
+    }
+    persist_target_catalog(path, entries)
+        .map(|_| "generated".to_string())
+        .unwrap_or_else(|error| format!("persist-failed: {error}"))
 }
 
 /// System prompt that frames the catalog generation task.

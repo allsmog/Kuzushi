@@ -51,17 +51,30 @@ pub(crate) fn record_anthropic_env_presence(log: &mut AuthPingLog) {
 
 pub(crate) fn record_codex_runtime_auth_presence(log: &mut AuthPingLog) {
     record_env_presence(log, &["OPENAI_API_KEY"], "OPENAI_API_KEY env present");
+    record_openai_base_url_presence(log);
+    record_codex_ci_presence(log);
+}
+
+fn record_openai_base_url_presence(log: &mut AuthPingLog) {
     if let Ok(base_url) = std::env::var("OPENAI_BASE_URL") {
-        let masked = if base_url.len() > 96 {
-            format!("{}…", &base_url[..96])
-        } else {
-            base_url
-        };
         log.record(
             true,
-            format!("OPENAI_BASE_URL present ({masked}); runtime/provider auth may be injected out-of-band"),
+            format!(
+                "OPENAI_BASE_URL present ({}); runtime/provider auth may be injected out-of-band",
+                masked_openai_base_url(base_url)
+            ),
         );
     }
+}
+
+fn masked_openai_base_url(base_url: String) -> String {
+    if base_url.len() <= 96 {
+        return base_url;
+    }
+    format!("{}…", &base_url[..96])
+}
+
+fn record_codex_ci_presence(log: &mut AuthPingLog) {
     if std::env::var("CODEX_CI").is_ok() {
         log.record(
             true,

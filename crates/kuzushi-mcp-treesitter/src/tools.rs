@@ -88,29 +88,13 @@ struct CallersHandler;
 impl ToolHandler for NodeAtHandler {
     async fn call(&self, args: Value) -> Result<Value> {
         let request = NodeAtRequest::from_json(&args)?;
-        let bytes = std::fs::read(&request.file)
-            .with_context(|| format!("could not read {}", request.file.display()))?;
-        let language = grammar_for(&request.language)?;
-        let mut parser = Parser::new();
-        parser
-            .set_language(&language)
-            .context("could not set tree-sitter language")?;
-        let tree = parser
-            .parse(&bytes, None)
-            .context("tree-sitter parse failed")?;
+        let parsed = parse_source_file(&request.file, &request.language)?;
+        let target = node_target_byte(&parsed.bytes, request.line, request.column)?;
 
-        let line_index = request.line.saturating_sub(1);
-        let line_start =
-            nth_line_start(&bytes, line_index).context("requested line is past end of file")?;
-        let column = request
-            .column
-            .map(|c| c.saturating_sub(1))
-            .unwrap_or_else(|| first_non_whitespace_column(&bytes, line_start));
-        let target_byte = (line_start + column).min(bytes.len());
-
-        let Some(node) = tree
+        let Some(node) = parsed
+            .tree
             .root_node()
-            .descendant_for_byte_range(target_byte, target_byte)
+            .descendant_for_byte_range(target.byte, target.byte)
         else {
             return Ok(json!({
                 "found": false,
@@ -118,20 +102,12 @@ impl ToolHandler for NodeAtHandler {
             }));
         };
 
-        let mut chain = Vec::new();
-        let mut cursor = node;
-        loop {
-            chain.push(node_summary(&cursor, &bytes));
-            match cursor.parent() {
-                Some(parent) => cursor = parent,
-                None => break,
-            }
-        }
+        let chain = node_parent_chain(node, &parsed.bytes);
         Ok(json!({
             "found": true,
             "file": request.file.display().to_string(),
             "line": request.line,
-            "column": column + 1,
+            "column": target.column + 1,
             "node": chain.first().cloned().unwrap_or(Value::Null),
             "parents": chain.into_iter().skip(1).collect::<Vec<_>>(),
         }))
@@ -142,38 +118,10 @@ impl ToolHandler for NodeAtHandler {
 impl ToolHandler for QueryHandler {
     async fn call(&self, args: Value) -> Result<Value> {
         let request = QueryRequest::from_json(&args)?;
-        let bytes = std::fs::read(&request.file)
-            .with_context(|| format!("could not read {}", request.file.display()))?;
-        let language = grammar_for(&request.language)?;
-        let mut parser = Parser::new();
-        parser
-            .set_language(&language)
-            .context("could not set tree-sitter language")?;
-        let tree = parser
-            .parse(&bytes, None)
-            .context("tree-sitter parse failed")?;
-        let query = Query::new(&language, &request.query)
+        let parsed = parse_source_file(&request.file, &request.language)?;
+        let query = Query::new(&parsed.language, &request.query)
             .with_context(|| format!("invalid tree-sitter query: {}", request.query))?;
-        let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&query, tree.root_node(), bytes.as_slice());
-        let mut out = Vec::new();
-        while let Some(query_match) = matches.next() {
-            if out.len() >= request.limit {
-                break;
-            }
-            let captures: Vec<Value> = query_match
-                .captures
-                .iter()
-                .map(|capture| {
-                    let name = query.capture_names()[capture.index as usize].to_string();
-                    json!({
-                        "name": name,
-                        "node": node_summary(&capture.node, &bytes),
-                    })
-                })
-                .collect();
-            out.push(json!({"captures": captures}));
-        }
+        let out = collect_query_matches(&query, &parsed, request.limit);
         Ok(json!({
             "file": request.file.display().to_string(),
             "language": request.language,
@@ -188,46 +136,148 @@ impl ToolHandler for QueryHandler {
 impl ToolHandler for CallersHandler {
     async fn call(&self, args: Value) -> Result<Value> {
         let request = CallersRequest::from_json(&args)?;
-        let bytes = std::fs::read(&request.file)
-            .with_context(|| format!("could not read {}", request.file.display()))?;
-        let language = grammar_for(&request.language)?;
-        let mut parser = Parser::new();
-        parser.set_language(&language).context("set_language")?;
-        let tree = parser.parse(&bytes, None).context("parse failed")?;
+        let parsed = parse_source_file(&request.file, &request.language)?;
         let pattern = callers_pattern(&request.language);
-        let query = Query::new(&language, &pattern)
+        let query = Query::new(&parsed.language, &pattern)
             .with_context(|| format!("could not build callers query for {}", request.language))?;
-        let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&query, tree.root_node(), bytes.as_slice());
-        let function = &request.function;
-        let mut hits = Vec::new();
-        while let Some(query_match) = matches.next() {
-            for capture in query_match.captures {
-                let name = query.capture_names()[capture.index as usize];
-                if name != "callee" {
-                    continue;
-                }
-                let captured_text = capture.node.utf8_text(&bytes).unwrap_or("").to_string();
-                if !callee_matches(&captured_text, function) {
-                    continue;
-                }
-                let call_node = capture
-                    .node
-                    .parent()
-                    .or_else(|| query_match.captures.first().map(|c| c.node))
-                    .unwrap_or(capture.node);
-                hits.push(json!({
-                    "callee": captured_text,
-                    "call": node_summary(&call_node, &bytes),
-                }));
-            }
-        }
+        let hits = collect_call_sites(&query, &parsed, &request.function);
         Ok(json!({
             "file": request.file.display().to_string(),
             "function": request.function,
             "hits": hits,
         }))
     }
+}
+
+struct ParsedSource {
+    bytes: Vec<u8>,
+    language: Language,
+    tree: tree_sitter::Tree,
+}
+
+fn parse_source_file(file: &PathBuf, language_name: &str) -> Result<ParsedSource> {
+    let bytes =
+        std::fs::read(file).with_context(|| format!("could not read {}", file.display()))?;
+    let language = grammar_for(language_name)?;
+    let mut parser = Parser::new();
+    parser
+        .set_language(&language)
+        .context("could not set tree-sitter language")?;
+    let tree = parser
+        .parse(&bytes, None)
+        .context("tree-sitter parse failed")?;
+    Ok(ParsedSource {
+        bytes,
+        language,
+        tree,
+    })
+}
+
+struct NodeTarget {
+    byte: usize,
+    column: usize,
+}
+
+fn node_target_byte(bytes: &[u8], line: usize, column: Option<usize>) -> Result<NodeTarget> {
+    let line_start = nth_line_start(bytes, line.saturating_sub(1))
+        .context("requested line is past end of file")?;
+    let column = column
+        .map(|c| c.saturating_sub(1))
+        .unwrap_or_else(|| first_non_whitespace_column(bytes, line_start));
+    Ok(NodeTarget {
+        byte: (line_start + column).min(bytes.len()),
+        column,
+    })
+}
+
+fn node_parent_chain(node: Node<'_>, bytes: &[u8]) -> Vec<Value> {
+    let mut chain = Vec::new();
+    let mut cursor = node;
+    loop {
+        chain.push(node_summary(&cursor, bytes));
+        match cursor.parent() {
+            Some(parent) => cursor = parent,
+            None => return chain,
+        }
+    }
+}
+
+fn collect_query_matches(query: &Query, parsed: &ParsedSource, limit: usize) -> Vec<Value> {
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(query, parsed.tree.root_node(), parsed.bytes.as_slice());
+    let mut out = Vec::new();
+    while let Some(query_match) = matches.next() {
+        if out.len() >= limit {
+            break;
+        }
+        let captures: Vec<Value> = query_match
+            .captures
+            .iter()
+            .map(|capture| {
+                let name = query.capture_names()[capture.index as usize].to_string();
+                json!({
+                    "name": name,
+                    "node": node_summary(&capture.node, &parsed.bytes),
+                })
+            })
+            .collect();
+        out.push(json!({"captures": captures}));
+    }
+    out
+}
+
+fn collect_call_sites(query: &Query, parsed: &ParsedSource, function: &str) -> Vec<Value> {
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(query, parsed.tree.root_node(), parsed.bytes.as_slice());
+    let mut hits = Vec::new();
+    while let Some(query_match) = matches.next() {
+        collect_call_site_match(
+            query,
+            &parsed.bytes,
+            function,
+            query_match.captures,
+            &mut hits,
+        );
+    }
+    hits
+}
+
+fn collect_call_site_match(
+    query: &Query,
+    bytes: &[u8],
+    function: &str,
+    captures: &[tree_sitter::QueryCapture<'_>],
+    hits: &mut Vec<Value>,
+) {
+    for capture in captures {
+        let name = query.capture_names()[capture.index as usize];
+        if name != "callee" {
+            continue;
+        }
+        collect_call_site_capture(bytes, function, captures, capture, hits);
+    }
+}
+
+fn collect_call_site_capture(
+    bytes: &[u8],
+    function: &str,
+    captures: &[tree_sitter::QueryCapture<'_>],
+    capture: &tree_sitter::QueryCapture<'_>,
+    hits: &mut Vec<Value>,
+) {
+    let captured_text = capture.node.utf8_text(bytes).unwrap_or("").to_string();
+    if !callee_matches(&captured_text, function) {
+        return;
+    }
+    let call_node = capture
+        .node
+        .parent()
+        .or_else(|| captures.first().map(|c| c.node))
+        .unwrap_or(capture.node);
+    hits.push(json!({
+        "callee": captured_text,
+        "call": node_summary(&call_node, bytes),
+    }));
 }
 
 struct NodeAtRequest {
@@ -323,16 +373,26 @@ fn callers_pattern(language: &str) -> String {
     // grammar names differ a bit per language; this covers the usual
     // ones. Languages we don't have a precise pattern for fall back to
     // a permissive `(call _) @callee` shape.
-    match language {
-        "javascript" | "typescript" => "(call_expression function: (_) @callee)".to_string(),
-        "python" => "(call function: (_) @callee)".to_string(),
-        "c" | "cpp" => "(call_expression function: (_) @callee)".to_string(),
-        "java" => "(method_invocation name: (identifier) @callee)".to_string(),
-        "ruby" => "(call method: (identifier) @callee)".to_string(),
-        "php" => "(function_call_expression function: (_) @callee)".to_string(),
-        "go" => "(call_expression function: (_) @callee)".to_string(),
-        _ => "(_) @callee".to_string(),
-    }
+    callers_pattern_table()
+        .iter()
+        .find_map(|(languages, pattern)| languages.contains(&language).then_some(*pattern))
+        .unwrap_or("(_) @callee")
+        .to_string()
+}
+
+fn callers_pattern_table() -> &'static [(&'static [&'static str], &'static str)] {
+    &[
+        (
+            &["javascript", "typescript"],
+            "(call_expression function: (_) @callee)",
+        ),
+        (&["python"], "(call function: (_) @callee)"),
+        (&["c", "cpp"], "(call_expression function: (_) @callee)"),
+        (&["java"], "(method_invocation name: (identifier) @callee)"),
+        (&["ruby"], "(call method: (identifier) @callee)"),
+        (&["php"], "(function_call_expression function: (_) @callee)"),
+        (&["go"], "(call_expression function: (_) @callee)"),
+    ]
 }
 
 fn callee_matches(captured: &str, target: &str) -> bool {

@@ -38,20 +38,51 @@ pub(crate) fn fetch_online_cve_or_advisory(id: &str, input: &Value) -> Result<Op
     // hard error — sources that simply return empty bodies (no data
     // for this id) fall through to the next source.
     let candidates = advisory_sources_for_id(id);
-    let mut last_error: Option<anyhow::Error> = None;
-    for source in candidates {
-        match fetch_advisory_from_source(source, id, input) {
-            Ok(Some(record)) => return Ok(Some(record)),
-            Ok(None) => continue,
-            Err(err) => {
-                last_error = Some(err);
-                continue;
-            }
-        }
-    }
+    fetch_first_advisory_record(candidates, id, input)
+}
+
+fn fetch_first_advisory_record(
+    sources: Vec<AdvisorySource>,
+    id: &str,
+    input: &Value,
+) -> Result<Option<CveRecord>> {
+    fetch_next_advisory_record(&sources, id, input, None)
+}
+
+fn fetch_next_advisory_record(
+    sources: &[AdvisorySource],
+    id: &str,
+    input: &Value,
+    mut last_error: Option<anyhow::Error>,
+) -> Result<Option<CveRecord>> {
+    let Some((source, remaining)) = sources.split_first() else {
+        return advisory_fetch_result(last_error);
+    };
+    fetch_or_remember_advisory_error(*source, id, input, &mut last_error)?.map_or_else(
+        || fetch_next_advisory_record(remaining, id, input, last_error),
+        |record| Ok(Some(record)),
+    )
+}
+
+fn advisory_fetch_result(last_error: Option<anyhow::Error>) -> Result<Option<CveRecord>> {
     match last_error {
-        Some(err) => Err(err),
+        Some(error) => Err(error),
         None => Ok(None),
+    }
+}
+
+fn fetch_or_remember_advisory_error(
+    source: AdvisorySource,
+    id: &str,
+    input: &Value,
+    last_error: &mut Option<anyhow::Error>,
+) -> Result<Option<CveRecord>> {
+    match fetch_advisory_from_source(source, id, input) {
+        Ok(record) => Ok(record),
+        Err(err) => {
+            *last_error = Some(err);
+            Ok(None)
+        }
     }
 }
 
@@ -60,11 +91,21 @@ pub(crate) fn fetch_advisory_from_source(
     id: &str,
     input: &Value,
 ) -> Result<Option<CveRecord>> {
-    match source {
-        AdvisorySource::Nvd => fetch_nvd_advisory(id, input),
-        AdvisorySource::Ghsa => fetch_ghsa_advisory(id, input),
-        AdvisorySource::Osv => fetch_osv_advisory(id, input),
-    }
+    advisory_fetcher(source)(id, input)
+}
+
+type AdvisoryFetcher = fn(&str, &Value) -> Result<Option<CveRecord>>;
+
+fn advisory_fetcher(source: AdvisorySource) -> AdvisoryFetcher {
+    const FETCHERS: &[(AdvisorySource, AdvisoryFetcher)] = &[
+        (AdvisorySource::Nvd, fetch_nvd_advisory),
+        (AdvisorySource::Ghsa, fetch_ghsa_advisory),
+        (AdvisorySource::Osv, fetch_osv_advisory),
+    ];
+    FETCHERS
+        .iter()
+        .find_map(|(candidate, fetcher)| (*candidate == source).then_some(*fetcher))
+        .unwrap_or(fetch_osv_advisory)
 }
 
 pub(crate) fn fetch_nvd_advisory(id: &str, input: &Value) -> Result<Option<CveRecord>> {

@@ -5,10 +5,21 @@ pub async fn run_query(scala: &str) -> Result<String> {
     // when reachable, otherwise lazy-spawns a child process owned by
     // the MCP server's lifetime. After the call, JOERN_SERVER_URL is
     // pinned to a known-good URL for the rest of this process.
-    let url = super::auto_spawn::ensure_joern_server().await?;
-    let client = joern_http_client()?;
-    let response = send_joern_query(&client, &url, scala).await?;
+    let response = send_query_to_ready_server(scala).await?;
     read_joern_response(response).await
+}
+
+async fn send_query_to_ready_server(scala: &str) -> Result<reqwest::Response> {
+    let client = joern_http_client()?;
+    send_query_with_ready_client(&client, scala).await
+}
+
+async fn send_query_with_ready_client(
+    client: &reqwest::Client,
+    scala: &str,
+) -> Result<reqwest::Response> {
+    let url = super::auto_spawn::ensure_joern_server().await?;
+    send_joern_query(client, &url, scala).await
 }
 
 /// Default URL the auto-spawn module pins JOERN_SERVER_URL to. Kept

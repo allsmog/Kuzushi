@@ -3503,17 +3503,31 @@ fn make_finding(severity: Severity, fp: &str, title: &str) -> Finding {
 }
 
 fn key_event_for_trigger(trigger: HotkeyTrigger) -> KeyEvent {
-    let code = match trigger {
-        HotkeyTrigger::Char(ch) => KeyCode::Char(ch),
-        HotkeyTrigger::Enter => KeyCode::Enter,
-        HotkeyTrigger::Tab => KeyCode::Tab,
-        HotkeyTrigger::Esc => KeyCode::Esc,
-        HotkeyTrigger::PageUp => KeyCode::PageUp,
-        HotkeyTrigger::PageDown => KeyCode::PageDown,
-        HotkeyTrigger::Up => KeyCode::Up,
-        HotkeyTrigger::Down => KeyCode::Down,
-    };
+    let code = hotkey_trigger_code(trigger);
     KeyEvent::new(code, KeyModifiers::empty())
+}
+
+fn hotkey_trigger_code(trigger: HotkeyTrigger) -> KeyCode {
+    if let HotkeyTrigger::Char(ch) = trigger {
+        return KeyCode::Char(ch);
+    }
+    non_char_hotkey_code(trigger)
+}
+
+fn non_char_hotkey_code(trigger: HotkeyTrigger) -> KeyCode {
+    const NON_CHAR_CODES: &[(HotkeyTrigger, KeyCode)] = &[
+        (HotkeyTrigger::Enter, KeyCode::Enter),
+        (HotkeyTrigger::Tab, KeyCode::Tab),
+        (HotkeyTrigger::Esc, KeyCode::Esc),
+        (HotkeyTrigger::PageUp, KeyCode::PageUp),
+        (HotkeyTrigger::PageDown, KeyCode::PageDown),
+        (HotkeyTrigger::Up, KeyCode::Up),
+        (HotkeyTrigger::Down, KeyCode::Down),
+    ];
+    NON_CHAR_CODES
+        .iter()
+        .find_map(|(candidate, code)| (*candidate == trigger).then_some(*code))
+        .unwrap_or(KeyCode::Null)
 }
 
 fn app_with_findings(count: usize) -> ShellApp {

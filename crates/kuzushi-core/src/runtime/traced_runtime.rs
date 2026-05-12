@@ -168,12 +168,7 @@ impl AgentRuntime for TracedRuntime<'_> {
         let start = Instant::now();
         let prompt_len = request.prompt.len();
         let result = self.inner.spawn_subagent_blocking(role, request);
-        let verb = match role {
-            SubagentRole::Generic => "subagent",
-            SubagentRole::UnsafeBlockReasoner => "subagent-unsafe",
-            SubagentRole::LifetimeAliasingReasoner => "subagent-lifetime",
-            SubagentRole::FfiBoundaryReasoner => "subagent-ffi",
-        };
+        let verb = subagent_trace_verb(role);
         self.record_query(
             verb,
             prompt_len,
@@ -182,6 +177,19 @@ impl AgentRuntime for TracedRuntime<'_> {
         );
         result
     }
+}
+
+fn subagent_trace_verb(role: SubagentRole) -> &'static str {
+    const VERBS: &[(SubagentRole, &str)] = &[
+        (SubagentRole::Generic, "subagent"),
+        (SubagentRole::UnsafeBlockReasoner, "subagent-unsafe"),
+        (SubagentRole::LifetimeAliasingReasoner, "subagent-lifetime"),
+        (SubagentRole::FfiBoundaryReasoner, "subagent-ffi"),
+    ];
+    VERBS
+        .iter()
+        .find_map(|(candidate, verb)| (*candidate == role).then_some(*verb))
+        .unwrap_or("subagent")
 }
 
 fn preview_text(text: &str) -> String {

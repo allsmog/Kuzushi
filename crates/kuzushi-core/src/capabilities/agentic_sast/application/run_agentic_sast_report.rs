@@ -12,81 +12,129 @@ pub(crate) fn run_agentic_sast_report(
 ) -> Result<AgenticSastReport> {
     let runtime = required_agentic_sast_runtime(runtime)?;
     let run = AgenticSastRun::from_input(input, ctx)?;
-    let parent_step = ctx.trace.and_then(|trace| {
-        Some(
-            trace
-                .step(
-                    "tool",
-                    "scan",
-                    format!(
-                        "agentic-sast start · target={} inventory={}",
-                        run.target.display(),
-                        run.inventory.len()
-                    ),
-                )
-                .emit(),
-        )
-    });
-    let agent_call_phase = match (ctx.trace, parent_step) {
-        (Some(trace), Some(parent)) => Some(
-            trace
-                .child(parent)
-                .step("reasoning", "scan", "agent-call")
-                .emit(),
-        ),
-        _ => None,
-    };
-    // Push the agent-call phase as parent so every inner LLM round-trip
-    // surfaces as an indented child in the feed.
-    let _llm_scope = match (ctx.trace, agent_call_phase) {
-        (Some(trace), Some(phase)) => Some(trace.parent_scope(phase)),
-        _ => None,
-    };
-    let mut findings = query_agentic_sast_findings(runtime, &run, None)?;
+    let parent_step = emit_agentic_sast_start(ctx, &run);
+    let mut findings = collect_agentic_sast_findings(runtime, &run, ctx, parent_step)?;
+    apply_agentic_sast_whitebox_profile(&run, &mut findings)?;
+    let persisted = persist_agentic_sast_findings(&run.target, &findings, ctx)?;
+    emit_agentic_sast_done(ctx, findings.len());
+    Ok(agentic_sast_report(&run, findings, persisted))
+}
+
+fn collect_agentic_sast_findings(
+    runtime: &dyn AgentRuntime,
+    run: &AgenticSastRun,
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+) -> Result<Vec<Finding>> {
+    let findings = query_agentic_sast_with_scope(runtime, run, ctx, parent_step)?;
+    emit_agentic_sast_validation_count(ctx, parent_step, findings.len());
+    review_agentic_sast_with_scope(runtime, run, findings, ctx, parent_step)
+}
+
+fn query_agentic_sast_with_scope(
+    runtime: &dyn AgentRuntime,
+    run: &AgenticSastRun,
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+) -> Result<Vec<Finding>> {
+    let _llm_scope = begin_agentic_sast_child_scope(ctx, parent_step, "agent-call");
+    let findings = query_agentic_sast_findings(runtime, run, None)?;
     drop(_llm_scope);
+    Ok(findings)
+}
+
+fn review_agentic_sast_with_scope(
+    runtime: &dyn AgentRuntime,
+    run: &AgenticSastRun,
+    findings: Vec<Finding>,
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+) -> Result<Vec<Finding>> {
+    let _validation_scope =
+        begin_agentic_sast_child_scope(ctx, parent_step, "static-validation review-loop");
+    let findings = maybe_review_agentic_sast_findings(runtime, run, findings)?;
+    drop(_validation_scope);
+    Ok(findings)
+}
+
+fn apply_agentic_sast_whitebox_profile(
+    run: &AgenticSastRun,
+    findings: &mut [Finding],
+) -> Result<()> {
+    if run.whitebox_static {
+        mark_whitebox_static_findings(findings, StaticProofState::CodeCited)?;
+    }
+    Ok(())
+}
+
+fn agentic_sast_report(
+    run: &AgenticSastRun,
+    findings: Vec<Finding>,
+    persisted: Option<AgenticSastPersistedRun>,
+) -> AgenticSastReport {
+    AgenticSastReport {
+        target: run.target.display().to_string(),
+        count: findings.len(),
+        findings,
+        persisted,
+        cost_usd: 0.0,
+    }
+}
+
+fn emit_agentic_sast_start(ctx: &ToolExecutionContext<'_>, run: &AgenticSastRun) -> Option<usize> {
+    ctx.trace.map(|trace| {
+        trace
+            .step(
+                "tool",
+                "scan",
+                format!(
+                    "agentic-sast start · target={} inventory={}",
+                    run.target.display(),
+                    run.inventory.len()
+                ),
+            )
+            .emit()
+    })
+}
+
+fn emit_agentic_sast_validation_count(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    finding_count: usize,
+) {
     if let (Some(trace), Some(parent)) = (ctx.trace, parent_step) {
         let _ = trace
             .child(parent)
             .step(
                 "reasoning",
                 "scan",
-                format!("static-validation · {} candidate findings", findings.len()),
+                format!("static-validation · {finding_count} candidate findings"),
             )
             .emit();
     }
-    let _validation_scope = match (ctx.trace, parent_step) {
-        (Some(trace), Some(parent)) => {
-            let phase = trace
-                .child(parent)
-                .step("reasoning", "scan", "static-validation review-loop")
-                .emit();
-            Some(trace.parent_scope(phase))
-        }
-        _ => None,
-    };
-    findings = maybe_review_agentic_sast_findings(runtime, &run, findings)?;
-    drop(_validation_scope);
-    if run.whitebox_static {
-        mark_whitebox_static_findings(&mut findings, StaticProofState::CodeCited)?;
-    }
+}
 
-    let persisted = persist_agentic_sast_findings(&run.target, &findings, ctx)?;
+fn begin_agentic_sast_child_scope(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    label: &str,
+) -> Option<crate::run_artifacts::ParentScope> {
+    let trace = ctx.trace?;
+    let parent = parent_step?;
+    let phase = trace.child(parent).step("reasoning", "scan", label).emit();
+    Some(trace.parent_scope(phase))
+}
+
+fn emit_agentic_sast_done(ctx: &ToolExecutionContext<'_>, finding_count: usize) {
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
                 "done",
                 "scan",
-                format!("agentic-sast complete · {} findings", findings.len()),
+                format!("agentic-sast complete · {finding_count} findings"),
             )
             .emit();
     }
-    Ok(AgenticSastReport {
-        target: run.target.display().to_string(),
-        count: findings.len(),
-        findings,
-        persisted,
-        cost_usd: 0.0,
-    })
 }
 
 pub(crate) struct AgenticSastRun {

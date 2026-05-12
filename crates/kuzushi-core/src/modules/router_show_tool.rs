@@ -54,29 +54,105 @@ pub(crate) fn run_full_mode_hunt_tool(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    use crate::capabilities::full_mode_multi::{report_to_tool_json, run as run_full_mode_multi};
-
     let cfg = full_mode_config_from_input(&input, ctx)?;
+    run_full_mode_hunt_config(ctx, runtime, cfg)
+}
+
+fn run_full_mode_hunt_config(
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    cfg: crate::capabilities::full_mode_multi::FullModeConfig,
+) -> Result<Value> {
     if cfg.dry_run {
         return full_mode_dry_run_response(&cfg, ctx);
     }
 
-    let runtime = required_full_mode_runtime(runtime)?;
-    let routed = full_mode_routed_runtime(runtime, ctx)?;
+    run_live_full_mode_hunt(ctx, runtime, cfg)
+}
+
+struct FullModeRuntimeContext {
+    routed: crate::agent_router::RoutedRuntime,
+    limiter: Option<crate::spend::SpendLimiter>,
+}
+
+fn run_live_full_mode_hunt(
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    cfg: crate::capabilities::full_mode_multi::FullModeConfig,
+) -> Result<Value> {
+    let report = complete_live_full_mode_report(ctx, runtime, &cfg)?;
+    Ok(crate::capabilities::full_mode_multi::report_to_tool_json(
+        &report,
+    ))
+}
+
+fn complete_live_full_mode_report(
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    cfg: &crate::capabilities::full_mode_multi::FullModeConfig,
+) -> Result<crate::capabilities::full_mode_multi::FullModeReport> {
+    let runtime_context = prepare_full_mode_runtime_context(ctx, runtime)?;
+    run_live_full_mode_with_context(ctx, &runtime_context, cfg)
+}
+
+fn run_live_full_mode_with_context(
+    ctx: &ToolExecutionContext<'_>,
+    runtime_context: &FullModeRuntimeContext,
+    cfg: &crate::capabilities::full_mode_multi::FullModeConfig,
+) -> Result<crate::capabilities::full_mode_multi::FullModeReport> {
+    let mut report = run_live_full_mode_report(cfg, ctx, runtime_context)?;
+    apply_full_mode_auto_triage(ctx, runtime_context, cfg, &mut report)?;
+    Ok(report)
+}
+
+fn prepare_full_mode_runtime_context(
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<FullModeRuntimeContext> {
+    let routed = required_full_mode_routed_runtime(runtime, ctx)?;
     let limiter = full_mode_spend_limiter(ctx)?;
-    let mut report = run_full_mode_multi(&routed, limiter.as_ref(), &cfg)?;
+    Ok(FullModeRuntimeContext { routed, limiter })
+}
+
+fn required_full_mode_routed_runtime(
+    runtime: Option<&dyn AgentRuntime>,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<crate::agent_router::RoutedRuntime> {
+    let runtime = required_full_mode_runtime(runtime)?;
+    full_mode_routed_runtime(runtime, ctx)
+}
+
+fn run_live_full_mode_report(
+    cfg: &crate::capabilities::full_mode_multi::FullModeConfig,
+    ctx: &ToolExecutionContext<'_>,
+    runtime_context: &FullModeRuntimeContext,
+) -> Result<crate::capabilities::full_mode_multi::FullModeReport> {
+    let report = crate::capabilities::full_mode_multi::run(
+        &runtime_context.routed,
+        runtime_context.limiter.as_ref(),
+        cfg,
+    )?;
     persist_full_mode_report(ctx, &report)?;
+    Ok(report)
+}
+
+fn apply_full_mode_auto_triage(
+    ctx: &ToolExecutionContext<'_>,
+    runtime_context: &FullModeRuntimeContext,
+    cfg: &crate::capabilities::full_mode_multi::FullModeConfig,
+    report: &mut crate::capabilities::full_mode_multi::FullModeReport,
+) -> Result<()> {
+    if !cfg.auto_triage {
+        return Ok(());
+    }
 
     // Auto-triage hook: when enabled, run deep-audit on every persisted
-    // HIGH+CRITICAL finding using the same routed runtime + spend
-    // limiter the chunk pass used. The triage verdict is saved back into
-    // the findings store so a subsequent `findings --triage` query
-    // reflects it; the per-finding cost is summed into `report.cost_usd`.
-    if cfg.auto_triage {
-        let extra = auto_triage_full_mode_findings(&cfg, ctx, &routed, &report)?;
-        report.cost_usd += extra;
-    }
-    Ok(report_to_tool_json(&report))
+    // HIGH+CRITICAL finding using the same routed runtime + spend limiter
+    // the chunk pass used. The verdict is saved back into the findings
+    // store so a later `findings --triage` query reflects it.
+    let extra = auto_triage_full_mode_findings(cfg, ctx, &runtime_context.routed, report)?;
+    report.cost_usd += extra;
+    Ok(())
 }
 
 fn auto_triage_full_mode_findings(
@@ -85,53 +161,95 @@ fn auto_triage_full_mode_findings(
     routed: &crate::agent_router::RoutedRuntime,
     report: &crate::capabilities::full_mode_multi::FullModeReport,
 ) -> Result<f64> {
-    use crate::capabilities::deep_auditor::{
-        run_deep_auditor, save_evidence, DeepAuditConfig, DEFAULT_MAX_STEPS, DEFAULT_PASSES,
-        DEFAULT_TEMPERATURE,
-    };
-    use crate::findings::Severity;
     use crate::spend::SpendLimiter;
 
+    let Some((workspace, store)) = auto_triage_resources(ctx)? else {
+        return Ok(0.0);
+    };
+    let spend = SpendLimiter::open(workspace.findings_db_path())?;
+    let audit_cfg = auto_triage_config(cfg, workspace.root());
+
+    Ok(report
+        .findings
+        .iter()
+        .map(|finding| {
+            auto_triage_candidate_cost(finding, routed, Some(&spend), &audit_cfg, store, workspace)
+        })
+        .sum())
+}
+
+fn auto_triage_resources<'a>(
+    ctx: &'a ToolExecutionContext<'a>,
+) -> Result<
+    Option<(
+        &'a crate::workspace::WorkspaceTarget,
+        &'a crate::findings::FindingStore,
+    )>,
+> {
     let workspace = ctx
         .workspace
         .ok_or_else(|| anyhow::anyhow!("autoTriage requires a workspace target"))?;
-    let store = match ctx.findings_store {
-        Some(store) => store,
-        None => return Ok(0.0),
-    };
-    let spend = SpendLimiter::open(workspace.findings_db_path())?;
+    Ok(ctx.findings_store.map(|store| (workspace, store)))
+}
 
+fn auto_triage_config(
+    cfg: &crate::capabilities::full_mode_multi::FullModeConfig,
+    workspace_root: &std::path::Path,
+) -> crate::capabilities::deep_auditor::DeepAuditConfig {
+    use crate::capabilities::deep_auditor::{
+        DeepAuditConfig, DEFAULT_MAX_STEPS, DEFAULT_PASSES, DEFAULT_TEMPERATURE,
+    };
     let max_steps = cfg
         .auto_triage_max_steps
         .unwrap_or(DEFAULT_MAX_STEPS.min(12));
     let deposit_usd = cfg.auto_triage_deposit_usd.unwrap_or(1.0);
-
-    let audit_cfg = DeepAuditConfig {
-        workspace_root: workspace.root().to_path_buf(),
+    DeepAuditConfig {
+        workspace_root: workspace_root.to_path_buf(),
         max_steps,
         deposit_usd,
         system_prompt: None,
         include_static_evidence: true,
         temperature: DEFAULT_TEMPERATURE,
         passes: DEFAULT_PASSES,
-    };
-
-    let mut extra_cost = 0.0;
-    for finding in &report.findings {
-        if !matches!(finding.severity, Severity::High | Severity::Critical) {
-            continue;
-        }
-        let outcome = match run_deep_auditor(routed, Some(&spend), &audit_cfg, finding) {
-            Ok(o) => o,
-            Err(_) => continue, // never let one bad triage abort the rest
-        };
-        if let Some(id) = finding.id {
-            let _ = store.save_triage(id, &outcome.triage);
-            let _ = save_evidence(&workspace.findings_db_path(), id, &outcome.evidence);
-        }
-        extra_cost += outcome.cost_usd;
     }
-    Ok(extra_cost)
+}
+
+fn auto_triage_candidate_cost(
+    finding: &crate::findings::Finding,
+    routed: &crate::agent_router::RoutedRuntime,
+    spend: Option<&crate::spend::SpendLimiter>,
+    audit_cfg: &crate::capabilities::deep_auditor::DeepAuditConfig,
+    store: &crate::findings::FindingStore,
+    workspace: &crate::workspace::WorkspaceTarget,
+) -> f64 {
+    use crate::capabilities::deep_auditor::run_deep_auditor;
+
+    if !matches!(
+        finding.severity,
+        crate::findings::Severity::High | crate::findings::Severity::Critical
+    ) {
+        return 0.0;
+    }
+    run_deep_auditor(routed, spend, audit_cfg, finding)
+        .map(|outcome| {
+            persist_auto_triage_outcome(finding, store, workspace, &outcome);
+            outcome.cost_usd
+        })
+        .unwrap_or(0.0)
+}
+
+fn persist_auto_triage_outcome(
+    finding: &crate::findings::Finding,
+    store: &crate::findings::FindingStore,
+    workspace: &crate::workspace::WorkspaceTarget,
+    outcome: &crate::capabilities::deep_auditor::DeepAuditOutcome,
+) {
+    use crate::capabilities::deep_auditor::save_evidence;
+
+    if let Some(id) = finding.id {
+        let _ = store.save_triage(id, &outcome.triage);
+        let _ = save_evidence(&workspace.findings_db_path(), id, &outcome.evidence);
+    }
 }
 
 pub(crate) fn full_mode_config_from_input(

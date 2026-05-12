@@ -363,18 +363,38 @@ where
     let mut kept = Vec::new();
     let mut dropped = Vec::new();
     for (cve_id, record, pattern) in entries {
-        let outcome = match run_regression_gate(target, &cve_id, &record, &pattern) {
-            Ok(value) => value,
-            Err(err) => RegressionGateOutcome::unverified(format!(
-                "regression-gate error for {cve_id}: {err:#}"
-            )),
-        };
-        match outcome.status {
-            RegressionGateStatus::Rejected if !accept_rejected => dropped.push(outcome),
-            _ => kept.push(outcome),
-        }
+        let outcome = regression_gate_outcome(target, cve_id, record, pattern);
+        push_regression_gate_partition(outcome, accept_rejected, &mut kept, &mut dropped);
     }
     (kept, dropped)
+}
+
+fn regression_gate_outcome(
+    target: &Path,
+    cve_id: String,
+    record: Value,
+    pattern: Value,
+) -> RegressionGateOutcome {
+    run_regression_gate(target, &cve_id, &record, &pattern).unwrap_or_else(|err| {
+        RegressionGateOutcome::unverified(format!("regression-gate error for {cve_id}: {err:#}"))
+    })
+}
+
+fn push_regression_gate_partition(
+    outcome: RegressionGateOutcome,
+    accept_rejected: bool,
+    kept: &mut Vec<RegressionGateOutcome>,
+    dropped: &mut Vec<RegressionGateOutcome>,
+) {
+    if rejected_should_drop(&outcome, accept_rejected) {
+        dropped.push(outcome);
+    } else {
+        kept.push(outcome);
+    }
+}
+
+fn rejected_should_drop(outcome: &RegressionGateOutcome, accept_rejected: bool) -> bool {
+    matches!(outcome.status, RegressionGateStatus::Rejected) && !accept_rejected
 }
 
 #[cfg(test)]
