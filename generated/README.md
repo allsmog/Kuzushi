@@ -18,8 +18,6 @@ The generator registry lives in [`scripts/codegen/index.ts`](../scripts/codegen/
 | ------------- | ------------------------------- | ---------------------------------------------------- |
 | `schemas/`    | `src/schemas.ts` (Zod)          | JSON Schema projections for external tooling         |
 | `schemas/llm-io/` | `src/schemas.ts` (Zod)      | Raw LLM I/O contracts (triage / verify / poc harness) |
-| `db/`         | `src/migrations/`               | Consolidated SQLite `schema.sql` reference dump      |
-
 ## Why these files are committed
 
 - **Diff review:** generated drift shows up in PRs, so reviewers can spot

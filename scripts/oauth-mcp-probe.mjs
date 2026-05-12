@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Reproduce the bridge's multi-turn agent loop with real MCP tools.
-import { Agent } from "@mariozechner/pi-agent-core";
-import { getModel } from "@mariozechner/pi-ai";
+import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+// Reproduce the bridge's multi-turn agent loop with real MCP tools.
+import { Agent } from "@mariozechner/pi-agent-core";
+import { getModel } from "@mariozechner/pi-ai";
 
 const credsPath = path.join(homedir(), ".kuzushi", "oauth-credentials.json");
 const creds = JSON.parse(readFileSync(credsPath, "utf8"));
@@ -50,10 +50,14 @@ async function spawnHandle(label, bin) {
       handle.pending.set(id, { resolve, reject });
       const body = { jsonrpc: "2.0", id, method };
       if (params !== undefined) body.params = params;
-      child.stdin.write(JSON.stringify(body) + "\n");
+      child.stdin.write(`${JSON.stringify(body)}\n`);
     });
   }
-  await send("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "p", version: "0" } });
+  await send("initialize", {
+    protocolVersion: "2024-11-05",
+    capabilities: {},
+    clientInfo: { name: "p", version: "0" },
+  });
   const list = await send("tools/list");
   handle.tools = list.tools;
   handle.send = send;
@@ -66,7 +70,7 @@ for (const [label, bin] of Object.entries(servers)) {
 }
 
 const tools = [];
-for (const [label, h] of Object.entries(handles)) {
+for (const h of Object.values(handles)) {
   for (const t of h.tools) {
     const safeName = t.name.replace(/[^a-zA-Z0-9_]/g, "_");
     tools.push({
@@ -76,7 +80,9 @@ for (const [label, h] of Object.entries(handles)) {
       execute: async (_id, params) => {
         const startedAt = Date.now();
         const result = await h.send("tools/call", { name: t.name, arguments: params ?? {} });
-        const text = result?.content?.[0]?.text ? String(result.content[0].text) : JSON.stringify(result);
+        const text = result?.content?.[0]?.text
+          ? String(result.content[0].text)
+          : JSON.stringify(result);
         console.error(`[probe] ${t.name} -> ${Date.now() - startedAt}ms ${text.length}B`);
         return { content: [{ type: "text", text }], details: result };
       },
@@ -92,7 +98,7 @@ const baseSystemPrompt =
 const structuredOutputContract = [
   "",
   "Structured output contract:",
-  'Return only strict JSON for `analysis`. Do not include markdown fences, prose, or trailing commentary.',
+  "Return only strict JSON for `analysis`. Do not include markdown fences, prose, or trailing commentary.",
   "Required JSON schema:",
   JSON.stringify(
     { type: "object", properties: { summary: { type: "string" } }, required: ["summary"] },
@@ -128,7 +134,9 @@ agent.subscribe((event) => {
 
 console.error("[probe] prompting...");
 const startedAt = Date.now();
-await agent.prompt("Run all four node_at calls (lines 5, 9, 10, 15) in parallel as a batch, then run both callers calls (handle_request, snprintf) in parallel as a batch, then summarize.");
+await agent.prompt(
+  "Run all four node_at calls (lines 5, 9, 10, 15) in parallel as a batch, then run both callers calls (handle_request, snprintf) in parallel as a batch, then summarize.",
+);
 console.error("[probe] done in", Date.now() - startedAt, "ms");
 console.error("[probe] errorMessage:", agent.state.errorMessage);
 console.error("[probe] text:", text.slice(0, 500));

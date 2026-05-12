@@ -428,6 +428,7 @@ mod tests {
             "prompts",
             "prompt",
             "provider",
+            "pwn",
             "quickstart",
             "quit",
             "reparse",
