@@ -90,6 +90,10 @@ pub enum ShellView {
     /// per `design/mockups/patch.jsx`.  String is the finding alias
     /// the patch addresses.
     Patch(String),
+    /// Live module-progress dashboard. Split pane: left shows DAG status
+    /// (queued / active / done / failing per task), right shows a tagged
+    /// reasoning feed `[module:verb]`. Session state lives on `app.activity`.
+    Activity,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

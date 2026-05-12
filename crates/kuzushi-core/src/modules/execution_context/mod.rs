@@ -3,12 +3,16 @@ use std::path::Path;
 use crate::artifact_kb::{artifact_knowledge_prompt_context, ArtifactKnowledgePromptContext};
 use crate::config::V2Config;
 use crate::findings::FindingStore;
+use crate::run_artifacts::TraceHandle;
 use crate::workspace::WorkspaceTarget;
 
 pub struct ToolExecutionContext<'a> {
     pub config: &'a V2Config,
     pub workspace: Option<&'a WorkspaceTarget>,
     pub findings_store: Option<&'a FindingStore>,
+    /// Optional handle for emitting reasoning trace steps. `None` in non-shell
+    /// contexts (kuzushi run, evals) — producers should treat absence as a no-op.
+    pub trace: Option<&'a TraceHandle>,
 }
 
 impl<'a> ToolExecutionContext<'a> {

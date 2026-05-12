@@ -33,6 +33,7 @@ pub enum ShellCommand {
     Since(String),
     Replay(String),
     Trace(String),
+    Activity,
     Plan(String),
     PlanApply,
     PlanDiscard,

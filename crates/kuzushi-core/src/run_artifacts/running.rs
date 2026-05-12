@@ -81,6 +81,9 @@ impl RunSummary {
     }
 }
 
+// schema v2: adds module_id / verb / parent_step / severity / started_at_ms
+// for the live module-progress view. All new fields are optional so older
+// trace.jsonl files round-trip without rewrites.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct RunTraceStep {

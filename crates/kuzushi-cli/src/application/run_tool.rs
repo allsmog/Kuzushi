@@ -61,6 +61,7 @@ pub(crate) fn run_tool_command(
         config: &config,
         workspace: workspace.as_ref(),
         findings_store: store.as_ref(),
+        trace: trace.as_ref(),
     };
     let result = registry.execute_tool_with_runtime(&tool, input, &ctx, runtime_ref);
     let output = match result {

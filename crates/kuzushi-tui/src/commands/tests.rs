@@ -260,6 +260,10 @@ mod tests {
             parse_command("/trace run-123"),
             ShellCommand::Trace("run-123".to_string())
         );
+        assert_eq!(parse_command("/activity"), ShellCommand::Activity);
+        assert_eq!(parse_command("activity"), ShellCommand::Activity);
+        assert_eq!(parse_command("/progress"), ShellCommand::Activity);
+        assert_eq!(parse_command("/a"), ShellCommand::Activity);
         assert_eq!(
             parse_command("/plan only admin routes"),
             ShellCommand::Plan("only admin routes".to_string())
@@ -369,6 +373,7 @@ mod tests {
         }
 
         let expected = std::collections::BTreeSet::from([
+            "activity",
             "actor",
             "attach",
             "ask",
@@ -490,6 +495,7 @@ mod tests {
             ShellCommand::Since(_) => "since",
             ShellCommand::Replay(_) => "replay",
             ShellCommand::Trace(_) => "trace",
+            ShellCommand::Activity => "activity",
             ShellCommand::Plan(_) => "plan",
             ShellCommand::PlanApply => "plan-apply",
             ShellCommand::PlanDiscard => "plan-discard",

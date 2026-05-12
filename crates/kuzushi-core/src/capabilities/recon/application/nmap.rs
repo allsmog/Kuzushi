@@ -9,6 +9,15 @@ pub(crate) fn run_recon_nmap(
         "recon:nmap needs an active workspace. Pass --target <repo> or start the shell with --target.",
     )?;
     let options = NmapInput::from_tool_input(input)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "nmap",
+                format!("recon:nmap start · target={}", options.target),
+            )
+            .emit();
+    }
     let scan = ReconNmapScanner::from_input(&options);
     let parsed = scan.scan(cancel)?;
     let mut store = ReconWorkspaceStore::open(workspace)?;
@@ -61,6 +70,19 @@ pub(crate) fn run_recon_nmap(
         }),
     )?;
 
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "nmap",
+                format!(
+                    "recon:nmap complete · {} hosts · {} services",
+                    hosts.len(),
+                    services.len()
+                ),
+            )
+            .emit();
+    }
     Ok(ReconReport {
         tool: "recon:nmap".to_string(),
         target: options.target,

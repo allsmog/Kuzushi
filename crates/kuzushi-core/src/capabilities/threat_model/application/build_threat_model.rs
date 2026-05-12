@@ -13,8 +13,38 @@ pub(crate) fn build_threat_model(
         )
     })?;
     let input = parse_build_input(&input, ctx, flavor)?;
+    let verb = match flavor {
+        BuildFlavor::ThreatModel => "build",
+        BuildFlavor::RandoriPasta => "pasta",
+    };
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                verb,
+                format!(
+                    "{} start · methodology={}",
+                    flavor.tool_name(),
+                    input.methodology
+                ),
+            )
+            .emit();
+    }
     let previous_model = load_persistent_threat_model(&input.target);
     let prompt = build_agent_prompt(&input, previous_model.as_ref())?;
+    // Phase scope so the threat-model agent's LLM round-trip surfaces under
+    // dfd-collect / stride-classify / actor-stories rather than as a loose
+    // top-level event.
+    let _llm_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step(
+                "reasoning",
+                verb,
+                "dfd-collect · stride-classify · actor-stories",
+            )
+            .emit();
+        trace.parent_scope(phase)
+    });
     let raw = query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
@@ -34,6 +64,7 @@ pub(crate) fn build_threat_model(
             Ok(raw)
         },
     )?;
+    drop(_llm_scope);
     let (document_candidate, bridge_findings) = extract_document_and_findings(raw)?;
     let document = normalize_document(document_candidate, &input.methodology)?;
     let document = apply_methodology(document, &input.methodology)?;
@@ -102,6 +133,20 @@ pub(crate) fn build_threat_model(
         "  Cost:     $0.0000".to_string(),
     ]);
     append_top_threats(&mut lines, &document);
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                verb,
+                format!(
+                    "{} complete · {threats} threats · {nodes} nodes",
+                    flavor.tool_name(),
+                    threats = threat_count,
+                    nodes = node_count
+                ),
+            )
+            .emit();
+    }
 
     Ok(json!({
         "ok": threat_count > 0 || node_count > 0 || flow_count > 0,

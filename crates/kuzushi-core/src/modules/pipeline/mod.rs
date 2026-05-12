@@ -66,6 +66,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
+            trace: None,
         };
 
         assert!(!registry

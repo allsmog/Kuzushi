@@ -141,6 +141,7 @@ mod tests {
             config: &V2Config::default(),
             workspace: None,
             findings_store: None,
+            trace: None,
         };
 
         let tools = registry

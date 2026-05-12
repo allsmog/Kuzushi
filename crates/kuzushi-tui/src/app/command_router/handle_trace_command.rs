@@ -9,6 +9,36 @@ pub(crate) fn handle_trace_command(app: &mut ShellApp, command: &ShellCommand) -
     true
 }
 
+pub(crate) fn handle_activity_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Activity = command else {
+        return false;
+    };
+    if app.activity.is_none() {
+        let run_id = app
+            .tool_run_id
+            .clone()
+            .or_else(|| app.scan.as_ref().and_then(|scan| scan.run_id.clone()))
+            .unwrap_or_else(|| {
+                format!(
+                    "manual-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0)
+                )
+            });
+        let mut session = ActivitySession::new(run_id);
+        // Seed with all DAG-participating tasks so manual `/activity`
+        // openers see the same Queued layout the scan-mode auto-open
+        // produces.
+        session.seed_from_registry(&app.registry);
+        app.activity = Some(session);
+    }
+    app.shell_view = ShellView::Activity;
+    app.log("activity", "live module-progress dashboard");
+    true
+}
+
 pub(crate) fn handle_plan_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
     let ShellCommand::Plan(goal) = command else {
         return false;

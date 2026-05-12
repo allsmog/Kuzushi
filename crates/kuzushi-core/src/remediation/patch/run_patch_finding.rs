@@ -12,6 +12,15 @@ pub fn run_patch_finding(
         .findings_store
         .context("patch:finding requires a findings store for the active workspace")?;
     let input = PatchFindingInput::from_tool_input(&input)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "finding",
+                format!("patch:finding start · fp={}", input.fingerprint),
+            )
+            .emit();
+    }
     let Some(finding) = store.get_finding_by_reference(&input.fingerprint)? else {
         return Ok(json!({
             "ok": false,
@@ -63,6 +72,18 @@ pub fn run_patch_finding(
     let mut final_explanation = None;
 
     for attempt in 1..=input.max_iterations {
+        // Phase scope so each attempt's LLM calls (rationale + diff-draft +
+        // tests-author) appear under a per-attempt header in the feed.
+        let attempt_scope = ctx.trace.map(|trace| {
+            let phase = trace
+                .step(
+                    "reasoning",
+                    "finding",
+                    format!("rationale · diff-draft (attempt {})", attempt),
+                )
+                .emit();
+            (trace.parent_scope(phase), phase)
+        });
         let synthesis = synthesize_patch(
             runtime,
             &model,
@@ -72,6 +93,17 @@ pub fn run_patch_finding(
             &triage,
             &history,
         )?;
+        drop(attempt_scope);
+        // Validation phase doesn't make LLM calls but logs a checkpoint.
+        if let Some(trace) = ctx.trace {
+            let _ = trace
+                .step(
+                    "reasoning",
+                    "finding",
+                    format!("guardrail-check (attempt {})", attempt),
+                )
+                .emit();
+        }
         let worktree = create_disposable_worktree(workspace.root())?;
         let validation = validate_patch(&worktree, &synthesis.diff, &plan);
         cleanup_worktree(workspace.root(), &worktree);
@@ -121,6 +153,15 @@ pub fn run_patch_finding(
     };
     store.insert_patch_result(&result)?;
 
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "finding",
+                format!("patch:finding complete · status={:?}", result.status),
+            )
+            .emit();
+    }
     Ok(patch_result_to_tool_json(
         &finding.fingerprint,
         &result,

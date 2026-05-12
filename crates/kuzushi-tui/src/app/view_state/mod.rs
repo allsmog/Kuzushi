@@ -2,12 +2,14 @@ use super::*;
 pub(crate) use super::*;
 
 use self::PendingConfirm;
+pub(crate) use activity::*;
 use kuzushi_core::{AttachmentRecord, KnownArtifact, ReconHost, ReconNote, ReconService};
 pub(crate) use label::*;
 pub(crate) use rank::*;
 pub(crate) use sast_task_row::*;
 use std::path::PathBuf;
 use std::time::Instant;
+mod activity;
 mod label;
 mod rank;
 mod sast_task_row;
@@ -18,6 +20,14 @@ mod sast_task_row;
 
 #[cfg(test)]
 mod tests;
+pub use activity::is_hidden_module_id;
+pub use activity::ActivitySession;
+pub use activity::DagTaskRow;
+pub use activity::DagTaskState;
+pub use activity::PaneFocus;
+pub use activity::RecordedTraceEvent;
+pub use activity::SubsystemAggregate;
+pub use activity::ACTIVITY_FEED_RING_CAPACITY;
 pub use label::ActorDetailFilter;
 pub use label::OptionsFilter;
 pub use label::OptionsView;

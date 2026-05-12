@@ -42,6 +42,15 @@ pub fn run_ndiff_extract_fix_pattern(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "extract-fix-pattern",
+                "ndiff:extract-fix-pattern start",
+            )
+            .emit();
+    }
     let source = match resolve_ndiff_fix_pattern_source(&input)? {
         NdiffFixPatternSourceResolution::Ready(source) => source,
         NdiffFixPatternSourceResolution::Rejected(response) => return Ok(response),
@@ -52,6 +61,13 @@ pub fn run_ndiff_extract_fix_pattern(
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let thinking_level = agentic_hunter_thinking_level(&input);
     let prompt = build_ndiff_fix_pattern_prompt(source.record.as_ref(), &source.patch_text);
+    // Phase scope so the LLM call indents under `extract-fix-pattern` in the feed.
+    let _llm_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step("reasoning", "extract-fix-pattern", "extract-fix-pattern")
+            .emit();
+        trace.parent_scope(phase)
+    });
     let pattern = query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
@@ -69,5 +85,16 @@ pub fn run_ndiff_extract_fix_pattern(
         ),
         require_json_object,
     )?;
-    ndiff_fix_pattern_response(source, pattern)
+    drop(_llm_scope);
+    let response = ndiff_fix_pattern_response(source, pattern);
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "extract-fix-pattern",
+                "ndiff:extract-fix-pattern complete",
+            )
+            .emit();
+    }
+    response
 }

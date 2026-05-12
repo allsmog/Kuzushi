@@ -126,7 +126,10 @@ pub(crate) fn full_mode_failed_chunk_ids(input: &Value) -> Result<Option<Vec<u32
             .filter(|s| !s.is_empty())
             .map(parse_failed_chunk_id)
             .collect::<Result<Vec<_>>>()?,
-        Value::Array(values) => values.iter().map(parse_failed_chunk_id_value).collect::<Result<Vec<_>>>()?,
+        Value::Array(values) => values
+            .iter()
+            .map(parse_failed_chunk_id_value)
+            .collect::<Result<Vec<_>>>()?,
         other => anyhow::bail!(
             "full-mode:hunt failedChunkIds must be a comma-separated string or array, got {other}"
         ),
@@ -150,7 +153,9 @@ fn parse_failed_chunk_id_value(value: &Value) -> Result<u32> {
         Value::Number(number) => number
             .as_u64()
             .and_then(|v| u32::try_from(v).ok())
-            .ok_or_else(|| anyhow::anyhow!("full-mode:hunt failedChunkIds has out-of-range value {number}")),
+            .ok_or_else(|| {
+                anyhow::anyhow!("full-mode:hunt failedChunkIds has out-of-range value {number}")
+            }),
         Value::String(raw) => parse_failed_chunk_id(raw.trim()),
         other => anyhow::bail!("full-mode:hunt failedChunkIds has invalid array value {other}"),
     }

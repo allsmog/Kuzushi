@@ -148,6 +148,7 @@ pub(crate) fn run_registry_scan_worker(
         config: &config,
         workspace: Some(&workspace),
         findings_store: Some(&store),
+        trace: None,
     };
     let _ = tx.send(ScanEvent::Stage("running sast:scan".to_string()));
     let result = registry.execute_tool_with_runtime(

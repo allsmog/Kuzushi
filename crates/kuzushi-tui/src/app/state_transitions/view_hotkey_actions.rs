@@ -120,6 +120,48 @@ impl ShellApp {
             ViewHotkeyAction::ResumeScan => {
                 self.handle_command(ShellCommand::Resume(None));
             }
+            ViewHotkeyAction::ActivityTabPaneFocus => {
+                if let Some(session) = self.activity.as_mut() {
+                    session.toggle_pane_focus();
+                }
+            }
+            ViewHotkeyAction::ActivityToggleVerbose => {
+                if let Some(session) = self.activity.as_mut() {
+                    session.toggle_verbose_subsystems();
+                }
+            }
+            ViewHotkeyAction::ActivityTogglePause => {
+                if let Some(session) = self.activity.as_mut() {
+                    session.toggle_paused();
+                }
+            }
+            ViewHotkeyAction::ActivityReset => {
+                self.activity = None;
+            }
+            ViewHotkeyAction::ActivityFocusSelected => {
+                if let Some(session) = self.activity.as_mut() {
+                    if !session.tasks.is_empty() {
+                        let cursor = session
+                            .task_scroll
+                            .min(session.tasks.len().saturating_sub(1));
+                        let task_id = session
+                            .tasks
+                            .values()
+                            .nth(cursor)
+                            .map(|row| row.task_id.clone());
+                        session.focus_task = task_id;
+                    }
+                }
+            }
+            ViewHotkeyAction::ActivityCancelRunning => {
+                // Try scan first, then single-tool. Both are no-ops if nothing
+                // is running, so the order doesn't matter much; scan abort
+                // first matches the operator mental model when both fire.
+                let aborted = self.request_scan_abort() || self.request_tool_abort();
+                if !aborted {
+                    self.log("activity", "no running tool or scan to cancel");
+                }
+            }
             _ => return false,
         }
         true

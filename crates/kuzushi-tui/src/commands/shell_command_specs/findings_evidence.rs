@@ -38,6 +38,12 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "stream run events",
     },
     ShellCommandSpec {
+        command: "activity",
+        aliases: &["activity", "/activity", "progress", "/progress", "/a"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "live module-progress dashboard",
+    },
+    ShellCommandSpec {
         command: "since <ref>",
         aliases: &["/since <ref>"],
         category: ShellCommandCategory::FindingsEvidence,

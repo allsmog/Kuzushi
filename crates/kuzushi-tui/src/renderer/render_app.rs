@@ -13,8 +13,19 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         height: max_view_height,
         ..area
     };
-    let view_lines = shell_view_lines(app, view_area);
-    let view_height = (view_lines.len() as u16).clamp(1, max_view_height);
+    // Activity view uses a true Ratatui split-pane (frame-level), not the
+    // shared line-based path. Skip the line computation entirely.
+    let activity_mode = matches!(app.shell_view, ShellView::Activity);
+    let view_lines = if activity_mode {
+        Vec::new()
+    } else {
+        shell_view_lines(app, view_area)
+    };
+    let view_height = if activity_mode {
+        max_view_height
+    } else {
+        (view_lines.len() as u16).clamp(1, max_view_height)
+    };
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -22,7 +33,11 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         .split(area);
 
     let mut index = 0;
-    render_lines(frame, chunks[index], view_lines);
+    if activity_mode {
+        render_activity_view(frame, chunks[index], app);
+    } else {
+        render_lines(frame, chunks[index], view_lines);
+    }
     index += 1;
     index += 1;
     for section in sections {

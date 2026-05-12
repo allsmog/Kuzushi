@@ -24,7 +24,10 @@ pub use run_summary_store::write_run_summary;
 pub use running::RunArtifact;
 pub use running::RunSummary;
 pub use running::RunTraceStep;
-pub use trace_handle::{ParentScope, TraceHandle, TraceSink, TraceStepBuilder};
+pub use trace_handle::{
+    current_parent_step, BroadcastSink, JsonlSink, ParentScope, TraceHandle, TraceSink,
+    TraceStepBuilder,
+};
 pub use write_run_artifact_json::append_run_trace_step;
 pub use write_run_artifact_json::next_run_trace_step_number;
 pub use write_run_artifact_json::write_run_artifact_json;

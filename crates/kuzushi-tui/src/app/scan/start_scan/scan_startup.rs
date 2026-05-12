@@ -22,7 +22,21 @@ impl ShellApp {
         self.scan_cancel = Some(cancel.clone());
         self.findings.clear();
         self.selected_finding = None;
-        self.shell_view = ShellView::ModuleRun;
+        // Mint an Activity session so trace events from the scan worker
+        // have somewhere to land. The drain pump (drain_trace_events) also
+        // creates one lazily, but seeding it here keeps the run-id consistent
+        // with the scan's eventual run id once the worker assigns one.
+        // Seed from the registry so the DAG pane shows all queued tasks
+        // from the first frame instead of "(no DAG tasks yet)" while the
+        // worker spins up.
+        let mut session = ActivitySession::new("scan-pending");
+        session.seed_from_registry(&self.registry);
+        self.activity = Some(session);
+        self.shell_view = if self.auto_open_activity {
+            ShellView::Activity
+        } else {
+            ShellView::ModuleRun
+        };
         self.log(
             "scan",
             format!("starting {}", request.target_root.display()),
