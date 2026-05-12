@@ -1,4 +1,6 @@
-use crate::capabilities::uaf_hunt::adapters::clang_subprocess::ClangMcpClient;
+use crate::capabilities::uaf_hunt::adapters::clang_subprocess::{
+    rewrite_unsupported_method_error, ClangMcpClient,
+};
 use crate::capabilities::uaf_hunt::adapters::parse_uaf_hunt_input;
 use crate::capabilities::uaf_hunt::application::{
     build_uaf_hunt_user_prompt, normalize_uaf_hunt_findings, persist_uaf_hunt_findings,
@@ -41,7 +43,7 @@ pub fn run_uaf_hunt_report(
 
     let stats = clang_stats.lock().expect("clang stats lock").clone();
     let findings = extract_findings(&outcome, &options)?;
-    let persisted = persist_uaf_hunt_findings(&target, &findings, ctx)?;
+    let persisted = persist_uaf_hunt_findings(&target, &findings, &outcome.transcript, ctx)?;
 
     Ok(UafHuntReport {
         target: target.display().to_string(),
@@ -227,10 +229,25 @@ impl<'a> ToolCallHandler for UafHuntHandler<'a> {
                     if stats.first_error.is_none() {
                         stats.first_error = Some(formatted.clone());
                     }
-                    ToolResult {
-                        call_id: call.call_id.clone(),
-                        output: json!({"error": formatted}),
-                        is_error: true,
+                    // Intercept "method not found" failures (clangd 18
+                    // doesn't implement outgoingCalls). Return a structured
+                    // advisory so the agent learns to fall back to
+                    // clang_definition + read_file instead of retrying the
+                    // unsupported call.
+                    if let Some(advisory) =
+                        rewrite_unsupported_method_error(clang_method, &err)
+                    {
+                        ToolResult {
+                            call_id: call.call_id.clone(),
+                            output: advisory.to_tool_result(),
+                            is_error: false,
+                        }
+                    } else {
+                        ToolResult {
+                            call_id: call.call_id.clone(),
+                            output: json!({"error": formatted}),
+                            is_error: true,
+                        }
                     }
                 }
             };

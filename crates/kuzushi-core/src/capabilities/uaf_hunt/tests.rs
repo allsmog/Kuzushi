@@ -1,3 +1,4 @@
+use super::adapters::clang_subprocess::rewrite_unsupported_method_error;
 use super::adapters::{parse_uaf_hunt_input, resolve_compile_commands_path};
 use serde_json::json;
 use tempfile::tempdir;
@@ -130,4 +131,71 @@ fn explicit_compile_commands_path_honored() {
     )
     .unwrap();
     assert_eq!(resolved, custom);
+}
+
+#[test]
+fn default_max_agent_steps_is_120_with_a_400_cap() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("compile_commands.json"), "[]").unwrap();
+
+    // No explicit override → use the new default.
+    let default = parse_uaf_hunt_input(&json!({}), dir.path()).unwrap();
+    assert_eq!(
+        default.max_agent_steps, 120,
+        "first live run hit the cap at 85 steps on a single alloc/free pair; \
+         60 default was too low for any real codebase"
+    );
+
+    // Explicit override clamped at 400 (defense against runaway costs).
+    let huge = parse_uaf_hunt_input(&json!({"maxAgentSteps": 10_000}), dir.path()).unwrap();
+    assert_eq!(huge.max_agent_steps, 400);
+
+    // Operator can pick anywhere in [4, 400].
+    let custom = parse_uaf_hunt_input(&json!({"maxAgentSteps": 250}), dir.path()).unwrap();
+    assert_eq!(custom.max_agent_steps, 250);
+}
+
+#[test]
+fn method_not_found_for_callees_becomes_workaround_advisory() {
+    let error = anyhow::anyhow!(
+        "uaf-hunt: mcp-clang returned JSON-RPC error code -32601: method not found"
+    );
+    let advisory = rewrite_unsupported_method_error("clang.callees", &error)
+        .expect("clangd's method-not-found error must produce an advisory");
+    assert_eq!(advisory.method, "clang.callees");
+    assert!(
+        advisory.reason.contains("outgoingCalls"),
+        "reason should name the specific LSP method: {}",
+        advisory.reason
+    );
+    assert!(
+        advisory.workaround.contains("clang_definition")
+            && advisory.workaround.contains("read_file"),
+        "workaround must name the fallback tools: {}",
+        advisory.workaround
+    );
+    let json = advisory.to_tool_result();
+    assert_eq!(json["unsupported"], json!(true));
+    assert_eq!(json["method"], json!("clang.callees"));
+}
+
+#[test]
+fn non_method_not_found_errors_pass_through_unchanged() {
+    // E.g. the clang subprocess died with a stdout-closed error, or
+    // clangd reported an invalid position. These should NOT become
+    // advisories — they're real failures the operator needs to see.
+    for chain in [
+        "uaf-hunt: mcp-clang closed stdout unexpectedly",
+        "uaf-hunt: tool clang.references returned error: position out of range",
+        "ENOENT: compile_commands.json missing",
+    ] {
+        let advisory = rewrite_unsupported_method_error(
+            "clang.references",
+            &anyhow::anyhow!(chain.to_string()),
+        );
+        assert!(
+            advisory.is_none(),
+            "advisory should be None for non-method-not-found error: {chain}"
+        );
+    }
 }
