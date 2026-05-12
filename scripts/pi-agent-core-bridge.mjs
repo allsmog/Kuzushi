@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   chmodSync,
   closeSync,
   existsSync,
-  appendFileSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -60,7 +60,8 @@ function mcpEnvironment(request) {
 }
 
 function mcpToolTimeoutMs(request) {
-  const raw = runtimeOptions(request).mcpToolTimeoutMs ?? runtimeOptions(request).mcp_tool_timeout_ms;
+  const raw =
+    runtimeOptions(request).mcpToolTimeoutMs ?? runtimeOptions(request).mcp_tool_timeout_ms;
   const value = Number(raw ?? process.env.KUZUSHI_MCP_TOOL_TIMEOUT_MS ?? 60_000);
   if (!Number.isFinite(value) || value <= 0) return 60_000;
   return Math.floor(value);
@@ -137,8 +138,7 @@ async function readStdin() {
  * to use an Anthropic OAuth bag. If the caller's system prompt already
  * starts with the line, leave it as-is so we don't double-prefix.
  */
-const CLAUDE_CODE_IDENTITY_LINE =
-  "You are Claude Code, Anthropic's official CLI for Claude.";
+const CLAUDE_CODE_IDENTITY_LINE = "You are Claude Code, Anthropic's official CLI for Claude.";
 
 function applyClaudeCodeIdentityPrefix(systemPrompt) {
   const body = typeof systemPrompt === "string" ? systemPrompt : "";
@@ -190,9 +190,7 @@ function providerEnvName(provider) {
  */
 function numericTemperature(request) {
   const candidate =
-    request?.temperature ??
-    request?.samplingTemperature ??
-    request?.sampling_temperature;
+    request?.temperature ?? request?.samplingTemperature ?? request?.sampling_temperature;
   if (candidate === undefined || candidate === null) return undefined;
   const value = Number(candidate);
   if (!Number.isFinite(value)) return undefined;
@@ -475,15 +473,19 @@ async function runOpenAiResponsesCall(provider, modelId, request) {
   }
   const outputText =
     parsed.output_text ??
-    parsed.output?.flatMap?.((item) => item.content ?? []).map?.((part) => part.text ?? "").join?.("") ??
+    parsed.output
+      ?.flatMap?.((item) => item.content ?? [])
+      .map?.((part) => part.text ?? "")
+      .join?.("") ??
     "";
   return String(outputText || "").trim();
 }
 
 async function resolveOpenAiBearerToken(provider, request) {
-  const freshOauth = provider === "openai-codex"
-    ? await getFreshOAuthAccessTokenForProvider("openai-codex")
-    : undefined;
+  const freshOauth =
+    provider === "openai-codex"
+      ? await getFreshOAuthAccessTokenForProvider("openai-codex")
+      : undefined;
   return (
     freshOauth ??
     providerAuthToken(provider) ??
@@ -816,9 +818,7 @@ async function spawnMcpServer(spec, cwd, request) {
     tools: [],
   };
   child.on("error", (error) => {
-    bridgeLog(
-      `[kuzushi-bridge] MCP server ${spec.binary} errored: ${error.message ?? error}\n`,
-    );
+    bridgeLog(`[kuzushi-bridge] MCP server ${spec.binary} errored: ${error.message ?? error}\n`);
     handle.alive = false;
   });
   child.on("exit", () => {
@@ -871,10 +871,11 @@ function sendMcpRequest(handle, method, params) {
 
 function receiveMcpStdout(handle, chunk) {
   handle.buffer += chunk;
-  let newlineIndex;
-  while ((newlineIndex = handle.buffer.indexOf("\n")) >= 0) {
+  let newlineIndex = handle.buffer.indexOf("\n");
+  while (newlineIndex >= 0) {
     const line = handle.buffer.slice(0, newlineIndex).trim();
     handle.buffer = handle.buffer.slice(newlineIndex + 1);
+    newlineIndex = handle.buffer.indexOf("\n");
     if (!line) continue;
     let payload;
     try {
@@ -902,10 +903,11 @@ function wrapMcpToolForAgent(handle, mcpTool) {
     name: safeName,
     label: safeName,
     description: `[mcp:${handle.profile}] ${mcpTool.description}`,
-    parameters: mcpTool.inputSchema ?? mcpTool.input_schema ?? {
-      type: "object",
-      additionalProperties: true,
-    },
+    parameters: mcpTool.inputSchema ??
+      mcpTool.input_schema ?? {
+        type: "object",
+        additionalProperties: true,
+      },
     execute: async (_toolCallId, params) => {
       const startedAt = Date.now();
       const verbose = bridgeVerbose;
@@ -975,8 +977,7 @@ function subscribeMessageEnd(agent, onMessageEnd) {
 }
 
 function sanitizeMaxOutputTokens(request) {
-  const raw =
-    request.maxOutputTokens ?? request.max_output_tokens ?? request.maxTokens;
+  const raw = request.maxOutputTokens ?? request.max_output_tokens ?? request.maxTokens;
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
     return null;
   }
@@ -1010,9 +1011,7 @@ async function runAgent(AgentCtor, model, request) {
   if (model?.provider === "anthropic" && (await anthropicOauthIsActive(request))) {
     systemPrompt = applyClaudeCodeIdentityPrefix(systemPrompt);
   }
-  const thinkingLevel =
-    normalizeThinkingLevel(request.thinkingLevel) ??
-    "low";
+  const thinkingLevel = normalizeThinkingLevel(request.thinkingLevel) ?? "low";
 
   if (provider === "openai" || provider === "openai-codex") {
     const openaiText = await runOpenAiResponsesCall(provider, modelId, {
@@ -1440,12 +1439,16 @@ async function handlePing(request) {
   const [provider, modelId] = parseModelSpec(request.model);
   if (provider === "openai-codex" || provider === "openai") {
     const t0 = Date.now();
-    const result = await runAgent(null, { provider, id: modelId }, {
-      model: `${provider}:${modelId}`,
-      system_prompt: "You are an auth ping probe. Reply with ok.",
-      prompt: "ok",
-      cwd: process.cwd(),
-    });
+    const result = await runAgent(
+      null,
+      { provider, id: modelId },
+      {
+        model: `${provider}:${modelId}`,
+        system_prompt: "You are an auth ping probe. Reply with ok.",
+        prompt: "ok",
+        cwd: process.cwd(),
+      },
+    );
     const latency_ms = Date.now() - t0;
 
     const auth_mode = (await resolveOpenAiBearerToken(provider, request))
@@ -1579,10 +1582,7 @@ async function handleNextStep(request) {
   const rawSystem = request.systemPrompt ?? request.system_prompt ?? "";
   const body = {
     model: modelId,
-    system:
-      oauthToken || envOauth
-        ? claudeCodeIdentitySystemBlocks(rawSystem)
-        : rawSystem,
+    system: oauthToken || envOauth ? claudeCodeIdentitySystemBlocks(rawSystem) : rawSystem,
     messages: request.messages ?? [],
     tools: (request.tools ?? []).map((t) => ({
       name: t.name,
