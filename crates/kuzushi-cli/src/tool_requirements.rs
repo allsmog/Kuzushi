@@ -39,6 +39,7 @@ pub(crate) const WORKSPACE_TOOL_PREFIXES: &[&str] = &[
     "variant:",
     "ndiff:",
     "systems-hunt:",
+    "threat-intel:",
     "uaf-hunt:",
 ];
 
