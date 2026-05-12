@@ -1,3 +1,6 @@
+use crate::capabilities::threat_intel::application::regression_gate::{
+    run_regression_gate, RegressionGateOutcome, RegressionGateStatus,
+};
 use crate::capabilities::threat_intel::domain::HuntKind;
 use crate::modules::ToolExecutionContext;
 use crate::runtime::AgentRuntime;
@@ -32,15 +35,74 @@ pub fn harvest_threat_intel_catalog(
 ) -> Result<Value> {
     let cves = parse_cve_list(input)?;
     let output_path = resolve_output_path(input, ctx)?;
+    let gate_enabled = input
+        .get("regressionGate")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let accept_rejected = input
+        .get("acceptRejected")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let gate_target = ctx.workspace.map(|w| w.root().to_path_buf());
     let mut per_cve = Vec::with_capacity(cves.len());
     let mut new_entries = Vec::new();
     let mut harvested = 0u32;
     let mut skipped = 0u32;
     let mut failed = 0u32;
+    let mut rejected_by_gate = 0u32;
+    let mut validated_by_gate = 0u32;
+    let mut unverified_by_gate = 0u32;
 
     for cve in &cves {
         match harvest_one(cve, ctx, runtime, &mut dispatch_tool) {
-            Ok(HarvestedEntry::Entry(entry)) => {
+            Ok(HarvestedEntry::Entry(mut entry)) => {
+                let gate_outcome = if gate_enabled {
+                    match gate_target.as_deref() {
+                        Some(target) => Some(gate_outcome_or_unverified(
+                            target,
+                            cve,
+                            &entry.fetched_record,
+                            &entry.fetched_pattern,
+                        )),
+                        None => Some(RegressionGateOutcome::unverified(
+                            "no workspace target available; pass --target <repo> to enable \
+                             the regression gate"
+                                .to_string(),
+                        )),
+                    }
+                } else {
+                    None
+                };
+                let gate_status_for_entry =
+                    gate_outcome.as_ref().map(|outcome| outcome.status.clone());
+                let drop_due_to_gate = matches!(
+                    gate_status_for_entry,
+                    Some(RegressionGateStatus::Rejected)
+                ) && !accept_rejected;
+
+                match gate_status_for_entry {
+                    Some(RegressionGateStatus::Validated) => validated_by_gate += 1,
+                    Some(RegressionGateStatus::Unverified) => unverified_by_gate += 1,
+                    Some(RegressionGateStatus::Rejected) => rejected_by_gate += 1,
+                    None => {}
+                }
+
+                if let Some(outcome) = &gate_outcome {
+                    entry.gate_outcome = Some(outcome.clone());
+                }
+
+                if drop_due_to_gate {
+                    skipped += 1;
+                    per_cve.push(json!({
+                        "cve": cve,
+                        "status": "rejected-by-gate",
+                        "reason": gate_outcome.as_ref().map(|o| o.reason.clone()),
+                        "preFixHits": gate_outcome.as_ref().and_then(|o| o.pre_fix_hits),
+                        "postFixHits": gate_outcome.as_ref().and_then(|o| o.post_fix_hits),
+                    }));
+                    continue;
+                }
+
                 harvested += 1;
                 per_cve.push(json!({
                     "cve": cve,
@@ -48,6 +110,7 @@ pub fn harvest_threat_intel_catalog(
                     "entryId": entry.id,
                     "hunt": entry.hunt.as_str(),
                     "cwe": entry.cwe,
+                    "gate": gate_outcome,
                 }));
                 new_entries.push(entry);
             }
@@ -80,8 +143,29 @@ pub fn harvest_threat_intel_catalog(
             "harvested": harvested,
             "skipped": skipped,
             "failed": failed,
+            "regressionGate": {
+                "enabled": gate_enabled,
+                "acceptRejected": accept_rejected,
+                "validated": validated_by_gate,
+                "unverified": unverified_by_gate,
+                "rejected": rejected_by_gate,
+            },
         },
     }))
+}
+
+fn gate_outcome_or_unverified(
+    target: &Path,
+    cve: &str,
+    record: &Value,
+    pattern: &Value,
+) -> RegressionGateOutcome {
+    match run_regression_gate(target, cve, record, pattern) {
+        Ok(outcome) => outcome,
+        Err(err) => RegressionGateOutcome::unverified(format!(
+            "regression-gate error for {cve}: {err:#}"
+        )),
+    }
 }
 
 #[derive(Debug)]
@@ -106,6 +190,15 @@ struct HarvestedCatalogEntry {
     affected_files: Vec<String>,
     confidence: String,
     description: String,
+    /// Raw ndiff:fetch-cve `record` Value, kept so the regression gate
+    /// can read patches/affectedFiles without re-fetching.
+    fetched_record: Value,
+    /// Raw ndiff:extract-fix-pattern `pattern` Value, kept for the
+    /// same reason — `keywords` / `detectionQuery` feed the gate.
+    fetched_pattern: Value,
+    /// Set after the regression gate runs. None when the gate was
+    /// disabled (`regressionGate: false` in the input).
+    gate_outcome: Option<RegressionGateOutcome>,
 }
 
 fn parse_cve_list(input: &Value) -> Result<Vec<String>> {
@@ -223,31 +316,31 @@ fn harvest_one(
 
     Ok(HarvestedEntry::Entry(catalog_entry_from_pattern(
         cve,
-        &record,
-        &pattern_data,
+        record,
+        pattern_data,
     )))
 }
 
 fn catalog_entry_from_pattern(
     cve: &str,
-    record: &Value,
-    pattern: &Value,
+    record: Value,
+    pattern: Value,
 ) -> HarvestedCatalogEntry {
-    let cwe = first_cwe(pattern, record).unwrap_or_else(|| "CWE-Other".to_string());
+    let cwe = first_cwe(&pattern, &record).unwrap_or_else(|| "CWE-Other".to_string());
     let title = record
         .get("description")
         .and_then(Value::as_str)
         .map(first_sentence)
-        .unwrap_or_else(|| pattern_description(pattern).unwrap_or_else(|| cve.to_string()));
-    let severity = nvd_severity(record).unwrap_or_else(|| "high".to_string());
+        .unwrap_or_else(|| pattern_description(&pattern).unwrap_or_else(|| cve.to_string()));
+    let severity = nvd_severity(&record).unwrap_or_else(|| "high".to_string());
     let id = sanitize_entry_id(&format!("redis-{}", cve));
     let hunt = hunt_kind_for_cwe(&cwe);
-    let source_signals = pattern_signals_from_vulnerable_shape(pattern);
-    let sink_signals = pattern_signals_from_detection_query(pattern);
-    let sanitizer_signals = pattern_signals_from_fix_shape(pattern);
-    let structural_queries = pattern_keywords(pattern);
-    let languages = pattern_languages(pattern);
-    let affected_files = pattern_affected_files(record);
+    let source_signals = pattern_signals_from_vulnerable_shape(&pattern);
+    let sink_signals = pattern_signals_from_detection_query(&pattern);
+    let sanitizer_signals = pattern_signals_from_fix_shape(&pattern);
+    let structural_queries = pattern_keywords(&pattern);
+    let languages = pattern_languages(&pattern);
+    let affected_files = pattern_affected_files(&record);
     let confidence = pattern
         .get("confidence")
         .and_then(Value::as_str)
@@ -274,6 +367,9 @@ fn catalog_entry_from_pattern(
         affected_files,
         confidence,
         description,
+        fetched_record: record,
+        fetched_pattern: pattern,
+        gate_outcome: None,
     }
 }
 
@@ -447,16 +543,17 @@ fn render_entry_toml(buf: &mut String, entry: &HarvestedCatalogEntry) {
     push_toml_string(buf, "title", &entry.title);
     push_toml_string(buf, "cwe", &entry.cwe);
     push_toml_string(buf, "severity", &entry.severity);
+    push_toml_string(buf, "provenance", &provenance_string(entry));
+    push_toml_string(buf, "source_repo", "");
     push_toml_string(
         buf,
-        "provenance",
-        &format!(
-            "harvested via threat-intel:harvest from {} (confidence={}); verify before trusting",
-            entry.cve, entry.confidence
-        ),
+        "fix_commit",
+        entry
+            .gate_outcome
+            .as_ref()
+            .and_then(|outcome| outcome.fix_sha.as_deref())
+            .unwrap_or(""),
     );
-    push_toml_string(buf, "source_repo", "");
-    push_toml_string(buf, "fix_commit", "");
     push_toml_string(buf, "hunt", entry.hunt.as_str());
 
     let subtable = match entry.hunt {
@@ -477,6 +574,31 @@ fn render_entry_toml(buf: &mut String, entry: &HarvestedCatalogEntry) {
         push_toml_string(buf, "description", &entry.description);
     }
     buf.push('\n');
+}
+
+fn provenance_string(entry: &HarvestedCatalogEntry) -> String {
+    let mut chunks = vec![format!(
+        "harvested via threat-intel:harvest from {} (confidence={})",
+        entry.cve, entry.confidence
+    )];
+    if let Some(outcome) = &entry.gate_outcome {
+        let label = match outcome.status {
+            crate::capabilities::threat_intel::application::regression_gate::RegressionGateStatus::Validated => "regression-gate=validated",
+            crate::capabilities::threat_intel::application::regression_gate::RegressionGateStatus::Unverified => "regression-gate=unverified",
+            crate::capabilities::threat_intel::application::regression_gate::RegressionGateStatus::Rejected => "regression-gate=rejected",
+        };
+        chunks.push(label.to_string());
+        if let (Some(pre), Some(post)) = (outcome.pre_fix_hits, outcome.post_fix_hits) {
+            chunks.push(format!("hits pre/post={pre}/{post}"));
+        }
+        if let Some(sha) = &outcome.fix_sha {
+            chunks.push(format!("fix={}", &sha[..sha.len().min(12)]));
+        }
+    } else {
+        chunks.push("regression-gate=disabled".to_string());
+    }
+    chunks.push("verify before trusting".to_string());
+    chunks.join("; ")
 }
 
 fn render_uaf_hunt_subtable(buf: &mut String, entry: &HarvestedCatalogEntry) {
@@ -631,7 +753,7 @@ mod tests {
             "description": "Lua client UAF",
             "confidence": "HIGH",
         });
-        let entry = catalog_entry_from_pattern("CVE-2025-49844", &record, &pattern);
+        let entry = catalog_entry_from_pattern("CVE-2025-49844", record, pattern);
         assert_eq!(entry.cwe, "CWE-416");
         assert_eq!(entry.hunt, HuntKind::UafHunt);
         assert_eq!(entry.severity, "critical");
@@ -658,6 +780,9 @@ mod tests {
             affected_files: vec!["src/t_stream.c".to_string()],
             confidence: "HIGH".to_string(),
             description: "Stream count overflow".to_string(),
+            fetched_record: serde_json::json!({}),
+            fetched_pattern: serde_json::json!({}),
+            gate_outcome: None,
         };
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("harvested.toml");
@@ -689,6 +814,9 @@ mod tests {
             affected_files: vec!["src/networking.c".to_string()],
             confidence: "HIGH".to_string(),
             description: "Client UAF".to_string(),
+            fetched_record: serde_json::json!({}),
+            fetched_pattern: serde_json::json!({}),
+            gate_outcome: None,
         };
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("harvested.toml");
