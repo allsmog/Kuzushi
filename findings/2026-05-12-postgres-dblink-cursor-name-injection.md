@@ -5,7 +5,55 @@
 **File:** `contrib/dblink/dblink.c`
 **Severity (agent triage):** high
 **Confidence:** high
-**Kuzushi run:** `/tmp/targets/pg-fdw/.kuzushi/runs/run-1778543845-5c417988a3af/`
+**Kuzushi runs:**
+- Original discovery: `/tmp/targets/pg-fdw/.kuzushi/runs/run-1778543845-5c417988a3af/`
+- OOB rediscovery via E1 deterministic detector (commit `0deed42b`):
+  `/tmp/targets/pg-fdw/.kuzushi/runs/run-1778548124-476c1e319e8a/`
+  (backend=structural, no joern, $0.14, 14s)
+
+## Out-of-the-box rediscovery
+
+Re-ran with the new E1 + E3 pipeline (`feat(taint-iris-next):
+out-of-the-box dblink-class CVE detection on postgres mainline`,
+commit `0deed42b`). Same target, but using only the deterministic
+tree-sitter identifier-injection detector — no joern flow query.
+
+Detector surfaced **12 ts.identifier-injection candidates** in
+contrib/dblink + contrib/postgres_fdw:
+
+- `dblink.c:479` (DECLARE + CURSOR FOR — 2 hits in the same line)
+- `dblink.c:546` (CLOSE)
+- `dblink.c:644` (FETCH FROM)
+- `dblink.c:2154` (INTO — dblink_build_sql_*)
+- `dblink.c:2222` (FROM — dblink_build_sql_*)
+- `dblink.c:2271` (UPDATE — dblink_build_sql_*)
+- `dblink.c:2412` (FROM — dblink_build_sql_*)
+- `postgres_fdw/deparse.c:1895` (FROM)
+- `postgres_fdw/deparse.c:1965` (JOIN)
+- `postgres_fdw/postgres_fdw.c:3975` (DECLARE)
+- `postgres_fdw/postgres_fdw.c:6930` (JOIN)
+
+Agent triage outcome — **2 findings (the original dblink_open
++ dblink_close sites), automatic privilege-boundary framing**:
+> "attacker who can call dblink_close (directly *or via a
+> **SECURITY DEFINER wrapper or GRANT EXECUTE asymmetry**) can break
+> out of the cursor-name identifier slot... arbitrary SQL that
+> executes on the remote server with the credentials of the **user
+> mapping**"
+
+The E3 "Realistic Exploit Patterns" prompt section landed the
+SECURITY DEFINER framing in the model's verdict automatically — no
+manual operator framing needed.
+
+Cost reduction from the original audit: **$3.81 → $0.14** (27x
+cheaper, no joern). Time reduction: **~14s** vs. the original
+~90-minute joern-hang-then-narrow-to-pg-fdw cycle.
+
+This is the closed loop on the
+`/root/.claude/plans/lovely-sleeping-blanket.md` plan: point at
+`pg-fdw` (or, after the E2b partition workflow, any of the
+recommended subdirs), get the audit-grade finding without manual
+intervention.
 
 ## Summary
 
