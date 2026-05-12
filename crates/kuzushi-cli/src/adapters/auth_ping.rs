@@ -4,6 +4,7 @@ use super::auth_bridge::{
 };
 use super::auth_oauth::{
     auth_ping_model, record_anthropic_env_presence, record_anthropic_oauth_readiness,
+    record_codex_runtime_auth_presence,
 };
 use crate::command::AuthCommand;
 use anyhow::Result;
@@ -113,6 +114,8 @@ pub(crate) fn probe_auth_credentials(
 ) -> Result<()> {
     if provider == "anthropic" {
         probe_anthropic_credentials(config, log)?;
+    } else if matches!(provider, "openai-codex" | "codex" | "openai") {
+        record_codex_runtime_auth_presence(log);
     }
     Ok(())
 }

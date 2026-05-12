@@ -663,6 +663,7 @@ OUT
             },
             chunks_dispatched: 1,
             chunks_failed: 0,
+            failed_chunk_errors: Vec::new(),
             cost_usd: 0.0,
             dry_run: false,
         };

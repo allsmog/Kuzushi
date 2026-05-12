@@ -1,6 +1,8 @@
 use super::plan::plan;
 use crate::agent_router::RoutedRuntime;
-use crate::capabilities::full_mode_multi::domain::{FullModeConfig, FullModePlan, FullModeReport};
+use crate::capabilities::full_mode_multi::domain::{
+    FailedChunkError, FullModeConfig, FullModePlan, FullModeReport,
+};
 use crate::spend::SpendLimiter;
 use anyhow::{Context, Result};
 
@@ -34,9 +36,15 @@ fn dispatch_full_mode_chunks(
     let mut all_findings = Vec::new();
     let mut dispatched = 0u32;
     let mut failed = 0u32;
+    let mut failed_chunk_errors = Vec::new();
     let mut cost = 0.0f64;
 
     for chunk in &plan.chunks {
+        if let Some(ids) = &cfg.failed_chunk_ids {
+            if !ids.contains(&chunk.id) {
+                continue;
+            }
+        }
         let chunk_result =
             chunk_execution::run_full_mode_chunk(runtime, spend, cfg, chunk, model, system_prompt)?;
         if chunk_result.succeeded {
@@ -45,6 +53,12 @@ fn dispatch_full_mode_chunks(
             all_findings.extend(chunk_result.findings);
         } else {
             failed += 1;
+            failed_chunk_errors.push(FailedChunkError {
+                chunk_id: chunk.id,
+                reason: chunk_result
+                    .error
+                    .unwrap_or_else(|| "unknown chunk failure".to_string()),
+            });
         }
     }
 
@@ -53,6 +67,7 @@ fn dispatch_full_mode_chunks(
         plan,
         chunks_dispatched: dispatched,
         chunks_failed: failed,
+        failed_chunk_errors,
         cost_usd: cost,
         dry_run: false,
     })

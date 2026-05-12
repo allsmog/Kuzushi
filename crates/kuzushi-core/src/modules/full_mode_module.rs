@@ -22,7 +22,7 @@ pub(crate) fn full_mode_module() -> BuiltinModule {
                     OptionType::Int,
                     "Token budget per chunk; chunks pack files up to this cap.",
                 )
-                .default(serde_json::json!(120_000)),
+                .default(serde_json::json!(12_000)),
                 opt(
                     "depositUsdPerChunk",
                     OptionType::Float,
@@ -39,6 +39,11 @@ pub(crate) fn full_mode_module() -> BuiltinModule {
                     "scopeFile",
                     OptionType::Path,
                     "Optional repo-relative path to a newline-delimited scope file. Defaults to <target>/.kuzushi/v2/since.txt when --since populated it.",
+                ),
+                opt(
+                    "failedChunkIds",
+                    OptionType::String,
+                    "Optional retry filter: comma-separated chunk IDs (\"3,7,11\") or JSON array when using run JSON input.",
                 ),
             ],
         )],
