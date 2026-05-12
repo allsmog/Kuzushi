@@ -77,6 +77,9 @@ impl ModuleRegistry {
         if let Some(result) = dispatch_systems_hunt_tool(name, &input, ctx, runtime) {
             return result;
         }
+        if let Some(result) = dispatch_uaf_hunt_tool(name, &input, ctx, runtime) {
+            return result;
+        }
         if let Some(result) = dispatch_runtime_analysis_tool(name, &input, ctx, runtime) {
             return result;
         }
