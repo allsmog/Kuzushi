@@ -8,8 +8,10 @@ TEST_APP_DIR="${TEST_APP_DIR:-/tmp/kuzushi-smoke-app}"
 TEST_LOG_DIR="${TEST_LOG_DIR:-/tmp/kuzushi-smoke-logs}"
 FAKE_BIN_DIR="${TEST_LOG_DIR}/bin"
 DB_PATH="${TEST_APP_DIR}/.kuzushi/v2/findings.sqlite3"
-HOST_TRIPLE="$(node -p '`${process.platform}-${process.arch}`')"
-DOWNLOADED_NATIVE_BIN="${REPO_DIR}/native/${HOST_TRIPLE}/kuzushi"
+NATIVE_EXE_NAME="$(node -p 'process.platform === "win32" ? "kuzushi.exe" : "kuzushi"')"
+DOWNLOADED_NATIVE_BIN="$(
+  find "${REPO_DIR}/native" -type f -name "${NATIVE_EXE_NAME}" -print -quit 2>/dev/null || true
+)"
 
 # Command used to invoke the Kuzushi CLI. CI can set
 # KUZUSHI_CMD="node bin/kuzushi-rs.mjs" after downloading native/.
@@ -60,7 +62,8 @@ export PATH="${FAKE_BIN_DIR}:${PATH}"
 export KUZUSHI_MODEL="${KUZUSHI_MODEL:-openai:gpt-4.1}"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-fake-key}"
 
-if [[ -z "${KUZUSHI_NATIVE_BIN:-}" && -x "${DOWNLOADED_NATIVE_BIN}" ]]; then
+if [[ -z "${KUZUSHI_NATIVE_BIN:-}" && -n "${DOWNLOADED_NATIVE_BIN}" ]]; then
+  chmod +x "${DOWNLOADED_NATIVE_BIN}"
   export KUZUSHI_NATIVE_BIN="${DOWNLOADED_NATIVE_BIN}"
 fi
 
