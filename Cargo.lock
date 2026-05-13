@@ -988,6 +988,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "kuzushi-mcp-revng"
+version = "0.24.0-alpha.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "dirs",
+ "kuzushi-mcp-common",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "kuzushi-mcp-treesitter"
 version = "0.24.0-alpha.0"
 dependencies = [

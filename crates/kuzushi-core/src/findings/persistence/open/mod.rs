@@ -1,6 +1,7 @@
 use super::*;
 
 mod connection_and_schema;
+mod finding_evidence;
 mod finding_lists;
 mod finding_lookup;
 mod finding_writes;

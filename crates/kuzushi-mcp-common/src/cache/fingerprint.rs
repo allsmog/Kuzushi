@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use super::sha256::sha256_bytes;
+use super::sha256::sha256_hex_bytes;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -69,10 +69,5 @@ fn remote_url_value(trimmed: &str) -> Option<&str> {
 }
 
 pub(crate) fn sha256_hex(input: &str) -> String {
-    let bytes = sha256_bytes(input.as_bytes());
-    let mut hex = String::with_capacity(64);
-    for byte in bytes {
-        hex.push_str(&format!("{byte:02x}"));
-    }
-    hex
+    sha256_hex_bytes(input.as_bytes())
 }

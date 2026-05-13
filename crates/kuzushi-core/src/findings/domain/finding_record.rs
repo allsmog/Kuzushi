@@ -41,6 +41,17 @@ impl VulnSource {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FindingEvidence {
+    pub kind: String,
+    pub file_path: String,
+    pub line: u32,
+    pub snippet: String,
+    pub rationale: String,
+    pub confidence: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Finding {
     pub id: Option<i64>,
     pub scan_id: Option<String>,
@@ -79,6 +90,8 @@ pub struct Finding {
     /// merges. Computed from `(file, line/16, normalized_cwe)`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dedup_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<FindingEvidence>,
 }
 
 pub(crate) const DEDUP_LINE_BUCKET: u32 = 16;

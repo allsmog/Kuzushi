@@ -54,6 +54,20 @@ pub struct ReconSnapshot {
     pub last_target: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct PwnView {
+    pub target: Option<PathBuf>,
+    pub binary: Option<PathBuf>,
+    pub state_path: Option<PathBuf>,
+    pub profile_snapshot: Option<serde_json::Value>,
+    pub reverse_snapshots: Vec<serde_json::Value>,
+    pub auto_solve_snapshot: Option<serde_json::Value>,
+    pub state_snapshot: Option<serde_json::Value>,
+    pub candidates_snapshot: Option<serde_json::Value>,
+    pub selected_panel: usize,
+    pub selected_row: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellView {
     Catalog,
@@ -90,6 +104,9 @@ pub enum ShellView {
     /// per `design/mockups/patch.jsx`.  String is the finding alias
     /// the patch addresses.
     Patch(String),
+    /// Dedicated pwn workflow dashboard backed by pwn:* tool results and
+    /// `.kuzushi/pwn/<hash>/state.json`.
+    Pwn,
     /// Live module-progress dashboard. Split pane: left shows DAG status
     /// (queued / active / done / failing per task), right shows a tagged
     /// reasoning feed `[module:verb]`. Session state lives on `app.activity`.

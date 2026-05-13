@@ -49,6 +49,31 @@ mod tests {
             parse_command("/scan ./repo"),
             ShellCommand::Scan(Some(PathBuf::from("./repo")))
         );
+        assert_eq!(parse_command("/pwn"), ShellCommand::Pwn(PwnCommand::Show));
+        assert_eq!(
+            parse_command("/pwn target ./challenge/bin"),
+            ShellCommand::Pwn(PwnCommand::Target(PathBuf::from("./challenge/bin")))
+        );
+        assert_eq!(
+            parse_command("/pwn profile"),
+            ShellCommand::Pwn(PwnCommand::Profile)
+        );
+        assert_eq!(
+            parse_command("/pwn reverse main"),
+            ShellCommand::Pwn(PwnCommand::Reverse(Some("main".to_string())))
+        );
+        assert_eq!(
+            parse_command("/pwn auto"),
+            ShellCommand::Pwn(PwnCommand::Auto)
+        );
+        assert_eq!(
+            parse_command("/pwn state"),
+            ShellCommand::Pwn(PwnCommand::State)
+        );
+        assert_eq!(
+            parse_command("/pwn candidates 127.0.0.1:31337"),
+            ShellCommand::Pwn(PwnCommand::Candidates("127.0.0.1:31337".to_string()))
+        );
         assert_eq!(
             parse_command("/model openai:gpt-5.5 xtrahigh"),
             ShellCommand::Model(Some("openai:gpt-5.5 xtrahigh".to_string()))
@@ -403,6 +428,7 @@ mod tests {
             "prompts",
             "prompt",
             "provider",
+            "pwn",
             "quickstart",
             "quit",
             "reparse",
@@ -509,6 +535,7 @@ mod tests {
             ShellCommand::Task(_) => "task",
             ShellCommand::Context(_) => "context",
             ShellCommand::Workspace(_) => "workspace",
+            ShellCommand::Pwn(_) => "pwn",
             ShellCommand::KnowledgeBase(_) => "kb",
             ShellCommand::Attach(_) => "attach",
             ShellCommand::Detach(_) => "detach",

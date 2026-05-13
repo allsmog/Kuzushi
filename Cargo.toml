@@ -9,6 +9,7 @@ members = [
   "crates/kuzushi-mcp-common",
   "crates/kuzushi-mcp-gtags",
   "crates/kuzushi-mcp-joern",
+  "crates/kuzushi-mcp-revng",
   "crates/kuzushi-mcp-treesitter",
   "crates/kuzushi-openai",
   "crates/kuzushi-sandbox",

@@ -129,6 +129,7 @@ impl ShellApp {
             | ShellView::Threat(_)
             | ShellView::ThreatEditor
             | ShellView::PromptsEditor
+            | ShellView::Pwn
             | ShellView::Tune
             | ShellView::ActorDetail(_)
             | ShellView::ModuleRun

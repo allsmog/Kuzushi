@@ -6,6 +6,10 @@ impl ShellApp {
     /// carlini-threat-hunt / agentic-sast snapshots reachable across log
     /// truncation.
     pub(crate) fn cache_tool_snapshot(&mut self, tool_name: &str, result: &serde_json::Value) {
+        if tool_name.starts_with("pwn:") {
+            self.cache_pwn_snapshot(tool_name, result);
+            return;
+        }
         let Some(data) = result.get("data") else {
             return;
         };

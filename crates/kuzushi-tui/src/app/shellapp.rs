@@ -39,6 +39,7 @@ pub struct ShellApp {
     pub context_view: ContextSnapshotView,
     pub workspace_view: WorkspaceView,
     pub kb_view: KnowledgeBaseView,
+    pub pwn_view: PwnView,
     pub agent_chat: Option<AgentChatView>,
     pub session_thinking_level: Option<String>,
     pub findings: Vec<Finding>,

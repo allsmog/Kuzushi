@@ -24,6 +24,7 @@ pub(crate) fn row_to_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Findin
         verification: None,
         vuln_source: row.vuln_source,
         dedup_key: row.dedup_key,
+        evidence: Vec::new(),
     })
 }
 

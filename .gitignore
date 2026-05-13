@@ -34,6 +34,12 @@ perf/results.json
 .ralph/
 ralph-*.md
 
+# Local Hack The Box challenge downloads
+/822
+/pwn_under_the_web/
+/1188
+/htb_1188/
+
 # Local Claude Design / scratch prompts — do not commit
 kuzushi-*-prompt.md
 
