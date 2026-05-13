@@ -8,6 +8,8 @@ TEST_APP_DIR="${TEST_APP_DIR:-/tmp/kuzushi-smoke-app}"
 TEST_LOG_DIR="${TEST_LOG_DIR:-/tmp/kuzushi-smoke-logs}"
 FAKE_BIN_DIR="${TEST_LOG_DIR}/bin"
 DB_PATH="${TEST_APP_DIR}/.kuzushi/v2/findings.sqlite3"
+HOST_TRIPLE="$(node -p '`${process.platform}-${process.arch}`')"
+DOWNLOADED_NATIVE_BIN="${REPO_DIR}/native/${HOST_TRIPLE}/kuzushi"
 
 # Command used to invoke the Kuzushi CLI. CI can set
 # KUZUSHI_CMD="node bin/kuzushi-rs.mjs" after downloading native/.
@@ -57,6 +59,10 @@ chmod +x "${FAKE_BIN_DIR}/semgrep"
 export PATH="${FAKE_BIN_DIR}:${PATH}"
 export KUZUSHI_MODEL="${KUZUSHI_MODEL:-openai:gpt-4.1}"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-fake-key}"
+
+if [[ -z "${KUZUSHI_NATIVE_BIN:-}" && -x "${DOWNLOADED_NATIVE_BIN}" ]]; then
+  export KUZUSHI_NATIVE_BIN="${DOWNLOADED_NATIVE_BIN}"
+fi
 
 if [[ -z "${KUZUSHI_NATIVE_BIN:-}" && ! -x "${REPO_DIR}/target/debug/kuzushi" ]]; then
   cargo build -q -p kuzushi-cli
