@@ -53,6 +53,9 @@ pub fn scan_engines_for_tasks(tasks: &[String]) -> Result<Vec<Box<dyn ScanEngine
             "dep-hygiene" | "dep-hygiene:check" => scanners.push(Box::new(DepHygieneScanner)),
             "cargo-audit" | "cargo-audit:scan" => scanners.push(Box::new(CargoAuditScanner)),
             "secret-scan" | "secret-scan:scan" => scanners.push(Box::new(SecretScanScanner)),
+            "exploit-chain" | "exploit-chain:scan" => anyhow::bail!(
+                "exploit-chain is LLM-only; run exploit-chain:scan directly so Kuzushi can require and pass an agent runtime"
+            ),
             "iac-scan" | "iac-scan:scan" => scanners.push(Box::new(IacScanScanner::default())),
             "" => {}
             other => anyhow::bail!(

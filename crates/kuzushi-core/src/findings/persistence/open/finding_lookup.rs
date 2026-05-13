@@ -24,6 +24,7 @@ impl FindingStore {
             .optional()
             .context("Could not load finding")?;
 
+        self.attach_evidence_to_finding(finding.as_mut())?;
         self.attach_latest_verification(finding.as_mut())?;
         Ok(finding)
     }
@@ -64,6 +65,7 @@ impl FindingStore {
             0 => Ok(None),
             1 => {
                 let mut finding = matches.into_iter().next();
+                self.attach_evidence_to_finding(finding.as_mut())?;
                 self.attach_latest_verification(finding.as_mut())?;
                 Ok(finding)
             }

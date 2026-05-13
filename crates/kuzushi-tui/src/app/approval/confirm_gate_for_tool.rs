@@ -69,6 +69,45 @@ pub fn confirm_gate_for_tool(
         }
     }
 
+    if tool == "pwn:run-candidates" {
+        let target = input
+            .get("target")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let max_attempts = input
+            .get("maxAttempts")
+            .or_else(|| input.get("max_attempts"))
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(10);
+        let parallelism = input
+            .get("parallelism")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(1);
+        let state_id = input
+            .get("stateId")
+            .or_else(|| input.get("state_id"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let key = confirm_allowlist_key(tool, target);
+        if allowlist.contains(&key) {
+            return None;
+        }
+        return Some(PendingConfirm {
+            kind: ConfirmKind::PwnCandidateAttempt,
+            tool: tool.to_string(),
+            target: target.to_string(),
+            rationale: Some(format!(
+                "state={state_id} · maxAttempts={max_attempts} · parallelism={parallelism}"
+            )),
+            allowlist: None,
+            actor: input
+                .get("actor")
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string),
+            remembered: false,
+        });
+    }
+
     // fs:write outside .kuzushi/.
     if tool == "fs:write" {
         let path = input

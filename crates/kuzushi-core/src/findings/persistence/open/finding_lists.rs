@@ -23,8 +23,11 @@ impl FindingStore {
             "#,
         )?;
         let rows = stmt.query_map(params![scan_id], row_to_finding)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .context("Could not list findings for scan run")
+        let mut findings = rows
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not list findings for scan run")?;
+        self.attach_evidence_to_findings(&mut findings)?;
+        Ok(findings)
     }
 
     pub fn list_findings_filtered(&self, filter: &FindingListFilter) -> Result<FindingListReport> {
@@ -65,6 +68,7 @@ impl FindingStore {
             }
         }
 
+        self.attach_evidence_to_findings(&mut findings)?;
         Ok(FindingListReport { count, findings })
     }
 }

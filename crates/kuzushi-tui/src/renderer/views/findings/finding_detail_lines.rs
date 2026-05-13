@@ -38,7 +38,14 @@ pub(crate) fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stat
         ),
     ));
     lines.push(blank());
-    lines.push(divider("EVIDENCE", area.width));
+    if !finding.evidence.is_empty() {
+        lines.push(divider("STRUCTURED EVIDENCE", area.width));
+        append_structured_evidence_lines(finding, area, &mut lines);
+        lines.push(blank());
+        lines.push(divider("MESSAGE", area.width));
+    } else {
+        lines.push(divider("EVIDENCE", area.width));
+    }
     for line in finding.message.lines().take(8) {
         lines.push(indent(
             Line::raw(fit(line, area.width.saturating_sub(2) as usize)),
@@ -65,4 +72,22 @@ pub(crate) fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stat
         area.width as usize,
     ));
     lines
+}
+
+fn append_structured_evidence_lines(finding: &Finding, area: Rect, lines: &mut Vec<Line<'static>>) {
+    let header_width = area.width.saturating_sub(4) as usize;
+    let detail_width = area.width.saturating_sub(6) as usize;
+    for item in finding.evidence.iter().take(8) {
+        let header = format!(
+            "{} · conf {} · {}:{}",
+            item.kind, item.confidence, item.file_path, item.line
+        );
+        lines.push(indent(muted(&fit(&header, header_width)), 2));
+        if !item.snippet.trim().is_empty() {
+            lines.push(indent(Line::raw(fit(&item.snippet, detail_width)), 4));
+        }
+        if !item.rationale.trim().is_empty() {
+            lines.push(indent(muted(&fit(&item.rationale, detail_width)), 4));
+        }
+    }
 }

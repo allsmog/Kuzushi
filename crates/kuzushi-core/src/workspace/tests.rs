@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use crate::findings::{Finding, FindingStore, Severity};
+    use crate::findings::{Finding, FindingEvidence, FindingStore, Severity};
     use std::fs;
 
     #[test]
@@ -40,20 +40,24 @@ mod tests {
         store
             .insert_scan_run("run-1", workspace.root(), "completed")
             .unwrap();
-        store
-            .insert_finding(
-                "run-1",
-                &Finding::new_tool(
-                    "fixture",
-                    "fixture/sql",
-                    "src/app.ts",
-                    10,
-                    None,
-                    Severity::High,
-                    "request data reaches SQL",
-                ),
-            )
-            .unwrap();
+        let finding = Finding::new_tool(
+            "fixture",
+            "fixture/sql",
+            "src/app.ts",
+            10,
+            None,
+            Severity::High,
+            "request data reaches SQL",
+        )
+        .with_evidence(vec![FindingEvidence {
+            kind: "sink".to_string(),
+            file_path: "src/app.ts".to_string(),
+            line: 10,
+            snippet: "db.query(request.query.q)".to_string(),
+            rationale: "The request value is used in a SQL query".to_string(),
+            confidence: 91,
+        }]);
+        store.insert_finding("run-1", &finding).unwrap();
 
         let output = tmp.path().join("exports/findings.json");
         let report = export_workspace_findings(&workspace, &output, None).unwrap();
@@ -64,6 +68,11 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
         assert_eq!(exported["count"], serde_json::json!(1));
         assert_eq!(exported["findings"][0]["rule_id"], "fixture/sql");
+        assert_eq!(exported["findings"][0]["evidence"][0]["kind"], "sink");
+        assert_eq!(
+            exported["findings"][0]["evidence"][0]["filePath"],
+            "src/app.ts"
+        );
     }
 
     #[test]

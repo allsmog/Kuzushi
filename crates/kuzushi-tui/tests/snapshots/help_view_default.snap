@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 162
 ---
-mode:shell | target:none | catalog | 0 findings | 37 mods
+mode:shell | target:none | catalog | 0 findings | 39 mods
 
  -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
@@ -29,6 +29,8 @@ run <tool> [json] - dispatch a tool; run . is shell-only focused-module shorthan
   aliases / examples: run ., /run <tool> [json], run . [json]
 ask <question> - explicit agent question
   aliases / examples: /ask <question>, ?text
+pwn [verb] - open the pwn dashboard or launch pwn workflow tools
+  aliases / examples: /pwn, /pwn target <path>, /pwn auto
 
 OPTIONS / TASKS — options + sast task control
 options [tool] - show tool options

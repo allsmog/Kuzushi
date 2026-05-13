@@ -10,7 +10,7 @@ mod run_scan;
 mod session;
 
 pub use command_payloads::{
-    ContextCommand, SastTaskCommand, SastTaskModeCommand, WorkspaceCommand,
+    ContextCommand, PwnCommand, SastTaskCommand, SastTaskModeCommand, WorkspaceCommand,
 };
 
 pub(crate) const SHELL_COMMAND_SPEC_GROUPS: &[&[ShellCommandSpec]] = &[

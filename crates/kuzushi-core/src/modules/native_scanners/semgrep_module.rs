@@ -140,3 +140,28 @@ pub(in crate::modules) fn iac_scan_module() -> BuiltinModule {
         vec![dag("iac-scan:scan", "findings", &["context:build"])],
     )
 }
+
+pub(in crate::modules) fn exploit_chain_module() -> BuiltinModule {
+    builtin_module(
+        "exploit-chain",
+        "Exploit Chain Scan",
+        ModuleKind::Defense,
+        "LLM-driven analyzer that connects vulnerability primitives into likely exploit paths and PoC guidance.",
+        vec![tool_with_options(
+            "exploit-chain:scan",
+            "Scan source for chained exploitability signals and synthesize PoC shapes with the configured agent runtime.",
+            vec![
+                target_option(),
+                opt(
+                    "maxEvidence",
+                    OptionType::Int,
+                    "Maximum source excerpts sent to LLM evidence extraction.",
+                )
+                .aliases(&["max_evidence"])
+                .default(json!(140))
+                .advanced(),
+            ],
+        )],
+        vec![dag("exploit-chain:scan", "findings", &["context:build"])],
+    )
+}

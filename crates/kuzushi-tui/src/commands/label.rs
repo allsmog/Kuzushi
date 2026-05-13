@@ -57,6 +57,7 @@ pub enum ShellCommand {
     Task(SastTaskCommand),
     Context(ContextCommand),
     Workspace(WorkspaceCommand),
+    Pwn(PwnCommand),
     KnowledgeBase(Option<String>),
     Attach(String),
     Detach(String),

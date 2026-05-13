@@ -1,6 +1,6 @@
 use super::*;
 
-use super::approval::{confirm_gate_for_tool, parse_pending_patch};
+use super::approval::{confirm_gate_for_tool, parse_pending_patch, ConfirmKind};
 use super::artifacts::{append_trace_step, write_run_summary};
 use super::command_router::unknown_command_message;
 use super::findings::{
@@ -3499,6 +3499,7 @@ fn make_finding(severity: Severity, fp: &str, title: &str) -> Finding {
         created_at: String::new(),
         vuln_source: None,
         dedup_key: None,
+        evidence: Vec::new(),
     }
 }
 
@@ -4794,6 +4795,55 @@ fn cache_tool_snapshot_populates_pending_patch_for_patch_run() {
         Some("approval.patches = human-required")
     );
     assert_eq!(app.shell_view, ShellView::Patch("F-0001".to_string()));
+}
+
+#[test]
+fn cache_tool_snapshot_populates_pwn_dashboard_snapshots() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let profile = serde_json::json!({
+        "binary": "/tmp/chal",
+        "stateId": "abc123",
+        "statePath": "/tmp/state.json",
+        "arch": "x86-64",
+        "needed": []
+    });
+    app.cache_tool_snapshot("pwn:profile-binary", &profile);
+    assert_eq!(
+        app.pwn_view.binary,
+        Some(std::path::PathBuf::from("/tmp/chal"))
+    );
+    assert_eq!(
+        app.pwn_view.state_path,
+        Some(std::path::PathBuf::from("/tmp/state.json"))
+    );
+    assert!(app.pwn_view.profile_snapshot.is_some());
+
+    let reverse = serde_json::json!({
+        "function": "main",
+        "revng": {"ok": true, "output": "void main() {}"},
+        "dangerousIo": ["gets"]
+    });
+    app.cache_tool_snapshot("pwn:reverse", &reverse);
+    assert_eq!(app.pwn_view.reverse_snapshots.len(), 1);
+}
+
+#[test]
+fn pwn_run_candidates_requires_confirmation() {
+    let input = serde_json::json!({
+        "target": "127.0.0.1:31337",
+        "stateId": "abc123",
+        "maxAttempts": 3,
+        "parallelism": 1
+    });
+    let confirm = confirm_gate_for_tool("pwn:run-candidates", &input, &Default::default())
+        .expect("confirmation");
+    assert_eq!(confirm.kind, ConfirmKind::PwnCandidateAttempt);
+    assert_eq!(confirm.target, "127.0.0.1:31337");
+    assert!(confirm
+        .rationale
+        .as_deref()
+        .unwrap_or("")
+        .contains("abc123"));
 }
 
 #[test]

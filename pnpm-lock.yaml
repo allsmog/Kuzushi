@@ -30,8 +30,8 @@ importers:
         specifier: 0.68.0
         version: 0.68.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
       '@mariozechner/pi-ai':
-        specifier: ^0.68.0
-        version: 0.68.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
+        specifier: ^0.73.1
+        version: 0.73.1(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)
       '@openai/codex-sdk':
         specifier: ^0.125.0
         version: 0.125.0
@@ -132,6 +132,15 @@ packages:
 
   '@anthropic-ai/sdk@0.90.0':
     resolution: {integrity: sha512-MzZtPabJF1b0FTDl6Z6H5ljphPwACLGP13lu8MTiB8jXaW/YXlpOp+Po2cVou3MPM5+f5toyLnul9whKCy7fBg==}
+    hasBin: true
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
+    peerDependenciesMeta:
+      zod:
+        optional: true
+
+  '@anthropic-ai/sdk@0.91.1':
+    resolution: {integrity: sha512-LAmu761tSN9r66ixvmciswUj/ZC+1Q4iAfpedTfSVLeswRwnY3n2Nb6Tsk+cLPP28aLOPWeMgIuTuCcMC6W/iw==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -761,6 +770,13 @@ packages:
   '@mariozechner/pi-ai@0.68.0':
     resolution: {integrity: sha512-/Th1hzj33FVTStpd0Cw8TWNXe5jcLvnzD/PzReBA6h+FsfvMSropxYovHvN9B3JH+EMKLaf3wf5IePnhMjN6vg==}
     engines: {node: '>=20.0.0'}
+    deprecated: please use @earendil-works/pi-ai instead going forward
+    hasBin: true
+
+  '@mariozechner/pi-ai@0.73.1':
+    resolution: {integrity: sha512-Jh4lXawZYuC83HzSIYuVum9NBqJD49i4JOt3H96cGW/924cwJMOyUs1Mv/e4QPzTXnzrqMoGviNQnvGgSu1LSg==}
+    engines: {node: '>=20.0.0'}
+    deprecated: please use @earendil-works/pi-ai instead going forward
     hasBin: true
 
   '@mistralai/mistralai@2.2.0':
@@ -2916,6 +2932,9 @@ packages:
     resolution: {integrity: sha512-OZs6gsjF4vMp32qrCbiVSkrFmXtG/AZhY3t0iAMrMBiAZyV9oALtXO8hsrHbMXF9x6L3grlFuwW2oAz7cav+Gw==}
     engines: {node: '>= 0.6'}
 
+  typebox@1.1.38:
+    resolution: {integrity: sha512-pZ0aQPmMmXoUvSbeuWf/Hzsc+avNw/Zd6VeE8CFgkVGWyuHPJvqeJJDeJqLve+K70LvjYIoleGcoJHPT17cWoA==}
+
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
@@ -3132,6 +3151,12 @@ snapshots:
       zod: 4.3.6
 
   '@anthropic-ai/sdk@0.90.0(zod@4.3.6)':
+    dependencies:
+      json-schema-to-ts: 3.1.1
+    optionalDependencies:
+      zod: 4.3.6
+
+  '@anthropic-ai/sdk@0.91.1(zod@4.3.6)':
     dependencies:
       json-schema-to-ts: 3.1.1
     optionalDependencies:
@@ -3936,6 +3961,28 @@ snapshots:
       openai: 6.26.0(ws@8.19.0)(zod@4.3.6)
       partial-json: 0.1.7
       proxy-agent: 6.5.0
+      undici: 7.22.0
+      zod-to-json-schema: 3.25.1(zod@4.3.6)
+    transitivePeerDependencies:
+      - '@modelcontextprotocol/sdk'
+      - aws-crt
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+      - ws
+      - zod
+
+  '@mariozechner/pi-ai@0.73.1(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(ws@8.19.0)(zod@4.3.6)':
+    dependencies:
+      '@anthropic-ai/sdk': 0.91.1(zod@4.3.6)
+      '@aws-sdk/client-bedrock-runtime': 3.1033.0
+      '@google/genai': 1.43.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))
+      '@mistralai/mistralai': 2.2.0
+      chalk: 5.6.2
+      openai: 6.26.0(ws@8.19.0)(zod@4.3.6)
+      partial-json: 0.1.7
+      proxy-agent: 6.5.0
+      typebox: 1.1.38
       undici: 7.22.0
       zod-to-json-schema: 3.25.1(zod@4.3.6)
     transitivePeerDependencies:
@@ -6251,6 +6298,8 @@ snapshots:
       content-type: 1.0.5
       media-typer: 1.1.0
       mime-types: 3.0.2
+
+  typebox@1.1.38: {}
 
   typescript@5.9.3: {}
 

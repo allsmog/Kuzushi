@@ -24,6 +24,18 @@ pub enum WorkspaceCommand {
     Unsupported(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PwnCommand {
+    Show,
+    Target(PathBuf),
+    Profile,
+    Reverse(Option<String>),
+    Auto,
+    State,
+    Candidates(String),
+    Unsupported(String),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SastTaskModeCommand {
     Auto,

@@ -16,5 +16,5 @@ KUZUSHI  mode:run | target none | 1 findings (1 critical) | ctx missing | view r
 
  -- TRANSCRIPT ---------------------------------------------------------------------------------------------------------
  15:21:17 | system kuzushi shell
- 15:21:17 | startup ready: 37 module(s), 67 tool(s), target none
+ 15:21:17 | startup ready: 39 module(s), 74 tool(s), target none
  15:21:17 | help type help for commands | ? <text> to ask | scan to start

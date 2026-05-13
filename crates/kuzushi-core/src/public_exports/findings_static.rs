@@ -4,10 +4,10 @@ pub use crate::findings::{
     format_finding_alias, normalize_cwe, parse_finding_alias, project_finding, proof_ladder_state,
     proof_state_label, resolve_finding_alias, runtime_validation_label, severity_badge,
     severity_icon, sorted_finding_aliases, stable_finding_alias, Finding, FindingDetailReport,
-    FindingListFilter, FindingListReport, FindingNextAction, FindingProjection, FindingStore,
-    FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus, PersistedProofVerdict,
-    PersistedSandboxBackend, PersistedVerification, ProofLadderState, Severity, StaticProofState,
-    TriageOutcome, TriageVerdict, VulnSource,
+    FindingEvidence, FindingListFilter, FindingListReport, FindingNextAction, FindingProjection,
+    FindingStore, FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus,
+    PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, ProofLadderState,
+    Severity, StaticProofState, TriageOutcome, TriageVerdict, VulnSource,
 };
 pub use crate::pr_comment::{build_pr_comment, PrCommentInput};
 pub use crate::remediation::patch::run_patch_finding;

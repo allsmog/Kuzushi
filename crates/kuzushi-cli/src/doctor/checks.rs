@@ -65,6 +65,75 @@ pub(crate) fn check_scanner_binary(binary: &'static str) -> DoctorCheck {
     }
 }
 
+pub(crate) fn check_container_runtime() -> DoctorCheck {
+    if let Some(path) = resolve_executable(
+        "podman",
+        env::var_os("PATH").as_deref(),
+        &current_dir_for_doctor(),
+    ) {
+        return DoctorCheck::ok(
+            "container-runtime",
+            format!("found podman at {}", path.display()),
+        );
+    }
+    if let Some(path) = resolve_executable(
+        "docker",
+        env::var_os("PATH").as_deref(),
+        &current_dir_for_doctor(),
+    ) {
+        return DoctorCheck::ok(
+            "container-runtime",
+            format!("found docker at {}", path.display()),
+        );
+    }
+    DoctorCheck::warn(
+        "container-runtime",
+        "neither podman nor docker was found on PATH",
+        "Install Podman or Docker before using rev.ng-backed pwn reverse-engineering tools.",
+    )
+}
+
+pub(crate) fn check_revng_image() -> DoctorCheck {
+    let runtime = resolve_executable(
+        "podman",
+        env::var_os("PATH").as_deref(),
+        &current_dir_for_doctor(),
+    )
+    .map(|_| "podman")
+    .or_else(|| {
+        resolve_executable(
+            "docker",
+            env::var_os("PATH").as_deref(),
+            &current_dir_for_doctor(),
+        )
+        .map(|_| "docker")
+    });
+    let Some(runtime) = runtime else {
+        return DoctorCheck::warn(
+            "revng-image",
+            "rev.ng image was not checked because no container runtime is available",
+            "Install Podman or Docker, then run `kuzushi mcp health revng`.",
+        );
+    };
+    let image =
+        env::var("KUZUSHI_REVNG_IMAGE").unwrap_or_else(|_| "revng/revng:latest".to_string());
+    match std::process::Command::new(runtime)
+        .args(["image", "inspect", &image])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        Ok(status) if status.success() => {
+            DoctorCheck::ok("revng-image", format!("{image} is available to {runtime}"))
+        }
+        _ => DoctorCheck::warn(
+            "revng-image",
+            format!("{image} is not available locally"),
+            format!("Pull it with `{runtime} pull {image}` or set KUZUSHI_REVNG_IMAGE."),
+        ),
+    }
+}
+
 pub(crate) fn check_model_config(config: &kuzushi_core::V2Config) -> DoctorCheck {
     match config
         .model
