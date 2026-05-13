@@ -66,6 +66,29 @@ The most useful improvements are:
 13. Add memory-origin analysis for secrets: track startup reads, heap-resident
     buffers, retained pointers, `/proc/$PPID/maps` probes, and likely offsets
     for in-memory flags or tokens.
+14. Add `pwn:protocol` to learn menu state machines and IO quirks: prompts
+    without newlines, misleading labels, `scanf` mixed with raw `read`, and
+    cases where menu choices and payload bytes must be sent separately.
+15. Add `pwn:primitive-discovery` to translate reverse-engineering facts into
+    concrete exploit capabilities: partial pointer writes, low-byte zeroing,
+    arbitrary read/write/free candidates, global-array overlap, and BSS fake
+    chunk opportunities.
+16. Add `pwn:leak-decoder` for formatted leak channels. It should recover raw
+    memory when bytes are wrapped in row prefixes, suffixes, padding, banners,
+    or menu text.
+17. Add `pwn:glibc-version-plan` so exploit planning is driven by the supplied
+    libc. For glibc 2.37, hook overwrite plans such as `__free_hook = system`
+    should be treated as stale; prefer safe-linking-aware tcache poisoning,
+    stack return overwrite, FSOP, or other modern targets.
+18. Add `pwn:stack-target` to use `environ` leaks plus stack scans to locate
+    markers, saved frame pointers, active return slots, and reliable overwrite
+    addresses.
+19. Add `pwn:heap-layout-calibrate` to repeatedly run with the bundled
+    `ld`/`libc`, infer chunk offsets, tcache keys, unsorted-bin offsets, and
+    safe-linking formulas before attacking the remote service.
+20. Add `pwn:exploit-skeleton` to generate robust local/remote exploit
+    harnesses with transcript capture, leak parsers, retries, flushed progress
+    logs, and post-shell command execution.
 
 ## Target Workflow
 
@@ -109,6 +132,24 @@ For the memento challenge specifically, this should have surfaced:
   heap base, then `gets` plus a stack pivot to load a second-stage ROP chain
   that calls `puts(heap + 0x2a0)`.
 
+For the Magic Scrolls challenge specifically, this should have surfaced:
+
+- Misleading menu dispatch and IO synchronization hazards: the displayed
+  `1..6` labels did not match the raw `0..5` exit behavior, one prompt had no
+  newline, and `scanf` plus raw `read` required payloads to be sent after the
+  `Spell:` prompt rather than buffered with the menu choice.
+- `power=4` turned magic-number updates into writes over `spells[0]` and
+  `spells[1]`, giving partial low-byte zeroing, arbitrary pointer selection,
+  arbitrary read through the favorite-spell printer, and arbitrary free.
+- The favorite-spell leak channel was formatted with banners, row prefixes,
+  suffixes, and padding, so raw memory needed a decoder before heap/libc/stack
+  values were trustworthy.
+- Local heap calibration exposed the tcache safe-linking key, deterministic
+  chunk offsets, and the unsorted-bin libc pointer offset before the remote run.
+- glibc 2.37 made hook-overwrite plans stale; the useful route was a fake BSS
+  chunk, safe-linking-aware tcache poisoning, `environ` stack discovery, and a
+  stack return overwrite with `system("/bin/sh")`.
+
 ## Priority
 
 The highest-impact work is not more generic scanning. The priority should be
@@ -126,4 +167,11 @@ pwn:libc-fingerprint
 pwn:write-planner
 pwn:rop-stage
 pwn:memory-origin
+pwn:protocol
+pwn:primitive-discovery
+pwn:leak-decoder
+pwn:glibc-version-plan
+pwn:stack-target
+pwn:heap-layout-calibrate
+pwn:exploit-skeleton
 ```
