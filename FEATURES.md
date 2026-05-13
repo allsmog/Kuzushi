@@ -54,6 +54,18 @@ The most useful improvements are:
 9. Persist pwn state under `.kuzushi/runs/<id>/`, including leaks, bases,
    failed strategies, crash logs, generated exploit scripts, and remote
    transcripts.
+10. Add libc fingerprinting from leaks: normalize leaked return addresses
+    against candidate glibc builds, cache matching libc/ld packages, and
+    report exact offsets for functions and gadgets.
+11. Add constrained-write planning for byte-limited primitives: model target
+    windows, bad bytes, low-byte ASLR constraints, reconnect predicates, and
+    payload ordering.
+12. Add staged ROP generation: stack alignment, pivot gadgets, `gets`/`read`
+    second stages, newline checks, and reusable chains for `system`, `puts`,
+    and memory disclosure.
+13. Add memory-origin analysis for secrets: track startup reads, heap-resident
+    buffers, retained pointers, `/proc/$PPID/maps` probes, and likely offsets
+    for in-memory flags or tokens.
 
 ## Target Workflow
 
@@ -78,6 +90,25 @@ For the scanner challenge specifically, this should have surfaced:
 - A viable non-ROP route through fake stack chunks, tcache poisoning, and
   `__free_hook = system`.
 
+For the memento challenge specifically, this should have surfaced:
+
+- Signed-length bug in `remember`: values like `0xff` pass the `len > 0x18`
+  guard and drive a much longer write loop.
+- Off-by-one/count corruption at `count == 0x18`, enabling stack disclosure
+  through `recall` and constrained stack writes through the stored pointer.
+- Remote libc identity from leaked `__libc_start_main` return sites; the useful
+  remote match was Ubuntu glibc `2.39-0ubuntu8.7`, where small patch-level
+  offset drift changed `system` and ROP gadget addresses.
+- One-byte stack-pointer targeting constraints: only some ASLR low bytes let
+  the primitive write the desired return slots, so the harness needed automatic
+  reconnect/retry logic.
+- Initial `system("cat flag.txt")` was the wrong objective: the flag was read
+  into a heap allocation during startup and was not present as a file in the
+  service working directory.
+- A viable two-stage chain: `system("cat /proc/$PPID/maps")` to recover the
+  heap base, then `gets` plus a stack pivot to load a second-stage ROP chain
+  that calls `puts(heap + 0x2a0)`.
+
 ## Priority
 
 The highest-impact work is not more generic scanning. The priority should be
@@ -91,4 +122,8 @@ pwn:harness
 pwn:oracle
 pwn:heap-glibc
 pwn:debug-crash
+pwn:libc-fingerprint
+pwn:write-planner
+pwn:rop-stage
+pwn:memory-origin
 ```
