@@ -253,6 +253,7 @@ const rules = [
     forbidden:
       /\b(load_persistent_threat_model|threat_model_doc\(|serde_json|std::env|std::path|PathBuf|read_to_string)\b/,
   },
+  { name: "TUI threat nav renderer reads threat-navigation view model", roots: ["crates/kuzushi-tui/src/renderer/shared/threat_model/threat_nav.rs"], forbidden: /ThreatView::/ },
 ];
 
 for (const [name, candidates] of boundaries) if (!hasBoundary(candidates)) failures.push(`missing DDD boundary: ${name}`);
