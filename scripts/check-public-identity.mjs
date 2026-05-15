@@ -29,7 +29,7 @@ const publicDocForbidden = [
 ];
 
 const files = publicFiles();
-const failures = files.flatMap(scanFile);
+const failures = [...identityFailures(), ...files.flatMap(scanFile)];
 
 if (failures.length > 0) {
   console.error("Kuzushi public identity check failed:");
@@ -66,6 +66,40 @@ function scanFile(file) {
   return readFileSync(path.join(root, file), "utf8")
     .split(/\r?\n/)
     .flatMap((line, index) => lineFailures(file, line, index + 1));
+}
+
+function identityFailures() {
+  const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+  const bin = pkg.bin ?? {};
+  return [
+    ...binEntryFailures(bin),
+    ...legacyBinFailures(bin),
+    ...binShimAliasFailures(),
+  ];
+}
+
+function binEntryFailures(bin) {
+  const expected = "./bin/kuzushi-rs.mjs";
+  return ["kuzushi", "kz"].flatMap((name) =>
+    bin[name] === expected ? [] : [`package.json: bin.${name} must point at "${expected}"`],
+  );
+}
+
+function legacyBinFailures(bin) {
+  return ["codex", "kuzushi-ts"]
+    .filter((name) => Object.hasOwn(bin, name))
+    .map((name) => `package.json: legacy bin.${name} must not be published`);
+}
+
+function binShimAliasFailures() {
+  return binShimPreservesCompactAlias()
+    ? []
+    : ["bin/kuzushi-rs.mjs: shim must pass KUZUSHI_CLI_NAME=kz when invoked as kz"];
+}
+
+function binShimPreservesCompactAlias() {
+  const source = readFileSync(path.join(root, "bin/kuzushi-rs.mjs"), "utf8");
+  return source.includes('invokedName === "kz" ? "kz" : "kuzushi"');
 }
 
 function lineFailures(file, line, lineNumber) {
