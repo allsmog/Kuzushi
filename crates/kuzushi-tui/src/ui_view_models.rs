@@ -52,7 +52,7 @@ pub(crate) use run_trace::{
     replay_model, trace_model, ReplayModel, RunArtifactDetail, TraceModel, TraceStep,
 };
 pub(crate) use status_footer::status_footer_model;
-pub(crate) use threat_model::threat_model_doc;
+pub(crate) use threat_model::{threat_model_doc, threat_summary_review, ThreatSummaryReview};
 pub(crate) use tools::{tools_model, ToolRow};
 pub(crate) use view_status::view_status_segment;
 
