@@ -148,11 +148,13 @@ fn failure_to_llm_context(
     let missing_artifacts = missing_failure_artifacts(target, run_id, artifacts);
     let claims_forbidden = forbidden_failure_claims();
     let recovery_options = failure_recovery_options(tool, &missing_artifacts);
+    let next_artifacts = next_failure_artifacts(target, run_id, artifacts);
     let fallback_prompt = failure_fallback_prompt(
         tool,
         error,
         &allowed_proof_level,
         &missing_artifacts,
+        &next_artifacts,
         &claims_forbidden,
         &recovery_options,
     );
@@ -163,7 +165,7 @@ fn failure_to_llm_context(
         artifacts_available: artifacts.to_vec(),
         missing_artifacts,
         allowed_proof_level,
-        next_files_or_artifacts_to_inspect: next_failure_artifacts(target, run_id, artifacts),
+        next_files_or_artifacts_to_inspect: next_artifacts,
         recovery_options,
         fallback_prompt,
         claims_forbidden,
@@ -231,12 +233,14 @@ fn failure_fallback_prompt(
     error: &str,
     proof_level: &str,
     missing_artifacts: &[String],
+    next_artifacts: &[String],
     forbidden_claims: &[String],
     recovery_options: &[String],
 ) -> String {
     format!(
-        "Continue the failed Kuzushi run for {tool}. Cause: {error}. Proof level: {proof_level}. Missing artifacts: {}. Forbidden claims: {}. Recovery options: {}.",
+        "Continue the failed Kuzushi run for {tool}. Cause: {error}. Proof level: {proof_level}. Missing artifacts: {}. Inspect next: {}. Forbidden claims: {}. Recovery options: {}.",
         compact_failure_list(missing_artifacts),
+        compact_failure_list(next_artifacts),
         compact_failure_list(forbidden_claims),
         compact_failure_list(recovery_options),
     )

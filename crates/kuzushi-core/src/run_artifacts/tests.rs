@@ -275,6 +275,8 @@ mod tests {
         assert!(context.next_files_or_artifacts_to_inspect.len() <= 12);
         assert!(context.fallback_prompt.contains("context:build"));
         assert!(context.fallback_prompt.contains("artifact-review-only"));
+        assert!(context.fallback_prompt.contains("Inspect next:"));
+        assert!(context.fallback_prompt.contains("failures.json"));
         assert!(context
             .claims_forbidden
             .contains(&"empirical proof claim".to_string()));
