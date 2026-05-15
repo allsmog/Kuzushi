@@ -45,11 +45,12 @@ fn push_plain_artifacts(
 }
 
 fn plain_artifact_row(artifact: &PlainKnowledgeBaseArtifactRow, widths: &[usize]) -> String {
+    let [state, path, description] = &artifact.cells;
     table_text(
         &[
-            artifact.state,
-            &fit(&artifact.path, widths.get(1).copied().unwrap_or(24)),
-            &fit(&artifact.description, widths.get(2).copied().unwrap_or(20)),
+            state,
+            &fit(path, widths.get(1).copied().unwrap_or(24)),
+            &fit(description, widths.get(2).copied().unwrap_or(20)),
         ],
         widths,
     )
@@ -74,12 +75,13 @@ fn push_plain_attachments(
 }
 
 fn plain_attachment_row(record: &PlainKnowledgeBaseAttachmentRow, widths: &[usize]) -> String {
+    let [id, kind, source, status] = &record.cells;
     table_text(
         &[
-            &record.id,
-            record.kind,
-            &fit(&record.source, widths.get(2).copied().unwrap_or(22)),
-            &fit(&record.status, widths.get(3).copied().unwrap_or(18)),
+            id,
+            kind,
+            &fit(source, widths.get(2).copied().unwrap_or(22)),
+            &fit(status, widths.get(3).copied().unwrap_or(18)),
         ],
         widths,
     )

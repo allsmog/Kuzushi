@@ -24,7 +24,7 @@ pub(crate) fn knowledge_base_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stat
 }
 
 fn summary_row(row: &KnowledgeBaseSummaryRow) -> Line<'static> {
-    detail(row.label, &row.value)
+    detail(&row.cells[0], &row.cells[1])
 }
 
 fn append_known_artifacts(lines: &mut Vec<Line<'static>>, model: &KnowledgeBaseModel, area: Rect) {
@@ -44,11 +44,12 @@ fn append_known_artifacts(lines: &mut Vec<Line<'static>>, model: &KnowledgeBaseM
 }
 
 fn artifact_row(artifact: &KnowledgeBaseArtifactRow, widths: &[usize]) -> Line<'static> {
+    let [state, path, description] = &artifact.cells;
     table_row(
         &[
-            artifact.state,
-            &fit(&artifact.path, widths.get(1).copied().unwrap_or(24)),
-            &fit(&artifact.description, widths.get(2).copied().unwrap_or(20)),
+            state,
+            &fit(path, widths.get(1).copied().unwrap_or(24)),
+            &fit(description, widths.get(2).copied().unwrap_or(20)),
         ],
         widths,
     )
@@ -87,12 +88,13 @@ fn append_attached_records(lines: &mut Vec<Line<'static>>, model: &KnowledgeBase
 }
 
 fn attachment_row(record: &KnowledgeBaseAttachmentRow, widths: &[usize]) -> Line<'static> {
+    let [id, kind, source, status] = &record.cells;
     table_row(
         &[
-            &record.id,
-            record.kind,
-            &fit(&record.source, widths.get(2).copied().unwrap_or(22)),
-            &fit(&record.status, widths.get(3).copied().unwrap_or(18)),
+            id,
+            kind,
+            &fit(source, widths.get(2).copied().unwrap_or(22)),
+            &fit(status, widths.get(3).copied().unwrap_or(18)),
         ],
         widths,
     )

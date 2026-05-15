@@ -2,6 +2,10 @@ use super::compact_target_path;
 use crate::ShellApp;
 use kuzushi_core::{AttachmentKind, AttachmentRecord, KnownArtifact, SUPPORTED_ATTACHMENT_MODULES};
 
+const KB_SUMMARY_COLUMN_COUNT: usize = 2;
+const KB_ARTIFACT_COLUMN_COUNT: usize = 3;
+const KB_ATTACHMENT_COLUMN_COUNT: usize = 4;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct KnowledgeBaseModel {
     pub(crate) title: &'static str,
@@ -13,23 +17,17 @@ pub(crate) struct KnowledgeBaseModel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct KnowledgeBaseSummaryRow {
-    pub(crate) label: &'static str,
-    pub(crate) value: String,
+    pub(crate) cells: [String; KB_SUMMARY_COLUMN_COUNT],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct KnowledgeBaseArtifactRow {
-    pub(crate) state: &'static str,
-    pub(crate) path: String,
-    pub(crate) description: String,
+    pub(crate) cells: [String; KB_ARTIFACT_COLUMN_COUNT],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct KnowledgeBaseAttachmentRow {
-    pub(crate) id: String,
-    pub(crate) kind: &'static str,
-    pub(crate) source: String,
-    pub(crate) status: String,
+    pub(crate) cells: [String; KB_ATTACHMENT_COLUMN_COUNT],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,9 +49,7 @@ pub(crate) struct PlainKnowledgeBaseArtifacts {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlainKnowledgeBaseArtifactRow {
-    pub(crate) state: &'static str,
-    pub(crate) path: String,
-    pub(crate) description: String,
+    pub(crate) cells: [String; KB_ARTIFACT_COLUMN_COUNT],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,10 +62,7 @@ pub(crate) struct PlainKnowledgeBaseAttachments {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlainKnowledgeBaseAttachmentRow {
-    pub(crate) id: String,
-    pub(crate) kind: &'static str,
-    pub(crate) source: String,
-    pub(crate) status: String,
+    pub(crate) cells: [String; KB_ATTACHMENT_COLUMN_COUNT],
 }
 
 pub(crate) fn knowledge_base_model(app: &ShellApp) -> KnowledgeBaseModel {
@@ -128,13 +121,13 @@ fn summary_rows(
 
 fn summary_row(label: &'static str, value: &str) -> KnowledgeBaseSummaryRow {
     KnowledgeBaseSummaryRow {
-        label,
-        value: value.to_string(),
+        cells: [label.to_string(), value.to_string()],
     }
 }
 
 fn plain_summary_row(row: KnowledgeBaseSummaryRow) -> String {
-    format!("{}: {}", row.label, row.value)
+    let [label, value] = row.cells;
+    format!("{label}: {value}")
 }
 
 fn plain_artifacts(rows: Vec<KnowledgeBaseArtifactRow>) -> PlainKnowledgeBaseArtifacts {
@@ -149,11 +142,7 @@ fn plain_artifacts(rows: Vec<KnowledgeBaseArtifactRow>) -> PlainKnowledgeBaseArt
 }
 
 fn plain_artifact_row(row: KnowledgeBaseArtifactRow) -> PlainKnowledgeBaseArtifactRow {
-    PlainKnowledgeBaseArtifactRow {
-        state: row.state,
-        path: row.path,
-        description: row.description,
-    }
+    PlainKnowledgeBaseArtifactRow { cells: row.cells }
 }
 
 fn plain_attachments(rows: Vec<KnowledgeBaseAttachmentRow>) -> PlainKnowledgeBaseAttachments {
@@ -168,12 +157,7 @@ fn plain_attachments(rows: Vec<KnowledgeBaseAttachmentRow>) -> PlainKnowledgeBas
 }
 
 fn plain_attachment_row(row: KnowledgeBaseAttachmentRow) -> PlainKnowledgeBaseAttachmentRow {
-    PlainKnowledgeBaseAttachmentRow {
-        id: row.id,
-        kind: row.kind,
-        source: row.source,
-        status: row.status,
-    }
+    PlainKnowledgeBaseAttachmentRow { cells: row.cells }
 }
 
 fn store_label(path: Option<&std::path::PathBuf>) -> String {
@@ -185,13 +169,16 @@ fn artifact_rows(artifacts: &[KnownArtifact]) -> Vec<KnowledgeBaseArtifactRow> {
     artifacts
         .iter()
         .map(|artifact| KnowledgeBaseArtifactRow {
-            state: if artifact.exists {
-                "present"
-            } else {
-                "missing"
-            },
-            path: artifact.path.clone(),
-            description: artifact.description.clone(),
+            cells: [
+                if artifact.exists {
+                    "present"
+                } else {
+                    "missing"
+                }
+                .to_string(),
+                artifact.path.clone(),
+                artifact.description.clone(),
+            ],
         })
         .collect()
 }
@@ -204,10 +191,12 @@ fn attachment_rows(
         .iter()
         .filter(|record| record.module_id == module_id)
         .map(|record| KnowledgeBaseAttachmentRow {
-            id: record.id.clone(),
-            kind: attachment_kind(&record.kind),
-            source: record.source.clone(),
-            status: record.status.clone(),
+            cells: [
+                record.id.clone(),
+                attachment_kind(&record.kind).to_string(),
+                record.source.clone(),
+                record.status.clone(),
+            ],
         })
         .collect()
 }
