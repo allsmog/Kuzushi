@@ -47,3 +47,21 @@ fn uses_activity_frame_only_for_activity_view() {
     app.shell_view = ShellView::ModuleRun;
     assert!(!uses_activity_frame(&app));
 }
+
+#[test]
+fn plain_render_mode_selects_specialized_plain_views() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    assert_eq!(plain_render_mode(&app), PlainRenderMode::LineBased);
+
+    app.shell_view = ShellView::Help;
+    assert_eq!(plain_render_mode(&app), PlainRenderMode::Help);
+
+    app.shell_view = ShellView::Options(crate::OptionsView {
+        tool_name: "sast:scan".to_string(),
+        filter: crate::OptionsFilter::Standard,
+    });
+    assert!(matches!(
+        plain_render_mode(&app),
+        PlainRenderMode::Options(view) if view.tool_name == "sast:scan"
+    ));
+}

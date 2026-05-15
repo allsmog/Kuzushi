@@ -112,7 +112,10 @@ pub(crate) use prompt_tuning::{
 pub(crate) use recent_module_activity::{
     recent_module_activity_model, ModuleActivityModel, ModuleActivityRow,
 };
-pub(crate) use routing::{routing_mode, routing_mode_segment, uses_activity_frame, RoutingMode};
+pub(crate) use routing::{
+    plain_render_mode, routing_mode, routing_mode_segment, uses_activity_frame, PlainRenderMode,
+    RoutingMode,
+};
 pub(crate) use run_status::scan_status;
 pub(crate) use run_timeline::{run_timeline_model, PastRunStatus, RunTimelineRow};
 pub(crate) use run_trace::{
