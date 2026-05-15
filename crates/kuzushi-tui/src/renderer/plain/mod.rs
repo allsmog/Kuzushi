@@ -5,8 +5,7 @@ use self::{
     fit, kb_artifact_widths, kb_attachment_widths, option_table_widths, sast_task_table_widths,
     shell_view_lines, table_text, wrap_text,
 };
-use crate::app::{ShellApp, ShellView};
-use crate::ui_view_models::context_strip_model;
+use crate::app::ShellApp;
 pub(in crate::renderer) use finalize_width_safe_plain_lines::*;
 pub(in crate::renderer) use plain_config_lines::*;
 pub(in crate::renderer) use plain_context_lines::*;

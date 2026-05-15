@@ -65,3 +65,53 @@ fn plain_render_mode_selects_specialized_plain_views() {
         PlainRenderMode::Options(view) if view.tool_name == "sast:scan"
     ));
 }
+
+#[test]
+fn shell_view_line_route_projects_primary_scroll_state() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Catalog;
+    app.catalog_expanded = true;
+    app.modules_scroll = 7;
+
+    assert_eq!(
+        shell_view_line_route(&app),
+        ShellViewLineRoute::Primary(PrimaryViewRoute::Catalog {
+            expanded: true,
+            scroll: 7,
+        })
+    );
+
+    app.shell_view = ShellView::Activity;
+    app.scroll_offset = 4;
+    assert_eq!(
+        shell_view_line_route(&app),
+        ShellViewLineRoute::Primary(PrimaryViewRoute::Activity { scroll: 4 })
+    );
+}
+
+#[test]
+fn shell_view_line_route_projects_payload_views() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Trace("run-1".to_string());
+
+    assert_eq!(
+        shell_view_line_route(&app),
+        ShellViewLineRoute::ThreatAndRun(ThreatAndRunViewRoute::Trace("run-1"))
+    );
+
+    app.shell_view = ShellView::Options(crate::OptionsView {
+        tool_name: "sast:scan".to_string(),
+        filter: crate::OptionsFilter::Advanced,
+    });
+    assert!(matches!(
+        shell_view_line_route(&app),
+        ShellViewLineRoute::System(SystemViewRoute::Options(view))
+            if view.tool_name == "sast:scan"
+    ));
+
+    app.shell_view = ShellView::Patch("F-0001".to_string());
+    assert_eq!(
+        shell_view_line_route(&app),
+        ShellViewLineRoute::WorkspaceAndSession(WorkspaceSessionViewRoute::Patch("F-0001"))
+    );
+}

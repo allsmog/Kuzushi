@@ -159,8 +159,9 @@ pub(crate) use recent_module_activity::{
 };
 pub(crate) use recommendation::{recommendation_model, RecommendationModel, RecommendationRow};
 pub(crate) use routing::{
-    plain_render_mode, routing_mode, routing_mode_segment, uses_activity_frame, PlainRenderMode,
-    RoutingMode,
+    plain_render_mode, routing_mode, routing_mode_segment, shell_view_line_route,
+    uses_activity_frame, PlainRenderMode, PrimaryViewRoute, RoutingMode, ShellViewLineRoute,
+    SystemViewRoute, ThreatAndRunViewRoute, WorkspaceSessionViewRoute,
 };
 pub(crate) use run_status::scan_status;
 pub(crate) use run_timeline::{run_timeline_model, PastRunStatus, RunTimelineRow};
