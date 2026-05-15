@@ -19,6 +19,7 @@ mod home_cockpit;
 mod keybindings;
 mod module_detail;
 mod options;
+mod prereq_prompt;
 mod prompt;
 mod prompt_tuning;
 mod routing;
@@ -54,6 +55,7 @@ pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitMo
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use module_detail::{module_detail_model, ModuleDetailModel};
 pub(crate) use options::{options_model, OptionRow, OptionsModelStatus};
+pub(crate) use prereq_prompt::{prereq_prompt_model, PrereqPromptModel, PrereqPromptStepModel};
 pub(crate) use prompt::prompt_brand;
 pub(crate) use prompt_tuning::{
     prompts_model, tune_model, PromptRow, TuneActionRow, TuneHouseRules, TuneModel,

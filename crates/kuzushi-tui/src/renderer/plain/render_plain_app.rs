@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui_view_models::{prereq_prompt_model, PrereqPromptModel, PrereqPromptStepModel};
 
 pub fn render_plain_app(app: &ShellApp, width: usize) -> String {
     let lines = render_plain_lines(app, width);
@@ -101,7 +102,7 @@ pub(crate) fn plain_log_lines(line: &LogLine) -> Vec<String> {
     lines
 }
 
-fn plain_prereq_plan_lines(plan: &PendingPrereqPrompt, width: usize) -> Vec<String> {
+fn plain_prereq_plan_lines(plan: &PrereqPromptModel, width: usize) -> Vec<String> {
     let mut lines = vec![
         plain_section_divider("PREREQUISITE PLAN", width),
         format!("final tool: {}", plan.final_tool),
@@ -112,7 +113,7 @@ fn plain_prereq_plan_lines(plan: &PendingPrereqPrompt, width: usize) -> Vec<Stri
     }
     lines.push(format!(
         "actions: approve | reuse cached | regenerate | cancel (recommended: {})",
-        plan.recommended_action.label()
+        plan.recommended_action
     ));
     lines
 }
@@ -123,8 +124,8 @@ fn prepend_plain_activity_lines(app: &ShellApp, width: usize, lines: Vec<String>
         prefix.extend(plain_live_activity_lines(activity, width));
         prefix.push(String::new());
     }
-    if let Some(plan) = app.pending_prereq_prompt.as_ref() {
-        prefix.extend(plain_prereq_plan_lines(plan, width));
+    if let Some(plan) = prereq_prompt_model(app) {
+        prefix.extend(plain_prereq_plan_lines(&plan, width));
         prefix.push(String::new());
     }
     if prefix.is_empty() {
@@ -142,21 +143,13 @@ fn plain_live_activity_lines(activity: &LiveActivity, width: usize) -> Vec<Strin
     ]
 }
 
-fn plain_prereq_step_lines(step: &PrereqPlanStep) -> Vec<String> {
-    let writes = step
-        .writes
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
+fn plain_prereq_step_lines(step: &PrereqPromptStepModel) -> Vec<String> {
     vec![
         format!(
             "- {} {} via {}",
-            step.artifact_state.label(),
-            step.artifact_label,
-            step.tool
+            step.state_label, step.artifact_label, step.tool
         ),
-        format!("  writes: {writes}"),
+        format!("  writes: {}", step.writes),
         format!("  risk: {}", step.risk),
         format!("  cost: {}", step.cost_hint),
     ]
