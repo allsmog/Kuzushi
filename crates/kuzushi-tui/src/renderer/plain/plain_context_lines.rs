@@ -1,41 +1,23 @@
 use super::*;
 use crate::ui_view_models::{
-    context_snapshot_model, workspace_model, ContextSnapshotDetails, WorkspaceModel,
+    plain_context_model, workspace_model, PlainContextModel, WorkspaceModel,
 };
 
 pub(crate) fn plain_context_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
-    let model = context_snapshot_model(app);
+    let model = plain_context_model(app);
 
-    lines.push(String::new());
-    lines.push(plain_section_divider("CONTEXT", width));
-    lines.push(format!("snapshot: {}", model.snapshot));
-    lines.push(format!("state: {}", model.state));
-    lines.push(format!("status: {}", model.status));
-
-    if let Some(details) = &model.details {
-        push_plain_context_details(&mut lines, details);
-    } else {
-        lines.push(String::new());
-        lines.push(
-            "No context snapshot exists yet. Next: context build writes .kuzushi/context-snapshot.json."
-                .to_string(),
-        );
-    }
-
-    lines.push(String::new());
-    lines.push("Next: context build, context status, context regen repo".to_string());
+    push_plain_context_summary(&mut lines, &model, width);
     lines
 }
 
-fn push_plain_context_details(lines: &mut Vec<String>, details: &ContextSnapshotDetails) {
-    lines.push(format!("target: {}", details.target));
-    lines.push(format!("discovery: {}", details.discovery));
-    lines.push(format!("files: {}", details.files));
-    lines.push(format!("languages: {}", details.languages));
-    lines.push(format!("frameworks: {}", details.frameworks));
-    lines.push(format!("generated: {}", details.generated));
-    lines.push(format!("stale: {}", details.stale));
+fn push_plain_context_summary(lines: &mut Vec<String>, model: &PlainContextModel, width: usize) {
+    lines.push(String::new());
+    lines.push(plain_section_divider(model.title, width));
+    lines.extend(model.summary_rows.iter().cloned());
+    lines.extend(model.body_rows.iter().cloned());
+    lines.push(String::new());
+    lines.push(model.next_hint.to_string());
 }
 
 pub(crate) fn plain_workspace_lines(app: &ShellApp, width: usize) -> Vec<String> {
