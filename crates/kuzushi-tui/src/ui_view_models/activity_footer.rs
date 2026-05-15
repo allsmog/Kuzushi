@@ -4,77 +4,61 @@ use crate::ActivitySession;
 pub(crate) struct ActivityFooterModel {
     pub(crate) body: String,
     pub(crate) hints: &'static [ActivityFooterHint],
+    pub(crate) plain_hints: Vec<(&'static str, &'static str)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ActivityFooterHint {
-    pub(crate) key: &'static str,
-    pub(crate) hint: &'static str,
+    pub(crate) full_key_text: &'static str,
+    pub(crate) full_hint_text: &'static str,
+    pub(crate) plain_key_text: &'static str,
+    pub(crate) plain_hint_text: &'static str,
+}
+
+macro_rules! footer_hint {
+    ($key:literal, $hint:literal) => {
+        ActivityFooterHint {
+            full_key_text: concat!("[", $key),
+            full_hint_text: concat!($hint, "]"),
+            plain_key_text: $key,
+            plain_hint_text: $hint,
+        }
+    };
 }
 
 const FULL_HINTS: &[ActivityFooterHint] = &[
-    ActivityFooterHint {
-        key: "j/k",
-        hint: "scroll",
-    },
-    ActivityFooterHint {
-        key: "Tab",
-        hint: "pane",
-    },
-    ActivityFooterHint {
-        key: "V",
-        hint: "verbose",
-    },
-    ActivityFooterHint {
-        key: "p",
-        hint: "pause",
-    },
-    ActivityFooterHint {
-        key: "R",
-        hint: "reset",
-    },
-    ActivityFooterHint {
-        key: "Enter",
-        hint: "focus",
-    },
-    ActivityFooterHint {
-        key: "c",
-        hint: "cancel",
-    },
+    footer_hint!("j/k", "scroll"),
+    footer_hint!("Tab", "pane"),
+    footer_hint!("V", "verbose"),
+    footer_hint!("p", "pause"),
+    footer_hint!("R", "reset"),
+    footer_hint!("Enter", "focus"),
+    footer_hint!("c", "cancel"),
 ];
 
 const NARROW_HINTS: &[ActivityFooterHint] = &[
-    ActivityFooterHint {
-        key: "j/k",
-        hint: "scroll",
-    },
-    ActivityFooterHint {
-        key: "Tab",
-        hint: "pane",
-    },
-    ActivityFooterHint {
-        key: "V",
-        hint: "verbose",
-    },
-    ActivityFooterHint {
-        key: "p",
-        hint: "pause",
-    },
-    ActivityFooterHint {
-        key: "R",
-        hint: "reset",
-    },
-    ActivityFooterHint {
-        key: "c",
-        hint: "cancel",
-    },
+    footer_hint!("j/k", "scroll"),
+    footer_hint!("Tab", "pane"),
+    footer_hint!("V", "verbose"),
+    footer_hint!("p", "pause"),
+    footer_hint!("R", "reset"),
+    footer_hint!("c", "cancel"),
 ];
 
 pub(crate) fn activity_footer_model(session: &ActivitySession, width: u16) -> ActivityFooterModel {
+    let hints = footer_hints(width);
     ActivityFooterModel {
         body: focus_body(session),
-        hints: footer_hints(width),
+        hints,
+        plain_hints: plain_hint_pairs(hints),
     }
+}
+
+fn plain_hint_pairs(hints: &[ActivityFooterHint]) -> Vec<(&'static str, &'static str)> {
+    hints
+        .iter()
+        .map(|hint| (hint.plain_key_text, hint.plain_hint_text))
+        .collect()
 }
 
 fn focus_body(session: &ActivitySession) -> String {
@@ -130,7 +114,18 @@ mod tests {
             model.body,
             " ▸ FOCUS  triage:run  Active  steps 3  reviewing evidence"
         );
-        assert_eq!(model.hints.last().map(|hint| hint.key), Some("c"));
+        assert_eq!(
+            model.hints.last().map(|hint| hint.plain_key_text),
+            Some("c")
+        );
+        assert_eq!(
+            model.hints.first().map(|hint| hint.full_key_text),
+            Some("[j/k")
+        );
+        assert_eq!(
+            model.hints.first().map(|hint| hint.full_hint_text),
+            Some("scroll]")
+        );
     }
 
     #[test]
@@ -150,9 +145,20 @@ mod tests {
             activity_footer_model(&session, 80)
                 .hints
                 .iter()
-                .map(|hint| hint.key)
+                .map(|hint| hint.plain_key_text)
                 .collect::<Vec<_>>(),
             vec!["j/k", "Tab", "V", "p", "R", "c"]
+        );
+        assert_eq!(
+            activity_footer_model(&session, 80).plain_hints,
+            vec![
+                ("j/k", "scroll"),
+                ("Tab", "pane"),
+                ("V", "verbose"),
+                ("p", "pause"),
+                ("R", "reset"),
+                ("c", "cancel"),
+            ]
         );
     }
 }

@@ -177,16 +177,16 @@ fn focus_footer_lines(width: u16, session: &ActivitySession) -> Vec<Line<'static
 fn key_hint_spans(hints: &[ActivityFooterHint]) -> Vec<Span<'static>> {
     let mut spans = vec![Span::raw(" ")];
     for (index, hint) in hints.iter().enumerate() {
-        append_key_hint(&mut spans, index, hint.key, hint.hint);
+        append_key_hint(&mut spans, index, hint);
     }
     spans
 }
 
-fn append_key_hint(spans: &mut Vec<Span<'static>>, index: usize, key: &str, hint: &str) {
+fn append_key_hint(spans: &mut Vec<Span<'static>>, index: usize, hint: &ActivityFooterHint) {
     if index > 0 {
         spans.push(Span::raw(" "));
     }
-    spans.push(Span::styled(format!("[{key}"), theme::accent()));
+    spans.push(Span::styled(hint.full_key_text, theme::accent()));
     spans.push(Span::raw(" "));
-    spans.push(Span::styled(format!("{hint}]"), theme::muted()));
+    spans.push(Span::styled(hint.full_hint_text, theme::muted()));
 }
