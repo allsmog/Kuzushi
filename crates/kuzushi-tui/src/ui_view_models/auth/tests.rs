@@ -8,8 +8,8 @@ fn auth_provider_rows_hide_secret_values() {
     let rows = auth_provider_rows(&app);
 
     assert_eq!(rows.len(), 3);
-    assert!(rows.iter().any(|row| row.name == "pi-agent-core"));
-    assert!(!rows.iter().any(|row| row.detail.contains("sk-")));
+    assert!(rows.iter().any(|row| row.cells[0] == "pi-agent-core"));
+    assert!(!rows.iter().any(|row| row.cells[2].contains("sk-")));
 }
 
 #[test]

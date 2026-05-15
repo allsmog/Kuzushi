@@ -1,27 +1,26 @@
 use crate::ShellApp;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AuthProviderState {
+pub(crate) enum AuthProviderTone {
     Connected,
     Missing,
     Inactive,
 }
 
-impl AuthProviderState {
-    pub(crate) fn label(self) -> &'static str {
+impl AuthProviderTone {
+    fn label(self) -> &'static str {
         match self {
-            AuthProviderState::Connected => "connected",
-            AuthProviderState::Missing => "missing",
-            AuthProviderState::Inactive => "inactive",
+            AuthProviderTone::Connected => "connected",
+            AuthProviderTone::Missing => "missing",
+            AuthProviderTone::Inactive => "inactive",
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AuthProviderRow {
-    pub(crate) name: &'static str,
-    pub(crate) state: AuthProviderState,
-    pub(crate) detail: String,
+    pub(crate) tone: AuthProviderTone,
+    pub(crate) cells: [String; 3],
 }
 
 pub(crate) fn auth_provider_rows(app: &ShellApp) -> Vec<AuthProviderRow> {
@@ -59,11 +58,11 @@ pub(crate) fn oauth_summary() -> String {
 fn runtime_env_row(app: &ShellApp) -> AuthProviderRow {
     let api_key_env = app.config.runtime.api_key_env.as_str();
     let env_set = std::env::var_os(api_key_env).is_some();
-    AuthProviderRow {
-        name: "pi-agent-core",
-        state: connected_or_missing(env_set),
-        detail: runtime_env_detail(api_key_env, env_set),
-    }
+    auth_provider_row(
+        "pi-agent-core",
+        connected_or_missing(env_set),
+        runtime_env_detail(api_key_env, env_set),
+    )
 }
 
 fn runtime_env_detail(api_key_env: &str, env_set: bool) -> String {
@@ -77,34 +76,41 @@ fn runtime_env_detail(api_key_env: &str, env_set: bool) -> String {
 fn anthropic_auth_row() -> AuthProviderRow {
     let env_set = std::env::var_os("ANTHROPIC_API_KEY").is_some();
     let oauth = crate::app::oauth_provider_status("anthropic");
-    AuthProviderRow {
-        name: "anthropic",
-        state: connected_or_missing(env_set || oauth == "ok"),
-        detail: format!(
+    auth_provider_row(
+        "anthropic",
+        connected_or_missing(env_set || oauth == "ok"),
+        format!(
             "ANTHROPIC_API_KEY={}; oauth {oauth}",
             if env_set { "set" } else { "missing" }
         ),
-    }
+    )
 }
 
 fn openai_oauth_row() -> AuthProviderRow {
     let oauth = crate::app::oauth_provider_status("openai-codex");
-    AuthProviderRow {
-        name: "openai",
-        state: if oauth == "ok" {
-            AuthProviderState::Connected
+    auth_provider_row(
+        "openai",
+        if oauth == "ok" {
+            AuthProviderTone::Connected
         } else {
-            AuthProviderState::Inactive
+            AuthProviderTone::Inactive
         },
-        detail: format!("oauth {oauth}"),
+        format!("oauth {oauth}"),
+    )
+}
+
+fn auth_provider_row(name: &str, tone: AuthProviderTone, detail: String) -> AuthProviderRow {
+    AuthProviderRow {
+        tone,
+        cells: [name.to_string(), tone.label().to_string(), detail],
     }
 }
 
-fn connected_or_missing(connected: bool) -> AuthProviderState {
+fn connected_or_missing(connected: bool) -> AuthProviderTone {
     if connected {
-        AuthProviderState::Connected
+        AuthProviderTone::Connected
     } else {
-        AuthProviderState::Missing
+        AuthProviderTone::Missing
     }
 }
 
