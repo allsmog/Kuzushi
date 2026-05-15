@@ -57,6 +57,13 @@ pub trait AgentRuntime: Send + Sync {
         )
     }
 
+    /// Optional provider-specific readiness check for tool loops. This
+    /// should verify auth/scope issues that would otherwise fail on the
+    /// first model step after expensive local setup.
+    fn preflight_tool_loop_blocking(&self, _request: &AgentToolLoopRequest) -> Result<()> {
+        Ok(())
+    }
+
     /// Resolve a tier handle (`Cheap`/`Mid`/`Deep`) to a concrete model
     /// name. Default: pass-through to whatever the operator
     /// configured. Providers that can route across model classes

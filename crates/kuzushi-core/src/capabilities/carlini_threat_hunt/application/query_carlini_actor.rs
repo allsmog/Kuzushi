@@ -1,4 +1,6 @@
+use super::run_carlini_threat_hunt::CarliniDebugArtifacts;
 use super::*;
+use crate::structured_output::balanced_json_slices;
 
 pub(crate) fn query_carlini_actor(
     runtime: &dyn AgentRuntime,
@@ -9,19 +11,80 @@ pub(crate) fn query_carlini_actor(
     inventory: &[(String, String)],
     actor_hunt: &ActorHunt,
     actor_fingerprint: &str,
+    debug_artifacts: Option<&CarliniDebugArtifacts>,
 ) -> Result<Value> {
     let prompt = build_actor_prompt(target, actor_hunt, options, inventory, actor_fingerprint);
+    write_carlini_actor_prompt_artifact(debug_artifacts, actor_fingerprint, &prompt);
     let request = carlini_actor_request(model, target, prompt, input);
-    query_required_structured_json(
-        runtime,
-        request,
-        StructuredJsonContract::new(
-            "carlini-threat-hunt:run",
-            "CarliniThreatFindings",
-            findings_schema(),
-        ),
+    let contract = StructuredJsonContract::new(
+        "carlini-threat-hunt:run",
+        "CarliniThreatFindings",
+        findings_schema(),
+    );
+    let request = request.with_structured_output(contract.runtime_contract());
+    let response = runtime.query_blocking(request.clone())?;
+    write_carlini_actor_response_artifact(debug_artifacts, actor_fingerprint, "initial", &response);
+    let response = if response.truncated {
+        retry_carlini_with_higher_output_budget(runtime, &request)
+            .inspect(|retry| {
+                write_carlini_actor_response_artifact(
+                    debug_artifacts,
+                    actor_fingerprint,
+                    "retry",
+                    retry,
+                );
+            })
+            .unwrap_or(response)
+    } else {
+        response
+    };
+    if let Some(value) = extract_carlini_findings_response(&response) {
+        return Ok(value);
+    }
+    parse_or_repair_required_structured_json(
+        response,
+        contract,
         require_json_object,
+        |repair_prompt, output| {
+            write_carlini_actor_repair_prompt_artifact(
+                debug_artifacts,
+                actor_fingerprint,
+                &repair_prompt,
+            );
+            let repair_request = repair_request_from(&request, repair_prompt, output);
+            let repair_response = runtime.query_blocking(repair_request);
+            if let Ok(response) = &repair_response {
+                write_carlini_actor_response_artifact(
+                    debug_artifacts,
+                    actor_fingerprint,
+                    "repair",
+                    response,
+                );
+            }
+            repair_response
+        },
     )
+}
+
+pub(crate) fn extract_carlini_findings_response(response: &AgentQueryResponse) -> Option<Value> {
+    if let Some(structured) = response.structured.as_ref() {
+        if is_carlini_findings_object(structured) {
+            return Some(structured.clone());
+        }
+    }
+
+    let mut candidates = balanced_json_slices(&response.text, '{', '}');
+    candidates.reverse();
+    candidates.into_iter().find_map(|candidate| {
+        let value = serde_json::from_str::<Value>(candidate).ok()?;
+        is_carlini_findings_object(&value).then_some(value)
+    })
+}
+
+fn is_carlini_findings_object(value: &Value) -> bool {
+    value
+        .get("findings")
+        .is_some_and(|findings| findings.is_array())
 }
 
 fn carlini_actor_request(
@@ -53,6 +116,156 @@ pub(in crate::capabilities::carlini_threat_hunt) fn max_output_tokens_from_input
         .filter_map(|key| input.get(*key).and_then(Value::as_u64))
         .find(|tokens| *tokens > 0 && *tokens <= u32::MAX as u64)
         .map(|tokens| tokens as u32)
+}
+
+fn retry_carlini_with_higher_output_budget(
+    runtime: &dyn AgentRuntime,
+    request: &AgentQueryRequest,
+) -> Result<AgentQueryResponse> {
+    const RETRY_FLOOR: u32 = 16_000;
+    const RETRY_CEILING: u32 = 65_535;
+    let next_budget = match request.max_output_tokens {
+        Some(cap) if cap >= RETRY_CEILING => cap,
+        Some(cap) => cap.saturating_mul(2).clamp(RETRY_FLOOR, RETRY_CEILING),
+        None => RETRY_FLOOR,
+    };
+    runtime.query_blocking(request.clone().with_max_output_tokens(next_budget))
+}
+
+fn write_carlini_actor_prompt_artifact(
+    debug_artifacts: Option<&CarliniDebugArtifacts>,
+    actor_fingerprint: &str,
+    prompt: &str,
+) {
+    write_carlini_actor_artifact(
+        debug_artifacts,
+        actor_fingerprint,
+        "prompt",
+        &json!({ "actorFingerprint": actor_fingerprint, "prompt": prompt }),
+    );
+}
+
+fn write_carlini_actor_repair_prompt_artifact(
+    debug_artifacts: Option<&CarliniDebugArtifacts>,
+    actor_fingerprint: &str,
+    prompt: &str,
+) {
+    write_carlini_actor_artifact(
+        debug_artifacts,
+        actor_fingerprint,
+        "repair-prompt",
+        &json!({ "actorFingerprint": actor_fingerprint, "prompt": prompt }),
+    );
+}
+
+fn write_carlini_actor_response_artifact(
+    debug_artifacts: Option<&CarliniDebugArtifacts>,
+    actor_fingerprint: &str,
+    phase: &str,
+    response: &AgentQueryResponse,
+) {
+    write_carlini_actor_artifact(
+        debug_artifacts,
+        actor_fingerprint,
+        phase,
+        &carlini_actor_response_artifact_payload(actor_fingerprint, phase, response),
+    );
+}
+
+pub(crate) fn carlini_actor_response_artifact_payload(
+    actor_fingerprint: &str,
+    phase: &str,
+    response: &AgentQueryResponse,
+) -> Value {
+    let ignored_tool_prelude = ignored_tool_prelude_summary(response);
+    json!({
+        "actorFingerprint": actor_fingerprint,
+        "phase": phase,
+        "text": response.text,
+        "structured": response.structured,
+        "ignoredToolPrelude": ignored_tool_prelude,
+        "costUsd": response.cost_usd,
+        "inputTokens": response.input_tokens,
+        "outputTokens": response.output_tokens,
+        "truncated": response.truncated,
+        "stopReason": response.stop_reason,
+    })
+}
+
+fn ignored_tool_prelude_summary(response: &AgentQueryResponse) -> Value {
+    let preludes = ignored_tool_prelude_objects(&response.text);
+    json!({
+        "present": !preludes.is_empty(),
+        "count": preludes.len(),
+        "reason": "Carlini threat hunt is a prompt-only query path; tool-shaped JSON in model text was ignored and was not executed.",
+        "objects": preludes,
+    })
+}
+
+fn ignored_tool_prelude_objects(text: &str) -> Vec<Value> {
+    let slices = balanced_json_slices(text, '{', '}');
+    let findings_index = slices
+        .iter()
+        .rposition(|candidate| {
+            serde_json::from_str::<Value>(candidate)
+                .ok()
+                .is_some_and(|value| is_carlini_findings_object(&value))
+        })
+        .unwrap_or(slices.len());
+
+    slices
+        .into_iter()
+        .take(findings_index)
+        .filter_map(|candidate| serde_json::from_str::<Value>(candidate).ok())
+        .filter(is_tool_shaped_json)
+        .collect()
+}
+
+fn is_tool_shaped_json(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.contains_key("cmd")
+        || object.contains_key("tool")
+        || object.contains_key("tool_call")
+        || object.contains_key("toolCall")
+        || (object.contains_key("name") && object.contains_key("arguments"))
+}
+
+fn write_carlini_actor_artifact(
+    debug_artifacts: Option<&CarliniDebugArtifacts>,
+    actor_fingerprint: &str,
+    phase: &str,
+    value: &Value,
+) {
+    let Some(debug_artifacts) = debug_artifacts else {
+        return;
+    };
+    let leaf = format!(
+        "carlini-threat-hunt/{}-{}.json",
+        sanitize_actor_artifact_leaf(actor_fingerprint),
+        phase
+    );
+    let _ = crate::run_artifacts::write_run_artifact_json(
+        &debug_artifacts.target,
+        &debug_artifacts.run_id,
+        &leaf,
+        format!("carlini {phase}"),
+        value,
+    );
+}
+
+fn sanitize_actor_artifact_leaf(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 pub(crate) fn record_unique_carlini_findings(
@@ -99,6 +312,8 @@ pub(crate) fn carlini_threat_hunt_report(
     options: CarliniInput,
     actors: usize,
     actor_runs: usize,
+    prompt_inventory_files: usize,
+    threat_focused_prompt_files: usize,
     findings: Vec<Finding>,
 ) -> Result<CarliniThreatHuntReport> {
     let persisted = persist_findings(&target, &findings, ctx)?;
@@ -107,6 +322,8 @@ pub(crate) fn carlini_threat_hunt_report(
         count: findings.len(),
         actors,
         actor_runs,
+        prompt_inventory_files,
+        threat_focused_prompt_files,
         findings,
         persisted,
         kb_context: Some(options.kb_context),

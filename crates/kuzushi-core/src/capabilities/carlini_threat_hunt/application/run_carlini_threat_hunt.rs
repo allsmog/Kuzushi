@@ -20,11 +20,18 @@ pub fn run_carlini_threat_hunt_report(
 struct CarliniThreatHuntRun<'a> {
     target: PathBuf,
     parent_step: Option<usize>,
+    debug_artifacts: Option<CarliniDebugArtifacts>,
     options: CarliniInput,
     runtime: &'a dyn AgentRuntime,
     model: String,
     capped: Vec<ActorHunt>,
     inventory: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CarliniDebugArtifacts {
+    pub(crate) target: PathBuf,
+    pub(crate) run_id: String,
 }
 
 struct CarliniThreatHuntScope {
@@ -37,7 +44,6 @@ struct CarliniExecutionInputs<'a> {
     options: CarliniInput,
     runtime: &'a dyn AgentRuntime,
     model: String,
-    inventory: Vec<(String, String)>,
 }
 
 fn prepare_carlini_threat_hunt_run<'a>(
@@ -48,6 +54,7 @@ fn prepare_carlini_threat_hunt_run<'a>(
     let scope = prepare_carlini_threat_hunt_scope(input, ctx)?;
     let execution = prepare_carlini_execution_inputs(input, ctx, runtime, &scope.target)?;
     let capped = capped_actor_hunts(scope.actors, execution.options.max_actors);
+    let inventory = collect_carlini_inventory(&scope.target, &capped)?;
     emit_carlini_actor_spawn(
         ctx,
         scope.parent_step,
@@ -58,11 +65,16 @@ fn prepare_carlini_threat_hunt_run<'a>(
     Ok(CarliniThreatHuntRun {
         target: scope.target,
         parent_step: scope.parent_step,
+        debug_artifacts: ctx.trace.and_then(|trace| {
+            trace
+                .run_artifact_location()
+                .map(|(target, run_id)| CarliniDebugArtifacts { target, run_id })
+        }),
         options: execution.options,
         runtime: execution.runtime,
         model: execution.model,
         capped,
-        inventory: execution.inventory,
+        inventory,
     })
 }
 
@@ -89,14 +101,133 @@ fn prepare_carlini_execution_inputs<'a>(
 ) -> Result<CarliniExecutionInputs<'a>> {
     let options = CarliniInput::from_tool_input(input, ctx, &target)?;
     let (runtime, model) = resolve_carlini_runtime_model(runtime, &options)?;
-    let inventory = collect_repo_inventory(&target, 80, 2048)?;
 
     Ok(CarliniExecutionInputs {
         options,
         runtime,
         model,
-        inventory,
     })
+}
+
+pub(crate) fn collect_carlini_inventory(
+    target: &Path,
+    hunts: &[ActorHunt],
+) -> Result<Vec<(String, String)>> {
+    const MAX_TOTAL_FILES: usize = 80;
+    const MAX_FOCUSED_FILES: usize = 24;
+    const MAX_FOCUSED_BYTES: usize = 4096;
+    const MAX_GENERIC_BYTES: usize = 2048;
+
+    let mut inventory =
+        collect_threat_focused_inventory(target, hunts, MAX_FOCUSED_FILES, MAX_FOCUSED_BYTES)?;
+    let mut seen = inventory
+        .iter()
+        .map(|(path, _)| path.clone())
+        .collect::<BTreeSet<_>>();
+    for (path, snippet) in collect_repo_inventory(target, MAX_TOTAL_FILES, MAX_GENERIC_BYTES)? {
+        if inventory.len() >= MAX_TOTAL_FILES {
+            break;
+        }
+        if seen.insert(path.clone()) {
+            inventory.push((path, snippet));
+        }
+    }
+    Ok(inventory)
+}
+
+fn collect_threat_focused_inventory(
+    target: &Path,
+    hunts: &[ActorHunt],
+    max_files: usize,
+    max_bytes_per_file: usize,
+) -> Result<Vec<(String, String)>> {
+    let mut files = Vec::new();
+    let mut seen = BTreeSet::new();
+    for relative in threat_affected_file_paths(hunts) {
+        if files.len() >= max_files {
+            break;
+        }
+        if !seen.insert(relative.clone()) {
+            continue;
+        }
+        if let Some(snippet) = read_threat_focused_snippet(target, &relative, max_bytes_per_file)? {
+            files.push(snippet);
+        }
+    }
+    Ok(files)
+}
+
+fn threat_affected_file_paths(hunts: &[ActorHunt]) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for hunt in hunts {
+        for threat in &hunt.threats {
+            for key in ["affectedFiles", "affected_files"] {
+                for raw in object_string_array(threat, &[key]) {
+                    if let Some(relative) = normalize_threat_file_path(&raw) {
+                        paths.push(relative);
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
+fn threat_focused_inventory_count(inventory: &[(String, String)], hunts: &[ActorHunt]) -> usize {
+    let focused = threat_affected_file_paths(hunts)
+        .into_iter()
+        .map(|path| path.display().to_string())
+        .collect::<BTreeSet<_>>();
+    inventory
+        .iter()
+        .filter(|(path, _)| focused.contains(path))
+        .count()
+}
+
+fn normalize_threat_file_path(raw: &str) -> Option<PathBuf> {
+    let trimmed = raw.trim().trim_start_matches("./");
+    if trimmed.is_empty()
+        || trimmed.contains('*')
+        || trimmed.contains('?')
+        || trimmed.contains('[')
+        || trimmed.contains(']')
+    {
+        return None;
+    }
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        return None;
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(part) => normalized.push(part),
+            std::path::Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    (!normalized.as_os_str().is_empty()).then_some(normalized)
+}
+
+fn read_threat_focused_snippet(
+    target: &Path,
+    relative: &Path,
+    max_bytes_per_file: usize,
+) -> Result<Option<(String, String)>> {
+    let path = target.join(relative);
+    let Ok(file_type) = fs::metadata(&path).map(|metadata| metadata.file_type()) else {
+        return Ok(None);
+    };
+    if !file_type.is_file() {
+        return Ok(None);
+    }
+    let raw = fs::read(&path).unwrap_or_default();
+    if raw.iter().take(4096).any(|byte| *byte == 0) {
+        return Ok(None);
+    }
+    let snippet = String::from_utf8_lossy(&raw[..raw.len().min(max_bytes_per_file)]).to_string();
+    Ok(Some((relative.display().to_string(), snippet)))
 }
 
 fn resolve_carlini_runtime_model<'a>(
@@ -138,6 +269,7 @@ fn execute_carlini_threat_hunt_run(
         &run.model,
         &run.inventory,
         &run.capped,
+        run.debug_artifacts.as_ref(),
     )?;
     drop(_actor_scope);
     finalize_carlini_findings(input, &mut findings, run.options.max_findings)?;
@@ -148,6 +280,8 @@ fn execute_carlini_threat_hunt_run(
         run.options,
         run.capped.len(),
         total_runs,
+        run.inventory.len(),
+        threat_focused_inventory_count(&run.inventory, &run.capped),
         findings,
     )
 }

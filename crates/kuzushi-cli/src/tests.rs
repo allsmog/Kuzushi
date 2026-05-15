@@ -6,7 +6,9 @@ mod tests {
     use crate::adapters::auth_oauth::{anthropic_oauth_readiness_message, auth_ping_model};
     use crate::adapters::auth_ping::AuthPingLog;
     use crate::application::config::{config_command, ensure_config_init_allowed};
-    use crate::application::run_tool::{apply_option_override, parse_option_override};
+    use crate::application::run_tool::{
+        apply_option_override, parse_option_override, start_cli_tool_run,
+    };
     use crate::application::scan::{scan_scope_body, scan_tool_input, scan_worktree_suffix};
     use crate::application::suppressions::{suppressions_command_output, suppressions_plain_lines};
     use crate::command::{ConfigCommand, McpBackend, ScanModeArg};
@@ -22,7 +24,8 @@ mod tests {
     use crate::tool_requirements::{
         tool_defaults_to_workspace, tool_needs_finding_store, tool_needs_runtime,
     };
-    use kuzushi_core::{RunSummary, ToolOptionStore, WorkspaceTarget};
+    use crate::tool_run_artifacts::finish_cli_tool_run;
+    use kuzushi_core::{load_run_summary, RunSummary, ToolOptionStore, WorkspaceTarget};
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -127,6 +130,32 @@ mod tests {
         assert!(runs_show_output(&summary, true)
             .unwrap()
             .contains("\"runId\": \"run-123\""));
+    }
+
+    #[test]
+    fn cli_tool_completion_preserves_started_summary_and_input_artifact() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = start_cli_tool_run(tmp.path(), "demo:tool", &serde_json::json!({"x": 1}));
+        let started = load_run_summary(tmp.path(), &run_id).unwrap();
+
+        finish_cli_tool_run(
+            tmp.path(),
+            &run_id,
+            "demo:tool",
+            &serde_json::json!({"ok": true, "findingsCount": 0}),
+        );
+        let completed = load_run_summary(tmp.path(), &run_id).unwrap();
+
+        assert_eq!(completed.status, "complete");
+        assert_eq!(completed.started_at_unix, started.started_at_unix);
+        assert!(started.process_id.is_some());
+        assert!(completed.process_id.is_none());
+        let artifact_labels = completed
+            .artifacts
+            .iter()
+            .map(|artifact| artifact.label.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(artifact_labels, vec!["input", "result"]);
     }
 
     #[test]

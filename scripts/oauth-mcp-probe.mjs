@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 // Reproduce the bridge's multi-turn agent loop with real MCP tools.
-import { Agent } from "@mariozechner/pi-agent-core";
-import { getModel } from "@mariozechner/pi-ai";
+import { Agent } from "@earendil-works/pi-agent-core";
+import { getModel } from "@earendil-works/pi-ai";
 
 const credsPath = path.join(homedir(), ".kuzushi", "oauth-credentials.json");
 const creds = JSON.parse(readFileSync(credsPath, "utf8"));

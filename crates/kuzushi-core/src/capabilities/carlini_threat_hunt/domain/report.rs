@@ -14,6 +14,8 @@ pub struct CarliniThreatHuntReport {
     pub count: usize,
     pub actors: usize,
     pub actor_runs: usize,
+    pub prompt_inventory_files: usize,
+    pub threat_focused_prompt_files: usize,
     pub findings: Vec<Finding>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub persisted: Option<CarliniThreatHuntPersistedRun>,

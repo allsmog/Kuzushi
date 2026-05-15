@@ -152,6 +152,44 @@ fi
     }
 
     #[test]
+    fn tool_loop_preflight_surfaces_openai_scope_errors_before_first_step() {
+        use kuzushi_core::{AgentTool, AgentToolLoopRequest};
+        let runtime = RuntimeConfig {
+            kind: RuntimeKind::PiAgentCore,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            thinking_level: None,
+            agent_bridge_command: Some(vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                "REQ=$(cat); case \"$REQ\" in *next-step-preflight*) printf '%s' '{\"ok\":false,\"error\":\"missing api.responses.write\"}' ;; *) printf '%s' '{\"ok\":true,\"step\":\"final\",\"text\":\"unexpected\"}' ;; esac"
+                    .to_string(),
+            ]),
+            anthropic_oauth: None,
+        };
+        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let req = AgentToolLoopRequest {
+            model: "openai-codex:gpt-5.5".to_string(),
+            cwd: ".".into(),
+            system_prompt: "sys".to_string(),
+            prompt: "p".to_string(),
+            tools: vec![AgentTool {
+                name: "read_source".to_string(),
+                description: "".to_string(),
+                input_schema: serde_json::json!({"type":"object"}),
+            }],
+            max_steps: 1,
+            runtime_options: None,
+            temperature: None,
+        };
+
+        let err = bridge.preflight_tool_loop_blocking(&req).unwrap_err();
+
+        assert!(err.to_string().contains("next-step preflight"));
+        assert!(err.to_string().contains("api.responses.write"));
+    }
+
+    #[test]
     fn bridge_failure_json_is_returned_as_actionable_error() {
         let runtime = RuntimeConfig {
             kind: RuntimeKind::PiAgentCore,
@@ -161,7 +199,7 @@ fi
             agent_bridge_command: Some(vec![
                 "sh".to_string(),
                 "-c".to_string(),
-                "printf '%s' '{\"ok\":false,\"error\":\"install @mariozechner/pi-agent-core\"}'; exit 1"
+                "printf '%s' '{\"ok\":false,\"error\":\"install @earendil-works/pi-agent-core\"}'; exit 1"
                     .to_string(),
             ]),
             anthropic_oauth: None,
@@ -186,7 +224,61 @@ fi
             .to_string();
 
         assert!(err.contains("pi-agent-core bridge failed"));
-        assert!(err.contains("install @mariozechner/pi-agent-core"));
+        assert!(err.contains("install @earendil-works/pi-agent-core"));
+    }
+
+    #[test]
+    fn query_retries_transient_bridge_failures_with_same_request() {
+        let tmp = tempfile::tempdir().unwrap();
+        let counter = tmp.path().join("counter");
+        let payload = tmp.path().join("payload.json");
+        std::fs::write(&counter, "0").unwrap();
+        let script = format!(
+            r#"#!/bin/sh
+N=$(cat {counter})
+echo $((N+1)) > {counter}
+cat > {payload}
+if [ "$N" = "0" ]; then
+  printf '%s' '{{"ok":false,"error":"openai-codex responses error: WebSocket closed 1006"}}'
+else
+  printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
+fi
+"#,
+            counter = counter.display(),
+            payload = payload.display()
+        );
+        let bridge_script = tmp.path().join("bridge.sh");
+        std::fs::write(&bridge_script, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bridge_script, std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        }
+
+        let runtime = RuntimeConfig {
+            kind: RuntimeKind::PiAgentCore,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            thinking_level: None,
+            agent_bridge_command: Some(vec![bridge_script.to_string_lossy().into_owned()]),
+            anthropic_oauth: None,
+        };
+        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let response = bridge
+            .query_blocking(AgentQueryRequest::new(
+                "openai-codex:gpt-5.5",
+                ".",
+                "system",
+                "prompt",
+            ))
+            .unwrap();
+
+        assert_eq!(response.text, "done");
+        assert_eq!(std::fs::read_to_string(counter).unwrap().trim(), "2");
+        let retried_payload = std::fs::read_to_string(payload).unwrap();
+        assert!(retried_payload.contains("\"model\":\"openai-codex:gpt-5.5\""));
+        assert!(retried_payload.contains("\"prompt\":\"prompt\""));
     }
 
     #[test]

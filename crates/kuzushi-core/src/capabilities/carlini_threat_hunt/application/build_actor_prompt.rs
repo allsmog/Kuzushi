@@ -31,7 +31,7 @@ fn actor_prompt_header(
 
 fn actor_prompt_target_rule(target: &Path) -> String {
     format!(
-        "IMPORTANT: Only examine files under {}. Do not read, grep, or navigate outside this directory.",
+        "IMPORTANT: Only examine files under {}. This run is prompt-only: you cannot execute tools, shell commands, grep, or file reads. Do not emit tool-call JSON such as {{\"cmd\": ...}}; reason only from the provided snippets.",
         target.display()
     )
 }

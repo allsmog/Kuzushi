@@ -17,5 +17,8 @@ pub struct UafHuntInput {
     pub compile_commands_path: PathBuf,
     /// Operator-supplied per-tool-call timeout for mcp-clang RPCs.
     pub clang_call_timeout_secs: u64,
+    /// Include docs/examples/tests/fixtures in repo-walking tools. Defaults
+    /// false so production hunts spend their budget on shipped code.
+    pub include_non_production: bool,
     pub model: Option<String>,
 }

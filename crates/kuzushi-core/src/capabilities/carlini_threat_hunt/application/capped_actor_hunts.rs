@@ -1,3 +1,4 @@
+use super::run_carlini_threat_hunt::CarliniDebugArtifacts;
 use super::*;
 
 pub(crate) fn capped_actor_hunts(actors: ActorsResult, max_actors: usize) -> Vec<ActorHunt> {
@@ -31,11 +32,20 @@ pub(crate) fn run_carlini_actor_hunts(
     model: &str,
     inventory: &[(String, String)],
     actors: &[ActorHunt],
+    debug_artifacts: Option<&CarliniDebugArtifacts>,
 ) -> Result<Vec<Finding>> {
     let mut state = CarliniActorRunState::default();
     for actor_hunt in actors {
         run_carlini_actor_hunt(
-            runtime, input, target, options, model, inventory, actor_hunt, &mut state,
+            runtime,
+            input,
+            target,
+            options,
+            model,
+            inventory,
+            actor_hunt,
+            debug_artifacts,
+            &mut state,
         )?;
     }
     Ok(state.findings)
@@ -56,11 +66,20 @@ pub(crate) fn run_carlini_actor_hunt(
     model: &str,
     inventory: &[(String, String)],
     actor_hunt: &ActorHunt,
+    debug_artifacts: Option<&CarliniDebugArtifacts>,
     state: &mut CarliniActorRunState,
 ) -> Result<()> {
     for _ in 0..options.runs_per_actor {
         run_carlini_actor_iteration(
-            runtime, input, target, options, model, inventory, actor_hunt, state,
+            runtime,
+            input,
+            target,
+            options,
+            model,
+            inventory,
+            actor_hunt,
+            debug_artifacts,
+            state,
         )?;
     }
     Ok(())
@@ -74,6 +93,7 @@ pub(crate) fn run_carlini_actor_iteration(
     model: &str,
     inventory: &[(String, String)],
     actor_hunt: &ActorHunt,
+    debug_artifacts: Option<&CarliniDebugArtifacts>,
     state: &mut CarliniActorRunState,
 ) -> Result<()> {
     let actor_fingerprint = build_actor_fingerprint(&actor_hunt.actor, state.run_index);
@@ -86,6 +106,7 @@ pub(crate) fn run_carlini_actor_iteration(
         inventory,
         actor_hunt,
         &actor_fingerprint,
+        debug_artifacts,
     )?;
     let normalized = normalize_findings(raw, target, options.max_findings, &actor_fingerprint)?;
     record_unique_carlini_findings(state, normalized);

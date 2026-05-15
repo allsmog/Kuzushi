@@ -112,6 +112,24 @@ mod tests {
     }
 
     #[test]
+    fn parses_label_colon_entry_point_summary_counts() {
+        let tmp = tempdir().unwrap();
+        write_fixture(tmp.path());
+        fs::write(
+            tmp.path().join("x-ray").join(REQUIRED_ENTRY_POINTS_MD),
+            "# Entry Points\n\n**Summary:** total: 6, permissionless: 6, role-gated: 0, admin-only: 0\n",
+        )
+        .unwrap();
+
+        let data = read_x_ray_report_artifacts(tmp.path(), None, "rust", 0.0).unwrap();
+
+        assert_eq!(data.entry_point_counts.total, 6);
+        assert_eq!(data.entry_point_counts.permissionless, 6);
+        assert_eq!(data.entry_point_counts.role_gated, 0);
+        assert_eq!(data.entry_point_counts.admin_only, 0);
+    }
+
+    #[test]
     fn run_writes_structured_pi_agent_core_artifacts() {
         let tmp = tempdir().unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();

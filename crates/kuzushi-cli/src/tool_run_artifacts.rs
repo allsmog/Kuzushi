@@ -1,6 +1,6 @@
 use kuzushi_core::{
-    append_run_trace_step, next_run_trace_step_number, write_run_artifact_json, write_run_summary,
-    RunSummary, RunTraceStep,
+    append_run_trace_step, load_run_summary, next_run_trace_step_number, write_run_artifact_json,
+    write_run_summary, RunSummary, RunTraceStep,
 };
 use std::path::Path;
 
@@ -12,15 +12,10 @@ pub(crate) fn finish_cli_tool_run(
 ) {
     let result_artifact =
         write_run_artifact_json(target, run_id, "result.json", "result", output).ok();
-    let mut summary = RunSummary::running(
-        run_id.to_string(),
-        "run",
-        Some(tool.to_string()),
-        target.display().to_string(),
-    )
-    .complete()
-    .with_findings(run_output_findings_count(output))
-    .with_cost(run_output_cost_usd(output));
+    let mut summary = load_existing_summary(target, run_id, tool)
+        .complete()
+        .with_findings(run_output_findings_count(output))
+        .with_cost(run_output_cost_usd(output));
     if let Some(artifact) = result_artifact {
         summary = summary.with_artifact(artifact);
     }
@@ -39,13 +34,7 @@ pub(crate) fn finish_cli_tool_run(
 }
 
 pub(crate) fn fail_cli_tool_run(target: &Path, run_id: &str, tool: &str, error: &str) {
-    let summary = RunSummary::running(
-        run_id.to_string(),
-        "run",
-        Some(tool.to_string()),
-        target.display().to_string(),
-    )
-    .failed(error.to_string());
+    let summary = load_existing_summary(target, run_id, tool).failed(error.to_string());
     let _ = append_run_trace_step(
         target,
         run_id,
@@ -58,6 +47,17 @@ pub(crate) fn fail_cli_tool_run(target: &Path, run_id: &str, tool: &str, error: 
         .with_severity("danger"),
     );
     let _ = write_run_summary(target, &summary);
+}
+
+fn load_existing_summary(target: &Path, run_id: &str, tool: &str) -> RunSummary {
+    load_run_summary(target, run_id).unwrap_or_else(|_| {
+        RunSummary::running(
+            run_id.to_string(),
+            "run",
+            Some(tool.to_string()),
+            target.display().to_string(),
+        )
+    })
 }
 
 pub(crate) fn run_output_findings_count(output: &serde_json::Value) -> Option<u64> {

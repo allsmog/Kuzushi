@@ -17,4 +17,6 @@ mod resolve_threat_model_document;
 mod run_carlini_threat_hunt;
 mod run_options;
 
+#[cfg(test)]
+pub(crate) use run_carlini_threat_hunt::collect_carlini_inventory;
 pub use run_carlini_threat_hunt::{run_carlini_threat_hunt, run_carlini_threat_hunt_report};

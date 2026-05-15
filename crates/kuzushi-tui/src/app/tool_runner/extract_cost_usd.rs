@@ -22,15 +22,10 @@ pub(crate) fn record_tool_run_complete(
         return;
     };
     let artifact = write_run_artifact_json(target, run_id, "result.json", "result", result).ok();
-    let mut summary = RunSummary::running(
-        run_id.to_string(),
-        "tool",
-        Some(tool_name.to_string()),
-        target.display().to_string(),
-    )
-    .complete()
-    .with_findings(extract_findings_count(result))
-    .with_cost(extract_cost_usd(result));
+    let mut summary = load_existing_tool_summary(target, run_id, tool_name)
+        .complete()
+        .with_findings(extract_findings_count(result))
+        .with_cost(extract_cost_usd(result));
     if let Some(artifact) = artifact {
         summary = summary.with_artifact(artifact);
     }
@@ -57,13 +52,7 @@ pub(crate) fn record_tool_run_failed(
     let (Some(target), Some(run_id)) = (target, run_id) else {
         return;
     };
-    let summary = RunSummary::running(
-        run_id.to_string(),
-        "tool",
-        Some(tool_name.to_string()),
-        target.display().to_string(),
-    )
-    .failed(error.to_string());
+    let summary = load_existing_tool_summary(target, run_id, tool_name).failed(error.to_string());
     let _ = append_run_trace_step(
         target,
         run_id,
@@ -76,6 +65,21 @@ pub(crate) fn record_tool_run_failed(
         .with_severity("danger"),
     );
     let _ = write_run_summary(target, &summary);
+}
+
+fn load_existing_tool_summary(
+    target: &std::path::Path,
+    run_id: &str,
+    tool_name: &str,
+) -> RunSummary {
+    load_run_summary(target, run_id).unwrap_or_else(|_| {
+        RunSummary::running(
+            run_id.to_string(),
+            "tool",
+            Some(tool_name.to_string()),
+            target.display().to_string(),
+        )
+    })
 }
 
 pub(crate) fn extract_findings_count(value: &serde_json::Value) -> Option<u64> {

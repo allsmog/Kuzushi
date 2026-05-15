@@ -45,3 +45,41 @@ fn carlini_max_output_tokens_accepts_operator_cap_aliases() {
         None
     );
 }
+
+#[test]
+fn carlini_extracts_findings_from_concatenated_tool_transcript() {
+    let response = AgentQueryResponse {
+        text: r#"{"cmd":"pwd"}{"cmd":"grep -R fopen ."}{"findings":[{"ruleId":"carlini-threat-hunt/example","filePath":"docs/examples/ftp-wildcard.c","startLine":68}]}"#
+            .to_string(),
+        ..AgentQueryResponse::default()
+    };
+
+    let value = extract_carlini_findings_response(&response).expect("findings response");
+
+    assert_eq!(
+        value["findings"][0]["ruleId"],
+        "carlini-threat-hunt/example"
+    );
+}
+
+#[test]
+fn carlini_response_artifact_marks_tool_shaped_preludes_as_ignored() {
+    let response = AgentQueryResponse {
+        text: r#"{"cmd":["bash","-lc","grep -R token ."]}{"findings":[]}"#.to_string(),
+        ..AgentQueryResponse::default()
+    };
+
+    let artifact =
+        carlini_actor_response_artifact_payload("carlini-threat-hunt:User:0", "initial", &response);
+
+    assert_eq!(artifact["ignoredToolPrelude"]["present"], json!(true));
+    assert_eq!(artifact["ignoredToolPrelude"]["count"], json!(1));
+    assert!(artifact["ignoredToolPrelude"]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("was not executed"));
+    assert_eq!(
+        artifact["ignoredToolPrelude"]["objects"][0]["cmd"][0],
+        json!("bash")
+    );
+}

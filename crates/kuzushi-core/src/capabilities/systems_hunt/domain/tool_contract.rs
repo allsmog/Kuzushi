@@ -25,3 +25,14 @@ pub(crate) const SKIP_DIRS: &[&str] = &[
     "target",
     "vendor",
 ];
+
+pub(crate) const NON_PRODUCTION_SYSTEMS_DIRS: &[&str] = &[
+    "__tests__",
+    "doc",
+    "docs",
+    "example",
+    "examples",
+    "fixtures",
+    "test",
+    "tests",
+];

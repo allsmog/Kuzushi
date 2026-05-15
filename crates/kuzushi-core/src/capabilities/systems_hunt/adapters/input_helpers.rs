@@ -15,6 +15,18 @@ pub(crate) fn positive_usize(input: &Value, keys: &[&str], default: usize) -> Re
     Ok(default)
 }
 
+pub(crate) fn bool_option(input: &Value, keys: &[&str], default: bool) -> Result<bool> {
+    for key in keys {
+        if let Some(value) = input.get(*key) {
+            let Some(value) = value.as_bool() else {
+                anyhow::bail!("systems-hunt {key} must be a boolean");
+            };
+            return Ok(value);
+        }
+    }
+    Ok(default)
+}
+
 pub(crate) fn optional_nonempty_string(input: &Value, key: &str) -> Result<Option<String>> {
     let Some(value) = input.get(key) else {
         return Ok(None);

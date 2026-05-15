@@ -8,8 +8,11 @@ use kuzushi_core::{
 use super::bridge_payloads::BridgeRequest;
 use super::bridge_process::run_bridge;
 use super::next_step_bridge::next_step_blocking as run_next_step_blocking;
+use super::next_step_bridge::preflight_tool_loop_blocking as run_preflight_tool_loop_blocking;
 use super::runtime_config::PiAgentCoreRuntime;
 use super::triage::{clamp_outcome, fallback_triage_outcome, triage_prompt, TRIAGE_SYSTEM_PROMPT};
+use std::thread;
+use std::time::Duration;
 
 fn clamp_token_count_u32(value: u64) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
@@ -39,15 +42,7 @@ impl AgentRuntime for PiAgentCoreRuntime {
             temperature: request.temperature,
         };
 
-        let response = run_bridge(&self.command, &bridge_request)?;
-        if !response.ok {
-            anyhow::bail!(
-                "pi-agent-core bridge failed: {}",
-                response
-                    .error
-                    .unwrap_or_else(|| "unknown error".to_string())
-            );
-        }
+        let response = run_bridge_with_transport_retries(&self.command, bridge_request)?;
 
         Ok(AgentQueryResponse {
             text: response.text.unwrap_or_default(),
@@ -85,6 +80,71 @@ impl AgentRuntime for PiAgentCoreRuntime {
     ) -> Result<AgentLoopStep> {
         run_next_step_blocking(self, request, history)
     }
+
+    fn preflight_tool_loop_blocking(&self, request: &AgentToolLoopRequest) -> Result<()> {
+        run_preflight_tool_loop_blocking(self, request)
+    }
+}
+
+fn run_bridge_with_transport_retries(
+    command: &[String],
+    request: BridgeRequest,
+) -> Result<super::bridge_payloads::BridgeResponse> {
+    const ATTEMPTS: usize = 3;
+    let mut last_error: Option<anyhow::Error> = None;
+    for attempt in 1..=ATTEMPTS {
+        match run_bridge(command, &request) {
+            Ok(response) if response.ok => return Ok(response),
+            Ok(response) => {
+                let message = response
+                    .error
+                    .unwrap_or_else(|| "unknown error".to_string());
+                if !is_transient_bridge_error(&message) || attempt == ATTEMPTS {
+                    anyhow::bail!("pi-agent-core bridge failed: {message}");
+                }
+                last_error = Some(anyhow::anyhow!("pi-agent-core bridge failed: {message}"));
+            }
+            Err(error) => {
+                let message = error.to_string();
+                if !is_transient_bridge_error(&message) || attempt == ATTEMPTS {
+                    return Err(error);
+                }
+                last_error = Some(error);
+            }
+        }
+        thread::sleep(Duration::from_millis(retry_delay_ms(attempt)));
+    }
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("pi-agent-core bridge failed")))
+}
+
+fn retry_delay_ms(attempt: usize) -> u64 {
+    match attempt {
+        0 | 1 => 250,
+        2 => 500,
+        _ => 1_000,
+    }
+}
+
+fn is_transient_bridge_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    [
+        "websocket closed 1006",
+        "websocket closed",
+        "socket hang up",
+        "econnreset",
+        "etimedout",
+        "network error",
+        "fetch failed",
+        "429",
+        "rate limit",
+        "temporarily unavailable",
+        "internal server error",
+        "bad gateway",
+        "service unavailable",
+        "gateway timeout",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 fn triage_outcome_from_response(response: AgentQueryResponse) -> TriageOutcome {

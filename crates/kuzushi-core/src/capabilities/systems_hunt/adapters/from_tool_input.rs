@@ -7,6 +7,11 @@ impl SystemsHuntInput {
             max_surfaces: positive_usize(input, &["maxSurfaces", "max_surfaces"], 50)?,
             max_files: positive_usize(input, &["maxFiles", "max_files"], 5000)?,
             head_bytes: positive_usize(input, &["headBytes", "head_bytes"], 16384)?,
+            include_non_production: bool_option(
+                input,
+                &["includeNonProduction", "include_non_production"],
+                false,
+            )?,
             max_trigger_hypotheses_per_surface: positive_usize(
                 input,
                 &[

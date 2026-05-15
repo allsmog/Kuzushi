@@ -33,10 +33,14 @@ pub fn run_uaf_hunt_report(
         );
     }
 
+    let request = build_loop_request(&target, &options, ctx)?;
+    runtime
+        .preflight_tool_loop_blocking(&request)
+        .context("uaf-hunt: agent tool-loop preflight failed")?;
+
     let mut clang = ClangMcpClient::spawn(&target, &options.compile_commands_path)?;
     let clang_stats = Arc::new(Mutex::new(ClangCallStats::default()));
-    let toolbox = build_uaf_hunt_toolbox(&target, &mut clang, Arc::clone(&clang_stats));
-    let request = build_loop_request(&target, &options, ctx)?;
+    let toolbox = build_uaf_hunt_toolbox(&target, &options, &mut clang, Arc::clone(&clang_stats));
     let mut handler = toolbox;
     let outcome = run_tool_loop(runtime, &request, &mut handler)
         .context("uaf-hunt: agent tool-loop failed")?;
@@ -180,11 +184,13 @@ fn extract_first_json_object(text: &str) -> Option<Value> {
 /// second MCP server.
 fn build_uaf_hunt_toolbox<'a>(
     target: &Path,
+    options: &UafHuntInput,
     clang: &'a mut ClangMcpClient,
     stats: Arc<Mutex<ClangCallStats>>,
 ) -> UafHuntHandler<'a> {
     UafHuntHandler {
         target: target.to_path_buf(),
+        include_non_production: options.include_non_production,
         clang: clang as *mut ClangMcpClient,
         stats,
         _marker: std::marker::PhantomData,
@@ -202,6 +208,7 @@ fn build_uaf_hunt_toolbox<'a>(
 /// long-lived subprocess through the trait.
 struct UafHuntHandler<'a> {
     target: PathBuf,
+    include_non_production: bool,
     clang: *mut ClangMcpClient,
     stats: Arc<Mutex<ClangCallStats>>,
     _marker: std::marker::PhantomData<&'a mut ClangMcpClient>,
@@ -221,7 +228,11 @@ impl<'a> ToolCallHandler for UafHuntHandler<'a> {
         if let Some(clang_method) = clang_tool_method(name) {
             return self.run_clang_tool(call, clang_method);
         }
-        Ok(run_uaf_repo_tool(&self.target, call))
+        Ok(run_uaf_repo_tool(
+            &self.target,
+            self.include_non_production,
+            call,
+        ))
     }
 }
 
@@ -268,9 +279,9 @@ fn clang_tool_arguments(target: &Path, call: &ToolCall) -> Value {
     arguments
 }
 
-fn run_uaf_repo_tool(target: &Path, call: &ToolCall) -> ToolResult {
+fn run_uaf_repo_tool(target: &Path, include_non_production: bool, call: &ToolCall) -> ToolResult {
     match call.name.as_str() {
-        "grep" => handle_grep(target, call),
+        "grep" => handle_grep(target, include_non_production, call),
         "read_file" => handle_read_file(target, call),
         "list_dir" => handle_list_dir(target, call),
         other => failed_tool_result(
@@ -307,7 +318,7 @@ fn clang_tool_method(name: &str) -> Option<&'static str> {
     }
 }
 
-fn handle_grep(target: &Path, call: &ToolCall) -> ToolResult {
+fn handle_grep(target: &Path, include_non_production: bool, call: &ToolCall) -> ToolResult {
     let pattern = match call.input.get("pattern").and_then(Value::as_str) {
         Some(value) if !value.is_empty() => value.to_string(),
         _ => {
@@ -328,7 +339,7 @@ fn handle_grep(target: &Path, call: &ToolCall) -> ToolResult {
                 .filter_map(|item| item.as_str().map(str::to_string))
                 .collect()
         })
-        .unwrap_or_else(default_c_globs);
+        .unwrap_or_else(|| default_c_globs(include_non_production));
     let max_results = call
         .input
         .get("maxResults")
@@ -350,14 +361,34 @@ fn handle_grep(target: &Path, call: &ToolCall) -> ToolResult {
     }
 }
 
-fn default_c_globs() -> Vec<String> {
-    vec![
+fn default_c_globs(include_non_production: bool) -> Vec<String> {
+    let mut globs = vec![
         "**/*.c".to_string(),
         "**/*.h".to_string(),
         "**/*.cc".to_string(),
         "**/*.cpp".to_string(),
         "**/*.hpp".to_string(),
+    ];
+    if !include_non_production {
+        globs.extend(non_production_exclude_globs());
+    }
+    globs
+}
+
+fn non_production_exclude_globs() -> Vec<String> {
+    [
+        "!docs/**",
+        "!doc/**",
+        "!examples/**",
+        "!example/**",
+        "!tests/**",
+        "!test/**",
+        "!fixtures/**",
+        "!__tests__/**",
     ]
+    .iter()
+    .map(|glob| glob.to_string())
+    .collect()
 }
 
 fn run_ripgrep(
@@ -536,5 +567,15 @@ mod tests {
         assert_eq!(parsed["findings"], json!([]));
         assert!(extract_first_json_object("no object").is_none());
         assert!(extract_first_json_object("} before {").is_none());
+    }
+
+    #[test]
+    fn default_grep_scope_excludes_non_production_dirs() {
+        let production = default_c_globs(false);
+        assert!(production.iter().any(|glob| glob == "!tests/**"));
+        assert!(production.iter().any(|glob| glob == "!examples/**"));
+
+        let broad = default_c_globs(true);
+        assert!(broad.iter().all(|glob| !glob.starts_with('!')));
     }
 }

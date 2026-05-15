@@ -13,4 +13,7 @@ pub(crate) struct SystemsHuntInput {
     /// Bytes read per file during the fast classify pass. Default 16 KiB (was
     /// 4 KiB): captures roughly 250 lines without bloating wallclock.
     pub(crate) head_bytes: usize,
+    /// Include docs/examples/tests in surface discovery. Defaults false so a
+    /// root-target production hunt does not spend its surface budget on samples.
+    pub(crate) include_non_production: bool,
 }

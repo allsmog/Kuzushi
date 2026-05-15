@@ -12,6 +12,7 @@ pub mod systems_hunt;
 pub mod taint_iris;
 pub mod taint_iris_next;
 pub mod threat_intel;
+pub mod threat_leads;
 pub mod threat_model;
 pub mod uaf_hunt;
 pub mod variant_ndiff;
@@ -31,6 +32,7 @@ pub use threat_intel::{
     parse_catalog_str, CatalogEntry, CatalogFile, CatalogSeverity, HuntKind,
     SUPPORTED_SCHEMA_VERSIONS,
 };
+pub use threat_leads::*;
 pub use threat_model::*;
 pub use uaf_hunt::*;
 pub use variant_ndiff::*;
