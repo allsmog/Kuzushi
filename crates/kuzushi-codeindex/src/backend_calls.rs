@@ -19,14 +19,33 @@ pub(crate) fn definition_call(
             tool: "gtags.definitions",
             args: serde_json::json!({ "symbol": symbol, "repoPath": repo }),
         }),
-        Backend::Joern => Some(BackendToolCall {
-            tool: "joern.query",
-            args: serde_json::json!({
-                "scala": format!("cpg.method.name(\"{}\").l", symbol.replace('"', "\\\""))
-            }),
-        }),
+        Backend::Joern => {
+            if !is_safe_joern_symbol(symbol) {
+                return None;
+            }
+            Some(BackendToolCall {
+                tool: "joern.query",
+                args: serde_json::json!({
+                    "scala": format!("cpg.method.nameExact(\"{}\").l", symbol)
+                }),
+            })
+        }
         Backend::Clang => None,
     }
+}
+
+/// A Joern method `name` is interpolated into a Scala literal, so any
+/// character that could escape the string (`"`, `\`) or alter Scala parsing
+/// MUST be rejected at the source. Real symbol names are identifier-shaped:
+/// alphanumerics, underscore, and the C++/Rust/Java qualifiers `:`, `.`, `<`,
+/// `>`, `~`. Anything outside that set is a query-injection attempt and we
+/// drop the call rather than try to escape.
+fn is_safe_joern_symbol(symbol: &str) -> bool {
+    !symbol.is_empty()
+        && symbol.len() <= 256
+        && symbol
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ':' | '.' | '<' | '>' | '~'))
 }
 
 pub(crate) fn references_call(
