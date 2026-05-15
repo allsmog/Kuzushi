@@ -12,6 +12,7 @@ const HOME_ARTIFACTS: &[HomeArtifactSpec] = &[
     HomeArtifactSpec::new("failures", "failures.json"),
     HomeArtifactSpec::new("report", "report.md"),
 ];
+const HOME_ARTIFACT_COLUMN_COUNT: usize = 4;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HomeCockpitModel {
@@ -27,10 +28,7 @@ pub struct HomeCockpitModel {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HomeArtifactRow {
-    pub label: &'static str,
-    pub path: String,
-    pub glyph: &'static str,
-    pub state: &'static str,
+    pub cells: [String; HOME_ARTIFACT_COLUMN_COUNT],
 }
 
 pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
@@ -78,10 +76,12 @@ fn home_artifact_row(run_dir: &Path, artifact: &HomeArtifactSpec) -> HomeArtifac
     let path = run_dir.join(artifact.leaf);
     let state = artifact_state(&path);
     HomeArtifactRow {
-        label: artifact.label,
-        path: path.display().to_string(),
-        glyph: state.glyph,
-        state: state.label,
+        cells: [
+            state.glyph.to_string(),
+            artifact.label.to_string(),
+            state.label.to_string(),
+            path.display().to_string(),
+        ],
     }
 }
 
@@ -227,6 +227,25 @@ mod tests {
         assert_eq!(
             artifact_state_from_text("No report was recorded for this run.").label,
             "placeholder"
+        );
+    }
+
+    #[test]
+    fn home_artifact_row_shapes_display_cells() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path();
+        std::fs::write(run_dir.join("context.json"), r#"{"status":"partial"}"#).unwrap();
+
+        let row = home_artifact_row(run_dir, &HomeArtifactSpec::new("ctx", "context.json"));
+
+        assert_eq!(
+            row.cells,
+            [
+                "◆".to_string(),
+                "ctx".to_string(),
+                "partial".to_string(),
+                run_dir.join("context.json").display().to_string(),
+            ]
         );
     }
 }

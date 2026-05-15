@@ -47,11 +47,12 @@ fn append_home_rail(lines: &mut Vec<Line<'static>>, model: &HomeCockpitModel, ar
 }
 
 fn rail_row(artifact: &HomeArtifactRow, width: u16) -> Line<'static> {
+    let [glyph, label, state, path] = &artifact.cells;
     let path_width = (width as usize).saturating_sub(38).max(24);
     row(&[
-        pad(artifact.glyph, 3),
-        pad(artifact.label, 12),
-        pad(artifact.state, 12),
-        fit(&artifact.path, path_width),
+        pad(glyph, 3),
+        pad(label, 12),
+        pad(state, 12),
+        fit(path, path_width),
     ])
 }
