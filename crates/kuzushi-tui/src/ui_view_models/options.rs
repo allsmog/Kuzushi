@@ -27,18 +27,12 @@ pub(crate) enum OptionsBody {
 pub(crate) struct OptionsTable {
     pub(crate) hint: &'static str,
     pub(crate) headers: [&'static str; 7],
-    pub(crate) rows: Vec<OptionRow>,
+    pub(crate) rows: Vec<OptionsTableRow>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct OptionRow {
-    pub(crate) name: String,
-    pub(crate) value: String,
-    pub(crate) default_value: String,
-    pub(crate) required: &'static str,
-    pub(crate) option_type: &'static str,
-    pub(crate) aliases: String,
-    pub(crate) description: String,
+pub(crate) struct OptionsTableRow {
+    pub(crate) cells: [String; 7],
     has_stored_value: bool,
 }
 
@@ -65,13 +59,7 @@ pub(crate) struct PlainOptionsTable {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlainOptionRow {
-    pub(crate) name: String,
-    pub(crate) value: String,
-    pub(crate) default_value: String,
-    pub(crate) required: &'static str,
-    pub(crate) option_type: &'static str,
-    pub(crate) aliases: String,
-    pub(crate) description: String,
+    pub(crate) cells: [String; 7],
 }
 
 pub(crate) fn options_model(app: &ShellApp, view: &OptionsView) -> OptionsModel {
@@ -134,16 +122,8 @@ fn plain_options_table(table: OptionsTable) -> PlainOptionsTable {
     }
 }
 
-fn plain_option_row(row: OptionRow) -> PlainOptionRow {
-    PlainOptionRow {
-        name: row.name,
-        value: row.value,
-        default_value: row.default_value,
-        required: row.required,
-        option_type: row.option_type,
-        aliases: row.aliases,
-        description: row.description,
-    }
+fn plain_option_row(row: OptionsTableRow) -> PlainOptionRow {
+    PlainOptionRow { cells: row.cells }
 }
 
 fn options_model_body(view: &OptionsView, body: OptionsBody) -> OptionsModel {
@@ -155,7 +135,7 @@ fn options_model_body(view: &OptionsView, body: OptionsBody) -> OptionsModel {
     }
 }
 
-fn options_table(rows: Vec<OptionRow>) -> OptionsTable {
+fn options_table(rows: Vec<OptionsTableRow>) -> OptionsTable {
     OptionsTable {
         hint:
             "set <key> <value> writes session state; setg writes global state. Option names are canonical; aliases work.",
@@ -190,23 +170,24 @@ fn option_row(
     spec: &OptionSpec,
     filter: OptionsFilter,
     current: Option<&serde_json::Value>,
-) -> Option<OptionRow> {
+) -> Option<OptionsTableRow> {
     let has_stored_value = current.is_some();
     if !option_visible(spec, filter, has_stored_value) {
         return None;
     }
-    Some(OptionRow {
-        name: spec.name.clone(),
-        value: current.map(format_json_value).unwrap_or_else(dash),
-        default_value: spec
-            .default
-            .as_ref()
-            .map(format_json_value)
-            .unwrap_or_else(dash),
-        required: required_label(spec, current),
-        option_type: option_type_label(spec.option_type),
-        aliases: option_alias_label(spec),
-        description: option_description(spec),
+    Some(OptionsTableRow {
+        cells: [
+            spec.name.clone(),
+            current.map(format_json_value).unwrap_or_else(dash),
+            spec.default
+                .as_ref()
+                .map(format_json_value)
+                .unwrap_or_else(dash),
+            required_label(spec, current).to_string(),
+            option_type_label(spec.option_type).to_string(),
+            option_alias_label(spec),
+            option_description(spec),
+        ],
         has_stored_value,
     })
 }

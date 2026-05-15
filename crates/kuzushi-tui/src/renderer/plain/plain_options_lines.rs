@@ -44,15 +44,17 @@ fn push_plain_options_table(lines: &mut Vec<String>, width: usize, table: &Plain
 }
 
 fn plain_option_row(row: &PlainOptionRow, widths: &[usize]) -> String {
+    let aliases = fit(&row.cells[5], widths.get(5).copied().unwrap_or(10));
+    let description = fit(&row.cells[6], widths.get(6).copied().unwrap_or(16));
     table_text(
         &[
-            &row.name,
-            &row.value,
-            &row.default_value,
-            row.required,
-            row.option_type,
-            &fit(&row.aliases, widths.get(5).copied().unwrap_or(10)),
-            &fit(&row.description, widths.get(6).copied().unwrap_or(16)),
+            &row.cells[0],
+            &row.cells[1],
+            &row.cells[2],
+            &row.cells[3],
+            &row.cells[4],
+            &aliases,
+            &description,
         ],
         widths,
     )
