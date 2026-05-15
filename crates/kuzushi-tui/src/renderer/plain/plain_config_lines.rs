@@ -1,5 +1,7 @@
 use super::*;
-use crate::ui_view_models::{catalog_model, config_model, ConfigModel, ConfigModelRow};
+use crate::ui_view_models::{
+    config_model, plain_context_strip_model, ConfigModel, ConfigModelRow, PlainContextStripModel,
+};
 
 pub(crate) fn plain_config_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
@@ -51,15 +53,11 @@ fn plain_model_row(row: &ConfigModelRow, widths: &[usize]) -> String {
 }
 
 pub(crate) fn plain_context_strip(app: &ShellApp, width: usize) -> Vec<String> {
-    let catalog = catalog_model(app);
-    let strip = context_strip_model(app);
-    vec![fit(
-        &format!(
-            "{} | target:{} | {} | {} | {} mods",
-            strip.mode, strip.target, strip.view, strip.findings, catalog.module_count
-        ),
-        width,
-    )]
+    plain_context_strip_rows(plain_context_strip_model(app, width))
+}
+
+fn plain_context_strip_rows(model: PlainContextStripModel) -> Vec<String> {
+    model.rows
 }
 
 pub(crate) fn plain_model_widths(width: usize) -> Vec<usize> {

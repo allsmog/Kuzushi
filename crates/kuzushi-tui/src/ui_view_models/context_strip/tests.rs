@@ -72,3 +72,26 @@ fn context_strip_model_reports_active_scan_stage() {
         })
     );
 }
+
+#[test]
+fn plain_context_strip_line_projects_status_and_module_count() {
+    let strip = ContextStripModel {
+        mode: "mode:shell".to_string(),
+        target: "none".to_string(),
+        context_present: false,
+        model: "unconfigured".to_string(),
+        findings: "0 findings".to_string(),
+        view: "modules".to_string(),
+        compact_activity: None,
+        activity: None,
+        run: None,
+        stage: None,
+        cost: None,
+    };
+
+    assert_eq!(
+        plain_context_strip_line(&strip, 12, 80),
+        "mode:shell | target:none | modules | 0 findings | 12 mods"
+    );
+    assert_eq!(plain_context_strip_line(&strip, 12, 10), "mode:sh...");
+}
