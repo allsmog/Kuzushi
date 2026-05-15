@@ -181,6 +181,7 @@ const rules = [
       /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\.registry\.modules\(|\.tools\(\)|\.metadata\(\)/,
   },
   { name: "TUI module progress renderer reads SAST task view model", roots: ["crates/kuzushi-tui/src/renderer/views/module/append_progress_section.rs"], forbidden: /\b(option_store|sast_task_rows|serde_json|crate::app::SastTaskRow)\b/ },
+  { name: "TUI threat patch chrome reads threat patch view model", roots: ["crates/kuzushi-tui/src/renderer/chrome/cards/render_threat_patch_card.rs", "crates/kuzushi-tui/src/renderer/chrome/cards/confirm_card_height.rs"], forbidden: /\b(pending_threat_patch|serde_json|crate::app::ThreatPatch)\b/ },
   {
     name: "TUI catalog renderer reads catalog view model",
     roots: ["crates/kuzushi-tui/src/renderer/views/catalog/catalog_lines"],
