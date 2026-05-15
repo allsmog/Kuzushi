@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::{cost_cap_halt_model, throttle_banner_model};
+use crate::ui_view_models::{cost_cap_halt_model, throttle_banner_model, transcript_chrome_height};
 
 pub(crate) fn section_slot(kind: RenderSection, height: u16) -> Option<RenderSectionSlot> {
     (height > 0).then_some(RenderSectionSlot { kind, height })
@@ -24,13 +24,7 @@ pub(crate) fn render_constraints(
 }
 
 pub(crate) fn transcript_height(app: &ShellApp, area: Rect) -> u16 {
-    match (
-        matches!(app.shell_view, ShellView::ModuleRun),
-        area.height >= 12,
-    ) {
-        (false, true) => 2,
-        _ => 0,
-    }
+    transcript_chrome_height(app, area.height)
 }
 
 pub(crate) fn keybind_footer_height(area: Rect) -> u16 {

@@ -13,6 +13,7 @@ mod agent_chat;
 mod attack_surface;
 mod auth;
 mod catalog;
+mod chrome_layout;
 mod config;
 mod confirm_card;
 mod context_snapshot;
@@ -65,6 +66,7 @@ pub(crate) use auth::{
     AuthProviderState,
 };
 pub(crate) use catalog::{catalog_model, CatalogActionModule, CatalogModel, CatalogModuleGroup};
+pub(crate) use chrome_layout::transcript_chrome_height;
 pub(crate) use config::{config_model, ConfigModel, ConfigModelRow};
 pub(crate) use confirm_card::{confirm_card_model, ConfirmCardModel};
 pub(crate) use context_snapshot::{
