@@ -1,6 +1,7 @@
 use crate::{SastTaskMode, SastTaskRow, ShellApp};
 
 const SAST_TASK_SUMMARY_COLUMN_COUNT: usize = 2;
+const SAST_TASK_COLUMN_COUNT: usize = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SastTasksModel {
@@ -8,13 +9,21 @@ pub(crate) struct SastTasksModel {
     pub(crate) summary_rows: Vec<SastTaskSummaryRow>,
     pub(crate) legend: &'static str,
     pub(crate) headers: [&'static str; 5],
-    pub(crate) rows: Vec<SastTaskRow>,
+    pub(crate) rows: Vec<SastTaskDisplayRow>,
     pub(crate) command_hints: [&'static str; 5],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SastTaskSummaryRow {
     pub(crate) cells: [String; SAST_TASK_SUMMARY_COLUMN_COUNT],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SastTaskDisplayRow {
+    pub(crate) cells: [String; SAST_TASK_COLUMN_COUNT],
+    pub(crate) selected: bool,
+    pub(crate) source: &'static str,
+    pub(crate) task_id: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,15 +37,15 @@ pub(crate) struct PlainSastTasksModel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlainSastTaskRow {
-    pub(crate) state: &'static str,
-    pub(crate) id: &'static str,
-    pub(crate) cost: &'static str,
-    pub(crate) scan_task: &'static str,
-    pub(crate) notes: &'static str,
+    pub(crate) cells: [String; SAST_TASK_COLUMN_COUNT],
 }
 
 pub(crate) fn sast_tasks_model(app: &ShellApp) -> SastTasksModel {
-    let rows = app.sast_task_rows();
+    let task_rows = app.sast_task_rows();
+    let rows = task_rows
+        .into_iter()
+        .map(sast_task_display_row)
+        .collect::<Vec<_>>();
     SastTasksModel {
         title: "SAST TASKS",
         summary_rows: vec![
@@ -54,6 +63,21 @@ pub(crate) fn sast_tasks_model(app: &ShellApp) -> SastTasksModel {
             "/task mode auto|manual|toggle",
             "/task reset",
         ],
+    }
+}
+
+fn sast_task_display_row(row: SastTaskRow) -> SastTaskDisplayRow {
+    SastTaskDisplayRow {
+        cells: [
+            row.state.to_string(),
+            row.id.to_string(),
+            row.cost.to_string(),
+            row.scan_task.to_string(),
+            row.notes.to_string(),
+        ],
+        selected: row.selected,
+        source: row.source,
+        task_id: row.id,
     }
 }
 
@@ -89,14 +113,8 @@ fn plain_sast_task_summary_row(row: SastTaskSummaryRow) -> String {
     format!("{label}: {value}")
 }
 
-fn plain_sast_task_row(row: SastTaskRow) -> PlainSastTaskRow {
-    PlainSastTaskRow {
-        state: row.state,
-        id: row.id,
-        cost: row.cost,
-        scan_task: row.scan_task,
-        notes: row.notes,
-    }
+fn plain_sast_task_row(row: SastTaskDisplayRow) -> PlainSastTaskRow {
+    PlainSastTaskRow { cells: row.cells }
 }
 
 fn mode_label(mode: SastTaskMode) -> &'static str {
@@ -106,7 +124,7 @@ fn mode_label(mode: SastTaskMode) -> &'static str {
     }
 }
 
-fn selected_summary(rows: &[SastTaskRow]) -> String {
+fn selected_summary(rows: &[SastTaskDisplayRow]) -> String {
     let enabled = rows.iter().filter(|row| row.selected).count();
     let blocked = rows.iter().filter(|row| row.source == "blocked").count();
     format!("{enabled}/{} enabled, {blocked} blocked", rows.len())
@@ -135,7 +153,7 @@ mod tests {
             .summary_rows
             .iter()
             .any(|row| row.cells[0] == "selected" && row.cells[1].contains("enabled")));
-        assert!(model.rows.iter().any(|row| row.id == "semgrep"));
+        assert!(model.rows.iter().any(|row| row.task_id == "semgrep"));
     }
 
     #[test]
@@ -168,7 +186,7 @@ mod tests {
         assert!(model
             .summary_rows
             .contains(&"mode: auto + denylist".to_string()));
-        assert!(model.rows.iter().any(|row| row.id == "semgrep"));
+        assert!(model.rows.iter().any(|row| row.cells[1] == "semgrep"));
         assert_eq!(
             model.next_hint,
             "Next: task block <id>, task allow <id>, task toggle [id], task mode auto|manual|toggle"

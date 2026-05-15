@@ -91,13 +91,14 @@ fn push_sast_task_table(lines: &mut Vec<Line<'static>>, width: u16, model: &Sast
     lines.push(table_header(&model.headers, &sast_task_table_widths(width)));
     let widths = sast_task_table_widths(width);
     for row in &model.rows {
+        let [state, id, cost, scan_task, notes] = &row.cells;
         lines.push(table_row(
             &[
-                row.state,
-                row.id,
-                row.cost,
-                row.scan_task,
-                &fit(row.notes, widths.get(4).copied().unwrap_or(20)),
+                state,
+                id,
+                cost,
+                scan_task,
+                &fit(notes, widths.get(4).copied().unwrap_or(20)),
             ],
             &widths,
         ));
