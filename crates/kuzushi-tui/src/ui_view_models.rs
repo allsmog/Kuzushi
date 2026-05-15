@@ -165,7 +165,9 @@ pub(crate) use run_trace::{
     alias_reference_model, replay_model, trace_model, ReplayModel, RunArtifactDetail, TraceModel,
     TraceStep,
 };
-pub(crate) use sast_tasks::{sast_tasks_model, SastTasksModel};
+pub(crate) use sast_tasks::{
+    plain_sast_tasks_model, sast_tasks_model, PlainSastTaskRow, PlainSastTasksModel, SastTasksModel,
+};
 pub(crate) use session_story::{
     session_history_model, session_story_model, CommandHistoryModel, SessionStoryModel,
 };

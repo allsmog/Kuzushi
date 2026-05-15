@@ -1,38 +1,49 @@
 use super::*;
-use crate::ui_view_models::{help_model, HelpCategoryModel, HelpCommandRow};
+use crate::ui_view_models::{
+    help_model, plain_sast_tasks_model, HelpCategoryModel, HelpCommandRow, PlainSastTaskRow,
+    PlainSastTasksModel,
+};
 
 pub(crate) fn plain_sast_tasks_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
-    let model = crate::ui_view_models::sast_tasks_model(app);
-
+    let model = plain_sast_tasks_model(app);
+    push_plain_sast_tasks_summary(&mut lines, &model, width);
+    push_plain_sast_tasks_table(&mut lines, &model, width);
     lines.push(String::new());
-    lines.push(plain_section_divider("SAST TASKS", width));
-    lines.push(format!("mode: {}", model.mode_label));
-    lines.push(format!("selected: {}", model.selected_summary));
+    lines.push(model.next_hint.to_string());
+    lines
+}
+
+fn push_plain_sast_tasks_summary(
+    lines: &mut Vec<String>,
+    model: &PlainSastTasksModel,
+    width: usize,
+) {
+    lines.push(String::new());
+    lines.push(plain_section_divider(model.title, width));
+    lines.extend(model.summary_rows.iter().cloned());
+}
+
+fn push_plain_sast_tasks_table(lines: &mut Vec<String>, model: &PlainSastTasksModel, width: usize) {
     lines.push(String::new());
     let widths = sast_task_table_widths(width.min(u16::MAX as usize) as u16);
-    lines.push(table_text(
-        &["state", "id", "cost", "scan", "notes"],
-        &widths,
-    ));
-    for row in model.rows {
-        lines.push(table_text(
-            &[
-                row.state,
-                row.id,
-                row.cost,
-                row.scan_task,
-                &fit(row.notes, widths.get(4).copied().unwrap_or(20)),
-            ],
-            &widths,
-        ));
+    lines.push(table_text(&model.headers, &widths));
+    for row in &model.rows {
+        lines.push(plain_sast_task_row(row, &widths));
     }
-    lines.push(String::new());
-    lines.push(
-        "Next: task block <id>, task allow <id>, task toggle [id], task mode auto|manual|toggle"
-            .to_string(),
-    );
-    lines
+}
+
+fn plain_sast_task_row(row: &PlainSastTaskRow, widths: &[usize]) -> String {
+    table_text(
+        &[
+            row.state,
+            row.id,
+            row.cost,
+            row.scan_task,
+            &fit(row.notes, widths.get(4).copied().unwrap_or(20)),
+        ],
+        widths,
+    )
 }
 
 pub(crate) fn plain_help_lines(app: &ShellApp, width: usize) -> Vec<String> {
