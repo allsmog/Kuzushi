@@ -168,7 +168,7 @@ inside the TUI and your terminal still gives you a selection modifier.
 | `kuzushi shell [--target <repo>]` | Start the Ratatui shell. |
 | `kuzushi demo` | Scan a vendored vulnerable fixture offline — no API key, no model, no external scanners. The fastest way to see a real finding with evidence. |
 | `kuzushi scan <repo> [--mode standard\|whitebox-static] [--tasks a,b] [--triage] [--json] [--ci] [--fail-on low\|medium\|high\|critical] [--sarif out.sarif]` | Run the Rust SAST umbrella executor and persist findings. `--fail-on` exits 3 when findings at/above the severity exist (CI gating); `--sarif` writes a SARIF 2.1.0 export for Code Scanning upload. Descriptor-backed inputs also support `verifyWhen`, `verifyMax`, and `verifyVotes` for post-triage verification selection. |
-| `kuzushi findings --target <repo> [--severity high,critical] [--verdict true_positive] [--name text] [--file-path path] [--limit 50] [--json]` | List persisted findings. |
+| `kuzushi findings --target <repo> [--severity high,critical] [--verdict true_positive] [--name text] [--file-path path] [--vuln-source sarif,...] [--limit 50] [--json]` | List persisted findings. |
 | `kuzushi finding <F-0001\|fingerprint-prefix> --target <repo> [--json]` | Inspect one finding's evidence, proof state, verification summary, patch result, and next action. |
 | `kuzushi decision <F-0001\|fingerprint-prefix> --target <repo> --verdict confirmed\|rejected_false_positive\|suppressed\|deferred\|accepted_risk\|needs_review --reason <text> [--json]` | Append a human review decision for a persisted finding. This carries forward by durable identity and does not mutate scanner triage. |
 | `kuzushi runs list [--status completed,failed]\|show <runId>\|trace <runId>\|diff <a> <b>\|prune --target <repo>` | Inspect, compare, or prune replayable summaries, result artifacts, and trace JSONL under `.kuzushi/v3/runs/<runId>/`. |
@@ -181,8 +181,8 @@ inside the TUI and your terminal still gives you a selection modifier.
 | `kuzushi tools [--json]` | List visible executable tool descriptors. |
 | `kuzushi doctor [--target <repo>] [--json]` | Check config, local state, findings DB openability, scanner binaries, bridge readiness, and model/auth setup. |
 | `kuzushi run <module:tool> --input '<json>' [--option key=value]` | Execute one explicit tool through the Rust registry. Use global `--target` for workspace-backed tools; `run .` is shell-only focused-module shorthand. |
-| `kuzushi mcp serve <gtags\|clang\|joern\|tree-sitter\|codeql>` | Run a local MCP server over stdio. Use `kuzushi mcp health <backend>` for a JSON readiness check. |
-| `kuzushi auth ping [anthropic\|openai] [--model provider:model]` | Round-trip auth diagnostics; interactive provider login is handled inside `kuzushi shell`. |
+| `kuzushi mcp serve\|health <backend>` | Run or health-check a local MCP server over stdio. Backends: `gtags`, `clang`, `joern`, `tree-sitter`, `codeql`, `revng`. |
+| `kuzushi auth ping [provider] [--model <spec>]` | Round-trip a 1-token request to verify credentials, network, and bridge. Interactive provider login is handled inside `kuzushi shell`. |
 | `kuzushi config show` | Print effective config. |
 | `kuzushi config init [--force]` | Write the default global config. |
 | `kuzushi config path` | Print the global config path. |
@@ -341,24 +341,36 @@ current built-ins are:
 
 | Module | Primary tools |
 | --- | --- |
+| `catalog` | `catalog:modules`, `catalog:tools` |
+| `config` | `config:show` |
+| `router` | `router:show` |
 | `module-recommender` | `module-recommender:recommend` |
+| `workspace` | `workspace:status`, `workspace:export-findings` |
 | `context` | `context:build` |
 | `sast` | `sast:scan` |
+| `full-mode` | `full-mode:hunt` |
+| `classifier-gate` | `classifier-gate:score` |
+| `deep-audit` | `deep-audit:run` |
+| `smoke` | `smoke:next-step` |
 | `semgrep` | `semgrep:scan` |
 | `codeql` | `codeql:scan` |
 | `cargo-audit` | `cargo-audit:scan` |
 | `govulncheck` | `govulncheck:scan` |
+| `iac-scan` | `iac-scan:scan` |
+| `exploit-chain` | `exploit-chain:scan` |
 | `agentic-sast` | `agentic-sast:scan` |
 | `offense-review` | `offense-review:threat-hunt` |
 | `taint-iris-next` | `taint-iris-next:dataflow-plan`, `taint-iris-next:source-sink-trace`, `taint-iris-next:finding-review` |
+| `threat-intel` | `threat-intel:list`, `threat-intel:apply`, `threat-intel:harvest` |
 | `triage` | `triage:run` |
-| `verify` | `verify:finding` |
+| `verify` | `verify:finding`, `verify:exploit` |
 | `patch` | `patch:finding` |
 | `findings` | `findings:list` |
 | `report` | `report:build` |
 | `threat-model` | `threat-model:build`, `threat-model:read`, `threat-model:methodologies` |
 | `threat-intel` | `threat-intel:discover`, `threat-intel:list`, `threat-intel:apply`, `threat-intel:harvest` |
-| `randori` | `randori:pasta` |
+| `threat-leads` | `threat-leads:build`, `threat-leads:read` |
+| `randori` | `randori:pasta`, `randori:threat-model` |
 | `x-ray` | `x-ray:run`, `x-ray:read` |
 | `dep-hygiene` | `dep-hygiene:check` |
 | `secret-scan` | `secret-scan:scan` |
@@ -366,16 +378,11 @@ current built-ins are:
 | `sbom-scan` | `sbom-scan:scan` |
 | `variant` | `variant:lift-pattern`, `variant:hunt` |
 | `ndiff` | `ndiff:fetch-cve`, `ndiff:extract-fix-pattern`, `ndiff:hunt-variants` |
-| `iac-scan` | `iac-scan:scan` |
 | `android-apk` | `android-apk:scan` |
 | `entry-points` | `entry-points:extract` |
 | `cpg` | `cpg:build` |
 | `codeql-db` | `codeql:create-db` |
 | `bounty` | `bounty:import-har`, `bounty:import-burp` |
-| `router` | `router:show` |
-| `catalog` | `catalog:modules`, `catalog:tools` |
-| `config` | `config:show` |
-| `workspace` | `workspace:status`, `workspace:export-findings` |
 
 Internal DAG modules such as `context-lite`, `pipeline`, and `systems-hunt`
 stay hidden from `kuzushi modules`; `systems-hunt:*` entries are internal DAG
