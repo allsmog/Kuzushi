@@ -8,9 +8,9 @@ pub(crate) struct LiveActivityModel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PlainLiveActivityRow {
-    pub(crate) label: &'static str,
-    pub(crate) value: String,
+pub(crate) struct PlainLiveActivityModel {
+    pub(crate) title: &'static str,
+    pub(crate) rows: Vec<String>,
 }
 
 pub(crate) fn live_activity_model(app: &ShellApp) -> Option<LiveActivityModel> {
@@ -22,23 +22,21 @@ pub(crate) fn live_activity_model(app: &ShellApp) -> Option<LiveActivityModel> {
     })
 }
 
-pub(crate) fn plain_live_activity_rows(app: &ShellApp) -> Option<Vec<PlainLiveActivityRow>> {
-    live_activity_model(app).map(|model| {
-        vec![
-            PlainLiveActivityRow {
-                label: "phase",
-                value: model.phase_label.to_string(),
-            },
-            PlainLiveActivityRow {
-                label: "subject",
-                value: model.subject,
-            },
-            PlainLiveActivityRow {
-                label: "detail",
-                value: model.detail,
-            },
-        ]
-    })
+pub(crate) fn plain_live_activity_model(app: &ShellApp) -> Option<PlainLiveActivityModel> {
+    live_activity_model(app).map(PlainLiveActivityModel::from_live_activity_model)
+}
+
+impl PlainLiveActivityModel {
+    fn from_live_activity_model(model: LiveActivityModel) -> Self {
+        PlainLiveActivityModel {
+            title: "LIVE ACTIVITY",
+            rows: vec![
+                format!("phase: {}", model.phase_label),
+                format!("subject: {}", model.subject),
+                format!("detail: {}", model.detail),
+            ],
+        }
+    }
 }
 
 #[cfg(test)]
@@ -64,7 +62,7 @@ mod tests {
     }
 
     #[test]
-    fn plain_live_activity_rows_project_labelled_plain_rows() {
+    fn plain_live_activity_model_projects_plain_lines() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.live_activity = Some(LiveActivity::new(
             LiveActivityPhase::WritingArtifact,
@@ -72,23 +70,15 @@ mod tests {
             "writes .kuzushi/threat-model.json",
         ));
 
-        let rows = plain_live_activity_rows(&app).expect("live activity rows");
+        let model = plain_live_activity_model(&app).expect("live activity model");
 
+        assert_eq!(model.title, "LIVE ACTIVITY");
         assert_eq!(
-            rows,
+            model.rows,
             vec![
-                PlainLiveActivityRow {
-                    label: "phase",
-                    value: "writing artifact".to_string(),
-                },
-                PlainLiveActivityRow {
-                    label: "subject",
-                    value: "threat-model:build".to_string(),
-                },
-                PlainLiveActivityRow {
-                    label: "detail",
-                    value: "writes .kuzushi/threat-model.json".to_string(),
-                },
+                "phase: writing artifact".to_string(),
+                "subject: threat-model:build".to_string(),
+                "detail: writes .kuzushi/threat-model.json".to_string(),
             ]
         );
     }
