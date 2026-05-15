@@ -1,4 +1,5 @@
-use crate::ShellApp;
+use super::scan_status;
+use crate::{ScanPanelState, ShellApp};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,10 +13,24 @@ pub(crate) enum PastRunStatus {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct PastRun {
+struct PastRun {
+    run_id: String,
+    status_kind: PastRunStatus,
+    findings: Option<u64>,
+    target: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RunTimelineModel {
+    pub(crate) rows: Vec<RunTimelineRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RunTimelineRow {
     pub(crate) run_id: String,
+    pub(crate) status: String,
     pub(crate) status_kind: PastRunStatus,
-    pub(crate) findings: Option<u64>,
+    pub(crate) findings: String,
     pub(crate) target: String,
 }
 
@@ -32,8 +47,79 @@ impl PastRun {
     }
 }
 
-pub(crate) fn past_runs_model(app: &ShellApp) -> Vec<PastRun> {
+pub(crate) fn run_timeline_model(app: &ShellApp, past_limit: usize) -> RunTimelineModel {
+    let active = app.scan.as_ref().map(active_scan_row);
+    let active_run_id = active.as_ref().map(|row| row.run_id.clone());
+    let mut rows = active.into_iter().collect::<Vec<_>>();
+    rows.extend(past_run_rows(app, past_limit, active_run_id.as_deref()));
+    RunTimelineModel { rows }
+}
+
+fn past_runs_model(app: &ShellApp) -> Vec<PastRun> {
     collect_past_runs(&runs_root(app))
+}
+
+fn active_scan_row(scan: &ScanPanelState) -> RunTimelineRow {
+    RunTimelineRow {
+        run_id: scan
+            .run_id
+            .as_deref()
+            .map(short_id)
+            .unwrap_or_else(pending_id),
+        status: scan_status(scan),
+        status_kind: active_scan_status(scan),
+        findings: scan.findings_count.to_string(),
+        target: scan.target.display().to_string(),
+    }
+}
+
+fn active_scan_status(scan: &ScanPanelState) -> PastRunStatus {
+    if scan.error.is_some() {
+        PastRunStatus::Failed
+    } else if scan.running {
+        PastRunStatus::Running
+    } else {
+        PastRunStatus::Complete
+    }
+}
+
+fn past_run_rows(
+    app: &ShellApp,
+    past_limit: usize,
+    active_run_id: Option<&str>,
+) -> Vec<RunTimelineRow> {
+    let mut past_runs = past_runs_model(app);
+    past_runs.sort_by(|a, b| b.run_id.cmp(&a.run_id));
+    past_runs
+        .iter()
+        .take(past_limit)
+        .map(past_run_row)
+        .filter(|row| Some(row.run_id.as_str()) != active_run_id)
+        .collect()
+}
+
+fn past_run_row(past: &PastRun) -> RunTimelineRow {
+    RunTimelineRow {
+        run_id: short_id(&past.run_id),
+        status: past.status_label().to_string(),
+        status_kind: past.status_kind,
+        findings: finding_count_label(past.findings),
+        target: past.target.clone(),
+    }
+}
+
+fn short_id(run_id: &str) -> String {
+    run_id.chars().take(8).collect()
+}
+
+fn pending_id() -> String {
+    "pending".to_string()
+}
+
+fn finding_count_label(findings: Option<u64>) -> String {
+    findings
+        .map(|count| count.to_string())
+        .unwrap_or_else(|| "\u{2014}".to_string())
 }
 
 fn runs_root(app: &ShellApp) -> PathBuf {
@@ -104,3 +190,6 @@ fn parse_past_run_status(status: &str) -> PastRunStatus {
         _ => PastRunStatus::Unknown,
     }
 }
+
+#[cfg(test)]
+mod tests;
