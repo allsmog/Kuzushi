@@ -19,9 +19,7 @@ pub(crate) struct HelpCategoryModel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HelpCommandRow {
-    pub(crate) command: &'static str,
-    pub(crate) aliases: String,
-    pub(crate) description: &'static str,
+    pub(crate) cells: [String; 3],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,9 +94,12 @@ fn plain_help_category(category: HelpCategoryModel) -> PlainHelpCategoryModel {
 }
 
 fn plain_help_command_rows(row: HelpCommandRow) -> Vec<String> {
-    let mut rows = vec![format!("{} - {}", row.command, row.description)];
-    if row.aliases != "-" {
-        rows.push(format!("  aliases / examples: {}", row.aliases));
+    let command = &row.cells[0];
+    let aliases = &row.cells[1];
+    let description = &row.cells[2];
+    let mut rows = vec![format!("{command} - {description}")];
+    if aliases != "-" {
+        rows.push(format!("  aliases / examples: {aliases}"));
     }
     rows
 }
@@ -138,9 +139,11 @@ fn help_category_blurb(category: ShellCommandCategory) -> &'static str {
 
 fn help_command_row(spec: &ShellCommandSpec) -> HelpCommandRow {
     HelpCommandRow {
-        command: spec.command,
-        aliases: help_alias_text(spec),
-        description: spec.description,
+        cells: [
+            spec.command.to_string(),
+            help_alias_text(spec),
+            spec.description.to_string(),
+        ],
     }
 }
 

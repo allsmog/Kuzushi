@@ -16,7 +16,7 @@ fn help_model_projects_registered_examples_and_aliases() {
         .categories
         .iter()
         .flat_map(|category| category.commands.iter())
-        .any(|row| row.aliases.contains("/h")));
+        .any(|row| row.cells[1].contains("/h")));
 }
 
 #[test]
