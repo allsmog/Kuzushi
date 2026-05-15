@@ -23,17 +23,27 @@ pub fn load_config_for_target(target: Option<&Path>) -> Result<V2Config> {
     load_config(ConfigPaths::from_target(target)?)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConfigSource {
+    /// Operator-owned config under `$HOME/.kuzushi/v2/`. Trusted.
+    Global,
+    /// Config under `<target>/.kuzushi/v2/`. Untrusted: a scanned repository
+    /// can include this file, so `[runtime]` and `[operator]` fields must
+    /// never be honored from this source.
+    Project,
+}
+
 pub fn load_config(paths: ConfigPaths) -> Result<V2Config> {
     let mut config = V2Config::default();
 
     let global_path = paths.global_config_path();
     if global_path.exists() {
-        merge_file(&mut config, &global_path)?;
+        merge_file(&mut config, &global_path, ConfigSource::Global)?;
     }
 
     if let Some(project_path) = paths.project_config_path() {
         if project_path.exists() {
-            merge_file(&mut config, &project_path)?;
+            merge_file(&mut config, &project_path, ConfigSource::Project)?;
         }
     }
 
@@ -71,13 +81,79 @@ pub(crate) fn write_config_body(path: &Path, body: String) -> Result<()> {
     fs::write(path, body).with_context(|| format!("Could not write {}", path.display()))
 }
 
-pub(crate) fn merge_file(config: &mut V2Config, path: &Path) -> Result<()> {
+pub(crate) fn merge_file(
+    config: &mut V2Config,
+    path: &Path,
+    source: ConfigSource,
+) -> Result<()> {
     let raw =
         fs::read_to_string(path).with_context(|| format!("Could not read {}", path.display()))?;
     let patch: PartialConfig =
         toml::from_str(&raw).with_context(|| format!("Could not parse {}", path.display()))?;
+    reject_untrusted_runtime_overrides(path, &patch, source)?;
     merge_config(config, patch);
     Ok(())
+}
+
+/// A target repository's `.kuzushi/v2/config.toml` is loaded as part of the
+/// effective configuration, but it must not be able to redirect the agent
+/// bridge, API endpoint, credential env var, OAuth config, or operator
+/// safety knobs — those are operator decisions that must come from the
+/// global config under `$HOME/.kuzushi/v2/`. Without this gate a malicious
+/// target repo could swap `agent_bridge_command` for an exfil binary that
+/// receives the operator's API key over stdin.
+fn reject_untrusted_runtime_overrides(
+    path: &Path,
+    patch: &PartialConfig,
+    source: ConfigSource,
+) -> Result<()> {
+    if source != ConfigSource::Project {
+        return Ok(());
+    }
+    let mut forbidden: Vec<&'static str> = Vec::new();
+    if let Some(runtime) = patch.runtime.as_ref() {
+        if runtime.kind.is_some() {
+            forbidden.push("runtime.kind");
+        }
+        if runtime.api_key_env.is_some() {
+            forbidden.push("runtime.api_key_env");
+        }
+        if runtime.base_url.is_some() {
+            forbidden.push("runtime.base_url");
+        }
+        if runtime.agent_bridge_command.is_some() {
+            forbidden.push("runtime.agent_bridge_command");
+        }
+        if runtime.thinking_level.is_some() {
+            forbidden.push("runtime.thinking_level");
+        }
+        if runtime.anthropic_oauth.is_some() {
+            forbidden.push("runtime.anthropic_oauth");
+        }
+    }
+    if let Some(operator) = patch.operator.as_ref() {
+        if operator.session_budget_usd.is_some() {
+            forbidden.push("operator.session_budget_usd");
+        }
+        if operator.spend_hard_ceiling_usd.is_some() {
+            forbidden.push("operator.spend_hard_ceiling_usd");
+        }
+        if operator.trusted_workflow_auto_accept.is_some() {
+            forbidden.push("operator.trusted_workflow_auto_accept");
+        }
+    }
+    if forbidden.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "project config at {} sets operator-only fields ({}). These can only \
+         come from the global config at $HOME/.kuzushi/v2/config.toml — a \
+         target repository must not be able to redirect credentials or \
+         process execution. Move these settings to the global config, or \
+         remove them from the project file.",
+        path.display(),
+        forbidden.join(", "),
+    );
 }
 
 pub(crate) fn merge_config(config: &mut V2Config, patch: PartialConfig) {
