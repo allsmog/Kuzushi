@@ -33,6 +33,8 @@ fn findings_model_projects_counts_rows_and_selection() {
     let model = findings_model(&app);
 
     assert_eq!(model.total, 2);
+    assert_eq!(model.triaged, 1);
+    assert_eq!(model.pending, 1);
     assert_eq!(model.counts.high, 1);
     assert_eq!(model.counts.medium, 1);
     assert_eq!(model.header, "FINDINGS · 2 · 1 triaged · 1 pending");

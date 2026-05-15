@@ -788,6 +788,48 @@ fn module_run_body_omits_streaming_cursor_when_idle() {
 }
 
 #[test]
+fn module_run_findings_preview_uses_projected_finding_rows() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::ModuleRun;
+    let mut triaged = Finding::new_semgrep(
+        "demo.sql",
+        "src/search.ts",
+        12,
+        Some(14),
+        Severity::High,
+        "SQL injection in search",
+    );
+    triaged.triage = Some(TriageOutcome {
+        verdict: TriageVerdict::TruePositive,
+        confidence: 0.91,
+        rationale: "source and sink are linked".to_string(),
+        cost_usd: 0.0,
+    });
+    app.findings = vec![
+        triaged,
+        Finding::new_tool(
+            "codeql",
+            "js/path-injection",
+            "src/files.ts",
+            22,
+            None,
+            Severity::Medium,
+            "Path traversal candidate",
+        ),
+    ];
+
+    let rendered = module_run_lines(&app, Rect::new(0, 0, 120, 40))
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("FINDINGS · 1 TRIAGED · 1 PENDING"));
+    assert!(rendered.contains("SQL injection in search"));
+    assert!(rendered.contains("src/search.ts:12-14"));
+}
+
+#[test]
 fn recent_module_activity_uses_recon_snapshot_when_present() {
     use crate::app::ReconSnapshot;
     use kuzushi_core::{ReconHost, ReconService};

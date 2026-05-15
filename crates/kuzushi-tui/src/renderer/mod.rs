@@ -11,8 +11,7 @@ use crate::commands::{
 use crate::theme;
 pub(in crate::renderer) use chrome::*;
 use kuzushi_core::{
-    finding_location, sorted_finding_aliases, AttachmentKind, Severity,
-    SUPPORTED_ATTACHMENT_MODULES,
+    sorted_finding_aliases, AttachmentKind, Severity, SUPPORTED_ATTACHMENT_MODULES,
 };
 pub(in crate::renderer) use plain::*;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};

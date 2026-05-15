@@ -8,6 +8,8 @@ use kuzushi_core::{
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FindingsModel {
     pub(crate) total: usize,
+    pub(crate) triaged: usize,
+    pub(crate) pending: usize,
     pub(crate) counts: SeverityCounts,
     pub(crate) header: String,
     pub(crate) cursor: usize,
@@ -79,6 +81,8 @@ pub(crate) fn findings_model(app: &ShellApp) -> FindingsModel {
     let pending = total.saturating_sub(triaged);
     FindingsModel {
         total,
+        triaged,
+        pending,
         counts: SeverityCounts::from_findings(&app.findings),
         header: format!("FINDINGS · {total} · {triaged} triaged · {pending} pending"),
         cursor: app.findings_cursor.min(total.saturating_sub(1)),
