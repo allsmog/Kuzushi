@@ -1,8 +1,12 @@
 use crate::attack_surface::AttackSurfaceKind;
 use serde_json::{json, Value};
 
+use super::deterministic_dfd_surface_specs::{
+    surface_dfd_flows, surface_dfd_nodes, surface_trust_boundaries,
+};
+
 pub(super) fn optional_dfd_nodes() -> Vec<(AttackSurfaceKind, Value)> {
-    vec![
+    let mut nodes = vec![
         (AttackSurfaceKind::DbQueryBoundary, data_store_node()),
         (
             AttackSurfaceKind::CommandExecutionBoundary,
@@ -22,11 +26,13 @@ pub(super) fn optional_dfd_nodes() -> Vec<(AttackSurfaceKind, Value)> {
             AttackSurfaceKind::TenantIsolationBoundary,
             tenant_isolation_node(),
         ),
-    ]
+    ];
+    nodes.extend(surface_dfd_nodes());
+    nodes
 }
 
 pub(super) fn optional_dfd_flows() -> Vec<(AttackSurfaceKind, Value)> {
-    vec![
+    let mut flows = vec![
         (AttackSurfaceKind::DbQueryBoundary, data_store_flow()),
         (
             AttackSurfaceKind::CommandExecutionBoundary,
@@ -46,49 +52,56 @@ pub(super) fn optional_dfd_flows() -> Vec<(AttackSurfaceKind, Value)> {
             AttackSurfaceKind::TenantIsolationBoundary,
             tenant_isolation_flow(),
         ),
-    ]
+    ];
+    flows.extend(surface_dfd_flows());
+    flows
 }
 
 pub(super) fn optional_trust_boundaries() -> Vec<(AttackSurfaceKind, Value)> {
-    vec![
-        (
-            AttackSurfaceKind::ExternalServiceClient,
-            trust_boundary(
-                "tb-outbound-service",
-                "Outbound service boundary",
-                "flow-external-service",
-            ),
-        ),
-        (
-            AttackSurfaceKind::AuthBoundary,
-            trust_boundary("tb-auth-boundary", "Authentication boundary", "flow-auth-control"),
-        ),
-        (
-            AttackSurfaceKind::SessionStateBoundary,
-            trust_boundary(
-                "tb-session-state",
-                "Session state boundary",
-                "flow-session-state",
-            ),
-        ),
-        (
-            AttackSurfaceKind::RequestTrustBoundary,
-            trust_boundary(
-                "tb-request-trust",
-                "Request trust boundary",
-                "flow-request-trust",
-            ),
-        ),
-        (
-            AttackSurfaceKind::TenantIsolationBoundary,
-            trust_boundary(
-                "tb-tenant-isolation",
-                "Tenant isolation boundary",
-                "flow-tenant-isolation",
-            ),
-        ),
-    ]
+    let mut boundaries = base_trust_boundaries();
+    boundaries.extend(surface_trust_boundaries());
+    boundaries
 }
+
+fn base_trust_boundaries() -> Vec<(AttackSurfaceKind, Value)> {
+    BASE_TRUST_BOUNDARY_SPECS
+        .iter()
+        .map(|(kind, id, name, flow)| (*kind, trust_boundary(id, name, flow)))
+        .collect()
+}
+
+const BASE_TRUST_BOUNDARY_SPECS: &[(AttackSurfaceKind, &str, &str, &str)] = &[
+    (
+        AttackSurfaceKind::ExternalServiceClient,
+        "tb-outbound-service",
+        "Outbound service boundary",
+        "flow-external-service",
+    ),
+    (
+        AttackSurfaceKind::AuthBoundary,
+        "tb-auth-boundary",
+        "Authentication boundary",
+        "flow-auth-control",
+    ),
+    (
+        AttackSurfaceKind::SessionStateBoundary,
+        "tb-session-state",
+        "Session state boundary",
+        "flow-session-state",
+    ),
+    (
+        AttackSurfaceKind::RequestTrustBoundary,
+        "tb-request-trust",
+        "Request trust boundary",
+        "flow-request-trust",
+    ),
+    (
+        AttackSurfaceKind::TenantIsolationBoundary,
+        "tb-tenant-isolation",
+        "Tenant isolation boundary",
+        "flow-tenant-isolation",
+    ),
+];
 
 pub(super) fn dfd_node(
     id: &str,
