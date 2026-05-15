@@ -1,6 +1,6 @@
 use super::{
-    active_stage_label, compact_target_path, findings_count_summary, format_session_cost,
-    routing_mode_segment, view_status_segment, ShellApp,
+    active_stage_label, catalog_model, compact_target_path, findings_count_summary,
+    format_session_cost, routing_mode_segment, view_status_segment, ShellApp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +24,11 @@ pub(crate) struct ContextStripSegment {
     pub(crate) value: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlainContextStripModel {
+    pub(crate) rows: Vec<String>,
+}
+
 pub(crate) fn context_strip_model(app: &ShellApp) -> ContextStripModel {
     ContextStripModel {
         mode: routing_mode_segment(app),
@@ -38,6 +43,46 @@ pub(crate) fn context_strip_model(app: &ShellApp) -> ContextStripModel {
         stage: stage_segment(app),
         cost: cost_segment_value(app),
     }
+}
+
+pub(crate) fn plain_context_strip_model(app: &ShellApp, width: usize) -> PlainContextStripModel {
+    let strip = context_strip_model(app);
+    let module_count = catalog_model(app).module_count;
+    PlainContextStripModel {
+        rows: vec![plain_context_strip_line(&strip, module_count, width)],
+    }
+}
+
+fn plain_context_strip_line(
+    strip: &ContextStripModel,
+    module_count: usize,
+    width: usize,
+) -> String {
+    fit_plain_text(
+        &format!(
+            "{} | target:{} | {} | {} | {} mods",
+            strip.mode, strip.target, strip.view, strip.findings, module_count
+        ),
+        width,
+    )
+}
+
+fn fit_plain_text(value: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    if max_chars <= 3 {
+        return value.chars().take(max_chars).collect();
+    }
+    let mut truncated = value
+        .chars()
+        .take(max_chars.saturating_sub(3))
+        .collect::<String>();
+    truncated.push_str("...");
+    truncated
 }
 
 impl ContextStripModel {

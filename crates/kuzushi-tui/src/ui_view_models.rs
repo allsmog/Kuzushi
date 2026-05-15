@@ -103,7 +103,10 @@ pub(crate) use confirm_card::{confirm_card_model, ConfirmCardModel};
 pub(crate) use context_snapshot::{
     context_snapshot_model, ContextSnapshotDetails, ContextSnapshotModel,
 };
-pub(crate) use context_strip::{context_strip_model, ContextStripModel, ContextStripSegment};
+pub(crate) use context_strip::{
+    context_strip_model, plain_context_strip_model, ContextStripModel, ContextStripSegment,
+    PlainContextStripModel,
+};
 pub(crate) use cost::{cost_model, CostBudgetRow, CostBudgetStatus, CostModel};
 pub(crate) use display_text::{compact_target_path, format_session_cost};
 pub(crate) use failure_handoff::failure_handoff_context;
