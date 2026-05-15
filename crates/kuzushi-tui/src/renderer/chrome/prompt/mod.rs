@@ -1,4 +1,5 @@
 pub(in crate::renderer) use super::*;
+use crate::ui_view_models::prompt_brand;
 
 pub(crate) fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if area.height == 0 {
@@ -41,20 +42,4 @@ pub(in crate::renderer) fn prompt_text(
             .unwrap_or_else(|| format!("{brand}/module> ")),
         RoutingMode::Shell => format!("{brand}> "),
     }
-}
-
-fn prompt_brand() -> &'static str {
-    if std::env::var("KUZUSHI_CLI_NAME").ok().as_deref() == Some("kz") {
-        return "kz";
-    }
-    match std::env::args().next().as_deref().and_then(binary_stem) {
-        Some("kz") => "kz",
-        _ => "kuzushi",
-    }
-}
-
-fn binary_stem(path: &str) -> Option<&str> {
-    path.rsplit(['/', '\\'])
-        .next()
-        .map(|name| name.strip_suffix(".exe").unwrap_or(name))
 }
