@@ -13,8 +13,8 @@ use crate::proof::whitebox_policy::{
 use crate::runtime::SubagentRole;
 use crate::runtime::{AgentQueryRequest, AgentRuntime, AgentToolPolicy};
 use crate::structured_output::{
-    parse_or_repair_required_structured_json, query_required_structured_json,
-    StructuredJsonContract,
+    parse_or_repair_required_structured_json_with_cost, query_required_structured_json,
+    query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

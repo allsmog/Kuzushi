@@ -3,9 +3,27 @@ mod tests {
     use super::super::*;
     use crate::config::V2Config;
     use crate::findings::{FindingStore, StaticProofState};
+    use crate::runtime::{AgentQueryResponse, TriageRequest};
     use crate::workspace::WorkspaceTarget;
-    use std::fs;
+    use std::{fs, path::Path};
     use tempfile::tempdir;
+
+    struct FakeRuntime {
+        response: AgentQueryResponse,
+    }
+
+    impl AgentRuntime for FakeRuntime {
+        fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            Ok(self.response.clone())
+        }
+
+        fn triage_finding_blocking(
+            &self,
+            _request: TriageRequest,
+        ) -> Result<crate::findings::TriageOutcome> {
+            unreachable!("agentic-sast tests do not triage")
+        }
+    }
 
     #[test]
     fn whitebox_triage_response_normalizes_static_schema_fields() {
@@ -177,6 +195,231 @@ mod tests {
         assert_eq!(
             stored[0].static_proof_state,
             Some(StaticProofState::NeedsRuntimeEvidence)
+        );
+    }
+
+    #[test]
+    fn run_agentic_sast_report_preserves_query_cost() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/routes.ts"), "const ok = true;\n").unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let config = V2Config {
+            model: Some("openai:gpt-5.5".to_string()),
+            ..V2Config::default()
+        };
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+        let runtime = FakeRuntime {
+            response: AgentQueryResponse {
+                text: String::new(),
+                structured: Some(json!({"findings": []})),
+                cost_usd: 0.073,
+                ..Default::default()
+            },
+        };
+
+        let report = run_agentic_sast_report(&json!({}), &ctx, Some(&runtime)).unwrap();
+
+        assert_eq!(report.count, 0);
+        assert!((report.cost_usd - 0.073).abs() < 1e-9);
+    }
+
+    #[test]
+    fn hunt_focus_is_included_in_agentic_prompt() {
+        let input = AgenticSastInput::from_tool_input(&json!({
+            "focus": "Prioritize attacker-controlled tensor byte-length overflows."
+        }))
+        .unwrap();
+
+        let prompt = build_agentic_sast_prompt(
+            Path::new("/repo"),
+            &input,
+            &[(
+                "services/webnn/tensor.cc".to_string(),
+                "void f() {}".to_string(),
+            )],
+            None,
+            false,
+        );
+
+        assert!(prompt
+            .contains("Hunt focus: Prioritize attacker-controlled tensor byte-length overflows."));
+    }
+
+    #[test]
+    fn agentic_sast_input_accepts_bounded_inventory_limits() {
+        let input = AgenticSastInput::from_tool_input(&json!({
+            "maxInventoryFiles": 120,
+            "maxBytesPerFile": 4096
+        }))
+        .unwrap();
+
+        assert_eq!(input.max_inventory_files, 120);
+        assert_eq!(input.max_bytes_per_file, 4096);
+
+        let capped = AgenticSastInput::from_tool_input(&json!({
+            "maxInventoryFiles": 9999,
+            "maxBytesPerFile": 9999
+        }))
+        .unwrap();
+
+        assert_eq!(capped.max_inventory_files, 500);
+        assert_eq!(capped.max_bytes_per_file, 8192);
+    }
+
+    #[test]
+    fn merge_agentic_sast_findings_deduplicates_review_pass_location() {
+        let first = Finding::new_tool(
+            "agentic",
+            "webnn-shared-lock-count-race",
+            "services/webnn/queueable_resource_state_base.cc",
+            13,
+            Some(13),
+            Severity::Medium,
+            "Shared lock is dropped too early.",
+        );
+        let review = Finding::new_tool(
+            "agentic",
+            "webnn-shared-lock-count-race",
+            "services/webnn/queueable_resource_state_base.cc",
+            13,
+            Some(13),
+            Severity::High,
+            "Shared lock is dropped too early.\n\nEvidence: the first shared holder calls unlock and clears the shared state while another shared holder can still be active.",
+        );
+
+        assert_ne!(first.fingerprint, review.fingerprint);
+
+        let merged = merge_agentic_sast_findings(vec![first], vec![review], 8);
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].severity, Severity::High);
+        assert!(merged[0].message.contains("another shared holder"));
+    }
+
+    #[test]
+    fn inventory_and_findings_respect_include_and_exclude_patterns() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("content/browser/loader")).unwrap();
+        fs::create_dir_all(temp.path().join("base")).unwrap();
+        fs::write(
+            temp.path()
+                .join("content/browser/loader/keep_alive_url_loader.cc"),
+            "void allowed() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("base/linux_util.cc"),
+            "void ignored() {}\n",
+        )
+        .unwrap();
+
+        let include = vec!["content/browser/loader/keep_alive_url_loader*".to_string()];
+        let exclude = vec!["**/*test*".to_string()];
+        let inventory =
+            collect_agentic_repo_inventory_with_filters(temp.path(), 10, 256, &include, &exclude)
+                .unwrap();
+        assert_eq!(inventory.len(), 1);
+        assert_eq!(
+            inventory[0].0,
+            "content/browser/loader/keep_alive_url_loader.cc"
+        );
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let config = V2Config {
+            model: Some("openai:gpt-5.5".to_string()),
+            ..V2Config::default()
+        };
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+        };
+        let runtime = FakeRuntime {
+            response: AgentQueryResponse {
+                text: String::new(),
+                structured: Some(json!({
+                    "findings": [
+                        {
+                            "ruleId": "allowed",
+                            "filePath": "content/browser/loader/keep_alive_url_loader.cc",
+                            "startLine": 1,
+                            "severity": "WARNING",
+                            "message": "allowed finding"
+                        },
+                        {
+                            "ruleId": "outside",
+                            "filePath": "base/linux_util.cc",
+                            "startLine": 1,
+                            "severity": "WARNING",
+                            "message": "outside finding"
+                        }
+                    ]
+                })),
+                cost_usd: 0.01,
+                ..Default::default()
+            },
+        };
+
+        let report = run_agentic_sast_report(
+            &json!({"includePatterns": include, "excludePatterns": exclude}),
+            &ctx,
+            Some(&runtime),
+        )
+        .unwrap();
+
+        assert_eq!(report.count, 1);
+        assert_eq!(
+            report.findings[0].file_path,
+            "content/browser/loader/keep_alive_url_loader.cc"
+        );
+    }
+
+    #[test]
+    fn inventory_includes_cpp_headers_and_objective_cpp_sources() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(
+            temp.path()
+                .join("third_party/angle/src/libANGLE/renderer/metal"),
+        )
+        .unwrap();
+        fs::write(
+            temp.path()
+                .join("third_party/angle/src/libANGLE/renderer/metal/TextureMtl.mm"),
+            "void objective_cpp_source() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path()
+                .join("third_party/angle/src/libANGLE/renderer/metal/TextureMtl.h"),
+            "void header_decl();\n",
+        )
+        .unwrap();
+
+        let include = vec![
+            "third_party/angle/src/libANGLE/renderer/metal/TextureMtl.mm".to_string(),
+            "third_party/angle/src/libANGLE/renderer/metal/TextureMtl.h".to_string(),
+        ];
+        let inventory =
+            collect_agentic_repo_inventory_with_filters(temp.path(), 10, 256, &include, &[])
+                .unwrap();
+        let paths = inventory
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            paths,
+            vec![
+                "third_party/angle/src/libANGLE/renderer/metal/TextureMtl.h",
+                "third_party/angle/src/libANGLE/renderer/metal/TextureMtl.mm",
+            ]
         );
     }
 }

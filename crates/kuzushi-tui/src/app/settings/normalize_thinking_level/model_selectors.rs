@@ -4,9 +4,9 @@ pub(crate) fn resolve_model_selector(selector: &str) -> Option<&'static ModelCho
     let key = selector.trim().to_ascii_lowercase().replace('_', "-");
     match key.as_str() {
         "1" | "gpt-5.5" | "5.5" | "openai:gpt-5.5" => MODEL_CHOICES.get(0),
-        "2" | "gpt-5.5-mini" | "5.5-mini" | "mini" | "openai:gpt-5.5-mini" => MODEL_CHOICES.get(1),
+        "2" | "gpt-5.4-mini" | "5.4-mini" | "mini" | "openai:gpt-5.4-mini" => MODEL_CHOICES.get(1),
         "3" | "codex:gpt-5.5" | "openai-codex:gpt-5.5" | "codex-5.5" => MODEL_CHOICES.get(2),
-        "4" | "codex:gpt-5.5-mini" | "openai-codex:gpt-5.5-mini" | "codex-mini" => {
+        "4" | "codex:gpt-5.4-mini" | "openai-codex:gpt-5.4-mini" | "codex-mini" => {
             MODEL_CHOICES.get(3)
         }
         "5" | "sonnet" | "claude-sonnet" | "claude-sonnet-4-6" | "anthropic:claude-sonnet-4-6" => {

@@ -86,6 +86,11 @@ fn systems_hunt_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<
     Ok(target)
 }
 
+struct CostedSystemsHuntRaw {
+    raw: Value,
+    cost_usd: f64,
+}
+
 fn ensure_systems_hunt_surfaces(
     ctx: &ToolExecutionContext<'_>,
     target: &Path,
@@ -114,7 +119,7 @@ fn ensure_systems_hunt_surfaces(
 fn query_systems_hunt_with_scope(
     run: &SystemsHuntRun<'_>,
     ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
+) -> Result<CostedSystemsHuntRaw> {
     let _llm_scope = begin_systems_hunt_scope(ctx);
     emit_selected_systems_surfaces(ctx, &run.context);
     let raw = query_systems_hunt_findings(
@@ -142,13 +147,13 @@ fn begin_systems_hunt_scope(
 }
 
 fn finalize_systems_hunt_report(
-    raw: Value,
+    raw: CostedSystemsHuntRaw,
     ctx: &ToolExecutionContext<'_>,
     run: &SystemsHuntRun<'_>,
 ) -> Result<SystemsHuntReport> {
     let artifact_root = artifact_root(&run.target, &run.options.artifact_dir)?;
     let (mut findings, artifacts) = normalize_systems_hunt_findings(
-        raw,
+        raw.raw,
         &run.target,
         &run.context,
         &artifact_root,
@@ -163,7 +168,7 @@ fn finalize_systems_hunt_report(
         findings,
         persisted,
         artifacts,
-        cost_usd: 0.0,
+        cost_usd: raw.cost_usd,
     })
 }
 
@@ -248,8 +253,8 @@ fn query_systems_hunt_findings(
     options: &SystemsHuntInput,
     agent_tool_policy: AgentToolPolicy,
     thinking_level: &str,
-) -> Result<Value> {
-    let invariants = query_systems_invariants(
+) -> Result<CostedSystemsHuntRaw> {
+    let invariants = query_systems_invariants_with_cost(
         runtime,
         model,
         target,
@@ -258,23 +263,29 @@ fn query_systems_hunt_findings(
         agent_tool_policy.clone(),
         thinking_level,
     )?;
-    let triggers = query_systems_triggers(
+    let triggers = query_systems_triggers_with_cost(
         runtime,
         model,
         target,
         context,
-        &invariants,
+        &invariants.value,
         options,
         agent_tool_policy.clone(),
         thinking_level,
     )?;
-    query_required_structured_json(
+    let findings = query_required_structured_json_with_cost(
         runtime,
         AgentQueryRequest::new(
             model.to_string(),
             target.to_path_buf(),
             SYSTEMS_HUNT_SYSTEM_PROMPT.to_string(),
-            build_systems_hunt_prompt(target, context, &invariants, &triggers, options)?,
+            build_systems_hunt_prompt(
+                target,
+                context,
+                &invariants.value,
+                &triggers.value,
+                options,
+            )?,
         )
         .with_tool_policy(agent_tool_policy)
         .with_thinking_level(thinking_level.to_string()),
@@ -284,5 +295,9 @@ fn query_systems_hunt_findings(
             findings_schema(),
         ),
         require_json_object,
-    )
+    )?;
+    Ok(CostedSystemsHuntRaw {
+        raw: findings.value,
+        cost_usd: invariants.cost_usd + triggers.cost_usd + findings.cost_usd,
+    })
 }

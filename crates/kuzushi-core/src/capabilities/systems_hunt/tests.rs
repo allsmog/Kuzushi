@@ -39,6 +39,7 @@ mod tests {
                             "cheapVerifiable": true
                         }]
                     })),
+                    cost_usd: 0.01,
                     ..Default::default()
                 });
             }
@@ -58,6 +59,7 @@ mod tests {
                             "rationale": "length reaches memcpy"
                         }]
                     })),
+                    cost_usd: 0.02,
                     ..Default::default()
                 });
             }
@@ -81,6 +83,7 @@ mod tests {
                             "cheapVerifiable": true
                         }]
                     })),
+                    cost_usd: 0.03,
                     ..Default::default()
                 });
             }
@@ -201,6 +204,89 @@ mod tests {
     }
 
     #[test]
+    fn inventory_skips_test_sources_for_production_hunts() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src/testing")).unwrap();
+        fs::write(
+            temp.path().join("src/parser.cc"),
+            "void Parse(char *packet, size_t len) { memcpy(packet, packet, len); }\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/parser_unittest.cc"),
+            "void Test() { char frame[64]; memcpy(frame, frame, sizeof(frame)); }\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/parser_unittest_2_autogen.h"),
+            "void TestAutogen() { char frame[64]; memcpy(frame, frame, sizeof(frame)); }\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/parser_test_util_common.h"),
+            "void TestUtil() { char frame[64]; memcpy(frame, frame, sizeof(frame)); }\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/parser_tests.cc"),
+            "void Tests() { char frame[64]; memcpy(frame, frame, sizeof(frame)); }\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/test_shared_image_interface.cc"),
+            "void TestShared() { char frame[64]; memcpy(frame, frame, sizeof(frame)); }\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/testing/helper.cc"),
+            "void Helper() { char frame[64]; memcpy(frame, frame, sizeof(frame)); }\n",
+        )
+        .unwrap();
+
+        let output = gather_systems_context(
+            temp.path(),
+            &SystemsHuntInput::from_tool_input(&json!({"maxSurfaces": 10})).unwrap(),
+        )
+        .unwrap();
+        let files = output
+            .surfaces
+            .iter()
+            .map(|surface| surface.file_path.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(files, vec!["src/parser.cc"]);
+    }
+
+    #[test]
+    fn prompt_context_keeps_high_surface_runs_compact() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        for index in 0..80 {
+            fs::write(
+                temp.path().join(format!("src/parser_{index}.cc")),
+                "void Parse(char *packet, size_t len) {\n  char frame[64];\n  memcpy(frame, packet, len);\n  CHECK(len < sizeof(frame));\n}\n",
+            )
+            .unwrap();
+        }
+
+        let output = gather_systems_context(
+            temp.path(),
+            &SystemsHuntInput::from_tool_input(&json!({
+                "maxSurfaces": 80,
+                "maxFiles": 200,
+                "headBytes": 4096,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let prompt_context = format_context_for_prompt(&output).unwrap();
+
+        assert_eq!(output.surfaces.len(), 80);
+        assert!(prompt_context.len() < 200_000);
+        assert!(!prompt_context.contains("\n  \"surfaces\""));
+    }
+
+    #[test]
     fn runs_systems_hunt_through_runtime_and_writes_artifact() {
         let temp = tempdir().unwrap();
         fs::create_dir_all(temp.path().join("src")).unwrap();
@@ -232,6 +318,7 @@ mod tests {
         assert_eq!(store.list_findings(10).unwrap().len(), 1);
         assert_eq!(report.artifacts.len(), 1);
         assert!(temp.path().join(&report.artifacts[0]).exists());
+        assert!((report.cost_usd - 0.06).abs() < 1e-9);
     }
 
     #[test]

@@ -21,8 +21,8 @@ pub(crate) const MODEL_CHOICES: &[ModelChoice] = &[
     },
     ModelChoice {
         index: 2,
-        id: "openai:gpt-5.5-mini",
-        label: "GPT-5.5 mini",
+        id: "openai:gpt-5.4-mini",
+        label: "GPT-5.4 mini",
         provider: "openai",
         auth: "OPENAI_API_KEY",
         thinking_level: "high",
@@ -37,8 +37,8 @@ pub(crate) const MODEL_CHOICES: &[ModelChoice] = &[
     },
     ModelChoice {
         index: 4,
-        id: "openai-codex:gpt-5.5-mini",
-        label: "Codex GPT-5.5 mini",
+        id: "openai-codex:gpt-5.4-mini",
+        label: "Codex GPT-5.4 mini",
         provider: "openai-codex",
         auth: "OAuth",
         thinking_level: "high",

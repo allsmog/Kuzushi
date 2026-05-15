@@ -9,6 +9,27 @@ pub(crate) fn query_systems_invariants(
     agent_tool_policy: AgentToolPolicy,
     thinking_level: &str,
 ) -> Result<SystemsInvariantOutput> {
+    Ok(query_systems_invariants_with_cost(
+        runtime,
+        model,
+        target,
+        context,
+        _options,
+        agent_tool_policy,
+        thinking_level,
+    )?
+    .value)
+}
+
+pub(crate) fn query_systems_invariants_with_cost(
+    runtime: &dyn AgentRuntime,
+    model: &str,
+    target: &Path,
+    context: &SystemsContextOutput,
+    _options: &SystemsHuntInput,
+    agent_tool_policy: AgentToolPolicy,
+    thinking_level: &str,
+) -> Result<CostedStructuredJson<SystemsInvariantOutput>> {
     // Pick a sub-agent role appropriate for the dominant surface kind.
     // When at least one Rust unsafe-region surface is present, the
     // UnsafeBlockReasoner preamble keeps the agent on-task. Otherwise
@@ -36,14 +57,18 @@ pub(crate) fn query_systems_invariants(
     } else {
         runtime.spawn_subagent_blocking(role, request.clone())?
     };
-    let raw = parse_or_repair_required_structured_json(
+    parse_or_repair_required_structured_json_with_cost(
         response,
         StructuredJsonContract::new(
             "systems-hunt:systems-invariant-extract",
             "SystemsInvariants",
             invariants_schema(),
         ),
-        require_json_object,
+        |raw| {
+            require_json_object(raw).map(|raw| SystemsInvariantOutput {
+                invariants: parse_invariants(&raw),
+            })
+        },
         |repair_prompt, output| {
             let mut repair_request = AgentQueryRequest::new(
                 request.model.clone(),
@@ -65,10 +90,7 @@ pub(crate) fn query_systems_invariants(
                 runtime.spawn_subagent_blocking(role, repair_request)
             }
         },
-    )?;
-    Ok(SystemsInvariantOutput {
-        invariants: parse_invariants(&raw),
-    })
+    )
 }
 
 pub(crate) fn pick_role_for_invariants(context: &SystemsContextOutput) -> SubagentRole {

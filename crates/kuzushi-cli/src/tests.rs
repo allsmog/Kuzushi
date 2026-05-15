@@ -24,7 +24,7 @@ mod tests {
     use crate::tool_requirements::{
         tool_defaults_to_workspace, tool_needs_finding_store, tool_needs_runtime,
     };
-    use crate::tool_run_artifacts::finish_cli_tool_run;
+    use crate::tool_run_artifacts::{fail_cli_tool_run, finish_cli_tool_run};
     use kuzushi_core::{load_run_summary, RunSummary, ToolOptionStore, WorkspaceTarget};
     use std::path::{Path, PathBuf};
 
@@ -133,29 +133,56 @@ mod tests {
     }
 
     #[test]
-    fn cli_tool_completion_preserves_started_summary_and_input_artifact() {
+    fn cli_tool_run_preserves_started_summary_and_artifact_manifest() {
         let tmp = tempfile::tempdir().unwrap();
-        let run_id = start_cli_tool_run(tmp.path(), "demo:tool", &serde_json::json!({"x": 1}));
+        let input = serde_json::json!({"model": "local", "maxFindings": 1});
+        let run_id = start_cli_tool_run(tmp.path(), "agentic-sast:scan", &input);
         let started = load_run_summary(tmp.path(), &run_id).unwrap();
 
         finish_cli_tool_run(
             tmp.path(),
             &run_id,
-            "demo:tool",
-            &serde_json::json!({"ok": true, "findingsCount": 0}),
+            "agentic-sast:scan",
+            &serde_json::json!({
+                "ok": true,
+                "costUsd": 0.0,
+                "data": { "findings": [] }
+            }),
         );
-        let completed = load_run_summary(tmp.path(), &run_id).unwrap();
 
-        assert_eq!(completed.status, "complete");
-        assert_eq!(completed.started_at_unix, started.started_at_unix);
+        let summary = load_run_summary(tmp.path(), &run_id).unwrap();
+        assert_eq!(summary.status, "complete");
+        assert_eq!(summary.started_at_unix, started.started_at_unix);
         assert!(started.process_id.is_some());
-        assert!(completed.process_id.is_none());
-        let artifact_labels = completed
+        assert!(summary.process_id.is_none());
+        let labels = summary
             .artifacts
             .iter()
             .map(|artifact| artifact.label.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(artifact_labels, vec!["input", "result"]);
+        assert_eq!(labels, vec!["input", "result"]);
+        for artifact in &summary.artifacts {
+            assert!(
+                std::path::Path::new(&artifact.path).exists(),
+                "missing artifact {}",
+                artifact.path
+            );
+        }
+
+        let failed_run_id = start_cli_tool_run(tmp.path(), "agentic-sast:scan", &input);
+        fail_cli_tool_run(
+            tmp.path(),
+            &failed_run_id,
+            "agentic-sast:scan",
+            "bridge failed",
+        );
+
+        let failed_summary = load_run_summary(tmp.path(), &failed_run_id).unwrap();
+        assert_eq!(failed_summary.status, "failed");
+        assert_eq!(failed_summary.error.as_deref(), Some("bridge failed"));
+        assert_eq!(failed_summary.artifacts.len(), 1);
+        assert_eq!(failed_summary.artifacts[0].label, "input");
+        assert!(std::path::Path::new(&failed_summary.artifacts[0].path).exists());
     }
 
     #[test]

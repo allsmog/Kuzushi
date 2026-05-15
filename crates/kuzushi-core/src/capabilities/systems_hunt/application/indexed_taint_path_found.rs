@@ -32,20 +32,43 @@ pub(crate) fn query_systems_triggers(
     agent_tool_policy: AgentToolPolicy,
     thinking_level: &str,
 ) -> Result<SystemsTriggerOutput> {
-    let raw = query_required_structured_json(
+    Ok(query_systems_triggers_with_cost(
+        runtime,
+        model,
+        target,
+        context,
+        invariants,
+        options,
+        agent_tool_policy,
+        thinking_level,
+    )?
+    .value)
+}
+
+pub(crate) fn query_systems_triggers_with_cost(
+    runtime: &dyn AgentRuntime,
+    model: &str,
+    target: &Path,
+    context: &SystemsContextOutput,
+    invariants: &SystemsInvariantOutput,
+    options: &SystemsHuntInput,
+    agent_tool_policy: AgentToolPolicy,
+    thinking_level: &str,
+) -> Result<CostedStructuredJson<SystemsTriggerOutput>> {
+    query_required_structured_json_with_cost(
         runtime,
         AgentQueryRequest::new(
             model.to_string(),
             target.to_path_buf(),
             SYSTEMS_TRIGGER_SYSTEM_PROMPT.to_string(),
             format!(
-            "Synthesize at most {} attacker trigger hypotheses per surface. Return JSON with triggers[].\n\n\
-            For each surface you have file_path + line_number markers; use Read to fetch source as needed (line text is not embedded to keep this prompt small).\n\n\
-            Context:\n{}\n\nInvariants:\n{}",
-            options.max_trigger_hypotheses_per_surface,
-            lean_prompt_payload(context)?,
-            lean_prompt_payload(invariants)?,
-        ),
+                "Synthesize at most {} attacker trigger hypotheses per surface. Return JSON with triggers[].\n\n\
+                 For each surface you have file_path + line_number markers; use Read to fetch source as needed (line text is not embedded to keep this prompt small).\n\n\
+                 Context:\n{}\n\nInvariants:\n{}",
+                options.max_trigger_hypotheses_per_surface,
+                lean_prompt_payload(context)?,
+                lean_prompt_payload(invariants)?,
+            ),
         )
         .with_tool_policy(agent_tool_policy)
         .with_thinking_level(thinking_level.to_string()),
@@ -54,11 +77,12 @@ pub(crate) fn query_systems_triggers(
             "SystemsTriggers",
             triggers_schema(),
         ),
-        require_json_object,
-    )?;
-    Ok(SystemsTriggerOutput {
-        triggers: parse_triggers(&raw),
-    })
+        |raw| {
+            require_json_object(raw).map(|raw| SystemsTriggerOutput {
+                triggers: parse_triggers(&raw),
+            })
+        },
+    )
 }
 
 pub(crate) fn build_systems_hunt_prompt(
@@ -84,4 +108,51 @@ pub(crate) fn build_systems_hunt_prompt(
         invariants = lean_prompt_payload(invariants)?,
         triggers = lean_prompt_payload(triggers)?,
     ))
+}
+
+pub(crate) fn format_context_for_prompt(context: &SystemsContextOutput) -> Result<String> {
+    let surfaces = context
+        .surfaces
+        .iter()
+        .map(compact_surface_for_prompt)
+        .collect::<Vec<_>>();
+    let surface_packs = context
+        .surface_packs
+        .iter()
+        .map(compact_surface_pack_for_prompt)
+        .collect::<Vec<_>>();
+    Ok(serde_json::to_string(&json!({
+        "metadata": &context.metadata,
+        "surfaces": surfaces,
+        "surfacePacks": surface_packs,
+    }))?)
+}
+
+fn compact_surface_for_prompt(surface: &RankedSystemsSurface) -> Value {
+    json!({
+        "id": &surface.id,
+        "filePath": &surface.file_path,
+        "startLine": surface.start_line,
+        "kind": &surface.kind,
+        "score": surface.score,
+        "domains": &surface.domains,
+        "reasons": &surface.reasons,
+        "attackerControlledFields": &surface.attacker_controlled_fields,
+        "hardeningSignals": surface.hardening_signals.iter().take(4).collect::<Vec<_>>(),
+        "evidence": surface.evidence.iter().take(4).collect::<Vec<_>>(),
+    })
+}
+
+fn compact_surface_pack_for_prompt(pack: &SystemsSurfacePack) -> Value {
+    json!({
+        "surfaceId": &pack.surface_id,
+        "anchorFilePath": &pack.anchor_file_path,
+        "anchorStartLine": pack.anchor_start_line,
+        "relatedFiles": &pack.related_files,
+        "unsafeSites": pack.unsafe_sites.iter().take(4).collect::<Vec<_>>(),
+        "resourceProvenanceSites": pack.resource_provenance_sites.iter().take(4).collect::<Vec<_>>(),
+        "hardeningSites": pack.hardening_sites.iter().take(4).collect::<Vec<_>>(),
+        "inputSites": pack.input_sites.iter().take(4).collect::<Vec<_>>(),
+        "helperTemplates": &pack.helper_templates,
+    })
 }
