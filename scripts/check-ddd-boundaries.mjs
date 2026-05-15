@@ -193,31 +193,12 @@ const rules = [
   { name: "TUI auth and cost renderers read auth/config/cost view models", roots: ["crates/kuzushi-tui/src/renderer/views/system/auth_lines.rs", "crates/kuzushi-tui/src/renderer/views/system/cost_lines.rs"], forbidden: /\b(runtime_backend_label|display_model_selector|format_session_cost|\.config\b|session_thinking_level|session_cost_usd|last_tool_cost_usd|session_budget_usd)\b/ },
   { name: "TUI run timeline renderer reads run timeline view model", roots: ["crates/kuzushi-tui/src/renderer/views/runs/runs_lines.rs"], forbidden: /\b(past_runs_model|scan_status|ScanPanelState|\.scan\b)\b/ },
   { name: "TUI prompt-tuning renderer reads prompt-tuning view models", roots: ["crates/kuzushi-tui/src/renderer/views/editor/tune_lines.rs"], forbidden: /\b(read_house_rules|TuneAction|tune_cursor_clamped|prompts_cursor_clamped|focused_module|PROMPT_VERB_NAMES|crate::app::ShellApp)\b/ },
-  {
-    name: "TUI catalog renderer reads catalog view model",
-    roots: ["crates/kuzushi-tui/src/renderer/views/catalog/catalog_lines"],
-    forbidden:
-      /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\bModuleKind\b|\.registry\.modules\(|\.tools\(\)|\.metadata\(\)/,
-  },
+  { name: "TUI catalog renderer reads catalog view model", roots: ["crates/kuzushi-tui/src/renderer/views/catalog/catalog_lines"], forbidden: /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\bModuleKind\b|\.registry\.modules\(|\.tools\(\)|\.metadata\(\)/ },
   { name: "TUI compact catalog reads catalog view model", roots: ["crates/kuzushi-tui/src/renderer/views/catalog/catalog_lines/collapsed_state.rs", "crates/kuzushi-tui/src/renderer/shared/catalog/catalog_next_hint.rs"], forbidden: /\bShellApp\b|app\.|sorted_finding_aliases|Severity::|first_finding_|context_view|\.findings\b/ },
-  {
-    name: "TUI catalog navigation reads catalog view model",
-    roots: ["crates/kuzushi-tui/src/app/catalog"],
-    forbidden:
-      /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\bModuleKind\b|\.registry\.modules\(|\.tools\(\)|\.metadata\(\)|catalog_category/,
-  },
-  {
-    name: "TUI plain config renderer reads catalog view model",
-    roots: ["crates/kuzushi-tui/src/renderer/plain/plain_config_lines.rs"],
-    forbidden:
-      /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\bModuleKind\b|\.registry\.modules\(|\.metadata\(\)/,
-  },
-  {
-    name: "TUI options renderers read options view model",
-    roots: ["crates/kuzushi-tui/src/renderer/views/options/mod.rs", "crates/kuzushi-tui/src/renderer/plain/plain_options_lines.rs", "crates/kuzushi-tui/src/renderer/plain/plain_sast_tasks_lines.rs"],
-    forbidden:
-      /kuzushi_core::(?:OptionSpec|OptionType|ToolDescriptor)|\.registry\.resolve_tool\(|\.options\b|option_store|sast_task_rows|serde_json/,
-  },
+  { name: "TUI context renderers read context snapshot view model", roots: ["crates/kuzushi-tui/src/renderer/views/workspace/context_lines.rs", "crates/kuzushi-tui/src/renderer/plain/plain_context_lines.rs"], forbidden: /app\.context_view|ContextSnapshotView|running_tool_name|spinner_glyph|\.snapshot_path|files_indexed|generated_slices|stale_slices/ },
+  { name: "TUI catalog navigation reads catalog view model", roots: ["crates/kuzushi-tui/src/app/catalog"], forbidden: /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\bModuleKind\b|\.registry\.modules\(|\.tools\(\)|\.metadata\(\)|catalog_category/ },
+  { name: "TUI plain config renderer reads catalog view model", roots: ["crates/kuzushi-tui/src/renderer/plain/plain_config_lines.rs"], forbidden: /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\bModuleKind\b|\.registry\.modules\(|\.metadata\(\)/ },
+  { name: "TUI options renderers read options view model", roots: ["crates/kuzushi-tui/src/renderer/views/options/mod.rs", "crates/kuzushi-tui/src/renderer/plain/plain_options_lines.rs", "crates/kuzushi-tui/src/renderer/plain/plain_sast_tasks_lines.rs"], forbidden: /kuzushi_core::(?:OptionSpec|OptionType|ToolDescriptor)|\.registry\.resolve_tool\(|\.options\b|option_store|sast_task_rows|serde_json/ },
   {
     name: "TUI tools renderer reads tools view model",
     roots: ["crates/kuzushi-tui/src/renderer/views/system/tools_lines.rs"],

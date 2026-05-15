@@ -2,9 +2,8 @@ use super::*;
 pub(in crate::renderer) use super::*;
 
 use self::{
-    compact_target_path, fit, help_category_blurb, join_or_dash, kb_artifact_widths,
-    kb_attachment_widths, option_table_widths, sast_task_table_widths, shell_view_lines,
-    table_text, wrap_text,
+    compact_target_path, fit, help_category_blurb, kb_artifact_widths, kb_attachment_widths,
+    option_table_widths, sast_task_table_widths, shell_view_lines, table_text, wrap_text,
 };
 use crate::app::{LogLine, ShellApp, ShellView};
 use crate::commands::{
