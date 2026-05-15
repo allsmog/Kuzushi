@@ -8,7 +8,7 @@ pub(crate) struct ConfigModel {
     pub(crate) reasoning_override: Option<String>,
     pub(crate) summary_title: &'static str,
     pub(crate) summary_rows: Vec<ConfigSummaryRow>,
-    pub(crate) model_rows: Vec<ConfigModelRow>,
+    pub(crate) model_table: ConfigModelTable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +24,13 @@ pub(crate) struct ConfigModelRow {
     pub(crate) model: String,
     pub(crate) effort: String,
     pub(crate) auth: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConfigModelTable {
+    pub(crate) title: &'static str,
+    pub(crate) headers: [&'static str; 5],
+    pub(crate) rows: Vec<ConfigModelRow>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,7 +68,11 @@ pub(crate) fn config_model(app: &ShellApp) -> ConfigModel {
         reasoning_override,
         summary_title: "CONFIG",
         summary_rows,
-        model_rows: config_model_rows(app),
+        model_table: ConfigModelTable {
+            title: "MODELS",
+            headers: ["", "#", "model", "effort", "auth"],
+            rows: config_model_rows(app),
+        },
     }
 }
 
@@ -74,16 +85,16 @@ impl PlainConfigModel {
         let ConfigModel {
             summary_title,
             summary_rows,
-            model_rows,
+            model_table,
             ..
         } = model;
         PlainConfigModel {
             summary_title,
             summary_rows: plain_config_summary_rows(&summary_rows),
             model_table: PlainConfigModelTable {
-                title: "MODELS",
-                headers: ["#", "model", "effort", "auth"],
-                rows: plain_config_model_rows(model_rows),
+                title: model_table.title,
+                headers: plain_config_model_headers(model_table.headers),
+                rows: plain_config_model_rows(model_table.rows),
             },
             next_hint: "Next: model <n> [xhigh], auth login openai, auth login anthropic, cost",
         }
@@ -133,6 +144,10 @@ fn plain_config_model_rows(rows: Vec<ConfigModelRow>) -> Vec<PlainConfigModelRow
             auth: row.auth,
         })
         .collect()
+}
+
+fn plain_config_model_headers(headers: [&'static str; 5]) -> [&'static str; 4] {
+    [headers[1], headers[2], headers[3], headers[4]]
 }
 
 fn config_summary_rows(

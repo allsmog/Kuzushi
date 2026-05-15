@@ -1,5 +1,7 @@
 use super::*;
-use crate::ui_view_models::{config_model, ConfigModel, ConfigModelRow, ConfigSummaryRow};
+use crate::ui_view_models::{
+    config_model, ConfigModel, ConfigModelRow, ConfigModelTable, ConfigSummaryRow,
+};
 
 pub(crate) fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
@@ -24,15 +26,16 @@ fn config_summary_row(row: &ConfigSummaryRow) -> Line<'static> {
 
 fn push_config_model_table(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area: Rect) {
     lines.push(blank());
-    lines.push(divider("MODELS", area.width));
+    lines.push(config_model_table_title(&model.model_table, area.width));
     let widths = config_model_widths(area);
-    lines.push(aligned_header(
-        &["", "#", "model", "effort", "auth"],
-        &widths,
-    ));
-    for row in &model.model_rows {
+    lines.push(aligned_header(&model.model_table.headers, &widths));
+    for row in &model.model_table.rows {
         lines.push(config_model_row(row, &widths));
     }
+}
+
+fn config_model_table_title(table: &ConfigModelTable, width: u16) -> Line<'static> {
+    divider(table.title, width)
 }
 
 fn config_model_widths(area: Rect) -> [usize; 5] {

@@ -21,8 +21,13 @@ fn config_model_summarizes_default_runtime_state() {
         .summary_rows
         .iter()
         .any(|row| row.label == "onboarding"));
-    assert!(!model.model_rows.is_empty());
-    assert!(model.model_rows[app.selected_model_index].selected);
+    assert_eq!(model.model_table.title, "MODELS");
+    assert_eq!(
+        model.model_table.headers,
+        ["", "#", "model", "effort", "auth"]
+    );
+    assert!(!model.model_table.rows.is_empty());
+    assert!(model.model_table.rows[app.selected_model_index].selected);
 }
 
 #[test]
