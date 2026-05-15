@@ -61,6 +61,31 @@ fn recent_log_activity_lines(app: &ShellApp, module_id: &str, take: usize) -> Ve
     out
 }
 
+fn recent_module_log(app: &ShellApp, module_id: &str, take: usize) -> Vec<(String, String)> {
+    let module_id = module_id.to_string();
+    let mut matches: Vec<(String, String)> = app
+        .log
+        .iter()
+        .rev()
+        .filter(|line| {
+            line.prefix == module_id
+                || line.prefix.starts_with(&format!("{module_id}:"))
+                || line.body.contains(&format!("{module_id}:"))
+                || is_recon_tool_log(line, &module_id)
+        })
+        .take(take)
+        .map(|line| (line.prefix.clone(), line.body.clone()))
+        .collect();
+    matches.reverse();
+    matches
+}
+
+fn is_recon_tool_log(line: &LogLine, module_id: &str) -> bool {
+    module_id == "recon"
+        && (line.prefix == "tool" || line.prefix == "result")
+        && line.body.contains("recon")
+}
+
 pub(crate) fn recon_snapshot_lines(
     snapshot: &crate::app::ReconSnapshot,
     take: usize,
