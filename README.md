@@ -209,9 +209,9 @@ current built-ins are:
 | `semgrep` | `semgrep:scan` |
 | `codeql` | `codeql:scan` |
 | `agentic-sast` | `agentic-sast:scan` |
-| `carlini-threat-hunt` | `carlini-threat-hunt:run` |
+| `offense-review` | `offense-review:threat-hunt` |
 | `taint-iris` | `taint-iris:hunt` |
-| `taint-iris-next` | `taint-iris-next:hunt` |
+| `taint-iris-next` | `taint-iris-next:dataflow-plan`, `taint-iris-next:source-sink-trace`, `taint-iris-next:finding-review` |
 | `triage` | `triage:run` |
 | `verify` | `verify:finding` |
 | `patch` | `patch:finding` |
@@ -238,8 +238,8 @@ exact tool name for operators who opt into them: `chrome-rce`,
 ## External Dependencies
 
 Native deterministic tools run without an LLM: `module-recommender`,
-`context`, `findings`, `dep-hygiene`, `secret-scan`, `iac-scan`, Chrome RCE
-native checks, and local artifact readers.
+`context`, `findings`, `dep-hygiene`, `secret-scan`, `iac-scan`, and local
+artifact readers.
 
 Subprocess-backed tools require the operator to install or configure binaries:
 
@@ -281,7 +281,19 @@ not silently succeed and they do not substitute a different model.
 | `.kuzushi/v2/artifact-kb.sqlite3` | Local artifact knowledge search index |
 | `.kuzushi/context-snapshot.json` | `context:build` |
 | `.kuzushi/threat-model.json` | `threat-model:*`, `randori:*`, and threat-model readers |
-| `.kuzushi/runs/<runId>/summary.json` | `sast:scan` |
+| `.kuzushi/latest` | latest completed, partial, failed, skipped, or running run id |
+| `.kuzushi/runs/<runId>/run.json` | canonical run metadata, status, cost, LLM audit, and artifact list |
+| `.kuzushi/runs/<runId>/events.jsonl` | tool lifecycle events |
+| `.kuzushi/runs/<runId>/context.json` | run-scoped context snapshot or explicit skipped marker |
+| `.kuzushi/runs/<runId>/attack-surface.json` | run-scoped attack-surface snapshot or explicit skipped marker |
+| `.kuzushi/runs/<runId>/threat-model.json` | run-scoped threat-model snapshot or explicit skipped marker |
+| `.kuzushi/runs/<runId>/recommendations.json` | run-scoped recommendation snapshot or explicit skipped marker |
+| `.kuzushi/runs/<runId>/findings.json` | normalized finding snapshot or explicit skipped marker |
+| `.kuzushi/runs/<runId>/proof.json` | proof-state snapshot or explicit skipped marker |
+| `.kuzushi/runs/<runId>/failures.json` | bounded failure handoff context, empty when no failure is recorded |
+| `.kuzushi/runs/<runId>/report.md` | generated or placeholder Markdown report |
+| `.kuzushi/runs/<runId>/report.sarif` | optional SARIF report when a tool emits one |
+| `.kuzushi/runs/<runId>/summary.json` | legacy compatibility mirror of `run.json` |
 | `.kuzushi/runs/<runId>/triage.jsonl` | `sast:scan --triage` and post-scan triage |
 | `.kuzushi/runs/<runId>/verify.jsonl` | `sast:scan` with verify/auto-patch inputs |
 | `x-ray/` | `x-ray:run` |
