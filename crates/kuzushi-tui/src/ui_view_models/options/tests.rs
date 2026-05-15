@@ -22,7 +22,11 @@ fn options_model_formats_stored_option_rows() {
     let OptionsBody::Table(table) = &model.body else {
         panic!("expected ready options table");
     };
-    let triage = table.rows.iter().find(|row| row.name == "triage").unwrap();
+    let triage = table
+        .rows
+        .iter()
+        .find(|row| row.cells[0] == "triage")
+        .unwrap();
 
     assert_eq!(model.title, "OPTIONS");
     assert!(table.hint.contains("session state"));
@@ -42,8 +46,8 @@ fn options_model_formats_stored_option_rows() {
         label: "view",
         value: "options".to_string(),
     }));
-    assert_eq!(triage.value, "true");
-    assert_eq!(triage.option_type, "bool");
+    assert_eq!(triage.cells[1], "true");
+    assert_eq!(triage.cells[4], "bool");
     assert!(triage.has_stored_value);
 }
 
@@ -92,7 +96,7 @@ fn plain_options_model_projects_ready_table() {
             "description"
         ]
     );
-    assert!(table.rows.iter().any(|row| row.name == "triage"));
+    assert!(table.rows.iter().any(|row| row.cells[0] == "triage"));
     assert_eq!(
         table.next_hint,
         "Next: set <key> <value>, setg <key> <value>, show advanced, show missing"

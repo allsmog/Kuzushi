@@ -1,9 +1,12 @@
 use super::*;
 pub(in crate::renderer) use super::*;
 use crate::ui_view_models::{
-    options_model, sast_tasks_model, OptionRow, OptionsBody, OptionsSummaryRow, OptionsTable,
+    options_model, sast_tasks_model, OptionsBody, OptionsSummaryRow, OptionsTable, OptionsTableRow,
     SastTasksModel,
 };
+
+const OPTION_ALIASES_COLUMN: usize = 5;
+const OPTION_DESCRIPTION_COLUMN: usize = 6;
 
 pub(crate) fn options_lines(
     app: &ShellApp,
@@ -43,16 +46,22 @@ fn push_options_table(lines: &mut Vec<Line<'static>>, width: u16, table: &Option
     }
 }
 
-fn option_row_line(row: &OptionRow, widths: &[usize]) -> Line<'static> {
-    let aliases = fit(&row.aliases, widths.get(5).copied().unwrap_or(10));
-    let description = fit(&row.description, widths.get(6).copied().unwrap_or(16));
+fn option_row_line(row: &OptionsTableRow, widths: &[usize]) -> Line<'static> {
+    let aliases = fit(
+        &row.cells[OPTION_ALIASES_COLUMN],
+        widths.get(OPTION_ALIASES_COLUMN).copied().unwrap_or(10),
+    );
+    let description = fit(
+        &row.cells[OPTION_DESCRIPTION_COLUMN],
+        widths.get(OPTION_DESCRIPTION_COLUMN).copied().unwrap_or(16),
+    );
     table_row(
         &[
-            &row.name,
-            &row.value,
-            &row.default_value,
-            row.required,
-            row.option_type,
+            &row.cells[0],
+            &row.cells[1],
+            &row.cells[2],
+            &row.cells[3],
+            &row.cells[4],
             &aliases,
             &description,
         ],
