@@ -21,8 +21,12 @@ fn options_model_formats_stored_option_rows() {
     let model = options_model(&app, &options_view("sast:scan", OptionsFilter::Standard));
     let triage = model.rows.iter().find(|row| row.name == "triage").unwrap();
 
+    assert_eq!(model.title, "OPTIONS");
     assert_eq!(model.status, OptionsModelStatus::Ready);
-    assert_eq!(model.filter_label, "options");
+    assert!(model.summary_rows.contains(&OptionsSummaryRow {
+        label: "view",
+        value: "options".to_string(),
+    }));
     assert_eq!(triage.value, "true");
     assert_eq!(triage.option_type, "bool");
     assert!(triage.has_stored_value);
@@ -35,6 +39,10 @@ fn options_model_marks_unknown_tools() {
     let model = options_model(&app, &options_view("missing:tool", OptionsFilter::Standard));
 
     assert_eq!(model.status, OptionsModelStatus::UnknownTool);
+    assert!(model.summary_rows.contains(&OptionsSummaryRow {
+        label: "tool",
+        value: "missing:tool".to_string(),
+    }));
     assert!(model.rows.is_empty());
 }
 

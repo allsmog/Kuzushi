@@ -1,7 +1,8 @@
 use super::*;
 pub(in crate::renderer) use super::*;
 use crate::ui_view_models::{
-    options_model, sast_tasks_model, OptionRow, OptionsModelStatus, SastTasksModel,
+    options_model, sast_tasks_model, OptionRow, OptionsModelStatus, OptionsSummaryRow,
+    SastTasksModel,
 };
 
 pub(crate) fn options_lines(
@@ -12,11 +13,16 @@ pub(crate) fn options_lines(
     let model = options_model(app, view);
     let mut lines = context_strip(app, area);
     lines.push(blank());
-    lines.push(divider("OPTIONS", area.width));
-    lines.push(detail("tool", &model.tool_name));
-    lines.push(detail("view", model.filter_label));
+    lines.push(divider(model.title, area.width));
+    for row in &model.summary_rows {
+        lines.push(options_summary_row(row));
+    }
     push_options_body(&mut lines, area.width, &model.status, &model.rows);
     lines
+}
+
+fn options_summary_row(row: &OptionsSummaryRow) -> Line<'static> {
+    detail(row.label, &row.value)
 }
 
 fn push_options_body(
