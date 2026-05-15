@@ -7,8 +7,8 @@ use ratatui::buffer::Buffer;
 use ratatui::Terminal;
 
 use crate::ui_view_models::{
-    threat_dfd_nodes_from_doc, threat_scope_buckets_from_doc, threat_story_rows_from_doc,
-    threat_stride_rollup_from_doc, view_status_segment, RoutingMode,
+    catalog_model, threat_dfd_nodes_from_doc, threat_scope_buckets_from_doc,
+    threat_story_rows_from_doc, threat_stride_rollup_from_doc, view_status_segment, RoutingMode,
 };
 
 use super::*;
@@ -613,13 +613,16 @@ fn catalog_next_hint_steers_through_context_then_findings() {
 
     // Default fresh app: no context snapshot built.
     assert!(
-        catalog_next_hint(&app).contains("context build"),
+        catalog_model(&app)
+            .collapsed
+            .next_hint
+            .contains("context build"),
         "fresh app should suggest context build"
     );
 
     // After context exists but no findings: first-finding scan hint.
     app.context_view.exists = true;
-    let hint = catalog_next_hint(&app);
+    let hint = catalog_model(&app).collapsed.next_hint;
     assert!(
         hint.contains("First finding") || hint.contains("scan"),
         "ctx-built no-findings should suggest scanning, got: {hint}"
@@ -628,7 +631,7 @@ fn catalog_next_hint_steers_through_context_then_findings() {
     // With non-critical findings: drill-in suggestion.
     let medium = Finding::new_semgrep("demo.rule", "src/a.rs", 1, None, Severity::Medium, "x");
     app.findings = vec![medium];
-    let hint = catalog_next_hint(&app);
+    let hint = catalog_model(&app).collapsed.next_hint;
     assert!(hint.contains("findings"), "got: {hint}");
     assert!(hint.contains("triage"), "got: {hint}");
     assert!(hint.contains("threats regen"), "got: {hint}");
@@ -637,7 +640,7 @@ fn catalog_next_hint_steers_through_context_then_findings() {
     // With a critical finding: open-by-alias suggestion.
     let critical = Finding::new_semgrep("demo.crit", "src/b.rs", 2, None, Severity::Critical, "y");
     app.findings.push(critical);
-    let hint = catalog_next_hint(&app);
+    let hint = catalog_model(&app).collapsed.next_hint;
     assert!(hint.contains("open F-"), "got: {hint}");
 }
 

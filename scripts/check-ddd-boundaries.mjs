@@ -198,6 +198,7 @@ const rules = [
     forbidden:
       /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\bModuleKind\b|\.registry\.modules\(|\.tools\(\)|\.metadata\(\)/,
   },
+  { name: "TUI compact catalog reads catalog view model", roots: ["crates/kuzushi-tui/src/renderer/views/catalog/catalog_lines/collapsed_state.rs", "crates/kuzushi-tui/src/renderer/shared/catalog/catalog_next_hint.rs"], forbidden: /\bShellApp\b|app\.|sorted_finding_aliases|Severity::|first_finding_|context_view|\.findings\b/ },
   {
     name: "TUI catalog navigation reads catalog view model",
     roots: ["crates/kuzushi-tui/src/app/catalog"],

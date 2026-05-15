@@ -1,5 +1,6 @@
 use crate::ShellApp;
 use kuzushi_core::modules::ModuleKind;
+use kuzushi_core::{sorted_finding_aliases, Severity};
 use std::collections::BTreeMap;
 
 pub(crate) const CATALOG_CATEGORY_ORDER: &[&str] = &["OFFENSE", "INTEL", "GOVERNANCE", "DEFENSE"];
@@ -8,6 +9,7 @@ pub(crate) const CATALOG_CATEGORY_ORDER: &[&str] = &["OFFENSE", "INTEL", "GOVERN
 pub(crate) struct CatalogModel {
     pub(crate) module_count: usize,
     pub(crate) default_action: Option<CatalogActionModule>,
+    pub(crate) collapsed: CatalogCollapsedModel,
     pub(crate) groups: Vec<CatalogModuleGroup>,
 }
 
@@ -31,6 +33,14 @@ pub(crate) struct CatalogModuleRow {
     pub(crate) focused: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CatalogCollapsedModel {
+    pub(crate) target_warning: Option<&'static str>,
+    pub(crate) next_hint: String,
+    pub(crate) scan_hint: Option<String>,
+    pub(crate) scan_command: &'static str,
+}
+
 pub(crate) fn catalog_model(app: &ShellApp) -> CatalogModel {
     let modules = catalog_modules(app);
     let module_count = modules.len();
@@ -40,8 +50,63 @@ pub(crate) fn catalog_model(app: &ShellApp) -> CatalogModel {
     CatalogModel {
         module_count,
         default_action,
+        collapsed: collapsed_catalog_model(app),
         groups: catalog_groups(&modules, focused_id, cursor_id.as_deref()),
     }
+}
+
+fn collapsed_catalog_model(app: &ShellApp) -> CatalogCollapsedModel {
+    CatalogCollapsedModel {
+        target_warning: collapsed_target_warning(app),
+        next_hint: catalog_next_hint(app),
+        scan_hint: app.findings.is_empty().then(|| app.first_finding_hint()),
+        scan_command: app.first_finding_scan_command(),
+    }
+}
+
+fn collapsed_target_warning(app: &ShellApp) -> Option<&'static str> {
+    if app.target.is_none() {
+        return Some("[!] no target selected; `scan .` uses the current directory");
+    }
+    app.findings
+        .is_empty()
+        .then_some("[!] active target has no persisted findings yet")
+}
+
+fn catalog_next_hint(app: &ShellApp) -> String {
+    if !app.context_view.exists {
+        return "Build the context snapshot with `context build` so SAST has structure to walk."
+            .to_string();
+    }
+    critical_finding_hint(app)
+        .or_else(|| findings_waiting_hint(app))
+        .unwrap_or_else(|| app.first_finding_hint())
+}
+
+fn critical_finding_hint(app: &ShellApp) -> Option<String> {
+    has_critical_finding(app)
+        .then(|| sorted_finding_aliases(&app.findings).into_iter().next())
+        .flatten()
+        .map(|(alias, _)| {
+            format!(
+                "Drill in: `open {alias}` for the highest-severity finding · `findings` for the list."
+            )
+        })
+}
+
+fn findings_waiting_hint(app: &ShellApp) -> Option<String> {
+    (!app.findings.is_empty()).then(|| {
+        format!(
+            "{} finding(s) waiting · `findings` to triage · `threats regen` for STRIDE refresh.",
+            app.findings.len()
+        )
+    })
+}
+
+fn has_critical_finding(app: &ShellApp) -> bool {
+    app.findings
+        .iter()
+        .any(|finding| finding.severity == Severity::Critical)
 }
 
 fn catalog_modules(app: &ShellApp) -> Vec<CatalogActionModule> {
@@ -150,3 +215,6 @@ fn module_category(kind: ModuleKind) -> &'static str {
         ModuleKind::Internal => "GOVERNANCE",
     }
 }
+
+#[cfg(test)]
+mod tests;
