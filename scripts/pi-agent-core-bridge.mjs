@@ -418,7 +418,10 @@ async function runOpenAiResponsesCall(provider, modelId, request) {
       .filter((part) => part?.type === "text" && typeof part.text === "string")
       .map((part) => part.text)
       .join("");
-    return String(text || "").trim();
+    return {
+      text: String(text || "").trim(),
+      usage: codexMessageUsage(message, modelId),
+    };
   }
 
   const base = resolveOpenAiResponsesBaseUrl();
@@ -469,7 +472,40 @@ async function runOpenAiResponsesCall(provider, modelId, request) {
       .map?.((part) => part.text ?? "")
       .join?.("") ??
     "";
-  return String(outputText || "").trim();
+  return {
+    text: String(outputText || "").trim(),
+    usage: openAiResponsesUsage(parsed?.usage, modelId),
+  };
+}
+
+/// Coerce a pi-ai single-message `usage` into the `{ inputTokens, outputTokens,
+/// costUsd }` shape the rest of the bridge uses. Falls back to the rate-card
+/// approximation when pi-ai doesn't surface a cost (codex OAuth responses
+/// generally don't carry one).
+function codexMessageUsage(message, modelId) {
+  const usage = message?.usage;
+  if (!usage || typeof usage !== "object") return undefined;
+  const inputTokens = Number(usage.input ?? usage.input_tokens ?? 0) || 0;
+  const outputTokens = Number(usage.output ?? usage.output_tokens ?? 0) || 0;
+  let costUsd = Number(usage.cost?.total ?? 0);
+  if (!Number.isFinite(costUsd) || costUsd <= 0) {
+    costUsd = approximateOpenAiCostUsd(modelId, {
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+    });
+  }
+  return { inputTokens, outputTokens, costUsd };
+}
+
+function openAiResponsesUsage(usage, modelId) {
+  const safeUsage = usage && typeof usage === "object" ? usage : {};
+  const inputTokens = Number(safeUsage.input_tokens ?? 0) || 0;
+  const outputTokens = Number(safeUsage.output_tokens ?? 0) || 0;
+  return {
+    inputTokens,
+    outputTokens,
+    costUsd: approximateOpenAiCostUsd(modelId, safeUsage),
+  };
 }
 
 async function completeOpenAiCodexWithRetry(completeSimple, model, request, bearerToken) {
@@ -1078,10 +1114,11 @@ async function runAgent(AgentCtor, model, request) {
   const thinkingLevel = normalizeThinkingLevel(request.thinkingLevel) ?? "low";
 
   if (provider === "openai" || provider === "openai-codex") {
-    const openaiText = await runOpenAiResponsesCall(provider, modelId, {
-      ...request,
-      systemPrompt,
-    });
+    const { text: openaiText, usage: openaiUsage } = await runOpenAiResponsesCall(
+      provider,
+      modelId,
+      { ...request, systemPrompt },
+    );
     if (!openaiText) {
       throw new Error(`openai responses returned empty output_text for ${provider}:${modelId}`);
     }
@@ -1096,7 +1133,7 @@ async function runAgent(AgentCtor, model, request) {
     writeFullPromptDump(request);
     return {
       text: openaiText,
-      usage: undefined,
+      usage: openaiUsage,
       errorMessage: undefined,
       truncated: false,
       stopReason: undefined,
@@ -1900,7 +1937,7 @@ async function handleOpenAiNextStepPreflight(provider, modelId, request) {
 }
 
 async function handleOpenAiCodexTextNextStep(provider, modelId, request) {
-  const text = await runOpenAiResponsesCall(provider, modelId, {
+  const { text } = await runOpenAiResponsesCall(provider, modelId, {
     ...request,
     systemPrompt: openAiCodexNextStepSystemPrompt(request),
     prompt: openAiCodexNextStepPrompt(request),
