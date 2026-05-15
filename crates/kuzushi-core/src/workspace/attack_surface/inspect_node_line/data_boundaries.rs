@@ -15,12 +15,13 @@ pub(super) fn inspect_deserialization(
     ]) {
         return;
     }
+    let route = inspection.route();
     inspection.add_surface(
         builder,
         AttackSurfaceKind::DeserializationPoint,
         "Deserialization or parser boundary",
-        None,
-        None,
+        route.method.as_deref(),
+        route.path.as_deref(),
         Some("parser_boundary"),
         "node.deserialization",
     );
@@ -40,12 +41,13 @@ pub(super) fn inspect_database(
     ]) {
         return;
     }
+    let route = inspection.route();
     inspection.add_surface(
         builder,
         AttackSurfaceKind::DbQueryBoundary,
         "Database query boundary",
-        None,
-        None,
+        route.method.as_deref(),
+        route.path.as_deref(),
         Some("data_store"),
         "node.db-query",
     );
