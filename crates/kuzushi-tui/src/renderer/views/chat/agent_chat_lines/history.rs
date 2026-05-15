@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn append_agent_history(
     lines: &mut Vec<Line<'static>>,
-    agent: &AgentChatView,
+    agent: &AgentChatSession,
     body_w: usize,
     width: u16,
 ) {
@@ -19,7 +19,7 @@ pub(super) fn append_agent_history(
 
 fn append_completed_agent_turn(
     lines: &mut Vec<Line<'static>>,
-    turn: &ChatTurn,
+    turn: &AgentChatTurn,
     body_w: usize,
     width: u16,
 ) {

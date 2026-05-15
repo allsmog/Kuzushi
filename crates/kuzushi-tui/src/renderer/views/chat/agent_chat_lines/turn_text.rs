@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn append_active_agent_turn(
     lines: &mut Vec<Line<'static>>,
-    agent: &AgentChatView,
+    agent: &AgentChatSession,
     body_w: usize,
     width: u16,
 ) {
@@ -11,7 +11,15 @@ pub(super) fn append_active_agent_turn(
         lines.push(indent(styled(&line, theme::primary()), 3));
     }
     lines.push(blank());
+    append_active_agent_response(lines, agent, body_w, width);
+}
 
+fn append_active_agent_response(
+    lines: &mut Vec<Line<'static>>,
+    agent: &AgentChatSession,
+    body_w: usize,
+    width: u16,
+) {
     if let Some(error) = &agent.error {
         append_limited_agent_text(
             lines,

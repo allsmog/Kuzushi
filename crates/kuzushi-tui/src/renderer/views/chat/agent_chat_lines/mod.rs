@@ -1,5 +1,7 @@
 use super::*;
-use crate::ui_view_models::failure_handoff_context;
+use crate::ui_view_models::{
+    agent_chat_model, failure_handoff_context, AgentChatModel, AgentChatSession, AgentChatTurn,
+};
 use kuzushi_core::run_artifacts::FailureToLlmContext;
 
 mod history;
@@ -9,12 +11,13 @@ pub(crate) fn agent_chat_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
     let mut lines = context_strip(app, area);
     lines.push(blank());
 
-    let Some(agent) = &app.agent_chat else {
+    let model = agent_chat_model(app);
+    let Some(agent) = &model.session else {
         append_agent_empty_state(&mut lines, area.width);
         return lines;
     };
     lines.push(divider("AGENT", area.width));
-    append_agent_status(&mut lines, app, agent);
+    append_agent_status(&mut lines, &model);
 
     let body_w = area.width.saturating_sub(3) as usize;
     append_failure_handoff_panel(&mut lines, agent, body_w, area.width);
@@ -51,12 +54,6 @@ pub(crate) fn failure_handoff_lines(app: &ShellApp, area: Rect) -> Vec<Line<'sta
     lines
 }
 
-fn current_failure_context(app: &ShellApp) -> Option<&FailureToLlmContext> {
-    app.agent_chat
-        .as_ref()
-        .and_then(|agent| agent.failure_context.as_ref())
-}
-
 fn append_failure_empty_state(lines: &mut Vec<Line<'static>>) {
     lines.extend(empty_state_panel(
         "no failure handoff loaded",
@@ -88,24 +85,21 @@ fn append_agent_empty_state(lines: &mut Vec<Line<'static>>, width: u16) {
     ));
 }
 
-fn append_agent_status(lines: &mut Vec<Line<'static>>, app: &ShellApp, agent: &AgentChatView) {
-    let status = agent_status_label(agent);
+fn append_agent_status(lines: &mut Vec<Line<'static>>, model: &AgentChatModel) {
+    let status = model
+        .session
+        .as_ref()
+        .map(|agent| agent.status)
+        .unwrap_or("idle");
     lines.push(detail("mode", "agent chat"));
     lines.push(detail("status", status));
-    lines.push(detail(
-        "model",
-        &app.config
-            .model
-            .as_deref()
-            .map(crate::app::display_model_selector)
-            .unwrap_or_else(|| "unconfigured".to_string()),
-    ));
+    lines.push(detail("model", &model.model));
     lines.push(blank());
 }
 
 fn append_failure_handoff_panel(
     lines: &mut Vec<Line<'static>>,
-    agent: &AgentChatView,
+    agent: &AgentChatSession,
     body_w: usize,
     width: u16,
 ) {
@@ -204,17 +198,5 @@ fn failure_list(values: &[String]) -> String {
         "none".to_string()
     } else {
         values.join(", ")
-    }
-}
-
-fn agent_status_label(agent: &AgentChatView) -> &'static str {
-    if agent.abort_requested {
-        "abort requested"
-    } else if agent.running {
-        "running"
-    } else if agent.error.is_some() {
-        "failed"
-    } else {
-        "answered"
     }
 }
