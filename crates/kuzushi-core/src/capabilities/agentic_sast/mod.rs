@@ -4,7 +4,9 @@ use crate::runtime::{AgentQueryRequest, AgentRuntime, AgentToolPolicy};
 use crate::static_proof_validator::{
     static_proof_claim_from_whitebox_schema, validate_static_proof_claim, StaticProofValidation,
 };
-use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
+use crate::structured_output::{
+    query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
+};
 use crate::whitebox_static::{
     agent_tool_policy_for_input, mark_whitebox_static_findings, whitebox_static_profile_requested,
     whitebox_static_proof_state_from_input, whitebox_static_triage_prompt_block,

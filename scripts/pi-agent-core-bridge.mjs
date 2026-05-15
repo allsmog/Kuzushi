@@ -258,7 +258,14 @@ function aggregateAgentUsage(agent) {
     inputTokens += Number(usage.input ?? usage.input_tokens ?? 0) || 0;
     outputTokens += Number(usage.output ?? usage.output_tokens ?? 0) || 0;
     const total = Number(usage.cost?.total ?? 0);
-    if (Number.isFinite(total)) costUsd += total;
+    if (Number.isFinite(total) && total > 0) {
+      costUsd += total;
+    } else {
+      for (const key of ["input", "output", "cacheRead", "cacheWrite"]) {
+        const value = Number(usage.cost?.[key] ?? 0);
+        if (Number.isFinite(value)) costUsd += value;
+      }
+    }
   }
   if (!touched) return undefined;
   return { inputTokens, outputTokens, costUsd };
@@ -1130,6 +1137,7 @@ async function runAgent(AgentCtor, model, request) {
       providerAuthToken(provider) ??
       configuredProviderApiKey(provider, request) ??
       process.env[providerEnvName(provider)] ??
+      inheritedOpenAiAuthToken(provider) ??
       (provider === "openai" ? process.env.OPENAI_API_KEY : undefined),
   });
 
@@ -1196,10 +1204,16 @@ async function runAgent(AgentCtor, model, request) {
       modelId = String(model?.id ?? "unknown");
     }
     const baseUrlSet = Boolean(process.env.OPENAI_BASE_URL);
-    const apiKeySet = Boolean(process.env.OPENAI_API_KEY);
+    const openAiAuthSet = Boolean(
+      process.env.OPENAI_API_KEY ??
+        process.env.OPENAI_AUTH_TOKEN ??
+        process.env.OPENAI_OAUTH_TOKEN ??
+        inheritedOpenAiAuthToken(provider),
+    );
     throw new Error(
       `empty_model_output provider=${provider} model=${modelId} ` +
-        `OPENAI_BASE_URL=${baseUrlSet ? "set" : "unset"} OPENAI_API_KEY=${apiKeySet ? "set" : "unset"}`,
+        `OPENAI_BASE_URL=${baseUrlSet ? "set" : "unset"} ` +
+        `OPENAI_AUTH=${openAiAuthSet ? "set" : "unset"}`,
     );
   }
 
@@ -1304,6 +1318,41 @@ function readOauthCredentials(home = os.homedir()) {
   } catch {
     return {};
   }
+}
+
+function codexAuthPath(home = os.homedir()) {
+  const codexHome = String(process.env.CODEX_HOME ?? "").trim();
+  return path.join(codexHome ? path.resolve(codexHome) : path.join(home, ".codex"), "auth.json");
+}
+
+function readCodexAuth(home = os.homedir()) {
+  const filePath = codexAuthPath(home);
+  if (!existsSync(filePath)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function inheritedOpenAiAuthToken(provider) {
+  const normalized = String(provider ?? "")
+    .trim()
+    .toLowerCase();
+  if (normalized !== "openai-codex" && normalized !== "codex" && normalized !== "openai") {
+    return undefined;
+  }
+  const auth = readCodexAuth();
+  const accessToken = nonEmptyString(auth?.tokens?.access_token);
+  if (normalized === "openai-codex" || normalized === "codex") {
+    return accessToken;
+  }
+  return nonEmptyString(auth?.OPENAI_API_KEY) ?? accessToken;
 }
 
 function writeOauthCredentials(bag, home = os.homedir()) {
@@ -1693,7 +1742,7 @@ async function handleNextStep(request) {
           input: block.input ?? {},
           callId: block.id,
         },
-        cost_usd,
+        costUsd: cost_usd,
       };
     }
   }
@@ -1708,7 +1757,7 @@ async function handleNextStep(request) {
     step: "final",
     text: finalText,
     structured: maybeParseJson(finalText),
-    cost_usd,
+    costUsd: cost_usd,
   };
 }
 

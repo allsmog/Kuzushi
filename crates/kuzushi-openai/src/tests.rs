@@ -26,6 +26,93 @@ mod tests {
     }
 
     #[test]
+    fn query_bridge_preserves_snake_case_cost_from_bridge_response() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bridge = tmp.path().join("bridge.sh");
+        std::fs::write(
+            &bridge,
+            r#"#!/bin/sh
+printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234}'
+"#,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bridge, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let runtime = RuntimeConfig {
+            kind: RuntimeKind::PiAgentCore,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            agent_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
+            anthropic_oauth: None,
+        };
+        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+
+        let response = bridge
+            .query_blocking(AgentQueryRequest::new(
+                "openai:gpt-5.5".to_string(),
+                ".",
+                "sys".to_string(),
+                "prompt".to_string(),
+            ))
+            .unwrap();
+
+        assert_eq!(response.text, "done");
+        assert_eq!(response.structured.unwrap()["ok"], serde_json::json!(true));
+        assert!((response.cost_usd - 0.1234).abs() < 1e-9);
+    }
+
+    #[test]
+    fn triage_bridge_sets_cost_on_structured_outcome() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bridge = tmp.path().join("bridge.sh");
+        std::fs::write(
+            &bridge,
+            r#"#!/bin/sh
+printf '%s' '{"ok":true,"structured":{"verdict":"true_positive","confidence":0.9,"rationale":"reachable"},"costUsd":0.045}'
+"#,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bridge, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let runtime = RuntimeConfig {
+            kind: RuntimeKind::PiAgentCore,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            agent_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
+            anthropic_oauth: None,
+        };
+        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+
+        let outcome = bridge
+            .triage_finding_blocking(TriageRequest {
+                model: "openai:gpt-5.5".to_string(),
+                cwd: ".".into(),
+                finding: Finding::new_tool(
+                    "semgrep",
+                    "demo",
+                    "src/db.ts",
+                    9,
+                    Some(9),
+                    Severity::High,
+                    "SQL injection in search",
+                ),
+                prompt_template: None,
+            })
+            .unwrap();
+
+        assert_eq!(outcome.verdict, kuzushi_core::TriageVerdict::TruePositive);
+        assert!((outcome.cost_usd - 0.045).abs() < 1e-9);
+    }
+
+    #[test]
     fn next_step_bridge_round_trips_tool_call_then_final() {
         use kuzushi_core::{AgentTool, AgentToolLoopRequest, ToolCall, ToolResult};
         // A fake bridge that returns a tool_call on first stdin, then a

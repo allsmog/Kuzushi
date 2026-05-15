@@ -84,9 +84,35 @@ pub(crate) fn systems_invariants_from_input_or_query(
     agent_tool_policy: AgentToolPolicy,
     thinking_level: &str,
 ) -> Result<SystemsInvariantOutput> {
+    Ok(systems_invariants_from_input_or_query_with_cost(
+        input,
+        runtime,
+        model,
+        target,
+        context,
+        options,
+        agent_tool_policy,
+        thinking_level,
+    )?
+    .value)
+}
+
+pub(crate) fn systems_invariants_from_input_or_query_with_cost(
+    input: &Value,
+    runtime: &dyn AgentRuntime,
+    model: &str,
+    target: &Path,
+    context: &SystemsContextOutput,
+    options: &SystemsHuntInput,
+    agent_tool_policy: AgentToolPolicy,
+    thinking_level: &str,
+) -> Result<CostedStructuredJson<SystemsInvariantOutput>> {
     match invariants_from_input(input).transpose()? {
-        Some(output) => Ok(output),
-        None => query_systems_invariants(
+        Some(output) => Ok(CostedStructuredJson {
+            value: output,
+            cost_usd: 0.0,
+        }),
+        None => query_systems_invariants_with_cost(
             runtime,
             model,
             target,

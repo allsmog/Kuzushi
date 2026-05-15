@@ -13,11 +13,16 @@ pub(crate) fn run_agentic_sast_report(
     let runtime = required_agentic_sast_runtime(runtime)?;
     let run = AgenticSastRun::from_input(input, ctx)?;
     let parent_step = emit_agentic_sast_start(ctx, &run);
-    let mut findings = collect_agentic_sast_findings(runtime, &run, ctx, parent_step)?;
-    apply_agentic_sast_whitebox_profile(&run, &mut findings)?;
-    let persisted = persist_agentic_sast_findings(&run.target, &findings, ctx)?;
-    emit_agentic_sast_done(ctx, findings.len());
-    Ok(agentic_sast_report(&run, findings, persisted))
+    let mut result = collect_agentic_sast_findings(runtime, &run, ctx, parent_step)?;
+    apply_agentic_sast_whitebox_profile(&run, &mut result.value)?;
+    let persisted = persist_agentic_sast_findings(&run.target, &result.value, ctx)?;
+    emit_agentic_sast_done(ctx, result.value.len());
+    Ok(agentic_sast_report(
+        &run,
+        result.value,
+        persisted,
+        result.cost_usd,
+    ))
 }
 
 fn collect_agentic_sast_findings(
@@ -25,10 +30,13 @@ fn collect_agentic_sast_findings(
     run: &AgenticSastRun,
     ctx: &ToolExecutionContext<'_>,
     parent_step: Option<usize>,
-) -> Result<Vec<Finding>> {
-    let findings = query_agentic_sast_with_scope(runtime, run, ctx, parent_step)?;
-    emit_agentic_sast_validation_count(ctx, parent_step, findings.len());
-    review_agentic_sast_with_scope(runtime, run, findings, ctx, parent_step)
+) -> Result<CostedStructuredJson<Vec<Finding>>> {
+    let mut result = query_agentic_sast_with_scope(runtime, run, ctx, parent_step)?;
+    emit_agentic_sast_validation_count(ctx, parent_step, result.value.len());
+    let review = review_agentic_sast_with_scope(runtime, run, result.value, ctx, parent_step)?;
+    result.value = review.value;
+    result.cost_usd += review.cost_usd;
+    Ok(result)
 }
 
 fn query_agentic_sast_with_scope(
@@ -36,9 +44,9 @@ fn query_agentic_sast_with_scope(
     run: &AgenticSastRun,
     ctx: &ToolExecutionContext<'_>,
     parent_step: Option<usize>,
-) -> Result<Vec<Finding>> {
+) -> Result<CostedStructuredJson<Vec<Finding>>> {
     let _llm_scope = begin_agentic_sast_child_scope(ctx, parent_step, "agent-call");
-    let findings = query_agentic_sast_findings(runtime, run, None)?;
+    let findings = query_agentic_sast_findings_with_cost(runtime, run, None)?;
     drop(_llm_scope);
     Ok(findings)
 }
@@ -49,12 +57,23 @@ fn review_agentic_sast_with_scope(
     findings: Vec<Finding>,
     ctx: &ToolExecutionContext<'_>,
     parent_step: Option<usize>,
-) -> Result<Vec<Finding>> {
+) -> Result<CostedStructuredJson<Vec<Finding>>> {
+    if run.options.passes != 2 || findings.is_empty() {
+        return Ok(CostedStructuredJson {
+            value: findings,
+            cost_usd: 0.0,
+        });
+    }
     let _validation_scope =
         begin_agentic_sast_child_scope(ctx, parent_step, "static-validation review-loop");
-    let findings = maybe_review_agentic_sast_findings(runtime, run, findings)?;
+    let review_context = summarize_agentic_findings_for_review(&findings);
+    let review = query_agentic_sast_findings_with_cost(runtime, run, Some(&review_context))?;
+    let findings = merge_agentic_sast_findings(findings, review.value, run.options.max_findings);
     drop(_validation_scope);
-    Ok(findings)
+    Ok(CostedStructuredJson {
+        value: findings,
+        cost_usd: review.cost_usd,
+    })
 }
 
 fn apply_agentic_sast_whitebox_profile(
@@ -71,13 +90,14 @@ fn agentic_sast_report(
     run: &AgenticSastRun,
     findings: Vec<Finding>,
     persisted: Option<AgenticSastPersistedRun>,
+    cost_usd: f64,
 ) -> AgenticSastReport {
     AgenticSastReport {
         target: run.target.display().to_string(),
         count: findings.len(),
         findings,
         persisted,
-        cost_usd: 0.0,
+        cost_usd,
     }
 }
 
@@ -155,7 +175,13 @@ impl AgenticSastRun {
         let whitebox_static = whitebox_static_profile_requested(input)?;
         let system_prompt = agentic_sast_system_prompt(whitebox_static);
         let tool_policy = agent_tool_policy_for_input(input)?;
-        let inventory = collect_agentic_repo_inventory(&target, 80, 2048)?;
+        let inventory = collect_agentic_repo_inventory_with_filters(
+            &target,
+            options.max_inventory_files,
+            options.max_bytes_per_file,
+            &options.include_patterns,
+            &options.exclude_patterns,
+        )?;
         Ok(Self {
             target,
             options,

@@ -1,6 +1,6 @@
 use kuzushi_core::{
     append_run_trace_step, load_run_summary, next_run_trace_step_number, write_run_artifact_json,
-    write_run_summary, RunSummary, RunTraceStep,
+    write_run_summary, RunArtifact, RunSummary, RunTraceStep,
 };
 use std::path::Path;
 
@@ -17,7 +17,7 @@ pub(crate) fn finish_cli_tool_run(
         .with_findings(run_output_findings_count(output))
         .with_cost(run_output_cost_usd(output));
     if let Some(artifact) = result_artifact {
-        summary = summary.with_artifact(artifact);
+        push_artifact_if_new(&mut summary.artifacts, artifact);
     }
     let _ = append_run_trace_step(
         target,
@@ -58,6 +58,16 @@ fn load_existing_summary(target: &Path, run_id: &str, tool: &str) -> RunSummary 
             target.display().to_string(),
         )
     })
+}
+
+fn push_artifact_if_new(artifacts: &mut Vec<RunArtifact>, artifact: RunArtifact) {
+    if artifacts
+        .iter()
+        .any(|existing| existing.path == artifact.path && existing.label == artifact.label)
+    {
+        return;
+    }
+    artifacts.push(artifact);
 }
 
 pub(crate) fn run_output_findings_count(output: &serde_json::Value) -> Option<u64> {

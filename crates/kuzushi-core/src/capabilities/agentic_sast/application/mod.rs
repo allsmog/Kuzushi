@@ -9,7 +9,10 @@ mod static_validation;
 mod task_selection;
 
 pub(crate) use build_prompt::*;
-pub(crate) use collect_repo_inventory::{collect_agentic_repo_inventory, is_agentic_context_file};
+pub(crate) use collect_repo_inventory::{
+    agentic_path_allowed, collect_agentic_repo_inventory,
+    collect_agentic_repo_inventory_with_filters, is_agentic_context_file,
+};
 pub(crate) use normalize_findings::*;
 pub(crate) use query_findings::*;
 pub(crate) use run_agentic_sast_report::*;

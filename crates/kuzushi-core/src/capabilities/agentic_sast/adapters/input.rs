@@ -4,6 +4,8 @@ impl AgenticSastInput {
     pub(crate) fn from_tool_input(input: &Value) -> Result<Self> {
         let max_findings = agentic_sast_max_findings(input)?;
         let passes = agentic_sast_passes(input)?;
+        let max_inventory_files = agentic_sast_max_inventory_files(input)?;
+        let max_bytes_per_file = agentic_sast_max_bytes_per_file(input)?;
         let severity = string_list_input(input, &["severity"])?.unwrap_or_else(|| {
             vec![
                 "ERROR".to_string(),
@@ -11,13 +13,22 @@ impl AgenticSastInput {
                 "INFO".to_string(),
             ]
         });
+        let include_patterns =
+            string_list_input(input, &["includePatterns", "include_patterns"])?.unwrap_or_default();
         let exclude_patterns =
             string_list_input(input, &["excludePatterns", "exclude_patterns"])?.unwrap_or_default();
+        let focus = optional_nonempty_string(input, "focus")?
+            .or(optional_nonempty_string(input, "huntFocus")?)
+            .or(optional_nonempty_string(input, "hunt_focus")?);
 
         Ok(Self {
             max_findings,
             passes,
+            max_inventory_files,
+            max_bytes_per_file,
             severity,
+            focus,
+            include_patterns,
             exclude_patterns,
         })
     }
@@ -46,6 +57,28 @@ fn agentic_sast_passes(input: &Value) -> Result<usize> {
         "agentic-sast:scan passes must be 1 or 2"
     );
     Ok(passes)
+}
+
+fn agentic_sast_max_inventory_files(input: &Value) -> Result<usize> {
+    bounded_positive_usize_input(
+        input
+            .get("maxInventoryFiles")
+            .or_else(|| input.get("max_inventory_files")),
+        80,
+        500,
+        "agentic-sast:scan maxInventoryFiles must be a positive integer",
+    )
+}
+
+fn agentic_sast_max_bytes_per_file(input: &Value) -> Result<usize> {
+    bounded_positive_usize_input(
+        input
+            .get("maxBytesPerFile")
+            .or_else(|| input.get("max_bytes_per_file")),
+        2048,
+        8192,
+        "agentic-sast:scan maxBytesPerFile must be a positive integer",
+    )
 }
 
 fn bounded_positive_usize_input(

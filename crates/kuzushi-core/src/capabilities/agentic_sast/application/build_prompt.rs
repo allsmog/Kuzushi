@@ -13,6 +13,14 @@ pub(crate) fn build_agentic_sast_prompt(
         format!("Severity filter: {}", options.severity.join(", ")),
         format!("Max findings: {}", options.max_findings),
         format!(
+            "Include paths/globs: {}",
+            if options.include_patterns.is_empty() {
+                "(all readable source)".to_string()
+            } else {
+                options.include_patterns.join(", ")
+            }
+        ),
+        format!(
             "Exclude paths/globs: {}",
             if options.exclude_patterns.is_empty() {
                 "(none)".to_string()
@@ -23,6 +31,10 @@ pub(crate) fn build_agentic_sast_prompt(
         String::new(),
         "Evidence requirements: name the attacker-controlled source, sink, missing guard, and exact file:line. Omit uncertain or hypothetical findings.".to_string(),
     ];
+    if let Some(focus) = &options.focus {
+        prompt.push(String::new());
+        prompt.push(format!("Hunt focus: {focus}"));
+    }
     if whitebox_static {
         prompt.push(String::new());
         prompt.push(whitebox_static_triage_prompt_block().to_string());

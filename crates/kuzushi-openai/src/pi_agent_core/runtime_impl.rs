@@ -148,23 +148,33 @@ fn is_transient_bridge_error(message: &str) -> bool {
 }
 
 fn triage_outcome_from_response(response: AgentQueryResponse) -> TriageOutcome {
-    structured_triage_outcome(response.structured)
-        .or_else(|| text_triage_outcome(response.text))
+    let call_cost = response.cost_usd;
+    structured_triage_outcome(response.structured, call_cost)
+        .or_else(|| text_triage_outcome(response.text, call_cost))
         .unwrap_or_else(empty_triage_outcome)
 }
 
-fn structured_triage_outcome(structured: Option<serde_json::Value>) -> Option<TriageOutcome> {
+fn structured_triage_outcome(
+    structured: Option<serde_json::Value>,
+    call_cost: f64,
+) -> Option<TriageOutcome> {
     let structured = structured?;
     serde_json::from_value::<TriageOutcome>(structured)
         .ok()
-        .map(clamp_outcome)
+        .map(|mut outcome| {
+            outcome.cost_usd = call_cost;
+            clamp_outcome(outcome)
+        })
 }
 
-fn text_triage_outcome(text: String) -> Option<TriageOutcome> {
+fn text_triage_outcome(text: String, call_cost: f64) -> Option<TriageOutcome> {
     if text.is_empty() {
         return None;
     }
-    Some(parsed_text_triage_outcome(&text).unwrap_or_else(|| fallback_triage_outcome(text)))
+    let mut outcome =
+        parsed_text_triage_outcome(&text).unwrap_or_else(|| fallback_triage_outcome(text));
+    outcome.cost_usd = call_cost;
+    Some(outcome)
 }
 
 fn parsed_text_triage_outcome(text: &str) -> Option<TriageOutcome> {

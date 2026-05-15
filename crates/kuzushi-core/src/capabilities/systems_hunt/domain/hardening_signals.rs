@@ -64,7 +64,7 @@ impl SurfaceAccumulator {
             domains: self.domains.into_iter().collect(),
             reasons: self.reasons.into_iter().collect(),
             attacker_controlled_fields: self.attacker_controlled_fields.into_iter().collect(),
-            hardening_signals: self.hardening_signals.into_iter().collect(),
+            hardening_signals: self.hardening_signals.into_iter().take(12).collect(),
             evidence: self.evidence.into_iter().take(12).collect(),
         }
     }

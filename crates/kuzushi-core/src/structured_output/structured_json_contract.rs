@@ -25,20 +25,38 @@ impl StructuredJsonContract {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CostedStructuredJson<T> {
+    pub(crate) value: T,
+    pub(crate) cost_usd: f64,
+}
+
 pub(crate) fn query_required_structured_json<T>(
     runtime: &dyn AgentRuntime,
     request: AgentQueryRequest,
     contract: StructuredJsonContract,
     validate: impl Fn(Value) -> Result<T>,
 ) -> Result<T> {
+    Ok(query_required_structured_json_with_cost(runtime, request, contract, validate)?.value)
+}
+
+pub(crate) fn query_required_structured_json_with_cost<T>(
+    runtime: &dyn AgentRuntime,
+    request: AgentQueryRequest,
+    contract: StructuredJsonContract,
+    validate: impl Fn(Value) -> Result<T>,
+) -> Result<CostedStructuredJson<T>> {
     let request = request.with_structured_output(contract.runtime_contract());
     let response = runtime.query_blocking(request.clone())?;
     let response = if response.truncated {
-        retry_with_higher_output_budget(runtime, &request).unwrap_or(response)
+        match retry_with_higher_output_budget(runtime, &request) {
+            Ok(retry_response) => retry_response,
+            Err(_) => response,
+        }
     } else {
         response
     };
-    parse_or_repair_required_structured_json(
+    parse_or_repair_required_structured_json_with_cost(
         response,
         contract,
         validate,
@@ -91,8 +109,24 @@ pub(crate) fn parse_or_repair_required_structured_json<T>(
     validate: impl Fn(Value) -> Result<T>,
     repair: impl FnOnce(String, AgentStructuredOutput) -> Result<AgentQueryResponse>,
 ) -> Result<T> {
+    Ok(
+        parse_or_repair_required_structured_json_with_cost(response, contract, validate, repair)?
+            .value,
+    )
+}
+
+pub(crate) fn parse_or_repair_required_structured_json_with_cost<T>(
+    response: AgentQueryResponse,
+    contract: StructuredJsonContract,
+    validate: impl Fn(Value) -> Result<T>,
+    repair: impl FnOnce(String, AgentStructuredOutput) -> Result<AgentQueryResponse>,
+) -> Result<CostedStructuredJson<T>> {
+    let initial_cost = response.cost_usd;
     match parse_and_validate(&response, &contract, &validate) {
-        Ok(value) => Ok(value),
+        Ok(value) => Ok(CostedStructuredJson {
+            value,
+            cost_usd: initial_cost,
+        }),
         Err(initial_error) => {
             if response.truncated {
                 return Err(truncation_error(&contract, &response, &initial_error));
@@ -109,7 +143,9 @@ pub(crate) fn parse_or_repair_required_structured_json<T>(
                     &initial_error,
                 ));
             }
-            parse_and_validate(&repair_response, &contract, &validate).with_context(|| {
+            let repair_cost = repair_response.cost_usd;
+            let value =
+                parse_and_validate(&repair_response, &contract, &validate).with_context(|| {
                 let repair_raw = raw_agent_response(&repair_response);
                 format!(
                     "{tool} could not satisfy structured JSON contract `{schema}` after one repair pass.\n\
@@ -120,6 +156,10 @@ pub(crate) fn parse_or_repair_required_structured_json<T>(
                     tool = contract.tool_name,
                     schema = contract.schema_name,
                 )
+            })?;
+            Ok(CostedStructuredJson {
+                value,
+                cost_usd: initial_cost + repair_cost,
             })
         }
     }

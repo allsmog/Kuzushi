@@ -93,8 +93,47 @@ fn should_skip_systems_dir(name: &str, include_non_production: bool) -> bool {
 }
 
 pub(crate) fn is_systems_source(path: &Path) -> bool {
+    if is_non_production_test_source(path) {
+        return false;
+    }
     path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| SYSTEMS_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
         .unwrap_or(false)
+}
+
+fn is_non_production_test_source(path: &Path) -> bool {
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| stem.to_ascii_lowercase())
+        .unwrap_or_default();
+    if stem.ends_with("_test")
+        || stem.ends_with("_tests")
+        || stem.ends_with("_unittest")
+        || stem.ends_with("_browsertest")
+        || stem.ends_with("_perftest")
+        || stem.ends_with("_fuzzer")
+        || stem.contains("_test_")
+        || stem.contains("_tests_")
+        || stem.contains("_unittest_")
+        || stem.contains("_browsertest_")
+        || stem.contains("_perftest_")
+        || stem.contains("_fuzzer_")
+        || stem.starts_with("test_")
+        || stem == "test"
+        || stem == "tests"
+    {
+        return true;
+    }
+
+    path.components().any(|component| {
+        let Some(name) = component.as_os_str().to_str() else {
+            return false;
+        };
+        matches!(
+            name.to_ascii_lowercase().as_str(),
+            "test" | "tests" | "testing" | "unittest" | "unittests" | "browser_tests"
+        )
+    })
 }
