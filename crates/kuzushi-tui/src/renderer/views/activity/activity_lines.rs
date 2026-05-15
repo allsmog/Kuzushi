@@ -2,6 +2,7 @@ use super::dag_pane::{dag_row_text, dag_state_style, dag_subsystems_row_text};
 use super::feed_pane::{feed_event_style, feed_event_text};
 use super::*;
 use crate::app::PaneFocus;
+use crate::ui_view_models::activity_header_model;
 use std::time::Instant;
 
 /// Build the line list for the Activity view. Renders a split-pane layout:
@@ -13,40 +14,14 @@ pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
 
     let Some(session) = app.activity.as_ref() else {
-        lines.push(divider("ACTIVITY", area.width));
-        lines.push(muted(
-            "(no run active; start one with `scan` or `run <tool>` and the feed will appear here)",
-        ));
+        push_inactive_activity_lines(&mut lines, area.width);
         return lines;
     };
 
-    let total = session.tasks.len();
-    let done = session
-        .tasks
-        .values()
-        .filter(|t| matches!(t.state, crate::app::DagTaskState::Done))
-        .count();
-    let running = session
-        .tasks
-        .values()
-        .filter(|t| matches!(t.state, crate::app::DagTaskState::Active))
-        .count();
-    let header = format!(
-        "ACTIVITY  run {run}  ·  {done}/{total} done  ·  {running} running",
-        run = session.run_id,
-        done = done,
-        total = total,
-        running = running,
-    );
-    lines.push(divider(&header, area.width));
+    let header = activity_header_model(session);
+    lines.push(divider(&header.summary_title, area.width));
 
-    let total_width = area.width as usize;
-    // Reserve 1 column for divider, split the rest 46% / 54%.
-    let usable = total_width.saturating_sub(1);
-    let left_w = (usable * 46 / 100).max(20);
-    let right_w = usable.saturating_sub(left_w).max(20);
-
-    // Header row showing pane labels.
+    let (left_w, right_w) = activity_pane_widths(area.width);
     lines.push(pane_header_line(
         "DAG",
         "FEED",
@@ -54,51 +29,7 @@ pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         right_w,
         session.pane_focus,
     ));
-
-    let now = Instant::now();
-    let mut left_rows: Vec<(String, ratatui::style::Style)> = Vec::new();
-    for row in session.tasks.values() {
-        let text = dag_row_text(row, left_w, now);
-        left_rows.push((text, dag_state_style(row.state)));
-    }
-    if let Some(text) = dag_subsystems_row_text(session, left_w) {
-        left_rows.push((text, theme::muted()));
-    }
-
-    let mut right_rows: Vec<(String, ratatui::style::Style)> = Vec::new();
-    for event in session.events.iter() {
-        if let Some(text) = feed_event_text(event, session.verbose_subsystems, right_w) {
-            right_rows.push((text, feed_event_style(event)));
-        }
-    }
-    // Pause marker: when paused, prepend a sentinel row at the head of the
-    // feed so the operator notices the freeze.
-    if session.paused {
-        right_rows.insert(
-            0,
-            (fit("⏸ paused — press p to resume", right_w), theme::warn()),
-        );
-    }
-
-    let max_rows = left_rows.len().max(right_rows.len());
-    for i in 0..max_rows {
-        let (left_text, left_style) = left_rows
-            .get(i)
-            .cloned()
-            .unwrap_or((" ".repeat(left_w), theme::primary()));
-        let (right_text, right_style) = right_rows
-            .get(i)
-            .cloned()
-            .unwrap_or((String::new(), theme::primary()));
-        lines.push(combined_pane_line(
-            left_text,
-            left_style,
-            right_text,
-            right_style,
-            left_w,
-            right_w,
-        ));
-    }
+    lines.extend(activity_pane_lines(session, left_w, right_w));
 
     lines.push(blank());
     lines.push(focus_footer_line(session, area.width));
@@ -111,6 +42,94 @@ pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ("Enter", "focus task"),
     ]));
     lines
+}
+
+type ActivityPaneRow = (String, ratatui::style::Style);
+
+fn push_inactive_activity_lines(lines: &mut Vec<Line<'static>>, width: u16) {
+    lines.push(divider("ACTIVITY", width));
+    lines.push(muted(
+        "(no run active; start one with `scan` or `run <tool>` and the feed will appear here)",
+    ));
+}
+
+fn activity_pane_widths(width: u16) -> (usize, usize) {
+    let usable = (width as usize).saturating_sub(1);
+    let left_w = (usable * 46 / 100).max(20);
+    (left_w, usable.saturating_sub(left_w).max(20))
+}
+
+fn activity_pane_lines(
+    session: &crate::app::ActivitySession,
+    left_w: usize,
+    right_w: usize,
+) -> Vec<Line<'static>> {
+    let left_rows = dag_pane_rows(session, left_w);
+    let right_rows = feed_pane_rows(session, right_w);
+    let max_rows = left_rows.len().max(right_rows.len());
+    (0..max_rows)
+        .map(|index| combined_activity_pane_line(&left_rows, &right_rows, index, left_w, right_w))
+        .collect()
+}
+
+fn dag_pane_rows(session: &crate::app::ActivitySession, left_w: usize) -> Vec<ActivityPaneRow> {
+    let now = Instant::now();
+    let mut rows = session
+        .tasks
+        .values()
+        .map(|row| (dag_row_text(row, left_w, now), dag_state_style(row.state)))
+        .collect::<Vec<_>>();
+    if let Some(text) = dag_subsystems_row_text(session, left_w) {
+        rows.push((text, theme::muted()));
+    }
+    rows
+}
+
+fn feed_pane_rows(session: &crate::app::ActivitySession, right_w: usize) -> Vec<ActivityPaneRow> {
+    let mut rows = session
+        .events
+        .iter()
+        .filter_map(|event| {
+            feed_event_text(event, session.verbose_subsystems, right_w)
+                .map(|text| (text, feed_event_style(event)))
+        })
+        .collect::<Vec<_>>();
+    push_pause_feed_row(session.paused, &mut rows, right_w);
+    rows
+}
+
+fn push_pause_feed_row(paused: bool, rows: &mut Vec<ActivityPaneRow>, right_w: usize) {
+    if paused {
+        rows.insert(
+            0,
+            (fit("⏸ paused — press p to resume", right_w), theme::warn()),
+        );
+    }
+}
+
+fn combined_activity_pane_line(
+    left_rows: &[ActivityPaneRow],
+    right_rows: &[ActivityPaneRow],
+    index: usize,
+    left_w: usize,
+    right_w: usize,
+) -> Line<'static> {
+    let (left_text, left_style) = left_rows
+        .get(index)
+        .cloned()
+        .unwrap_or((" ".repeat(left_w), theme::primary()));
+    let (right_text, right_style) = right_rows
+        .get(index)
+        .cloned()
+        .unwrap_or((String::new(), theme::primary()));
+    combined_pane_line(
+        left_text,
+        left_style,
+        right_text,
+        right_style,
+        left_w,
+        right_w,
+    )
 }
 
 fn pane_header_line(

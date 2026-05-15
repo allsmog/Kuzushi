@@ -7,6 +7,7 @@ use crate::ShellApp;
 use std::path::{Path, PathBuf};
 
 mod active_stage;
+mod activity_header;
 mod actor_detail;
 mod advisory_chrome;
 mod agent_chat;
@@ -58,6 +59,7 @@ mod transcript;
 mod view_status;
 mod workspace;
 pub(crate) use active_stage::active_stage_label;
+pub(crate) use activity_header::activity_header_model;
 pub(crate) use actor_detail::{actor_detail_model, ActorDetailModel, ActorTranscriptRow};
 pub(crate) use advisory_chrome::{cost_cap_halt_model, throttle_banner_model, CostCapHaltModel};
 pub(crate) use agent_chat::{agent_chat_model, AgentChatModel, AgentChatSession, AgentChatTurn};
