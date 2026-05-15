@@ -18,7 +18,10 @@ mod run_trace;
 mod threat_model;
 mod tools;
 pub(crate) use attack_surface::{attack_surface_risk_model, AttackSurfaceRiskModel};
-pub(crate) use auth::{auth_provider_rows, model_auth_status, AuthProviderRow, AuthProviderState};
+pub(crate) use auth::{
+    auth_env_summary, auth_provider_rows, model_auth_status, oauth_summary, AuthProviderRow,
+    AuthProviderState,
+};
 pub(crate) use catalog::{catalog_model, CatalogActionModule, CatalogModel, CatalogModuleGroup};
 pub(crate) use failure_handoff::failure_handoff_context;
 pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
