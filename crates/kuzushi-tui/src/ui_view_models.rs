@@ -20,6 +20,7 @@ mod cost;
 mod display_text;
 mod failure_handoff;
 mod finding_summary;
+mod findings;
 mod home_cockpit;
 mod keybindings;
 mod module_detail;
@@ -64,6 +65,10 @@ pub(crate) use display_text::{compact_target_path, format_session_cost};
 pub(crate) use failure_handoff::failure_handoff_context;
 pub(crate) use finding_summary::{
     findings_count_summary, status_footer_findings_summary, SeverityCounts,
+};
+pub(crate) use findings::{
+    findings_model, selected_finding_detail_model, FindingDetailModel, FindingEvidenceRow,
+    FindingListRow, FindingsModel, TriageSummaryModel,
 };
 pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
 pub(crate) use keybindings::footer_keybindings;

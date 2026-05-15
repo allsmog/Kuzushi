@@ -11,9 +11,7 @@ use crate::commands::{
 use crate::theme;
 pub(in crate::renderer) use chrome::*;
 use kuzushi_core::{
-    finding_confidence_label, finding_cwe_label, finding_evidence_preview, finding_location,
-    finding_source_label, finding_verdict_label, proof_state_label, runtime_validation_label,
-    sorted_finding_aliases, stable_finding_alias, AttachmentKind, Finding, Severity,
+    finding_location, sorted_finding_aliases, AttachmentKind, Severity,
     SUPPORTED_ATTACHMENT_MODULES,
 };
 pub(in crate::renderer) use plain::*;
@@ -23,7 +21,6 @@ use ratatui::widgets::Paragraph;
 pub(in crate::renderer) use render_app::*;
 pub(in crate::renderer) use section_slot::*;
 pub(in crate::renderer) use shared::*;
-use std::collections::BTreeMap;
 pub(in crate::renderer) use views::*;
 mod chrome;
 mod plain;

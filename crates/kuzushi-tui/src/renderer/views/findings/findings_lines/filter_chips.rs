@@ -1,8 +1,9 @@
 use super::*;
+use crate::ui_view_models::FindingsModel;
 
-pub(super) fn filter_chip_line(app: &ShellApp) -> Line<'static> {
-    let counts = SeverityCounts::from_findings(&app.findings);
-    let total = app.findings.len();
+pub(super) fn filter_chip_line(model: &FindingsModel) -> Line<'static> {
+    let counts = model.counts;
+    let total = model.total;
     let mut chip_spans: Vec<Span<'static>> = Vec::new();
     chip_spans.push(Span::styled("filters ", theme::label()));
     chip_spans.push(Span::styled(format!("[all:{total}]"), theme::accent()));

@@ -1,16 +1,11 @@
 use super::*;
+use crate::ui_view_models::FindingsModel;
 
-pub(super) fn append_empty_findings(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'static>>) {
-    let hint = if app.context_view.exists {
-        "scan runs configured scanners against the active target."
-    } else {
-        "scan dispatches the umbrella scanner once context-snapshot exists."
-    };
-    let context_cta = if app.context_view.exists {
-        None
-    } else {
-        Some(("context build", "build the snapshot first if you have time"))
-    };
+pub(super) fn append_empty_findings(
+    model: &FindingsModel,
+    area: Rect,
+    lines: &mut Vec<Line<'static>>,
+) {
     lines.push(divider("FINDINGS · empty", area.width));
     lines.extend(empty_state_panel(
         "no findings yet",
@@ -18,7 +13,7 @@ pub(super) fn append_empty_findings(app: &ShellApp, area: Rect, lines: &mut Vec<
             "kuzushi keeps the ledger in .kuzushi/v2/findings.sqlite3.",
             "nothing has been promoted on this workspace.",
         ],
-        &[Some(("scan", hint)), context_cta]
+        &[Some(("scan", model.empty.hint)), model.empty.context_cta]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>(),
